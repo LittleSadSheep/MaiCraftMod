@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import java.util.Set;
 
 /** 合法蓝图本来就有方块坐标，检查目标时不能把这些坐标误当成鼠标脚本一概拒绝。 */
 public final class BlueprintGoalData {
@@ -42,7 +43,7 @@ public final class BlueprintGoalData {
                 || MachineAbilityAdapter.BUILD.equals(goal.ability())
                 || MachineAbilityAdapter.OPERATE.equals(goal.ability()) && operation != null
                     && operation.isJsonPrimitive() && operation.getAsJsonPrimitive().isString()
-                    && java.util.Set.of("run_production","watch_production").contains(operation.getAsString());
+                    && Set.of("run_production","watch_production").contains(operation.getAsString());
         if (productionDeclared && parameters.has("production")) {
             // Anchored ports and paths are typed design data. Their strict parser still rejects slot/click scripts.
             MachineProductionIntent.validate(parameters);

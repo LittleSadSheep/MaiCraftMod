@@ -25,6 +25,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import com.google.gson.JsonElement;
+import java.util.LinkedHashSet;
+import java.util.stream.StreamSupport;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.server.ClientMachineWatches;
+import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import org.maiwithu.maicraft.client.server.ServerMachineObservationTaskRecord;
+import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
+import org.maiwithu.maicraft.core.integration.machine.control.MachineControlInspection;
+import org.maiwithu.maicraft.core.integration.machine.control.VehicleDriveTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.runtime.MachineWatchTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineSurvivalMaterials;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord;
+import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource;
+import org.maiwithu.maicraft.task.TaskRecord;
 
 /** 把“查看、设计、操作、修改或建造机器”交给相应实现；用户只给目标，具体放置和菜单点击由 Mod 负责。 */
 final class MachineAbilityAdapter {
@@ -205,7 +224,7 @@ final class MachineAbilityAdapter {
 
     private static IntentAction inspect(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         if (goal.parameters().has("structure_id")) {
-            var inspection=org.maiwithu.maicraft.core.integration.machine.control.MachineControlInspection.structure(player,
+            var inspection=MachineControlInspection.structure(player,
                     UUID.fromString(goal.parameters().get("structure_id").getAsString()));
             return new IntentAction.Report(TaskResult.ok("Physical structure control paths inspected; see verified connections, unresolved inputs and vehicle classification.",
                     Map.of("machine",inspection.report())),null);
@@ -221,8 +240,8 @@ final class MachineAbilityAdapter {
         if (!player.level().isLoaded(center)) throw bad("machine_anchor_unloaded: travel closer before inspecting; unloaded terrain is not empty space");
         MachineSnapshots.Snapshot snapshot = MachineSnapshots.inspect(player, label, center, radius);
         runtime.remember(label, position);
-        org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.inspected(player,label,center,radius);
-        return new IntentAction.Native(new org.maiwithu.maicraft.client.server.ServerMachineObservationTaskRecord(
+        ClientMachineCatalog.inspected(player,label,center,radius);
+        return new IntentAction.Native(new ServerMachineObservationTaskRecord(
                 "machine-inspection-" + UUID.randomUUID(), player.level().getGameTime() + 1_200, snapshot,
                 integer(p, "component_offset", 0, 0, 768), integer(p, "resource_offset", 0, 0, 4096)));
     }
@@ -243,7 +262,7 @@ final class MachineAbilityAdapter {
             report.add("recipe_evidence", MachineRecipeEvidence.inspect(player,
                     goal.parameters().getAsJsonObject("design").get("expected_output").getAsString()));
             // 审阅只给目标材料的工艺入口；要选机器或继续拆原料时再读EMI，避免设计报告展开整棵配方树。
-            report.addProperty("material_knowledge_uri", org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource.uri(
+            report.addProperty("material_knowledge_uri", RecipeKnowledgeSource.uri(
                     ResourceLocation.parse(p.getAsJsonObject("design").get("expected_output").getAsString())));
         }
         if (snapshot != null) {
@@ -269,37 +288,37 @@ final class MachineAbilityAdapter {
         String callId = "machine-" + UUID.randomUUID();
         String operation = requiredString(p, "operation", 64);
         if ("cancel_watch".equals(operation)) {
-            var result = org.maiwithu.maicraft.client.server.ClientMachineWatches.cancel(player,UUID.fromString(requiredString(p,"job_id",36)));
+            var result = ClientMachineWatches.cancel(player,UUID.fromString(requiredString(p,"job_id",36)));
             return new IntentAction.Report(TaskResult.ok("后台观察取消已请求；机器本身不会被关闭。",Map.of("monitor",result)),null);
         }
         if ("watch_production".equals(operation)) {
-            if (!org.maiwithu.maicraft.client.server.ServerAssistClient.supported("machine.watch")) throw bad("machine_watch_requires_server_support");
+            if (!ServerAssistClient.supported("machine.watch")) throw bad("machine_watch_requires_server_support");
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
-            var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(snapshot.center(),snapshot.dimension(),p.getAsJsonObject("production"));
+            var plan = new ProductionRunPlan(snapshot.center(),snapshot.dimension(),p.getAsJsonObject("production"));
             WatchLimits limits = watchLimits(p);
-            var task = new org.maiwithu.maicraft.core.integration.machine.runtime.MachineWatchTaskRecord(callId,player.level().getGameTime()+6000,
+            var task = new MachineWatchTaskRecord(callId,player.level().getGameTime()+6000,
                     snapshot.label(),plan,limits.minimumProcessEvents(),limits.durationTicks(),limits.idleTicks());
             MachineSnapshots.consume(snapshot); return new IntentAction.Native(task);
         }
         if ("run_production".equals(operation)) {
             MachineProductionIntent.requireRuntime(p.getAsJsonObject("production"));
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
-            var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
+            var protections = new LinkedHashSet<>(goal.inheritedProtectionLabels());
             if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
             var task = MachineProductionIntent.createTask(callId, player.level().getGameTime() + 45L * 60 * 20,
                     player, snapshot.center(), snapshot.dimension(), p.getAsJsonObject("production"), null, List.copyOf(protections),
                     p.has("material_policy") ? SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(p.get("material_policy").getAsString())
                             : SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY);
-            if (task instanceof org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord network)
-                org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),network.plan);
+            if (task instanceof MachineProductionTaskRecord network)
+                ClientMachineCatalog.registerPlan(player,snapshot.label(),network.plan);
             MachineSnapshots.consume(snapshot);
             return new IntentAction.Native(task);
         }
         if ("drive_vehicle".equals(operation)) {
             var destination=resolve(goal.target(),player,runtime);
-            return new IntentAction.Native(new org.maiwithu.maicraft.core.integration.machine.control.VehicleDriveTaskRecord(
+            return new IntentAction.Native(new VehicleDriveTaskRecord(
                     callId,player.level().getGameTime()+15*60*20,UUID.fromString(requiredString(p,"structure_id",36)),
-                    new net.minecraft.world.phys.Vec3(destination.x(),destination.y(),destination.z())));
+                    new Vec3(destination.x(),destination.y(),destination.z())));
         }
         if ("close_menu".equals(operation)) return new IntentAction.Native(MachineMenu.closeTask(callId, deadline));
         if (Set.of("deposit", "withdraw").contains(operation)) {
@@ -353,15 +372,15 @@ final class MachineAbilityAdapter {
         if ("apply_blueprint".equals(p.get("operation").getAsString())) return build(goal, player, runtime);
         if ("connect_external_input".equals(p.get("operation").getAsString())) {
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
-            var installation = org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.requireInstallation(player,snapshot.center());
+            var installation = ClientMachineCatalog.requireInstallation(player,snapshot.center());
             String inputId = requiredString(p,"input_id",64), sourceLabel = optionalString(p,"source_label",160);
             var input = installation.inputs().stream().filter(value -> value.id().equals(inputId)).findFirst()
                     .orElseThrow(() -> bad("machine_external_input_unknown: " + inputId));
             BlockPos source = sourceLabel == null ? null : block(resolve(new Goal.SemanticTarget("landmark",sourceLabel,null,null),player,runtime));
-            var protections = new java.util.LinkedHashSet<>(goal.inheritedProtectionLabels());
+            var protections = new LinkedHashSet<>(goal.inheritedProtectionLabels());
             if (p.has("protected_labels")) p.getAsJsonArray("protected_labels").forEach(value -> protections.add(value.getAsString()));
             if (input.medium().equals("kinetic")) {
-                var task = new org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord(
+                var task = new EconomicKineticTaskRecord(
                         "machine-utility-"+UUID.randomUUID(),player.level().getGameTime()+15L*60*20,snapshot.dimension(),
                         sourceLabel,source,null,inputId,snapshot.center().offset(input.offset()),input.face(),input.blockId(),
                         input.minimumRpm()==null?0:input.minimumRpm(),integer(p,"source_radius",64,8,128),false,
@@ -369,10 +388,10 @@ final class MachineAbilityAdapter {
                 MachineSnapshots.consume(snapshot);return new IntentAction.Native(task);
             }
             if(source==null)throw bad("source_label is required for this utility medium");
-            var request = new org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord.Request(
+            var request = new UtilityConnectionTaskRecord.Request(
                     source,snapshot.center().offset(input.offset()),input.face(),input.blockId(),input.medium(),
                     input.minimumRpm() == null ? 0 : input.minimumRpm(),0,input.resource());
-            var task = new org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord(
+            var task = new UtilityConnectionTaskRecord(
                     "machine-utility-"+UUID.randomUUID(),player.level().getGameTime()+15L*60*20,snapshot.dimension(),sourceLabel,inputId,request,
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64)),List.copyOf(protections));
             MachineSnapshots.consume(snapshot); return new IntentAction.Native(task);
@@ -407,7 +426,7 @@ final class MachineAbilityAdapter {
         }
         var layout = compileLayout(p, player);
         if (layout == null) return IntentAction.Pending.INSTANCE;
-        if (p.has("production") && !org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs.parse(layout.blueprint()).isEmpty())
+        if (p.has("production") && !MachineUtilityInputs.parse(layout.blueprint()).isEmpty())
             throw bad("external_utility_connection_is_separate: build without production, connect_external_input, then run_production");
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
         if (layout.buildable()) {
@@ -419,22 +438,22 @@ final class MachineAbilityAdapter {
             BlockPos anchor = design == null ? snapshot.center() : MachineConstructionPlan.floorAnchor(snapshot.center(), layout);
             // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
             var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", false));
-            if (!org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
+            if (!ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
                 return IntentAction.Pending.INSTANCE;
             List<String> protectedLabels = p.has("protected_labels")
-                    ? java.util.stream.StreamSupport.stream(p.getAsJsonArray("protected_labels").spliterator(), false)
-                        .map(com.google.gson.JsonElement::getAsString).toList() : List.of();
+                    ? StreamSupport.stream(p.getAsJsonArray("protected_labels").spliterator(), false)
+                        .map(JsonElement::getAsString).toList() : List.of();
             long deadline = player.level().getGameTime() + Math.max(45L * 60 * 20,
                     (long) (plan.blocks().size() + plan.parts().size()) * 100);
             var task = new MachineBuildTaskRecord("machine-" + UUID.randomUUID(), deadline, plan,
                     snapshot.dimension(), SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
                             optionalString(p, "material_policy", 64)), protectedLabels);
-            org.maiwithu.maicraft.task.TaskRecord execution = task;
+            TaskRecord execution = task;
             // 网络生产保留旧执行器；原生过程通过同一工厂包装建造顺序，不把v2误交给v1端口网络解析。
             if (p.has("production")) execution = MachineProductionIntent.createTask(task.getToolCallId(), deadline,
                     player, anchor, snapshot.dimension(), p.getAsJsonObject("production"), task, protectedLabels, task.materialPolicy);
-            if (execution instanceof org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord production)
-                org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
+            if (execution instanceof MachineProductionTaskRecord production)
+                ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
             MachineSnapshots.consume(snapshot);
             // 一份观察只用于发起一次修改，即使后面的施工失败，也要重新观察才可另开一份修改任务。
             return new IntentAction.Native(execution);
@@ -491,7 +510,7 @@ final class MachineAbilityAdapter {
                     : PonderBlueprintStore.resolve(requiredString(p, "blueprint_uri", 2048));
             result = MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(blueprint, MachineConstructionPlan.registry()));
         }
-        return result == null ? null : org.maiwithu.maicraft.core.integration.machine.utility.MachineSurvivalMaterials.requireSurvivalBlueprint(player,result);
+        return result == null ? null : MachineSurvivalMaterials.requireSurvivalBlueprint(player,result);
     }
 
     private static void validateSeparateUtilityConstruction(JsonObject p) {

@@ -9,6 +9,11 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.enchant.EnchantParameters;
 import org.maiwithu.maicraft.task.TaskResult;
+import com.google.gson.JsonObject;
+import java.util.List;
+import java.util.UUID;
+import org.maiwithu.maicraft.core.integration.machine.process.MinecraftEnchantProcessAdapter;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** 附魔台目标只来自当前维度的已加载事实；准备物品、选择报价与花费确认交给同一项附魔任务。 */
 final class EnchantAbilityAdapter {
@@ -54,12 +59,12 @@ final class EnchantAbilityAdapter {
         if (!player.level().isLoaded(table) || !player.level().getBlockState(table).is(Blocks.ENCHANTING_TABLE))
             return unavailable("The selected position is not an observed loaded enchanting table.");
         // 旧能力只转换执行请求，保留父Goal原文和旧消费编号；新旧入口共同使用同一附魔机制工厂与已验收执行器。
-        var production = new com.google.gson.JsonObject(); production.addProperty("schema_version", 2);
-        production.addProperty("process", org.maiwithu.maicraft.core.integration.machine.process.MinecraftEnchantProcessAdapter.ID);
+        var production = new JsonObject(); production.addProperty("schema_version", 2);
+        production.addProperty("process", MinecraftEnchantProcessAdapter.ID);
         production.add("parameters", options.executionParameters());
-        return new IntentAction.Native(MachineProductionIntent.createTask("enchant-" + java.util.UUID.randomUUID(),
+        return new IntentAction.Native(MachineProductionIntent.createTask("enchant-" + UUID.randomUUID(),
                 player.level().getGameTime() + 10L * 60 * 20, player, table, player.level().dimension().location().toString(),
-                production, null, java.util.List.of(), org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY));
+                production, null, List.of(), SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY));
     }
 
     private static IntentAction unavailable(String detail) {

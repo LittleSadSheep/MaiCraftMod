@@ -13,6 +13,11 @@ import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskR
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionDesignCompiler;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
+import java.math.BigDecimal;
+import org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
+import org.maiwithu.maicraft.task.TaskRecord;
 
 /** 统一解析旧网络与有限原生加工；只有实际适配器观察能证明可执行，声明或设计通过不等于已经生产。 */
 final class MachineProductionIntent {
@@ -61,12 +66,12 @@ final class MachineProductionIntent {
     static boolean isNative(JsonObject production) {
         var version = production == null ? null : production.get("schema_version");
         return version != null && version.isJsonPrimitive() && version.getAsJsonPrimitive().isNumber()
-                && version.getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(2)) == 0;
+                && version.getAsBigDecimal().compareTo(BigDecimal.valueOf(2)) == 0;
     }
 
-    static org.maiwithu.maicraft.task.TaskRecord createTask(String callId, long deadline, LocalPlayer player,
+    static TaskRecord createTask(String callId, long deadline, LocalPlayer player,
             BlockPos anchor, String dimension, JsonObject production, MachineBuildTaskRecord construction,
-            List<String> protectedLabels, org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy policy) {
+            List<String> protectedLabels, SemanticMaterialSupplyCoordinator.MaterialPolicy policy) {
         requireRuntime(production);
         if (isNative(production)) {
             var request = NativeProcessRequest.parse(production);
@@ -74,8 +79,8 @@ final class MachineProductionIntent {
             return construction == null ? NativeProcessRegistry.createTask(callId, deadline, player, anchor, request)
                     : new NativeProcessTaskRecord(callId, deadline, request, anchor, dimension, construction);
         }
-        var plan = new org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan(anchor, dimension, production);
-        return new org.maiwithu.maicraft.core.integration.machine.runtime.MachineProductionTaskRecord(
+        var plan = new ProductionRunPlan(anchor, dimension, production);
+        return new MachineProductionTaskRecord(
                 callId, deadline, plan, construction, protectedLabels, policy);
     }
 

@@ -21,12 +21,14 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.maiwithu.maicraft.core.Constants;
+import java.util.Objects;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** 把任务进度写进磁盘文件：游戏线程先留一份文本，后台依次写入，避免每次保存都卡住游戏。 */
 public final class IntentStateStore {
     public static final int VERSION = 1;
     // 保存与恢复每次读取有效启动配置，不能让较早加载的类把大建筑检查点锁死在旧四 MiB 常量。
-    public static int maxBytes() { return org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxIntentStateBytes(); }
+    public static int maxBytes() { return BuildingBudgets.current().maxIntentStateBytes(); }
     private static final int MAX_RESIDENT_IDENTITIES = 8;
 
     // 同一个世界连续要求保存时，只保留最近那份待写文本，不把每个旧版本都排队写一遍。
@@ -45,7 +47,7 @@ public final class IntentStateStore {
     }
 
     IntentStateStore(Executor writerExecutor) {
-        this.writerExecutor = java.util.Objects.requireNonNull(writerExecutor);
+        this.writerExecutor = Objects.requireNonNull(writerExecutor);
     }
 
     public enum Status { ABSENT, LOADED, CORRUPT, OVER_BUDGET }
@@ -145,7 +147,7 @@ public final class IntentStateStore {
     private LoadResult overBudget(StateIdentity identity) {
         // 调低文件预算时保留原任务，并向接单入口提供可以直接返回给玩家的恢复办法。
         blockRecovery(identity, "Semantic state recovery is blocked by maxIntentStateBytes in "
-                + org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH
+                + BuildingBudgets.CONFIG_PATH
                 + ". The checkpoint is preserved; increase this limit and restart the client to restore it before starting new tasks.");
         return new LoadResult(Status.OVER_BUDGET, new JsonObject());
     }
@@ -153,7 +155,7 @@ public final class IntentStateStore {
     /** 已读到合法 JSON，但当前模型规则或预算无法恢复时锁住原检查点，不能以空任务覆盖。 */
     public void preserveUnrestored(StateIdentity identity) {
         blockRecovery(identity, "Semantic state recovery is blocked by the current configuration or installed version. "
-                + "The checkpoint is preserved; review " + org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH
+                + "The checkpoint is preserved; review " + BuildingBudgets.CONFIG_PATH
                 + " and restore compatible settings or version, then restart the client before starting new tasks.");
     }
 

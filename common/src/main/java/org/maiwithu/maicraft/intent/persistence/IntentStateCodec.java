@@ -21,6 +21,8 @@ import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
+import java.nio.charset.StandardCharsets;
+import java.util.stream.IntStream;
 
 /** 把总任务、计划和地标转成可保存的 JSON，再从中恢复；不保存旧玩家的按键、菜单或正在走的路线。 */
 public final class IntentStateCodec {
@@ -315,7 +317,7 @@ public final class IntentStateCodec {
         if (steps.isEmpty()) steps.addAll(goal.executableSteps());
         // 旧存档若保留了原步骤顺序，可从原始树补回分组范围；已有的执行范围继续保留。
         List<Goal> declared = goal.executableSteps();
-        if (steps.size() == declared.size() && java.util.stream.IntStream.range(0, steps.size())
+        if (steps.size() == declared.size() && IntStream.range(0, steps.size())
                 .allMatch(i -> steps.get(i).toJson().equals(declared.get(i).toJson()))) {
             for (int i = 0; i < steps.size(); i++) {
                 steps.set(i, steps.get(i).withInheritedProtection(declared.get(i).inheritedProtectionLabels()));
@@ -563,7 +565,7 @@ public final class IntentStateCodec {
         }
         // 蓝图可能有许多方块，不套普通元数据每层二百五十六项的限制，但目标整体仍不能超过文件预算。
         // 请求准入与实际状态文件共用有效预算，避免场景已允许保存，却在语义目标检查时仍被旧常量拒绝。
-        if (original.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > IntentStateStore.maxBytes())
+        if (original.toString().getBytes(StandardCharsets.UTF_8).length > IntentStateStore.maxBytes())
             throw new IllegalArgumentException("semantic goal exceeds checkpoint byte budget; reference a blueprint resource instead");
         return original;
     }

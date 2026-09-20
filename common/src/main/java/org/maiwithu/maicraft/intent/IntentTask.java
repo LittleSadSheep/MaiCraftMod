@@ -34,6 +34,14 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.stream.Collectors;
+import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 
 /**
  * 把“我想做成这件事”一步步做出来，例如先取材料，再建房子。
@@ -278,7 +286,7 @@ final class IntentTask implements Task {
 
     private TaskState beginNative(TaskRecord nextRecord) {
             // 原生加工消费前统一留下跨重启边界；附魔仍保留旧命名空间，水中转化与包装子任务也不能重复投料。
-            if (nextRecord instanceof org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord consumption)
+            if (nextRecord instanceof NativeConsumptionTaskRecord consumption)
                 EnchantSubmissionBinding.bind(consumption, record, runtime);
             retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
@@ -327,8 +335,8 @@ final class IntentTask implements Task {
 
     private void retainBuildProject(TaskRecord child) {
         // 施工与供料共用冻结蓝图；只从这两类任务保留工程编号，恢复时不会重新找地或生成建筑。
-        var plan = child instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord build ? build
-                : child instanceof org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord supply ? supply.plan
+        var plan = child instanceof BuildTaskRecord build ? build
+                : child instanceof SemanticBuildSupplyTaskRecord supply ? supply.plan
                 : null;
         if (plan != null && record.retainBuildProject(plan.projectId(), plan.projectProtectionLabels())) {
             invalidateProtectionCache();
@@ -355,7 +363,7 @@ final class IntentTask implements Task {
         if (result == null) result = defaultResult(state);
         // 如果只是靠近电梯读到了楼层，就重新判断该去哪层，不能把“读到楼层”当成“已到目的地”。
         if(result.success() && reobserve) return TaskState.RUNNING;
-        if (finishingRecord instanceof org.maiwithu.maicraft.core.task.build.BuildTaskRecord
+        if (finishingRecord instanceof BuildTaskRecord
                 && MachineAbilityAdapter.supports(currentGoal().ability())) {
             // 机器方块搭好了，只能证明外形完成；不能据此说机器已经通电、运转或产出了物品。
             Map<String, Object> machineData = new LinkedHashMap<>(result.data());
@@ -698,7 +706,7 @@ final class IntentTask implements Task {
                     "earlier", "place", "position", "from", "into").contains(token)) continue;
             result.add(token);
             int[] points = token.codePoints().toArray();
-            if (points.length >= 2 && java.util.Arrays.stream(points).anyMatch(
+            if (points.length >= 2 && Arrays.stream(points).anyMatch(
                     point -> Character.UnicodeScript.of(point) == Character.UnicodeScript.HAN)) {
                 for (int index = 0; index + 1 < points.length; index++) {
                     result.add(new String(points, index, 2));
@@ -895,7 +903,7 @@ final class IntentTask implements Task {
         cachedProtectionStep = step;
         LongOpenHashSet mutation = new LongOpenHashSet();
         LongOpenHashSet body = new LongOpenHashSet();
-        java.util.LinkedHashSet<String> requested = new java.util.LinkedHashSet<>(
+        LinkedHashSet<String> requested = new LinkedHashSet<>(
                 explicitProtectedLabels(currentGoal()));
         if ("maicraft:sequence".equals(record.goal().ability())) {
             requested.addAll(explicitProtectedLabels(record.goal()));
@@ -923,7 +931,7 @@ final class IntentTask implements Task {
     private static Set<String> explicitProtectedLabels(Goal goal) {
         if (goal == null) return Set.of();
         return goal.protectionLabels().stream().map(IntentTask::normalizeProtectionLabel)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private static String normalizeProtectionLabel(String label) {
@@ -1017,7 +1025,7 @@ final class IntentTask implements Task {
     }
 
     private static Object sanitizeValue(Object value) {
-        if (value instanceof com.google.gson.JsonElement json) {
+        if (value instanceof JsonElement json) {
             return sanitizeJson(json);
         }
         if (value instanceof Map<?, ?> map) {
@@ -1053,11 +1061,11 @@ final class IntentTask implements Task {
         return value;
     }
 
-    private static Object sanitizeJson(com.google.gson.JsonElement value) {
+    private static Object sanitizeJson(JsonElement value) {
         if (value == null || value.isJsonNull()) return null;
         if (value.isJsonObject()) {
             Map<String, Object> clean = new LinkedHashMap<>();
-            for (Map.Entry<String, com.google.gson.JsonElement> entry
+            for (Map.Entry<String, JsonElement> entry
                     : value.getAsJsonObject().entrySet()) {
                 if (internalResultKey(entry.getKey())) continue;
                 Object nested = sanitizeEntry(entry.getKey(), entry.getValue());
@@ -1067,7 +1075,7 @@ final class IntentTask implements Task {
         }
         if (value.isJsonArray()) {
             List<Object> clean = new ArrayList<>();
-            for (com.google.gson.JsonElement element : value.getAsJsonArray()) {
+            for (JsonElement element : value.getAsJsonArray()) {
                 Object nested = sanitizeJson(element);
                 if (nested != null) clean.add(nested);
             }
@@ -1083,7 +1091,7 @@ final class IntentTask implements Task {
         // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。
         if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
         // Committed block changes are auditable world evidence, not a replayable planned route.
-        var json = new com.google.gson.Gson().toJsonTree(value);
+        var json = new Gson().toJsonTree(value);
         if (!json.isJsonArray()) return List.of();
         List<Object> result = new ArrayList<>();
         for (var entry : json.getAsJsonArray()) {

@@ -20,6 +20,16 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneExport;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneBlocks;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.TaskResult;
+import java.util.UUID;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
+import org.maiwithu.maicraft.core.blueprint.BuildingModelInspection;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import org.maiwithu.maicraft.mcp.knowledge.BuildingSceneResources;
+import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
  * 把创建、编辑、查看、导出、预览和施工这些模型操作接到各自实现。只有 operation=build 会返回真正的建筑任务。
@@ -42,7 +52,7 @@ final class BuildingSceneAdapter {
         JsonObject p = goal.parameters();
         String op = BuildingSceneContract.operation(goal);
         // 修订冻结项目之前先结束身体任务，避免旧施工单在材料检查点把新修订覆盖回去。
-        if (op.equals("revise_project")) requireRevisionIdle(org.maiwithu.maicraft.task.CompanionTickDispatcher.current());
+        if (op.equals("revise_project")) requireRevisionIdle(CompanionTickDispatcher.current());
         String dimension = player.level().dimension().location().toString();
         BuildingSceneStore.Entry entry = null;
         BuildingSceneStore store = null;
@@ -54,7 +64,7 @@ final class BuildingSceneAdapter {
             store = stores.get();
             entry = store.load(p.get("scene_id").getAsString(), dimension);
             // 带版本要求时同时检查当前契约和原场景凭据，旧模型仍可读取原文后另行创建已校验版本。
-            org.maiwithu.maicraft.core.blueprint.BuildingModelContract.checkScene(entry,p);
+            BuildingModelContract.checkScene(entry,p);
             anchor = entry.anchor();
             if (goal.target() != null) {
                 var requested = BuildingAnchor.resolve(goal, player, runtime);
@@ -63,15 +73,15 @@ final class BuildingSceneAdapter {
             // 查看定义时读取原场景中的具名组件，保留固定锚点，角色不走路、不取料或放置。
             if (op.equals("get_component_info")) {
                 Map<String, Object> description = metadata(entry);
-                description.putAll(jsonMap(org.maiwithu.maicraft.core.blueprint.BuildingModelInspection.componentInfo(
+                description.putAll(jsonMap(BuildingModelInspection.componentInfo(
                         entry.scene(), p.get("component_name").getAsString(), p.has("page") ? p.get("page").getAsInt() : 0)));
                 return new IntentAction.Report(TaskResult.ok("Building component inspected; no construction was started", description), null);
             }
             if (op.equals("get_scene_info") || op.equals("get_object_info")) {
                 Map<String, Object> description = metadata(entry);
                 description.putAll(jsonMap(op.equals("get_scene_info")
-                        ? org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection.sceneInfo(entry.scene(), p.has("page") ? p.get("page").getAsInt() : 0)
-                        : org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection.objectInfo(entry.scene(), p.get("object_name").getAsString(), p.has("page") ? p.get("page").getAsInt() : 0)));
+                        ? BuildingSceneInspection.sceneInfo(entry.scene(), p.has("page") ? p.get("page").getAsInt() : 0)
+                        : BuildingSceneInspection.objectInfo(entry.scene(), p.get("object_name").getAsString(), p.has("page") ? p.get("page").getAsInt() : 0)));
                 return new IntentAction.Report(TaskResult.ok("Building model inspected; no construction was started", description), null);
             }
             JsonObject source = op.equals("update_scene")
@@ -95,7 +105,7 @@ final class BuildingSceneAdapter {
         // 先确认注册名和状态能被当前游戏表达，再保存新版本；缺材料种类不会被换成近似方块。
         var targets = BuildTool.resolvedTargets(args.getAsJsonArray("ops"), true);
         if (op.equals("revise_project")) {
-            var revision = org.maiwithu.maicraft.core.blueprint.BuildProjectStore.current().reviseFromScene(
+            var revision = BuildProjectStore.current().reviseFromScene(
                     p.get("project_id").getAsString(), player.level(), entry.parentSceneId(), entry.sceneId(), targets);
             // 这里只更新确定的施工要求；原世界、材料和原生支撑记录保留，后续仍须显式续建才能挖掉旧地板。
             return new IntentAction.Report(TaskResult.ok("Building project adopted the scene revision; no construction was started",
@@ -126,7 +136,7 @@ final class BuildingSceneAdapter {
                     throw new IllegalArgumentException("Preview requires all model cells within loaded buildable terrain");
                 cells.put(target.pos(), target.desiredState());
             });
-            var session = PreviewSession.design("scene-" + java.util.UUID.randomUUID(), dimension, goal.outcome(), cells);
+            var session = PreviewSession.design("scene-" + UUID.randomUUID(), dimension, goal.outcome(), cells);
             if (!publish.test(session)) return new IntentAction.Report(TaskResult.fail("The blueprint preview could not be displayed", data), null);
             data.put("preview_created", true);
             data.put("preview_id", session.owner());
@@ -137,7 +147,7 @@ final class BuildingSceneAdapter {
             data.put("format", format);
             data.put("minecraft_offset", BuildingSceneExport.minimum(blueprint));
         } else {
-            data.putAll(jsonMap(org.maiwithu.maicraft.core.blueprint.BuildingSceneInspection.sceneInfo(entry.scene(), 0)));
+            data.putAll(jsonMap(BuildingSceneInspection.sceneInfo(entry.scene(), 0)));
         }
         return new IntentAction.Report(TaskResult.ok("Building model " + op + " completed; no construction was started", data), null);
     }
@@ -145,7 +155,7 @@ final class BuildingSceneAdapter {
     // 把局部偏移加到固定锚点，生成逐格 set；拒绝实体、部件和非空 NBT 配置，这些另由机器能力处理。
     static JsonObject buildArguments(JsonObject blueprint, Goal.WorldPosition anchor, JsonObject parameters) {
         // 已经编译的大建筑在转换为绝对施工目标时继续使用建筑预算，不退回机器蓝图的默认规模。
-        org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.validateBuildingWire(blueprint);
+        MachineBlueprintDocument.validateBuildingWire(blueprint);
         if (blueprint.has("entities") && !blueprint.getAsJsonArray("entities").isEmpty())
             throw new IllegalArgumentException("Building models do not support entity installation");
         JsonArray ops = new JsonArray();
@@ -164,9 +174,9 @@ final class BuildingSceneAdapter {
             op.addProperty("z", Math.addExact(anchor.z(), offset.get(2).getAsInt()));
             op.add("properties", properties.deepCopy()); ops.add(op);
         }
-        if (ops.size() > org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxTargets())
+        if (ops.size() > BuildingBudgets.current().maxTargets())
             throw new IllegalArgumentException("Building model exceeds maxTargets="
-                    + org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxTargets()
+                    + BuildingBudgets.current().maxTargets()
                     + " in config/maicraft-building.properties");
         JsonObject args = new JsonObject(); args.add("ops", ops);
         // 模型保持明确材料与精确状态；允许分批备料，默认不替换已有方块。specified 只固定材质，实际取材按 ordinary 策略执行。
@@ -189,14 +199,14 @@ final class BuildingSceneAdapter {
             result.put("capability_revision",entry.capabilityRevision());
             result.put("design_schema_revision",entry.designSchemaRevision());
         }
-        result.put("scene_uri", org.maiwithu.maicraft.mcp.knowledge.BuildingSceneResources.sceneUri(entry.sceneId()));
-        result.put("blueprint_uri", org.maiwithu.maicraft.mcp.knowledge.BuildingSceneResources.blueprintUri(entry.sceneId()));
+        result.put("scene_uri", BuildingSceneResources.sceneUri(entry.sceneId()));
+        result.put("blueprint_uri", BuildingSceneResources.blueprintUri(entry.sceneId()));
         if (entry.parentSceneId() != null) result.put("parent_scene_id", entry.parentSceneId());
         var anchor = entry.anchor();
         result.put("anchor", Map.of("x", anchor.x(), "y", anchor.y(), "z", anchor.z(), "dimension", anchor.dimension()));
         return result;
     }
-    static void requireRevisionIdle(org.maiwithu.maicraft.task.TaskRecord active) {
+    static void requireRevisionIdle(TaskRecord active) {
         if (active != null && !active.getState().isTerminal())
             throw new IllegalArgumentException("Finish or cancel the active body task before revising a frozen building project");
     }

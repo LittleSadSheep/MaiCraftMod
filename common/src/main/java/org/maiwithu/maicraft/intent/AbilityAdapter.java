@@ -19,6 +19,13 @@ import org.maiwithu.maicraft.core.scan.TargetIndex;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
+import org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord;
+import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskResult;
 
 /**
  * 把模型填好的目标翻译成下一步该做什么，例如“去营地”变成调用移动工具。
@@ -129,11 +136,11 @@ final class AbilityAdapter {
                             option("cancel", "Cancel the whole task.")));
         }
         // 先找已加载区域里的床；查询分多刻进行，没有查完就等，不把“暂时没找到”当作“没有”。
-        java.util.Set<Block> bedBlocks = BuiltInRegistries.BLOCK
+        Set<Block> bedBlocks = BuiltInRegistries.BLOCK
                 .getTag(BlockTags.BEDS)
                 .map(tag -> tag.stream().map(holder -> holder.value())
-                        .collect(java.util.stream.Collectors.toUnmodifiableSet()))
-                .orElseGet(java.util.Set::of);
+                        .collect(Collectors.toUnmodifiableSet()))
+                .orElseGet(Set::of);
         if (!bedBlocks.isEmpty()) {
             TargetIndex.register(player.clientLevel, bedBlocks);
             TargetIndex.Result beds;
@@ -283,7 +290,7 @@ final class AbilityAdapter {
             TransportMode transport = TransportMode.parse(string(goal.parameters(), "transport_mode"));
             if (transport != TransportMode.AUTO && transport != TransportMode.JETPACK)
                 throw new IllegalArgumentException("physical boarding uses transport_mode=auto or jetpack");
-            parameters.addProperty("structure_id", java.util.UUID.fromString(string(goal.parameters(), "structure_id")).toString());
+            parameters.addProperty("structure_id", UUID.fromString(string(goal.parameters(), "structure_id")).toString());
             return new IntentAction.Tool("board_structure",parameters.toString());
         }
         TravelDestination.validatePrecision(goal.parameters());
@@ -300,16 +307,16 @@ final class AbilityAdapter {
                 throw new IllegalArgumentException("platform discovery uses a region and auto, ground or jetpack transport");
             String direction=string(goal.parameters(),"direction");
             if (direction==null) direction="forward";
-            org.maiwithu.maicraft.core.pathing.goal.RegionalGoal.direction(direction,0);
+            RegionalGoal.direction(direction,0);
             parameters.addProperty("direction",direction);
-            parameters.addProperty("transport_mode",mode.name().toLowerCase(java.util.Locale.ROOT));
+            parameters.addProperty("transport_mode",mode.name().toLowerCase(Locale.ROOT));
             parameters.addProperty("max_distance",integer(goal.parameters(),"max_distance",64,8,128));
             parameters.addProperty("may_alter_terrain",bool(goal.parameters(),"may_alter_terrain",false)
                     || bool(goal.preferences(),"may_alter_terrain",false));
             return new IntentAction.Tool("travel_region",parameters.toString());
         }
         if (goal.parameters().has("direction")) throw new IllegalArgumentException("direction is for platform discovery");
-        parameters.addProperty("transport_mode", mode.name().toLowerCase(java.util.Locale.ROOT));
+        parameters.addProperty("transport_mode", mode.name().toLowerCase(Locale.ROOT));
         String block = string(goal.parameters(), "block_id");
         if (block == null) block = string(goal.parameters(), "block");
         if (block != null) {
@@ -373,7 +380,7 @@ final class AbilityAdapter {
                 }
                 JsonObject explore = new JsonObject();
                 explore.addProperty("target", exploreTarget);
-                explore.addProperty("transport_mode", mode.name().toLowerCase(java.util.Locale.ROOT));
+                explore.addProperty("transport_mode", mode.name().toLowerCase(Locale.ROOT));
                 explore.addProperty("max_distance",
                         integer(goal.parameters(), "max_distance", 768, 64, 2_048));
                 if (bool(goal.parameters(), "may_alter_terrain", false)
@@ -704,7 +711,7 @@ final class AbilityAdapter {
                             option("cancel", "Cancel the task.")));
         }
         String style = string(parameters, "style");
-        if (style != null) style = style.strip().toLowerCase(java.util.Locale.ROOT);
+        if (style != null) style = style.strip().toLowerCase(Locale.ROOT);
         if (style != null && !List.of("auto", "ground", "unobtrusive").contains(style)) {
             return decision(goal,
                     "Unsupported lighting style: " + style,
@@ -717,7 +724,7 @@ final class AbilityAdapter {
         args.addProperty("center_z", center.z());
         if (explicitRadius) {
             args.addProperty("radius", integer(parameters, "radius", 1, 1,
-                    org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord.MAX_EXPLICIT_RADIUS));
+                    SemanticLightAreaTaskRecord.MAX_EXPLICIT_RADIUS));
         }
         args.addProperty("coverage", coverage);
         args.addProperty("placement_preference", placementPreference);
@@ -1024,11 +1031,11 @@ sealed interface IntentAction {
     /** 信息还没查完，下一个游戏刻继续判断同一目标。 */
     enum Pending implements IntentAction { INSTANCE }
     /** 不用再做动作，直接交回结果；可附上 Mod 自己确认过的位置供后续步骤使用。 */
-    record Report(org.maiwithu.maicraft.task.TaskResult result,
+    record Report(TaskResult result,
                   Goal.WorldPosition verifiedPosition) implements IntentAction {}
     /** 已经创建好具体任务单，交给总任务逐步执行。 */
-    record Native(org.maiwithu.maicraft.task.TaskRecord record,boolean reobserveAfterSuccess) implements IntentAction {
-        Native(org.maiwithu.maicraft.task.TaskRecord record) { this(record,false); }
+    record Native(TaskRecord record,boolean reobserveAfterSuccess) implements IntentAction {
+        Native(TaskRecord record) { this(record,false); }
     }
     /** 按顺序执行一组内部工具，例如先摆床、再走过去、最后躺下。 */
     record Chain(List<Tool> actions) implements IntentAction {

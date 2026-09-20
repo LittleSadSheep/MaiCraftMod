@@ -28,6 +28,15 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import org.maiwithu.maicraft.client.preview.PreviewController;
+import org.maiwithu.maicraft.client.preview.PreviewSession;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
 
 /**
  * 保存客户端业务任务的计划、公开 ID、进度、决策和持久化状态，供 MCP 查询。
@@ -149,7 +158,7 @@ public final class IntentRuntime {
 
     public IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey) {
         return execute(player, goal, planId, requestKey,
-                org.maiwithu.maicraft.client.preview.PreviewController::showDesign);
+                PreviewController::showDesign);
     }
 
     public static boolean isReadOnlyDesign(Goal goal) {
@@ -157,14 +166,14 @@ public final class IntentRuntime {
     }
 
     IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
-                            java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign) {
-        return execute(player,goal,planId,requestKey,publishDesign,org.maiwithu.maicraft.core.blueprint.BuildingSceneStore::current);
+                            Predicate<PreviewSession> publishDesign) {
+        return execute(player,goal,planId,requestKey,publishDesign,BuildingSceneStore::current);
     }
 
     // 设计保存仍由同一只读分支推进；注入世界场景仓库便于验证并行设计绝不会替换角色当前施工槽。
     IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
-                            java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign,
-                            java.util.function.Supplier<org.maiwithu.maicraft.core.blueprint.BuildingSceneStore> sceneStores) {
+                            Predicate<PreviewSession> publishDesign,
+                            Supplier<BuildingSceneStore> sceneStores) {
         // 先确认旧进度可继续保存，再校验并接单；受阻时不能发布 started、写新文件或把任务交给身体。
         requireRecoveredState();
         validateGoal(goal);
@@ -237,7 +246,7 @@ public final class IntentRuntime {
         List<IntentTaskRecord> all = new ArrayList<>(tasks.values());
         int from = Math.max(0, all.size() - Math.max(1, limit));
         List<IntentTaskRecord> result = new ArrayList<>(all.subList(from, all.size()));
-        java.util.Collections.reverse(result);
+        Collections.reverse(result);
         return List.copyOf(result);
     }
 
@@ -259,8 +268,8 @@ public final class IntentRuntime {
         if (label == null) return null;
         Landmark remembered = landmarks.get(normalizeLabel(label));
         if (remembered != null) return remembered;
-        var minecraft = net.minecraft.client.Minecraft.getInstance();
-        var location = minecraft == null ? null : org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.resolveLabel(minecraft.player,label);
+        var minecraft = Minecraft.getInstance();
+        var location = minecraft == null ? null : ClientMachineCatalog.resolveLabel(minecraft.player,label);
         return location == null ? null : new Landmark(label,location,LandmarkAreaRole.ORDINARY);
     }
 
@@ -417,13 +426,13 @@ public final class IntentRuntime {
     }
 
     // 一次消费的独立日志与当前总任务使用同一世界身份，不能从公开参数指定别的存档路径。
-    org.maiwithu.maicraft.intent.persistence.StateIdentity requiredStateIdentity() {
+    StateIdentity requiredStateIdentity() {
         requireRecoveredState();
         if (stateIdentity == null) throw new IllegalStateException("a durable operation requires the currently bound world");
         return stateIdentity;
     }
 
-    java.util.concurrent.CompletableFuture<Void> checkpointBeforeEnchantment(IntentTaskRecord parent) {
+    CompletableFuture<Void> checkpointBeforeEnchantment(IntentTaskRecord parent) {
         requireEnchantmentParent(parent);
         try {
             // 绕过普通五秒保存间隔，完整保留稳定任务身份、request_key和当前步骤；返回实际磁盘写入凭据给消费屏障等待。
@@ -437,7 +446,7 @@ public final class IntentRuntime {
         }
     }
 
-    java.util.concurrent.CompletableFuture<Void> followEnchantmentCheckpoint(IntentTaskRecord parent) {
+    CompletableFuture<Void> followEnchantmentCheckpoint(IntentTaskRecord parent) {
         requireEnchantmentParent(parent);
         // 本运行时的合并快照仍包含已登记父任务；跟随最新回执，若它失败则让屏障停止，不能自动改写再试。
         var latest = stateStore.latestSaveCompletion(stateIdentity);
@@ -529,7 +538,7 @@ public final class IntentRuntime {
         if (problem != null) {
             data.addProperty("checkpoint_preserved", true);
             data.addProperty("new_tasks_blocked", true);
-            data.addProperty("configuration", org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH);
+            data.addProperty("configuration", BuildingBudgets.CONFIG_PATH);
         }
         attention.publish(
                 "state_restored",

@@ -6,6 +6,9 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneCompiler;
 import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import java.math.BigDecimal;
+import java.util.UUID;
+import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
 
 /**
  * 定义建模操作的输入规则，它们仍属于 build 或 design_build 的模式。design_build 只能查看和准备，不能启动施工。
@@ -52,12 +55,12 @@ final class BuildingSceneContract {
         if (p.has("scene")) BuildingSceneCompiler.validateWire(object(p, "scene"));
         // 建筑逐格输入与作者模型共用建筑预算，协议预检不得偷偷沿用机器规划的较小上限。
         if (p.has("blueprint")) MachineBlueprintDocument.validateBuildingWire(object(p, "blueprint"));
-        if (p.has("scene_id")) java.util.UUID.fromString(string(p, "scene_id"));
+        if (p.has("scene_id")) UUID.fromString(string(p, "scene_id"));
         if (Set.of("update_scene", "get_scene_info", "get_object_info", "get_component_info", "export_scene", "revise_project").contains(op)
                 && !p.has("scene_id")) throw new IllegalArgumentException(op + " needs scene_id");
         // 采用新场景修订必须明确指向旧项目，且不夹带新的取材、地点或替换权限；普通续建仍只读取冻结目标。
         if (op.equals("revise_project")) {
-            java.util.UUID.fromString(string(p, "project_id"));
+            UUID.fromString(string(p, "project_id"));
             if (goal.target() != null || !Set.of("operation", "scene_id", "project_id",
                     BuildingModelContract.EXPECTED_CAPABILITY,BuildingModelContract.EXPECTED_SCHEMA).containsAll(p.keySet()))
                 throw new IllegalArgumentException("revise_project keeps the original site and policies; supply only scene_id and project_id");
@@ -77,7 +80,7 @@ final class BuildingSceneContract {
             if (!Set.of("get_scene_info", "get_object_info", "get_component_info").contains(op) || !p.get("page").isJsonPrimitive()
                     || !p.getAsJsonPrimitive("page").isNumber() || p.get("page").getAsBigDecimal().scale() > 0
                     || p.get("page").getAsBigDecimal().signum() < 0
-                    || p.get("page").getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(1024)) > 0)
+                    || p.get("page").getAsBigDecimal().compareTo(BigDecimal.valueOf(1024)) > 0)
                 throw new IllegalArgumentException("model query page must be an integer from 0 to 1024");
         }
         if (p.has("replace_existing") && (!p.get("replace_existing").isJsonPrimitive()
@@ -90,7 +93,7 @@ final class BuildingSceneContract {
 
     static void validateEdits(JsonObject edits) {
         // 公共编辑与保存使用同一套 v1/v2 字段校验；完整合并并编译成功后才发布不可变的新版本。
-        org.maiwithu.maicraft.core.blueprint.BuildingSceneStore.validateEdits(edits);
+        BuildingSceneStore.validateEdits(edits);
     }
 
     static JsonObject object(JsonObject value, String key) {

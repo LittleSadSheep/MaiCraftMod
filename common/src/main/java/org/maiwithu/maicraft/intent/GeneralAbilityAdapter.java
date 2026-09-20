@@ -32,6 +32,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.world.item.Items;
+import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
+import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 
 /**
  * 把战斗、跟随、吃东西、装备和交互等目标，转换成已经实现的具体工具调用。
@@ -127,7 +132,7 @@ public final class GeneralAbilityAdapter {
         List<String> invalidItems = itemIds.stream().filter(value -> {
             ResourceLocation id = ResourceLocation.tryParse(value);
             return id == null || !BuiltInRegistries.ITEM.containsKey(id)
-                    || BuiltInRegistries.ITEM.get(id) == net.minecraft.world.item.Items.AIR;
+                    || BuiltInRegistries.ITEM.get(id) == Items.AIR;
         }).toList();
         if (!invalidItems.isEmpty()) {
             return decision(goal, "The item selector contains unknown namespaced items: "
@@ -152,9 +157,9 @@ public final class GeneralAbilityAdapter {
         Integer targetCount;
         try {
             count = strictInteger(p, "count", 1,
-                    org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord.MAX_COUNT);
+                    SemanticContainerTaskRecord.MAX_COUNT);
             targetCount = strictInteger(p, "target_count", 0,
-                    org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord.MAX_COUNT);
+                    SemanticContainerTaskRecord.MAX_COUNT);
         } catch (IllegalArgumentException invalid) {
             return decision(goal, invalid.getMessage(),
                     List.of(option("retry", "Provide a bounded semantic item count."),
@@ -218,8 +223,8 @@ public final class GeneralAbilityAdapter {
         args.addProperty("selection", nearest ? "nearest" : "unique");
         // 这里用前面综合判断出的 nearest；即使参数写 unique，目标中的 nearest 仍可能让它变成就近选择。
         args.addProperty("radius", integer(p, "radius",
-                org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord.DEFAULT_RADIUS,
-                1, org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord.MAX_RADIUS));
+                SemanticContainerTaskRecord.DEFAULT_RADIUS,
+                1, SemanticContainerTaskRecord.MAX_RADIUS));
         if (p.has("protected_labels")) {
             if (!p.get("protected_labels").isJsonArray()) {
                 return decision(goal, "protected_labels must be an array of remembered labels.",
@@ -445,20 +450,20 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel interaction.")), null);
         }
         var hoe = !containerOnly && "till".equals(purpose) && itemId(p) == null
-                ? org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.tillingTool(player) : null;
+                ? WorkToolPreparation.tillingTool(player) : null;
         // 要耕地但没指定工具时，Mod 自己找合适的锄；必要时先取到工具，再执行原交互。
         String selectedItem = hoe == null ? itemId(p) : hoe.itemId().toString();
         IntentAction interaction = interactBlock(goal, player, runtime, blockId, selectedItem, hoe != null && !hoe.carried());
         if (hoe == null) return interaction;
-        int carried = org.maiwithu.maicraft.core.PlayerInv.buildableCount(
+        int carried = PlayerInv.buildableCount(
                 player.getInventory(), BuiltInRegistries.ITEM.get(hoe.itemId()));
-        boolean storage = org.maiwithu.maicraft.core.inventory.StockEvidence.latest(player)
-                .map(org.maiwithu.maicraft.core.inventory.StockEvidence.Snapshot::supportsToolSupply).orElse(false);
+        boolean storage = StockEvidence.latest(player)
+                .map(StockEvidence.Snapshot::supportsToolSupply).orElse(false);
         return prepareUseTool(hoe, carried, storage, interaction);
     }
 
     static IntentAction prepareUseTool(
-            org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.UseTool tool,
+            WorkToolPreparation.UseTool tool,
             int carriedCount, boolean storage, IntentAction interaction) {
         // 工具已带着，或交互本身还不能执行时，不另开取工具任务；否则把取工具插在交互前面。
         if (tool.carried() || !(interaction instanceof IntentAction.Tool || interaction instanceof IntentAction.Chain))

@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
 
 /** 展示作者模型或冻结施工单的只读预览；不生成房屋、不取材料、不走路，也不施工。 */
 final class BuildDesignAdapter {
@@ -33,7 +34,7 @@ final class BuildDesignAdapter {
         var args = tool.arguments();
         Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
         (args.has("project_targets")
-                ? org.maiwithu.maicraft.core.blueprint.BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
+                ? BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
                 : BuildTool.resolvedTargets(args.getAsJsonArray("ops")))
                 .forEach(target -> cells.put(target.pos(), target.desiredState()));
         // 展开到最终每一格的状态，用于显示蓝图；这里没有把这些格子提交给施工任务。

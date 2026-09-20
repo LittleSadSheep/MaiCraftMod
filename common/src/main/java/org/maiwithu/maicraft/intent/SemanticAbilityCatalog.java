@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import org.maiwithu.maicraft.core.build.BuildingBudgetReport;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 
 /** Public contracts that teach a model semantic fields without exposing internal actions. */
 public final class SemanticAbilityCatalog {
@@ -16,7 +18,7 @@ public final class SemanticAbilityCatalog {
         JsonObject description = describeContract(ability);
         if (MachineAbilityAdapter.DESIGN.equals(ability) || MachineAbilityAdapter.BUILD.equals(ability)
                 || MachineAbilityAdapter.MODIFY.equals(ability)) {
-            var budget = org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget.current();
+            var budget = MachinePlanningBudget.current();
             JsonObject limits = new JsonObject();
             limits.addProperty("max_targets", budget.maxTargets()); limits.addProperty("max_components", budget.maxComponents());
             limits.addProperty("max_connections", budget.maxConnections()); limits.addProperty("max_radius", budget.maxRadius());
@@ -26,7 +28,7 @@ public final class SemanticAbilityCatalog {
         }
         // 保存、预览和实际建造都公布当前建筑配置，不把机器规划默认值误当成整座建筑上限。
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability))
-            description.add("planning_budget", org.maiwithu.maicraft.core.build.BuildingBudgetReport.current());
+            description.add("planning_budget", BuildingBudgetReport.current());
         return description;
     }
 

@@ -13,12 +13,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import java.util.LinkedHashSet;
 
 /** MCP 总任务的任务单：记住总目标、做到了哪一步、为什么暂停，以及正在等调用者回答什么。 */
 public final class IntentTaskRecord extends TaskRecord {
 
     private static final int MAX_ATTEMPTS = 64;
-    private static final com.google.gson.Gson PROGRESS_JSON = new com.google.gson.Gson();
+    private static final Gson PROGRESS_JSON = new Gson();
 
     private final UUID externalId;
     private final UUID planId;
@@ -256,11 +259,11 @@ public final class IntentTaskRecord extends TaskRecord {
         if (!"maicraft:build".equals(current.ability())) return false;
         JsonObject parameters = new JsonObject();
         parameters.addProperty("project_id", id);
-        var labels = new java.util.LinkedHashSet<>(savedProtectionLabels);
+        var labels = new LinkedHashSet<>(savedProtectionLabels);
         if (current.parameters().has("protected_labels")) current.parameters().getAsJsonArray("protected_labels")
                 .forEach(value -> labels.add(value.getAsString()));
         if (!labels.isEmpty()) {
-            var values = new com.google.gson.JsonArray();
+            var values = new JsonArray();
             labels.forEach(values::add);
             parameters.add("protected_labels", values);
         }

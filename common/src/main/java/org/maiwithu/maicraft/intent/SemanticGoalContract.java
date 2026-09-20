@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 
 import java.util.Set;
+import java.util.UUID;
+import org.maiwithu.maicraft.client.chat.ChatMessage;
 
 /** 检查目标使用了已声明的能力、参数名和目标类型；大多数参数的具体值仍交给各能力自己检查。 */
 final class SemanticGoalContract {
@@ -32,7 +34,7 @@ final class SemanticGoalContract {
         validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
         if (ChatAbilityAdapter.ABILITY.equals(ability)) {
-            try { org.maiwithu.maicraft.client.chat.ChatMessage.parse(goal.parameters()); }
+            try { ChatMessage.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
             }
@@ -46,7 +48,7 @@ final class SemanticGoalContract {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
             // 普通续建只引用已冻结的蓝图，不能夹带新尺寸、材质或其他设计参数重新生成建筑。
             else if (goal.parameters().has("project_id")) {
-                java.util.UUID.fromString(BuildingSceneContract.string(goal.parameters(), "project_id"));
+                UUID.fromString(BuildingSceneContract.string(goal.parameters(), "project_id"));
                 for (String key : goal.parameters().keySet())
                     if (!Set.of("project_id", "protected_labels").contains(key))
                         throw violation("invalid_build_resume", path + ".parameters", ability,
