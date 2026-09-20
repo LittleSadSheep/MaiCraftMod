@@ -21,10 +21,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
-import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
@@ -36,6 +34,8 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
+import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.CraftRoute;
+import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.IngredientGroup;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -52,7 +52,6 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-import java.util.Arrays;
 import java.util.Objects;
 import net.minecraft.world.inventory.DataSlot;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -86,12 +85,6 @@ public final class SemanticCookCompanionTask
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
         MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
         CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
-    private record IngredientGroup(List<Item> alternatives, int uses) {}
-    private record CraftRoute(
-            ResourceLocation recipeId,
-            int outputCount,
-            List<IngredientGroup> ingredients,
-            boolean requiresWorkstation) {}
     private record FuelChoice(
             Item item, int burnTicks, int count, long waste, long acquisitionCost) {}
     private record ResolvedCandidate(
@@ -148,8 +141,7 @@ public final class SemanticCookCompanionTask
     private String failedChildMessage;
     private boolean outcomeUncertain;
     private Map<String, Object> prerequisiteFailure = Map.of();
-    private Map<Item, List<CraftRoute>> craftRoutes = Map.of();
-    private boolean craftRoutesIndexed;
+    private final CookingRecipePlanner recipePlanner;
     /** Minimum squared loaded-world distance for each observed block type. */
     private Map<Block, Long> nearbyBlockDistances = Map.of();
     private final Set<String> rejectedInputCandidates = new LinkedHashSet<>();
@@ -159,6 +151,7 @@ public final class SemanticCookCompanionTask
 
     public SemanticCookCompanionTask(LocalPlayer player, SemanticCookTaskRecord record) {
         super(player, record);
+        recipePlanner = new CookingRecipePlanner(player);
     }
 
     @Override protected void onStart() { initialOutputCount = outputCount(); }
@@ -287,7 +280,6 @@ public final class SemanticCookCompanionTask
                     "No untried recipe matching recipe_preference can produce " + r.itemId + ".",
                     FailureType.NO_MATERIAL);
         }
-        if (!craftRoutesIndexed) craftRoutes = indexCraftRoutes();
         nearbyBlockDistances = snapshotNearbyBlocks();
 
         List<ResolvedCandidate> plans = new ArrayList<>();
@@ -451,66 +443,6 @@ public final class SemanticCookCompanionTask
         return new FuelChoice(item, burn, needed, waste, cost);
     }
 
-    /** Build a compact ordinary-crafting graph once; it is evidence, never an executor. */
-    // 为了估计备料成本，本类另外整理了一份合成关系；只保存产物种类、数量、材料替代组及是否需要工作台。
-    private Map<Item, List<CraftRoute>> indexCraftRoutes() {
-        Map<Item, List<CraftRoute>> indexed = new HashMap<>();
-        var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
-        for (RecipeHolder<?> holder : manager.getRecipes()) {
-            try {
-                if (!(holder.value() instanceof CraftingRecipe recipe)
-                        || recipe.isSpecial()
-                        || !RecipeProbe.usableIngredients(recipe)) {
-                    continue;
-                }
-                ItemStack output = RecipeProbe.resultOf(
-                        recipe, player.level().registryAccess());
-                if (output.isEmpty()) continue;
-                List<IngredientGroup> groups = ingredientGroups(recipe);
-                if (groups.isEmpty()) continue;
-                int ingredientUses = recipe.getIngredients().stream()
-                        .mapToInt(ingredient -> ingredient == null || ingredient.isEmpty() ? 0 : 1)
-                        .sum();
-                boolean workstation = recipe instanceof ShapedRecipe shaped
-                        ? shaped.getWidth() > 2 || shaped.getHeight() > 2
-                        : ingredientUses > 4;
-                indexed.computeIfAbsent(output.getItem(), ignored -> new ArrayList<>())
-                        .add(new CraftRoute(
-                                holder.id(), Math.max(1, output.getCount()),
-                                groups, workstation));
-            } catch (RuntimeException brokenRecipe) {
-                Constants.LOG.debug(
-                        "[maicraft-cook] skipped unusable acquisition-cost recipe {}: {}",
-                        holder.id(), brokenRecipe.toString());
-            }
-        }
-        indexed.replaceAll((item, routes) -> routes.stream()
-                .sorted(Comparator.comparing(route -> route.recipeId().toString()))
-                .toList());
-        craftRoutesIndexed = true;
-        return Map.copyOf(indexed);
-    }
-
-    // 候选物品列表完全相同的材料格合成一组，并数这种材料用了几格，避免重复遍历相同要求。
-    private static List<IngredientGroup> ingredientGroups(CraftingRecipe recipe) {
-        Map<List<Item>, Integer> uses = new LinkedHashMap<>();
-        for (Ingredient ingredient : recipe.getIngredients()) {
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            List<Item> alternatives = Arrays.stream(ingredient.getItems())
-                    .filter(stack -> stack != null && !stack.isEmpty())
-                    .map(ItemStack::getItem)
-                    .distinct()
-                    .sorted(Comparator.comparing(item ->
-                            BuiltInRegistries.ITEM.getKey(item).toString()))
-                    .toList();
-            if (alternatives.isEmpty()) return List.of();
-            uses.merge(alternatives, 1, Integer::sum);
-        }
-        return uses.entrySet().stream()
-                .map(entry -> new IngredientGroup(entry.getKey(), entry.getValue()))
-                .toList();
-    }
-
     /**
      * Estimate only routes the semantic acquisition child can actually execute. The result is a
      * relative preparation cost, not a promise: live child receipts remain authoritative and can
@@ -538,7 +470,7 @@ public final class SemanticCookCompanionTask
             return best;
         }
 
-        List<CraftRoute> routes = craftRoutes.getOrDefault(item, List.of());
+        List<CraftRoute> routes = recipePlanner.routesFor(item);
         if (routes.isEmpty()) return best;
         Set<Item> nextLineage = new LinkedHashSet<>(lineage);
         nextLineage.add(item);
