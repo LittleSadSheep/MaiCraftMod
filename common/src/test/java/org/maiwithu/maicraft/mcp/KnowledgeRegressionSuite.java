@@ -8,6 +8,8 @@ public final class KnowledgeRegressionSuite {
         net.minecraft.server.Bootstrap.bootStrap();
         org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest.main(args);
         org.maiwithu.maicraft.mcp.knowledge.BuildingModelContractResourcesTest.main(args);
+        // 教材先跑实际建模与方块状态检查，避免把能解析但会堵门或填满屋顶的案例交给设计 Agent。
+        org.maiwithu.maicraft.mcp.knowledge.BuildingTutorialResourcesTest.main(args);
         // 材料配方页只读取所选工艺页并链接设备教程，缺失知识不能伪装成可执行配方。
         org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSourceTest.main(args);
         org.maiwithu.maicraft.core.integration.emi.EmiRecipeKnowledgeTest.main(args);

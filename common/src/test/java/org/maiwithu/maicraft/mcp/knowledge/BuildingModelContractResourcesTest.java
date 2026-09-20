@@ -19,7 +19,7 @@ public final class BuildingModelContractResourcesTest {
         check(uris.contains(BuildingModelContract.INDEX_URI) && uris.contains(snapshot.schemaUri()),"目录与固定版本Schema均须通过标准资源列表发现");
         var index = JsonParser.parseString(library.read(BuildingModelContract.INDEX_URI).text()).getAsJsonObject();
         check(index.get("protocol_version").getAsInt() == 1 && index.get("revision").getAsString().equals(snapshot.revision()),"资源目录外壳及版本必须与运行时契约一致");
-        check(index.getAsJsonArray("resources").isEmpty(),"接入目录不伪造未编写或未验证的教程");
+        check(!index.getAsJsonArray("resources").isEmpty(),"建造目录须发布随包且可验证的教程");
         var read = request("read"); read.addProperty("uri",index.get("design_schema_uri").getAsString());
         var contents = library.request(read).getAsJsonArray("contents");
         check(contents.size() == 1 && contents.get(0).getAsJsonObject().get("text").getAsString().equals(snapshot.schemaText()),"资源读取须返回完整Schema而非摘要或截断片段");

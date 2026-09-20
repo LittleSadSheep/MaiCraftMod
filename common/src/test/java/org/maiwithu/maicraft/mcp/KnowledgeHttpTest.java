@@ -34,10 +34,18 @@ public final class KnowledgeHttpTest {
             var initialized = send("initialize", json("{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"knowledge-test\",\"version\":\"1\"}}"));
             check(initialized.getAsJsonObject("result").get("instructions").getAsString().contains(KnowledgeLibrary.INDEX), "initial discovery hint");
             JsonObject list = send("resources/list", new JsonObject()).getAsJsonObject("result");
+            // 风格目录增长后第三方教程可能在下一页；按游标读完元数据，不靠首页位置发现资源。
+            var allResources = list.getAsJsonArray("resources").deepCopy();
+            var page = list;
+            while (page.has("nextCursor")) {
+                var cursor = new JsonObject(); cursor.add("cursor", page.get("nextCursor"));
+                page = send("resources/list", cursor).getAsJsonObject("result");
+                allResources.addAll(page.getAsJsonArray("resources"));
+            }
             String scene = null;
             boolean attention = false;
             boolean chatflow = false;
-            for (var element : list.getAsJsonArray("resources")) {
+            for (var element : allResources) {
                 var row = element.getAsJsonObject();
                 check(!row.has("text"), "resources/list must not preload tutorial bodies");
                 String uri = row.get("uri").getAsString();
@@ -49,13 +57,24 @@ public final class KnowledgeHttpTest {
                     "keep attention and chatflow, and discover foreign Ponder scenes");
             // 标准HTTP发现与资源读取必须保留完整Schema；纯资料查询不会委派世界感知或开始施工。
             var contract = org.maiwithu.maicraft.core.blueprint.BuildingModelContract.current();
-            check(list.getAsJsonArray("resources").asList().stream().anyMatch(value ->
+            check(allResources.asList().stream().anyMatch(value ->
                     value.getAsJsonObject().get("uri").getAsString().equals(org.maiwithu.maicraft.core.blueprint.BuildingModelContract.INDEX_URI)),
                     "building contract index must be discoverable over HTTP");
             var contractContent = send("resources/read",uri(org.maiwithu.maicraft.core.blueprint.BuildingModelContract.INDEX_URI))
                     .getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
             var contractIndex = json(contractContent.get("text").getAsString());
             check(contractIndex.get("design_schema_uri").getAsString().equals(contract.schemaUri()),"HTTP index must identify the exact current schema");
+            // 每篇教材经标准 MCP 与四工具回退通道读出的正文完全相同，不能截成摘要或另套模板。
+            for (var tutorial : contractIndex.getAsJsonArray("resources")) {
+                String tutorialUri = tutorial.getAsJsonObject().get("uri").getAsString();
+                String expected = knowledge.read(tutorialUri).text();
+                var document = send("resources/read", uri(tutorialUri)).getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
+                var fallbackRequest = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\"}}");
+                fallbackRequest.getAsJsonObject("arguments").addProperty("resource_uri", tutorialUri);
+                var fallbackResult = send("tools/call", fallbackRequest).getAsJsonObject("result");
+                check(document.get("text").getAsString().equals(expected) && !fallbackResult.get("isError").getAsBoolean()
+                        && fallbackResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().equals(expected), "full tutorial over both HTTP routes");
+            }
             var schemaContent = send("resources/read",uri(contract.schemaUri())).getAsJsonObject("result")
                     .getAsJsonArray("contents").get(0).getAsJsonObject();
             check(schemaContent.get("text").getAsString().equals(contract.schemaText())

@@ -138,6 +138,8 @@ public final class KnowledgeLibrary {
         query = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
         if (query.length() > 256) throw new IllegalArgumentException("Knowledge query is too long");
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
+        // 按欧式、院落或网格等词发现教材时只返回目录摘要，角色不会因此读正文或开始建房。
+        BuildingModelContractResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
         builtins.values().forEach(doc -> candidates.put(doc.uri(), doc.entry()));
         source.searchCandidates(query).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
         String[] terms = query.isEmpty() ? new String[0] : query.split("\\s+");
@@ -150,7 +152,7 @@ public final class KnowledgeLibrary {
         result.addProperty("total_matches", matches.size()); result.addProperty("truncated", matches.size() > limit);
         result.addProperty("provider_status", source.status()); result.addProperty("content_loaded", false);
         // 材料搜索也只看注册名称；不为了排序查询EMI配方或编译未请求的教程，正文在下一次按需读取时展开。
-        result.addProperty("search_scope", "Registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; recipe trees and unrequested scene bodies are not loaded or searched.");
+        result.addProperty("search_scope", "Bundled building tutorial titles/summaries, registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; recipe trees and unrequested scene bodies are not loaded or searched.");
         result.addProperty("next_step", "Read a returned URI with resources/read or perceive(view=knowledge, resource_uri=...). No matches do not prove no relevant mechanic exists.");
         return result;
     }
