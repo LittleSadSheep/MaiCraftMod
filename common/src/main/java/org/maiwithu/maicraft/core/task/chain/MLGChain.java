@@ -10,12 +10,14 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
+import java.util.Map;
+import org.maiwithu.maicraft.task.reflex.Reflex;
 
 /**
  * 意外坠落时启动落地自救，并记录用了什么、是否受伤、辅助物有没有收回。
  * 计划中的下落和意外下落共用同一套落地过程；已有导航接手时，这里不重复启动。
  */
-public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.Reflex {
+public final class MLGChain implements Task, Reflex {
     private LandingAssistSession session;
     private boolean attentionActive;
     private float attentionStartHealth;
@@ -65,7 +67,7 @@ public final class MLGChain implements Task, org.maiwithu.maicraft.task.reflex.R
     // 把这一轮自救已经确认的事实汇总成通知。没确认放下或收回的东西，不记成成功操作。
     private void finishAttention(LocalPlayer player, String outcome) {
         if (!attentionActive) return;
-        var facts = session == null ? java.util.Map.<String, Object>of() : session.diagnostics();
+        var facts = session == null ? Map.<String, Object>of() : session.diagnostics();
         String resource = Boolean.TRUE.equals(facts.get("removed_own_aid")) ? "confirmed own landing aid recovered"
                 : Boolean.TRUE.equals(facts.get("confirmed_own_placement")) ? "confirmed own landing aid remains"
                 : "no own placement or recovery confirmed";

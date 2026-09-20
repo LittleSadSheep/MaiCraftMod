@@ -7,6 +7,7 @@ import java.util.Locale;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskRecord;
+import java.util.Objects;
 
 /**
  * One semantic survival-progression goal.  Concrete prerequisites, entities, structures,
@@ -81,7 +82,7 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
             SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy, List<String> protectedLabels,
             boolean preparePortal) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
-        this.milestone = java.util.Objects.requireNonNull(milestone, "milestone");
+        this.milestone = Objects.requireNonNull(milestone, "milestone");
         this.maxSearchDistance = Math.clamp(
                 maxSearchDistance, MIN_SEARCH_DISTANCE, MAX_SEARCH_DISTANCE);
         this.portalSearchRadius = Math.clamp(

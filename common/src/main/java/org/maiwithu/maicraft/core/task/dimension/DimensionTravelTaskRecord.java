@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.task.dimension;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
+import java.util.Objects;
 
 /** One semantic request to reach another dimension through an observed physical portal. */
 public final class DimensionTravelTaskRecord extends TaskRecord {
@@ -37,7 +38,7 @@ public final class DimensionTravelTaskRecord extends TaskRecord {
         this.destinationDimension = parsed.toString();
         this.searchRadius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, searchRadius));
         this.mayAlterTerrain = mayAlterTerrain;
-        this.preparation = java.util.Objects.requireNonNull(preparation);
+        this.preparation = Objects.requireNonNull(preparation);
     }
 
     @Override

@@ -11,6 +11,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EndPortalFrameBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import java.util.Collections;
 
 /** A complete, inward-facing ring of twelve existing frames. End frames are never manufactured. */
 public record EndPortalFrame(BlockPos center) {
@@ -22,7 +23,7 @@ public record EndPortalFrame(BlockPos center) {
             for (int offset = -1; offset <= 1; offset++)
                 frames.put(center.relative(outward, 2).relative(outward.getClockWise(), offset), outward.getOpposite());
         }
-        return java.util.Collections.unmodifiableMap(frames);
+        return Collections.unmodifiableMap(frames);
     }
 
     public List<BlockPos> interior() {

@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.task.reflex.PolicyReflex;
 
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
+import org.maiwithu.maicraft.core.task.chain.BreathChain;
 
 /**
  * 登记三种自动自救的名字和说明：防摔、换气、自卫。
@@ -17,7 +18,7 @@ public final class CoreReflexes {
 
     public static void registerAll() {
         ReflexRegistry.register(new MLGChain());
-        ReflexRegistry.register(new org.maiwithu.maicraft.core.task.chain.BreathChain());
+        ReflexRegistry.register(new BreathChain());
         ReflexRegistry.register(new MobDefenseChain());
     }
 }

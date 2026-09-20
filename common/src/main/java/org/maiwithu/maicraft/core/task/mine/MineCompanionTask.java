@@ -50,6 +50,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 
 /**
  * 持续找材料：查附近已加载的目标方块，走近并挖掉，再靠近地上物品让游戏自然拾取。
@@ -258,7 +262,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         lastProgressTick = player.level().getGameTime();
         lastProgressPos = feet();
         // 与 goto 的 start 日志对称:一任务一条,让日志里能看到任务确实启动了
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] mine start targets={} count={} feet={} firstQuery={} hit(s) mapComplete={}",
                 r.label, r.count, feet().toShortString(),
                 knownOres.size(), lastQueryComplete);
@@ -436,7 +440,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     //
                     // 所以这里只重新规划。真卡住了由 STALL_TICKS 那把尺子收工,不记账到某一格。
                     if (reachableTarget() == null && !knownOres.isEmpty()) {
-                        org.maiwithu.maicraft.core.Constants.LOG.debug(
+                        Constants.LOG.debug(
                                 "[maicraft-task] mine ARRIVED 但够不到 feet={} nearestOre={} —— 重规划",
                                 feet().toShortString(), nearestOreInfo());
                         stopNav();
@@ -552,7 +556,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      */
     private boolean internalMiningGoal(CalculationContext ctx, BlockPos pos) {
         if (knownOres.contains(pos)) return true;
-        net.minecraft.world.level.block.state.BlockState state = player.level().getBlockState(pos);
+        BlockState state = player.level().getBlockState(pos);
         if (state.isAir()) return true;                         // broken-out air still continues the run
         return r.targets.contains(state.getBlock()) && plausibleToBreak(ctx, pos, state);
     }
@@ -570,9 +574,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return false;
         }
         return !(ctx.get(pos.getX(), pos.getY() + 1, pos.getZ()).getBlock()
-                        == net.minecraft.world.level.block.Blocks.BEDROCK
+                        == Blocks.BEDROCK
                 && ctx.get(pos.getX(), pos.getY() - 1, pos.getZ()).getBlock()
-                        == net.minecraft.world.level.block.Blocks.BEDROCK);
+                        == Blocks.BEDROCK);
     }
 
     /** Matching loose items worth walking over for native pickup. A freshly
@@ -991,7 +995,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 if (target.equals(harvestTarget) && harvestBefore != null && !harvestBefore.isAir()) {
                     if (confirmedHarvests.size() < 32) confirmedHarvests.add(Map.of(
                             "position", Map.of("x", target.getX(), "y", target.getY(), "z", target.getZ()),
-                            "block_id", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(harvestBefore.getBlock()).toString(),
+                            "block_id", BuiltInRegistries.BLOCK.getKey(harvestBefore.getBlock()).toString(),
                             "block_state", harvestBefore.toString(),
                             "natural_tree_filter_enabled", r.naturalLogsOnly && harvestBefore.is(BlockTags.LOGS)));
                     else truncatedHarvests++;
@@ -1119,7 +1123,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         TargetIndex.Result res = TargetIndex.query(sl, feet(), r.targets,
                 MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET, excluded);
         lastQueryComplete = res.complete();
-        org.maiwithu.maicraft.core.Constants.LOG.debug(
+        Constants.LOG.debug(
                 "[maicraft-task] mine query feet={} raw={} complete={} known(before merge)={}",
                 feet().toShortString(), res.hits().size(), res.complete(),
                 knownOres.size());
@@ -1151,7 +1155,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         BlockPos feet = feet();
         // 问的是"挖不挖得成",按可改地形算——这是挖矿任务,许可本来就是 TERRAFORM
         CalculationContext ctx = ContextFactory.forExecution(player,
-                org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.TERRAFORM);
+                TerrainPermit.TERRAFORM);
         knownOres.removeIf(p -> {
             var state = level.getBlockState(p);
             if (state.isAir() || !r.targets.contains(state.getBlock()) || unworkable.contains(p)
@@ -1190,7 +1194,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return "none";
         }
         BlockPos feet = feet();
-        String block = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+        String block = BuiltInRegistries.BLOCK
                 .getKey(player.level().getBlockState(n).getBlock()).toString();
         int dy = n.getY() - feet.getY();
         return n.toShortString() + " " + block + " dy=" + (dy >= 0 ? "+" + dy : dy)
@@ -1240,7 +1244,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (now - lastProgressTick < STALL_TICKS) {
             return null;
         }
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] mine 卡住 {} 刻:没挖掉任何一格、也没挪窝 | feet={} 名单 {} 个",
                 now - lastProgressTick, feet().toShortString(), knownOres.size());
         if (r.getMined() > 0) {

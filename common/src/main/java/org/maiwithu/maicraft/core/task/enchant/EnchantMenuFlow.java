@@ -16,6 +16,8 @@ import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord.Mov
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
+import net.minecraft.world.item.ItemStack;
 
 /** 在已由任务打开且为空的附魔台界面中完成装料、一次附魔、核验取回和关闭；不接管后来换出的菜单。 */
 final class EnchantMenuFlow {
@@ -77,7 +79,7 @@ final class EnchantMenuFlow {
                 yield startTransfer(inventory.loadInput(menu));
             }
             case LOAD_LAPIS -> {
-                if (!net.minecraft.world.item.ItemStack.matches(inventory.input, menu.getSlot(0).getItem())
+                if (!ItemStack.matches(inventory.input, menu.getSlot(0).getItem())
                         || !menu.getSlot(1).getItem().isEmpty() || !menu.getCarried().isEmpty())
                     yield abandon("enchantment_work_slots_changed_before_lapis", FailureType.TARGET_LOST);
                 var moves = inventory.loadLapis(menu);
@@ -212,7 +214,7 @@ final class EnchantMenuFlow {
 
     Map<String, Object> data() {
         var data = new LinkedHashMap<String, Object>(transaction.data());
-        data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         data.put("outcome_uncertain", transaction.attempted() && !successful);
         data.put("item_return_verified", returned); data.put("gui_closed", closed); data.put("cleanup_status", cleanupStatus);
         // 只有真实按钮回执已确认、成品也已冻结时才展示全部附魔；报价线索不能冒充最终随机结果。

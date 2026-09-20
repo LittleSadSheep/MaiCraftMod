@@ -10,6 +10,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.LeavesBlock;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 把已经找到的相邻矿石或同一竖直树干分成一小批，决定先继续挖还是先捡地上材料。
@@ -78,7 +79,7 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
         return false;
     }
 
-    private static boolean naturalLeaf(net.minecraft.world.level.block.state.BlockState state) {
+    private static boolean naturalLeaf(BlockState state) {
         return state.getBlock() instanceof LeavesBlock && !state.getValue(LeavesBlock.PERSISTENT);
     }
 

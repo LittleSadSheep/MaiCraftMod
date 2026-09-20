@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 
 /** 找背包中的一件可附魔物品 → 不改地形走近已有台子 → 原生开界面 → 一次附魔 → 核验取回并关闭。 */
 public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTaskRecord> {
@@ -85,7 +87,7 @@ public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTas
                         yield failIssue("enchantment_opened_menu_already_occupied", FailureType.INTERRUPTED);
                     if (!context.menus().ensureVisible(context)) yield TaskState.RUNNING;
                     // 绑定这一张已可见、两格均为空的原生附魔菜单；后续换菜单或报价都不能沿用旧操作。
-                    org.maiwithu.maicraft.core.integration.machine.MachineMenu.rememberNativeOpened(player, menu, r.table);
+                    MachineMenu.rememberNativeOpened(player, menu, r.table);
                     flow = new EnchantMenuFlow(player, r, menu, inventory, r::prepareNativeConsumptionBoundary);
                     phase = Phase.ENCHANT; yield TaskState.RUNNING;
                 }
@@ -110,7 +112,7 @@ public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTas
         if (state == null) return TaskState.RUNNING;
         if (state != TaskState.SUCCESS) activeChild.stop(player, Task.StopReason.REPLACED);
         var result = activeChild.result(state); activeChild = null; activeRecord = null;
-        if (state != TaskState.SUCCESS) return failIssue("enchantment_" + phase.name().toLowerCase(java.util.Locale.ROOT)
+        if (state != TaskState.SUCCESS) return failIssue("enchantment_" + phase.name().toLowerCase(Locale.ROOT)
                 + "_failed: " + result.message(), state == TaskState.TIMEOUT ? FailureType.TIMED_OUT : FailureType.UNKNOWN);
         if (phase == Phase.APPROACH) phase = Phase.OPEN;
         else { phase = Phase.WAIT_MENU; waitMenuUntil = player.level().getGameTime() + 60; }
@@ -162,7 +164,7 @@ public final class EnchantCompanionTask extends AbstractCompanionTask<EnchantTas
     @Override public Map<String, Object> progress() {
         // 状态查询只组装已观察数据，不推进子任务或菜单；报价、所选档位与返还状态在进行中即可由总任务转发。
         var data = new LinkedHashMap<String, Object>(super.progress());
-        data.put("phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         if (flow != null) data.putAll(flow.data());
         return data;
     }

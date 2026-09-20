@@ -5,6 +5,8 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 把“先走近，再执行”组织成公共流程。
@@ -25,7 +27,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
      * 教学失败要点名的目标格(算距离、给 goto 坐标用)。返回 null = 无固定
      * 格目标(实体目标、原地动作),失败话术退化为通用文案。默认 null。
      */
-    protected net.minecraft.core.BlockPos gotoFirstTarget() {
+    protected BlockPos gotoFirstTarget() {
         return null;
     }
 
@@ -62,7 +64,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         if (reached()) return act();
         if (nav == null) {
             // 无到场导航的动作任务:不在工作距离内 = 教学失败,旅行归 goto
-            net.minecraft.core.BlockPos t = gotoFirstTarget();
+            BlockPos t = gotoFirstTarget();
             if (t != null) {
                 double dist = Math.sqrt(player.distanceToSqr(
                         t.getX() + 0.5, t.getY() + 0.5, t.getZ() + 0.5));
@@ -94,7 +96,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
                 }
                 dudTicks = 0;
                 stopNav();
-                org.maiwithu.maicraft.core.Constants.LOG.info(
+                Constants.LOG.info(
                         "[maicraft-task] STANCE_DUD {} feet={} — nav arrived, reached() still"
                                 + " false after {} ticks; routing the recovery ladder",
                         getClass().getSimpleName(), player.blockPosition().toShortString(),

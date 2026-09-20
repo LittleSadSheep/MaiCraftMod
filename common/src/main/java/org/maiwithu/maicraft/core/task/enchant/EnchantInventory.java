@@ -12,6 +12,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord.Move;
+import java.util.Collections;
+import java.util.TreeMap;
 
 /** 附魔前冻结一件装备或一本书的来源，并为附魔书保留空位；所有搬运都使用真实菜单槽和完整物品组件。 */
 final class EnchantInventory {
@@ -133,10 +135,10 @@ final class EnchantInventory {
     Map<String, Integer> resultEnchantments() {
         // 只读已经冻结的成品，完整列出随机附魔的实际结果；附魔书读取储存附魔，装备读取普通附魔组件。
         var component = result.is(Items.ENCHANTED_BOOK) ? DataComponents.STORED_ENCHANTMENTS : DataComponents.ENCHANTMENTS;
-        var values = new java.util.TreeMap<String, Integer>();
+        var values = new TreeMap<String, Integer>();
         result.getOrDefault(component, ItemEnchantments.EMPTY).entrySet().forEach(entry ->
                 entry.getKey().unwrapKey().ifPresent(key -> values.put(key.location().toString(), entry.getIntValue())));
-        return java.util.Collections.unmodifiableMap(values);
+        return Collections.unmodifiableMap(values);
     }
 
     private boolean canReceive(int inventorySlot, ItemStack stack) {

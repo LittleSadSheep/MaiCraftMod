@@ -6,6 +6,8 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.actor.VanillaHotbar;
 
 /**
  * 供任务反复调用的“把这格物品拿到主手”步骤。
@@ -14,11 +16,11 @@ import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
  */
 public final class FirstPersonActionGate {
     public enum Status { RUNNING, READY, FAILED }
-    public record ConfirmedSwap(int source, int hotbar, net.minecraft.world.item.ItemStack sourceBefore,
-                                net.minecraft.world.item.ItemStack hotbarBefore) {
+    public record ConfirmedSwap(int source, int hotbar, ItemStack sourceBefore,
+                                ItemStack hotbarBefore) {
         public ConfirmedSwap { sourceBefore = sourceBefore.copy(); hotbarBefore = hotbarBefore.copy(); }
-        @Override public net.minecraft.world.item.ItemStack sourceBefore() { return sourceBefore.copy(); }
-        @Override public net.minecraft.world.item.ItemStack hotbarBefore() { return hotbarBefore.copy(); }
+        @Override public ItemStack sourceBefore() { return sourceBefore.copy(); }
+        @Override public ItemStack hotbarBefore() { return hotbarBefore.copy(); }
     }
 
     private static final int CONFIRM_TICKS = 20;
@@ -108,7 +110,7 @@ public final class FirstPersonActionGate {
         // 背包里的物品换到“当前手上那格”；扩展快捷栏模组（如 HotBaaaar）会把 selected 抬到 9 以上，
         // 而原版 SWAP 交换只认 0~8，先折回原版范围再发起交换，否则自卫选武会在收尾阶段崩溃。
         selectedHotbarSlot = inventorySlot < 9
-                ? inventorySlot : org.maiwithu.maicraft.client.actor.VanillaHotbar.swapTarget(player.getInventory().selected);
+                ? inventorySlot : VanillaHotbar.swapTarget(player.getInventory().selected);
         if (inventorySlot >= 9) {
             if (!menuSession.inventoryReady(context)) return Status.RUNNING;
             pendingSwap = new ConfirmedSwap(inventorySlot, selectedHotbarSlot,

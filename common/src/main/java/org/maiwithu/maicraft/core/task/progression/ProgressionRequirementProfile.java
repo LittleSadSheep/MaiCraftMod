@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EquipmentSlot;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import java.util.Arrays;
 
 /** Data-driven private loadout policy for progression; never serialized to the model. */
 public final class ProgressionRequirementProfile {
@@ -84,7 +85,7 @@ public final class ProgressionRequirementProfile {
     }
 
     private static List<ResourceLocation> ids(String... values) {
-        return java.util.Arrays.stream(values).map(ProgressionRequirementProfile::id).toList();
+        return Arrays.stream(values).map(ProgressionRequirementProfile::id).toList();
     }
 
     private static ResourceLocation id(String value) {

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord;
 
 /**
  * Reconciliatory progression state machine.  It owns exactly one typed child at a time and
@@ -325,7 +326,7 @@ public final class ReachMilestoneCompanionTask
         if ((purpose == Purpose.DIMENSION_TRAVEL
                 || purpose == Purpose.SUPPLY_DIMENSION_TRAVEL)
                 && "portal_not_observed".equals(childIssue) && !r.preparePortal) {
-            String destination = record instanceof org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord travel
+            String destination = record instanceof DimensionTravelTaskRecord travel
                     ? travel.destinationDimension : "";
             if (ProgressionFacts.END.equals(destination)
                     || ProgressionFacts.END.equals(facts.dimension())) {

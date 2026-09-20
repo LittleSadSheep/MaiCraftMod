@@ -91,7 +91,7 @@ public final class SemanticElytraCompanionTask
     private static final float SAFETY_HEALTH_FLOOR = 8.0F;
     private static final int VOID_GROUND_PROBE = 32;
 
-    private final Set<net.minecraft.world.level.block.Block> gatewayBlocks =
+    private final Set<Block> gatewayBlocks =
             Set.of(Blocks.END_GATEWAY);
     private ClientLevel indexedLevel;
     private BlockPos origin;

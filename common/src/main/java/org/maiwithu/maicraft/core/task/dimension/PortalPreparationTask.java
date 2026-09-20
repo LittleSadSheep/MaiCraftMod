@@ -26,12 +26,15 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Locale;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 /** Observe -> obtain materials -> build/repair -> use native items -> verify the actual portal. */
 public final class PortalPreparationTask extends AbstractCompanionTask<PortalPreparationTaskRecord> {
     private enum Phase { SURVEY, SUPPLY, RETURN, BUILD, LOCATE, MOVE, ACTIVATE, VERIFY }
     private final ClientLevel world;
-    private final java.util.function.BiFunction<LocalPlayer, TaskRecord, Task> childFactory;
+    private final BiFunction<LocalPlayer, TaskRecord, Task> childFactory;
     private PortalSiteSurvey survey;
     private PortalPreparationSite site;
     private Phase phase = Phase.SURVEY;
@@ -52,7 +55,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         this(player, record, TaskFactory::create);
     }
     PortalPreparationTask(LocalPlayer player, PortalPreparationTaskRecord record,
-                          java.util.function.BiFunction<LocalPlayer, TaskRecord, Task> childFactory) {
+                          BiFunction<LocalPlayer, TaskRecord, Task> childFactory) {
         super(player, record); world = player.clientLevel; this.childFactory = childFactory;
     }
 
@@ -160,7 +163,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     }
     private long deadline() { return Math.max(r.getDeadlineGameTime(), world.getGameTime() + 6000); }
     private String callId() { return r.getToolCallId() + "-portal-" + (++serial); }
-    private <T> T guarded(java.util.function.Supplier<T> operation) {
+    private <T> T guarded(Supplier<T> operation) {
         if (site == null) return operation.get();
         return NavigationSafetyContext.withForbiddenBodyCells(site.forbiddenBody(), () -> phase == Phase.BUILD
                 ? operation.get() : NavigationSafetyContext.withPreservedStructures(site.footprint(), operation));
@@ -183,7 +186,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
                 if (result.data() != null && result.data().containsKey(key)) evidence.put(key, result.data().get(key));
             childEvidence = Map.copyOf(evidence);
             String fallback = "requires_dimension".equals(evidence.get("failure_type")) ? "requires_dimension"
-                    : "portal_" + phase.name().toLowerCase(java.util.Locale.ROOT) + "_failed";
+                    : "portal_" + phase.name().toLowerCase(Locale.ROOT) + "_failed";
             return blocked(evidence.getOrDefault("issue_code", fallback).toString(), result.message());
         }
         if (phase == Phase.SUPPLY) {
@@ -203,7 +206,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     }
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>(childEvidence);
-        data.put("portal_prepared", complete); data.put("preparation_phase", phase.name().toLowerCase(java.util.Locale.ROOT));
+        data.put("portal_prepared", complete); data.put("preparation_phase", phase.name().toLowerCase(Locale.ROOT));
         if (issue != null) { data.put("issue_code", issue); data.put("requires_decision", true); }
         return data;
     }

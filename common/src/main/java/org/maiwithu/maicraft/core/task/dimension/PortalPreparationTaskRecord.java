@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.dimension;
 
 import org.maiwithu.maicraft.task.TaskRecord;
+import java.util.Objects;
 
 /** Private preparation child; actual portal cells never become model-supplied coordinates. */
 public final class PortalPreparationTaskRecord extends TaskRecord {
@@ -16,7 +17,7 @@ public final class PortalPreparationTaskRecord extends TaskRecord {
         this.destination = destination;
         this.radius = Math.clamp(radius, 16, 512);
         this.mayAlterTerrain = mayAlterTerrain;
-        this.policy = java.util.Objects.requireNonNull(policy);
+        this.policy = Objects.requireNonNull(policy);
     }
     @Override public String describe() { return "prepare a portal to " + destination; }
 }

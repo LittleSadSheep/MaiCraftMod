@@ -54,6 +54,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.core.component.DataComponents;
 
 /** Receipt-driven first-person orchestration for one live Ender Dragon encounter. */
 public final class DragonFightCompanionTask
@@ -1095,7 +1096,7 @@ public final class DragonFightCompanionTask
         for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
             ItemStack stack = player.getInventory().getItem(slot);
             if (stack.isEmpty() || failedFoods.contains(stack.getItem())) continue;
-            FoodProperties food = stack.get(net.minecraft.core.component.DataComponents.FOOD);
+            FoodProperties food = stack.get(DataComponents.FOOD);
             if (food == null || !player.canEat(food.canAlwaysEat())) continue;
             Item item = stack.getItem();
             if (item == Items.CHORUS_FRUIT || item == Items.PUFFERFISH

@@ -19,6 +19,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
+import net.minecraft.world.level.block.Block;
 
 /** Pure client-observation snapshot used to reconcile progression after every child and handoff. */
 public record ProgressionFacts(
@@ -161,7 +162,7 @@ public record ProgressionFacts(
 
     private static BlockPos nearestLive(
             ClientLevel level, BlockPos origin, List<BlockPos> candidates,
-            net.minecraft.world.level.block.Block expected) {
+            Block expected) {
         BlockPos best = null;
         double bestDistance = Double.POSITIVE_INFINITY;
         for (BlockPos candidate : candidates) {

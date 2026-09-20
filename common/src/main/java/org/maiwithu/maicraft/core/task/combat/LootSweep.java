@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
 
 /**
  * 围绕本轮死亡地点追踪可能的战利品，再结合背包变化判断哪些收到了、哪些还在地上、哪些解释不清。
@@ -472,7 +473,7 @@ final class LootSweep {
                 && player.blockPosition().equals(item.blockPosition());
     }
 
-    net.minecraft.world.phys.Vec3 nearestPosition() {
+    Vec3 nearestPosition() {
         return nearest().map(ItemEntity::position).orElse(player.position());
     }
 
@@ -540,7 +541,7 @@ final class LootSweep {
         return hash;
     }
 
-    private java.util.Optional<ItemEntity> nearest() {
+    private Optional<ItemEntity> nearest() {
         return live().stream().min(Comparator.comparingDouble(player::distanceToSqr));
     }
 

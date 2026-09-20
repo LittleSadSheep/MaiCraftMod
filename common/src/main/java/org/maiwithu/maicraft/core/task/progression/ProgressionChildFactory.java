@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
 
 /** Constructs typed private children while propagating the milestone's safety envelope. */
 public final class ProgressionChildFactory {
@@ -74,7 +75,7 @@ public final class ProgressionChildFactory {
         return new DimensionTravelTaskRecord(
                 callId("dimension"), parent.getDeadlineGameTime(), destinationDimension,
                 parent.portalSearchRadius, parent.mayAlterTerrain,
-                new org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy(parent.preparePortal,
+                new PortalPreparationPolicy(parent.preparePortal,
                         parent.allowRareConsumables, parent.allowCombat, parent.maxSearchDistance,
                         parent.materialPolicy, parent.allowedSources, parent.protectedLabels));
     }

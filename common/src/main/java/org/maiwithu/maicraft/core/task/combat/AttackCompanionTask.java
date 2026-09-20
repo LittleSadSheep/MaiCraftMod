@@ -43,6 +43,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /**
  * 把一场战斗组织成观察敌人、选武器、攻击、走位或撤退，并在判定击败后收集掉落物。
@@ -133,7 +137,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      *
      * <p>每次重搜刷新:搜出路了就移出去。它不是一次判死,是"上一段搜索的结论"。
      */
-    private final java.util.Set<Integer> noPath = new java.util.HashSet<>();
+    private final Set<Integer> noPath = new HashSet<>();
 
     private final Map<Item, Integer> inventoryBaseline = new HashMap<>();
     private final Map<Integer, Float> observedHealth = new HashMap<>();
@@ -144,7 +148,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * 这一场经手过的 id。无差别模式没有事先的名单,不记下来就无处结算战果
      * ——它打倒的东西会因为"不在请求清单里"而被整场吞掉。
      */
-    private final java.util.Set<Integer> touchedIds = new java.util.LinkedHashSet<>();
+    private final Set<Integer> touchedIds = new LinkedHashSet<>();
 
     /** 退避的寻路连续失败次数。够了就是"退不掉",判据据此改判背水一战。 */
     private final RetreatProgress retreat = new RetreatProgress();
@@ -197,7 +201,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         settleFinishedTargets();
-        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
+        if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         if (phase == Phase.LOOT) {
             boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging);
             if (threatened != defendingDuringLoot) {
@@ -208,7 +212,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 if (!threatened) tickWeapon(field); // 结束未发出的过期反击，或结算已有动作。
             }
             defendingDuringLoot = threatened;
-            if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
+            if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
             if (!threatened) return tickLoot();
             // 暂停的是追逐物品；死亡与掉落观察仍继续，不能在恢复时丢失归属证据。
             loot.discover();
@@ -226,7 +230,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             abortShot();
             target = chosen;
         }
-        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
+        if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         if (target != null) {
             lastTargetPosition = target.position();
             lastTargetPositions.put(target.getId(), lastTargetPosition);
@@ -333,7 +337,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 把已经有结果的目标记进账本(死了 / 不见了)。 */
     // 活物必须有死亡证据；末影水晶沿用严格任务的“已出手且原位置仍加载”的移除凭证。
     private void settleFinishedTargets() {
-        var observedIds = new java.util.LinkedHashSet<>(r.entityIds);
+        var observedIds = new LinkedHashSet<>(r.entityIds);
         observedIds.addAll(touchedIds);
         for (int id : observedIds) {
             if (r.terminal(id)) {
@@ -520,7 +524,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             meleeSelection.reset();
             return;
         }
-        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return;
+        if (!ClientRuntime.requireContext(player).mutationAvailable()) return;
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
             Battlefield.Foe plannedFoe = field.byId(meleeVictimId);
@@ -784,7 +788,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先检查距离和弹道，再把弓弩拿到主手，最后推进拉弓／装填／发射。
     // 离得太远或没有弹道时继续等待走位，不凭估计盲射。
     private TaskState shootAt(Loadout loadout) {
-        if (!org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
+        if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         Loadout.Pick weapon = loadout.ranged();
         if (weapon == null) {
             return closeIn();   // 弓没了:回去走位,别放弃这只
@@ -945,7 +949,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * 路上要绕开谁。<b>间距给零</b>:它们只让经过的格子变贵(边成本 ×4)与影响估价,
      * 不参与"到没到"——落点旁边站着一只怪也算到了,不然她永远到不了、也就永远不换落点。
      */
-    private java.util.List<org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities.Threat>
+    private List<GoalAvoidEntities.Threat>
             roadHazards() {
         return Menace.field(player, CombatThreats.around(player, FLEE_SCAN_RADIUS)).stream()
                 .map(t -> t.withClearance(0.0))
@@ -1122,7 +1126,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         meleeSelection.reset();
         rangedSelection.reset();
         InputDriver.halt(player);
-        org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player).body().releaseAll();
+        ClientRuntime.requireContext(player).body().releaseAll();
         super.cleanup();
     }
 

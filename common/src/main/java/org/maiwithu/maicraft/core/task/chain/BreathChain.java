@@ -18,6 +18,9 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * Autonomous surface-for-air survival chain — the player-body equivalent of the
@@ -39,7 +42,7 @@ import net.minecraft.world.phys.Vec3;
  * does it fall back to best-effort straight-up and diaries the entrapment so
  * the cognition layer hears about it while there is still air to act on.
  */
-public final class BreathChain implements Task, org.maiwithu.maicraft.task.reflex.Reflex {
+public final class BreathChain implements Task, Reflex {
 
     /** How high the straight-up column is probed before calling the ceiling sealed;
      *  deeper unbroken water than this means "open ocean, just keep rising". */
@@ -191,8 +194,8 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         if (!level.getFluidState(start).is(FluidTags.WATER)) {
             start = companion.blockPosition();
         }
-        java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
-        java.util.HashSet<Long> seen = new java.util.HashSet<>();
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+        HashSet<Long> seen = new HashSet<>();
         queue.add(start);
         seen.add(start.asLong());
         int budget = AIR_SEARCH_BUDGET;
@@ -222,7 +225,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         GameplayAttentionMonitor.reflexEscalated(
                 id(), "the direct ascent is sealed and no nearby opening was proved",
                 "air continues falling while the reflex uses best-effort upward movement");
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-breath] drowning under a sealed ceiling with {}s of air; no opening within {} blocks",
                 Math.max(0, companion.getAirSupply() / 20), AIR_SEARCH_RADIUS);
     }
@@ -242,7 +245,7 @@ public final class BreathChain implements Task, org.maiwithu.maicraft.task.refle
         airColumn = null;
         retargetCooldown = 0;
         trappedNoted = false;
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-breath] breath recovery completed (lowest air: {}s)",
                 Math.max(0, worst / 20));
     }

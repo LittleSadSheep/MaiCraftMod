@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.act.Ballistics;
 import org.maiwithu.maicraft.core.combat.Loadout;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /**
  * 把一发弓箭或弩箭分成跨刻操作：选好的武器开始使用，等待拉弓／装填，瞄准后松开或再次点击。
@@ -77,7 +78,7 @@ final class RangedShot {
             // 任务收尾可能发生在本刻操作名额已被占用的时刻（例如同刻先举过盾），
             // 名额不可用或没有进行中的操作入口时先不切槽，把回执留给运行时逐刻收尾，
             // 避免清理阶段直接把客户端打崩；与 Interaction.stop 的收尾守卫同一套约定。
-            org.maiwithu.maicraft.client.actor.LocalPlayerContext context = ClientRuntime.actor()
+            LocalPlayerContext context = ClientRuntime.actor()
                     .activeContext().filter(c -> c.player() == player).orElse(null);
             if (context != null && context.mutationAvailable()) {
                 receipt = context.actions().cancelMainHandUse(context, receipt);

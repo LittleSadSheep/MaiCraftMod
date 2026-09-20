@@ -14,6 +14,10 @@ import org.maiwithu.maicraft.task.TaskResult;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 
 /**
  * 具体任务共用的执行外壳：开始前检查条件，每个游戏刻做一点，结束时停导航并整理结果。
@@ -44,8 +48,8 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
      * 本任务历次导航累计真动过的地形(每条导航停下时并入)。回执末尾如实相告——
      * 不论成败、不论任务,"路上挖了什么放了什么"只在这一处说一次。
      */
-    private final org.maiwithu.maicraft.core.pathing.execute.TerrainBill journey =
-            new org.maiwithu.maicraft.core.pathing.execute.TerrainBill();
+    private final TerrainBill journey =
+            new TerrainBill();
 
     /** Model-facing reason for a terminal FAILED; also the fallback result message. */
     private String doneReason = "done";
@@ -118,7 +122,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
 
     /** 执行代码抛异常时，记日志并把这件任务标为内部错误；已经放下或挖掉的方块不会自动还原。 */
     private void crashed(String phase, RuntimeException e) {
-        org.maiwithu.maicraft.core.Constants.LOG.error(
+        Constants.LOG.error(
                 "[maicraft-task] {} 在 {} 阶段抛出异常,本任务判失败(服务端不受影响)",
                 getClass().getSimpleName(), phase, e);
         fail("the task hit an internal error and stopped: " + e.getClass().getSimpleName()
@@ -133,9 +137,9 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         cleanup();
         // 路上真动过的地形跟着每一种收场走:成功也好失败也罢,拆了什么就说什么
         String enRoute = journey.isEmpty() ? "" : " En route I had to " + journey.describe() + ".";
-        Map<String, Object> data = new java.util.LinkedHashMap<>(resultData());
+        Map<String, Object> data = new LinkedHashMap<>(resultData());
         if (finalState == TaskState.FAILED) {
-            data.putIfAbsent("failure_type", failType.name().toLowerCase(java.util.Locale.ROOT));
+            data.putIfAbsent("failure_type", failType.name().toLowerCase(Locale.ROOT));
         }
         return switch (finalState) {
             case SUCCESS   -> TaskResult.ok(successMessage() + enRoute, data);
@@ -194,7 +198,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
      */
     protected void fail(String why, FailureType t) {
         // 终局必须留声:任务凭什么收场是排障的第一现场,不能只活在返回值里
-        org.maiwithu.maicraft.core.Constants.LOG.info("[maicraft-task] {} FAILED({}) {}",
+        Constants.LOG.info("[maicraft-task] {} FAILED({}) {}",
                 getClass().getSimpleName(), t, why);
         this.doneReason = why;
         this.failType = t;

@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /** One aimed block use. Never falls through to throwing an eye, and never retries an uncertain click. */
 final class PortalActivation {
@@ -68,7 +69,7 @@ final class PortalActivation {
         if (!context.permitsNativeActions() || !context.mutationAvailable()) return TaskState.RUNNING;
         receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit, new NativeConfirmation() {
             @Override public boolean requiresBlockAcknowledgement() { return true; }
-            @Override public Verdict observe(org.maiwithu.maicraft.client.actor.LocalPlayerContext current) {
+            @Override public Verdict observe(LocalPlayerContext current) {
                 return applied.getAsBoolean() ? Verdict.APPLIED : Verdict.PENDING;
             }
         }, 100);

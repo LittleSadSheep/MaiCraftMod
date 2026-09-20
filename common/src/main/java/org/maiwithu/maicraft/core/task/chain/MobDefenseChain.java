@@ -19,6 +19,8 @@ import net.minecraft.world.entity.Mob;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 收到生物造成的伤害，或观察到近处明确的攻击目标时，暂时接管当前工作自卫。
@@ -142,7 +144,7 @@ public final class MobDefenseChain implements Task, Reflex {
                 "reflex-" + now, now + NO_DEADLINE, List.of(), true);
         fight = new AttackCompanionTask(companion, record);
         fight.start(companion);
-        org.maiwithu.maicraft.core.Constants.LOG.info("[maicraft-defense] 自动接管 —— 身边 {} 个危险",
+        Constants.LOG.info("[maicraft-defense] 自动接管 —— 身边 {} 个危险",
                 dangersNear(companion).size());
     }
 
@@ -157,11 +159,11 @@ public final class MobDefenseChain implements Task, Reflex {
                 ? "immediate danger handled" : "self-defense ended without confirmed success");
         dangerLastSeenTick = NEVER;
         InputDriver.halt(companion);
-        org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(companion).body().releaseAll();
-        org.maiwithu.maicraft.core.Constants.LOG.info("[maicraft-defense] 收场 {} —— {}", state, line);
+        ClientRuntime.requireContext(companion).body().releaseAll();
+        Constants.LOG.info("[maicraft-defense] 收场 {} —— {}", state, line);
         // <b>不急</b>:她的后台任务照跑,黄了自有 task_finished 报。这条只是让主人翻聊天流时
         // 看得懂她刚才为什么打了一架、或者挪了二十格。攒着搭下一轮的车就够。
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-defense] hit danger and handled it on instinct — {}", line);
     }
 
@@ -189,7 +191,7 @@ public final class MobDefenseChain implements Task, Reflex {
             finishAttention(companion, "body or reflex unavailable; combat result unconfirmed");
         }
         InputDriver.halt(companion);
-        org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(companion).body().releaseAll();
+        ClientRuntime.requireContext(companion).body().releaseAll();
     }
 
     @Override
