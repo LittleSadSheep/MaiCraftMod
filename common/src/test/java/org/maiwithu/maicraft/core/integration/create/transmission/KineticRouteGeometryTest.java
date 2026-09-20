@@ -9,6 +9,8 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
+import java.util.concurrent.CancellationException;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
 /** Native-independent checks of physical axes, filled posts, loaded-world isolation and exact candidate BOMs. */
 public final class KineticRouteGeometryTest {
@@ -120,7 +122,7 @@ public final class KineticRouteGeometryTest {
                 "too-small native span is not enlarged to make conveyor geometry pass");
         Thread.currentThread().interrupt();
         try { generate(source, target, new World(source, target), 16); throw new AssertionError("interrupted geometry accepted"); }
-        catch (java.util.concurrent.CancellationException expected) { checks++; }
+        catch (CancellationException expected) { checks++; }
         finally { Thread.interrupted(); }
     }
     private static void verifyFilledPosts(Plan plan, int ground) {
@@ -138,7 +140,7 @@ public final class KineticRouteGeometryTest {
     private static void verifyMaterials(List<Plan> plans) {
         for (Plan plan : plans) {
             Map<String, Integer> expected = new HashMap<>(); plan.placements().forEach(p -> expected.merge(
-                    org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems.itemId(p.blockId(), p.properties()), 1, Integer::sum));
+                    MachinePlacementItems.itemId(p.blockId(), p.properties()), 1, Integer::sum));
             plan.chainLinks().forEach(link -> expected.merge("minecraft:chain", (int) Math.max(1, Math.round(Math.sqrt(link.from().distSqr(link.to())) / 2.5)), Integer::sum));
             check(expected.equals(plan.bom()), "candidate BOM is exactly its real block placements plus native chain charges");
             check(plan.placements().stream().map(Placement::position).distinct().count() == plan.placements().size(), "a physical cell appears only once in materials and construction");

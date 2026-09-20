@@ -14,6 +14,9 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
+import java.util.ArrayList;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 
 // 检查甲板内部候选、位置变换、失去支撑、多层替代落点和稳定接触计数；原生接触数据由测试替身提供。
 public final class ShipBoardingGeometryTest {
@@ -49,10 +52,10 @@ public final class ShipBoardingGeometryTest {
         }
         var tallBounds = new AABB(Vec3.atLowerCornerOf(origin),Vec3.atLowerCornerOf(origin.offset(5,13,5)));
         var multiDeck = StructureDeckGeometry.sample(world,p->true,pose,tallBounds,origin,Vec3.atCenterOf(origin),.76,1.88);
-        var power = new org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter.Snapshot(true,"fixture","pack",true,true,
+        var power = new JetpackNativeAdapter.Snapshot(true,"fixture","pack",true,true,
                 900,17000,.016,.32,.6,-.03,.08);
         var ranked = ShipLandingTarget.rank(multiDeck.surfaces(),tallBounds.getCenter(),point ->
-                org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute.edgeTicks(new Vec3(0,90,20),point,power));
+                JetpackRoute.edgeTicks(new Vec3(0,90,20),point,power));
         check(!ranked.isEmpty() && ranked.getFirst().world().y < 110,
                 "a lower usable deck must beat a much higher broad roof when its native flight cost is lower");
         var alternatives = ShipLandingTarget.alternatives(ranked);
@@ -63,7 +66,7 @@ public final class ShipBoardingGeometryTest {
         var wideRoof = multiDeck.surfaces().stream().filter(s -> s.block().getY()==origin.getY()+12).toList();
         var narrowDeck = multiDeck.surfaces().stream().filter(s -> s.block().getY()==origin.getY()
                 && s.block().getX()==origin.getX()).toList();
-        var mixed = new java.util.ArrayList<>(wideRoof); mixed.addAll(narrowDeck);
+        var mixed = new ArrayList<>(wideRoof); mixed.addAll(narrowDeck);
         var mixedRank = ShipLandingTarget.rank(mixed,tallBounds.getCenter(),p -> 0);
         check(mixedRank.size()==mixed.size(),"wide interior faces cannot discard a narrower but body-clear lower deck");
         check(ShipLandingTarget.alternatives(mixedRank).stream().anyMatch(narrowDeck::contains),

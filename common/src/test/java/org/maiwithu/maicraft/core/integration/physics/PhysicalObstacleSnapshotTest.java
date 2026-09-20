@@ -19,6 +19,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import sun.misc.Unsafe;
+import java.util.ArrayList;
 
 /**
  * 用给定结构位置和方块检查碰撞转换、门洞保留、贴边后退、实时更新与后台快照隔离，以及读取不足时的保守障碍。
@@ -68,7 +69,7 @@ public final class PhysicalObstacleSnapshotTest {
         check(unknown.conservativeStructures() == 1 && !unknown.clearSegment(new Vec3(1.5,0,2),new Vec3(1.5,0,-1),.6,1.8),
                 "unloaded structure voxels must not create an unobserved corridor");
         Scene huge = new Scene();
-        var chunks = new java.util.ArrayList<LevelChunk>();
+        var chunks = new ArrayList<LevelChunk>();
         for (int x = 0; x < 32; x += 16) for (int z = 0; z < 32; z += 16)
             chunks.add(chunk(new BlockPos(x,0,z), huge));
         var large = structure(pose,new AABB(0,0,0,32,64,32),chunks);

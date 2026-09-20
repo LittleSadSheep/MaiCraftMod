@@ -15,6 +15,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
+import net.minecraft.world.level.block.Blocks;
 import static org.maiwithu.maicraft.core.blueprint.BuildingModelTestData.*;
 
 /** 只检查设计数据和导入登记；超世界高度的坐标不是原生可施工承诺，测试不创建世界或启动身体任务。 */
@@ -58,7 +59,7 @@ public final class BuildingCoordinateBudgetTest {
         ops.add(ops.get(0).deepCopy());
         ops.get(2).getAsJsonObject().addProperty("block_id", "minecraft:dirt");
         var replaced = BuildTool.resolvedTargets(ops, true);
-        check(replaced.size() == 2 && replaced.get(0).block() == net.minecraft.world.level.block.Blocks.DIRT
+        check(replaced.size() == 2 && replaced.get(0).block() == Blocks.DIRT
                 && replaced.get(1).block() == targets.get(1).block(), "完整坐标去重改变了同格后写覆盖规则");
         return targets;
     }

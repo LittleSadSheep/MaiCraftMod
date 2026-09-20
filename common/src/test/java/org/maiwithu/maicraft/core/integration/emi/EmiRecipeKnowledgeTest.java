@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.resources.ResourceLocation;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** 用有界假索引验证只读分页契约；不会模拟EMI引擎，也不启动游戏或创建合成动作。 */
 public final class EmiRecipeKnowledgeTest {
@@ -49,7 +50,7 @@ public final class EmiRecipeKnowledgeTest {
     }
 
     private static void metadataProbe() {
-        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new AtomicInteger();
         var reader = new EmiRecipeKnowledge((player, id, uses) -> new EmiRecipeAccess.Query("available", "fixture", "metadata", 1200,
                 index -> { calls.incrementAndGet(); throw new AssertionError("索引提示不能展开任何正文"); }, () -> true));
         JsonObject probe = reader.readIndex(null, ITEM, false);

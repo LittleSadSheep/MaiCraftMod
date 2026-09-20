@@ -19,6 +19,14 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import sun.misc.Unsafe;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import java.util.HashMap;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeMap;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 
 /**
  * 检查轿厢高度对齐、单次协议确认、失败走路、取消后出口阻塞和错误楼层；用替身控制状态，没有实际乘坐电梯。
@@ -29,8 +37,8 @@ public final class ElevatorSessionTest {
         var unsafeField = Unsafe.class.getDeclaredField("theUnsafe"); unsafeField.setAccessible(true);
         var memory = (Unsafe) unsafeField.get(null);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
-        set(net.minecraft.world.entity.LivingEntity.class, player, "attributes",
-                new net.minecraft.world.entity.ai.attributes.AttributeMap(net.minecraft.world.entity.player.Player.createAttributes().build()));
+        set(LivingEntity.class, player, "attributes",
+                new AttributeMap(Player.createAttributes().build()));
         set(Entity.class, player, "position", new Vec3(0.5, 100, 0.5));
         var cabin = new CreateElevatorBridge.Cabin(player, null, new CreateElevatorBridge.Column(0, 0, Direction.NORTH),
                 2, 102, true, new Vec3(0, 100, 0), Map.of(), null, List.of(),
@@ -45,16 +53,16 @@ public final class ElevatorSessionTest {
     }
 
     private static void geometryStateHash() {
-        var nbt = new net.minecraft.nbt.CompoundTag();
-        var blocks = new java.util.HashMap<BlockPos, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo>();
+        var nbt = new CompoundTag();
+        var blocks = new HashMap<BlockPos, StructureTemplate.StructureBlockInfo>();
         var pos = BlockPos.ZERO;
-        blocks.put(pos, new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo(pos,
-                net.minecraft.world.level.block.Blocks.IRON_BLOCK.defaultBlockState(), nbt));
+        blocks.put(pos, new StructureTemplate.StructureBlockInfo(pos,
+                Blocks.IRON_BLOCK.defaultBlockState(), nbt));
         int before = CreateElevatorTravel.geometryHash(blocks);
         nbt.putString("floor_label", "different display data");
         check(before == CreateElevatorTravel.geometryHash(blocks), "display NBT unnecessarily invalidated cabin geometry");
-        blocks.put(pos, new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo(pos,
-                net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), nbt));
+        blocks.put(pos, new StructureTemplate.StructureBlockInfo(pos,
+                Blocks.AIR.defaultBlockState(), nbt));
         check(before != CreateElevatorTravel.geometryHash(blocks), "actual collision state change failed to invalidate geometry");
     }
 
@@ -86,11 +94,11 @@ public final class ElevatorSessionTest {
     }
 
     private static void failedWalkAndCancelledExit(LocalPlayer player) throws Exception {
-        var floor = net.minecraft.world.level.block.Blocks.IRON_BLOCK.defaultBlockState();
+        var floor = Blocks.IRON_BLOCK.defaultBlockState();
         var first = BlockPos.ZERO;
         var second = new BlockPos(3, 0, 0);
-        var blocks = Map.of(first, new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo(first, floor, null),
-                second, new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo(second, floor, null));
+        var blocks = Map.of(first, new StructureTemplate.StructureBlockInfo(first, floor, null),
+                second, new StructureTemplate.StructureBlockInfo(second, floor, null));
         var geometry = new ElevatorGeometry(blocks, null, 0.6, 1.8);
         Vec3 start = new Vec3(0.5, 1, 0.5), destination = new Vec3(3.5, 1, 0.5);
         set(Entity.class, player, "position", start);
@@ -103,9 +111,9 @@ public final class ElevatorSessionTest {
         // This is the persisted state after a failed path search: a goal, but no route.
         set(ElevatorMotion.class, motion, "localGoal", destination);
         for (int tick = 0; tick < 2; tick++) check(motion.inside(context, cabin, geometry, destination,
-                it.unimi.dsi.fastutil.longs.LongSets.emptySet()) == ElevatorMotion.Progress.BLOCKED, "empty failed route became arrival on the next tick");
+                LongSets.emptySet()) == ElevatorMotion.Progress.BLOCKED, "empty failed route became arrival on the next tick");
         set(Entity.class, player, "position", destination);
-        check(motion.inside(context, cabin, geometry, destination, it.unimi.dsi.fastutil.longs.LongSets.emptySet())
+        check(motion.inside(context, cabin, geometry, destination, LongSets.emptySet())
                 == ElevatorMotion.Progress.REACHED, "actual supported destination was rejected");
         set(Entity.class, player, "position", start);
         CreateElevatorTravel journey = new CreateElevatorTravel(new BlockPos(4, 1, 0)); journey.requestStop();

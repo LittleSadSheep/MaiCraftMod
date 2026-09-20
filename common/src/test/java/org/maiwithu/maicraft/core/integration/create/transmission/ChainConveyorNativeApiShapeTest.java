@@ -10,6 +10,7 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import java.util.ArrayList;
 
 /** Bytecode compatibility checks for the installed optional Create JAR; not a gameplay acceptance test. */
 public final class ChainConveyorNativeApiShapeTest {
@@ -60,7 +61,7 @@ public final class ChainConveyorNativeApiShapeTest {
                 .orElseThrow(() -> new AssertionError("missing method " + owner.name + "." + name));
     }
     private static List<MethodInsnNode> calls(MethodNode method, String owner, String name) {
-        var result = new java.util.ArrayList<MethodInsnNode>();
+        var result = new ArrayList<MethodInsnNode>();
         for (var instruction : method.instructions) if (instruction instanceof MethodInsnNode call && call.owner.equals(owner) && call.name.equals(name)) result.add(call);
         return result;
     }

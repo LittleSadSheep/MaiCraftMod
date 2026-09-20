@@ -16,6 +16,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.border.WorldBorder;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** Native handler bytecode is checked separately; this exercises geometry and inventory admission. */
 public final class ChainConveyorContractTest {
@@ -88,9 +90,9 @@ public final class ChainConveyorContractTest {
         var link = observed.getAsJsonObject("native").getAsJsonObject("create").getAsJsonObject("chain_conveyor").getAsJsonArray("connections").get(0).getAsJsonObject();
         link.addProperty("bidirectional", true); link.addProperty("peer_read_status", "observed");
         check(ChainConveyorRead.peerVerified(observed, delta), "both server endpoints count only after permitted native peer observation");
-        var sources = List.of(org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source.STORAGE);
+        var sources = List.of(SemanticAcquireTaskRecord.Source.STORAGE);
         var record = new ChainConveyorLinkTaskRecord("source-policy", 1000, "minecraft:overworld", BlockPos.ZERO, delta,
-                org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE, sources, false, List.of("city"));
+                SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE, sources, false, List.of("city"));
         check(record.allowedSources.equals(sources) && !record.allowHarm && record.protectedLabels.equals(List.of("city")), "specific source and harm policy survive the compatible constructor");
     }
     private static void fails(Runnable test, String code) {

@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
+import java.util.List;
 
 /**
  * 检查移动支撑、门口衔接、多层甲板、台阶、禁入区域和到站门预测；加载状态由测试传入，未验证真实客户端的加载接口。
@@ -76,8 +77,8 @@ public final class ElevatorGeometryTest {
         for (int x = -1; x <= 1; x++) for (int z = -1; z <= 1; z++) cabin.put(new BlockPos(x, -4, z), Blocks.IRON_BLOCK.defaultBlockState());
         var stances = cabin.geometry().stances;
         check(stances.stream().filter(p -> p.y == 1).count() > stances.stream().filter(p -> p.y == -3).count(), "fixture roof must be larger than its cabin floor");
-        check(ElevatorSurvey.deckCandidates(stances, 118, 115).equals(java.util.List.of(-3.0)), "larger roof hid the source cabin floor");
-        check(ElevatorSurvey.deckCandidates(stances, 106, 103).equals(java.util.List.of(-3.0)), "contact offset failed to project destination floor");
+        check(ElevatorSurvey.deckCandidates(stances, 118, 115).equals(List.of(-3.0)), "larger roof hid the source cabin floor");
+        check(ElevatorSurvey.deckCandidates(stances, 106, 103).equals(List.of(-3.0)), "contact offset failed to project destination floor");
         check(ElevatorSurvey.deckCandidates(stances, 106, 110).isEmpty(), "invented unsupported deck height");
     }
 

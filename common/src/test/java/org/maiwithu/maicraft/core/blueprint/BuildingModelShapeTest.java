@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.world.phys.Vec3;
+import java.util.stream.Collectors;
 
 /** 只用几何直接检查建筑图元；不初始化方块注册表、不生成世界，也不把线段外的延长线当成建筑棱。 */
 public final class BuildingModelShapeTest {
@@ -102,7 +103,7 @@ public final class BuildingModelShapeTest {
     private static void bounds(BuildingModelShape shape, Vec3 size) { close(shape.boundsMin(),size.scale(-.5),"图元下界居中且尺寸正确"); close(shape.boundsMax(),size.scale(.5),"图元上界居中且尺寸正确"); }
     private static BuildingModelShape shape(String name) { return BuildingModelShape.create(name,new JsonObject(),SIZE); }
     private static BuildingModelShape.Face face(BuildingModelShape shape, String id) { return shape.faces().stream().filter(face -> face.id().equals(id)).findFirst().orElseThrow(); }
-    private static Set<String> ids(BuildingModelShape shape) { return shape.faces().stream().map(BuildingModelShape.Face::id).collect(java.util.stream.Collectors.toSet()); }
+    private static Set<String> ids(BuildingModelShape shape) { return shape.faces().stream().map(BuildingModelShape.Face::id).collect(Collectors.toSet()); }
     private static JsonObject json(String text) { return JsonParser.parseString(text).getAsJsonObject(); }
     private static void rejected(Runnable action, String message) { try { action.run(); } catch (IllegalArgumentException expected) { return; } throw new AssertionError(message); }
     private static void close(Vec3 actual, Vec3 expected, String message) { check(actual.distanceTo(expected) < 1e-7,message+": "+actual+" != "+expected); }

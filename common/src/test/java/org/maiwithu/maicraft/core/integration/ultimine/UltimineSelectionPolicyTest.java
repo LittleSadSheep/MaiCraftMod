@@ -7,6 +7,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy.*;
+import org.maiwithu.maicraft.server.machine.NativeApi;
 
 /** 验证原生完整九格范围，包括当前没有绘制或匹配出来的格子也不能越权破坏。 */
 public final class UltimineSelectionPolicyTest {
@@ -84,7 +85,7 @@ public final class UltimineSelectionPolicyTest {
     }
     private static void missingOptionalModCanBeClosedWithoutInitializingIt() {
         // 未安装可选模组时，检测和取消都能安全结束，不会为了松键强行初始化原生客户端。
-        if (!org.maiwithu.maicraft.server.machine.NativeApi.present("dev.ftb.mods.ftbultimine.client.FTBUltimineClient")) {
+        if (!NativeApi.present("dev.ftb.mods.ftbultimine.client.FTBUltimineClient")) {
             check(!UltimineNative.available(), "missing Ultimine is detected before taking any native input");
             new UltimineSession().close(); checks++;
         }

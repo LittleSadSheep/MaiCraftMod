@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort.Movement;
+import net.minecraft.util.Mth;
 
 // 用身体碰撞盒和固定参数回放侧向漂移、窄门、低顶盖和移动中上升，确认预测会提前刹车且通道恢复后仍能前进。
 public final class JetpackMotionTest {
@@ -69,7 +70,7 @@ public final class JetpackMotionTest {
                 refocused = true;
                 brake = !JetpackMotion.clearTrajectory(doorway, position, velocity, aim, yaw, requested, POWER);
             }
-            yaw += net.minecraft.util.Mth.clamp(net.minecraft.util.Mth.wrapDegrees(requested - yaw) * .25F, -12, 12);
+            yaw += Mth.clamp(Mth.wrapDegrees(requested - yaw) * .25F, -12, 12);
             Vec3 target = brake ? new Vec3(position.x, aim.y, position.z) : aim;
             var next = JetpackMotion.step(position, velocity, JetpackView.command(position, velocity, target, yaw, false, POWER), yaw, POWER);
             check(doorway.clear(position, next.position()), "turning to the current aperture must avoid its edge");

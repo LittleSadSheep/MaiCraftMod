@@ -6,6 +6,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.function.Consumer;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** 检查模型变成方块后，墙厚、开窗、独立玻璃、后写材质和两种坐标旋转都保持预期；也验证非法模型被拒绝。 */
 public final class BuildingSceneCompilerTest {
@@ -71,10 +75,10 @@ public final class BuildingSceneCompilerTest {
     private static void rejectsConfiguredExcess() {
         // 用显式小限额保留单体超量与合并超量检查，正常大工程默认值提高后不再误把合法房屋列为坏输入。
         try {
-            var directory = java.nio.file.Files.createTempDirectory("v1-scene-budget-");
-            java.nio.file.Files.createDirectories(directory.resolve("config"));
-            java.nio.file.Files.writeString(directory.resolve(org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH), "maxTargets=16384\n");
-            org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory);
+            var directory = Files.createTempDirectory("v1-scene-budget-");
+            Files.createDirectories(directory.resolve("config"));
+            Files.writeString(directory.resolve(BuildingBudgets.CONFIG_PATH), "maxTargets=16384\n");
+            BuildingBudgets.initialize(directory);
             try {
                 rejects(s -> { JsonObject large = s.getAsJsonArray("objects").get(0).getAsJsonObject(); large.addProperty("primitive", "cube"); large.add("dimensions", JsonParser.parseString("[32,32,32]")); large.add("location", JsonParser.parseString("[16,16,16]")); });
                 rejects(s -> {
@@ -82,8 +86,8 @@ public final class BuildingSceneCompilerTest {
                     for (int i = 0; i < 3; i++) disjoint.add(mesh("Volume" + i, "wall", "[" + (10 + i * 32) + ",10,10]", "[20,20,20]"));
                     s.add("objects", disjoint); BuildingSceneCompiler.validateWire(s);
                 });
-            } finally { org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("restore-defaults")); }
-        } catch (java.io.IOException failure) { throw new AssertionError(failure); }
+            } finally { BuildingBudgets.initialize(directory.resolve("restore-defaults")); }
+        } catch (IOException failure) { throw new AssertionError(failure); }
     }
 
     private static JsonObject scene() {
@@ -112,7 +116,7 @@ public final class BuildingSceneCompilerTest {
         return result;
     }
     private static long count(Map<String, JsonObject> cells, String id) { return cells.values().stream().filter(c -> c.get("block_id").getAsString().equals(id)).count(); }
-    private static void rejects(java.util.function.Consumer<JsonObject> edit) {
+    private static void rejects(Consumer<JsonObject> edit) {
         JsonObject invalid = scene(); edit.accept(invalid);
         try { BuildingSceneCompiler.compile(invalid); }
         catch (IllegalArgumentException expected) { return; }

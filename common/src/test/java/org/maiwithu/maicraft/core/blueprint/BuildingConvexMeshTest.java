@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
+import com.google.gson.JsonPrimitive;
 
 /** 自定义建筑凸体先检查拓扑和真实外形；缺面、凹陷与自交均应拒绝，不能偷偷补面或改写源模型。 */
 public final class BuildingConvexMeshTest {
@@ -57,7 +58,7 @@ public final class BuildingConvexMeshTest {
         for (String vertex : List.of("[0,0]","[2,0,0]","[-0.01,0,0]","[\"0\",0,0]","null")) {
             var object = cube(); object.getAsJsonArray("vertices").set(0,JsonParser.parseString(vertex)); rejected(object,"错误顶点不得进入几何搜索");
         }
-        var nonfinite = cube(); nonfinite.getAsJsonArray("vertices").get(0).getAsJsonArray().set(0,new com.google.gson.JsonPrimitive(Double.NaN));
+        var nonfinite = cube(); nonfinite.getAsJsonArray("vertices").get(0).getAsJsonArray().set(0,new JsonPrimitive(Double.NaN));
         rejected(nonfinite,"非有限顶点必须拒绝");
         for (String face : List.of("[0,1]","[0,1,1,3]","[0,1,99]","[0,-1,2]","[0,1.5,2]","[0,\"1\",2]")) {
             var object = cube(); object.getAsJsonArray("faces").set(0,JsonParser.parseString(face)); rejected(object,"错误索引或退化面必须拒绝");
@@ -74,7 +75,7 @@ public final class BuildingConvexMeshTest {
     private static void openConcaveAndDegenerateSurfaces() {
         var open = cube(); open.getAsJsonArray("faces").remove(4); rejected(open,"少一面形成开口，不能自动封口当实体");
         var crossing = cube(); crossing.getAsJsonArray("faces").set(4,JsonParser.parseString("[0,2,1,3]")); rejected(crossing,"四角交叉绕序必须拒绝");
-        var nonplanar = cube(); nonplanar.getAsJsonArray("vertices").get(2).getAsJsonArray().set(1,new com.google.gson.JsonPrimitive(.75));
+        var nonplanar = cube(); nonplanar.getAsJsonArray("vertices").get(2).getAsJsonArray().set(1,new JsonPrimitive(.75));
         rejected(nonplanar,"一个角翘起的四边面不能冒充平面");
         var concave = octahedron(); concave.getAsJsonArray("vertices").set(2,JsonParser.parseString("[0.5,0.25,0.5]"));
         rejected(concave,"各面仍是平面三角形的内凹顶点，必须由全局凸性检查拒绝");

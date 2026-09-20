@@ -20,6 +20,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.item.Item;
 
 /** 用小型公开读取接口与私有实现核验EMI元数据契约；不实现EMI配方引擎，不执行任何合成或界面操作。 */
 public final class EmiRecipeReaderTest {
@@ -143,8 +144,8 @@ public final class EmiRecipeReaderTest {
         public ItemStack getItemStack() { throw new AssertionError("不能靠数量截断的ItemStack转换猜测媒体身份"); }
     }
     private static class ItemView extends StackView {
-        final net.minecraft.world.item.Item item;
-        ItemView(net.minecraft.world.item.Item item, long amount, float chance, DataComponentPatch patch) { super(amount, chance, patch); this.item = item; }
+        final Item item;
+        ItemView(Item item, long amount, float chance, DataComponentPatch patch) { super(amount, chance, patch); this.item = item; }
         public ResourceLocation getId() { return BuiltInRegistries.ITEM.getKey(item); } public Object getKey() { return item; }
     }
     private static final class FluidView extends StackView {

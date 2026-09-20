@@ -12,11 +12,13 @@ import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 
 /** 原生定义只经序列化读取；深度、节点、UTF-8超预算或序列化失败都明确未知，不执行配方补猜字段。 */
 public final class NativeRecipeDefinitionTest {
     public static void main(String[] args) {
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
         var invalid = new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(Items.BRICK),
                 NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK))) {

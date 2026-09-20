@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.core.blueprint;
 import com.google.gson.JsonObject;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
+import java.io.IOException;
+import java.nio.file.Files;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import static org.maiwithu.maicraft.core.blueprint.BuildingModelTestData.*;
 
 /** 验证坏组件和超量阵列在编译前被拒绝，不能靠未实例化、深层复用或重叠去绕过工作预算。 */
@@ -12,14 +15,14 @@ public final class BuildingModelGuardTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         // 越界夹具使用显式的小预算，避免正常航站楼默认值提高后，旧的拒绝测试变成合法大模型。
         try {
-            var directory = java.nio.file.Files.createTempDirectory("model-guard-budget-");
-            java.nio.file.Files.createDirectories(directory.resolve("config"));
-            java.nio.file.Files.writeString(directory.resolve(org.maiwithu.maicraft.core.build.BuildingBudgets.CONFIG_PATH),
+            var directory = Files.createTempDirectory("model-guard-budget-");
+            Files.createDirectories(directory.resolve("config"));
+            Files.writeString(directory.resolve(BuildingBudgets.CONFIG_PATH),
                     "maxObjects=1024\nmaxTargets=16384\nmaxVoxelWork=16777216\n");
-            org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory);
+            BuildingBudgets.initialize(directory);
             try { unusedDefinitionsAreChecked(); loopsAndExpansionAreBounded(); invalidPropertiesDoNotHide(); voxelBudgetsAreBounded(); }
-            finally { org.maiwithu.maicraft.core.build.BuildingBudgets.initialize(directory.resolve("restore-defaults")); }
-        } catch (java.io.IOException failure) { throw new AssertionError(failure); }
+            finally { BuildingBudgets.initialize(directory.resolve("restore-defaults")); }
+        } catch (IOException failure) { throw new AssertionError(failure); }
         System.out.println("BuildingModelGuardTest: unused definitions, cycles, expansion and voxel budgets passed");
     }
     private static JsonObject base() { return scene(mesh("Base","cube",new double[]{.5,.5,.5},new int[]{1,1,1},"Body")); }

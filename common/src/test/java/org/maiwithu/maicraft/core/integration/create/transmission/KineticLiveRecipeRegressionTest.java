@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.io.IOException;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
 /** Replays the live 63-shaft/3-gearbox failure with actual shipped recipe JSON, including tool-recycling fanout and tags. */
@@ -19,7 +20,7 @@ public final class KineticLiveRecipeRegressionTest {
         try (var stream = KineticLiveRecipeRegressionTest.class.getResourceAsStream("live-kinetic-recipes.json")) {
             if (stream == null) throw new AssertionError("missing live recipe regression fixture");
             fixture = JsonParser.parseString(new String(stream.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
-        } catch (java.io.IOException failed) { throw new AssertionError(failed); }
+        } catch (IOException failed) { throw new AssertionError(failed); }
         check(fixture.get("observed_native_recipe_count").getAsInt() == 4977 && fixture.get("observed_live_search_entries").getAsInt() == 8192,
                 "fixture must retain the actual client's exhausted-budget provenance");
         Map<String, List<Recipe>> recipes = new LinkedHashMap<>();

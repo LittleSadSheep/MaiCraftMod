@@ -6,6 +6,10 @@ import java.nio.file.Files;
 import java.util.Properties;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.Goal;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
 import static org.maiwithu.maicraft.core.blueprint.BuildingModelTestData.*;
 
 /** 设计契约可重复发现；格式/预算变化不会冒充旧校验，失败编辑也不能覆盖已保存的作者模型。 */
@@ -15,7 +19,7 @@ public final class BuildingModelContractTest {
             var value = BuildingModelContract.current();
             System.out.println("building-contract-fingerprint="+value.revision()+"/"+value.designSchemaRevision()); return;
         }
-        net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var current = BuildingModelContract.current();
         var again = BuildingModelContract.describe(BuildingBudgets.current());
         check(current.revision().equals(again.revision()) && current.schemaText().equals(again.schemaText()),"相同定义必须生成相同契约和Schema正文");
@@ -38,7 +42,7 @@ public final class BuildingModelContractTest {
         // 输出真实Schema供独立JSON Schema实现核验，文件只写入指定的临时验证目录。
         String output = System.getProperty("maicraft.building.contract.output");
         if (output != null) {
-            var directory = java.nio.file.Path.of(output); Files.createDirectories(directory);
+            var directory = Path.of(output); Files.createDirectories(directory);
             Files.writeString(directory.resolve("schema.json"),current.schemaText());
             Files.writeString(directory.resolve("index.json"),current.index().toString());
         }
@@ -53,11 +57,11 @@ public final class BuildingModelContractTest {
         var arguments = directory.resolve("java.args");
         String classpath = System.getProperty("java.class.path").replace("\\","\\\\").replace("\"","\\\"");
         Files.writeString(arguments,"-cp\n\""+classpath+"\"\n"+BuildingModelContractTest.class.getName()+"\n--fingerprint\n");
-        String binary = java.nio.file.Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
+        String binary = Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
         for (int attempt = 0; attempt < 3; attempt++) {
             var output = directory.resolve("probe-"+attempt+".log");
             var process = new ProcessBuilder(binary,"@"+arguments).redirectErrorStream(true).redirectOutput(output.toFile()).start();
-            if (!process.waitFor(15,java.util.concurrent.TimeUnit.SECONDS)) { process.destroyForcibly(); throw new AssertionError("独立契约指纹进程未及时完成"); }
+            if (!process.waitFor(15,TimeUnit.SECONDS)) { process.destroyForcibly(); throw new AssertionError("独立契约指纹进程未及时完成"); }
             String text = Files.readString(output);
             check(process.exitValue() == 0 && text.lines().anyMatch(expected::equals),"跨进程契约指纹必须稳定: "+text);
         }

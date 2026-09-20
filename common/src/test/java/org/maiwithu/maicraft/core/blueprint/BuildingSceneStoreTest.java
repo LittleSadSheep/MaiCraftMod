@@ -6,6 +6,8 @@ import com.google.gson.JsonParser;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 
 /** Saved revisions keep object identity and the original site across edits and process reloads. */
 public final class BuildingSceneStoreTest {
@@ -14,7 +16,7 @@ public final class BuildingSceneStoreTest {
         Path root = Files.createTempDirectory("building-scene-store-");
         String world = "a".repeat(64), dimension = "minecraft:overworld";
         int[] compilations = {0};
-        var store = new BuildingSceneStore(new org.maiwithu.maicraft.intent.persistence.StateIdentity(world, root), source -> {
+        var store = new BuildingSceneStore(new StateIdentity(world, root), source -> {
             compilations[0]++;
             return BuildingSceneCompiler.compile(source);
         });
@@ -75,7 +77,7 @@ public final class BuildingSceneStoreTest {
         rejects(() -> store.updatePrepared(first.sceneId(), "minecraft:the_nether", prepared));
         rejects(() -> new BuildingSceneStore(root, "b".repeat(64)).updatePrepared(first.sceneId(), dimension, prepared));
         // 把测试文件故意加到上限之外，确认读取会拒绝；只影响这个测试创建的临时目录。
-        Files.write(source, new byte[org.maiwithu.maicraft.core.build.BuildingBudgets.current().maxSceneBytes() + 1]);
+        Files.write(source, new byte[BuildingBudgets.current().maxSceneBytes() + 1]);
         rejects(() -> store.load(first.sceneId(), dimension));
         System.out.println("BuildingSceneStoreTest: immutable world-bound revisions passed");
     }

@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import net.minecraft.core.BlockPos;
+import java.util.HashSet;
 
 /** Dense and sparse terrain must return the same nearest cells regardless of visit order. */
 public final class SearchGeometryTest {
@@ -43,7 +44,7 @@ public final class SearchGeometryTest {
         boundary.offer(BlockPos.ZERO);
         if (!boundary.canStopAfterRing(0)) throw new AssertionError("Zero-distance candidate should finish");
         // A full old window of individually rejected targets must not hide farther usable ore.
-        var rejected = new java.util.HashSet<BlockPos>();
+        var rejected = new HashSet<BlockPos>();
         for (int x = 1; x <= 64; x++) rejected.add(new BlockPos(x, 0, 0));
         var usable = new SearchGeometry.NearestPositions(BlockPos.ZERO, 64, rejected);
         rejected.clear(); // selection owns its exclusion snapshot across ticks

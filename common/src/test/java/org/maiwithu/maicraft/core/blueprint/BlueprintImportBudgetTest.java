@@ -9,6 +9,8 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import java.io.IOException;
+import java.util.Random;
 
 /** 导入大蓝图时使用配置的条目、扫描量和文件预算；调高后可重试，压缩数据仍不能绕过限制。 */
 public final class BlueprintImportBudgetTest {
@@ -41,7 +43,7 @@ public final class BlueprintImportBudgetTest {
             // 随机内容避免压缩后过小；先限制源文件，再单独限制解压后的原生NBT计费。
             Path file = directory.resolve("schematics/budget.nbt"); Files.createDirectories(file.getParent());
             CompoundTag compressed = structure(1); byte[] noise = new byte[16_384];
-            new java.util.Random(19).nextBytes(noise); compressed.putByteArray("fixture_payload", noise);
+            new Random(19).nextBytes(noise); compressed.putByteArray("fixture_payload", noise);
             NbtIo.writeCompressed(compressed, file);
             configure(directory, "maxImportFileBytes=4096\nmaxImportNbtBytes=65536\n");
             rejects(() -> BlueprintFiles.read(directory, "budget"));
@@ -78,7 +80,7 @@ public final class BlueprintImportBudgetTest {
     private static ListTag integers(int... values) { ListTag result = new ListTag(); for (int value : values) result.add(IntTag.valueOf(value)); return result; }
     @FunctionalInterface private interface Checked { void run() throws Exception; }
     private static void rejects(Checked operation) throws Exception {
-        try { operation.run(); } catch (IllegalArgumentException | java.io.IOException expected) { return; }
+        try { operation.run(); } catch (IllegalArgumentException | IOException expected) { return; }
         throw new AssertionError("超预算蓝图被接受");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

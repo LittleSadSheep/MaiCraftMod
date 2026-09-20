@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.transport.TransportTargets.Destination;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 检查平台分组、起飞后升高再平移、靠近平台后落下，以及跳过路点时不能穿过低顶盖或下方地板；运动按测试公式逐刻推进。
@@ -98,13 +99,13 @@ public final class JetpackCourseTest {
         check(JetpackRoute.nextWaypoint(open, ascending, new Vec3(0, 12.8, 0), 1, POWER) == 2,
                 "native upward coasting above the cruise minimum remains an arrived ascent");
         // Actual failed sweep from the cross-floor trial: turning early intersected the Y114 floor.
-        var floor = new net.minecraft.world.phys.AABB(-78, 114, -13, -77, 115, -12);
+        var floor = new AABB(-78, 114, -13, -77, 115, -12);
         JetpackRoute.Space scene = new JetpackRoute.Space() {
             public boolean clear(Vec3 a, Vec3 b) {
                 int steps = Math.max(1, (int) Math.ceil(a.distanceTo(b) / .2));
                 for (int i = 0; i <= steps; i++) {
                     Vec3 p = a.lerp(b, (double) i / steps);
-                    if (new net.minecraft.world.phys.AABB(p.x - .38, p.y + .001, p.z - .38,
+                    if (new AABB(p.x - .38, p.y + .001, p.z - .38,
                             p.x + .38, p.y + 1.88, p.z + .38).intersects(floor)) return false;
                 }
                 return true;
@@ -120,13 +121,13 @@ public final class JetpackCourseTest {
                 "stay in the clear descent column until below the floor before turning underneath it");
     }
     private static void lowCeilingShortcut() {
-        var slab = new net.minecraft.world.phys.AABB(0, 2, 0, 1, 3, 1);
+        var slab = new AABB(0, 2, 0, 1, 3, 1);
         JetpackRoute.Space room = new JetpackRoute.Space() {
             public boolean clear(Vec3 from, Vec3 to) {
                 int steps = Math.max(1, (int)Math.ceil(from.distanceTo(to) / .1));
                 for (int i = 0; i <= steps; i++) {
                     Vec3 p = from.lerp(to, (double)i / steps);
-                    if (new net.minecraft.world.phys.AABB(p.x - .38, p.y + .001, p.z - .38,
+                    if (new AABB(p.x - .38, p.y + .001, p.z - .38,
                             p.x + .38, p.y + 1.88, p.z + .38).intersects(slab)) return false;
                 }
                 return true;

@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineti
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /** Regional endpoint evidence is supplied explicitly; no Create physics or world mutations are simulated. */
 public final class CreateEconomicEndpointBridgeTest {
@@ -37,7 +38,7 @@ public final class CreateEconomicEndpointBridgeTest {
             field(CreateMechanicalPowerTask.class, "progressiveSurvey").set(task, survey);
             field(CreateMechanicalPowerTask.class, "economicAfterEndpoints").setBoolean(task, true);
             field(CreateMechanicalPowerTask.class, "dimension").set(task, "minecraft:overworld");
-            var tick = CreateMechanicalPowerTask.class.getDeclaredMethod("progressSurvey", org.maiwithu.maicraft.client.actor.LocalPlayerContext.class); tick.setAccessible(true);
+            var tick = CreateMechanicalPowerTask.class.getDeclaredMethod("progressSurvey", LocalPlayerContext.class); tick.setAccessible(true);
             check(tick.invoke(task, ClientRuntime.requireContext(h.player)) == TaskState.RUNNING, "resolved endpoint evidence must hand off before any old route execution");
             var economic = (EconomicKineticTaskRecord) field(CreateMechanicalPowerTask.class, "economicRecord").get(task);
             check(economic.source.equals(source.position()) && economic.target.equals(target.position()), "economic routing receives actual resolved machines, not empty region centers");

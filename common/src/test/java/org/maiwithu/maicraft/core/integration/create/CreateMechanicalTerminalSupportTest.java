@@ -14,6 +14,7 @@ import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
+import java.lang.reflect.Field;
 
 public final class CreateMechanicalTerminalSupportTest {
     public static void main(String[] args) throws Exception {
@@ -76,7 +77,7 @@ public final class CreateMechanicalTerminalSupportTest {
     private static CreateMechanicalPlan.KineticEndpoint endpoint(BlockPos at, Direction face, boolean powered) {
         return new CreateMechanicalPlan.KineticEndpoint(at, Blocks.END_ROD.defaultBlockState(), face, powered ? 64 : 0, powered);
     }
-    private static java.lang.reflect.Field field(String name) throws Exception {
+    private static Field field(String name) throws Exception {
         var field = CreateMechanicalPowerTask.class.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

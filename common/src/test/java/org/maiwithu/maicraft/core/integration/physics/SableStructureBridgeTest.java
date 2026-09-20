@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import sun.misc.Unsafe;
+import java.util.ArrayList;
 
 /**
  * 用具有相同方法名的替身对象检查接口缺失、部分字段失败、结构身份、观察上限和已加载区块；不证明某个实际 Sable 安装版本的接口兼容。
@@ -136,7 +137,7 @@ public final class SableStructureBridgeTest {
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
     private static void presentationSelection() {
         Counts counts = new Counts();
-        var nativeList = new java.util.ArrayList<NativeShip>();
+        var nativeList = new ArrayList<NativeShip>();
         for (int i = 0; i < 30; i++) {
             var small = new NativeShip(counts); small.world = new NativeBounds(i,0,0,i+1,1,1); nativeList.add(small);
         }

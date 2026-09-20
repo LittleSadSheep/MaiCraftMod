@@ -21,6 +21,8 @@ import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import java.lang.reflect.Method;
+import java.util.UUID;
 
 /** 建筑模型、冻结施工单和自有支撑各用自己的配置预算；失败不发布半份记录，恢复不再被旧常量截断。 */
 public final class BuildingPersistenceBudgetTest {
@@ -83,7 +85,7 @@ public final class BuildingPersistenceBudgetTest {
         configure(directory, "maxScaffolds=3\n"); check(BuildProjectScaffolds.decode(encoded).size() == 3, "提高支撑记录预算未生效");
 
         // 只直接测试 sidecar 的文件读写边界；不调用世界恢复，绝不把这些夹具记录当作真实放置证据。
-        var store = new BuildProjectStore(new StateIdentity(WORLD, directory)); String id = java.util.UUID.randomUUID().toString();
+        var store = new BuildProjectStore(new StateIdentity(WORLD, directory)); String id = UUID.randomUUID().toString();
         Path sidecar = directory.resolve("budget-scaffolds.json"); var hundred = scaffolds(100);
         var write = BuildProjectStore.class.getDeclaredMethod("saveScaffolds", Path.class, String.class, String.class, Map.class);
         var read = BuildProjectStore.class.getDeclaredMethod("readScaffolds", Path.class, String.class, String.class);
@@ -109,7 +111,7 @@ public final class BuildingPersistenceBudgetTest {
         Path config = directory.resolve(BuildingBudgets.CONFIG_PATH); Files.createDirectories(config.getParent());
         Files.writeString(config, properties); BuildingBudgets.initialize(directory);
     }
-    private static Object invoke(java.lang.reflect.Method method, Object owner, Object... arguments) throws Exception {
+    private static Object invoke(Method method, Object owner, Object... arguments) throws Exception {
         try { return method.invoke(owner, arguments); }
         catch (InvocationTargetException failed) {
             if (failed.getCause() instanceof Exception exception) throw exception;
