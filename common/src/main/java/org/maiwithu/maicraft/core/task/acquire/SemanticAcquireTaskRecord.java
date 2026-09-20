@@ -12,17 +12,17 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One final-inventory acquisition goal governed by live progress and finite graph evidence. */
+/** 一张最终背包需求单：要什么、要多少、可以从哪些来源取得，以及需要遵守的保护范围。 */
 public final class SemanticAcquireTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "acquire_items";
-    /** Large enough for ordinary modded item tags while planner work is sliced per tick. */
+    /** 一组最多接受这些物品变体；实际规划按游戏刻分步推进。 */
     public static final int MAX_ITEM_ALTERNATIVES = 256;
-    /** Full 36-slot main-inventory ceiling for ordinary 64-stack materials. */
+    /** 按主背包三十六格、每格六十四件设数量上限，不代表不可堆叠物品也装得下。 */
     public static final int MAX_FINAL_COUNT = 36 * 64;
     public static final int DEFAULT_RADIUS = 16;
     public static final int MAX_RADIUS = 48;
 
-    /** Sources are semantic permissions, not concrete instructions. */
+    /** 来源表示允许做哪些事；执行顺序根据现场库存和配方条件决定。 */
     public enum Source {
         INVENTORY,
         NEARBY,
@@ -47,10 +47,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         }
     }
 
-    /**
-     * Optional semantic evidence about a source family. Refs remain resource IDs/tags; there are
-     * no positions, entity runtime IDs, routes, slots or interaction steps here.
-     */
+    /** 可选来源线索只说明方块、标签、生物和职业等种类，不携带位置、临时实体编号、槽位或操作步骤。 */
     public record SourceHint(
             List<String> blockRefs,
             List<ResourceLocation> entityTypeIds,
@@ -78,11 +75,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         }
     }
 
-    /**
-     * Ordinary survival default. Mining remains subject to harvest/protection checks. Hunting is
-     * discoverable here so the task can explain the real prerequisite, but cannot start unless
-     * {@code allowHarm} is explicitly true.
-     */
+    /** 普通生存默认来源；采矿仍检查工具和保护，狩猎只有明确允许伤害后才能真正动手。 */
     public static final List<Source> DEFAULT_SOURCES =
             List.of(Source.INVENTORY, Source.NEARBY, Source.CRAFT, Source.COOK,
                     Source.MINE, Source.HUNT);
@@ -134,7 +127,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
                 ? Math.clamp(storageSearchRadius, 1, MAX_RADIUS) : this.searchRadius;
     }
 
-    /** Calling this method forces static task registration during Mod initialization. */
+    /** 模组初始化时确保这类取物任务已登记，随后才能从任务单创建执行器。 */
     public static void ensureRegistered() {}
 
     @Override

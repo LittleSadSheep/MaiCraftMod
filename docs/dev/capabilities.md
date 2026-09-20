@@ -36,7 +36,7 @@
 | `drop_items` | 按要求把物品丢到目标区域 | `GeneralAbilityAdapter.drop` | 入口核对 |
 | `fish` | 钓鱼并确认收获 | `GeneralAbilityAdapter.fish` | 入口核对 |
 | `sleep` | 找到床并睡觉 | `AbilityAdapter.sleep` | 入口核对 |
-| `acquire_items` | 从允许的来源拿到所需物品 | `AbilityAdapter.acquire` | 入口核对 |
+| `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
 | `craft` | 根据配方制作物品 | `AbilityAdapter.craft` | 入口核对 |
 | `cook` | 烹饪或烧炼所需物品 | `AbilityAdapter.cook` | 入口核对 |
 | `trade` | 与村民完成指定交易 | `AbilityAdapter.trade` | 入口核对 |

@@ -2,12 +2,14 @@ package org.maiwithu.maicraft.core.tools;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -24,15 +26,13 @@ import net.minecraft.world.item.crafting.ShapedRecipe;
 import org.maiwithu.maicraft.agent.tool.ToolArgs;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
 import org.maiwithu.maicraft.task.TaskResult;
-import java.util.Arrays;
-import java.util.stream.Collectors;
-import org.maiwithu.maicraft.core.Constants;
 
 /** Read-only recipe planning for the receipt-owned crafting task. */
 public final class CraftOps {

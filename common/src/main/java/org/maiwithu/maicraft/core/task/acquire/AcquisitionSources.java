@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.acquire;
 
-import java.util.List;
 import java.util.Comparator;
+import java.util.List;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
 
 /** 取物的前置需求沿用当前许可；补工具、燃料或工作台都不能成为扩大取材范围的理由。 */

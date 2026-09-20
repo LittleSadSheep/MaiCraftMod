@@ -9,8 +9,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.HoeItem;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.PickaxeItem;
 import net.minecraft.world.level.block.Block;
@@ -88,7 +88,7 @@ public final class WorkToolPreparation {
                 .requirement().acceptableItemIds().getFirst();
     }
 
-    /** Ordinary tilling shares the same material thresholds, but must select an actual hoe. */
+    /** 耕地沿用同一套材料富余阈值，但必须选锄头，不能拿挖土快的铲子代替。 */
     public static UseTool tillingTool(LocalPlayer player) {
         List<ItemStack> inventory = inventory(player);
         var stock = StockEvidence.latest(player).filter(StockEvidence.Snapshot::supportsToolSupply);

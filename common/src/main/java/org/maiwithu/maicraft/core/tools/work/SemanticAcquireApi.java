@@ -9,8 +9,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
@@ -30,7 +30,7 @@ public final class SemanticAcquireApi {
 
     private SemanticAcquireApi() {}
 
-    /** Root registration point: call once beside the other internal work tools. */
+    /** 初始化时登记取物任务和对应内部工具，公开 MCP 仍通过语义能力调用。 */
     public static void register() {
         SemanticAcquireTaskRecord.ensureRegistered();
         ToolRegistry.register(new SemanticAcquireTool());

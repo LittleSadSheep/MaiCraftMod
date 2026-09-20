@@ -2,28 +2,28 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Collections;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.core.tools.RecipeProbe;
-import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
+import org.maiwithu.maicraft.core.tools.RecipeProbe;
 
 /** 只推演缺料配方，不开菜单、不消耗材料；角色实际取材和合成仍由取物任务调度。 */
 final class AcquisitionRecipePlanner {
@@ -189,7 +189,6 @@ final class AcquisitionRecipePlanner {
         return best;
     }
 
-
     record IngredientNeed(
             List<ResourceLocation> itemIds, int missing) {}
 
@@ -246,7 +245,6 @@ final class AcquisitionRecipePlanner {
         SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(itemIds);
         return !hint.entityTypeIds().isEmpty() && hint.blockRefs().isEmpty();
     }
-
 
     record Frontier(
             IngredientNeed ingredient,

@@ -3,14 +3,17 @@ package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -20,8 +23,8 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -29,19 +32,20 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
-import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.IngredientNeed;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.Frontier;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.IngredientNeed;
+import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
+import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
-import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
@@ -61,10 +65,6 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-import java.util.Collection;
-import java.util.Locale;
-import java.util.stream.Collectors;
-import org.maiwithu.maicraft.core.Constants;
 
 /**
  * 把“背包里最终要有这些物品”逐步做成：先看现货，再考虑捡取、库存、合成、烹饪、采矿、交易和狩猎。
@@ -171,11 +171,8 @@ public final class SemanticAcquireCompanionTask
     private TaskState tickAcquisition() {
         // 先看最终数量是否已够，再推进当前子任务或原料需求；通常拿够就停，不为了内部计划继续多做。
         plannerStepsThisTick = 0;
-        // This check deliberately precedes child advancement. A child may have made the semantic
-        // fact true on the previous tick; no menu cleanup, recipe branch or mining swing is allowed
-        // to continue merely because its internal task has not yet declared terminal success. The
-        // sole exception is an effect already in flight behind a terminal barrier: that exact child
-        // is allowed to settle its receipt and close its menu, but not to start another effect.
+        // 先看上一刻是否已经拿够，不能因为子任务还没报结束就多挖一下或多做一批。
+        // 已提交的原生动作例外：让同一子任务结清回执、关闭菜单，再结束取物，不追加新操作。
         if (count(r.itemIds) >= r.count) {
             // 子任务说“已有操作必须先结束”时仍让它做收尾；攻击任务目前把整场战斗和相关拾取都算在内。
             if (activeChild != null
@@ -303,7 +300,7 @@ public final class SemanticAcquireCompanionTask
                 return startChild(need, SemanticAcquireTaskRecord.Source.STORAGE, record, "withdraw available missing materials through one visible ordinary container");
             }
         }
-        // Ordinary containers and the existing AE2 network share STORAGE permission, never mining or hidden inventory writes.
+        // 普通箱子与 AE2 共用仓库许可；切换后端不会获得挖矿许可，也不能绕过真实取物流程。
         if (!Ae2ResourceSupply.available()) {
             addIssue("storage", "storage_adapter_unavailable",
                     "no further safe ordinary container or supported storage-network adapter is available",
@@ -341,11 +338,8 @@ public final class SemanticAcquireCompanionTask
         }
         Set<String> excludedRecipes = new LinkedHashSet<>(need.lineageRecipes);
         excludedRecipes.addAll(need.rejectedRecipes);
-        // A commitment prevents speculative recursion from hopping between incomplete routes. It
-        // must not hide a different route whose complete material condition is now true: using
-        // already-carried inputs is strictly less work than extending the old prerequisite chain.
-        // One comparison round is one planner unit. Charging once per tag member made the result
-        // depend on registry order and could stop before the cheapest satisfiable alternative.
+        // 先比较所有现在能做的配方，再决定是否继续补旧路线的原料；现成材料不能被旧承诺挡住。
+        // 一整轮比较共用一次规划预算，不能按标签成员逐项扣预算，否则可能还没看到便宜配方就停下。
         if (!takePlannerStep()) return TaskState.RUNNING;
         for (ResourceLocation output : need.itemIds) {
             int requestedOwnFinal = PlayerInv.buildableCount(
@@ -369,9 +363,6 @@ public final class SemanticAcquireCompanionTask
                 .orElse(null);
         if (selected != null) {
             // 现在有现成可做的配方，就不再为了先前尚未凑齐的方案继续找额外材料。
-            // Material-complete alternatives supersede an incomplete commitment. Commitment only
-            // prevents speculative prerequisite hopping; it may never force more acquisition
-            // after another acceptable recipe is already executable from live inventory.
             need.committedRecipeIds.clear();
             need.committedRecipeIds.add(selected.plan().task().recipeId.toString());
             need.committedRecipeEffectsObserved = false;
@@ -404,9 +395,7 @@ public final class SemanticAcquireCompanionTask
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
                 .filter(CraftRecoveryCandidate::surfaceSupported)
                 .filter(candidate -> candidate.cost().missingMaterials() > 0)
-                // A conversion whose only missing inputs are already members of this need's
-                // ancestry cannot advance the inventory fact. Skip the dominated/cyclical route
-                // as a set instead of reporting every stripped-log/wood recipe one by one.
+                // 某个必需原料组只剩祖先物品时，整条配方都绕回原需求，不能继续为它制造其他配件。
                 .filter(candidate -> recipePlanner.chooseIngredient(candidate, need) != null)
                 .sorted(Comparator
                         .comparingInt((CraftRecoveryCandidate candidate) ->
@@ -788,10 +777,7 @@ public final class SemanticAcquireCompanionTask
                         + BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()));
     }
 
-    /**
-     * One source of truth for both initial hunt selection and harmless pre-strike retargeting.
-     * The returned order is the same nearest-first loaded-evidence order used by reviewHunt.
-     */
+    /** 首次狩猎与首次出手前的换目标共用同一筛选，按已加载、可攻击且不受保护的近处目标排序。 */
     private List<Entity> safeLoadedHuntCandidates(
             SemanticAcquireTaskRecord.SourceHint hint,
             GenericEntitySearchTaskRecord.Relation relation,
@@ -831,8 +817,7 @@ public final class SemanticAcquireCompanionTask
             renewProgressLease();
         }
         activeNeed.lastObservedCount = liveCount;
-        // The root fact is checked by onTick before this method. Check the active recursive need too:
-        // an external pickup or the child's previous effect may have completed it already.
+        // 总目标已经在外层检查，这里还要检查正在补的原料；上一刻的拾取也可能已经把这一项补齐。
         if (liveCount >= activeNeed.requiredFinalCount) {
             if (activeChild.mustSettleBeforeSatisfiedCancellation()) {
                 activeChild.requestSatisfiedSettlement();
@@ -874,10 +859,7 @@ public final class SemanticAcquireCompanionTask
         UUID completedHuntTarget = activeHuntTarget;
         clearActive();
 
-        // Defeating the source entity is not the whole harmful acquisition transaction.  The
-        // attack child also owns every attributable, reachable drop from that kill.  If that
-        // settlement failed, requested-item progress must not launder the incomplete loot sweep
-        // into semantic success (for example: wool entered inventory while mutton remained).
+        // 击杀之后还要结算本次可归属、可到达的掉落；拿到羊毛却没收完羊肉，不能掩盖收尾失败。
         if (completedSource == SemanticAcquireTaskRecord.Source.HUNT
                 && completedHuntStage == HuntChildStage.ATTACK
                 && terminal != TaskState.SUCCESS
@@ -989,9 +971,7 @@ public final class SemanticAcquireCompanionTask
                                             + "review the receipt before choosing another route",
                                     FailureType.NO_MATERIAL);
                         }
-                        // Retry the semantic craft source, but never the same proven-failed recipe.
-                        // This allows a 2x2 alternative after every concrete 3x3 station/site route
-                        // failed, without blindly repeating the failed physical effect.
+                        // 工作台路线已确实失败后排除该配方，再考虑其他合成路线，例如背包四格配方。
                         completedNeed.rejectedRecipes.add(craft.recipeId.toString());
                         completedNeed.committedRecipeIds.remove(craft.recipeId.toString());
                         if (completedNeed.committedRecipeIds.isEmpty()) {
@@ -1043,8 +1023,7 @@ public final class SemanticAcquireCompanionTask
             return null;
         }
         Entity live = player.clientLevel.getEntity(attack.entityIds.getFirst());
-        // Once the exact entity is dead/unloaded, AttackCompanionTask owns attribution and loot
-        // settlement. Interrupting that stage here would strand the very drops it must collect.
+        // 目标死亡或离开加载范围后，由攻击任务继续判断归属和收取掉落；在这里打断会丢下待收物品。
         if (live == null || live.isRemoved() || !live.isAlive()) return null;
 
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(activeNeed);
@@ -1067,12 +1046,7 @@ public final class SemanticAcquireCompanionTask
                 protectionReasons, "hunt_target_became_protected", true);
     }
 
-    /**
-     * A search receipt can select the nearest entity at that instant, then a much nearer member of
-     * the same population can enter loaded evidence while the body is still approaching. Before
-     * the first strike, changing that execution handle is harmless; after a strike, defeat or loot
-     * begins, the combat/drop transaction must remain committed to the original identity.
-     */
+    /** 靠近途中出现明显更近的同类目标时，只允许在首次出手前换目标；出手后必须完成原目标的战斗与掉落收尾。 */
     private TaskState retargetUncommittedHuntToCloserCandidate() {
         // 还没出手时，眼前出现明显更近的同类目标可以换；已经开始伤害或拾取后不再偷偷换对象。
         if (activeSource != SemanticAcquireTaskRecord.Source.HUNT
@@ -1107,8 +1081,7 @@ public final class SemanticAcquireCompanionTask
             return null;
         }
 
-        // Recheck the barrier immediately before cancellation. No old target is rejected: it
-        // remains a valid future candidate; this is only a harmless nearest-target correction.
+        // 真正切换前再查一次是否已经出手；旧目标仍可供以后选择，不能仅因路更远就记成不可用。
         if (attack.strikes() > 0
                 || !attack.defeated().isEmpty()
                 || activeChild.mustSettleBeforeSatisfiedCancellation()) {
@@ -1138,11 +1111,7 @@ public final class SemanticAcquireCompanionTask
                         + " before any combat effect");
     }
 
-    /**
-     * Hysteresis is derived from the live vanilla/modded entity interaction reach rather than an
-     * arbitrary world-distance constant. Entering current strike reach is categorically better;
-     * otherwise the replacement must remove at least one whole strike-reach band of approach.
-     */
+    /** 用当前攻击距离判断是否值得换目标：已经能够着的新目标优先，否则至少少走一个攻击距离，避免来回改道。 */
     private boolean materiallyCloserForAttack(Entity current, Entity replacement) {
         // 新目标必须进入可攻击距离，或至少省下一整段攻击距离的接近路程，避免两只来回走动就反复改目标。
         double nativeReach = player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
@@ -1218,8 +1187,7 @@ public final class SemanticAcquireCompanionTask
                                 "hunt the still-live entity verified by the internal search receipt");
                     }
                 }
-                // If the exact identity crossed a load boundary during child settlement, preserve
-                // the old broad re-observation fallback. No runtime identity enters public data.
+                // 搜索收尾时目标可能刚好离开加载范围；重新观察同类候选，不向外暴露临时实体编号。
                 need.huntSearchExpandedView = true;
                 renewProgressLease();
                 return TaskState.RUNNING;
@@ -1267,9 +1235,7 @@ public final class SemanticAcquireCompanionTask
                 } else {
                     renewProgressLease();
                 }
-                // AttackCompanionTask already snapshots pre-existing drops, tracks only new/merged
-                // loot from this kill, approaches it and reports the resulting inventory delta.
-                // A second type-wide collector here would be able to steal old or unrelated items.
+                // 攻击任务已经区分旧掉落与本次新增、合并的战利品并负责收取；不能再按物品种类泛捡一遍。
                 return TaskState.RUNNING;
             }
             if (targetUuid != null) rejectedHuntTargets.add(targetUuid);
@@ -1378,11 +1344,7 @@ public final class SemanticAcquireCompanionTask
         activeHuntTarget = null;
     }
 
-    /**
-     * Route commitment is based on observed effects, never on mere dispatch. A failed search or
-     * menu-open attempt may be replaced safely; an inventory delta, a placed station, mining,
-     * crafting, transfer or attack receipt must be narrated before another route is chosen.
-     */
+    /** 按实际库存变化和操作回执判断路线是否已经花了东西或改变世界；单纯发起搜索不等于发生效果。 */
     private void markActiveEffectsIfObserved(
             TaskState terminal, TaskResult result, int targetProgress) {
         if (activeNeed == null || !activeChildEffectsObserved(
@@ -1411,8 +1373,7 @@ public final class SemanticAcquireCompanionTask
                 "deposited", "transferred")) {
             if (positiveNumber(data.get(key))) return true;
         }
-        // A terminal attack can have damaged a living target without producing loot yet. Treat
-        // that physical authorization as consequential even if an older receipt lacks counters.
+        // 攻击结束时可能已经伤到生物却没有掉落；旧回执缺少攻击计数时也不能当作完全没有效果。
         return activeSource == SemanticAcquireTaskRecord.Source.HUNT
                 && activeHuntStage == HuntChildStage.ATTACK
                 && terminal != TaskState.PENDING;
@@ -1444,7 +1405,7 @@ public final class SemanticAcquireCompanionTask
                     return FailureType.valueOf(
                             String.valueOf(raw).toUpperCase(Locale.ROOT));
                 } catch (IllegalArgumentException ignored) {
-                    // Fall through to the lifecycle-derived reason.
+                    // 子任务没有可识别的失败类型时，再按超时、取消等实际终态解释。
                 }
             }
         }
@@ -1478,9 +1439,7 @@ public final class SemanticAcquireCompanionTask
                 + "|" + relation.name()
                 + "|" + String.join(",", stringIds(hint.entityTypeIds()))
                 + "|expanded=" + need.huntSearchExpandedView
-                // A successful kill or a newly rejected identity changes the search facts even
-                // inside the same chunk. Omitting them made the repeated-state guard suppress the
-                // next required hunt after partial item progress.
+                // 同一区块里击杀过目标、增加库存或排除某个实体，也算搜索条件变化；数量没够时应能继续寻找。
                 + "|inventory=" + count(need.itemIds)
                 + "|rejected=" + rejectedHuntTargets.size();
     }
@@ -1587,11 +1546,7 @@ public final class SemanticAcquireCompanionTask
         }
     }
 
-    /**
-     * Insert one finite-lineage, Mod-owned workstation item prerequisite ahead of an unchanged recipe.
-     * The prerequisite inherits exactly the source families already authorized for its parent;
-     * adding a workstation must not silently narrow the user's original acquisition policy.
-     */
+    /** 为原配方先补一个工作台，沿用父需求的来源许可，并记录配方来路以阻止循环。 */
     private boolean pushCraftingSurfacePrerequisite(
             AcquisitionNeed parent, CraftRecoveryCandidate blockedRecipe) {
         return pushCraftingSurfacePrerequisite(
@@ -1599,11 +1554,7 @@ public final class SemanticAcquireCompanionTask
                 blockedRecipe.surfacePrerequisiteItems());
     }
 
-    /**
-     * A physical craft can discover that every route to an observed station is unusable only after
-     * execution. Insert the same semantic workstation need used by planning, then leave the parent
-     * recipe untouched so it resumes after the carried surface exists.
-     */
+    /** 实际走到工作台才发现无法使用时，尝试补可携带工作台，补齐后仍回到同一配方。 */
     private boolean recoverCraftingSurface(
             AcquisitionNeed parent, CraftTaskRecord craft, TaskResult result) {
         // 真正走到工作台发现不能用时，可以先补一个工作台；如果背包已有工作台，问题就不是再取一个能解决的。
@@ -1622,7 +1573,7 @@ public final class SemanticAcquireCompanionTask
         if (itemIds.isEmpty()) {
             itemIds.addAll(CraftingWorkstationCoordinator.prerequisiteItemIds());
         }
-        // If a table is still carried, another item cannot repair a placement-site failure.
+        // 已经带着工作台却找不到摆放位置时，再做一个工作台也解决不了问题。
         if (count(itemIds) > 0) return false;
         return pushCraftingSurfacePrerequisite(
                 parent, craft.recipeId.toString(), parent.itemIds.getFirst().toString(), itemIds);
@@ -1641,8 +1592,7 @@ public final class SemanticAcquireCompanionTask
         lineageItems.addAll(itemIds);
         Set<String> lineageRecipes = new LinkedHashSet<>(parent.lineageRecipes);
         lineageRecipes.add(blockedRecipeId);
-        // This prerequisite is still part of the user's original acquisition. Preserve every
-        // source family the parent explicitly authorized instead of inventing a narrower gate.
+        // 补工作台也是原取物任务的一部分，沿用父需求已经允许的来源。
         List<SemanticAcquireTaskRecord.Source> prerequisiteSources =
                 List.copyOf(parent.allowedSources);
         if (prerequisiteSources.isEmpty()) return false;
@@ -1669,12 +1619,6 @@ public final class SemanticAcquireCompanionTask
         return true;
     }
 
-    private boolean recipeAllowedByCommit(AcquisitionNeed need, TaskRecord record) {
-        if (need.committedRecipeIds.isEmpty()) return true;
-        return record instanceof CraftTaskRecord craft
-                && need.committedRecipeIds.contains(craft.recipeId.toString());
-    }
-
     private static boolean recipeAllowedByCommit(AcquisitionNeed need, String recipeId) {
         return need.committedRecipeIds.isEmpty()
                 || need.committedRecipeIds.contains(recipeId);
@@ -1687,7 +1631,7 @@ public final class SemanticAcquireCompanionTask
         }
     }
 
-    /** Exclude competing identities so CraftOps can expose the already selected recipe itself. */
+    /** 检查当前承诺路线能否直接开做时，先排除其他配方，避免拿另一条路线的条件冒充它已经齐备。 */
     private Set<String> nonCommittedCraftRecipes(AcquisitionNeed need) {
         if (need.committedRecipeIds.isEmpty()) return Set.of();
         Set<ResourceLocation> outputs = Set.copyOf(need.itemIds);
@@ -1727,9 +1671,7 @@ public final class SemanticAcquireCompanionTask
                                 entity.getItem().getItem())))) {
             Entity owner = item.getOwner();
             List<String> reasons = new ArrayList<>();
-            // Item thrower/target ownership is not part of the ItemStack synced-data field. A null
-            // client owner therefore means "not proven", not "wild/free". Only a drop whose owner
-            // resolves to this exact LocalPlayer is safe for the broad collector.
+            // 客户端的物品堆同步不保证带有投掷者信息；owner 为空只表示没证明归属，不能当作无主物品。
             if (owner == null) reasons.add("owner_not_proven_by_client_facts");
             else if (owner != player) reasons.add("owned_by_other_entity");
             reasons.addAll(landmarkReasons(item.blockPosition()));
@@ -1848,11 +1790,7 @@ public final class SemanticAcquireCompanionTask
         return false;
     }
 
-    /**
-     * Gate only the physical source currently under consideration. Inventory, storage, recipes,
-     * cooking and trade have already had (or will still receive) their own independent chance.
-     * A failed gate advances this one source without spending work or constructing a child.
-     */
+    /** 维度门槛只排除当前采矿或狩猎来源；仍保留背包、仓库、加工与交易各自的机会。 */
     private boolean sourceDimensionAllowed(
             AcquisitionNeed need, SemanticAcquireTaskRecord.Source source) {
         // 当前把内置的来源维度当成这一类采集行动的前置条件，检查发生在观察具体矿块／生物之前。
