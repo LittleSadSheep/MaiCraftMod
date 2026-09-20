@@ -14,6 +14,13 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import baritone.pathing.movement.CollisionGeometry;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.level.block.CampfireBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.integration.create.ContraptionObstacles;
+import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 /**
  * 按干燥程度和身体空间找最多六十四格的飞行路线，先试升高、平移、落下，再按六方向搜索。
@@ -236,11 +243,11 @@ public final class JetpackRoute {
 
     /** This view is used only within the current client tick; a session never retains it. */
     public static Space observed(LocalPlayerContext ctx) {
-        return observed(ctx, org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.forbiddenBodyCells());
+        return observed(ctx, NavigationSafetyContext.forbiddenBodyCells());
     }
     // 按实际身体尺寸加余量检查边界、禁入格和碰撞；这里的 hasChunksAt/hasChunkAt 不能在原版客户端确证区域已加载。
-    public static Space observed(LocalPlayerContext ctx, it.unimi.dsi.fastutil.longs.LongSet forbidden) {
-        var contraptions=org.maiwithu.maicraft.core.integration.create.ContraptionObstacles.capture(ctx.level(),ctx.player().position());
+    public static Space observed(LocalPlayerContext ctx, LongSet forbidden) {
+        var contraptions=ContraptionObstacles.capture(ctx.level(),ctx.player().position());
         return new Space() {
             private boolean body(Vec3 feet) {
                 double half = ctx.player().getBbWidth() * 0.5 + 0.08;
@@ -259,7 +266,7 @@ public final class JetpackRoute {
                             || forbidden.contains(p.asLong())) return false;
                 }
                 return ctx.level().noCollision(ctx.player(), box)
-                        && org.maiwithu.maicraft.core.integration.physics.SableStructureBridge.clearBody(ctx.level(), box);
+                        && SableStructureBridge.clearBody(ctx.level(), box);
             }
             public boolean clear(Vec3 from, Vec3 to) {
                 if(!contraptions.clearSegment(from,to,ctx.player().getBbWidth()+.16,ctx.player().getBbHeight()+.08)) return false;
@@ -288,9 +295,9 @@ public final class JetpackRoute {
             }
         };
     }
-    private static boolean hazard(net.minecraft.world.level.block.state.BlockState state) {
+    private static boolean hazard(BlockState state) {
         return state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.CACTUS) || state.is(Blocks.SWEET_BERRY_BUSH)
-                || state.is(Blocks.POINTED_DRIPSTONE) || state.getBlock() instanceof net.minecraft.world.level.block.BaseFireBlock
-                || state.getBlock() instanceof net.minecraft.world.level.block.CampfireBlock;
+                || state.is(Blocks.POINTED_DRIPSTONE) || state.getBlock() instanceof BaseFireBlock
+                || state.getBlock() instanceof CampfireBlock;
     }
 }

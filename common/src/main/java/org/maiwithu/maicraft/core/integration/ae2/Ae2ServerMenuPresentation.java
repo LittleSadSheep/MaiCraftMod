@@ -5,6 +5,7 @@ import java.util.function.BooleanSupplier;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import java.util.Objects;
 
 /** The actual terminal menu is the interaction context, held through native receipts and inventory synchronization. */
 final class Ae2ServerMenuPresentation {
@@ -13,8 +14,8 @@ final class Ae2ServerMenuPresentation {
     private long changedTick = Long.MIN_VALUE;
 
     Ae2ServerMenuPresentation(AbstractContainerMenu menu, BooleanSupplier sameTerminal) {
-        this.menu = java.util.Objects.requireNonNull(menu);
-        this.sameTerminal = java.util.Objects.requireNonNull(sameTerminal);
+        this.menu = Objects.requireNonNull(menu);
+        this.sameTerminal = Objects.requireNonNull(sameTerminal);
     }
 
     boolean owns(LocalPlayerContext context) {

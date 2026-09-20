@@ -7,6 +7,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 
 /** 从客户端真正持有的菜单 host 绑定访问来源；不依赖 AE2 只保存在服务端菜单上的 locator。 */
 final class Ae2DepositAccess {
@@ -69,13 +71,13 @@ final class Ae2DepositAccess {
         try { target.getClass().getMethod(method); return true; }
         catch (NoSuchMethodException unavailable) { return false; }
     }
-    static boolean sameTerminalIgnoringEnergy(net.minecraft.world.item.ItemStack before, net.minecraft.world.item.ItemStack after) {
+    static boolean sameTerminalIgnoringEnergy(ItemStack before, ItemStack after) {
         if (before.getCount() != after.getCount() || before.getItem() != after.getItem()) return false;
         // 无线终端在原生存入时会消耗自身电量；只在副本上忽略这一项，名称、绑定、升级等组件仍须完全一致。
-        var energy = net.minecraft.core.registries.BuiltInRegistries.DATA_COMPONENT_TYPE.get(net.minecraft.resources.ResourceLocation.parse("ae2:stored_energy"));
+        var energy = BuiltInRegistries.DATA_COMPONENT_TYPE.get(ResourceLocation.parse("ae2:stored_energy"));
         var left = before.copy(); var right = after.copy();
         if (energy != null) { left.remove(energy); right.remove(energy); }
-        return net.minecraft.world.item.ItemStack.isSameItemSameComponents(left, right);
+        return ItemStack.isSameItemSameComponents(left, right);
     }
     private static Object call(Object target, String method) {
         try {

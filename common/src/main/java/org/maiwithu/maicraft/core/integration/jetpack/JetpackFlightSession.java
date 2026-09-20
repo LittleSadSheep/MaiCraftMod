@@ -12,6 +12,14 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
 
 /**
  * 执行一趟飞行：分次找路、开启背包和悬停、按路飞、处理移动目标或障碍、落地后恢复原开关。
@@ -28,8 +36,8 @@ public final class JetpackFlightSession implements TransportSession {
     private boolean discoveringExit;
     private int departureNodes;
     private boolean searchCharged, searchBudgetExhausted;
-    private final java.util.List<Map<String,Object>> preflightAttempts = new java.util.ArrayList<>();
-    private java.util.List<Vec3> platform;
+    private final List<Map<String,Object>> preflightAttempts = new ArrayList<>();
+    private List<Vec3> platform;
     private final LongSet forbidden;
     private Phase phase = Phase.PLAN;
     private JetpackRoute.Plan route;
@@ -53,29 +61,29 @@ public final class JetpackFlightSession implements TransportSession {
     private String failure = "", detail = "";
     private Result terminal;
     private Map<String, Object> nativeEvidence = Map.of();
-    private final java.util.ArrayDeque<Map<String, Object>> trace = new java.util.ArrayDeque<>();
+    private final ArrayDeque<Map<String, Object>> trace = new ArrayDeque<>();
     private long traceTick = Long.MIN_VALUE;
     private Phase recordedPhase;
     private Map<String, Object> departure = Map.of(), lastObstacle = Map.of();
-    private final java.util.ArrayDeque<Map<String, Object>> events = new java.util.ArrayDeque<>();
+    private final ArrayDeque<Map<String, Object>> events = new ArrayDeque<>();
 
     public JetpackFlightSession(Vec3 target) { this(target, LongSets.emptySet()); }
     public JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells) {
-        this(target, forbiddenBodyCells, java.util.List.of(target));
+        this(target, forbiddenBodyCells, List.of(target));
     }
-    public JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells, java.util.List<Vec3> platform) {
+    public JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells, List<Vec3> platform) {
         this(target, forbiddenBodyCells, platform, null);
     }
     public JetpackFlightSession(MovingFlightTarget target, LongSet forbiddenBodyCells) {
-        this(target.point(), forbiddenBodyCells, java.util.List.of(target.point()), target);
+        this(target.point(), forbiddenBodyCells, List.of(target.point()), target);
     }
-    private JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells, java.util.List<Vec3> platform, MovingFlightTarget movingTarget) {
+    private JetpackFlightSession(Vec3 target, LongSet forbiddenBodyCells, List<Vec3> platform, MovingFlightTarget movingTarget) {
         this.movingTarget = movingTarget;
         if (target == null || !Double.isFinite(target.x) || !Double.isFinite(target.y) || !Double.isFinite(target.z)) {
             throw new IllegalArgumentException("finite jetpack target required");
         }
         this.target = target;
-        this.platform = java.util.List.copyOf(platform);
+        this.platform = List.copyOf(platform);
         this.forbidden = LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
         fastDescent = new JetpackFastDescent(this.forbidden);
     }
@@ -115,7 +123,7 @@ public final class JetpackFlightSession implements TransportSession {
                 else requestStop();
                 if (!effects) return finish(ctx, false);
             } else {
-                target = movingTarget.point(); platform = java.util.List.of(target);
+                target = movingTarget.point(); platform = List.of(target);
                 if (phase==Phase.LAND && !movingTarget.landingSelected()) phase=Phase.FLY;
                 if ((phase == Phase.FLY || phase == Phase.LAND) && grounded && movingTarget.contact()) phase = Phase.LAND;
             }
@@ -238,7 +246,7 @@ public final class JetpackFlightSession implements TransportSession {
         planningTarget=target;
         if (!landingSelected()) {
             if (!JetpackRoute.flightClear(space,position,target,power)) { obstruction(ctx,space,target); return; }
-            route=new JetpackRoute.Plan(java.util.List.of(position,target),route.emergencyLandings(),
+            route=new JetpackRoute.Plan(List.of(position,target),route.emergencyLandings(),
                     (int)Math.ceil(140+JetpackRoute.edgeTicks(position,target,power)));
             planningLanding=false; waypoint=1; waypointDistance=Double.POSITIVE_INFINITY; waypointTick=lastTick; repaired=false;
             return;
@@ -247,7 +255,7 @@ public final class JetpackFlightSession implements TransportSession {
         double reserve = Math.max(1, route.points().get(route.points().size()-2).y - route.points().getLast().y);
         Vec3 approach = target.add(0,reserve,0);
         if (JetpackRoute.flightClear(space,position,approach,power) && space.clear(approach,target)) {
-            route = new JetpackRoute.Plan(java.util.List.of(position,approach,target), route.emergencyLandings(),
+            route = new JetpackRoute.Plan(List.of(position,approach,target), route.emergencyLandings(),
                     (int)Math.ceil(140 + JetpackRoute.edgeTicks(position,target,power)));
             waypoint = 1; waypointDistance = Double.POSITIVE_INFINITY; waypointTick = lastTick;
         } else {
@@ -363,7 +371,7 @@ public final class JetpackFlightSession implements TransportSession {
             landing = platform.stream().filter(p -> Math.abs(p.y - target.y) < 0.01)
                     .filter(p -> JetpackRoute.supportsLanding(space, p))
                     .filter(p -> space.clear(new Vec3(p.x, approachHeight, p.z), p))
-                    .min(java.util.Comparator.comparingDouble(p -> Math.hypot(p.x - position.x, p.z - position.z))).orElse(null);
+                    .min(Comparator.comparingDouble(p -> Math.hypot(p.x - position.x, p.z - position.z))).orElse(null);
         }
         if (landing == null || !JetpackRoute.supportsLanding(space, landing)) {
             // Retain native hover and braking while searching next tick, instead of releasing an airborne body.
@@ -528,9 +536,9 @@ public final class JetpackFlightSession implements TransportSession {
     @Override public boolean safeToInterrupt() { return terminal != null || grounded && !effects; }
     @Override public boolean livenessActive() { return terminal == null && (receipt != null || effects || search != null && !search.done()); }
     @Override public String phase() { return fastDescent.active() ? "jetpack_drop_" + fastDescent.phase()
-            : "jetpack_" + phase.name().toLowerCase(java.util.Locale.ROOT); }
-    @Override public org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot debugPath() {
-        return route == null ? null : new org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot(
+            : "jetpack_" + phase.name().toLowerCase(Locale.ROOT); }
+    @Override public NavigationPathSnapshot debugPath() {
+        return route == null ? null : new NavigationPathSnapshot(
                 route.points(), waypoint, landing, steeringTarget);
     }
     @Override public Map<String, Object> diagnostics() {
@@ -545,7 +553,7 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("native_client_evidence", nativeEvidence);
         result.put("recent_flight_trace", compactTrace(trace));
         result.put("departure", departure); result.put("flight_events", compactTrace(events));
-        result.put("preflight_attempts",java.util.List.copyOf(preflightAttempts));
+        result.put("preflight_attempts",List.copyOf(preflightAttempts));
         result.put("last_obstruction", lastObstacle); result.put("platform_cells", platform.size());
         result.put("fast_descent", fastDescent.diagnostics());
         result.put("clearance_braking", clearanceBraking);
@@ -560,15 +568,15 @@ public final class JetpackFlightSession implements TransportSession {
         return result;
     }
     /** Keep changes and their time spans; repeated per-tick native dictionaries do not fill MCP context. */
-    static java.util.List<Map<String,Object>> compactTrace(java.util.Collection<Map<String,Object>> source) {
-        var rows = new java.util.ArrayList<Map<String,Object>>();
+    static List<Map<String,Object>> compactTrace(Collection<Map<String,Object>> source) {
+        var rows = new ArrayList<Map<String,Object>>();
         Map<String,Object> previous = null;
         for (var entry : source) {
             var state = new LinkedHashMap<>(entry); Object tick = state.remove("tick");
             Object nativeState = state.remove("native_client_evidence");
             if (nativeState instanceof Map<?,?> evidence) {
                 var motion = new LinkedHashMap<String,Object>();
-                for (String key : java.util.List.of("native_up","on_ground","native_pose","fall_distance","velocity_y"))
+                for (String key : List.of("native_up","on_ground","native_pose","fall_distance","velocity_y"))
                     if (evidence.get(key) != null) motion.put(key,evidence.get(key));
                 state.put("motion",Map.copyOf(motion));
             }
@@ -582,7 +590,7 @@ public final class JetpackFlightSession implements TransportSession {
         }
         return rows.stream().map(Map::copyOf).toList();
     }
-    public static Map<String, Object> inspect(net.minecraft.client.player.LocalPlayer player) {
+    public static Map<String, Object> inspect(LocalPlayer player) {
         var power = JetpackNativeAdapter.observe(player);
         var result = new LinkedHashMap<String, Object>();
         result.put("known", power.known()); result.put("reason", power.reason()); result.put("item", power.item());

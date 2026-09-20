@@ -4,12 +4,16 @@ package org.maiwithu.maicraft.core.integration.ae2;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import java.util.Set;
+import java.util.UUID;
+import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 
 /** Native CPU planning and submission are distinct one-shot requests; status never resubmits a job. */
 final class Ae2ServerCraftJob {
     interface Port {
         ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating);
-        void cancel(java.util.UUID request);
+        void cancel(UUID request);
         boolean mayCancel();
     }
     private static final Port NATIVE = new Port() {
@@ -18,7 +22,7 @@ final class Ae2ServerCraftJob {
                     ? ServerAssistClient.submit(operation, arguments, mutating, null)
                     : ServerAssistClient.submit(operation, arguments, mutating);
         }
-        public void cancel(java.util.UUID request) { ServerAssistClient.cancel(request); }
+        public void cancel(UUID request) { ServerAssistClient.cancel(request); }
         public boolean mayCancel() { return ServerAssistClient.nativeFallbackAllowed("inventory.ae2_craft_cancel"); }
     };
     private final JsonObject target;
@@ -102,7 +106,7 @@ final class Ae2ServerCraftJob {
                     && resource.equals(result.get("resource_id").getAsString())
                     && membership.equals(result.get("membership").getAsString())
                     && amount == result.get("amount").getAsBigDecimal().intValueExact()
-                    && java.util.Set.of("planning", "ready", "missing_materials", "running", "completed",
+                    && Set.of("planning", "ready", "missing_materials", "running", "completed",
                             "cancelled", "rejected", "failed", "uncertain").contains(result.get("status").getAsString());
         } catch (RuntimeException malformed) { return false; }
     }
@@ -124,10 +128,10 @@ final class Ae2ServerCraftJob {
             // Cleanup has no task owner: retiring the original task must not delete its queued cancellation.
             JsonObject body = jobBody();
             if (body.has("container_id")) {
-                var minecraft = net.minecraft.client.Minecraft.getInstance();
+                var minecraft = Minecraft.getInstance();
                 if (minecraft == null || minecraft.player == null
                         || minecraft.player.containerMenu.containerId != body.get("container_id").getAsInt()
-                        || !org.maiwithu.maicraft.client.actor.MenuVisibility.matches(minecraft, minecraft.player.containerMenu))
+                        || !MenuVisibility.matches(minecraft, minecraft.player.containerMenu))
                     body.remove("container_id");
             }
             port.submit("inventory.ae2_craft_cancel", body, true);

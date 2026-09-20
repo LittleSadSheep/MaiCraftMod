@@ -10,6 +10,12 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 import org.maiwithu.maicraft.core.integration.jetpack.MovingFlightTarget;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Objects;
+import java.util.function.ToDoubleFunction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter;
 
 /**
  * 跟踪指定结构上的一个甲板位置，结构平移转动时更新世界落点；到达要由原生接触关系和连续八刻稳定站立共同确认。
@@ -28,7 +34,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
 
     public ShipLandingTarget(UUID id) { this(id,null); }
     public ShipLandingTarget(UUID id,Vec3 interactionFocus) {
-        this.id=java.util.Objects.requireNonNull(id); this.interactionFocus=interactionFocus;
+        this.id=Objects.requireNonNull(id); this.interactionFocus=interactionFocus;
     }
 
     @Override public boolean update(LocalPlayerContext context) {
@@ -49,7 +55,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
                 var clear = geometry.surfaces().stream().filter(s -> world.clear(s.feet(), s.feet()))
                         .filter(s -> interactionFocus==null || s.feet().add(0,context.player().getEyeHeight(),0)
                                 .distanceTo(ship.pose().toWorld(interactionFocus))<context.player().blockInteractionRange()-1).toList();
-                var power = org.maiwithu.maicraft.core.integration.jetpack.JetpackNativeAdapter.inspect(context);
+                var power = JetpackNativeAdapter.inspect(context);
                 candidates = alternatives(rank(clear, ship.storageBounds().getCenter(), p -> power.controllable()
                         ? JetpackRoute.edgeTicks(context.player().position(),p,power) : p.distanceTo(context.player().position())));
                 site = nativeContact.supportedBy(id) && context.player().onGround()
@@ -78,7 +84,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
     }
     // 把估计路程、甲板边缘暴露程度和靠近结构中心的偏好合成排序，不只选离玩家最近的边缘。
     static List<StructureDeckGeometry.Surface> rank(List<StructureDeckGeometry.Surface> sites, Vec3 center,
-            java.util.function.ToDoubleFunction<Vec3> travelCost) {
+            ToDoubleFunction<Vec3> travelCost) {
         return sites.stream().sorted(Comparator.comparingDouble(site -> {
             int exposed = 0;
             for (Vec3 offset : List.of(new Vec3(1,0,0),new Vec3(-1,0,0),new Vec3(0,0,1),new Vec3(0,0,-1)))
@@ -89,7 +95,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
     }
     // 最多留三个明显不同的落点，优先保留另一高度的甲板，避免三个机会都花在相邻格。
     static List<StructureDeckGeometry.Surface> alternatives(List<StructureDeckGeometry.Surface> ranked) {
-        var result = new java.util.ArrayList<StructureDeckGeometry.Surface>();
+        var result = new ArrayList<StructureDeckGeometry.Surface>();
         if (ranked.isEmpty()) return List.of();
         result.add(ranked.getFirst());
         ranked.stream().filter(s -> Math.abs(s.storage().y-ranked.getFirst().storage().y)>=.75)
@@ -145,12 +151,12 @@ public final class ShipLandingTarget implements MovingFlightTarget {
         };
     }
     @Override public Map<String, Object> diagnostics() {
-        var out = new java.util.LinkedHashMap<String,Object>();
+        var out = new LinkedHashMap<String,Object>();
         out.put("structure_id",id.toString()); out.put("available",available); out.put("detail",detail);
         out.put("native_contact",contact); out.put("stable_contact_ticks",support.ticks); out.put("boarded",touchdown());
         out.put("velocity_blocks_per_tick",velocity.toString());
         out.put("candidate_index",candidateIndex); out.put("candidate_count",candidates.size());
-        if (site != null) out.put("deck_block_id",net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(site.state().getBlock()).toString());
+        if (site != null) out.put("deck_block_id",BuiltInRegistries.BLOCK.getKey(site.state().getBlock()).toString());
         if (site != null) { out.put("deck_storage",site.storage().toString()); out.put("deck_world",point.toString()); }
         return out;
     }

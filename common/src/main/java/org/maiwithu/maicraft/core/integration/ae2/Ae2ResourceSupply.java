@@ -17,6 +17,13 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import java.util.function.Predicate;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot;
 
 /**
  * AE2 供料的共用入口：调用者说明可接受哪些物品、要多少和是否允许合成，具体找终端、选网络条目、拿取与收尾交给会话。
@@ -353,19 +360,19 @@ public final class Ae2ResourceSupply {
     }
 
     /** Read-only water acquisition evidence; absent entries cannot prove an unfinished sync is empty. */
-    public static Optional<com.google.gson.JsonObject> observeOpenWaterInventory(
-            net.minecraft.world.inventory.AbstractContainerMenu menu) {
+    public static Optional<JsonObject> observeOpenWaterInventory(
+            AbstractContainerMenu menu) {
         try {
             var available = Ae2ReflectionBridge.availability().bridge();
             if (available.isEmpty()) return Optional.empty();
             var bridge = available.orElseThrow();
-            if (!bridge.isStorageMenu(menu) || !org.maiwithu.maicraft.client.actor.MenuVisibility.matches(
-                    net.minecraft.client.Minecraft.getInstance(), menu)) return Optional.empty();
-            var out = new com.google.gson.JsonObject();
+            if (!bridge.isStorageMenu(menu) || !MenuVisibility.matches(
+                    Minecraft.getInstance(), menu)) return Optional.empty();
+            var out = new JsonObject();
             out.addProperty("connected", bridge.connected(menu));
             var entries = bridge.entries(menu);
             out.addProperty("repository_available", entries != null);
-            out.add("synchronization_complete", com.google.gson.JsonNull.INSTANCE);
+            out.add("synchronization_complete", JsonNull.INSTANCE);
             out.addProperty("absence_is_authoritative", false);
             out.addProperty("evidence_source", "ae2_synchronized_client_repository");
             if (entries == null) return Optional.of(out);
@@ -375,7 +382,7 @@ public final class Ae2ResourceSupply {
             out.addProperty("units_per_bucket", bridge.fluidBucketUnits());
             out.addProperty("network_empty_buckets", Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET));
             out.addProperty("network_water_buckets", Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.WATER_BUCKET));
-            var level = net.minecraft.client.Minecraft.getInstance().level;
+            var level = Minecraft.getInstance().level;
             if (level != null) out.addProperty("observed_game_tick", level.getGameTime());
             return Optional.of(out);
         } catch (RuntimeException | LinkageError unavailable) {
@@ -425,7 +432,7 @@ public final class Ae2ResourceSupply {
     }
 
     /** 存入可限制固定终端位置；携带的无线终端沿用其原生权限，其他操作忽略此新增约束。 */
-    public static Session begin(LocalPlayer player, Request request, java.util.function.Predicate<BlockPos> depositAccess) {
+    public static Session begin(LocalPlayer player, Request request, Predicate<BlockPos> depositAccess) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(request, "request");
         Ae2ReflectionBridge bridge = Ae2ReflectionBridge.availability().bridge().orElseThrow(
@@ -442,7 +449,7 @@ public final class Ae2ResourceSupply {
         if (request.operation() != Operation.SUPPLY || request.groups().size() != 1 || request.totalCount() != 1)
             throw new IllegalArgumentException("in-place reflex supply accepts one required item");
         if (request.allowCrafting() && request.acceptedItemIds().stream().anyMatch(id ->
-                !org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot.plainBoat(BuiltInRegistries.ITEM.get(id))))
+                !BoatLandingSnapshot.plainBoat(BuiltInRegistries.ITEM.get(id))))
             throw new IllegalArgumentException("in-place crafting is reserved for one landing boat");
         Ae2ReflectionBridge bridge = Ae2ReflectionBridge.availability().bridge().orElseThrow(
                 () -> new IllegalStateException("AE2 client integration is unavailable: " + availabilityDetail()));
@@ -456,7 +463,7 @@ public final class Ae2ResourceSupply {
     }
 
     public static Ae2SupplyTaskRecord taskRecord(String toolCallId, long deadlineGameTime, Request request,
-                                                java.util.function.Predicate<BlockPos> depositAccess) {
+                                                Predicate<BlockPos> depositAccess) {
         return new Ae2SupplyTaskRecord(toolCallId, deadlineGameTime, request, depositAccess);
     }
 }

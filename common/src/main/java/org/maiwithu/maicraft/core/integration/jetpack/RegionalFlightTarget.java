@@ -12,6 +12,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalTerrain;
+import java.util.Set;
 
 /**
  * 在请求的范围和方向里边飞边找平台；没有可落平台时先挑一小段通畅空中位置，观察后继续。
@@ -21,7 +22,7 @@ public final class RegionalFlightTarget implements MovingFlightTarget {
     private final RegionalGoal goal;
     private RegionalTerrain terrain;
     private final Map<BlockPos,Integer> visits=new HashMap<>();
-    private final java.util.Set<BlockPos> rejected=new HashSet<>();
+    private final Set<BlockPos> rejected=new HashSet<>();
     private Vec3 point, position;
     private Vec3 segmentStart;
     private List<Vec3> candidates=List.of();

@@ -31,6 +31,14 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.function.Predicate;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ClientLevel;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.server.ServerAssistClient;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 /**
  * 完成一趟 AE2 供料：准备终端和手持、打开可见菜单、检查库存、逐批取物或提交合成、确认结果，再关界面并归还临时栏位。
@@ -190,8 +198,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private String accessBeforeServer;
     private Ae2DepositTransfer deposit;
     private AbstractContainerMenu depositMenu;
-    private net.minecraft.client.gui.screens.Screen depositScreen;
-    private final java.util.function.Predicate<BlockPos> depositAccessPolicy;
+    private Screen depositScreen;
+    private final Predicate<BlockPos> depositAccessPolicy;
     private Ae2DepositAccess.Bound depositAccess;
 
     Ae2SupplySession(
@@ -205,7 +213,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     Ae2SupplySession(LocalPlayer player, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge, boolean inPlace,
-                     java.util.function.Predicate<BlockPos> depositAccessPolicy) {
+                     Predicate<BlockPos> depositAccessPolicy) {
         this.player = player;
         this.request = request;
         this.bridge = bridge;
@@ -214,7 +222,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         this.callerOrigin = player.blockPosition().immutable();
         this.callerDimension = player.level().dimension().location();
         this.baseline = inventoryCounts();
-        this.depositAccessPolicy = java.util.Objects.requireNonNull(depositAccessPolicy);
+        this.depositAccessPolicy = Objects.requireNonNull(depositAccessPolicy);
     }
 
     @Override
@@ -470,7 +478,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     // 鼠标拿着物品时先拒绝。可复用已打开的终端，否则先找无线终端，再尝试已记住或附近的固定终端。
     private void start(LocalPlayerContext context) {
-        if (!org.maiwithu.maicraft.client.server.ServerAssistClient.nativeFallbackAllowed("inventory.ae2_supply")) {
+        if (!ServerAssistClient.nativeFallbackAllowed("inventory.ae2_supply")) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "server_supply_blocked",
                     "known server denial or an unresolved mutation prevents native supply fallback", false);
             return;
@@ -707,7 +715,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         List<Ae2TerminalAccess.FixedTarget> targets = new ArrayList<>();
         for (BlockPos position : BlockPos.betweenClosed(center.offset(-radius, -radius, -radius),
                 center.offset(radius, radius, radius))) {
-            var chunk = ((net.minecraft.client.multiplayer.ClientLevel) player.level())
+            var chunk = ((ClientLevel) player.level())
                     .getChunkSource().getChunkNow(position.getX() >> 4, position.getZ() >> 4);
             if (chunk == null) continue;
             var entity = chunk.getBlockEntities().get(position);
@@ -905,7 +913,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         Object menu = storageMenuOrFail();
         if (menu == null) return;
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositAccess == null) {
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+            var context = ClientRuntime.requireContext(player);
             depositMenu = player.containerMenu; depositScreen = context.minecraft().screen;
             depositAccess = Ae2DepositAccess.read(depositMenu, player, bridge, fixedTarget);
             if (!depositAccessAllowed()) {
@@ -917,7 +925,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     "ae2_network_disconnected", "the AE2 terminal is not connected to a storage network");
             return;
         }
-        if (fixedTarget != null && tryServerSupply(org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player),
+        if (fixedTarget != null && tryServerSupply(ClientRuntime.requireContext(player),
                 fixedTarget, Phase.WAIT_REPOSITORY)) return;
         List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
         if (entries == null) {
@@ -929,8 +937,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) {
             // 存入保留创建会话时的背包基线；路上少了余料不能悄悄降低应留存量，更不能转入合成分支。
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
-            var reserved = new java.util.LinkedHashSet<>(reservedInventorySlots());
+            var context = ClientRuntime.requireContext(player);
+            var reserved = new LinkedHashSet<>(reservedInventorySlots());
             if (depositAccess.itemSlot() != null) reserved.add(depositAccess.itemSlot());
             deposit = new Ae2DepositTransfer(context, request, bridge, reserved, baseline, depositAccess.itemSlot());
             if (fixedTarget != null) Ae2TerminalAccess.remember(player, fixedTarget);
@@ -984,7 +992,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     private boolean fixedAccessAllowed(BlockPos position) {
         return request.operation() != Ae2ResourceSupply.Operation.DEPOSIT || player.level().dimension().location().equals(callerDimension)
-                && !org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.protectsUse(position) && depositAccessPolicy.test(position);
+                && !NavigationSafetyContext.protectsUse(position) && depositAccessPolicy.test(position);
     }
     private boolean depositAccessAllowed() {
         return depositAccess != null && player.level().dimension().location().equals(callerDimension)
@@ -1856,7 +1864,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void finishUncertain(String code, String message) {
         stopNavigation();
         try {
-            org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player)
+            ClientRuntime.requireContext(player)
                     .body().releaseAll();
         } catch (RuntimeException ignored) {
             // Body/control epoch may already have ended; no compensating packet is submitted.
@@ -1870,7 +1878,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (deposit != null) deposit.captureConfirmed();
         if (deposit != null && deposit.preserveMenu()) preserveUnrelatedMenu = true;
         try {
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+            var context = ClientRuntime.requireContext(player);
             if (!stoppingInPlace && ownsOpenMenu(context) && (menuReceipt == null || menuReceipt.terminal()
                     || menuReceipt.kind() != MenuReceipt.Kind.CLOSE)) {
                 context.menus().closeForTaskBoundary(context, INVENTORY_CONFIRM_TICKS,
@@ -1966,7 +1974,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     private Object storageMenuOrFail() {
         Object menu = player.containerMenu;
-        var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(player);
+        var context = ClientRuntime.requireContext(player);
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT && depositMenu != null
                 && (menu != depositMenu || context.minecraft().screen != depositScreen)) {
             preserveUnrelatedMenu = true;

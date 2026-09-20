@@ -16,6 +16,9 @@ import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.level.block.CampfireBlock;
+import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 
 /**
  * 飞行通道检查失败后，补查当前场景里能解释的原因：边界、未知区域、液体、危险物、保护格、方块或实体碰撞。
@@ -56,7 +59,7 @@ public final class JetpackObstruction {
                     if (type != null) { block(result, pos, state); return found(result, type); }
                 }
                 if (level.noCollision(player, box)) {
-                    if (!org.maiwithu.maicraft.core.integration.physics.SableStructureBridge.clearBody(level, box)) {
+                    if (!SableStructureBridge.clearBody(level, box)) {
                         result.put("reason", "sable_body_collision_or_native_query_unavailable");
                         return found(result, "physical_structure_check");
                     }
@@ -101,8 +104,8 @@ public final class JetpackObstruction {
     }
     private static boolean hazard(BlockState state) {
         return state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.CACTUS) || state.is(Blocks.SWEET_BERRY_BUSH)
-                || state.is(Blocks.POINTED_DRIPSTONE) || state.getBlock() instanceof net.minecraft.world.level.block.BaseFireBlock
-                || state.getBlock() instanceof net.minecraft.world.level.block.CampfireBlock;
+                || state.is(Blocks.POINTED_DRIPSTONE) || state.getBlock() instanceof BaseFireBlock
+                || state.getBlock() instanceof CampfireBlock;
     }
     private static Map<String, Integer> cell(BlockPos p) { return Map.of("x", p.getX(), "y", p.getY(), "z", p.getZ()); }
     private static Map<String, Double> point(Vec3 p) { return Map.of("x", p.x, "y", p.y, "z", p.z); }

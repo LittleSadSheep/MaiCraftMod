@@ -7,6 +7,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import java.util.List;
 
 /** 只读核对 AE2 原生 Shift 的目的地规则；不让满网时的后备动作改动合成格、升级槽或过滤设置。 */
 final class Ae2DepositMenu {
@@ -34,7 +35,7 @@ final class Ae2DepositMenu {
     }
     boolean safeFallback(AbstractContainerMenu menu, ItemStack sample) {
         Object destinations = call(destination, menu, sample, true);
-        if (!(destinations instanceof java.util.List<?> slots) || !slots.isEmpty()) return false;
+        if (!(destinations instanceof List<?> slots) || !slots.isEmpty()) return false;
         for (Slot slot : menu.slots) {
             if (invoke(playerSide, menu, slot)) continue;
             if (fakeSlot.isInstance(slot)) return false;

@@ -15,6 +15,8 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 读取结构局部的真实碰撞面，找直立身体可能站得下的位置，并把候选转换到世界坐标。最多读八千一百九十二格、保留六十四个表面，不把候选当作已登船。
@@ -24,9 +26,9 @@ public final class StructureDeckGeometry {
     public record Surface(BlockState state, BlockPos block, AABB box, Vec3 storage, Vec3 world, Vec3 normal, Vec3 feet) {
         public Surface { block = block.immutable(); }
     }
-    public record Sample(java.util.List<Surface> surfaces, int reads, int unknown, int shapeErrors,
+    public record Sample(List<Surface> surfaces, int reads, int unknown, int shapeErrors,
                          int steep, boolean truncated, boolean exhausted) {
-        public Sample { surfaces = java.util.List.copyOf(surfaces); }
+        public Sample { surfaces = List.copyOf(surfaces); }
         public String state() { return exhausted || unknown > 0 || shapeErrors > 0 || truncated ? "partial" : "sampled"; }
     }
     private StructureDeckGeometry() {}
@@ -35,7 +37,7 @@ public final class StructureDeckGeometry {
     public static Sample sample(BlockGetter world, Predicate<BlockPos> loaded, StructurePose pose,
                              AABB storageBounds, BlockPos origin, Vec3 focus, double width, double height) {
         if (pose == null || storageBounds == null || origin == null)
-            return new Sample(java.util.List.of(),0,1,0,0,false,false);
+            return new Sample(List.of(),0,1,0,0,false,false);
         GuardedView view = new GuardedView(world, loaded, storageBounds);
         Vec3 normal = pose.normalToWorld(new Vec3(0, 1, 0));
         var surfaces = new ArrayList<Surface>();
@@ -145,7 +147,7 @@ public final class StructureDeckGeometry {
                 BlockState air = Blocks.AIR.defaultBlockState(); known.put(p.immutable(), air); return air;
             }
             if (!loaded.test(p)) { unknown++; return Blocks.AIR.defaultBlockState(); }
-            try { BlockState value = java.util.Objects.requireNonNull(world.getBlockState(p)); known.put(p.immutable(), value); return value; }
+            try { BlockState value = Objects.requireNonNull(world.getBlockState(p)); known.put(p.immutable(), value); return value; }
             catch (RuntimeException | LinkageError unavailable) { unknown++; return Blocks.AIR.defaultBlockState(); }
         }
         public BlockEntity getBlockEntity(BlockPos p) {

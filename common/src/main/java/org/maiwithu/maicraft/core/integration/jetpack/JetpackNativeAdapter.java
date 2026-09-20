@@ -11,6 +11,10 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 
 /**
  * 读取胸甲槽中 Create 喷气背包、FlightLib 开关、同步参数与优先气罐，并通过模组已有协议设置模式。
@@ -41,12 +45,12 @@ public final class JetpackNativeAdapter {
         ctx.requireCurrent();
         return observeCurrentPlayer(ctx.player());
     }
-    public static Snapshot observe(net.minecraft.client.player.LocalPlayer player) {
-        if (!net.minecraft.client.Minecraft.getInstance().isSameThread()) throw new IllegalStateException("client-thread jetpack observation required");
+    public static Snapshot observe(LocalPlayer player) {
+        if (!Minecraft.getInstance().isSameThread()) throw new IllegalStateException("client-thread jetpack observation required");
         return observeCurrentPlayer(player);
     }
     // 先确认支持的胸甲物品和模组选中的飞行来源一致，再读取开关、耗气和速度；读取失败就返回未知。
-    private static Snapshot observeCurrentPlayer(net.minecraft.client.player.LocalPlayer player) {
+    private static Snapshot observeCurrentPlayer(LocalPlayer player) {
         if (player == null) return Snapshot.unavailable("local player unavailable");
         ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
         String id = BuiltInRegistries.ITEM.getKey(chest.getItem()).toString();
@@ -62,7 +66,7 @@ public final class JetpackNativeAdapter {
                 return Snapshot.unavailable("FlightLib active/hover state has not been observed");
             }
             Object configs = singleton(CONFIG);
-            Method synced = java.util.Arrays.stream(configs.getClass().getMethods())
+            Method synced = Arrays.stream(configs.getClass().getMethods())
                     .filter(m -> m.getName().startsWith("getSYNCED_SERVER$") && m.getParameterCount() == 0)
                     .findFirst().orElseThrow();
             Object config = synced.invoke(configs);
@@ -88,15 +92,15 @@ public final class JetpackNativeAdapter {
     }
 
     /** Native client evaluation, including the actual active-context gate. This is never a server ACK. */
-    public static Map<String, Object> activeEvidence(net.minecraft.client.player.LocalPlayer player) {
-        Map<String, Object> evidence = new java.util.LinkedHashMap<>();
+    public static Map<String, Object> activeEvidence(LocalPlayer player) {
+        Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("known", false);
         evidence.put("scope", "client_only_no_server_ack");
         if (player == null) {
             evidence.put("reason", "local player unavailable");
             return Map.copyOf(evidence);
         }
-        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        var minecraft = Minecraft.getInstance();
         if (minecraft == null || !minecraft.isSameThread()) throw new IllegalStateException("client-thread jetpack observation required");
         try {
             evidence.put("abilities_flying", player.getAbilities().flying);

@@ -8,6 +8,8 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
+import java.util.Locale;
+import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 
 /**
  * 沿已对准的落点加快下降：短且无伤时暂时关背包，较高时提前重启悬停，最后用潜行下降。
@@ -46,7 +48,7 @@ public final class JetpackFastDescent {
     public void requestStop() { stopping = true; if (phase == Phase.IDLE) phase = Phase.DONE; }
     /** Manual control/body loss revokes native authority; leave mode restoration to the new owner. */
     public void abandon() { phase = Phase.DONE; receipt = null; }
-    public String phase() { return phase.name().toLowerCase(java.util.Locale.ROOT); }
+    public String phase() { return phase.name().toLowerCase(Locale.ROOT); }
     public Map<String, Object> diagnostics() {
         return Map.of("phase", phase(), "detail", detail, "restart_height", Double.isFinite(restartHeight) ? restartHeight : "unavailable",
                 "recovering", recovering, "effects_started", effects, "touchdown", touchdown);
@@ -77,9 +79,9 @@ public final class JetpackFastDescent {
         }
         var info = ctx.connection().getPlayerInfo(player.getUUID());
         // 当前把已下落距离先加进参数，伤害预算又因最后的 true 再加一次；短落差可能因此被误判为有伤害。
-        boolean harmless=landing!=null && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(player).damage(
+        boolean harmless=landing!=null && FallDamageBudget.capture(player).damage(
                 player.fallDistance+Math.max(0,player.getY()-landing.y),
-                org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY,true)<=0;
+                FallDamageBudget.Landing.ORDINARY,true)<=0;
         var observation = new Observation(ctx.tickRevision(), player.position(), player.getDeltaMovement(), landing,
                 power, column, JetpackNativeAdapter.uprightActive(JetpackNativeAdapter.activeEvidence(player)),
                 player.onGround(), info == null ? -1 : info.getLatency(), receiptCommand,

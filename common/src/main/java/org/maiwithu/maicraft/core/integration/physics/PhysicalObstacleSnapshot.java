@@ -8,6 +8,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import java.util.Arrays;
+import net.minecraft.world.level.BlockGetter;
 
 /**
  * 把移动结构的实际方块碰撞转换到世界位置，供当前导航或后台搜索读取。能读清细节时保留门洞；读不全某个结构时用它的整体范围作保守障碍。
@@ -32,7 +34,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
     }
 
     // 只展开玩家附近十六格内的部分；某结构的细节不完整时丢掉它已读出的零散盒子，改用整体范围。
-    static PhysicalObstacleSnapshot capture(net.minecraft.world.level.BlockGetter world,
+    static PhysicalObstacleSnapshot capture(BlockGetter world,
             List<SableStructureBridge.Structure> structures, Vec3 focus, String state) {
         var boxes = new ArrayList<AABB>();
         int reads = 0, conservative = 0;
@@ -112,7 +114,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
     private static boolean escapesNearestFace(AABB box, Vec3 from, Vec3 to) {
         double[] distances = {from.x - box.minX, box.maxX - from.x, from.y - box.minY,
                 box.maxY - from.y, from.z - box.minZ, box.maxZ - from.z};
-        double nearest = java.util.Arrays.stream(distances).min().orElseThrow();
+        double nearest = Arrays.stream(distances).min().orElseThrow();
         double[] movement = {from.x - to.x, to.x - from.x, from.y - to.y,
                 to.y - from.y, from.z - to.z, to.z - from.z};
         for (int i = 0; i < distances.length; i++)

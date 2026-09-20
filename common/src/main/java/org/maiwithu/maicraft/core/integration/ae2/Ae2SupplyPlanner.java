@@ -10,6 +10,8 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import java.util.function.ToIntFunction;
+import java.util.stream.Collectors;
 
 /**
  * 只计划、不点击：按请求选择网络里的具体物品，并预分配背包空间；后续执行必须继续符合这份选择和已确认数量。
@@ -111,7 +113,7 @@ final class Ae2SupplyPlanner {
 
         Allocator fork() {
             return new Allocator(slots.stream().map(InventorySlot::copy)
-                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new)));
+                    .collect(Collectors.toCollection(ArrayList::new)));
         }
 
         int unboundEmptySlots() {
@@ -375,7 +377,7 @@ final class Ae2SupplyPlanner {
             LocalPlayer player,
             List<Ae2ReflectionBridge.Entry> entries,
             Set<Integer> reservedSlots,
-            java.util.function.ToIntFunction<Ae2ResourceSupply.Group> groupProgress) {
+            ToIntFunction<Ae2ResourceSupply.Group> groupProgress) {
         Allocator allocator = Allocator.capture(player, reservedSlots);
         for (PlannedGroup group : plan.groups()) {
             if (groupProgress.applyAsInt(group.group()) != group.confirmedCount()) {
