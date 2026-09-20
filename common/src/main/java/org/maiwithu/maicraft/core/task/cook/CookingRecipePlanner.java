@@ -12,6 +12,8 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.tools.ToolParse;
 import java.util.ArrayList;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
@@ -56,7 +58,7 @@ final class CookingRecipePlanner {
         this.request = request;
     }
 
-    void observeNearbyBlocks(Map<Block, Long> blocks) { nearbyBlockDistances = Map.copyOf(blocks); }
+    void observeNearbyBlocks() { nearbyBlockDistances = snapshotNearbyBlocks(); }
 
     long acquisitionCost(Item item, int count) { return acquisitionCost(item, count, Set.of(), 0); }
 
@@ -305,6 +307,104 @@ final class CookingRecipePlanner {
         long cost = acquisitionCost(item, needed);
         long waste = (long) needed * burn - neededTicks;
         return new FuelChoice(item, burn, needed, waste, cost);
+    }
+
+
+    record ResolvedCandidate(
+            CookingRecipe candidate,
+            FuelChoice fuel,
+            long inputCost,
+            long stationCost,
+            long preparationCost) {}
+
+    // 从客户端已收到的配方表读加工结果，展开第一种原料的物品种类；读出异常的配方略过。
+    // 这里保存 Item 而非完整 ItemStack，组件敏感的特殊配方需要另查是否能完整表达。
+    List<CookingRecipe> candidates() {
+        List<CookingRecipe> result = new ArrayList<>();
+        var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
+        for (RecipeHolder<?> holder : manager.getRecipes()) {
+            try {
+                if (!(holder.value() instanceof AbstractCookingRecipe cooking)
+                        || !RecipeProbe.usableIngredients(cooking)) continue;
+                ItemStack output = RecipeProbe.resultOf(
+                        cooking, player.level().registryAccess());
+                if (output.isEmpty() || !output.is(BuiltInRegistries.ITEM.get(request.itemId))) {
+                    continue;
+                }
+                CookingDevice device = CookingDevice.forRecipe(cooking.getType());
+                if (device == null || cooking.getIngredients().isEmpty()) continue;
+                LinkedHashSet<Item> inputs = new LinkedHashSet<>();
+                for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
+                    if (stack != null && !stack.isEmpty()) inputs.add(stack.getItem());
+                }
+                for (Item input : inputs) result.add(new CookingRecipe(
+                        holder.id(), cooking, device, input, Math.max(1, output.getCount())));
+            } catch (RuntimeException brokenRecipe) {
+                Constants.LOG.debug(
+                        "[maicraft-cook] skipped unusable cooking recipe {}: {}",
+                        holder.id(), brokenRecipe.toString());
+            }
+        }
+        return result;
+    }
+
+    // FASTEST 优先比较单次烧制时间，再看准备成本；其他偏好先看准备成本。
+    // 这不是把走路、备料和全部批次耗时相加后的总完成时间。
+    Comparator<ResolvedCandidate> candidateComparator() {
+        Comparator<ResolvedCandidate> preparation = Comparator
+                .comparingLong(ResolvedCandidate::preparationCost)
+                .thenComparingLong(ResolvedCandidate::inputCost)
+                .thenComparingLong(ResolvedCandidate::stationCost);
+        Comparator<ResolvedCandidate> speed = Comparator.comparingInt(
+                plan -> plan.candidate().recipe().getCookingTime());
+        Comparator<ResolvedCandidate> stable = Comparator
+                .comparingInt((ResolvedCandidate plan) -> plan.candidate().device().ordinal())
+                .thenComparing(plan -> BuiltInRegistries.ITEM.getKey(
+                        plan.candidate().input()).toString())
+                .thenComparing(plan -> plan.candidate().recipeId().toString());
+        return request.preference == SemanticCookTaskRecord.Preference.FASTEST
+                ? speed.thenComparing(preparation).thenComparing(stable)
+                : preparation.thenComparing(speed).thenComparing(stable);
+    }
+
+    boolean preferred(CookingDevice device) {
+        return switch (request.preference) {
+            case SMELTING -> device == CookingDevice.FURNACE;
+            case BLASTING -> device == CookingDevice.BLAST_FURNACE;
+            case SMOKING -> device == CookingDevice.SMOKER;
+            default -> true;
+        };
+    }
+
+    // 一次读取周围已加载的小范围方块，按种类记最近距离，供估价和判断有没有设备；不读取未加载地形。
+    private Map<Block, Long> snapshotNearbyBlocks() {
+        Map<Block, Long> distances = new HashMap<>();
+        BlockPos origin = player.blockPosition();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dz = -16; dz <= 16; dz++) {
+                for (int dy = -8; dy <= 8; dy++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    if (!player.level().isLoaded(cursor)) continue;
+                    Block block = player.level().getBlockState(cursor).getBlock();
+                    if (block != Blocks.AIR) {
+                        long dxDistance = cursor.getX() - origin.getX();
+                        long dyDistance = cursor.getY() - origin.getY();
+                        long dzDistance = cursor.getZ() - origin.getZ();
+                        long distanceSquared = dxDistance * dxDistance
+                                + dyDistance * dyDistance + dzDistance * dzDistance;
+                        distances.merge(block, distanceSquared, Math::min);
+                    }
+                }
+            }
+        }
+        return Map.copyOf(distances);
+    }
+
+    boolean stationReady(CookingDevice device) {
+        return nearbyBlockDistances.containsKey(device.block)
+                || PlayerInv.buildableCount(
+                        player.getInventory(), device.block.asItem()) > 0;
     }
 
 }

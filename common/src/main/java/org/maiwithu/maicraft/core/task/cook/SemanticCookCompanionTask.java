@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.core.task.cook;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -18,9 +17,6 @@ import net.minecraft.world.inventory.AbstractFurnaceMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.crafting.AbstractCookingRecipe;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
@@ -33,6 +29,7 @@ import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.FuelChoice;
+import org.maiwithu.maicraft.core.task.cook.CookingRecipePlanner.ResolvedCandidate;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
@@ -40,7 +37,6 @@ import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
-import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -71,13 +67,6 @@ public final class SemanticCookCompanionTask
     private enum Purpose { ACQUIRE_INPUT, ACQUIRE_FUEL, ACQUIRE_STATION, PLACE_STATION,
         MOVE_STATION, OPEN_STATION, LOAD_INPUT, LOAD_FUEL, TAKE_OUTPUT,
         CLOSE_WAIT, CLEAN_INPUT, CLOSE, ABANDON_CLOSE }
-    private record ResolvedCandidate(
-            CookingRecipe candidate,
-            FuelChoice fuel,
-            long inputCost,
-            long stationCost,
-            long preparationCost) {}
-
     private Phase phase = Phase.RESOLVE;
     private CookingRecipe candidate;
     private Item fuel;
@@ -126,8 +115,6 @@ public final class SemanticCookCompanionTask
     private boolean outcomeUncertain;
     private Map<String, Object> prerequisiteFailure = Map.of();
     private final CookingRecipePlanner recipePlanner;
-    /** Minimum squared loaded-world distance for each observed block type. */
-    private Map<Block, Long> nearbyBlockDistances = Map.of();
     private final Set<String> rejectedInputCandidates = new LinkedHashSet<>();
     private final Set<CookingDevice> rejectedDevices = new LinkedHashSet<>();
     private final List<Map<String, Object>> planningAttempts = new ArrayList<>();
@@ -238,7 +225,7 @@ public final class SemanticCookCompanionTask
 
     // 先找能产出目标的配方，再估原料、燃料和设备的准备成本，从认为可行的组合里选择一组。
     private TaskState resolve() {
-        List<CookingRecipe> candidates = candidates();
+        List<CookingRecipe> candidates = recipePlanner.candidates();
         if (candidates.isEmpty()) {
             return failOrClean("no_cooking_recipe",
                     "No smelting, blasting, smoking or campfire recipe produces " + r.itemId + ".",
@@ -255,7 +242,7 @@ public final class SemanticCookCompanionTask
                             : "No campfire recipe produces " + r.itemId + ".",
                     FailureType.UNKNOWN);
         }
-        candidates.removeIf(c -> c.device() == CookingDevice.CAMPFIRE || !preferred(c.device())
+        candidates.removeIf(c -> c.device() == CookingDevice.CAMPFIRE || !recipePlanner.preferred(c.device())
                 || rejectedDevices.contains(c.device())
                 || rejectedInputCandidates.contains(candidateKey(c)));
         if (candidates.isEmpty()) {
@@ -263,14 +250,13 @@ public final class SemanticCookCompanionTask
                     "No untried recipe matching recipe_preference can produce " + r.itemId + ".",
                     FailureType.NO_MATERIAL);
         }
-        nearbyBlockDistances = snapshotNearbyBlocks();
-        recipePlanner.observeNearbyBlocks(nearbyBlockDistances);
+        recipePlanner.observeNearbyBlocks();
 
         List<ResolvedCandidate> plans = new ArrayList<>();
         for (CookingRecipe option : candidates) {
             int raw = rawRemaining(option);
             long inputCost = recipePlanner.acquisitionCost(option.input(), raw);
-            boolean ready = stationReady(option.device());
+            boolean ready = recipePlanner.stationReady(option.device());
             long stationCost = ready ? 0L : recipePlanner.acquisitionCost(option.device().block.asItem(), 1);
             FuelChoice fuelChoice = recipePlanner.chooseFuel(option, rawRemaining(option));
             if (fuelChoice == null) continue;
@@ -286,7 +272,7 @@ public final class SemanticCookCompanionTask
         }
         ResolvedCandidate selected = plans.stream()
                 .filter(plan -> plan.preparationCost() < CookingRecipePlanner.UNAVAILABLE_COST)
-                .min(candidateComparator())
+                .min(recipePlanner.candidateComparator())
                 .orElse(null);
         if (selected == null) {
             return failOrClean("no_reachable_cooking_plan",
@@ -300,90 +286,6 @@ public final class SemanticCookCompanionTask
         prerequisiteFailure = Map.of();
         phase = Phase.PREPARE;
         return TaskState.RUNNING;
-    }
-
-    // 从客户端已收到的配方表读加工结果，展开第一种原料的物品种类；读出异常的配方略过。
-    // 这里保存 Item 而非完整 ItemStack，组件敏感的特殊配方需要另查是否能完整表达。
-    private List<CookingRecipe> candidates() {
-        List<CookingRecipe> result = new ArrayList<>();
-        var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
-        for (RecipeHolder<?> holder : manager.getRecipes()) {
-            try {
-                if (!(holder.value() instanceof AbstractCookingRecipe cooking)
-                        || !RecipeProbe.usableIngredients(cooking)) continue;
-                ItemStack output = RecipeProbe.resultOf(
-                        cooking, player.level().registryAccess());
-                if (output.isEmpty() || !output.is(BuiltInRegistries.ITEM.get(r.itemId))) {
-                    continue;
-                }
-                CookingDevice device = CookingDevice.forRecipe(cooking.getType());
-                if (device == null || cooking.getIngredients().isEmpty()) continue;
-                LinkedHashSet<Item> inputs = new LinkedHashSet<>();
-                for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
-                    if (stack != null && !stack.isEmpty()) inputs.add(stack.getItem());
-                }
-                for (Item input : inputs) result.add(new CookingRecipe(
-                        holder.id(), cooking, device, input, Math.max(1, output.getCount())));
-            } catch (RuntimeException brokenRecipe) {
-                Constants.LOG.debug(
-                        "[maicraft-cook] skipped unusable cooking recipe {}: {}",
-                        holder.id(), brokenRecipe.toString());
-            }
-        }
-        return result;
-    }
-
-    // FASTEST 优先比较单次烧制时间，再看准备成本；其他偏好先看准备成本。
-    // 这不是把走路、备料和全部批次耗时相加后的总完成时间。
-    private Comparator<ResolvedCandidate> candidateComparator() {
-        Comparator<ResolvedCandidate> preparation = Comparator
-                .comparingLong(ResolvedCandidate::preparationCost)
-                .thenComparingLong(ResolvedCandidate::inputCost)
-                .thenComparingLong(ResolvedCandidate::stationCost);
-        Comparator<ResolvedCandidate> speed = Comparator.comparingInt(
-                plan -> plan.candidate().recipe().getCookingTime());
-        Comparator<ResolvedCandidate> stable = Comparator
-                .comparingInt((ResolvedCandidate plan) -> plan.candidate().device().ordinal())
-                .thenComparing(plan -> BuiltInRegistries.ITEM.getKey(
-                        plan.candidate().input()).toString())
-                .thenComparing(plan -> plan.candidate().recipeId().toString());
-        return r.preference == SemanticCookTaskRecord.Preference.FASTEST
-                ? speed.thenComparing(preparation).thenComparing(stable)
-                : preparation.thenComparing(speed).thenComparing(stable);
-    }
-
-    private boolean preferred(CookingDevice device) {
-        return switch (r.preference) {
-            case SMELTING -> device == CookingDevice.FURNACE;
-            case BLASTING -> device == CookingDevice.BLAST_FURNACE;
-            case SMOKING -> device == CookingDevice.SMOKER;
-            default -> true;
-        };
-    }
-
-    // 一次读取周围已加载的小范围方块，按种类记最近距离，供估价和判断有没有设备；不读取未加载地形。
-    private Map<Block, Long> snapshotNearbyBlocks() {
-        Map<Block, Long> distances = new HashMap<>();
-        BlockPos origin = player.blockPosition();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        for (int dx = -16; dx <= 16; dx++) {
-            for (int dz = -16; dz <= 16; dz++) {
-                for (int dy = -8; dy <= 8; dy++) {
-                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
-                    if (!player.level().isLoaded(cursor)) continue;
-                    Block block = player.level().getBlockState(cursor).getBlock();
-                    if (block != Blocks.AIR) {
-                        long dxDistance = cursor.getX() - origin.getX();
-                        long dyDistance = cursor.getY() - origin.getY();
-                        long dzDistance = cursor.getZ() - origin.getZ();
-                        long distanceSquared = dxDistance * dxDistance
-                                + dyDistance * dyDistance + dzDistance * dzDistance;
-                        distances.merge(block, distanceSquared, Math::min);
-                    }
-                }
-            }
-        }
-        return Map.copyOf(distances);
     }
 
     // 还欠上一炉的结果时先回到原设备核对；新批次则根据产物和燃料堆叠上限决定装多少原料。
@@ -1329,12 +1231,6 @@ public final class SemanticCookCompanionTask
 
     private void renewCookProgressLease() {
         r.extendDeadlineTo(player.level().getGameTime() + COOK_PROGRESS_LEASE_TICKS);
-    }
-
-    private boolean stationReady(CookingDevice device) {
-        return nearbyBlockDistances.containsKey(device.block)
-                || PlayerInv.buildableCount(
-                        player.getInventory(), device.block.asItem()) > 0;
     }
 
     // 只按同种方块和距离找最近位置，没有检查里面有没有别人放的东西，或当前能否走到。
