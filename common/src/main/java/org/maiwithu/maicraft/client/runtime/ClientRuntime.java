@@ -110,50 +110,11 @@ public final class ClientRuntime {
             // 玩家仍持有控制权时，不推进计时器和任务动作。
             CompanionTickDispatcher.observeBody(context.player());
             BuildPreviewGate.settleCancellation();
-            if (PreviewController.waitingReview()) {
-                tickStage = "preview_review";
-                BuildPreviewGate.freezeWaitingDeadline();
-                intents.tickPersistence(minecraft, context.player());
-                GameplayAttentionMonitor.afterSemanticBind(context.player());
-                return;
+            if (canAdvanceTasks(context, intents)) {
+                intents.controlAvailable();
+                pathingMayDrive = advanceTasks(context);
             }
-            if (GameplayAttentionMonitor.blocksAutomation(context.player())) {
-                // 例如死亡后还在等待决定，就先不运行自动任务；自动自救也一起停在这里。
-                tickStage = "attention_required";
-                intents.tickPersistence(minecraft, context.player());
-                GameplayAttentionMonitor.afterSemanticBind(context.player());
-                return;
-            }
-            if (!context.permitsNativeActions()) {
-                tickStage = context.body().automationOwnsControls() ? "control_transition" : "player_control";
-                if (!context.body().automationOwnsControls()) {
-                    intents.controlUnavailable(
-                            context.player(), ACTOR.controlUnavailableReason());
-                }
-                intents.tickPersistence(minecraft, context.player());
-                GameplayAttentionMonitor.afterSemanticBind(context.player());
-                return;
-            }
-            if (!context.mutationAvailable()) {
-                // 这一刻已经为旧动作做过一次游戏操作，就等下一刻再做新事；目前连只查条件的任务也会等。
-                tickStage = "settling_native_action";
-                intents.tickPersistence(minecraft, context.player());
-                GameplayAttentionMonitor.afterSemanticBind(context.player());
-                return;
-            }
-            intents.controlAvailable();
-            if (TransportRuntime.tickCleanup(context)) {
-                tickStage = "settling_transport";
-                pathingMayDrive = context.mutationAvailable();
-                intents.tickPersistence(minecraft, context.player());
-                GameplayAttentionMonitor.afterSemanticBind(context.player());
-                return;
-            }
-            tickStage = "running_tasks";
-            CompanionTickDispatcher.tick(context.player());
-            ServerSessionRuntime.dispatch(context);
-            // 语义任务可能已用掉本刻唯一的原生操作额度，此时导航不能再追加挖掘或放置。
-            pathingMayDrive = context.mutationAvailable() && !PreviewController.waitingReview();
+            // 等待预览、交还身体和正常执行都经过同一处存档与提醒更新，避免分支各自漏掉收尾。
             intents.tickPersistence(minecraft, context.player());
             GameplayAttentionMonitor.afterSemanticBind(context.player());
         } finally {
@@ -163,6 +124,46 @@ public final class ClientRuntime {
                 ACTOR.endTick(context);
             }
         }
+    }
+
+    /** 按原有顺序判断角色为何暂停；这里只决定本刻能否调度，不执行任务动作。 */
+    private static boolean canAdvanceTasks(LocalPlayerContext context, IntentRuntime intents) {
+        if (PreviewController.waitingReview()) {
+            tickStage = "preview_review";
+            BuildPreviewGate.freezeWaitingDeadline();
+            return false;
+        }
+        if (GameplayAttentionMonitor.blocksAutomation(context.player())) {
+            // 例如死亡后等待决定时，普通任务和自动自救都停在这里，观察与存档仍继续。
+            tickStage = "attention_required";
+            return false;
+        }
+        if (!context.permitsNativeActions()) {
+            tickStage = context.body().automationOwnsControls() ? "control_transition" : "player_control";
+            if (!context.body().automationOwnsControls()) {
+                intents.controlUnavailable(context.player(), ACTOR.controlUnavailableReason());
+            }
+            return false;
+        }
+        if (!context.mutationAvailable()) {
+            // 本刻已为旧动作做过一次游戏操作，任务保留到下一刻再推进，避免重复消耗操作额度。
+            tickStage = "settling_native_action";
+            return false;
+        }
+        return true;
+    }
+
+    /** 先处理尚未结束的交通动作，再推进调度赢家，最后判断导航是否还能使用本刻操作额度。 */
+    private static boolean advanceTasks(LocalPlayerContext context) {
+        if (TransportRuntime.tickCleanup(context)) {
+            tickStage = "settling_transport";
+            return context.mutationAvailable();
+        }
+        tickStage = "running_tasks";
+        CompanionTickDispatcher.tick(context.player());
+        ServerSessionRuntime.dispatch(context);
+        // 子任务可能消耗原生操作额度或重新打开预览，导航须在它结束本刻执行后重新判断。
+        return context.mutationAvailable() && !PreviewController.waitingReview();
     }
 
     /** 兼容适配器每次操作都重新取得当刻身体上下文，避免跨游戏刻复用过期授权。 */
