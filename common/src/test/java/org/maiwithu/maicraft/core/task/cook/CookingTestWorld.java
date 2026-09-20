@@ -62,6 +62,13 @@ final class CookingTestWorld implements AutoCloseable {
     }
 
     static Object read(Object target, String name) throws Exception { return field(target.getClass(), name).get(target); }
+    static void set(Object target, String name, Object value) throws Exception { field(target.getClass(), name).set(target, value); }
+    static void phase(Object target, String phase) throws Exception {
+        var field = field(target.getClass(), "phase");
+        for (Object value : field.getType().getEnumConstants())
+            if (((Enum<?>) value).name().equals(phase)) { field.set(target, value); return; }
+        throw new IllegalArgumentException(phase);
+    }
     static Object invoke(Object target, String name) throws Exception {
         var method = target.getClass().getDeclaredMethod(name);
         method.setAccessible(true);

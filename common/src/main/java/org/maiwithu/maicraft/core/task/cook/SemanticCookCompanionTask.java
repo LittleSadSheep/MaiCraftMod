@@ -114,6 +114,7 @@ public final class SemanticCookCompanionTask
     private boolean stationClaimed;
     private boolean stationPlaced;
     private boolean openedMenu;
+    private AbstractFurnaceMenu ownedMenu;
     private boolean openRequested;
     private boolean effectsStarted;
     private boolean finishRequested;
@@ -166,6 +167,12 @@ public final class SemanticCookCompanionTask
     @Override
     // 先看目标数量是否已够，再继续未结束的子任务。收货和收回剩料正在确认时，不能因背包一时增长就跳过确认。
     protected TaskState onTick() {
+        // 跨刻期间换成另一份菜单时先停止旧子任务，不能让同类同编号的新炉子接收旧槽位操作。
+        if (openedMenu && ownedMenu != null && player.containerMenu != ownedMenu
+                && !observingOwnClose()) {
+            cancelActiveChild();
+            return menuLost();
+        }
         boolean outputTransferSettling = phase == Phase.VERIFY_OUTPUT
                 || phase == Phase.VERIFY_CLEAN_INPUT
                 || activePurpose == Purpose.TAKE_OUTPUT
@@ -752,6 +759,8 @@ public final class SemanticCookCompanionTask
 
     // 回到已选设备附近并重新右键；上一批仍在里面时必须保留那个位置，不能随便换另一台同类设备。
     private TaskState openStation() {
+        // 人工或其他工作正在使用界面时等待；只有从玩家背包返回世界后才开始本次开炉。
+        if (player.containerMenu != player.inventoryMenu) return TaskState.RUNNING;
         if (stationPos == null || (player.level().isLoaded(stationPos)
                 && !player.level().getBlockState(stationPos).is(candidate.device.block))) {
             if (stationClaimed && ownedInputLoaded > 0) {
@@ -781,14 +790,18 @@ public final class SemanticCookCompanionTask
         }
         openAttempts++;
         openRequested = true;
+        ownedMenu = null;
         return start(new InteractAtTaskRecord(
                 childId("open"), childDeadline(30L * 20L),
-                MouseButton.RIGHT, stationPos, 0, null), Purpose.OPEN_STATION);
+                MouseButton.RIGHT, stationPos, 0, null, null, candidate.device.block), Purpose.OPEN_STATION);
     }
 
     // 等炉类菜单出现、显示且类型与配方对应；未打开时有限重试，出现错误菜单时只安排关闭并报错。
     private TaskState waitMenu() {
-        if (player.containerMenu instanceof AbstractFurnaceMenu) {
+        if (player.containerMenu instanceof AbstractFurnaceMenu menu) {
+            if (!openRequested || ownedMenu != null && ownedMenu != menu) return menuLost();
+            // 本次打开收到的菜单对象只绑定一次；等渲染时若又换了对象，也不能重新认领。
+            ownedMenu = menu;
             openedMenu = true;
             var context = ClientRuntime.requireContext(player);
             if (!context.menus().ensureVisible(context)) return TaskState.RUNNING;
@@ -799,7 +812,7 @@ public final class SemanticCookCompanionTask
                 outcomeUncertain |= effectsStarted;
                 openedMenu = true;
                 return start(new CloseMenuTaskRecord(
-                        childId("wrong-menu-close"), childDeadline(30L * 20L)),
+                        childId("wrong-menu-close"), childDeadline(30L * 20L), ownedMenu),
                         Purpose.ABANDON_CLOSE);
             }
             // This counter is a consecutive confirmation retry budget for one
@@ -816,13 +829,9 @@ public final class SemanticCookCompanionTask
                 return TaskState.RUNNING;
             }
             if (player.containerMenu != player.inventoryMenu) {
-                rememberFailure("station_open_unconfirmed",
+                return failOrClean("station_open_unconfirmed",
                         "The selected workstation opened an unexpected synchronized menu.",
                         FailureType.TARGET_LOST);
-                openedMenu = true;
-                return start(new CloseMenuTaskRecord(
-                        childId("unexpected-menu-close"), childDeadline(30L * 20L)),
-                        Purpose.ABANDON_CLOSE);
             }
             return failOrClean("station_open_unconfirmed",
                     "The selected workstation did not open a synchronized furnace-family menu.",
@@ -946,7 +955,7 @@ public final class SemanticCookCompanionTask
             return menuLost();
         }
         return start(new CloseMenuTaskRecord(
-                childId("wait-close"), childDeadline(30L * 20L)), Purpose.CLOSE_WAIT);
+                childId("wait-close"), childDeadline(30L * 20L), ownedMenu), Purpose.CLOSE_WAIT);
     }
 
     // 用菜单里的总耗时、当前进度和剩余原料数估计整批完成时刻，并给后续检查留一点时间。
@@ -1164,7 +1173,7 @@ public final class SemanticCookCompanionTask
         // distinguished from same-kind fuel inserted by a player or hopper, so reclaiming it
         // would be an ownership guess.
         return start(new CloseMenuTaskRecord(
-                childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
+                childId("close"), childDeadline(30L * 20L), ownedMenu), Purpose.CLOSE);
     }
 
     private void beginCleanupSnapshot(ItemStack input) {
@@ -1331,6 +1340,7 @@ public final class SemanticCookCompanionTask
             case TAKE_OUTPUT -> phase = Phase.VERIFY_OUTPUT;
             case CLOSE_WAIT -> {
                 openedMenu = false;
+                ownedMenu = null;
                 openRequested = false;
                 closedWaitStartedTick = player.level().getGameTime();
                 openMode = OpenMode.RESUME_BATCH;
@@ -1339,11 +1349,13 @@ public final class SemanticCookCompanionTask
             case CLEAN_INPUT -> phase = Phase.VERIFY_CLEAN_INPUT;
             case CLOSE -> {
                 openedMenu = false;
+                ownedMenu = null;
                 openRequested = false;
                 return finishCleanup();
             }
             case ABANDON_CLOSE -> {
                 openedMenu = false;
+                ownedMenu = null;
                 openRequested = false;
                 phase = Phase.COMPLETE;
             }
@@ -1478,7 +1490,7 @@ public final class SemanticCookCompanionTask
         if (openedMenu && player.containerMenu instanceof AbstractFurnaceMenu
                 && menuMatches()) {
             return start(new CloseMenuTaskRecord(
-                    childId("abandon-close"), childDeadline(30L * 20L)),
+                    childId("abandon-close"), childDeadline(30L * 20L), ownedMenu),
                     Purpose.ABANDON_CLOSE);
         }
         openedMenu = false;
@@ -1531,12 +1543,32 @@ public final class SemanticCookCompanionTask
     }
 
     private AbstractFurnaceMenu furnaceMenu() {
-        return player.containerMenu instanceof AbstractFurnaceMenu menu ? menu : null;
+        return menuMatches() ? ownedMenu : null;
     }
 
-    // 当前只按普通炉、高炉或烟熏炉的菜单类型判断，没有绑定本次打开的菜单实例／编号；不同同类菜单也会通过（A60）。
+    // 类型对应配方，对象对应本次打开；编号可能复用，不能单凭编号或类型继续转移物品。
     private boolean menuMatches() {
-        return candidate.device.matches(player.containerMenu);
+        return ownedMenu != null && player.containerMenu == ownedMenu && candidate.device.matches(ownedMenu);
+    }
+
+    private boolean observingOwnClose() {
+        if (player.containerMenu != player.inventoryMenu) return false;
+        return activePurpose == Purpose.CLOSE || activePurpose == Purpose.CLOSE_WAIT
+                || activePurpose == Purpose.ABANDON_CLOSE;
+    }
+
+    private void cancelActiveChild() {
+        Task child = activeChild;
+        Purpose purpose = activePurpose;
+        activeChild = null;
+        activeRecord = null;
+        activePurpose = null;
+        if (child == null) return;
+        // 未确认的装料或取物可能已抵达服务端；先留下不确定性，再保证子任务也交付一次取消结果。
+        outcomeUncertain |= purpose == Purpose.LOAD_INPUT || purpose == Purpose.LOAD_FUEL
+                || purpose == Purpose.TAKE_OUTPUT || purpose == Purpose.CLEAN_INPUT;
+        try { child.stop(player, Task.StopReason.REPLACED); }
+        finally { outcomeUncertain |= uncertain(child.result(TaskState.CANCELLED)); }
     }
 
     // 读取菜单同步的数据：燃烧剩余时间、燃料总时长、加工进度和单次总时长；未提供的下标按零处理。
@@ -1692,13 +1724,17 @@ public final class SemanticCookCompanionTask
     @Override
     // 任务整体被结束时停止子任务、尝试关闭当前使用过的菜单并停导航；已成功放置的设备和已经发生的加工不会撤销。
     protected void cleanup() {
-        if (activeChild != null) {
-            activeChild.stop(player, Task.StopReason.REPLACED);
-            activeChild = null;
-            activeRecord = null;
-            activePurpose = null;
+        try {
+            cancelActiveChild();
+        } finally {
+            closeOwnedMenuAtBoundary();
+            super.cleanup();
         }
-        if ((openedMenu || openRequested) && player.containerMenu != player.inventoryMenu) {
+    }
+
+    private void closeOwnedMenuAtBoundary() {
+        // 只能关闭本次实际绑定的菜单；打开尚未确认或已换成别人的菜单时，保留当前界面。
+        if (ownedMenu != null && player.containerMenu == ownedMenu) {
             try {
                 var context = ClientRuntime.requireContext(player);
                 context.menus().closeForTaskBoundary(
@@ -1709,7 +1745,7 @@ public final class SemanticCookCompanionTask
             }
         }
         openedMenu = false;
-        super.cleanup();
+        ownedMenu = null;
     }
 
     @Override
