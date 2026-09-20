@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
+import java.util.List;
 
 public final class PortalSurveyTest {
     public static void main(String[] args) throws Exception {
@@ -25,7 +26,7 @@ public final class PortalSurveyTest {
                 check(site != null && site.nether().equals(frame), "intact frames are reused without construction permission");
                 var stance = PortalApproach.find(world.player, site, frame.origin().below(), Vec3.atBottomCenterOf(frame.origin()), Set.of());
                 check(stance != null && !site.forbiddenBody().contains(stance), "ignition stance stays outside the portal");
-                check(PortalPreparationSupplies.next(world.player, site).alternatives().equals(java.util.List.of(Items.FLINT_AND_STEEL)),
+                check(PortalPreparationSupplies.next(world.player, site).alternatives().equals(List.of(Items.FLINT_AND_STEEL)),
                         "an intact frame only needs ignition supply");
                 world.inventory.setItem(0, new ItemStack(Items.FIRE_CHARGE));
                 check(PortalPreparationSupplies.next(world.player, site) == null, "an existing fire charge avoids acquiring another ignition item");

@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuPort;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.core.component.DataComponents;
 
 /** 用真实 Slot 取半堆／放回规则和延迟点击回执验证分堆；不把本地槽操作伪称为服务器网络验收。 */
 public final class ContainerSplitTransferTest {
@@ -29,7 +30,7 @@ public final class ContainerSplitTransferTest {
     private static void exactNativeSlots(int source, int amount, int destination) throws Exception {
         try (var fixture = new Fixture(source, amount, destination)) {
             // 真实箱子槽保存命名物品的组件；分堆不能把它变成另一种无组件的石砖。
-            fixture.stock.getItem(0).set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, Component.literal("Counted bricks"));
+            fixture.stock.getItem(0).set(DataComponents.CUSTOM_NAME, Component.literal("Counted bricks"));
             if (destination > 0) fixture.menu.getSlot(27).set(fixture.stock.getItem(0).copyWithCount(destination));
             fixture.reset(amount);
             var status = fixture.step();

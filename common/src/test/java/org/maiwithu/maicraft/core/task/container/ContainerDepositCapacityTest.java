@@ -14,6 +14,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Arrays;
+import java.util.stream.IntStream;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 
 /** Plans a real vanilla slot layout without clicking; capacity and cursor preservation remain independent of transfer-tail code. */
 public final class ContainerDepositCapacityTest {
@@ -28,12 +31,12 @@ public final class ContainerDepositCapacityTest {
             var record = SemanticContainerTaskRecord.depositAvailableAt("spoil-capacity", 1000, ResourceLocation.parse("minecraft:dirt"), 10,
                     new BlockPos(3, 1, 3), ResourceLocation.parse("minecraft:barrel"), List.of());
             var task = new SemanticContainerCompanionTask(h.player, record);
-            Class<?> view = java.util.Arrays.stream(task.getClass().getDeclaredClasses()).filter(type -> type.getSimpleName().equals("MenuView")).findFirst().orElseThrow();
+            Class<?> view = Arrays.stream(task.getClass().getDeclaredClasses()).filter(type -> type.getSimpleName().equals("MenuView")).findFirst().orElseThrow();
             var constructor = view.getDeclaredConstructors()[0]; constructor.setAccessible(true);
-            set(task, "view", constructor.newInstance(menu, java.util.stream.IntStream.range(27, 63).boxed().toList(),
-                    java.util.stream.IntStream.range(0, 27).boxed().toList(), true, false));
+            set(task, "view", constructor.newInstance(menu, IntStream.range(27, 63).boxed().toList(),
+                    IntStream.range(0, 27).boxed().toList(), true, false));
             set(task, "expectedContainerId", 7); set(task, "expectedMenuClass", menu.getClass()); set(task, "ownedMenu", menu);
-            var fingerprint = task.getClass().getDeclaredMethod("fingerprint", net.minecraft.world.inventory.AbstractContainerMenu.class); fingerprint.setAccessible(true);
+            var fingerprint = task.getClass().getDeclaredMethod("fingerprint", AbstractContainerMenu.class); fingerprint.setAccessible(true);
             set(task, "stableFingerprint", fingerprint.invoke(null, menu));
             var plan = task.getClass().getDeclaredMethod("plan"); plan.setAccessible(true);
             check(plan.invoke(task) == TaskState.RUNNING && ((Number) get(task, "plannedAmount")).intValue() == 5,

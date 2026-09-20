@@ -35,6 +35,17 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import java.util.UUID;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloorTaskRecord;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
+import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.intent.IntentRuntime;
+import org.maiwithu.maicraft.intent.IntentTaskRecord;
+import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.TaskResult;
 
 /** Real MoveTo/nav/runtime ordering with an inert body: no game, window, path search or packets. */
 public final class MoveToTransportCompletionTest {
@@ -56,21 +67,21 @@ public final class MoveToTransportCompletionTest {
 
     private static void observationDoesNotCompleteTravel(Unsafe memory) throws Exception {
         try(var f=new Fixture(memory,.5)) {
-            var goal=new org.maiwithu.maicraft.intent.Goal("maicraft:travel","Choose an elevator floor",null,
+            var goal=new Goal("maicraft:travel","Choose an elevator floor",null,
                     "{\"transport_mode\":\"elevator\"}","{}",List.of(),List.of());
-            var record=new org.maiwithu.maicraft.intent.IntentTaskRecord(java.util.UUID.randomUUID(),null,goal);
+            var record=new IntentTaskRecord(UUID.randomUUID(),null,goal);
             record.setState(TaskState.RUNNING);
             Class<?> type=Class.forName("org.maiwithu.maicraft.intent.IntentTask");
-            var ctor=type.getDeclaredConstructor(LocalPlayer.class,record.getClass(),org.maiwithu.maicraft.intent.IntentRuntime.class);
+            var ctor=type.getDeclaredConstructor(LocalPlayer.class,record.getClass(),IntentRuntime.class);
             ctor.setAccessible(true); Object parent=ctor.newInstance(f.player,record,null);
-            var observed=new org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloorTaskRecord(
-                    "test-floor-sync",100,java.util.UUID.randomUUID(),null,true);
+            var observed=new ElevatorFloorTaskRecord(
+                    "test-floor-sync",100,UUID.randomUUID(),null,true);
             observed.setState(TaskState.SUCCESS);
-            org.maiwithu.maicraft.task.Task child=new org.maiwithu.maicraft.task.Task() {
+            Task child=new Task() {
                 public TaskState tick(LocalPlayer player) { return TaskState.SUCCESS; }
                 public void stop(LocalPlayer player,StopReason reason) {}
                 public String name() { return "native floor observation"; }
-                public org.maiwithu.maicraft.task.TaskResult result(TaskState state) { return org.maiwithu.maicraft.task.TaskResult.ok("floors synchronized"); }
+                public TaskResult result(TaskState state) { return TaskResult.ok("floors synchronized"); }
             };
             field(type,"child").set(parent,child); field(type,"childRecord").set(parent,observed);
             field(type,"reobserveAfterChild").setBoolean(parent,true);
@@ -170,7 +181,7 @@ public final class MoveToTransportCompletionTest {
 
     private static void automaticLandingResult(Unsafe memory) throws Exception {
         var failed = Map.<String,Object>of("strategy","WATER","complete",true,"failed",true,"native_water_contact",false);
-        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(failed);
+        LandingAssistPolicy.report(failed);
         try (var f = new Fixture(memory,.5)) {
             var task = f.task(coordinates(0D,0D),true); task.onStart();
             check(task.onTick()==TaskState.SUCCESS,"an old landing failure must not contaminate a new move");
@@ -178,7 +189,7 @@ public final class MoveToTransportCompletionTest {
         }
         try (var f = new Fixture(memory,.5)) {
             var record=coordinates(0D,0D); var task=f.task(record,true); task.onStart();
-            org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.report(failed);
+            LandingAssistPolicy.report(failed);
             check(task.onTick()==TaskState.FAILED && record.internalVerifiedPosition()==null,
                     "arrival cannot overwrite this move's failed automatic protection");
             check(task.result(TaskState.FAILED).data().get("landing_assist").equals(failed),"failure receipt must retain actual rescue evidence");
@@ -236,7 +247,7 @@ public final class MoveToTransportCompletionTest {
 
         MoveToCompanionTask task(MoveToTaskRecord record, boolean reached) throws Exception {
             if (record.kind != MoveToTaskRecord.Kind.FIND) compiled = new GoalCompiler.Compiled(record.coordinateGoal(),
-                    it.unimi.dsi.fastutil.longs.LongSets.emptySet());
+                    LongSets.emptySet());
             var task = new MoveToCompanionTask(player, record);
             nav = PlayerNav.to(player, () -> compiled, 1, () -> reached).withTransportMode(TransportMode.GROUND);
             navigator = (TransportNavigator) field(PlayerNav.class, "navigator").get(nav);
@@ -284,7 +295,7 @@ public final class MoveToTransportCompletionTest {
     }
 
     private static final class TestPlayer extends LocalPlayer {
-        @Override public net.minecraft.world.item.ItemStack getItemBySlot(net.minecraft.world.entity.EquipmentSlot slot) { return net.minecraft.world.item.ItemStack.EMPTY; }
+        @Override public ItemStack getItemBySlot(EquipmentSlot slot) { return ItemStack.EMPTY; }
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isAlive() { return true; }
         @Override public float getHealth() { return 20; }

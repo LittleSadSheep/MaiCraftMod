@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Objects;
 
 /** The real acquisition parent must settle committed storage work before accepting inventory progress. */
 public final class StorageSettlementTest {
@@ -48,7 +49,7 @@ public final class StorageSettlementTest {
             check(child.ticks == (barrier ? 1 : 0), "only committed child work may continue after the final fact becomes true");
             check(world.inventory.getItem(0).getCount() == 1 && world.blockUses() == 0 && world.itemUses() == 0,
                     "settlement cannot take more materials, discard progress or issue a new native action");
-            check(java.util.Objects.equals(get(parent, "failureCode"), failureCode), "wrong storage settlement failure evidence");
+            check(Objects.equals(get(parent, "failureCode"), failureCode), "wrong storage settlement failure evidence");
         }
     }
 

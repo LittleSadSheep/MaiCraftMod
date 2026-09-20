@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation.Verdict;
 import sun.misc.Unsafe;
+import java.lang.reflect.Field;
 
 /** 用原版菜单同步字段和物品组件模拟服务端分包；只观察报价与结果，不执行附魔按钮或推算随机附魔。 */
 public final class EnchantmentQuoteTest {
@@ -185,7 +186,7 @@ public final class EnchantmentQuoteTest {
         }
         Verdict observe(MenuConfirmation confirmation) { return confirmation.observe(context, null); }
     }
-    private static java.lang.reflect.Field field(Class<?> type, String name) throws Exception {
+    private static Field field(Class<?> type, String name) throws Exception {
         // 客户端世界引用声明在玩家父类；夹具沿继承链定位真实字段，才能建立供报价读取的同一身体与世界。
         for (Class<?> current = type; current != null; current = current.getSuperclass()) {
             try { var value = current.getDeclaredField(name); value.setAccessible(true); return value; }

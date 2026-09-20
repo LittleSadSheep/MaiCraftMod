@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Set;
 
 /** Exercises the real acquisition STORAGE branch before any AE2 availability or network request is needed. */
 public final class OrdinaryStorageAcquireTest {
@@ -37,7 +38,7 @@ public final class OrdinaryStorageAcquireTest {
                     "ordinary warehouse was skipped or its exact target/count was lost to the AE2 path");
             set(task, "activeChild", new EmptySettledContainer());
             var tick = task.getClass().getDeclaredMethod("tickActiveChild"); tick.setAccessible(true); tick.invoke(task);
-            check(!((java.util.Set<?>) get(need, "exhaustedSources")).contains(SemanticAcquireTaskRecord.Source.STORAGE),
+            check(!((Set<?>) get(need, "exhaustedSources")).contains(SemanticAcquireTaskRecord.Source.STORAGE),
                     "one empty ordinary container must not exhaust the entire storage source family");
             set(task, "plannerStepsThisTick", 0); attempt.invoke(task, need);
             selected = (SemanticContainerTaskRecord) get(task, "activeRecord");

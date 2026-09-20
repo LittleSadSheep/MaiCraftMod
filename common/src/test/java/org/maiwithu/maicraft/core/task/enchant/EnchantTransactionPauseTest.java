@@ -30,6 +30,8 @@ import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuPort;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.task.TaskState;
+import java.lang.reflect.Field;
+import java.util.Map;
 
 /** 用真实物品组件和回执对象复现暂停期间的异步确认；只验证控制层证据保留，不伪称本地夹具完成服务器附魔。 */
 public final class EnchantTransactionPauseTest {
@@ -63,7 +65,7 @@ public final class EnchantTransactionPauseTest {
                     "the resumed return is bound to the complete confirmed output snapshot");
             f.transaction.confirmedResult().set(DataComponents.CUSTOM_NAME, Component.literal("外部修改副本"));
             check(ItemStack.matches(confirmed, f.transaction.confirmedResult()), "callers cannot mutate historical output evidence");
-            check(data.get("result_enchantments").equals(java.util.Map.of("minecraft:unbreaking", 3, "minecraft:efficiency", 4))
+            check(data.get("result_enchantments").equals(Map.of("minecraft:unbreaking", 3, "minecraft:efficiency", 4))
                             && f.buttons == 1 && !Boolean.TRUE.equals(data.get("gui_closed")),
                     "all confirmed enchantments are visible without replaying the button or claiming cleanup finished");
         }
@@ -182,7 +184,7 @@ public final class EnchantTransactionPauseTest {
         @Override public void close() throws Exception { world.close(); }
     }
 
-    private static java.lang.reflect.Field field(Class<?> type, String name) throws Exception {
+    private static Field field(Class<?> type, String name) throws Exception {
         var field = type.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static void rejects(Runnable action, String reason) {

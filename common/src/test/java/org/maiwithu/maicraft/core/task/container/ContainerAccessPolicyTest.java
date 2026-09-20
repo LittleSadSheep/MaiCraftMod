@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
+import java.util.Locale;
 
 /** 原生箱桶与非普通命名方块实体共用访问保护；测试只查询夹具，不能开 GUI、改库存或混淆普通容器类型。 */
 public final class ContainerAccessPolicyTest {
@@ -88,7 +89,7 @@ public final class ContainerAccessPolicyTest {
             remember(landmarks, table, null);
             check(!ContainerSupplySources.accessAllowed(h.player, table, List.of(PRIVATE)), "a dimension-unspecified protected location retains the existing local-radius rule");
             remember(landmarks, new BlockPos(100, 1, 100), "minecraft:overworld");
-            named.setCustomName(Component.literal(PRIVATE.toUpperCase(java.util.Locale.ROOT)));
+            named.setCustomName(Component.literal(PRIVATE.toUpperCase(Locale.ROOT)));
             check(!ContainerSupplySources.accessAllowed(h.player, table, List.of(PRIVATE)),
                     "native Nameable custom names protect non-container entities even when the landmark itself is far away");
             // 当前原生箱桶仅公开读名字；夹具通过已核实的 name 字段设置初始名称，不伪造不存在的游戏命名操作。

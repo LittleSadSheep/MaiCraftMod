@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
+import net.minecraft.world.level.border.WorldBorder;
 
 /** Real supply startup must reach frozen review before it has any material or acquisition child. */
 public final class BuildSupplyPreviewTest {
@@ -195,8 +196,8 @@ public final class BuildSupplyPreviewTest {
         @Override public boolean isLoaded(BlockPos pos) { return !unloaded; }
         @Override public int getMinBuildHeight() { return -64; }
         @Override public int getHeight() { return 384; }
-        @Override public net.minecraft.world.level.border.WorldBorder getWorldBorder() {
-            return new net.minecraft.world.level.border.WorldBorder();
+        @Override public WorldBorder getWorldBorder() {
+            return new WorldBorder();
         }
         @Override public BlockState getBlockState(BlockPos pos) {
             return blocks == null ? Blocks.AIR.defaultBlockState()

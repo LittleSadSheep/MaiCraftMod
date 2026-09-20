@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.PlayerInv;
 
 /** 通过真实获取任务的背包路径核对返回策略；测试站位变化和停止导航不冒充真实仓库/登高验收。 */
 public final class MaterialSupplyReturnPolicyTest {
@@ -110,7 +111,7 @@ public final class MaterialSupplyReturnPolicyTest {
     private static SemanticMaterialSupplyCoordinator.Tick runCarried(InteractionWorldTestHarness h, SemanticMaterialSupplyCoordinator supply) {
         return supply.tick(h.player, child -> { child.start(h.player); return child.tick(h.player); });
     }
-    private static int count(InteractionWorldTestHarness h) { return org.maiwithu.maicraft.core.PlayerInv.buildableCount(h.inventory, Items.SMOOTH_QUARTZ); }
+    private static int count(InteractionWorldTestHarness h) { return PlayerInv.buildableCount(h.inventory, Items.SMOOTH_QUARTZ); }
     private static Field field(Object target, String name) throws Exception {
         for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) try {
             Field field = type.getDeclaredField(name); field.setAccessible(true); return field;

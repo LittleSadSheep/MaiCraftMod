@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.PlayerInv;
 
 /** 推进真实供料父任务验证出坑、存余料、取建材、续建的顺序；模拟库存回执不代表真实 GUI 验收。 */
 public final class BuildSupplyCargoDispatchTest {
@@ -154,7 +155,7 @@ public final class BuildSupplyCargoDispatchTest {
         public TaskResult result(TaskState state) { return TaskResult.ok("模拟存入", Map.of("operation", "deposit", "bounded_storage_deposit", true,
                 "moved_count", moved, "moved_items", moved == 0 ? Map.of() : Map.of("minecraft:dirt", moved), "outcome_uncertain", false)); }
     }
-    private static int count(LocalPlayer player, Item item) { return org.maiwithu.maicraft.core.PlayerInv.buildableCount(player.getInventory(), item); }
+    private static int count(LocalPlayer player, Item item) { return PlayerInv.buildableCount(player.getInventory(), item); }
     @SuppressWarnings("unchecked") private static Map<Class<? extends TaskRecord>, TaskFactory.Runner<? extends TaskRecord>> runners() throws Exception {
         return (Map<Class<? extends TaskRecord>, TaskFactory.Runner<? extends TaskRecord>>) field(TaskFactory.class, "RUNNERS").get(null);
     }

@@ -8,6 +8,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 
 /** Parent supply receipts preserve native source proof even if the material goal later fails. */
 public final class MaterialSupplyReceiptTest {
@@ -47,14 +49,14 @@ public final class MaterialSupplyReceiptTest {
     private static void publicEvidenceSurvives(Map<?, ?> receipt) throws Exception {
         var sanitize = Class.forName("org.maiwithu.maicraft.intent.IntentTask").getDeclaredMethod("sanitizeMap", Map.class);
         sanitize.setAccessible(true);
-        var gson = new com.google.gson.Gson();
+        var gson = new Gson();
         var value = gson.toJsonTree(sanitize.invoke(null, receipt));
         var attention = Class.forName("org.maiwithu.maicraft.intent.IntentRuntime")
-                .getDeclaredMethod("sanitizeAttentionValue", com.google.gson.JsonElement.class);
-        attention.setAccessible(true); value = (com.google.gson.JsonElement) attention.invoke(null, value);
+                .getDeclaredMethod("sanitizeAttentionValue", JsonElement.class);
+        attention.setAccessible(true); value = (JsonElement) attention.invoke(null, value);
         var persist = Class.forName("org.maiwithu.maicraft.intent.persistence.IntentStateCodec")
-                .getDeclaredMethod("safeElement", com.google.gson.JsonElement.class, int.class);
-        persist.setAccessible(true); value = (com.google.gson.JsonElement) persist.invoke(null, value, 0);
+                .getDeclaredMethod("safeElement", JsonElement.class, int.class);
+        persist.setAccessible(true); value = (JsonElement) persist.invoke(null, value, 0);
         var transfer = value.getAsJsonObject().getAsJsonArray("storage_attempts").get(0).getAsJsonObject()
                 .getAsJsonArray("server_supply_transfers").get(0).getAsJsonObject();
         check(transfer.get("request_id").getAsString().equals("settled-native-request")

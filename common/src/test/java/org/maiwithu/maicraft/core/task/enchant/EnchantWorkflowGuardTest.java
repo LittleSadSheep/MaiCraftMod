@@ -27,6 +27,8 @@ import org.maiwithu.maicraft.client.actor.MenuPort;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
 
 /** 复用真实背包、菜单槽和演员夹具验证附魔准备与取消边界；不把本地造出的附魔品伪称为服务端闭环成功。 */
 public final class EnchantWorkflowGuardTest {
@@ -167,7 +169,7 @@ public final class EnchantWorkflowGuardTest {
         }
     }
 
-    private static EnchantTaskRecord record(net.minecraft.world.item.Item item) {
+    private static EnchantTaskRecord record(Item item) {
         return new EnchantTaskRecord("enchant-guards", 2000, BuiltInRegistries.ITEM.getKey(item), new BlockPos(3, 1, 3), 3, 3, 3);
     }
     private static void rejects(Runnable action, String reason) {
@@ -178,8 +180,8 @@ public final class EnchantWorkflowGuardTest {
 
     private static final class CleanupProbe implements Task {
         int stops, results;
-        @Override public TaskState tick(net.minecraft.client.player.LocalPlayer player) { throw new AssertionError("cleanup cannot resume child work"); }
-        @Override public void stop(net.minecraft.client.player.LocalPlayer player, StopReason why) { stops++; }
+        @Override public TaskState tick(LocalPlayer player) { throw new AssertionError("cleanup cannot resume child work"); }
+        @Override public void stop(LocalPlayer player, StopReason why) { stops++; }
         @Override public TaskResult result(TaskState state) { results++; return TaskResult.cancelled("probe cleaned"); }
         @Override public String name() { return "enchant cleanup probe"; }
     }

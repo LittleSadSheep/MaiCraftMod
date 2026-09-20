@@ -11,6 +11,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import java.util.Arrays;
 
 /** 工艺知识交接只冻结状态与链接；可选索引缺失不变成无配方结论，也不改变任何库存或建造许可。 */
 public final class MaterialProcessPlanningTest {
@@ -41,7 +42,7 @@ public final class MaterialProcessPlanningTest {
             check(world.itemUses() == 0 && world.blockUses() == 0 && world.inventory.isEmpty(), "交接不能消耗材料、放机器或操作世界");
         }
         check(!MaterialProcessPlanning.allowsPlanning(List.of(SemanticAcquireTaskRecord.Source.INVENTORY)), "只查库存的许可不能被升级为制造规划");
-        check(java.util.Arrays.stream(SemanticAcquireTaskRecord.Source.values()).noneMatch(source -> source.name().equals("MACHINE")),
+        check(Arrays.stream(SemanticAcquireTaskRecord.Source.values()).noneMatch(source -> source.name().equals("MACHINE")),
                 "工艺发现不需要增加一个默认授予危险动作的Source");
         System.out.println("MaterialProcessPlanningTest: bounded knowledge-only statuses, URIs and unchanged permissions passed");
     }

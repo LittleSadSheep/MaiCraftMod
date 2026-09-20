@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.portal.PortalShape;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import java.util.function.Function;
 
 public final class NetherPortalFrameTest {
     public static void main(String[] args) throws Exception {
@@ -29,7 +30,7 @@ public final class NetherPortalFrameTest {
             var large = new NetherPortalFrame(BlockPos.ZERO, axis, 21, 21);
             var states = new HashMap<BlockPos, BlockState>();
             large.frame().forEach(p -> states.put(p, Blocks.OBSIDIAN.defaultBlockState()));
-            java.util.function.Function<BlockPos, BlockState> read = p -> states.getOrDefault(p, Blocks.AIR.defaultBlockState());
+            Function<BlockPos, BlockState> read = p -> states.getOrDefault(p, Blocks.AIR.defaultBlockState());
             check(large.equals(NetherPortalFrame.observe(read, large.cell(20, 20), axis)), "maximum-size frames are reusable");
             check(!large.active(read), "a complete frame alone is not an activated portal");
             large.interior().forEach(p -> states.put(p, Blocks.NETHER_PORTAL.defaultBlockState().setValue(NetherPortalBlock.AXIS, axis)));

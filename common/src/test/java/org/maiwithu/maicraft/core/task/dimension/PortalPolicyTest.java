@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.core.task.dimension;
 import static org.maiwithu.maicraft.core.task.dimension.NetherPortalFrameTest.check;
 import com.google.gson.JsonParser;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
+import com.google.gson.JsonObject;
+import java.util.List;
 
 public final class PortalPolicyTest {
     public static void main(String[] args) {
@@ -14,8 +16,8 @@ public final class PortalPolicyTest {
                 "material gathering inherits terrain and combat constraints");
         var inventory = PortalPreparationPolicy.parse(JsonParser.parseString(
                 "{\"prepare_portal\":true,\"material_policy\":\"inventory_only\",\"allow_combat\":true}").getAsJsonObject());
-        check(inventory.sources(true).equals(java.util.List.of(Source.INVENTORY)), "inventory-only preparation stays inventory-only");
-        check(!PortalPreparationPolicy.parse(new com.google.gson.JsonObject()).enabled(), "legacy travel cannot begin portal construction");
+        check(inventory.sources(true).equals(List.of(Source.INVENTORY)), "inventory-only preparation stays inventory-only");
+        check(!PortalPreparationPolicy.parse(new JsonObject()).enabled(), "legacy travel cannot begin portal construction");
         System.out.println("PortalPolicyTest: independent preparation, terrain, supply and rare-item permissions passed");
     }
 }

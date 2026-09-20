@@ -24,6 +24,9 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.task.TaskState;
+import java.util.Map;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /** 用原生箱子菜单验证实际落槽顺序和双边守恒；测试不伪造服务器网络确认。 */
 public final class ContainerBatchReplanTest {
@@ -94,7 +97,7 @@ public final class ContainerBatchReplanTest {
             field(ContainerTransferCompanionTask.class, "menu").set(lower, fixture.menu);
             check(begin.invoke(lower, allowed) == TaskState.RUNNING, "an empty compatible destination accepts its exact initial plan");
             fixture.menu.setCarried(new ItemStack(Items.DIAMOND));
-            Method pickup = ContainerTransferCompanionTask.class.getDeclaredMethod("submitPickup", org.maiwithu.maicraft.client.actor.LocalPlayerContext.class, ContainerTransferTaskRecord.Move.class); pickup.setAccessible(true);
+            Method pickup = ContainerTransferCompanionTask.class.getDeclaredMethod("submitPickup", LocalPlayerContext.class, ContainerTransferTaskRecord.Move.class); pickup.setAccessible(true);
             check(pickup.invoke(lower, ClientRuntime.requireContext(fixture.world.player), allowed) == TaskState.FAILED,
                     "an unexpected cursor arriving before pickup must not be treated as this task's rollback stack");
             lower.result(TaskState.FAILED);
@@ -118,7 +121,7 @@ public final class ContainerBatchReplanTest {
             Object cache = field(world.level.getClass(), "chunks").get(world.level), chunk = field(cache.getClass(), "chunk").get(cache);
             field(chunk.getClass(), "level").set(chunk, world.level); field(ChunkAccess.class, "levelHeightAccessor").set(chunk, world.level);
             var barrel = new BarrelBlockEntity(target, Blocks.BARREL.defaultBlockState()); barrel.setLevel(world.level);
-            field(chunk.getClass(), "blockEntities").set(chunk, new HashMap<>(java.util.Map.of(target, barrel)));
+            field(chunk.getClass(), "blockEntities").set(chunk, new HashMap<>(Map.of(target, barrel)));
             field(chunk.getClass(), "pendingBlockEntities").set(chunk, new HashMap<>());
             var record = new SemanticContainerTaskRecord("batch", 1000, SemanticContainerTaskRecord.Operation.WITHDRAW,
                     List.of(ResourceLocation.parse("minecraft:stone_bricks")), null, requested, null, ResourceLocation.parse("minecraft:barrel"), null,
@@ -127,14 +130,14 @@ public final class ContainerBatchReplanTest {
             Class<?> candidate = Class.forName(SemanticContainerCompanionTask.class.getName() + "$Candidate");
             var constructor = candidate.getDeclaredConstructors()[0]; constructor.setAccessible(true);
             field(SemanticContainerCompanionTask.class, "target").set(task, constructor.newInstance(target, ResourceLocation.parse("minecraft:barrel"), false));
-            Method classify = SemanticContainerCompanionTask.class.getDeclaredMethod("classify", net.minecraft.world.inventory.AbstractContainerMenu.class); classify.setAccessible(true);
+            Method classify = SemanticContainerCompanionTask.class.getDeclaredMethod("classify", AbstractContainerMenu.class); classify.setAccessible(true);
             field(SemanticContainerCompanionTask.class, "view").set(task, classify.invoke(task, menu));
             field(SemanticContainerCompanionTask.class, "expectedContainerId").setInt(task, menu.containerId);
             field(SemanticContainerCompanionTask.class, "expectedMenuClass").set(task, menu.getClass());
             restartPlan(stock.countItem(Items.STONE_BRICKS));
         }
         void restartPlan(int count) throws Exception {
-            Method fingerprint = SemanticContainerCompanionTask.class.getDeclaredMethod("fingerprint", net.minecraft.world.inventory.AbstractContainerMenu.class); fingerprint.setAccessible(true);
+            Method fingerprint = SemanticContainerCompanionTask.class.getDeclaredMethod("fingerprint", AbstractContainerMenu.class); fingerprint.setAccessible(true);
             field(SemanticContainerCompanionTask.class, "stableFingerprint").set(task, fingerprint.invoke(null, menu));
             field(SemanticContainerCompanionTask.class, "initialContainerCount").setInt(task, count);
             field(SemanticContainerCompanionTask.class, "lastContainerCount").setInt(task, count);

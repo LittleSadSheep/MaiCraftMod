@@ -22,6 +22,8 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier;
 
 /** 坑底缺料时先派出坑子任务，确认人在地面后才取料；夹具站位仅用于测试状态交接，不代表真人施工。 */
 public final class BuildSupplyAccessDispatchTest {
@@ -54,7 +56,7 @@ public final class BuildSupplyAccessDispatchTest {
             check(task.progress().get("phase").equals("preparing_supply_access")
                     && field(task, "buildRounds").getInt(task) == 0, "access has its own progress phase and is not a built batch");
             // 只注入已经站到地面的观察，然后推进真实子任务预检；这一步不能把未建的木地板算完成。
-            var exit = org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier.supplyAccess(h.player, access).exit();
+            var exit = BuildExcavationFrontier.supplyAccess(h.player, access).exit();
             h.position(Vec3.atBottomCenterOf(exit)); h.nextTick();
             for (int i = 0; i < 4 && field(task, "activeChild").get(task) != null; i++) {
                 check(task.tick(h.player) == TaskState.RUNNING, "access completion leaves the parent building goal pending"); h.nextTick();
@@ -107,7 +109,7 @@ public final class BuildSupplyAccessDispatchTest {
         try (var h = new InteractionWorldTestHarness()) {
             var task = task(h);
             // 角色在图纸外一格的施工柱顶，材料仍缺；先调度施工离场，不能把“出了图纸边界”当成到达地面。
-            h.set(new BlockPos(6, 7, 4), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+            h.set(new BlockPos(6, 7, 4), Blocks.STONE.defaultBlockState());
             h.position(new Vec3(6.5, 8, 4.5)); task.start(h.player);
             check(task.tick(h.player) == TaskState.RUNNING
                             && ((BuildTaskRecord) field(task, "activeRecord").get(task)).supplyAccessOnly(),
@@ -124,10 +126,10 @@ public final class BuildSupplyAccessDispatchTest {
             var task = task(h);
             // 已加载范围只剩孤柱和危险地面：查询必须报告出口未证实，不得递归转去采木头凑建材。
             for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) {
-                h.set(new BlockPos(x, 0, z), net.minecraft.world.level.block.Blocks.MAGMA_BLOCK.defaultBlockState());
-                for (int y = 1; y < 8; y++) h.set(new BlockPos(x, y, z), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+                h.set(new BlockPos(x, 0, z), Blocks.MAGMA_BLOCK.defaultBlockState());
+                for (int y = 1; y < 8; y++) h.set(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState());
             }
-            h.set(new BlockPos(4, 7, 4), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+            h.set(new BlockPos(4, 7, 4), Blocks.STONE.defaultBlockState());
             h.position(new Vec3(4.5, 8, 4.5)); task.start(h.player);
             check(task.tick(h.player) == TaskState.FAILED
                             && task.resultData().get("failure_code").equals("construction_supply_exit_unavailable"),
