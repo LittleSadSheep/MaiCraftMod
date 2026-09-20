@@ -266,7 +266,7 @@ final class IntentTask implements Task {
     private TaskState beginNative(TaskRecord nextRecord) {
             // 原生加工消费前统一留下跨重启边界；附魔仍保留旧命名空间，水中转化与包装子任务也不能重复投料。
             if (nextRecord instanceof NativeConsumptionTaskRecord consumption)
-                EnchantSubmissionBinding.bind(consumption, record, runtime);
+                NativeSubmissionBinding.bind(consumption, record, runtime);
             retainBuildProject(nextRecord);
             // 记住这一步的任务单，创建对应执行代码，只做第一次准备；后续每刻继续同一个对象。
             childRecord = nextRecord;

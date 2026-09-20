@@ -67,12 +67,12 @@ public final class EnchantIntentTest {
 
     private static void stableSubmissionIdentity() {
         UUID id=UUID.randomUUID();Goal enchant=goal();
-        var original=new IntentTaskRecord(id,null,enchant);UUID first=EnchantSubmissionBinding.operationId(original);
+        var original=new IntentTaskRecord(id,null,enchant);UUID first=NativeSubmissionBinding.operationId(original, "enchant");
         Goal prerequisite=new Goal("maicraft:remember_place","记住台子",new Goal.SemanticTarget("coordinates",null,
                 new Goal.WorldPosition(2,1,2,"minecraft:overworld"),null),"{\"label\":\"附魔台\"}","{}",List.of(),List.of());
         original.insertRecovery(prerequisite);
         original.addStepResult(new IntentTaskRecord.StepSnapshot(0,prerequisite.ability(),true,"identity fixture",TaskResult.ok("identity fixture").toJson()));
-        check(EnchantSubmissionBinding.operationId(original).equals(first),"插入不同准备步骤不能给原消费换编号");
+        check(NativeSubmissionBinding.operationId(original, "enchant").equals(first),"插入不同准备步骤不能给原消费换编号");
         var saved=IntentStateCodec.encode("e".repeat(64),List.of(),List.of(original),Map.of(),List.of());
         // 按正式恢复入口重建暂停任务，确保重连后回到原附魔步骤仍沿用同一次消费标识。
         var decoded=IntentStateCodec.decode(saved).tasks().getFirst();
@@ -80,11 +80,11 @@ public final class EnchantIntentTest {
                 decoded.steps(),decoded.stepIndex(),decoded.completed(),decoded.internalPositions(),
                 decoded.internalAreaProtections(),decoded.attempts(),decoded.decision(),decoded.pendingAnswer(),
                 decoded.terminal(),100);
-        check(EnchantSubmissionBinding.operationId(restored).equals(first),"重启恢复后保留同一消费编号");
+        check(NativeSubmissionBinding.operationId(restored, "enchant").equals(first),"重启恢复后保留同一消费编号");
         Goal sequence=new Goal("maicraft:sequence","两次独立附魔",null,"{}","{}",List.of(),List.of(enchant,enchant));
-        var repeated=new IntentTaskRecord(id,null,sequence);UUID before=EnchantSubmissionBinding.operationId(repeated);
+        var repeated=new IntentTaskRecord(id,null,sequence);UUID before=NativeSubmissionBinding.operationId(repeated, "enchant");
         repeated.addStepResult(new IntentTaskRecord.StepSnapshot(0,enchant.ability(),true,"identity fixture",TaskResult.ok("identity fixture").toJson()));
-        check(!EnchantSubmissionBinding.operationId(repeated).equals(before),"明确排列的两个相同目标拥有独立消费编号");
+        check(!NativeSubmissionBinding.operationId(repeated, "enchant").equals(before),"明确排列的两个相同目标拥有独立消费编号");
     }
 
     private static Goal goal() {

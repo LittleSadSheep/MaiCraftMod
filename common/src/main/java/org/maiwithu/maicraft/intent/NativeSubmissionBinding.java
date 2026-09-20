@@ -12,18 +12,14 @@ import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.core.task.base.NativeConsumptionTaskRecord;
 import org.maiwithu.maicraft.core.task.base.NativeConsumptionJournal;
 
-/** 用持久总任务身份绑定原生消费；保留旧附魔标识，重启或插入准备步骤不会重新放行同一次投料。 */
-final class EnchantSubmissionBinding {
-    private EnchantSubmissionBinding() {}
+/** 用持久总任务身份绑定单次原生提交；先保存任务再预留操作编号，重启或补前置步骤都不能重复放行。 */
+final class NativeSubmissionBinding {
+    private NativeSubmissionBinding() {}
 
     static void bind(NativeConsumptionTaskRecord child, IntentTaskRecord parent, IntentRuntime runtime) {
         String namespace = child.consumptionNamespace();
         var journal = new NativeConsumptionJournal(runtime.requiredStateIdentity(), operationId(parent, namespace), namespace);
         child.submissionBarrier(barrier(parent, runtime, namespace, journal::prepare));
-    }
-
-    static BooleanSupplier barrier(IntentTaskRecord parent, IntentRuntime runtime, BooleanSupplier reserve) {
-        return barrier(parent, runtime, "enchant", reserve);
     }
 
     static BooleanSupplier barrier(IntentTaskRecord parent, IntentRuntime runtime, String namespace, BooleanSupplier reserve) {
@@ -40,8 +36,8 @@ final class EnchantSubmissionBinding {
                     if (!operation.equals(operationId(parent, namespace))) throw new IllegalStateException("native_consumption_parent_step_changed");
                     if (!durable) {
                         // 父任务编号、请求去重键和当前步骤必须先真正落盘；内存里已有快照不能保护进程崩溃后的重发。
-                        if (checkpoint == null) checkpoint = runtime.checkpointBeforeEnchantment(parent);
-                        else if (checkpoint.isCancelled()) checkpoint = runtime.followEnchantmentCheckpoint(parent);
+                        if (checkpoint == null) checkpoint = runtime.checkpointBeforeSubmission(parent);
+                        else if (checkpoint.isCancelled()) checkpoint = runtime.followSubmissionCheckpoint(parent);
                         if (!checkpoint.isDone()) return false;
                         checkpoint.join(); durable = true;
                     }
@@ -53,19 +49,15 @@ final class EnchantSubmissionBinding {
                     failed = new IllegalStateException(prefix + ": do not submit the native operation", failure);
                     throw failed;
                 }
-                // 检查点完成后才预留一次附魔；预留仍须自行同步成功，任何等待阶段都不发出原生按钮。
+                // 检查点完成后才预留这一次操作；预留仍须同步成功，任何等待阶段都不发出原生请求。
                 return reserve.getAsBoolean();
             }
         };
     }
 
-    static UUID operationId(IntentTaskRecord parent) {
-        return operationId(parent, "enchant");
-    }
-
     static UUID operationId(IntentTaskRecord parent, String namespace) {
         JsonObject goal = identityGoal(parent.steps().get(parent.stepIndex())); int previousMatches = 0;
-        // 两个明确排列的相同附魔目标可以分别执行；恢复前插入不同的取材/观察步骤不会改变原附魔的标识。
+        // 两个明确排列的相同目标可以分别执行；插入不同的取材或观察步骤不会给原操作换一个编号。
         for (int index = 0; index < parent.stepIndex(); index++)
             if (identityGoal(parent.steps().get(index)).equals(goal)) previousMatches++;
         String identity = namespace + ":" + parent.externalId() + ":" + previousMatches + ":" + canonical(goal);

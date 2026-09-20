@@ -428,8 +428,8 @@ public final class IntentRuntime {
         return stateIdentity;
     }
 
-    CompletableFuture<Void> checkpointBeforeEnchantment(IntentTaskRecord parent) {
-        requireEnchantmentParent(parent);
+    CompletableFuture<Void> checkpointBeforeSubmission(IntentTaskRecord parent) {
+        requireSubmissionParent(parent);
         try {
             // 绕过普通五秒保存间隔，完整保留稳定任务身份、request_key和当前步骤；返回实际磁盘写入凭据给消费屏障等待。
             var completion = stateStore.saveAsync(stateIdentity, IntentStateCodec.encode(
@@ -442,17 +442,17 @@ public final class IntentRuntime {
         }
     }
 
-    CompletableFuture<Void> followEnchantmentCheckpoint(IntentTaskRecord parent) {
-        requireEnchantmentParent(parent);
+    CompletableFuture<Void> followSubmissionCheckpoint(IntentTaskRecord parent) {
+        requireSubmissionParent(parent);
         // 本运行时的合并快照仍包含已登记父任务；跟随最新回执，若它失败则让屏障停止，不能自动改写再试。
         var latest = stateStore.latestSaveCompletion(stateIdentity);
-        return latest == null || latest.isCancelled() ? checkpointBeforeEnchantment(parent) : latest;
+        return latest == null || latest.isCancelled() ? checkpointBeforeSubmission(parent) : latest;
     }
 
-    private void requireEnchantmentParent(IntentTaskRecord parent) {
+    private void requireSubmissionParent(IntentTaskRecord parent) {
         requireCurrentBinding(parent);
         if (tasks.get(parent.externalId()) != parent || parent.stepIndex() >= parent.steps().size())
-            throw new IllegalStateException("enchantment parent is not the registered current task");
+            throw new IllegalStateException("submission parent is not the registered current task");
     }
 
     public void restoredTaskAttached(IntentTaskRecord record) {

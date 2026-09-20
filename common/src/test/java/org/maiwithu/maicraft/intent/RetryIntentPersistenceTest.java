@@ -35,13 +35,13 @@ public final class RetryIntentPersistenceTest {
 
     private static void revisedProcessSurvives(Path directory, boolean build) throws Exception {
         var h = new Harness(directory, machine(build));
-        UUID original = EnchantSubmissionBinding.operationId(h.parent);
+        UUID original = NativeSubmissionBinding.operationId(h.parent, "enchant");
         JsonObject fresh = json("{\"snapshot_id\":\"" + UUID.randomUUID() + "\"}");
         check(h.task.persistAnswerParameters(answer(fresh)) == null && h.changed.get() == 1, "新观察先成为当前持久步骤");
-        check(EnchantSubmissionBinding.operationId(h.parent).equals(original), "只换snapshot_id不能换消费编号");
+        check(NativeSubmissionBinding.operationId(h.parent, "enchant").equals(original), "只换snapshot_id不能换消费编号");
         JsonObject budget = current(h).parameters(); budget.getAsJsonObject("production").getAsJsonObject("parameters").addProperty("max_lapis", 2);
         h.task.persistAnswerParameters(answer(budget));
-        check(!EnchantSubmissionBinding.operationId(h.parent).equals(original)
+        check(!NativeSubmissionBinding.operationId(h.parent, "enchant").equals(original)
                 && current(h).parameters().getAsJsonObject("production").getAsJsonObject("parameters").get("max_lapis").getAsInt() == 2,
                 "真实预算调整必须写回目标并进入消费身份");
         // 旧附魔前置失败后允许改用另一机制；崩溃恢复必须保留实际执行的工序，不能回到旧namespace重新消费。
@@ -50,17 +50,17 @@ public final class RetryIntentPersistenceTest {
         check(h.task.persistAnswerParameters(answer(changed)) == null, "真实工序参数可在消费前经允许的retry修改");
         check(current(h).target().equals(h.parent.goal().target()) && current(h).target().position() == null,
                 "写回参数不得把原机器地标解析成坐标或改写最初请求");
-        String namespace = namespace(current(h)); UUID operation = EnchantSubmissionBinding.operationId(h.parent, namespace);
+        String namespace = namespace(current(h)); UUID operation = NativeSubmissionBinding.operationId(h.parent, namespace);
         check(namespace.equals("world-process"), "消费命名空间来自写回后的实际工序");
         var journal = new TestJournal(h.identity, operation, namespace, h.queue); var consumer = new ConsumerRecord(namespace);
-        consumer.submissionBarrier(EnchantSubmissionBinding.barrier(h.parent, h.runtime, namespace, journal::prepare));
+        consumer.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, namespace, journal::prepare));
         check(!consumer.prepareNativeConsumptionBoundary(), "先等待包含新工序的父检查点"); h.queue.runNext();
         IntentTaskRecord restored = h.restore();
         check(current(h).toJson().equals(restored.steps().get(restored.stepIndex()).toJson())
                 && namespace(restored.steps().get(restored.stepIndex())).equals(namespace), "磁盘恢复的实际目标和namespace必须与消费任务一致");
         check(!consumer.prepareNativeConsumptionBoundary(), "父目标落盘后再排预约写入"); h.queue.runNext();
         check(consumer.prepareNativeConsumptionBoundary(), "两份真实文件完成后才能消费");
-        UUID recovered = EnchantSubmissionBinding.operationId(restored, namespace);
+        UUID recovered = NativeSubmissionBinding.operationId(restored, namespace);
         check(recovered.equals(operation), "恢复后必须落到实际工序同一个预约编号");
         var replay = new TestJournal(h.identity, recovered, namespace, h.queue);
         check(!replay.prepare(), "恢复实例仍检查已有预约"); h.queue.runNext();

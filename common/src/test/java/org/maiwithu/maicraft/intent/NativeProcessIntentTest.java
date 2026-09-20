@@ -92,38 +92,38 @@ public final class NativeProcessIntentTest {
 
     private static void durableIdentity() throws Exception {
         UUID parentId = UUID.randomUUID(); Goal first = machine(UUID.randomUUID().toString());
-        var parent = new IntentTaskRecord(parentId, null, first); UUID operation = EnchantSubmissionBinding.operationId(parent);
+        var parent = new IntentTaskRecord(parentId, null, first); UUID operation = NativeSubmissionBinding.operationId(parent, "enchant");
         var identity = new StateIdentity("e".repeat(64), Files.createTempDirectory("native-process-identity-"));
         ArrayDeque<Runnable> writes = new ArrayDeque<>(); Executor executor = writes::addLast;
         var constructor = NativeConsumptionJournal.class.getDeclaredConstructor(StateIdentity.class, UUID.class, String.class, Executor.class);
         constructor.setAccessible(true); var journal = constructor.newInstance(identity, operation, "enchant", executor);
         check(!journal.prepare(), "先等待真实预约写入"); writes.removeFirst().run(); check(journal.prepare(), "预约已同步");
         Goal refreshed = machine(UUID.randomUUID().toString()); parent.replaceCurrent(refreshed);
-        check(EnchantSubmissionBinding.operationId(parent).equals(operation), "同父任务刷新snapshot_id不改变消费标识");
-        var retry = constructor.newInstance(identity, EnchantSubmissionBinding.operationId(parent), "enchant", executor);
+        check(NativeSubmissionBinding.operationId(parent, "enchant").equals(operation), "同父任务刷新snapshot_id不改变消费标识");
+        var retry = constructor.newInstance(identity, NativeSubmissionBinding.operationId(parent, "enchant"), "enchant", executor);
         check(!retry.prepare(), "新实例仍检查原预约"); writes.removeFirst().run(); rejects(retry::prepare);
         // 明确排列两次才有两次消费；比较之前相同目标时也忽略观察引用。
         Goal sequence = new Goal("maicraft:sequence", "两次原生加工", null, "{}", "{}", List.of(), List.of(first, refreshed));
-        var repeated = new IntentTaskRecord(parentId, null, sequence); UUID before = EnchantSubmissionBinding.operationId(repeated);
+        var repeated = new IntentTaskRecord(parentId, null, sequence); UUID before = NativeSubmissionBinding.operationId(repeated, "enchant");
         repeated.addStepResult(new IntentTaskRecord.StepSnapshot(0, first.ability(), true, "fixture", TaskResult.ok("fixture").toJson()));
-        check(!EnchantSubmissionBinding.operationId(repeated).equals(before), "显式两次过程不能共用一个消费编号");
+        check(!NativeSubmissionBinding.operationId(repeated, "enchant").equals(before), "显式两次过程不能共用一个消费编号");
         JsonObject higherBudget = refreshed.parameters(); higherBudget.getAsJsonObject("production").getAsJsonObject("parameters").addProperty("max_lapis", 2);
         parent.replaceCurrent(refreshed.withParameters(higherBudget));
-        check(!EnchantSubmissionBinding.operationId(parent).equals(operation), "真实成本预算不得从消费标识中删除");
+        check(!NativeSubmissionBinding.operationId(parent, "enchant").equals(operation), "真实成本预算不得从消费标识中删除");
         JsonObject world = refreshed.parameters(); world.add("production", json("{\"schema_version\":2,\"process\":\"ae2:transform\",\"parameters\":{\"recipe_id\":\"example:first\",\"batches\":1}}"));
         Goal worldGoal = refreshed.withParameters(world); var worldParent = new IntentTaskRecord(parentId, null, worldGoal);
-        UUID worldId = EnchantSubmissionBinding.operationId(worldParent, "world-process");
+        UUID worldId = NativeSubmissionBinding.operationId(worldParent, "world-process");
         world.getAsJsonObject("production").getAsJsonObject("parameters").addProperty("recipe_id", "example:second");
         worldParent.replaceCurrent(refreshed.withParameters(world));
-        check(!EnchantSubmissionBinding.operationId(worldParent, "world-process").equals(worldId), "水中机制的真实配方选择保留在消费标识中");
+        check(!NativeSubmissionBinding.operationId(worldParent, "world-process").equals(worldId), "水中机制的真实配方选择保留在消费标识中");
         parent.replaceCurrent(refreshed.withTarget(new Goal.SemanticTarget("landmark", "另一处台子", null, null)));
-        check(!EnchantSubmissionBinding.operationId(parent).equals(operation), "真实地点变化保留在消费意图中");
+        check(!NativeSubmissionBinding.operationId(parent, "enchant").equals(operation), "真实地点变化保留在消费意图中");
         // 兼容旧附魔的字节级算法，不将其父Goal迁移成机器请求。
         var old = new IntentTaskRecord(parentId, null, legacy());
         String canonical = "{\"ability\":\"maicraft:enchant\",\"children\":[],\"constraints\":[],\"outcome\":\"附魔一本书\",\"parameters\":{\"item_id\":\"minecraft:book\",\"max_lapis\":1,\"max_levels_spent\":1},\"preferences\":{}}";
         UUID expected = UUID.nameUUIDFromBytes(("enchant:" + parentId + ":0:" + canonical).getBytes(StandardCharsets.UTF_8));
-        check(EnchantSubmissionBinding.operationId(old).equals(expected), "旧附魔消费编号算法必须完全保留");
-        check(!EnchantSubmissionBinding.operationId(old, "world-process").equals(expected), "不同机制的消费命名空间必须隔离");
+        check(NativeSubmissionBinding.operationId(old, "enchant").equals(expected), "旧附魔消费编号算法必须完全保留");
+        check(!NativeSubmissionBinding.operationId(old, "world-process").equals(expected), "不同机制的消费命名空间必须隔离");
     }
 
     private static void onDemandKnowledge() {

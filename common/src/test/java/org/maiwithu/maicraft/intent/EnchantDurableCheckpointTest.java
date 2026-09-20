@@ -32,7 +32,7 @@ public final class EnchantDurableCheckpointTest {
 
     private static void parentBeforeReservation(Path directory) throws Exception {
         var h = new Harness(directory); var reservations = new AtomicInteger(); var markerReady = new AtomicBoolean();
-        h.child.submissionBarrier(EnchantSubmissionBinding.barrier(h.parent, h.runtime, () -> {
+        h.child.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, "enchant", () -> {
             verifyRestored(h); reservations.incrementAndGet(); return markerReady.get();
         }));
         check(!h.child.prepareNativeConsumptionBoundary() && !h.child.prepareNativeConsumptionBoundary(), "父任务未落盘时持续等待");
@@ -47,7 +47,7 @@ public final class EnchantDurableCheckpointTest {
 
     private static void coalescedCheckpoint(Path directory) throws Exception {
         var h = new Harness(directory); var reservations = new AtomicInteger();
-        h.child.submissionBarrier(EnchantSubmissionBinding.barrier(h.parent, h.runtime, () -> {
+        h.child.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, "enchant", () -> {
             verifyRestored(h); reservations.incrementAndGet(); return true;
         }));
         check(!h.child.prepareNativeConsumptionBoundary(), "先等待强制捕获的父任务检查点");
@@ -66,7 +66,7 @@ public final class EnchantDurableCheckpointTest {
     private static void failedCheckpoint(Path blocked, boolean coalesced) throws Exception {
         // 文件占据检查点目录，实际后台写入必然失败；覆盖旧future后的失败也必须保留，不能自动再捕获重试。
         Files.writeString(blocked, "not a directory"); var h = new Harness(blocked); var reservations = new AtomicInteger();
-        h.child.submissionBarrier(EnchantSubmissionBinding.barrier(h.parent, h.runtime, () -> { reservations.incrementAndGet(); return true; }));
+        h.child.submissionBarrier(NativeSubmissionBinding.barrier(h.parent, h.runtime, "enchant", () -> { reservations.incrementAndGet(); return true; }));
         check(!h.child.prepareNativeConsumptionBoundary(), "失败也须由实际后台写入回执决定");
         if (coalesced) check(h.captureOrdinary(), "普通保存可以合并消费屏障的旧future");
         var latest = h.store.latestSaveCompletion(h.identity); h.queue.runNext();
@@ -85,7 +85,7 @@ public final class EnchantDurableCheckpointTest {
         var restored = IntentTaskRecord.restored(snapshot.id(), snapshot.planId(), snapshot.goal(), h.identity.key(),
                 snapshot.steps(), snapshot.stepIndex(), snapshot.completed(), snapshot.internalPositions(), snapshot.internalAreaProtections(),
                 snapshot.attempts(), snapshot.decision(), snapshot.pendingAnswer(), snapshot.terminal(), 100);
-        check(EnchantSubmissionBinding.operationId(restored).equals(EnchantSubmissionBinding.operationId(h.parent)), "重启必须重新计算出同一附魔预约编号");
+        check(NativeSubmissionBinding.operationId(restored, "enchant").equals(NativeSubmissionBinding.operationId(h.parent, "enchant")), "重启必须重新计算出同一附魔预约编号");
     }
 
     private static IntentStateCodec.Decoded read(Harness h) {
