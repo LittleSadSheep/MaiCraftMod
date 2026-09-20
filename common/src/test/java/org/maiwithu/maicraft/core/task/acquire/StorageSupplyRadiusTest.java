@@ -88,12 +88,12 @@ public final class StorageSupplyRadiusTest {
             remember.invoke(cache, h.player, h.level, Map.of(barrel, entities.get(barrel)),
                     new StockEvidence.Snapshot(StockEvidence.Source.CONTAINER, Map.of(STONE, 1124L), Set.of(), h.level.getGameTime()));
             Object candidate = stoneBrickRecipe();
-            check(hint(task, candidate, need) == 0 && ((Map<?, ?>) get(task, "recipeObservedStock")).get(STONE).equals(1124L),
+            check(hint(task, candidate, need) == 0 && ((Map<?, ?>) get(get(task, "recipePlanner"), "recipeObservedStock")).get(STONE).equals(1124L),
                     "the actual recipe hint call sees observed stock at the same extended warehouse radius");
             var explicit = new SemanticAcquireTaskRecord("public-sixteen", 1000, List.of(BRICKS), 4, sources, false,
                     SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
             var local = new SemanticAcquireCompanionTask(h.player, explicit); local.onStart();
-            check(hint(local, candidate, get(local, "rootNeed")) == 1 && ((Map<?, ?>) get(local, "recipeObservedStock")).isEmpty(),
+            check(hint(local, candidate, get(local, "rootNeed")) == 1 && ((Map<?, ?>) get(get(local, "recipePlanner"), "recipeObservedStock")).isEmpty(),
                     "the same remembered warehouse remains outside an explicit public sixteen-block request");
             var forbidden = new SemanticAcquireTaskRecord("storage-forbidden", 1000, List.of(BRICKS), 4,
                     List.of(SemanticAcquireTaskRecord.Source.CRAFT), false, SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 48);
@@ -121,8 +121,8 @@ public final class StorageSupplyRadiusTest {
                 new CraftPlanCost(4, CraftPlanCost.Surface.READY, 0, 4, "minecraft:stone_bricks"), List.of());
     }
     private static int hint(Object task, Object candidate, Object need) throws Exception {
-        Method method = task.getClass().getDeclaredMethod("observedStockPriority", candidate.getClass(), need.getClass());
-        method.setAccessible(true); return (int) method.invoke(task, candidate, need);
+        return ((AcquisitionRecipePlanner) get(task, "recipePlanner"))
+                .stockPriority((CraftRecoveryCandidate) candidate, (AcquisitionNeed) need);
     }
     @SuppressWarnings("unchecked") private static Map<Class<? extends TaskRecord>, TaskFactory.Runner<? extends TaskRecord>> runners() throws Exception {
         return (Map<Class<? extends TaskRecord>, TaskFactory.Runner<? extends TaskRecord>>) staticGet(TaskFactory.class, "RUNNERS");

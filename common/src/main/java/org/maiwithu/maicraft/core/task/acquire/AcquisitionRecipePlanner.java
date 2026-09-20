@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -20,6 +21,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
+import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 
@@ -29,15 +31,24 @@ final class AcquisitionRecipePlanner {
     static final int UNREACHABLE_STRUCTURE_COST = 1_000_000;
     private final LocalPlayer player;
     private final boolean allowHarm;
+    private final int storageSearchRadius;
+    private final List<String> protectedLabels;
+    private AcquisitionNeed stockHintNeed;
+    private long stockHintTick = Long.MIN_VALUE;
+    private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
+    private final Map<String, Integer> recipeStockPriorities = new HashMap<>();
+
     private Map<ResourceLocation, List<CraftingRecipe>> recipeIndex;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> stockRecipes = new HashMap<>();
 
-    AcquisitionRecipePlanner(LocalPlayer player, boolean allowHarm) {
+    AcquisitionRecipePlanner(LocalPlayer player, boolean allowHarm, int storageSearchRadius, List<String> protectedLabels) {
         this.player = player;
         this.allowHarm = allowHarm;
+        this.storageSearchRadius = storageSearchRadius;
+        this.protectedLabels = List.copyOf(protectedLabels);
     }
 
-    List<ObservedRecipeStockCost.Recipe> stockRecipes(ResourceLocation output) {
+    private List<ObservedRecipeStockCost.Recipe> stockRecipes(ResourceLocation output) {
         // 仓库估价只展开普通九格内配方；未知配方不会凭空变成可用材料，也不会阻断其他候选。
         return stockRecipes.computeIfAbsent(output, ignored -> {
             List<ObservedRecipeStockCost.Recipe> result = new ArrayList<>();
@@ -65,7 +76,7 @@ final class AcquisitionRecipePlanner {
         });
     }
 
-    Map<ResourceLocation, List<CraftingRecipe>> recipes() {
+    private Map<ResourceLocation, List<CraftingRecipe>> recipes() {
         // 一次任务共用按成品整理的配方索引；递归找原料时复用，避免每一层重新扫描整张配方表。
         if (recipeIndex != null) return recipeIndex;
         Map<ResourceLocation, List<CraftingRecipe>> indexed = new LinkedHashMap<>();
@@ -234,6 +245,86 @@ final class AcquisitionRecipePlanner {
         }
         SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(itemIds);
         return !hint.entityTypeIds().isEmpty() && hint.blockRefs().isEmpty();
+    }
+
+
+    record Frontier(
+            IngredientNeed ingredient,
+            Set<String> recipeIds,
+            List<ResourceLocation> outputItemIds) {}
+
+    /** 只用已授权仓库的近期观察给路线排序；真正开做仍要求材料进入背包。 */
+    int stockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
+        if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
+        long tick = player.level().getGameTime();
+        if (stockHintNeed != parent || stockHintTick != tick) {
+            stockHintNeed = parent;
+            stockHintTick = tick;
+            recipeStockPriorities.clear();
+            // 已打开仓库的库存提示与实际开箱候选共用同一范围，避免远处已有材料被错误排除、转去重新生产。
+            recipeObservedStock = ContainerSupplySources.observedCounts(
+                    player, player.blockPosition(), storageSearchRadius, protectedLabels);
+            Map<ResourceLocation, Long> carried = new LinkedHashMap<>();
+            for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
+                ItemStack stack = player.getInventory().items.get(slot);
+                if (!stack.isEmpty()) {
+                    carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()), (long) stack.getCount(), Long::sum);
+                }
+            }
+            recipeCarriedStock = Map.copyOf(carried);
+        }
+        if (recipeObservedStock.isEmpty()) return 1;
+        return recipeStockPriorities.computeIfAbsent(candidate.recipeId(), ignored -> {
+            List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
+            for (var ingredient : candidate.ingredients()) {
+                if (ingredient.required() > 32768) return 1;
+                ingredients.add(new ObservedRecipeStockCost.Need(
+                        ingredient.itemIds(), ingredient.required()));
+            }
+            return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
+                    this::stockRecipes, parent.lineageItems);
+        });
+    }
+
+    /** 各条路线都只差一件时可合并替代原料；否则保留一条完整配方，不能从两条路线各凑一半。 */
+    Frontier chooseFrontier(
+            CraftRecoveryCandidate chosen,
+            List<CraftRecoveryCandidate> viableCandidates,
+            AcquisitionNeed parent) {
+        // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
+        // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
+        IngredientNeed primary = chooseIngredient(chosen, parent);
+        if (primary == null) return null;
+
+        LinkedHashSet<ResourceLocation> itemIds = new LinkedHashSet<>(primary.itemIds());
+        LinkedHashSet<String> recipeIds = new LinkedHashSet<>();
+        LinkedHashSet<ResourceLocation> outputItemIds = new LinkedHashSet<>();
+        recipeIds.add(chosen.recipeId());
+        outputItemIds.add(chosen.outputItem());
+
+        if (chosen.cost().missingMaterials() == 1 && primary.missing() == 1) {
+            for (CraftRecoveryCandidate candidate : viableCandidates) {
+                if (candidate == chosen
+                        || candidate.cost().missingMaterials() != 1
+                        || candidate.cost().surface() != chosen.cost().surface()) {
+                    continue;
+                }
+                IngredientNeed alternative = chooseIngredient(candidate, parent);
+                if (alternative == null || alternative.missing() != 1) continue;
+                itemIds.addAll(alternative.itemIds());
+                recipeIds.add(candidate.recipeId());
+                outputItemIds.add(candidate.outputItem());
+            }
+        }
+
+        IngredientNeed frontier = primary;
+        if (recipeIds.size() > 1) {
+            frontier = new IngredientNeed(List.copyOf(itemIds), 1);
+        }
+        return new Frontier(
+                frontier,
+                Collections.unmodifiableSet(recipeIds),
+                List.copyOf(outputItemIds));
     }
 
 }

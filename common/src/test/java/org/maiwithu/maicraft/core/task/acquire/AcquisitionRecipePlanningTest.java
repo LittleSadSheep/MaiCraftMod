@@ -101,7 +101,7 @@ public final class AcquisitionRecipePlanningTest {
                 List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT));
         var planks = recipe("planks", Items.OAK_PLANKS, Ingredient.of(Items.OAK_LOG));
         install(world, List.of(planks));
-        var planner = new AcquisitionRecipePlanner(world.player, false);
+        var planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
         check(planner.ingredientStructureCost(List.of(plank), need) == 1, "原木变木板还需一层合成");
         check(planner.ingredientStructureCost(List.of(plank, BuiltInRegistries.ITEM.getKey(Items.BIRCH_LOG)), need) == 0,
                 "原料可替代时保留较直接的来源，不强制制造另一个变体");
@@ -111,7 +111,7 @@ public final class AcquisitionRecipePlanningTest {
         check(planner.structureCost(candidate, need) == 4, "候选成本同时计算缺料量与原料转换层数");
         // 构造往返配方复现循环：木板依赖原木，原木又依赖木板；两者都没带时不能当作现成来源。
         install(world, List.of(planks, recipe("reverse", Items.OAK_LOG, Ingredient.of(Items.OAK_PLANKS))));
-        planner = new AcquisitionRecipePlanner(world.player, false);
+        planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
         check(planner.ingredientStructureCost(List.of(plank), need) == AcquisitionRecipePlanner.UNREACHABLE_STRUCTURE_COST,
                 "循环路线不能排成零成本叶子");
         world.inventory.setItem(0, new ItemStack(Items.OAK_PLANKS));
@@ -135,7 +135,7 @@ public final class AcquisitionRecipePlanningTest {
         var wool = BuiltInRegistries.ITEM.getKey(Items.WHITE_WOOL);
         var need = new AcquisitionNeed(List.of(stick), 4, 0, Set.of(stick), Set.of(), Set.of(),
                 List.of(SemanticAcquireTaskRecord.Source.CRAFT, SemanticAcquireTaskRecord.Source.HUNT));
-        var planner = new AcquisitionRecipePlanner(world.player, false);
+        var planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
         var onePlank = new CraftRecoveryCandidate.IngredientDemand(List.of(plank), 1, 1);
         var repeated = candidate(stick, "three_slots", List.of(onePlank, onePlank, onePlank));
         check(planner.chooseIngredient(repeated, need).missing() == 3, "三个相同配方格应合成一项缺三份的需求");
@@ -149,6 +149,17 @@ public final class AcquisitionRecipePlanningTest {
                 new CraftRecoveryCandidate.IngredientDemand(List.of(wool), 1, 1)));
         check(planner.chooseIngredient(restricted, need).itemIds().equals(List.of(wool)),
                 "先检查受伤害许可限制的原料");
+        // 两条路线各只差一件，拿到任意一种即可做成；多件路线不能把不同配方的半套材料相加。
+        var first = candidate(stick, "first", List.of(onePlank));
+        var second = candidate(stick, "second",
+                List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(coal), 1, 1)));
+        var merged = planner.chooseFrontier(first, List.of(first, second), need);
+        check(merged.ingredient().missing() == 1 && Set.copyOf(merged.ingredient().itemIds()).equals(Set.of(plank, coal))
+                        && merged.recipeIds().equals(Set.of("first", "second")),
+                "一件替代原料足以解锁任意一条完整配方");
+        var separate = planner.chooseFrontier(repeated, List.of(repeated, second), need);
+        check(separate.ingredient().missing() == 3 && separate.recipeIds().equals(Set.of("three_slots")),
+                "不能把另一条路线的一件原料混进缺三件的配方");
     }
 
     private static CraftRecoveryCandidate candidate(ResourceLocation output, String id,

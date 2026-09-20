@@ -5,7 +5,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,6 +37,7 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.IngredientNeed;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanner.Frontier;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
@@ -62,7 +62,6 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Locale;
 import java.util.stream.Collectors;
 import org.maiwithu.maicraft.core.Constants;
@@ -89,11 +88,6 @@ public final class SemanticAcquireCompanionTask
 
     private record ExecutableCraft(ResourceLocation outputItem, CraftOps.Plan plan) {}
 
-    private record CraftFrontier(
-            IngredientNeed ingredient,
-            Set<String> recipeIds,
-            List<ResourceLocation> outputItemIds) {}
-
     private record NearbySurvey(
             int safeCount,
             int protectedCount,
@@ -119,10 +113,6 @@ public final class SemanticAcquireCompanionTask
     private Map<String, Object> processPlanning = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private final AcquisitionRecipePlanner recipePlanner;
-    private AcquisitionNeed stockHintNeed;
-    private long stockHintTick = Long.MIN_VALUE;
-    private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
-    private final Map<String, Integer> recipeStockPriorities = new HashMap<>();
     private Map<ResourceLocation, Integer> initialCounts = Map.of();
     private AcquisitionNeed rootNeed;
     private Task activeChild;
@@ -147,7 +137,7 @@ public final class SemanticAcquireCompanionTask
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
         super(player, record);
-        recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm);
+        recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm, record.storageSearchRadius, record.protectedLabels);
     }
 
     @Override
@@ -421,7 +411,7 @@ public final class SemanticAcquireCompanionTask
                 .sorted(Comparator
                         .comparingInt((CraftRecoveryCandidate candidate) ->
                                 candidate.cost().surface().ordinal())
-                        .thenComparingInt(candidate -> observedStockPriority(candidate, need))
+                        .thenComparingInt(candidate -> recipePlanner.stockPriority(candidate, need))
                         .thenComparingInt(candidate ->
                                 recipePlanner.structureCost(candidate, need))
                         .thenComparing(CraftRecoveryCandidate::cost, CraftPlanCost.ORDER))
@@ -467,7 +457,7 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
 
-        CraftFrontier frontier = chooseCraftFrontier(chosen, viableCandidates, need);
+        Frontier frontier = recipePlanner.chooseFrontier(chosen, viableCandidates, need);
         if (frontier == null) {
             need.rejectedRecipes.add(chosen.recipeId());
             addIssue("craft", "recipe_cycle_or_missing_evidence",
@@ -499,7 +489,7 @@ public final class SemanticAcquireCompanionTask
                 "depth", need.depth,
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
                 "missing_count", ingredient.missing(),
-                "observed_stock_material_hint", observedStockPriority(chosen, need) == 0,
+                "observed_stock_material_hint", recipePlanner.stockPriority(chosen, need) == 0,
                 "source_order", childSources.stream()
                         .map(source -> source.name().toLowerCase(Locale.ROOT))
                         .toList()));
@@ -1723,83 +1713,6 @@ public final class SemanticAcquireCompanionTask
             }
         }
         return Set.copyOf(excluded);
-    }
-
-    /** Fresh authorized warehouse contents influence preference only; executable crafting still requires carried items. */
-    private int observedStockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
-        if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
-        long tick = player.level().getGameTime();
-        if (stockHintNeed != parent || stockHintTick != tick) {
-            stockHintNeed = parent; stockHintTick = tick; recipeStockPriorities.clear();
-            // 已打开仓库的库存提示与实际开箱候选共用同一范围，避免远处已有材料被错误排除、转去重新生产。
-            recipeObservedStock = ContainerSupplySources.observedCounts(player, player.blockPosition(), r.storageSearchRadius, r.protectedLabels);
-            Map<ResourceLocation, Long> carried = new LinkedHashMap<>();
-            for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
-                ItemStack stack = player.getInventory().items.get(slot);
-                if (!stack.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()), (long) stack.getCount(), Long::sum);
-            }
-            recipeCarriedStock = Map.copyOf(carried);
-        }
-        if (recipeObservedStock.isEmpty()) return 1;
-        return recipeStockPriorities.computeIfAbsent(candidate.recipeId(), ignored -> {
-            List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
-            for (var ingredient : candidate.ingredients()) {
-                if (ingredient.required() > 32768) return 1;
-                ingredients.add(new ObservedRecipeStockCost.Need(ingredient.itemIds(), ingredient.required()));
-            }
-            return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
-                    recipePlanner::stockRecipes, parent.lineageItems);
-        });
-    }
-
-    /**
-     * Build the next material frontier without leaking registry order into physical behavior.
-     *
-     * <p>When several acceptable outputs each have a recipe that is exactly one material short,
-     * acquiring one item from any of those recipes makes one complete recipe executable. Their
-     * acceptable inputs therefore form one real semantic alternative set. Nearby collection and
-     * mining can then choose the closest reachable member of that set instead of trying recipe IDs
-     * alphabetically. More complicated frontiers stay on one recipe because mixing partial inputs
-     * from unrelated recipes would not prove either recipe satisfiable.</p>
-     */
-    private CraftFrontier chooseCraftFrontier(
-            CraftRecoveryCandidate chosen,
-            List<CraftRecoveryCandidate> viableCandidates,
-            AcquisitionNeed parent) {
-        // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
-        // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
-        IngredientNeed primary = recipePlanner.chooseIngredient(chosen, parent);
-        if (primary == null) return null;
-
-        LinkedHashSet<ResourceLocation> itemIds = new LinkedHashSet<>(primary.itemIds());
-        LinkedHashSet<String> recipeIds = new LinkedHashSet<>();
-        LinkedHashSet<ResourceLocation> outputItemIds = new LinkedHashSet<>();
-        recipeIds.add(chosen.recipeId());
-        outputItemIds.add(chosen.outputItem());
-
-        if (chosen.cost().missingMaterials() == 1 && primary.missing() == 1) {
-            for (CraftRecoveryCandidate candidate : viableCandidates) {
-                if (candidate == chosen
-                        || candidate.cost().missingMaterials() != 1
-                        || candidate.cost().surface() != chosen.cost().surface()) {
-                    continue;
-                }
-                IngredientNeed alternative = recipePlanner.chooseIngredient(candidate, parent);
-                if (alternative == null || alternative.missing() != 1) continue;
-                itemIds.addAll(alternative.itemIds());
-                recipeIds.add(candidate.recipeId());
-                outputItemIds.add(candidate.outputItem());
-            }
-        }
-
-        IngredientNeed frontier = primary;
-        if (recipeIds.size() > 1) {
-            frontier = new IngredientNeed(List.copyOf(itemIds), 1);
-        }
-        return new CraftFrontier(
-                frontier,
-                Collections.unmodifiableSet(recipeIds),
-                List.copyOf(outputItemIds));
     }
 
     /**
