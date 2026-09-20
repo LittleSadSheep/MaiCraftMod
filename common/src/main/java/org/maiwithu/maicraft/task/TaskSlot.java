@@ -46,17 +46,18 @@ final class TaskSlot {
         }
 
         record = next;
-        // 先记下新任务，再找负责做这件事的代码；如果“找执行代码”这一步抛异常，下面的 try 接不住。
-        task = TaskFactory.create(player, next);
-        acceptedGameTime = player.level().getGameTime();
-        next.setState(TaskState.RUNNING);
-        next.markStarted(acceptedGameTime);
         try {
+            // 创建和启动都属于接单过程；任一步失败都要交付失败结果并清空槽位，不能留下无人推进的任务单。
+            task = TaskFactory.create(player, next);
+            acceptedGameTime = player.level().getGameTime();
+            next.setState(TaskState.RUNNING);
+            next.markStarted(acceptedGameTime);
             task.start(player);
         } catch (RuntimeException exception) {
             next.setState(TaskState.FAILED);
             runCleanupAfterFailure();
-            next.setResult(TaskResult.fail("task start failed: " + safeMessage(exception)));
+            String stage = task == null ? "creation" : "start";
+            next.setResult(TaskResult.fail("task " + stage + " failed: " + safeMessage(exception)));
         }
         settleIfTerminal(player);
     }
@@ -148,6 +149,8 @@ final class TaskSlot {
     }
 
     private void runCleanupAfterFailure() {
+        // 构造失败时没有执行器可以收尾，仍由 settle 释放身体并交付任务单上的失败结果。
+        if (task == null) return;
         // result 不只负责回答结果，还负责关菜单、停导航等收尾；即使收尾出错，也要报告任务失败。
         try {
             task.result(TaskState.FAILED);

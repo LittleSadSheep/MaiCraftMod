@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import org.maiwithu.maicraft.task.TaskSlotFailureTest;
 import org.maiwithu.maicraft.client.chat.ChatTypingTest;
 import org.maiwithu.maicraft.client.preview.PreviewRefreshTest;
 import org.maiwithu.maicraft.client.preview.PreviewSessionTest;
@@ -107,6 +108,8 @@ import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 /** Actual visibility-policy checks and architecture guards; live UI clicks still need a game. */
 public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
+        // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
+        TaskSlotFailureTest.main(args);
         ChatTypingTest.main(args);
         ChatSessionTest.main(args);
         ChatAbilityTest.main(args);
