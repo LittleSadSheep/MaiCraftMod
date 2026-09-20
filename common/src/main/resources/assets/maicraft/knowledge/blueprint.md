@@ -150,6 +150,50 @@ v1 坐标与共用验收约定：
 - `BOOLEAN/DIFFERENCE` 引用同一对象列表中的节点。组件里的切割引用按每个实例隔离；切割节点不独立建造，也不能再引用其他切割器。空腔和被切掉的位置产生 AIR，外轮廓以外不产生清障目标。
 - `overlap_policy` 默认为 `last_wins`；`error` 拒绝异材质实体重叠，相同最终材质仍可重叠。引用环、未知组件/材质、无效变换及展开数量或体素工作超预算都在施工前拒绝。
 
+### 平面网格与交替半砖
+
+v2 的 `panel` 可添加 `pattern`，将小段二进制图案重复到整个平面。每个字符对应一格，行宽须一致；首格可以是 `0` 或 `1`，不补前导格、不改变输入顺序。尺寸不是图案周期的整数倍时，边缘保留剩余部分。
+
+下面是 `objects` 中的一块 8×6 竖直面板，场景使用 `minecraft_y_up`，材质表中的 `Frame` 可定义为 `{"block_id":"minecraft:stone_bricks"}`。图案由 `01 / 10` 重复，默认 `1` 沿用平面的材质，`0` 留孔：
+
+```json
+{
+  "name":"Screen", "type":"MESH", "primitive":"panel",
+  "location":[4,3,0.5], "dimensions":[8,6,1], "material":"Frame",
+  "pattern":{"axes":["x","y"],"rows":["01","10"]}
+}
+```
+
+若要每行都按“下半砖、上半砖”交替，在场景 `materials` 中定义：
+
+```json
+{
+  "Upper":{"block_id":"minecraft:stone_slab","properties":{"type":"top"}},
+  "Lower":{"block_id":"minecraft:stone_slab","properties":{"type":"bottom"}}
+}
+```
+
+然后通过 `update_scene.edits.objects` 更新面板，或直接将这些字段写入新面板：
+
+```json
+{
+  "name":"Screen", "material":"Upper",
+  "pattern":{
+    "axes":["x","y"], "rows":["01"],
+    "materials":{"1":"Upper","0":"Lower"}
+  }
+}
+```
+
+`rows:["10"]` 就是每行先上半砖再下半砖；`rows:["01","10"]` 则每行交错。半砖模式每格都有方块，其间空隙来自半砖形状，`0` 不再表示整格空气。
+
+- `axes` 的第一项是列方向，第二项是行方向，必须不同；剩余轴是厚度且尺寸必须为 1。`["x","y"]` 适合竖墙，`["x","z"]` 适合水平面。轴名与面材质约定一致，始终采用转换后的 Minecraft 局部 Y-up 轴，Blender 场景也一样。
+- 第一字符位于对象局部包围盒的最小角，列与行分别沿指定轴的正方向增长；行数组不是固定从世界高处往下排。图案随后随对象或组件旋转、镜像和阵列复制，每个实例保留相同图案相位。
+- `pattern.materials` 可分别覆盖 `0`、`1` 的具名材质；未指定 `1` 时沿用面或棱涂装后的材质，未指定 `0` 时产生空气孔洞。映射会经过组件的 `material_map`，半砖等状态继续遵循 `block_state_axes`；旋转后需要竖直半砖等游戏无法表达的状态会被拒绝。
+- 图案在面、棱涂装后选材，布尔切割仍可移除其中的实体格；空心或切割已经移除的格子不会被图案填回。带图案的平面不能充当布尔切割体。
+- 默认留孔与布尔开孔一样，只给未被其他对象占据的位置补空气，不删除独立玻璃、框架等对象。空气目标计入建筑预算；清除现场已有方块仍需 `replace_existing:true`。
+- 编辑 `pattern` 时整体替换该对象的图案配置，需要同时提供 `axes`、`rows` 和要保留的材质映射。查询、保存、预览、导出与施工共用此图案；旧 v1 场景须先显式升级为 v2。
+
 `get_scene_info` 分页返回源节点和组件摘要；`get_object_info` 的 `expanded_paths` 每页最多 64 个，带 `page` 与 `has_more`，可继续查询真实场景的生成路径。生成路径只读，应编辑其源对象或组件。详细网格查询返回 `surface_faces` / `surface_edges`，分别包含可绑定的 ID、局部法线/面距及棱端点；原始凸面索引 `faces` 保持不变。这些面棱属于布尔切割前的原始图元，新切割面不会自动获得独立的材质 ID。
 
 `get_component_info` 返回原 `definition` 和组件局部展开样本 `local_expanded_paths`；这些局部样本不能直接用作场景对象查询。组件须经实例平移才对齐格网时，仍返回定义，并在 `local_geometry_unavailable` 说明局部原点样本为何不可用。
