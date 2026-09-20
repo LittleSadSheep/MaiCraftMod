@@ -14,6 +14,7 @@
 | [CookingDevice](../../common/src/main/java/org/maiwithu/maicraft/core/task/cook/CookingDevice.java) | 哪种配方对应哪台炉子、哪种菜单和怎样的燃烧时长？ |
 | [CookingRecipePlanner](../../common/src/main/java/org/maiwithu/maicraft/core/task/cook/CookingRecipePlanner.java) | 哪份准备方案比较合适，需要哪些现货或前置合成？ |
 | [CookingBatch](../../common/src/main/java/org/maiwithu/maicraft/core/task/cook/CookingBatch.java) | 这一炉能装几份原料，要备几份燃料？ |
+| [CookingBatchLedger](../../common/src/main/java/org/maiwithu/maicraft/core/task/cook/CookingBatchLedger.java) | 实际装入、退回和取走多少，本炉数量是否守恒？ |
 | [SemanticCookCompanionTask](../../common/src/main/java/org/maiwithu/maicraft/core/task/cook/SemanticCookCompanionTask.java) | 角色现在该备料、开炉、等待，还是核对并收尾？ |
 
 公开能力直接建立类型明确的任务单。旧内部 `cook` 工具也经过同一个参数入口，不再各自转换数量。它和取物入口共用 [SemanticParameters](../../common/src/main/java/org/maiwithu/maicraft/core/tools/SemanticParameters.java) 的严格读取规则。
@@ -40,7 +41,9 @@
   → 数量还没够就准备下一炉
 ```
 
-第一次使用要求炉内原料、燃料、结果和活动进度都为空。开始装料的请求只是一个动作安排；原生搬运确认后，才把装入量记到本批账里。
+第一次使用要求炉内原料、燃料、结果和活动进度都为空。若最近的炉子被占用，先关闭自己打开的菜单，再尝试另一台；同一位置不会反复试，候选尝试有上限。到场导航固定指向所选炉子，不能按类型搜索又回到已排除的忙炉。已经投入原料的炉次始终留在原炉处理。
+
+开始装料的请求只是一个动作安排；原生搬运确认后，才把实装量记到本批账里。保护标签也在烹饪本体检查，失效的名字不会被当作没有保护。地标锚点由共享 [LandmarkProtection](../../common/src/main/java/org/maiwithu/maicraft/core/task/base/LandmarkProtection.java) 处理，外层已提供的完整区域保护仍保留。
 
 等待时会关闭界面，记住炉子位置和返回站位。到预计完成时刻，或已加载的炉子提前熄火时，再去检查。关界面期间不会通过后台直接读取服务器库存。
 
@@ -72,11 +75,13 @@
 
 ## 收货要核对哪本账
 
-本批确认装入的原料数，减去炉内仍剩的原料数，就是已经消耗的原料数。按配方产量计算出的成品，应等于结果槽里的数量加上本任务已经取走的数量。对不上时会停止认领内容，不把新出现的外来物品算给自己。
+`CookingBatchLedger` 计算：确认装入量减去已退回量，再减去炉内剩余量，才是已经加工的原料数。按配方产量计算出的成品，应等于结果槽里的数量加上已经取走的数量。槽位包分开到达时先只读等待；超过同步窗口仍对不上，才停止认领，不把外来物品算给自己。
 
-取结果之后，还要核对主背包是否增加了预期数量。退回剩料也需要确认原料槽与背包两边的变化。当前会把剩余燃料留在炉里，避免在没有完整燃料归属账时猜着取回。
+取结果之后，用低层搬运回执中的实际数量核对主背包。例如计划点击时看见八件、随后实际取回十二件，账上就应是十二件。背包只装下三件时保留这三件的确认事实，停止并报告余量仍在炉内，不能把整堆算作已收。
 
-如果上层取物目标被另一种替代物品满足，会调用 `requestSatisfiedSettlement`。烹饪随后只结清原炉次，不为追赶自己的旧数量再开新一炉。结果会区分“上层目标已经满足，所以结束收尾”和“本烹饪目标的数量确实已达到”。
+退料期间仍可能烧好新产物：十六份原料中退回十四份、烧好两份，是正常守恒。退料后重新检查整炉账，再收这两件产物。当前仍把剩余燃料留在炉里，避免在没有完整燃料归属账时猜着取回。
+
+如果上层取物目标被另一种替代物品满足，会调用 `requestSatisfiedSettlement`。尚未提交的装料不再点击；分堆已拿起一小堆时，先结清手中这堆，不再拿下一堆。烹饪按实际装入量记账，只收尾原炉次，不为追赶旧数量再开新炉。结果区分“上层目标满足而结束收尾”和“本烹饪数量确实达到”。父取物任务也保留所有来源的未结与不确定结果，不会仅因库存达标就把它们改报成功。
 
 取消不会让服务器里的炉子停止燃烧。结果用 `batch_outstanding`、`outcome_uncertain` 和已确认装入、取回的数量说明未结事项；无法确认时不会硬填 `effects_started=false`。
 
@@ -90,7 +95,9 @@
 - `CookingStockBudgetTest`：原料与燃料共享库存、递归消耗、合成余料、混合替代材料与允许来源。
 - `CookingMenuCloseTest`、`CookingMenuOwnershipTest`：同编号菜单替换、关闭绑定与鼠标物品保留。
 - `CookingSettlementTest`、`CookingPreparationEffectsTest`：上层提前满足、取消未结炉次、准备阶段的实际效果与不确定性。
+- `CookingOutputReceiptTest`、`CookingSynchronizationTest`：按实际回执收货退料、分批槽位同步与持久不守恒的拒绝。
+- `CookingStationSelectionTest`、`CookingProtectionTest`：忙炉切换、固定目标和内部调用的保护范围。
 
 其中数量和收尾测试会在明确注明的控制器边界提供已确认的库存变化；它们不冒充真实服务端的炉子加工与鼠标点击验收。
 
-后续仍要继续处理并验证：忙炉与不可达炉子的候选切换、原生槽位分批同步、暂停时的子任务时限、燃料余量和容器剩余物，以及断线重启后未结炉次的定位与持久证据。这些没有因为拆出了规划器或构建通过，就标成已经完成。
+后续仍要继续处理并验证：开炉原生回执与来源的首次绑定、暂停时的子任务时限、燃料余量和容器剩余物、特殊组件与贵重输入，以及断线重启后未结炉次的定位与持久证据。导航算法的全链路和整合包实机场景也不能由这些离线测试替代。
