@@ -24,7 +24,38 @@ public final class UtilityConnectionTaskGuardTest {
         existingKineticConnection(true, true);
         existingKineticConnection(false, true);
         existingKineticConnection(true, false);
-        System.out.println("UtilityConnectionTaskGuardTest: unsupported requests, server gate and kinetic idempotency passed");
+        existingAdjacentEnergy(true, true, false);
+        existingAdjacentEnergy(false, true, false);
+        existingAdjacentEnergy(true, false, false);
+        existingAdjacentEnergy(true, true, true);
+        System.out.println("UtilityConnectionTaskGuardTest: unsupported requests, server gate and existing utility idempotency passed");
+    }
+    private static void existingAdjacentEnergy(boolean connected, boolean exports, boolean changedEndpoint) throws Exception {
+        try (var fixture = new UtilityConnectionReplayFixture(true, true)) {
+            fixture.edgeConnected = connected; fixture.sourceExports = exports;
+            var request = new UtilityConnectionTaskRecord.Request(fixture.source, fixture.target, Direction.WEST,
+                    "minecraft:stone", "energy", 0, 0, "neoforge:energy");
+            var task = new UtilityConnectionTask(fixture.world.player, new UtilityConnectionTaskRecord("utility-direct-energy", 1000,
+                    "minecraft:overworld", "city", "input", request, MaterialPolicy.INVENTORY_ONLY, List.of()));
+            task.start(fixture.world.player); TaskState state = TaskState.RUNNING;
+            for (int i = 0; i < 40 && !state.isTerminal(); i++) {
+                state = task.tick(fixture.world.player); fixture.advance();
+                // 即使连接回执刚返回，端点被别的施工替换后也必须按当前世界拒绝，不能套用先前的接触关系。
+                if (changedEndpoint && fixture.sent.stream().anyMatch(row -> row.has("body") && row.getAsJsonObject("body").has("path")))
+                    fixture.world.set(fixture.target, net.minecraft.world.level.block.Blocks.DIRT.defaultBlockState());
+            }
+            var result = task.result(state);
+            if (connected && exports && !changedEndpoint) {
+                check(state == TaskState.SUCCESS && Boolean.TRUE.equals(result.data().get("no_change")), "相邻端点经原生核验后直接成功");
+                check(Boolean.TRUE.equals(result.data().get("connection_ready")), "不能只凭接触或缓存电量通过");
+                check(fixture.sent.stream().anyMatch(row -> row.has("body") && row.getAsJsonObject("body").has("path")
+                        && row.getAsJsonObject("body").getAsJsonArray("path").size() == 2), "必须实际查询声明的两个端点原生边");
+            } else {
+                check(state == TaskState.FAILED && Boolean.FALSE.equals(result.data().get("no_change")), "连接未知、禁止输出或端点变化都不能假报无需改动成功");
+            }
+            check(Boolean.FALSE.equals(result.data().get("route_built")) && Boolean.FALSE.equals(result.data().get("production_verified"))
+                    && fixture.world.blockUses() == 0 && fixture.world.itemUses() == 0, "直接连接核验不得铺线、开配置或冒称生产完成");
+        }
     }
     private static void rejectsClientOnlySnapshots() throws Exception {
         try (var fixture = new UtilityConnectionReplayFixture(false)) {

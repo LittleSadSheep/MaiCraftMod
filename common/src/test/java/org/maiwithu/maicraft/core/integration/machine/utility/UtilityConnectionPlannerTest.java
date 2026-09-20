@@ -12,12 +12,22 @@ import net.minecraft.core.Direction;
 public final class UtilityConnectionPlannerTest {
     public static void main(String[] args) {
         exactFacesAndProtectedDetour();
+        directFacingEndpoints();
         loadedCorridorAndLimits();
         nativePortDirectionsAndStorageViews();
         kineticPowerAndMembership();
         pendingPowerDoesNotBecomeSupplied();
         requirementsRemainExplicit();
-        System.out.println("UtilityConnectionPlannerTest: 6 routing and native evidence groups passed");
+        System.out.println("UtilityConnectionPlannerTest: 7 routing and native evidence groups passed");
+    }
+    private static void directFacingEndpoints() {
+        // 紧贴的输入口无需中间空气格，但两端面必须相对；不能改认更近的其他面或跨过一个空隙。
+        BlockPos source = BlockPos.ZERO, target = source.east();
+        var route = UtilityConnectionPlanner.direct(source, List.of(Direction.EAST), target, Direction.WEST);
+        check(route != null && route.path().equals(List.of(source, target)) && route.cables().isEmpty(), "直接端点只生成待检查边");
+        check(UtilityConnectionPlanner.direct(source, List.of(Direction.NORTH), target, Direction.WEST) == null, "错误输出面不能视作直接连接");
+        check(UtilityConnectionPlanner.direct(source, List.of(Direction.EAST), target, Direction.NORTH) == null, "必须进入作者声明的输入面");
+        check(UtilityConnectionPlanner.direct(source, List.of(Direction.EAST), target.east(), Direction.WEST) == null, "隔着空气仍须走普通铺线流程");
     }
     private static void exactFacesAndProtectedDetour() {
         BlockPos source = BlockPos.ZERO, target = new BlockPos(6, 0, 0), obstacle = new BlockPos(3, 0, 0);

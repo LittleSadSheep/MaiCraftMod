@@ -21,6 +21,13 @@ public final class UtilityConnectionPlanner {
     private record Step(BlockPos at, int cost, int remaining) {}
     private UtilityConnectionPlanner() {}
 
+    /** 电源已经贴住声明输入面时，只列出待原生核验的两个端点；接触本身不证明已通电，也不需要中间放线格。 */
+    public static Route direct(BlockPos source, List<Direction> exportFaces, BlockPos target, Direction inputFace) {
+        if (!target.relative(inputFace).equals(source)) return null;
+        return exportFaces.stream().filter(face -> source.relative(face).equals(target)).findFirst()
+                .map(face -> new Route(face, List.of(source, target))).orElse(null);
+    }
+
     public static Route plan(BlockPos source, List<Direction> exportFaces, BlockPos target,
             Direction inputFace, Predicate<BlockPos> emptyLoadedCell) {
         if (source.distManhattan(target) > MAX_SPAN) throw new IllegalArgumentException("utility_route_requires_nearer_outlet");
