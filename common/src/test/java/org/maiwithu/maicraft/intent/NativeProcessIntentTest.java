@@ -21,6 +21,13 @@ import org.maiwithu.maicraft.core.task.enchant.EnchantTaskRecord;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import org.maiwithu.maicraft.core.integration.machine.MachineBuildTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
+import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskTest;
+import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 统一机器入口只编译真实机制意图；以临时预约文件验证刷新观察不能重新消费，不操作游戏。 */
 public final class NativeProcessIntentTest {
@@ -70,14 +77,14 @@ public final class NativeProcessIntentTest {
             rejects(() -> NativeProcessRegistry.createTask("wrong-site", 1000, h.player, table, NativeProcessRequest.parse(production())));
             // 原生位置尚未建成时仍可组合建造，工厂必须交回延迟加工包装，不能提前打开台子或退回v1网络解析。
             var blueprint = json("{\"schema_version\":1,\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:enchanting_table\"}]}");
-            var layout = org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument.compile(blueprint,
-                    org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan.registry());
-            var plan = org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan.compile(table, layout, false);
-            var construction = new org.maiwithu.maicraft.core.integration.machine.MachineBuildTaskRecord("build-process", 1000, plan,
-                    "minecraft:overworld", org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY, List.of());
+            var layout = MachineBlueprintDocument.compile(blueprint,
+                    MachineConstructionPlan.registry());
+            var plan = MachineConstructionPlan.compile(table, layout, false);
+            var construction = new MachineBuildTaskRecord("build-process", 1000, plan,
+                    "minecraft:overworld", SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY, List.of());
             var combined = MachineProductionIntent.createTask("build-process", 1000, h.player, table, "minecraft:overworld", production(),
                     construction, List.of(), construction.materialPolicy);
-            check(combined instanceof org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskRecord wrapped
+            check(combined instanceof NativeProcessTaskRecord wrapped
                     && wrapped.construction == construction && wrapped.anchor.equals(table), "build_machine v2复用原建造任务和固定锚点");
             check(h.blockUses() == 0 && h.itemUses() == 0, "契约、观察和工厂不隐式使用世界");
         }
@@ -129,14 +136,14 @@ public final class NativeProcessIntentTest {
 
     private static void constructionRetryDecisions() {
         // 检查真实恢复选项，而不只检查包装数据：施工倒桶未知时不能向调用方提供普通retry。
-        var state = org.maiwithu.maicraft.task.TaskState.FAILED;
+        var state = TaskState.FAILED;
         Goal goal = machine(UUID.randomUUID().toString());
-        var unknown = org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskTest.constructionFailureReceipt(true, state);
+        var unknown = NativeProcessTaskTest.constructionFailureReceipt(true, state);
         check(!RecoveryAdvisor.ordinaryRetryAllowed(unknown)
                 && !RecoveryAdvisor.ordinaryRetryAllowed(json(unknown.toJson()))
                 && RecoveryAdvisor.afterFailure(goal, state, unknown).options().stream().noneMatch(option -> option.choice().equals("retry")),
                 "即使包装尚未预约加工，施工桶结果未知也必须禁止内存与恢复后的普通重试");
-        var unsubmitted = org.maiwithu.maicraft.core.integration.machine.process.NativeProcessTaskTest.constructionFailureReceipt(false, state);
+        var unsubmitted = NativeProcessTaskTest.constructionFailureReceipt(false, state);
         check(RecoveryAdvisor.ordinaryRetryAllowed(unsubmitted) && RecoveryAdvisor.ordinaryRetryAllowed(json(unsubmitted.toJson()))
                 && RecoveryAdvisor.afterFailure(goal, state, unsubmitted).options().stream().anyMatch(option -> option.choice().equals("retry")),
                 "真正未提交桶的失败可补新观察后继续，不误判为已消费加工");
