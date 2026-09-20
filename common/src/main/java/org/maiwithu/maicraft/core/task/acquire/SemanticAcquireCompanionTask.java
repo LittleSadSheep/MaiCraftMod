@@ -43,6 +43,7 @@ import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
+import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
 import org.maiwithu.maicraft.core.task.entity.EntitySemanticSafety;
@@ -88,15 +89,6 @@ public final class SemanticAcquireCompanionTask
     private static final int UNREACHABLE_STRUCTURE_COST = 1_000_000;
 
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
-
-    private record CraftCandidate(
-            ResourceLocation outputItem,
-            String recipeId,
-            Map<String, Object> data,
-            CraftPlanCost cost,
-            boolean surfaceSupported,
-            boolean surfaceReady,
-            List<ResourceLocation> surfacePrerequisiteItems) {}
 
     private record ExecutableCraft(ResourceLocation outputItem, CraftOps.Plan plan) {}
 
@@ -367,7 +359,7 @@ public final class SemanticAcquireCompanionTask
     private TaskState attemptCraft(AcquisitionNeed need) {
         // 对每种可接受成品查配方，优先选择材料和工作台都已经满足、成本较低的方案。
         int deficit = missing(need);
-        List<CraftCandidate> candidates = new ArrayList<>();
+        List<CraftRecoveryCandidate> candidates = new ArrayList<>();
         List<ExecutableCraft> executable = new ArrayList<>();
         CraftingWorkstationCoordinator.PlanningSnapshot workstation =
                 CraftOps.requiresWorkstationForAny(need.itemIds, player)
@@ -394,7 +386,7 @@ public final class SemanticAcquireCompanionTask
             if (plan.executable()) {
                 executable.add(new ExecutableCraft(output, plan));
             } else {
-                collectCraftCandidates(output, plan, candidates);
+                candidates.addAll(plan.recoveryCandidates());
             }
         }
 
@@ -417,16 +409,16 @@ public final class SemanticAcquireCompanionTask
                     "craft " + selected.outputItem() + " via the cheapest live satisfiable path");
         }
 
-        CraftCandidate surfacePrerequisite = candidates.stream()
+        CraftRecoveryCandidate surfacePrerequisite = candidates.stream()
                 .filter(candidate -> recipeAllowedByCommit(need, candidate.recipeId()))
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
-                .filter(CraftCandidate::surfaceSupported)
+                .filter(CraftRecoveryCandidate::surfaceSupported)
                 .filter(candidate -> candidate.cost().missingMaterials() == 0)
                 .filter(candidate -> candidate.cost().surface()
                         == CraftPlanCost.Surface.PREREQUISITE)
                 .filter(candidate -> !candidate.surfacePrerequisiteItems().isEmpty())
-                .sorted(Comparator.comparing(CraftCandidate::cost, CraftPlanCost.ORDER))
+                .sorted(Comparator.comparing(CraftRecoveryCandidate::cost, CraftPlanCost.ORDER))
                 .findFirst().orElse(null);
         // 原料都齐但缺工作台时，先把取得工作台当作一个小需求，不把它误报为原料缺失。
         if (surfacePrerequisite != null
@@ -434,26 +426,26 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
 
-        List<CraftCandidate> viableCandidates = candidates.stream()
+        List<CraftRecoveryCandidate> viableCandidates = candidates.stream()
                 .filter(candidate -> recipeAllowedByCommit(need, candidate.recipeId()))
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
                 .filter(candidate -> !need.lineageRecipes.contains(candidate.recipeId()))
-                .filter(CraftCandidate::surfaceSupported)
+                .filter(CraftRecoveryCandidate::surfaceSupported)
                 .filter(candidate -> candidate.cost().missingMaterials() > 0)
                 // A conversion whose only missing inputs are already members of this need's
                 // ancestry cannot advance the inventory fact. Skip the dominated/cyclical route
                 // as a set instead of reporting every stripped-log/wood recipe one by one.
                 .filter(candidate -> chooseIngredient(candidate, need) != null)
                 .sorted(Comparator
-                        .comparingInt((CraftCandidate candidate) ->
+                        .comparingInt((CraftRecoveryCandidate candidate) ->
                                 candidate.cost().surface().ordinal())
                         .thenComparingInt(candidate -> observedStockPriority(candidate, need))
                         .thenComparingInt(candidate ->
                                 recursiveCandidateStructureCost(candidate, need))
-                        .thenComparing(CraftCandidate::cost, CraftPlanCost.ORDER))
+                        .thenComparing(CraftRecoveryCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
         // 还缺原料时，排除循环和已失败配方，再比较所需转换层数与成本，挑一个值得继续补材料的方案。
-        CraftCandidate chosen = viableCandidates.isEmpty()
+        CraftRecoveryCandidate chosen = viableCandidates.isEmpty()
                 ? null : viableCandidates.getFirst();
         if (chosen == null) {
             if (!need.committedRecipeIds.isEmpty()) {
@@ -1625,68 +1617,13 @@ public final class SemanticAcquireCompanionTask
         }
     }
 
-    private void collectCraftCandidates(
-            ResourceLocation output, CraftOps.Plan plan, List<CraftCandidate> target) {
-        // 把合成规划报告整理成候选配方和成本；兼容旧报告字段，但没有具体配方编号的条目不能执行。
-        List<?> values = plan.recoveryCandidates();
-        if (values.isEmpty()) {
-            TaskResult immediate = plan.immediate();
-            if (immediate == null || immediate.data() == null) return;
-            Object raw = immediate.data().get("candidate_recipes");
-            if (!(raw instanceof List<?> fallback)) return;
-            values = fallback;
-        }
-        for (Object value : values) {
-            if (!(value instanceof Map<?, ?> map)) continue;
-            Map<String, Object> data = stringKeyMap(map);
-            String recipeId = string(data.get("recipe_id"));
-            if (recipeId == null) continue;
-            boolean surfaceSupported = bool(data.get("crafting_surface_supported"));
-            boolean surfaceReady = bool(data.get("crafting_surface_ready"));
-            CraftPlanCost.Surface surface = craftSurface(
-                    data.get("crafting_surface_state"), surfaceSupported, surfaceReady,
-                    bool(data.get("crafting_surface_preparable")));
-            CraftPlanCost cost = new CraftPlanCost(
-                    Math.max(0, integer(data.get("ingredients_missing"), Integer.MAX_VALUE)),
-                    surface,
-                    Math.max(0, integer(data.get("output_waste"), 0)),
-                    Math.max(0, integer(data.get("ingredient_uses"), Integer.MAX_VALUE)),
-                    output + "|" + recipeId);
-            List<ResourceLocation> surfacePrerequisites = new ArrayList<>();
-            Object rawPrerequisites = data.get("crafting_surface_prerequisite_item_ids");
-            if (rawPrerequisites instanceof List<?> ids) {
-                for (Object rawId : ids) {
-                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(rawId));
-                    if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
-                        surfacePrerequisites.add(id);
-                    }
-                }
-            }
-            if (surfacePrerequisites.isEmpty()) {
-                String fallback = string(data.get("crafting_surface_prerequisite_item_id"));
-                ResourceLocation id = fallback == null ? null : ResourceLocation.tryParse(fallback);
-                if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
-                    surfacePrerequisites.add(id);
-                }
-            }
-            target.add(new CraftCandidate(
-                    output,
-                    recipeId,
-                    data,
-                    cost,
-                    surfaceSupported,
-                    surfaceReady,
-                    List.copyOf(new LinkedHashSet<>(surfacePrerequisites))));
-        }
-    }
-
     /**
      * Insert one finite-lineage, Mod-owned workstation item prerequisite ahead of an unchanged recipe.
      * The prerequisite inherits exactly the source families already authorized for its parent;
      * adding a workstation must not silently narrow the user's original acquisition policy.
      */
     private boolean pushCraftingSurfacePrerequisite(
-            AcquisitionNeed parent, CraftCandidate blockedRecipe) {
+            AcquisitionNeed parent, CraftRecoveryCandidate blockedRecipe) {
         return pushCraftingSurfacePrerequisite(
                 parent, blockedRecipe.recipeId(), blockedRecipe.outputItem().toString(),
                 blockedRecipe.surfacePrerequisiteItems());
@@ -1812,7 +1749,7 @@ public final class SemanticAcquireCompanionTask
      * crafting layers stand between each missing group and a non-crafting leaf. Thus direct wool
      * is preferred to wool-plus-dye conversion without encoding any particular item or recipe.
      */
-    private int recursiveCandidateStructureCost(CraftCandidate candidate, AcquisitionNeed parent) {
+    private int recursiveCandidateStructureCost(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         // 只估计还需经过几层普通合成，用来给候选排序；没有说世界里一定有那些原材料。
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return UNREACHABLE_STRUCTURE_COST;
@@ -1843,7 +1780,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     /** Fresh authorized warehouse contents influence preference only; executable crafting still requires carried items. */
-    private int observedStockPriority(CraftCandidate candidate, AcquisitionNeed parent) {
+    private int observedStockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
         long tick = player.level().getGameTime();
         if (stockHintNeed != parent || stockHintTick != tick) {
@@ -1985,8 +1922,8 @@ public final class SemanticAcquireCompanionTask
      * from unrelated recipes would not prove either recipe satisfiable.</p>
      */
     private CraftFrontier chooseCraftFrontier(
-            CraftCandidate chosen,
-            List<CraftCandidate> viableCandidates,
+            CraftRecoveryCandidate chosen,
+            List<CraftRecoveryCandidate> viableCandidates,
             AcquisitionNeed parent) {
         // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
         // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
@@ -2000,7 +1937,7 @@ public final class SemanticAcquireCompanionTask
         outputItemIds.add(chosen.outputItem());
 
         if (chosen.cost().missingMaterials() == 1 && primary.missing() == 1) {
-            for (CraftCandidate candidate : viableCandidates) {
+            for (CraftRecoveryCandidate candidate : viableCandidates) {
                 if (candidate == chosen
                         || candidate.cost().missingMaterials() != 1
                         || candidate.cost().surface() != chosen.cost().surface()) {
@@ -2076,7 +2013,7 @@ public final class SemanticAcquireCompanionTask
      * A three-slot stone-material row is one need for three interchangeable materials, not three
      * separate planner branches.
      */
-    private IngredientNeed chooseIngredient(CraftCandidate candidate, AcquisitionNeed parent) {
+    private IngredientNeed chooseIngredient(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         // 同样的可替代原料组先合并数量；优先验证最难或需要授权的那组，避免先做一堆配件最后才发现关键原料拿不到。
         Object raw = candidate.data().get("ingredients");
         if (!(raw instanceof List<?> values)) return null;
@@ -2792,23 +2729,6 @@ public final class SemanticAcquireCompanionTask
 
     private static boolean bool(Object value) {
         return value instanceof Boolean flag && flag;
-    }
-
-    private static CraftPlanCost.Surface craftSurface(
-            Object raw, boolean supported, boolean ready, boolean preparable) {
-        String value = string(raw);
-        if (value != null) {
-            try {
-                return CraftPlanCost.Surface.valueOf(value.toUpperCase(Locale.ROOT));
-            } catch (IllegalArgumentException ignored) {
-                // Fall through to the backwards-compatible booleans below.
-            }
-        }
-        if (!supported) return CraftPlanCost.Surface.UNSUPPORTED;
-        if (ready) return CraftPlanCost.Surface.READY;
-        return preparable
-                ? CraftPlanCost.Surface.PREPARABLE
-                : CraftPlanCost.Surface.UNAVAILABLE;
     }
 
     private static String string(Object value) {

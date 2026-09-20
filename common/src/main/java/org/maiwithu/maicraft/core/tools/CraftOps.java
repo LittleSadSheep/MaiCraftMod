@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
+import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
 import org.maiwithu.maicraft.task.TaskResult;
@@ -46,7 +47,7 @@ public final class CraftOps {
             CraftTaskRecord task,
             TaskResult immediate,
             CraftPlanCost cost,
-            List<Map<String, Object>> recoveryCandidates) {
+            List<CraftRecoveryCandidate> recoveryCandidates) {
         public Plan {
             recoveryCandidates = recoveryCandidates == null
                     ? List.of() : List.copyOf(recoveryCandidates);
@@ -242,8 +243,15 @@ public final class CraftOps {
         }
 
         Candidate chosen = candidates.get(0);
-        List<Map<String, Object>> allCandidateData = candidates.stream()
-                .map(candidate -> candidateData(candidate, deficit, Integer.MAX_VALUE))
+        // 缺料恢复使用完整候选，公开报告仍单独限长；展示字段缺失不会再改变内部配方选择。
+        List<CraftRecoveryCandidate> recoveryCandidates = candidates.stream()
+                .map(candidate -> new CraftRecoveryCandidate(BuiltInRegistries.ITEM.getKey(target),
+                        candidate.id().toString(), candidateData(candidate, deficit, Integer.MAX_VALUE),
+                        new CraftPlanCost(candidate.cost().missingMaterials(), candidate.cost().surface(),
+                                candidate.cost().outputWaste(), candidate.cost().ingredientUses(),
+                                targetName + "|" + candidate.id()),
+                        candidate.surfaceSupported(), candidate.surfaceReady(),
+                        candidate.surfacePrerequisiteItems()))
                 .toList();
         List<Map<String, Object>> reported = candidates.stream()
                 .limit(MAX_RECOVERY_CANDIDATES)
@@ -270,7 +278,7 @@ public final class CraftOps {
             return new Plan(null, TaskResult.fail(
                     "cannot yet reach inventory target " + wantedInventoryCount + " "
                             + targetName + ": " + reason,
-                    targetFacts), chosen.cost(), allCandidateData);
+                    targetFacts), chosen.cost(), recoveryCandidates);
         }
 
         targetFacts.put("selected_recipe_id", chosen.id().toString());

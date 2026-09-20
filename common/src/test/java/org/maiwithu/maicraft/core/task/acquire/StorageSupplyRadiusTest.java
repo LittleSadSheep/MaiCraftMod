@@ -13,6 +13,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerCompanionTask;
@@ -113,9 +114,8 @@ public final class StorageSupplyRadiusTest {
         return coordinator;
     }
     private static Object stoneBrickRecipe() throws Exception {
-        Class<?> type = Class.forName(SemanticAcquireCompanionTask.class.getName() + "$CraftCandidate");
-        var constructor = type.getDeclaredConstructors()[0]; constructor.setAccessible(true);
-        return constructor.newInstance(BRICKS, "minecraft:stone_bricks", Map.of("ingredients", List.of(Map.of(
+        // 用实际传递的配方候选验证仓库提示，不再反射创建执行器的私有展示结构。
+        return new CraftRecoveryCandidate(BRICKS, "minecraft:stone_bricks", Map.of("ingredients", List.of(Map.of(
                 "acceptable_item_ids", List.of(STONE.toString()), "required", 4))), null, true, true, List.of());
     }
     private static int hint(Object task, Object candidate, Object need) throws Exception {
