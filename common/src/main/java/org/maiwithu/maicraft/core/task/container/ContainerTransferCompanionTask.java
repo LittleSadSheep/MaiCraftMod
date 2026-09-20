@@ -28,6 +28,7 @@ public final class ContainerTransferCompanionTask
     private int moveIndex;
     private Phase phase = Phase.BEGIN;
     private MenuReceipt receipt;
+    private QuickMoveEvidence quick;
     private ItemStack sourceKind = ItemStack.EMPTY;
     private ItemStack sourceBefore = ItemStack.EMPTY;
     private ItemStack destinationBefore = ItemStack.EMPTY;
@@ -39,6 +40,7 @@ public final class ContainerTransferCompanionTask
     private int confirmedSplitClicks;
     private final List<Integer> moved = new ArrayList<>();
     private String pendingFailure;
+    private FailureType pendingFailureType = FailureType.UNKNOWN;
     private AbstractContainerMenu menu;
     private boolean completed;
     private boolean preserveUnexpectedCursor;
@@ -79,7 +81,7 @@ public final class ContainerTransferCompanionTask
             afterConfirmedClick();
         }
         if (phase == Phase.FAILING) {
-            fail(pendingFailure, FailureType.UNKNOWN);
+            fail(pendingFailure, pendingFailureType);
             return TaskState.FAILED;
         }
         if (moveIndex >= r.moves.size()) {
@@ -191,13 +193,19 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
-    // 快速移动只观察源格是否改变；当前没有读取实际减少量，后面却把 requested 整堆记为已搬（A49）。
+    // 点击前重新冻结源格与两侧数量，确认后按实际变化记账；容量不足不能被写成整堆完成。
     private TaskState submitQuick(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
         ItemStack before = player.containerMenu.getSlot(move.from()).getItem().copy();
+        if (before.isEmpty() || !ItemStack.isSameItemSameComponents(before, sourceKind)
+                || !player.containerMenu.getCarried().isEmpty()
+                || move.count() > 0 && before.getCount() != requested) {
+            return rejectBeforePickup("source or cursor changed before quick move; no click was submitted");
+        }
+        requested = before.getCount();
+        quick = new QuickMoveEvidence(player, player.containerMenu, move.from());
         receipt = context.menus().click(
                 context, move.from(), 0, ClickType.QUICK_MOVE,
-                (c, ignored) -> !same(c.player().containerMenu.getSlot(move.from()).getItem(), before)
-                        ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING, 20);
+                (c, ignored) -> quick.observe(), 20);
         return TaskState.RUNNING;
     }
 
@@ -289,10 +297,20 @@ public final class ContainerTransferCompanionTask
         return TaskState.RUNNING;
     }
 
-    // 确认后才换阶段和记数量。快速移动当前直接记 requested，部分容量场景会误报整堆完成。
+    // 确认后才换阶段和记数量；部分快速搬运保留已确认数量，但不能把未搬走的余量当作完成。
     private void afterConfirmedClick() {
         switch (phase) {
-            case QUICK -> completeMove(requested);
+            case QUICK -> {
+                int expected = requested;
+                int actual = quick.moved();
+                completeMove(actual);
+                if (actual < expected) {
+                    pendingFailure = "native quick move transferred " + actual + " of " + expected
+                            + " items; the remaining source was left in place";
+                    pendingFailureType = FailureType.NO_SPACE;
+                    phase = Phase.FAILING;
+                }
+            }
             case PICKUP -> phase = swapMode ? Phase.SWAP_DEST : Phase.PLACE_ALL;
             case PLACE_ALL -> completeMove(requested);
             case SWAP_DEST -> {
@@ -312,7 +330,7 @@ public final class ContainerTransferCompanionTask
         sourceKind = ItemStack.EMPTY;
         sourceBefore = ItemStack.EMPTY;
         destinationBefore = ItemStack.EMPTY;
-        requested = 0; movedThis = 0; swapMode = false; split = null;
+        requested = 0; movedThis = 0; swapMode = false; split = null; quick = null;
     }
 
     // 失败时若鼠标还拿着东西且源格有效，先尝试放回；放回后仍报告原失败，不把回收鼠标物品当任务成功。
