@@ -71,8 +71,48 @@ public final class BuildingModelV2RuntimeTest {
                 throw new AssertionError("预览把未加载的区块当成已观察现场");
             } catch (IllegalArgumentException expected) { }
             check(h.blockUses() == 0 && h.itemUses() == 0, "建模、查询、导出、预览和生成施工参数全程没有游戏操作");
+            patternPreviewBuildAndEdit(store,h);
         }
         System.out.println("BuildingModelV2RuntimeTest: public scene operations, native preview, exact build arguments and exports passed");
+    }
+    private static void patternPreviewBuildAndEdit(BuildingSceneStore store, InteractionWorldTestHarness h) {
+        // 先保存留孔面板，再改成上下半砖；每份版本的预览、导出和施工都必须保留同一份最终方块要求。
+        var source = json("""
+                {"schema_version":2,"coordinate_system":"minecraft_y_up","materials":{
+                 "Body":{"block_id":"minecraft:stone_bricks"},
+                 "Upper":{"block_id":"minecraft:stone_slab","properties":{"type":"top"}},
+                 "Lower":{"block_id":"minecraft:stone_slab","properties":{"type":"bottom"}}},
+                 "objects":[{"name":"Screen","type":"MESH","primitive":"panel","location":[2,2,0.5],
+                  "dimensions":[4,4,1],"material":"Body","pattern":{"axes":["x","y"],"rows":["01","10"]}}]}
+                """);
+        var create = json("{\"operation\":\"create_scene\"}"); create.add("scene",source);
+        var created = report(BuildingSceneAdapter.adapt(goal(create,true),h.player,null,session -> false,() -> store));
+        String original = created.data().get("scene_id").toString(), id = original;
+        for (int version = 0; version < 2; version++) {
+            var preview = new AtomicReference<PreviewSession>();
+            report(BuildingSceneAdapter.adapt(goal(parameters("preview",id),false),h.player,null,session -> { preview.set(session); return true; },() -> store));
+            var action = (IntentAction.Tool) BuildingSceneAdapter.adapt(goal(parameters("build",id),false),h.player,null,session -> false,() -> store);
+            var arguments = action.arguments(); var targets = BuildTool.resolvedTargets(arguments.getAsJsonArray("ops"),true);
+            var actual = new LinkedHashMap<BlockPos,BlockState>(); targets.forEach(target -> actual.put(target.pos(),target.desiredState()));
+            check(targets.size() == 16 && actual.equals(preview.get().cells()),"预览与施工须包括相同空气格或半砖状态");
+            check(!arguments.get("replace_existing").getAsBoolean(),"图案留孔不能暗中批准挖掉现场已有方块");
+            var first = actual.get(new BlockPos(0,1,0)); var second = actual.get(new BlockPos(1,1,0));
+            if (version == 0) check(first.isAir() && second.is(net.minecraft.world.level.block.Blocks.STONE_BRICKS),"零开头面板应先留孔再放方块");
+            else check(first.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
+                            == net.minecraft.world.level.block.state.properties.SlabType.BOTTOM
+                    && second.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SLAB_TYPE)
+                            == net.minecraft.world.level.block.state.properties.SlabType.TOP,"半砖版本应以下半砖开头");
+            var saved = store.load(id,"minecraft:overworld");
+            var compiled = BuildingSceneCompiler.compile(saved.scene());
+            check(BuildingSceneExport.structure(compiled).getList("blocks",net.minecraft.nbt.Tag.TAG_COMPOUND).size() == 16,"导出不丢掉网格的留孔或半砖目标");
+            if (version == 0) {
+                var edit = parameters("update_scene",id);
+                edit.add("edits",json("{\"objects\":[{\"name\":\"Screen\",\"material\":\"Upper\",\"pattern\":{\"axes\":[\"x\",\"y\"],\"rows\":[\"01\"],\"materials\":{\"0\":\"Lower\"}}}]}"));
+                id = report(BuildingSceneAdapter.adapt(goal(edit,false),h.player,null,session -> false,() -> store)).data().get("scene_id").toString();
+            }
+        }
+        check(store.load(original,"minecraft:overworld").scene().equals(source),"改成半砖时原来的留孔场景版本仍须保留");
+        check(h.blockUses() == 0 && h.itemUses() == 0,"网格建模和预览不会实际取料或放置");
     }
     private static JsonObject parameters(String operation,String id) { JsonObject value = new JsonObject(); value.addProperty("operation",operation); value.addProperty("scene_id",id); return value; }
     private static Goal goal(JsonObject parameters,boolean target) {
