@@ -45,6 +45,12 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.blueprint.BuildingModelSurfaceTest.main(args);
         // 网格孔洞与交替半砖也必须经由同一编译器展开，再检查组件变换和材料状态。
         org.maiwithu.maicraft.core.blueprint.BuildingModelPatternTest.main(args);
+        try { org.maiwithu.maicraft.core.blueprint.BuildingModelContractTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("versioned building contract regression",failure); }
+        try { BuildingSceneVersionRuntimeTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("versioned scene operation regression",failure); }
+        try { BuildingDesignConcurrencyTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("concurrent building design regression",failure); }
         org.maiwithu.maicraft.core.blueprint.BuildingModelCompositionTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelGuardTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelInspectionTest.main(args);

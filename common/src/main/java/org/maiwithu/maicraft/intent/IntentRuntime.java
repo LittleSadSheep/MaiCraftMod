@@ -158,6 +158,13 @@ public final class IntentRuntime {
 
     IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
                             java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign) {
+        return execute(player,goal,planId,requestKey,publishDesign,org.maiwithu.maicraft.core.blueprint.BuildingSceneStore::current);
+    }
+
+    // 设计保存仍由同一只读分支推进；注入世界场景仓库便于验证并行设计绝不会替换角色当前施工槽。
+    IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
+                            java.util.function.Predicate<org.maiwithu.maicraft.client.preview.PreviewSession> publishDesign,
+                            java.util.function.Supplier<org.maiwithu.maicraft.core.blueprint.BuildingSceneStore> sceneStores) {
         // 先确认旧进度可继续保存，再校验并接单；受阻时不能发布 started、写新文件或把任务交给身体。
         requireRecoveredState();
         validateGoal(goal);
@@ -191,7 +198,7 @@ public final class IntentRuntime {
             TaskResult result;
             try {
                 var action = BuildingSceneContract.supports(goal)
-                        ? BuildingSceneAdapter.adapt(goal, player, this, publishDesign)
+                        ? BuildingSceneAdapter.adapt(goal, player, this, publishDesign,sceneStores)
                         : BuildDesignAdapter.design(goal, player, this, publishDesign);
                 if (!(action instanceof IntentAction.Report report))
                     throw new IllegalStateException("read-only design returned an executable action");
