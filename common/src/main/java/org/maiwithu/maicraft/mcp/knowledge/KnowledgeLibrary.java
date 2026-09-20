@@ -79,6 +79,7 @@ public final class KnowledgeLibrary {
     public KnowledgeDocument read(String uri) {
         if (uri.length() > 2048) throw new IllegalArgumentException("Resource URI is too long");
         KnowledgeDocument document = builtins.get(uri);
+        if (document == null) document = BuildingModelContractResources.read(uri);
         if (PROCESSES.equals(uri) && document != null) {
             // 只有显式读这一页才展开机制参数；这里报告适配器契约，真实配方、菜单和材料仍由现场观察确认。
             String contracts = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(
@@ -94,6 +95,7 @@ public final class KnowledgeLibrary {
 
     private List<KnowledgeDocument.Entry> catalog() {
         Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        BuildingModelContractResources.entries().forEach(entry -> entries.put(entry.uri(),entry));
         builtins.values().forEach(doc -> entries.put(doc.uri(), doc.entry()));
         source.entries().forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
         return entries.values().stream().sorted(Comparator.comparing(KnowledgeDocument.Entry::uri)).toList();

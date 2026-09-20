@@ -331,6 +331,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 "(task monitor) and maicraft://chatflow (received game chat for a dedicated companion agent) " +
                 "and read them on updates; notifications themselves do not run the model. " +
                 "For block behavior and Ponder tutorials, start with maicraft://knowledge/index. " +
+                "For building design formats and validation revisions, read maicraft://building/index. " +
                 "Discover metadata using resources/list or perceive(view=knowledge, focus=item ID/name), " +
                 "then read one returned URI using resources/read or perceive(view=knowledge, resource_uri=...). " +
                 "Reference knowledge is not an execution capability or a live-world observation.");
@@ -949,7 +950,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         String uri = requiredString(params, "uri");
         if (ATTENTION_URI.toString().equals(uri)) return ATTENTION_URI;
         if (CHATFLOW_URI.toString().equals(uri)) return CHATFLOW_URI;
-        if (uri.startsWith("maicraft://knowledge/"))
+        if (uri.startsWith("maicraft://knowledge/") || uri.startsWith("maicraft://building/"))
             throw new RpcException(-32602, "Knowledge is read on demand; resource update subscriptions are supported for maicraft://attention and maicraft://chatflow only");
         throw new RpcException(-32002, "Resource not found");
     }
