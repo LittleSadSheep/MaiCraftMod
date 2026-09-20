@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.NonNullList;
@@ -69,9 +68,8 @@ public final class AcquisitionRecipePlanningTest {
         check(missing.recoveryCandidates().size() == 10, "内部保留超过展示上限的全部十条路线");
         var reported = (List<?>) missing.immediate().data().get("candidate_recipes");
         check(reported.size() == 8, "对外报告仍遵守长度上限");
-        var facts = missing.recoveryCandidates().getFirst().data();
-        var ingredient = (Map<?, ?>) ((List<?>) facts.get("ingredients")).getFirst();
-        check(((List<?>) ingredient.get("acceptable_item_ids")).size() == 80,
+        var ingredient = missing.recoveryCandidates().getFirst().ingredients().getFirst();
+        check(ingredient.itemIds().size() == 80,
                 "内部补料不能继承展示的六十四种原料截断");
     }
 

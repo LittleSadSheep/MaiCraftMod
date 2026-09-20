@@ -67,7 +67,7 @@ public final class CraftOps {
     private record IngredientFact(
             int recipeSlot,
             String description,
-            List<String> acceptableItemIds,
+            List<ResourceLocation> acceptableItemIds,
             int required,
             int satisfied) {
         int missing() {
@@ -246,11 +246,13 @@ public final class CraftOps {
         // 缺料恢复使用完整候选，公开报告仍单独限长；展示字段缺失不会再改变内部配方选择。
         List<CraftRecoveryCandidate> recoveryCandidates = candidates.stream()
                 .map(candidate -> new CraftRecoveryCandidate(BuiltInRegistries.ITEM.getKey(target),
-                        candidate.id().toString(), candidateData(candidate, deficit, Integer.MAX_VALUE),
+                        candidate.id().toString(), candidate.allocation().ingredients().stream()
+                                .map(ingredient -> new CraftRecoveryCandidate.IngredientDemand(
+                                        ingredient.acceptableItemIds(),
+                                        ingredient.required(), ingredient.missing())).toList(),
                         new CraftPlanCost(candidate.cost().missingMaterials(), candidate.cost().surface(),
                                 candidate.cost().outputWaste(), candidate.cost().ingredientUses(),
                                 targetName + "|" + candidate.id()),
-                        candidate.surfaceSupported(), candidate.surfaceReady(),
                         candidate.surfacePrerequisiteItems()))
                 .toList();
         List<Map<String, Object>> reported = candidates.stream()
@@ -377,7 +379,7 @@ public final class CraftOps {
             fact.put("satisfied", ingredient.satisfied());
             fact.put("missing", ingredient.missing());
             fact.put("acceptable_item_ids", ingredient.acceptableItemIds().stream()
-                    .limit(acceptableItemLimit).toList());
+                    .limit(acceptableItemLimit).map(ResourceLocation::toString).toList());
             fact.put("acceptable_item_id_count", ingredient.acceptableItemIds().size());
             fact.put("acceptable_item_ids_truncated",
                     ingredient.acceptableItemIds().size() > acceptableItemLimit);
@@ -434,12 +436,13 @@ public final class CraftOps {
                 requiredTotal - satisfiedTotal);
     }
 
-    private static List<String> acceptableItemIds(Ingredient ingredient) {
+    private static List<ResourceLocation> acceptableItemIds(Ingredient ingredient) {
+        // 内部一直保存物品编号，只在对外报告时转文字；排序沿用完整编号，避免模组加载顺序影响补料。
         return Arrays.stream(ingredient.getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
-                .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
+                .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()))
                 .distinct()
-                .sorted()
+                .sorted(Comparator.comparing(ResourceLocation::toString))
                 .toList();
     }
 

@@ -14,6 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
+import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerCompanionTask;
@@ -115,8 +116,9 @@ public final class StorageSupplyRadiusTest {
     }
     private static Object stoneBrickRecipe() throws Exception {
         // 用实际传递的配方候选验证仓库提示，不再反射创建执行器的私有展示结构。
-        return new CraftRecoveryCandidate(BRICKS, "minecraft:stone_bricks", Map.of("ingredients", List.of(Map.of(
-                "acceptable_item_ids", List.of(STONE.toString()), "required", 4))), null, true, true, List.of());
+        return new CraftRecoveryCandidate(BRICKS, "minecraft:stone_bricks",
+                List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(STONE), 4, 4)),
+                new CraftPlanCost(4, CraftPlanCost.Surface.READY, 0, 4, "minecraft:stone_bricks"), List.of());
     }
     private static int hint(Object task, Object candidate, Object need) throws Exception {
         Method method = task.getClass().getDeclaredMethod("observedStockPriority", candidate.getClass(), need.getClass());

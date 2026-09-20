@@ -93,7 +93,7 @@ public final class SemanticAcquireCompanionTask
     private record ExecutableCraft(ResourceLocation outputItem, CraftOps.Plan plan) {}
 
     private record IngredientNeed(
-            List<ResourceLocation> itemIds, int missing, Map<String, Object> fact) {}
+            List<ResourceLocation> itemIds, int missing) {}
 
     private record CraftFrontier(
             IngredientNeed ingredient,
@@ -1751,26 +1751,17 @@ public final class SemanticAcquireCompanionTask
      */
     private int recursiveCandidateStructureCost(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         // 只估计还需经过几层普通合成，用来给候选排序；没有说世界里一定有那些原材料。
-        Object raw = candidate.data().get("ingredients");
-        if (!(raw instanceof List<?> values)) return UNREACHABLE_STRUCTURE_COST;
         Map<StructureKey, Integer> memo = new HashMap<>();
         int total = 0;
-        for (Object value : values) {
-            if (!(value instanceof Map<?, ?> map)) continue;
-            Map<String, Object> fact = stringKeyMap(map);
-            int missing = integer(fact.get("missing"), 0);
+        for (var ingredient : candidate.ingredients()) {
+            int missing = ingredient.missing();
             if (missing <= 0) continue;
             int best = UNREACHABLE_STRUCTURE_COST;
-            Object acceptable = fact.get("acceptable_item_ids");
-            if (acceptable instanceof List<?> ids) {
-                for (Object rawId : ids) {
-                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(rawId));
-                    if (id == null || !BuiltInRegistries.ITEM.containsKey(id)
-                            || parent.lineageItems.contains(id)) continue;
-                    best = Math.min(best, recursiveCraftDepth(
-                            id, parent.lineageItems, new LinkedHashSet<>(), memo,
-                            STRUCTURAL_RECIPE_DEPTH));
-                }
+            for (ResourceLocation id : ingredient.itemIds()) {
+                if (parent.lineageItems.contains(id)) continue;
+                best = Math.min(best, recursiveCraftDepth(
+                        id, parent.lineageItems, new LinkedHashSet<>(), memo,
+                        STRUCTURAL_RECIPE_DEPTH));
             }
             if (best >= UNREACHABLE_STRUCTURE_COST) return UNREACHABLE_STRUCTURE_COST;
             total = Math.min(UNREACHABLE_STRUCTURE_COST,
@@ -1796,21 +1787,10 @@ public final class SemanticAcquireCompanionTask
         }
         if (recipeObservedStock.isEmpty()) return 1;
         return recipeStockPriorities.computeIfAbsent(candidate.recipeId(), ignored -> {
-            Object raw = candidate.data().get("ingredients"); if (!(raw instanceof List<?> rows)) return 1;
             List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
-            for (Object row : rows) {
-                if (!(row instanceof Map<?, ?> values)) return 1;
-                Map<String, Object> fact = stringKeyMap(values);
-                if (bool(fact.get("acceptable_item_ids_truncated"))) return 1;
-                int required = integer(fact.get("required"), -1); if (required < 1 || required > 32768) return 1;
-                Object acceptable = fact.get("acceptable_item_ids"); if (!(acceptable instanceof List<?> ids)) return 1;
-                List<ResourceLocation> alternatives = new ArrayList<>();
-                for (Object value : ids) {
-                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(value));
-                    if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return 1;
-                    alternatives.add(id);
-                }
-                ingredients.add(new ObservedRecipeStockCost.Need(alternatives, required));
+            for (var ingredient : candidate.ingredients()) {
+                if (ingredient.required() > 32768) return 1;
+                ingredients.add(new ObservedRecipeStockCost.Need(ingredient.itemIds(), ingredient.required()));
             }
             return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
                     this::observedStockRecipes, parent.lineageItems);
@@ -1953,13 +1933,7 @@ public final class SemanticAcquireCompanionTask
 
         IngredientNeed frontier = primary;
         if (recipeIds.size() > 1) {
-            frontier = new IngredientNeed(
-                    List.copyOf(itemIds),
-                    1,
-                    Map.of(
-                            "kind", "one_unit_recipe_alternatives",
-                            "alternative_recipe_count", recipeIds.size(),
-                            "acceptable_item_count", itemIds.size()));
+            frontier = new IngredientNeed(List.copyOf(itemIds), 1);
         }
         return new CraftFrontier(
                 frontier,
@@ -2015,54 +1989,20 @@ public final class SemanticAcquireCompanionTask
      */
     private IngredientNeed chooseIngredient(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         // 同样的可替代原料组先合并数量；优先验证最难或需要授权的那组，避免先做一堆配件最后才发现关键原料拿不到。
-        Object raw = candidate.data().get("ingredients");
-        if (!(raw instanceof List<?> values)) return null;
         Map<List<ResourceLocation>, Integer> missingByItems = new LinkedHashMap<>();
-        Map<List<ResourceLocation>, List<Map<String, Object>>> factsByItems =
-                new LinkedHashMap<>();
-        for (Object value : values) {
-            if (!(value instanceof Map<?, ?> map)) continue;
-            Map<String, Object> fact = stringKeyMap(map);
-            int missing = integer(fact.get("missing"), 0);
+        for (var ingredient : candidate.ingredients()) {
+            int missing = ingredient.missing();
             if (missing <= 0) continue;
-            List<ResourceLocation> declaredIds = new ArrayList<>();
-            Object acceptable = fact.get("acceptable_item_ids");
-            if (acceptable instanceof List<?> list) {
-                for (Object element : list) {
-                    ResourceLocation id = ResourceLocation.tryParse(String.valueOf(element));
-                    if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
-                        declaredIds.add(id);
-                    }
-                }
-            }
-            declaredIds = declaredIds.stream().distinct().toList();
-            boolean truncated = bool(fact.get("acceptable_item_ids_truncated"));
-            if (declaredIds.isEmpty()) return null;
-            List<ResourceLocation> ids = declaredIds.stream()
+            List<ResourceLocation> ids = ingredient.itemIds().stream()
                     .filter(id -> !parent.lineageItems.contains(id))
                     .toList();
-            // One blocked required group invalidates the entire recipe. Silently dropping it and
-            // acquiring a different group first is how "any bed" devolved into making every dye:
-            // the recipe still needed an ancestor bed, even though the dye itself was acyclic.
-            if (ids.isEmpty()) {
-                // A truncated report cannot prove that an unseen alternative is or is not in the
-                // lineage. Conservative rejection keeps this recipe side-effect free; it never
-                // permits the remaining groups to run as though this required group did not exist.
-                if (truncated) return null;
-                return null;
-            }
-            List<ResourceLocation> key = List.copyOf(ids);
-            missingByItems.merge(key, missing, Integer::sum);
-            factsByItems.computeIfAbsent(key, ignored -> new ArrayList<>()).add(fact);
+            // 只要一组必需材料绕回祖先，整个配方就不能继续；不能先去做染料，最后才发现染床还得先有床。
+            if (ids.isEmpty()) return null;
+            missingByItems.merge(ids, missing, Integer::sum);
         }
         List<IngredientNeed> choices = new ArrayList<>();
         for (Map.Entry<List<ResourceLocation>, Integer> entry : missingByItems.entrySet()) {
-            Map<String, Object> combinedFact = new LinkedHashMap<>();
-            combinedFact.put("missing", entry.getValue());
-            combinedFact.put("ingredient_groups",
-                    List.copyOf(factsByItems.getOrDefault(entry.getKey(), List.of())));
-            choices.add(new IngredientNeed(
-                    entry.getKey(), entry.getValue(), Map.copyOf(combinedFact)));
+            choices.add(new IngredientNeed(entry.getKey(), entry.getValue()));
         }
         List<RankedIngredient> ranked = new ArrayList<>();
         for (IngredientNeed choice : choices) {
@@ -2072,9 +2012,7 @@ public final class SemanticAcquireCompanionTask
                     recursiveIngredientStructureCost(choice.itemIds(), parent)));
         }
         return ranked.stream()
-                // Verify the route's real bottleneck before manufacturing easy accessories. A
-                // permission boundary is harder than a transformation; among transformations the
-                // deeper frontier is checked first, then the larger material bundle.
+                // 先验证权限受限、转换层数更深或数量更多的原料，避免先做一堆容易的配件。
                 .sorted(Comparator
                         .comparing(RankedIngredient::decisionRequired).reversed()
                         .thenComparing(Comparator.comparingInt(
@@ -2715,12 +2653,6 @@ public final class SemanticAcquireCompanionTask
             clearActive();
         }
         super.cleanup();
-    }
-
-    private static Map<String, Object> stringKeyMap(Map<?, ?> source) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        source.forEach((key, value) -> result.put(String.valueOf(key), value));
-        return result;
     }
 
     private static int integer(Object value, int fallback) {
