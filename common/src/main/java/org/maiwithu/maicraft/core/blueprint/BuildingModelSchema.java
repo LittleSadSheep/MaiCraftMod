@@ -15,7 +15,7 @@ public final class BuildingModelSchema {
             "tetrahedron", "triangular_pyramid", "pyramid", "prism", "cylinder", "cone", "convex_polyhedron");
     private static final Set<String> COMMON = Set.of("name", "type", "location", "rotation_euler", "mirror", "array", "modifiers", "block_state_axes");
     private static final Set<String> MESH = Set.of("primitive", "dimensions", "role", "material", "fill", "wall_thickness",
-            "face_materials", "edge_material", "edge_materials", "edge_width", "open_faces", "segments", "vertices", "faces");
+            "face_materials", "edge_material", "edge_materials", "edge_width", "open_faces", "segments", "vertices", "faces", "pattern");
     private static final Set<String> INSTANCE = Set.of("component", "material_map");
     private BuildingModelSchema() {}
 
@@ -104,6 +104,8 @@ public final class BuildingModelSchema {
         if (node.has("faces")) for (var face : array(node.get("faces"), 4, 64, "faces"))
             for (var index : array(face, 3, 64, "face")) integer(index, 0, 63, "face vertex index");
         if (node.has("array")) validateArray(object(node.get("array"), "array"));
+        // 编辑或新建网格时先核对图案字段；平面方向在转换到统一局部坐标后继续检查。
+        if (node.has("pattern")) BuildingModelPattern.validate(object(node.get("pattern"), "pattern"));
         if (node.has("modifiers")) for (var value : array(node.get("modifiers"), 0, BuildingBudgets.current().maxConnections(), "modifiers")) {
             JsonObject modifier = object(value, "modifier"); keys(modifier, Set.of("type", "operation", "object"), "modifier");
             if (!"BOOLEAN".equals(string(modifier.get("type"), 16, "modifier.type"))

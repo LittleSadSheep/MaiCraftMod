@@ -64,6 +64,8 @@ final class BuildingModelExpansion {
             // 未摆出的图元也先验证几何和直角变换，组件库中不能悄悄保存开放或退化的凸体。
             BuildingModelTransform.local(node, blender, Vec3.ZERO);
             if (!node.get("type").getAsString().equals("INSTANCE")) {
+                // 未实例化的组件也检查图案平面，避免复制窗格时才发现图案沿厚度方向展开。
+                BuildingModelPattern.validatePanel(node, BuildingModelTransform.dimensions(node, blender));
                 String primitive = node.has("primitive") ? node.get("primitive").getAsString() : node.get("type").getAsString();
                 var shape = shapeCache.computeIfAbsent(node, ignored -> createShape(primitive, node, BuildingModelTransform.dimensions(node, blender)));
                 BuildingModelMaterialRules.validate(scene.getAsJsonObject("materials"), node, shape, localCutters.contains(node.get("name").getAsString())
@@ -78,13 +80,13 @@ final class BuildingModelExpansion {
                 if (++declaredModifiers > connectionLimit()) throw bad("model exceeds the modifier budget");
                 JsonObject cutter = siblings.get(reference);
                 if (cutter == null || reference.equals(node.get("name").getAsString())) throw bad("Boolean cutter must name a different object in the same component");
-                if (cutter.get("type").getAsString().equals("INSTANCE") || !rawCuts(cutter).isEmpty()
+                if (cutter.get("type").getAsString().equals("INSTANCE") || cutter.has("pattern") || !rawCuts(cutter).isEmpty()
                         || cutter.has("fill") && !cutter.get("fill").getAsString().equals("solid"))
-                    throw bad("Boolean cutters must be solid primitive meshes without modifiers; arrays are allowed");
+                    throw bad("Boolean cutters must be solid primitive meshes without patterns or modifiers; arrays are allowed");
             }
             if (node.has("role") && node.get("role").getAsString().equals("cutter")
-                    && (!rawCuts(node).isEmpty() || node.has("fill") && !node.get("fill").getAsString().equals("solid")))
-                throw bad("cutter meshes must be solid and have no modifiers");
+                    && (node.has("pattern") || !rawCuts(node).isEmpty() || node.has("fill") && !node.get("fill").getAsString().equals("solid")))
+                throw bad("cutter meshes must be solid and have no patterns or modifiers");
         }
     }
 

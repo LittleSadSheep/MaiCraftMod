@@ -43,6 +43,8 @@ public final class MachineRegressionSuite {
         org.maiwithu.maicraft.core.blueprint.BuildingConvexMeshTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelBlockStatesTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelSurfaceTest.main(args);
+        // 网格孔洞与交替半砖也必须经由同一编译器展开，再检查组件变换和材料状态。
+        org.maiwithu.maicraft.core.blueprint.BuildingModelPatternTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelCompositionTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelGuardTest.main(args);
         org.maiwithu.maicraft.core.blueprint.BuildingModelInspectionTest.main(args);
