@@ -14,6 +14,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import java.util.Collections;
 
 /**
  * 判断某个空隙是否连到蓝图外面，让完全封闭的内部空腔不产生外轮廓。
@@ -40,7 +41,7 @@ final class PreviewExteriorSpace {
         private final Map<BlockPos, TreeMap<Integer, VoxelShape>> occupied = new HashMap<>();
         private final Iterator<Map.Entry<BlockPos, VoxelShape>> input;
         private Iterator<Map.Entry<BlockPos, TreeMap<Integer, VoxelShape>>> rows;
-        private Iterator<Map.Entry<Integer, VoxelShape>> blocks = java.util.Collections.emptyIterator();
+        private Iterator<Map.Entry<Integer, VoxelShape>> blocks = Collections.emptyIterator();
         private Iterator<Map.Entry<BlockPos, Column>> columns;
         private Iterator<Node> outside;
         private BlockPos rowPosition;

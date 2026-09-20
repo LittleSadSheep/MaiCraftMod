@@ -10,6 +10,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
+import java.util.Objects;
 
 /** 真正调用游戏的挖掘、使用、攻击等操作，并保存一项待确认动作；结果由后续观察判断，不直接用 API 返回值。 */
 public final class DefaultNativeActionPort implements NativeActionPort {
@@ -31,7 +32,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (player.getInventory().selected < 0 || player.getInventory().selected > 8 || expectedSelected.isEmpty()
                 || !ItemStack.matches(player.getMainHandItem(), expectedSelected))
             throw new IllegalStateException("selected stack changed before native drop");
-        java.util.Objects.requireNonNull(confirmation, "drop requires exact debit and receiving evidence");
+        Objects.requireNonNull(confirmation, "drop requires exact debit and receiving evidence");
         current.claimMutation();
         var receipt = oneShot(NativeActionReceipt.Kind.DROP_SELECTED, current, confirmation, timeoutTicks);
         try {
@@ -43,9 +44,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         return poll(current, receipt);
     }
     private boolean activeProtocolUsesMenu;
-    /** Non-null while an ownerless break must be physically stopped by {@link #advance}. */
+    /** 旧任务留下的挖掘还未实际停止时保留此回执，由 {@link #advance} 完成停手。 */
     private String pendingBreakCancellationReason;
-    /** Which pending item use is currently observed as no longer held, and since when. */
+    /** 记录哪次待确认的物品使用已松开，以及首次观察到松开的时间。 */
     private NativeActionReceipt abandonedItemUse;
     private long abandonedItemUseSinceTick = -1;
 
@@ -173,8 +174,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                 NativeActionReceipt.Kind.USE_BLOCK, current,
                 acknowledged == null ? confirmation : acknowledged, timeoutTicks);
         try {
-            // Tasks run after the player's movement packet; rendered camera updates can be newer.
-            // UseItemOn carries neither rotation nor crouch, so send the observed body first.
+            // 任务在玩家移动包之后执行，渲染更新的镜头可能比服务端已知朝向更新。
+            // 方块交互包不含朝向和潜行状态，因此点击前先同步实际身体姿态。
             var player = current.player();
             current.connection().send(new ServerboundMovePlayerPacket.Rot(
                     player.getYRot(), player.getXRot(), player.onGround()));

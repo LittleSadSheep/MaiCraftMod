@@ -13,9 +13,8 @@ public interface NativeActionPort {
     NativeActionReceipt cancelBreaking(LocalPlayerContext context, NativeActionReceipt receipt);
 
     /**
-     * Request cancellation of a break whose task owner is about to disappear.  The actor boundary
-     * performs the physical stop no later than its next tick, before another task may mutate the
-     * body, so cancellation remains safe even when this tick's one mutation was already submitted.
+     * 挖掘任务即将结束时登记停手请求；身体边界最迟在下一游戏刻实际停止挖掘，
+     * 再允许后继任务操作身体，避免本刻已经用完操作额度时留下持续破坏动作。
      */
     NativeActionReceipt cancelBreakingForTaskBoundary(
             LocalPlayerContext context,
@@ -83,14 +82,10 @@ public interface NativeActionPort {
             int timeoutTicks);
 
     /**
-     * Retire a submitted one-shot effect when its owning task ends before confirmation.
-     *
-     * <p>This does not pretend that the effect was rolled back: the returned receipt is marked
-     * uncertain when its postcondition has not settled yet.  It only releases the serialized
-     * actor slot so a discarded task-local receipt cannot block the next task.  Continuous native
-     * actions ({@link NativeActionReceipt.Kind#BREAK_BLOCK BREAK_BLOCK} and
-     * {@link NativeActionReceipt.Kind#USE_ITEM USE_ITEM}) must be physically stopped through their
-     * dedicated APIs instead.
+     * 单次操作尚未确认而所属任务已结束时，释放该任务占用的身体操作槽。
+     * 后置状态未稳定的回执仍标为不确定，不把释放槽位当成撤销已经发生的效果。
+     * 持续挖掘（{@link NativeActionReceipt.Kind#BREAK_BLOCK BREAK_BLOCK}）和持续使用物品
+     * （{@link NativeActionReceipt.Kind#USE_ITEM USE_ITEM}）须调用各自的停手接口。
      */
     NativeActionReceipt retireOneShotForTaskBoundary(
             LocalPlayerContext context,

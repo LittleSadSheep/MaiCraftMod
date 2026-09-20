@@ -17,7 +17,7 @@ public final class MenuVisibility {
     private long readyTick;
     private long afterFrame;
 
-    /** Keeps the actual player inventory and its slot layout visible even in creative mode. */
+    /** 创造模式下也显示真实玩家背包及其槽位布局，确保点击对象与画面一致。 */
     public static final class PlayerInventoryScreen extends InventoryScreen {
         public PlayerInventoryScreen(LocalPlayer player) { super(player); }
     }
@@ -30,7 +30,7 @@ public final class MenuVisibility {
         return matches(minecraft, player.inventoryMenu);
     }
 
-    /** Called after rendering the screen, never from a game tick. */
+    /** 界面实际渲染完成后才登记可见状态，游戏刻更新不能代替可见证据。 */
     public static void rendered(Screen screen) {
         renderedScreen = screen;
         renderedFrame++;

@@ -130,14 +130,14 @@ final class PreviewMeshSection implements AutoCloseable {
         refresh.rebuilt(hash(minecraft), camera, now);
     }
 
-    /** Camera movement changes draw order, not block models, outline vertices or GPU buffer identity. */
+    /** 镜头移动只改变绘制顺序，方块模型、轮廓顶点和 GPU 缓冲区继续复用。 */
     // 模型顶点保留，只更新各面从远到近的绘制顺序；不再次调用方块模型生成器。
     void resort(Vec3 camera) {
         for (int pass = 0; pass < models.length; pass++) {
             if (models[pass] == null || sortStates[pass] == null) continue;
             try (ByteBufferBuilder memory = new ByteBufferBuilder(4096)) {
                 models[pass].bind();
-                // uploadIndexBuffer consumes the Result; the retained centroids own no native memory.
+                // 上传索引后 Result 即被消费；保留的面中心坐标不持有原生内存。
                 models[pass].uploadIndexBuffer(sortStates[pass].buildSortedIndexBuffer(memory, sorting(origin, camera)));
             } finally { VertexBuffer.unbind(); }
         }

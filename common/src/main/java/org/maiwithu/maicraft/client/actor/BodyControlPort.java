@@ -26,7 +26,7 @@ public interface BodyControlPort {
     // 只接受当前游戏刻的指令，旧任务保存的编号不能在以后继续使用。
     void applyMovement(Movement movement, long leaseTickRevision);
 
-    /** Re-evaluated against the physical camera yaw while its one-tick lease remains valid. */
+    /** 镜头方向请求只在当前游戏刻有效，执行时根据玩家实际朝向重新计算转动。 */
     @FunctionalInterface
     interface Steering { Movement atYaw(float yaw); }
 
@@ -36,13 +36,13 @@ public interface BodyControlPort {
 
     void requestLook(float yaw, float pitch, long leaseTickRevision);
 
-    /** A time-critical interaction needs its real camera ray aligned during this actor tick. */
+    /** 当前游戏刻就要交互时，先让真实镜头射线对准目标，避免点击落到别处。 */
     default void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
         requestLook(yaw,pitch,leaseTickRevision);
     }
 
     void clearLook();
 
-    /** Immediately zero every injected signal. This never sends an interaction packet. */
+    /** 立即清空自动注入的移动与按键信号；停止输入本身不发送交互包。 */
     void releaseAll();
 }

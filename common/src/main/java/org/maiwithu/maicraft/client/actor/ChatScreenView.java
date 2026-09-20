@@ -16,7 +16,7 @@ final class ChatScreenView implements ChatSession.View {
 
     // 无界面时可以开始；只有失焦自动出现、且不显示暂停菜单的后台暂停界面也可以让开。其他界面保留。
     static boolean mayOpen(Screen current, boolean windowActive) {
-        // pauseGame(true) creates this invisible singleplayer pause on loss of window focus.
+        // 窗口失焦后，单人游戏可能通过 pauseGame(true) 打开这个不可见的暂停界面。
         return current == null || !windowActive && current instanceof PauseScreen pause && !pause.showsPauseMenu();
     }
 
@@ -47,7 +47,7 @@ final class ChatScreenView implements ChatSession.View {
             return manual;
         }
 
-        // Real user input hands the draft to an ordinary ChatScreen; the task cannot reclaim it.
+        // 玩家实际输入后，把草稿交还原版聊天框；自动聊天任务不能再次接管这份草稿。
         @Override public boolean keyPressed(int key, int scanCode, int modifiers) {
             if (key == GLFW.GLFW_KEY_ESCAPE) { minecraft.setScreen(null); return true; }
             return handoff().keyPressed(key, scanCode, modifiers);

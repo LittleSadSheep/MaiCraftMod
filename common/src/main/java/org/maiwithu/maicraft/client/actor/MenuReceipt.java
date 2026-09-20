@@ -21,7 +21,7 @@ public final class MenuReceipt {
     private int synchronizationStateId;
     private Status status = Status.PENDING;
     private String detail = "awaiting the server-synchronized menu state";
-    /** First tick of an exact positive postcondition not accompanied by menu revision evidence. */
+    /** 记录首次满足精确后置条件的游戏刻，供没有菜单版本更新时等待稳定确认。 */
     private long unacknowledgedAppliedSince = Long.MIN_VALUE;
 
     MenuReceipt(Kind kind, LocalPlayerContext context, int containerId, int beforeStateId,

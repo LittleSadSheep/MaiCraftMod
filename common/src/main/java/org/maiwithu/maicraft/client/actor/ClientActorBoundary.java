@@ -5,6 +5,8 @@ import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 每个客户端刻先确认“现在操作哪个玩家、谁拥有控制权”，再给任务一份只在这一刻有效的操作入口。
@@ -69,7 +71,7 @@ public final class ClientActorBoundary {
         updateWindowControl(body.effectiveAutomationRequested());
         if (player == null || minecraft.level == null || minecraft.gameMode == null ||
                 minecraft.getConnection() == null) {
-            // No context means no endTick to expire physical inputs; stop them at this boundary.
+            // 没有身体上下文就不会经过 endTick，因此在这里停止输入，避免角色继续沿用上一刻的动作。
             body.releaseAll();
             if (playerChanged) {
                 controlRevision = nextRevision(controlRevision, "control revision");
@@ -131,12 +133,12 @@ public final class ClientActorBoundary {
         activeContext = null;
     }
 
-    /** Retain the cursor guard while F8 settles an open automation menu before restoring it. */
+    /** 按 F8 交还控制权时，先保留鼠标保护，等自动操作的菜单收尾后再恢复光标。 */
     public boolean preventsMouseGrab() {
         return windowControlActive || body.effectiveAutomationRequested();
     }
 
-    /** Mouse ownership follows the logical request, including a retained portal handoff. */
+    /** 鼠标归属跟随控制请求；已获准的传送门交接期间也保持同一归属。 */
     void updateWindowControl(boolean controlled) {
         // 自动控制时释放鼠标捕获，让人能看其他窗口；归还控制时只在游戏仍活跃、没有菜单时恢复原捕获状态。
         if (controlled == windowControlActive) return;
@@ -147,7 +149,7 @@ public final class ClientActorBoundary {
         } else {
             boolean restore = restoreMouseOnRelease;
             restoreMouseOnRelease = false;
-            // Never focus another window, dismiss a GUI, or lock the cursor after disconnecting.
+            // 断开连接后不再抢占窗口焦点、关闭玩家界面或锁定光标。
             if (restore && minecraft.isWindowActive() && minecraft.screen == null
                     && minecraft.player != null && minecraft.level != null) {
                 minecraft.mouseHandler.grabMouse();
@@ -159,10 +161,10 @@ public final class ClientActorBoundary {
     public DefaultNativeActionPort actions() { return actions; }
     public DefaultMenuPort menus() { return menus; }
 
-    /** Read-only diagnostics; requesting them must not create a tick or take control. */
-    public java.util.Map<String, Object> diagnosticState() {
+    /** 诊断只读取当前状态，不能为了查询而新建游戏刻上下文或取得控制权。 */
+    public Map<String, Object> diagnosticState() {
         requireClientThread();
-        var result = new java.util.LinkedHashMap<String, Object>();
+        var result = new LinkedHashMap<String, Object>();
         result.put("actor_tick", tickRevision);
         result.put("control_revision", controlRevision);
         result.put("control_requested", body.automationControlRequested());
@@ -181,7 +183,7 @@ public final class ClientActorBoundary {
         return result;
     }
 
-    /** Render-cadence camera integration; no task or native mutation is advanced here. */
+    /** 按渲染帧推进镜头转动；任务执行和原生游戏操作仍由游戏刻调度。 */
     public void renderFrame() {
         requireClientThread();
         body.renderFrame(minecraft.player);
@@ -203,7 +205,7 @@ public final class ClientActorBoundary {
         return new AutomationRequest(request.revision(), request.created());
     }
 
-    /** Undo a newly-created request when task creation fails; later requests are never revoked. */
+    /** 创建任务失败时只撤回本次新建的接管请求，不能误撤后来提交的请求。 */
     public void rollbackAutomationControl(AutomationRequest request) {
         requireClientThread();
         if (request == null) return;
@@ -222,7 +224,7 @@ public final class ClientActorBoundary {
         return body.effectiveAutomationRequested();
     }
 
-    /** Applied by beginTick, where native leases and input ownership are reconciled together. */
+    /** 到 beginTick 再应用预览状态，让原生动作授权与输入归属在同一边界核对。 */
     public void previewReview(boolean waiting) {
         requireClientThread();
         previewReview = waiting;
@@ -236,8 +238,8 @@ public final class ClientActorBoundary {
     }
 
     /**
-     * Returns the fresh context between {@link #beginTick()} and {@link #endTick(LocalPlayerContext)}.
-     * Compatibility adapters must call this for every forwarded operation and must never cache it.
+     * 只在 {@link #beginTick()} 到 {@link #endTick(LocalPlayerContext)} 之间返回当刻的身体上下文。
+     * 兼容适配器每次转发操作都必须重新获取，避免下一刻继续操作失效的玩家或授权。
      */
     public Optional<LocalPlayerContext> activeContext() {
         requireClientThread();
@@ -247,7 +249,7 @@ public final class ClientActorBoundary {
                 : Optional.empty();
     }
 
-    /** Read-only identity/clock for observations made between actor ticks; grants no action lease. */
+    /** 在两次游戏刻之间只提供玩家身份和时钟供观察，不授予身体操作权限。 */
     public record ObservationStamp(long bodyEpoch, long tickRevision) {}
 
     public Optional<ObservationStamp> observationStamp(LocalPlayer player) {

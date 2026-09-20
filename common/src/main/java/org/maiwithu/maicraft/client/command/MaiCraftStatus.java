@@ -10,6 +10,8 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import com.google.gson.JsonObject;
+import java.util.Locale;
 
 /**
  * 整理 /maicraft status 的本地说明：MCP 是否监听、角色控制权、当前任务和最近问题，不改变任务状态。
@@ -94,7 +96,7 @@ public final class MaiCraftStatus {
     private static String publicState(IntentTaskRecord record) {
         if (record.decisionSnapshot() != null) return "waiting_for_decision";
         if (record.paused()) return "paused";
-        return record.getState().name().toLowerCase(java.util.Locale.ROOT);
+        return record.getState().name().toLowerCase(Locale.ROOT);
     }
 
     private static void appendLatestTerminalIssue(List<Component> lines) {
@@ -105,16 +107,16 @@ public final class MaiCraftStatus {
                 .orElse(null);
         if (failed == null) return;
         String message = failed.terminalSnapshot() == null
-                ? failed.getState().name().toLowerCase(java.util.Locale.ROOT)
+                ? failed.getState().name().toLowerCase(Locale.ROOT)
                 : jsonMessage(failed.terminalSnapshot().result(), failed.getState());
         lines.add(line("Last issue", compact(message), ChatFormatting.RED));
     }
 
-    private static String jsonMessage(com.google.gson.JsonObject result, TaskState fallback) {
+    private static String jsonMessage(JsonObject result, TaskState fallback) {
         if (result != null && result.has("message") && result.get("message").isJsonPrimitive()) {
             return result.get("message").getAsString();
         }
-        return fallback.name().toLowerCase(java.util.Locale.ROOT);
+        return fallback.name().toLowerCase(Locale.ROOT);
     }
 
     private static Component line(String label, String value, ChatFormatting valueColor) {

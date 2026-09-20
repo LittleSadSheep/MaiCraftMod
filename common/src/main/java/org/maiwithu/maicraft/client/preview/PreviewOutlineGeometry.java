@@ -20,6 +20,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import java.util.Collections;
 
 /**
  * 把所选蓝图的方块外形合在一起，只画与外界相通的转折边，避免每块石头之间都出现网格线。
@@ -49,9 +50,9 @@ final class PreviewOutlineGeometry {
         private final Map<BlockPos, VoxelShape> shapes = new LinkedHashMap<>();
         private final Map<BlockPos, BlockPos> owners = new HashMap<>();
         private final Set<Edge> emitted = new HashSet<>();
-        private Iterator<AABB> sourceBoxes = java.util.Collections.emptyIterator();
+        private Iterator<AABB> sourceBoxes = Collections.emptyIterator();
         private Iterator<Map.Entry<BlockPos, VoxelShape>> fragments;
-        private Iterator<CandidateEdge> candidates = java.util.Collections.emptyIterator();
+        private Iterator<CandidateEdge> candidates = Collections.emptyIterator();
         private PreviewExteriorSpace.Builder exterior;
         private BlockPos sourcePos, edgePos;
         private AABB box;

@@ -9,7 +9,7 @@ public interface MenuPort {
     /** 必要时显示玩家背包，并等对应界面真正可操作。 */
     boolean ensureVisible(LocalPlayerContext context);
 
-    /** Mark a GUI operation submitted through a mod's native protocol. */
+    /** 登记经模组原生协议提交的菜单操作，让后续任务等待对应确认。 */
     void interactionSubmitted(LocalPlayerContext context);
 
     MenuReceipt click(LocalPlayerContext context, int slot, int button, ClickType clickType,

@@ -18,7 +18,7 @@ public record ChatMessage(String text, int intervalMillis) {
         if (text.codePoints().anyMatch(c -> Character.isISOControl(c) || c == 0xA7
                 || c >= Character.MIN_SURROGATE && c <= Character.MAX_SURROGATE))
             throw new IllegalArgumentException("text must be one line without control, formatting or unpaired surrogate characters");
-        // Match ChatScreen's normalization so the visible draft matches the submitted content.
+        // 沿用原版聊天框的文本规范化规则，确保玩家看到的草稿与实际提交内容一致。
         text = StringUtils.normalizeSpace(text.trim());
         if (text.isEmpty() || text.equals("/"))
             throw new IllegalArgumentException("text must contain a message or a slash-prefixed command");

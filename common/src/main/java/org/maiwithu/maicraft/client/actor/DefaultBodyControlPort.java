@@ -8,6 +8,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import org.lwjgl.glfw.GLFW;
+import net.minecraft.client.Minecraft;
 
 /**
  * 把本地玩家的键盘和转头交给自动任务，也负责按 F8 后还给玩家。
@@ -50,7 +51,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     boolean effectiveAutomationRequested() { return automationRequested && !reviewSuspended; }
 
-    /** Human inspection releases input without creating a fresh grant on confirmation. */
+    /** 玩家检查预览时释放自动输入，确认预览本身不额外创建一份接管授权。 */
     // 让玩家查看预览时先还回键盘，但保留自动任务想继续操作的请求。
     void suspendForReview(boolean suspended) {
         if (reviewSuspended == suspended) return;
@@ -122,10 +123,9 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             targetYaw = null;
             targetPitch = null;
         }
-        // BotInput still describes the input consumed by the preceding physical player tick.
-        // Native secondary-use checks read it directly, so tasks must observe that posture until
-        // endTick applies this tick's renewed command (or STOPPED when no command was renewed).
-        // Clearing it here makes a requested crouch appear false before every placement attempt.
+        // BotInput 仍保留上一轮玩家移动实际采用的姿态，原版潜行交互检查会直接读取它。
+        // 因此任务执行时继续沿用该姿态，直到 endTick 应用本轮续订的输入或停止输入。
+        // 若在这里提前清空，放置前的检查就会把已经请求的潜行误判为未潜行。
     }
 
     /**
@@ -205,7 +205,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return true;
     }
 
-    /** F8's logical operation is separate from GLFW polling so revocation can be regression tested. */
+    /** 将 F8 撤销控制权的处理与 GLFW 按键轮询分开，便于独立验证交还身体的流程。 */
     boolean toggleHumanRequest(LocalPlayer player) {
         if (automationRequested) cancelAutomationRequest();
         else requestAutomation(player);
@@ -245,14 +245,14 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         player.setSprinting(command.sprinting());
     }
 
-    /** Screens that can coexist with leased world movement. */
+    /** 判断当前界面是否允许角色在已有移动授权下继续行走。 */
     public static boolean permitsWorldMovement(Screen screen) {
-        // BotInput contains movement signals, not keyboard events. Chat may stay open while the
-        // assigned route runs; container and modal screens still suppress world movement.
+        // BotInput 提供移动信号而非键盘事件，因此沿指定路线行走时可以保留聊天框。
+        // 容器和模态界面仍禁止世界移动，避免角色在处理菜单时离开交互位置。
         return screen == null || screen instanceof ChatScreen;
     }
 
-    /** Advance the same physical first-person camera once per rendered frame. */
+    /** 每个渲染帧推进一次玩家真实的第一人称镜头，使转向与画面更新同步。 */
     // 画面每刷新一帧都推进一点转头，因此镜头不必等下一次游戏刻才跳动。
     void renderFrame(LocalPlayer player) {
         if (!automationOwnsControls() || player == null || player != controlledPlayer
@@ -261,7 +261,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         }
         advanceLook(player, System.nanoTime());
         if (steering != null && botInput != null)
-            writeMovement(player, botInput, net.minecraft.client.Minecraft.getInstance().screen);
+            writeMovement(player, botInput, Minecraft.getInstance().screen);
     }
 
     void shutdown() {
@@ -332,7 +332,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         if (!cameraInitialized) synchronizeCamera(player);
         float dt;
         if (lastLookUpdateNanos == 0L) {
-            // A first sample still makes visible progress even at a very low render rate.
+            // 首次采样也推进一小段转向，避免低帧率时镜头迟迟不动。
             dt = 1.0f / 60.0f;
         } else {
             dt = (float) ((nowNanos - lastLookUpdateNanos) * 1.0e-9);
@@ -429,11 +429,11 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     record AutomationRequest(long revision, boolean created) {}
 
-    /** Input carrier that never reads the human keyboard while automation owns the body. */
+    /** 自动化持有身体时只消费注入的移动信号，不读取玩家键盘。 */
     public static final class BotInput extends Input {
         @Override
         public void tick(boolean slowDown, float movementScale) {
-            // Values are supplied by this port at the end of each client tick.
+            // 每个客户端游戏刻结束时，由身体控制端写入本轮移动信号。
         }
     }
 

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.client.preview;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
+import java.util.function.IntSupplier;
 
 /**
  * 给两个加载器挂接同一套客户端命令：开关施工预览、确认或取消、隐藏显示，以及只看某层或高度区间。
@@ -43,7 +44,7 @@ public final class PreviewCommands {
     }
 
     // 把无额外参数的命令统一转给控制器，命令返回值沿用控制器的成功或失败结果。
-    private static <S> LiteralArgumentBuilder<S> action(String name, java.util.function.IntSupplier action) {
+    private static <S> LiteralArgumentBuilder<S> action(String name, IntSupplier action) {
         return LiteralArgumentBuilder.<S>literal(name).executes(context -> action.getAsInt());
     }
 }

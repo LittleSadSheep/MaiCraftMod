@@ -16,7 +16,7 @@ public interface NativeConfirmation {
 
     Verdict observe(LocalPlayerContext context);
     default int stableTicksRequired() { return 2; }
-    /** Placement receipts may require the server to finish reconciling this use's prediction. */
+    /** 放置方块后，回执可能还需等待服务端完成本次交互的预测校正。 */
     default boolean requiresBlockAcknowledgement() { return false; }
     default Verdict observeAcknowledged(LocalPlayerContext context) { return observe(context); }
     /** 调用方已拥有服务器发来的新实体证据时，不再多等一次稳定刻。 */
@@ -36,7 +36,7 @@ public interface NativeConfirmation {
         };
     }
 
-    /** Vanilla removal leaves the original fluid behind when breaking a waterlogged block. */
+    /** 原版挖掉含水方块后会留下原有流体，不能把留下的水误判为破坏失败。 */
     static Verdict breakReplacementVerdict(BlockState before, BlockState live) {
         if (live.isAir()) return Verdict.APPLIED;
         if (live.equals(before)) return Verdict.PENDING;

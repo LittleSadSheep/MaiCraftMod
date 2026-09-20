@@ -5,6 +5,9 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import java.util.Objects;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 
 /** 实际操作玩家菜单：一次点一个槽位、报价按钮或配方，等结果明确后再接受下一次；也负责任务结束时关好界面。 */
 public final class DefaultMenuPort implements MenuPort {
@@ -23,8 +26,8 @@ public final class DefaultMenuPort implements MenuPort {
         DefaultLocalPlayerContext current = requireSubmission(context);
         current.body().releaseAll();
         if (closingMenu != null || active != null && !active.terminal()) return false;
-        // Chat coexists with automation; replace it with the real inventory before any clicks.
-        // Other user dialogs remain untouched, and the new inventory still needs a rendered frame.
+        // 自动移动允许保留聊天框，但整理物品前必须先切换到真实背包界面。
+        // 保留玩家打开的其他对话框；新打开的背包也须实际渲染一帧后才能点击。
         if (DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen)
                 && current.player().containerMenu == current.player().inventoryMenu) {
             if (!current.mutationAvailable()) return false;
@@ -88,8 +91,7 @@ public final class DefaultMenuPort implements MenuPort {
         MenuReceipt receipt = create(
                 MenuReceipt.Kind.SWAP_TO_HOTBAR, current, menu, timeoutTicks, false, confirmation);
         try {
-            // InventoryMenu uses the same indices for main inventory slots 9..35. The button is
-            // the destination hotbar index for ClickType.SWAP.
+            // 原版背包主物品栏沿用槽位 9..35；交换操作的按钮参数表示目标快捷栏槽位。
             current.gameMode().handleInventoryMouseClick(
                     menu.containerId, sourceInventorySlot, hotbarSlot, ClickType.SWAP, current.player());
             interactionSubmitted(current);
@@ -150,7 +152,7 @@ public final class DefaultMenuPort implements MenuPort {
         requireVisible(current);
         if (button < 0) throw new IllegalArgumentException("menu button must be nonnegative");
         if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
-        java.util.Objects.requireNonNull(confirmation, "menu button requires an exact postcondition");
+        Objects.requireNonNull(confirmation, "menu button requires an exact postcondition");
         AbstractContainerMenu menu = current.player().containerMenu;
         current.claimMutation();
         MenuReceipt receipt = create(MenuReceipt.Kind.BUTTON, current, menu, timeoutTicks, false, confirmation);
@@ -181,7 +183,7 @@ public final class DefaultMenuPort implements MenuPort {
         current.body().releaseAll();
         if (!current.mutationAvailable()) return;
         if (visible && !visibility.ready(current)) {
-            // A terminating task may already be gone; keep its successor out until close settles.
+            // 原任务可能已经结束；关闭菜单尚未确认时，仍需阻止后继任务接管菜单。
             current.claimMutation();
             return;
         }
@@ -216,8 +218,7 @@ public final class DefaultMenuPort implements MenuPort {
                             ? "the owning task ended before menu confirmation"
                             : boundaryReason);
         }
-        // close() intentionally installs a new active receipt. The task may discard its reference,
-        // but ClientActorBoundary.advance() still confirms that close on following ticks.
+        // close() 会登记新的关闭回执；即使原任务不再持有它，身体边界也会在后续游戏刻继续确认。
         return close(context, timeoutTicks);
     }
 
@@ -273,10 +274,9 @@ public final class DefaultMenuPort implements MenuPort {
                 } else if (receipt.kind() != MenuReceipt.Kind.BUTTON && receipt.appliedStableWithoutRevision(
                         context.tickRevision(), unacknowledgedStabilityTicks(context))) {
                     // 没有菜单版本更新时，目前允许本地期望状态稳定一段时间后当作成功，不是收到了专门的服务器确认。
-                    // MultiPlayerGameMode applies menu clicks optimistically before the server can
-                    // correct them. When an accepted click produces no stateId update, absence of
-                    // a correction beyond one observed RTT plus a small tick margin is the only
-                    // available acknowledgement. A transient optimistic frame cannot pass this.
+                    // 原版客户端先预测菜单点击结果，再接受服务端修正；不能把短暂的预测画面当成成功。
+                    // 若点击没有带来 stateId 更新，需等待已观测往返延迟加少量游戏刻余量，
+                    // 期间始终没有修正，才可将稳定的后置状态作为当前可取得的确认依据。
                     receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED,
                             "the exact menu postcondition remained stable beyond the server round-trip window");
                 }
@@ -320,11 +320,10 @@ public final class DefaultMenuPort implements MenuPort {
     }
 
     /**
-     * Human handoff is a transaction boundary. Closing through the vanilla player path makes the
-     * server return any carried cursor stack to inventory (or apply its normal overflow behavior)
-     * before automation releases the menu.
+     * 向玩家交还菜单前，先通过原版关闭流程处理鼠标上携带的物品。
+     * 服务端会将它归还背包或执行原版溢出处理，再由自动化释放菜单控制权。
      */
-    void revokeForHumanHandoff(net.minecraft.client.player.LocalPlayer player, String reason) {
+    void revokeForHumanHandoff(LocalPlayer player, String reason) {
         // 人工接管时结束旧等待并走原版关闭；光标上的物品由游戏正常返还或按溢出规则处理。
         if (active != null && !active.terminal()) {
             active.finish(MenuReceipt.Status.UNCERTAIN, reason);
@@ -333,13 +332,13 @@ public final class DefaultMenuPort implements MenuPort {
         closingMenu = null;
         visibility.reset();
         boolean automationMenuOpen = player.containerMenu != player.inventoryMenu
-                || MenuVisibility.inventoryVisible(net.minecraft.client.Minecraft.getInstance(), player);
+                || MenuVisibility.inventoryVisible(Minecraft.getInstance(), player);
         boolean carrying = !player.containerMenu.getCarried().isEmpty();
         if (!automationMenuOpen && !carrying) return;
         try {
             player.closeContainer();
         } catch (RuntimeException ignored) {
-            // The receipt already says uncertain; the live menu remains visible to the human.
+            // 回执已标记结果不确定，保留真实菜单供玩家检查当前状态。
         }
     }
 
