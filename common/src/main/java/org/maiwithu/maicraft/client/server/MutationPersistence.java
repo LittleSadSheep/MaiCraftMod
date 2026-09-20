@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.client.server;
 
 import com.google.gson.JsonObject;
 
-/** Write-ahead safety fence. Persistence failures must prevent new mutation dispatch. */
+/** 发送写操作前先持久化未决记录；保存失败时禁止提交新的游戏修改。 */
 public interface MutationPersistence {
     void beforeSubmission(ClientRequestReceipt receipt);
     void afterObservation(ClientRequestReceipt receipt);

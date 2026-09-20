@@ -18,8 +18,11 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Instant;
+import java.util.Locale;
+import java.util.Objects;
 
-/** Durable unresolved request identities; it never stores executable requests or replays them. */
+/** 持久化结果未决的请求身份，用于后续核对；不保存或重放可执行请求。 */
 public final class MutationJournal implements MutationPersistence {
     private static final long MAX_BYTES = 1_048_576;
     private final Path path;
@@ -35,7 +38,7 @@ public final class MutationJournal implements MutationPersistence {
         this.temporary = this.path.resolveSibling(this.path.getFileName() + ".pending");
         try {
             load(this.path);
-            // A crash before atomic replacement may leave additional pre-submission identities.
+            // 原子替换前崩溃可能留下额外的预提交身份，恢复时也需保留以防重复操作。
             load(temporary);
         } catch (IOException | RuntimeException corrupt) {
             failure = "mutation_journal_unreadable";
@@ -43,9 +46,9 @@ public final class MutationJournal implements MutationPersistence {
     }
 
     public void bind(String server, String player, String dimension) {
-        this.server = java.util.Objects.requireNonNull(server);
-        this.player = java.util.Objects.requireNonNull(player);
-        this.dimension = java.util.Objects.requireNonNull(dimension);
+        this.server = Objects.requireNonNull(server);
+        this.player = Objects.requireNonNull(player);
+        this.dimension = Objects.requireNonNull(dimension);
     }
 
     @Override public void beforeSubmission(ClientRequestReceipt receipt) {
@@ -59,9 +62,9 @@ public final class MutationJournal implements MutationPersistence {
         entry.addProperty("server", server);
         entry.addProperty("player", player);
         entry.addProperty("dimension", dimension);
-        entry.addProperty("backend", receipt.backend.name().toLowerCase(java.util.Locale.ROOT));
+        entry.addProperty("backend", receipt.backend.name().toLowerCase(Locale.ROOT));
         entry.addProperty("body_digest", digest(receipt.arguments.toString()));
-        entry.addProperty("recorded_at", java.time.Instant.now().toString());
+        entry.addProperty("recorded_at", Instant.now().toString());
         if (receipt.scope != null) {
             entry.addProperty("session_id", receipt.scope.sessionId());
             entry.addProperty("dimension", receipt.scope.dimension());
@@ -123,7 +126,7 @@ public final class MutationJournal implements MutationPersistence {
                 while (buffer.hasRemaining()) channel.write(buffer);
                 channel.force(true);
             }
-            // Refuse mutation if this filesystem cannot durably replace the journal atomically.
+            // 文件系统无法可靠地原子替换日志时拒绝写操作，避免重启后丢失未决请求。
             Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException failed) {
             failure = "mutation_journal_write_failed";

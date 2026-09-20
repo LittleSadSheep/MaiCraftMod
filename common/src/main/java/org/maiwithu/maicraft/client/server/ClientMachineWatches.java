@@ -10,7 +10,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
-/** Background status only: no task dispatch, movement, menu operation or automatic refill. */
+/** 后台只观察机器任务状态，不调度身体、操作菜单或自动补料。 */
 public final class ClientMachineWatches {
     private static final Map<UUID, Job> jobs = new LinkedHashMap<>();
     private static LocalPlayer player;

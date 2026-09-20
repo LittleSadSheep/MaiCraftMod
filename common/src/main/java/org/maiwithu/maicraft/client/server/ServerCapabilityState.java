@@ -4,8 +4,9 @@ package org.maiwithu.maicraft.client.server;
 import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Locale;
 
-/** Negotiated support is separate from registration and per-request execution conditions. */
+/** 协商出的服务端支持、客户端已登记能力和每次执行条件分别判断。 */
 public final class ServerCapabilityState {
     public enum State { DISCONNECTED, NEGOTIATING, READY, CLIENT_ONLY, DENIED, LOST }
     public record Scope(long connection, String sessionId, String dimension) {}
@@ -72,7 +73,7 @@ public final class ServerCapabilityState {
 
     JsonObject report() {
         JsonObject report = new JsonObject();
-        report.addProperty("state", state.name().toLowerCase(java.util.Locale.ROOT));
+        report.addProperty("state", state.name().toLowerCase(Locale.ROOT));
         report.addProperty("reason", reason);
         if (scope != null) {
             report.addProperty("session_id", scope.sessionId());

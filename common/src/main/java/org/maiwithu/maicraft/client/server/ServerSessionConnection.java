@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
-/** Client-thread negotiation and control lease; this class never replays an operation. */
+/** 在客户端线程完成能力协商和控制授权续订，不重放任何业务操作。 */
 final class ServerSessionConnection {
     final ServerCapabilityState capabilities = new ServerCapabilityState();
     final BooleanSupplier available;
@@ -142,7 +142,7 @@ final class ServerSessionConnection {
         JsonObject envelope = scoped("control");
         envelope.addProperty("controlGeneration", wireGeneration);
         envelope.addProperty("allowed", allowed);
-        try { send(envelope); } catch (RuntimeException ignored) { /* same generation is safe to retry */ }
+        try { send(envelope); } catch (RuntimeException ignored) { /* 同一代控制授权可安全重试，不会新增游戏操作 */ }
     }
 
     boolean mutationPermitted() {
@@ -176,7 +176,7 @@ final class ServerSessionConnection {
 
     void close() {
         if (capabilities.scope != null && available.getAsBoolean()) {
-            try { send(scoped("close")); } catch (RuntimeException ignored) { /* receipts stay unresolved */ }
+            try { send(scoped("close")); } catch (RuntimeException ignored) { /* 保留未决回执，等待后续核对实际效果 */ }
         }
     }
 

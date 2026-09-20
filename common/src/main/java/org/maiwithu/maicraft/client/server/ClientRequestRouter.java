@@ -13,11 +13,11 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import static org.maiwithu.maicraft.client.server.ClientRequestReceipt.*;
 
-/** One client-thread router for server enhancement and explicitly equivalent client fallbacks. */
+/** 在客户端线程统一选择服务端增强或已声明行为等价的客户端回退实现。 */
 public final class ClientRequestRouter {
     @FunctionalInterface
     public interface MutationGate {
-        /** Claim the current actor's mutation slot before invoking send; false leaves the request queued. */
+        /** 发送前先占用本刻身体操作额度；无法取得额度时让请求继续排队。 */
         boolean submit(ClientRequestReceipt receipt, Runnable send);
     }
 
@@ -120,7 +120,7 @@ public final class ClientRequestRouter {
         return Optional.ofNullable(ledger.requests.get(id)).map(ClientRequestReceipt::snapshot);
     }
 
-    /** Query only the original server identity; never resubmit, including after a timeout. */
+    /** 只向原服务端查询既有请求，超时后也不重新提交，避免重复执行。 */
     public Optional<Snapshot> query(UUID id) {
         requireThread.run();
         ClientRequestReceipt receipt = ledger.requests.get(id);
@@ -153,11 +153,11 @@ public final class ClientRequestRouter {
                         session.capabilities.limit("maxRequests", 512, 512) - Math.max(0, envelope.get("remainingRequests").getAsInt()));
             }
         } catch (RuntimeException malformed) {
-            // A malformed remote observation cannot release a mutation fence or cause a fallback.
+            // 无效的远端观察不能解除写操作隔离，也不能触发客户端回退重做。
         }
     }
 
-    /** Observe lifecycle and query receipts even when the human owns the body. */
+    /** 玩家自行控制身体时也继续观察连接生命周期，并查询既有请求回执。 */
     public void observe(long tick) {
         requireThread.run();
         this.tick = tick;
@@ -177,7 +177,7 @@ public final class ClientRequestRouter {
         if (session.capabilities.state != ServerCapabilityState.State.NEGOTIATING || !session.available.getAsBoolean()) clearRenewal();
     }
 
-    /** Call within the actor tick; native client backends retain their ordinary actor/menu checks. */
+    /** 在身体游戏刻内分发；客户端原生回退仍须通过身体和菜单操作检查。 */
     public void dispatch(boolean allowMutations) {
         dispatch(allowMutations, receipt -> true);
     }
@@ -222,7 +222,7 @@ public final class ClientRequestRouter {
             JsonObject envelope = receipt.envelope("request");
             envelope.addProperty("controlGeneration", session.wireGeneration);
             envelope.add("body", receipt.arguments.deepCopy());
-            // Pin before crossing the send boundary: a sender may throw after enqueueing the packet.
+            // 发送前先固定请求身份；发送器可能在包已入队后抛出异常，不能据此重发。
             if (!ledger.submitted(receipt, tick)) return;
             try {
                 if (session.send(envelope)) sentInScope++;
@@ -260,7 +260,7 @@ public final class ClientRequestRouter {
         return operation != null && choose(operation, new JsonObject(), false).supported();
     }
 
-    /** Previously negotiated support while this exact world binding renews its bounded receipt scope. */
+    /** 同一世界绑定续订回执保留期时，继续识别此前已协商的操作支持。 */
     public boolean renegotiating(String operationId) {
         requireThread.run();
         if (session.capabilities.state != ServerCapabilityState.State.NEGOTIATING || !session.available.getAsBoolean()
@@ -271,7 +271,7 @@ public final class ClientRequestRouter {
                 && feature.version() == operation.version() && feature.mutating() == operation.mutating();
     }
 
-    /** Consume permission for a new independent read after this exact read's scope expired; never replay its ID. */
+    /** 原只读请求超出保留期后，消费一次新查询许可；新查询不能重用旧请求身份。 */
     public boolean takeExpiredReadForRefresh(UUID id) {
         requireThread.run();
         ClientRequestReceipt receipt = ledger.requests.get(id);
@@ -293,7 +293,7 @@ public final class ClientRequestRouter {
         if (receipt == null || receipt.operation.mutating() || receipt.backend != Backend.SERVER || receipt.scope == null
                 || receipt.scope.connection() != receivedConnection || !receipt.code.equals("session_expired")
                 || receipt.status != Status.UNKNOWN) return;
-        // A read has no mutation to reconcile; retain its old identity as a failed observation in the ledger.
+        // 只读请求没有待核对的写入效果，将旧身份作为失败的观察保留在账本中。
         receipt.update(new Result(Status.FAILED, Effect.NOT_APPLIED, receipt.result, "session_expired", receipt.message));
         if (currentReadRefresh(receipt) && session.capabilities.scope != null
                 && session.capabilities.scope.sessionId().equals(receipt.scope.sessionId())) rotationRequested = true;
@@ -314,7 +314,7 @@ public final class ClientRequestRouter {
         return operation != null && session.capabilities.supports(operation);
     }
 
-    /** Legacy native callers must also respect known denial and persisted uncertainty. */
+    /** 旧原生调用入口同样遵守已知拒绝状态和持久化的未决效果限制。 */
     public boolean nativeFallbackAllowed(String operationId) {
         requireThread.run();
         ClientOperation operation = operations.get(operationId);

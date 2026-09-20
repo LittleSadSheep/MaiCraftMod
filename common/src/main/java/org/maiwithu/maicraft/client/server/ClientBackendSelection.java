@@ -3,9 +3,10 @@ package org.maiwithu.maicraft.client.server;
 
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import java.util.Locale;
 import static org.maiwithu.maicraft.client.server.ClientRequestReceipt.Backend;
 
-/** Decide support first; evaluate current conditions separately for each operation. */
+/** 先判断后端是否支持操作，再分别检查本次操作的实际执行条件。 */
 final class ClientBackendSelection {
     record Choice(Backend backend, boolean supported, boolean ready, String reason) {
         JsonObject report(ClientOperation operation) {
@@ -14,7 +15,7 @@ final class ClientBackendSelection {
             value.addProperty("supported", supported);
             value.addProperty("version", operation.version());
             value.addProperty("mutating", operation.mutating());
-            value.addProperty("backend", backend.name().toLowerCase(java.util.Locale.ROOT));
+            value.addProperty("backend", backend.name().toLowerCase(Locale.ROOT));
             if (backend == Backend.SERVER && ready) {
                 value.add("available", JsonNull.INSTANCE);
                 value.addProperty("execution_conditions", "requires_server_validation");

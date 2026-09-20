@@ -10,7 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import static org.maiwithu.maicraft.client.server.ClientRequestReceipt.*;
 
-/** Client-only observations use the snapshot schema while explicitly retaining unknown server facts. */
+/** 客户端沿用机器快照格式，只填写能观察到的状态，服务端事实仍可保持未知。 */
 final class ClientMachineSnapshot implements ClientFallback {
     @Override public boolean supported() { return true; }
 

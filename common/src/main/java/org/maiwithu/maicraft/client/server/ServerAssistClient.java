@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Public client-thread operation facade shared by semantic tasks and the MCP capability report. */
+/** 供语义任务和 MCP 能力查询共用的客户端线程操作入口。 */
 public final class ServerAssistClient {
     private ServerAssistClient() {}
 
@@ -23,7 +23,7 @@ public final class ServerAssistClient {
         return submit(operation, arguments, mutating, ServerSessionRuntime.submissionOwner());
     }
 
-    /** Explicit ownership lets cancellation retire queued remote work before the next client tick. */
+    /** 明确记录请求所属任务，使取消任务时能在下一游戏刻前撤下排队的远端工作。 */
     public static ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating, String ownerTaskId) {
         ClientRequestReceipt receipt = ServerSessionRuntime.router().submit(operation, arguments, mutating);
         ServerSessionRuntime.rememberOwner(receipt, ownerTaskId);
@@ -35,6 +35,6 @@ public final class ServerAssistClient {
     public static void cancel(UUID id) { ServerSessionRuntime.router().cancel(id); }
     public static JsonObject capabilityReport() { return ServerSessionRuntime.router().capabilityReport(); }
 
-    /** Register contracts before connecting; equivalent native backends may be attached afterward. */
+    /** 连接前登记协议契约；行为等价的客户端原生后端可以稍后接入。 */
     public static void register(ClientOperation operation) { ServerSessionRuntime.router().register(operation); }
 }

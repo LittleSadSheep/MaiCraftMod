@@ -5,8 +5,9 @@ import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
+import java.util.Objects;
 
-/** Optional native observations enrich an already-created structural snapshot under the same identity. */
+/** 在原有快照身份下补充可选的原生观察，保留已经建立的结构信息。 */
 public final class ServerMachineObservationTaskRecord extends TaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(ServerMachineObservationTaskRecord.class, ServerMachineObservationTask::new); }
     final MachineSnapshots.Snapshot snapshot;
@@ -25,7 +26,7 @@ public final class ServerMachineObservationTaskRecord extends TaskRecord impleme
     public ServerMachineObservationTaskRecord(String callId, long deadline, MachineSnapshots.Snapshot snapshot,
                                               int componentOffset, int resourceOffset) {
         super("machine_server_observation", callId, deadline);
-        this.snapshot = java.util.Objects.requireNonNull(snapshot);
+        this.snapshot = Objects.requireNonNull(snapshot);
         if (componentOffset < 0 || componentOffset > 768) throw new IllegalArgumentException("component offset must be 0..768");
         this.componentOffset = componentOffset;
         if (resourceOffset < 0 || resourceOffset > 4096) throw new IllegalArgumentException("resource offset must be 0..4096");

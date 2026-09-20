@@ -5,18 +5,18 @@ import com.google.gson.JsonObject;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-/** An explicitly equivalent native client implementation of one operation/version. */
+/** 为指定操作及版本提供行为明确等价的客户端原生执行入口。 */
 public interface ClientFallback {
-    /** Registration alone is insufficient: the required client mod/API must actually exist. */
+    /** 已登记回退实现仍不够，实际运行环境中也必须存在对应模组或接口。 */
     boolean supported();
 
-    /** Fresh execution conditions, such as a visible terminal, range or current materials. */
+    /** 执行前重新检查终端是否可见、交互距离和当前材料等条件。 */
     Availability availability(JsonObject arguments);
 
-    /** Called once on the client thread; completion may arrive on any thread. */
+    /** 在客户端线程提交一次操作；完成结果可以从其他线程返回。 */
     void submit(UUID requestId, JsonObject arguments, Consumer<ClientRequestReceipt.Result> completion);
 
-    /** Retire queued native work; already submitted effects must still report their actual result. */
+    /** 撤销尚未执行的原生工作；已提交的效果仍须报告最终实际结果。 */
     default void cancel(UUID requestId) {}
 
     record Availability(boolean available, String reason) {

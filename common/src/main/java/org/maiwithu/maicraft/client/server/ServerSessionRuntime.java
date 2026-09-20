@@ -15,8 +15,11 @@ import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.network.ClientProtocolBridge;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import com.google.gson.JsonObject;
+import net.minecraft.world.level.storage.LevelResource;
+import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Loader-installed transport listener, advanced only inside the common client's actor lifecycle. */
+/** 加载器安装传输监听器，之后只在公共客户端的身体生命周期中推进会话。 */
 public final class ServerSessionRuntime {
     private static final ConcurrentLinkedQueue<Runnable> callbacks = new ConcurrentLinkedQueue<>();
     private static final ServerRequestOwners owners = new ServerRequestOwners();
@@ -39,8 +42,8 @@ public final class ServerSessionRuntime {
         installed = true;
         router();
         ClientProtocolBridge.installListener(new ClientProtocolBridge.Listener() {
-            @Override public void connected() { /* binding waits for the actual player and world */ }
-            @Override public void received(com.google.gson.JsonObject envelope) {
+            @Override public void connected() { /* 等真实玩家和世界就绪后再绑定会话 */ }
+            @Override public void received(JsonObject envelope) {
                 long receivedConnection = connectionRevision;
                 var frozen = envelope.deepCopy();
                 enqueue(() -> router.receive(frozen, receivedConnection));
@@ -100,14 +103,14 @@ public final class ServerSessionRuntime {
             var server = minecraft.getCurrentServer();
             var local = minecraft.getSingleplayerServer();
             String serverIdentity = server != null ? "remote:" + server.ip : "local:" + (local == null
-                    ? minecraft.gameDirectory.toPath() : local.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT));
+                    ? minecraft.gameDirectory.toPath() : local.getWorldPath(LevelResource.ROOT));
             journal.bind(serverIdentity, player.getUUID().toString(), level.dimension().location().toString());
             boolean allowed = context.body().automationOwnsControls() && !PreviewController.waitingReview()
                     && !GameplayAttentionMonitor.blocksAutomation(context.player());
             router.bind(connectionRevision, bindingRevision, level.dimension().location().toString(),
                     context.controlRevision(), allowed, tick);
         }
-        // Bind the current body/control owner before callbacks can settle or enqueue more work.
+        // 先绑定当前身体和控制权，再处理回调，避免新入队或结算的请求沿用旧玩家授权。
         for (int i = 0; i < 256; i++) {
             Runnable callback = callbacks.poll();
             if (callback == null) break;
@@ -131,7 +134,7 @@ public final class ServerSessionRuntime {
                 && ServerRequestOwners.ordinaryWinner(winner), receipt -> owners.selected(receipt.id(), owner));
     }
 
-    /** Passive job status never acquires the body or admits a native mutation. */
+    /** 被动查询机器任务状态，不取得身体控制权，也不提交原生修改。 */
     public static void dispatchBackgroundReads() {
         requireThread();
         if (installed) router.dispatch(false, receipt -> false,
@@ -143,7 +146,7 @@ public final class ServerSessionRuntime {
         String winner = CompanionTickDispatcher.controllingTask();
         if (winner.equals("synchronous_task"))
             return CompanionTickDispatcher.list().stream().filter(record -> record != current)
-                    .map(org.maiwithu.maicraft.task.TaskRecord::publicId).findFirst().orElse(null);
+                    .map(TaskRecord::publicId).findFirst().orElse(null);
         return winner.equals("current_task") && current != null ? current.publicId() : null;
     }
 
@@ -174,13 +177,13 @@ public final class ServerSessionRuntime {
                     "server " + receipt.operation.id(), send, NativeConfirmation.pending(), 1)
                     : context.actions().submitControlProtocol(context,
                     "server " + receipt.operation.id(), send, NativeConfirmation.pending(), 1);
-            // The actor enforces this tick's native boundary. The router/journal own the remote
-            // receipt, so a delayed reply must not lock next tick's emergency native input slot.
+            // 身体端只约束本刻的操作额度，远端回执由独立路由和日志持续跟踪。
+            // 因此远端回复延迟不能占住下一刻的原生输入额度，阻塞紧急自救。
             context.actions().retireOneShotForTaskBoundary(context, nativeReceipt,
                     "remote request outcome is retained by the independent server receipt ledger");
             return true;
         } catch (IllegalStateException unavailable) {
-            // Native screen, control and active-action gates run before the sender is invoked.
+            // 界面、控制权和当前动作检查均发生在发送前，检查不通过时保持未提交。
             return false;
         }
     }

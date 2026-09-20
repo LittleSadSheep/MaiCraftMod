@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Reads one bounded native page per request without movement, menu opening or game-thread waits. */
+/** 每次请求读取一页有界原生观察，不移动玩家、打开菜单或阻塞游戏线程。 */
 final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMachineObservationTaskRecord> {
     private record Target(int componentIndex, BlockPos position) {}
     private final MachineObservationPages pages = new MachineObservationPages();

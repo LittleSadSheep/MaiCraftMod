@@ -7,9 +7,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.Locale;
 import static org.maiwithu.maicraft.client.server.ClientRequestReceipt.*;
 
-/** Bounded receipt history; uncertain mutations survive world changes and prevent implicit replay. */
+/** 有界保存请求历史；换世界时保留结果不明的写操作，防止自动重放造成重复效果。 */
 final class ClientReceiptLedger {
     private static final int MAX_RECEIPTS = 512;
     final Map<UUID, ClientRequestReceipt> requests = new LinkedHashMap<>();
@@ -50,10 +51,10 @@ final class ClientReceiptLedger {
             return;
         }
         if (request.backend == Backend.SERVER && session.canQuery(request.scope)) {
-            try { session.send(request.envelope("cancel")); } catch (RuntimeException ignored) { /* unknown */ }
+            try { session.send(request.envelope("cancel")); } catch (RuntimeException ignored) { /* 尚无法确认实际效果 */ }
         } else if (request.backend == Backend.CLIENT) {
             try { request.operation.fallback().cancel(request.id()); }
-            catch (RuntimeException ignored) { /* cancellation cannot assert rollback */ }
+            catch (RuntimeException ignored) { /* 请求取消不能证明已发生的效果被撤销 */ }
         }
         if (!request.authoritative()) request.update(new Result(Status.UNKNOWN, Effect.UNKNOWN,
                 request.result, "cancelled_awaiting_receipt", reason));
@@ -139,20 +140,20 @@ final class ClientReceiptLedger {
                 || tick < request.nextQueryTick || !session.canQuery(request.scope)) return;
         request.nextQueryTick = tick + (tick - request.submittedTick < 100 ? 20 : 100);
         try { session.send(request.envelope("query")); }
-        catch (RuntimeException ignored) { /* read-only reconciliation may be retried */ }
+        catch (RuntimeException ignored) { /* 只读核对失败后可以再次查询原请求的结果 */ }
     }
 
     static Result decode(JsonObject envelope) {
         Status status;
         Effect effect;
         try {
-            status = Status.valueOf(ServerCapabilityState.text(envelope, "status").toUpperCase(java.util.Locale.ROOT));
-            effect = Effect.valueOf(ServerCapabilityState.text(envelope, "effect").toUpperCase(java.util.Locale.ROOT));
+            status = Status.valueOf(ServerCapabilityState.text(envelope, "status").toUpperCase(Locale.ROOT));
+            effect = Effect.valueOf(ServerCapabilityState.text(envelope, "effect").toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException unknown) { return null; }
         if (status == Status.QUEUED || status == Status.CANCELLED) return null;
         if (status == Status.PENDING || status == Status.UNKNOWN) effect = Effect.UNKNOWN;
         JsonObject result = ServerCapabilityState.object(envelope, "result");
-        // A successful protocol dispatch can still carry a business operation of unknown effect.
+        // 协议请求发送成功，并不代表对应机器操作的实际效果已经明确。
         if (ServerCapabilityState.text(result, "effect").equals("unknown")
                 || ServerCapabilityState.text(result, "status").equals("uncertain")
                 || ServerCapabilityState.text(result, "status").equals("unknown")) effect = Effect.UNKNOWN;

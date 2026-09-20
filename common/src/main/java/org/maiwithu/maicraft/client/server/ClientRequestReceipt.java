@@ -6,14 +6,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.Objects;
 
-/** One submission identity, retained for reconciliation even after cancellation or a timeout. */
+/** 每次提交保留唯一身份，取消或超时后仍凭它核对实际效果。 */
 public final class ClientRequestReceipt {
     public enum Status { QUEUED, PENDING, SUCCEEDED, REJECTED, FAILED, CANCELLED, UNKNOWN }
     public enum Effect { NOT_APPLIED, APPLIED, UNKNOWN }
     public enum Backend { UNSELECTED, SERVER, CLIENT }
 
-    /** SUCCEEDED describes dispatch; operation-specific result fields still decide task success. */
+    /** SUCCEEDED 表示分发成功，任务是否完成仍由具体操作的结果字段决定。 */
     public record Result(Status status, Effect effect, JsonObject result, String code, String message) {
         public Result {
             if (status == null || effect == null) throw new IllegalArgumentException("status/effect required");
@@ -74,9 +75,9 @@ public final class ClientRequestReceipt {
                 status, effect, retired, code, message, serverTick, result);
     }
 
-    /** Every observer invocation uses the client executor, including registration after settlement. */
+    /** 回执观察者始终在客户端执行器上运行，结算完成后新登记的观察者也遵守此规则。 */
     public void onUpdate(Consumer<Snapshot> observer) {
-        java.util.Objects.requireNonNull(observer, "observer");
+        Objects.requireNonNull(observer, "observer");
         dispatch.accept(() -> {
             requireThread.run();
             if (observers.size() >= 32) throw new IllegalStateException("receipt observer limit reached");

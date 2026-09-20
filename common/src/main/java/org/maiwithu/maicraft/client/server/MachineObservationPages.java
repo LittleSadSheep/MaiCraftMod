@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** Bounded observation pages retain their native ticks and never turn inventory into production proof. */
+/** 分页观察保留各自原生时刻；库存快照不能被当作已经生产物品的证据。 */
 final class MachineObservationPages {
     static final int MAX_CHARS = 98_304;
     final JsonArray pages = new JsonArray();

@@ -20,12 +20,18 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
+import org.maiwithu.maicraft.client.server.ClientMachineWatches;
+import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
+import org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
+import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 
 /**
- * The single in-process runtime shared by the embedded MCP endpoint and the real local-player body.
- *
- * <p>Loaders start this once, call {@link #tick(Minecraft)} once at END_CLIENT_TICK, and stop it
- * during client shutdown. No Python process, second scheduler, or synthetic player exists.</p>
+ * 内嵌 MCP 与真实本地玩家共用的客户端运行入口。
+ * 加载器在客户端启动时初始化，在每次 END_CLIENT_TICK 调用 {@link #tick(Minecraft)}，退出时关闭。
  */
 public final class ClientRuntime {
     public static final int DEFAULT_MCP_PORT = 8766;
@@ -38,7 +44,7 @@ public final class ClientRuntime {
 
     private ClientRuntime() {}
 
-    /** Start the loopback MCP endpoint around the one injected game runtime. */
+    /** 围绕当前游戏运行时启动本机 MCP 服务，供外部客户端提交和观察任务。 */
     public static synchronized void start(RuntimeFacade facade) {
         Objects.requireNonNull(facade, "facade");
         if (mcp != null && mcp.isRunning()) return;
@@ -61,26 +67,24 @@ public final class ClientRuntime {
         }
     }
 
-    /**
-     * Advance exactly one actor context and one scheduler winner for this client tick.
-     */
+    /** 每个客户端游戏刻只打开一份身体上下文，并推进本轮获得身体的任务。 */
     public static void tick(Minecraft minecraft) {
         // 总流程：观察世界 → 取得本 tick 的身体上下文 → 检查控制权 → 调度任务 → 推进导航 → 归还上下文。
         // 中途因预览或人工接管而返回时，仍需通过 finally 收尾，不能遗留上一轮的按键或原生动作。
         requireClientThread(minecraft);
-        org.maiwithu.maicraft.core.combat.CombatThreats.observe(minecraft.player);
-        org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime.tick();
+        CombatThreats.observe(minecraft.player);
+        PonderReplayRuntime.tick();
         // 即使玩家正在自己操作，也继续观察世界和更新预览，让 MCP 能看到当前发生了什么。
         tickStage = "observing";
-        org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.tick(minecraft);
-        org.maiwithu.maicraft.core.inventory.StockEvidence.observe(minecraft.player);
+        ClientMachineCatalog.tick(minecraft);
+        StockEvidence.observe(minecraft.player);
         NavProfiler.clientTickPulse();
         PreviewController.tick(minecraft);
-        org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade.tickObservation(minecraft.player);
+        MaiCraftRuntimeFacade.tickObservation(minecraft.player);
         ACTOR.previewReview(PreviewController.waitingReview());
         Optional<LocalPlayerContext> opened = ACTOR.beginTick();
         if (opened.isEmpty()) {
-            org.maiwithu.maicraft.client.server.ServerSessionRuntime.observe(minecraft, null);
+            ServerSessionRuntime.observe(minecraft, null);
             tickStage = "no_body";
             if (bodyPresent) {
                 bodyGone();
@@ -92,18 +96,18 @@ public final class ClientRuntime {
         boolean pathingMayDrive = false;
         try {
             bodyPresent = true;
-            org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.observeControl(context);
+            TransportRuntime.observeControl(context);
             BlockSearch.tick(context.level());
             TargetIndex.clientTick(context.level());
             GameplayAttentionMonitor.tick(context.player());
-            org.maiwithu.maicraft.client.server.ServerSessionRuntime.observe(minecraft, context);
-            org.maiwithu.maicraft.client.server.ClientMachineWatches.tick(minecraft);
-            org.maiwithu.maicraft.client.server.ServerSessionRuntime.dispatchBackgroundReads();
+            ServerSessionRuntime.observe(minecraft, context);
+            ClientMachineWatches.tick(minecraft);
+            ServerSessionRuntime.dispatchBackgroundReads();
             IntentRuntime intents = IntentRuntime.get();
             // 任务状态与玩家/世界实例绑定；换维度、重生等情况下先处理交接，再尝试推进任务。
             intents.beforeBodyTick(minecraft);
-            // Binding is lifecycle-only. It may cancel a stale body or complete an authorised
-            // portal handoff, but never advances timers or task logic without control authority.
+            // 此处只处理身体生命周期：清理失效玩家或完成已获准的传送门交接。
+            // 玩家仍持有控制权时，不推进计时器和任务动作。
             CompanionTickDispatcher.observeBody(context.player());
             BuildPreviewGate.settleCancellation();
             if (PreviewController.waitingReview()) {
@@ -130,9 +134,6 @@ public final class ClientRuntime {
                 GameplayAttentionMonitor.afterSemanticBind(context.player());
                 return;
             }
-            // A task-boundary cleanup may have used this actor tick to physically release an
-            // ownerless native action.  Keep the semantic task intact and resume next tick; trying
-            // to advance a new child now would violate the one-native-mutation boundary.
             if (!context.mutationAvailable()) {
                 // 这一刻已经为旧动作做过一次游戏操作，就等下一刻再做新事；目前连只查条件的任务也会等。
                 tickStage = "settling_native_action";
@@ -141,7 +142,7 @@ public final class ClientRuntime {
                 return;
             }
             intents.controlAvailable();
-            if (org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.tickCleanup(context)) {
+            if (TransportRuntime.tickCleanup(context)) {
                 tickStage = "settling_transport";
                 pathingMayDrive = context.mutationAvailable();
                 intents.tickPersistence(minecraft, context.player());
@@ -150,9 +151,8 @@ public final class ClientRuntime {
             }
             tickStage = "running_tasks";
             CompanionTickDispatcher.tick(context.player());
-            org.maiwithu.maicraft.client.server.ServerSessionRuntime.dispatch(context);
-            // A semantic action may have consumed this tick's one native-mutation slot. Do not
-            // let the embedded path executor append a break/place gesture after it.
+            ServerSessionRuntime.dispatch(context);
+            // 语义任务可能已用掉本刻唯一的原生操作额度，此时导航不能再追加挖掘或放置。
             pathingMayDrive = context.mutationAvailable() && !PreviewController.waitingReview();
             intents.tickPersistence(minecraft, context.player());
             GameplayAttentionMonitor.afterSemanticBind(context.player());
@@ -165,10 +165,7 @@ public final class ClientRuntime {
         }
     }
 
-    /**
-     * Resolve the fresh context for the current tick. Compatibility adapters call this for every
-     * operation and never retain the returned object across ticks.
-     */
+    /** 兼容适配器每次操作都重新取得当刻身体上下文，避免跨游戏刻复用过期授权。 */
     public static LocalPlayerContext requireContext(LocalPlayer player) {
         Minecraft minecraft = Minecraft.getInstance();
         requireClientThread(minecraft);
@@ -188,25 +185,25 @@ public final class ClientRuntime {
     public static String lastTickStage() { return tickStage; }
 
 
-    /** Advance only the leased first-person camera at render cadence. */
+    /** 按渲染帧推进已获准的第一人称镜头转动。 */
     public static void renderFrame(Minecraft minecraft) {
         requireClientThread(minecraft);
         ACTOR.renderFrame();
     }
 
-    /** Register explicit MCP authority for takeover at the next actor tick. */
+    /** 根据 MCP 的明确授权登记接管请求，在下一次身体游戏刻应用。 */
     public static ClientActorBoundary.AutomationRequest requestAutomationControl(
             LocalPlayer player) {
         return ACTOR.requestAutomationControl(player);
     }
 
-    /** Roll back only a newly-created takeover request when semantic submission fails. */
+    /** 语义任务提交失败时，只撤回此次新建的接管请求。 */
     public static void rollbackAutomationControl(
             ClientActorBoundary.AutomationRequest request) {
         ACTOR.rollbackAutomationControl(request);
     }
 
-    /** Stop accepting MCP work and cancel body-bound tasks without waiting on them. */
+    /** 关闭 MCP 接收入口，并在客户端线程清理绑定当前玩家的任务。 */
     public static synchronized void stop() {
         EmbeddedMcpService service = mcp;
         mcp = null;
@@ -214,8 +211,8 @@ public final class ClientRuntime {
 
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cleanup = () -> {
-            org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog.shutdown();
-            org.maiwithu.maicraft.client.server.ServerSessionRuntime.shutdown();
+            ClientMachineCatalog.shutdown();
+            ServerSessionRuntime.shutdown();
             ACTOR.shutdown();
             PreviewController.shutdown();
             IntentRuntime.get().shutdownPersistence();
@@ -232,12 +229,12 @@ public final class ClientRuntime {
         return mcp != null && mcp.isRunning();
     }
 
-    /** Actual loopback port, or {@code -1} while the embedded MCP endpoint is stopped. */
+    /** 返回实际监听的本机端口；MCP 服务关闭时返回 {@code -1}。 */
     public static synchronized int mcpPort() {
         return mcp == null ? -1 : mcp.port();
     }
 
-    /** Live transport sessions; this is diagnostic state and never gates execution. */
+    /** 返回当前 MCP 连接数供诊断，不据此决定任务是否执行。 */
     public static synchronized int mcpSessionCount() {
         return mcp == null ? 0 : mcp.sessionCount();
     }
@@ -251,10 +248,10 @@ public final class ClientRuntime {
     }
 
     private static void bodyGone(boolean saveSemanticState) {
-        org.maiwithu.maicraft.core.combat.CombatThreats.clear();
+        CombatThreats.clear();
         // 先记住“刚才做到哪了”，再停止旧玩家的任务；反过来会只记下“任务已取消”，下次就接不上了。
         EmbeddedBaritoneRuntime.bodyGone();
-        org.maiwithu.maicraft.core.pathing.transport.TransportRuntime.abandon();
+        TransportRuntime.abandon();
         if (saveSemanticState) IntentRuntime.get().bodyUnavailable();
         CompanionTickDispatcher.bodyGone();
         BlockSearch.cancelAll();

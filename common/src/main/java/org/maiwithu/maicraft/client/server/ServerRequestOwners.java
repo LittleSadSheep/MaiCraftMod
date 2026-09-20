@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Check owner lifetime before dispatch, since the scheduler may inspect its deadline later this tick. */
+/** 分发前先检查所属任务是否到期，避免调度器稍后才检查期限时误执行旧请求。 */
 final class ServerRequestOwners {
     private final Map<UUID, String> owners = new LinkedHashMap<>();
 

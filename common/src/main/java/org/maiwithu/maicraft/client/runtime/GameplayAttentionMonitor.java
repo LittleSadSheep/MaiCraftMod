@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.intent.Goal;
 
 /**
  * 把天气、时间、受伤和死亡变化整理成 Attention 事件；聊天区消息单独送进 ChatFlow。
@@ -83,8 +84,8 @@ public final class GameplayAttentionMonitor {
 
         // 再次看到活着的身体时先准备重新绑定；任务记录恢复并完成 afterSemanticBind 之前，自动行为仍暂停。
         if (lifeState == LifeState.DEAD_REPORTED || lifeState == LifeState.RESPAWN_REQUESTED) {
-            // This is a fresh LocalPlayer body. Arm same-identity restore before
-            // CompanionTickDispatcher observes and retires the dead body.
+            // 检测到重生后的新玩家对象时，先登记同一身份的进度恢复，
+            // 再让任务调度器观察并清理已死亡的旧身体。
             IntentRuntime.get().prepareRespawnHandoff();
             lifeState = LifeState.RESPAWN_OBSERVED;
             remember(level, dimension, phase, weather, effectiveHealth);
@@ -204,7 +205,7 @@ public final class GameplayAttentionMonitor {
         }
     }
 
-    /** Report a safety reflex once, without exposing movement, target or inventory internals. */
+    /** 每次自救触发只报告一次，通知中不携带移动目标或背包内部细节。 */
     // 同一种紧急反应只记一次开始；它还在进行时重复请求不会重复发通知。
     public static synchronized void reflexStarted(
             String reflex, String reason, String actionCategory,
@@ -252,13 +253,13 @@ public final class GameplayAttentionMonitor {
         publish("agent.reflex", "An emergency reflex finished.", data);
     }
 
-    /** Dead and just-rebound bodies may be observed, but semantic work must not advance yet. */
+    /** 死亡或刚重新绑定的玩家仍可被观察，但语义任务须等待恢复流程完成。 */
     public static synchronized boolean blocksAutomation(LocalPlayer player) {
         return player == null || player.isDeadOrDying() || player.getHealth() <= 0.0F
                 || lifeState != LifeState.ALIVE;
     }
 
-    /** Publish the conservative post-respawn checkpoint after IntentRuntime has restored it. */
+    /** IntentRuntime 完成重生恢复后，再发布保守的任务检查点。 */
     // 重生后的任务绑定完成才报告库存对比，并解除死亡阶段的自动行为锁；没有自动开始捡回遗物。
     public static synchronized void afterSemanticBind(LocalPlayer player) {
         if (player == null || lifeState != LifeState.RESPAWN_OBSERVED || lastDeath == null) return;
@@ -460,7 +461,7 @@ public final class GameplayAttentionMonitor {
         return goalBoolean(record.goal(), key);
     }
 
-    private static boolean goalBoolean(org.maiwithu.maicraft.intent.Goal goal, String key) {
+    private static boolean goalBoolean(Goal goal, String key) {
         if (goal == null) return false;
         try {
             if (goal.parameters().has(key)) return goal.parameters().get(key).getAsBoolean();
