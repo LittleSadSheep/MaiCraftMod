@@ -20,6 +20,7 @@ public final class CookingSettlementTest {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         parentSatisfactionStopsNewBatches();
+        parentSatisfactionStopsUnsubmittedInput();
         try (var world = new CookingTestWorld()) {
             world.inventory(0, 16, 2);
             var task = new SemanticCookCompanionTask(world.game.player, world.request(16));
@@ -88,6 +89,28 @@ public final class CookingSettlementTest {
             check(parent.tick(world.game.player) == TaskState.SUCCESS
                     && !((Boolean) CookingTestWorld.read(cook, "batchOutstanding")), "结清原炉次后父任务才成功");
             check(world.game.blockUses() == 0 && world.game.itemUses() == 0, "该场景只验证协调，不冒充原生加工回执");
+        }
+    }
+
+    private static void parentSatisfactionStopsUnsubmittedInput() throws Exception {
+        try (var world = new CookingTestWorld()) {
+            world.inventory(0, 16, 2);
+            var task = new SemanticCookCompanionTask(world.game.player, world.request(16));
+            task.start(world.game.player); task.tick(world.game.player); task.tick(world.game.player);
+            var contents = new SimpleContainer(3);
+            var menu = new CookingTestWorld.Furnace(world, contents, new SimpleContainerData(4));
+            world.game.player.containerMenu = menu;
+            CookingTestWorld.set(task, "ownedMenu", menu); CookingTestWorld.set(task, "openedMenu", true);
+            CookingTestWorld.set(task, "stationClaimed", true); CookingTestWorld.phase(task, "LOAD_INPUT");
+            task.tick(world.game.player);
+            check(CookingTestWorld.read(task, "activeChild") != null, "已经建立装料单，但还没有发出点击");
+            task.requestSatisfiedSettlement();
+            task.tick(world.game.player);
+            check(CookingTestWorld.read(task, "ownedInputLoaded").equals(0)
+                    && Boolean.FALSE.equals(CookingTestWorld.read(task, "batchOutstanding"))
+                    && contents.getItem(0).isEmpty(), "原始计划十六份不能在零次搬运后被记成已入炉");
+            check(((List<?>) CookingTestWorld.read(world.game.player.connection, "packets")).isEmpty(),
+                    "父目标满足后，尚未提交的装料不能再发包");
         }
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

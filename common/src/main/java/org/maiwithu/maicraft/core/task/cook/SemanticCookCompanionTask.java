@@ -972,13 +972,21 @@ public final class SemanticCookCompanionTask
                 phase = Phase.WAIT_MENU;
             }
             case LOAD_INPUT -> {
-                effectsStarted = true;
-                batchOutstanding = true;
-                ownedInputLoaded = batchRaw;
+                int loaded = confirmedMoveTotal(result);
+                if (loaded < 0 || loaded == 0 && !parentSatisfied)
+                    return closeWithoutClaimingContents("cooking_input_load_unverified", "The input transfer did not report confirmed quantities.", FailureType.UNKNOWN);
+                // 父目标提前满足时，分堆可能只装完第一小堆；本炉只认原生回执确认的量。
+                effectsStarted |= loaded > 0;
+                batchOutstanding = loaded > 0;
+                ownedInputLoaded = loaded;
+                batchRaw = loaded;
                 phase = Phase.LOAD_FUEL;
             }
             case LOAD_FUEL -> {
-                effectsStarted = true;
+                int loaded = confirmedMoveTotal(result);
+                if (loaded < 0 || loaded == 0 && !parentSatisfied)
+                    return closeWithoutClaimingContents("cooking_fuel_load_unverified", "The fuel transfer did not report confirmed quantities.", FailureType.UNKNOWN);
+                effectsStarted |= loaded > 0;
                 phase = Phase.CONFIRM_START;
                 markCookEvidence();
             }
@@ -1033,6 +1041,16 @@ public final class SemanticCookCompanionTask
         Object counts = result.data().get("moved_counts");
         return counts instanceof List<?> values && values.size() == 1 && values.getFirst() instanceof Integer count
                 && count > 0 ? count : -1;
+    }
+
+    private static int confirmedMoveTotal(TaskResult result) {
+        if (result == null || result.data() == null || !(result.data().get("moved_counts") instanceof List<?> counts)) return -1;
+        int total = 0;
+        for (Object value : counts) {
+            if (!(value instanceof Integer count) || count < 0 || count > Integer.MAX_VALUE - total) return -1;
+            total += count;
+        }
+        return total;
     }
 
     private static boolean prerequisiteEffects(TaskResult result) {
@@ -1372,6 +1390,8 @@ public final class SemanticCookCompanionTask
         // 父目标可能由另一种可替代物品满足；这时只收尾当前这炉，不能继续追赶自己的旧成品数量。
         finishRequested = true;
         parentSatisfied = true;
+        if (activeChild != null && (activePurpose == Purpose.LOAD_INPUT || activePurpose == Purpose.LOAD_FUEL))
+            activeChild.requestSatisfiedSettlement();
     }
 
     private static int ceilDiv(long numerator, long denominator) {

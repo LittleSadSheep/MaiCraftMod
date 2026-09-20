@@ -25,6 +25,7 @@ public final class ContainerSplitTransferTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         for (int count : new int[]{49, 33, 29}) exactNativeSlots(64, count, 0);
         exactNativeSlots(63, 32, 7); guardedChangesAndCancellation(); sourceReturnPermission(); parentChoosesSplit(); parentCountsConfirmedClicks();
+        settlementStopsAtEmptyCursor(); unstartedParentDoesNotClick();
         System.out.println("ContainerSplitTransferTest: native slot halves, delayed receipts, capacity and foreign cursor guards passed");
     }
     private static void exactNativeSlots(int source, int amount, int destination) throws Exception {
@@ -107,6 +108,30 @@ public final class ContainerSplitTransferTest {
                 check(parent.resultData().get("confirmed_split_clicks").equals(i + 1), "each confirmed receipt contributes exactly one click");
             }
             check(parent.resultData().get("moved_counts").equals(List.of(49)), "optimized clicks still report the exact original move quantity");
+        }
+    }
+
+    private static void settlementStopsAtEmptyCursor() throws Exception {
+        try (var f = new Fixture(64, 49, 0)) {
+            f.step(); f.confirm();
+            check(!f.menu.getCarried().isEmpty(), "第一小堆已拿在手里");
+            f.transfer.requestSatisfiedSettlement();
+            var state = f.step();
+            for (int i = 0; i < 8 && state == ContainerSplitTransfer.Status.RUNNING; i++) { f.confirm(); state = f.step(); }
+            check(state == ContainerSplitTransfer.Status.COMPLETE && f.transfer.deposited() == 32
+                    && f.menu.getCarried().isEmpty() && f.stock.getItem(0).getCount() == 32 && f.clicks == 2,
+                    "结清手里的三十二件后停下，不能继续拿下一小堆凑原计划四十九件");
+        }
+    }
+
+    private static void unstartedParentDoesNotClick() throws Exception {
+        try (var f = new Fixture(64, 49, 0)) {
+            var task = new ContainerTransferCompanionTask(f.world.player,
+                    new ContainerTransferTaskRecord("already-satisfied", 1000, f.menu.containerId, List.of(f.move), false));
+            check(!task.mustSettleBeforeSatisfiedCancellation(), "只建立任务单不算已经提交搬运");
+            task.requestSatisfiedSettlement();
+            check(task.tick(f.world.player) == TaskState.SUCCESS && task.resultData().get("moved_counts").equals(List.of())
+                    && f.stock.getItem(0).getCount() == 64, "尚未开始的搬运在父目标满足后不得点击");
         }
     }
     private static final class Fixture implements AutoCloseable {

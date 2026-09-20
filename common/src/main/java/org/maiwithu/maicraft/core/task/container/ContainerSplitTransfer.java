@@ -23,6 +23,7 @@ final class ContainerSplitTransfer {
     private MenuReceipt receipt;
     private String failure;
     private boolean uncertain, confirmedThisTick;
+    private boolean settlementRequested;
 
     ContainerSplitTransfer(LocalPlayer player, AbstractContainerMenu menu, ContainerTransferTaskRecord.Move move, int amount) {
         this.player = player; this.menu = menu; this.move = move;
@@ -48,8 +49,9 @@ final class ContainerSplitTransfer {
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) return fail("split click was not confirmed: " + receipt.detail(), true);
             receipt = null; index++; confirmedThisTick = true;
         }
-        if (index == steps.size()) {
-            var last = steps.getLast().after(); Snapshot actual = snapshot();
+        if (index == steps.size() || settlementRequested && menu.getCarried().isEmpty()) {
+            // 父目标已经满足时，手里这一小堆结清后就停止，不再拿起下一小堆。
+            var last = index == 0 ? steps.getFirst().before() : steps.get(index - 1).after(); Snapshot actual = snapshot();
             return matches(actual.source, last.source()) && actual.cursor.isEmpty()
                     && (!exact() || matchesDestination(actual.destination, destinationBefore.getCount() + last.deposited()))
                     ? Status.COMPLETE : fail("split final inventory totals changed", true);
@@ -100,11 +102,14 @@ final class ContainerSplitTransfer {
     private static boolean either(ItemStack actual, ItemStack before, ItemStack after) { return same(actual, before) || same(actual, after); }
     private Status fail(String reason, boolean uncertain) { failure = reason; this.uncertain |= uncertain; return Status.FAILED; }
     boolean confirmedThisTick() { return confirmedThisTick; }
+    boolean hasStarted() { return receipt != null || index > 0; }
+    void requestSatisfiedSettlement() { settlementRequested = true; }
+    int deposited() { return index == 0 ? 0 : steps.get(index - 1).after().deposited(); }
     String failure() { return failure; }
     // 中途取消时若鼠标仍拿着本次半堆，也保持界面可见，避免关闭背包把无法放回的物品丢在地上。
     boolean preserveMenu() { return receipt != null || !menu.getCarried().isEmpty() || failure != null; }
     Map<String, Object> evidence() {
-        int deposited = index == 0 ? 0 : steps.get(index - 1).after().deposited();
+        int deposited = deposited();
         return Map.of("planned_clicks", steps.size(), "confirmed_clicks", index, "confirmed_deposited", deposited,
                 "outcome_uncertain", uncertain || receipt != null, "cursor_empty", menu.getCarried().isEmpty());
     }

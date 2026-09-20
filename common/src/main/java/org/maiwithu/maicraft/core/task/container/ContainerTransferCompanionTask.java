@@ -45,6 +45,7 @@ public final class ContainerTransferCompanionTask
     private boolean completed;
     private boolean preserveUnexpectedCursor;
     private boolean outcomeUncertain;
+    private boolean settlementRequested;
 
     public ContainerTransferCompanionTask(LocalPlayer player, ContainerTransferTaskRecord record) {
         super(player, record);
@@ -86,6 +87,11 @@ public final class ContainerTransferCompanionTask
         if (phase == Phase.FAILING) {
             fail(pendingFailure, pendingFailureType);
             return TaskState.FAILED;
+        }
+        if (settlementRequested && (phase == Phase.BEGIN || !mustSettleBeforeSatisfiedCancellation())) {
+            // 还没提交的下一笔没有需要结清的效果；保留已确认数量，把菜单交回父任务。
+            completed = true;
+            return TaskState.SUCCESS;
         }
         if (moveIndex >= r.moves.size()) {
             if (!r.closeAfter) { completed = true; return TaskState.SUCCESS; }
@@ -192,8 +198,19 @@ public final class ContainerTransferCompanionTask
             preserveUnexpectedCursor = split.preserveMenu();
             fail(split.failure(), FailureType.TARGET_LOST); return TaskState.FAILED;
         }
-        if (status == ContainerSplitTransfer.Status.COMPLETE) completeMove(requested);
+        if (status == ContainerSplitTransfer.Status.COMPLETE) completeMove(split.deposited());
         return TaskState.RUNNING;
+    }
+
+    @Override public boolean mustSettleBeforeSatisfiedCancellation() {
+        return receipt != null || outcomeUncertain || !moved.isEmpty()
+                || phase == Phase.PLACE_ALL || phase == Phase.SWAP_DEST || phase == Phase.RETURN_CURSOR
+                || split != null && split.hasStarted();
+    }
+
+    @Override public void requestSatisfiedSettlement() {
+        settlementRequested = true;
+        if (split != null) split.requestSatisfiedSettlement();
     }
 
     // 点击前重新冻结源格与两侧数量，确认后按实际变化记账；容量不足不能被写成整堆完成。
@@ -381,6 +398,7 @@ public final class ContainerTransferCompanionTask
         data.put("confirmed_split_clicks", confirmedSplitClicks);
         data.put("outcome_uncertain", outcomeUncertain || Boolean.TRUE.equals(splitEvidence.get("outcome_uncertain")));
         data.put("preserve_menu", preserveUnexpectedCursor || !r.closeAfter);
+        data.put("stopped_because_parent_satisfied", settlementRequested);
         if (!splitEvidence.isEmpty()) data.put("split_transfer", splitEvidence);
         return Map.copyOf(data);
     }
