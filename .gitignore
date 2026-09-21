@@ -39,6 +39,8 @@ runs
 *.prompt.md
 *.generated.md
 .vscode
+.codex/
+
 # 临时审阅和实验继续留在本地；面向贡献者的开发文档随实现一起维护。
 docs/
 !/docs/
