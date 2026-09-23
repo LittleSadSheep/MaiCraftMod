@@ -101,7 +101,7 @@ public final class EmbeddedBaritoneRuntime {
 
     private EmbeddedBaritoneRuntime() {}
 
-    /** Optional live diagnostics, without bootstrapping an otherwise idle Baritone instance. */
+    /** 可选的实时诊断查询，不会为此启动原本空闲的 Baritone 实例。 */
     public static Map<String, Object> diagnosticState() {
         requireClientThread();
         var result = new LinkedHashMap<String, Object>();
@@ -131,7 +131,7 @@ public final class EmbeddedBaritoneRuntime {
         return result;
     }
 
-    /** The developer overlay observes only the selected executor, never the search worker. */
+    /** 开发者覆盖层只观察当前选中的执行器，不读取搜索工作线程。 */
     public static NavigationPathSnapshot debugPath() {
         requireClientThread();
         if (owner == null || backend == null || world != Minecraft.getInstance().level) return null;
@@ -209,9 +209,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     /**
-     * Submit one read-only terrain-changing second opinion for the current owner. The policy is
-     * frozen with the failed preserve calculation; the returned path is diagnostic evidence and
-     * is never installed into the live path executor.
+     * 为当前所有者提交一次只读的地形变化路线复核。策略会随失败的保留地形计算一起冻结；返回路线仅作诊断证据，绝不会安装到实时执行器中。
      */
     static EmbeddedBaritoneTerrainProbe.ProbeFuture submitTerrainProbe(
             EmbeddedBaritoneNavigator navigator,
@@ -229,7 +227,7 @@ public final class EmbeddedBaritoneRuntime {
         return owner == navigator ? EmbeddedBaritonePolicy.snapshot() : null;
     }
 
-    /** Called exactly once at the end of an open MaiCraft actor tick. */
+    /** 在一次有效的 MaiCraft 角色 tick 结束时恰好调用一次。 */
     public static void tick(LocalPlayerContext context, boolean schedulerAllowsBodyWork) {
         requireClientThread();
         lastDrivenOwner = null;
@@ -240,20 +238,16 @@ public final class EmbeddedBaritoneRuntime {
 
         EmbeddedBaritoneNavigator current = owner;
         if (current == null) {
-            // The embedded backend has no claim on this tick's body. A semantic task may have
-            // released navigation and immediately issued its own close-range movement (loot
-            // pickup, portal approach, boat hand-off, and similar). Halting here would make the
-            // dormant backend the last writer and erase that legitimate command.
+            // 内嵌后端不拥有本 tick 的身体控制权。语义任务可能刚释放导航，就立刻发出自己的近距离移动指令，例如拾取掉落物、接近传送门或交接船只。
+            // 此处若执行停止，会让休眠后端成为最后写入者并抹掉合法指令。
             baritone.getInputOverrideHandler().clearAllKeys();
             ((LookBehavior) baritone.getLookBehavior()).clearTarget();
             ACTIONS.suspendAny(context,
                     "the navigation owner released its first-person body");
             return;
         }
-        // A task may have dropped its last PlayerNav reference after requesting a terminal
-        // outcome. Settle it here if the previous tick reached a safe movement boundary; while
-        // still airborne, keep only the already-selected movement alive even if normal scheduler
-        // work has moved on. Clearing its steering would turn cleanup into an avoidable fall.
+        // 任务请求终态后可能已丢弃最后一个 PlayerNav 引用。若上个 tick 已抵达安全移动边界，就在此结算；若角色仍在空中，即使常规调度工作已切换，也只保留已选中的移动。
+        // 清除其转向会让清理过程变成可以避免的坠落。
         current.settlePendingFailureAtSafeBoundary();
         if (owner != current) {
             promotePendingStart(baritone);
@@ -324,8 +318,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     /**
-     * Yield only physical outputs to a higher-priority first-person winner while retaining the
-     * calculated route. This never writes the body itself; the winning behavior owns that tick.
+     * 在保留已计算路线的同时，仅将身体控制输出让给优先级更高的第一人称行为；此方法本身不写入身体状态，由获胜行为负责本 tick 的控制。
      */
     public static void suspendActivePhysicalOutputs() {
         requireClientThread();
@@ -338,9 +331,7 @@ public final class EmbeddedBaritoneRuntime {
     }
 
     /**
-     * Whether the active route is at a physical hand-off point. A fall or launched parkour
-     * movement must retain its steering until it reaches a cancellable state; clearing its keys
-     * first and asking afterwards turns a scheduler preemption into an avoidable fall.
+     * 判断活动路线是否处于可进行物理交接的节点。坠落或已启动的跑酷移动必须保留转向，直到进入可取消状态；先清除按键再询问能否交接，会让调度抢占造成可避免的坠落。
      */
     public static boolean canSafelySuspendActive() {
         requireClientThread();
@@ -348,7 +339,7 @@ public final class EmbeddedBaritoneRuntime {
                 || ((PathingBehavior) backend.getPathingBehavior()).isSafeToCancel();
     }
 
-    /** A stopped route may still own a landing and its item-selection transaction. */
+    /** 路线停止后仍可能持有着陆动作和物品选择交易。 */
     public static boolean yieldActiveForExternalAction(LocalPlayer player) {
         requireClientThread();
         LocalPlayerContext context = ClientRuntime.requireContext(player);
@@ -357,7 +348,7 @@ public final class EmbeddedBaritoneRuntime {
         return owner == null ? context.mutationAvailable() : owner.yieldForExternalAction();
     }
 
-    /** A normal jump keeps its trajectory until its feet have actually missed the target support. */
+    /** 普通跳跃会继续保持轨迹，直到脚位确实越过目标支撑面。 */
     public static boolean canHandOffMissedLanding(LocalPlayer player) {
         requireClientThread();
         if (player == null || owner == null || backend == null || world != player.clientLevel
@@ -375,7 +366,7 @@ public final class EmbeddedBaritoneRuntime {
         return Double.isFinite(height) && height > 0 && player.getBoundingBox().minY < support.getY() + height - 0.01;
     }
 
-    /** Called only after MLG has resolved a legal continuation, before it writes this tick's inputs. */
+    /** 仅在 MLG 解析出合法后续动作后、写入本 tick 输入前调用。 */
     // 确认已经错过原落脚面后，解除旧路线的控制，把后续救援交给专门落地逻辑。
     public static boolean handOffMissedLanding(LocalPlayer player) {
         if (!canHandOffMissedLanding(player)) return false;
@@ -437,8 +428,7 @@ public final class EmbeddedBaritoneRuntime {
         if (pendingStart != null && pendingStart.navigator() == navigator) pendingStart = null;
         if (owner != navigator) return;
         if (backend != null) {
-            // Embedded BlockBreakHelper records only a local stop request. The actor boundary
-            // owns any native receipt invalidation after manual control or world loss.
+            // 内嵌 BlockBreakHelper 只记录本地停止请求；手动接管或世界退出后的原生回执失效由角色边界处理。
             backend.getPathingBehavior().forceCancel();
             backend.getInputOverrideHandler().clearAllKeys();
             ((LookBehavior) backend.getLookBehavior()).clearTarget();
@@ -479,7 +469,7 @@ public final class EmbeddedBaritoneRuntime {
         return new NavigationStep(movement.getSrc(), movement.getDest());
     }
 
-    /** The driven water route owns normal ascent/refill; the reflex covers idle or suspended bodies. */
+    /** 正在执行的水路由负责常规上浮和补气；反射链只处理空闲或挂起的身体。 */
     public static boolean managesSwimAir(LocalPlayer player) {
         if (player == null || backend == null || owner == null
                 || backend.getPlayerContext().player() != player
@@ -520,7 +510,7 @@ public final class EmbeddedBaritoneRuntime {
                 && movements.get(index) instanceof MovementFall fall ? fall : null;
     }
 
-    /** The scheduled fall retains its item and recovery ownership until the movement has settled. */
+    /** 已调度的坠落会持有物品和恢复控制权，直到移动稳定完成。 */
     public static boolean ownsActiveLandingAssist(LocalPlayer player) {
         if (player == null || owner == null || backend == null || world != player.clientLevel
                 || backend.getPlayerContext().player() != player) return false;
@@ -532,7 +522,7 @@ public final class EmbeddedBaritoneRuntime {
         return boat != null && (!boat.failed() || boat.cleanupPending());
     }
 
-    /** Called by the adapted upstream input behavior while the actor lease is open. */
+    /** 角色租约有效期间，由适配后的上游输入行为调用。 */
     public static void applyActionState(InputOverrideHandler input) {
         if (BUILD_SCAFFOLDS.pending()) return;
         LocalPlayerContext context = tickingContext;
@@ -541,7 +531,7 @@ public final class EmbeddedBaritoneRuntime {
         ACTIONS.tick(context, current, input);
     }
 
-    /** Compatibility hook for upstream movement code that wants a selected hotbar slot. */
+    /** 供上游移动代码兼容使用的快捷栏选择钩子。 */
     public static boolean ensureHotbarSelected(LocalPlayer player, int slot) {
         LocalPlayerContext context = tickingContext;
         EmbeddedBaritoneNavigator current = owner;
@@ -549,7 +539,7 @@ public final class EmbeddedBaritoneRuntime {
                 && ACTIONS.ensureHotbarSelected(context, current, player, slot);
     }
 
-    /** Building keeps its permanent materials reserved even if the only spare scaffold is off the hotbar. */
+    /** 建造任务会保留永久材料，即使唯一多余的脚手架方块不在快捷栏中也一样。 */
     public static boolean selectBuildScaffold(LocalPlayer player, boolean select) {
         var choice = BuildPlacementRegistry.scaffoldChoice(player);
         if (choice == null) return false;
@@ -567,16 +557,16 @@ public final class EmbeddedBaritoneRuntime {
                 || !BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return false;
         var choice = BuildPlacementRegistry.scaffoldChoice(context.player());
         if (choice == null || choice.inventorySlot() < 9) return false;
-        // Prepare while grounded, before Baritone can launch a placement-dependent jump.
+        // 角色落地时先准备材料，避免 Baritone 在材料选择完成前启动依赖放置的跳跃。
         return !BUILD_SCAFFOLDS.select(context, current, context.player());
     }
 
-    /** Compatibility hook for upstream cancellation sites; no game-mode call occurs here. */
+    /** 为上游取消逻辑提供兼容钩子；此处不会调用游戏模式接口。 */
     public static void requestStopBreaking() {
         ACTIONS.requestStopBreaking();
     }
 
-    /** Called by the adapted upstream input behavior while the actor lease is open. */
+    /** 角色租约有效期间，由适配后的上游输入行为调用。 */
     // 把 Baritone 请求的按键交给角色输入层；游泳、收回落地用品或乘船救援有更具体的控制要求时，采用这些要求。
     public static void applyInputState(InputOverrideHandler input) {
         if (backend == null || owner == null) return;
@@ -594,7 +584,7 @@ public final class EmbeddedBaritoneRuntime {
         boolean sneak = input.isInputForcedDown(Input.SNEAK);
         boolean sprint = input.isInputForcedDown(Input.SPRINT)
                 || (executor != null && executor.isSprinting());
-        // The swim phase owns sprinting as well as depth: rising/refilling needs an upright body.
+        // 游泳阶段同时管理疾跑和深度；上浮或补气需要角色保持直立姿态。
         if (player.isInWater()) {
             if (executor != null && executor.submergedWaterTravelActive()) {
                 sprint = executor.submergedWaterSprinting() && forward > 0.5F;
@@ -608,9 +598,7 @@ public final class EmbeddedBaritoneRuntime {
                     jump = true;
                     sneak = false;
                 } else if (executor.submergedWaterTravelActive()) {
-                    // The upstream movement's generic water bob requests JUMP. While the selected
-                    // route owns a deliberate cruise depth, neutral vertical intent means hold
-                    // that depth, not surface.
+                    // 上游通用水中浮动逻辑会请求 JUMP；当选定路线要求保持巡航深度时，中性垂直意图表示维持深度，而不是浮出水面。
                     jump = false;
                     sneak = false;
                 }
@@ -619,13 +607,12 @@ public final class EmbeddedBaritoneRuntime {
         MovementFall assistedFall = currentFall(owner);
         if (tickingContext != null && assistedFall != null && assistedFall.landingAssist() != null
                 && assistedFall.landingAssist().holdingForRecovery(tickingContext)) {
-            // Generic swimming must not jump out of the clutch water or fight its recovery aim.
+            // 通用游泳输入不能让角色跳出救援所需的水域，也不能与其恢复瞄准冲突。
             forward = 0; strafe = 0; jump = false; sneak = assistedFall.landingAssist().wantsSneak(tickingContext); sprint = false;
         }
         var landingMovement = assistedFall != null && assistedFall.landingBoat() != null
                 ? assistedFall.landingBoat().movementOverride() : null;
-        // Boat.interact refuses secondary use. Release the ordinary fall's edge-crouch before
-        // the next player physics/input tick, not only after entering the mount window.
+        // Boat.interact 会拒绝副手使用。在进入上船窗口之前、下一个玩家物理或输入 tick 到来前，就要释放普通坠落时的边缘潜行。
         if(assistedFall!=null && assistedFall.landingBoat()!=null) sneak=assistedFall.landingBoat().wantsSneak();
         else if(tickingContext!=null && assistedFall!=null && assistedFall.landingAssist()!=null
                 && assistedFall.landingAssist().plan().kind()==LandingAssistPlan.Kind.BOAT)
@@ -647,19 +634,15 @@ public final class EmbeddedBaritoneRuntime {
         InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
     }
 
-    /** Called by adapted LookBehavior; DefaultBodyControlPort remains the only camera owner.
+    /** 由适配后的 LookBehavior 调用；DefaultBodyControlPort 仍是唯一的镜头控制者。
      *
-     * <p>Movement aims hold a committed course instead of chasing Baritone's per-tick cell
-     * aim. That raw stream pitches down toward cell centers below eye level, steepening as
-     * the body closes in and snapping back at every movement handoff — a visible per-block
-     * bob with the head held down the entire trip. Here the camera locks to a course yaw;
-     * bearing corrections inside the course's turn window do not rotate the visible
-     * camera. Physical movement yaw is supplied independently by Baritone's player-rotation
-     * bridge, so the camera never decomposes that correction into a second steering input.
-     * Only a real corner re-commits the visible course and swings the camera once.
-     * While grounded the pitch rests at a near-level scenic angle; airborne it follows the
-     * aim so falls and jumps keep their control. Precision block-interaction aims bypass
-     * all of this so digging and placing keep exact rotations.</p>
+     * <p>移动时镜头沿已确定路线朝向，不追随 Baritone 每 tick 提供的方块中心瞄准点。原始瞄准流会压低视线对准低于眼高的格子，
+     * 随角色接近而越来越陡，并在每次移动交接时弹回，造成逐格点头、全程低头的明显抖动。
+     * 此处将镜头锁定在路线航向上；在路线转弯窗口内的细微方向修正不会转动可见镜头。
+     * 实际移动朝向由 Baritone 的玩家旋转桥单独提供，因此镜头不会把该修正拆成第二个转向输入。
+     * 只有真正转角时才提交新的可见航向，并让镜头转动一次。
+     * 落地时俯仰保持接近水平的观景角度；空中时跟随瞄准，保证坠落和跳跃仍可操控。
+     * 精确方块交互瞄准会绕过以上逻辑，让挖掘和放置保留准确视角。</p>
      */
     // 实际点击所需的精确瞄准直接交给视角层；普通走路用缓慢改变的路线朝向，地面视角保持略向下。
     public static void requestLook(float yaw, float pitch, boolean precisionAim) {
@@ -677,8 +660,7 @@ public final class EmbeddedBaritoneRuntime {
         }
         if (tickingContext == null) return;
         float courseYaw = CAMERA_COURSE.target(yaw, tickingContext.tickRevision());
-        // Re-issued every tick even when unchanged: the look lease must stay fresh or the
-        // camera would freeze on whatever the last precision aim left it on.
+        // 即使视角没有变化，也必须每 tick 续发，保持镜头租约有效；否则镜头会冻结在上一次精确瞄准留下的方向。
         float walkPitch = player.onGround()
                 && !(executor != null && executor.submergedWaterTravelActive())
                 ? WALK_PITCH_DEGREES
@@ -686,9 +668,9 @@ public final class EmbeddedBaritoneRuntime {
         InputDriver.look(player, courseYaw, walkPitch);
     }
 
-    /** Course-steering state; reset whenever navigation ownership changes. */
+    /** 路线转向状态；导航所有权变化时重置。 */
     private static final NavigationCameraCourse CAMERA_COURSE = new NavigationCameraCourse();
-    /** Grounded walking pitch — near level, so the ride never reads as head-down. */
+    /** 落地行走时的俯仰角保持接近水平，避免整段旅程看起来都在低头。 */
     private static final float WALK_PITCH_DEGREES = 8.0f;
 
     private static IBaritone backend() {
@@ -746,8 +728,7 @@ public final class EmbeddedBaritoneRuntime {
         settings.allowPlace.value = permit.mayAlter();
         settings.allowParkourPlace.value = permit.mayAlter();
         settings.allowDownward.value = permit.mayAlter();
-        // Keep the legacy setting aligned with the route request. Automatic self-rescue captures
-        // its separate landing-only policy and does not authorize general terrain modification.
+        // 让旧版设置与当前路线请求保持一致。自动自救会单独捕获仅限着陆的策略，不会因此授权一般地形修改。
         settings.allowWaterBucketFall.value = permit.mayUseWaterBucket();
     }
 
@@ -790,8 +771,7 @@ public final class EmbeddedBaritoneRuntime {
         EmbeddedBaritoneNavigator navigator = next.navigator();
         owner = navigator;
         configure(baritone, next.permit(), next.sprintAllowed());
-        // Activation may happen after the semantic parent's ThreadLocal scope has closed.
-        // The queued request owns the immutable policy captured when that parent requested it.
+        // 激活可能发生在语义父任务的 ThreadLocal 作用域关闭之后；排队请求持有父任务提交时捕获的不可变策略。
         EmbeddedBaritonePolicy.installSnapshot(next.policy());
         pendingPolicyOwner = null;
         pendingPolicyGoal = null;
