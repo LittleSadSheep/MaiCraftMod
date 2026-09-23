@@ -46,7 +46,7 @@ public final class JetpackFastDescent {
     public boolean hasModeChanges() { return modeChanges; }
     public boolean finished() { return phase == Phase.DONE; }
     public void requestStop() { stopping = true; if (phase == Phase.IDLE) phase = Phase.DONE; }
-    /** Manual control/body loss revokes native authority; leave mode restoration to the new owner. */
+    /** 玩家手动接管或身体丢失时撤销原生操作权限；由新的所有者负责恢复模式。 */
     public void abandon() { phase = Phase.DONE; receipt = null; }
     public String phase() { return phase.name().toLowerCase(Locale.ROOT); }
     public Map<String, Object> diagnostics() {
@@ -54,7 +54,7 @@ public final class JetpackFastDescent {
                 "recovering", recovering, "effects_started", effects, "touchdown", touchdown);
     }
 
-    /** Returns true while this sequence owns this tick's input, including its final recovery tick. */
+    /** 此序列拥有本 tick 输入时返回 true，包括最后一个恢复 tick。 */
     public boolean tick(LocalPlayerContext ctx, Vec3 landing, JetpackNativeAdapter.Snapshot power, boolean allowStart) {
         return tick(ctx, landing, power, allowStart, true);
     }
@@ -62,7 +62,7 @@ public final class JetpackFastDescent {
                         boolean allowStart, boolean touchdown) {
         return tick(ctx,landing,power,allowStart,touchdown,JetpackRoute.observed(ctx,forbidden));
     }
-    /** Use the same fresh static/physical-deck geometry as the owning flight session. */
+    /** 与所属飞行会话共用同一份新鲜静态和实体甲板几何信息。 */
     public boolean tick(LocalPlayerContext ctx, Vec3 landing, JetpackNativeAdapter.Snapshot power,
                         boolean allowStart, boolean touchdown, JetpackRoute.Space space) {
         ctx.requireCurrent();
@@ -99,7 +99,7 @@ public final class JetpackFastDescent {
             effects = modeChanges = true;
         }
         Vec3 position = player.position(), velocity = player.getDeltaMovement();
-        // No UP during the restart window: released UP lets native hover clamp a fast downward velocity.
+        // 重启窗口期间不按 UP：释放 UP 会使原生悬停逻辑钳制高速向下速度。
         boolean sneak = phase == Phase.BRAKING;
         if (sneak) effects = true;
         ctx.body().applySteering(yaw -> {
@@ -112,7 +112,7 @@ public final class JetpackFastDescent {
         return true;
     }
 
-    /** The same sequence is exercised without a game client by the timing/state regressions. */
+    /** 同一序列也会在无游戏客户端的计时和状态回归场景中执行。 */
     Command advance(Observation o, boolean allowStart) {
         return advance(o, allowStart, true);
     }
@@ -190,7 +190,7 @@ public final class JetpackFastDescent {
             }
             default -> {}
         }
-        // State transitions into recovery send the ON command on this tick, never a tick after the threshold.
+        // 状态进入恢复阶段时应在本 tick 立即发送 ON 命令，不能延迟到越过阈值后的下一刻。
         if (phase == Phase.ENABLING) {
             Command wanted = power.hover() ? Command.ON : Command.HOVER;
             return pending(o, wanted) ? Command.NONE : wanted;
@@ -202,7 +202,7 @@ public final class JetpackFastDescent {
         return Math.hypot(position.x - landing.x, position.z - landing.z) < 0.18
                 && velocity.horizontalDistance() < 0.06;
     }
-    /** Correct drift only when the next native impulse stays inside the verified descent alignment. */
+    /** 仅当下一次原生冲量仍落在已核实的下降对齐范围内时，才修正漂移。 */
     static BodyControlPort.Movement shiftSteering(Vec3 position, Vec3 velocity, Vec3 landing, float yaw,
                                                   JetpackNativeAdapter.Snapshot power) {
         var correction = JetpackSteering.toward(position, velocity, landing, yaw, true, power);
@@ -221,15 +221,14 @@ public final class JetpackFastDescent {
         return observed != null && (touchdown ? observed.distanceToSqr(directlyBelow) < 0.0001 : observed.y <= landing.y + 0.01)
                 && space.clear(position, directlyBelow) && space.clear(position, landing);
     }
-    /** Installed FlightLib 3.2.1 DOWN clamps displacement to max(rawVy, -hoverVerticalSpeed).
-     * Allow the measured RTT, a threshold-crossing tick and two input ticks before releasing DOWN.
+    /** 已安装的 FlightLib 3.2.1 会将 DOWN 位移限制为 max(rawVy, -hoverVerticalSpeed)。
+     * 释放 DOWN 前应预留实测 RTT、越过阈值的一刻以及两次输入 tick。
      */
     static double shiftReleaseHeight(JetpackNativeAdapter.Snapshot power, int pingMillis) {
         int ticks = 3 + (int)Math.ceil((pingMillis < 0 ? 150 : Math.min(10000, pingMillis)) / 50D);
         return 0.1 + power.vertical() * ticks - power.hoverDescent();
     }
-    /** MC air travel displaces by raw velocity, then applies gravity and 0.98 drag. Include a full
-     * measured RTT, two receipt observations and two tick-order margins before native hover braking.
+    /** Minecraft 空中移动先按原始速度位移，再应用重力和 0.98 阻力。原生悬停制动前要预留完整实测 RTT、两次回执观察和两个 tick 顺序余量。
      */
     static double restartHeight(double rawVy, double gravity, int pingMillis) {
         if (!Double.isFinite(rawVy) || !Double.isFinite(gravity) || gravity <= 0) return Double.POSITIVE_INFINITY;
