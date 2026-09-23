@@ -108,7 +108,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final LongOpenHashSet protectedCells = new LongOpenHashSet();
     private final LongOpenHashSet scaffoldAirCells = new LongOpenHashSet();
     private final LongOpenHashSet forbiddenBodyCells = new LongOpenHashSet();
-    /** Area cells inherited from earlier semantic steps; unlike blueprint sacred cells, mutable targets here are rejected. */
+    /** 从前序语义步骤继承的区域格；与蓝图 sacred 格不同，这里的可变目标会被拒绝。 */
     private final LongOpenHashSet inheritedProtectedMutationCells = new LongOpenHashSet();
     private final LongOpenHashSet completed = new LongOpenHashSet();
     private final List<BuildTaskRecord.Target> preflightOrder = new ArrayList<>();
@@ -249,8 +249,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (cell != null) {
                 protectedCells.add(cell.asLong());
                 inheritedProtectedMutationCells.add(cell.asLong());
-                // A protected target still has to be entered while it is empty in an earlier
-                // construction layer. Live collision prevents entering it after it is built.
+                // 前一施工层仍需在受保护目标为空时进入该格；目标建成后，实时碰撞会阻止角色再次进入。
                 if (!targets.containsKey(cell.asLong())) forbiddenBodyCells.add(cell.asLong());
             }
         }
@@ -424,9 +423,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (!(target.item() instanceof BlockItem)) addUnsupported("no_native_block_item", target.pos(),
                     "requested state has no block item that can be placed by hand",
                     List.of("placeable_substitute", "leave_for_player", "cancel"));
-            // A missing gesture in today's world is not an unsupported block state: earlier
-            // work, a different order or removable click supports can open the required face.
-            // The live native placement prediction still checks the exact authored state.
+            // 当前世界中缺少可用手势并不代表方块状态不可支持：前序施工、不同放置顺序或可拆除的点击支撑都可能打开所需表面。
+            // 真正放置前仍由原生实时预测核对蓝图指定的确切状态。
         }
         CellPlan plan = new CellPlan(target, generated);
         plans.add(plan); plansByPrimary.put(target.pos().asLong(), plan);
@@ -650,8 +648,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 failAt(cell.target().pos(), "temporary support cell changed or gained protection",
                         FailureType.TARGET_LOST, "temporary_support_changed", false); return TaskState.FAILED;
             }
-            // Retain a previous material batch's confirmed support until every permanent cell
-            // is finished. It stays incomplete in accounting and enters final scaffold cleanup.
+            // 上一材料批次已确认的临时支撑要保留到所有永久方块完成；它仍计为未完成，最后进入脚手架清理阶段。
             if (player.level().isLoaded(cell.target().pos()) && ownedAirScaffold(cell.target(),
                     player.level().getBlockState(cell.target().pos()))) { queueAt++; continue; }
             clearQueue = clearCells(cell); clearAt = 0;
@@ -767,7 +764,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (player.level().getBlockState(clearing).isAir()) {
             if (!r.hasExecutionGuards() && !clearing.equals(digger.current())) return nextClear();
-            // A guarded machine edit accepts disappearance only through its own pending break receipt.
+            // 受保护的机器编辑只能凭自己的待处理破坏回执确认目标消失。
             return switch (digger.settleGone(true)) {
                 case PROGRESSING -> TaskState.RUNNING;
                 case BROKE_TARGET -> {
@@ -904,7 +901,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             footingSearchAfter = lastPlacedTarget; worksiteSearched = false;
             phase = Phase.WORKSITE; return TaskState.RUNNING;
         }
-        // Finish a confirmed intermediate slab/layer before moving to another target.
+        // 先完成已确认的中间半砖或施工层，再转向其他目标。
         if (useCount > 0) { worksite = null; worksiteSearch = null; worksiteSearched = true; }
         Vec3 approaching = worksite != null ? worksite.feet()
                 : nav != null && gesture != null ? Vec3.atBottomCenterOf(gesture.stance()) : null;
@@ -1124,7 +1121,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         long deadline = System.nanoTime() + 4_000_000;
         for (int at = 0; at < worksite.placements().size(); at++) {
             if (System.nanoTime() >= deadline) {
-                // Resume only the unchecked tail next time; a slice ending is not invalidation.
+                // 下次只继续尚未检查的尾部；当前时间片结束不代表已核验结果失效。
                 worksite = new BuildWorksitePlanner.Worksite(worksite.stance(), worksite.feet(),
                         worksite.placements().subList(at, worksite.placements().size()), worksite.distanceSquared(),
                         worksite.heightLoss(), worksite.route(), worksite.constructionAccess());
@@ -1141,7 +1138,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 return;
             }
         }
-        // Retaining a destination needs fresh evidence that it still benefits unfinished work.
+        // 只有重新确认目标仍有助于未完成施工时，才保留当前目的地。
         worksite = null; worksiteSearched = false; worksiteProgress = null;
     }
 
@@ -1175,7 +1172,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
             stanceNavigation.selectPass(worksitePass);
         }
-        // No direct corridor does not mean no route: ordinary navigation still tries around obstacles.
+        // 没有直线路径不代表无路可走，普通寻路仍会尝试绕过障碍物。
         phase = Phase.PLACE_NAV; return TaskState.RUNNING;
     }
 
@@ -1187,7 +1184,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             note = reason + "; evaluating shared " + stanceNavigation.stage();
             return TaskState.RUNNING;
         }
-        // The bounded shared-route budget must not skip the independently verified support fallback.
+        // 共享路线预算有界，但不能因此跳过独立核验的支撑方案回退。
         if (cell != null) {
             TaskState support = prepareTemporarySupports();
             if (support != null) return support;
@@ -1293,7 +1290,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState prepareHeldItem() {
         // 普通放置与檐边前的锚点准备共用同一原生取物流程，等可见背包与选中回执收尾后才继续。
         int slot;
-        // Finish any native swap before reconciling ownership against its post-swap inventory.
+        // 根据交换后的背包核对物品归属前，必须先完成原生交换回执。
         // 换槽已经开始就继续等待同一个槽位，不能在交易尚未确认时因为背包暂态又改选其他物品。
         if (selection.started()) slot = selection.requestedSlot();
         else if (player.getAbilities().instabuild) {
@@ -1356,8 +1353,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted))) {
             return waitForAim("native_placement_state_mismatch", aimConvergence.ready(player, gesture.point().subtract(eye)));
         }
-        // A valid ray/state can occur while crossing a facing boundary during a camera turn.
-        // Keep the actual view settled before clicking so ordinary player ticks can synchronize it.
+        // 转动镜头跨过朝向边界时，可能短暂出现有效射线和方块状态；点击前先让实际视角稳定，给普通玩家 tick 时间同步。
         if (!placementSettling.ready(player, gesture, cell.target().pos(), hit, predicted))
             return waitForAim("waiting_for_view_settle", false);
         BlockState placedPrimary = predicted == null ? cell.target().desiredState() : predicted;
@@ -1434,7 +1430,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState waitForAim(String reason, boolean settled) {
         aimWaitReason = reason;
         lastAimObservation = placementDiagnostics();
-        // Near a slab's half-height boundary, a one-degree view tolerance is still a different click.
+        // 接近半砖高度边界时，即使视线只差一度，实际命中也可能不同。
         if (settled && aimError <= .05 || aimProgress.stalled(ClientRuntime.requireContext(player).tickRevision(), aimError)) {
             if (!settled) aimWaitReason = reason + "_not_progressing";
             return rejectGesture();
@@ -1544,7 +1540,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (placementAccess != null && placementAccess.edgeActive()) { phase = Phase.EDGE_RETURN; return; }
         if (isTemporary(cell) && useCount > 0)
             confirmedScaffold(cell.target().pos(), player.level().getBlockState(cell.target().pos()));
-        // Keep creative materials available for later cells instead of clearing the slot per click.
+        // 保留创造模式所需材料供后续格使用，不要每次点击后清空快捷栏槽位。
         r.placedOne(); renewBuildProgress(); markComplete(cell);
         finishCell();
     }
@@ -1602,7 +1598,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             stanceNavigation.environmentChanged();
             gestureSearch = null; gestureProgress = null;
             liveGestures = List.of(); gestureAt = 0;
-            // Keep any active walk bound to its current gesture; re-enumerate after it settles.
+            // 让当前行走继续绑定原有交互动作；等动作稳定后再重新枚举候选。
         }
     }
 
@@ -1632,7 +1628,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         if (pending.target().costsMaterial() && !constructionMatches(pending.target(), pending.generated()))
                             next.putIfAbsent(pending.target().item(), order);
                     }
-                    // A target changed after verification still needs its cached material.
+                    // 核验后目标发生变化时，仍需保留其缓存材料。
                     for (var target : r.targets) if (target.costsMaterial() && (!player.level().isLoaded(target.pos())
                             || !target.constructionMatches(player.level().getBlockState(target.pos())))) next.putIfAbsent(target.item(), order++);
                 }
@@ -1679,7 +1675,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 临时点击支撑最终会拆掉，因此原目标必须本来就能存活，不能靠临时垫块永久托住沙子或悬空装饰。
     private TaskState prepareTemporarySupports() {
-        // Supports used only to obtain a click face must not be required for final survival.
+        // 只为获得可点击表面而放置的临时支撑，不得成为最终生存结构的必需方块。
         if (supportedCell != null || isTemporary(cell) || cell.target().block() instanceof FallingBlock
                 || !cell.target().desiredState().canSurvive(player.level(), cell.target().pos())) return null;
         scaffoldDropRisk = Map.of();
@@ -2066,8 +2062,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 有进门／上楼通行要求的方案，还要检查这些地方实际连得通；方块都对并不一定代表房子能用。
         traversabilityResult = traversabilityScan.tick();
         if (traversabilityResult == null) {
-            // This tick consumed new, finite verification work; yielding it must not spend the
-            // build's remaining native-action budget on main-thread scheduling fairness.
+            // 本 tick 已完成新的有限核验工作；让出线程时不应因主线程调度公平性而扣减施工剩余的原生操作预算。
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return TaskState.RUNNING;
         }
@@ -2400,7 +2395,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void confirmedScaffold(BlockPos placeAt, BlockState state) {
-        // The embedded native receipt, rather than an attempted click, grants cleanup ownership.
+        // 只有嵌入的原生回执，而不是一次尝试点击，才授予后续清理所有权。
         BuildTaskRecord.Target target = targets.get(placeAt.asLong());
         if (target != null && !BuildCellRules.isAirTarget(target)) return;
         if (!state.isAir() && state.getFluidState().isEmpty()) {
@@ -2465,7 +2460,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
     @Override public Map<Item, Integer> scaffoldReservations() {
         if (player.getAbilities().instabuild && !r.consumeMaterials) return Map.of();
-        // SemanticBuildSupply passes the complete frozen source.targets to every carried-material batch.
+        // SemanticBuildSupply 会将完整冻结的 source.targets 传给每个随身材料批次。
         return BuildTemporarySupportMaterials.remaining(r.targets,
                 target -> constructionMatches(target, BuildPlacementGeometry.generatedBy(target)));
     }
