@@ -14,7 +14,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 
-/** Real vanilla ingredient/component semantics; the native recipe lookup is an explicit policy fixture. */
+/** 使用真实原版材料和数据组件语义；原生配方查询由明确的策略夹具提供。 */
 public final class CreatePressInputInspectionTest {
     private CreatePressInputInspectionTest() {}
     public static void main(String[] args) {

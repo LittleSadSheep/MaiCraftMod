@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.server.ClientOperation;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Component-exact authoritative stock enters the established planner without inventing resource keys. */
+/** 组件完全匹配的权威库存会进入既有规划器，不会臆造资源键。 */
 public final class Ae2ServerSupplyTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

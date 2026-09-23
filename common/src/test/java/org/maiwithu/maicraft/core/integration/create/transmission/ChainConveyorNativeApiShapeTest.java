@@ -12,7 +12,7 @@ import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import java.util.ArrayList;
 
-/** Bytecode compatibility checks for the installed optional Create JAR; not a gameplay acceptance test. */
+/** 检查已安装可选 Create JAR 的字节码兼容性；不属于游戏玩法验收测试。 */
 public final class ChainConveyorNativeApiShapeTest {
     private static final String BASE = "com/simibubi/create/content/kinetics/chainConveyor/";
     private static final String ENTITY = BASE + "ChainConveyorBlockEntity";

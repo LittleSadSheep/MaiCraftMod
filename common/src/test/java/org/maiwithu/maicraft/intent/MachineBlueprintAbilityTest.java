@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.Set;
 
-/** Models may declare structure, while ambiguous sources and cross-operation fields remain errors. */
+/** 模型可以声明结构，但来源有歧义或字段跨操作混用时仍须报错。 */
 public final class MachineBlueprintAbilityTest {
     private static final String URI = "maicraft://knowledge/ponder/structure/create-deployer/0123456789abcdef";
 

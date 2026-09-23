@@ -7,7 +7,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** Missing exact input evidence must stop locally instead of expanding toward unrelated machines. */
+/** 缺少精确输入证据时必须就地停止，不能向无关机器扩展搜索。 */
 public final class CreateExactUtilityEndpointTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

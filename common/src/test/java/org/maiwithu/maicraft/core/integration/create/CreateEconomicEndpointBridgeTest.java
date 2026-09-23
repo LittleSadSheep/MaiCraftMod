@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** Regional endpoint evidence is supplied explicitly; no Create physics or world mutations are simulated. */
+/** 区域端点证据由测试显式提供；不模拟 Create 物理行为或世界修改。 */
 public final class CreateEconomicEndpointBridgeTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

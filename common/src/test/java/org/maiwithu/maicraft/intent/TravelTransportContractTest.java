@@ -11,7 +11,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.tools.MovementOps;
 
-/** Semantic mode requests survive adaptation; an unknown destination cannot pretend to be a forced transport trip. */
+/** 语义模式请求经过适配后仍须保留；未知目的地不能伪装成强制交通行程。 */
 public final class TravelTransportContractTest {
     public static void main(String[] args) {
         for (String mode : List.of("auto", "ground", "jetpack", "elevator")) {

@@ -6,7 +6,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** A worker must retain its exact registry snapshot even if the caller replaces its collections. */
+/** 即使调用方替换了集合，工作线程也必须保留原始注册表快照。 */
 public final class MachineLayoutJobsTest {
     public static void main(String[] args) {
         Set<String> directions = new HashSet<>(Set.of("north", "south"));

@@ -47,7 +47,7 @@ import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** Real MoveTo/nav/runtime ordering with an inert body: no game, window, path search or packets. */
+/** 使用惰性身体测试真实 MoveTo、导航和运行时的调用顺序；不启动游戏、窗口、路径搜索或数据包。 */
 public final class MoveToTransportCompletionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -5,7 +5,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Terrain preservation must not block a requested menu, and must never remove inherited use protection. */
+/** 地形保护不能阻止请求打开菜单，也绝不能移除继承而来的使用保护。 */
 public final class NavigationUseProtectionTest {
     public static void main(String[] args) {
         BlockPos user = new BlockPos(1,0,0), machine = new BlockPos(2,0,0);

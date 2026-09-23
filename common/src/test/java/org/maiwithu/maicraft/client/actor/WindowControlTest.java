@@ -10,7 +10,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.Bootstrap;
 import sun.misc.Unsafe;
 
-/** Exercise cursor ownership without opening a native window or moving the user's mouse. */
+/** 不打开原生窗口或移动用户鼠标，测试光标所有权管理。 */
 public final class WindowControlTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

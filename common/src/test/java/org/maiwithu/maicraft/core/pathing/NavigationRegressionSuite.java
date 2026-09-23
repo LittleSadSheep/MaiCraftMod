@@ -90,7 +90,7 @@ import org.maiwithu.maicraft.mcp.NearbyCollisionPerceptionTest;
 import org.maiwithu.maicraft.mcp.PhysicalDeckSamplerTest;
 import org.maiwithu.maicraft.mcp.PhysicalStructurePerceptionTest;
 
-/** Regressions of production algorithms; live movement and server confirmations need a game session. */
+/** 生产算法的回归测试；真实移动和服务器确认仍需游戏会话。 */
 // 导航相关回归的集合入口，逐个调用既有测试 main；不是扫描目录自动发现所有测试。
 // 按下面明确列出的顺序运行导航相关检查，任何断言失败就中断。新增测试文件不会自动加入；落地补料的菜单检查另由 GuiRegressionSuite 运行。
 public final class NavigationRegressionSuite {

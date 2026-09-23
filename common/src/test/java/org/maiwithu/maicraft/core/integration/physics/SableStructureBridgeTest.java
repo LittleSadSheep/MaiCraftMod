@@ -208,7 +208,7 @@ public final class SableStructureBridgeTest {
     public static final class BrokenHolder {
         public LevelChunk getChunk() { throw new IllegalStateException("fixture chunk unavailable"); }
     }
-    /** Constructor is never run: allocation gives the test a chunk without a Minecraft level. */
+    /** 不调用构造器；直接分配实例即可在没有 Minecraft 世界的情况下提供区块夹具。 */
     public static final class FakeChunk extends LevelChunk {
         ChunkPos position;
         int blockReads;

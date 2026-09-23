@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 
-/** Saved revisions keep object identity and the original site across edits and process reloads. */
+/** 修改内容和进程重载后，已保存修订仍须保持对象身份和原始场地。 */
 public final class BuildingSceneStoreTest {
     // 在临时目录保存并重开模型，检查外部修改不改变已存版本、局部编辑保留锚点，并拒绝跨世界、跨维度和非法编辑。
     public static void main(String[] args) throws Exception {

@@ -62,7 +62,7 @@ import org.maiwithu.maicraft.mcp.NearbySignPerceptionTest;
 import org.maiwithu.maicraft.mcp.PerceiveSectionsTest;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** No game launch required; actual server receipts still require in-game acceptance tests. */
+/** 无需启动游戏；真实服务器回执仍需通过游戏内验收测试。 */
 public final class MachineRegressionSuite {
     // 顺序运行机器、建造和部分语义边界测试；任一断言或未处理异常都会使这组检查失败。
     public static void main(String[] args) {

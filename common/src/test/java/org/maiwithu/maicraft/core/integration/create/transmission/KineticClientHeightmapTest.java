@@ -11,7 +11,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** Uses real native heightmaps: a server-only preallocated map is not a client terrain observation. */
+/** 使用真实原生高度图；仅存在于服务器的预分配高度图不能算作客户端地形观察。 */
 public final class KineticClientHeightmapTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

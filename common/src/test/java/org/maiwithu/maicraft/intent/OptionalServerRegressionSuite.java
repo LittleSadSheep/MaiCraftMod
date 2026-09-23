@@ -70,7 +70,7 @@ import org.maiwithu.maicraft.server.machine.create.CreatePressInputInspectionTes
 import org.maiwithu.maicraft.server.machine.mekanism.MekanismResourceRegressionTest;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest;
 
-/** Protocol, native resources and production invariants; live mod-world acceptance runs separately. */
+/** 验证协议、原生资源和生产不变量；模组实际世界中的验收另行执行。 */
 public final class OptionalServerRegressionSuite {
     public static void main(String[] args) throws Exception {
         CreateConfigurationContractTest.main(args);

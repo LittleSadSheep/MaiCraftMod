@@ -5,7 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.entity.SignText;
 
-/** Sign labels are readable data, including Chinese, both sides and client-filtered text. */
+/** 告示牌标签应作为可读数据返回，包括中文、正反两面文字和客户端过滤后的内容。 */
 public final class NearbySignPerceptionTest {
     public static void main(String[] args) {
         SignText front = new SignText().setMessage(0, Component.literal("喷气背包"))

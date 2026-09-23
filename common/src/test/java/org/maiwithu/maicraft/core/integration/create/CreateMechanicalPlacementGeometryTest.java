@@ -10,7 +10,7 @@ import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** Replays source/receiver stance geometry using an explicitly supplied native preferred-axis fact. */
+/** 使用明确提供的原生优选轴事实，回放来源端与接收端的站位几何。 */
 public final class CreateMechanicalPlacementGeometryTest {
     public static void main(String[] args) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {

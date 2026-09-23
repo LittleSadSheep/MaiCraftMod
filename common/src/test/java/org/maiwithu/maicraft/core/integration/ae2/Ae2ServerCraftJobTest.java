@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.network.ServerFeature;
 import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 import java.util.UUID;
 
-/** Native job lifecycle contract: planning, one start, status polling, and uncertainty/cancellation. */
+/** 原生作业生命周期契约：规划、单次启动、状态轮询，以及不确定结果和取消处理。 */
 public final class Ae2ServerCraftJobTest {
     public static void main(String[] args) {
         var success = new Harness(false);

@@ -6,7 +6,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Matching blocks must never erase a failed cleanup receipt or advance a sealed machine's stage. */
+/** 匹配方块不能覆盖清理失败回执，也不能推进已封装机器的施工阶段。 */
 public final class BuildBatchCompletionTest {
     public static void main(String[] args) {
         var geometryOnly = TaskResult.fail("cleanup unreachable", Map.of("aggregate_verification", true,

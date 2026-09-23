@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 import sun.misc.Unsafe;
 import java.util.HashMap;
 
-/** Inert menu/AE host fixture: only the production actor visibility and session state machines run. */
+/** 惰性菜单和 AE 主机夹具：只运行生产环境使用的角色可见性与会话状态机。 */
 final class Ae2ServerMenuFixture implements AutoCloseable {
     final InteractionWorldTestHarness world = new InteractionWorldTestHarness();
     final Minecraft minecraft = Minecraft.getInstance();

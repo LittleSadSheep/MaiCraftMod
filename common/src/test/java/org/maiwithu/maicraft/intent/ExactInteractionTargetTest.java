@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.task.TaskDispatch;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Complete semantic entry through native task compilation, using the real loaded section index. */
+/** 通过原生任务编译器完成完整语义入口，并使用真实已加载区块索引。 */
 public final class ExactInteractionTargetTest {
     private static final BlockPos TARGET = new BlockPos(3, 2, 3), NEIGHBOR = new BlockPos(5, 2, 3);
 

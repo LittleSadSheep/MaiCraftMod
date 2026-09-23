@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 import java.lang.reflect.Proxy;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
-/** Completion must wait for the visible GUI's close receipt, including failure and no-op paths. */
+/** 操作完成前必须等待可见界面的关闭回执，包括失败和无操作路径。 */
 public final class VisibleMenuSessionTest {
     public static void main(String[] args) {
         Harness harness = new Harness();

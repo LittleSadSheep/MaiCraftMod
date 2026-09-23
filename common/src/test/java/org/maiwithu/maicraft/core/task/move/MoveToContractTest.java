@@ -6,7 +6,7 @@ import java.util.Locale;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.tools.MovementOps;
 
-/** Complete coordinates cannot fall back to success at the bottom of a cliff. */
+/** 已给出完整坐标时，不能因为停在悬崖底部就按近似成功处理。 */
 public final class MoveToContractTest {
     public static void main(String[] args) {
         var exact = new MoveToTaskRecord("exact", 600, -399D, 65D, 330D, null, true);

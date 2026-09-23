@@ -8,7 +8,7 @@ import java.util.List;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 
-/** Public requests retain construction-only behavior and cannot smuggle slot scripts into production plans. */
+/** 公开请求仍只负责施工，不能将槽位操作脚本夹带进生产计划。 */
 public final class MachineProductionContractTest {
     private static final Set<String> ABILITIES = Set.of(MachineAbilityAdapter.BUILD, MachineAbilityAdapter.DESIGN,
             MachineAbilityAdapter.OPERATE, MachineAbilityAdapter.INSPECT);

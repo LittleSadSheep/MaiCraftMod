@@ -28,7 +28,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
 import net.minecraft.world.level.border.WorldBorder;
 
-/** Real supply startup must reach frozen review before it has any material or acquisition child. */
+/** 真实供料启动流程必须先到达冻结审核阶段，之后才能创建材料或获取子任务。 */
 public final class BuildSupplyPreviewTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

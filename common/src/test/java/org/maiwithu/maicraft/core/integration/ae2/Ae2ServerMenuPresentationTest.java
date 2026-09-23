@@ -12,7 +12,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import static org.maiwithu.maicraft.core.integration.ae2.Ae2ServerMenuFixture.field;
 
-/** Real menu ownership/render gates and session transitions; the fixture does not claim a rendered Minecraft game. */
+/** 验证真实菜单所有权、渲染门槛和会话转换；夹具不会伪称运行了渲染中的 Minecraft。 */
 public final class Ae2ServerMenuPresentationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.regex.Pattern;
 
-/** Source boundary audit: headless tests cannot launch the real crafting task or its native UI. */
+/** 源码边界审计：无头测试无法启动真实合成任务或其原生界面。 */
 public final class GuiBoundaryAuditTest {
     public static void main(String[] args) throws Exception {
         Path root = Path.of(System.getProperty("user.dir")).toAbsolutePath();

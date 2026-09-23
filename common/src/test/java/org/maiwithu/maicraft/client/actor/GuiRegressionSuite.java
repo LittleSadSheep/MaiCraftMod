@@ -122,7 +122,7 @@ import org.maiwithu.maicraft.intent.CookGoalTest;
 import org.maiwithu.maicraft.intent.ExactInteractionTargetTest;
 import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 
-/** Actual visibility-policy checks and architecture guards; live UI clicks still need a game. */
+/** 验证真实可见性策略和架构边界；实际界面点击仍需在游戏中测试。 */
 public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
