@@ -41,8 +41,7 @@ public final class LandingAssistGeometry {
             public BlockState getBlockState(BlockPos pos) {
                 if (plan.kind() == LandingAssistPlan.Kind.WATER) {
                     BlockState state = world.getBlockState(pos);
-                    // Removing water preserves slabs/stairs and ignores the transient water
-                    // column while independently proving a real solid floor under the body.
+                    // 移除液体影响可保留半砖和楼梯，并忽略暂时的水柱；同时仍独立核实角色下方存在真实坚实地面。
                     return pos.equals(plan.cell()) && !WaterBucketFall.waterContainer(state)
                             ? Blocks.AIR.defaultBlockState() : WaterBucketFall.dryGeometry(state);
                 }
@@ -58,8 +57,7 @@ public final class LandingAssistGeometry {
         var destination = TransportLanding.inspect(geometry, loaded, physicalFeet, width, height, forbiddenBody).destination();
         if (destination == null) return false;
         if (plan.kind() == LandingAssistPlan.Kind.WATER && plan.cell().getY() < plan.feet().getY()) {
-            // Waterlogging is useful only when fluid extends above the native collision floor.
-            // A full-height top slab/step with water below the feet cannot reset the falling body.
+            // 只有液面高于原生碰撞地面时，含水方块才可用于救援；脚下为完整高度的上半砖或台阶、液体低于脚位时，无法重置坠落状态。
             double waterTop = plan.cell().getY() + Fluids.WATER
                     .getSource(false).getHeight(world,plan.cell());
             return destination.landingPoint().y < waterTop - 1.0E-4;
