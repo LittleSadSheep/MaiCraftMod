@@ -56,7 +56,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.core.component.DataComponents;
 
-/** Receipt-driven first-person orchestration for one live Ender Dragon encounter. */
+/** 通过动作回执，以第一人称操作协调一次正在进行的末影龙战斗。 */
 public final class DragonFightCompanionTask
         extends AbstractCompanionTask<DragonFightTaskRecord> {
     private enum Phase { OBSERVE, SURVEY, CRYSTALS, DRAGON, RECOVER, CONFIRM }
@@ -105,7 +105,7 @@ public final class DragonFightCompanionTask
     private UUID selectedCrystalUuid;
     private BlockPos selectedCrystalLastPosition;
     private int selectedCrystalRuntimeId = -1;
-    /** Candidate currently delegated to the movement child; rejected only if that child fails. */
+    /** 当前交给移动子任务尝试的候选位置；只有子任务失败后才将其排除。 */
     private BlockPos activeCrystalVantage;
     private AttackTaskRecord activeAttackRecord;
     private List<BlockPos> cagePlan = List.of();
@@ -146,7 +146,7 @@ public final class DragonFightCompanionTask
     private int rareConsumablesConsumed;
     private final Set<Long> requiredTowerChunks = new HashSet<>();
     private final Set<Long> observedTowerChunks = new HashSet<>();
-    /** Distinct loaded stances tried for the selected crystal; exhaustion is geometric, not numeric. */
+    /** 已为选定水晶尝试过的不同已加载站位；是否耗尽由实际几何候选决定，而不是固定重试次数。 */
     private final Set<Long> attemptedCrystalVantages = new HashSet<>();
     private final Set<Item> failedFoods = new HashSet<>();
     private String failureCode;
@@ -233,7 +233,7 @@ public final class DragonFightCompanionTask
         }
         if (activeChild != null && activePurpose == Purpose.EAT
                 && (dangerousBreath() != null || !safePlayerPosition())) {
-            // Eating is recovery, but it must not pin the body inside a newly arrived breath cloud.
+            // 进食用于恢复，但不能让角色停留在刚抵达的龙息云中。
             cancelActiveChild(false);
             phase = Phase.RECOVER;
         }
@@ -280,7 +280,7 @@ public final class DragonFightCompanionTask
             }
             dragon = observed;
             if (phase == Phase.CONFIRM && observed.isAlive() && !observed.isDeadOrDying()) {
-                // A same-encounter live entity proves the previous disappearance was not death.
+                // 若同一场战斗中的实体仍然存在，就证明先前的消失不是死亡。
                 dragonRemovalObserved = false;
                 deathPhaseObserved = false;
                 exitPortalObserved = false;
@@ -581,9 +581,8 @@ public final class DragonFightCompanionTask
         }
         FailureType type = lastFailure();
         if (transientExecutionFailure(type)) {
-            // Reject this concrete stance after a whole bounded child made no verified change.
-            // The next pass explores another loaded candidate; termination is exhaustion of
-            // those real candidates, not an arbitrary retry number.
+            // 有界子任务完整执行但没有确认任何变化后，排除此具体站位。下一轮尝试其他已加载候选；
+            // 只有实际候选全部耗尽才终止，不使用任意重试次数限制。
             attemptedCrystalVantages.add(player.blockPosition().asLong());
             phase = Phase.CRYSTALS;
             return TaskState.RUNNING;
@@ -780,8 +779,7 @@ public final class DragonFightCompanionTask
         Purpose purpose = activePurpose;
         TaskState terminal = runChild(finished);
         if (terminal == null) {
-            // A child may renew itself from verified physical progress.  The encounter root must
-            // inherit that lease or its initial estimate becomes an unrelated total-duration cap.
+            // 子任务可能依据已核实的实际进展续期；战斗根任务必须继承该期限，否则初始估算会变成无关的总时长硬上限。
             if (activeRecord != null) r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
             return TaskState.RUNNING;
         }
@@ -941,7 +939,7 @@ public final class DragonFightCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** Recheck volatile facts immediately before handing this tick to a child. */
+    /** 将本 tick 交给子任务前，重新检查可能变化的事实。 */
     private TaskState validateActiveWork() {
         if (activePurpose == Purpose.ATTACK_CRYSTAL) {
             EndCrystal observed = selectedCrystalUuid == null
@@ -958,8 +956,7 @@ public final class DragonFightCompanionTask
                             List.of("reload the same tower sector",
                                     "repeat the bounded crystal survey"));
                 }
-                // Keep the child alive for its native strike/despawn receipt. finishCrystalAttack
-                // is the only place allowed to convert this absence into a confirmed destruction.
+                // 保留子任务以等待原生攻击或实体消失回执；只有 finishCrystalAttack 可以把当前缺失转换为确认摧毁。
                 return null;
             }
             if (observed.getId() != selectedCrystalRuntimeId) {
@@ -1175,7 +1172,7 @@ public final class DragonFightCompanionTask
                 || !insideRadius(feet.getX(), feet.getZ(), fightOrigin, SAFE_PLAYER_RADIUS)
                 || feet.getY() <= player.level().getMinBuildHeight() + 3) return false;
         if (player.onGround() || player.isInWater()) return groundWithin(feet, 3);
-        // Normal jumps and knockback above solid island terrain are left to the fall reflex.
+        // 位于坚实岛屿上方的普通跳跃和击退由坠落反射链处理。
         return groundWithin(feet, 32);
     }
 
@@ -1237,17 +1234,15 @@ public final class DragonFightCompanionTask
     }
 
     /**
-     * Every crystal ever observed remains semantically unresolved until this parent accepts its
-     * own strict attack receipt.  This closes the gap where an unselected crystal could unload
-     * between observation and selection and then disappear from the aggregate entity list.
+     * 每颗观察到的水晶都保持语义上的未结算状态，直到父任务接纳它自己的严格攻击回执。
+     * 这样可避免未选中的水晶在观察与选择之间卸载，随后又从聚合实体列表中消失而被误认为已处理。
      */
     private TaskState unresolvedCrystalObservationFailure() {
         for (Map.Entry<UUID, BlockPos> entry : unresolvedCrystals.entrySet()) {
             if (findCrystal(entry.getKey()) != null) continue;
             if (activePurpose == Purpose.ATTACK_CRYSTAL
                     && entry.getKey().equals(selectedCrystalUuid)) {
-                // The attack child gets one chance to produce the matching strike/despawn
-                // receipt. validateActiveWork separately rejects an unloaded target sector.
+                // 先让攻击子任务有一次机会产生匹配的命中或消失回执；validateActiveWork 会另外拒绝已卸载的目标区块。
                 continue;
             }
             BlockPos last = entry.getValue();
@@ -1280,9 +1275,8 @@ public final class DragonFightCompanionTask
     }
 
     /**
-     * Cover every client chunk whose horizontal footprint intersects the tower disk.  A loaded
-     * entity list is only negative evidence after each of these sectors has actually entered the
-     * local client's world at least once during this encounter.
+     * 覆盖水平范围与水晶塔圆盘相交的每个客户端区块。只有本次战斗中每个扇区至少一次进入本地客户端世界后，
+     * 已加载实体列表才能作为“没有水晶”的否定证据。
      */
     private void initializeTowerCoverage() {
         requiredTowerChunks.clear();
@@ -1324,7 +1318,7 @@ public final class DragonFightCompanionTask
                 && observedTowerChunks.containsAll(requiredTowerChunks);
     }
 
-    /** Pick a loaded, standable point that advances the view toward one missing tower sector. */
+    /** 选择一个已加载且可站立的位置，使视角朝缺失水晶塔扇区推进。 */
     private BlockPos findCoverageVantage() {
         long missing = 0L;
         boolean foundMissing = false;
@@ -1460,9 +1454,7 @@ public final class DragonFightCompanionTask
     }
 
     /**
-     * Find a first-person stance; it may only use already loaded, standable island ground.  The
-     * clear-line variant is a conservative prefilter—the real projectile simulation is repeated
-     * after arrival before any shot is authorized.
+     * 寻找第一人称站位；只允许使用已加载且可站立的岛屿地面。清晰射线版本仅作保守预筛选；抵达后还要重新运行真实弹射物模拟，才可授权发射。
      */
     private BlockPos findCrystalVantage(EndCrystal target, boolean requireClearLine) {
         ClientLevel level = player.clientLevel;
@@ -1546,8 +1538,7 @@ public final class DragonFightCompanionTask
         if (!barSet.contains(aperture)
                 || !player.level().getBlockState(aperture).is(Blocks.IRON_BARS)) return null;
 
-        // The ray-hit bar must belong to one connected enclosure, not merely share a scan cube
-        // with a handful of unrelated decorative bars.
+        // 射线命中的栏杆必须属于同一片连通围栏，不能只因处于同一个扫描立方体就与零散装饰栏杆混为一谈。
         Set<BlockPos> connected = new HashSet<>();
         List<BlockPos> frontier = new ArrayList<>();
         connected.add(aperture);
@@ -1844,7 +1835,7 @@ public final class DragonFightCompanionTask
         try {
             child.result(TaskState.CANCELLED);
         } catch (RuntimeException ignored) {
-            // Parent cleanup still releases all first-person controls.
+            // 父任务清理仍会释放所有第一人称控制输入。
         }
         if (countInterruption && activePurpose != null && !activePurpose.recovery()) {
             interruptedCombatChildren++;
