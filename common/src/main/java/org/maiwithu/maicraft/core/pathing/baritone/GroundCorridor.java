@@ -48,7 +48,7 @@ public final class GroundCorridor {
     public boolean exhausted() { return remainingReads <= 0; }
     private void charge() { if (remainingReads-- <= 0) throw new IllegalStateException("corridor observation budget"); }
 
-    /** Every column touched by the body must have the same full ceiling before shortening a hop. */
+    /** 缩短跳跃前，身体经过的每个柱列上方都必须存在同一高度的完整顶棚。 */
     public boolean hasContinuousCeiling(Vec3 from, Vec3 to, double clearance) {
         if (exhausted() || from == null || to == null || !Double.isFinite(from.lengthSqr() + to.lengthSqr())
                 || !Double.isFinite(width + clearance) || width <= 0 || width > 2 || clearance <= 0
@@ -86,7 +86,7 @@ public final class GroundCorridor {
         var supports = new ArrayList<double[]>();
         for (int x = Mth.floor(Math.min(from.x, to.x) - half) - 1; x <= Math.floor(Math.max(from.x, to.x) + half) + 1; x++) {
             for (int z = Mth.floor(Math.min(from.z, to.z) - half) - 1; z <= Math.floor(Math.max(from.z, to.z) + half) + 1; z++) {
-                // Shape owners one cell outside the swept body can protrude into its path.
+                // 位于身体扫掠范围外一格的形状所有者也可能向路线凸出。
                 if (interval(from, to, x - half - 1, x + half + 2, z - half - 1, z + half + 2) == null) continue;
                 for (int y = Mth.floor(from.y) - 2; y <= Math.floor(from.y + height) + 1; y++) {
                     BlockPos cell = new BlockPos(x, y, z);
@@ -98,7 +98,7 @@ public final class GroundCorridor {
                         AABB box = local.move(cell);
                         if (hits(from, to, box, half, height, false)) return false;
                         if (Math.abs(box.maxY - from.y) > EPS || TransportLanding.unsafe(view, cell, state)) continue;
-                        // Keep a real portion of the footprint supported, including cell seams.
+                        // 保证脚底轮廓仍有真实支撑，包括方块格交界处。
                         double contact = Math.max(0, half - Math.min(0.05, half / 2));
                         double[] interval = interval(from, to, box.minX - contact, box.maxX + contact,
                                 box.minZ - contact, box.maxZ + contact);
@@ -139,7 +139,7 @@ public final class GroundCorridor {
         return interval[0] <= interval[1];
     }
 
-    /** Guard neighbor reads made by native collision implementations too; cache for this query only. */
+    /** 同时防护原生碰撞实现对邻格的读取；缓存仅在本次查询期间有效。 */
     private record LoadedView(BlockGetter delegate, Predicate<BlockPos> loaded, Runnable charge, Map<BlockPos, BlockState> states)
             implements BlockGetter {
         LoadedView(BlockGetter delegate, Predicate<BlockPos> loaded, Runnable charge) { this(delegate, loaded, charge, new HashMap<>()); }
