@@ -78,8 +78,7 @@ final class EmbeddedBaritoneActionBridge {
         if (receipt == null && activeFall != null && activeFall.landingAssist() != null) {
             var assist = activeFall.landingAssist();
             assist.tick(context);
-            // Placement may need secondary use, but a newly placed slime must release it
-            // before the next physical landing, without waiting for the receipt's dwell.
+            // 放置可能需要副手使用键，但刚放下的黏液块会在下次实际着陆前松开该键，无需等待回执驻留时间。
             if (!context.player().onGround()) input.setInputForceState(Input.SNEAK, assist.wantsSneak(context));
             LandingAssistPolicy.report(assist.diagnostics());
             for (var change : assist.drainChanges()) {
@@ -174,12 +173,11 @@ final class EmbeddedBaritoneActionBridge {
                 }
             }
         } catch (RuntimeException unavailable) {
-            // A boundary may arrive after another winner claimed this tick. Keep the receipt so
-            // its authoritative actor-boundary polling can settle it on a later owned tick.
+            // 其他行为可能先取得本 tick 控制权，随后才到达边界；保留回执，以便之后由拥有控制权的 tick 通过权威角色边界轮询完成结算。
         }
     }
 
-    /** Keep retiring a receipt after its navigator has already released runtime ownership. */
+    /** 即使导航器已释放运行时所有权，也继续回收该回执。 */
     void suspendAny(LocalPlayerContext context, String reason) {
         EmbeddedBaritoneNavigator navigator = receiptOwner;
         if (navigator != null) suspend(context, navigator, reason);
@@ -263,8 +261,7 @@ final class EmbeddedBaritoneActionBridge {
         BlockPos clicked = hit.getBlockPos().immutable();
         BlockState clickedState = context.level().getBlockState(clicked);
         boolean openable = isHandOpenable(clickedState) && !sneakRequested;
-        // The movement command is submitted after this action phase. Wait for the real body to
-        // release secondary use; otherwise vanilla skips the door and may place a held block.
+        // 移动指令会在此动作阶段之后提交。等待真实角色松开副手使用键，否则原版可能跳过开门并放置手持方块。
         if (openable && !passageUseReady(sneakRequested, context.player().isSecondaryUseActive())) return;
         InteractionHand hand = chooseUseHand(clickedState, sneakRequested,
                 context.player().getMainHandItem(), context.player().getOffhandItem());
@@ -274,7 +271,7 @@ final class EmbeddedBaritoneActionBridge {
         // 普通开门走通行交互分支，检查身体禁入范围；它与挖掘、放置所需的地形修改许可不同。
         if (openable) {
             BlockPos otherHalf = otherDoorHalf(clicked, clickedState);
-            // Protecting a structure from mining/placement must still allow its doors to work.
+            // 保护结构免受挖掘或放置影响时，仍必须允许操作其中的门。
             if (EmbeddedBaritonePolicy.forbidsBody(clicked)
                     || EmbeddedBaritonePolicy.forbidsBody(otherHalf)) {
                 return;
@@ -376,8 +373,7 @@ final class EmbeddedBaritoneActionBridge {
                 && controller.isHittingBlock()
                 && breakTarget.equals(controller.getCurrentBlock())) {
             float progress = controller.getDestroyProgress();
-            // A held mouse button is not progress. Keep the high-water mark across retries of
-            // this block so a server-rejected break cannot keep the navigation alive forever.
+            // 持续按住鼠标键不算进展。重试破坏同一方块时保留最高破坏进度，避免服务器拒绝操作后仍让导航永远保持活动。
             if (breakProgress.observe(progress)) {
                 receiptOwner.recordConfirmedNativeAction();
             }
@@ -399,8 +395,7 @@ final class EmbeddedBaritoneActionBridge {
             if (pendingKind == PendingKind.BREAK
                     && breakTarget != null && breakBefore != null) {
                 receiptOwner.recordConfirmedBreak(breakTarget, breakBefore);
-                // A later replacement at the same coordinate starts a new excavation. Failed
-                // attempts retain their high-water mark, but a confirmed break ends that episode.
+                // 后续同一坐标上的替换方块属于新的挖掘事件。失败尝试保留最高进度，但确认破坏后即结束本次事件。
                 breakProgress.reset();
             } else if (pendingKind == PendingKind.BLOCK_USE && terrainUse) {
                 recordWorldDelta(context, receiptOwner, clickedCell, clickedBefore);
@@ -452,8 +447,7 @@ final class EmbeddedBaritoneActionBridge {
 
     static InteractionHand chooseUseHand(BlockState clicked, boolean sneakRequested,
                                          ItemStack main, ItemStack off) {
-        // Vanilla invokes a door's useWithoutItem only for MAIN_HAND. An offhand block here
-        // would bypass opening and reach the item's placement fallback instead.
+        // 原版只会在 MAIN_HAND 调用门的 useWithoutItem。若此处使用副手方块，会绕过开门并进入物品放置回退流程。
         if (isHandOpenable(clicked) && !sneakRequested) return InteractionHand.MAIN_HAND;
         if (main.getItem() instanceof BlockItem || main.getItem() instanceof BucketItem) {
             return InteractionHand.MAIN_HAND;
@@ -468,7 +462,7 @@ final class EmbeddedBaritoneActionBridge {
         return !sneakRequested && !actualSecondaryUse;
     }
 
-    /** Tracks one excavation across retries, until its block is confirmed removed. */
+    /** 跨重试跟踪一次挖掘，直到确认方块已被移除。 */
     static final class BreakProgress {
         private BlockPos target;
         private BlockState state;
@@ -518,10 +512,8 @@ final class EmbeddedBaritoneActionBridge {
     }
 
     /**
-     * Size the confirmation lease from vanilla's live per-tick destroy progress instead of
-     * imposing a fixed wall-clock cutoff. Slow but valid work (for example a poor tool against a
-     * hard block) therefore remains valid, while the extra half-duration plus synchronization
-     * margin still bounds a receipt whose server facts never arrive.
+     * 根据原版实时逐刻破坏进度设置确认期限，而不是施加固定墙上时间限制。这样使用差工具破坏坚硬方块等较慢但有效的操作仍可完成；
+     * 额外半段时长和同步余量仍会限制服务器事实始终未到达的回执。
      */
     private static int breakConfirmationTicks(float destroyProgress) {
         long expected = Math.max(1L, (long) Math.ceil(1.0D / destroyProgress));
