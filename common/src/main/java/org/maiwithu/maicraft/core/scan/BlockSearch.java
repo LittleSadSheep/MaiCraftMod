@@ -27,16 +27,16 @@ import java.util.function.Predicate;
  */
 public final class BlockSearch {
 
-    /** Hard stop: convert a crawling scan into a partial answer (30s). */
+    /** 最长扫描时间；超时后返回部分结果（约 30 秒）。 */
     private static final int DEADLINE_TICKS = 600;
-    /** Same collect cap as the synchronous scanner — bounds memory and sort. */
+    /** 与同步扫描器使用相同的结果数量上限，限制内存占用和排序成本。 */
     private static final int MAX_COLLECT = 8_192;
 
     private static final List<BlockSearch> JOBS = new ArrayList<>();
     private static int nextId = 1;
 
     private final int id = nextId++;
-    /** What was asked for, short enough for one log line: {@code iron_ore} / {@code iron_ore+1}. */
+    /** 本次查询的简短目标描述，便于记录在一行日志中，例如 {@code iron_ore} 或 {@code iron_ore+1}。 */
     private final String label;
     private long startTick = -1;
     private final UUID entityUuid;
@@ -48,7 +48,7 @@ public final class BlockSearch {
     private final Consumer<ScanResult> onDone;
 
     private final int centerChunkX, centerChunkZ, maxRing;
-    /** Section Y values in visit order — nearest layer first ({@link SearchGeometry#sectionOrder}). */
+    /** 按访问顺序排列的区块层 Y 值，先扫描最近层（{@link SearchGeometry#sectionOrder}）。 */
     private final int[] sectionOrder;
     private int ring, perimIdx;
     private long deadline = -1;
@@ -58,30 +58,27 @@ public final class BlockSearch {
     private boolean stoppedEarly;
     private boolean matchesTrimmed;
 
-    /** How far out the nearest {@code want} reach — the stop rule's whole input. */
+    /** 第 {@code want} 个最近目标的距离；停止规则只使用此值。 */
     private final SearchGeometry.NearestBound bound;
-    /** Watermark into {@link #matches} — everything below it is already in {@link #bound}. */
+    /** {@link #matches} 中的处理水位线；此位置之前的结果已纳入 {@link #bound}。 */
     private int fed;
 
-    // Column in progress (budget ran dry mid-column); null = fetch next.
+    // 当前仍在扫描的柱列（预算用尽时可能尚未扫完）；为空时获取下一列。
     private ChunkAccess currentChunk;
     private int currentChunkX, currentChunkZ, sectionCursor;
 
     private final List<BlockScanner.Hit> matches = new ArrayList<>();
 
     /**
-     * One scan's answer plus its coverage ledger: how many of {@code columnsTotal}
-     * chunk columns were actually read, how many were skipped for not being
-     * loaded, and whether the deadline cut the walk short. The caller words the
-     * reply from these — a hit list alone can't tell the model whether "nothing
-     * found" means "nothing there".
+     * 单次扫描的结果及覆盖账本：实际读取了 {@code columnsTotal} 中多少个区块柱列，多少个因未加载而跳过，以及扫描是否因期限而提前结束。
+     * 调用方据此撰写答复；仅有命中列表无法让模型区分“没有发现”和“该区域确实没有目标”。
      */
     public record ScanResult(List<BlockScanner.Hit> matches, int columnsScanned,
                              int columnsUnloaded, int columnsTotal,
                              int sectionsScanned, boolean deadlineHit, boolean stoppedEarly,
                              boolean collectCapHit) {
 
-        /** Did the walk actually cover the whole requested sphere? */
+        /** 是否已经实际覆盖完整的请求球形范围？ */
         public boolean coveredEverything() {
             return !deadlineHit && !stoppedEarly && !collectCapHit && columnsUnloaded == 0;
         }
@@ -114,13 +111,10 @@ public final class BlockSearch {
     }
 
     /**
-     * Register a search; the result arrives via the callback on a later tick.
+     * 登记一次搜索；结果会在后续 tick 通过回调返回。
      *
-     * @param want how many nearest hits the caller actually needs — the stop rule's quota.
-     *             Ask for what you will use: a bigger number walks further to prove itself.
-     * @return a handle for {@link #cancel(int)}, per SEARCH rather than per companion —
-     *         one pet can have a {@code scan_blocks} query and a {@code goto} lookup in
-     *         flight at once, and abandoning one must not silence the other.
+     * @param want 调用方实际需要的最近命中数量，也是停止规则的配额。按实际用途设置；配额越大，扫描距离越远。
+     * @return 供 {@link #cancel(int)} 使用的搜索句柄；每次搜索单独编号，而非每个同伴共用。一个同伴可能同时执行 {@code scan_blocks} 和 {@code goto} 查询，取消其中一个不能影响另一个。
      */
     // 登记一个分刻扫描任务并返回编号，暂不扫描；完成时才调用 onDone。
     public static int start(UUID entityUuid, ClientLevel level, BlockPos center, int radius, int want,
@@ -130,18 +124,18 @@ public final class BlockSearch {
         return job.id;
     }
 
-    /** Abandon one search: no callback will fire. Unknown / already-finished ids are a no-op. */
+    /** 放弃指定搜索且不再触发回调；未知或已完成的编号不产生任何操作。 */
     // 只从扫描列表移除，不调用完成回调；取消后的调用结算由外层负责。
     public static void cancel(int id) {
         JOBS.removeIf(job -> job.id == id);
     }
 
-    /** Abandon every pending scan when the local body or world disappears. */
+    /** 本地角色或世界退出时，放弃所有等待中的扫描。 */
     public static void cancelAll() {
         JOBS.clear();
     }
 
-    /** Advance all pending scans under the shared client-tick budget. */
+    /** 在共享客户端 tick 预算内推进所有等待中的扫描。 */
     // 按列表顺序给任务机会，共享本刻扫描预算；前面的任务可能先用完额度。
     public static void tick(ClientLevel level) {
         if (JOBS.isEmpty()) return;
@@ -151,7 +145,7 @@ public final class BlockSearch {
         }
     }
 
-    /** @return true when finished (reply sent). */
+    /** @return 已完成并发送答复时返回 true。 */
     // 记住扫到哪一圈、哪列和哪个高度段；用完额度就暂停在这里，下刻接着扫。
     // 三十秒左右的游戏刻期限从首次推进时开始，不按每个任务实际获得的 CPU 时间计。
     private boolean tickOne(ClientLevel level) {
@@ -174,7 +168,7 @@ public final class BlockSearch {
                 finish(level.getGameTime(), false);   // spiral exhausted
                 return true;
             }
-            // Scan the in-progress column one budgeted section at a time, nearest layer first.
+            // 每次按预算扫描当前柱列的一层区块，并从最近层开始。
             while (sectionCursor < sectionOrder.length) {
                 if (!SearchBudget.trySectionScan()) return false;
                 BlockScanner.scanChunkSection(level, currentChunk,
@@ -184,8 +178,7 @@ public final class BlockSearch {
                 sectionsScanned++;
                 feedBound();
                 if (matches.size() > MAX_COLLECT) {
-                    // A memory bound must not stop mid-ring: an adjacent section may contain
-                    // closer cells than the dense section visited first.
+                    // 内存上限不能让扫描停在同一环的中间：相邻区块可能比先扫描的高密度区块包含更近的目标。
                     matches.sort(Comparator.comparingDouble(BlockScanner.Hit::distance));
                     matches.subList(MAX_COLLECT, matches.size()).clear();
                     matchesTrimmed = true;
@@ -198,17 +191,15 @@ public final class BlockSearch {
     }
 
     /**
-     * Resolve the next spiral column into {@link #currentChunk}, tallying and
-     * skipping columns whose chunk isn't loaded. Returns false only when the
-     * spiral is exhausted or the shared column-check budget is spent. Even unloaded columns
-     * consume a permit so a large empty search cannot bypass the tick deadline.
+     * 将螺旋扫描中的下一柱列解析到 {@link #currentChunk}，统计并跳过区块未加载的柱列。
+     * 只有螺旋范围耗尽或共享柱列检查预算用尽时才返回 false；未加载柱列同样消耗配额，避免大范围空扫描绕过 tick 期限。
      */
     // 按方形圈取下一列；未加载区块只计为缺失，不主动加载。已有最近结果足够好时可以证明后续外圈无需再扫。
     private boolean nextColumn(ClientLevel level) {
         while (ring <= maxRing) {
             if (perimIdx >= RingSpiral.perimeter(ring)) {
                 if (SearchGeometry.canStop(ring, bound)) {
-                    // The nearest `want` are already closer than anything the next ring could hold.
+                    // 已找到的最近 `want` 个目标都比下一环可能出现的任何目标更近。
                     stoppedEarly = true;
                     return false;
                 }
@@ -234,7 +225,7 @@ public final class BlockSearch {
         return false;
     }
 
-    /** Hand the hits found since the last call to the distance bound the stop rule reads. */
+    /** 将上次调用后发现的命中交给距离边界，供停止规则读取。 */
     private void feedBound() {
         for (int i = fed; i < matches.size(); i++) {
             bound.offer(matches.get(i).distance());
@@ -244,12 +235,11 @@ public final class BlockSearch {
 
     // 先移除任务再调用回调，返回扫描覆盖、未加载、提前停止和截断信息；找到一些结果不等于范围全部查完。
     private void finish(long now, boolean deadlineHit) {
-        // Remove before calling foreign callbacks: they may enqueue/cancel searches or throw.
+        // 先移除当前搜索再调用外部回调，因为回调可能新增、取消搜索或抛出异常。
         JOBS.remove(this);
         matches.sort(Comparator.comparingDouble(BlockScanner.Hit::distance));
-        // One line per search, and it has to carry everything a bug report needs: what was
-        // asked, what came back, WHY it stopped, and what it cost. "She can't find X" is
-        // answered by the stop reason plus the unloaded count, without a debug build.
+        // 每次搜索只记一行，但必须包含排障所需信息：查询内容、返回结果、停止原因和扫描成本。
+        // 即使没有调试构建，也可通过停止原因和未加载数量解释角色为何找不到目标。
         Constants.LOG.info("[maicraft-scan] {} r={} → {} hit(s){} | {} | {}/{} columns read,"
                         + " {} not loaded | {} tick(s)",
                 label, radius, matches.size(),
@@ -268,7 +258,7 @@ public final class BlockSearch {
         return "covered the whole radius";
     }
 
-    /** {@code iron_ore} for one target, {@code iron_ore+1} for a set — one log line, not a list. */
+    /** 单个目标记为 {@code iron_ore}，目标集合记为 {@code iron_ore+1}；只占一行日志，不展开成列表。 */
     private static String describe(Set<Block> targets) {
         Iterator<Block> it = targets.iterator();
         if (!it.hasNext()) return "nothing";
