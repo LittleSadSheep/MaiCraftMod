@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
 
-/** Constructs typed private children while propagating the milestone's safety envelope. */
+/** 创建类型明确的私有子任务，并传递里程碑的安全约束。 */
 public final class ProgressionChildFactory {
     private final LocalPlayer player;
     private final ReachMilestoneTaskRecord parent;
@@ -44,8 +44,7 @@ public final class ProgressionChildFactory {
                 && parent.materialPolicy
                         != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 && !sources.contains(SemanticAcquireTaskRecord.Source.HUNT)) {
-            // The ordinary material-supply default intentionally omits harm. Progression may add
-            // hostile hunting only after the separate combat permission has actually been granted.
+            // 普通材料供给默认不包含伤害性行为；只有单独获得战斗许可后，进度任务才可加入主动猎杀敌对生物的步骤。
             sources.add(SemanticAcquireTaskRecord.Source.HUNT);
         }
         return new SemanticAcquireTaskRecord(
@@ -94,7 +93,7 @@ public final class ProgressionChildFactory {
                 parent.allowRareConsumables, parent.protectedLabels);
     }
 
-    /** Choose a real standable cell beside a verified portal-frame anchor. */
+    /** 在已核实的传送门框锚点旁，选择一个真实可站立的方块格。 */
     public MoveToTaskRecord approachStronghold(BlockPos anchor) {
         BlockPos stance = standableNear(anchor);
         if (stance == null) return null;
