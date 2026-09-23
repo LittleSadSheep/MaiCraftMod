@@ -20,7 +20,7 @@ public final class ContainerOps {
     private static final long MIN_TIMEOUT_TICKS = 30L * 20L;
     private static final long MAX_INITIAL_LEASE_TICKS = 10L * 60L * 20L;
 
-    /** One semantic move. A null destination means menu-routed whole-stack transfer. */
+    /** 一次语义转移；目标为空时由菜单路由整堆物品。 */
     public record Move(int from, Integer to, Integer count) {}
 
     public record Plan(ContainerTransferTaskRecord task, TaskResult immediate) {
@@ -30,8 +30,7 @@ public final class ContainerOps {
     }
 
     /**
-     * Freeze only the menu identity and semantic requests. Slot contents remain live facts owned by
-     * the cross-tick task, so later moves can depend on changes made by earlier moves.
+     * 仅冻结菜单身份和语义请求。槽位内容仍是跨 tick 任务持有的实时事实，因此后续转移可依据此前转移造成的变化继续执行。
      */
     // 这里只验证已经打开并显示的外部菜单与槽号；玩家自己的背包界面不被这个入口接受。
     public Plan plan(List<Move> moves, LocalPlayer self, ToolContext context) {
@@ -64,8 +63,7 @@ public final class ContainerOps {
                 continue;
             }
 
-            // QUICK_MOVE is defined by the live menu and always routes the whole stack. An exact
-            // count therefore applies only to an explicit destination.
+            // QUICK_MOVE 由当前菜单定义，并始终路由整个堆叠；因此只有指定了目标槽位时，数量才表示精确转移数。
             // 没给目的槽时统一用快速移动，忽略 count；有目的槽但数量缺省或非正时，按整堆处理。
             int count = destination < 0 || move.count() == null || move.count() <= 0
                     ? 0 : move.count();
