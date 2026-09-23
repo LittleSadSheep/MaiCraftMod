@@ -19,7 +19,7 @@ public final class VisibleMenuSession {
         return context.menus().ensureVisible(context);
     }
 
-    /** Inventory slot numbers are valid only after an existing workstation has been closed. */
+    /** 只有关闭现有工作站后，背包槽位编号才有效。 */
     public boolean inventoryReady(LocalPlayerContext context) {
         // 其他工作站的槽号不能当作玩家背包槽号；先关工作站，再显示背包并等待可操作。
         used = true;
@@ -31,7 +31,7 @@ public final class VisibleMenuSession {
         return ready(context);
     }
 
-    /** A hotbar item still cannot be used in the world while a container screen is open. */
+    /** 容器界面打开时，快捷栏物品仍无法在世界中使用。 */
     public boolean worldReady(LocalPlayerContext context) {
         // 回到世界里用物品前先关自己的菜单；如果用户打开了不相关的对话框，就等，不擅自关掉它。
         if (!settleSwitch(context)) return false;
@@ -59,7 +59,7 @@ public final class VisibleMenuSession {
         return false;
     }
 
-    /** Wait for the last operation to remain visible and the native close to be confirmed. */
+    /** 等待上一次操作结果持续可见，并确认原生界面关闭完成。 */
     public boolean close(LocalPlayerContext context) {
         // 正常结束等关闭确认，没使用过界面则无需关闭；这个对象记住已关闭状态，重复调用不会再点。
         if (!used || closed) return true;
@@ -76,7 +76,7 @@ public final class VisibleMenuSession {
         return true;
     }
 
-    /** Revocation can interrupt a pending click, so ordinary idle-only close is insufficient. */
+    /** 权限撤销可能中断待处理点击，因此仅在普通空闲时关闭界面并不足够。 */
     public void cleanup(LocalPlayer player) {
         // 被取消时，旧点击可能还没确认，使用专门的任务结束关闭入口，不要求旧点击先成功。
         if (!used || closed) return;
@@ -84,7 +84,7 @@ public final class VisibleMenuSession {
             var context = ClientRuntime.requireContext(player);
             context.menus().closeForTaskBoundary(context, 20, "the owning GUI task ended");
         } catch (RuntimeException ignored) {
-            // Human handoff and actor revocation own the final close when authority has gone.
+            // 权限失效后，由人工交接或角色权限撤销流程负责最终关闭界面。
         }
     }
 }
