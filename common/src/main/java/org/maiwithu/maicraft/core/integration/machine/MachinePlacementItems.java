@@ -23,7 +23,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import org.maiwithu.maicraft.core.mixin.BlockItemPlacementAccess;
 import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
 
-/** State-specific native items and audited post-placement state, without synthetic item data or world writes. */
+/** 使用依状态而定的原生物品，并审核放置后的状态；不伪造物品数据，也不直接写入世界。 */
 public final class MachinePlacementItems {
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
     private MachinePlacementItems() {}
@@ -63,7 +63,7 @@ public final class MachinePlacementItems {
             return access.maicraft$placementState(context);
         return item.getBlock().getStateForPlacement(context);
     }
-    /** Mirrors VerticalGearboxItem.updateCustomBlockEntityTag; ordinary GearboxBlock placement always stays Y. */
+    /** 复现 VerticalGearboxItem.updateCustomBlockEntityTag 的规则；普通 GearboxBlock 放置始终保持 Y 轴。 */
     public static BlockState projectedFinalState(ItemStack stack, Level level, BlockPos target, Direction candidateHorizontal, BlockState initial) {
         if (initial == null || !BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals("create:vertical_gearbox")) return initial;
         if (!BuiltInRegistries.BLOCK.getKey(initial.getBlock()).toString().equals("create:gearbox") || !initial.hasProperty(BlockStateProperties.AXIS)) return null;

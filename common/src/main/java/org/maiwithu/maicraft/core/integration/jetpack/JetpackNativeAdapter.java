@@ -91,7 +91,7 @@ public final class JetpackNativeAdapter {
         }
     }
 
-    /** Native client evaluation, including the actual active-context gate. This is never a server ACK. */
+    /** 原生客户端侧评估，包括真实活动上下文检查；这绝不是服务器确认回执。 */
     public static Map<String, Object> activeEvidence(LocalPlayer player) {
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("known", false);
@@ -138,7 +138,7 @@ public final class JetpackNativeAdapter {
         return Map.copyOf(evidence);
     }
 
-    /** A compatible native upright context, not a claim that the server cleared fall distance. */
+    /** 表示原生兼容的直立上下文，不代表服务器已清除坠落距离。 */
     public static boolean uprightActive(Map<String, Object> evidence) {
         return evidence != null && "client_only_no_server_ack".equals(evidence.get("scope"))
                 && Boolean.TRUE.equals(evidence.get("known")) && Boolean.TRUE.equals(evidence.get("active_context_present"))

@@ -65,7 +65,7 @@ public final class JetpackObstruction {
                     }
                     continue;
                 }
-                // Include neighbour-owned protruding shapes (fences and modded blocks), without loading chunks.
+                // 将相邻方块拥有的凸出形状也纳入检查（例如栅栏和模组方块），同时不加载任何区块。
                 for (BlockPos pos : BlockPos.betweenClosed(low.offset(-1, -1, -1), high.offset(1, 1, 1))) {
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
@@ -77,7 +77,7 @@ public final class JetpackObstruction {
                     result.put("planning_margin_only", !Shapes.joinIsNotEmpty(shape, Shapes.create(actualBody), BooleanOp.AND));
                     return found(result, "block");
                 }
-                // The same entity predicate used by vanilla EntityGetter.getEntityCollisions.
+                // 与原版 EntityGetter.getEntityCollisions 使用相同的实体判定。
                 for (var entity : level.getEntities(player, box.inflate(1.0E-7), EntitySelector.NO_SPECTATORS.and(player::canCollideWith))) {
                     if (!entity.getBoundingBox().intersects(box)) continue;
                     result.put("entity_id", entity.getId()); result.put("entity_type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());

@@ -29,7 +29,7 @@ public final class MachinePlacementRules {
         return state.setValue(property, parsed);
     }
 
-    /** Registry/state compilation is separately testable without constructing a player or a world. */
+    /** 注册表和状态编译逻辑可独立测试，无需构造玩家或世界。 */
     // 当前机器规划仍共用此方法：名字和属性必须存在；若建造会重置明确给出的属性，立即报不支持，不静默换值。
     public static BlockState resolveState(String blockId, Map<String, String> properties) {
         ResourceLocation id = ResourceLocation.tryParse(blockId);
@@ -82,7 +82,7 @@ public final class MachinePlacementRules {
         }
     }
 
-    /** Mekanism bounding machines alter extra cells that the generic block-item builder cannot receipt. */
+    /** Mekanism 多格机器会改动额外方块格，通用方块物品构建器无法对此取得回执。 */
     // 拒绝需要额外结构格却没有专门安装步骤的方块。Mekanism 通过可选 API 查询，无法确认时也拒绝。
     static void requireModeledEffects(Block block) {
         ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
