@@ -53,7 +53,7 @@ import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
  * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
  */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
-    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, PARTS, SEAL, FLUID_CHECK, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
+    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUID_CHECK, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
     private final Level world;
     private final Map<BlockPos, BlockState> preview;
     private final JsonArray configurations;
@@ -77,6 +77,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int filterIndex;
     private int fluidCheckIndex, fluidIndex;
     private int installationIndex, verifyInstallationIndex, verifyProcessingIndex;
+    private int attachmentIndex;
     private boolean assemblyVerified;
     private long commissioningDeadline;
     private boolean acquiringItem;
@@ -125,6 +126,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             case SURVEY -> surveyParts();
             case BLOCKS -> buildBlocks();
             case INSTALLATIONS -> installNative();
+            case ATTACHMENTS -> installAttachments();
             case PARTS -> installPart();
             case SEAL -> seal();
             case FLUID_CHECK -> checkFluids();
@@ -166,7 +168,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
 
     private TaskState installNative() {
         // 方块准备完成后按作者顺序执行原生连接；已存在的整条结构不取材料、不重发点击。
-        if (installationIndex >= r.plan.installations().size()) { phase = Phase.PARTS; return TaskState.RUNNING; }
+        if (installationIndex >= r.plan.installations().size()) { phase = Phase.ATTACHMENTS; return TaskState.RUNNING; }
         var installation = r.plan.installations().get(installationIndex);
         if (installation.matches(world)) { installationIndex++; return TaskState.RUNNING; }
         for (var material : installation.materials().entrySet()) if (!ensureItem(material.getKey(), material.getValue())) return TaskState.RUNNING;
@@ -181,6 +183,21 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (MachineInstallation.matches(world, part.position(), part.spec())) { partIndex++; return TaskState.RUNNING; }
         ResourceLocation item = BuiltInRegistries.ITEM.getKey(part.spec().item());
         if (ensureItem(item)) start(new AePartTaskRecord(id(), deadline(), part.position(), item.toString(), part.spec().side()));
+        return TaskState.RUNNING;
+    }
+    private TaskState installAttachments() {
+        if (attachmentIndex >= r.plan.attachmentLayers().size()) { phase = Phase.PARTS; return TaskState.RUNNING; }
+        // 先确认本层全部支承已经存在，再让角色用原生物品安装；下层回执成功后才能推进上一层附件。
+        for (var target : r.plan.attachmentLayers().get(attachmentIndex)) {
+            for (BlockPos support : r.plan.placementDependencies().get(target.pos())) if (!world.isLoaded(support)) return load(support);
+            try { r.plan.validatePlacementDependency(world, target.pos()); }
+            catch (RuntimeException invalid) { return failure("native_placement_dependency_changed", invalid.getMessage()); }
+        }
+        boolean consume = !WorkProfile.of(player).freeMaterials();
+        var task = r.plan.attachmentTask(attachmentIndex, id(), deadline(), consume);
+        task.executionGuards(List.of(), actor -> actor.level() == world, (actor, at) -> actor.level() == world && world.isLoaded(at), (actor, at) -> {});
+        if (consume) start(new SemanticBuildSupplyTaskRecord(id(), r.getDeadlineGameTime(), task, r.materialPolicy, List.of(), false, r.protectedLabels, false));
+        else start(task);
         return TaskState.RUNNING;
     }
 
@@ -372,6 +389,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
                 result == null ? "Native assembly did not produce a receipt." : result.message());
         if (!acquiringItem && phase == Phase.PARTS) partIndex++;
         if (!acquiringItem && phase == Phase.INSTALLATIONS) installationIndex++;
+        if (!acquiringItem && phase == Phase.ATTACHMENTS) attachmentIndex++;
         if (!acquiringItem && phase == Phase.CONFIGURE) configIndex++;
         if (!acquiringItem && phase == Phase.CONTENTS) contentsIndex++;
         if (!acquiringItem && phase == Phase.FILTERS) filterIndex++;
@@ -426,6 +444,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         JsonArray plannedPorts = r.plan.report().getAsJsonArray("power_ports");
         if (plannedPorts != null) data.put("power_port_observations", MachinePowerPortObservations.observe(player.level() == world ? world : null, r.plan.anchor(), plannedPorts));
         data.put("native_installations_completed", installationIndex);
+        data.put("attachment_layers_completed", attachmentIndex);
         data.put("processing_relationships_verified", assemblyVerified);
         if (!r.plan.utilityInputs().isEmpty()) {
             data.put("external_inputs",MachineUtilityInputs.json(r.plan.utilityInputs()));

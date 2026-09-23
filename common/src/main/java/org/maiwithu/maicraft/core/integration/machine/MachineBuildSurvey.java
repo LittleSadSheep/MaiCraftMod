@@ -30,11 +30,14 @@ final class MachineBuildSurvey {
     private int fluidIndex;
     private int installationIndex;
     private int processingIndex;
+    private int dependencyIndex;
+    private final List<BlockPos> dependentTargets;
     private final Set<BlockPos> completedInstallations = new HashSet<>();
     private final Set<BlockPos> declaredPositions = new HashSet<>();
 
     MachineBuildSurvey(MachineConstructionPlan plan) {
         this.plan = plan; positions = plan.positions();
+        dependentTargets = List.copyOf(plan.placementDependencies().keySet());
         plan.blocks().forEach(target -> declaredPositions.add(target.pos()));
         sealTargets = plan.seals().stream().flatMap(seal -> seal.targets().stream()).toList();
         plan.parts().stream().filter(part -> part.spec().side() == null).forEach(part -> centers.add(part.position()));
@@ -66,6 +69,17 @@ final class MachineBuildSurvey {
             installationIndex++;
         }
         if (installationIndex < plan.installations().size()) return new Progress(false, null, null);
+        // 支承在蓝图内时由编译器检查最终状态；引用已有支承时先检查现场，不能先开工再发现依赖不成立。
+        while (dependencyIndex < dependentTargets.size() && budget-- > 0) {
+            BlockPos at = dependentTargets.get(dependencyIndex);
+            for (BlockPos support : plan.placementDependencies().get(at)) if (!plan.preview().containsKey(support)) {
+                if (!world.isLoaded(support)) return new Progress(false, support, null);
+                try { plan.validatePlacementDependency(world, at); }
+                catch (RuntimeException unavailable) { return new Progress(false, null, unavailable.getMessage()); }
+            }
+            dependencyIndex++;
+        }
+        if (dependencyIndex < dependentTargets.size()) return new Progress(false, null, null);
         // 加工净空同样只读检查；原图没有声明拆除时，不会为了摆得下设备自动挖空附近结构。
         while (processingIndex < plan.processing().size() && budget-- > 0) {
             for (BlockPos gap : plan.processing().get(processingIndex).clearance()) {

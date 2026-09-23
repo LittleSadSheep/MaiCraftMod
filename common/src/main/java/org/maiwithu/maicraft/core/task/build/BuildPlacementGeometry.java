@@ -661,7 +661,7 @@ final class BuildPlacementGeometry {
                 BlockPos destination = context.getClickedPos();
                 return new NativePlacement(destination, destination.equals(target)
                         ? MachinePlacementItems.projectedFinalState(stack,
-                            player.level(), destination, context.getHorizontalDirection(), blockItem.getBlock().getStateForPlacement(context)) : null);
+                            player.level(), destination, context.getHorizontalDirection(), MachinePlacementItems.placementState(blockItem, context, projectedSupport)) : null);
             });
         } catch (RuntimeException ignored) {
             return null;

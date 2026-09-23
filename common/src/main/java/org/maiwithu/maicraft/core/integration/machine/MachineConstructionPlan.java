@@ -29,6 +29,8 @@ import net.minecraft.world.level.block.LiquidBlock;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltInstallation;
+import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
+import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineNativeInstallation;
 
 /**
@@ -49,6 +51,10 @@ public final class MachineConstructionPlan {
     private final List<MachineNativeInstallation> installations;
     private final List<MachineProcessingRelation> processing;
     private final Set<BlockPos> nativePositions;
+    private final Map<BlockPos, BlockState> finalStates;
+    private final Map<BlockPos, BuildTaskRecord.Target> targetsByPosition;
+    private final Map<BlockPos, List<BlockPos>> placementDependencies;
+    private final List<List<BuildTaskRecord.Target>> attachmentLayers;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
@@ -64,6 +70,26 @@ public final class MachineConstructionPlan {
         nativePositions = Set.copyOf(nativeCells);
         Map<BlockPos, BuildTaskRecord.Target> byPosition = new LinkedHashMap<>();
         blocks.forEach(target -> byPosition.put(target.pos(), target));
+        targetsByPosition = Map.copyOf(byPosition);
+        Map<BlockPos, BlockState> finals = new LinkedHashMap<>(); blocks.forEach(target -> finals.put(target.pos(), target.desiredState()));
+        installations.forEach(step -> finals.putAll(step.targets())); finalStates = Map.copyOf(finals);
+        Map<BlockPos, List<BlockPos>> dependencies = new LinkedHashMap<>(); JsonArray dependencyReport = new JsonArray();
+        for (var target : blocks) {
+            var required = CreateFunnelPlacement.dependencies(target.desiredState()).stream().map(target.pos()::offset).toList();
+            if (required.isEmpty()) continue;
+            dependencies.put(target.pos(), required);
+            JsonObject row = new JsonObject(); row.add("offset", MachineAssemblyDocument.json(target.pos().subtract(anchor)));
+            JsonArray needs = new JsonArray();
+            for (BlockPos support : required) {
+                if (finals.containsKey(support)) CreateFunnelPlacement.validate(target.desiredState(), finals.get(support));
+                needs.add(MachineAssemblyDocument.json(support.subtract(anchor)));
+            }
+            row.add("requires", needs); dependencyReport.add(row);
+        }
+        placementDependencies = Map.copyOf(dependencies);
+        attachmentLayers = MachinePlacementDependencies.layers(dependencies).stream().map(layer -> layer.stream().map(byPosition::get).toList()).toList();
+        this.report.add("placement_dependencies", dependencyReport);
+        this.report.addProperty("attachment_layers", attachmentLayers.size());
         List<Seal> closures = new ArrayList<>();
         if (report.has("seal_after_cleanup")) for (var element : report.getAsJsonArray("seal_after_cleanup")) {
             var closure = element.getAsJsonObject(); List<BuildTaskRecord.Target> targets = new ArrayList<>();
@@ -116,11 +142,15 @@ public final class MachineConstructionPlan {
             report.addProperty("processing_relation_count", compiled.processing().size());
             report.addProperty("physical_target_count", compiled.positions().size());
             report.addProperty("native_installation_validated", true);
+            report.addProperty("physical_layout_compiled", true);
+            report.add("placement_dependencies", compiled.report.get("placement_dependencies").deepCopy());
+            report.add("attachment_layers", compiled.report.get("attachment_layers").deepCopy());
             report.addProperty("site_and_material_preflight_pending", true);
             return new SemanticMachineLayout.Result(true, layout.blueprint(), report);
         } catch (IllegalArgumentException unsupported) {
             report.addProperty("buildable", false);
             report.addProperty("native_installation_validated", false);
+            report.addProperty("physical_layout_compiled", false);
             JsonObject validation = report.getAsJsonObject("validation");
             validation.addProperty("valid", false);
             validation.getAsJsonArray("errors").add("unsupported_native_installation: " + unsupported.getMessage());
@@ -267,7 +297,7 @@ public final class MachineConstructionPlan {
     public BuildTaskRecord blockTask(String callId, long deadline, boolean consume, List<BlockPos> partClears, Set<BlockPos> openings, Set<BlockPos> completedInstallations) {
         List<BuildTaskRecord.Target> placement = new ArrayList<>();
         // 源流体留给封洞后的桶操作，不能变成空气施工目标而把已经正确的水源重新挖掉。
-        for (var target : blocks) if (!isFluid(target) && !completedInstallations.contains(target.pos())) placement.add(openings.contains(target.pos())
+        for (var target : blocks) if (!isFluid(target) && !placementDependencies.containsKey(target.pos()) && !completedInstallations.contains(target.pos())) placement.add(openings.contains(target.pos())
                 ? new BuildTaskRecord.Target(Blocks.AIR.defaultBlockState(), Items.AIR, target.pos(),
                     "temporary machine entrance", null, null, null, false, Set.of(), true)
                 : placementTarget(target));
@@ -294,10 +324,20 @@ public final class MachineConstructionPlan {
     }
 
     public Map<BlockPos, BlockState> preview() {
-        Map<BlockPos, BlockState> result = new LinkedHashMap<>();
-        blocks.forEach(target -> result.put(target.pos(), target.desiredState()));
-        installations.forEach(step -> result.putAll(step.targets()));
-        return Map.copyOf(result);
+        return finalStates;
+    }
+    public Map<BlockPos, List<BlockPos>> placementDependencies() { return placementDependencies; }
+    public List<List<BuildTaskRecord.Target>> attachmentLayers() { return attachmentLayers; }
+    public void validatePlacementDependency(Level world, BlockPos at) {
+        for (BlockPos support : placementDependencies.getOrDefault(at, List.of()))
+            CreateFunnelPlacement.validate(targetsByPosition.get(at).desiredState(), world.getBlockState(support));
+    }
+    public BuildTaskRecord attachmentTask(int index, String callId, long deadline, boolean consume) {
+        // 附件仍走已有的生存放置、材料补给和真实回执；所有已建成的计划格都保护为补料禁挖区。
+        var task = new BuildTaskRecord(callId, deadline, attachmentLayers.get(index), replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
+                replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
+        task.previewManaged(true); task.materialSupplyProtection(positions());
+        task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
     public BlockPos anchor() { return anchor; }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
@@ -326,6 +366,7 @@ public final class MachineConstructionPlan {
         blocks.forEach(target -> positions.add(target.pos())); parts.forEach(part -> positions.add(part.position()));
         installations.forEach(step -> positions.addAll(step.targets().keySet()));
         processing.forEach(relation -> positions.addAll(relation.clearance()));
+        placementDependencies.values().forEach(positions::addAll);
         return List.copyOf(positions);
     }
     public JsonObject report() { return report.deepCopy(); }

@@ -19,6 +19,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.HashSet;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import org.maiwithu.maicraft.core.mixin.BlockItemPlacementAccess;
+import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
 
 /** State-specific native items and audited post-placement state, without synthetic item data or world writes. */
 public final class MachinePlacementItems {
@@ -32,6 +35,8 @@ public final class MachinePlacementItems {
         if (state.isAir()) return Items.AIR;
         // 源流体由它自己的原生桶物品安装，不把液体方块的 AIR 物品误当成材料，也不借生物桶生成额外实体。
         if (state.getBlock() instanceof LiquidBlock) return fluidBucket(state);
+        BlockItem nativeVariant = CreateFunnelPlacement.material(state);
+        if (nativeVariant != null) return nativeVariant;
         String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
         Map<String, String> properties = state.hasProperty(BlockStateProperties.AXIS)
                 ? Map.of("axis", state.getValue(BlockStateProperties.AXIS).getName()) : Map.of();
@@ -51,6 +56,11 @@ public final class MachinePlacementItems {
         if (!(item instanceof BucketItem bucket) || item instanceof MobBucketItem || item == Items.BUCKET)
             throw new IllegalArgumentException("machine_source_fluid_bucket_unavailable");
         return bucket;
+    }
+    public static BlockState placementState(BlockItem item, BlockPlaceContext context, boolean projectedSupport) {
+        // 临时支承尚未放下时只预测方块朝向；真实落点存在后调用物品原生方法，纳入漏斗等物品的状态转换。
+        if (!projectedSupport && item instanceof BlockItemPlacementAccess access) return access.maicraft$placementState(context);
+        return item.getBlock().getStateForPlacement(context);
     }
     /** Mirrors VerticalGearboxItem.updateCustomBlockEntityTag; ordinary GearboxBlock placement always stays Y. */
     public static BlockState projectedFinalState(ItemStack stack, Level level, BlockPos target, Direction candidateHorizontal, BlockState initial) {

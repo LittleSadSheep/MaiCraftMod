@@ -4,6 +4,7 @@
   "package": "org.maiwithu.maicraft.core.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "BlockItemPlacementAccess",
     "FishingHookAccessor",
     "MenuDataSlotsAccessor"
   ],
