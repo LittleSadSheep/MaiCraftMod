@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.client.server.ClientRequestRouter;
 import org.maiwithu.maicraft.network.ServerFeature;
 import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 
-/** Real client/server protocol with delayed welcome delivery; no Minecraft world or fabricated receipt states. */
+/** 使用真实客户端/服务器协议和延迟欢迎信息；不创建 Minecraft 世界，也不伪造回执状态。 */
 public final class ProductionSessionRolloverTest {
     private static final String READ = "machine.snapshot", WRITE = "machine.configure";
     private ProductionSessionRolloverTest() {}

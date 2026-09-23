@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.core.integration.machine.runtime;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionSessionRolloverTest.Fixture;
 
-/** Real router/dispatcher expiry with independent client and server clocks; every replacement read gets a new ID. */
+/** 使用独立客户端与服务器时钟测试真实路由器/派发器过期；每次替换读取都会分配新 ID。 */
 public final class ProductionSessionIdleExpiryTest {
     private static final String READ = "machine.snapshot", WRITE = "machine.configure";
     private ProductionSessionIdleExpiryTest() {}

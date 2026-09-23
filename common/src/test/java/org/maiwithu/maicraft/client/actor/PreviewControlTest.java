@@ -7,7 +7,7 @@ import net.minecraft.server.Bootstrap;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.field;
 
-/** A review is an input suspension, while F8 remains a revocation of the original authority. */
+/** 审核预览会暂时挂起输入；F8 则会撤销原有控制权限。 */
 public final class PreviewControlTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

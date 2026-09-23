@@ -108,7 +108,7 @@ public final class ElevatorSessionTest {
                 (p,m,a) -> m.getReturnType() == boolean.class ? true : null);
         LocalPlayerContext context = proxyContext(player, body, null);
         ElevatorMotion motion = new ElevatorMotion();
-        // This is the persisted state after a failed path search: a goal, but no route.
+        // 这是路径搜索失败后的持久化状态：有目标，但没有路线。
         set(ElevatorMotion.class, motion, "localGoal", destination);
         for (int tick = 0; tick < 2; tick++) check(motion.inside(context, cabin, geometry, destination,
                 LongSets.emptySet()) == ElevatorMotion.Progress.BLOCKED, "empty failed route became arrival on the next tick");

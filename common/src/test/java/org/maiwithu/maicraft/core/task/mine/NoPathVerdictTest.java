@@ -5,7 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
-/** The production decision must never turn an unchanged exhausted search into another A*. */
+/** 正式判定绝不能把未变化且已耗尽的搜索再次启动为新的 A*。 */
 public final class NoPathVerdictTest {
     public static void main(String[] args) {
         Vec3 stance = new Vec3(-77.5, 115, -9.5);

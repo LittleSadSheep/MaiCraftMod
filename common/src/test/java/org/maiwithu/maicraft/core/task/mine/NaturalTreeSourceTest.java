@@ -20,7 +20,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
-/** Source evidence used by semantic material mining, without a game or machine-ID exclusions. */
+/** 测试语义材料挖掘使用的来源证据，不启动游戏，也不依赖机器 ID 排除清单。 */
 public final class NaturalTreeSourceTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

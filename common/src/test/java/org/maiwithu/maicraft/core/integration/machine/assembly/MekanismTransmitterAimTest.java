@@ -10,7 +10,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-/** Geometry replays use the installed Mek small-cable dimensions; native gameplay is validated separately. */
+/** 几何回放使用已安装 Mek 小型线缆的尺寸；原生游戏行为另行验证。 */
 public final class MekanismTransmitterAimTest {
     private static final BlockPos TARGET = BlockPos.ZERO;
     private static final VoxelShape CENTER = Shapes.box(5.0/16, 5.0/16, 5.0/16, 11.0/16, 11.0/16, 11.0/16);

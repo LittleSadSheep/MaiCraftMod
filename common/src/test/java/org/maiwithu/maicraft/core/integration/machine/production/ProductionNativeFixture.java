@@ -7,7 +7,7 @@ import com.google.gson.JsonParser;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 
-/** Real wire shapes with fixture-native observations, no Minecraft classes or invented game effects. */
+/** 使用真实传输结构和夹具原生观察结果，不引入 Minecraft 类或臆造游戏效果。 */
 final class ProductionNativeFixture {
     static final String DIMENSION = "minecraft:overworld";
     static final Point ANCHOR = new Point(100,64,100);

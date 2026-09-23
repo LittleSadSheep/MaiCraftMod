@@ -9,7 +9,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReview;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 
-/** Exercises passive source materialization, shared physical distribution and fail-closed layout limits. */
+/** 测试被动来源实例化、共享物理配电，以及失败时关闭的布局范围限制。 */
 public final class MachineLayoutUtilityInputsTest {
     private static int checks;
     private static final SemanticMachineLayout.Registry REGISTRY = new SemanticMachineLayout.Registry() {

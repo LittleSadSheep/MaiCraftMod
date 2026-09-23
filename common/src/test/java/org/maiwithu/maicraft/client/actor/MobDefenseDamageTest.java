@@ -52,7 +52,7 @@ public final class MobDefenseDamageTest {
             check(field.byId(shooter.getId()).authorized() && field.byId(shooter.getId()).engaging(),
                     "the actual reflex child selects a shooter outside the local combat radius");
             check(!field.byId(bystander.getId()).authorized(), "a bystander never inherits the attacker's authorization");
-            // With usable melee equipment, the existing plan approaches that exact attacker.
+            // 有可用近战装备时，现有战斗计划会接近并攻击指定的敌人。
             var equipped = new Battlefield(field.effectiveHealth(), field.meleeReach(), true, false, false, field.foes());
             check(AttackPlan.decide(equipped, null).foeId() == shooter.getId(), "damage evidence reaches combat planning");
             f.h.level.entities.clear();

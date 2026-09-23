@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.core.integration.machine.production;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Point;
 
-/** A current, anchored native obstruction blocks admission; unknown ports and diagnostic unknowns do not. */
+/** 当前且有锚点的原生障碍会阻止准入；未知端口和诊断性未知不会。 */
 public final class ProductionPressInputObstructionTest {
     private ProductionPressInputObstructionTest() {}
     public static void main(String[] args) {

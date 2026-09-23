@@ -18,7 +18,7 @@ import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** The real native adapter runs against a chunk source that rejects loading absent chunks. */
+/** 真实原生适配器使用拒绝加载缺失区块的区块数据源运行。 */
 public final class LoadedMachineDiscoveryTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

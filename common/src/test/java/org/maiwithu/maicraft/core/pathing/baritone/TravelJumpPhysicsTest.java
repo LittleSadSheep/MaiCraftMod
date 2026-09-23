@@ -9,7 +9,7 @@ public final class TravelJumpPhysicsTest {
         check(low != null && low.airborneTicks() == 3, "ceiling collision still applies gravity on the first tick");
         check(Math.abs(low.apexHeight() - .2) < 1e-6, "two-block ceiling caps an adult player's rise");
         check(low.forwardDistance() < open.forwardDistance(), "low ceilings require a shorter landing corridor");
-        // First grounded move: (.48 + .13) * .546, then airborne acceleration before moving.
+        // 第一次地面移动按 (.48 + .13) * .546 计算，随后在位移前应用空中加速度。
         double first = .48 + .13, second = first * .546 + .026, third = second * .91 + .026;
         check(Math.abs(low.forwardDistance() - first - second - third) < 1e-9,
                 "takeoff and airborne friction follow native travel order");

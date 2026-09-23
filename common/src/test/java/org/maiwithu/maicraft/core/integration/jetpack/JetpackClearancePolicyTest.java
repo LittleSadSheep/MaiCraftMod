@@ -61,7 +61,7 @@ public final class JetpackClearancePolicyTest {
         Vec3 point = new Vec3(1.5, 0, .5);
         check(penalty(portal(3, 3), point) > penalty(portal(3, 4), point),
                 "a lower lintel above the required UP reserve should have a finite extra cost");
-        // A protruding custom shape is represented by its actual bounds, with no block-name rule.
+        // 凸出的自定义形状按实际边界表示，不依据方块名称特判。
         var protrusion = new ShapeSpace(List.of(new AABB(1.9, .2, .2, 2.15, 2.8, .8)));
         var open = new ShapeSpace(List.of());
         check(Double.isFinite(penalty(protrusion, point)) && penalty(protrusion, point) > penalty(open, point),

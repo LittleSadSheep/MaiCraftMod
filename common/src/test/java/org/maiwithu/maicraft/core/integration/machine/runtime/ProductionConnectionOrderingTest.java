@@ -10,7 +10,7 @@ import com.google.gson.JsonPrimitive;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import static org.maiwithu.maicraft.core.integration.machine.runtime.ProductionConnectionFixture.*;
 
-/** Spatial scheduling changes visitation only; native request bodies, identity, coverage and clocks stay exact. */
+/** 空间调度只改变访问顺序；原生请求内容、身份、覆盖范围和时钟都保持精确。 */
 public final class ProductionConnectionOrderingTest {
     public static void main(String[] args) {
         reverseVisitsKeepOriginalQueriesAndAdapter();

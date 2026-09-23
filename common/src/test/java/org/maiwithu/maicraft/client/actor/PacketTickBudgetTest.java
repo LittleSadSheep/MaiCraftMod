@@ -5,7 +5,7 @@ import net.minecraft.server.Bootstrap;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.field;
 
-/** The early catch and normal end-of-tick scheduler share one authority and one mutation budget. */
+/** tick 开始时的捕获逻辑和常规结束调度器共用同一份权限及修改预算。 */
 public final class PacketTickBudgetTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -9,7 +9,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.*;
 
-/** Synthetic adapter evidence exercises contracts; it never claims a live machine exists. */
+/** 使用合成适配器证据测试契约；绝不声称存在真实运行的机器。 */
 final class ProductionFixture {
     static final Resource IRON = new Resource("items", "iron#fixture"), SHEET = new Resource("items", "sheet#fixture"), RPM = new Resource("kinetic", "rpm");
     static JsonObject manifest() {

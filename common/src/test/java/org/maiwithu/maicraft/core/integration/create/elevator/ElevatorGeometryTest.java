@@ -86,7 +86,7 @@ public final class ElevatorGeometryTest {
         Scene cabin = new Scene();
         for (int x = -3; x <= -1; x++) for (int z = -2; z <= -1; z++)
             cabin.put(new BlockPos(x, -4, z), Blocks.IRON_BLOCK.defaultBlockState());
-        // A low fixture occupies one floor cell and offers a separate, step-reachable top.
+        // 低矮夹具占据一个地板格，并提供另一个可通过一步到达的顶面。
         cabin.put(new BlockPos(-1, -3, -2), Blocks.STONE_SLAB.defaultBlockState());
         for (int x = -3; x <= 0; x++) for (int z = -2; z <= 1; z++)
             cabin.put(new BlockPos(x, 0, z), Blocks.IRON_BLOCK.defaultBlockState());

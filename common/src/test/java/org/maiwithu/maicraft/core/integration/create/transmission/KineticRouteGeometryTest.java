@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGe
 import java.util.concurrent.CancellationException;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
-/** Native-independent checks of physical axes, filled posts, loaded-world isolation and exact candidate BOMs. */
+/** 不依赖原生 API，检查实际轴向、填充支柱、已加载世界隔离和精确候选材料清单。 */
 public final class KineticRouteGeometryTest {
     private static int checks;
     public static void main(String[] args) {

@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** Native handler bytecode is checked separately; this exercises geometry and inventory admission. */
+/** 原生处理器字节码由其他测试单独检查；此处测试几何和背包物品准入。 */
 public final class ChainConveyorContractTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

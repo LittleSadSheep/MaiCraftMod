@@ -54,7 +54,7 @@ public final class ProductionSupplyHintsTest {
         var plan = new ProductionRunPlan(BlockPos.ZERO, "minecraft:overworld", authored);
         plan.bindResolved(ProductionRunPlanBindingTest.report(authored, "plain"));
         check(plan.supplyConsumers("source", new Resource("items", "minecraft:raw_iron")).equals(Set.of("process")), "Transport nodes do not consume a recipe batch");
-        // A declared but non-first process must never replace the actual input consumer in metadata.
+        // 已声明但并非首选的工艺，绝不能替换元数据中真实的输入消耗者。
         JsonObject unrelated = authored.deepCopy();
         unrelated.getAsJsonArray("nodes").add(JsonParser.parseString("{\"id\":\"later\",\"kind\":\"process\",\"offset\":[6,0,0],\"recipe_id\":\"test:later\",\"batches\":3}"));
         JsonObject invalid = ProductionRunPlanBindingTest.report(unrelated, "plain");

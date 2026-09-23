@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 
-/** Real server response shapes, including its actual response-budget compactor; no world connectivity is fabricated. */
+/** 使用真实服务器响应结构及其预算压缩器；不伪造世界连接状态。 */
 public final class ProductionConnectionResponsesTest {
     private static final String DIMENSION = "minecraft:overworld";
     private static final String RESOURCE = "items:minecraft:iron_ingot#" + "0123456789abcdef".repeat(4);

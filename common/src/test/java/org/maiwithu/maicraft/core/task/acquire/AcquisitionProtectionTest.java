@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
 
-/** Exercises the actual nested mutation/body scope used by mining and its terrain pathfinder. */
+/** 测试挖矿及其地形寻路器实际使用的嵌套修改/身体作用域。 */
 public final class AcquisitionProtectionTest {
     private static final String DIMENSION = "minecraft:overworld";
 

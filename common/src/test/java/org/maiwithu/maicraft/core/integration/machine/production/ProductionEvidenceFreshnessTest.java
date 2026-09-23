@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 import static org.maiwithu.maicraft.core.integration.machine.production.ProductionNativeEvidence.*;
 
-/** Exercise real accumulators and final proof, retaining native row clocks and finite-run semantics. */
+/** 测试真实累加器和最终证明，同时保留原生行时钟和有限运行语义。 */
 public final class ProductionEvidenceFreshnessTest {
     public static void main(String[] args) {
         rowClocksAndInvalidation();

@@ -169,7 +169,7 @@ public final class JetpackFastDescentTest {
             while (height > JetpackFastDescent.restartHeight(raw, 0.08, ping)) {
                 height += raw; raw = (raw - 0.08) * 0.98;
             }
-            // Four margin ticks reserve enough room even when detection crosses the threshold by one physics step.
+            // 预留四个余量 tick，即使检测晚一个物理步才越过阈值也有足够空间。
             for (int delay = 0; delay < 2 + (int)Math.ceil(ping / 50D); delay++) {
                 height += raw; raw = (raw - 0.08) * 0.98;
             }

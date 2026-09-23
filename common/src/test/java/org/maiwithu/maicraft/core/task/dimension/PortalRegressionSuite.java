@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.core.task.dimension;
 
 import org.maiwithu.maicraft.intent.PortalPreparationContractTest;
 
-/** Portal preparation contracts and native-action boundaries without opening a game window. */
+/** 不打开游戏窗口，测试传送门准备契约和原生动作边界。 */
 public final class PortalRegressionSuite {
     public static void main(String[] args) throws Exception {
         NetherPortalFrameTest.main(args);

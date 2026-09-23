@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import java.util.HashSet;
 import java.util.function.ToDoubleFunction;
 
-/** Finite scheduling and real wire-shape tests; travel numbers model read-target order, not actual game completion. */
+/** 测试有限调度和真实传输结构；移动数据只模拟读取目标顺序，不代表真实游戏任务完成。 */
 public final class ProductionReadScheduleTest {
     private ProductionReadScheduleTest() {}
     public static void main(String[] args) throws Exception {

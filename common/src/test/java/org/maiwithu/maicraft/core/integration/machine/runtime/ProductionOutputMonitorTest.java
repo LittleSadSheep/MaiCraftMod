@@ -101,7 +101,7 @@ public final class ProductionOutputMonitorTest {
             boolean boundary = fixture.monitor.consumeRoundBoundary();
             check(!fixture.monitor.consumeRoundBoundary(), "A completed observation boundary is single-use");
             if (elapsed <= 160) check(!boundary, "Far observations must not yield during either navigation leg");
-            // A still-full source asks for another pass every 20 ticks; it must not pull us back early.
+            // 来源仍然装满时会每 20 tick 请求再处理一批；不能过早将我们拉回去。
             boolean sourceNeedsAnotherPass = elapsed >= 20;
             if (boundary && sourceNeedsAnotherPass) { refills++; break; }
         }

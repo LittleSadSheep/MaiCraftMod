@@ -12,7 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 
-/** Deterministic client-world seam; these tests never start navigation, open a menu or load a chunk. */
+/** 确定性的客户端世界适配层；测试不会启动导航、打开菜单或加载区块。 */
 public final class MachineDiscoveryScannerTest {
     private static final MachineDiscoveryScanner.BlockSample SHAFT = sample("create:shaft", "create:shaft", false);
     public static void main(String[] args) throws Exception {

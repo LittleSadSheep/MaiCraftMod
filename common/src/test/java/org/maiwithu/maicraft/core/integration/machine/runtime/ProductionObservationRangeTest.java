@@ -8,7 +8,7 @@ import java.util.function.ToDoubleFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-/** Native range arithmetic for every requested target; actual Create permission calls are checked by the GameTest harness. */
+/** 为每个请求目标测试原生距离计算；实际 Create 权限调用由 GameTest 框架验证。 */
 public final class ProductionObservationRangeTest {
     private ProductionObservationRangeTest() {}
     public static void main(String[] args) {

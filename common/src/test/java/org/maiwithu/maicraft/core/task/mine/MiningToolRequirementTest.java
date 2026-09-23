@@ -13,7 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 
-/** Tests the production selector used by prepared work batches, including worn/staged tools. */
+/** 测试已准备工作批次使用的正式工具选择器，包括磨损和暂存工具。 */
 public final class MiningToolRequirementTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();

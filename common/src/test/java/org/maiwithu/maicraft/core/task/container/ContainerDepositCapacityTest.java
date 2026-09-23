@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.stream.IntStream;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
-/** Plans a real vanilla slot layout without clicking; capacity and cursor preservation remain independent of transfer-tail code. */
+/** 使用真实原版槽位布局进行规划但不点击；容量计算和游标保留独立于转移收尾逻辑。 */
 public final class ContainerDepositCapacityTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

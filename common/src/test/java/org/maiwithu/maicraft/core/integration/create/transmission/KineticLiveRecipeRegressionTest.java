@@ -13,7 +13,7 @@ import java.util.Set;
 import java.io.IOException;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
-/** Replays the live 63-shaft/3-gearbox failure with actual shipped recipe JSON, including tool-recycling fanout and tags. */
+/** 使用实际附带的配方 JSON 重放 63 根轴和 3 个齿轮箱导致的真实失败，包括工具回收分支和标签。 */
 public final class KineticLiveRecipeRegressionTest {
     public static void main(String[] args) {
         JsonObject fixture;

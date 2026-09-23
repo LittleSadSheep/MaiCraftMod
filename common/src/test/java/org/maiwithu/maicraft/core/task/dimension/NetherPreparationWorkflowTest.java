@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Orchestration fixture substitutes construction/travel receipts; ignition uses the real native action port. */
+/** 编排夹具替代施工和旅行回执；点燃操作使用真实原生动作端口。 */
 public final class NetherPreparationWorkflowTest {
     public static void main(String[] args) throws Exception {
         for (boolean built : new boolean[]{false, true}) {

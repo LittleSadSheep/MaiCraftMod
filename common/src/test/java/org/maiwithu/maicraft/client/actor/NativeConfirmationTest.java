@@ -7,7 +7,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-/** Tests the exact replacement verdict used by native mining receipt polling. */
+/** 测试原生挖掘回执轮询实际使用的替换判定。 */
 public final class NativeConfirmationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

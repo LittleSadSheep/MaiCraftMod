@@ -19,7 +19,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import sun.misc.Unsafe;
 
-/** Real batch membership, natural-tree evidence, collection priority and vanilla pickup geometry. */
+/** 测试真实批次成员关系、天然树证据、收集优先级和原版拾取几何。 */
 public final class MiningBatchTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

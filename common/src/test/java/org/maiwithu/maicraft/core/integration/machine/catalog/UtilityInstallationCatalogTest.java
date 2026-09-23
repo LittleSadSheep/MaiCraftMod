@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInpu
 import net.minecraft.core.Direction;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Ports must survive reconnect without inventing a producing line or a current connection. */
+/** 端口在重连后必须保留，且不能臆造生产线路或当前连接。 */
 public final class UtilityInstallationCatalogTest {
     public static void main(String[] args) throws Exception {
         var directory = Files.createTempDirectory("maicraft-utility-catalog-");

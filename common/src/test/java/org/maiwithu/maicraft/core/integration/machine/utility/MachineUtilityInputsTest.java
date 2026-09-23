@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 import com.google.gson.JsonPrimitive;
 
-/** Contract validation does not need a world, installed mod or a powered network. */
+/** 验证契约无需世界、已安装模组或供电网络。 */
 public final class MachineUtilityInputsTest {
     private static int checks;
     public static void main(String[] args) {

@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
-/** Real batch ratios, stock opportunity cost, tag alternatives and cycles, with no game instance needed. */
+/** 无需游戏实例即可测试真实批次比例、库存机会成本、标签替代方案和循环依赖。 */
 public final class KineticMaterialCostsTest {
     public static void main(String[] args) {
         KineticLiveRecipeRegressionTest.main(args);

@@ -13,7 +13,7 @@ import java.util.Arrays;
 import java.util.concurrent.RejectedExecutionException;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Catalog memory/file contracts only: no client, world, input driver or game action is created. */
+/** 仅验证目录内存和文件契约：不创建客户端、世界、输入驱动器或游戏动作。 */
 public final class MachineCatalogTest {
     private static final Identity IDENTITY = new Identity("test-world", "test-account");
     private static final Position PRESS = new Position(102, 66, 100);

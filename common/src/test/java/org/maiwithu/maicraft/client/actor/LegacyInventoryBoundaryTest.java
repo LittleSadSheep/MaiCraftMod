@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 import baritone.utils.player.BaritonePlayerController;
 import net.minecraft.world.inventory.ClickType;
 
-/** A dormant legacy path must not regain invisible inventory mutation when enabled by a caller. */
+/** 调用方启用休眠的旧路径后，该路径也不得恢复不可见的背包修改。 */
 public final class LegacyInventoryBoundaryTest {
     public static void main(String[] args) {
         try {

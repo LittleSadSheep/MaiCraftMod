@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import sun.misc.Unsafe;
 import net.minecraft.client.gui.screens.ChatScreen;
 
-/** Exercises the production visibility state machine without creating a graphics window. */
+/** 不创建图形窗口，直接测试生产环境使用的界面可见性状态机。 */
 public final class MenuVisibilityTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
