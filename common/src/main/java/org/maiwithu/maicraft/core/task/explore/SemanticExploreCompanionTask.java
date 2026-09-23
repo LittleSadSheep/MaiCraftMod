@@ -38,8 +38,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import java.util.Locale;
 
 /**
- * Observe loaded facts, travel to an internal frontier, load more terrain, and repeat until the
- * semantic target is verified at the body. No seed, generator or chunk-loading API is used.
+ * 先观察已加载地形，再前往内部边界、加载周围地形并重复，直到角色亲自核实语义目标。全程不读取种子或生成器，也不调用区块加载接口。
  */
 public final class SemanticExploreCompanionTask
         extends AbstractCompanionTask<SemanticExploreTaskRecord> {
@@ -67,9 +66,7 @@ public final class SemanticExploreCompanionTask
             boolean oceanBiome, boolean largeConnectedWater,
             int forwardRun, int lateralWidth, int deepestColumn, int score) {
         boolean qualifiesAsCoast() {
-            // "Coast" means dry land adjoining a sea, not merely the edge of a large lake.
-            // The size evidence remains useful for ranking, but cannot replace observed ocean
-            // biome evidence from loaded client terrain.
+            // “海岸”必须是邻接海洋的干燥陆地，而非大型湖泊边缘。水域规模仍可用于排序，但不能替代已加载客户端地形中实际观察到的海洋生物群系证据。
             return oceanBiome;
         }
     }
@@ -85,23 +82,23 @@ public final class SemanticExploreCompanionTask
     private static final int BIOME_SAMPLES_PER_TICK = 192;
     private static final int COAST_COLUMNS_PER_TICK = 4;
     private static final int COAST_LOCAL_RADIUS = 4;
-    /** Bounded connected-water evidence measured away from a candidate dry bank. */
+    /** 在候选干燥岸边之外测得的有界连续水域证据。 */
     private static final int LARGE_WATER_FORWARD_PROBE = 12;
     private static final int LARGE_WATER_SIDE_PROBE = 6;
     private static final int LARGE_WATER_MIN_FORWARD_RUN = 8;
     private static final int LARGE_WATER_MIN_LATERAL_WIDTH = 7;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    /** A new observation center should expose more than the chunk already around the body. */
+    /** 新的观察中心必须能看到角色当前所在区块之外的地形。 */
     private static final int MIN_FRONTIER_PROGRESS = 16;
-    /** Finite loaded-column sampling budget; this limits one selection slice, not travel time. */
+    /** 每次目标选择可抽样的已加载柱列数量上限；它限制单次选择工作量，不限制行进时间。 */
     private static final int FRONTIER_DIRECTION_PROBES = 16;
     private static final int FRONTIER_DIRECTION_PASSES = 2;
     private static final int FRONTIER_RAY_STRIDE = 8;
     private static final int[] SHORE_RETURN_RADII = {
             1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 88, 112
     };
-    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    /** 初始路段期限；只要路线持续取得已核实进展，MoveTo 就会续期自己的任务记录。 */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_REPORTED_FAILURES = 16;
@@ -290,10 +287,7 @@ public final class SemanticExploreCompanionTask
                 advanceObservationColumn();
                 if (found != null
                         && !rejectedTargets.contains(found.candidate().approach().asLong())) {
-                    // Offsets are ordered nearest-first. The local probe has already compared
-                    // nearby dry approaches (including shore-terrain preference), so leave now
-                    // instead of standing still to scan the entire loaded view for a prettier
-                    // but farther coast.
+                    // 偏移量按由近到远排列。本地探测已比较附近干燥接近点和岸边地形偏好，因此立即出发，不要停在原地扫完整个视野寻找更远但看起来更好的海岸。
                     return startTargetTravel(found.candidate());
                 }
             } else {
@@ -307,9 +301,7 @@ public final class SemanticExploreCompanionTask
             }
         }
         if (observationColumn < offsets.size()) {
-            // Observation deliberately samples a finite local grid in bounded per-tick slices.
-            // Preserve that CPU budget without charging the semantic liveness lease for queued
-            // slices (especially when game ticks are accelerated).
+            // 观察会按每刻预算分批抽样有限的本地网格。保留这一 CPU 上限，同时不要因排队等待抽样而消耗语义任务的存活期限，尤其是在游戏刻加速时。
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return TaskState.RUNNING;
         }
@@ -395,9 +387,7 @@ public final class SemanticExploreCompanionTask
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "explore" : r.getToolCallId();
         String childCall = parentCall + "-internal-leg-" + (++legSerial);
-        // A target kind that promises a dry approach uses the same exact grounded contract for
-        // both its observation frontiers and its final target. Terrain-neutral biome targets keep
-        // the original stand-or-swim contract (an ocean-biome cell cannot be onGround).
+        // 要求干燥接近路线的目标，其观察边界和最终目标都必须满足同一精确着陆条件。对地形没有要求的生物群系目标仍允许站立或游泳，因为海洋生物群系格不可能满足 onGround。
         moveRecord = targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND
                 ? MoveToTaskRecord.strictStance(
                         childCall, now + INITIAL_LEG_LEASE_TICKS, target, r.mayAlterTerrain, r.transportMode)
@@ -417,9 +407,7 @@ public final class SemanticExploreCompanionTask
         } else {
             terminal = runChild(moveChild);
             if (terminal == null) {
-                // A long healthy journey remains alive as long as its physical child continues
-                // to renew a verified-progress lease. Semantic radius/waypoint bounds still cap
-                // the search scope; elapsed wall-clock time does not redefine the goal.
+                // 只要实际执行的子任务持续续期已核实进度期限，耗时较长但健康的旅程就继续存活。语义半径和航点边界仍限制搜索范围，墙上时间不会改变目标含义。
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
                 return TaskState.RUNNING;
             }
@@ -469,10 +457,8 @@ public final class SemanticExploreCompanionTask
             surfaceCache.clear();
             BlockPos body = BlockHelper.playerFeet(
                     level, player.getX(), player.getY(), player.getZ()).immutable();
-            // MoveTo may legitimately report a bounded near-success when the exact path is
-            // obstructed. That is useful for ordinary destinations, but a coast receipt promises
-            // a dry land approach: being in adjacent shallow water is evidence of seeing the
-            // coast, not evidence of having reached it.
+            // 精确路线被挡住时，MoveTo 可以按设计报告有限的近似成功；普通目的地可接受这种结果，但海岸回执承诺角色到达干燥陆地。
+            // 站在相邻浅水格只能证明看到了海岸，不能证明已抵达海岸。
             if (player.onGround() && BlockHelper.isDryStandable(level, body)) {
                 TargetCandidate bodyCoast = findCoastNear(
                         level, body.getX(), body.getZ(), 0);
@@ -563,10 +549,8 @@ public final class SemanticExploreCompanionTask
     }
 
     /**
-     * Bounded semantic evidence for a sea. A loaded water sample in an ocean biome is required;
-     * continuous outward run and lateral breadth increase confidence and ranking but never turn a
-     * plains lake or river into a coast. Every probe is a loaded client column and the fixed budget
-     * never discovers terrain.
+     * 有界的海洋语义证据。必须实际观察到已加载海洋生物群系中的水格；向外连续延伸距离和横向宽度只提升可信度与排序，
+     * 不会把平原湖泊或河流误判为海岸。每次探测只检查已加载客户端柱列，固定预算不会主动发现或加载地形。
      */
     private WaterEvidence waterEvidence(
             ClientLevel level, int waterX, int waterZ, Direction awayFromLand) {
@@ -726,9 +710,8 @@ public final class SemanticExploreCompanionTask
     }
 
     /**
-     * Choose an observation center for a target whose semantic approach is dry land. The target
-     * kind merely declares that surface contract; this selector contains no biome/entity special
-     * case. It samples loaded facts only and leaves actual reachability to the first-person child.
+     * 为要求干燥陆地接近路线的语义目标选择观察中心。目标类型只声明地表条件，此选择器不对特定生物群系或实体做特判。
+     * 这里只抽样已加载事实，实际可达性留给第一人称子任务核实。
      */
     private BlockPos nextDryLandWaypoint(ClientLevel level) {
         BlockPos current = BlockHelper.playerFeet(
@@ -757,8 +740,7 @@ public final class SemanticExploreCompanionTask
         }
         if (choices.isEmpty()) return deferFrontierDirectionPass();
 
-        // Keep the outward spiral's coverage ordering, but never choose an observed water
-        // crossing while an all-dry expansion is available in this selection slice.
+        // 保留向外螺旋的覆盖顺序；若本轮仍有全程干燥的扩展路线，就不选择已观察到的涉水路线。
         boolean hasAllDryChoice = choices.stream()
                 .anyMatch(choice -> !choice.crossesObservedWater());
         BlockPos desired = nextSpiralPoint();
@@ -781,9 +763,8 @@ public final class SemanticExploreCompanionTask
     }
 
     /**
-     * Sample one ray in loaded terrain. Water is not treated as a destination. A far bank becomes
-     * eligible only after the complete sampled water run and at least as much dry runway have
-     * both been observed; this prevents a guessed far shore from turning into open-water search.
+     * 在已加载地形中抽样一条射线，不把水面当作目的地。只有观测完整段水域，并且水域两侧都至少有同等长度的干燥路面后，远岸才可作为候选，
+     * 避免凭猜测认定远岸并让搜索转成开放水域探索。
      */
     private FrontierChoice sampledDryFrontierToward(
             ClientLevel level, BlockPos current, BlockPos desired) {
