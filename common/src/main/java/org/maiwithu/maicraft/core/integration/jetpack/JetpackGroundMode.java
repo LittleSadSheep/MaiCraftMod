@@ -38,7 +38,7 @@ public final class JetpackGroundMode {
         if(!power.known()) return attempted ? Decision.FAILED : Decision.READY;
         if(!power.active()) return Decision.READY;
         if(attempted) return Decision.FAILED;
-        // A fast fall already has gravity control: do not consume its urgent water-use tick.
+        // 快速坠落已受重力控制，不要消耗紧急放水所需的 tick。
         return grounded || power.hover() && verticalSpeed>-.2 ? Decision.DISABLE : Decision.READY;
     }
     public boolean failed() { return failed; }

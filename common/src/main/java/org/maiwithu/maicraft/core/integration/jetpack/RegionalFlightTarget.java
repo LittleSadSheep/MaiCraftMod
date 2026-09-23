@@ -85,7 +85,7 @@ public final class RegionalFlightTarget implements MovingFlightTarget {
                 + visits.getOrDefault(cell(target),0)*30;
     }
     private static BlockPos cell(Vec3 point) { return BlockPos.containing(point.scale(1D/3)); }
-    // These are observation neighborhoods; native platform contact owns final arrival.
+    // 这些只是观察范围；是否真正抵达仍以原生平台接触为准。
     static boolean arrived(Vec3 current,Vec3 target) { return current.distanceToSqr(target)<2.25; }
     static boolean passed(Vec3 start,Vec3 target,Vec3 current) {
         if(start==null) return false;
