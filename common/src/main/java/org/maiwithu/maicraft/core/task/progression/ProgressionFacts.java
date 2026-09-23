@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import net.minecraft.world.level.block.Block;
 
-/** Pure client-observation snapshot used to reconcile progression after every child and handoff. */
+/** 纯客户端观察快照，用于每个子任务和交接后重新核对进度。 */
 public record ProgressionFacts(
         String dimension,
         boolean strongholdFrameLoaded,
@@ -99,7 +99,7 @@ public record ProgressionFacts(
                 dragon, elytra, hash);
     }
 
-    /** Record only a typed successful dragon-fight transition on this live connection. */
+    /** 仅当当前连接上发生类型明确且成功的末影龙战斗阶段转换时记录。 */
     public static void markDragonTransition(LocalPlayer player) {
         SHARED_DRAGON_RECEIPTS.put(player.connection, player.level().getGameTime());
     }
@@ -176,7 +176,7 @@ public record ProgressionFacts(
         return best;
     }
 
-    /** Static recovery evidence: a loaded central End portal plus its bedrock fountain signature. */
+    /** 静态恢复证据：已加载的末地中央传送门，以及基岩喷泉的特征结构。 */
     private static boolean observeExitPortalSignature(ClientLevel level) {
         BlockPos center = new BlockPos(0, 64, 0);
         if (!level.isLoaded(center)) return false;
