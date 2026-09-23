@@ -7,7 +7,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
-/** Stable optional bootstrap. Feature compatibility is negotiated inside the envelope. */
+/** 稳定的可选引导通道；功能兼容性在消息封装内协商。 */
 public record OptionalServerPayload(String json) implements CustomPacketPayload {
     public static final Type<OptionalServerPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath("maicraft", "optional_server"));

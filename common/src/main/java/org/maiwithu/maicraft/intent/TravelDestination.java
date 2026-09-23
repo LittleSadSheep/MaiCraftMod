@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.resources.ResourceLocation;
 import java.util.Set;
 
-/** A travel destination may omit height; verified world positions used by other abilities may not. */
+/** 移动目的地可省略高度；其他功能使用的已核实世界位置则必须包含高度。 */
 record TravelDestination(double x, Double y, double z, String dimension) {
     static TravelDestination fromGoal(Goal goal) {
         JsonObject parameters = goal.parameters();

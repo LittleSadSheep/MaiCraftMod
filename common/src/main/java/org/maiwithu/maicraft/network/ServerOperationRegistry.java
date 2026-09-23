@@ -11,7 +11,7 @@ import java.util.function.BiPredicate;
 import net.minecraft.server.level.ServerPlayer;
 import org.maiwithu.maicraft.server.machine.ServerMenuAccess;
 
-/** Common registration point for authoritative modules, independent of either loader. */
+/** 权威服务器模块的公共注册入口，不依赖任何一种加载器。 */
 public final class ServerOperationRegistry {
     private record Operation(ServerFeature feature, BiFunction<ServerPlayer, JsonObject, JsonObject> handler) {}
     private static final Map<String, Operation> OPERATIONS = new LinkedHashMap<>();
@@ -33,7 +33,7 @@ public final class ServerOperationRegistry {
             throw new IllegalStateException("Operation already registered: " + operationId);
     }
 
-    /** Server owner policy is checked both at negotiation and immediately before execution. */
+    /** 服务器所有者策略会在协商时和执行前立即分别检查。 */
     public static synchronized void setPolicy(BiPredicate<ServerPlayer, String> next) {
         policy = Objects.requireNonNull(next);
     }

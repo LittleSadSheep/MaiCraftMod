@@ -13,7 +13,7 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
-/** Loader-independent dispatch tied to the authenticated packet listener, never a client-supplied UUID. */
+/** 与加载器无关的派发逻辑绑定到已认证的数据包监听器，绝不使用客户端提供的 UUID。 */
 public final class OptionalServerNetwork {
     private static final Map<ServerGamePacketListenerImpl, ServerProtocolDispatcher> CONNECTIONS =
             Collections.synchronizedMap(new IdentityHashMap<>());

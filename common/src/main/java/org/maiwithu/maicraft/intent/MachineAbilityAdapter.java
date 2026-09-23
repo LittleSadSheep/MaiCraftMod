@@ -596,7 +596,7 @@ final class MachineAbilityAdapter {
     static WatchLimits watchLimits(JsonObject p) {
         int events = integer(p,"minimum_process_events",1,1,100);
         int duration = integer(p,"max_duration_ticks",72000,20,72000);
-        // The default must fit a short observation; explicit values retain strict bounds.
+        // 默认值必须适用于短距离观察；显式指定值仍严格遵守范围限制。
         int idle = integer(p,"idle_ticks",Math.min(6000,duration),20,duration);
         return new WatchLimits(events,duration,idle);
     }

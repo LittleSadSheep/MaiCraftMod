@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-/** Read synchronized sign labels from loaded client chunks without touching or editing a sign. */
+/** 从已加载客户端区块读取已同步的告示牌文字，不会触碰或编辑告示牌。 */
 final class NearbySignPerception {
     private static final int RADIUS = 32;
     private static final int MAX_BLOCK_ENTITIES = 8192;

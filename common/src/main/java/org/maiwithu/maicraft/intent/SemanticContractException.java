@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.intent;
 
-/** Stable, machine-classifiable rejection of a public semantic Goal contract. */
+/** 对公开语义 Goal 契约的稳定拒绝结果，可由机器分类处理。 */
 public final class SemanticContractException extends IllegalArgumentException {
 
     private final String violationCode;

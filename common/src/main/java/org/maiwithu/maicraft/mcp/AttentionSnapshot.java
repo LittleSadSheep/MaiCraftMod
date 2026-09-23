@@ -47,7 +47,7 @@ final class AttentionSnapshot {
         if (!available) {
             // 玩家不在可用世界时，不把上一世界的消息当成当前情况交出去。
             reason = "runtime_unavailable";
-            // Old connection events cannot be mistaken for the currently controlled world.
+            // 旧连接事件不能被误认为当前正在控制的世界。
             result.add("events", new JsonArray());
         }
         result.addProperty("wake_reason", reason);

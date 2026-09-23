@@ -80,7 +80,7 @@ final class AttentionFeed {
         // 指定任务时只看它的任务消息，但受伤、死亡、应急等重要事件仍要通知，不能因为只盯一个任务而漏掉。
         if (taskId == null) return true;
         if (event.has("task_id")) return taskId.toString().equals(event.get("task_id").getAsString());
-        // Body safety and lifecycle signals still interrupt a task-scoped wait; chat lives in ChatFlow.
+        // 身体安全和生命周期信号仍会中断任务级等待；聊天消息由 ChatFlow 单独处理。
         return !"background".equals(event.get("priority").getAsString());
     }
 

@@ -9,7 +9,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.build.BuildingBudgetReport;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 
-/** Public contracts that teach a model semantic fields without exposing internal actions. */
+/** 向模型说明公开语义字段的契约，不暴露内部动作细节。 */
 public final class SemanticAbilityCatalog {
 
     private SemanticAbilityCatalog() {}

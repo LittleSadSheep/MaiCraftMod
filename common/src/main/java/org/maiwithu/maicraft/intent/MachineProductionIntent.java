@@ -46,7 +46,7 @@ final class MachineProductionIntent {
             report.addProperty("evidence_required", "重新观察实际加工位置、原生配方或菜单报价、输入与真实产物；设计通过不代表已经消费或完成。");
             return report;
         }
-        // A layout-only review must retain unresolved native recipe, port, power and supply requirements.
+        // 仅审核布局时，也必须保留尚未解决的原生配方、端口、动力和供料需求。
         return ProductionDesignCompiler.compile(production, new ProductionEvidence() {
             @Override public Recipe recipe(String recipeId) { return null; }
         }).report();

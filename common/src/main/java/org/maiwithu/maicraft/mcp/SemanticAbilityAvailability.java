@@ -5,7 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 
-/** Catalog registration describes an implementation; a goal still needs its live prerequisites checked. */
+/** 目录注册说明某项功能已实现；具体目标仍须检查实时前置条件。 */
 final class SemanticAbilityAvailability {
     private SemanticAbilityAvailability() {}
 

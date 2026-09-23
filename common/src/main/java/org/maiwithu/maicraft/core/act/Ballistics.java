@@ -78,7 +78,7 @@ public final class Ballistics {
         return best;
     }
 
-    /** A simple no-drag fallback retained for callers that only need a look point. */
+    /** 为只需要瞄准点的调用方保留的无阻力简易回退算法。 */
     // 简化版只按重力计算低弧线，不看墙和实体。无解时退回直接看目标，所以返回点不代表一定射得到。
     public static Vec3 aimPoint(Vec3 eye, Vec3 target, double v, double g) {
         Vec3 direction = solveDirection(eye, target, v, g);

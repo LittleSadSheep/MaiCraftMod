@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-/** One asynchronous terrain thumbnail; client ticks do the work without blocking the game thread. */
+/** 一次异步地形缩略图采样；工作在客户端 tick 中推进，不会阻塞游戏线程。 */
 final class NavigationOverview {
     private WeakReference<LocalPlayer> body=new WeakReference<>(null);
     private RegionalTerrain scan;

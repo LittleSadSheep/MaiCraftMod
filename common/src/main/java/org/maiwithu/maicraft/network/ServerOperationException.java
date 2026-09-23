@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.network;
 
-/** A handler may use this only when preflight guarantees no mutation was attempted. */
+/** 只有预检能保证尚未尝试任何修改时，处理器才可使用此异常。 */
 public final class ServerOperationException extends RuntimeException {
     private final String code;
 

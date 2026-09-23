@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.network;
 
 import com.google.gson.JsonObject;
 
-/** Version and policy at negotiation time; execution rechecks the live policy. */
+/** 协商时的版本和策略；实际执行前会重新检查实时策略。 */
 public record ServerFeature(String operationId, int version, boolean mutating, boolean enabled,
                             JsonObject limits) {
     public ServerFeature {
