@@ -65,7 +65,7 @@ final class CreateMechanicalStager {
         ItemStack selected = player.getMainHandItem();
         if (usable(selected, chainItem) > 0) return Status.READY;
 
-        // An exhausted staged stack has to be swapped back before another source is chosen.
+        // 已耗尽的临时快捷栏堆叠必须先交换回背包，才能选择新的材料来源。
         if (activeSwapSource >= 0) {
             if (!readyInventory(context)) return Status.RUNNING;
             menuReceipt = context.menus().swapInventoryToHotbar(
@@ -185,8 +185,7 @@ final class CreateMechanicalStager {
                         expectedDisplacedAtSource = ItemStack.EMPTY;
                         pendingSelect = -1;
                     }
-                    // A rejected restoration leaves the known staged swap in place; a future
-                    // continuation may safely try that restoration again.
+                    // 回滚未获确认时，保留已知的临时交换状态；后续续接时可安全地再次尝试恢复。
                     swapRestorationPending = false;
                 }
                 detail = "inventory transaction was not definitely applied: " + receiptDetail;
@@ -202,7 +201,7 @@ final class CreateMechanicalStager {
             }
             if (closeAfterSwap) return Status.RUNNING;
             if (context.minecraft().screen == null) inventoryScreenOwned = false;
-            // A staged swap is confirmed; select it in a later native mutation.
+            // 临时交换已获确认；之后再通过原生修改选择该物品。
             if (pendingSelect >= 0 && context.player().getInventory().selected != pendingSelect) {
                 int slot = pendingSelect;
                 selectReceipt = context.actions().selectHotbar(context, slot, CONFIRM_TICKS);

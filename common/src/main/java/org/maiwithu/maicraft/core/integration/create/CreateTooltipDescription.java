@@ -20,7 +20,7 @@ public record CreateTooltipDescription(String translationKey, String summary, Li
         controls = List.copyOf(controls);
     }
 
-    /** Translation lookup returns null for absent keys; numbering follows ItemDescription.fillBuilder. */
+    /** 翻译查找在键缺失时返回 null；编号规则遵循 ItemDescription.fillBuilder。 */
     public static CreateTooltipDescription read(String key, Function<String, String> translations) {
         Budget budget = new Budget();
         String summary = translations.apply(key + ".summary");
@@ -75,7 +75,7 @@ public record CreateTooltipDescription(String translationKey, String summary, Li
         int remaining = MAX_CHARACTERS;
         boolean truncated;
         String take(String value, boolean highlightMarkup) {
-            // Create strips underscores only in summary/body lines, not literal condition/control headings.
+            // Create 只会在摘要和正文中去掉下划线，不会处理字面条件或控制标题。
             String plain = (highlightMarkup ? value.replace("_", "") : value).replaceAll("§[0-9A-FK-ORa-fk-or]", "").strip();
             if (plain.length() > remaining) { plain = plain.substring(0, remaining); truncated = true; }
             remaining -= plain.length();
@@ -83,7 +83,7 @@ public record CreateTooltipDescription(String translationKey, String summary, Li
         }
     }
 
-    /** Client-thread cache. A new language object invalidates both locale changes and resource-pack reloads. */
+    /** 客户端线程缓存；语言对象变化时会同时使语言切换和资源包重载结果失效。 */
     public static final class Cache {
         private static final int CAPACITY = 1024;
         private Object revision;
@@ -93,7 +93,7 @@ public record CreateTooltipDescription(String translationKey, String summary, Li
             CreateTooltipDescription result = values.get(key);
             if (result != null) return result;
             result = CreateTooltipDescription.read(key, translations);
-            // Most registry items have no Create description. Avoid filling the cache with absent entries.
+            // 大多数注册物品都没有 Create 描述，不要为缺失条目填充缓存。
             if (!result.isEmpty()) {
                 if (values.size() >= CAPACITY) values.remove(values.keySet().iterator().next());
                 values.put(key, result);
