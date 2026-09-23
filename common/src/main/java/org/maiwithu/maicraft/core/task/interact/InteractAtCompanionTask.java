@@ -59,8 +59,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
      */
     private long holdUntil = -1;       // game tick to release a fixed-duration hold (holdTicks > 0)
     private String successMsg = "done";
-    // A right-click that activated a real block (a station's GUI): captured so the
-    // result can report it and the agent loop can remember it in <known_blocks>.
+    // 右键实际激活的方块（例如打开工作台界面）会被记录，供结果报告并让智能体循环写入 <known_blocks>。
     private BlockPos activatedBlock;
     private String activatedBlockId;
 
@@ -70,7 +69,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected List<Precondition> preconditions() {
-        // If an item to use was named, fail fast unless we actually carry it.
+        // 若请求指定了要使用的物品，必须先确认背包确实持有，否则立即失败。
         return List.of(() -> r.item == null || PlayerInv.count(player.getInventory(), r.item) > 0 ? null
                 : new Precondition.Failure(
                         "don't have " + BuiltInRegistries.ITEM.getKey(r.item).getPath() + " to use",
@@ -96,7 +95,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected TaskState act() {
-        // Resolve the crosshair once we're in position, then drive the action.
+        // 到达交互位置后再解析准星命中，并据此执行动作。
         if (interaction == null) {
             if (r.requiredBlock != null && (!player.level().isLoaded(r.aim)
                     || !player.level().getBlockState(r.aim).is(r.requiredBlock))) {
@@ -129,12 +128,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                                     player.level(), player, player.getEyePosition(), r.aim, REACH);
                     aimPoint = visible == null ? Vec3.atCenterOf(r.aim) : visible.getLocation();
                 }
-                // A use interaction must not inherit placement sneak from the preceding task.
+                // 使用交互不能继承前一施工任务留下的潜行放置状态。
                 InputDriver.halt(player);
                 InputDriver.lookAt(player, aimPoint);
-                // requestLook is applied/rate-limited at endTick. Always cross that boundary and
-                // wait for the actual camera vector to converge before trusting nativeRaytrace;
-                // otherwise the old view can turn ordinary camera lag into a false obstruction.
+                // requestLook 会在 endTick 应用并限速。必须跨过该边界，等真实镜头方向收敛后再信任 nativeRaytrace；
+                // 否则旧视角会把正常的镜头延迟误判为遮挡。
                 if (!aimConvergence.ready(player, aimPoint.subtract(player.getEyePosition()))) {
                     return TaskState.RUNNING;
                 }
@@ -171,18 +169,15 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                         FailureType.OCCLUDED);
                 return TaskState.FAILED;
             }
-            // A right-click landing on a block activates it (opens a station's GUI,
-            // flips a switch, …). Remember the block we touched so <known_blocks> can
-            // walk us back to stations we've used, not just ones we placed. The harvest
-            // filters to tracked station types; doors/buttons fall away there.
+            // 右键命中方块会激活它，例如打开工作台界面或切换开关。记录交互过的方块，让 <known_blocks> 除了已放置工作台外，也能带角色返回用过的工作站。
+            // 后续收录仅保留受跟踪的工作站类型，门和按钮会被过滤掉。
             if (!bucket && button() == Interaction.Button.USE && hit instanceof BlockHitResult bhr) {
                 activatedBlock = bhr.getBlockPos();
                 activatedBlockId = BuiltInRegistries.BLOCK
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
             }
             receipt = PressReceipt.before(player, r.aim);
-            // This is the real LocalPlayer. Preserve vanilla's ordinary fall-through from an
-            // unhandled block/entity use to the held item (food, pearls and modded items included).
+            // 当前操作对象是真实 LocalPlayer；保留原版处理：方块或实体未响应使用操作时，继续使用手持物品，包括食物、珍珠和模组物品。
             interaction = bucket ? Interaction.useInAir(player, InteractionHand.MAIN_HAND,
                     r.holdTicks == 0 ? Interaction.Timing.once()
                             : r.holdTicks > 0 ? Interaction.Timing.hold(r.holdTicks) : Interaction.Timing.hold())
@@ -197,7 +192,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
         }
 
-        // A fixed-duration hold ends when its window elapses: release the button.
+        // 固定时长的按住操作到期后松开按键。
         // 当前实现到按住时限就直接停止并结算，不再等 interaction 内尚未确认的点击。
         // 只有另外设置了 expectedBlock 才会核对目标方块，未设置时可能把仍在等待的动作报成成功（A30）。
         if (holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
@@ -273,7 +268,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         return " — " + String.join("; ", changes);
     }
 
-    /** Release the interaction, then the nav + overlay (base default). */
+    /** 释放交互，再释放导航和目标覆盖层（父类默认清理）。 */
     @Override
     protected void cleanup() {
         if (interaction != null) interaction.stop();
@@ -292,8 +287,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             data.put("y", r.aim.getY());
             data.put("z", r.aim.getZ());
         }
-        // Report the activated station (and its exact position, authoritative over the
-        // raw aim) so the agent loop can harvest it into <known_blocks>.
+        // 报告已激活的工作站和确切位置；位置以实际命中为准，不使用原始瞄准点，供智能体循环收录到 <known_blocks>。
         if (activatedBlock != null) {
             data.put("block", activatedBlockId);
             data.put("x", activatedBlock.getX());
