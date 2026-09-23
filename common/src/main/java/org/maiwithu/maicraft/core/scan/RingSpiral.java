@@ -8,14 +8,14 @@ public final class RingSpiral {
 
     private RingSpiral() {}
 
-    /** Number of cells on {@code ring}'s perimeter (1 for the center ring). */
+    /** {@code ring} 周长包含的格子数；中心环为 1。 */
     public static int perimeter(int ring) {
         return ring == 0 ? 1 : 8 * ring;
     }
 
     /**
-     * The {@code idx}-th cell of {@code ring}'s perimeter as a (dx, dz) offset
-     * from the spiral center. {@code idx} must be in {@code [0, perimeter(ring))}.
+     * 返回 {@code ring} 周长上第 {@code idx} 个格子相对于螺旋中心的 (dx, dz) 偏移。
+     * {@code idx} 必须位于 {@code [0, perimeter(ring))} 范围内。
      */
     // 中心圈只有原点；其他圈按四条边依次给出偏移，每条边两倍圈数个位置，避免角点重复。
     public static int[] offset(int ring, int idx) {
