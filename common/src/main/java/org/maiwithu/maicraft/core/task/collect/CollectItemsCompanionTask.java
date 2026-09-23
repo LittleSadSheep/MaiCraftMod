@@ -30,7 +30,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private enum Phase { SCAN, APPROACH }
 
     private static final double WALK_SPEED = 1.0;
-    /** Bounded packet-settle window after the entity disappears or contact is made. */
+    /** 掉落实体消失或角色接触后，等待数据包同步的有界窗口。 */
     private static final int PICKUP_SYNC_TICKS = 20;
 
     private Phase phase = Phase.SCAN;
@@ -41,10 +41,10 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private int disappearedWithoutReceipt;
     private int pickupRejected;
     private String lastUncollectedDetail;
-    /** First observed count for every nearby id, used to prove an id-to-id vanilla merge. */
+    /** 记录附近每个实体 ID 首次观察到的数量，用于核实原版实体 ID 间的堆叠合并。 */
     private final Map<Integer, Integer> firstObservedEntityCounts = new HashMap<>();
 
-    /** Item-entity ids we reached but couldn't absorb, so SCAN won't loop on them. */
+    /** 已到达但无法收入背包的物品实体 ID，供 SCAN 跳过，避免循环追踪。 */
     private final TargetSet<ItemEntity> skipped = new TargetSet<>(ItemEntity::getId);
 
     public CollectItemsCompanionTask(LocalPlayer player, CollectItemsTaskRecord record) {
@@ -103,7 +103,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
-            // Nothing left within radius. Success at zero remains a valid "nothing here" receipt.
+            // 半径范围内没有剩余物品；即使数量为零，也可用回执确认“此处没有物品”。
             return TaskState.SUCCESS;
         }
         if (!r.targetUuids.isEmpty() && !NativePickupReceipt.insideVanillaTouchEnvelope(player, best)
