@@ -12,11 +12,16 @@ import net.minecraft.core.Direction;
 
 /** 折线只决定运输路径；拐角归接收段，物品交接和动力连通分别建模。 */
 public final class MachineBeltRoutes {
+    public record Expansion(JsonArray installations, List<String> sourcePaths) {}
     private MachineBeltRoutes() {}
     public static JsonArray expand(JsonArray entries, int radius, int lengthLimit) {
-        JsonArray result = new JsonArray(); int targets = 0;
+        return expandWithSources(entries, radius, lengthLimit).installations();
+    }
+    public static Expansion expandWithSources(JsonArray entries, int radius, int lengthLimit) {
+        JsonArray result = new JsonArray(); int targets = 0, sourceIndex = 0; List<String> sources = new ArrayList<>();
         for (var raw : entries) {
-            if (!raw.isJsonObject() || !raw.getAsJsonObject().has("path")) { result.add(raw.deepCopy()); continue; }
+            String path = "goal.parameters.blueprint.assembly.installations[" + sourceIndex++ + "]";
+            if (!raw.isJsonObject() || !raw.getAsJsonObject().has("path")) { result.add(raw.deepCopy()); sources.add(path); continue; }
             JsonObject route = raw.getAsJsonObject();
             for (String key : route.keySet()) if (!Set.of("type", "path", "pulleys").contains(key)) throw bad("belt_path_uses_point_order; omit " + key);
             if (!route.has("type") || !route.get("type").isJsonPrimitive() || !route.getAsJsonPrimitive("type").isString()
@@ -37,10 +42,12 @@ public final class MachineBeltRoutes {
                 for (var rawPulley : route.getAsJsonArray("pulleys"))
                     if (!pulleys.add(MachineAssemblyDocument.position(rawPulley, radius))) throw bad("belt_pulley_must_be_unique_and_on_span");
             }
+            boolean closed = points.getFirst().equals(points.getLast());
             for (int i = 0; i < points.size() - 1; i++) {
                 BlockPos first = points.get(i), end = points.get(i + 1); Direction motion = direction(first, end);
                 // 转角那格属于后一条带，前一条停在相邻格；两段不会争用同一个端轴或方块实体。
-                if (i < points.size() - 2) end = end.relative(motion.getOpposite());
+                // 闭环的末段也在首格之前交接，让第一段独占闭合拐角及其端轴。
+                if (closed || i < points.size() - 2) end = end.relative(motion.getOpposite());
                 int remaining = first.distManhattan(end) + 1;
                 if (remaining < 2) throw bad("belt_route_segment_too_short: " + first);
                 while (remaining > 0) {
@@ -57,13 +64,14 @@ public final class MachineBeltRoutes {
                         BlockPos at = first.relative(motion, step); if (pulleys.remove(at)) onSegment.add(MachineAssemblyDocument.json(at));
                     }
                     if (!onSegment.isEmpty()) segment.add("pulleys", onSegment); result.add(segment);
+                    sources.add(path + ".path");
                     first = last.relative(motion); remaining -= count;
                 }
             }
             if (!pulleys.isEmpty()) throw bad("belt_pulley_must_be_unique_and_on_span");
         }
         if (result.size() > MachinePlanningBudget.current().maxConnections()) throw bad("native_installation_target_budget_exceeded");
-        return result;
+        return new Expansion(result, List.copyOf(sources));
     }
     private static Direction direction(BlockPos from, BlockPos to) {
         int x = to.getX() - from.getX(), y = to.getY() - from.getY(), z = to.getZ() - from.getZ();
@@ -83,8 +91,10 @@ public final class MachineBeltRoutes {
             for (int j = 0; j < spans.size(); j++) if (i != j && spans.get(j).cells().contains(inlet)) {
                 JsonObject transfer = new JsonObject(); transfer.add("from", MachineAssemblyDocument.json(outlet));
                 transfer.add("to", MachineAssemblyDocument.json(inlet)); transfer.addProperty("incoming_direction", motion.getName());
+                transfer.addProperty("entry_face", motion.getOpposite().getName());
                 var receiver = spans.get(j); var receiverInput = rows.get(j).getAsJsonObject(); Boolean compatible = null;
-                if (!receiver.processesItems()) compatible = false;
+                // 斜带可以接收工件而不能充当加工面，交接不能误用加工面条件来拒绝合法输送。
+                if (!List.of("horizontal", "upward", "downward").contains(receiver.slope())) compatible = false;
                 else if (receiverInput.has("flow")) {
                     Direction receiving = receiverInput.get("flow").getAsString().equals("first_to_second") ? receiver.facing() : receiver.facing().getOpposite();
                     compatible = receiving != motion.getOpposite();

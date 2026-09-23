@@ -29,8 +29,8 @@ public final class MachineDesignRejection extends IllegalArgumentException {
         row.addProperty("next_action", "Revise the indicated design while preserving expected_output and forbidden_mods, then review it again. Runtime-only unknowns require targeted inspection.");
         return row;
     }
-    public static JsonObject beltIssue(String message, int index, JsonElement raw, Map<BlockPos, JsonObject> blocks) {
-        JsonObject issue = issue(message, "goal.parameters.blueprint.assembly.installations[" + index + "]");
+    public static JsonObject beltIssue(String message, String path, JsonElement raw, Map<BlockPos, JsonObject> blocks) {
+        JsonObject issue = issue(message, path);
         if (!raw.isJsonObject()) return issue;
         JsonObject context = new JsonObject();
         for (String key : List.of("first", "second")) {
@@ -58,5 +58,7 @@ public final class MachineDesignRejection extends IllegalArgumentException {
         try { MachineBlueprintDocument.validateWire(blueprint.getAsJsonObject()); return null; }
         catch (MachineDesignRejection rejected) { return rejected.details(); }
         catch (IllegalArgumentException rejected) { return new MachineDesignRejection(List.of(issue(rejected.getMessage(), "goal.parameters.blueprint"))).details(); }
+        // 可选模组未就绪时保留主请求的拒绝结果，补充预检未知，不能让诊断生成覆盖原来的错误。
+        catch (RuntimeException | LinkageError unavailable) { return new MachineDesignRejection(List.of(issue("blueprint_preflight_unavailable", "goal.parameters.blueprint"))).details(); }
     }
 }

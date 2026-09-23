@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometry;
 public final class MachineBeltAssembly {
     private MachineBeltAssembly() {}
 
-    public static void prepareShafts(JsonObject blueprint, JsonArray installations, int radius) {
+    public static void prepareShafts(JsonObject blueprint, JsonArray installations, int radius, List<String> sourcePaths) {
         Map<BlockPos, JsonObject> blocks = MachineAssemblyDocument.blocks(blueprint);
         Set<BlockPos> parts = new HashSet<>();
         for (var raw : blueprint.getAsJsonArray("blocks")) if (raw.getAsJsonObject().has("part"))
@@ -24,35 +24,35 @@ public final class MachineBeltAssembly {
         List<JsonObject> issues = new ArrayList<>(); int index = 0;
         for (var raw : installations) {
             try {
-            if (!raw.isJsonObject()) throw bad("installation must be an object");
-            JsonObject entry = raw.getAsJsonObject();
-            if (!entry.has("type") || !entry.get("type").isJsonPrimitive() || !entry.getAsJsonPrimitive("type").isString()
-                    || !entry.get("type").getAsString().equals("create:belt"))
-                throw bad("unsupported_native_installation; read the machine assembly capability contract");
-            BlockPos first = MachineAssemblyDocument.position(entry.get("first"), radius);
-            BlockPos second = MachineAssemblyDocument.position(entry.get("second"), radius);
-            Direction.Axis authored = axis(blocks.get(first)), other = axis(blocks.get(second));
-            if (authored != null && other != null && authored != other) throw bad("belt_endpoint_axes_mismatch");
-            Direction.Axis chosen = authored != null ? authored : other != null ? other : inferredAxis(first, second);
-            // 先检查带长与轴向，再补两端准备轴；作者写错的显式朝向不能被自动展开偷偷覆盖。
-            var span = CreateBeltGeometry.between(first, second, chosen, Math.min(2 * radius + 1, MachinePlanningBudget.current().maxTargets()));
-            shaft(blueprint, blocks, parts, first, chosen);
-            shaft(blueprint, blocks, parts, second, chosen);
-            // 中间接动力时只在指定位置增加带轮，不把整条带每格都铺满传动杆。
-            if (entry.has("pulleys")) {
-                if (!entry.get("pulleys").isJsonArray() || entry.getAsJsonArray("pulleys").size() > span.cells().size()) throw bad("invalid_belt_pulleys");
-                Set<BlockPos> seen = new HashSet<>();
-                for (var pulley : entry.getAsJsonArray("pulleys")) {
-                    BlockPos at = MachineAssemblyDocument.position(pulley, radius);
-                    if (!span.cells().contains(at) || !seen.add(at)) throw bad("belt_pulley_must_be_unique_and_on_span");
-                    Direction.Axis present = axis(blocks.get(at));
-                    if (present != null && present != chosen) throw bad("belt_pulley_axis_mismatch");
-                    shaft(blueprint, blocks, parts, at, chosen);
+                if (!raw.isJsonObject()) throw bad("installation must be an object");
+                JsonObject entry = raw.getAsJsonObject();
+                if (!entry.has("type") || !entry.get("type").isJsonPrimitive() || !entry.getAsJsonPrimitive("type").isString()
+                        || !entry.get("type").getAsString().equals("create:belt"))
+                    throw bad("unsupported_native_installation; read the machine assembly capability contract");
+                BlockPos first = MachineAssemblyDocument.position(entry.get("first"), radius);
+                BlockPos second = MachineAssemblyDocument.position(entry.get("second"), radius);
+                Direction.Axis authored = axis(blocks.get(first)), other = axis(blocks.get(second));
+                if (authored != null && other != null && authored != other) throw bad("belt_endpoint_axes_mismatch");
+                Direction.Axis chosen = authored != null ? authored : other != null ? other : inferredAxis(first, second);
+                // 先检查带长与轴向，再补两端准备轴；作者写错的显式朝向不能被自动展开偷偷覆盖。
+                var span = CreateBeltGeometry.between(first, second, chosen, Math.min(2 * radius + 1, MachinePlanningBudget.current().maxTargets()));
+                shaft(blueprint, blocks, parts, first, chosen);
+                shaft(blueprint, blocks, parts, second, chosen);
+                // 中间接动力时只在指定位置增加带轮，不把整条带每格都铺满传动杆。
+                if (entry.has("pulleys")) {
+                    if (!entry.get("pulleys").isJsonArray() || entry.getAsJsonArray("pulleys").size() > span.cells().size()) throw bad("invalid_belt_pulleys");
+                    Set<BlockPos> seen = new HashSet<>();
+                    for (var pulley : entry.getAsJsonArray("pulleys")) {
+                        BlockPos at = MachineAssemblyDocument.position(pulley, radius);
+                        if (!span.cells().contains(at) || !seen.add(at)) throw bad("belt_pulley_must_be_unique_and_on_span");
+                        Direction.Axis present = axis(blocks.get(at));
+                        if (present != null && present != chosen) throw bad("belt_pulley_axis_mismatch");
+                        shaft(blueprint, blocks, parts, at, chosen);
+                    }
                 }
-            }
             } catch (IllegalArgumentException invalid) {
                 // 收集独立带段的错误后整体拒绝；补出的准备轴只在本次副本中，任何错误都不会开始施工。
-                issues.add(MachineDesignRejection.beltIssue(invalid.getMessage(), index, raw, blocks));
+                issues.add(MachineDesignRejection.beltIssue(invalid.getMessage(), sourcePaths.get(index), raw, blocks));
             }
             index++;
         }

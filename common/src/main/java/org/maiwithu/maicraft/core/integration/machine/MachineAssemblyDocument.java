@@ -27,9 +27,10 @@ public final class MachineAssemblyDocument {
         JsonArray installations = array(source, "installations"), processing = array(source, "processing");
         // 实装版本负责给出带长上限；离线格式检查只用规划预算，不能借默认长度假称原生安装可用。
         int length = CreateBeltAccess.available() ? CreateBeltAccess.maximumLength() : Math.min(2 * radius + 1, MachinePlanningBudget.current().maxTargets());
-        installations = MachineBeltRoutes.expand(installations, radius, length);
+        var expanded = MachineBeltRoutes.expandWithSources(installations, radius, length);
+        installations = expanded.installations();
         // 作者只给带段时先推导端轴，再让原有占格、加工与禁用模组检查审查完整展开结果。
-        MachineBeltAssembly.prepareShafts(blueprint, installations, radius);
+        MachineBeltAssembly.prepareShafts(blueprint, installations, radius, expanded.sourcePaths());
         JsonArray installs = new JsonArray(), relations = new JsonArray();
         Map<BlockPos, JsonObject> blocks = blocks(blueprint); Set<BlockPos> occupied = new LinkedHashSet<>(), parts = new LinkedHashSet<>();
         for (var raw : blueprint.getAsJsonArray("blocks")) if (raw.getAsJsonObject().has("part")) parts.add(position(raw.getAsJsonObject().get("offset")));
