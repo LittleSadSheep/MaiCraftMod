@@ -20,7 +20,7 @@ public final class LocalToolDispatcher {
 
     private LocalToolDispatcher() {}
 
-    /** Submit one internal capability call to the Minecraft client thread. */
+    /** 将一个内部能力调用提交到 Minecraft 客户端线程。 */
     public static void ship(ToolCall call) {
         // 先登记调用编号，再交给游戏线程处理；相同编号不能同时执行两次，后来的那次会被拒绝。
         if (call == null) {
@@ -64,14 +64,14 @@ public final class LocalToolDispatcher {
         }
     }
 
-    /** Complete a parked call exactly once. Task settlement uses this same path. */
+    /** 恰好一次完成已挂起的调用；任务结算也复用此路径。 */
     public static void deliver(String toolCallId, String resultJson) {
         // 先从“等待结果”的名单中删掉，再回复；这样即使重复通知结束，也只会回复一次。
         ToolCall call = IN_FLIGHT.remove(toolCallId);
         if (call != null) call.complete(resultJson);
     }
 
-    /** Cancel the current body task and forget calls anchored to this local body. */
+    /** 取消当前身体任务，并丢弃绑定到此本地身体的调用。 */
     public static void abort(UUID playerUuid) {
         Minecraft minecraft = Minecraft.getInstance();
         Runnable cancel = () -> {
@@ -84,7 +84,7 @@ public final class LocalToolDispatcher {
         if (minecraft.isSameThread()) cancel.run(); else minecraft.execute(cancel);
     }
 
-    /** Forget calls from a world that is no longer active. */
+    /** 丢弃来自已不再活动世界的调用。 */
     public static void forget(UUID playerUuid) {
         // 这里只删除这个玩家还在等的调用，不通知它们“已取消”；等待者不会因此收到结果。
         IN_FLIGHT.values().removeIf(call -> playerUuid.equals(call.ctx().entityUuid()));
