@@ -30,7 +30,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot;
  * SUPPLY 要求背包净增加指定数量；PREPARE 只准备网络库存。结果分别记录确认数量、已产生影响和是否还有不确定事务。
  */
 public final class Ae2ResourceSupply {
-    /** Evidence produced only by an explicit bounded machine observation. */
+    /** 仅由明确且有界的机器观察生成的证据。 */
     public record ExplicitAccessObservation(
             boolean integrationAvailable,
             int radius,
@@ -45,7 +45,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Whether a request moves items to the player or only prepares complete network stock. */
+    /** 请求是将物品转入玩家背包，还是仅准备足量的网络库存。 */
     public enum Operation {
         SUPPLY,
         PREPARE,
@@ -54,9 +54,9 @@ public final class Ae2ResourceSupply {
     }
 
     public enum SelectionMode {
-        /** Any mixture of the acceptable item IDs may satisfy the count. */
+        /** 可接受的物品 ID 可任意混合计数以满足需求。 */
         AGGREGATE,
-        /** One concrete acceptable item ID is selected and locked for the whole group. */
+        /** 整组操作会选定一个具体可接受物品 ID，并在任务期间锁定它。 */
         SINGLE_VARIANT
     }
 
@@ -105,7 +105,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Complete approved request. Accepted item IDs may not overlap across groups. */
+    /** 完整且已获准的请求；不同组之间的可接受物品 ID 不得重叠。 */
     public record Request(List<Group> groups, boolean allowCrafting, Operation operation) {
         public Request {
             Objects.requireNonNull(groups, "groups");
@@ -150,7 +150,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Exact before/after evidence for one concrete acceptable item ID. */
+    /** 针对一个具体可接受物品 ID 的精确前后状态证据。 */
     public record ItemDelta(
             ResourceLocation itemId,
             int before,
@@ -166,7 +166,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Exact before/after evidence for one semantic group and each accepted concrete item. */
+    /** 针对一个语义组以及其中每种可接受具体物品的精确前后状态证据。 */
     public record GroupDelta(
             ResourceLocation itemId,
             List<ResourceLocation> acceptableItemIds,
@@ -190,7 +190,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Terminal session outcome. {@code uncertain=true} forbids blind mechanical retry. */
+    /** 会话终态结果；{@code uncertain=true} 时禁止盲目重试原生操作。 */
     public record Outcome(
             Status status,
             String code,
@@ -227,7 +227,7 @@ public final class Ae2ResourceSupply {
             return status != Status.RUNNING;
         }
 
-        /** Structured data suitable for {@code TaskResult}. */
+        /** 可直接用于 {@code TaskResult} 的结构化数据。 */
         public Map<String, Object> data() {
             List<Map<String, Object>> deltas = new ArrayList<>();
             for (GroupDelta delta : groups) {
@@ -290,7 +290,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Cross-tick execution. Call exactly once per scheduler tick with the fresh actor context. */
+    /** 跨 tick 执行；每个调度器 tick 都要用最新角色上下文恰好调用一次。 */
     public interface Session {
         Optional<Outcome> tick(LocalPlayerContext context);
 
@@ -298,25 +298,24 @@ public final class Ae2ResourceSupply {
 
         String phase();
 
-        /** Inventory arrival cannot cancel the receipt and cleanup of an already submitted effect. */
+        /** 背包物品到达后，不能取消已提交效果的回执结算和清理。 */
         default boolean mustSettleBeforeSatisfiedCancellation() { return false; }
 
         default void requestSatisfiedSettlement() {}
 
         /**
-         * True while a bounded native receipt, verified route, or already-submitted external
-         * crafting job is still legitimately in flight. Callers may renew a liveness lease;
-         * this is not evidence that a new side effect should be submitted.
+         * 有界原生回执、已核实路线或已提交的外部合成任务仍在合法执行时返回 true。调用方可据此续期存活期限；
+         * 这不代表应该提交新的副作用。
          */
         boolean livenessActive();
 
-        /** Release locomotion on preemption without selecting a new strategy or repeating a packet. */
+        /** 被抢占时释放移动，但不重新选策略，也不重复发送数据包。 */
         void pause(LocalPlayerContext context);
 
-        /** Best-effort first-person handoff for replacement/body loss; never claims success. */
+        /** 因任务替换或身体丢失而进行的尽力第一人称交接；绝不据此报告成功。 */
         Outcome cancel(LocalPlayerContext context, String reason);
 
-        /** Stop acquiring and reconcile the native menu close before returning control to a reflex. */
+        /** 停止获取物品，并在将控制权交还反射链前完成原生菜单关闭核对。 */
         default Optional<Outcome> finishInPlace(LocalPlayerContext context, String reason) {
             return Optional.of(cancel(context, reason));
         }
@@ -332,10 +331,10 @@ public final class Ae2ResourceSupply {
         return Ae2ReflectionBridge.availability().detail();
     }
 
-    /** Physical-terminal enhancement is optional; wireless and visible-menu supply keep their native path. */
+    /** 实体终端增强是可选的；无线供料和可见菜单供料仍沿用各自原生路径。 */
     public static boolean serverAssistanceSupported() { return Ae2ServerSupply.available(); }
 
-    /** Current synchronized repository only; craftable patterns never contribute to stored counts. */
+    /** 仅统计当前已同步的仓库库存；可合成的样板绝不计入已存数量。 */
     public static Optional<StockEvidence.Snapshot> observeOpenStock(
             Object menu, long observedGameTick) {
         try {
@@ -359,7 +358,7 @@ public final class Ae2ResourceSupply {
         }
     }
 
-    /** Read-only water acquisition evidence; absent entries cannot prove an unfinished sync is empty. */
+    /** 只读的水源获取证据；条目缺失不能证明尚未完成的同步结果为空。 */
     public static Optional<JsonObject> observeOpenWaterInventory(
             AbstractContainerMenu menu) {
         try {
@@ -391,8 +390,7 @@ public final class Ae2ResourceSupply {
     }
 
     /**
-     * Record fixed AE access seen inside an explicit {@code inspect_machine} observation. Merely
-     * walking near a terminal never calls this method; supply also has its own bounded discovery.
+     * 记录在明确的 {@code inspect_machine} 观察中确认的固定 AE 访问点。角色仅仅走到终端附近不会调用此方法；供料流程还有独立的有界搜索。
      */
     public static ExplicitAccessObservation rememberObservedAccess(
             LocalPlayer player, BlockPos center, int radius) {
@@ -441,7 +439,7 @@ public final class Ae2ResourceSupply {
         return new Ae2SupplySession(player, request, bridge, false, Objects.requireNonNull(depositAccess));
     }
 
-    /** Available while falling: use wireless/currently reachable access; never start navigation. */
+    /** 坠落期间可用：只使用无线或当前可达的访问点，绝不启动导航。 */
     // 原地自救一次只补一件；只有落地船允许再走自动合成，不能把紧急补料变成任意合成任务。
     public static Session beginInPlace(LocalPlayer player, Request request) {
         Objects.requireNonNull(player, "player");
@@ -456,7 +454,7 @@ public final class Ae2ResourceSupply {
         return new Ae2SupplySession(player, request, bridge, true);
     }
 
-    /** Task-runtime convenience used by the acquire adapter. */
+    /** 供获取适配器使用的任务运行时便捷入口。 */
     public static Ae2SupplyTaskRecord taskRecord(
             String toolCallId, long deadlineGameTime, Request request) {
         return new Ae2SupplyTaskRecord(toolCallId, deadlineGameTime, request);
