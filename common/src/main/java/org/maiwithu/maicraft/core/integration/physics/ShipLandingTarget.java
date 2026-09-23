@@ -78,7 +78,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
         } catch (RuntimeException | LinkageError changed) { return unavailable("native deck geometry changed: " + changed.getClass().getSimpleName()); }
     }
 
-    /** Prefer a broad usable patch and its interior, then reduce approach distance. */
+    /** 优先选择宽阔可用甲板的内部区域，再缩短接近距离。 */
     static StructureDeckGeometry.Surface choose(List<StructureDeckGeometry.Surface> sites, Vec3 center, Vec3 player) {
         return rank(sites,center,p -> p.distanceTo(player)).stream().findFirst().orElse(null);
     }
@@ -89,7 +89,7 @@ public final class ShipLandingTarget implements MovingFlightTarget {
             int exposed = 0;
             for (Vec3 offset : List.of(new Vec3(1,0,0),new Vec3(-1,0,0),new Vec3(0,0,1),new Vec3(0,0,-1)))
                 if (sites.stream().noneMatch(s -> s.storage().distanceToSqr(site.storage().add(offset)) < .0625)) exposed++;
-            // Prefer room for horizontal braking, but never discard a narrower legal deck.
+            // 优先保留足够水平制动空间，但不能因此排除较窄且仍合法的甲板。
             return travelCost.applyAsDouble(site.feet()) + exposed * 24 + .001 * site.storage().distanceToSqr(center);
         })).toList();
     }

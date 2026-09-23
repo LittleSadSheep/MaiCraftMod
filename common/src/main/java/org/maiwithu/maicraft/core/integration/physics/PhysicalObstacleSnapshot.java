@@ -47,7 +47,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
                     || structure.storageBounds() == null;
             if (!unknown) {
                 try {
-                    // Neighbor origins may have shapes protruding into the world-space window.
+                    // 相邻方块的碰撞形状可能凸入当前世界坐标窗口。
                     AABB area = transformBox(structure.pose(), interest, false).inflate(1).intersect(structure.storageBounds());
                     BlockPos min = BlockPos.containing(area.minX, area.minY, area.minZ);
                     BlockPos max = BlockPos.containing(Math.nextDown(area.maxX), Math.nextDown(area.maxY), Math.nextDown(area.maxZ));
@@ -73,7 +73,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
                 } catch (RuntimeException | LinkageError missingGeometry) { unknown = true; }
             }
             if (unknown) {
-                // A partially observed vessel is an obstacle, never an empty corridor.
+                // 只观察到部分船体时按障碍处理，绝不能视为畅通走廊。
                 boxes.subList(firstBox, boxes.size()).clear();
                 boxes.add(bounds); conservative++;
             }
@@ -98,7 +98,7 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
         return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
-    /** Swept upright body, with an outward escape from an already touching/moving obstacle. */
+    /** 扫掠直立身体空间；若已接触或正向障碍移动，则额外检查向外脱离路线。 */
     public boolean clearSegment(Vec3 from, Vec3 to, double width, double height) {
         for (AABB obstacle : boxes) {
             AABB expanded = new AABB(obstacle.minX - width / 2 + EPS, obstacle.minY - height + EPS,
