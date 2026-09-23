@@ -13,7 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.FallingBlock;
 
-/** Read-only reservations over the full concrete build, including later semantic supply batches. */
+/** 对完整具体建筑方案执行只读材料预留，包括后续语义供料批次。 */
 public final class BuildTemporarySupportMaterials {
     public record Choice(Item item, int inventorySlot) {}
     private BuildTemporarySupportMaterials() {}
@@ -30,7 +30,7 @@ public final class BuildTemporarySupportMaterials {
     public static Item choose(List<Item> allowed, Map<Item, Integer> reserved, ToIntFunction<Item> carried,
                               int required, boolean creativeFree) {
         if (required < 1) throw new IllegalArgumentException("A support chain must consume a positive material quantity");
-        // Preserve configured order within each tier, while preferring materials with no permanent demand.
+        // 保留每个优先级层级中的配置顺序，同时优先选用没有永久需求的材料。
         for (int tier = 0; tier < 2; tier++) for (Item item : allowed) {
             int permanent = reserved.getOrDefault(item, 0);
             if ((permanent == 0) != (tier == 0) || !eligible(item)) continue;
