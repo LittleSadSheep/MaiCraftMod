@@ -13,14 +13,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import java.util.Objects;
 
-/** Read-only retry recognition for one isolated, already constructed basic energy-cable path. */
+/** 对一条已建成且独立的基础能源线缆路径执行只读重试识别。 */
 public final class UtilityExistingCableRoute {
     public static final int MAX_CABLES = 128;
     public interface WorldView {
         boolean loaded(BlockPos position);
-        /** True only for the supported Mekanism basic universal cable. */
+        /** 仅对受支持的 Mekanism 基础通用线缆返回 true。 */
         boolean cable(BlockPos position);
-        /** Other block entities or conduits which could attach an unrelated network. */
+        /** 可能连接到无关网络的其他方块实体或导管。 */
         boolean device(BlockPos position);
     }
     public static final class RejectedRouteException extends IllegalArgumentException {
@@ -29,7 +29,7 @@ public final class UtilityExistingCableRoute {
     private enum Cell { CABLE, DEVICE, OTHER }
     private UtilityExistingCableRoute() {}
 
-    /** Null means no complete simple path exists; an unsafe existing network is never bypassed silently. */
+    /** null 表示不存在完整简单路径；绝不会静默绕过不安全的现有网络。 */
     public static UtilityConnectionPlanner.Route find(BlockPos source, List<Direction> eligibleSourceFaces,
             BlockPos target, Direction exactTargetFace, WorldView world) {
         if (source == null || target == null || source.equals(target) || exactTargetFace == null
@@ -38,7 +38,7 @@ public final class UtilityExistingCableRoute {
         requireLoaded(world, source); requireLoaded(world, target);
         Map<BlockPos, Cell> observations = new HashMap<>();
         BlockPos end = target.relative(exactTargetFace);
-        // A fresh machine must not trigger exploration of the city's existing outlets and their consumers.
+        // 新机器不得触发对城市中现有能源端口及其使用设备的探索。
         if (end.equals(source) || observe(world, end, observations) != Cell.CABLE) return null;
         var graph = component(source, target, end, world, observations, new HashSet<>());
         int edges = graph.values().stream().mapToInt(List::size).sum() / 2;

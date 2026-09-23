@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Bounded real-player deposits into authored sources; machines transport all intermediate resources. */
+/** 由玩家真实操作，将有限数量的物品存入手工指定来源；所有中间资源均由机器运输。 */
 public final class ProductionInputSupply {
     private enum Phase { OBSERVE, CARRIED, QUOTE, TRANSFER, CLOSE }
     private record Supply(ProductionSupplyBudget.Key key, Port port, ProductionSupplyBudget budget) {}
@@ -63,7 +63,7 @@ public final class ProductionInputSupply {
         });
     }
 
-    /** True means this bounded pass settled, not that native production or all resource requirements succeeded. */
+    /** 返回 true 表示本次有界操作已结算，不代表原生生产或全部资源需求已成功。 */
     public boolean tick() {
         if (cancelled) throw new IllegalStateException("Production input supply was cancelled");
         if (!player.level().dimension().location().toString().equals(plan.dimension()))
@@ -142,7 +142,7 @@ public final class ProductionInputSupply {
                     MaterialPolicy policy = MaterialPolicy.parse(plan.node(supply.key().source()).materialPolicy());
                     if (policy == MaterialPolicy.INVENTORY_ONLY)
                         throw new IllegalStateException("production_input_missing_inventory: " + supply.key().resource());
-                    // Acquire only the currently released chunk, never the entire observation-window budget.
+                    // 只获取当前已释放的一批材料，绝不一次消耗整个观察窗口的预算。
                     if (!work.closeMachineMenu()) return false;
                     acquisition.begin(player, owner.getToolCallId(), owner.getDeadlineGameTime(),
                         new Demand(List.of(ResourceLocation.parse(registryId)), pacer.quoteAmount(), "production source " + supply.key().source()),
@@ -205,7 +205,7 @@ public final class ProductionInputSupply {
                         phase = Phase.CARRIED; body = null; return false;
                     }
                 } catch (RuntimeException invalidReceipt) {
-                    // The mutation already settled. A failed evidence callback must never cause a second deposit.
+                    // 修改操作已经结算；若证据回调失败，也绝不能因此再次存入物品。
                     cancelled = true; throw invalidReceipt;
                 }
                 return advance();
@@ -224,12 +224,12 @@ public final class ProductionInputSupply {
         }
         return ready && now >= nextRefillTick;
     }
-    /** All finite item allocations are accounted for; says nothing about downstream work still in flight. */
+    /** 所有有限物品分配均已核算；此状态不代表下游仍在进行的工作已经完成。 */
     public boolean exhausted() {
         return supplies.stream().filter(supply -> supply.key().medium().equals("items"))
                 .allMatch(supply -> supply.budget().initialized() && supply.budget().remaining() == 0);
     }
-    /** Bounded source-side diagnostic for the owner's OBSERVE phase; final target timing remains the observer's responsibility. */
+    /** 供所有者 OBSERVE 阶段使用的有界来源诊断；最终目标计时仍由观察器负责。 */
     public String pacingFailure() {
         if (cancelled || cursor < supplies.size()) return null;
         long now = player.level().getGameTime(); var progress = work.processingProgress();

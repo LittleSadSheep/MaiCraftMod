@@ -15,7 +15,7 @@ import java.util.UUID;
 import java.util.function.LongSupplier;
 import net.minecraft.core.BlockPos;
 
-/** Client-thread-owned, bounded discovery of candidates; never a complete factory or production-function inference. */
+/** 由客户端线程拥有的有界候选发现器；绝不推断完整工厂结构或生产功能。 */
 public final class MachineDiscoveryScanner {
     public static final int CHUNK_RADIUS = 2, INDEX_SAMPLES_PER_TICK = 24, CHUNK_STARTS_PER_TICK = 2;
     public static final int RECHECKS_PER_TICK = 8, REGION_CELLS_PER_TICK = 96, MAX_TRACKED = 8192, MAX_REGION_RADIUS = 8;
@@ -32,7 +32,7 @@ public final class MachineDiscoveryScanner {
                          int recheckedThisTick, int regionCellsThisTick, long interruptedChunkPasses,
                          long trackingEvictions, RegionReport region) {}
 
-    /** Null reads/iterators mean unloaded or unavailable, never air. Implementations must never load chunks. */
+    /** 读取结果或迭代器为 null 表示未加载或不可用，绝不表示空气；实现不得加载区块。 */
     public interface WorldView {
         Object worldIdentity();
         Object playerIdentity();
@@ -40,14 +40,14 @@ public final class MachineDiscoveryScanner {
         String dimension();
         long gameTick();
         BlockPos playerPosition();
-        /** Detached immutable positions: this iterator can be retained across ticks, unlike a live native index. */
+        /** 已分离的不可变坐标，可跨 tick 保留；不同于实时原生索引。 */
         Iterator<BlockPos> loadedBlockEntities(int chunkX, int chunkZ);
         BlockSample readLoaded(BlockPos position);
     }
     public interface Sink {
         default void sessionChanged(Session session) {}
         void observed(MachineDiscoveryCandidate candidate);
-        /** Called only when a loaded, changed block proves the former candidate is no longer present. */
+        /** 只有已加载方块发生变化，证明旧候选已不存在时才调用。 */
         void removed(String dimension, BlockPos position, String observedBlockId, long gameTick);
         default void regionFinished(RegionReport report) {}
     }
@@ -69,7 +69,7 @@ public final class MachineDiscoveryScanner {
     MachineDiscoveryScanner(LongSupplier nanoTime) { this.nanoTime = Objects.requireNonNull(nanoTime); }
     public Status status() { return status; }
 
-    /** Optional detail scan; it is still incremental and never navigates toward missing terrain. */
+    /** 可选的细节扫描；仍采用增量方式，绝不导航前往缺失地形。 */
     public UUID requestRegion(BlockPos center, int radius) {
         if (session == null) throw new IllegalStateException("machine_discovery_session_missing");
         if (region != null) throw new IllegalStateException("machine_discovery_region_pending");
@@ -103,7 +103,7 @@ public final class MachineDiscoveryScanner {
                 if (!activeEntries.hasNext()) { activeEntries = null; continue; }
                 pos = activeEntries.next().immutable();
             } catch (ConcurrentModificationException changed) {
-                // Move to the next chunk, then revisit this one on the next rotation. No absence is inferred.
+                // 转到下一个区块，并在下一轮旋转时重新访问此区块；不会据此推断目标不存在。
                 activeEntries = null; interrupted++; continue;
             }
             indexed++; inspect(view, sink, pos, "loaded_client_block_entity_index");
@@ -146,7 +146,7 @@ public final class MachineDiscoveryScanner {
         var hint = MachineDiscoveryHints.classify(sample);
         if (hint == null) {
             var old = known.get(pos);
-            // A missing client block entity can hide its Container interface; the unchanged block is not absent.
+            // 客户端方块实体缺失可能隐藏其 Container 接口；只要方块本身未变化，就不能认为候选已消失。
             if (old != null && !old.blockId().equals(sample.blockId())) {
                 known.remove(pos); sink.removed(view.dimension(), pos, sample.blockId(), view.gameTick());
             }

@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.Locale;
 
-/** Measures a finite run of native production events; an inventory increase alone is not production. */
+/** 测量有限区间内的原生生产事件；背包数量增加本身不能证明机器进行了生产。 */
 public final class ProductionEvidenceWindow {
     public enum Provenance { NATIVE_RECIPE_OUTPUT, OBSERVED_STORAGE_DELTA }
     public enum Status { AWAITING_EVIDENCE, OBSERVING, STALLED, VERIFIED, INVALIDATED }
@@ -22,7 +22,7 @@ public final class ProductionEvidenceWindow {
         }
     }
 
-    /** Sequence belongs to one server observation stream, not the client receive time. */
+    /** 序号属于单一服务器观察流，而不是客户端接收时间。 */
     public record Event(String scope, long sequence, String producer, String resourceKey,
                         BigDecimal amount, long gameTick, Provenance provenance) {
         public Event {
@@ -51,7 +51,7 @@ public final class ProductionEvidenceWindow {
         this.requirement = Objects.requireNonNull(requirement);
     }
 
-    /** Returns false for stale, foreign or unrelated events. Only native output advances the proof. */
+    /** 过期、外来或不相关事件返回 false；只有原生产物能推进生产证明。 */
     public boolean accept(Event event) {
         if (invalidation != null || !scope.equals(event.scope()) || event.sequence() <= lastSequence) return false;
         if (event.gameTick() < latestEventTick) {
@@ -64,7 +64,7 @@ public final class ProductionEvidenceWindow {
             observedGrowth = observedGrowth.add(event.amount());
             return false;
         }
-        // A long interruption starts a new continuous run, retaining the actual total already made.
+        // 长时间中断会开始新的连续运行区间，同时保留此前实际产出的总量。
         if (lastRunTick >= 0 && event.gameTick() - lastRunTick > requirement.maxIdleTicks()) {
             interruptedRuns++; firstRunTick = -1; runEvents = 0; runOutput = BigDecimal.ZERO;
         }
@@ -76,7 +76,7 @@ public final class ProductionEvidenceWindow {
         return true;
     }
 
-    /** A changed machine identity or incomplete native event history must not silently preserve a proof. */
+    /** 机器身份发生变化或原生事件历史不完整时，不能静默保留已有证明。 */
     public void invalidate(String reason) {
         if (invalidation == null) invalidation = Objects.requireNonNull(reason);
     }
@@ -90,7 +90,7 @@ public final class ProductionEvidenceWindow {
         return Status.OBSERVING;
     }
 
-    /** A finite observed run remains evidence after a bounded batch finishes; current idleness is reported separately. */
+    /** 有界批次完成后，有限观察到的生产运行仍是有效证据；当前是否空闲应单独报告。 */
     public boolean hasVerifiedRun() { return invalidation == null && verifiedRun != null; }
 
     private boolean qualifies() {
