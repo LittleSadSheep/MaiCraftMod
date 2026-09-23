@@ -63,7 +63,7 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
  */
 public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTaskRecord> {
 
-    private static final int MAX_ORES = 64;            // cap on tracked target locations
+    private static final int MAX_ORES = 64;            // 限制同时跟踪的目标位置数量，避免一次查询缓存过多矿点。
     /** 目标查询的最大 chebyshev 区块环半径。 */
     private static final int QUERY_MAX_CHUNK_RADIUS = 32;
     /** 名单低于此数触发补货查询——索引由方块变更钩子实时维护,自己挖掉的目标即时出账,
@@ -78,14 +78,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final int QUERY_BUILD_BUDGET = 48;
     private static final double REACH_SQR = 4.5 * 4.5;
     private static final double MINE_SPEED = 1.0;
-    /** Give up branch-mining after this many ticks with no ore found (~30 s). */
+    /** 连续约 30 秒没有发现矿物后，停止分支挖掘并结束本轮寻找。 */
     private static final int MAX_BRANCH_TICKS = 600;
     /**
-     * Whether to keep hunting when no target is known. OFF (the default): "no ore
-     * known" ends the task with whatever was gathered — the body does NOT wander
-     * off across the world looking for more, which is the safer contract for a
-     * companion the player expects to stay nearby. Flip this to enable the opt-in
-     * explore mode (the bounded branch-mine below). */
+     * 未发现目标时是否继续寻找。默认关闭：查不到矿物就返回已采集结果，不让角色
+     * 为了找矿独自走遍世界，保证同伴仍停留在玩家附近；开启后才进入下方有界的
+     * 探索模式，向外分支挖掘。
+     */
     // 目前关闭盲目向外挖隧道找矿。附近已加载区域查完仍没目标，就报告没有合适来源。
     private static final boolean EXPLORE_FOR_BLOCKS = false;
     /** 同一格连续这么多刻拉不出射线,就记进 {@link #unworkable} —— 够到测试说它能挖,
@@ -100,17 +99,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      */
     private static final int STALL_TICKS = 400;
 
-    /** Renewed only by a confirmed target break or meaningful body displacement. */
+    /** 只有目标方块确认挖掉或角色确实移动后才续期，避免原地等待被误判为有进展。 */
     private static final int PROGRESS_LEASE_TICKS = STALL_TICKS + 40;
 
     /** 挪出这么远就算"她在动",进度计时重新起算。 */
     private static final double STALL_MOVE = 2.0;
 
-    /** Keep a freshly broken target cell as the exclusive pickup goal while its
-     *  server-spawned item synchronizes to the first-person client. */
+    /** 方块刚挖掉后暂时只前往该格拾取，等待服务器生成的掉落物同步到第一人称客户端。 */
     private static final int DROP_LOITER_TICKS = 12;
-    /** Once the body occupies an eligible loose item's cell and its pickup delay
-     *  has elapsed, this is ample time for the authoritative inventory update. */
+    /** 角色到达可拾取物品所在格且拾取延迟结束后，留出足够时间等待权威背包更新。 */
     private static final int DROP_CLOSE_WAIT_TICKS = 20;
 
     private final List<BlockPos> knownOres = new ArrayList<>();
@@ -125,45 +122,37 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      * 被挖了),整份作废重来。
      */
     private final Set<BlockPos> unworkable = new HashSet<>();
-    /** Targets pruned because no carried tool harvests them (force=false only) — kept so the
-     *  terminal failure can name the tool problem instead of reporting an empty field. */
+    /** force=false 时记录因现有工具无法采集而剔除的目标，最终失败时才能指出工具不足，而不是误报附近无矿。 */
     private final Set<BlockPos> unharvestable = new HashSet<>();
-    /** Items that satisfy this mining request. Semantic acquire supplies the exact
-     *  family up front; raw mine learns only types actually observed after a direct break. */
+    /** 本次挖矿请求认可的掉落物：语义采集预先提供准确物品族；普通挖矿只接纳直接挖掘后实际观察到的类型。 */
     private Set<Item> dropItems = Set.of();
-    /** Semantic callers provide the exact acceptable final item family. Its task-start
-     *  baseline makes path-executor breaks and direct BlockDigger breaks share one tally. */
+    /** 语义调用方提供准确的最终物品族；以任务开始时的背包为基线，统一统计寻路挖掘和 BlockDigger 直接挖掘所得。 */
     private int progressItemBaseline;
-    /** Raw mine has no semantic output family. Snapshot every item once, then count
-     *  only positive deltas for types learned from a direct break's live result. */
+    /** 普通挖矿没有预设输出物品族：先记录全背包快照，再只统计直接挖掘的实时结果所确认物品类型的正向增量。 */
     private Map<Item, Integer> rawInventoryBaseline = Map.of();
-    /** Matching loose items to walk over, refreshed every tick. */
+    /** 每刻刷新符合请求的掉落物位置，角色随后走近并依靠原版机制拾取。 */
     private List<BlockPos> drops = List.of();
     private List<ItemEntity> liveOwnedDrops = List.of();
     private MiningBatch batch;
     private final NaturalTreeSource naturalTrees = new NaturalTreeSource();
     private final boolean naturalLogSource;
     private long pendingDropsSince = Long.MIN_VALUE;
-    /** Recently broken target cells retained as temporary walk-over members. */
+    /** 暂存刚挖掉的目标格，短时间内作为寻路拾取目标。 */
     private final Map<BlockPos, Long> anticipatedDrops = new HashMap<>();
-    /** Target cells that vanished during navigation, retained only until the
-     *  navigation's native terrain ledger confirms a corresponding break. */
+    /** 寻路途中消失的目标格；只有寻路原生地形账本确认对应破坏后才保留为有效来源。 */
     private final Map<BlockPos, Long> pendingPathBreaks = new LinkedHashMap<>();
-    /** Loose entities present before a break cannot become this task's loot merely
-     *  because they share an item id. Counts also detect a new drop merging into an old stack. */
+    /** 破坏前已存在的掉落实体不能仅因物品 ID 相同就算作本任务产物；同时记录数量以识别新掉落并入旧堆叠的情况。 */
     private final Map<Integer, Integer> preexistingDropCounts = new HashMap<>();
-    /** Only new entity identities born beside a receipt/ledger-bound break origin
-     *  may own pickup movement. */
+    /** 只有在回执或账本确认的破坏来源附近新生成的实体，才可归属本任务并驱动角色前往拾取。 */
     private final Set<Integer> attributedDropIds = new HashSet<>();
     private final Set<Integer> ambiguousMergedDropIds = new HashSet<>();
-    /** Loaded target cells watched for path-executor air transitions. */
+    /** 监视已加载目标格，捕捉寻路执行器将方块变为空气的变化。 */
     private final Set<BlockPos> watchedTargetCells = new HashSet<>();
-    /** A fully searched, unreachable loose entity must not starve every later
-     *  target. Its identity remains excluded for this finite mining task. */
+    /** 完整尝试后仍不可达的掉落物不得持续阻塞后续目标；本次有限挖矿任务会按实体身份跳过它。 */
     private final Set<Integer> unreachableDropIds = new HashSet<>();
     private int unreachableDropCount;
     private int ambiguousMergedDropCount;
-    /** Close-but-not-absorbed settle counter; reset by every verified inventory gain. */
+    /** 角色靠近但背包尚未增加时的等待计数；每次确认物品入包后清零。 */
     private int dropCloseTicks;
     private int lastVerifiedGathered;
     /** 无掉落画像(创造)下的进度计数:破坏的目标方块数——背包增量在
@@ -182,7 +171,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private long lastQueryChunk = Long.MIN_VALUE;
     private int branchTicks;
     private String progressNote = "done";
-    /** The ore currently returning {@code NO_SHOT}, and for how many consecutive ticks. */
+    /** 当前连续返回 {@code NO_SHOT} 的矿物位置及持续刻数。 */
     private BlockPos noShotPos;
     private int noShotTicks;
     /** 上一次真有进展(挖掉一格)或明显挪窝的时刻与位置 —— 卡死判定的量尺。 */
@@ -195,11 +184,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  终局判定("附近没有目标")必须等它为 true 才能下。 */
     private boolean lastQueryComplete;
 
-    // Progressive dig (blocks break tick-by-tick at legitimate player speed, not
-    // instabreak) — shared with the path executor so all breaking reads the same.
+    // 按玩家正常速度逐刻挖掘，与寻路执行器共用 BlockDigger，确保两条破坏路径读取同一进度。
     private final BlockDigger digger;
-    /** Requested target stays distinct from BlockDigger.current(), which may be
-     *  a temporary occluder selected to open the target's line of sight. */
+    /** 保留请求中的目标；BlockDigger.current() 可能暂时指向遮挡视线的方块，不能把它误当成真正矿物目标。 */
     private BlockPos activeTarget;
     private BlockPos harvestTarget;
     private BlockState harvestBefore;
@@ -217,10 +204,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     // 生存模式至少要能采出某一种请求材料；不能用错误等级的工具把矿挖没却拿不到东西。
     // 这里不保证所有目标种类都能采，后面还会逐格筛选。
     protected List<Precondition> preconditions() {
-        // Fail fast if NO requested target is harvestable with the current inventory — mining it
-        // would destroy the block for no drop. Same gate as break_block / the cost model
-        // (BlockHelper.canHarvest, whole-inventory). prune() then drops any individual unharvestable
-        // cell, so a mixed request (e.g. coal we can mine + diamond we can't) still works.
+        // 先检查当前背包是否至少有一种请求目标可采集，避免挖掉方块却没有掉落；与 break_block 和成本模型共用整包工具判定。
+        // 随后的 prune() 会单独剔除工具不够的格子，因此同一请求中可挖的煤仍能继续采集，不会被不可挖的钻石拖累。
         return List.of(() -> {
             if (WorkProfile.of(player).instaBreak()) {
                 return null;   // 瞬破画像无视工具等级,工具门不适用
@@ -241,11 +226,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     @Override
     // 记下开始时的背包数量和地上已有的物品，后面只计算本轮增加量；再向方块索引登记要找的种类。
     protected void onStart() {
-        // Semantic acquire already knows the acceptable final item family. Keep that
-        // set fixed for the whole task so every native pickup, including a target
-        // broken by path execution, contributes through one task-start baseline.
-        // Raw mine has no such fact: it starts empty and learns only an actually
-        // observed result type after its own BlockDigger breaks a target.
+        // 语义采集已经知道允许的最终物品族，整项任务都使用这份集合与启动时基线，统一统计原生拾取及寻路过程中破坏的目标。
+        // 普通挖矿没有预先的物品信息：从空集合开始，只在 BlockDigger 直接挖掉目标并观察到实际产物后学习类型。
         dropItems = r.progressItems.isEmpty()
                 ? new HashSet<>()
                 : r.progressItems;
@@ -283,16 +265,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (gathered > lastVerifiedGathered) {
             lastVerifiedGathered = gathered;
             dropCloseTicks = 0;
-            // Do not clear causal break origins merely because one inventory packet arrived.
-            // A block may materialize multiple stacks/types over adjacent client packets. The
-            // origin is retired by droppedItems() after it observes the whole loaded batch, or by
-            // its existing bounded synchronization expiry when pickup happened before rendering.
+            // 一条背包更新到达时不能立刻清掉破坏来源：方块的多组物品可能分散在相邻客户端数据包中出现。
+            // 等 droppedItems() 看完整个已加载掉落批次后再回收来源；若物品先被拾取、实体尚未渲染，则由原有同步期限收尾。
             noteProgress();
         }
         Level level = player.level();
 
-        // Settle a confirmed break before changing jobs, so its new entity keeps the causal
-        // origin even when another batch's drop is already ready for collection.
+        // 切换任务前先结算已确认的破坏，使新掉落实体保留正确来源，即使另一批掉落物此时已经可以收集。
         BlockPos effective = digger.current();
         if (activeTarget != null && effective != null && level.getBlockState(effective).isAir()) {
             acceptDigResult(activeTarget, digger.settleGone(effective.equals(activeTarget)));
@@ -327,9 +306,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
             return collectDrops();
         }
-        // Reaching the requested inventory count does not abandon another physical result from
-        // this task. Keep the child alive through pending origin synchronization and every loaded,
-        // attributable matching drop before success is returned.
+        // 达到背包数量后仍要处理本任务造成的其他实物掉落；等待来源同步，并收齐所有已加载且可归属的匹配掉落物后才报告成功。
         // 本任务还要求处理留下的相关掉落物：数量够了，仍会因走不到或与旧物品合堆而失败。
         // 上层取物任务如何看待这种失败另有规则，不由这一段决定。
         if (gathered >= r.count) {
@@ -347,9 +324,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.FAILED;
         }
 
-        // 0) Continue one requested target until it breaks or becomes unworkable.
-        // BlockDigger.current() is the effective cell and may temporarily be an
-        // occluder, so never replace the semantic target with that implementation detail.
+        // 0) 持续处理已选目标，直到挖掉或确认不可处理。BlockDigger.current() 可能暂时指向遮挡方块，不能覆盖语义目标。
         // 已经选中的这一格尽量接着挖。先让寻路结束必须连贯完成的跳跃／挖掘，避免两边同时控制玩家。
         if (activeTarget != null) {
             if (nav != null && !nav.yieldForExternalAction()) {
@@ -371,13 +346,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.RUNNING;
         }
 
-        // 1) Mine any target we can already reach + see from here (no pathing) —
-        //    a tree gets mined from beside, never by digging under it.
+        // 1) 先原地挖掘当前可达且视线畅通的目标，无需寻路；例如从树旁砍树，不从树下挖掘。
         BlockPos reachable = reachableTarget();
         if (reachable != null) {
-            // Preserve the warm route, but explicitly hand off every native/menu receipt before
-            // the independent BlockDigger takes the same serialized actor slot.  A plain pause
-            // clears only locomotion and can leave the route's final BREAK_BLOCK receipt pending.
+            // 保留已热启动的路线，但先交接所有原生操作和菜单回执，再让独立的 BlockDigger 占用同一串行角色操作槽。
+            // 单纯暂停只会停止移动，路线最后一次 BREAK_BLOCK 仍可能有待确认回执。
             if (nav != null && !nav.yieldForExternalAction()) {
                 return TaskState.RUNNING;
             }
@@ -387,9 +360,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.RUNNING;
         }
 
-        // 2) Head for the ore field. Navigation may break target cells while executing
-        //    a safe terrain-modifying movement; any resulting matching entity is found
-        //    next tick and takes the exclusive pickup branch above.
+        // 2) 前往矿物区域。安全地形移动过程中，寻路也可能挖掉目标；下刻发现对应掉落物后，转入上方独占的拾取分支。
         // 附近没有能原地挖到的目标时，把整批候选一起交给寻路，不只盯着直线距离最近的一格。
         if (!knownOres.isEmpty()) {
             branchTicks = 0;
@@ -408,15 +379,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (nav == null || navIsBranch || navIsDrop) {
                 stopNav();
                 pathAttempt = new NoPathVerdict(player.position(), currentGoals, "");
-                // Compiled front door: one composite over every known target stance.
-                // A route may chop a target on the way past; its matching native result
-                // is detected next tick and moved into the exclusive pickup branch.
-                // Revalidating: the ore field changes every few ticks (mined cells pruned,
-                // rescans merging, unworkable cells trimming), so hand the freshly compiled goal to
-                // the engine EVERY tick — the current segment is kept unless its destination
-                // is no longer accepted by the new goal (then it soft-cancels and re-plans),
-                // and standing in a stance whose ore just got mined out resumes navigation
-                // instead of reporting a stale arrival.
+                // 将所有已知目标的可站立位置合成一个寻路目标；路线途经时也可能挖矿，下刻再识别其掉落并转入独占拾取分支。
+                // 矿区每几刻都会变化，因此每刻重编目标交给引擎；当前路线终点仍被接受时继续前进，否则软取消并重规划。
+                // 若站位对应的矿刚被挖掉，也恢复寻路，避免把过期到达状态误报为成功。
                 nav = PlayerNav.toRevalidating(player, this::oreFieldCompiled, MINE_SPEED,
                         () -> reachableTarget() != null, travelContext());
                 navIsBranch = false;
@@ -428,9 +393,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             switch (nav.tick()) {
                 case RUNNING -> { return TaskState.RUNNING; }
                 case ARRIVED -> {
-                    // Arrival normally means an in-place target just became reachable — next tick step 1
-                    // pauses the nav and digs. Only clear inputs here (pause), never tear the nav down:
-                    // teardown would throw away the goal + any in-flight search and force a cold restart.
+                    // 到达通常表示有目标刚变得可原地挖；下一刻由步骤 1 暂停寻路并开挖。此处只清输入，不能销毁寻路目标和进行中的搜索。
                     nav.pause();
                     // [ANCHOR arrived-dud] 到了站位,却什么都够不到。<b>这不构成关于任何一颗矿的
                     // 证据</b>:最常见的成因根本不是故障 —— 这一刻人在空中(reachableTarget 第一行
@@ -445,7 +408,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                                 feet().toShortString(), nearestOreInfo());
                         stopNav();
                     }
-                    return TaskState.RUNNING;   // a reachable shaft is handled next tick
+                    return TaskState.RUNNING;   // 下一刻处理已经可达的矿脉
                 }
                 case FAILED -> {
                     FailureType type = nav.failType();
@@ -467,9 +430,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
         }
 
-        // 3) No ore known and nothing dropped nearby. An incomplete index (cold area
-        //    still building under the per-query budget) means "don't know yet", not
-        //    "nothing there" — wait for full coverage before any verdict. 等扫描的刻
+        // 3) 未知矿点且附近没有掉落物时，若索引仍受单次预算限制而构建中，只能视为“尚未查明”，必须等覆盖完整再下结论。等待索引的刻数
         //    不烧任务预算:索引按真实时间分摊构建,而期限数游戏刻——tick 远快于真实
         //    时间时(/tick rate、不限速的测试服),期限会在首查返回前烧光,任务无声
         //    TIMEOUT。与 nav 规划在飞的冻结(AbstractCompanionTask)同一条保护。
@@ -478,10 +439,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return TaskState.RUNNING;
         }
-        //    Default: stop here — only the
-        //    opt-in explore mode branch-mines outward for more. So
-        //    report the verified partial inventory fact rather than running off
-        //    across the world or claiming a vanished block as gathered output.
+        // 默认在此停止；只有显式开启探索模式时才向外分支挖掘。返回已核实的部分库存，不让角色跑遍世界，也不把消失的方块冒充采集所得。
         // 当前配置会在这里结束“查完却没找到”的情况；下面保留的隧道探索分支不会执行。
         if (!EXPLORE_FOR_BLOCKS) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
@@ -494,7 +452,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return noOreFailure();
         }
 
-        // 3b) Opt-in explore — branch-mine outward (bounded) to dig fresh tunnel and expose more.
+        // 3b) 显式开启探索时，角色才会在限定时间内向外分支挖掘新隧道以寻找更多矿物。
         if (branchPoint == null) {
             branchPoint = feet();
             branchY = branchPoint.getY();
@@ -517,27 +475,26 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         switch (nav.tick()) {
             case RUNNING, ARRIVED -> { return TaskState.RUNNING; }
-            case FAILED -> { stopNav(); return TaskState.RUNNING; } // boxed in — rescan/retry
+            case FAILED -> { stopNav(); return TaskState.RUNNING; } // 被地形困住时停止寻路，重新扫描后再试
         }
         return TaskState.RUNNING;
     }
 
     // ---- goals ----
 
-    /** The ore-only objective. Loose results are deliberately excluded: once an
-     *  item exists, {@link #collectDrops()} owns movement until that result settles. */
+    /** 只包含矿物目标；掉落实体不混入此目标，一旦生成便由 {@link #collectDrops()} 独占移动，直到结算完成。 */
     // 有掉落物等待收集时，尽量只继续当前小批目标；没有候选时用原地站立目标结束本次寻路。
     private GoalCompiler.Compiled oreFieldCompiled() {
         List<BlockPos> targets = knownOres.stream().filter(this::inCurrentWorkBatch).toList();
         if (targets.isEmpty()) {
-            // Degenerate frame (targets vanished between ticks): stand where we are.
+            // 两刻之间所有目标都消失时，以当前位置作为退化目标，避免产生无效寻路。
             return GoalCompiler.standOn(feet());
         }
         return GoalCompiler.mineField(
                 targets, List.of());
     }
 
-    /** Exact walk-over cells for loose items only. */
+    /** 仅为地面掉落物生成可直接走过拾取的精确目标格。 */
     private GoalCompiler.Compiled dropFieldCompiled() {
         if (drops.isEmpty()) return GoalCompiler.standOn(feet());
         return GoalCompiler.mineField(List.of(), new ArrayList<>(drops));
@@ -550,14 +507,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
 
     /**
-     * Is {@code pos} also part of what we're mining — a known target, a filter
-     * match, or already-broken air continuing the shaft? Used by {@link #coalesce}
-     * to read the vertical run a block sits in.
+     * {@code pos} 是否属于当前挖掘范围：已知目标、筛选器匹配项，或竖井延续处已经挖空的格子？{@link #coalesce} 用此判断读取方块所在的竖向连续段。
      */
     private boolean internalMiningGoal(CalculationContext ctx, BlockPos pos) {
         if (knownOres.contains(pos)) return true;
         BlockState state = player.level().getBlockState(pos);
-        if (state.isAir()) return true;                         // broken-out air still continues the run
+        if (state.isAir()) return true;                         // 刚挖通的空气格仍视为同一竖向树干延伸。
         return r.targets.contains(state.getBlock()) && plausibleToBreak(ctx, pos, state);
     }
 
@@ -579,10 +534,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                         == Blocks.BEDROCK);
     }
 
-    /** Matching loose items worth walking over for native pickup. A freshly
-     *  broken target cell remains a temporary member while the server creates its
-     *  item entity. Raw mine learns result types only from an item or inventory
-     *  increase observed during one of those direct-break windows. */
+    /** 返回值得角色走近并由原版拾取的匹配掉落物。方块刚挖掉时暂留目标格，等待服务器生成物品实体；
+     *  普通挖矿只在这些直接破坏窗口中观察到实体或背包增加后，才学习实际掉落类型。 */
     // 只在已加载的附近区域找物品。先前已存在的实体不直接认作本轮产物，
     // 新出现且靠近确认挖掘点的物品才尝试归入本轮；这是一组观察规则，不是服务器给出的来源证明。
     private List<BlockPos> droppedItems() {
@@ -617,9 +570,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             Integer oldCount = preexistingDropCounts.get(id);
             if (nearConfirmedOrigin) {
                 if (oldCount == null) {
-                    // Ordinary block loot has no thrower. A resolved owner proves this is a
-                    // player/entity-thrown stack that merely entered the break window, so it
-                    // cannot be claimed as this mining task's result.
+                    // 普通方块掉落没有投掷者；若能解析出所属者，说明这是玩家或实体扔出的物品，只是恰好进入破坏窗口，不能算作本任务产物。
                     if (entity.getOwner() != null) {
                         preexistingDropCounts.put(id, entity.getItem().getCount());
                         continue;
@@ -633,17 +584,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     }
                 // 新掉落合进原来就在地上的那一堆时，无法只捡其中属于本轮的部分，所以记录合堆问题并留下。
                 } else if (entity.getItem().getCount() > oldCount) {
-                    // A new block drop merged into a stack that predates this task. Walking
-                    // over it would also take the old/player-owned portion, so do not collect.
+                    // 新方块掉落并入任务开始前就存在的堆叠；走过去会连旧物品或玩家物品一并拾走，因此不能收取。
                     if (ambiguousMergedDropIds.add(id)) ambiguousMergedDropCount++;
                     preexistingDropCounts.put(id, entity.getItem().getCount());
                     collectNearbyOrigins(p, materializedOrigins);
                 }
             }
 
-            // While a path break is awaiting its native ledger, leave nearby new ids
-            // unclassified. Once confirmed they become attributed; if confirmation
-            // never arrives, the bounded pending origin expires and they become baseline.
+            // 等待寻路原生账本确认期间，不急着分类附近的新实体；确认后归入本任务，若始终未确认，则由有限期来源记录到期后纳入旧物基线。
             if (!nearPendingPathOrigin) {
                 preexistingDropCounts.put(id, entity.getItem().getCount());
             }
@@ -654,21 +602,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 && attributedDropIds.contains(entity.getId()) && !unreachableDropIds.contains(entity.getId())
                 && dropItems.contains(entity.getItem().getItem())).toList();
         for (BlockPos p : anticipatedDrops.keySet()) {
-            // A materialized live entity owns movement, but its break origin remains an open
-            // attribution window until the existing synchronization expiry. Different output
-            // stacks can arrive on adjacent client packets; retiring the origin on the first one
-            // made the later stack look pre-existing. When no live entity represents the origin,
-            // keep the origin as a short-lived wait goal so the task does not start another break.
+            // 实体生成后由它驱动移动，但破坏来源仍保留到同步期限，因为不同产物可能分布在相邻客户端数据包中。
+            // 若第一个实体出现时就回收来源，后续堆叠会被误认为旧物；来源暂时没有对应实体时，则短暂等待，避免开始下一次破坏。
             if (!materializedOrigins.contains(p)) out.add(p);
         }
         return new ArrayList<>(out);
     }
 
     /**
-     * Walk over matching loose results before selecting another block. Arrival alone
-     * is not success: the enclosing task still reads its final count exclusively from
-     * the synchronized main inventory. A truly unreachable entity is skipped by id so
-     * another source can satisfy the request instead of being starved forever.
+     * 选择下一个方块前，先走近匹配的掉落物并等待拾取。到达本身不代表成功，最终数量仍只读已同步的主背包。
+     * 确认某实体无法抵达后按 ID 跳过，让其他来源继续满足请求，避免整项任务一直被它阻塞。
      */
     // 先让不能中断的导航动作结束，再靠近物品等待原版自然拾取；这里不直接把物品塞进背包。
     private TaskState collectDrops() {
@@ -679,8 +622,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         ItemEntity close = nearestLiveDrop();
         if (close == null && !anticipatedDrops.isEmpty()) {
-            // The existing attribution window is only 12 ticks. Let the server materialize or
-            // naturally absorb the drop instead of planning a walk into the freshly broken cell.
+            // 来源归属窗口只有 12 刻；等待服务器生成掉落实体或自然拾取，不要规划路线走进刚挖空的格子。
             if (nav != null) nav.pause();
             else InputDriver.halt(player);
             return TaskState.RUNNING;
@@ -701,8 +643,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 return TaskState.FAILED;
             }
             if (dropCloseTicks < DROP_CLOSE_WAIT_TICKS) return TaskState.RUNNING;
-            // Natural pickup did not arrive within one synchronization window. Try the ordinary
-            // exact approach below for one more bounded window before reporting its failure.
+            // 一个同步窗口内没有自然拾取时，再按下方的精确靠近方式等待一个有限窗口，然后才报告失败。
         } else {
             dropCloseTicks = 0;
         }
@@ -738,8 +679,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     progressNote = "left " + unreachableDropCount
                             + " mined drop(s) unreachable and continued with another source";
                 }
-                // If only an anticipated cell exists, there is no entity to condemn:
-                // release this route and let the bounded synchronization window expire.
+                // 若只有预期来源格、还没有对应实体，就不能把掉落判为不可达；释放当前路线并等待有限同步窗口到期。
                 stopNav();
                 yield TaskState.RUNNING;
             }
@@ -794,8 +734,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 || reachableTarget() != null;
     }
 
-    /** A direct block drop spawns at its broken cell and may drift a little before
-     *  the client observes it. This is only a raw-mine type-discovery fallback. */
+    /** 直接破坏方块的掉落物在原格生成，客户端观察到之前可能略有漂移；仅作为普通挖矿发现物品类型的备用依据。 */
     private boolean nearAnticipatedDrop(BlockPos p) {
         return anticipatedDrops.keySet().stream()
                 .anyMatch(origin -> origin.distSqr(p) <= 9);
@@ -819,9 +758,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
     }
 
-    /** Bind target air transitions to confirmed native breaks made by the active
-     *  path executor. A vanished target without a corresponding ledger increment
-     *  expires as unowned evidence and never authorizes pickup. */
+    /** 将目标格变为空气的变化与当前寻路执行器确认的原生破坏记录绑定；没有对应账本增量的消失目标会作为未归属证据过期，不能授权拾取。 */
     // 寻路也可能顺路挖掉目标矿。先记录看到它变成空气，再核对导航的挖掘记录，才认作待收产物来源。
     private void observeNavigationBreakOrigins() {
         long now = player.level().getGameTime();
@@ -846,21 +783,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     /**
-     * Pre-filter for the in-place pick, squared: candidates farther than this from the feet can't be
-     * within block reach of the eyes (4.5 eye reach + 1.62 eye height + aim-point slack), so they are
-     * skipped without spending rays. {@link #knownOres} is kept sorted nearest-first by {@link #prune},
-     * so iteration simply stops at the first candidate beyond the filter.
+     * 原地挖掘候选的平方距离预筛选：离脚位更远的方块不可能进入眼部交互范围，因此不再耗费射线检测。
+     * {@link #knownOres} 已由 {@link #prune} 按距离从近到远排序，遇到第一个超出范围的候选后即可结束遍历。
      */
     private static final double IN_PLACE_FILTER_SQR = 7.0 * 7.0;
 
     /**
-     * The in-place mining pick: the nearest known target the eyes can ACTUALLY hit from where the body
-     * stands right now ({@link #reachable}: centre + exposed face points, within block reach, nothing
-     * solid in the way) — mined on the spot, no pathing. Column and height don't matter; hittability
-     * does. The support cell directly under the body is also eligible when the cell below it is a
-     * loaded, dry, standable floor: breaking it is then the same safe one-block descent used by the
-     * movement graph. If the landing floor is liquid, empty, unloaded, or otherwise unwalkable, the
-     * support target stays with navigation/side mining instead.
+     * 原地挖掘选择器：从当前眼位寻找最近且确实可击中的已知目标（{@link #reachable} 检查方块中心和暴露面、交互距离及遮挡），找到后直接挖，不走寻路。
+     * 是否同列或同高不重要，能否实际命中才重要。脚下支撑格仅在下一格已加载、干燥且可站立时允许挖除，
+     * 这与移动图认可的安全下降一格一致；若落点是液体、空处、未加载或不可行走，则交由寻路或侧向开挖处理。
      */
     // 当前只在玩家落地时开始原地挖；按距离挑能从眼睛看到的候选。
     // 脚下支撑块只有挖掉后下一层能站稳才允许挖，避免直落深坑。
@@ -874,7 +805,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         for (BlockPos ore : knownOres) {
             if (!inCurrentWorkBatch(ore)) continue;
             if (ore.distSqr(feet) > IN_PLACE_FILTER_SQR) {
-                break;   // sorted nearest-first — everything after this is farther still
+                break;   // 候选已按距离从近到远排序，后续位置只会更远。
             }
             if ((ore.equals(support) && !safeSupportDescent(level, support))
                     || level.getBlockState(ore).isAir()) {
@@ -890,7 +821,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return best;
     }
 
-    /** Live-world counterpart of {@code MovementDownward}'s landing-floor guard. */
+    /** 在当前世界状态下复用 {@code MovementDownward} 的落地面安全判定。 */
     private static boolean safeSupportDescent(Level level, BlockPos support) {
         BlockPos landingFloor = support.below();
         if (!level.isLoaded(landingFloor)) return false;
@@ -899,9 +830,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 && MovementHelper.canWalkOn(level, landingFloor);
     }
 
-    /** Face points of a block (each face centre, from its collision shape), tried when the block's own
-     *  centre is occluded — so a block whose centre is blocked but whose face is exposed still counts,
-     *  the way a real click can catch it at an angle. */
+    /** 方块碰撞形状各面的中心点；方块中心被遮挡时继续尝试暴露面，使角色能像玩家斜向点击一样命中侧面。 */
     private static final Vec3[] BLOCK_FACE_POINTS = {
             new Vec3(0.5, 0, 0.5), new Vec3(0.5, 1, 0.5),
             new Vec3(0.5, 0.5, 0), new Vec3(0.5, 0.5, 1),
@@ -909,11 +838,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     };
 
     /**
-     * Can the body reach {@code target} to break it from where it stands right now — an eye-line to the
-     * block (its centre first, then each exposed face point) within block-interaction range
-     * ({@link #REACH_SQR}) that nothing solid obstructs but the target itself. Reach is measured from the
-     * EYE, so an upward target is reachable as high as a standing body's eyes allow — not merely what its
-     * feet are next to — and a face-occluded block is still reachable via an exposed side.
+     * 角色能否站在当前位置通过视线挖掉 {@code target}：先测方块中心，再测暴露面，并要求在 {@link #REACH_SQR} 交互范围内且中途没有其他实心方块遮挡。
+     * 距离从眼部计算，所以站立角色能挖到眼高允许的上方目标；若中心被遮挡，也可从暴露侧面命中。
      */
     // 试中心和形状六个面的点，不只看整格中心；薄方块或旁边有遮挡时，侧面可能仍够得着。
     private boolean reachable(BlockPos target) {
@@ -937,26 +863,22 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return false;
     }
 
-    /** Is {@code point} within reach of {@code eyes}, and does an eye→point ray hit {@code target} first
-     *  (nothing solid in the way)? */
+    /** {@code point} 是否在 {@code eyes} 的交互范围内，并且从眼部发出的射线首先命中 {@code target}？ */
     private boolean reachableAt(Vec3 eyes, BlockPos target, Vec3 point) {
         if (eyes.distanceToSqr(point) > REACH_SQR) {
             return false;
         }
-        // OUTLINE (the selection shape), matching how a real click picks a block and what BlockDigger's
-        // own reach ray uses — so this gate and the actual dig never disagree about whether a block is
-        // hittable (a COLLIDER gate could green-light an ore the digger then can't draw a shot at).
+        // 使用 OUTLINE 选择形状，与玩家点击和 BlockDigger 的射线规则一致，避免判定允许挖掘、实际瞄准却无法命中的矛盾。
         BlockHitResult hit = player.level().clip(new ClipContext(
                 eyes, point, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target);
     }
 
-    // ---- mining (progressive, tick-by-tick like a real player) ----
+    // ---- 按玩家正常速度逐刻推进的挖掘 ----
 
-    /** Advance the shared dig one tick (it switches to the best tool itself); on the tick the TARGET
-     *  breaks, drop it from the ore list. A {@link BlockDigger.DigResult#BROKE_OCCLUDER} (a leaf cleared
-     *  to open the line of sight) is NOT the target, so the ore stays. Progress is read from the task's
-     *  inventory baseline, because one block can yield several items and pickup happens later.
+    /** 每刻推进共享挖掘器（它会自行切换到最佳工具）；目标真正破坏时才从矿物名单移除。
+     *  {@link BlockDigger.DigResult#BROKE_OCCLUDER} 只表示清掉叶子以打开视线，不是目标已挖掉。进度以任务开始时的背包为基线，
+     *  因为一个方块可能产生多件物品，而且拾取会稍后发生。
      *
      *  <p>Recovery: 连续的 {@code NO_SHOT}(够到测试过了,可挖掘始终成不了射线)记数,满
      *  {@link #MAX_NO_SHOT_TICKS} 就把<b>那一格</b>记进 {@link #unworkable} 继续往下走,
@@ -1021,7 +943,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     if (++noShotTicks >= MAX_NO_SHOT_TICKS) {
                         unworkable.add(target.immutable());
                         knownOres.remove(target);
-                        digger.cancel();   // release the in-progress-dig latch on this ore
+                        digger.cancel();   // 释放此矿物上进行中的挖掘锁存状态。
                         activeTarget = null;
                         clearNoShot();
                     }
@@ -1047,14 +969,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private Map<Item, Integer> inventoryCounts() {
         Map<Item, Integer> counts = new HashMap<>();
         Inventory inv = player.getInventory();
-        // Main inventory only; armor/offhand are not mining output.
+        // 只统计主背包；盔甲栏和副手不属于挖矿产物。
         for (ItemStack stack : inv.items) {
             if (!stack.isEmpty()) counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
         return counts;
     }
 
-    /** Aggregate the exact acceptable products supplied by the semantic planner. */
+    /** 汇总语义规划器明确提供的可接受产物数量。 */
     private int progressItemCount() {
         if (r.progressItems.isEmpty()) return 0;
         int total = 0;
@@ -1066,8 +988,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return total;
     }
 
-    /** Learn an immediately picked-up raw result without guessing a block-to-item
-     *  mapping. This fallback is active only while a direct break window is live. */
+    /** 不猜测方块到物品的对应关系，只在直接破坏窗口仍有效时，通过刚被拾取的普通挖矿结果学习掉落类型。 */
     // 内部通用 mine 没指定期望产物时，目前把背包里任何增加的物品种类都学成产物。
     // 因此旁人扔来的无关物品也可能被算入这一轮；指定了 progressItems 的取物任务不走此分支。
     private void learnRawInventoryResults() {
@@ -1078,8 +999,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
     }
 
-    /** Positive task-start inventory deltas for raw result types that have actually
-     *  been observed after a direct target break. */
+    /** 对直接挖掉目标后实际观察到的普通产物类型，统计相对于任务开始时的正向背包增量。 */
     // 把已学到的每种物品与开始时相比，分别取增加量再相加；减少某种物品不会抵扣其他种类的增加。
     private int rawItemProgress() {
         Map<Item, Integer> current = inventoryCounts();
@@ -1131,12 +1051,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         lastQueryComplete &= !naturalTrees.budgetDeferred && rejectedBefore == naturalTrees.rejected.size();
     }
 
-    /** Add fresh, still-workable hits to knownOres, then prune (which re-validates
-     *  every entry against the live world and keeps the nearest {@link #MAX_ORES}). */
+    /** 将新发现且仍可处理的命中位置并入 knownOres，再由 prune 对照实时世界复核并保留最近的 {@link #MAX_ORES} 个目标。 */
     private void mergeHits(List<BlockPos> hits) {
-        // One-off Set view for dedup: knownOres stays a distance-ordered list (prune sorts it),
-        // but membership checks against it must not be linear scans — a big batch times a
-        // linear contains is O(N^2) on the server thread.
+        // 临时用 Set 去重：knownOres 仍由 prune 按距离排序保存为列表；避免在服务器线程上对大批候选反复线性 contains，造成 O(N²) 检查。
         Set<BlockPos> seen = new HashSet<>(knownOres);
         for (BlockPos hit : hits) {
             BlockPos p = hit.immutable();
@@ -1162,10 +1079,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     || !plausibleToBreak(ctx, p, state)) {
                 return true;
             }
-            // Harvestability gate. Tool-skipped cells are remembered so the terminal failure
-            // can say "you need a better tool" instead of the misleading "nothing found" (the
-            // tool situation can also CHANGE mid-task: the only good pick breaking makes this
-            // fire on re-prune).
+            // 复核当前工具是否能采集；记住因工具不足而跳过的格子，最终才能报告“需要更好的工具”，而不是误报“什么也没找到”。
+            // 工具情况可能在任务中变化，例如唯一的优质镐损坏；每次重新剪枝都会重新检查。
             if (!WorkProfile.of(player).instaBreak()
                     && !BlockHelper.canHarvest(player.getInventory(), state)) {
                 unharvestable.add(p.immutable());
@@ -1179,15 +1094,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
     }
 
-    /** Nearest known ore to the feet, or null — for the "near ore exists but heading far" diagnostics. */
+    /** 返回离脚位最近的已知矿物；没有矿物时返回 null，供“附近有矿却越走越远”诊断使用。 */
     private BlockPos nearestOre() {
         BlockPos feet = feet();
         return knownOres.stream().min(Comparator.comparingDouble(feet::distSqr)).orElse(null);
     }
 
-    /** Log-friendly nearest-ore descriptor (ASCII so it survives any log encoding):
-     *  "316,64,391 minecraft:oak_log dy=+0 dist=1.0" or "none". dy = ore.y - feet.y (spot "it's 4 up,
-     *  needs pillaring" vs "same level"); the block id spots a mis-handled type (vine/leaves/etc.). */
+    /** 最近矿物的日志描述使用 ASCII，避免编码问题，例如 "316,64,391 minecraft:oak_log dy=+0 dist=1.0" 或 "none"。
+     *  dy 是矿物高度减脚位高度，可区分“高四格，需要垫高”和“同高”；方块 ID 用于发现误处理的藤蔓、树叶等类型。 */
     private String nearestOreInfo() {
         BlockPos n = nearestOre();
         if (n == null) {
@@ -1231,11 +1145,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             lastProgressTick++;
             return null;
         }
-        // A partial TargetIndex result is not a finished search space.  Building the index is
-        // deliberately split across bounded batches, so a large/just-loaded area may need more
-        // than STALL_TICKS even though every query is advancing that finite scan.  Do not turn
-        // that per-batch budget into an accidental wall-clock cap on the semantic mine task.
-        // Once coverage is complete, the ordinary no-movement/no-break lease below applies.
+        // TargetIndex 只返回部分结果时，搜索空间尚未完成；索引分成有界批次构建，大型或刚加载区域可能超过 STALL_TICKS 才扫完。
+        // 只要扫描仍在推进就不应误用单批预算作为整个语义挖矿任务的硬期限；覆盖完整后再按下方无移动、无破坏的期限判定卡住。
         if (!lastQueryComplete) {
             lastProgressTick = now;
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
@@ -1259,16 +1170,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.FAILED;
     }
 
-    /** Terminal "nothing gathered, no ore left to go for" failure, distinguishing a
-     *  genuinely empty field ({@code MINED_OUT} — widening the search or stopping is the
-     *  LLM's call) from a field that WAS found but every target turned out unworkable
-     *  ({@code NO_PATH} — 没有任何站位能对它拉出射线), with the counts.
-     *  「走不到」那一档不在这里 —— 它由 {@link #stalledOut} 收工。 */
+    /** 没有采集结果且不再有目标时返回终态，并附上数量：真正的空矿区用 {@code MINED_OUT}，由大模型决定扩大搜索或停止；
+     *  找到目标但每一格都不可处理时用 {@code NO_PATH}，表示没有任何站位能对目标拉出射线。
+     *  单纯“走不到”不在此判定，由 {@link #stalledOut} 负责结束任务。 */
     // 分别说明缺正确工具、发现目标但没法挖到、或确实没找到来源，避免所有情况都说“矿没了”。
     private TaskState noOreFailure() {
         if (!unharvestable.isEmpty()) {
-            // Targets exist but the carried tools can't make them drop — the actionable
-            // problem is the tool, not the deposit. Names the escape hatches explicitly.
+            // 目标确实存在，但手持工具无法让它们掉落；应报告工具不足而不是矿床耗尽，并明确给出更换工具或强制破坏的处理方式。
             fail("found " + unharvestable.size() + " " + r.label + " but none can be harvested with"
                     + " the current tools (mining would destroy them without any drop); gathered "
                     + r.getMined() + ". Equip a better tool (equip_item) and retry; to just destroy"
@@ -1314,9 +1222,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 || ambiguousMergedDropCount > 0) {
             return true;
         }
-        // A terrain movement can break and immediately pick up the requested block between two
-        // parent ticks. Its execution ledger is the authoritative committed-effect receipt even
-        // before observeNavigationBreakOrigins() has promoted the cell into anticipatedDrops.
+        // 两次父任务 tick 之间，地形移动可能挖掉目标并立刻拾取；即使 observeNavigationBreakOrigins() 尚未把方块加入 anticipatedDrops，
+        // 寻路执行账本也已经是确认该效果的权威回执。
         if (nav != null) {
             for (BlockPos target : watchedTargetCells) {
                 if (player.level().isLoaded(target)
@@ -1329,12 +1236,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return false;
     }
 
-    /** Use the same authoritative feet cell as path planning/execution. */
+    /** 与寻路规划和执行共用权威脚位，避免各自计算出的站立格不同。 */
     private BlockPos feet() {
         return PlayerNav.playerFeet(player);
     }
 
-    /** Stop the nav AND clear the branch-mode flag (extends the base's nav release). */
+    /** 停止寻路并清除分支模式标记，补足父类的寻路释放操作。 */
     @Override
     protected void stopNav() {
         super.stopNav();
@@ -1345,9 +1252,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     @Override
     // 结束时停止移动和挖掘，撤销对方块索引的订阅，避免任务没了还继续扫描或保留挖掘等待。
     protected void cleanup() {
-        // super.cleanup() = stopNav() (nav.stop clears the overlay when a nav exists) + an explicit
-        // so a task that finished while shaft-mining (nav == null) still
-        // clears its lingering goal boxes. Then release the dig + the index registration.
+        // 父类 cleanup() 会调用 stopNav()，但只有存在寻路时才清除目标覆盖层；此处再显式停止输入，确保竖井挖掘期间结束的任务也能清掉残留目标框。
+        // 随后释放挖掘器并注销目标索引，避免任务结束后继续控制角色或扫描方块。
         InputDriver.halt(player);
         super.cleanup();
         digger.cancel();
