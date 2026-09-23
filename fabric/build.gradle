@@ -8,7 +8,7 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
-    // Loader compilation includes common sources directly, so keep this on Fabric's classpath too.
+    // 加载器会直接编译公共源码，因此也要把该依赖保留在 Fabric 类路径中。
     compileOnly "com.google.code.findbugs:jsr305:3.0.2"
 }
 

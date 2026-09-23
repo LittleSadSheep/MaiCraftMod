@@ -46,8 +46,8 @@ repositories {
     }
 }
 
-// Declare capabilities on the outgoing configurations.
-// Read more about capabilities here: https://docs.gradle.org/current/userguide/component_capabilities.html#sec:declaring-additional-capabilities-for-a-local-component
+// 在输出配置上声明 capabilities。
+// 相关说明见 https://docs.gradle.org/current/userguide/component_capabilities.html#sec:declaring-additional-capabilities-for-a-local-component。
 // 声明产物可被依赖方识别的坐标。按当前 archivesName 公式，前两个 capability 名字相同。
 ['apiElements', 'runtimeElements', 'sourcesElements'].each { variant ->
     configurations."$variant".outgoing {

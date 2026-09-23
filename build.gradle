@@ -1,8 +1,8 @@
 // 在根项目声明两种加载器插件的版本，具体模块再启用；这里的 apply false 不会直接把插件应用到根项目。
 plugins {
-    // see https://fabricmc.net/develop/ for new versions
+    // 新版本信息见 https://fabricmc.net/develop/。
     id 'fabric-loom' version '1.8-SNAPSHOT' apply false
-    // see https://projects.neoforged.net/neoforged/moddevgradle for new versions
+    // 新版本信息见 https://projects.neoforged.net/neoforged/moddevgradle。
     id 'net.neoforged.moddev' version '2.0.141' apply false
 }
 

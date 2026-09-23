@@ -6,7 +6,7 @@ plugins {
 // 选择 NeoForge 版本与映射，并配置开发运行入口；可选访问转换文件来自公共模块。
 neoForge {
     version = neoforge_version
-    // Automatically enable neoforge AccessTransformers if the file exists
+    // 文件存在时自动启用 NeoForge AccessTransformers。
     def at = project(':common').file('src/main/resources/META-INF/accesstransformer.cfg')
     if (at.exists()) {
         accessTransformers.from(at.absolutePath)
@@ -29,8 +29,8 @@ neoForge {
         data {
             data()
 
-            // DataGen can be run by - "./gradlew :neoforge:runData" in Terminal.
-            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
+            // 可在终端运行 "./gradlew :neoforge:runData" 执行数据生成。
+            // 指定用于数据生成的 modid、生成资源的输出位置，以及查找现有资源的目录。
             programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
 
         }
