@@ -16,7 +16,7 @@ import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import sun.misc.Unsafe;
 
-/** Native enrichment updates the actual snapshot cache without manufacturing new structural freshness. */
+/** 原生信息补充会更新实际快照缓存，但不会伪造新的结构新鲜度。 */
 public final class MachineSnapshotEnrichmentTest {
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {

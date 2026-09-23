@@ -11,7 +11,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 
-/** Validates that named storage fields are actually wired to native output handlers, not merely present. */
+/** 验证命名的存储字段确实连接到原生输出处理器，而不只是字段存在。 */
 public final class MekOutputSpaceShapeTest {
     private static final String MACHINE = "mekanism/common/tile/machine/";
     private static final String CHEMICAL = "Lmekanism/api/chemical/IChemicalTank;";

@@ -27,7 +27,7 @@ public final class ProtocolObservationTest {
             field(receipt, "status", "succeeded");
             field(receipt, "effect", "not_applied");
             check(receipt.get("remainingRequests").getAsInt() >= 0, "Receipt budget must be nonnegative");
-            // Keep a real mutation receipt alive while recycling many read-only scopes.
+            // 循环创建和回收多个只读作用域时，保留一份真实修改回执。
             if (sample % 100 == 0) check(fixture.send(mutationQuery).equals(mutation), "Mutation receipt was retired under read pressure");
         }
         check(scopes > ServerProtocolDispatcher.MAX_SESSIONS, "Long-run case must exceed the retained scope bound");

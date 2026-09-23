@@ -95,7 +95,7 @@ final class ActorControlTestHarness {
         }
     }
 
-    /** Unsafe skips the constructor; sprinting is recorded without entity or network mutation. */
+    /** 使用 Unsafe 跳过构造器；记录疾跑状态时不修改实体或网络。 */
     private static final class TestPlayer extends LocalPlayer {
         boolean sprinting;
         boolean sleeping;

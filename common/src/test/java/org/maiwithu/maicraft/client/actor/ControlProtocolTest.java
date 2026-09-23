@@ -11,7 +11,7 @@ import net.minecraft.world.InteractionHand;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.field;
 
-/** Native control packets retain actor leases and receipts without acquiring a visible menu. */
+/** 原生控制数据包会保留角色租约和回执，不会因此取得可见菜单。 */
 public final class ControlProtocolTest {
     private static final NativeConfirmation PENDING = context -> NativeConfirmation.Verdict.PENDING;
     private static final NativeConfirmation APPLIED = context -> NativeConfirmation.Verdict.APPLIED;

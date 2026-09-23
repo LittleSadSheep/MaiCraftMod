@@ -17,7 +17,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 import java.util.ArrayList;
 import org.objectweb.asm.tree.TypeInsnNode;
 
-/** Checks the installed optional mixin target, not actual game acceptance or resource delivery. */
+/** 检查已安装的可选 mixin 目标，不验证游戏实际接受操作或交付资源。 */
 public final class MekDeliveryHookShapeTest {
     private static final String PIPE = "mekanism/common/content/network/transmitter/LogisticalTransporterBase";
     private static final String STACK = "mekanism/common/content/transporter/TransporterStack";

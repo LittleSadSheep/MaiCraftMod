@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
 
-/** Cancellation on the client thread between actor ticks must reach nested navigation cleanup. */
+/** 客户端线程在两个角色 tick 之间取消时，必须触发嵌套导航清理。 */
 public final class CompanionCancellationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

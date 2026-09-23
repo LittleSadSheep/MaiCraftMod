@@ -18,7 +18,7 @@ import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
-/** Checks native injection sites and executed resource operations; does not simulate machine production. */
+/** 检查原生注入位置和已执行的资源操作；不模拟机器生产。 */
 public final class MekProductionHookShapeTest {
     private static final String ROOT = "mekanism/api/recipes/";
     private static final String CACHE = ROOT + "cache/CachedRecipe";

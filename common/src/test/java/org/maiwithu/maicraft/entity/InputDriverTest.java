@@ -1,6 +1,6 @@
 package org.maiwithu.maicraft.entity;
 
-/** Shift is downward swim control in water, and slow sneaking on land. */
+/** 在水中 Shift 用于下潜，在陆地上则用于慢速潜行。 */
 public final class InputDriverTest {
     public static void main(String[] args) {
         check(InputDriver.permitsSprint(true, true, true), "descent must preserve swimming sprint");

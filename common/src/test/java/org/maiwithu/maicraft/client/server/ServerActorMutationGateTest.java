@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
-/** The actual runtime gate claims one actor mutation without blocking next-tick emergency input. */
+/** 真实运行时门控会占用一次角色修改权限，但不会阻塞下一 tick 的紧急输入。 */
 public final class ServerActorMutationGateTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

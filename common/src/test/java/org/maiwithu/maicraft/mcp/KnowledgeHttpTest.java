@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.core.integration.ftbquests.FtbRewardFixture.Reward;
 import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
 
-/** Real JSON-RPC/HTTP checks against the actual embedded service, with no Minecraft world. */
+/** 直接对嵌入服务执行真实 JSON-RPC/HTTP 测试，不需要 Minecraft 世界。 */
 public final class KnowledgeHttpTest {
     private final HttpClient client = HttpClient.newHttpClient();
     private URI endpoint;

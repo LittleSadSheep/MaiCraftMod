@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.network.codec.ByteBufCodecs;
 
-/** Real vanilla stack evidence remains exact when copied and counted by Mekanism production observers. */
+/** Mekanism 生产观察器复制并计数后，真实原版堆叠证据仍须保持精确。 */
 public final class MekanismResourceRegressionTest {
     private MekanismResourceRegressionTest() {}
 

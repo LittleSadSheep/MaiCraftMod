@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 
-/** Pure boundary tests: a plausible layout or incomplete native evidence cannot certify a path. */
+/** 纯边界测试：看似合理的布局或不完整的原生证据都不能证明路线已连通。 */
 public final class ConnectionInspectionTest {
     private ConnectionInspectionTest() {}
 

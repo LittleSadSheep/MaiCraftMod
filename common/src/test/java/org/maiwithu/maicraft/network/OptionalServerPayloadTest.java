@@ -6,7 +6,7 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 
-/** Exercises the actual Minecraft codec, including UTF-8 wire size and response/request asymmetry. */
+/** 使用真实 Minecraft 编解码器测试，包括 UTF-8 传输大小和响应/请求不对称性。 */
 public final class OptionalServerPayloadTest {
     public static void main(String[] args) {
         JsonObject request = new JsonObject();

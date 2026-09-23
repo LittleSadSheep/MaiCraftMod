@@ -8,7 +8,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalTerrain;
 import sun.misc.Unsafe;
 
-/** One request waits for bounded tick slices, then returns that completed snapshot without resetting it. */
+/** 单次请求等待有界 tick 切片完成后返回快照，不会重置已完成的结果。 */
 public final class NavigationOverviewTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

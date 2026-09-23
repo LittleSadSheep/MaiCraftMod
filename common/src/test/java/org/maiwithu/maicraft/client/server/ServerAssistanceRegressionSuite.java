@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.server;
 
-/** Standalone fault-injection checks; no running client, optional mods or network server required. */
+/** 独立故障注入测试；无需运行客户端、可选模组或网络服务器。 */
 public final class ServerAssistanceRegressionSuite {
     public static void main(String[] args) throws Exception {
         ClientServerFallbackTest.main(args);

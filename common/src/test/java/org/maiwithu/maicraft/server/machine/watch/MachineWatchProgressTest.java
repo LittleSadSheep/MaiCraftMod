@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 import java.util.stream.Collectors;
 import org.maiwithu.maicraft.network.ServerOperationException;
 
-/** Uses the real retained journal and native wire shapes; no world writes or monitor-supplied events. */
+/** 使用真实保留日志和原生传输结构；不修改世界，也不注入监控事件。 */
 public final class MachineWatchProgressTest {
     private static final String WORLD = "minecraft:overworld", RECIPE = "create:pressing/iron_ingot";
     private static final BlockPos PRESS = new BlockPos(0,2,0), OUTPUT = BlockPos.ZERO, SINK = new BlockPos(2,0,0);

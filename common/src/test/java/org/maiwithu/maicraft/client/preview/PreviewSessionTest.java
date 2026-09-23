@@ -11,7 +11,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Review state and immutable authored geometry can be checked without a game or graphics context. */
+/** 无需游戏或图形上下文即可核对审核状态和不可变手工几何。 */
 public final class PreviewSessionTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();

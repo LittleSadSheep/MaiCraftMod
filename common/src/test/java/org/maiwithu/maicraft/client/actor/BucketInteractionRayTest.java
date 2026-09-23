@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.world.InteractionHand;
 
-/** Actual native task camera gate and actor USE_ITEM dispatch, with real vanilla block/fluid rays. */
+/** 使用真实原版方块/流体射线，测试原生任务镜头门控和角色 USE_ITEM 派发。 */
 public final class BucketInteractionRayTest {
     private static final BlockPos WATER = new BlockPos(3, 2, 3), MACHINE = new BlockPos(4, 2, 3);
 

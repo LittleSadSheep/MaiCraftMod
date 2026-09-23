@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.server.inventory;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Native lifecycle decisions are bound to the exact owned link object, finite, and terminal. */
+/** 原生生命周期判定绑定到确切拥有的链接对象，并具有有限期限和明确终态。 */
 public final class Ae2NativeCraftingCompletionTest {
     public static void main(String[] args) {
         Object owned = new Object(), other = new Object();

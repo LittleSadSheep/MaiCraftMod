@@ -10,7 +10,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
-/** Real supply/session state machines with delayed native slot and menu receipts, without a GUI. */
+/** 在无界面环境中测试真实供料/会话状态机及延迟到达的原生槽位和菜单回执。 */
 public final class CreativeBuildSupplyMenuTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -8,7 +8,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.network.ServerOperationException;
 
-/** Server-only regressions for evidence identity, causal cursors and response bounds. */
+/** 仅服务器侧的回归测试，覆盖证据身份、因果游标和响应边界。 */
 public final class ServerNativeRegressionTest {
     public static void main(String[] args) {
         identitiesRetainComponents();

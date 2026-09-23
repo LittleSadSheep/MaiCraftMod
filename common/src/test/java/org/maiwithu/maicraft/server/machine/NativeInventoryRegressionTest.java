@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.network.codec.ByteBufCodecs;
 
-/** Exercises real vanilla stacks and inventories without a client, world, renderer or fabricated transaction result. */
+/** 使用真实原版堆叠和背包进行测试，不启动客户端、世界或渲染器，也不伪造交易结果。 */
 public final class NativeInventoryRegressionTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

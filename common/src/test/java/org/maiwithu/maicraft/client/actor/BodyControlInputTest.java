@@ -7,7 +7,7 @@ import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.server.Bootstrap;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 
-/** Directional keys and analog impulses must agree for controllers that read native Input flags. */
+/** 对于读取原生 Input 标志的控制器，方向键和模拟冲量必须保持一致。 */
 public final class BodyControlInputTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();

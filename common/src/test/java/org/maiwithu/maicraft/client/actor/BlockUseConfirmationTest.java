@@ -10,7 +10,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
-/** Real action port: prediction, delayed acknowledgement, rollback, refusal, timeout and cancellation. */
+/** 测试真实动作端口中的预测、延迟确认、回滚、拒绝、超时和取消。 */
 public final class BlockUseConfirmationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

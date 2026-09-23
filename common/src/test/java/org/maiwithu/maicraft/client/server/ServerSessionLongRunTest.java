@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.network.ServerFeature;
 import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 import static org.maiwithu.maicraft.client.server.ServerRouterTestHarness.check;
 
-/** Exercise the real client router and server protocol together across thousands of requests. */
+/** 通过数千个请求共同测试真实客户端路由器和服务器协议。 */
 public final class ServerSessionLongRunTest {
     public static void main(String[] args) {
         var test = new ServerSessionLongRunTest();

@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.network.ProtocolJson;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Unrelated factory traffic must not erase a long-running authorized production observation. */
+/** 无关工厂流量不能清除正在运行的已授权生产观察。 */
 public final class ProductionRetentionTest {
     public static void main(String[] args) {
         unrelatedFactoriesCannotStarveRetainedEndpoints();

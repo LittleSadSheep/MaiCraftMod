@@ -13,7 +13,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 
-/** Native actions observe the posture already applied across a physical player tick. */
+/** 原生动作应观察到物理玩家 tick 期间已经应用的姿势。 */
 public final class BodyPostureObservationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

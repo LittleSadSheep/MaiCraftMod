@@ -1,6 +1,6 @@
 package org.maiwithu.maicraft.client.actor;
 
-/** Moving targets cannot make a settled camera drift away or accelerate past its target. */
+/** 移动目标不能让已稳定的镜头漂移，或使镜头加速越过目标。 */
 public final class BodyCameraSmoothingTest {
     public static void main(String[] args) {
         for (float dt : new float[]{1f / 30, 1f / 60, 1f / 144}) {
