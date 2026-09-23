@@ -68,10 +68,10 @@ public final class PhysicalStructureSearchCompanionTask
     private static final int FRONTIER_GRID = 64;
     private static final int MAX_FRONTIER_LEG = 80;
     private static final int MIN_FRONTIER_LEG = 12;
-    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    /** 初始路段期限；只要路线持续取得已核实进展，MoveTo 就会续期自己的任务记录。 */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int MOVING_EVIDENCE_SCAN_INTERVAL = 5;
-    /** A receipt-confirmed throw renews search liveness; distance and inventory bound the search. */
+    /** 回执确认投掷后会续期搜索存活期限；距离和背包变化共同限制搜索范围。 */
     private static final int EYE_PROGRESS_LEASE_TICKS = 3 * 60 * 20;
     private static final int EYE_RECEIPT_TICKS = 40;
     private static final int EYE_SPAWN_RADIUS = 12;
