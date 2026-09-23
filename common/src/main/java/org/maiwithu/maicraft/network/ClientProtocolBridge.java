@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.network;
 import com.google.gson.JsonObject;
 import java.util.Objects;
 
-/** Loader seam only. It deliberately has no reference to Minecraft client classes. */
+/** 仅作为加载器适配接口；有意不引用 Minecraft 客户端类。 */
 public final class ClientProtocolBridge {
     public interface Transport {
         boolean available();
@@ -26,7 +26,7 @@ public final class ClientProtocolBridge {
     public static void installListener(Listener next) { listener = Objects.requireNonNull(next); }
     public static boolean available() { return transport != null && transport.available(); }
 
-    /** False means no send was attempted. A send exception must be reconciled as uncertain. */
+    /** false 表示未尝试发送；发送时若抛出异常，必须按结果不确定进行核对。 */
     public static boolean send(JsonObject envelope) {
         ProtocolJson.encodeRequest(envelope);
         if (!available()) return false;

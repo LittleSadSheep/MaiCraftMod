@@ -13,7 +13,7 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.util.TreeSet;
 
-/** Shared wire limits; the bootstrap channel does not change with feature versions. */
+/** 共享的传输限制；引导通道不会随功能版本变化。 */
 public final class ProtocolJson {
     public static final int BOOTSTRAP = 1;
     public static final int MAX_ENVELOPE_CHARS = 65536;
@@ -71,7 +71,7 @@ public final class ProtocolJson {
         return text;
     }
 
-    /** Requests stay below the smaller Minecraft serverbound custom-payload budget. */
+    /** 请求大小必须低于 Minecraft 服务端接收自定义载荷的较小预算。 */
     public static String encodeRequest(JsonObject value) {
         String text = encode(value);
         if (text.length() > MAX_REQUEST_CHARS) throw new IllegalArgumentException("Request too large");
