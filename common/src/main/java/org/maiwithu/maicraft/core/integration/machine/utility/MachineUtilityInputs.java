@@ -81,9 +81,11 @@ public final class MachineUtilityInputs {
     /** Validate concrete declarations against the exact declared block and an unobstructed exterior ray. */
     public static List<Input> parse(JsonObject blueprint) {
         supplyPreference(blueprint);
-        List<Input> declarations = parseDeclarations(MachineAssemblyPorts.bindInputs(blueprint, rows(blueprint)));
-        if (declarations.isEmpty()) return declarations;
+        JsonArray inputRows = rows(blueprint);
+        // 未声明外部资源时不要求实体蓝图，只有实际接入请求才解析安装后的方块与轴面。
+        if (inputRows.isEmpty()) return List.of();
         if (!blueprint.has("blocks") || !blueprint.get("blocks").isJsonArray()) throw bad("external inputs require blueprint.blocks");
+        List<Input> declarations = parseDeclarations(MachineAssemblyPorts.bindInputs(blueprint, inputRows));
         Map<BlockPos, JsonObject> cells = new LinkedHashMap<>();
         for (JsonElement element : blueprint.getAsJsonArray("blocks")) {
             JsonObject cell = object(element); BlockPos pos = position(cell.get("offset"));

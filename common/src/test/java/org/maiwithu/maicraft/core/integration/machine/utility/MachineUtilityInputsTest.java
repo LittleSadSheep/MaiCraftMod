@@ -14,6 +14,8 @@ import com.google.gson.JsonPrimitive;
 public final class MachineUtilityInputsTest {
     private static int checks;
     public static void main(String[] args) {
+        // 没有外接需求时无需展开任何机器，保持旧的空文档查询语义。
+        check(MachineUtilityInputs.parse(new JsonObject()).isEmpty(), "an absent utility declaration needs no blueprint");
         preservesConcreteRequirementsAcrossExplicitCompilation();
         historicalOffsetsDoNotDependOnTodaysPlanningBudget();
         rejectsImaginaryUnsafeOrMismatchedPorts();

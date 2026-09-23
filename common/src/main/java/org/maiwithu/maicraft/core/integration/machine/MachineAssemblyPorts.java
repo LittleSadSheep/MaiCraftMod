@@ -62,6 +62,8 @@ public final class MachineAssemblyPorts {
         return "kinetic_" + UUID.nameUUIDFromBytes(address.getBytes(StandardCharsets.UTF_8));
     }
     public static JsonArray bindInputs(JsonObject blueprint, JsonArray inputs) {
+        // 没有请求接动力时无需读取方块，允许空的历史需求文档沿用原来的查询方式。
+        if (inputs.isEmpty()) return new JsonArray();
         Map<String, JsonObject> ports = new LinkedHashMap<>();
         for (var raw : describe(blueprint)) ports.put(raw.getAsJsonObject().get("id").getAsString(), raw.getAsJsonObject());
         Map<BlockPos, JsonObject> finals = finalBlocks(blueprint); JsonArray result = new JsonArray();
