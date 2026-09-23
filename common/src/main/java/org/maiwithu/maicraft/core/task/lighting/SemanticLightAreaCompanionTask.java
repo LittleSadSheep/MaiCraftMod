@@ -49,7 +49,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Locale;
 
-/** Loaded-fact lighting planner with receipt-driven Build and actual light verification. */
+/** 基于已加载事实规划照明，通过施工回执放置灯具并核实实际光照。 */
 public final class SemanticLightAreaCompanionTask
         extends AbstractCompanionTask<SemanticLightAreaTaskRecord> {
 
@@ -88,10 +88,10 @@ public final class SemanticLightAreaCompanionTask
     private final List<BlockPos> protectedAnchors = new ArrayList<>();
     private final Set<BlockPos> protectedMutationCells = new LinkedHashSet<>();
     private final Set<BlockPos> protectedNavigationCells = new LinkedHashSet<>();
-    /** Seed discovery visits every currently loaded column reachable from the landmark column. */
+    /** 从地标所在柱列开始，访问当前所有可达的已加载柱列以发现初始候选。 */
     private final ArrayDeque<Long> seedColumns = new ArrayDeque<>();
     private final Set<Long> queuedSeedColumns = new HashSet<>();
-    /** The component itself is expanded only through live matching block facts. */
+    /** 只有实时观察到的匹配方块事实才会扩展语义区域。 */
     private final ArrayDeque<BlockPos> componentCells = new ArrayDeque<>();
     private final Set<Long> queuedComponentCells = new HashSet<>();
     private final Set<Long> observedComponentCells = new HashSet<>();
@@ -283,10 +283,8 @@ public final class SemanticLightAreaCompanionTask
     }
 
     /**
-     * Discover one complete semantic component. A landmark is only the search seed: neither its
-     * coordinates nor a guessed radius become the area's boundary. Every accepted cell was read
-     * while loaded, and every unloaded edge is either loaded by first-person travel or reported as
-     * unreachable before any lighting plan is frozen.
+     * 发现一个完整语义连通区域。地标只用于启动搜索，其坐标和猜测半径都不会成为区域边界。
+     * 每个接纳的格子都必须在区块已加载时读取；未加载边界要么由第一人称移动实际加载，要么在冻结照明方案前报告不可达。
      */
     private TaskState tickConnectedObservation() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
@@ -307,8 +305,7 @@ public final class SemanticLightAreaCompanionTask
             if (!observedComponentCells.add(requestedKey)) continue;
             if (!insideRequestedBoundary(requested)) continue;
             if (!level.isLoaded(requested)) {
-                // The cell was loaded when queued but moved outside the client view meanwhile.
-                // Its already-observed neighbour remains the only evidence-backed approach.
+                // 方块入队时已加载，但随后移出了客户端视野；已观察到的相邻格仍是唯一有证据支持的接近路线。
                 observedComponentCells.remove(requestedKey);
                 continue;
             }
@@ -325,8 +322,7 @@ public final class SemanticLightAreaCompanionTask
 
         recheckLoadedComponentFrontiers(level);
         if (!componentCells.isEmpty()) return TaskState.RUNNING;
-        // FRONTIERS_PER_TICK is a CPU slice, never a task boundary. Finish consuming live
-        // loaded facts before choosing a physical loading leg.
+        // FRONTIERS_PER_TICK 只限制每 tick 的 CPU 工作量，不是任务边界。选择实际移动以加载地形前，先处理完当前所有实时已加载事实。
         for (ComponentFrontier frontier : componentFrontiers.values()) {
             if (level.isLoaded(frontier.unknownCell())) return TaskState.RUNNING;
         }
@@ -350,17 +346,15 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private void expandComponentNeighbours(ClientLevel level, BlockPos from) {
-        // Direct 8-neighbour morphology handles ordinary contiguous beds and one-block height
-        // terraces. No gap cell is ever added to the coverage denominator.
+        // 直接使用八邻域形态学连接普通连续种植床和高差一格的梯田；绝不把空隙格加入覆盖率分母。
         for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
             if (dx == 0 && dz == 0) continue;
             inspectComponentLanding(level, from, from.offset(dx, -1, dz));
             inspectComponentLanding(level, from, from.offset(dx, 0, dz));
             inspectComponentLanding(level, from, from.offset(dx, 1, dz));
         }
-        // A real one-cell service seam (water channel, dirt path or walkable aisle) may split a
-        // single semantic region into two block components. Bridge only that one observed seam and
-        // require a real matching member on the far side; this is local morphology, not a radius.
+        // 一格宽的实际通道（例如水渠、土路或可行走过道）可能把同一语义区域切成两个方块连通分量。
+        // 仅跨越这条已观察到的一格通道，并要求远侧确实存在匹配方块；这是局部形态连接，不是半径扩张。
         int[][] cardinals = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         for (int[] direction : cardinals) {
             BlockPos gap = from.offset(direction[0], 0, direction[1]);
@@ -399,7 +393,7 @@ public final class SemanticLightAreaCompanionTask
                         && below.isFaceSturdy(level, cell.below(), Direction.UP));
     }
 
-    /** Returns null once a real matching seed has been enqueued. */
+    /** 已有真实匹配种子入队时返回 null。 */
     private TaskState tickSeedDiscovery(ClientLevel level) {
         if (!seedSearchInitialized) {
             seedSearchInitialized = true;
@@ -552,9 +546,7 @@ public final class SemanticLightAreaCompanionTask
             if (match != null && queuedComponentCells.add(match.pos().asLong())) {
                 componentCells.addLast(match.pos());
             } else if (level.isLoaded(frontier.knownCell())) {
-                // Loading a non-member seam can reveal a real member immediately beyond it.
-                // Re-expand the known edge so the one-cell morphology bridge is evaluated from
-                // newly available facts before boundary closure is considered.
+                // 加载非成员通道后，紧邻另一侧可能立即出现真实成员。先用新事实重新扩展已知边缘并检查一格形态桥接，再判断区域边界是否闭合。
                 expandComponentNeighbours(level, frontier.knownCell());
             }
             renewLightingProgress();
@@ -747,13 +739,12 @@ public final class SemanticLightAreaCompanionTask
                 protectedMutationCells.add(pos.immutable());
             }
             if (isGrowthCell(state)) {
-                // A build approach with terrain permission must not clear or enter a crop cell.
+                // 施工路线即使拥有地形修改许可，也不得清除或进入作物格。
                 protectedMutationCells.add(pos.immutable());
                 protectedNavigationCells.add(pos.immutable());
             } else if (state.getBlock() instanceof FarmBlock) {
-                // Deny the body cell above every observed farmland block, including unplanted
-                // cells that remain valid adjacent placement targets. Construction can click a
-                // target without ever using it as a walking or jumping landing cell.
+                // 禁止角色进入每个已观察耕地上方的身体格，即使该格尚未种植且仍是有效的相邻放置目标。
+                // 施工可以点击目标格，但不能把它当作行走或跳跃落脚点。
                 protectedMutationCells.add(pos.immutable());
                 protectedNavigationCells.add(pos.above().immutable());
             }
@@ -1218,8 +1209,7 @@ public final class SemanticLightAreaCompanionTask
                 if (selected.contains(candidate)) continue;
                 int gain = 0;
                 for (long cell : candidate.covers()) if (!covered.contains(cell)) gain++;
-                // Measured coverage gain is always primary. Placement preference only
-                // chooses between candidates with the same positive gain.
+                // 始终优先选择实测覆盖增益；放置偏好只在多个候选都能增加相同覆盖量时用于打破平局。
                 if (gain > bestGain || gain == bestGain && gain > 0
                         && (best == null
                                 || candidate.preferenceScore() > best.preferenceScore())) {
