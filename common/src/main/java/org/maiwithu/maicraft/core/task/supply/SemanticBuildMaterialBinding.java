@@ -29,18 +29,15 @@ import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import java.util.function.ToIntFunction;
 
 /**
- * Freezes a semantic building palette without performing acquisition to discover a variant.
+ * 冻结语义建筑材料方案，不通过实际采集来发现可替代变体。
  *
- * <p>The semantic planner still owns appearance and layout. This class only broadens ordinary
- * building roles (planks, masonry, logs, slabs, doors, panes, railings, stairs and carpet) to
- * equivalent registered blocks, then binds carried variants before review. Without carried
- * evidence the original design remains a material requirement, not a promise of availability.
- * Functional furniture, lights and block entities remain exact.</p>
+ * <p>外观和布局仍由语义规划器决定。此类仅将普通建筑角色（木板、砌石、原木、半砖、门、玻璃板、栏杆、楼梯和地毯）
+ * 扩展到已注册的等价方块，再于审核前绑定背包中实际持有的变体。没有背包证据时，原始设计仍是材料要求，而不代表材料已可用。
+ * 功能家具、灯具和方块实体保持精确匹配。</p>
  */
 final class SemanticBuildMaterialBinding {
-    // Ae2ResourceSupply.Request permits 2,048 accepted IDs in total. There are at most eleven
-    // broadened families plus exact singleton families, so 128 keeps every valid 128-group
-    // proposal below that aggregate limit without exposing or hard-coding a material palette.
+    // Ae2ResourceSupply.Request 总共最多接受 2,048 个 ID。扩展材料族最多十一种，另有精确匹配的单项族；
+    // 因此每族限制为 128 个，可让所有合法的 128 组方案低于总量上限，同时不暴露或硬编码材料调色板。
     private static final int MAX_ALTERNATIVES = 128;
     private static final int MAX_GROUPS = 128;
 
@@ -85,7 +82,7 @@ final class SemanticBuildMaterialBinding {
 
     private SemanticBuildMaterialBinding() {}
 
-    /** Registry membership proves compatibility only. Never mine a sample to decide a palette. */
+    /** 注册表成员关系只证明兼容性；绝不通过挖掘样本来决定材料方案。 */
     static ResourceLocation select(Family family, ToIntFunction<ResourceLocation> carried) {
         ResourceLocation selected = family.originals().getFirst();
         int best = Math.max(0, carried.applyAsInt(selected));
@@ -102,8 +99,7 @@ final class SemanticBuildMaterialBinding {
             int count = target.materialCount();
             if (count <= 0 || !(target.item() instanceof BlockItem blockItem)) continue;
             ResourceLocation id = BuiltInRegistries.ITEM.getKey(target.item());
-            // Exact palettes may deliberately mix variants of the same shape. Keeping only
-            // the family would collapse e.g. oak walls and spruce trim into one block type.
+            // 精确调色板可能有意混用形状相同的不同变体；若只保留材料族，会把橡木墙和云杉装饰合并为同一种方块。
             Kind kind = broadenMaterialFamilies ? kind(blockItem.getBlock(), id) : Kind.EXACT;
             String identity = kind == Kind.EXACT ? "exact:" + id : kind.name().toLowerCase(Locale.ROOT);
             Accumulator accumulator = accumulators.computeIfAbsent(
@@ -156,9 +152,8 @@ final class SemanticBuildMaterialBinding {
         for (BuildTaskRecord.Target target : source.targets) {
             ResourceLocation original = BuiltInRegistries.ITEM.getKey(target.item());
             ResourceLocation selected = replacements.get(original);
-            // A zero-cost cell can still be the upper half of a selected door. Once a family is
-            // rebound, every target carrying that original item must move together even though
-            // only the lower half appears in the material ledger.
+            // 零成本目标格仍可能是所选门的上半部。材料族重新绑定后，所有引用原物品的目标格必须一起迁移，
+            // 即使材料账本只记录门的下半部。
             if (selected == null || selected.equals(original)) {
                 rebound.add(target);
                 continue;
@@ -215,8 +210,7 @@ final class SemanticBuildMaterialBinding {
         String path = id.getPath();
         if (!ordinary(block)) return Kind.EXACT;
         if (block instanceof SlabBlock) return Kind.SLAB;
-        // An iron-style door is not interchangeable with a house door: selecting it would make
-        // the verified entrance depend on redstone that the semantic plan never requested.
+        // 铁门不能替代普通房屋门；选中铁门会使已验证入口依赖语义方案从未要求的红石。
         if (block instanceof DoorBlock door) {
             return door.type().canOpenByHand() ? Kind.DOOR : Kind.EXACT;
         }
