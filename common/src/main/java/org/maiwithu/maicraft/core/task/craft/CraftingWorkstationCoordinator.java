@@ -38,12 +38,10 @@ public final class CraftingWorkstationCoordinator {
     private static final int PLACEMENT_RADIUS = 5;
 
     /**
-     * Tables placed by the companion as temporary crafting surfaces in this live client world.
+     * 记录同伴在当前客户端世界中放置的临时工作台。
      *
-     * <p>This is deliberately a physical-asset ledger rather than task-local state. A craft may be
-     * preempted after placement, and the next craft must still know that this particular table is
-     * safe to reclaim. The weak level key prevents coordinates leaking into another save/session;
-     * every lookup also re-reads the loaded world cell before returning ownership.</p>
+     * <p>此账本跟踪实际方块资产，而不是绑定单个任务。合成任务可能在放置后被抢占，下一项合成仍需知道这张工作台可安全回收。
+     * 弱引用世界键可避免坐标泄漏到其他存档或会话；每次查找都会重新读取已加载的世界格，再确认所有权。</p>
      */
     private static final Map<ClientLevel, Map<Long, Block>> TEMPORARY_TABLES =
             new WeakHashMap<>();
@@ -89,7 +87,7 @@ public final class CraftingWorkstationCoordinator {
     private ClientLevel indexedLevel;
     private List<Block> indexedTables = List.of();
 
-    /** Keep the shared sparse block index warm for the lifetime of one physical craft task. */
+    /** 在一次实体合成任务期间持续维护共享稀疏方块索引。 */
     public void start(LocalPlayer player) {
         ClientLevel level = player.clientLevel;
         if (indexedLevel == level) return;
@@ -116,9 +114,8 @@ public final class CraftingWorkstationCoordinator {
     }
 
     /**
-     * Return the exact temporary table block at {@code pos}, or {@code null} when it is not ours.
-     * A loaded mismatch retires stale ownership rather than authorizing a later task to break a
-     * player's replacement block at the same coordinates.
+     * 返回 {@code pos} 上准确的临时工作台方块；若不属于本模组则返回 {@code null}。
+     * 若已加载的方块与记录不符，就撤销过期所有权，不能授权后续任务破坏玩家后来放在相同坐标的方块。
      */
     public static synchronized Block temporaryTable(LocalPlayer player, BlockPos pos) {
         // 读取时只核对方块类型；若别人换成同类型工作台，这份记录目前无法区分。
@@ -135,7 +132,7 @@ public final class CraftingWorkstationCoordinator {
         return null;
     }
 
-    /** Retire ownership after the table disappeared and its item was recovered (or was lost). */
+    /** 工作台消失且其物品已回收或确认丢失后，撤销所有权记录。 */
     public static synchronized void forgetTemporaryTable(
             LocalPlayer player, BlockPos pos) {
         if (pos == null) return;
@@ -145,7 +142,7 @@ public final class CraftingWorkstationCoordinator {
         if (entries.isEmpty()) TEMPORARY_TABLES.remove(player.clientLevel);
     }
 
-    /** Read-only feasibility snapshot shared by recipe ranking. */
+    /** 供配方排序共用的只读可行性快照。 */
     public static PlanningSnapshot inspect(LocalPlayer player) {
         // 给合成规划一个只读结论：工作台已就绪、可走近／摆放、需要先取得物品，或还在搜索。
         List<Block> tables = craftingTableBlocks();
@@ -197,7 +194,7 @@ public final class CraftingWorkstationCoordinator {
                         + "materialize the required workstation item before this recipe resumes");
     }
 
-    /** Resolve the next bounded physical step from fresh client facts. */
+    /** 根据最新客户端事实，解析下一步有界的实际操作。 */
     public Directive next(LocalPlayer player, BlockPos preferredStation) {
         // 身边可用的已有台优先；否则有随身台且能摆就先摆，最后才考虑走较远的路或继续搜索。
         start(player);
@@ -207,7 +204,7 @@ public final class CraftingWorkstationCoordinator {
         TableSearch search = nearestIndexedTable(player, rejectedStations, indexedTables);
         BlockPos existing = search.station();
 
-        // Conserve a carried table when a live station is already at hand.
+        // 附近已有可用工作台时，保留背包里携带的工作台供后续使用。
         if (preferred != null && withinReach(player, preferred)) {
             Block preferredBlock = player.level().getBlockState(preferred).getBlock();
             return new Directive(Action.READY, preferred, preferredBlock,
@@ -219,8 +216,7 @@ public final class CraftingWorkstationCoordinator {
                     "a loaded crafting table is within reach");
         }
 
-        // If the nearest known table needs a non-trivial journey, a table already carried is the
-        // safer and cheaper physical surface. Placement remains fully first-person and verified.
+        // 若最近的已知工作台需要长途行进，优先使用已经携带的工作台会更安全、更省成本；放置过程仍通过第一人称操作并逐步核实。
         Block carried = carriedTable(player);
         if (carried != null) {
             BlockPos site = placementSite(player, rejectedSites, carried);
@@ -253,7 +249,7 @@ public final class CraftingWorkstationCoordinator {
                 "no verified nearby cell can receive the carried crafting table");
     }
 
-    /** Reject only the failed physical route; another table or placement site may still work. */
+    /** 只排除失败的实际路线；其他工作台或放置位置仍可继续尝试。 */
     public void reject(Directive directive) {
         // 失败的工作台和失败的摆放位置分别记，不能一个位置摆不下就把所有工作台都判为不可用。
         if (directive == null) return;
@@ -342,7 +338,7 @@ public final class CraftingWorkstationCoordinator {
                 .toList();
     }
 
-    /** Semantic item alternatives that can materialize an ordinary 3x3 crafting surface. */
+    /** 可实际提供普通 3×3 合成台面的语义物品候选。 */
     public static List<ResourceLocation> prerequisiteItemIds() {
         return craftingTableItemIds();
     }
@@ -387,9 +383,7 @@ public final class CraftingWorkstationCoordinator {
                 || player.getBoundingBox().intersects(new AABB(cell))) {
             return false;
         }
-        // A workstation is not merely a placeable cube: the player must be able to look down at
-        // and use it after placement. Avoid wedging temporary stations directly under leaves,
-        // logs, ceilings or fluid while still allowing ordinary cave-floor placement.
+        // 工作台不只是能放下的方块；放置后玩家还必须能看见并使用它。避免把临时工作台塞在树叶、原木、天花板或液体正下方，同时允许放在普通洞穴地面。
         BlockPos clearance = cell.above();
         if (!player.level().isLoaded(clearance)
                 || !player.level().getBlockState(clearance)
