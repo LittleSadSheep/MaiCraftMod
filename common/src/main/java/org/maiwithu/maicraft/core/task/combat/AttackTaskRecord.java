@@ -27,9 +27,8 @@ public final class AttackTaskRecord extends TaskRecord {
     public final boolean indiscriminate;
 
     /**
-     * When true, even opportunistic in-reach melee may only touch an entity in
-     * {@link #entityIds}. The normal attack tool keeps its historical defensive
-     * behaviour by using the four-argument constructor, which defaults this to false.
+     * 为 true 时，即使是顺手进行的近战攻击，也只能命中 {@link #entityIds} 中的实体。
+     * 普通攻击工具使用四参数构造器，默认值为 false，因此保留原有防御行为。
      */
     public final boolean strictAuthorized;
 
