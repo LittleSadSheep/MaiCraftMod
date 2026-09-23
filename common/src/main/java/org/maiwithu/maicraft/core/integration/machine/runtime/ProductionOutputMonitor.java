@@ -14,7 +14,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Port;
 import java.util.LinkedHashSet;
 
-/** Baselines the world journal before supply, then requires native production and matching native delivery. */
+/** 在供料前建立世界日志基线，随后必须同时确认原生生产事件和匹配的原生送达。 */
 final class ProductionOutputMonitor {
     private final ProductionRunPlan plan;
     private final ProductionWork work;
@@ -111,14 +111,14 @@ final class ProductionOutputMonitor {
         } catch (RuntimeException invalid) { throw fail(invalid); }
     }
 
-    /** Consume immediately after tick: navigation and pending reads are never refill handoff points. */
+    /** tick 后立即消耗结果；导航或待处理读取都不是补货交接点。 */
     boolean consumeRoundBoundary() {
         boolean completed = roundBoundary; roundBoundary = false; return completed;
     }
 
     Map<String, Long> processingProgress() { return processing.snapshot(); }
 
-    /** -1 outside a completed, caught-up observation round; setup time does not count as a process stall. */
+    /** 未完成或尚未追上观察轮次时返回 -1；准备时间不计为生产流程停滞。 */
     long processingIdleTicks() {
         if (!completedRound || !caughtUp || releasedWatches || observationStartedTick < 0) return -1;
         return Math.max(0, cursor.tick() - Math.max(observationStartedTick, processing.latestTick()));
@@ -133,7 +133,7 @@ final class ProductionOutputMonitor {
                 && window.status(serverTick) != ProductionEvidenceWindow.Status.INVALIDATED;
     }
 
-    /** Root submits these read-only metadata requests with owner=null after cancelling its active request. */
+    /** 根任务取消活动请求后，以 owner=null 提交这些只读元数据请求。 */
     List<JsonObject> releaseBodies() {
         if (releasedWatches) return List.of();
         releasedWatches = true;
@@ -230,7 +230,7 @@ final class ProductionOutputMonitor {
         for (BlockPos position : positions) {
             List<BlockPos> group = groups.stream().filter(values -> values.size() < 4
                     && values.getFirst().distSqr(position) <= 16).findFirst().orElse(null);
-            // The bounded cluster also lets Work.observe choose a stance respecting every native target's range.
+            // 有界聚类也让 Work.observe 能选择同时满足所有原生目标距离要求的站位。
             if (group == null) { group = new ArrayList<>(); groups.add(group); }
             group.add(position.immutable());
         }

@@ -126,7 +126,7 @@ public final class MachineConstructionPlan {
         return id != null && (block ? BuiltInRegistries.BLOCK.containsKey(id) : BuiltInRegistries.ITEM.containsKey(id));
     }
 
-    /** Catch unsupported native installations during design review, before requesting a construction task. */
+    /** 在设计审核阶段识别不受支持的原生安装方式，避免随后创建施工任务。 */
     // 用零锚点试编译一次，提前发现安装器不支持的结构；实际位置、已有障碍和材料以后才检查。
     public static SemanticMachineLayout.Result reviewExplicit(SemanticMachineLayout.Result layout) {
         if (!layout.buildable()) return layout;
@@ -218,7 +218,7 @@ public final class MachineConstructionPlan {
             var row = raw.getAsJsonObject(); var relation = MachineProcessingRelation.compile(offset(anchor, row.get("processor")), offset(anchor, row.get("surface")), finalStates);
             processing.add(relation);
         }
-        // Generated halves must be declared even for model-authored blueprints.
+        // 即使蓝图由模型编写，自动生成的半方块也必须显式声明。
         Map<Long, BuildTaskRecord.Target> cells = new LinkedHashMap<>();
         blocks.values().forEach(target -> cells.put(target.pos().asLong(), target));
         blocks.values().forEach(target -> MachinePlacementRules.validateGeneratedCells(target, cells));
@@ -248,7 +248,7 @@ public final class MachineConstructionPlan {
             throw new IllegalArgumentException("expanded machine exceeds the physical planning budget");
         for (Part part : parts) if (blocks.containsKey(part.position()))
             throw new IllegalArgumentException("native part host overlaps an ordinary block target");
-        // Center cables form supports for peripheral parts and must always be installed first.
+        // 中心线缆为外围部件提供支撑，因此必须始终先安装。
         // 先排中心部件，再排装在各面的部件，避免面板先安装时还没有宿主。
         parts.sort(Comparator.comparing(part -> part.spec().side() != null));
         Map<String, Integer> nativeMaterials = new LinkedHashMap<>();
@@ -266,7 +266,7 @@ public final class MachineConstructionPlan {
         return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities, installations, processing);
     }
 
-    /** The survey anchor denotes the floor of the installation, including below-machine drives. */
+    /** 勘查锚点表示安装地面，包括机器下方的驱动装置。 */
     // 按蓝图最低偏移向上抬锚点，让整个计划最低层落在勘察到的地板高度；维护空间也参与计算。
     public static BlockPos floorAnchor(BlockPos surveyed, SemanticMachineLayout.Result layout) {
         int lowest = 0;
@@ -316,7 +316,7 @@ public final class MachineConstructionPlan {
         return task;
     }
 
-    /** Chain orientation is derived from neighbors, so only its shaft axis is enforced during assembly. */
+    /** 链条朝向由相邻方块决定，因此装配时只强制校验传动轴方向。 */
     // Create 链式传动箱的连接状态由相邻方块生成，初次放置先放宽这两项；原始计划仍保留，最后按原要求验收。
     private static BuildTaskRecord.Target placementTarget(BuildTaskRecord.Target target) {
         if (!BuiltInRegistries.BLOCK.getKey(target.block()).toString().equals("create:encased_chain_drive")) return target;

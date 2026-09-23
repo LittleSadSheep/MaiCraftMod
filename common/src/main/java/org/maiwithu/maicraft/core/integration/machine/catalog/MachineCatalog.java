@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionManif
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Owner-thread catalog memory with background persistence; this service never reads or changes a Minecraft world. */
+/** 由所有者线程管理目录记忆，并在后台持久化；此服务绝不读取或修改 Minecraft 世界。 */
 public final class MachineCatalog {
     public static final long CURRENT_OBSERVATION_TICKS = 1200;
     public enum State { UNBOUND, LOADING, READY, FAILED }
@@ -41,7 +41,7 @@ public final class MachineCatalog {
             Thread thread = new Thread(command, "maicraft-machine-catalog-io"); thread.setDaemon(true); return thread;
         }));
     }
-    /** Executor injection supports deterministic I/O tests; production should use a background executor. */
+    /** 注入执行器便于确定性 I/O 测试；正式运行时应使用后台执行器。 */
     public MachineCatalog(Path directory, Executor executor) { store = new MachineCatalogStore(directory, executor); }
 
     public Binding bind(Identity identity, String sessionKey) {
@@ -52,7 +52,7 @@ public final class MachineCatalog {
         if (state == State.READY && dirty) saveAsync();
         binding = new Binding(key, sessionKey, ++generation); currentTicks.clear(); error = "";
         if (sameReadyIdentity) { observeSave(lastSave, generation, saveRevision); return binding; }
-        // Same-process reconnect keeps unsaved history, never current observation status.
+        // 同一进程重新连接时保留尚未保存的历史，但绝不保留当前观察状态。
         devices.clear(); lines.clear(); installations.clear(); dirty = false; state = State.LOADING; lastSave = CompletableFuture.completedFuture(null);
         long requestedGeneration = generation;
         try {
@@ -76,7 +76,7 @@ public final class MachineCatalog {
     public Optional<Binding> binding() { requireOwner(); return Optional.ofNullable(binding); }
 
     public String observe(DeviceObservation observation) { return observe(binding, observation); }
-    /** Async callers must retain the binding under which they observed the candidate. */
+    /** 异步调用方必须保留观察候选时使用的绑定关系。 */
     public String observe(Binding expected, DeviceObservation observation) {
         requireBinding(expected);
         String id = deviceId(binding.identityKey(), observation.dimension(), observation.position());
@@ -90,7 +90,7 @@ public final class MachineCatalog {
                 previous == null ? observation.observedAtMillis() : previous.firstObservedAtMillis(), observation.observedAtMillis(), observation.gameTick());
         devices.put(id, device); currentTicks.put(id, observation.gameTick()); dirty = true; return id;
     }
-    /** Only explicit loaded-world absence/replacement belongs here; an unloaded target must remain unknown. */
+    /** 这里只记录已加载世界中明确缺失或被替换的情况；目标未加载时必须保留为未知。 */
     public boolean markAbsent(String dimension, Position position, long gameTick, long observedAtMillis) {
         return markAbsent(binding, dimension, position, gameTick, observedAtMillis);
     }
@@ -111,7 +111,7 @@ public final class MachineCatalog {
         Line line = new Line(id, label, dimension, anchor, encoded, CatalogLimits.hash(encoded), observedAtMillis, previous == null ? null : previous.commission());
         lines.put(id, line); dirty = true; return id;
     }
-    /** Records a caller-confirmed finite historical window, never a current production guarantee. */
+    /** 记录调用方确认过的有限历史时段，绝不作为当前仍在生产的保证。 */
     public void recordCommission(String lineId, CommissionEvidence evidence) {
         requireReady(); Line line = lines.get(lineId); if (line == null) throw new IllegalArgumentException("catalog_line_missing");
         lines.put(lineId, new Line(line.id(), line.label(), line.dimension(), line.anchor(), line.manifestJson(), line.manifestFingerprint(),
