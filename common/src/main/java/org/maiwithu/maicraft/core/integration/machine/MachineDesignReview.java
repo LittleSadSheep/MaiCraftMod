@@ -30,7 +30,7 @@ public final class MachineDesignReview {
     private static final Set<String> DESIGN_FIELDS = Set.of("components", "connections", "expected_output", "style", "constraints", "external_inputs", "supply_preference", "onsite_reason");
     private static final Set<String> CONSTRAINT_FIELDS = Set.of(
             "max_width", "max_depth", "max_height", "terrain_fit",
-            "maintenance_access", "preserve_existing", "throughput");
+            "maintenance_access", "preserve_existing", "throughput", "forbidden_mods");
     private static final Set<String> COMPONENT_FIELDS = Set.of("name", "block_id", "count", "role", "module", "module_tier", "module_options");
     private static final Set<String> CONNECTION_FIELDS = Set.of("from", "to", "medium", "purpose", "item_id", "resource");
     private static final Set<String> MEDIA = Set.of("kinetic", "items", "fluids", "energy", "chemicals", "ae_network", "redstone", "heat");
@@ -372,6 +372,11 @@ public final class MachineDesignReview {
         if (input == null) return null;
         checkFields(input, CONSTRAINT_FIELDS, "$.constraints", errors);
         JsonObject normalized = new JsonObject();
+        // 禁用范围是施工约束，必须传过逻辑图审阅，不能只留在自然语言说明里。
+        try {
+            if (input.has("forbidden_mods")) normalized.add("forbidden_mods", MachineDesignConstraints.json(
+                    MachineDesignConstraints.read(input)).get("forbidden_mods"));
+        } catch (IllegalArgumentException invalid) { error(errors, "$.constraints.forbidden_mods", "invalid_mod_constraint", invalid.getMessage()); }
         for (String key : List.of("max_width", "max_depth", "max_height")) {
             if (!input.has(key)) continue;
             JsonElement raw = input.get(key);

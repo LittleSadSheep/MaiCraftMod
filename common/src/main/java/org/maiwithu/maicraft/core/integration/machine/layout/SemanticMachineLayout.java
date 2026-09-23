@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReview;
+import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraints;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Bounds;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
@@ -48,6 +49,7 @@ public final class SemanticMachineLayout {
             return work.finish();
         }
         work.expectedOutput = design.has("expected_output") ? design.get("expected_output").getAsString() : null;
+        work.forbiddenMods = MachineDesignConstraints.forbiddenMods(design);
         work.supplyPreference = MachineUtilityInputs.supplyPreference(design);
         work.onsiteReason = design.has("onsite_reason") ? design.get("onsite_reason").getAsString() : null;
         JsonObject constraints = design.has("constraints") ? design.getAsJsonObject("constraints") : new JsonObject();

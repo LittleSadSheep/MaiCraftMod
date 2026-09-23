@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRoutin
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraints;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
@@ -35,6 +36,7 @@ final class MachineLayoutWork {
     final JsonArray externalInputs = new JsonArray();
     String supplyPreference = "external", onsiteReason;
     String expectedOutput;
+    Set<String> forbiddenMods = Set.of();
     final Set<String> failures = new LinkedHashSet<>();
     MachineLayoutWork(SemanticMachineLayout.Registry registry) {
         this.registry = registry; var budget = MachinePlanningBudget.current(); JsonObject limits = new JsonObject();
@@ -56,6 +58,10 @@ final class MachineLayoutWork {
     }
     // 检查预算、安装物品和重叠；AE2 中央电缆与不同面的部件可以共格，同一槽重复占用则报错。
     void add(Cell cell) {
+        // 旧布局兼容入口生成的运输器也受同一约束；发现违规就拒绝整份方案，不输出半条管线。
+        if (!MachineDesignConstraints.allows(forbiddenMods, cell.id())) {
+            fail("forbidden_mod_dependency", cell.id()); return;
+        }
         if (cells.size() + attachments.size() >= SemanticMachineLayout.MAX_TARGETS) {
             fail("target_budget_exceeded", "Physical layout exceeds the configured " + SemanticMachineLayout.MAX_TARGETS + "-target construction budget."); return;
         }
@@ -86,6 +92,7 @@ final class MachineLayoutWork {
             materials.merge(cell.id(), 1, Math::addExact);
         }
         blueprint.add("blocks", blocks);
+        if (!forbiddenMods.isEmpty()) blueprint.add("constraints", MachineDesignConstraints.json(forbiddenMods));
         blueprint.addProperty("supply_preference", supplyPreference);
         if (onsiteReason != null) blueprint.addProperty("onsite_reason", onsiteReason);
         if (buildable && !externalInputs.isEmpty()) blueprint.add("external_inputs", externalInputs.deepCopy());

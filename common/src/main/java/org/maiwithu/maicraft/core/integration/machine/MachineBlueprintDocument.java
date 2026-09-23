@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.core.build.BuildingBudgets;
  * 允许保存观察资料，但资料里的 NBT 和实体不会自动成为可以执行的安装操作。
  */
 public final class MachineBlueprintDocument {
-    private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities", "external_inputs", "supply_preference", "onsite_reason");
+    private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities", "external_inputs", "supply_preference", "onsite_reason", "constraints");
     private static final Set<String> BLOCK_FIELDS = Set.of("offset", "block_id", "properties", "nbt");
     private static final Set<String> PART_FIELDS = Set.of("offset", "item_id", "part");
     private static final Set<String> SIDES = Set.of("center", "up", "down", "north", "south", "east", "west");
@@ -28,6 +28,8 @@ public final class MachineBlueprintDocument {
 
     // 建筑和机器共用方块格式，但大型航站楼不能被机器自主规划的32768格或128格半径二次截断。
     public static void validateBuildingWire(JsonObject document) {
+        // 普通建筑执行器尚不承接机器约束，必须拒绝而不是接收后静默丢弃。
+        if (document != null && document.has("constraints")) throw bad("machine constraints require design_machine/build_machine");
         var budget = BuildingBudgets.current();
         normalized(document, budget.maxTargets(), budget.maxRadius());
     }
@@ -37,8 +39,11 @@ public final class MachineBlueprintDocument {
     public static SemanticMachineLayout.Result compile(JsonObject document, SemanticMachineLayout.Registry registry) {
         JsonObject blueprint = normalized(document);
         Set<String> errors = new LinkedHashSet<>();
+        Set<String> forbidden = MachineDesignConstraints.forbiddenMods(blueprint);
         for (JsonElement element : blueprint.getAsJsonArray("blocks")) {
             JsonObject block = element.getAsJsonObject();
+            String dependency = block.get(block.has("part") ? "item_id" : "block_id").getAsString();
+            if (!MachineDesignConstraints.allows(forbidden, dependency)) errors.add("forbidden_mod_dependency: " + dependency);
             if (block.has("part")) {
                 String id = block.get("item_id").getAsString();
                 if (!id.startsWith("ae2:") || !registry.itemExists(id)) errors.add("unsupported_native_part: " + id);
@@ -96,6 +101,12 @@ public final class MachineBlueprintDocument {
         JsonArray cells = document.getAsJsonArray("blocks");
         if (cells.isEmpty() || cells.size() > limit) throw bad("blueprint.blocks must contain 1.." + limit + " targets");
         JsonObject result = new JsonObject(); result.addProperty("schema_version", 1);
+        if (document.has("constraints")) {
+            // 显式机器只接收已能执行的约束，未知字段不能被悄悄忽略。
+            if (!document.get("constraints").isJsonObject()) throw bad("constraints must be an object");
+            keys(document.getAsJsonObject("constraints"), Set.of("forbidden_mods"), "blueprint constraints");
+            result.add("constraints", MachineDesignConstraints.json(MachineDesignConstraints.forbiddenMods(document)));
+        }
         JsonArray blocks = new JsonArray(); result.add("blocks", blocks);
         Set<String> slots = new HashSet<>(), ordinary = new HashSet<>(), parts = new HashSet<>();
         for (JsonElement element : cells) {

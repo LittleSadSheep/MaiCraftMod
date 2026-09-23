@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachineControlTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReviewTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraintsTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
 import java.util.Map;
@@ -73,6 +74,7 @@ public final class MachineRegressionSuite {
         MachineSurveyModelTest.main(args);
         VehicleRegressionSuite.main(args);
         MachineDesignReviewTest.main(args);
+        MachineDesignConstraintsTest.main(args);
         SemanticMachineLayoutTest.main(args);
         MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);

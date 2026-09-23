@@ -195,6 +195,7 @@ public final class MachineConstructionPlan {
             var value = raw.getAsJsonObject(); nativeMaterials.merge(value.get("item_id").getAsString(), value.get("count").getAsInt(), Math::addExact); });
         JsonObject materialCounts = new JsonObject(); nativeMaterials.forEach(materialCounts::addProperty);
         report.add("native_material_counts", materialCounts);
+        MachineDesignConstraints.verifyMaterials(layout.blueprint(), report);
         report.addProperty("source_fluid_targets", blocks.values().stream().filter(MachineConstructionPlan::isFluid).count());
         report.addProperty("native_material_scope", "full installation upper bound; already matching blocks and source fluids are reused");
         return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities);
