@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 
-/** Capture the actual remainder that OutputHelper discards, after the native insertion executes once. */
+/** 原生插入执行一次后，捕获 OutputHelper 会丢弃的真实剩余物品。 */
 @Pseudo
 @Mixin(targets = "mekanism.api.recipes.outputs.OutputHelper", remap = false)
 public abstract class MekOutputProductionMixin {

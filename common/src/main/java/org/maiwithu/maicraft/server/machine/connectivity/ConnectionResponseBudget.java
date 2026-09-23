@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** Keep every edge verdict while fitting the protocol's receipt envelope. */
+/** 在符合协议回执容量限制的同时保留每条边的判定结果。 */
 final class ConnectionResponseBudget {
     static final int MAX_CHARS = 48_000;
     private static final Set<String> COMPACT_FIELDS = Set.of("index", "from_index", "to_index", "status", "reason",
@@ -37,7 +37,7 @@ final class ConnectionResponseBudget {
             if (route.remove("sample_identity") != null) route.addProperty("sample_identity_omitted", true);
         }
         if (result.toString().length() > MAX_CHARS) {
-            // Individual status/native_support/reason remain complete; aggregate flags remain at the top level.
+            // 每项的 status/native_support/reason 保持完整；聚合标记保留在顶层。
             for (String name : new String[]{"edges", "intermediate"}) {
                 for (var value : result.getAsJsonArray(name)) {
                     value.getAsJsonObject().remove("operational");

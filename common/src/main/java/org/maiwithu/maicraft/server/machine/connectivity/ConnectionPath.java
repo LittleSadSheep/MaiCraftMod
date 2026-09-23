@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Set;
 import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
-/** Bounded explicit paths; geometry is a request constraint, never connection evidence. */
+/** 有界的显式路径；几何结构是请求约束，不是连接证据。 */
 record ConnectionPath(String system, String medium, List<Point> positions) {
     static final int MAX_POSITIONS = 128;
     record Point(int x, int y, int z) {

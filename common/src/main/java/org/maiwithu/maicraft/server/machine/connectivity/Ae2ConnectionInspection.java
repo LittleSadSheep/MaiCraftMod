@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.List;
 import java.util.Map;
 
-/** AE2 19: every physical edge and each multipart's internal pass-through is checked. */
+/** AE2 19：逐一核验每条物理边，以及每个多部件结构内部的转发连接。 */
 final class Ae2ConnectionInspection {
     private static final String HOST = "appeng.api.networking.IInWorldGridNodeHost";
     private static final String NODE = "appeng.api.networking.IGridNode";
@@ -44,7 +44,7 @@ final class Ae2ConnectionInspection {
         Object a = node(entity, incoming), b = node(entity, outgoing);
         if (a == null || b == null) return evidence("planned", false, false, "intermediate_grid_port_missing");
         if (a == b) return readiness(a, b, "same_native_node_pass_through");
-        // Same grid alone could be joined elsewhere in the world; require the local internal edge.
+        // 仅确认属于同一网络可能会误判世界另一处的连接，因此必须核实本地内部边。
         Object raw = NativeApi.call(a, NODE, "getConnections");
         if (!(raw instanceof List<?> connections) || connections.size() > 64) {
             return evidence("unknown", false, false, "intermediate_connection_list_outside_budget");
@@ -72,7 +72,7 @@ final class Ae2ConnectionInspection {
         result.details().addProperty("same_grid", same);
         result.details().addProperty("booted", booted); result.details().addProperty("powered", powered);
         result.details().addProperty("channels_satisfied", channels);
-        // Identity is scoped to this observation only, not a durable network or storage identifier.
+        // 身份只在本次观察中有效，不是持久化网络或存储标识。
         if (grid != null) result.details().addProperty("observation_grid_identity", Integer.toHexString(System.identityHashCode(grid)));
         return result;
     }

@@ -5,7 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.List;
 
-/** Native topology, readiness, resource compatibility and temporal flow are separate claims. */
+/** 原生拓扑、就绪状态、资源兼容性和时间流量是彼此独立的证明。 */
 record ConnectionEvidence(String status, boolean connected, boolean operational, String reason,
                           String provenance, JsonObject details) {
     static ConnectionEvidence of(String status, boolean connected, boolean operational, String reason,

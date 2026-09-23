@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 
-/** Records the actual cached inventory position at extraction, before later rotations can change it. */
+/** 提取发生时记录实际缓存的库存位置，避免后续旋转改变位置。 */
 @Pseudo
 @Mixin(targets = "mekanism.common.tile.TileEntityLogisticalSorter", remap = false)
 public abstract class MekSorterSourceMixin {

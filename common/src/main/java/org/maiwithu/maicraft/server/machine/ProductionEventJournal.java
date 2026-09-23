@@ -7,7 +7,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
-/** Ordered global cursors with independently retained endpoint histories and endpoint-specific gaps. */
+/** 按顺序分配全局游标，独立保留各端点历史，并记录各自的缺口。 */
 public final class ProductionEventJournal {
     public record OrderingMarker(String scope, long sequence, long tick) {}
     private final String scope;
@@ -16,7 +16,7 @@ public final class ProductionEventJournal {
 
     public ProductionEventJournal(String dimension) { scope = dimension + ":" + UUID.randomUUID(); }
     public long latestSequence() { return sequence; }
-    /** Actual successful extraction ordering only; no recipe or transfer event is fabricated. */
+    /** 只记录实际成功提取的顺序；不会伪造配方或转移事件。 */
     public OrderingMarker markExtraction(long tick) { return new OrderingMarker(scope, ++sequence, tick); }
     public boolean validCursor(long after, String expectedScope) {
         return after >= 0 && after <= sequence && (expectedScope == null || scope.equals(expectedScope));
@@ -80,7 +80,7 @@ public final class ProductionEventJournal {
         long next = after;
         boolean truncated = false;
         for (ProductionJournalEvent event : available.values()) {
-            // Every accepted event individually fits; a truncated page always advances over an actual event.
+            // 每个已接受事件都能单独放入；截断页面时仍会推进到某个实际事件之后。
             if (events.size() >= 64 || length + event.encoded().length() > 48_000 || nodes + event.nodes() > 7000) {
                 truncated = true; break;
             }

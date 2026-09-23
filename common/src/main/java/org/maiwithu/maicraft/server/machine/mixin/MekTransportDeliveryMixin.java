@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Slice;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Optional Mekanism 10.7 observer; native calls run exactly once and retain their return value. */
+/** 可选的 Mekanism 10.7 观察器；原生调用只运行一次并保留其返回值。 */
 @Pseudo
 @Mixin(targets = "mekanism.common.content.network.transmitter.LogisticalTransporterBase", remap = false)
 public abstract class MekTransportDeliveryMixin {

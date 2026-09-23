@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 
-/** The native response predicts a count; only these actual extraction returns can prove its source. */
+/** 原生响应只预测数量；只有这些真实提取返回值才能证明物品来源。 */
 @Pseudo
 @Mixin(targets = "mekanism.common.lib.inventory.HandlerTransitRequest$HandlerItemData", remap = false)
 public abstract class MekItemExtractionMixin {

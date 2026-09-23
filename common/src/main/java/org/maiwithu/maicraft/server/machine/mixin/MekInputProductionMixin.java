@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 
-/** Each target has one applicable shrink call; bridge methods and simulations cannot double count it. */
+/** 每个目标只存在一次适用的 shrink 调用；桥接方法和模拟执行不能重复计数。 */
 @Pseudo
 @Mixin(targets = {"mekanism.api.recipes.inputs.InputHelper$1", "mekanism.api.recipes.inputs.InputHelper$3",
         "mekanism.api.recipes.inputs.InputHelper$ChemicalInputHandler"}, remap = false)

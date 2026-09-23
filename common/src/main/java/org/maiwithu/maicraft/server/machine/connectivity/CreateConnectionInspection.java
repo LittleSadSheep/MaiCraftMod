@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorBridge;
 
-/** Create 6: query propagation rules and existing memberships without creating a network. */
+/** Create 6：只查询传动传播规则和现有成员关系，不创建网络。 */
 final class CreateConnectionInspection {
     private static final String KINETIC = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
@@ -34,8 +34,7 @@ final class CreateConnectionInspection {
                 && (!ChainConveyorBridge.connections(from).contains(to.getBlockPos().subtract(from.getBlockPos()))
                 || !ChainConveyorBridge.connections(to).contains(from.getBlockPos().subtract(to.getBlockPos()))))
             return evidence("planned", false, false, "native_chain_conveyor_link_absent_or_one_sided");
-        // isConnected itself assumes the caller already selected a propagation neighbor.
-        // In particular, aligned shafts at arbitrary distances must never be accepted.
+        // isConnected 本身假设调用方已选定传动邻居；特别是，不能把任意距离上方向一致的传动轴认作连接。
         boolean neighbor = candidate(from, to) || candidate(to, from);
         boolean connected = neighbor && (NativeApi.truth(NativeApi.call(null, PROPAGATOR, "isConnected", from, to))
                 || NativeApi.truth(NativeApi.call(null, PROPAGATOR, "isConnected", to, from)));

@@ -10,7 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** Connection-owned endpoint retention with separate quotas for unobserved traffic. */
+/** 按连接保留端点历史，并为未观察到的流量单独分配配额。 */
 final class ProductionHistoryIndex {
     static final int RETAINED_ENDPOINTS = 64;
     static final int ENDPOINTS_PER_OWNER = 32;
