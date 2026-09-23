@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
 import org.maiwithu.maicraft.core.integration.ftbquests.ReflectiveFtbQuestsAccess;
 import java.util.Arrays;
 
-/** Client-thread-only registry facts plus automatically discovered Ponder reference documents. */
+/** 仅在客户端线程读取注册表事实，并自动发现 Ponder 参考文档。 */
 public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
     public static final String BLOCK = "maicraft://knowledge/block/";
     private final PonderKnowledgeSource ponder = new PonderKnowledgeSource(new ReflectivePonderAccess(), MinecraftKnowledgeSource::displayName);

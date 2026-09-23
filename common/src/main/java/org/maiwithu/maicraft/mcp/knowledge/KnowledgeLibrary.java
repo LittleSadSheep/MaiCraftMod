@@ -18,7 +18,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
 
-/** Metadata-only discovery, explicit Markdown reads, and a tool fallback for resource-blind hosts. */
+/** 仅通过元数据发现资源、按需读取 Markdown，并为无法读取资源的宿主提供工具回退。 */
 public final class KnowledgeLibrary {
     public static final String INDEX = "maicraft://knowledge/index";
     public static final String GUIDE = "maicraft://knowledge/guide";

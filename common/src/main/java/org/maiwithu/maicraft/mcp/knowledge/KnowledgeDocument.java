@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
-/** Read-only reference material, separate from instructions and live machine capability claims. */
+/** 只读参考资料，与指令和实时机器能力声明分开。 */
 public record KnowledgeDocument(String uri, String name, String title, String description, String text, String mimeType) {
     public KnowledgeDocument(String uri, String name, String title, String description, String text) {
         this(uri, name, title, description, text, "text/markdown");
