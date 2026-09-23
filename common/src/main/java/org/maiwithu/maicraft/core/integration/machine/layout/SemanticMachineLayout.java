@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReview;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraints;
+import org.maiwithu.maicraft.core.integration.machine.MachineProcessingCapabilities;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Bounds;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
@@ -30,6 +31,11 @@ public final class SemanticMachineLayout {
         boolean blockExists(String id);
         boolean itemExists(String id);
         boolean supportsState(String blockId, Map<String, String> properties);
+        // 组合校验询问组件原生接口，未提供适配证据时不能从方块名称猜测加工能力。
+        default MachineProcessingCapabilities processing(String blockId, Map<String, String> properties) {
+            return MachineProcessingCapabilities.unavailable("processing_adapter_unavailable");
+        }
+        default boolean processingSpaceClear(String blockId, Map<String, String> properties) { return blockId.equals("minecraft:air"); }
     }
     public record Result(boolean buildable, JsonObject blueprint, JsonObject report) {}
     private record Instance(String id, String name, String blockId, String role, Pos position, MachineLayoutCatalog.Profile profile,

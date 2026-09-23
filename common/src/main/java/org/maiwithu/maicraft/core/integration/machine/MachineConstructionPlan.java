@@ -27,6 +27,7 @@ import com.google.gson.JsonArray;
 import java.util.Comparator;
 import net.minecraft.world.level.block.LiquidBlock;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
 
 /**
  * 把机器布局或逐格蓝图变成固定的装配计划：普通方块、AE2 部件、维护通道，以及最后要封闭的施工洞口。
@@ -75,6 +76,12 @@ public final class MachineConstructionPlan {
             public boolean supportsState(String id, Map<String, String> properties) {
                 try { MachinePlacementRules.resolveState(id, properties); return true; }
                 catch (IllegalArgumentException unavailable) { return false; }
+            }
+            public MachineProcessingCapabilities processing(String id, Map<String, String> properties) {
+                return CreateProcessingCapabilities.describe(MachinePlacementRules.resolveState(id, properties));
+            }
+            public boolean processingSpaceClear(String id, Map<String, String> properties) {
+                return CreateProcessingCapabilities.openProcessingSpace(MachinePlacementRules.resolveState(id, properties));
             }
         };
     }
