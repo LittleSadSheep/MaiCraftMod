@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 
-/** Live site constraints shared by surveying, supply, construction and the final activation click. */
+/** 由选址勘查、材料供给、施工和最后激活传送门点击共用的实时场地约束。 */
 record PortalPreparationSite(NetherPortalFrame nether, EndPortalFrame end) {
     PortalPreparationSite {
         if ((nether == null) == (end == null)) throw new IllegalArgumentException("exactly one portal type is required");
@@ -51,7 +51,7 @@ record PortalPreparationSite(NetherPortalFrame nether, EndPortalFrame end) {
         }) && interior().stream().allMatch(p -> NetherPortalFrame.empty(read(world, p)));
     }
 
-    /** A new raised frame needs solid ground and a clear approach on both sides; no clearing is inferred. */
+    /** 新建高架门框需要坚实地面和两侧畅通的接近路线；不会推断或授权清除障碍。 */
     boolean newSite(ClientLevel world) {
         if (nether == null || !valid(world) || interior().stream().anyMatch(p -> !air(world, p))) return false;
         Direction normal = nether.axis() == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
@@ -80,7 +80,7 @@ record PortalPreparationSite(NetherPortalFrame nether, EndPortalFrame end) {
     BuildTaskRecord construction(ClientLevel world, String callId, long deadline) {
         var record = new BuildTaskRecord(callId, deadline, missingBlocks(world), false);
         record.materialSupplyProtection(footprint());
-        // Navigation preserves the whole frame; only the explicit build target may place missing obsidian.
+        // 导航会保护整个门框；只有明确指定的施工目标才能放置缺失的黑曜石。
         record.executionGuards(frames(), player -> player.level() == world && valid(world),
                 (player, pos) -> player.level() == world && valid(world)
                         && (frames().contains(pos) ? air(world, pos) : !interior().contains(pos)),
