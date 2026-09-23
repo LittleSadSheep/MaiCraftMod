@@ -32,6 +32,7 @@ public final class MachineAssemblyResources {
         belt.addProperty("processing_surface", "Only horizontal belts support the external-workpiece processing relation; dry prepared spans only.");
         belt.addProperty("transport_direction", "First/second define connector geometry, not guaranteed item flow. Verify actual motion and signed kinetic speed before claiming the intended transport direction.");
         belt.addProperty("power_interfaces", "Endpoint shafts are automatic. Add intermediate pulley positions with pulleys. Review power_ports for final block, offset, axis, connection face and stable port ID; installed/powered remain unknown until observed. Adjacent turning belts exchange items, not necessarily rotation.");
+        belt.addProperty("power_binding", "Select a reviewed power_ports ID with external_inputs:[{id,medium:kinetic,port,minimum_rpm?,reason?}]. Compilation resolves the reference to the final belt block. After construction, connect_external_input uses your input id and freshly observed native shaft faces; the temporary preparation shaft is not the final target.");
         try { if (CreateBeltAccess.available()) belt.addProperty("endpoint_distance_exclusive_limit", CreateBeltAccess.maximumLength()); }
         catch (RuntimeException unavailable) { belt.addProperty("available", false); belt.addProperty("unavailable_reason", unavailable.getMessage()); }
         JsonArray installers = new JsonArray(); installers.add(belt); result.add("native_installers", installers);
@@ -57,7 +58,13 @@ public final class MachineAssemblyResources {
                        "pulleys":{"type":"array","items":{"$ref":"#/$defs/position"}},"flow":{"enum":["first_to_second","second_to_first"]}}}},
                      "processing":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["processor","surface"],"properties":{
                        "processor":{"$ref":"#/$defs/position"},"surface":{"$ref":"#/$defs/position"}}}}}},
-                   "external_inputs":{"type":"array"},"supply_preference":{"enum":["external","onsite"]},"onsite_reason":{"type":"string"},
+                   "external_inputs":{"type":"array","maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["id","medium"],"properties":{
+                     "id":{"type":"string","pattern":"^[a-zA-Z0-9_.-]+$","maxLength":64},"medium":{"enum":["kinetic","energy","fluids","chemicals","items"]},
+                     "port":{"type":"string","maxLength":64},"offset":{"$ref":"#/$defs/position"},"face":{"enum":["up","down","north","south","east","west"]},"block_id":{"type":"string"},
+                     "minimum_rpm":{"type":"integer","minimum":1,"maximum":1000000},"resource":{"type":"string"},"reason":{"type":"string","minLength":1,"maxLength":512}},
+                     "oneOf":[{"required":["port"],"properties":{"medium":{"const":"kinetic"}},"not":{"anyOf":[{"required":["offset"]},{"required":["face"]},{"required":["block_id"]},{"required":["resource"]}]}},
+                       {"required":["offset","face","block_id"],"not":{"required":["port"]}}]}},
+                   "supply_preference":{"enum":["external","onsite"]},"onsite_reason":{"type":"string"},
                    "metadata":{"type":"object"},"evidence":{"type":"object"},"entities":{"type":"array"}},
                  "anyOf":[{"properties":{"blocks":{"minItems":1}}},{"required":["assembly"],"properties":{"assembly":{"required":["installations"],"properties":{"installations":{"minItems":1}}}}}],
                  "$defs":{"position":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"integer"}}}}

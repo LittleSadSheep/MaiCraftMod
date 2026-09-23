@@ -14,6 +14,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyPorts;
 
 /** Declared passive boundaries, never generators or proof that a utility is connected. */
 public final class MachineUtilityInputs {
@@ -80,7 +81,7 @@ public final class MachineUtilityInputs {
     /** Validate concrete declarations against the exact declared block and an unobstructed exterior ray. */
     public static List<Input> parse(JsonObject blueprint) {
         supplyPreference(blueprint);
-        List<Input> declarations = parseDeclarations(rows(blueprint));
+        List<Input> declarations = parseDeclarations(MachineAssemblyPorts.bindInputs(blueprint, rows(blueprint)));
         if (declarations.isEmpty()) return declarations;
         if (!blueprint.has("blocks") || !blueprint.get("blocks").isJsonArray()) throw bad("external inputs require blueprint.blocks");
         Map<BlockPos, JsonObject> cells = new LinkedHashMap<>();
@@ -89,11 +90,17 @@ public final class MachineUtilityInputs {
             JsonObject prior = cells.putIfAbsent(pos, cell);
             if (prior != null && (!cell.has("part") || !prior.has("part"))) throw bad("ambiguous external input target");
         }
+        cells.putAll(MachineAssemblyPorts.finalBlocks(blueprint));
         for (Input input : declarations) {
             JsonObject cell = cells.get(input.offset);
             if (cell == null || cell.has("part") || !cell.has("block_id")
                     || !input.blockId.equals(cell.get("block_id").getAsString())) throw bad("external input must identify one exact declared full block: " + input.id);
             if (input.medium.equals("kinetic")) {
+                if (input.blockId.equals("create:belt")) {
+                    // 中间带轮允许从侧面接入弯折动力路线；实际相邻端口及网络状态由原生动力规划器复核。
+                    if (!MachineAssemblyPorts.hasBeltPort(blueprint, input.offset, input.face)) throw bad("native_belt_power_port_unavailable: " + input.id);
+                    continue;
+                }
                 JsonObject state = cell.has("properties") && cell.get("properties").isJsonObject() ? cell.getAsJsonObject("properties") : new JsonObject();
                 if (!state.has("axis") || !state.get("axis").isJsonPrimitive() || !state.get("axis").getAsString().equals(input.face.getAxis().getName()))
                     throw bad("kinetic input shaft axis must explicitly match its connection face");
@@ -147,7 +154,7 @@ public final class MachineUtilityInputs {
     private static boolean passiveConnector(String medium, String id) {
         if (id.equals(connector(medium))) return true;
         return switch (medium) {
-            case "kinetic" -> false;
+            case "kinetic" -> id.equals("create:belt");
             case "energy" -> id.matches("mekanism:(basic|advanced|elite|ultimate)_universal_cable");
             case "fluids" -> id.equals("create:fluid_tank") || id.matches("mekanism:(basic|advanced|elite|ultimate)_(mechanical_pipe|fluid_tank)");
             case "chemicals" -> id.matches("mekanism:(basic|advanced|elite|ultimate)_(pressurized_tube|chemical_tank)");

@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
@@ -59,5 +60,40 @@ public final class MachineAssemblyPorts {
         // 端口引用绑定锚点内的位置和接入面，添加另一段带或调整数组顺序不会让既有引用漂移。
         String address = at.getX() + "," + at.getY() + "," + at.getZ() + ":" + face.getName();
         return "kinetic_" + UUID.nameUUIDFromBytes(address.getBytes(StandardCharsets.UTF_8));
+    }
+    public static JsonArray bindInputs(JsonObject blueprint, JsonArray inputs) {
+        Map<String, JsonObject> ports = new LinkedHashMap<>();
+        for (var raw : describe(blueprint)) ports.put(raw.getAsJsonObject().get("id").getAsString(), raw.getAsJsonObject());
+        Map<BlockPos, JsonObject> finals = finalBlocks(blueprint); JsonArray result = new JsonArray();
+        for (var raw : inputs) {
+            if (!raw.isJsonObject()) throw new IllegalArgumentException("external input must be an object");
+            JsonObject row = raw.getAsJsonObject().deepCopy();
+            if (row.has("port")) {
+                // 模型引用已公开的端口即可选择接入点，不允许再附加矛盾坐标或把动力端口当成物品库存。
+                for (String key : row.keySet()) if (!Set.of("id", "medium", "port", "minimum_rpm", "reason").contains(key))
+                    throw new IllegalArgumentException("port input cannot override " + key);
+                if (!row.get("port").isJsonPrimitive() || !row.getAsJsonPrimitive("port").isString()) throw new IllegalArgumentException("power port must be an ID");
+                JsonObject port = ports.get(row.get("port").getAsString());
+                if (port == null) throw new IllegalArgumentException("unknown_power_port: " + row.get("port"));
+                if (!row.has("medium") || !row.get("medium").isJsonPrimitive() || !row.getAsJsonPrimitive("medium").isString()
+                        || !row.get("medium").getAsString().equals("kinetic")) throw new IllegalArgumentException("power port requires kinetic medium");
+                row.remove("port");
+                for (String key : List.of("offset", "face", "block_id")) row.add(key, port.get(key).deepCopy());
+            } else if (row.has("block_id") && row.get("block_id").isJsonPrimitive()
+                    && row.get("block_id").getAsString().equals("create:shaft") && row.has("offset")) {
+                // 兼容原来按准备轴声明的接口：同格安装成带轮后，持久目录必须绑定真实的最终方块。
+                JsonObject actual = finals.get(MachineAssemblyDocument.position(row.get("offset")));
+                if (actual != null && actual.get("block_id").getAsString().equals("create:belt")) row.addProperty("block_id", "create:belt");
+            }
+            result.add(row);
+        }
+        return result;
+    }
+    public static boolean hasBeltPort(JsonObject blueprint, BlockPos at, Direction face) {
+        for (var raw : describe(blueprint)) {
+            JsonObject port = raw.getAsJsonObject();
+            if (port.get("id").getAsString().equals(id(at, face)) && port.get("block_id").getAsString().equals("create:belt")) return true;
+        }
+        return false;
     }
 }

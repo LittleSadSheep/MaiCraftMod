@@ -2,8 +2,10 @@
 package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import java.util.Map;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
 /** 验证只声明运输路线也能生成端轴；显式设备、部件和模组禁令保持约束力。 */
@@ -28,6 +30,15 @@ public final class MachineBeltAssemblyTest {
         check(ports.size() == 6 && powered.blueprint().getAsJsonArray("blocks").size() == 3, "two endpoints and one intermediate pulley");
         check(ports.get(0).getAsJsonObject().get("powered").isJsonNull(), "a planned port is not an energized observation");
         check(ports.equals(MachineBlueprintDocument.compile(powered.blueprint(), REGISTRY).report().get("power_ports")), "stable port references");
+        JsonObject connected = withPulley.deepCopy();
+        JsonObject inputPort = JsonParser.parseString("{\"id\":\"drive\",\"medium\":\"kinetic\",\"minimum_rpm\":32}").getAsJsonObject();
+        inputPort.addProperty("port", ports.get(0).getAsJsonObject().get("id").getAsString());
+        var inputs = new JsonArray(); inputs.add(inputPort); connected.add("external_inputs", inputs);
+        var resolved = MachineBlueprintDocument.compile(connected, REGISTRY).blueprint();
+        check(MachineUtilityInputs.parse(resolved).getFirst().blockId().equals("create:belt"), "stored power target is the final pulley, not its temporary shaft");
+        check(MachineUtilityInputs.parseStoredDeclarations(resolved.getAsJsonArray("external_inputs")).getFirst().minimumRpm() == 32, "port selection and RPM survive the installation catalog");
+        inputPort.addProperty("face", "east"); rejects(connected, "port input cannot override face");
+        inputPort.remove("face"); inputPort.addProperty("port", "imaginary"); rejects(connected, "unknown_power_port");
         installation.add("pulleys", JsonParser.parseString("[[2,0,1]]")); rejects(withPulley, "belt_pulley_must_be_unique_and_on_span");
         input.add("constraints", JsonParser.parseString("{\"forbidden_mods\":[\"create\"]}"));
         check(!MachineBlueprintDocument.compile(input, REGISTRY).buildable(), "derived materials obey namespace restrictions");
