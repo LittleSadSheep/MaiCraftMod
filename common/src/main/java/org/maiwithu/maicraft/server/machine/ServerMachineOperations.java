@@ -72,7 +72,8 @@ public final class ServerMachineOperations {
         configuration.addProperty("native_interaction_reach", true);
         JsonArray actions = new JsonArray();
         if (NativeApi.present("com.simibubi.create.foundation.blockEntity.SmartBlockEntity")) {
-            actions.add("create.speed"); actions.add("create.filter");
+            // Create 已加载时只发布配置入口支持的动作，设计知识页也复用这份动作名称。
+            CreateConfigurationContract.ACTIONS.forEach(actions::add);
         }
         if (NativeApi.present("mekanism.common.tile.base.TileEntityMekanism")) {
             for (String action : new String[]{"mekanism.side", "mekanism.eject", "mekanism.redstone",

@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.core.integration.create;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -25,6 +28,30 @@ public final class CreateFunnelPlacement {
     private static final String SMART = "com.simibubi.create.foundation.blockEntity.SmartBlockEntity";
     private static final String DIRECT = "com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour";
     private CreateFunnelPlacement() {}
+    public static boolean hasNativeItemTransition(BlockItem item) {
+        return NativeApi.is(item, "com.simibubi.create.content.logistics.funnel.FunnelItem");
+    }
+    public static JsonObject describe(BlockState state) {
+        if (!NativeApi.is(state.getBlock(), VARIANT) && !NativeApi.is(state.getBlock(), FUNNEL)) return null;
+        JsonObject result = new JsonObject();
+        // 普通漏斗和带上漏斗有不同状态字段，公开资料不能把最终变体的 shape 冒充普通漏斗属性。
+        result.addProperty("belt_variant", NativeApi.is(state.getBlock(), VARIANT));
+        result.addProperty("ordinary_funnel_state", "facing and extracting; shape only belongs to the belt-mounted variant");
+        result.addProperty("operation", "native_block_item_placement"); result.addProperty("dependency_offset", "[0,-1,0] when horizontal or belt-mounted");
+        result.addProperty("final_identity_required", true);
+        try {
+            BlockState variant = NativeApi.is(state.getBlock(), VARIANT) ? state : (BlockState) NativeApi.call(state.getBlock(), FUNNEL,
+                    "getEquivalentBeltFunnel", new SupportView(Blocks.AIR.defaultBlockState()), BlockPos.ZERO, state.setValue(BlockStateProperties.FACING, Direction.NORTH));
+            result.addProperty("supported_final_variant", BuiltInRegistries.BLOCK.getKey(variant.getBlock()).toString());
+            result.addProperty("placement_item", BuiltInRegistries.ITEM.getKey(material(variant)).toString());
+            result.addProperty("support_rule", "The block below must natively support belt funnels; placement runs after that support is installed. On supported surfaces declare the final variant, not the ordinary funnel ID.");
+            result.addProperty("inventory_side", "opposite of facing");
+            JsonArray required = new JsonArray(); required.add("facing"); required.add("shape"); result.add("final_variant_author_state", required);
+            result.addProperty("final_variant_shape_rule", "Perpendicular to a belt: pulling receives into inventory, pushing feeds the belt. Along the belt: retracted. Extended needs a separate interaction and is not available through this placement operation.");
+            result.addProperty("execution_verified", false);
+        } catch (RuntimeException | LinkageError unavailable) { result.addProperty("unknown", "native_funnel_placement_contract_unavailable"); }
+        return result;
+    }
 
     public static BlockItem material(BlockState state) {
         return nativeRead(() -> materialNative(state));

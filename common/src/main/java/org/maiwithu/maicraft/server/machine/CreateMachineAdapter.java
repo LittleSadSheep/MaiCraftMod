@@ -85,11 +85,13 @@ final class CreateMachineAdapter {
     }
 
     static JsonObject configure(ServerPlayer player, BlockEntity entity, JsonObject body) {
+        // 先用公开的同一份参数契约校验，再访问眼前设备的原生配置行为，避免说明与执行范围分叉。
+        CreateConfigurationContract.validate(body);
         String action = ServerAccess.text(body, "action");
         if (!NativeApi.is(entity, SMART)) throw ServerAccess.denied("unsupported", "Target is not a Create machine");
         JsonObject result = new JsonObject();
         if (action.equals("create.speed")) {
-            int value = ServerAccess.integer(body, "value", -256, 256);
+            int value = CreateConfigurationContract.speedValue(body);
             if (!NativeApi.is(entity, SPEED)) throw ServerAccess.denied("unsupported", "A rotation speed controller is required");
             Object target = NativeApi.field(entity, SPEED, "targetSpeed");
             requireBehaviourAccess(player, target);
@@ -131,7 +133,7 @@ final class CreateMachineAdapter {
         JsonObject result = new JsonObject();
         if (action.equals("create.speed")) {
             if (!NativeApi.is(entity, SPEED)) return ServerMachineConfiguration.unknown("not_a_speed_controller");
-            int requested = ServerAccess.integer(body, "value", -256, 256);
+            int requested = CreateConfigurationContract.speedValue(body);
             Object target = NativeApi.field(entity, SPEED, "targetSpeed");
             int actual = (int) NativeApi.number(NativeApi.call(target, null, "getValue"));
             result.addProperty("value", actual); result.addProperty("verified_configuration", actual == requested);

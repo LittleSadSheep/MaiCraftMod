@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltAccess;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.server.machine.CreateConfigurationContract;
 
 /** 显式机器组合契约只描述组件与原生动作，不发布任何按产物选择的工作站模板。 */
 public final class MachineAssemblyResources {
@@ -14,7 +15,7 @@ public final class MachineAssemblyResources {
     private MachineAssemblyResources() {}
     public static List<KnowledgeDocument.Entry> entries() {
         return List.of(new KnowledgeDocument.Entry(URI, "machine.assembly", "通用机器组合与原生安装",
-                "显式蓝图、机械手与承载面、传送带原生连接、模组约束、配方工序和运行验收。", "machine assembly blueprint belt deployer processing 机器 加工 机械手 传送带"));
+                "显式蓝图、加工承载面、原生安装依赖、动力端口与配置参数。", "machine assembly blueprint belt deployer processing pulley shaft kinetic filter configuration create.filter create.speed 机器 加工 机械手 传送带 传动轴 动力 漏斗 配置"));
     }
     public static KnowledgeDocument read(String uri) {
         if (!URI.equals(uri)) return null;
@@ -23,7 +24,10 @@ public final class MachineAssemblyResources {
         result.addProperty("component_contract", MinecraftKnowledgeSource.BLOCK + "{namespace}/{path}");
         result.addProperty("recipe_contract", RecipeKnowledgeSource.PREFIX + "{namespace}/{path}");
         result.addProperty("production_contract", KnowledgeLibrary.PROCESSES);
+        result.addProperty("installation_guide", KnowledgeLibrary.BLUEPRINT);
         result.addProperty("configuration_contract", "production.configurations uses installed native operations; keep filters, mode and input setup explicit, never copy observed NBT into placement");
+        result.add("native_configuration_operations", CreateConfigurationContract.describe());
+        result.addProperty("review_workflow", "Read component contracts, choose the transport topology, review the blueprint, inspect generated power_ports and item_handoffs, bind selected external_inputs, and revise from validation.issues/design_diagnostics. Keep the same product and mod restrictions. Use a bounded revision budget; repeated identical errors require a different design or escalation, not unrelated perception calls.");
         result.addProperty("design_policy", "The author selects every component, work surface and transport technology. No product-specific workstation or implicit pipe/sorter/depot is inserted.");
         JsonObject belt = new JsonObject(); belt.addProperty("type", "create:belt"); belt.addProperty("available", CreateBeltAccess.available());
         belt.addProperty("item_id", CreateBeltAccess.ITEM.toString()); belt.addProperty("connector_count_per_link", 1);

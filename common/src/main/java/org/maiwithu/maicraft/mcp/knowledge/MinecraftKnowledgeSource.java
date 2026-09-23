@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.mcp.knowledge;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
+import org.maiwithu.maicraft.core.integration.create.CreateKineticCapabilities;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -75,6 +78,12 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
         text.append("## 原生工件加工接口\n\n```json\n").append(CreateProcessingCapabilities.descriptor(block.defaultBlockState()))
                 .append("\n```\n\n该接口仅描述外部工件加工与承载，不代表设备全部能力；完整机器组合契约见 ")
                 .append(MachineAssemblyResources.URI).append("。\n\n");
+        // 设计者同时看到动力接入与原生安装依赖，自动展开不会把轴向和最终形态藏在施工器内部。
+        for (JsonObject descriptor : new JsonObject[]{CreateKineticCapabilities.describe(block.defaultBlockState()), CreateFunnelPlacement.describe(block.defaultBlockState())})
+            if (descriptor != null) text.append("## 原生传动或安装契约\n\n```json\n").append(descriptor).append("\n```\n\n");
+        // 工件加工与库存补料是两个接口；提供带版本的源码规则，避免把相邻摆放误当成自动供料。
+        JsonObject transfer = NativeItemTransferContract.reference(id.toString());
+        if (transfer != null) text.append("## 库存传输源码参考\n\n```json\n").append(transfer).append("\n```\n\n");
         List<String> baseTooltip = CreateTooltipKnowledge.baseTooltip(block.asItem());
         if (!baseTooltip.isEmpty()) {
             text.append("## 默认物品说明\n\n");

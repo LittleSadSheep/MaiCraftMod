@@ -58,8 +58,9 @@ public final class MachinePlacementItems {
         return bucket;
     }
     public static BlockState placementState(BlockItem item, BlockPlaceContext context, boolean projectedSupport) {
-        // 临时支承尚未放下时只预测方块朝向；真实落点存在后调用物品原生方法，纳入漏斗等物品的状态转换。
-        if (!projectedSupport && item instanceof BlockItemPlacementAccess access) return access.maicraft$placementState(context);
+        // 临时支承仍按方块预测；带上漏斗需在真实支承处调用物品原生转换，普通方块保持原有候选站位校验。
+        if (!projectedSupport && CreateFunnelPlacement.hasNativeItemTransition(item) && item instanceof BlockItemPlacementAccess access)
+            return access.maicraft$placementState(context);
         return item.getBlock().getStateForPlacement(context);
     }
     /** Mirrors VerticalGearboxItem.updateCustomBlockEntityTag; ordinary GearboxBlock placement always stays Y. */

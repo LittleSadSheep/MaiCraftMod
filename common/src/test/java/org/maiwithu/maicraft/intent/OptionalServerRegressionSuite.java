@@ -60,6 +60,7 @@ import org.maiwithu.maicraft.network.OptionalServerPayloadTest;
 import org.maiwithu.maicraft.network.ProtocolRegressionSuite;
 import org.maiwithu.maicraft.server.inventory.Ae2NativeCraftingCompletionTest;
 import org.maiwithu.maicraft.server.machine.NativeInventoryRegressionTest;
+import org.maiwithu.maicraft.server.machine.CreateConfigurationContractTest;
 import org.maiwithu.maicraft.server.machine.ProductionRetentionTest;
 import org.maiwithu.maicraft.server.machine.ServerNativeRegressionTest;
 import org.maiwithu.maicraft.server.machine.connectivity.ChainConveyorConnectionPathTest;
@@ -72,6 +73,7 @@ import org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest;
 /** Protocol, native resources and production invariants; live mod-world acceptance runs separately. */
 public final class OptionalServerRegressionSuite {
     public static void main(String[] args) throws Exception {
+        CreateConfigurationContractTest.main(args);
         ProtocolRegressionSuite.main(args);
         OptionalServerPayloadTest.main(args);
         ServerAssistanceRegressionSuite.main(args);
