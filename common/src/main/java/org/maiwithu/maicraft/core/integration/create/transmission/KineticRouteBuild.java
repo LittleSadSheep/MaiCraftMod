@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineInstallation;
 
-/** Pure plans become ordinary first-person construction, never direct state or creative inventory writes. */
+/** 纯计划会转换为普通第一人称施工，绝不直接修改方块状态或创造模式背包。 */
 final class KineticRouteBuild {
     private KineticRouteBuild() {}
     static TaskRecord task(LocalPlayer player,String id,long deadline,KineticRouteGeometry.Plan route,

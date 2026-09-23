@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine.discovery;
 
 import java.util.List;
 
-/** Registry names suggest component roles; they do not establish recipes, factory boundaries or working connections. */
+/** 注册表名称只能提示部件用途，不能证明配方、工厂边界或有效连接。 */
 final class MachineDiscoveryHints {
     record Hint(String family, List<String> roles, String basis) {}
     private MachineDiscoveryHints() {}

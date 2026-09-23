@@ -12,7 +12,7 @@ import java.util.Objects;
 import java.util.UUID;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
-/** Bounded session-local ownership receipts prevent a partial route from becoming permission to build a detour. */
+/** 有界的会话级所有权回执可避免将部分路线误当成修建绕行路线的许可。 */
 final class KineticRouteContinuations {
     record Entry(Level world,UUID owner,EconomicKineticTaskRecord request,KineticRouteGeometry.Plan plan,
                  JsonObject costs,BlockEntity source,BlockEntity target,long expires) {}

@@ -42,7 +42,7 @@ final class ElevatorArrivalView implements BlockGetter {
         return new ElevatorArrivalView(world, opened);
     }
 
-    // SlidingDoorMovementBehaviour.getDoorFacing: elevators translate without rotating their cabin.
+    // 与 SlidingDoorMovementBehaviour.getDoorFacing 一致：电梯只平移，不会旋转轿厢。
     static Direction outward(BlockPos local, Direction stateFacing, Vec3 boundsCenter) {
         Direction direction = Direction.get(Direction.AxisDirection.POSITIVE, stateFacing.getAxis());
         Vec3 difference = Vec3.atCenterOf(local).add(Vec3.atLowerCornerOf(stateFacing.getNormal()).scale(-0.45)).subtract(boundsCenter);

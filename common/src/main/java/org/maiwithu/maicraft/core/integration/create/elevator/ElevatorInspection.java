@@ -35,7 +35,7 @@ final class ElevatorInspection {
                 data.put("recent_native_surface_contact", BRIDGE.recentSupport(cabin, player));
                 var geometry = new ElevatorGeometry(cabin.blocks(), cabin.view(), player.getBbWidth(), player.getBbHeight());
                 data.put("support_layers", ElevatorSurvey.supportLayers(geometry.stances));
-                // Static surroundings cannot show a contraption's open doors or protruding collision boxes.
+                // 静态环境无法反映装置门是否打开，也看不到凸出的碰撞箱。
                 Vec3 localFeet = cabin.local(player.position());
                 var nearby = cabin.blocks().entrySet().stream()
                         .filter(e -> e.getKey().distToCenterSqr(localFeet) < 4 * 4)

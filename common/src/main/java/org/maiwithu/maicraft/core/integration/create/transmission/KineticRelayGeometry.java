@@ -9,7 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 
-/** Elevated real chain-conveyor wheels on filled shaft columns, with native-cost links and terminal turns. */
+/** 将真实链式输送轮架高安装在填充的轴柱上，并按原生成本连接、在端点转向。 */
 final class KineticRelayGeometry {
     private record Terminal(Endpoint endpoint, Direction face, BlockPos base) {
         boolean existingWheel() { return face == null; }

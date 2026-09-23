@@ -123,7 +123,7 @@ final class ElevatorGeometry {
         return List.of();
     }
 
-    /** Prefer the connected cabin interior while keeping both boarding and arrival paths valid. */
+    /** 优先选择已连接的轿厢内部，同时保证登乘和到达路线都有效。 */
     // 控制位置要同时能从入口走到、到目的层后能走向出口；在可行位置里偏好甲板中间。
     List<Vec3> interiorPath(Vec3 from, Vec3 entrance, Vec3 exit, Predicate<Vec3> usable,
                             Vec3 sourceOrigin, Vec3 targetOrigin, double deck, double step, LongSet forbidden) {
@@ -141,7 +141,7 @@ final class ElevatorGeometry {
             Vec3 p = stances.get(i);
             if (source.previous[i] == -2 || arrival.previous[i] == -2 || Math.abs(p.y - deck) > step + EPS || !usable.test(p)) continue;
             boolean onDeck = Math.abs(p.y - deck) < EPS;
-            // Center dominates; equally central positions favor space away from either threshold.
+            // 优先轿厢中心；距中心相同的位置中，优先远离两端门槛的空间。
             double threshold = Math.min(p.distanceTo(entrance), p.distanceTo(exit));
             double score = p.distanceToSqr(center) - 0.05 * threshold + 0.001 * source.length[i];
             if (best < 0 || onDeck && !bestOnDeck || onDeck == bestOnDeck && score < bestScore) {
@@ -186,7 +186,7 @@ final class ElevatorGeometry {
         int samples = Math.max(1, (int) Math.ceil(length / 0.15));
         for (int i = 1; i <= samples; i++) {
             Vec3 point = from.lerp(to, (double) i / samples);
-            // Auto-step raises the feet before crossing the riser, matching normal walking.
+            // 跨越台阶前，自动踏步会先抬高脚位，与普通行走行为一致。
             point = new Vec3(point.x, Math.max(from.y, to.y), point.z);
             if (!worldClear(world, loaded, body(point)) || forbidden(point, width, height, forbidden)) return false;
             if (!supported(point.subtract(origin), actual, width)
