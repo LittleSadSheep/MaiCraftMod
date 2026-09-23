@@ -36,9 +36,9 @@ public final class KnowledgeLibraryTest {
             list.add("cursor", page.get("nextCursor")); page = library.request(list);
         }
         // 材料工艺和原生过程知识都只发布元数据，不在默认发现时展开合成树、机制契约或教程正文。
-        check(uris.size() == source.entries().size() + 7 + BuildingModelContractResources.entries().size() && source.reads == 0
+        check(uris.size() == source.entries().size() + 7 + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
                 && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES,
-                        "maicraft://attention", "maicraft://chatflow")),
+                        "maicraft://attention", "maicraft://chatflow", MachineAssemblyResources.URI)),
                 "attention, chatflow, builtins and all extension resources discovered without bodies");
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
         check(library.read(KnowledgeLibrary.RECIPES).text().contains("display_recipes"), "material planning guide available on demand");

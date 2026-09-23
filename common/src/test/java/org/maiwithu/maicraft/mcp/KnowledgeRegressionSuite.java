@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.mcp.knowledge.BuildingTutorialResourcesTest;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSourceTest;
+import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 
 // 验证知识资源库与 HTTP 的只读行为，先初始化原版注册信息以便检查真实方块属性。
 public final class KnowledgeRegressionSuite {
@@ -23,6 +24,7 @@ public final class KnowledgeRegressionSuite {
         BuildingTutorialResourcesTest.main(args);
         // 材料配方页只读取所选工艺页并链接设备教程，缺失知识不能伪装成可执行配方。
         RecipeKnowledgeSourceTest.main(args);
+        MachineAssemblyResourcesTest.main(args);
         EmiRecipeKnowledgeTest.main(args);
         CreateTooltipKnowledgeTest.main(args);
         PonderKnowledgeTest.main(args);

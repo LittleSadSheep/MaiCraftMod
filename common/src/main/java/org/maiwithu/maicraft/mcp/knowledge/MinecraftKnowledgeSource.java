@@ -12,6 +12,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledge;
+import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
 import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
 import java.util.Arrays;
 
@@ -70,6 +71,10 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
         for (Property<?> property : block.getStateDefinition().getProperties()) appendProperty(text, block, property);
         if (block.getStateDefinition().getProperties().isEmpty()) text.append("该方块没有方块状态属性。\n");
         text.append("\n属性来自当前注册表。属性名称不自动证明其物理含义；库存、过滤器、模式等也可能属于方块实体配置。\n\n");
+        // 提供组件的外部工件接口，供模型比较传送带、置物台等承载方式；未知适配不能冒充运行证明。
+        text.append("## 原生工件加工接口\n\n```json\n").append(CreateProcessingCapabilities.descriptor(block.defaultBlockState()))
+                .append("\n```\n\n该接口仅描述外部工件加工与承载，不代表设备全部能力；完整机器组合契约见 ")
+                .append(MachineAssemblyResources.URI).append("。\n\n");
         List<String> baseTooltip = CreateTooltipKnowledge.baseTooltip(block.asItem());
         if (!baseTooltip.isEmpty()) {
             text.append("## 默认物品说明\n\n");

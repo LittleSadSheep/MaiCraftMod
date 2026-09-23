@@ -11,11 +11,11 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.world.item.crafting.Recipe;
 
 /** 用安装版本的原生序列化器读取配方定义；概率、时间及模组条件由原配方保留，不按产物或模组名重编规则。 */
-final class NativeRecipeDefinition {
+public final class NativeRecipeDefinition {
     static final int MAX_BYTES = 32_768, MAX_NODES = 2048, MAX_DEPTH = 16;
     private NativeRecipeDefinition() {}
 
-    static JsonObject read(Recipe<?> recipe, HolderLookup.Provider registries) {
+    public static JsonObject read(Recipe<?> recipe, HolderLookup.Provider registries) {
         JsonObject out = new JsonObject(); out.addProperty("provenance", "installed_native_recipe_serializer");
         // 编码完整只证明读到了序列化字段；动态条件、实际加工能力和产出仍须现场验证。
         out.addProperty("recipe_semantics_complete", false);

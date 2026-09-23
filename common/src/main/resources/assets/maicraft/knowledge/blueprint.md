@@ -271,6 +271,27 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 - 可声明方块 `nbt` 对象及顶层 `entities` 数组，但当前原生施工尚不能通用复现它们。非空目标会在审查中明确返回不支持；不会悄悄忽略。请使用当前 `operate_machine` 已公布的操作配置机器，或移除不打算复现的要求。
 - 液体、Create 传送带、大水车等需要专用安装动作的目标，缺少适配器时会在审查中报告不支持。注册 ID 存在不能证明普通方块放置可以完成它。
 
+### 显式机器组合与原生安装
+
+新组合先读 `maicraft://knowledge/machine_assembly`，再读取相关方块的原生工件接口与当前配方。LLM 明确选择设备、承载面和输送方式；不会因为目标产物名称自动插入工作站、置物台、分拣器或管线。`design` 旧逻辑布局保留兼容，新组合优先使用 `blueprint`。
+
+机器蓝图可声明 `expected_output`（真实目标物品 ID）及 `constraints: {"forbidden_mods":["mekanism","mekanismgenerators","mekanismadditions"]}`。禁用值为精确注册命名空间，计划内新增方块、原生安装材料与配置工具都受检查。有明确产物要求时保留其真实 ID；通用工位或仅检查结构时可以不指定，不能为填字段而虚构或改变产品。
+
+下面是 `assembly` 字段片段，位置与设备由作者选择；它不绑定某种产品或工位数量：
+
+```json
+{
+  "installations": [{"type":"create:belt","first":[0,0,0],"second":[4,0,0]}],
+  "processing": [{"processor":[1,2,0],"surface":[1,0,0]}]
+}
+```
+
+`blocks` 中另行声明两根 `create:shaft`，例如上例两端都显式设 `axis:"z"`；加工设备位于 `[1,2,0]`，其朝向必须符合该组件的原生加工条件。连接器通过真实右键先选第一轴、再选第二轴，消耗一件 `create:belt_connector` 并创建整条带；禁止逐格放置 `create:belt`。中间轴可作为明确的带轮，水平带才作为这种外部工件的加工面；当前原生安装要求干燥路径。
+
+加工位置及动作净空来自组件接口。路径或净空被未声明的方块占用时返回阻塞；不会因为需要通行就自动扩大拆除范围。已经完成且整段原生状态一致的带会直接复用，恢复施工不会先把它拆回准备轴。原生点击结果未确认时不重放，回执保留连接器标记与库存／结构不确定性。
+
+工序、循环次数、中间物品、概率与条件从配方知识的 `display_recipes[].backing_recipe.definition` 读取；EMI 不可用时原生回退页在 `native_fallback.recipes[].native_definition.definition` 保留同类定义。定义可读不代表工艺已实际运行。过滤、模式、上料与启动按 `maicraft://knowledge/processes` 的原生生产协议显式执行；结构正确、工序成功和吞吐效率分别验收，不声称未经测量的全局最优产量。
+
 ## 构建与修改
 
 `design_machine` 和 `build_machine` 的参数中，在 `design`（旧组件图）、`blueprint`（上述对象）、`blueprint_uri`（返回的 Ponder 结构 URI）中选择且仅选择一个。资源 URI 必须先由 Ponder 回放资源生成；过期时重新读取场景提取。

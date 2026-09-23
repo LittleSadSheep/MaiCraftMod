@@ -257,13 +257,13 @@ final class MachineAbilityAdapter {
                 id -> registered(id, true), id -> registered(id, false)) : new JsonObject();
         report.addProperty("review_kind", p.has("design") ? "semantic_design" : "blueprint");
         if (p.has("blueprint_uri")) report.addProperty("blueprint_uri", p.get("blueprint_uri").getAsString());
-        if (p.has("design") && report.getAsJsonObject("validation").get("valid").getAsBoolean()
-                && p.getAsJsonObject("design").has("expected_output")) {
+        JsonObject outputSource = p.has("design") ? p.getAsJsonObject("design") : layout.blueprint();
+        if (outputSource.has("expected_output") && (!p.has("design") || report.getAsJsonObject("validation").get("valid").getAsBoolean())) {
             report.add("recipe_evidence", MachineRecipeEvidence.inspect(player,
-                    goal.parameters().getAsJsonObject("design").get("expected_output").getAsString()));
+                    outputSource.get("expected_output").getAsString()));
             // 审阅只给目标材料的工艺入口；要选机器或继续拆原料时再读EMI，避免设计报告展开整棵配方树。
             report.addProperty("material_knowledge_uri", RecipeKnowledgeSource.uri(
-                    ResourceLocation.parse(p.getAsJsonObject("design").get("expected_output").getAsString())));
+                    ResourceLocation.parse(outputSource.get("expected_output").getAsString())));
         }
         if (snapshot != null) {
             JsonObject context = new JsonObject();

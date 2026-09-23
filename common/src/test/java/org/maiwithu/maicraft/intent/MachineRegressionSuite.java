@@ -8,7 +8,10 @@ import org.maiwithu.maicraft.core.integration.machine.MachineControlTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReviewTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraintsTest;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometryTest;
+import org.maiwithu.maicraft.core.integration.create.BeltLinkReceiptTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyDocumentTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineNativeInstallationTest;
+import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
 import java.util.Map;
@@ -78,7 +81,11 @@ public final class MachineRegressionSuite {
         MachineDesignReviewTest.main(args);
         MachineDesignConstraintsTest.main(args);
         CreateBeltGeometryTest.main(args);
+        BeltLinkReceiptTest.main(args);
         MachineAssemblyDocumentTest.main(args);
+        MachineAssemblyResourcesTest.main(args);
+        try { MachineNativeInstallationTest.main(args); }
+        catch (Exception failed) { throw new AssertionError("native installation dispatch", failed); }
         SemanticMachineLayoutTest.main(args);
         MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);

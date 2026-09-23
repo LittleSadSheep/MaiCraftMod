@@ -99,7 +99,7 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
         String status = report.get("status").getAsString();
         // EMI缺失或未覆盖时仍保留原生配方表的有限展示证据；用途页和后续页不重复扫描整份同步表。
         if (!query.uses() && query.offset() == 0 && !Set.of("available", "partial").contains(status))
-            report.add("native_fallback", MachineRecipeEvidence.inspect(player, query.item().toString()));
+            report.add("native_fallback", MachineRecipeEvidence.inspect(player, query.item().toString(), true));
         return report;
     }
 

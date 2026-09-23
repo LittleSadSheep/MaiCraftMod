@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.integration.emi.NativeRecipeDefinition;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,6 +35,11 @@ public final class MachineRecipeEvidence {
      * 在角色有效的客户端更新中只读查询。找不到展示产物不能断言没有配方，报告会保留扫描范围及未读全的原因。
      */
     public static JsonObject inspect(LocalPlayer player, String expectedOutputId) {
+        return inspect(player, expectedOutputId, false);
+    }
+
+    /** 只有显式读取配方知识时附原生定义；设计摘要仍沿用原有回执形式。 */
+    public static JsonObject inspect(LocalPlayer player, String expectedOutputId, boolean includeDefinitions) {
         JsonObject report = base();
         JsonArray matches = report.getAsJsonArray("recipes");
         if (expectedOutputId == null || expectedOutputId.length() > MAX_IDENTIFIER_LENGTH) {
@@ -80,6 +86,7 @@ public final class MachineRecipeEvidence {
                     matched++;
                     if (matches.size() >= MAX_EMITTED_RECIPES) continue;
                     JsonObject evidence = describe(holder, recipe, outputId, output.getCount());
+                    if (includeDefinitions) evidence.add("native_definition", NativeRecipeDefinition.read(recipe, context.level().registryAccess()));
                     matches.add(evidence);
                     detailsTruncated |= evidence.get("details_truncated").getAsBoolean();
                 } catch (RuntimeException | LinkageError unavailable) {
