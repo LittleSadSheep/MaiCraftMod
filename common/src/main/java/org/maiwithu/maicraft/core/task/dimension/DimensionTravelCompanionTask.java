@@ -29,12 +29,10 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * Cross a portal with the real local-player body.
+ * 由真实的本地玩家角色穿过传送门。
  *
- * <p>Only already loaded portal blocks are evidence. The task never asks a server for hidden
- * structure locations and never invents coordinates. Immediately before walking into a portal it
- * authorises one scheduler handoff; only the same player and connection reaching the requested
- * dimension within thirty seconds may resume the semantic parent.</p>
+ * <p>只有已加载的传送门方块才作为证据。任务不会向服务器查询隐藏结构位置，也不会臆造坐标。
+ * 角色即将走入传送门前，只授权一次调度器交接；只有同一玩家和连接在三十秒内抵达目标维度，才可恢复语义父任务。</p>
  */
 public final class DimensionTravelCompanionTask
         extends AbstractCompanionTask<DimensionTravelTaskRecord> {
@@ -70,7 +68,7 @@ public final class DimensionTravelCompanionTask
     private PortalPreparationTaskRecord preparationRecord;
     private boolean preparationAttempted;
     private Map<String, Object> preparationData = Map.of();
-    /** Grows only when the current nearest window has been exhausted. */
+    /** 只有当前最近目标窗口全部耗尽时才扩大搜索范围。 */
     private int portalCandidateWindow = INITIAL_PORTAL_CANDIDATES;
 
     public DimensionTravelCompanionTask(
@@ -134,15 +132,12 @@ public final class DimensionTravelCompanionTask
                 .orElse(null);
         if (portal == null) {
             if (!observed.complete()) {
-                // TargetIndex advances a finite loaded-area scan in bounded batches.  Waiting
-                // for those batches must not consume the semantic task's liveness lease (notably
-                // on accelerated-tick clients); only a complete scan may support "not found".
+                // TargetIndex 会以有界批次推进有限的已加载区域扫描；等待批次完成时不能消耗语义任务的存活期限，尤其是在游戏刻加速的客户端上。
+                // 只有扫描完整后，才能据此得出“未找到”结论。
                 r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
                 return TaskState.RUNNING;
             }
-            // TargetIndex intentionally returns a nearest window. If every member of that
-            // finite window has already failed, widen the window instead of pretending that an
-            // arbitrary number of portal attempts exhausted the loaded search scope.
+            // TargetIndex 有意只返回最近目标窗口。若该有限窗口中的每个目标都已失败，就扩大搜索窗口，而不是误以为任意固定次数的尝试已耗尽整个已加载范围。
             if (observed.hits().size() >= portalCandidateWindow
                     && portalCandidateWindow < Integer.MAX_VALUE / 2) {
                 portalCandidateWindow *= 2;
