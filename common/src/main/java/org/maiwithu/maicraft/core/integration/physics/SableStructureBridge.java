@@ -34,13 +34,13 @@ public final class SableStructureBridge {
 
     private SableStructureBridge() {}
 
-    /** Vanilla noCollision does not include Sable voxels; use Sable's own player-fit query. */
+    /** 原版 noCollision 不包含 Sable 体素，因此使用 Sable 自己的玩家碰撞适配查询。 */
     public static boolean clearBody(Level level, AABB body) {
         var api = BodyApiHolder.API;
         if (!api.installed()) return true;
         if (api.method() == null) return false;
         try {
-            // The native helper removes 0.1 from X/Z size; retain the requested whole body.
+            // 原生辅助方法会将 X/Z 宽度缩小 0.1；此处保留调用方要求的完整身体尺寸。
             return api.method().invoke(null, level, body.inflate(.05,0,.05)) == null;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError unknown) { return false; }
     }
@@ -58,7 +58,7 @@ public final class SableStructureBridge {
     }
     private static final class BodyApiHolder { static final BodyApi API = BodyApi.load(); }
 
-    /** Direct native UUID lookup; tracking one vessel never depends on the nearby-list budget. */
+    /** 直接通过原生 UUID 查找；跟踪单个载具不受附近实体列表预算影响。 */
     public static Structure find(ClientLevel level, UUID id) {
         try {
             Class<?> type = Class.forName(CONTAINER, false, SableStructureBridge.class.getClassLoader());
@@ -75,7 +75,7 @@ public final class SableStructureBridge {
         public boolean supportedBy(UUID id) { return known && below && id.equals(trackingId) && id.equals(collisionId); }
     }
 
-    /** Current native collision, not the historical last-tracked UUID or a nearby hull box. */
+    /** 查询当前原生碰撞结果，而非历史上次跟踪的 UUID 或附近船体碰撞箱。 */
     public static Contact contact(Object entity) {
         try {
             Object tracked = call(entity, "sable$getTrackingSubLevel");
@@ -109,7 +109,7 @@ public final class SableStructureBridge {
         }, eye, preferredStorageHit, presentation);
     }
 
-    /** Injectable native source keeps offline tests outside Minecraft and Sable initialization. */
+    /** 可注入原生数据源，使离线测试无需初始化 Minecraft 或 Sable。 */
     static Frame openBound(NativeContainerSource source, Vec3 eye, BlockPos preferredStorageHit) {
         return openBound(source, eye, preferredStorageHit, false);
     }
@@ -170,7 +170,7 @@ public final class SableStructureBridge {
         }
     }
 
-    /** Native handles are private and expire with this observation; never serialize the frame itself. */
+    /** 原生句柄仅供内部使用，并随本次观察一起过期；绝不序列化框架对象本身。 */
     public static final class Frame {
         private final String state;
         private final String error;
@@ -193,7 +193,7 @@ public final class SableStructureBridge {
         public String state() { return state; }
         public String error() { return error; }
         public List<Structure> structures() { return structures; }
-        /** Native list size; -1 means unavailable. Omitted excludes observed removals. */
+        /** 原生列表长度；不可用时为 -1。省略字段表示排除了已观察到的移除项。 */
         public int total() { return total; }
         public int omitted() { return omitted; }
         public int metadataProbes() { return metadataProbes; }
@@ -222,7 +222,7 @@ public final class SableStructureBridge {
     public record HitResolution(String state, UUID structureId, String error) {}
     public record BlockRead(String state, BlockState blockState, String error) {}
 
-    /** Nullable fields have a corresponding errors entry, except an absent optional display name. */
+    /** 可空字段都对应一条 errors 记录；可选显示名称缺失时除外。 */
     public record Structure(UUID id, String name, Boolean ready, StructurePose pose,
             StructurePose lastPose, AABB worldBounds, BlockPos plotCenter, AABB storageBounds,
             List<LevelChunk> loadedChunks, Map<String, String> errors) {
