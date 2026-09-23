@@ -12,8 +12,7 @@ public final class MachineControl {
     private MachineControl() {}
 
     /**
-     * Internally resolved request. The semantic caller owns permission to operate this machine;
-     * neither a scan nor a control's proximity establishes that permission or its wiring.
+     * 内部解析后的请求。操作此机器的权限由语义调用方持有；扫描结果或控制器距离较近，都不能证明已获授权或线路连接正确。
      */
     public record Request(
             String dimension,
@@ -29,7 +28,7 @@ public final class MachineControl {
         }
     }
 
-    /** Force registration without installing another scheduler or exposing concrete coordinates. */
+    /** 强制注册任务，但不安装第二套调度器，也不公开具体坐标。 */
     public static void install() {
         TaskFactory.register(MachineControlTaskRecord.class, MachineControlTask::new);
     }
@@ -39,7 +38,7 @@ public final class MachineControl {
         return new MachineControlTaskRecord(callId, deadlineGameTime, request);
     }
 
-    /** Selection never guesses which of several switches controls the intended output. */
+    /** 多个开关中绝不猜测哪个控制目标输出。 */
     static BlockPos selectControl(List<BlockPos> candidates, BlockPos namedControl) {
         if (namedControl != null) return candidates.contains(namedControl) ? namedControl.immutable() : null;
         return candidates.size() == 1 ? candidates.getFirst().immutable() : null;

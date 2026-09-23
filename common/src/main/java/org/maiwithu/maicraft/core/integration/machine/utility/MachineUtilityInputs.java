@@ -16,7 +16,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyPorts;
 
-/** Declared passive boundaries, never generators or proof that a utility is connected. */
+/** 声明被动公用设施的边界，绝不代表发电机或已连通证明。 */
 public final class MachineUtilityInputs {
     public static final Set<String> MEDIA = Set.of("kinetic", "energy", "fluids", "chemicals", "items");
     private static final Set<String> REQUIREMENTS = Set.of("id", "medium", "minimum_rpm", "resource", "reason", "face");
@@ -78,7 +78,7 @@ public final class MachineUtilityInputs {
         return List.copyOf(result);
     }
 
-    /** Validate concrete declarations against the exact declared block and an unobstructed exterior ray. */
+    /** 对照准确声明的方块和畅通的外部射线，验证具体设施声明。 */
     public static List<Input> parse(JsonObject blueprint) {
         supplyPreference(blueprint);
         JsonArray inputRows = rows(blueprint);
@@ -117,12 +117,12 @@ public final class MachineUtilityInputs {
         return declarations;
     }
 
-    /** Stored requirements remain historical declarations; this does not verify a world or blueprint. */
+    /** 已存需求仅作为历史声明保留；此方法不会核验世界或蓝图。 */
     public static List<Input> parseDeclarations(JsonArray declarations) {
         return parseDeclarations(declarations, false);
     }
 
-    /** Persistence is bounded by supported world coordinates rather than today's mutable planning radius. */
+    /** 持久化范围由受支持的世界坐标决定，而非使用当前可变的规划半径。 */
     public static List<Input> parseStoredDeclarations(JsonArray declarations) {
         return parseDeclarations(declarations, true);
     }
