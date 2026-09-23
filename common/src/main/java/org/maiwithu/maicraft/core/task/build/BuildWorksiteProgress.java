@@ -9,7 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationStep;
 
-/** Measures useful movement along directed route edges, including returns over familiar ground. */
+/** 测量沿有向路线边的有效移动进展，包括沿已走过路线返回。 */
 final class BuildWorksiteProgress {
     private static final int STAGNANT_TICKS = 200;
     private static final int IDLE_TICKS = 400;
@@ -41,7 +41,7 @@ final class BuildWorksiteProgress {
         double distance=feet.distanceTo(goal);
         boolean progressed=Double.isFinite(closestGoal) && closestGoal-distance>=PROGRESS_DISTANCE;
         if (!Double.isFinite(closestGoal) || progressed) closestGoal=distance;
-        // The executor may already have advanced to the next edge when we observe its last movement.
+        // 观察到上一次移动时，执行器可能已经前进到下一条路线边。
         if (previous != null) progressed |= approaching(previous, feet);
         progressed |= approaching(step, feet);previous=step;
         if (progressed) stagnant=0;else stagnant++;
