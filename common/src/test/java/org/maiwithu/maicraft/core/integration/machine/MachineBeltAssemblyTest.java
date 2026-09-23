@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import java.util.Map;
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
@@ -29,6 +30,9 @@ public final class MachineBeltAssemblyTest {
         var ports = powered.report().getAsJsonArray("power_ports");
         check(ports.size() == 6 && powered.blueprint().getAsJsonArray("blocks").size() == 3, "two endpoints and one intermediate pulley");
         check(ports.get(0).getAsJsonObject().get("powered").isJsonNull(), "a planned port is not an energized observation");
+        var unknown = MachinePowerPortObservations.observe(null, BlockPos.ZERO, ports);
+        check(unknown.getAsJsonArray("ports").get(0).getAsJsonObject().get("installed").isJsonNull()
+                && !unknown.get("runtime_transfer_verified").getAsBoolean(), "leaving the world cannot certify installation or item transfer");
         check(ports.equals(MachineBlueprintDocument.compile(powered.blueprint(), REGISTRY).report().get("power_ports")), "stable port references");
         JsonObject connected = withPulley.deepCopy();
         JsonObject inputPort = JsonParser.parseString("{\"id\":\"drive\",\"medium\":\"kinetic\",\"minimum_rpm\":32}").getAsJsonObject();

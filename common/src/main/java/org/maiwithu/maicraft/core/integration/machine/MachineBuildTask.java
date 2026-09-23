@@ -423,6 +423,8 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
         data.put("machine_layout", r.plan.report());
+        JsonArray plannedPorts = r.plan.report().getAsJsonArray("power_ports");
+        if (plannedPorts != null) data.put("power_port_observations", MachinePowerPortObservations.observe(player.level() == world ? world : null, r.plan.anchor(), plannedPorts));
         data.put("native_installations_completed", installationIndex);
         data.put("processing_relationships_verified", assemblyVerified);
         if (!r.plan.utilityInputs().isEmpty()) {
