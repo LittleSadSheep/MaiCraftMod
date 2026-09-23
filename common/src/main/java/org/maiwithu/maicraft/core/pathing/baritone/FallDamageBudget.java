@@ -36,7 +36,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
         }
         public static Landing of(BlockState support) {
             if (support.is(Blocks.HAY_BLOCK) || support.is(Blocks.HONEY_BLOCK)) return CUSHIONED;
-            // Exact vanilla class only: an unknown mod subclass may override fallOn.
+            // 仅接受确切的原版类别：未知模组子类可能覆写 fallOn。
             if (support.getBlock().getClass() == BedBlock.class) return BED;
             return ORDINARY; // In particular, sneaking on slime does not cushion a fall.
         }
@@ -52,7 +52,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
         boolean effects = !fall.is(DamageTypeTags.BYPASSES_EFFECTS);
         double gravity = player.getAttributeValue(Attributes.GRAVITY);
         if (slow != null) gravity = Math.min(gravity, 0.01);
-        // Levitation makes the time to landing unknown; do not rely on finite buffs expiring later.
+        // 漂浮效果会使着陆时间无法确定；不能依赖有限时长的增益效果之后自行结束。
         if (player.hasEffect(MobEffects.LEVITATION)) gravity = 0;
         return new FallDamageBudget(player.getHealth(), player.getAbsorptionAmount(),
                 (float) player.getAttributeValue(Attributes.SAFE_FALL_DISTANCE),
@@ -81,8 +81,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
         double ticks = landingTickBound(remainingDistance);
         if (lasts(slowFallingTicks, ticks)) return 0;
         double distance = remainingDistance + (includeAccumulated ? accumulatedFallDistance : 0);
-        // LivingEntity.calculateFallDamage: distance and block scale are floats before the
-        // attribute multiplier. Beds halve distance; hay/honey scale damage before ceil.
+        // LivingEntity.calculateFallDamage 会先以 float 计算距离和方块倍率，再乘属性倍率。床会减半距离；干草或蜂蜜会在向上取整前缩放伤害。
         float excess = (float) distance * landing.distanceScale - safeFallDistance;
         float damage = (float) Math.max(0, Math.ceil((double) (excess * landing.damageScale) * damageMultiplier));
         if (lasts(resistanceTicks, ticks) && resistanceLevel > 0) {
@@ -93,8 +92,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
 
     // 用保守的时间上界判断药效是否够长；这不是精确的落地倒计时。
     private double landingTickBound(double distance) {
-        // Starting at rest, every downward tick after the first covers at least gravity*0.98.
-        // This deliberately loose bound also allows one second to clear the supporting edge.
+        // 从静止开始时，第一刻之后的每个下降 tick 至少移动 gravity*0.98。此处使用刻意宽松的界限，也预留一秒让角色离开支撑边缘。
         return gravity > 0 && Double.isFinite(gravity) ? 22 + Math.ceil(distance / (gravity * 0.98))
                 : Double.POSITIVE_INFINITY;
     }
@@ -110,8 +108,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
                 if (!holder.value().matchingSlot(slot)) continue;
                 var components = holder.value().getEffects(EnchantmentEffectComponents.DAMAGE_PROTECTION);
                 if (components.isEmpty()) continue;
-                // Unknown protection effects could also *lower* prior protection. In that case
-                // credit none rather than assume additive reduction from familiar enchant names.
+                // 未知保护效果也可能降低既有保护；遇到这种情况就不计入任何保护值，而不是依据熟悉的附魔名称臆测加成可叠加。
                 // 当前先按附魔名称筛选，遇到火焰保护等其他名称会直接把总保护返回零，连已知的摔落保护也丢掉。
                 if (!holder.is(Enchantments.PROTECTION) && !holder.is(Enchantments.FEATHER_FALLING)) return 0;
                 for (var component : components) {
