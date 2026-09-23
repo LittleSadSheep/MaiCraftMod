@@ -51,7 +51,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Receipt- and observation-driven End Gateway -> End City -> elytra executor. */
+/** 由动作回执与实时观察驱动，依次穿过末地折跃门、探索末地城并取得鞘翅。 */
 public final class SemanticElytraCompanionTask
         extends AbstractCompanionTask<SemanticElytraTaskRecord> {
     private enum Phase {
@@ -271,16 +271,14 @@ public final class SemanticElytraCompanionTask
             return TaskState.RUNNING;
         }
         if (!observed.complete()) {
-            // The loaded-area gateway index is finite but intentionally built in small batches.
-            // Do not turn a fixed number of scan ticks into evidence that no gateway exists, or
-            // consume the semantic lease while those bounded batches are still advancing.
+            // 已加载区域的折跃门索引范围有限，但有意分成小批次构建。不能仅因扫描了固定 tick 数就断言没有折跃门，
+            // 也不能在这些有界批次仍推进时消耗语义任务的存活期限。
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return TaskState.RUNNING;
         }
         if (protectedOnly && observed.hits().size() >= gatewayCandidateWindow
                 && gatewayCandidateWindow < Integer.MAX_VALUE / 2) {
-            // TargetIndex returns a nearest window.  Exhaust that finite result set before
-            // concluding that every in-scope gateway is protected.
+            // TargetIndex 返回最近目标窗口；必须先尝试完其中所有目标，才能断定搜索范围内的折跃门都受保护而不可用。
             gatewayCandidateWindow *= 2;
             return TaskState.RUNNING;
         }
@@ -584,9 +582,8 @@ public final class SemanticElytraCompanionTask
         Purpose purpose = activePurpose;
         TaskState terminal = runChild(finished);
         if (terminal == null) {
-            // The child owns the evidence for continued liveness (physical movement, observed
-            // acquisition, combat or structure-search progress).  Preserve that renewed lease at
-            // the semantic root instead of enforcing the tool's original wall-clock estimate.
+            // 子任务负责提供继续运行的证据（实际移动、观察到的获取、战斗或结构搜索进展）。
+            // 语义根任务应保留子任务续期后的期限，而不是强行套用工具最初的墙上时间估算。
             if (activeRecord != null) r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
             return TaskState.RUNNING;
         }
@@ -1139,8 +1136,7 @@ public final class SemanticElytraCompanionTask
     }
 
     /**
-     * With protected labels, no shared navigation API can prove that a terrain-changing route
-     * would avoid every protected radius, so all delegated routes are forced read-only.
+     * 存在受保护标签时，共享导航接口无法证明改变地形的路线会避开所有保护半径，因此所有委派路线都强制为只读。
      */
     private boolean effectiveMayAlterTerrain() {
         return r.mayAlterTerrain && r.protectedLabels.isEmpty();
@@ -1196,7 +1192,7 @@ public final class SemanticElytraCompanionTask
         try {
             child.result(terminal);
         } catch (RuntimeException ignored) {
-            // The parent still releases every first-person control in cleanup.
+            // 父任务仍会在清理阶段释放所有第一人称控制。
         }
         activeChild = null;
         activeRecord = null;
