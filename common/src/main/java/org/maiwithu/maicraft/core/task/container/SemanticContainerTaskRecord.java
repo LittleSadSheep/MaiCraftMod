@@ -55,9 +55,9 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public final Operation operation;
     public final List<ResourceLocation> itemIds;
     public final ResourceLocation tagId;
-    /** Exact amount to move, or null for all matching source items. */
+    /** 要转移的精确数量；为 null 时转移来源中所有匹配物品。 */
     public final Integer count;
-    /** Requested final count on the operation's semantic destination side. */
+    /** 操作目标一侧所要求的最终语义数量。 */
     public final Integer targetCount;
     public final ResourceLocation blockId;
     public final String landmarkLabel;
