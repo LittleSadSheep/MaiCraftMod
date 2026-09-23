@@ -8,7 +8,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Resolves keys from actual network facts; no caller-supplied stack or component is instantiated. */
+/** 根据真实网络事实解析键；不实例化调用方提供的堆叠或组件。 */
 public final class Ae2Keys {
     public static final String CRAFTING = "appeng.api.networking.crafting.ICraftingService";
     private Ae2Keys() {}

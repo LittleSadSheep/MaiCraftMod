@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 
-/** A server-issued plan token pins one terminal/network and exactly one native submission. */
+/** 服务器签发的计划令牌绑定到一台终端/一个网络，并仅允许一次原生提交。 */
 final class Ae2CraftJob {
     final UUID id = UUID.randomUUID();
     final WeakReference<ServerPlayer> owner;

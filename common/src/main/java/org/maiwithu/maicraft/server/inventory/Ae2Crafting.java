@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import java.util.concurrent.TimeUnit;
 
-/** Native AE2 planning and standalone CPU jobs, with player-bound tokens and no submission replay. */
+/** 原生 AE2 规划和独立 CPU 作业，使用绑定玩家的令牌，并禁止重复提交。 */
 public final class Ae2Crafting {
     static final String PLAN = "appeng.api.networking.crafting.ICraftingPlan";
     static final String LINK = "appeng.api.networking.crafting.ICraftingLink";
@@ -67,7 +67,7 @@ public final class Ae2Crafting {
         if (job.submissionStarted) return Ae2CraftingStatus.describe(player, job);
         if (!job.status.equals("ready")) throw ServerAccess.denied("plan_not_ready", "Crafting plan is not executable: " + job.status);
         Ae2SubmissionTracking tracking = Ae2SubmissionTracking.before(access, job.plan);
-        // Pin before calling AE2: any exception after this point can never trigger a second native submission.
+        // 调用 AE2 前先锁定令牌；此后发生任何异常都不能触发第二次原生提交。
         job.submissionStarted = true;
         job.status = "uncertain";
         Object submission = NativeApi.call(Ae2Keys.crafting(access), Ae2Keys.CRAFTING, "submitJob",

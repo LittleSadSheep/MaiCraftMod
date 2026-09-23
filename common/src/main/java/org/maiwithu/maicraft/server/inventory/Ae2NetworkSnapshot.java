@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.server.machine.SnapshotBudget;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Bounded pages from AE2's actual storage service and crafting CPU status. */
+/** 从 AE2 实际存储服务和合成 CPU 状态读取的有界分页数据。 */
 public final class Ae2NetworkSnapshot {
     private Ae2NetworkSnapshot() {}
 
