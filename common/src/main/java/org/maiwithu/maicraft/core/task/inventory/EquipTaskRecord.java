@@ -12,11 +12,11 @@ public final class EquipTaskRecord extends TaskRecord {
 
     public static final String TOOL_NAME = "equip_item";
 
-    /** The item to equip (must be present in the entity's own inventory). */
+    /** 要装备的物品（必须存在于实体自己的背包中）。 */
     public final Item item;
-    /** Target slot, or {@code null} to auto-route by item type. */
+    /** 目标槽位；为 {@code null} 时按物品类型自动选择。 */
     public final EquipmentSlot slot;
-    /** Human-readable label for messages / debug overlay (e.g. "wooden_pickaxe"). */
+    /** 消息或调试覆盖层使用的可读标签，例如 "wooden_pickaxe"。 */
     public final String label;
 
     public EquipTaskRecord(String toolCallId, long deadlineGameTime,
