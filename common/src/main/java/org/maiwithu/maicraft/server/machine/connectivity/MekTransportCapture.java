@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 import org.maiwithu.maicraft.server.machine.ProductionEventJournal.OrderingMarker;
 
-/** Records only returned, real forward insertions at a logistical transporter's final hop. */
+/** 仅记录物流运输器最终一跳中成功返回的真实正向插入。 */
 public final class MekTransportCapture {
     private static final String TRANSMITTER = "mekanism.common.content.network.transmitter.Transmitter";
     private static final String STACK = "mekanism.common.content.transporter.TransporterStack";
@@ -22,7 +22,7 @@ public final class MekTransportCapture {
 
     private MekTransportCapture() {}
 
-    /** Called at the itemStack read immediately before the native delivery request is constructed. */
+    /** 在读取 itemStack 后、构建原生交付请求前立即调用。 */
     public static void prepare(Object transmitter, Object transported, ItemStack input) {
         PENDING.remove();
         try {
@@ -36,15 +36,15 @@ public final class MekTransportCapture {
             BlockPos from = origin.source(), to = BlockPos.of(destination);
             BlockPos last = (BlockPos) NativeApi.call(transmitter, TRANSMITTER, "getBlockPos");
             if (from.equals(to) || ServerConnectionInspection.direction(last, to) == null) return;
-            // homeLocation can be the sorter instead of the inventory. Only observed extraction establishes source.
+            // homeLocation 可能指向分拣器而非库存；只有观察到实际提取才能确定来源。
             if (input.getCount() > origin.remaining() || !ItemStack.isSameItemSameComponents(input, origin.identity())) return;
             PENDING.set(new Frame(transmitter, transported, level, from, to, last, input.copy(), origin.extraction()));
         } catch (RuntimeException | LinkageError unsupported) {
-            // Instrumentation must never prevent or change the native inventory operation.
+            // 监测逻辑绝不能阻止或改变原生库存操作。
         }
     }
 
-    /** Consume before invoking native code, so exceptions and reentrant updates cannot reuse a frame. */
+    /** 调用原生代码前先消费帧，避免异常或重入更新重复使用同一帧。 */
     public static Frame take(Object transmitter) {
         Frame frame = PENDING.get();
         PENDING.remove();
@@ -61,13 +61,12 @@ public final class MekTransportCapture {
             if (inserted.isEmpty() || amount <= 0 || amount != inserted.getCount() || amount > frame.before().getCount()
                     || !ItemStack.isSameItemSameComponents(frame.before(), inserted)) return;
             if (!MekTransportOrigins.consume(frame.transported(), frame.level(), inserted)) return;
-            // The response comes from insertItem(..., false), after successful native return.
-            // This proves accepted source-attributed delivery, not the full route taken or later production.
+            // 响应来自成功返回后的 insertItem(..., false)。这只能证明来源可归属的物品已被接收，不能证明完整路线或后续生产结果。
             ServerProductionEvents.recordTransfer(frame.level(), frame.source(), destination,
                     ResourceIdentity.item(inserted, frame.level().registryAccess()), amount,
                     "mekanism.transporter.native_forward_delivery", frame.extraction());
         } catch (RuntimeException | LinkageError unsupported) {
-            // A failed observer may lose evidence; it must not cancel a completed native delivery.
+            // 观察器失败可能丢失证据，但不能取消已经完成的原生交付。
         }
     }
 }

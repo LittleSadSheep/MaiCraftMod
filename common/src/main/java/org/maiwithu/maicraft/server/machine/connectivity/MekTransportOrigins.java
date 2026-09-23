@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ProductionEventJournal.OrderingMarker;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 
-/** Runtime-only provenance from successful native extraction, never from a sorter's facing at delivery. */
+/** 运行时记录成功原生提取的来源；绝不根据分拣器交付时的朝向推断来源。 */
 public final class MekTransportOrigins {
     private static final int LIMIT = 4096;
     private static final String TRANSMITTER = "mekanism.common.content.network.transmitter.Transmitter";
@@ -53,7 +53,7 @@ public final class MekTransportOrigins {
         private Use(Pending pending) { this.pending = pending; }
     }
 
-    // TransitResponse has a mutable content-based hashCode. Native objects must be keyed by identity.
+    // TransitResponse 的内容型 hashCode 会变化；原生对象必须按对象身份作为键。
     private static final class IdentityRef extends WeakReference<Object> {
         private final int hash;
         private IdentityRef(Object value, ReferenceQueue<Object> queue) {
@@ -90,7 +90,7 @@ public final class MekTransportOrigins {
 
     public static synchronized Emission beginEmission(Object owner) {
         Emission scope = new Emission(SOURCES.get(owner));
-        // Invalid nested scopes still mask their parent, so a child can never donate a created stack.
+        // 无效的嵌套作用域仍会遮蔽父作用域，因此子作用域永远不能把新堆叠归给父作用域。
         if (EMITTING.get().size() >= 32) EMITTING.get().clear();
         EMITTING.get().push(scope);
         return scope;
@@ -110,7 +110,7 @@ public final class MekTransportOrigins {
         } catch (RuntimeException | LinkageError ignored) { scope.invalid = true; }
     }
 
-    /** Always call in finally; pass null when native emission threw. */
+    /** 始终在 finally 中调用；原生发射抛出异常时传入 null。 */
     public static synchronized void finishEmission(Emission scope, Object response) {
         if (scope == null || scope.closed) return;
         ArrayDeque<Emission> stack = EMITTING.get();
@@ -122,7 +122,7 @@ public final class MekTransportOrigins {
             if (expected.isEmpty() || transported == null || !matchesCargo(transported, expected)) return;
             PENDING.put(response, new Pending(scope.source, scope.transported, new WeakReference<>(response), expected));
         } catch (RuntimeException | LinkageError ignored) {
-            // Observation failure never changes native emission behavior.
+            // 观察失败绝不能改变原生发射行为。
         } finally {
             scope.closed = true;
             if (stack.peek() == scope) stack.pop(); else stack.clear();
@@ -156,7 +156,7 @@ public final class MekTransportOrigins {
         } catch (RuntimeException | LinkageError ignored) { scope.invalid = true; }
     }
 
-    /** completed means native useAll returned normally; its return stack is not an extraction receipt. */
+    /** completed 表示原生 useAll 正常返回；其返回堆叠不是提取回执。 */
     public static synchronized void finishUse(Use scope, boolean completed) {
         if (scope == null || scope.closed) return;
         ArrayDeque<Use> stack = USING.get();
@@ -168,12 +168,12 @@ public final class MekTransportOrigins {
             if (transported == null || ORIGINS.containsKey(transported) || !matchesCargo(transported, pending.expected)) return;
             ServerLevel level = pending.source.level.get();
             if (level == null) return;
-            // Freeze ordering at the verified native extraction, not when this cargo eventually arrives.
+            // 在已核实的原生提取时冻结顺序，而不是等这批货物最终到达时再记录。
             OrderingMarker extraction = ServerProductionEvents.markExtraction(level);
             ORIGINS.put(transported, new Tracked(pending.source.level, pending.source.position,
                     pending.expected.copyWithCount(1), scope.extracted, extraction));
         } catch (RuntimeException | LinkageError ignored) {
-            // A partial or unobserved extraction leaves this cargo unattributed.
+            // 部分提取或未观察到的提取不会归属此货物。
         } finally {
             scope.closed = true;
             if (stack.peek() == scope) stack.pop(); else stack.clear();

@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.List;
 
-/** A native PULL source and one real stack prove present feasibility, never actual delivery. */
+/** 原生 PULL 来源和一个真实堆叠可证明当前可行，但不能证明已实际交付。 */
 final class MekItemRouteEvidence {
     private static final String TRANSPORTER = "mekanism.common.content.network.transmitter.LogisticalTransporterBase";
     private static final String TRANSMITTER = "mekanism.common.content.network.transmitter.Transmitter";
@@ -54,7 +54,7 @@ final class MekItemRouteEvidence {
         route.addProperty("source_color", color == null ? "uncolored" : ((Enum<?>) color).name());
         route.addProperty("source_color_provenance", "native_transporter_pull");
         if (body.has("item_color")) {
-            // An asserted color never replaces the source transporter's actual PULL color.
+            // 显式声明的颜色绝不替代来源运输器的实际 PULL 颜色。
             route.add("asserted_item_color", body.get("item_color").deepCopy());
         }
         for (int index = 1; index < last; index++) {
@@ -87,7 +87,7 @@ final class MekItemRouteEvidence {
         }
         Object handler = NativeApi.call(entry, TRANSMITTER, "getAcceptor", sourceSide);
         if (!NativeApi.is(handler, ITEMS)) return finish(route, "planned", "source_item_handler_unavailable");
-        // TransporterUtils scans every destination slot internally. Bound its actual capability first.
+        // TransporterUtils 会在内部扫描所有目标槽；先限制并核实其实际能力范围。
         Object itemCapability = NativeApi.constant("mekanism.common.capabilities.Capabilities", "ITEM");
         Object destination = NativeApi.call(itemCapability, "mekanism.common.capabilities.MultiTypeCapability", "getCapabilityIfLoaded",
                 player.serverLevel(), path.getLast(), null, player.serverLevel().getBlockEntity(path.getLast()), destinationSide.getOpposite());
@@ -142,7 +142,7 @@ final class MekItemRouteEvidence {
         return NativeApi.truth(NativeApi.call(null, TRANSMITTER, "connectionMapContainsSide", connections, side));
     }
 
-    /** A sorter supplies its native filter color and an already simulated, exact source sample. */
+    /** 分拣器提供其原生过滤颜色，以及已完成模拟的精确来源样本。 */
     static JsonObject inspectColoredSample(ServerPlayer player, List<BlockPos> path, List<Object> transmitters,
                                           Object color, ItemStack sample) {
         JsonObject route = result("unknown", "sorter_route_required");
