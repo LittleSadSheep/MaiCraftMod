@@ -6,7 +6,7 @@ import java.util.List;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** One bounded first-person goal: leave a real elytra in the main inventory. */
+/** 一个有界的第一人称目标：确保主背包中持有真实鞘翅。 */
 public final class SemanticElytraTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "obtain_elytra";
     public static final int MIN_SEARCH_DISTANCE = 128;
@@ -61,7 +61,7 @@ public final class SemanticElytraTaskRecord extends TaskRecord {
         this.protectedLabels = List.copyOf(labels);
     }
 
-    /** Forces static TaskFactory registration during Mod initialization. */
+    /** 强制在 Mod 初始化期间完成静态 TaskFactory 注册。 */
     public static void ensureRegistered() {}
 
     @Override
