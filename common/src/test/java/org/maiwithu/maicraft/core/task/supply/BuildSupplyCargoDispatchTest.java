@@ -7,6 +7,7 @@ import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -57,6 +58,8 @@ public final class BuildSupplyCargoDispatchTest {
             var task = task(h, SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE);
             var entities = ContainerSupplySourcesTest.worldEntities(h);
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(1, 4, 4));
+            // 离开施工坑后只去此前确认的土料箱，不为整理背包临时搜陌生仓库。
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(1, 4, 4), ResourceLocation.parse("minecraft:dirt"), 1);
             h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
             for (int slot = 1; slot <= 24; slot++) h.inventory.setItem(slot, new ItemStack(Items.DIRT, 64));
             for (int slot = 25; slot < 36; slot++) h.inventory.setItem(slot, new ItemStack(Items.BREAD, 64));

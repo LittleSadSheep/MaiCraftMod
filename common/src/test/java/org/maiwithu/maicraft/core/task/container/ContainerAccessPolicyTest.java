@@ -37,6 +37,8 @@ public final class ContainerAccessPolicyTest {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = ContainerSupplySourcesTest.worldEntities(h);
             BlockPos barrel = new BlockPos(3, 1, 3); ContainerSupplySourcesTest.addBarrel(h, entities, barrel);
+            // 访问保护测试的仓库已有石料线索，附魔台仍不能混入普通库存候选。
+            ContainerSupplySourcesTest.rememberContents(h, barrel, ResourceLocation.parse("minecraft:stone"), 1);
             BlockPos table = new BlockPos(6, 1, 3); var tableState = Blocks.ENCHANTING_TABLE.defaultBlockState();
             h.set(table, tableState); var named = new EnchantingTableBlockEntity(table, tableState); named.setLevel(h.level); entities.put(table, named);
             check(ContainerSupplySources.accessAllowed(h.player, barrel, List.of()) && ContainerSupplySources.allowed(h.player, barrel, List.of()),

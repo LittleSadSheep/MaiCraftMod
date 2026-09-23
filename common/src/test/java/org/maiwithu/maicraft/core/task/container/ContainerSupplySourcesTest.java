@@ -45,6 +45,7 @@ public final class ContainerSupplySourcesTest {
         fixedTargetSurveyActuallyRunsForWithdrawalAndDeposit();
         fixedTargetOpenRegistersItsRunnerAndPreservesChildFailure();
         partialWithdrawalAndMenuOwnershipRemainExplicit();
+        automaticOpenRequiresCurrentStockEvidence();
     }
     private static void cacheNeverConfusesContainersOrWorlds() {
         var cache = new ContainerSupplySources.Cache(); Object owner = new Object(), level = new Object(), first = new Object(), second = new Object();
@@ -61,6 +62,22 @@ public final class ContainerSupplySourcesTest {
         cache.record(owner, level, ids, stock);
         check(cache.latest(new Object(), level, a, ids, 21) == null, "player replacement invalidates container stock");
     }
+    private static void automaticOpenRequiresCurrentStockEvidence() throws Exception {
+        // 排队时尚有铁锭线索，真正开箱前线索已失效；不能因之前选中过就继续访问。
+        try (var h = new InteractionWorldTestHarness()) {
+            var entities = worldEntities(h); BlockPos at = new BlockPos(3, 1, 3); addBarrel(h, entities, at);
+            rememberContents(h, at, IRON, 2);
+            var record = SemanticContainerTaskRecord.withdrawAvailableAt("expired-stock", 1000, List.of(IRON), 2,
+                    at, ResourceLocation.parse("minecraft:barrel"), List.of());
+            var task = new SemanticContainerCompanionTask(h.player, record); task.start(h.player);
+            check(task.tick(h.player) == TaskState.RUNNING, "known warehouse can be selected");
+            ContainerSupplySources.reset();
+            task.tick(h.player); // 开箱前拒绝后先走正常收尾，再发出失败终态。
+            check(task.tick(h.player) == TaskState.FAILED && "container_stock_evidence_expired".equals(task.result(TaskState.FAILED).data().get("failure_code")),
+                    "lost evidence stops the automatic visit before opening");
+            check(h.blockUses() == 0 && h.itemUses() == 0, "expired evidence never causes a native click");
+        } finally { ContainerSupplySources.reset(); }
+    }
     private static void choosesOnlyLoadedOrdinarySourcesAndProtectsBothChestHalves() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = worldEntities(h); BlockPos near = new BlockPos(3, 1, 3), far = new BlockPos(6, 1, 3);
@@ -68,6 +85,13 @@ public final class ContainerSupplySourcesTest {
             BlockPos furnace = new BlockPos(2, 1, 4); h.set(furnace, Blocks.FURNACE.defaultBlockState());
             var furnaceEntity = new FurnaceBlockEntity(furnace, Blocks.FURNACE.defaultBlockState()); furnaceEntity.setLevel(h.level); entities.put(furnace, furnaceEntity);
             var candidates = ContainerSupplySources.candidates(h.player, h.player.blockPosition(), 16, List.of(IRON), Set.of(), List.of());
+            // 仓库搜索必须先有目标材料线索，不能为了补铁锭先打开附近每只木桶。
+            check(candidates.isEmpty(), "unknown ordinary containers must not become automatic supply candidates");
+            rememberContents(h, near, IRON, 0); rememberContents(h, far, IRON, 7);
+            check(ContainerSupplySources.candidates(h.player, h.player.blockPosition(), 16, List.of(IRON), Set.of(), List.of()).size() == 1,
+                    "known empty containers are skipped instead of ranked behind stocked containers");
+            rememberContents(h, near, IRON, 3);
+            candidates = ContainerSupplySources.candidates(h.player, h.player.blockPosition(), 16, List.of(IRON), Set.of(), List.of());
             check(candidates.size() == 2 && candidates.getFirst().position().equals(near), "ordinary storage search does not raid furnace process slots");
             check(ContainerSupplySources.candidates(h.player, h.player.blockPosition(), 16, List.of(IRON), Set.of(near), List.of()).getFirst().position().equals(far),
                     "visited empty containers cannot repeatedly win nearest selection");
@@ -115,6 +139,8 @@ public final class ContainerSupplySourcesTest {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = worldEntities(h); BlockPos closer = new BlockPos(3, 1, 3), exact = new BlockPos(6, 1, 3);
             addBarrel(h, entities, closer); addBarrel(h, entities, exact);
+            // 这两个内部供料请求使用之前真实看见过的铁锭线索，仍须绑定确切仓库。
+            rememberContents(h, exact, IRON, 10);
             ResourceLocation barrel = ResourceLocation.parse("minecraft:barrel");
             for (var record : List.of(
                     SemanticContainerTaskRecord.withdrawAvailableAt("fixed-withdraw-survey", 1000, List.of(IRON), 10, exact, barrel, List.of()),
@@ -139,6 +165,7 @@ public final class ContainerSupplySourcesTest {
         try (var h = new InteractionWorldTestHarness()) {
             field(h.player.connection.getClass(), "playerInfoMap").set(h.player.connection, new HashMap<>());
             var entities = worldEntities(h); BlockPos at = new BlockPos(3, 1, 3); addBarrel(h, entities, at);
+            rememberContents(h, at, IRON, 10);
             var record = SemanticContainerTaskRecord.withdrawAvailableAt("fresh-storage-open", 1000, List.of(IRON), 10, at,
                     ResourceLocation.parse("minecraft:barrel"), List.of());
             var task = new SemanticContainerCompanionTask(h.player, record); task.start(h.player);
@@ -172,6 +199,14 @@ public final class ContainerSupplySourcesTest {
     public static void addBarrel(InteractionWorldTestHarness h, Map<BlockPos, BlockEntity> entities, BlockPos position) {
         var state = Blocks.BARREL.defaultBlockState(); h.set(position, state); var barrel = new BarrelBlockEntity(position, state);
         barrel.setLevel(h.level); entities.put(position, barrel);
+    }
+    /** 夹具明确注入一次已同步菜单观察；摆出箱子本身不会产生库存知识。 */
+    public static void rememberContents(InteractionWorldTestHarness h, BlockPos position, ResourceLocation item, long count) throws Exception {
+        var cache = (ContainerSupplySources.Cache) field(ContainerSupplySources.class, "CACHE").get(null);
+        Map<BlockPos, Object> identities = new LinkedHashMap<>();
+        ContainerSupplySources.footprint(h.level, position).forEach(at -> identities.put(at, h.level.getBlockEntity(at)));
+        cache.record(h.player, h.level, identities, new StockEvidence.Snapshot(
+                StockEvidence.Source.CONTAINER, Map.of(item, count), Set.of(), h.level.getGameTime()));
     }
     private static Field field(Class<?> type, String name) throws Exception {
         for (Class<?> owner = type; owner != null; owner = owner.getSuperclass()) try { var field = owner.getDeclaredField(name); field.setAccessible(true); return field; }

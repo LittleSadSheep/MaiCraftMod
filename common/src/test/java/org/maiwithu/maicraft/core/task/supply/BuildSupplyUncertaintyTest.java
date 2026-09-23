@@ -35,6 +35,8 @@ public final class BuildSupplyUncertaintyTest {
             h.inventory.setItem(2, new ItemStack(Items.DIRT, 64));
             var entities = ContainerSupplySourcesTest.worldEntities(h);
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(3, 1, 3));
+            // 先选有真实土料线索的仓库，后续继续验证存入回执不能掩盖施工未知。
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(3, 1, 3), ResourceLocation.parse("minecraft:dirt"), 1);
             BlockPos target = new BlockPos(5, 1, 5); h.set(target, Blocks.AIR.defaultBlockState());
             var plan = new BuildTaskRecord("uncertain-after-cleanup", 1000, List.of(new BuildTaskRecord.Target(
                     Blocks.OAK_PLANKS, Items.OAK_PLANKS, target, "wall", null, null, null)), false);

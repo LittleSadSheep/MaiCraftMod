@@ -66,6 +66,8 @@ public final class StorageSupplyRadiusTest {
             TaskFactory.register(SemanticContainerTaskRecord.class, SemanticContainerCompanionTask::new);
             var entities = ContainerSupplySourcesTest.worldEntities(h); BlockPos barrel = new BlockPos(1, 1, 1);
             ContainerSupplySourcesTest.addBarrel(h, entities, barrel);
+            // 扩大仓库半径只用于追回已知石砖，不能因此开启未知容器探索。
+            ContainerSupplySourcesTest.rememberContents(h, barrel, BRICKS, 4);
             // 玩家位置只作为三十一格外的查询中心；仓库仍来自夹具中真实已加载区块，不启动导航或加载新区域。
             h.position(new Vec3(1.5, 1, 32.5));
             var sources = List.of(SemanticAcquireTaskRecord.Source.STORAGE, SemanticAcquireTaskRecord.Source.MINE, SemanticAcquireTaskRecord.Source.NEARBY);

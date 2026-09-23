@@ -36,6 +36,9 @@ public final class BuildExcavationSpoilBoundaryTest {
             var entities = ContainerSupplySourcesTest.worldEntities(h); h.position(new Vec3(0.5, 1, 0.5));
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(5, 1, 0));
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(11, 1, 0));
+            // 两个已知土料箱仍须受首次整理范围约束，走近第一箱不能放宽边界。
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(5, 1, 0), DIRT, 1);
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(11, 1, 0), DIRT, 1);
             var supply = begin(h, 6); supply.tick(h.player, ignored -> null);
             // 第一只箱子已满，角色走近它后不能把原本范围外的第二只箱子纳入搜索。
             h.position(new Vec3(5.5, 1, 0.5)); replace(supply, "child", new DepositReceipt(0));
@@ -49,7 +52,11 @@ public final class BuildExcavationSpoilBoundaryTest {
     private static void fullWarehousesHaveAFiniteAttemptBudget() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = ContainerSupplySourcesTest.worldEntities(h); h.position(new Vec3(0.5, 1, 0.5));
-            for (int x = 1; x <= 9; x++) ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(x, 1, 1));
+            // 满箱预算只覆盖已有土料线索的容器，不再把陌生木桶当成可探索的候选。
+            for (int x = 1; x <= 9; x++) {
+                ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(x, 1, 1));
+                ContainerSupplySourcesTest.rememberContents(h, new BlockPos(x, 1, 1), DIRT, 1);
+            }
             var supply = begin(h, 16);
             for (int i = 0; i < ContainerSupplySources.MAX_ATTEMPTS; i++) {
                 supply.tick(h.player, ignored -> null); replace(supply, "child", new DepositReceipt(0));
@@ -65,6 +72,7 @@ public final class BuildExcavationSpoilBoundaryTest {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = ContainerSupplySourcesTest.worldEntities(h);
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(3, 1, 3));
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(3, 1, 3), DIRT, 1);
             var supply = begin(h, 16); supply.tick(h.player, ignored -> null);
             // 子回执说存了三份而背包没有变化，不能累计成已确认存入再自动重放。
             replace(supply, "child", new DepositReceipt(3));

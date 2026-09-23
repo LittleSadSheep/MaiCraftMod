@@ -42,7 +42,7 @@ public final class ContainerSupplySources {
     private ContainerSupplySources() {}
     public static List<Candidate> candidates(LocalPlayer player, BlockPos center, int radius,
             List<ResourceLocation> items, Set<BlockPos> visited, List<String> protectedLabels) {
-        // 多箱取料时跳过已经尝试过的整只箱子，优先去最近看见有货的箱子；不为找货强行加载区块。
+        // 缺料不是探索箱子的许可：只去最近实际看见目标材料的容器，未知、空箱或过期线索都跳过。
         List<Candidate> found = new ArrayList<>(); Set<BlockPos> seen = new HashSet<>(); int examined = 0;
         int chunks = (radius + 15) / 16;
         outer: for (int x = -chunks; x <= chunks; x++) for (int z = -chunks; z <= chunks; z++) {
@@ -57,8 +57,8 @@ public final class ContainerSupplySources {
                 if (footprint.stream().anyMatch(visited::contains)) continue;
                 Map<BlockPos, Object> identities = identities(player.level(), footprint);
                 var stock = CACHE.latest(player, player.level(), at, identities, player.level().getGameTime());
-                int rank = stock == null ? 1 : items.stream().anyMatch(id -> stock.storedCount(id) > 0) ? 0 : 2;
-                found.add(new Candidate(at, BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock()), footprint, rank));
+                if (stock == null || items.stream().noneMatch(id -> stock.storedCount(id) > 0)) continue;
+                found.add(new Candidate(at, BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock()), footprint, 0));
             }
         }
         return found.stream().sorted(Comparator.comparingInt(Candidate::stockRank)
@@ -75,6 +75,13 @@ public final class ContainerSupplySources {
         if (other.getBlock() != state.getBlock() || other.getValue(ChestBlock.TYPE) == ChestType.SINGLE
                 || !peer.relative(ChestBlock.getConnectedDirection(other)).equals(at)) return List.of();
         return List.of(at.immutable(), peer.immutable());
+    }
+    /** 自动取料开箱前重新核对线索；玩家指明的定向存取仍由公开容器能力单独执行。 */
+    public static boolean hasObservedItems(LocalPlayer player, BlockPos at, List<ResourceLocation> items) {
+        List<BlockPos> footprint = footprint(player.level(), at);
+        if (footprint.isEmpty()) return false;
+        var stock = CACHE.latest(player, player.level(), at, identities(player.level(), footprint), player.level().getGameTime());
+        return stock != null && items.stream().anyMatch(id -> stock.storedCount(id) > 0);
     }
     public static boolean allowed(LocalPlayer player, BlockPos at, List<String> protectedLabels) {
         // 普通仓库仍只认箱、桶、潜影盒；任一半不允许访问就整箱不碰，不能把 AE 终端当普通槽位扫描。

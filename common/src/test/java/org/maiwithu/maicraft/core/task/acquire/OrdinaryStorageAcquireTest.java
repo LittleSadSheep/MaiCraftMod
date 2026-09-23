@@ -28,6 +28,11 @@ public final class OrdinaryStorageAcquireTest {
             var entities = ContainerSupplySourcesTest.worldEntities(h);
             BlockPos first = new BlockPos(3, 1, 3), second = new BlockPos(6, 1, 3);
             ContainerSupplySourcesTest.addBarrel(h, entities, first); ContainerSupplySourcesTest.addBarrel(h, entities, second);
+            // 先前看过两箱铁锭，第一箱被取空后才可沿着第二条已有线索继续补料。
+            ContainerSupplySourcesTest.rememberContents(h, first, ResourceLocation.parse("minecraft:iron_ingot"), 3);
+            ContainerSupplySourcesTest.rememberContents(h, second, ResourceLocation.parse("minecraft:iron_ingot"), 7);
+            // 即使陌生木桶更近，真实取料分支也必须跳过它。
+            ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(2, 1, 2));
             var r = new SemanticAcquireTaskRecord("ordinary-storage", 1000, List.of(ResourceLocation.parse("minecraft:iron_ingot")), 10,
                     List.of(SemanticAcquireTaskRecord.Source.STORAGE), false, SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
             var task = new SemanticAcquireCompanionTask(h.player, r); task.onStart(); Object need = get(task, "rootNeed");

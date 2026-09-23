@@ -32,6 +32,9 @@ public final class BuildExcavationSpoilSupplyTest {
             h.player.inventoryMenu.setCarried(ItemStack.EMPTY);
             var entities = ContainerSupplySourcesTest.worldEntities(h); BlockPos first = new BlockPos(3, 1, 3), second = new BlockPos(6, 1, 3);
             ContainerSupplySourcesTest.addBarrel(h, entities, first); ContainerSupplySourcesTest.addBarrel(h, entities, second);
+            // 自动整理只续用已知土料箱，空的陌生箱子不因还有容量就成为倾倒目标。
+            ContainerSupplySourcesTest.rememberContents(h, first, DIRT, 1);
+            ContainerSupplySourcesTest.rememberContents(h, second, DIRT, 1);
             h.inventory.setItem(0, new ItemStack(Items.DIRT, 10)); h.inventory.setItem(1, new ItemStack(Items.DIAMOND_PICKAXE));
             var supply = new BuildExcavationSpoilSupply(); supply.begin(h.player, "spoil", 1000, Map.of(DIRT, 6), List.of(), 16);
             supply.tick(h.player, ignored -> { throw new AssertionError("selection should only prepare a child"); });

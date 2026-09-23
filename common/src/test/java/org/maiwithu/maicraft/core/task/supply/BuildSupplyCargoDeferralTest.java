@@ -8,6 +8,7 @@ import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -79,8 +80,10 @@ public final class BuildSupplyCargoDeferralTest {
             field(task, "cargoRetryAt").setLong(task, 0);
             for (int i = 0; i < 30; i++) check(!(boolean) prepare.invoke(task), "条件不变时不能每次检查都重新找箱子");
             check(!spoil(task).active() && field(task, "cargoDeferrals").getInt(task) == 1, "没有变化不会消耗新的整理轮次");
-            // 新出现的已加载普通仓库是新的可观察条件；仍不开箱偷看容量，只允许再走正常存入流程。
+            // 陌生箱子出现不会获得整理许可；确认它是土料箱后才允许有界重试。
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(3, 1, 3));
+            check(!(boolean) prepare.invoke(task), "新出现但内容未知的箱子不能唤起整理");
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(3, 1, 3), ResourceLocation.parse("minecraft:dirt"), 1);
             check((boolean) prepare.invoke(task) && spoil(task).active(), "观察到新仓库后可以有界重试整理");
             task.result(TaskState.CANCELLED);
         }
@@ -90,6 +93,7 @@ public final class BuildSupplyCargoDeferralTest {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = ContainerSupplySourcesTest.worldEntities(h); var task = task(h);
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(3, 1, 3));
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(3, 1, 3), ResourceLocation.parse("minecraft:dirt"), 1);
             for (int slot = 0; slot < 36; slot++) h.inventory.setItem(slot, new ItemStack(Items.DIRT, 64));
             TaskFactory.register(SemanticContainerTaskRecord.class, (player, record) -> new EmptyDeposit(false, false));
             task.start(h.player); TaskState state = TaskState.RUNNING;
@@ -107,6 +111,7 @@ public final class BuildSupplyCargoDeferralTest {
         for (boolean cursor : List.of(false, true)) try (var h = new InteractionWorldTestHarness()) {
             var entities = ContainerSupplySourcesTest.worldEntities(h); var task = task(h); ordinaryCargo(h, true);
             ContainerSupplySourcesTest.addBarrel(h, entities, new BlockPos(3, 1, 3));
+            ContainerSupplySourcesTest.rememberContents(h, new BlockPos(3, 1, 3), ResourceLocation.parse("minecraft:dirt"), 1);
             TaskFactory.register(SemanticContainerTaskRecord.class, (player, record) -> new EmptyDeposit(!cursor, cursor) {
                 @Override public TaskState tick(LocalPlayer owner) {
                     if (cursor) owner.inventoryMenu.setCarried(new ItemStack(Items.DIRT));

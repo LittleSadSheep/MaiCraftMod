@@ -39,6 +39,8 @@ AE2 世界流体加工使用 `ae2:transform`，例如 `{"recipe_id":"<现场返�
 
 上方展示字段位置，不是一份可直接执行的网络：所有名称与端口必须实际对应。只有 process 节点声明 `recipe_id`/`batches`，只有 source 节点声明 `material_policy`。材料策略为 `inventory_only`、`storage_available` 或 `ordinary`；介质包括 `items`、`fluids`、`chemicals`、`energy`、`kinetic`。资源身份可以使用原生观察返回的组件敏感身份。
 
+`storage_available` 不授权探索陌生箱子。自动取料只复访近期通过真实菜单确认有目标材料的普通容器；未知、已知没有目标材料或线索失效的箱子会被跳过。自动整理余料也只续用已知存放对应材料的容器。玩家明确要求访问某个箱子，或告示牌、可信记忆、聊天说明指向具体容器和材料时，先按该依据使用定向 `use_container` / `manage_container`；地标名称、附近有箱子或缺材料本身都不是访问与取用授权。已存在的保护标签继续生效。
+
 `path` 和 link 的 `configurations` 可省略。配置 arguments 支持 `action` 及原生定义的 `value`、`clear`、`item_id`、`components`、`resource_id`、`side`、`transmission`、`relative_side`、`data_type`、`enabled`、`mode`、`recipe_id`；未知动作或字段不得当成可执行。数量是有限观察窗口的预算，kinetic 数量表示最低转速。
 
 v1 保留至少两次原生产出事件、指定时间跨度和实际交付到 sink 的验收要求。`window_ticks` 是输出证据的最短跨度，`max_idle_ticks` 独立限制无进展间隔；上限均为72000刻。网络配方、端口、连接与事件仍要求相应服务器支持，设计检查不会降低这些证据要求。

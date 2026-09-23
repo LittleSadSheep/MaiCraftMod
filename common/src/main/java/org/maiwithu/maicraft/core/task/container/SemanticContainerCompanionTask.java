@@ -343,6 +343,9 @@ public final class SemanticContainerCompanionTask
         }
         if (!targetStillValid()) return failFinal("container_target_changed",
                 "The selected block changed before it could be opened.", FailureType.TARGET_LOST);
+        // 自动补料或整理余料只复访有对应材料的已知箱子；排队期间线索失效就停止，不临时改成盲搜。
+        if (r.storageSupply() && !ContainerSupplySources.hasObservedItems(player, target.position(), r.itemIds))
+            return failFinal("container_stock_evidence_expired", "The automatic storage visit no longer has recent evidence of the requested material. Use a targeted container goal only when authorized or supported by a specific source hint.", FailureType.TARGET_LOST);
         BlockEntity entity = player.level().getBlockEntity(target.position());
         if (entity instanceof BaseContainerBlockEntity container && !container.canOpen(player)) {
             return failFinal("container_locked", "The selected container reports that this player "
