@@ -13,6 +13,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometry;
+import org.maiwithu.maicraft.core.integration.create.CreateBeltAccess;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
 /** 显式蓝图的组件关系与原生安装声明；所有坐标、承载面和运输技术都由作者选择。 */
@@ -24,6 +25,9 @@ public final class MachineAssemblyDocument {
         JsonObject source = blueprint.has("assembly") ? object(blueprint.get("assembly"), "assembly") : new JsonObject();
         keys(source, Set.of("installations", "processing"));
         JsonArray installations = array(source, "installations"), processing = array(source, "processing");
+        // 实装版本负责给出带长上限；离线格式检查只用规划预算，不能借默认长度假称原生安装可用。
+        int length = CreateBeltAccess.available() ? CreateBeltAccess.maximumLength() : Math.min(2 * radius + 1, MachinePlanningBudget.current().maxTargets());
+        installations = MachineBeltRoutes.expand(installations, radius, length);
         // 作者只给带段时先推导端轴，再让原有占格、加工与禁用模组检查审查完整展开结果。
         MachineBeltAssembly.prepareShafts(blueprint, installations, radius);
         JsonArray installs = new JsonArray(), relations = new JsonArray();

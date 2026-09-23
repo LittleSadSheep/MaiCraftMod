@@ -33,6 +33,7 @@ public final class MachineAssemblyResources {
         belt.addProperty("transport_direction", "First/second define connector geometry, not guaranteed item flow. Verify actual motion and signed kinetic speed before claiming the intended transport direction.");
         belt.addProperty("power_interfaces", "Endpoint shafts are automatic. Add intermediate pulley positions with pulleys. Review power_ports for final block, offset, axis, connection face and stable port ID; installed/powered remain unknown until observed. Adjacent turning belts exchange items, not necessarily rotation.");
         belt.addProperty("power_binding", "Select a reviewed power_ports ID with external_inputs:[{id,medium:kinetic,port,minimum_rpm?,reason?}]. Compilation resolves the reference to the final belt block. After construction, connect_external_input uses your input id and freshly observed native shaft faces; the temporary preparation shaft is not the final target.");
+        belt.addProperty("route", "For a horizontal turning route, give path waypoints in desired item-flow order instead of first/second/flow. Corners belong to the receiving segment; each outgoing end is adjacent to its receiver. Long legs split at the installed native length limit. Read item_handoffs and power_ports separately; each segment still needs actual motion/power verification.");
         try { if (CreateBeltAccess.available()) belt.addProperty("endpoint_distance_exclusive_limit", CreateBeltAccess.maximumLength()); }
         catch (RuntimeException unavailable) { belt.addProperty("available", false); belt.addProperty("unavailable_reason", unavailable.getMessage()); }
         JsonArray installers = new JsonArray(); installers.add(belt); result.add("native_installers", installers);
@@ -53,8 +54,11 @@ public final class MachineAssemblyResources {
                        "offset":{"$ref":"#/$defs/position"},"item_id":{"type":"string"},"part":{"enum":["center","up","down","north","south","east","west"]}}}]}},
                    "constraints":{"type":"object","additionalProperties":false,"properties":{"forbidden_mods":{"type":"array","maxItems":64,"items":{"type":"string","pattern":"^[a-z0-9_.-]{1,64}$"}}}},
                    "assembly":{"type":"object","additionalProperties":false,"properties":{
-                     "installations":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["type","first","second"],"properties":{
+                     "installations":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["type"],"oneOf":[
+                       {"required":["first","second"],"not":{"required":["path"]}},
+                       {"required":["path"],"not":{"anyOf":[{"required":["first"]},{"required":["second"]},{"required":["flow"]}]}}],"properties":{
                        "type":{"const":"create:belt"},"first":{"$ref":"#/$defs/position"},"second":{"$ref":"#/$defs/position"},
+                       "path":{"type":"array","minItems":2,"items":{"$ref":"#/$defs/position"}},
                        "pulleys":{"type":"array","items":{"$ref":"#/$defs/position"}},"flow":{"enum":["first_to_second","second_to_first"]}}}},
                      "processing":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["processor","surface"],"properties":{
                        "processor":{"$ref":"#/$defs/position"},"surface":{"$ref":"#/$defs/position"}}}}}},

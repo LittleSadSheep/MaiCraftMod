@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometryTest;
 import org.maiwithu.maicraft.core.integration.create.BeltLinkReceiptTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyDocumentTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBeltAssemblyTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineBeltRoutesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineNativeInstallationTest;
 import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
@@ -127,6 +128,7 @@ public final class MachineRegressionSuite {
         catch (Exception failure) { throw new AssertionError("durable building continuation regression", failure); }
         MachineBlueprintDocumentTest.main(args);
         MachineBeltAssemblyTest.main(args);
+        MachineBeltRoutesTest.main(args);
         MachineBuildCompletionTest.main(args);
         MachinePlanningBudgetTest.main(args);
         MachineLayoutAeNetworksTest.main(args);
