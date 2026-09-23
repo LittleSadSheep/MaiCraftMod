@@ -21,17 +21,14 @@ public final class GoalCompiler {
     private GoalCompiler() {}
 
     /**
-     * The compiled navigation contract.
+     * 编译后的导航约定。
      *
-     * @param goal           search goal — node-domain arrival
-     * @param sacred         {@link BlockPos#asLong()} keys of cells the route must not
-     *                       break or bury (the {@code CalculationContext} domain);
-     *                       empty when the intent has no block objective
+     * @param goal           搜索目标，表示在移动图节点域中的到达条件。
+     * @param sacred         路线不得破坏或掩埋的格子键（{@link BlockPos#asLong()}）；属于 {@code CalculationContext} 的检查范围，无方块目标时为空。
      */
     public record Compiled(NavGoal goal, LongSet sacred) {
         /**
-         * Frozen value key for live-goal comparison. The primitive sacred set is copied so a
-         * caller cannot mutate an earlier tick's baseline behind the navigator's back.
+         * 用于比较实时目标的冻结值键。复制基础类型构成的 sacred 集合，避免调用方在寻路器背后修改先前 tick 的基线。
          */
         public CompiledFingerprint semanticFingerprint() {
             return new CompiledFingerprint(goal.semanticFingerprint(), sacred);
@@ -47,67 +44,54 @@ public final class GoalCompiler {
     }
 
     /**
-     * One mining stance: the ore (what becomes sacred), the stance BASE the feet
-     * band hangs from (usually the ore itself, but a run's top block anchors one
-     * lower — see {@code MineCompanionTask.coalesce}), and how far below that
-     * base the feet may end ({@link NavGoal#mineColumn}).
+     * 一个挖矿站位：包含矿石（作为 sacred 保护目标）、脚位范围所依附的站位基准（通常是矿石本身；竖向矿脉的顶块可能以其下方一格为基准，见 {@code MineCompanionTask.coalesce}），
+     * 以及最终脚位允许低于基准多少格（{@link NavGoal#mineColumn}）。
      */
 
     /**
-     * Use/open/work at a block (crafting table, chest, furnace, door): end
-     * TOUCHING it ({@link NavGoal#getToBlock} — y-anchored, no elevated cell
-     * satisfies), the target itself sacred, arrival = grounded within reach.
+     * 用于在方块上操作、打开或工作（工作台、箱子、熔炉、门）：终点必须能触及方块（{@link NavGoal#getToBlock} 以目标高度为基准，不接受高处格），
+     * 目标方块自身受 sacred 保护，且只有角色落地并处于交互距离内才算到达。
      */
     public static Compiled interact(BlockPos target) {
         BlockPos t = target.immutable();
         return new Compiled(NavGoal.getToBlock(t), single(t));
     }
 
-    /** Occupy exactly this cell. Nothing sacred. */
+    /** 要求占据指定方块格；没有 sacred 保护格。 */
     public static Compiled standOn(BlockPos cell) {
         BlockPos c = cell.immutable();
         return new Compiled(NavGoal.exact(c), LongSets.emptySet());
     }
 
-    /** Stand orthogonally beside {@code target} (a placement stance): the
-     *  target cell is sacred — the route may not scaffold into the cell the
-     *  task is about to fill. */
+    /** 要求正交相邻站在 {@code target} 旁作为放置站位；目标格受 sacred 保护，路线不能在任务即将填入方块的位置搭设脚手架。 */
     public static Compiled standAdjacent(BlockPos target) {
         BlockPos t = target.immutable();
         return new Compiled(NavGoal.adjacent(t), single(t));
     }
 
     /**
-     * Vicinity of a (usually moving) ground-dwelling point: horizontal radius
-     * at the target's height ±1 ({@link NavGoal#nearGround} — the raw 3D sphere
-     * is deliberately NOT used here). Nothing sacred.
+     * 用于通常会移动的地面目标：在目标高度上下各一格内按水平方向半径接近（{@link NavGoal#nearGround}，有意不用三维球形范围）；没有 sacred 保护格。
      */
     public static Compiled near(BlockPos center, double radius) {
         BlockPos c = center.immutable();
         return new Compiled(NavGoal.nearGround(c, radius), LongSets.emptySet());
     }
 
-    /** The {@code resolveBlockGoal} replacement: a walkable cell is a place to
-     *  stand, an occupied one is a block to get to (and not consume). */
+    /** 替代 {@code resolveBlockGoal}：目标为空地时将其作为站位；目标已被占据时则走到方块旁，不消耗该方块。 */
     public static Compiled block(Level level, BlockPos cell) {
         return block(BlockHelper.canWalkThrough(level, cell), cell);
     }
 
-    /** Pure core of {@link #block(Level, BlockPos)} (headless-testable). */
+    /** {@link #block(Level, BlockPos)} 的纯逻辑核心，可在无游戏环境下测试。 */
     public static Compiled block(boolean cellWalkable, BlockPos cell) {
         return cellWalkable ? standOn(cell) : interact(cell);
     }
 
     /**
-     * A whole mining objective in one search: composite of per-ore stances
-     * (plus a loose member per nearby drop, so the same walk collects them).
+     * 用一次搜索处理完整挖矿目标：组合每个矿物的站位，并为附近每个掉落物添加一个可行走目标，使同一路线也能收集它们。
      *
-     * <p>Target cells are deliberately NOT sacred — the route is allowed to chop a
-     * target on the way past. A stance often sits inside the target's own column
-     * (a tree trunk: "feet at/under the log" IS a log cell), so forbidding the
-     * path from breaking targets makes every stance of an untouched trunk
-     * unsatisfiable. An en-route break loses nothing: the cell leaves the live
-     * target index and its native drop is collected as the body traverses the path.
+     * <p>目标格有意不加入 sacred 集合，允许路线经过时顺手挖掉目标。站位可能位于目标自身柱列中（例如树干下方的脚位本身也是原木格），
+     * 禁止路线破坏目标会让尚未砍伐的树干站位全部无法满足。途中挖掉目标不会丢失结果：方块会从实时目标索引移除，角色沿路线经过时再按原生方式拾取掉落物。
      */
     public static Compiled mineField(List<BlockPos> ores, List<BlockPos> drops) {
         List<NavGoal> members = new ArrayList<>(ores.size() + drops.size());
@@ -121,10 +105,8 @@ public final class GoalCompiler {
     }
 
     /**
-     * Get beside ANY of these same-kind blocks (a "walk to the nearest X"
-     * objective): composite of per-candidate {@link NavGoal#getToBlock}
-     * members, EVERY candidate sacred — the route may neither break nor bury
-     * the very blocks it is travelling to; whichever ends up cheapest wins.
+     * 走到这些同类方块中的任意一个旁边（“前往最近的某类方块”）：组合每个候选的 {@link NavGoal#getToBlock} 目标，
+     * 并将每个候选都设为 sacred，路线不能破坏或掩埋正在前往的方块；最终选择成本最低的一项。
      */
     public static Compiled anyOf(List<BlockPos> candidates) {
         List<NavGoal> members = new ArrayList<>(candidates.size());
