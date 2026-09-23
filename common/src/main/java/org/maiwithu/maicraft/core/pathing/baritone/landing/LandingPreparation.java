@@ -27,7 +27,7 @@ public final class LandingPreparation {
     private InteractionHand hand = InteractionHand.MAIN_HAND;
 
     public LandingPreparation(Item item) { this.item = item; }
-    /** Fast path for a held item; preparation and hotbar changes use the tick methods. */
+    /** 已持有物品时的快速路径；材料准备和快捷栏变化由逐 tick 方法处理。 */
     public boolean acceptHeld(LocalPlayerContext context) {
         if (selection != null || swap != null || inventoryTouched || interruptedClose != null || failed) return false;
         if (!context.permitsNativeActions()
@@ -40,8 +40,7 @@ public final class LandingPreparation {
     public boolean tick(LocalPlayerContext context) {
         if (failed) return false;
         if (ready && context.player().getItemInHand(hand).is(item)) return true;
-        // Preparation is rechecked on each supported departure tick. A stale ready flag must
-        // not let a changed hotbar selection send the player off the edge without the bucket.
+        // 每个允许起跳的 tick 都重新检查准备状态，避免过期的 ready 标记在快捷栏变化后仍放行，使玩家没拿水桶就冲下悬崖。
         ready = false;
         if (!context.permitsNativeActions()) return false;
         interrupted |= !airborneAllowed && !context.player().onGround();
@@ -95,7 +94,7 @@ public final class LandingPreparation {
             }
         }
     }
-    /** A carried inventory item remains first choice in flight; use native visible inventory actions. */
+    /** 飞行期间仍优先使用背包中携带的物品；通过原生可见背包操作完成选择。 */
     public boolean tickEmergency(LocalPlayerContext context) {
         return tickEmergency(context,Integer.MAX_VALUE);
     }
