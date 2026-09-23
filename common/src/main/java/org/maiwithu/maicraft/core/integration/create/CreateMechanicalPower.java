@@ -24,7 +24,7 @@ public final class CreateMechanicalPower {
 
     public enum Transmission { AUTO, ENCASED_CHAIN_DRIVE }
 
-    /** An anchor normally expands into live evidence; exactFace binds an existing utility interface. */
+    /** 锚点通常会扩展为实时证据；exactFace 用于绑定现有动力接口。 */
     public record Endpoint(String name, BlockPos center, Direction exactFace) {
         public Endpoint(String name, BlockPos center) { this(name, center, null); }
         public Endpoint {
@@ -35,9 +35,8 @@ public final class CreateMechanicalPower {
     }
 
     /**
-     * Semantic request. {@code allowFreeReceiver} lets nearest authoritative destination evidence
-     * be either a compatible machine or a verified empty receiver; false requires a real, visible
-     * kinetic destination. Existing blocks are never replaced in either mode.
+     * 语义请求。{@code allowFreeReceiver} 为 true 时，最近的权威目标证据可以是兼容机器或已核实的空接收端；
+     * 为 false 时则必须存在真实可见的动力目标。两种模式都不会替换现有方块。
      */
     public record Request(
             Endpoint source,
@@ -56,12 +55,12 @@ public final class CreateMechanicalPower {
         }
     }
 
-    /** Presence of the optional kinetic API, without linking against it. */
+    /** 检查可选动力 API 是否存在，不在编译期链接该 API。 */
     public record Availability(boolean available, String detail) {}
 
     private CreateMechanicalPower() {}
 
-    /** Force the task runner registration during client initialization. Idempotent. */
+    /** 客户端初始化时强制注册任务执行器；可重复调用。 */
     public static void install() {
         TaskFactory.register(CreateMechanicalPowerTaskRecord.class,
                 CreateMechanicalPowerTask::new);
@@ -71,14 +70,14 @@ public final class CreateMechanicalPower {
         return CreateKineticsBridge.availability();
     }
 
-    /** Release an opaque paused-search or confirmed-prefix receipt that will not be resumed. */
+    /** 释放不会继续使用的不透明暂停搜索回执或已确认前缀回执。 */
     public static void discardContinuation(UUID token) {
         if (token == null) return;
         CreateEndpointContinuations.discard(token);
         CreateMechanicalContinuations.discard(token);
     }
 
-    /** Create a fresh semantic connection task. */
+    /** 创建新的语义连接任务。 */
     public static TaskRecord task(String callId, long deadlineGameTime, Request request) {
         return task(callId, deadlineGameTime, request,
                 SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY,
@@ -110,8 +109,7 @@ public final class CreateMechanicalPower {
     }
 
     /**
-     * Continue an exactly confirmed prefix.  Unknown, expired, different-body, or changed-world
-     * receipts fail as structured task results and never cause the previous placement to replay.
+     * 继续执行已精确确认的前缀。回执未知、过期、来自不同角色或世界已改变时，均返回结构化任务失败结果，绝不会重放先前的放置动作。
      */
     public static TaskRecord resumeTask(
             String callId, long deadlineGameTime, Request request, UUID continuationToken) {
@@ -121,8 +119,7 @@ public final class CreateMechanicalPower {
     }
 
     /**
-     * Continue an exact prefix without weakening the original semantic material and safety policy.
-     * The opaque receipt is supplied by the semantic parent, never planned by the model.
+     * 在不放宽原有语义材料与安全策略的前提下，继续执行精确前缀。此不透明回执由语义父任务提供，不由模型规划。
      */
     public static TaskRecord resumeTask(
             String callId,
@@ -140,7 +137,7 @@ public final class CreateMechanicalPower {
                 materialPolicy, allowedSources, allowHarm, protectedLabels);
     }
 
-    /** Client-thread loaded-region survey for UI/preflight. It never mutates the world. */
+    /** 在客户端线程勘查已加载区域，供界面和预检使用；绝不修改世界。 */
     public static Survey survey(LocalPlayer player, Request request) {
         Objects.requireNonNull(player, "player");
         CreateMechanicalPlan.Result result = CreateMechanicalPlanner.plan(player, request);
