@@ -69,7 +69,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     @Override
     protected List<Precondition> preconditions() {
         return List.of(
-                // Resolve + cache the target; fail fast if it despawned / moved out of range.
+                // 解析并缓存目标；若目标已消失或移出范围，立即失败。
                 () -> {
                     entity = player.clientLevel.getEntity(r.entityId);
                     return (entity == null || !entity.isAlive())
@@ -86,15 +86,13 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
 
     @Override
     protected PlayerNav buildNav() {
-        // Arrival = within reach AND a clear line of sight: nav keeps walking (toward the entity)
-        // until BOTH hold, so a wall between us and the target is cleared by re-positioning rather
-        // than stood in front of forever.
+        // 到达条件是同时处于交互距离内且视线畅通；寻路会持续跟随实体，直到两项都满足。
+        // 若墙挡在角色与目标之间，就重新调整站位绕开，而不是永远停在墙前。
         return new PlayerNav(player, () -> entity.blockPosition(), WALK_SPEED, this::inReachAndLos)
                 .withTerrainProbe();
     }
 
-    /** Act this tick when the target is gone (report the outcome), a fixed hold has elapsed, or we're
-     *  in reach with a clear line of sight; otherwise the base drives the nav to follow the entity. */
+    /** 目标消失时报告结果、固定按住时间到期，或已在交互距离内且视线畅通时执行本 tick 动作；否则由父类导航继续跟随实体。 */
     @Override
     protected boolean reached() {
         return entity == null || !entity.isAlive()
@@ -104,8 +102,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
 
     @Override
     protected TaskState act() {
-        // Target gone: death is success for a left-click that already landed; otherwise
-        // the target slipped away before we could touch it.
+        // 目标消失时，若此前左键已命中则视为成功；否则说明目标在角色接触前逃离。
         if (entity == null || !entity.isAlive()) {
             if (acted) {
                 successMsg = r.button == MouseButton.LEFT
@@ -130,7 +127,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
             return TaskState.SUCCESS;
         }
 
-        // A fixed-duration hold completes on time even if the line of sight lapsed near the end.
+        // 固定时长按住到期后即结束，即使临近结束时视线暂时被挡住。
         // 按住时限到了便停止并返回成功，即使最后一次交互还没确认；这也是审计记录 A30 的触发点。
         if (interaction != null && holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
             interaction.stop();
@@ -138,8 +135,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
             return TaskState.SUCCESS;
         }
 
-        // In reach + LOS: aim at the entity and confirm the crosshair actually resolves to IT
-        // (e.g. not another entity wandered into the exact line) before pressing.
+        // 处于距离内且视线畅通时，先瞄准实体并确认准星实际命中它，再按下按键；避免另一实体恰好走入射线后误操作。
         InputDriver.lookAt(player, entity.getEyePosition());
         HitResult hit = Interaction.nativeRaytrace(player, REACH);
         boolean onTarget = hit.getType() == HitResult.Type.ENTITY
@@ -161,8 +157,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
                 itemSelected = true;
             }
             receipt = PressReceipt.before(player, null);
-            // Real LocalPlayer semantics: when the entity does not consume the interaction,
-            // vanilla may continue with the held item.
+            // 遵循真实 LocalPlayer 语义：实体没有处理交互时，原版可能继续使用手持物品。
             interaction = Interaction.forHit(player, hit, button(), r.holdTicks, true);
             if (r.holdTicks > 0) {
                 holdUntil = player.level().getGameTime() + r.holdTicks;
@@ -253,7 +248,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         return " — " + String.join("; ", changes);
     }
 
-    /** Release the interaction, then the nav + overlay (base default). */
+    /** 释放交互，再释放导航和目标覆盖层（父类默认清理）。 */
     @Override
     protected void cleanup() {
         selection.reset();
