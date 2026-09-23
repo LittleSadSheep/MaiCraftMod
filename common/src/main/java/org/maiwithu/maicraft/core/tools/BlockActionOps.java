@@ -22,15 +22,15 @@ import net.minecraft.resources.ResourceLocation;
  */
 public final class BlockActionOps {
 
-    // mine budgets / bounds.
+    // 挖掘预算与范围。
     private static final int MAX_COUNT = 256;
-    /** Per-block budget is generous; total scales with count so big jobs don't time out. */
+    /** 单方块预算留有余量；总预算随目标数量增长，避免大型任务超时。 */
     private static final long TICKS_PER_BLOCK = 30 * 20;   // 30s each
     private static final long MIN_TIMEOUT_TICKS = 60 * 20; // 1 min floor
 
-    // interact_at: covers walking to the aim.
+    // interact_at：包含走到瞄准位置所需时间。
     private static final long INTERACT_AT_TIMEOUT_TICKS = 30 * 20;
-    // interact_entity: covers chasing a moving target.
+    // interact_entity：包含追赶移动目标所需时间。
     private static final long INTERACT_ENTITY_TIMEOUT_TICKS = 60 * 20;
 
     // 把物品来源方块名读成目标集合，数量压到 1～256，并按数量给采矿任务一个初始期限。
@@ -47,7 +47,7 @@ public final class BlockActionOps {
         return new MineBlockTaskRecord(ctx.toolCallId(), deadline, targets, clampedCount, label);
     }
 
-    /** Short label for messages: the first target's path (e.g. "iron_ore"), "+N" if more. */
+    /** 消息使用的简短标签：显示第一个目标路径（例如 "iron_ore"），另有目标时附加 "+N"。 */
     // 只为消息生成短标签：一种显示名字，多种显示首个名字加剩余种类数；不影响实际目标集合。
     private static String labelFor(Set<Block> targets) {
         Block first = targets.iterator().next();
