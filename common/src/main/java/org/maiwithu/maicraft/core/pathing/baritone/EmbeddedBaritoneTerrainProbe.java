@@ -26,10 +26,9 @@ public final class EmbeddedBaritoneTerrainProbe {
     private EmbeddedBaritoneTerrainProbe() {}
 
     /**
-     * Start a probe using an explicit goal, feet cell, and frozen safety policy.
+     * 使用明确的目标、脚位格和冻结安全策略启动一次探测。
      *
-     * @return a future whose {@link CompletableFuture#cancel(boolean)} also asks the underlying
-     *         Baritone search to stop
+     * @return 对此 future 调用 {@link CompletableFuture#cancel(boolean)} 时，也会请求底层 Baritone 搜索停止。
      */
     public static ProbeFuture submit(
             IBaritone baritone,
@@ -45,8 +44,7 @@ public final class EmbeddedBaritoneTerrainProbe {
                 baritone,
                 Objects.requireNonNull(frozenPolicy, "frozenPolicy"));
 
-        // Match an ordinary first-segment calculation: no previous-path backtracking preference,
-        // but retain upstream entity avoidance and all non-mutation movement costs.
+        // 与普通首段计算保持一致：不使用上一条路线的回溯偏好，但保留上游实体避让和所有不改变世界的移动成本。
         Favoring favoring = new Favoring(baritone.getPlayerContext(), null, context);
         AbstractNodeCostSearch search = new AStarPathFinder(
                 frozenStart,
@@ -74,7 +72,7 @@ public final class EmbeddedBaritoneTerrainProbe {
         return future;
     }
 
-    /** Immutable diagnostic result; the path remains evidence and is never handed to an executor. */
+    /** 不可变诊断结果；路线仅作为证据，绝不会交给执行器运行。 */
     public record Result(PathCalculationResult calculation, TerrainBill terrainBill) {
         public Result {
             Objects.requireNonNull(calculation, "calculation");
@@ -90,7 +88,7 @@ public final class EmbeddedBaritoneTerrainProbe {
         }
     }
 
-    /** A normal future with cancellation wired through to Baritone's one-shot A* instance. */
+    /** 普通 future，其取消操作会传递到底层一次性 Baritone A* 搜索。 */
     public static final class ProbeFuture extends CompletableFuture<Result> {
         private final AbstractNodeCostSearch search;
 
