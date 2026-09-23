@@ -193,9 +193,7 @@ final class SemanticBuildSupplyCompanionTask
         } else {
             terminal = runChild(activeChild);
             if (terminal == null) {
-                // Child records own their liveness evidence. Carry any progress-based renewal
-                // outward so a large healthy construction child is not cut off by
-                // the coordinator's original estimate.
+                // 子任务记录负责维护自己的存活证据；将基于进展续期的期限向上传递，避免大型且健康运行的施工子任务被协调器最初的估算提前中止。
                 r.extendDeadlineTo(activeRecord.getDeadlineGameTime());
                 return TaskState.RUNNING;
             }
@@ -249,9 +247,8 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     /**
-     * Bind every planner family before preview using carried evidence only. Registry alternatives
-     * are compatible shapes, not observed supply sources. With no carried evidence keep the
-     * design's material requirement; all fetching waits for review and targets that frozen item.
+     * 预览前只根据实际携带的物品绑定每个规划材料族。注册表中的替代品仅表示形状兼容，并非已观察到的供应来源。
+     * 若没有背包证据，就保留设计要求的原始材料；审核通过后才围绕冻结的材料目标执行获取。
      */
     static boolean batchCompleted(TaskState terminal, TaskResult result) {
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) return false;
@@ -270,7 +267,7 @@ final class SemanticBuildSupplyCompanionTask
             }
             activePlan = SemanticBuildMaterialBinding.bind(
                     r.plan, materialProposal, Map.copyOf(selectedVariants));
-            // Save the concrete palette shown in preview before any supply or construction runs.
+            // 在开始供料或施工前，保存预览中展示的具体材料方案。
             activePlan.persistProject();
             refreshLedgers();
             prepared = true;
@@ -505,7 +502,7 @@ final class SemanticBuildSupplyCompanionTask
         activeChild = TaskFactory.create(player, record);
     }
 
-    /** Find the first material that blocks the shared BuildOrder using fresh inventory facts. */
+    /** 根据最新背包事实，找出阻塞共享 BuildOrder 的首个材料。 */
     private BatchNeed nextNeed() {
         // 按实际施工顺序假算现有材料能做多少，找到第一种会卡住的材料，再按剩余需求和背包容量决定取多少。
         Map<Item, Integer> simulated = inventoryCounts();
