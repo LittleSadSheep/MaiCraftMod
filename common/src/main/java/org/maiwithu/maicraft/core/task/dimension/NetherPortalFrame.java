@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Observed or proposed vanilla frame. Origin is its bottom-left interior cell; corners are optional. */
+/** 已观察或拟建的原版传送门框；原点为内侧左下格，四角方块可有可无。 */
 public record NetherPortalFrame(BlockPos origin, Direction.Axis axis, int width, int height) {
     public NetherPortalFrame {
         origin = origin.immutable();
@@ -52,14 +52,14 @@ public record NetherPortalFrame(BlockPos origin, Direction.Axis axis, int width,
         });
     }
 
-    /** Null represents an unloaded cell and never constitutes empty-world evidence. */
+    /** null 表示该格尚未加载，绝不能作为世界为空的证据。 */
     public static boolean empty(BlockState state) {
         return state != null && (state.isAir() || state.is(Blocks.FIRE) || state.is(Blocks.NETHER_PORTAL));
     }
 
     private static boolean isObsidian(BlockState state) { return state != null && state.is(Blocks.OBSIDIAN); }
 
-    /** Recover the bounds of an intact frame from an interior cell, with bounded loaded-only reads. */
+    /** 从框内格子反推出完整门框边界；读取范围有界且只检查已加载地形。 */
     public static NetherPortalFrame observe(Function<BlockPos, BlockState> read, BlockPos seed, Direction.Axis axis) {
         if (axis == Direction.Axis.Y || !empty(read.apply(seed))) return null;
         BlockPos bottom = seed;
