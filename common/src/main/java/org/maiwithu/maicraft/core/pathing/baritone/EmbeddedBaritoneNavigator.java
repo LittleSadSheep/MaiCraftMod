@@ -154,8 +154,7 @@ public final class EmbeddedBaritoneNavigator {
             if (!isSafeToCancel()) return continueToSafeBoundary();
             pendingArrival = false;
             if (reached.getAsBoolean()) return arrive();
-            // The stronger predicate moved away while the current movement landed. Fall through
-            // and compile a fresh goal before accepting graph membership from a live supplier.
+            // 当前移动到达时，更严格的谓词目标已发生变化；继续执行下方逻辑以重新编译目标，再检查实时供应器提供的图成员关系。
         }
 
         if (reached.getAsBoolean()) return arriveWhenSafe();
@@ -182,8 +181,7 @@ public final class EmbeddedBaritoneNavigator {
             EmbeddedBaritoneRuntime.startOrUpdate(this, compiled, permit, sprintAllowed);
             started = true;
         } else {
-            // Protected-area ThreadLocals are task-scoped and may change even for a fixed target.
-            // Refresh the policy before a later segment calculation without forcing a replan.
+            // 保护区域 ThreadLocal 属于任务作用域，即使目标固定也可能变化；在之后计算路线段前刷新策略，但不强制立即重规划。
             if (EmbeddedBaritoneRuntime.refreshPolicy(this, compiled)) {
                 cancelTerrainProbe();
                 calculationFailed = false;
@@ -300,7 +298,7 @@ public final class EmbeddedBaritoneNavigator {
         terrainProbePolicy = null;
     }
 
-    /** A completed predicate may not clear steering in the middle of a fall or parkour launch. */
+    /** 谓词完成时，若角色仍在坠落或刚启动跑酷，不得清除转向输入。 */
     private PlayerNav.Status arriveWhenSafe() {
         if (!isSafeToCancel()) {
             pendingArrival = true;
@@ -313,8 +311,7 @@ public final class EmbeddedBaritoneNavigator {
     private PlayerNav.Status failWhenSafe(FailureType type, String reason) {
         pendingArrival = false;
         pendingPause = false;
-        // Preserve the first concrete terminal cause. A later cleanup/stop request must not
-        // overwrite the TARGET_LOST, CALC_FAILED, or policy evidence already being drained.
+        // 保留最先确认的终止原因。后续清理或停止请求不能覆盖仍在结算的 TARGET_LOST、CALC_FAILED 或策略证据。
         if (pendingFailureType == null) {
             pendingFailureType = type;
             pendingFailureReason = reason;
@@ -336,12 +333,12 @@ public final class EmbeddedBaritoneNavigator {
         return PlayerNav.Status.RUNNING;
     }
 
-    /** Runtime continuation for callers that released their last PlayerNav reference mid-air. */
+    /** 当调用方在空中释放最后一个 PlayerNav 引用时，由运行时继续推进。 */
     boolean requiresOrphanContinuation() {
         return !rescueDetached && (pendingFailureType != null || pendingPause);
     }
 
-    /** Retain task meaning, discard the missed route and prevent frame-final orphan steering. */
+    /** 保留任务语义，丢弃未命中的路线，并防止帧末遗留无人负责的转向输入。 */
     void detachForLandingRescue() {
         cancelTerrainProbe();
         started = false;
@@ -351,7 +348,7 @@ public final class EmbeddedBaritoneNavigator {
         rescueDetached = true;
     }
 
-    /** Finish a latched failure once the movement itself declares hand-off safe. */
+    /** 移动本身确认可安全交接后，完成已锁存的失败状态。 */
     void settlePendingFailureAtSafeBoundary() {
         if (pendingFailureType != null && isSafeToCancel()) {
             finishPendingFailureWhenSafe();
@@ -391,9 +388,8 @@ public final class EmbeddedBaritoneNavigator {
 
     void onPathEvent(PathEvent event) {
         events.merge(event, 1, Integer::sum);
-        // A plan-ahead miss does not invalidate the segment currently carrying the body.
-        // Upstream will retry from its real end; treating it as terminal made healthy walks stop
-        // halfway whenever a speculative next segment encountered unloaded or changing terrain.
+        // 前瞻路线失败不代表当前正在执行的路线段失效；上游会从真实终点重试。
+        // 若把前瞻失败当成终态，下一段遇到未加载或变化地形时，正常行走也会半途停止。
         if (event == PathEvent.CALC_FAILED) {
             calculationFailed = true;
         }
@@ -425,8 +421,7 @@ public final class EmbeddedBaritoneNavigator {
     private void abort(FailureType fallbackType, String fallbackReason) {
         if (terminalFailure) return;
         cancelTerrainProbe();
-        // A hard body/world/runtime boundary cannot be drained, but it still must not erase a
-        // more specific result that was already waiting for an airborne movement to land.
+        // 身体、世界或运行时的硬边界无法等待结算，但仍不能覆盖已经等待空中移动着陆的具体结果。
         failureType = pendingFailureType == null ? fallbackType : pendingFailureType;
         failureReason = pendingFailureType == null ? fallbackReason : pendingFailureReason;
         pendingFailureType = null;
@@ -502,7 +497,7 @@ public final class EmbeddedBaritoneNavigator {
         failWhenSafe(FailureType.TARGET_LOST, "navigation was stopped");
     }
 
-    /** Drop local planning on manual takeover without submitting a native world action. */
+    /** 玩家手动接管时丢弃本地规划，但不提交原生世界动作。 */
     public void abandon() {
         cancelTerrainProbe();
         stopped = true; terminalFailure = true; driveRequested = false;
@@ -522,9 +517,8 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private void completePause() {
-        // Another first-person winner may change the world while this task is suspended. A
-        // diagnostic A* is tied to the failed route's frozen chunk view, so discard it and take a
-        // fresh second opinion after resumption instead of reporting stale terrain evidence.
+        // 此任务挂起期间，另一个第一人称行为可能改变世界。诊断 A* 绑定失败路线的冻结区块视图，
+        // 因此恢复时应丢弃旧结果并重新检查，不能报告过时地形证据。
         cancelTerrainProbe();
         pendingPause = false;
         driveRequested = false;
@@ -533,8 +527,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public boolean yieldForExternalAction() {
-        // The caller may only poll this method until it can dig/use an item. Register the
-        // pending pause first so an unsafe movement keeps receiving ticks until it can yield.
+        // 调用方会持续轮询，直到可以挖掘或使用物品。先登记待处理暂停，使不安全的移动继续获得 tick，直到能够安全让出控制。
         pause();
         if (!isSafeToCancel()) return false;
         var context = ClientRuntime.requireContext(player);
