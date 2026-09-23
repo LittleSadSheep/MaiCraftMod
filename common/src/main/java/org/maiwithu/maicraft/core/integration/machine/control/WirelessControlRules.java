@@ -2,7 +2,7 @@ package org.maiwithu.maicraft.core.integration.machine.control;
 
 import net.minecraft.world.phys.Vec3;
 
-/** Create frequency equality is supplied by the native key object; positions are already in world space. */
+/** Create 频率是否相同由原生键对象判断；所有位置已经转换为世界坐标。 */
 public final class WirelessControlRules {
     public record Transfer(boolean inRange,int strength,String behavior) {}
     private WirelessControlRules() {}

@@ -73,7 +73,7 @@ public final class MachineCommissioning {
             result.addProperty("status", "observed");
             result.addProperty("formed", formed);
             result.addProperty("render_master", master);
-            // Bounds are sent only by the render master, while formed is sent by every casing.
+            // Bounds 只由渲染主方块发送，而 formed 则由每个外壳方块发送。
             if (formed && master) {
                 result.add("min", coordinates((BlockPos) call(data, "getMinPos")));
                 result.add("max", coordinates((BlockPos) call(data, "getMaxPos")));
@@ -175,7 +175,7 @@ public final class MachineCommissioning {
             JsonObject row = new JsonObject();
             row.addProperty("slot", i == 0 ? "center" : Direction.values()[i - 1].getSerializedName());
             row.addProperty("part_class", part.getClass().getName());
-            // Level emitters deliberately suppress these updates; their flags cannot certify a network.
+            // Level emitter 会有意抑制这些更新，因此其标记不能用于证明网络已建立。
             if (instance(part, "appeng.parts.AEBasePart")
                     && !instance(part, "appeng.parts.automation.AbstractLevelEmitterPart")) {
                 try {

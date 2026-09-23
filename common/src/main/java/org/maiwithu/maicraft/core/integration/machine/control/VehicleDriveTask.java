@@ -14,7 +14,7 @@ import java.util.LinkedHashMap;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.task.Task;
 
-/** Inspection precedes all movement; the selected structure is never inferred from its bounds alone. */
+/** 所有移动前必须先完成检查；不能仅凭外边界推断目标结构。 */
 public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTaskRecord> {
     private MachineControlInspection.Observation observation;
     private VehicleControlPlan plan;

@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.world.phys.Vec3;
 
-/** Learns small native control responses. No force model or keyboard-direction assumptions. */
+/** 学习较小的原生控制响应；不建立力学模型，也不假设键盘方向映射。 */
 public final class VehicleFeedbackPilot {
     public enum Phase { BASELINE, PROBE, SETTLE, DRIVE, BRAKE, DONE, FAILED }
     public record Sample(Vec3 position,double yaw) {}

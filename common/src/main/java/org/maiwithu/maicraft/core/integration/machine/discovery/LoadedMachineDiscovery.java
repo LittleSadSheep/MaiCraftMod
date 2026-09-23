@@ -13,7 +13,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import java.util.Objects;
 
-/** Native adapter reads existing client chunk indexes; it never requests chunks, movement, menus or server mutations. */
+/** 原生适配器只读取现有客户端区块索引；不会请求区块、移动角色、打开菜单或修改服务器。 */
 public final class LoadedMachineDiscovery {
     private final MachineDiscoveryScanner scanner;
     public LoadedMachineDiscovery() { this(new MachineDiscoveryScanner()); }
@@ -42,8 +42,7 @@ public final class LoadedMachineDiscovery {
         private LevelChunk loaded(int x, int z) { return level().getChunkSource().getChunk(x, z, ChunkStatus.FULL, false); }
         public Iterator<BlockPos> loadedBlockEntities(int chunkX, int chunkZ) {
             LevelChunk chunk = loaded(chunkX, chunkZ);
-            // Only positions survive this client tick. Native maps can clear or rehash before the next tick,
-            // and fastutil iterators may throw NPE rather than ConcurrentModificationException afterward.
+            // 跨客户端 tick 只能保留位置。原生映射可能在下个 tick 前被清空或重哈希，fastutil 迭代器之后也可能抛出 NPE 而非 ConcurrentModificationException。
             return chunk == null ? null : chunk.getBlockEntities().keySet().stream()
                     .map(BlockPos::immutable).toList().iterator();
         }

@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.core.BlockPos;
 
-/** Seat confirmation and native control share one cancellable transport lease. */
+/** 座位确认和原生控制共用一个可取消的交通工具租约。 */
 public final class VehicleDriveSession implements TransportSession {
     private final MachineControlInspection.Observation observation;
     private final VehicleControlPlan plan;
