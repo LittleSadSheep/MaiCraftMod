@@ -77,8 +77,7 @@ public final class MachineRecipeEvidence {
                     Recipe<?> recipe = holder.value();
                     ItemStack output = RecipeProbe.resultOf(recipe, context.level().registryAccess());
                     if (output.isEmpty()) {
-                        // RecipeProbe also returns EMPTY on unsupported/null/throwing display getters.
-                        // Never interpret this as a recipe that cannot produce any output.
+                        // RecipeProbe 在显示信息不受支持、为 null 或 getter 抛出异常时也会返回 EMPTY；绝不能据此认定配方没有任何产物。
                         withoutStaticResult++;
                         continue;
                     }
@@ -198,7 +197,7 @@ public final class MachineRecipeEvidence {
         return row;
     }
 
-    /** Returns whether a genuine identifier had to be omitted due to its bounded display length. */
+    /** 返回是否因显示长度有界而省略了真实标识符。 */
     private static boolean putIdentifier(JsonObject row, String key, ResourceLocation id, JsonArray unknowns) {
         if (id == null) {
             unknowns.add(key + "_unavailable");

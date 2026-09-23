@@ -27,13 +27,13 @@ public final class MachinePlanningBudget {
         maxTargets = read(source, "maxTargets", DEFAULT_MAX_TARGETS, Integer.MAX_VALUE, issues);
         maxComponents = read(source, "maxComponents", DEFAULT_MAX_COMPONENTS, Integer.MAX_VALUE, issues);
         maxConnections = read(source, "maxConnections", DEFAULT_MAX_CONNECTIONS, Integer.MAX_VALUE, issues);
-        // The current coordinate representation computes an inclusive diameter as 2 * radius + 1.
+        // 当前坐标表示方式按包含边界的直径计算，长度为 2 * 半径 + 1。
         maxRadius = read(source, "maxRadius", DEFAULT_MAX_RADIUS, (Integer.MAX_VALUE - 1) / 2, issues);
         searchVisitedBudget = read(source, "searchVisitedBudget", DEFAULT_SEARCH_VISITED_BUDGET, Integer.MAX_VALUE, issues);
         diagnostics = List.copyOf(issues);
     }
 
-    /** One immutable startup snapshot, so a layout cannot change resource budgets midway through planning. */
+    /** 只在启动时创建一份不可变快照，避免布局规划中途改变资源预算。 */
     // 第一次使用时读取 JVM 系统属性并缓存；之后修改属性不会自动热更新这份全局预算。
     public static MachinePlanningBudget current() { return SystemBudget.INSTANCE; }
     public static MachinePlanningBudget defaults() { return new MachinePlanningBudget(ignored -> null); }

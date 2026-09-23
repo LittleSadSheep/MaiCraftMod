@@ -170,7 +170,7 @@ public final class MachineMenu {
             JsonArray screen = new JsonArray(); screen.add(slot.x); screen.add(slot.y);
             entry.add("screen_offset", screen);
             JsonArray acceptable = new JsonArray();
-            // These are actual carried candidate stacks, not inferred recipes or arbitrary slot roles.
+            // 这些是实际携带的候选物品堆叠，不是推断出的配方或任意槽位分类。
             Set<String> acceptedIds = new LinkedHashSet<>();
             for (int inventory = 0; inventory < 36 && acceptable.size() < 16; inventory++) {
                 ItemStack candidate = self.getInventory().getItem(inventory);
@@ -266,7 +266,7 @@ public final class MachineMenu {
                 && origin.dimension().equals(player.level().dimension().location().toString());
     }
 
-    /** Class evidence supplements slot acceptance rules; generic virtual render entries fail closed. */
+    /** 类信息证据用于补充槽位接纳规则；遇到通用虚拟显示条目时默认拒绝。 */
     // 先排除结果／虚拟槽，再核对直接容器或已知模组存储接口；无法解释的自定义 getter 不当作已证实的普通库存。
     static String backingEvidence(Slot slot) {
         if (slot instanceof ResultSlot || MachineMenuPolicy.virtualEntryName(slot.getClass().getName())) return "virtual_or_recipe_entry";

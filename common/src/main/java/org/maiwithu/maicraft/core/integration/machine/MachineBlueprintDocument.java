@@ -35,7 +35,7 @@ public final class MachineBlueprintDocument {
         normalized(document, budget.maxTargets(), budget.maxRadius());
     }
 
-    /** No layout inference: coordinates and explicit state constraints retain the author's meaning. */
+    /** 不推断布局；坐标和显式状态约束均保持作者原意。 */
     // 先整理统一格式，再查询注册表能力；把不支持的方块、状态、NBT 和实体安装收集成错误列表，最多展示 32 条。
     public static SemanticMachineLayout.Result compile(JsonObject document, SemanticMachineLayout.Registry registry) {
         JsonObject blueprint = normalized(document);
@@ -90,7 +90,7 @@ public final class MachineBlueprintDocument {
         validation.add("issues", issues);
         validation.add("errors", errorRows); validation.addProperty("error_count", errors.size());
         validation.addProperty("errors_truncated", errors.size() > 32); report.add("validation", validation);
-        // Evidence remains available at its source; do not duplicate large tutorial NBT into every task result.
+        // 证据仍可从原始来源读取，不要将大型教程 NBT 复制到每个任务结果中。
         // 附带的教程证据用于阅读，不交给后续施工当成配置指令。
         blueprint.remove("evidence");
         return new SemanticMachineLayout.Result(errors.isEmpty(), blueprint, report);

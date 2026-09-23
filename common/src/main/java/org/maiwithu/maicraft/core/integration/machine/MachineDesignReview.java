@@ -64,7 +64,7 @@ public final class MachineDesignReview {
         String style = design.has("style") ? string(design, "style", "$", 256, errors) : null;
         JsonObject constraints = design.has("constraints")
                 ? constraints(design.get("constraints"), errors) : null;
-        // Do not traverse oversized lists. No partial material estimate or graph is returned on failure.
+        // 不遍历超限列表；发生失败时既不返回部分材料估算，也不返回部分图。
         if (componentsJson == null || connectionsJson == null) return invalid(errors);
         List<Component> components = new ArrayList<>();
         Map<String, Component> byName = new LinkedHashMap<>();
@@ -462,7 +462,7 @@ public final class MachineDesignReview {
         JsonElement value = object.get("count");
         if (value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
             try {
-                // Accept equivalent JSON number spellings, but never truncate fractions or overflow.
+                // 接受等价的 JSON 数字写法，但绝不截断小数或发生整数溢出。
                 int count = value.getAsBigDecimal().intValueExact();
                 if (count >= 1 && count <= MAX_COMPONENT_COUNT) return count;
             } catch (ArithmeticException | NumberFormatException invalid) { /* Return a validation issue below. */ }
@@ -475,7 +475,7 @@ public final class MachineDesignReview {
         try {
             if (!exists.test(id)) error(errors, path, "unknown_" + kind, "No installed " + kind + " has this identifier.");
         } catch (RuntimeException exception) {
-            // Registry unavailability is an explicit failure, never evidence that an identifier exists.
+            // 注册表不可用时必须明确失败，不能据此证明某个标识符存在。
             error(errors, path, "registry_unavailable", "Could not verify the installed " + kind + " registry.");
         }
     }
