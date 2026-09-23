@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.server.machine.ServerMachineOperations;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
-/** Optional authoritative server entry. No client-only class is referenced by this bootstrap. */
+/** 可选的权威服务器入口；此引导程序不引用任何仅客户端类。 */
 @Mod(Constants.MOD_ID)
 public final class MaiCraftNeoForge {
     public MaiCraftNeoForge(IEventBus modBus) {
@@ -31,7 +31,7 @@ public final class MaiCraftNeoForge {
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
-        // Never put the mod or feature version here: mismatches belong in JSON negotiation.
+        // 此处不要填入模组或功能版本；版本不匹配应由 JSON 协商处理。
         event.registrar("1").optional().playBidirectional(OptionalServerPayload.TYPE, OptionalServerPayload.CODEC,
                 (payload, context) -> {
                     if (context.flow() == PacketFlow.SERVERBOUND) {

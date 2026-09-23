@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.server.machine.ServerMachineOperations;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
-/** Common bootstrap is safe on dedicated servers and does not initialize client automation. */
+/** 公共引导程序可安全运行在独立服务器上，不会初始化客户端自动化。 */
 public final class MaiCraftFabric implements ModInitializer {
     @Override public void onInitialize() {
         ServerMachineOperations.register();
