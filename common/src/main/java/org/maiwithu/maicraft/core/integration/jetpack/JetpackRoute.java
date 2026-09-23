@@ -40,12 +40,12 @@ public final class JetpackRoute {
     private record Node(BlockPos pos, double cost, double score) {}
     private static final int[][] DIRECTIONS = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
 
-    /** Only coordinates and immutable numbers survive a tick; every world query uses the fresh Space. */
+    /** 跨 tick 只保留坐标和不可变数值；每次世界查询都使用新鲜的 Space。 */
     public static final class Search {
         private final Vec3 start, target;
         private final JetpackNativeAdapter.Snapshot power;
-        // Manhattan distance is exact in open six-axis space: thousands of cells can share f.
-        // Break that plateau toward the goal instead of flood-filling the whole intervening volume.
+        // 在六方向开放空间中，曼哈顿距离是精确的：数千格可能拥有相同 f 值。
+        // 沿目标方向打破平局，避免把两点间整个体积都填充搜索。
         private final PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(Node::score)
                 .thenComparing(Comparator.comparingDouble(Node::cost).reversed()));
         private final Map<BlockPos, Double> costs = new HashMap<>();
@@ -77,9 +77,9 @@ public final class JetpackRoute {
         }
         public boolean done() { return done; }
         public Plan result() { return result; }
-        /** Null while running or successful; budget exhaustion does not prove a corridor absent. */
+        /** 运行中或成功时为空；预算耗尽不能证明走廊不存在。 */
         public String failureReason() { return failureReason; }
-        /** Valid nodes whose neighbors were expanded; stale queue entries and templates cost no nodes. */
+        /** 已展开相邻节点的有效节点数；过期队列项和模板不计入节点预算。 */
         public int expanded() { return expanded; }
         // 搜索、初始化和最后的逐段复查都分次做；找到点列后还要确认整条线仍通畅，并计入预计耗气时间。
         public void advance(Space space, int nodeBudget, long timeBudgetNanos) {
@@ -87,7 +87,7 @@ public final class JetpackRoute {
             long began = System.nanoTime();
             int operations = 0;
             while (operations++ < nodeBudget && System.nanoTime() - began < timeBudgetNanos) {
-                // Initial body sweeps and the optional template also yield between operations.
+                // 初始身体扫掠和可选模板生成也会在操作之间让出时间片。
                 if (initialization < 4) {
                     initialize(space);
                     if (done) return;
@@ -161,7 +161,7 @@ public final class JetpackRoute {
                 open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
                 initialization++;
             } else {
-                // Prefer climb/cruise/descent only when its optional cruise margin is also clear.
+                // 只有可选巡航余量也畅通时，才优先采用爬升、巡航、下降组合路线。
                 Vec3 from = template.get(templatePoint - 1), to = template.get(templatePoint);
                 boolean clear = templatePoint == 3 ? space.clear(from, to) : flightClear(space, from, to, power);
                 if (clear && templatePoint == 2)
@@ -178,7 +178,7 @@ public final class JetpackRoute {
     public static double edgeTicks(Vec3 from, Vec3 to, JetpackNativeAdapter.Snapshot power) {
         double horizontal = Math.hypot(to.x - from.x, to.z - from.z);
         double vertical = Math.abs(to.y - from.y);
-        // Slow approach, braking and mode/landing reserves are included; no maximum-speed promise.
+        // 预算包含缓慢接近、制动以及模式切换和着陆余量；不承诺全程保持最高速度。
         return 12 + horizontal / Math.min(0.08, power.horizontal() * 3)
                 + vertical / (to.y > from.y ? Math.min(0.12, (power.vertical() - power.gravity()) * 0.5) : descentSpeed(power));
     }
@@ -186,8 +186,7 @@ public final class JetpackRoute {
         return -power.hoverDescent();
     }
     static BlockPos approachCell(Space space, Vec3 landing, JetpackNativeAdapter.Snapshot power) {
-        // Prefer a two-block reserve above the platform; a low ceiling may only admit one.
-        // The whole final descent column must be observed before choosing that staging height.
+        // 优先在平台上方保留两格空间；低矮天花板下可能只能保留一格。选择该准备高度前，必须观察完整的最终下降柱列。
         for (int clearance = 2; clearance >= 1; clearance--) {
             BlockPos candidate = BlockPos.containing(landing.x, Math.ceil(landing.y) + clearance, landing.z);
             if (space.clear(center(candidate), landing) && flightClear(space, center(candidate), center(candidate), power)) return candidate;
@@ -207,7 +206,7 @@ public final class JetpackRoute {
         return observed != null && observed.distanceToSqr(landing) < 0.01;
     }
 
-    /** Follow a clear forward corridor from the actual height; intermediate altitude is a guide. */
+    /** 从当前位置高度沿畅通的前向走廊前进；中间高度仅作导航参考。 */
     // 只有高度已满足且新的连接仍通畅时才跳过近路点；靠墙处保留原先选出的路线，避免把宽敞绕行压回窄缝。
     static int nextWaypoint(Space space, Plan route, Vec3 position, int current, JetpackNativeAdapter.Snapshot power) {
         int last = route.points().size() - 2;
@@ -223,8 +222,8 @@ public final class JetpackRoute {
             boolean level = Math.abs(candidate.y - point.y) < 0.01 && atHeight;
             boolean vertical = Math.hypot(candidate.x - point.x, candidate.z - point.z) < 0.01;
             if ((!level && !vertical) || position.distanceTo(candidate) > 6 || !flightClear(space, position, candidate, power)) break;
-            // Near an opening, keep its interior waypoint instead of shaving off a clear but tight corner.
-            // Normal arrival advancement above still admits narrow passages.
+            // 接近开口时保留位于开口内部的航点，不要为了缩短路径而切过虽畅通但狭窄的拐角。
+            // 上方的常规到达推进仍允许通过狭窄通道。
             if (level && JetpackClearancePolicy.edgePenalty(space, position, candidate, power) > 0) break;
             current = i;
         }
@@ -232,8 +231,7 @@ public final class JetpackRoute {
     }
     static boolean atWaypointHeight(Plan route, int index, double height) {
         double target = route.points().get(index).y;
-        // Extra height does not require waiting. The following swept-body check still prevents
-        // turning through a floor/ceiling while descending past an opening.
+        // 高出目标不需要额外等待。后续的身体扫掠检查仍会阻止角色在下降经过开口时穿过地板或天花板。
         return height >= target - 0.1;
     }
     private static Vec3 center(BlockPos p) { return new Vec3(p.getX() + 0.5, p.getY(), p.getZ() + 0.5); }
@@ -241,7 +239,7 @@ public final class JetpackRoute {
         return Math.abs(a.getX()-b.getX()) + Math.abs(a.getY()-b.getY()) + Math.abs(a.getZ()-b.getZ());
     }
 
-    /** This view is used only within the current client tick; a session never retains it. */
+    /** 此视图仅在当前客户端 tick 内使用，会话不会跨 tick 保留。 */
     public static Space observed(LocalPlayerContext ctx) {
         return observed(ctx, NavigationSafetyContext.forbiddenBodyCells());
     }
