@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledge;
 import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
 import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
+import org.maiwithu.maicraft.core.integration.ftbquests.ReflectiveFtbQuestsAccess;
 import java.util.Arrays;
 
 /** Client-thread-only registry facts plus automatically discovered Ponder reference documents. */
@@ -25,20 +26,25 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
     private final PonderKnowledgeSource ponder = new PonderKnowledgeSource(new ReflectivePonderAccess(), MinecraftKnowledgeSource::displayName);
     private final CreateTooltipKnowledge tooltips = new CreateTooltipKnowledge();
     private final RecipeKnowledgeSource recipes = new RecipeKnowledgeSource();
+    private final FtbQuestsKnowledgeSource quests = new FtbQuestsKnowledgeSource(new ReflectiveFtbQuestsAccess());
 
-    @Override public List<KnowledgeDocument.Entry> entries() { return ponder.entries(); }
+    // 任务书和教程共用发现入口；这里只列玩家可见标题，任务正文等读到具体 URI 才展开。
+    @Override public List<KnowledgeDocument.Entry> entries() {
+        List<KnowledgeDocument.Entry> entries = new ArrayList<>(ponder.entries()); entries.addAll(quests.entries()); return entries;
+    }
     // 搜索没有查询EMI索引，不能把Ponder未安装的状态当作所有配方来源都不可用。
-    @Override public String status() { return "ponder=" + ponder.status() + "; recipes=read_on_demand"; }
+    @Override public String status() { return "ponder=" + ponder.status() + "; recipes=read_on_demand; ftbquests=" + quests.status(); }
     @Override public JsonArray templates() {
         JsonArray templates = ponder.templates();
         // 配方模板只发布查询格式；实际材料页等调用者指定物品后才读取当前EMI索引。
         templates.addAll(recipes.templates());
+        templates.addAll(quests.templates());
         templates.add(PonderKnowledgeSource.template(BLOCK + "{namespace}/{+path}", "registry.block", "安装版本中的方块状态、物品说明、Create Shift/Ctrl 用法和 Ponder 场景链接"));
         return templates;
     }
 
     @Override public List<KnowledgeDocument.Entry> searchCandidates(String query) {
-        List<KnowledgeDocument.Entry> entries = new ArrayList<>(ponder.entries());
+        List<KnowledgeDocument.Entry> entries = new ArrayList<>(entries());
         if (!query.isBlank()) {
             String[] terms = query.toLowerCase(Locale.ROOT).split("\\s+");
             BuiltInRegistries.BLOCK.forEach(block -> {
@@ -58,6 +64,8 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
     }
 
     @Override public KnowledgeDocument read(String uri) {
+        // FTB 进度每次取当前连接的快照，不把上一次世界或队伍的结果当作长期知识缓存。
+        if (uri.startsWith(FtbQuestsKnowledgeSource.PREFIX)) return quests.read(uri);
         if (uri.startsWith(RecipeKnowledgeSource.PREFIX)) return recipes.read(uri);
         if (!uri.startsWith(BLOCK)) return ponder.read(uri);
         String tail = uri.substring(BLOCK.length()); int slash = tail.indexOf('/');

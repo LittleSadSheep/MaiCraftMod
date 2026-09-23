@@ -159,7 +159,8 @@ public final class KnowledgeLibrary {
         result.addProperty("total_matches", matches.size()); result.addProperty("truncated", matches.size() > limit);
         result.addProperty("provider_status", source.status()); result.addProperty("content_loaded", false);
         // 材料搜索也只看注册名称；不为了排序查询EMI配方或编译未请求的教程，正文在下一次按需读取时展开。
-        result.addProperty("search_scope", "Bundled building tutorial titles/summaries, registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; recipe trees and unrequested scene bodies are not loaded or searched.");
+        // 搜索任务书同样只比对可见标题和编号，不提前读剧情正文或把动态队伍进度写进目录。
+        result.addProperty("search_scope", "Bundled building tutorial titles/summaries, visible FTB quest/chapter titles and IDs, registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; quest bodies, recipe trees and unrequested scene bodies are not loaded or searched.");
         result.addProperty("next_step", "Read a returned URI with resources/read or perceive(view=knowledge, resource_uri=...). No matches do not prove no relevant mechanic exists.");
         return result;
     }
