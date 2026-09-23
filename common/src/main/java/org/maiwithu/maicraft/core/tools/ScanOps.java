@@ -15,9 +15,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * The {@code scan_blocks} implementation — the business half of
- * {@code ScanBlocksTool}. The query reads only chunk columns already loaded by the
- * local client and reports unloaded or budget-skipped space as unknown.
+ * {@code scan_blocks} 的实现，即 {@code ScanBlocksTool} 的业务逻辑。查询只读取本地客户端已经加载的区块柱列；
+ * 未加载或因预算跳过的区域会报告为未知。
  */
 public final class ScanOps {
 
@@ -55,8 +54,7 @@ public final class ScanOps {
             o.addProperty("z", s.pos().getZ());
             o.addProperty("block", BuiltInRegistries.BLOCK.getKey(s.state().getBlock()).toString());
             o.addProperty("distance", s.distance());
-            // Source vs flowing is THE decision bit for fluids: obsidian casting
-            // and bucket-filling both demand a source cell.
+            // 水源与流动水的区别是液体判断的关键：黑曜石生成和水桶装水都要求目标为水源格。
             if (!s.state().getFluidState().isEmpty()) {
                 o.addProperty("source", s.state().getFluidState().isSource());
             }
