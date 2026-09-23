@@ -38,7 +38,7 @@ public final class TransportTargets {
                 context.level().getMaxBuildHeight(), forbiddenBodyCells);
     }
 
-    /** Pure constructor used by geometry tests; all arguments are logical values. */
+    /** 几何测试使用的纯构造器；所有参数均为逻辑值。 */
     TransportTargets(GoalCompiler.Compiled compiled, Vec3 origin, double width, double height,
                       int minY, int maxY, LongSet forbiddenBodyCells) {
         // 先把组合目标拆成待检查的小区域；只复制目标和身体尺寸，不把活世界对象带到后续状态里。
@@ -64,7 +64,7 @@ public final class TransportTargets {
         if (!goals.isEmpty()) truncated = true;
     }
 
-    /** Returns true when this bounded search is finished, including explicit incomplete evidence. */
+    /** 有界搜索完成时返回 true，包括已明确标记为证据不完整的情况。 */
     public boolean tick(LocalPlayerContext context) {
         context.requireCurrent();
         return tick(context.level(), context.level()::isLoaded);
