@@ -29,7 +29,7 @@ public final class FirstPersonActionGate {
     private NativeActionReceipt selecting;
     private int requestedInventorySlot = -1;
     private int selectedHotbarSlot = -1;
-    /** The S -> H swap was confirmed; both the cached S and rediscovered H name this transaction. */
+    /** 已确认从槽位 S 交换到快捷栏 H；缓存中的 S 与重新发现的 H 都指向同一笔交易。 */
     private boolean stagedToHotbar;
     private boolean ready;
     private String failure = "selection was not confirmed";
@@ -49,10 +49,8 @@ public final class FirstPersonActionGate {
      */
     public Status select(LocalPlayerContext context, LocalPlayer player, int inventorySlot) {
         owner = player;
-        // A confirmed main-inventory -> hotbar swap necessarily changes where a caller that
-        // rediscovers the item will find it (source S becomes hotbar H). Settle that transaction
-        // before validating/comparing the freshly discovered slot; otherwise a correct S -> H
-        // transition is misreported as "selection target changed" while its receipt is pending.
+        // 确认从主背包交换到快捷栏后，重新查找物品的调用方必然会发现它换了位置（源槽 S 变为快捷栏 H）。
+        // 应先结算该交易，再验证或比较重新发现的槽位；否则回执仍待处理时，会把正确的 S→H 变化误报为“选择目标已改变”。
         if (staging != null) {
             staging = context.menus().poll(context, staging);
             if (!staging.terminal()) return Status.RUNNING;
@@ -94,8 +92,7 @@ public final class FirstPersonActionGate {
             return Status.RUNNING;
         }
 
-        // Do not swap S back into H when a caller intentionally keeps passing its cached source
-        // slot. The confirmed transaction has already made H the physical selection target.
+        // 若调用方有意继续传入缓存的源槽 S，就不要把物品再交换回 H；已确认的交易已将 H 设为实际选择目标。
         if (stagedToHotbar) {
             if (!menuSession.close(context) || !context.mutationAvailable()) return Status.RUNNING;
             if (player.getInventory().selected == selectedHotbarSlot) {
@@ -139,7 +136,7 @@ public final class FirstPersonActionGate {
         ConfirmedSwap result = confirmedSwap; confirmedSwap = null; return result;
     }
 
-    /** Close any inventory screen opened while staging, including interrupted transactions. */
+    /** 关闭准备过程中打开的所有背包界面，包括交易中断后残留的界面。 */
     // 结束菜单会话并忘记本次选择；这里只清掉 selecting 变量，没有退役动作端口中可能仍待确认的快捷栏选择。
     public void reset() {
         if (owner != null) menuSession.cleanup(owner);
