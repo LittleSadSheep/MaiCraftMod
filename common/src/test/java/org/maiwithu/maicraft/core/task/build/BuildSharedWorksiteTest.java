@@ -17,7 +17,7 @@ import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Plan access for a wall batch instead of navigating to hundreds of floating stances. */
+/** 为整批墙体规划通行路线，避免导航到数百个悬空站位。 */
 public final class BuildSharedWorksiteTest {
     public static void main(String[] args) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {

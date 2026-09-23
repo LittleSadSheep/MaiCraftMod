@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 
-/** Real task selection must respect supplied materials and resume retained worksite checks. */
+/** 真实任务选择必须遵守已提供的材料，并恢复仍保留的施工场地检查。 */
 final class BuildWorksiteSelectionTest {
     static void run() throws Exception {
         layerFrontier();

@@ -22,7 +22,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** Actual Create placement bytecode with an explicit fixture getter bridge, not a claim that production Mixins ran. */
+/** 使用明确的夹具读取桥测试真实 Create 放置字节码；不声称运行了生产环境 Mixin。 */
 public final class BuildPlacementSneakCreateTest {
     private record State(Input input, boolean shift, boolean jumping, float forward, float sideways, boolean crouching,
                          Vec3 position, AABB bounds, float yaw, float pitch, Object entityData) {}

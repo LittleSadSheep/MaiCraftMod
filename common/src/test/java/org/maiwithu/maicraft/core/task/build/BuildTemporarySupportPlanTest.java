@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
-/** Covers dependency deferral, suspended roof support ordering, and receipt-owned cleanup. */
+/** 覆盖依赖项延后、屋顶支撑暂停排序及回执所有权下的清理流程。 */
 public final class BuildTemporarySupportPlanTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

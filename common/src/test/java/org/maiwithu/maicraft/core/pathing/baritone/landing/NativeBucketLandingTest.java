@@ -55,7 +55,7 @@ public final class NativeBucketLandingTest {
                     case "useItem" -> {
                         var hand = (InteractionHand)args[1];
                         ItemStack held = f.player.getItemInHand(hand);
-                        // Waterlogging publishes its block change on the server side only.
+                        // 含水状态造成的方块变化只会由服务器端发布。
                         field(Level.class,"isClientSide").setBoolean(f.world,!slabSide || held.is(Items.BUCKET));
                         var result = held.getItem().use(f.world,f.player,hand);
                         field(Level.class,"isClientSide").setBoolean(f.world,true);

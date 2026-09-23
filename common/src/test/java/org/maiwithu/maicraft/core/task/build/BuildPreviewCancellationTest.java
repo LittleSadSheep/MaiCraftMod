@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Human-owned controls must not block cancellation or let an old review cancel newer work. */
+/** 玩家持有控制权时仍必须允许取消，也不能让旧审核取消新的施工任务。 */
 public final class BuildPreviewCancellationTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

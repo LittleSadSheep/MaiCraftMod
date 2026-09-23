@@ -16,7 +16,7 @@ import java.util.Set;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-/** Real native outlines and placement states, using an inert client world without a game window. */
+/** 使用惰性客户端世界测试真实原生轮廓和放置状态，不打开游戏窗口。 */
 public final class BuildPlacementGestureTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

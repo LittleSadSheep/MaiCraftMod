@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.world.phys.Vec3;
 
-/** Native placement enumeration yields inside a failed target instead of freezing a whole client tick. */
+/** 原生放置枚举在失败目标处让出执行权，避免冻结整个客户端 tick。 */
 public final class BuildPlacementBudgetTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

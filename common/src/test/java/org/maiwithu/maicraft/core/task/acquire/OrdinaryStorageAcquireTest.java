@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Set;
 
-/** Exercises the real acquisition STORAGE branch before any AE2 availability or network request is needed. */
+/** 在检查 AE2 可用性或发起网络请求前，先测试真实的 STORAGE 获取分支。 */
 public final class OrdinaryStorageAcquireTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

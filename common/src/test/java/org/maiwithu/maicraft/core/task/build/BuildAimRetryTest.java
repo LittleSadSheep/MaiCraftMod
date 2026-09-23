@@ -20,7 +20,7 @@ import java.util.ArrayList;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.SlabType;
 
-/** Exercise actual AIM rejection across actor ticks when native ray and synthetic geometry disagree. */
+/** 原生射线与合成几何不一致时，跨角色 tick 测试真实的 AIM 拒绝处理。 */
 public final class BuildAimRetryTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

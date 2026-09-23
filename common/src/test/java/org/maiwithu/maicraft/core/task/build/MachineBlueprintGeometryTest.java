@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-/** Regression: generic integer-progress fallback must not bypass explicit machine property requirements. */
+/** 回归测试：通用整数进度回退不能绕过机器明确声明的属性要求。 */
 public final class MachineBlueprintGeometryTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

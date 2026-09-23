@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import sun.misc.Unsafe;
 
-/** A successful native prediction is not permission to click during an unfinished camera turn. */
+/** 原生预测成功不代表镜头尚未转完时就可以点击。 */
 public final class BuildPlacementSettlingTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

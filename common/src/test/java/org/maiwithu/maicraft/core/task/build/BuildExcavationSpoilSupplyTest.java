@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Receipt-driven coordinator tests; the simulated receipts do not claim actual GUI transfer acceptance. */
+/** 通过回执驱动协调器；模拟回执不代表真实 GUI 已接受物品转移。 */
 public final class BuildExcavationSpoilSupplyTest {
     // 多个箱子分担余料时只累计真实存入的数量，玩家留下的游标和工具都不能被当作可丢弃的垃圾。
     private static final ResourceLocation DIRT = ResourceLocation.parse("minecraft:dirt");

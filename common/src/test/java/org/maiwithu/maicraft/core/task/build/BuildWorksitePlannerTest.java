@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 
-/** Native world geometry: coverage, blocked views, exact facing and conservative walking support. */
+/** 使用原生世界几何验证覆盖范围、视线遮挡、精确朝向和保守的行走支撑。 */
 public final class BuildWorksitePlannerTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

@@ -14,7 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import net.minecraft.client.player.LocalPlayer;
 
-/** The native slab replacement position is part of a placement proof, not just its block state. */
+/** 原生半砖替换位置属于放置证明的一部分，不能只核对方块状态。 */
 public final class BuildPlacementDestinationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

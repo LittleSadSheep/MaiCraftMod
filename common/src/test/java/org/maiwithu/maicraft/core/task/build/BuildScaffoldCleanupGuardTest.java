@@ -18,7 +18,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Pose;
 
-/** Cleanup's ownership and safety gates run before any native dig can be submitted. */
+/** 任何原生挖掘提交前，都必须先通过清理操作的所有权和安全门槛。 */
 public final class BuildScaffoldCleanupGuardTest {
     private static final BlockPos TARGET = new BlockPos(6, 1, 6);
 

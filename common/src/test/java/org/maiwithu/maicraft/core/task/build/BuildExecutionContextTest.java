@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.core.BlockPos;
 
-/** Supply batches must retain the same mutable receipt ledger, not a stale copy or no guards. */
+/** 供料批次必须保留同一份可变回执账本，不能使用过期副本或丢失保护条件。 */
 public final class BuildExecutionContextTest {
     public static void main(String[] args) {
         BuildTaskRecord original = new BuildTaskRecord("original", 100, List.of(), false, true);

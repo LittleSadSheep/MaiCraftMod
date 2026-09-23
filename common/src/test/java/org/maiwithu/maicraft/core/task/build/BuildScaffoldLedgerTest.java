@@ -19,7 +19,7 @@ import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 
-/** Hollow 18-cube support exceptions are bounded by authored air, real receipts and inherited protection. */
+/** 空心 18 格支撑例外受手工声明的空气格、真实回执和继承保护范围共同限制。 */
 public final class BuildScaffoldLedgerTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

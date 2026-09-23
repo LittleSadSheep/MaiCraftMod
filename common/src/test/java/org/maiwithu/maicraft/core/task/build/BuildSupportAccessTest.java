@@ -24,7 +24,7 @@ import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-/** A support is useful only if the projected target retains a reachable, real-shaped click face. */
+/** 只有投影目标仍保留可达且形状真实的点击面时，支撑方块才有用。 */
 public final class BuildSupportAccessTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

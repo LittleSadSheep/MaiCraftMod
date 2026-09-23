@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-/** Bookkeeping may run together, but an unresolved native action must stop the pipeline. */
+/** 账务记录可以并行处理，但未结算的原生动作必须阻止施工流水线继续推进。 */
 public final class BuildExecutionPacingTest {
     public static void main(String[] args) {
         var phase = new AtomicInteger();

@@ -17,7 +17,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** Native Minecraft methods are the oracle; all player and world changes belong to this inert test fixture. */
+/** 以 Minecraft 原生方法为准；玩家和世界的所有修改都仅发生在此惰性测试夹具中。 */
 public final class NativePlacementDirectionsTest {
     private NativePlacementDirectionsTest() {}
 
