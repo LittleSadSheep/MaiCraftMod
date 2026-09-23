@@ -50,7 +50,7 @@ public interface NavGoal {
         return SemanticFingerprint.of(this);
     }
 
-    /** Immutable value key used to compare two independently rebuilt goal snapshots. */
+    /** 不可变值键，用于比较分别重新构建的两个目标快照。 */
     record SemanticFingerprint(String kind, List<?> parameters) {
         public SemanticFingerprint {
             kind = Objects.requireNonNull(kind, "kind");
@@ -103,8 +103,7 @@ public interface NavGoal {
             if (goal instanceof RunAway g) {
                 return key("run_away", g.from.asLong(), g.maintainY);
             }
-            // There is one legacy anonymous goal whose only varying parameter is its center.
-            // Future custom goals with additional parameters must override semanticFingerprint().
+            // 目前只有一个旧式匿名目标，变化参数只有中心点；以后新增参数的自定义目标必须覆写 semanticFingerprint()。
             // 无法识别的自定义目标默认只比较类名和代表位置；有其他会变化的要求时，应由自定义实现提供自己的比较值。
             return key("custom:" + goal.getClass().getName(), goal.center().asLong());
         }
@@ -113,7 +112,7 @@ public interface NavGoal {
             return new SemanticFingerprint(kind, List.of(parameters));
         }
 
-        /** Composite/avoid semantics are order-insensitive but duplicate-sensitive. */
+        /** 组合目标和避让目标不依赖输入顺序，但会保留重复成员对语义的影响。 */
         private static <T> Map<T, Integer> multiset(List<T> values) {
             Map<T, Integer> counts = new HashMap<>();
             for (T value : values) {
@@ -123,7 +122,7 @@ public interface NavGoal {
         }
     }
 
-    // ---- the shared octile + vertical point bound ----
+    // ---- 共用的八方向水平距离与垂直距离下界 ----
 
     /**
      * 按横向直走／斜走以及上下高差估算到中心点的费用；这个帮助方法自身不知道目标允许多大的到达范围。
@@ -131,12 +130,10 @@ public interface NavGoal {
     static double pointBound(BlockPos goal, BlockPos from) {
         double dx = Math.abs(goal.getX() - from.getX());
         double dz = Math.abs(goal.getZ() - from.getZ());
-        // Horizontal: (diagonal·√2 + straight) × COST_HEURISTIC. COST_HEURISTIC
-        // (≈ sprint cost) IS the per-block weight here — the heap key adds no
-        // further multiplier (the weight is folded into the heuristic itself).
+        // 水平下界为（对角步数 × √2 + 直行步数）× COST_HEURISTIC；此处权重约等于疾跑成本，已经纳入估价，堆键不会再次相乘。
         double horizontal = (Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz))
                 * COST_HEURISTIC;
-        // Vertical: up costs JUMP per block, down costs DESCEND (fall[2]/2).
+        // 垂直下界按每格上升 JUMP、下降 DESCEND（fall[2]/2）计价。
         int dy = goal.getY() - from.getY();
         double vertical = dy > 0
                 ? dy * JUMP_ONE_BLOCK
@@ -144,28 +141,24 @@ public interface NavGoal {
         return horizontal + vertical;
     }
 
-    // ---- factories ----
+    // ---- 目标构造方法 ----
 
-    /** Exactly this feet cell. */
+    /** 要求脚位恰好到达此方块格。 */
     static NavGoal exact(BlockPos pos) {
         return new Exact(pos);
     }
 
     /**
-     * Reach the {@code (x, z)} column at ANY height.
-     * The heuristic is the pure horizontal
-     * octile term (no vertical), so the search heads for the column and stops at
-     * whatever ground exists there. This is the "go to a location" goal: the
-     * caller's Y is irrelevant, so a wrong/guessed Y can never make it unreachable.
+     * 要求到达 {@code (x, z)} 柱列中的任意高度。估价只使用水平八方向距离，不计垂直差，
+     * 因此搜索会朝该柱列前进，并在实际存在的地面处停止。这是“前往某地点”目标，调用方给出的 Y 不参与判定，猜错高度也不会导致目标不可达。
      */
     static NavGoal column(int x, int z) {
         return new Column(x, z);
     }
 
     /**
-     * Reach a Y level at ANY X/Z: "change elevation to this height" (climb to the surface,
-     * descend to a mining depth). Heuristic is the pure vertical term — up costs
-     * {@link #JUMP_ONE_BLOCK} per block, down {@link #DESCEND_ONE_BLOCK}.
+     * 要求脚位到达指定 Y 高度，X/Z 不限；用于“升到这个高度”或“下降到挖掘深度”。估价只计算垂直距离，
+     * 每格上升按 {@link #JUMP_ONE_BLOCK} 计，下降按 {@link #DESCEND_ONE_BLOCK} 计。
      */
     static NavGoal yLevel(int level) {
         return new YLevel(level);
@@ -193,19 +186,14 @@ public interface NavGoal {
         return new Ring(pos, inner, outer);
     }
 
-    /** Any feet cell within {@code radius} (Euclidean, blocks) of {@code pos}. */
+    /** 要求脚位落在 {@code pos} 的 {@code radius} 欧几里得距离内，半径单位为方块。 */
     static NavGoal near(BlockPos pos, double radius) {
         return new Near(pos, radius);
     }
 
     /**
-     * Any feet cell within {@code radius} (Euclidean, blocks) of {@code pos}
-     * HORIZONTALLY, with the feet at the target's height ±1. This is the
-     * vicinity goal for chasing/following things that live on the ground: unlike
-     * the raw 3D {@link #near} sphere it admits no elevated cell, so "place a
-     * scaffold, stand on it, count as arrived" is not a satisfying completion —
-     * the geometry that once made an approach finish by frantically pillaring
-     * beside its target.
+     * 要求脚位在 {@code pos} 水平方向的 {@code radius} 欧几里得距离内，且高度与目标相差不超过一格。
+     * 用于追赶或跟随地面目标；不同于三维 {@link #near} 球体，它不接受高处格子，避免角色搭脚手架站上去就被误判为已接近目标。
      */
     static NavGoal nearGround(BlockPos pos, double radius) {
         return new NearGround(pos, radius, 1);
@@ -220,23 +208,17 @@ public interface NavGoal {
     }
 
     /**
-     * Any feet cell horizontally adjacent to {@code target} (±1 step on one
-     * axis), at the target's height ±1 — "stand next to this block so you can
-     * work on it". The standability of the ending cell is the graph's own
-     * guarantee (only occupiable cells become nodes).
+     * 要求脚位与 {@code target} 水平相邻（某一轴相差一格），高度与目标相差不超过一格，表示角色能站在方块旁进行操作。
+     * 终点可站立性由移动图保证，因为只有可占据的位置才会成为节点。
      */
     static NavGoal adjacent(BlockPos target) {
         return new Adjacent(target);
     }
 
     /**
-     * Any feet cell TOUCHING {@code target}: beside it, on top of it, up to two
-     * below it (the two-block body still reaches its underside) — or in it, if
-     * the cell is enterable. Membership is a Manhattan bound with the body-height
-     * correction: {@code |dx| + |dy'| + |dz| <= 1} where {@code dy' = dy < 0 ?
-     * dy+1 : dy}. This is the "get to this block to use it" goal — the target
-     * cell itself stays untouched (a chest, a crafting table), the path ends on
-     * whichever neighbouring cell the graph can actually stand on.
+     * 要求脚位能触及 {@code target}：可在侧边、目标上方、下方最多两格（两格高的角色仍能碰到目标底面），若目标格可进入也可站在其中。
+     * 使用经过身体高度修正的曼哈顿边界：{@code |dx| + |dy'| + |dz| <= 1}，其中 {@code dy' = dy < 0 ? dy+1 : dy}。
+     * 用于“走到方块旁使用它”；箱子或工作台等目标本身保持不动，路线结束在图中实际可站立的相邻位置。
      */
     static NavGoal getToBlock(BlockPos target) {
         return new GetToBlock(target);
@@ -259,46 +241,35 @@ public interface NavGoal {
     }
 
     /**
-     * Any of several goals. Satisfied by reaching
-     * ANY member; the heuristic is the minimum over members, so a single A* search
-     * naturally heads for the CLOSEST reachable one. This is how mining targets a
-     * whole field of ore at once instead of greedily picking the nearest (which is
-     * often the one walled in and unreachable).
+     * 组合多个目标，到达其中任意一个成员即满足。估价取所有成员中的最小值，因此一次 A* 搜索会自然选择最近的可达目标；
+     * 挖矿借此同时规划整片矿区，而不是贪心追逐最近但可能被围住的矿点。
      */
     static NavGoal composite(List<NavGoal> goals) {
         return new Composite(goals);
     }
 
     /**
-     * Stand in the ore's own column to mine it — a family of mining stance
-     * goals, parameterised by how far BELOW the ore the feet may be:
+     * 要求角色站在矿物所在柱列进行挖掘；此目标族按脚位允许低于矿物多少格来配置：
      * <ul>
-     *   <li>{@code maxBelow == 0} → feet exactly at the ore;</li>
-     *   <li>{@code maxBelow == 1} → feet at the ore or one below;</li>
-     *   <li>{@code maxBelow == 2} → feet at the ore, one, or two below.</li>
+     *   <li>{@code maxBelow == 0} → 脚位与矿物同高；</li>
+     *   <li>{@code maxBelow == 1} → 脚位与矿物同高或低一格；</li>
+     *   <li>{@code maxBelow == 2} → 脚位与矿物同高，或低一至两格。</li>
      * </ul>
-     * Which one a given ore gets is decided by {@code MineCompanionTask.coalesce}:
-     * the bottom
-     * of a vertical run gets the exact ({@code maxBelow == 0}) stance so the body
-     * mines it in place rather
-     * than tunnelling under it. The vertical term in the heuristic folds the whole
-     * accepted band to zero cost.
+     * {@code MineCompanionTask.coalesce} 决定每个矿物使用哪种站位：竖直矿脉底部使用精确站位（{@code maxBelow == 0}），
+     * 让角色原地开挖而不是从矿脉下方掏隧道。估价会把允许的整个垂直范围折算为零距离。
      */
     static NavGoal mineColumn(BlockPos ore, int maxBelow) {
         return new MineColumn(ore, maxBelow);
     }
 
-    /** Loosest-stance shorthand (feet at the ore, one, or two below). */
+    /** 最宽松的站位简写：脚位可与矿物同高，或低一至两格。 */
     static NavGoal mine(BlockPos ore) {
         return mineColumn(ore, 2);
     }
 
     /**
-     * Get as FAR as possible from {@code from} while holding a y-level —
-     * used for branch mining: when no ore is
-     * known, head out along the level to dig fresh tunnel and expose more. Never
-     * "arrived" (isAt always false) so the search returns a best-effort partial that
-     * walks outward; the next replan continues exploring.
+     * 在保持相同 Y 高度的同时，尽可能远离 {@code from}。用于分支挖掘：找不到已知矿点时沿当前高度向外挖出新隧道以发现更多矿物。
+     * 目标永不返回“已到达”（isAt 始终为 false），因此搜索会返回尽力向外延伸的部分路线，下一次重规划继续探索。
      */
     static NavGoal runAway(BlockPos from, int maintainY) {
         return new RunAway(from, maintainY);
@@ -508,8 +479,7 @@ public interface NavGoal {
         }
 
         @Override public double heuristic(BlockPos from) {
-            // Full point bound, radius not subtracted — same deliberate slight
-            // inadmissibility as near(): aim at the centre for stable ordering.
+            // 使用完整点距离下界，不扣除半径；与 near() 一样有意轻微高估，以目标中心保持稳定排序。
             return pointBound(goal, from);
         }
 
@@ -536,7 +506,7 @@ public interface NavGoal {
         }
 
         @Override public double heuristic(BlockPos from) {
-            // One step + one jump of slack vs the point bound.
+            // 相对点距离下界留出一步移动和一次跳跃的余量。
             return Math.max(0.0, pointBound(goal, from)
                     - COST_HEURISTIC - JUMP_ONE_BLOCK);
         }
@@ -546,7 +516,7 @@ public interface NavGoal {
         }
     }
 
-    /** {@link #getToBlock} 的产物:身高修正的 Manhattan 贴脸邻域。 */
+    /** {@link #getToBlock} 创建的身高修正曼哈顿贴近邻域。 */
     /**
      * 提供侧面或下方的挖掘脚位范围，排除站在矿石上方；实际挖掘距离和视线仍由矿工检查。
      */
@@ -599,8 +569,7 @@ public interface NavGoal {
         }
 
         @Override public double heuristic(BlockPos from) {
-            // One step + one jump of slack vs the point bound (same slack as
-            // adjacent(): any accepted cell is at most that much off-centre).
+            // 相对点距离下界留出一步移动和一次跳跃的余量，与 adjacent() 相同，因为所有可接受格都只偏离中心这么远。
             return Math.max(0.0, pointBound(goal, from)
                     - COST_HEURISTIC - JUMP_ONE_BLOCK);
         }
@@ -622,11 +591,8 @@ public interface NavGoal {
             if (gs.isEmpty()) {
                 throw new IllegalArgumentException("composite goal needs at least one member");
             }
-            // Centre = centroid of the members, NOT gs.get(0). The member list is
-            // rebuilt every tick (ores re-sorted by distance as the body moves), so a
-            // first-member centre would jitter and trip PlayerNav's goal-moved replan
-            // every tick. The centroid only shifts when the SET changes (an ore mined
-            // or found), which is what "the goal moved" should actually mean.
+            // 中心点取所有成员的几何中心，而不是 gs.get(0)。成员列表每刻重建并随角色移动重新排序；若取首项，目标中心会抖动，导致 PlayerNav 每刻都重规划。
+            // 几何中心只会在成员集合变化（发现或挖掉矿物）时移动，这才代表目标本身确实改变。
             long sx = 0, sy = 0, sz = 0;
             for (NavGoal g : gs) {
                 BlockPos c = g.center();
@@ -681,13 +647,10 @@ public interface NavGoal {
             double dz = Math.abs(ore.getZ() - from.getZ());
             double horizontal = (Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz))
                     * COST_HEURISTIC;
-            // Feet anywhere in {o.y .. o.y-maxBelow} count as arrived: fold that
-            // band to zero.
+            // 脚位处于 {o.y .. o.y-maxBelow} 任一高度都算到达，因此将整个允许区间折算为零垂直距离。
             int yDiff = from.getY() - ore.getY();
             int adj = yDiff >= 0 ? yDiff : Math.min(0, yDiff + maxBelow);
-            // Above the goal (adj>0) we DESCEND to it,
-            // below it (adj<0) we ASCEND. (The old mine() had these two swapped,
-            // overestimating descents — an inadmissible heuristic.)
+            // 脚位高于目标（adj>0）时向下移动；低于目标（adj<0）时向上移动。旧版 mine() 将两者写反，会高估下降成本并破坏估价下界。
             double vertical = adj > 0
                     ? adj * DESCEND_ONE_BLOCK
                     : -adj * JUMP_ONE_BLOCK;
@@ -796,9 +759,7 @@ public interface NavGoal {
         }
 
         @Override public double heuristic(BlockPos fromPos) {
-            // Run-away heuristic: −(octile×weight) — negated so farther = lower h
-            // = preferred — then blended with the y-hold term:
-            // min*0.6 + yLevelTerm*1.5.
+            // 脱身估价为 −（八方向距离 × 权重），取反后越远估价越低、越优先；再与保持高度的代价按 min*0.6 + yLevelTerm*1.5 混合。
             double dx = Math.abs(from.getX() - fromPos.getX());
             double dz = Math.abs(from.getZ() - fromPos.getZ());
             double xz = (Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz))
