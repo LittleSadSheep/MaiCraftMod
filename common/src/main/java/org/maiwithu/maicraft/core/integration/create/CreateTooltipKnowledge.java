@@ -41,7 +41,7 @@ public final class CreateTooltipKnowledge {
         return item.getDescriptionId() + ".tooltip";
     }
 
-    /** Read only for an explicitly requested item, never while searching every registered block. */
+    /** 只有明确请求某个物品时才读取，不会在搜索所有注册方块时批量读取。 */
     public static List<String> baseTooltip(Item item) {
         try {
             List<Component> lines = new ArrayList<>();
@@ -51,7 +51,7 @@ public final class CreateTooltipKnowledge {
                     .filter(line -> !line.isBlank()).map(line -> line.length() > 1024 ? line.substring(0, 1024) + "…" : line)
                     .distinct().toList();
         } catch (RuntimeException | LinkageError unavailable) {
-            // Some item implementations require a world/player or loader tooltip context.
+            // 某些物品实现需要世界、玩家或加载器提供的提示上下文。
             return List.of();
         }
     }

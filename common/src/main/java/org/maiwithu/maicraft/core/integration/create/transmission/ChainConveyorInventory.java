@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 
-/** Exact owned inventory staging; Create consumes chains by item type, so special components are refused. */
+/** 精确准备归属明确的背包材料；Create 按物品类型消耗链条，因此拒绝携带特殊数据组件的链条。 */
 final class ChainConveyorInventory {
     private final FirstPersonActionGate selection = new FirstPersonActionGate();
     private final VisibleMenuSession restoration = new VisibleMenuSession();

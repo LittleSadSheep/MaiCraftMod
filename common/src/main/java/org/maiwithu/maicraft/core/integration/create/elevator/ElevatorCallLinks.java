@@ -64,7 +64,7 @@ final class ElevatorCallLinks {
     private void scan() {
         List<WorldLink> found = new ArrayList<>();
         var center = ctx.player().chunkPosition();
-        // Near chunks first; the fixed budget also bounds dense machine/storage bases.
+        // 优先检查附近区块；固定预算也能限制机器或储存设施密集地基的搜索成本。
         search: for (int ring = 0; ring <= 2; ring++) for (int dx = -ring; dx <= ring; dx++) for (int dz = -ring; dz <= ring; dz++) {
             if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
             var chunk = ctx.level().getChunkSource().getChunkNow(center.x + dx, center.z + dz);
@@ -86,7 +86,7 @@ final class ElevatorCallLinks {
                 && transmitter.frequency().equals(receiver.frequency()) && withinNativeRange;
     }
 
-    /** A button is either adjacent, or strongly powers an adjacent conducting support: at most 24 positions. */
+    /** 按钮必须直接相邻，或能强力激活相邻导电支撑；最多检查 24 个位置。 */
     static List<BlockPos> buttonCandidates(BlockPos transmitter) {
         var candidates = new LinkedHashSet<BlockPos>();
         for (Direction side : Direction.values()) {

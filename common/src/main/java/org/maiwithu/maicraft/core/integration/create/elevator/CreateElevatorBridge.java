@@ -212,8 +212,7 @@ final class CreateElevatorBridge {
         if (hit == null || selected(cabin, control) != floor || !cabin.serves(floor)) {
             throw new IllegalStateException("elevator selection or native hit changed before submission");
         }
-        // This is Create's exact right-click chain: the client behaviour sends its floor request,
-        // then the generic interaction packet performs server-side feedback/validation.
+        // 此处复现 Create 的完整右键调用链：客户端行为先发送楼层请求，再由通用交互数据包执行服务端反馈和校验。
         if (!Boolean.TRUE.equals(call(cabin.entity, "handlePlayerInteraction", ctx.player(), control, hit.getDirection(), InteractionHand.MAIN_HAND))) {
             throw new IllegalStateException("the native dynamic controller refused interaction");
         }

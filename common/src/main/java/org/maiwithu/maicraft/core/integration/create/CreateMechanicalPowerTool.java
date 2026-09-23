@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
  */
 public final class CreateMechanicalPowerTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
-    /** Initial liveness lease; verified survey, supply, travel and placement progress renew it. */
+    /** 初始存活期限；已核实的勘查、供料、移动和放置进展都会续期。 */
     private static final long INITIAL_LIVENESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private record Args(

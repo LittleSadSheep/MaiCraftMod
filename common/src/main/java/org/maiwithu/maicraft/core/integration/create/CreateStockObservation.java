@@ -26,8 +26,8 @@ public final class CreateStockObservation {
             Object holder = menu.getClass().getField("contentHolder").get(menu);
             Object summary = holder.getClass().getMethod("getLastClientsideStockSnapshotAsSummary").invoke(holder);
             if (!receivedCompleteSummary(holder, summary)) return Optional.empty();
-            // Create allocates a new summary only after the final packet of the response arrives.
-            // getTicksSinceLastUpdate measures requests, not responses, so it is not freshness proof.
+            // Create 只会在响应的最后一个数据包到达后分配新的摘要。
+            // getTicksSinceLastUpdate 测量的是请求时间而非响应时间，不能证明数据新鲜。
             return Optional.of(new StockEvidence.Snapshot(StockEvidence.Source.CREATE,
                     readSummary(summary), Set.of(), tick));
         } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
@@ -37,7 +37,7 @@ public final class CreateStockObservation {
 
     // 同一内容持有者收到新的摘要对象才算新完整响应；反复读取同一个对象不应使库存看起来刚更新过。
     static boolean receivedCompleteSummary(Object holder, Object summary) {
-        // The first sight of an existing BE snapshot supplies no receipt time for this GUI session.
+        // 本界面会话首次看到已有 BE 快照时，没有对应的接收时间。
         boolean received = holder == previousHolder && summary != null && summary != previousSummary;
         previousHolder = holder;
         previousSummary = summary;

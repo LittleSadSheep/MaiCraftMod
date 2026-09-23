@@ -7,11 +7,11 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Geometry preflight never substitutes for the executor's actual native placement prediction. */
+/** 几何预检绝不能替代执行器对真实原生放置结果的预测。 */
 final class CreateMechanicalPlacementGeometry {
     private CreateMechanicalPlacementGeometry() {}
 
-    /** Mirrors Create's preferred-axis input using its actual shaft-facing API, not registry-name guesses. */
+    /** 使用 Create 实际的轴向朝向 API 复现优选轴输入，不根据注册名称猜测。 */
     static boolean inheritsVerticalAxis(Level level, BlockPos target) {
         Direction.Axis preferred = null;
         for (Direction face : Direction.values()) {

@@ -32,7 +32,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
 
-/** Uses two real held-chain block interactions; the second native action is never replayed. */
+/** 通过两次真实的持链方块交互连接；第二次原生动作绝不会重放。 */
 final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLinkTaskRecord> {
     private enum Phase { MATERIALS, EQUIP, FIRST_READ, FIRST_CLICK, FIRST_CONFIRM, SECOND_READ, SECOND_CLICK, SECOND_CONFIRM, VERIFY_SECOND, VERIFY_FIRST, RESTORE }
     private final Level world;

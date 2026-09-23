@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Links two already built conveyor wheels through ordinary held-chain interactions. */
+/** 通过普通的持链交互，连接两个已经建好的输送轮。 */
 public final class ChainConveyorLinkTaskRecord extends TaskRecord {
     static { TaskFactory.register(ChainConveyorLinkTaskRecord.class, ChainConveyorLinkTask::new); }
     public final String dimension;
