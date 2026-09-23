@@ -43,8 +43,7 @@ public final class MovementGroundStraight extends Movement {
             delta = target.subtract(start);
         }
         double distance = delta.length();
-        // Installation checked the full line. Execution refreshes a braking-distance window,
-        // including the current momentum, instead of rescanning a distant route every tick.
+        // 安装时已检查整条路线。执行期间只刷新包含当前动量的制动距离窗口，不必每 tick 重新扫描远处路线。
         double reach = Math.max(4, ctx.player().getDeltaMovement().horizontalDistance() * 6 + 1);
         Vec3 end = distance <= reach ? target : start.add(delta.scale(reach / distance));
         GroundCorridor geometry = corridor();
@@ -60,8 +59,7 @@ public final class MovementGroundStraight extends Movement {
 
     // 允许角色在直线附近少量偏移，避免不是恰好踩在格心就算离开路线；这份容许位置集合不替代实时碰撞检查。
     @Override protected Set<BetterBlockPos> calculateValidPositions() {
-        // Include traversed cells, not merely endpoints: executor recovery and distance checks
-        // still use the movement's physical corridor when the line crosses no graph nodes.
+        // 记录路线经过的格子而非仅记录端点：即使直线路径未经过图节点，执行器恢复和距离检查仍需使用实际移动走廊。
         var cells = new HashSet<BetterBlockPos>();
         for (int x = Math.min(src.x, dest.x); x <= Math.max(src.x, dest.x); x++) {
             for (int z = Math.min(src.z, dest.z); z <= Math.max(src.z, dest.z); z++) {
