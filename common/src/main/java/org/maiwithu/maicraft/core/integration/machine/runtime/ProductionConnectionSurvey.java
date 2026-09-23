@@ -51,7 +51,7 @@ public final class ProductionConnectionSurvey {
                 position -> ProductionObservationRange.radius(player.level(), position));
     }
 
-    /** Deterministic environment seam for request/range regressions without fabricating a running game. */
+    /** 用于请求和范围回归的确定性环境接口，无需伪造正在运行的游戏。 */
     ProductionConnectionSurvey(ProductionRunPlan plan, ProductionWork work, Function<Resource, ProductionEvidence.Binding> bindings,
                                Supplier<String> dimension, LongSupplier clock, Function<BlockPos, String> nativeSystem) {
         this(plan, work, bindings, dimension, clock, nativeSystem, () -> null);
@@ -71,7 +71,7 @@ public final class ProductionConnectionSurvey {
         this.observationRadius = observationRadius;
     }
 
-    /** Choose at a settled boundary; pending navigation or an operation keeps its selected link. */
+    /** 仅在已结算边界选择连接；导航或操作待处理时保留当前选定连接。 */
     public Link nearestLink(List<Link> candidates) {
         if (candidates.isEmpty()) throw new IllegalArgumentException("production_connection_links_missing");
         if (active != null && !finished) {
@@ -86,7 +86,7 @@ public final class ProductionConnectionSurvey {
                 List<BlockPos> points = pathFor(candidate);
                 var parts = split(points, candidate.resource().medium());
                 double score = endpointDistance(feet, points, parts.getFirst());
-                // An unobserved authored adapter requires the original first-segment probe.
+                // 尚未观察到的手工指定适配器，需要执行原始首段探测。
                 if (selectSystem(candidate, parts.getFirst(), points) != null)
                     score = Math.min(score, endpointDistance(feet, points, parts.getLast()));
                 if (score < distance) { nearest = candidate; distance = score; }
@@ -95,14 +95,14 @@ public final class ProductionConnectionSurvey {
         return nearest;
     }
 
-    /** Null means movement or the same server request is still pending. A non-null report settles this link. */
+    /** 返回 null 表示移动或同一服务器请求仍在等待；返回非空报告时才结算此连接。 */
     public JsonObject tick(Link link) {
         Objects.requireNonNull(link);
         if (active == null || !active.equals(link)) {
             if (pending != null) throw new IllegalStateException("production_connection_link_changed_before_receipt_consumed");
             begin(link);
         }
-        // A world change or caller refresh cannot replace the operation occupying ProductionWork's request slot.
+        // 世界变化或调用方刷新都不能替换占据 ProductionWork 请求槽的操作。
         if (pending != null) return poll();
         if (finished) return result();
         if (!plan.dimension().equals(dimension.get())) return fail("production_connection_world_changed");
@@ -118,7 +118,7 @@ public final class ProductionConnectionSurvey {
         return poll();
     }
 
-    /** Call at a settled stage boundary; the task owns cancellation of its shared request slot. */
+    /** 在阶段结算边界调用；共享请求槽的取消权由任务持有。 */
     public void reset() {
         if (pending != null) throw new IllegalStateException("production_connection_reset_before_receipt_consumed");
         if (navigating) work.stopMovement();
@@ -150,7 +150,7 @@ public final class ProductionConnectionSurvey {
                 failure = "production_connection_path_does_not_match_endpoint_faces"; finished = true; return;
             }
             binding = ProductionConnectionBinding.resolve(link.resource(), bindings);
-            // Adapter identity belongs to the authored origin, never to whichever end is nearer.
+            // 适配器身份归属于手工指定的来源端，不能依据哪一端更近来确定。
             system = selectSystem(link, segments.getFirst(), path);
             Vec3 feet = bodyPosition.get();
             if (system != null && feet != null && endpointDistance(feet, path, segments.getLast())
@@ -170,7 +170,7 @@ public final class ProductionConnectionSurvey {
                 : ProductionConnectionPath.face(path.get(segment.start()), path.get(segment.start() + 1));
         String toFace = segment.end() == path.size() - 1 ? plan.port(active.to()).face()
                 : ProductionConnectionPath.face(path.get(segment.end()), path.get(segment.end() - 1));
-        // Native diagonal gears have no cardinal segment endpoint face; omit that optional assertion.
+        // 原生斜齿轮没有沿基点轴向的线段端面，因此省略该可选断言。
         if (fromFace != null) query.addProperty("from_face", fromFace);
         if (toFace != null) query.addProperty("to_face", toFace);
         return query;
