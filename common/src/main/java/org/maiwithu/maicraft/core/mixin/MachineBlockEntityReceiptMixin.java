@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Acknowledges a server BE update after vanilla and the optional mod have processed its data. */
+/** 原版和可选模组处理完服务器方块实体数据后，确认对应更新已完成。 */
 @Mixin(ClientPacketListener.class)
 public abstract class MachineBlockEntityReceiptMixin {
     @Shadow private ClientLevel level;
@@ -28,8 +28,7 @@ public abstract class MachineBlockEntityReceiptMixin {
         }
     }
 
-    // AEBaseMenu overrides initializeContents without calling vanilla's method, so the ordinary
-    // container mixin alone cannot observe its real initial inventory packet.
+    // AEBaseMenu 会覆写 initializeContents 而不调用原版方法，因此普通容器 mixin 无法单独观察到其真实初始库存数据包。
     @Inject(method = "handleContainerContent", at = @At("RETURN"))
     private void maicraft$receivedMachineContents(ClientboundContainerSetContentPacket packet, CallbackInfo callback) {
         var player = Minecraft.getInstance().player;

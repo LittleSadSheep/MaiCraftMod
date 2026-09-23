@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.world.level.block.FenceGateBlock;
 
-/** Shared block-state validity rules for construction scans, placement, and path costs. */
+/** 供施工扫描、放置和路径成本共用的方块状态有效性规则。 */
 public final class BuildValidity {
 
     private static final Set<Property<?>> ORIENTATION_PROPERTIES = Set.copyOf(List.of(

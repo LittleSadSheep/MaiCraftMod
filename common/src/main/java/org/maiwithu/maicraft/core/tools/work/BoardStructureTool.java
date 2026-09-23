@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
 import org.maiwithu.maicraft.task.TaskDispatch;
 
-/** Internal semantic travel operation; the public MCP surface remains the four intent tools. */
+/** 内部语义移动操作；公开 MCP 接口仍仅暴露四个意图工具。 */
 public final class BoardStructureTool implements MaiCraftTool {
     public String name() { return "board_structure"; }
     public String description() { return "Board an observed physical structure UUID using the equipped Create jetpack and native deck contact."; }

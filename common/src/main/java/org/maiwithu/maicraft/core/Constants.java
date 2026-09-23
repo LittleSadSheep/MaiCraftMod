@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.core;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Identity constants shared by the single MaiCraft mod runtime. */
+/** 单一 MaiCraft 模组运行时共用的身份常量。 */
 // 保存 Mod 的固定标识、显示名称与共用日志对象，避免各处写出不同名字。
 public final class Constants {
 

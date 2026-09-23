@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Feed synchronized client block changes into the sparse live target index. */
+/** 将同步后的客户端方块变化写入稀疏实时目标索引。 */
 @Mixin(Level.class)
 public abstract class ClientLevelBlockChangeMixin {
 

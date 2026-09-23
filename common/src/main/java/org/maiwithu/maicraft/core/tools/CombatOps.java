@@ -10,7 +10,7 @@ import java.util.Objects;
 /** 造 {@code attack} 的任务账本。 */
 public final class CombatOps {
 
-    /** Initial estimate only; verified health/defeat and navigation progress renew the task. */
+    /** 仅作为初始估算；核实生命值变化、击败目标或导航进展后会续期任务。 */
     private static final long PER_TARGET_TICKS = 75L * 20L;
     private static final long MIN_TICKS = 120L * 20L;
     private static final long MAX_INITIAL_LEASE_TICKS = 10L * 60L * 20L;
