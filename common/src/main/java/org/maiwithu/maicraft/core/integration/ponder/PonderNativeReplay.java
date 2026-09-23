@@ -73,12 +73,12 @@ final class PonderNativeReplay implements PonderReplaySession.Driver {
     }
 
     @Override public void tick() throws ReflectiveOperationException {
-        // The same pre-tick hook Ponder seekToTime uses to refresh section block entities without a render pass.
+        // 与 Ponder seekToTime 相同的 tick 前钩子，用于在不渲染的情况下刷新区段方块实体。
         for (Object element : (Iterable<?>) scene.getClass().getMethod("getElements").invoke(scene)) skipping.invoke(element, scene);
         tick.invoke(scene); elapsed++;
     }
     @Override public boolean finished() throws ReflectiveOperationException {
-        // markAsFinished can occur before later tutorial instructions. Drain the real schedule to retain every chapter.
+        // markAsFinished 可能早于后续教程指令触发；必须执行真实调度队列，才能保留所有章节。
         return ((List<?>) PonderInstructionReader.field(scene, "activeSchedule")).isEmpty();
     }
     @Override public int time() { return elapsed; }

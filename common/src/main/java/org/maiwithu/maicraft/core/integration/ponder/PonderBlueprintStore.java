@@ -40,7 +40,7 @@ public final class PonderBlueprintStore {
         return document == null ? null : document.deepCopy();
     }
 
-    /** Does not replay implicitly or interpret observed NBT as requested configuration. */
+    /** 不会隐式重放，也不会将观察到的 NBT 当作请求配置。 */
     // 展示时可以读不完整结构供判断，但实际导入必须是完整投影、非空且仍在当前环境缓存中的结果。
     public static JsonObject resolve(String uri) {
         hooks.refresh().run();

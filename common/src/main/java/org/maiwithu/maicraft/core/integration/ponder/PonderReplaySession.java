@@ -47,7 +47,7 @@ public final class PonderReplaySession {
                 if (previous.losesStructureTo(current)) retain(previous, previousTime, "before_removal_or_replacement");
                 while (boundaryIndex < boundaries.size() && time >= boundaries.get(boundaryIndex)) {
                     int boundary = boundaries.get(boundaryIndex++);
-                    // The blocking delay has completed in this tick; next chapter instructions start on the next tick.
+                    // 阻塞等待已在本 tick 完成；下一章指令要等到下一个 tick 才开始。
                     retain(current, time, "chapter_end"); finishChapter(boundary);
                 }
                 previous = current; previousTime = time;

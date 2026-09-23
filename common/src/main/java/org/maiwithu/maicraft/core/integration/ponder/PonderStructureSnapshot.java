@@ -28,7 +28,7 @@ public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections
     }
     public PonderStructureSnapshot { blocks = List.copyOf(blocks); sections = List.copyOf(sections); entities = entities.deepCopy(); }
 
-    /** Ignore mere motion, NBT animation counters and fades when deciding to preserve a destructive predecessor. */
+    /** 判断是否保留会被破坏的前序方块时，忽略单纯移动、NBT 动画计数器和渐隐效果。 */
     public boolean losesStructureTo(PonderStructureSnapshot after) {
         Map<String, String> beforeGeometry = visibleGeometry(), afterGeometry = after.visibleGeometry();
         if (beforeGeometry.entrySet().stream().anyMatch(e -> !e.getValue().equals(afterGeometry.get(e.getKey())))) return true;

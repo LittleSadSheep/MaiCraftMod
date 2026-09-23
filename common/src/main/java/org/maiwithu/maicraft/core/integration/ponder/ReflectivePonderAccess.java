@@ -69,8 +69,8 @@ public final class ReflectivePonderAccess implements PonderAccess {
         try {
             Api api = resolver.get(); Class<?> localizationType = api.localization();
             Object localization = localizationType.getConstructor().newInstance();
-            // This is the same null-world compilation used by PonderLocalization.generateSceneLang.
-            // Do not call SceneRegistryAccess.compile, scene.begin, scene.tick or any world instruction.
+            // 这里使用与 PonderLocalization.generateSceneLang 相同的无世界编译方式。
+            // 不要调用 SceneRegistryAccess.compile、scene.begin、scene.tick 或任何世界操作指令。
             Object scene = api.registry().getMethod("compileScene", localizationType, api.story(), api.level())
                     .invoke(null, localization, entry.nativeEntry(), null);
             return PonderInstructionReader.read(scene, defaults(api, localization));

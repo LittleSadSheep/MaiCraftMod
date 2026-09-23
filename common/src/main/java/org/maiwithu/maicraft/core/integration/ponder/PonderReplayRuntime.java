@@ -34,7 +34,7 @@ public final class PonderReplayRuntime {
         return job.session();
     }
 
-    /** Call once per client tick. A native callback is indivisible; the budget is checked between simulation ticks. */
+    /** 每个客户端 tick 调用一次。原生回调不可拆分；预算会在模拟 tick 之间检查。 */
     // 四毫秒预算在每个演示刻之间检查；单个回调和完整快照仍可能超过剩余时间，它不是强制中断时限。
     public static synchronized void tick() {
         if (JOBS.values().stream().noneMatch(job -> job.session().status().equals("running"))) return;
@@ -68,7 +68,7 @@ public final class PonderReplayRuntime {
         }
     }
 
-    /** Also available to integrations that rebuild Ponder's registry without a resource reload. */
+    /** 也供未触发资源重载、但需要重新构建 Ponder 注册表的集成调用。 */
     public static synchronized void invalidate() { JOBS.clear(); PonderBlueprintStore.clear(); }
 
     static synchronized void makeRoom(String sceneKey, int bytes) {
