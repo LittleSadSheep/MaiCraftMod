@@ -71,9 +71,8 @@ final class Ae2TerminalAccess {
     }
 
     /**
-     * Remember a fixed terminal only from an explicit, bounded machine observation. This inspects
-     * block-entity maps of already-loaded chunks intersecting the observed cube; it never loads a
-     * chunk, moves the player, opens a menu, or broadens the requested observation area.
+     * 只有通过明确且有界的机器观察，才记住固定终端。此操作只检查与观察立方体相交的已加载区块内的方块实体映射；
+     * 绝不加载区块、移动玩家、打开菜单或扩大请求的观察范围。
      */
     static synchronized ExplicitObservation rememberObservedWithin(
             LocalPlayer player, Ae2ReflectionBridge bridge, BlockPos center, int requestedRadius) {
@@ -206,7 +205,7 @@ final class Ae2TerminalAccess {
         Observed { position = position.immutable(); }
     }
 
-    /** Scan loaded block-entity maps by coordinate so block updates cannot invalidate an iterator. */
+    /** 按坐标扫描已加载区块的方块实体映射，避免方块更新使迭代器失效。 */
     // 把周围三十三格见方的立方体分多次检查，最多保留三十二个最近终端面，不为此加载新区域。
     static final class Discovery {
         static final int RADIUS = 16;
