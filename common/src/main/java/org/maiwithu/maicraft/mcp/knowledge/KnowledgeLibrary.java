@@ -17,6 +17,7 @@ import com.google.gson.GsonBuilder;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
+import org.maiwithu.maicraft.mcp.MetadataSearch;
 
 /** 仅通过元数据发现资源、按需读取 Markdown，并为无法读取资源的宿主提供工具回退。 */
 public final class KnowledgeLibrary {
@@ -30,6 +31,7 @@ public final class KnowledgeLibrary {
         List<KnowledgeDocument.Entry> entries();
         KnowledgeDocument read(String uri);
         default List<KnowledgeDocument.Entry> searchCandidates(String query) { return entries(); }
+        default List<KnowledgeDocument.Entry> searchCandidates(String query, boolean approximate) { return searchCandidates(query); }
         default JsonArray templates() { return new JsonArray(); }
         default String status() { return "unavailable"; }
     }
@@ -64,7 +66,9 @@ public final class KnowledgeLibrary {
                 JsonObject result = new JsonObject(); JsonArray contents = new JsonArray();
                 contents.add(read(required(request, "uri")).content()); result.add("contents", contents); yield result;
             }
-            case "search" -> search(string(request, "query"), request.has("limit") ? request.get("limit").getAsInt() : 10);
+            case "search" -> request.has("approximate") && request.get("approximate").getAsBoolean()
+                    ? searchApproximate(required(request, "query"), request.has("limit") ? request.get("limit").getAsInt() : 10)
+                    : search(string(request, "query"), request.has("limit") ? request.get("limit").getAsInt() : 10);
             default -> throw new IllegalArgumentException("Unknown knowledge request");
         };
     }
@@ -74,7 +78,9 @@ public final class KnowledgeLibrary {
         request.addProperty("action", uri == null ? "search" : "read");
         if (uri != null) request.addProperty("uri", uri);
         else {
-            request.addProperty("query", string(arguments, "focus"));
+            String query = string(arguments, "query");
+            request.addProperty("query", query == null ? string(arguments, "focus") : query);
+            request.addProperty("approximate", query != null);
             request.addProperty("limit", arguments.has("limit") ? arguments.get("limit").getAsInt() : 10);
         }
         return request;
@@ -162,6 +168,32 @@ public final class KnowledgeLibrary {
         // 搜索任务书同样只比对可见标题和编号，不提前读剧情正文或把动态队伍进度写进目录。
         result.addProperty("search_scope", "Bundled building tutorial titles/summaries, visible FTB quest/chapter titles and IDs, registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; quest bodies, recipe trees and unrequested scene bodies are not loaded or searched.");
         result.addProperty("next_step", "Read a returned URI with resources/read or perceive(view=knowledge, resource_uri=...). No matches do not prove no relevant mechanic exists.");
+        return result;
+    }
+
+    private JsonObject searchApproximate(String query, int limit) {
+        if (limit < 1 || limit > 20) throw new IllegalArgumentException("Knowledge limit must be 1..20");
+        var matcher = new MetadataSearch.Query(query);
+        Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
+        BuildingModelContractResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
+        MachineAssemblyResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
+        builtins.values().forEach(doc -> candidates.put(doc.uri(), doc.entry()));
+        // 候选召回也必须允许错字；否则目标在精确过滤阶段已经消失，后续排序无法补救。
+        source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        var matches = new ArrayList<JsonObject>();
+        for (var entry : candidates.values()) {
+            var match = matcher.match(entry.subjectId() == null ? entry.name() : entry.subjectId(), entry.title(), entry.searchable());
+            if (match == null) continue;
+            var row = entry.metadata(); row.add("match", match.toJson()); matches.add(row);
+        }
+        JsonArray hits = new JsonArray(); MetadataSearch.ranked(matches, "uri").stream().limit(limit).forEach(hits::add);
+        JsonObject result = new JsonObject(); result.add("resources", hits);
+        result.addProperty("query", query); result.addProperty("total_matches", matches.size());
+        result.addProperty("truncated", matches.size() > limit); result.addProperty("content_loaded", false);
+        result.addProperty("provider_status", source.status());
+        result.addProperty("search_scope", "Names, identifiers and declared metadata only; recipe graphs and document bodies are not loaded.");
+        result.addProperty("match_policy", "Exact identifiers/names rank first. Keywords are literal; 3..48 character terms allow bounded name/identifier edits. ranking_score is ordering evidence, not a probability.");
+        result.addProperty("next_step", "Select a candidate using its exact URI and identity, then read resource_uri. Ambiguous or absent matches require narrower keywords; search does not change the requested goal.");
         return result;
     }
 

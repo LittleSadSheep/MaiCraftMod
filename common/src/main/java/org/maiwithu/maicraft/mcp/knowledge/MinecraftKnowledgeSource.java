@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilitie
 import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
 import org.maiwithu.maicraft.core.integration.ftbquests.ReflectiveFtbQuestsAccess;
 import java.util.Arrays;
+import org.maiwithu.maicraft.mcp.MetadataSearch;
 
 /** 仅在客户端线程读取注册表事实，并自动发现 Ponder 参考文档。 */
 public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
@@ -60,6 +61,24 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
                 if (Arrays.stream(terms).allMatch(searchable::contains)) entries.add(RecipeKnowledgeSource.entry(id, name));
             });
         }
+        return entries;
+    }
+
+    @Override public List<KnowledgeDocument.Entry> searchCandidates(String query, boolean approximate) {
+        if (!approximate) return searchCandidates(query);
+        var matcher = new MetadataSearch.Query(query);
+        List<KnowledgeDocument.Entry> entries = new ArrayList<>(entries());
+        // 只发现当前注册表中的名称和已有说明；物品命中后才发布配方 URI，绝不在搜索时展开 EMI 配方。
+        BuiltInRegistries.BLOCK.forEach(block -> {
+            var entry = blockEntry(BuiltInRegistries.BLOCK.getKey(block), block);
+            if (matcher.match(entry.name(), entry.title(), entry.searchable()) != null) entries.add(entry);
+        });
+        BuiltInRegistries.ITEM.forEach(item -> {
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
+            String name = I18n.get(item.getDescriptionId());
+            if (matcher.match(id.toString(), name, id + " " + name) != null)
+                entries.add(RecipeKnowledgeSource.entry(id, name));
+        });
         return entries;
     }
 
@@ -116,7 +135,7 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
         if (summary.length() > 120) summary = summary.substring(0, 120) + "…";
         return new KnowledgeDocument.Entry(BLOCK + id.getNamespace() + "/" + id.getPath(), "block." + id,
                 block.getName().getString(), "实际方块状态与使用资料 · " + id + (summary.isBlank() ? "" : " · " + summary),
-                id + " " + description.searchText());
+                id + " " + description.searchText(), "text/markdown", id.toString());
     }
     private static String displayName(String value) {
         ResourceLocation id = ResourceLocation.tryParse(value);
