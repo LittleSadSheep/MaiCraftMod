@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestAccessTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbTaskConditionsTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestRewardsTest;
+import org.maiwithu.maicraft.mcp.knowledge.FtbReadOnlyResourcesTest;
 import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSourceTest;
 
 // 验证知识资源库与 HTTP 的只读行为，先初始化原版注册信息以便检查真实方块属性。
@@ -38,6 +39,7 @@ public final class KnowledgeRegressionSuite {
         FtbTaskConditionsTest.main(args);
         FtbQuestRewardsTest.main(args);
         FtbQuestsKnowledgeSourceTest.main(args);
+        FtbReadOnlyResourcesTest.main(args);
         // 同时确认知识 URI 能读出箱子的朝向属性，并拒绝把任意文件路径当成知识资源。
         var source = new MinecraftKnowledgeSource();
         var document = source.read("maicraft://knowledge/block/minecraft/chest");

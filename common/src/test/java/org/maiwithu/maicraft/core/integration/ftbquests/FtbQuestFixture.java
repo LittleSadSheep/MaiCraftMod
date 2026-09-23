@@ -83,16 +83,28 @@ public final class FtbQuestFixture {
     public static final class Chapter extends Node {
         public final List<Quest> quests = new ArrayList<>();
         public final List<Link> links = new ArrayList<>();
+        public final List<Image> images = new ArrayList<>();
         public boolean hideText;
         public Chapter(long id, String title) { super(id, title); }
         public List<Quest> getQuests() { return quests; }
         public List<Link> getQuestLinks() { return links; }
+        public Node getGroup() { return new Node(0, "教程分组"); }
+        public List<Image> getImages() { return images; }
         public List<String> getRawSubtitle() { return List.of("第一章说明"); }
         public boolean isHideTextUntilComplete() { return hideText; }
     }
     public record Link(Quest quest) {
         public boolean isVisible(Team team) { return quest.visible; }
         public Optional<Quest> getQuest() { return Optional.of(quest); }
+    }
+    public static final class Image extends Node {
+        public int reads;
+        public Image(long id, String text) { super(id, text); }
+        public boolean shouldShowImage(Team team) { return visible; }
+        public HolderLookup.Provider holderLookup() { return RegistryAccess.EMPTY; }
+        public void writeData(CompoundTag data, HolderLookup.Provider provider) {
+            reads++; data.putString("image", "pack:textures/guide.png"); data.putString("dependency", "0000000000009999");
+        }
     }
     public record Tri(boolean hidden) { public boolean get(boolean fallback) { return hidden || fallback; } }
     public static final class Quest extends Node {

@@ -118,7 +118,7 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
                                 ? FtbQuestRewards.read(quest, team, player, path, offset) : null));
             }
             result.add(new Chapter(id(chapter), text(call(chapter, "getTitle")), entries,
-                    () -> lines(call(chapter, "getRawSubtitle"))));
+                    () -> lines(call(chapter, "getRawSubtitle")), () -> FtbChapterDetails.read(chapter, team, ids)));
         });
         return result;
     }

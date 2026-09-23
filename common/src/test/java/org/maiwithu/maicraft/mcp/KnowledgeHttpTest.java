@@ -22,6 +22,7 @@ import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.List;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbRewardFixture.Reward;
 import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
 
@@ -140,6 +141,8 @@ public final class KnowledgeHttpTest {
     }
 
     private void verifyQuests(FtbQuestFixture fixture, JsonArray resources) throws Exception {
+        // 原生奖励定义经过同一个 HTTP 入口读取，模型取得候选信息时不会调用领取工具。
+        fixture.quest.rewards.add(new Reward(10, "item"));
         String quest = FtbQuestsKnowledgeSource.QUEST + "FEDCBA9876543210";
         check(resources.asList().stream().anyMatch(value -> value.getAsJsonObject().get("uri").getAsString().equals(quest))
                 && fixture.quest.bodyReads == 0, "HTTP 列举可见任务但不加载正文");
@@ -151,6 +154,13 @@ public final class KnowledgeHttpTest {
         var fallback = json(result.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
         check(!result.get("isError").getAsBoolean() && fallback.getAsJsonObject("quest")
                 .equals(json(content.get("text").getAsString()).getAsJsonObject("quest")), "工具与资源入口返回相同任务事实");
+        String rewardUri = fallback.getAsJsonObject("quest").getAsJsonObject("rewards").getAsJsonArray("entries")
+                .get(0).getAsJsonObject().get("uri").getAsString();
+        var rewardContent = send("resources/read", uri(rewardUri)).getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
+        request.getAsJsonObject("arguments").addProperty("resource_uri", rewardUri);
+        var rewardFallback = send("tools/call", request).getAsJsonObject("result");
+        check(json(rewardContent.get("text").getAsString()).getAsJsonObject("rewards").equals(json(rewardFallback
+                .getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString()).getAsJsonObject("rewards")), "奖励内容也在 Resource 和工具入口保持一致");
         fixture.quest.visible = false;
         check(send("resources/read", uri(quest)).getAsJsonObject("error").get("code").getAsInt() == -32002,
                 "任务隐藏后不能用旧 URI 继续读正文");

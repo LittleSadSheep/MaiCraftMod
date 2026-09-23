@@ -12,7 +12,7 @@ import java.util.function.BiFunction;
 public interface FtbQuestBook {
     record Quest(String id, String title, JsonObject summary, Supplier<JsonObject> details,
                  BiFunction<String, Integer, JsonObject> rewards) {}
-    record Chapter(String id, String title, List<Quest> quests, Supplier<JsonArray> description) {
+    record Chapter(String id, String title, List<Quest> quests, Supplier<JsonArray> description, Supplier<JsonObject> details) {
         public Chapter { quests = List.copyOf(quests); }
     }
     record Snapshot(JsonObject context, List<Chapter> chapters) {

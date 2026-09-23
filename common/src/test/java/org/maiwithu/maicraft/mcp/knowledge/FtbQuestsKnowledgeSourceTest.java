@@ -54,7 +54,7 @@ public final class FtbQuestsKnowledgeSourceTest {
         for (String suffix : List.of("?offset=-1", "?offset=40", "?offset=0&offset=0", "?offset=999999999999",
                 "?limit=2", "?", "#fragment", "?revision=bad", "?offset=0?offset=1")) rejected(source, chapter + suffix);
         rejected(source, quest + "?offset=0"); rejected(source, FtbQuestsKnowledgeSource.QUEST + "1");
-        check(source.read("file:///private") == null && source.templates().size() == 3, "外部 URI 不进入游戏读取");
+        check(source.read("file:///private") == null && source.templates().size() == 6, "外部 URI 不进入游戏读取");
         System.out.println("FtbQuestsKnowledgeSourceTest: passed");
     }
     private static JsonObject report(FtbQuestsKnowledgeSource source, String uri) {
