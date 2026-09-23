@@ -73,7 +73,7 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
             context.addProperty("dimension", env.dimension()); context.addProperty("locale", call(file, "getLocale").toString());
             if (flag(file, "isDisableGui")) return unavailable(context, "book_disabled", "服务器禁用了任务书界面");
             if (flag(team, "isLocked")) return unavailable(context, "book_locked", "当前队伍的任务书被锁定");
-            List<Chapter> chapters = catalog(file, team);
+            List<Chapter> chapters = catalog(file, team, env.player());
             context.addProperty("status", "available");
             context.addProperty("detail", "当前玩家可见的章节与任务；进度来自读取时已同步到客户端的数据");
             return new Snapshot(context, chapters);
@@ -90,7 +90,7 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
         return new Snapshot(context, List.of());
     }
 
-    private static List<Chapter> catalog(Object file, Object team) {
+    private static List<Chapter> catalog(Object file, Object team, UUID player) {
         List<Object> nativeChapters = new ArrayList<>();
         call(file, "forAllChapters", (Consumer<Object>) nativeChapters::add);
         Map<Object, List<Object>> visible = new LinkedHashMap<>(); Set<String> ids = new LinkedHashSet<>();
@@ -111,9 +111,11 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
         visible.forEach((chapter, quests) -> {
             List<Quest> entries = new ArrayList<>();
             for (Object quest : quests) {
-                JsonObject summary = FtbQuestDetails.summary(quest, team);
+                JsonObject summary = FtbQuestDetails.summary(quest, team, player);
                 entries.add(new Quest(id(quest), summary.get("title").getAsString(), summary,
-                        () -> FtbQuestDetails.read(quest, team, ids)));
+                        () -> FtbQuestDetails.read(quest, team, player, ids),
+                        (path, offset) -> summary.get("details_visible").getAsBoolean()
+                                ? FtbQuestRewards.read(quest, team, player, path, offset) : null));
             }
             result.add(new Chapter(id(chapter), text(call(chapter, "getTitle")), entries,
                     () -> lines(call(chapter, "getRawSubtitle"))));

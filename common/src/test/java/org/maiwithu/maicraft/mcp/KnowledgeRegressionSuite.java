@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSourceTest;
 import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestAccessTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbTaskConditionsTest;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestRewardsTest;
 import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSourceTest;
 
 // 验证知识资源库与 HTTP 的只读行为，先初始化原版注册信息以便检查真实方块属性。
@@ -35,6 +36,7 @@ public final class KnowledgeRegressionSuite {
         // 先验证玩家可见范围和队伍同步，再确认同一任务书经知识接口分页和按需展开。
         FtbQuestAccessTest.main(args);
         FtbTaskConditionsTest.main(args);
+        FtbQuestRewardsTest.main(args);
         FtbQuestsKnowledgeSourceTest.main(args);
         // 同时确认知识 URI 能读出箱子的朝向属性，并拒绝把任意文件路径当成知识资源。
         var source = new MinecraftKnowledgeSource();

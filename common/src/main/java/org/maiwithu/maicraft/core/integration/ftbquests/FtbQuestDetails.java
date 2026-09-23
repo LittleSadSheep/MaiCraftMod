@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.core.integration.ftbquests;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.Set;
+import java.util.UUID;
+import java.util.Date;
+import java.util.Optional;
 import java.util.stream.Stream;
 import static org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestApi.*;
 
@@ -11,18 +14,29 @@ import static org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestApi.*;
 final class FtbQuestDetails {
     private FtbQuestDetails() {}
 
-    static JsonObject summary(Object quest, Object team) {
+    static JsonObject summary(Object quest, Object team, UUID player) {
         JsonObject result = identity(quest);
         result.addProperty("completed", flag(team, "isCompleted", quest));
         result.addProperty("started", flag(team, "isStarted", quest));
         result.addProperty("can_start_tasks", flag(team, "canStartTasks", quest));
         result.addProperty("dependencies_satisfied", flag(team, "areDependenciesComplete", quest));
         result.addProperty("details_visible", !flag(quest, "hideDetailsUntilStartable") || flag(team, "canStartTasks", quest));
+        // 目录只读当前玩家的领取状态，不为筛选“可领奖”提前解析物品或遍历奖励表。
+        if (result.get("details_visible").getAsBoolean()) {
+            int count = 0, claimable = 0, unclaimed = 0;
+            for (Object reward : FtbQuestRewards.visible(quest, team)) {
+                Object claim = call(team, "getClaimType", player, reward); count++;
+                if (flag(claim, "canClaim")) claimable++;
+                if (!flag(claim, "isClaimed")) unclaimed++;
+            }
+            result.addProperty("visible_reward_count", count); result.addProperty("claimable_reward_count", claimable);
+            result.addProperty("unclaimed_reward_count", unclaimed);
+        }
         return result;
     }
 
-    static JsonObject read(Object quest, Object team, Set<String> visibleIds) {
-        JsonObject result = summary(quest, team);
+    static JsonObject read(Object quest, Object team, UUID player, Set<String> visibleIds) {
+        JsonObject result = summary(quest, team, player);
         if (!result.get("details_visible").getAsBoolean()) return result;
         Object chapter = call(quest, "getChapter");
         boolean showText = !flag(call(quest, "getHideTextUntilComplete"), "get", flag(chapter, "isHideTextUntilComplete"))
@@ -42,6 +56,13 @@ final class FtbQuestDetails {
         result.addProperty("optional", flag(quest, "isOptional"));
         result.addProperty("repeatable", flag(quest, "canBeRepeated"));
         result.addProperty("repeat_after_ms", call(team, "getMilliSecondsUntilRepeatable", quest).toString());
+        result.addProperty("completion_count", (Number) call(team, "getCompletionCount", quest));
+        // 只取 FTB 已登记的开始和完成时间，不把本次读取时间当作任务发生时间。
+        long questId = ((Number) call(quest, "getId")).longValue();
+        for (String event : new String[]{"Started", "Completed"}) {
+            Optional<?> time = (Optional<?>) call(team, "get" + event + "Time", questId);
+            time.ifPresent(value -> result.addProperty(event.toLowerCase() + "_at", ((Date) value).toInstant().toString()));
+        }
         JsonArray dependencies = new JsonArray(); int hidden = 0;
         // 隐藏前置只报告数量，不通过标题或 URI 泄露另一个尚未向玩家开放的章节。
         try (Stream<?> stream = (Stream<?>) call(quest, "streamDependencies")) {
@@ -57,6 +78,7 @@ final class FtbQuestDetails {
         JsonArray tasks = new JsonArray();
         for (Object task : (Iterable<?>) call(quest, "getTasks")) tasks.add(FtbQuestTasks.read(task, team));
         result.add("tasks", tasks);
+        result.add("rewards", FtbQuestRewards.read(quest, team, player, "", 0));
         return result;
     }
 }

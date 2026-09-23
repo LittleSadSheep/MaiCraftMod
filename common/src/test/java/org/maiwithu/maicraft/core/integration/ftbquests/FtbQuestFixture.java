@@ -5,6 +5,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Date;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbRewardFixture.Reward;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbRewardFixture.Claim;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import net.minecraft.core.HolderLookup;
@@ -63,6 +66,16 @@ public final class FtbQuestFixture {
         public boolean areDependenciesComplete(Quest quest) { return quest.dependenciesComplete; }
         public long getMilliSecondsUntilRepeatable(Quest quest) { return 0; }
         public long getProgress(Task task) { return task.progress; }
+        public boolean isRewardBlocked(Reward reward) { return reward.blocked; }
+        public Claim getClaimType(UUID player, Reward reward) {
+            return new Claim(reward.teamReward ? reward.sharedClaimed : reward.claimedPlayers.contains(player), true);
+        }
+        public Optional<Date> getRewardClaimTime(UUID player, Reward reward) {
+            return getClaimType(player, reward).isClaimed() ? Optional.of(new Date(1000)) : Optional.empty();
+        }
+        public int getCompletionCount(Quest quest) { return quest.completed ? 1 : 0; }
+        public Optional<Date> getStartedTime(long id) { return Optional.empty(); }
+        public Optional<Date> getCompletedTime(long id) { return Optional.empty(); }
         // 所有写入口都立即报错，避免测试把“读取时偷偷完成任务”误认为正常的进度更新。
         public void setProgress(Task task, long value) { throw new AssertionError("不能改任务进度"); }
         public Team getOrCreateTeamData(UUID id) { throw new AssertionError("不能创建队伍"); }
@@ -86,6 +99,7 @@ public final class FtbQuestFixture {
         private final Kind dependencyRequirement = new Kind("one_started");
         public final Chapter chapter;
         public final List<Task> tasks = new ArrayList<>();
+        public final List<Reward> rewards = new ArrayList<>();
         public final List<Node> dependencies = new ArrayList<>();
         public boolean startable = true, dependenciesComplete, hideDetails, hideText;
         public int bodyReads;
@@ -104,6 +118,7 @@ public final class FtbQuestFixture {
         public boolean canBeRepeated() { return false; }
         public Stream<Node> streamDependencies() { return dependencies.stream(); }
         public List<Task> getTasks() { return tasks; }
+        public List<Reward> getRewards() { return rewards; }
     }
     public record Type(String id) { public String getTypeId() { return id; } }
     public static final class Task extends Node {
