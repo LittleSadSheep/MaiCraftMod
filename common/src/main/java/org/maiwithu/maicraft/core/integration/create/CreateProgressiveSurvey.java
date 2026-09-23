@@ -371,9 +371,7 @@ final class CreateProgressiveSurvey {
             BlockPos position = route.positions().get(corridorIndex);
             BlockPos support = route.supportFor(corridorIndex);
             if (!level.isLoaded(position) || !level.isLoaded(support)) {
-                // Move a short distance INTO the unsurveyed prefix. Walking merely to the
-                // already-loaded boundary cell can leave its adjacent support across the chunk
-                // edge unloaded forever.
+                // 向尚未勘查的区域内部移动一小段。若只走到已加载边界格，其相邻支撑可能一直留在区块边缘外而无法加载。
                 BlockPos observationTarget = route.positions().get(Math.max(0, corridorIndex - 16));
                 return travelToward(context, observationTarget, 2,
                         "corridor_unreachable",
@@ -454,8 +452,7 @@ final class CreateProgressiveSurvey {
         plan = new CreateMechanicalPlan(source, destination, receiver, List.copyOf(surveyed),
                 route.geometry(), route.routeHash(), true, live.speed(), false);
         transitionTo(Phase.READY);
-        // The digest is private execution evidence reported separately; the semantic caller never
-        // receives individual route cells.
+        // 摘要是私有执行证据，单独报告给内部使用；语义调用方不会收到逐格路线坐标。
         surveyDigest = digest;
         return Status.READY;
     }
@@ -522,7 +519,7 @@ final class CreateProgressiveSurvey {
         }
     }
 
-    /** Incremental loaded-frontier navigation used by survey and progressive construction. */
+    /** 供勘查和渐进式施工使用的已加载边界增量导航。 */
     // 远处未加载时分段选当前可走到的观察点；走路失败记住该点，避免反复选同一个失败站位。
     static final class Travel {
         enum Status { RUNNING, ARRIVED, FAILED }
@@ -576,8 +573,7 @@ final class CreateProgressiveSurvey {
             }
             failure = nav.failReason();
             if (waypoint != null && deniedWaypoints.add(waypoint.asLong())) {
-                // Rejecting one concrete waypoint advances the finite candidate search. It is
-                // semantic progress, but deliberately not reported as physical movement.
+                // 排除一个具体航点会推进有限候选搜索，属于语义进展，但有意不报告为实际移动。
                 progressRevision++;
             }
             nav.stop();
