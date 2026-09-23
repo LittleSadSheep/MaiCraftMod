@@ -9,7 +9,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** No entry eviction within a session: losing a receipt must never enable a second mutation. */
+/** 同一会话内不会淘汰记录；丢失回执绝不能导致再次执行修改操作。 */
 final class RequestLedger {
     static final int MAX_REQUESTS = 512;
     static final int RECENT_READ_RESULTS = 8;
@@ -26,7 +26,7 @@ final class RequestLedger {
 
     boolean matches(String requestId, String fingerprint) {
         Entry entry = entries.get(requestId);
-        // Null fingerprints represent cancel-before-request tombstones.
+        // 空指纹表示请求提交前已取消的墓碑记录。
         return entry != null && (entry.fingerprint() == null || entry.fingerprint().equals(fingerprint));
     }
 

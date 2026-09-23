@@ -6,7 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** One negotiated world scope within one authenticated connection. Accessed on its game thread. */
+/** 一个经过协商、属于单一已认证连接的世界作用域；只能在其游戏线程访问。 */
 final class ProtocolSession {
     static final long RETENTION_TICKS = 6000;
     final String id = UUID.randomUUID().toString();
@@ -30,7 +30,7 @@ final class ProtocolSession {
             throw new IllegalArgumentException("Missing feature versions");
         JsonObject offered = hello.getAsJsonObject("features");
         for (ServerFeature feature : peer.features()) {
-            // A handler implements one concrete version. New versions keep the bootstrap stable.
+            // 一个处理器只实现一个具体版本；新增版本不得改变引导程序。
             if (offered.has(feature.operationId()) && ProtocolJson.number(offered, feature.operationId()) >= feature.version())
                 features.put(feature.operationId(), feature);
         }
