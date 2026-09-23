@@ -17,7 +17,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import java.util.function.Consumer;
 
-/** Continuous-ground acceleration; upstream Parkour and sprint-ascend still own their special moves. */
+/** 负责连续地面加速；上游 Parkour 和疾跑上升逻辑仍管理各自特殊动作。 */
 public final class TravelJumpPolicy {
     private static final float NORMAL_GROUND_FRICTION = 0.6F;
     private TravelJumpPolicy() {}
@@ -48,7 +48,7 @@ public final class TravelJumpPolicy {
 
     record Plan(List<IMovement> movements, double apexHeight, boolean headHit) {}
 
-    /** Uses the same swept body/floor geometry for grid steps and smoothed arbitrary bearings. */
+    /** 网格移动和经过平滑的任意方向移动共用相同的扫掠身体及地面几何。 */
     static Plan plan(BlockGetter world, Predicate<BlockPos> loaded, LongSet forbidden,
                      PhysicalObstacleSnapshot physical, TravelRunway runway,
                      TravelJumpPhysics.Launch launch, double width, Vec3 velocity) {
@@ -64,14 +64,14 @@ public final class TravelJumpPolicy {
             var corridor = new GroundCorridor(world, loaded, width + 2 * drift,
                     launch.bodyHeight() + flight.apexHeight(), forbidden, physical);
             Vec3 end = runway.point(reach);
-            // A gap in the canopy must reserve a full flight, not assume an early head collision.
+            // 树冠或顶棚存在缺口时，必须预留完整飞行空间，不能假设头部会提前撞上障碍。
             if (headHit && !corridor.hasContinuousCeiling(runway.start(), end, 2)) continue;
             if (corridor.clear(runway.start(), end)) return new Plan(verified, flight.apexHeight(), headHit);
         }
         return null;
     }
 
-    /** Full dry support keeps takeoff friction and height consistent with the projected flight. */
+    /** 完整干燥支撑面确保起跳摩擦和高度与预测飞行一致。 */
     private static boolean isStableTakeoff(IPlayerContext ctx, BlockPos feet) {
         BlockState support = ctx.world().getBlockState(feet.below());
         return support.getFluidState().isEmpty()
