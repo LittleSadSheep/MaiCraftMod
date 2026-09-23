@@ -85,8 +85,7 @@ final class NaturalTreeSource {
                 if (trunk.contains(neighbor)) continue;
                 if (!loaded.test(neighbor)) return false;
                 BlockState attached = world.getBlockState(neighbor);
-                // Cables, connectors, ladders and attached builds are not vegetation, even
-                // when collision-free or next to natural leaves. No machine/mod ID list.
+                // 线缆、连接器、梯子和附属建筑都不是植被，即使没有碰撞或紧邻天然树叶也不例外；不依赖机器或模组 ID 清单。
                 if (attached.hasBlockEntity() || !(attached.isAir() || attached.is(BlockTags.LOGS)
                         || attached.getBlock() instanceof LeavesBlock
                         || attached.is(BlockTags.REPLACEABLE_BY_TREES)

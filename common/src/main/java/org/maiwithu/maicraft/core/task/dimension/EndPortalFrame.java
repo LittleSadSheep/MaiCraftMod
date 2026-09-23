@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.EndPortalFrameBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import java.util.Collections;
 
-/** A complete, inward-facing ring of twelve existing frames. End frames are never manufactured. */
+/** 由十二个现有框组成且全部朝内的完整末地传送门框；不会制造末地传送门框方块。 */
 public record EndPortalFrame(BlockPos center) {
     public EndPortalFrame { center = center.immutable(); }
 
@@ -45,7 +45,7 @@ public record EndPortalFrame(BlockPos center) {
         return frames().keySet().stream().filter(p -> !read.apply(p).getValue(EndPortalFrameBlock.HAS_EYE)).toList();
     }
 
-    /** Activation replaces all nine interior cells, so foreign blocks and unknown cells block preparation. */
+    /** 激活时会替换内部全部九格，因此异物或未知格都会阻止准备流程。 */
     public boolean clearInterior(Function<BlockPos, BlockState> read) {
         return interior().stream().allMatch(p -> {
             BlockState state = read.apply(p);

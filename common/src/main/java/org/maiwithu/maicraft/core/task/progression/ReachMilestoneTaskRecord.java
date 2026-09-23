@@ -10,8 +10,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 
 /**
- * One semantic survival-progression goal.  Concrete prerequisites, entities, structures,
- * portal cells, routes and inventory positions are deliberately absent from this boundary.
+ * 一个语义生存进度目标。具体前置条件、实体、结构、传送门格、路线和背包位置都刻意不包含在此边界中。
  */
 public final class ReachMilestoneTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "reach_milestone";

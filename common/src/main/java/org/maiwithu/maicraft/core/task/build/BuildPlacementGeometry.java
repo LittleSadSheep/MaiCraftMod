@@ -216,7 +216,7 @@ final class BuildPlacementGeometry {
         return true;
     }
 
-    /** A hypothetical support view can prove access, but never replaces the live placement/acknowledgement gate. */
+    /** 假设支撑视图可用于证明可达性，但绝不能替代实时放置和回执确认门槛。 */
     static Gesture projectedGestureFrom(LocalPlayer player, BuildTaskRecord.Target target,
                                          BlockGetter projected,
                                          Predicate<BlockPos> loaded, Vec3 feet) {
@@ -635,7 +635,7 @@ final class BuildPlacementGeometry {
             return PlacementPlayerProjection.withCandidate(player, sneak, yaw, pitch, () -> {
                 BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(
                         player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
-                    // Only the hypothetical full support's destination differs; execution still uses the real context.
+                    // 只有假设完整支撑时的放置目标不同；实际执行仍使用真实上下文。
                     @Override public BlockPos getClickedPos() {
                         return projectedSupport ? hit.getBlockPos().relative(hit.getDirection()) : super.getClickedPos();
                     }

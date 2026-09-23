@@ -114,7 +114,7 @@ public final class SearchGeometry {
         }
     }
 
-    /** Bounded nearest candidates; dense sections must compare every cell before discarding it. */
+    /** 返回有界最近候选；在密集区段中，丢弃结果前必须比较每一个方块格。 */
     // 同样保留最近若干位置，并固定同距离时的坐标顺序；保存坐标副本，避免扫描复用的可变坐标把结果改掉。
     public static final class NearestPositions {
         private final int want;
@@ -151,7 +151,7 @@ public final class SearchGeometry {
         // 必须严格近于外圈理论下限才停，保留同距位置参与稳定排序的机会。
         public boolean canStopAfterRing(int ring) {
             double lowerBound = ringFloorDistance(ring + 1);
-            // Strict comparison keeps equal-distance tie-breaking independent of ring order.
+            // 使用严格比较，使相同距离的平局处理不依赖环的遍历顺序。
             return kept.size() >= want && kept.peek().distSqr(center) < lowerBound * lowerBound;
         }
 

@@ -10,7 +10,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Conservative nearby debris exclusion, not a simulation of fans, fluids or arbitrary item trajectories. */
+/** 保守排除附近碎屑；不模拟风扇、流体或任意物品轨迹。 */
 final class BuildScaffoldDropSafety {
     private static final int RADIUS = 2, DEPTH = 32;
     record Risk(String reason, BlockPos position, String block) {
@@ -37,7 +37,7 @@ final class BuildScaffoldDropSafety {
                             BuiltInRegistries.BLOCK.getKey(intake.getBlock()).toString());
                 }
                 if (!current.getFluidState().isEmpty()) return new Risk("scaffold_drop_path_fluid", pos, "fluid");
-                // Only an already present full block retained by the plan can shield a lower intake.
+                // 只有方案中保留的现有完整方块，才能遮挡下方入口。
                 if ((desired == null || desired.equals(current)) && current.isCollisionShapeFullBlock(world, pos)) {
                     blocked = true; break;
                 }
