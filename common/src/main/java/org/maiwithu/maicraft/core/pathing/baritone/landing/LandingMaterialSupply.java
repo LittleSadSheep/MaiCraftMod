@@ -55,7 +55,7 @@ public final class LandingMaterialSupply {
         this.begin = Objects.requireNonNull(begin);
     }
 
-    /** remainingTicks ends at the required landing action, not at eventual ground contact. */
+    /** remainingTicks 计算到必须执行的着陆动作截止，而不是计算到最终接触地面。 */
     public Result tick(LocalPlayerContext context, int remainingTicks) {
         if (result.state() == State.UNAVAILABLE) return result;
         if (!sameActor(context)) return unavailable("body, world or control changed; prior supply cleanup is unconfirmed");
@@ -75,8 +75,7 @@ public final class LandingMaterialSupply {
                 : unavailable("the bounded supply attempt already ended; no retry");
         try {
             if (session == null) {
-                // Existing hay is retained as a fallback, never duplicated or allowed to hide
-                // an obtainable damage-free aid in the network.
+                // 将已有干草保留为后备方案；不重复取用，也不让它掩盖网络中可获得的免伤用品。
                 var requested = carried != null && carried.equals(HAY)
                         ? accepted.stream().filter(id -> !id.equals(HAY)).toList() : accepted;
                 var group = new Ae2ResourceSupply.Group(requested.getFirst(), requested, 1,
@@ -89,7 +88,7 @@ public final class LandingMaterialSupply {
                     || context.tickRevision() - started >= MAX_SUPPLY_TICKS;
             Optional<Ae2ResourceSupply.Outcome> outcome = stopping
                     ? session.finishInPlace(context, stopReason) : session.tick(context);
-            // Even a terminal transaction may have submitted an asynchronous native menu close.
+            // 即使事务已进入终态，也可能提交了异步原生菜单关闭请求。
             if (outcome.isPresent()) outcome = session.finishInPlace(context, stopReason);
             if (outcome.isEmpty()) {
                 result = new Result(stopping ? State.CLEANING : State.ACQUIRING, null,
@@ -125,7 +124,7 @@ public final class LandingMaterialSupply {
         }
     }
 
-    /** Preemption does not restart extraction and never relinquishes a pending owned menu close. */
+    /** 任务抢占不会重新开始物品提取，也不会放弃仍待完成且由本任务拥有的菜单关闭操作。 */
     public Result finish(LocalPlayerContext context, String reason) {
         stopping = true;
         stopReason = reason == null ? "landing supply interrupted" : reason;
