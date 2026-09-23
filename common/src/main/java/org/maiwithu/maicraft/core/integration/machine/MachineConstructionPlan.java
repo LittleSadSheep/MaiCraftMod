@@ -154,6 +154,9 @@ public final class MachineConstructionPlan {
             JsonObject validation = report.getAsJsonObject("validation");
             validation.addProperty("valid", false);
             validation.getAsJsonArray("errors").add("unsupported_native_installation: " + unsupported.getMessage());
+            validation.addProperty("error_count", validation.getAsJsonArray("errors").size());
+            if (!validation.has("issues")) validation.add("issues", new JsonArray());
+            validation.getAsJsonArray("issues").add(MachineDesignRejection.issue(unsupported.getMessage(), "goal.parameters.blueprint"));
             return new SemanticMachineLayout.Result(false, layout.blueprint(), report);
         }
     }

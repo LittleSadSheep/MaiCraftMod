@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometry;
@@ -19,7 +21,9 @@ public final class MachineBeltAssembly {
         Set<BlockPos> parts = new HashSet<>();
         for (var raw : blueprint.getAsJsonArray("blocks")) if (raw.getAsJsonObject().has("part"))
             parts.add(MachineAssemblyDocument.position(raw.getAsJsonObject().get("offset")));
+        List<JsonObject> issues = new ArrayList<>(); int index = 0;
         for (var raw : installations) {
+            try {
             if (!raw.isJsonObject()) throw bad("installation must be an object");
             JsonObject entry = raw.getAsJsonObject();
             if (!entry.has("type") || !entry.get("type").isJsonPrimitive() || !entry.getAsJsonPrimitive("type").isString()
@@ -46,7 +50,13 @@ public final class MachineBeltAssembly {
                     shaft(blueprint, blocks, parts, at, chosen);
                 }
             }
+            } catch (IllegalArgumentException invalid) {
+                // 收集独立带段的错误后整体拒绝；补出的准备轴只在本次副本中，任何错误都不会开始施工。
+                issues.add(MachineDesignRejection.beltIssue(invalid.getMessage(), index, raw, blocks));
+            }
+            index++;
         }
+        if (!issues.isEmpty()) throw new MachineDesignRejection(issues);
     }
 
     public static Direction.Axis inferredAxis(BlockPos first, BlockPos second) {

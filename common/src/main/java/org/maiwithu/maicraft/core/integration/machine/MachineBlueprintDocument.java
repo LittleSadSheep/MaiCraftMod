@@ -86,6 +86,8 @@ public final class MachineBlueprintDocument {
         report.addProperty("processing_relationships_verified", false);
         JsonObject validation = new JsonObject(); validation.addProperty("valid", errors.isEmpty());
         JsonArray errorRows = new JsonArray(); errors.stream().limit(32).forEach(errorRows::add);
+        JsonArray issues = new JsonArray(); errors.stream().limit(32).forEach(error -> issues.add(MachineDesignRejection.issue(error, "goal.parameters.blueprint")));
+        validation.add("issues", issues);
         validation.add("errors", errorRows); validation.addProperty("error_count", errors.size());
         validation.addProperty("errors_truncated", errors.size() > 32); report.add("validation", validation);
         // Evidence remains available at its source; do not duplicate large tutorial NBT into every task result.

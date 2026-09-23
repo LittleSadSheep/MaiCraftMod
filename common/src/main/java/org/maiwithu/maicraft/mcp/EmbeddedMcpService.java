@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.integration.machine.MachineDesignRejection;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonParseException;
 import com.sun.net.httpserver.Headers;
@@ -376,7 +377,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         try {
             arguments = PublicToolCatalog.validateAndNormalize(name, params.get("arguments"));
         } catch (IllegalArgumentException exception) {
-            return toolError("invalid_arguments", message(exception), true, true, null);
+            return toolError("invalid_arguments", message(exception), true, true, null, MachineDesignRejection.inspectRequest(params.get("arguments")));
         }
 
         String requestKey = null;
@@ -442,7 +443,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (Exception exception) {
             Throwable failure = unwrap(exception);
             if (failure instanceof SemanticContractException violation) {
-                return semanticContractError(violation, requestKey);
+                return semanticContractError(violation, requestKey, MachineDesignRejection.inspectRequest(arguments));
             }
             if (!(failure instanceof IllegalArgumentException || failure instanceof IllegalStateException)) {
                 Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
@@ -827,6 +828,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
             } else {
                 suggestions.add("Query current task and world state before deciding whether to retry.");
             }
+        } else if (code.equals("invalid_arguments") || code.equals("invalid_semantic_goal")) {
+            // 确定性的设计错误需要修改请求；新设计使用新去重键，避免无意义观察和复用旧请求身份。
+            suggestions.add("Revise the rejected request using its diagnostics; a changed execute request needs a new request_key. Review the revised blueprint before construction. Repeated unchanged rejection requires a new approach or an escalation.");
         } else if (retryable) {
             suggestions.add("Re-observe current facts, then retry with the same request_key when present.");
         }
@@ -839,8 +843,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static JsonObject semanticContractError(
-            SemanticContractException violation, String requestKey) {
-        JsonObject details = new JsonObject();
+            SemanticContractException violation, String requestKey, JsonObject diagnostics) {
+        JsonObject details = diagnostics == null ? new JsonObject() : diagnostics.deepCopy();
         details.addProperty("violation", violation.violationCode());
         details.addProperty("path", violation.path());
         details.addProperty("ability", violation.ability());

@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyDocumentTes
 import org.maiwithu.maicraft.core.integration.machine.MachineBeltAssemblyTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBeltRoutesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementDependenciesTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineDesignRejectionTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineNativeInstallationTest;
 import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
@@ -131,6 +132,7 @@ public final class MachineRegressionSuite {
         MachineBeltAssemblyTest.main(args);
         MachineBeltRoutesTest.main(args);
         MachinePlacementDependenciesTest.main(args);
+        MachineDesignRejectionTest.main(args);
         MachineBuildCompletionTest.main(args);
         MachinePlanningBudgetTest.main(args);
         MachineLayoutAeNetworksTest.main(args);
