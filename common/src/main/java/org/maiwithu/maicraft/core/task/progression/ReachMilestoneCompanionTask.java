@@ -23,13 +23,12 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord;
 
 /**
- * Reconciliatory progression state machine.  It owns exactly one typed child at a time and
- * reconstructs every phase from live client facts, so a LocalPlayer handoff can discard this
- * instance without losing logical progress.
+ * 可协调恢复的进度状态机。一次只拥有一个类型明确的子任务，并根据客户端实时事实重建每个阶段，
+ * 因此 LocalPlayer 交接时可以丢弃当前实例而不会丢失逻辑进度。
  */
 public final class ReachMilestoneCompanionTask
         extends AbstractCompanionTask<ReachMilestoneTaskRecord> {
-    /** Fresh liveness granted when a new typed phase begins; child progress may renew it again. */
+    /** 新的类型阶段开始时授予的初始存活期限；子任务取得进展后可继续续期。 */
     private static final long CHILD_PROGRESS_LEASE_TICKS = 3L * 60L * 20L;
     private static final List<Block> INDEXED_BLOCKS =
             List.of(Blocks.END_PORTAL_FRAME, Blocks.END_PORTAL);
@@ -99,9 +98,8 @@ public final class ReachMilestoneCompanionTask
         ProgressionRequirementProfile.Requirement requirement = activeRequirement;
         TaskState terminal = runChild(child);
         if (terminal == null) {
-            // Structure search, acquisition, movement and encounter children renew their own
-            // records only from verified progress.  Carry that lease through the semantic root;
-            // otherwise a healthy multi-hour milestone can be killed by its original wall clock.
+            // 结构搜索、材料获取、移动和遭遇子任务都只依据已核实进展续期自己的记录。
+            // 将该期限传递到语义根任务，否则健康运行数小时的里程碑可能被最初的墙上时间预算提前结束。
             if (record != null) r.extendDeadlineTo(record.getDeadlineGameTime());
             return TaskState.RUNNING;
         }
@@ -146,8 +144,7 @@ public final class ReachMilestoneCompanionTask
                     Phase.LOCATE_STRONGHOLD);
         }
 
-        // A successful child that neither changed an observable fact nor completed a milestone
-        // must not be reissued forever. Dimension handoff success normally destroys this object.
+        // 子任务成功后若既未改变可观察事实、也未完成里程碑，就不能无限重复派发。维度交接成功通常会销毁此对象。
         if (after.fingerprint() == activeStartFingerprint
                 && purpose != Purpose.DIMENSION_TRAVEL
                 && purpose != Purpose.SUPPLY_DIMENSION_TRAVEL) {
@@ -169,9 +166,8 @@ public final class ReachMilestoneCompanionTask
     private TaskState planStronghold(ProgressionFacts facts) {
         if (!ProgressionFacts.OVERWORLD.equals(facts.dimension())) {
             if (ProgressionFacts.NETHER.equals(facts.dimension())) {
-                // A prior acquire child can legitimately move the semantic root here for blaze
-                // evidence. Rebuild from live inventory and finish that dimension-local need
-                // before returning, otherwise handoff reconstruction would bounce forever.
+                // 前一个获取子任务可能为取得烈焰人证据而合法地将语义根任务带到此处。
+                // 根据实时背包重建需求并完成当前维度内的事项后再返回，否则交接重建会在维度间无限往返。
                 TaskState localSupply = ensureRequirements(
                         facts, navigationRequirements(),
                         Phase.PREPARE_NAVIGATION);
@@ -272,7 +268,7 @@ public final class ReachMilestoneCompanionTask
                 Phase.SEARCH_ELYTRA);
     }
 
-    /** @return null when all requirements are live-satisfied; otherwise a running/terminal state. */
+    /** @return 所有要求均由实时事实满足时返回 null，否则返回运行中或终态。 */
     private TaskState ensureRequirements(
             ProgressionFacts facts,
             List<ProgressionRequirementProfile.Requirement> requirements,
@@ -377,7 +373,7 @@ public final class ReachMilestoneCompanionTask
     private List<ProgressionRequirementProfile.Requirement> navigationRequirements() {
         if (!r.preparePortal || r.milestone == ReachMilestoneTaskRecord.Milestone.STRONGHOLD)
             return ProgressionRequirementProfile.strongholdNavigation();
-        // Retain the navigation reserve plus up to twelve insertions before leaving a supply dimension.
+        // 离开材料维度前，保留导航储备以及最多十二件后续合成所需物品。
         var navigation = ProgressionRequirementProfile.strongholdNavigation().getFirst();
         return List.of(new ProgressionRequirementProfile.Requirement("portal_eye_reserve", navigation.alternatives(),
                 16, null, navigation.hostileHuntAllowed(), navigation.sourceHint()));
@@ -412,7 +408,7 @@ public final class ReachMilestoneCompanionTask
             try {
                 activeChild.result(TaskState.CANCELLED);
             } catch (RuntimeException ignored) {
-                // The parent still releases its index and first-person controls below.
+                // 父任务随后仍会在下方释放索引和第一人称控制。
             }
         }
         clearActive();
@@ -479,7 +475,7 @@ public final class ReachMilestoneCompanionTask
                     ProgressionFacts.OVERWORLD,
                     ProgressionFacts.NETHER,
                     ProgressionFacts.END).contains(dimension)) {
-                // DimensionTravel intentionally has no direct Nether<->End route.
+                // DimensionTravel 有意不提供下界与末地之间的直达路线。
                 if ((ProgressionFacts.NETHER.equals(current)
                         && ProgressionFacts.END.equals(dimension))
                         || (ProgressionFacts.END.equals(current)
