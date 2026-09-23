@@ -136,13 +136,13 @@ public final class EmbeddedMcpService implements AutoCloseable {
         return server != null;
     }
 
-    /** Returns the actual port, including an ephemeral port selected for port 0. */
+    /** 返回实际端口，包括指定端口为 0 时系统选择的临时端口。 */
     public synchronized int port() {
         if (server == null) return -1;
         return server.getAddress().getPort();
     }
 
-    /** Number of currently live MCP transport sessions, for the local read-only status command. */
+    /** 返回当前活动的 MCP 传输会话数，供本地只读状态命令使用。 */
     public int sessionCount() {
         return sessions.size();
     }
@@ -261,7 +261,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             Session session = requireSession(exchange);
             if (session == null || !validVersionHeader(exchange, session)) return;
             if (!"notifications/initialized".equals(method) && !"notifications/cancelled".equals(method)) {
-                // Unknown notifications are intentionally ignored by JSON-RPC.
+                // 按 JSON-RPC 规则有意忽略未知通知。
             }
             if ("notifications/initialized".equals(method)) session.initialized.set(true);
             if ("notifications/cancelled".equals(method) && request.has("params")
@@ -577,7 +577,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         SseConnection connection = new SseConnection(exchange, session::touch);
         session.attach(connection);
-        // Catch up after subscribing before GET, or after events occurred while SSE was disconnected.
+        // 在建立订阅后、处理 GET 前补齐更新；若 SSE 断开期间发生过事件，也在此追赶当前状态。
         if (session.attentionSubscribed.get()) {
             connection.enqueue(ATTENTION_URI.toString(), resourceNotification(ATTENTION_URI));
         }
@@ -616,7 +616,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         // 游戏线程只把通知放进队列，不能在这里向慢网络连接写数据，否则会拖住游戏更新。
         JsonObject notification = resourceNotification(uri);
         sessions.values().forEach(session -> {
-            // Never perform socket work on the Minecraft publication thread.
+            // 绝不在 Minecraft 发布线程上执行套接字操作。
             if (subscribed.test(session)) session.enqueue(uri.toString(), notification);
         });
     }
@@ -649,8 +649,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             });
             trimSessions();
         } catch (RuntimeException ignored) {
-            // Maintenance is best effort; one malformed/stale session must not
-            // cancel the periodic reaper.
+            // 维护操作尽力执行；单个格式错误或过期会话不能取消周期性回收器。
         }
     }
 
@@ -690,7 +689,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             sendStatus(exchange, 400, "Unsupported MCP protocol version");
             return false;
         }
-        // A missing header has the compatibility meaning defined by the transport.
+        // 请求头缺失时，按传输层定义的兼容语义处理。
         if (supplied != null && !session.version.equals(supplied)) {
             sendStatus(exchange, 400, "MCP protocol version does not match the session");
             return false;
@@ -774,7 +773,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         try {
             Runtime.getRuntime().removeShutdownHook(hook);
         } catch (IllegalStateException ignored) {
-            // The JVM is already shutting down and will finish this hook normally.
+            // JVM 已进入关闭流程，会正常完成此钩子。
         }
     }
 
@@ -1086,9 +1085,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
             SseConnection previous = connection.getAndSet(next);
             if (previous != null) previous.close();
 
-            // close() can race between the first check and getAndSet().  The
-            // second check prevents resurrecting an exchange on an expired
-            // session without taking a monitor that stop() would have to wait for.
+            // close() 可能在第一次检查与 getAndSet() 之间发生竞争。第二次检查可避免在会话过期后恢复交换对象，
+            // 同时不获取 stop() 必须等待的监视器。
             if (closed.get() && connection.compareAndSet(next, null)) next.close();
         }
 
@@ -1129,10 +1127,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
         private boolean enqueue(String uri, JsonObject message) {
             if (done.get()) return false;
 
-            // Resource-updated messages are level-triggered: one pending signal per
-            // uri already tells the client to read the latest snapshot.  Coalescing
-            // by uri keeps an attention signal from displacing a chatflow signal.
-            // Never wait for a slow reader and never perform socket work here.
+            // 资源更新消息采用电平触发：每个 URI 只需保留一个待处理信号，客户端收到后读取最新快照即可。
+            // 按 URI 合并信号可避免 Attention 更新挤掉 ChatFlow 更新；不要等待慢速读取者，也不要在此执行套接字操作。
             pending.put(uri, message.deepCopy());
             wakeups.release();
             return !done.get();
@@ -1152,8 +1148,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
                     while ((message = pollPending()) != null) writeMessage(message);
                 }
             } catch (IOException ignored) {
-                // A disconnected or non-reading client is isolated to this GET
-                // handler.  Its session is detached in handleGet's finally block.
+            // 已断开或停止读取的客户端仅影响当前 GET 处理器；其会话会在 handleGet 的 finally 块中分离。
             }
         }
 
@@ -1186,9 +1181,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             if (!done.compareAndSet(false, true)) return;
             pending.clear();
             wakeups.release();
-            // No monitor is acquired and no writer completion is awaited.  This
-            // makes session replacement, expiry, and stop() bounded even when a
-            // client has stopped reading its SSE stream.
+            // 不获取监视器，也不等待写入完成；即使客户端停止读取 SSE 流，会话替换、过期和 stop() 仍能有界完成。
             exchange.close();
         }
     }
