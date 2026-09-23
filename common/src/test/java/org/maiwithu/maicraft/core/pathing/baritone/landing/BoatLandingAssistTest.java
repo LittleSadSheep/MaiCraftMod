@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import sun.misc.Unsafe;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -78,8 +79,8 @@ public final class BoatLandingAssistTest {
         System.out.println("BoatLandingAssistTest: passed");
     }
     private static void rejectsCreativeRecovery() throws Exception {
-        var memoryField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
-        var player = (CreativePlayer)((sun.misc.Unsafe)memoryField.get(null)).allocateInstance(CreativePlayer.class);
+        var memoryField = Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
+        var player = (CreativePlayer)((Unsafe)memoryField.get(null)).allocateInstance(CreativePlayer.class);
         var ctx = (LocalPlayerContext)Proxy.newProxyInstance(
                 LocalPlayerContext.class.getClassLoader(),
                 new Class<?>[]{LocalPlayerContext.class}, (proxy,method,args) -> {

@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.pathing.baritone.landing;
 
 import java.lang.reflect.Field;
 import java.util.Set;
+import sun.misc.Unsafe;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -40,7 +41,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 public final class SharedLandingExecutionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        var memory = (sun.misc.Unsafe) field(sun.misc.Unsafe.class, "theUnsafe").get(null);
+        var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         var client = (Minecraft) memory.allocateInstance(Minecraft.class);
         field(Minecraft.class, "gameThread").set(client, Thread.currentThread());
         var instance = field(Minecraft.class, "instance"); Object previous = instance.get(null);

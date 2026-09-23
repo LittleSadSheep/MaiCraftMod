@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.integration.machine.assembly;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import sun.misc.Unsafe;
 import net.minecraft.core.Direction;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -145,8 +146,8 @@ public final class MachineAssemblyTest {
                     ClientboundContainerSetContentPacket.class);
             check(ClientPacketListener.class.getDeclaredField("level").getType()
                     == ClientLevel.class, "packet mixin matches the installed Minecraft client API");
-            var field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); field.setAccessible(true);
-            var memory = (sun.misc.Unsafe) field.get(null);
+            var field = Unsafe.class.getDeclaredField("theUnsafe"); field.setAccessible(true);
+            var memory = (Unsafe) field.get(null);
             var first = (ClientLevel) memory.allocateInstance(ClientLevel.class);
             var second = (ClientLevel) memory.allocateInstance(ClientLevel.class);
             check(ServerBlockEntityReceipts.revision(first, BlockPos.ZERO) == 0, "unsynchronized geometry has no receipt");

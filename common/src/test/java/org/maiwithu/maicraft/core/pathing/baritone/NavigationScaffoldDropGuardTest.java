@@ -6,6 +6,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.utils.IPlayerContext;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
+import sun.misc.Unsafe;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -59,8 +60,8 @@ public final class NavigationScaffoldDropGuardTest {
             check(policy.checked.equals(hit.getBlockPos().above()) && h.blockUses() == 0,
                     "unprotected support cannot bypass the exact destination's debris policy");
             var frozen = EmbeddedBaritonePolicy.capture(null, nav.protectedMutationCells(), null);
-            Field unsafe = sun.misc.Unsafe.class.getDeclaredField("theUnsafe"); unsafe.setAccessible(true);
-            var calculation = (CalculationContext) ((sun.misc.Unsafe) unsafe.get(null))
+            Field unsafe = Unsafe.class.getDeclaredField("theUnsafe"); unsafe.setAccessible(true);
+            var calculation = (CalculationContext) ((Unsafe) unsafe.get(null))
                     .allocateInstance(CalculationContext.class);
             field(calculation.getClass(), "hasThrowaway").setBoolean(calculation, true);
             field(calculation.getClass(), "maicraftPolicy").set(calculation, frozen);
