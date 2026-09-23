@@ -11,17 +11,16 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Perception tool implementations — the business half of {@code InspectBlockTool},
- * {@code GetOwnerStatusTool} and {@code GetWorldInfoTool}, which own the LLM-facing
- * name / description / schema and delegate here.
+ * 感知工具的具体实现：承载 {@code InspectBlockTool}、{@code GetOwnerStatusTool} 和 {@code GetWorldInfoTool} 的业务逻辑，
+ * 面向大模型的名称、说明和架构由各工具负责，再委托至此。
  */
 public final class PerceptionOps {
 
-    /** Vanilla {@code block_interaction_range} for players is 4.5. */
+    /** 玩家原版 {@code block_interaction_range} 为 4.5 格。 */
     private static final double REACH_SQR = 4.5 * 4.5;
 
     @SuppressWarnings("deprecation")  // BlockBehaviour.isSolid() carries Mojang's
-                                     // "deprecated for override" marker, not phased out.
+                                     // 标记为“建议覆写”，不代表该方法已废弃。
     public String inspectBlock(int x, int y, int z, LocalPlayer self) {
         BlockPos pos = new BlockPos(x, y, z);
         if (!self.level().isLoaded(pos)) {
@@ -41,9 +40,8 @@ public final class PerceptionOps {
         root.addProperty("loaded", true);
         root.addProperty("z", z);
         root.addProperty("block", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
-        // Block-state properties (e.g. end_portal_frame's has_eye/facing, so the
-        // model can tell which of the 12 frames still need an ender_eye; stairs
-        // facing; etc.). Omitted when the block has no properties.
+        // 返回方块状态属性，例如末地传送门框的 has_eye/facing，可让模型判断十二个框中哪些仍需末影之眼，或读取楼梯朝向等。
+        // 方块没有属性时省略此字段。
         if (!state.getProperties().isEmpty()) {
             JsonObject props = new JsonObject();
             for (Property<?> p : state.getProperties()) {
@@ -68,8 +66,7 @@ public final class PerceptionOps {
         if (!state.isAir() && hardness >= 0) {
             float toolSpeed = hand.getDestroySpeed(state);
             if (toolSpeed <= 0.0F) toolSpeed = 1.0F;
-            // Vanilla rule: a block that doesn't require the correct tool
-            // always uses the fast divisor.
+            // 原版规则：无需正确工具即可采集的方块始终使用快速破坏系数。
             boolean fast = !needsTool || handIsRightTool;
             float divisor = fast ? 30.0F : 100.0F;
             int ticks = hardness == 0.0F
@@ -86,15 +83,14 @@ public final class PerceptionOps {
         return root.toString();
     }
 
-    /** Serialized value of one block-state property (e.g. "true", "north"). */
+    /** 序列化一个方块状态属性的值，例如 "true" 或 "north"。 */
     private static <T extends Comparable<T>> String propValue(BlockState state, Property<T> p) {
         return p.getName(state.getValue(p));
     }
 
     public String getOwnerStatus(LocalPlayer self) {
         JsonObject root = new JsonObject();
-        // First-person automation inhabits the local player's body. Keep this
-        // compatibility query, but never invent a server-side owner relation.
+        // 第一人称自动化操控本地玩家的身体。保留此兼容性查询，但绝不臆造服务器侧的所有者关系。
         LocalPlayer player = self;
         root.addProperty("online", true);
         root.addProperty("relation", "local_player");
