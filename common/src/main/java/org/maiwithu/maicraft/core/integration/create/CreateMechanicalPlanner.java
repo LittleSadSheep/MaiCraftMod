@@ -50,10 +50,8 @@ final class CreateMechanicalPlanner {
             facts.put("recovery_options", List.of("retry_with_preserve_existing", "cancel"));
             return CreateMechanicalPlan.Result.fail("preserve_existing_required", facts);
         }
-        // Endpoint discovery and route planning are intentionally delegated to progressive,
-        // tick-sliced searches. A synchronous expanding scan would freeze the client precisely on
-        // the large but legitimate jobs this integration is meant to support, while any finite
-        // synchronous radius would turn absence inside an arbitrary circle into false evidence.
+        // 端点发现和路线规划交由渐进式、按 tick 切片的搜索执行。同步扩大扫描会让客户端在大型但合理的任务中冻结；
+        // 任意固定的同步半径又会把圆内未发现误当成不存在。
         facts.put("failure_code", "route_needs_exploration");
         facts.put("detail", "semantic endpoint anchors require progressive live-world evidence before preserving route construction");
         facts.put("endpoint_search", "progressive_nearest_evidence");
@@ -84,7 +82,7 @@ final class CreateMechanicalPlanner {
                 }
             }
         }
-        // A reachable working floor should not lose to a nearby machine roof merely because that roof is taller.
+        // 不应仅因附近机器顶面更高，就让可达的工作地面在站位排序中落后。
         candidates.sort(Comparator.comparingInt((BlockPos position) -> workingFeet == null ? 0 : Math.abs(position.getY() - workingFeet.getY()))
                 .thenComparingDouble(position -> position.distSqr(target))
                 .thenComparingLong(BlockPos::asLong));
@@ -106,10 +104,8 @@ final class CreateMechanicalPlanner {
         BlockState feetState = level.getBlockState(feet);
         BlockState headState = level.getBlockState(head);
         if (!feetState.getFluidState().isEmpty() || !headState.getFluidState().isEmpty()) return false;
-        // Use the exact same passability contract as PlayerNav: carpets, hand-openable doors,
-        // paths, stairs and slabs are real existing corridors, not "occupied" failures. Create
-        // remains stricter about fluids, crops/farmland and entities because this is a stationary
-        // precision-placement stance rather than an ordinary transit node.
+        // 与 PlayerNav 使用完全相同的通行规则：地毯、可手动开启的门、道路、楼梯和半砖都是现成走廊，不算“被占据”失败。
+        // Create 在液体、作物/农田和实体方面仍采用更严格规则，因为这里是静止精确放置站位，而不是普通路过节点。
         if (!BlockHelper.isStandable(level, feet)
                 || BlockHelper.isHazard(level, feet)
                 || BlockHelper.isHazard(level, head)
@@ -155,18 +151,13 @@ final class CreateMechanicalPlanner {
     enum ObstacleRouteStatus { RUNNING, FOUND, EXHAUSTED }
 
     /**
-     * Incremental 3D route search used by the progressive survey. A state is a candidate chain
-     * drive cell plus its horizontal chain-connection axis. Create's own propagation contract is
-     * mirrored here: horizontal neighbours connect only when both drives select the movement axis,
-     * while vertical neighbours connect through their shared Y shaft. A turn therefore happens by
-     * stepping vertically and selecting the other horizontal connection axis, not by pretending a
-     * single drive can bend an X chain into Z.
+     * 供渐进式勘查使用的增量三维路线搜索。一个状态由候选链条驱动格和水平方向连接轴组成。
+     * 这里复现 Create 自身的传动传播规则：只有相邻的两个驱动都选择移动轴时，水平方向才能连接；垂直方向则通过共用的 Y 轴连接。
+     * 因此转弯必须先竖直移动，再改选另一个水平连接轴，不能假设单个驱动可将 X 向链条弯成 Z 向。
      *
-     * <p>Each graph instance is one finite physical envelope around the two endpoints. Its owner
-     * discards an exhausted instance and expands the envelope, without a total-distance cutoff,
-     * until Minecraft's build height and world border are covered. Loaded transitions verify
-     * target emptiness, support continuity, and at least one first-person placement stance;
-     * unloaded transitions remain provisional until progressive physical survey.</p>
+     * <p>每个图实例只覆盖两个端点周围的有限物理范围。所有者会在当前图搜索耗尽时扩大范围，直到覆盖 Minecraft 建筑高度和世界边界，
+     * 不设置总距离上限。对已加载地形的转移会核验目标格为空、支撑连续，并存在至少一个第一人称放置站位；
+     * 未加载地形的转移保持暂定状态，等待后续物理勘查。</p>
      */
     static final class ObstacleAwareRouteSearch {
         private enum SearchStep { RUNNING, FOUND, EXHAUSTED }
