@@ -55,7 +55,7 @@ public final class NavigationHandoffTest {
 
     private static void pollingYieldRetainsDrive() throws Exception {
         try (Fixture fixture = new Fixture()) {
-            // The mining caller polls yield only; it never calls nav.tick().
+            // 挖矿调用方只轮询 yield，不会调用 nav.tick()。
             for (int tick = 0; tick < 3; tick++) {
                 check(!fixture.nav.yieldForExternalAction(), "unsafe movement yielded to a destructive action");
                 check(fixture.nav.requiresOrphanContinuation(), "yield did not latch the existing pending pause");
@@ -73,7 +73,7 @@ public final class NavigationHandoffTest {
         try (Fixture fixture = new Fixture()) {
             if (stop) fixture.nav.stop();
             else check(!fixture.nav.yieldForExternalAction(), "unsafe yield unexpectedly completed");
-            // After the caller disappears, use only the runtime's continuation entry points.
+            // 调用方消失后，只能通过运行时的续接入口继续执行。
             check(fixture.nav.consumeDriveRequest(), "initial continuation was not requested");
             check(!fixture.nav.consumeDriveRequest(), "drive flag must remain a one-tick request");
             for (int tick = 0; tick < 3; tick++) {
@@ -221,8 +221,7 @@ public final class NavigationHandoffTest {
         }
 
         private void finishMovement() throws Exception {
-            // Safety is normally published after PathExecutor.onTick(). All pause/stop
-            // transitions here still execute the real navigator and Baritone cleanup code.
+            // 安全状态通常在 PathExecutor.onTick() 后发布。此处所有暂停和停止转换仍会执行真实导航器及 Baritone 清理代码。
             set(pathing, "safeToCancel", true);
             nav.settlePendingFailureAtSafeBoundary();
         }

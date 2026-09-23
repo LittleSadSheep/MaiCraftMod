@@ -109,9 +109,8 @@ public final class SharedLandingExecutionTest {
         f.player.inventory.setItem(0, ItemStack.EMPTY);
         f.player.inventory.setItem(3, new ItemStack(Items.WATER_BUCKET));
         f.position(24, -0.8, false);
-        // A navigation estimate may credit synced vanilla flight immunity; the independent
-        // fast-fall trigger still operates in the current movement owner when that estimate
-        // does not describe the observed descent. Do not alter vanilla's mayfly damage rule.
+        // 导航估算可能依据同步到的原版飞行免伤；若估算与实际下降不符，独立的快速坠落触发仍由当前移动所有者处理。
+        // 不得改变原版 mayfly 伤害规则。
         f.player.getAbilities().mayfly = true;
         check(EmergencyLanding.triggered(f.player), "survival fast-fall rescue is independent of the damage estimate");
         var movement = (MovementFall) f.memory.allocateInstance(
@@ -207,8 +206,7 @@ public final class SharedLandingExecutionTest {
         field(Level.class, "damageSources").set(f.world, f.memory.allocateInstance(DamageSources.class));
         var session = new LandingAssistSession(plan);
         f.time++; session.tick(f.context);
-        // HayBlock.fallOn itself passes 0.2 to the native damage callback. The fixture applies
-        // ordinary ceil damage there; the production budget independently checks the same hit.
+        // HayBlock.fallOn 本身会向原生伤害回调传入 0.2。测试夹具在此处应用普通向上取整伤害；生产预算也会独立核验同一次命中。
         Blocks.HAY_BLOCK.fallOn(f.world, Blocks.HAY_BLOCK.defaultBlockState(), BlockPos.ZERO, f.player, 16);
         check(f.player.hayMultiplier == 0.2F && f.player.getHealth() == 17, "native hay behavior must cushion rather than reset damage");
         for (int i = 0; i < 12; i++) { f.time++; session.tick(f.context); }
@@ -224,8 +222,7 @@ public final class SharedLandingExecutionTest {
     private static void rejectsPlotStorageRay() throws Exception {
         var f = new WaterLandingReplayTest.Fixture(false);
         f.position(12, -1, false);
-        // Native integrations may return both location and cell in storage space, or retain
-        // the world intersection while returning only the storage cell. Neither is usable here.
+        // 原生集成可能同时以存储空间返回位置和方块格，也可能保留世界交点但只返回存储空间格；两种结果在此处都不可用。
         var storage = new BlockPos(28_000_000, 70, 28_000_000);
         for (var location : new Vec3[]{
                 Vec3.atCenterOf(storage), new Vec3(0.5, 0, 0.5)}) {

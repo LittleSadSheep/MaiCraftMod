@@ -30,7 +30,7 @@ import java.nio.file.Path;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Real compiler path, with a publisher capture; any body/tool work is a regression. */
+/** 通过真实编译器路径并捕获发布内容；任何身体或工具操作都视为回归。 */
 public final class BuildDesignPreviewTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -79,8 +79,8 @@ public final class BuildDesignPreviewTest {
         field(slotType, "record").set(existingSlot, bodyRecord);
         field(brainType, "current").set(existingBrain, existingSlot);
         brainField.set(null, existingBrain);
-        // Invoke the public execute path's actual control boundary and full runtime registration.
-        // Minecraft/ClientRuntime are deliberately not initialized: attempting takeover fails this test.
+        // 调用公开 execute 路径的真实控制边界和完整运行时注册。测试刻意不初始化 Minecraft/ClientRuntime，
+        // 若代码尝试接管玩家控制，测试就会失败。
         IntentTaskRecord record;
         try {
             record = (IntentTaskRecord) dispatch.invoke(null, design, player,

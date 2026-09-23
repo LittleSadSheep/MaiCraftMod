@@ -29,7 +29,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
-/** Exercises real descendant constructor capture and placement preflight, without placing blocks or opening MCP. */
+/** 测试真实子任务构造器捕获和放置预检；不会实际放置方块或打开 MCP。 */
 public final class ProductionConstructionProtectionTest {
     private static final BlockPos TARGET = new BlockPos(4, 1, 4), USER_PROTECTED = new BlockPos(10, 1, 10);
 
@@ -67,7 +67,7 @@ public final class ProductionConstructionProtectionTest {
             var target = constructionPlan.blocks().getFirst();
             var child = new PreflightDescendant(new BuildTaskRecord("actual-build-preflight", 1000,
                     List.of(target), false, false), childFails);
-            // Arrange only the active construction boundary; assertions exercise the actual Root call and build validation.
+            // 只布置活动施工边界；断言会调用真实 Root 入口并执行建造验证。
             Field phase = field(MachineProductionTask.class, "phase");
             boolean arranged = false;
             for (Object value : phase.getType().getEnumConstants()) if (((Enum<?>) value).name().equals("BUILD")) {
@@ -88,7 +88,7 @@ public final class ProductionConstructionProtectionTest {
             check(child.builder != null, "The real build descendant must have been constructed inside Root BUILD");
             LongSet inherited = (LongSet) field(child.builder.getClass(), "inheritedProtectedMutationCells").get(child.builder);
             check(inherited.contains(protectedCell.asLong()), "Descendant must retain the user's constructor-time protection");
-            // Run after the parent scope has unwound: cached inherited protection must still govern real preflight.
+            // 在父作用域退出后运行，核实缓存继承的保护仍会约束真实预检。
             var inspect = child.builder.getClass().getDeclaredMethod("inspectPrimary", BuildTaskRecord.Target.class);
             inspect.setAccessible(true); inspect.invoke(child.builder, target);
             @SuppressWarnings("unchecked") var blocked = (List<Map<String, Object>>) field(child.builder.getClass(), "blocked").get(child.builder);

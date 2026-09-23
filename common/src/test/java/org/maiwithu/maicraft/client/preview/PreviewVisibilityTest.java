@@ -29,7 +29,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-/** Actual Minecraft occlusion/voxel geometry with a frozen blueprint and a changing real-world view. */
+/** 使用真实 Minecraft 遮挡和体素几何，并结合冻结蓝图与不断变化的真实世界视图进行测试。 */
 public final class PreviewVisibilityTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -153,7 +153,7 @@ public final class PreviewVisibilityTest {
         preparation.advance(new PreviewFrameBudget(() -> 0, 0, 10_000, 64, 1));
         check(reads[0] == 0, "an expired frame cannot start a source shape query");
         notReady(preparation);
-        // The first shape consumes the time left in this frame; the second must wait for another frame.
+        // 第一个形状会耗尽本帧剩余时间；第二个必须等到下一帧。
         preparation.advance(new PreviewFrameBudget(() -> reads[0] == 0 ? 0 : 100, 100, 10_000, 64, 1));
         check(reads[0] == 1, "shape preparation yields when the shared frame deadline is reached");
         notReady(preparation);
@@ -220,7 +220,7 @@ public final class PreviewVisibilityTest {
         var frozen = MappedRegistry.class.getDeclaredField("frozen");
         holders.setAccessible(true); frozen.setAccessible(true);
         Object priorHolders = holders.get(registry); boolean priorFrozen = frozen.getBoolean(registry);
-        // Give this unregistered fixture a private holder, then restore the global registry before testing.
+        // 为此未注册夹具创建独立 holder，并在测试前恢复全局注册表。
         try {
             holders.set(registry, new IdentityHashMap<>()); frozen.setBoolean(registry, false);
             return new Block(
