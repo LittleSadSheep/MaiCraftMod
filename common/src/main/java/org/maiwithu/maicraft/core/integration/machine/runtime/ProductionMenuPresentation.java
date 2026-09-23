@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.core.Direction;
 import net.minecraft.world.Container;
 
-/** Keep the real container visible throughout a native transfer, then close only this task's menu. */
+/** 原生转移期间保持真实容器界面可见，结束后只关闭本任务打开的菜单。 */
 final class ProductionMenuPresentation {
     private final LocalPlayer player;
     private final ProductionWork work;

@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionManif
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
-/** Verifies the only permitted refinements of a reviewed manifest: native resource identities and recipe aliases. */
+/** 校验已审核清单中唯一允许的细化内容：原生资源身份和配方别名。 */
 final class ProductionPlanBindings {
     private record Binding(Resource resource, JsonObject identity) {}
     private final Map<Resource, Binding> resources = new LinkedHashMap<>();

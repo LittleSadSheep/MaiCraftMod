@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 
-/** Declarative production intent shared by authored and Ponder-derived layouts; no native handles or world access. */
+/** 由手工布局和 Ponder 派生布局共用的声明式生产意图；不包含原生句柄，也不访问世界。 */
 public record ProductionManifest(List<Node> nodes, List<Port> ports, List<Link> links,
                                  List<Configuration> configurations, Target target, Observation observation) {
     public static final Set<String> MEDIA = Set.of("items", "fluids", "chemicals", "energy", "kinetic");

@@ -9,7 +9,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.Vec3;
 
-/** A depot or thin pipe need not occupy the block center; aim at actual native outline geometry. */
+/** 仓库或细管道未必占据方块中心；应按真实原生轮廓形状瞄准。 */
 public final class ProductionInteractionSight {
     private ProductionInteractionSight() {}
 

@@ -40,14 +40,14 @@ final class MekanismInteractionGeometry {
         return null;
     }
 
-    /** The native list contains connected arm shapes in Direction order, followed by the center. */
+    /** 原生列表按 Direction 顺序包含已连接接口形状，最后是中心形状。 */
     static List<Vec3> transmitterSamples(BlockPos target, Direction desired, Vec3 eye, List<VoxelShape> boxes, int connections) {
         List<Direction> sides = connectedSides(connections);
         if (boxes.size() != sides.size() + 1) return List.of();
         List<Vec3> samples = new ArrayList<>();
         int selected = sides.indexOf(desired);
         if (selected >= 0) surfaceSamples(target, eye, boxes.get(selected), samples);
-        // An absent/disabled arm is configured by hitting its side of the actual center shape.
+        // 接口缺失或禁用时，应点击真实中心形状对应的侧面进行配置。
         surfaceSamples(target, eye, boxes.getLast(), samples);
         return samples;
     }

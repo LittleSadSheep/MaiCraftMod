@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** One production goal can include construction, but finishes only after its output observation succeeds. */
+/** 一个生产目标可以包含施工步骤，但只有产物观察成功后才算完成。 */
 public final class MachineProductionTaskRecord extends TaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(MachineProductionTaskRecord.class, MachineProductionTask::new); }
     public final ProductionRunPlan plan;

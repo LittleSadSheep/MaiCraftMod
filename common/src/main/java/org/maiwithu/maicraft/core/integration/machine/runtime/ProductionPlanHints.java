@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionManif
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 import java.util.ArrayList;
 
-/** Immutable compiler hints checked against the resolved source budgets and their immediate recipe consumers. */
+/** 不可变编译提示；会对照已解析的来源预算及其直接配方消耗者进行校验。 */
 final class ProductionPlanHints {
     private record Key(String source, Resource resource) {}
     private record Hint(long amount, long firstBatch, Set<String> consumers) {}

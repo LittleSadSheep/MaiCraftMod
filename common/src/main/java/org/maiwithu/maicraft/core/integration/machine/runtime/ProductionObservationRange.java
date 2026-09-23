@@ -9,9 +9,9 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Range planning only; the server still checks native access, target identity and player permissions. */
+/** 仅用于规划范围；原生访问、目标身份和玩家权限仍由服务器核验。 */
 final class ProductionObservationRange {
-    // Create 6.0.10 SmartBlockEntity.canPlayerUse measures player feet to the block center, inclusive.
+    // Create 6.0.10 SmartBlockEntity.canPlayerUse 计算玩家脚位到方块中心的距离，并包含边界值。
     static final double CREATE_RADIUS = 8;
     private static final double POSITION_MARGIN = .5;
     private ProductionObservationRange() {}
@@ -37,7 +37,7 @@ final class ProductionObservationRange {
         for (BlockPos position : positions)
             allowed = Math.min(allowed, radius.applyAsDouble(position) - POSITION_MARGIN - Math.sqrt(first.distSqr(position)));
         if (allowed < 1) throw new IllegalArgumentException("production_observation_group_exceeds_native_range");
-        // GoalNear uses block coordinates. Leave room for feet/center differences and verify the real body afterward.
+        // GoalNear 使用方块坐标。需为脚位和中心点的差异预留余量，并在之后核实真实身体位置。
         return Math.max(0, Math.min(10, (int) Math.floor(allowed) - 1));
     }
 }
