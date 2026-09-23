@@ -49,8 +49,8 @@ public final class FtbQuestAccessTest {
         fixture.task.progress = 8;
         check(!FtbQuestTasks.read(fixture.task, fixture.file.selfTeamData).get("completed").getAsBoolean(), "达到数量不推断任务已经完成");
         Task custom = new Task(7, "扩展任务", "addon:custom");
-        check(FtbQuestTasks.read(custom, fixture.file.selfTeamData).get("conditions_status").getAsString().equals("unsupported")
-                && custom.definitionReads == 0, "未知类型保留进度并说明条件未解析");
+        check(FtbQuestTasks.read(custom, fixture.file.selfTeamData).get("conditions_status").getAsString().equals("native_definition_only")
+                && custom.definitionReads == 1, "扩展类型只读序列化定义，不据此猜测已知物品行为");
 
         String session = first.context().get("session_id").getAsString();
         fixture.file.selfTeamData.id = UUID.randomUUID();

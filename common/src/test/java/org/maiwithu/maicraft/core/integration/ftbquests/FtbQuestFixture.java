@@ -113,6 +113,8 @@ public final class FtbQuestFixture {
         public Task(long id, String title, String type) { super(id, title); this.type = type; }
         public Type getType() { return new Type(type); }
         public long getMaxProgress() { return 8; }
+        public String formatMaxProgress() { return "8"; }
+        public String formatProgress(Team team, long progress) { return Long.toString(progress); }
         public boolean isOptionalForProgression(Team team) { return false; }
         public boolean consumesResources() { return true; }
         public HolderLookup.Provider holderLookup() { return RegistryAccess.EMPTY; }

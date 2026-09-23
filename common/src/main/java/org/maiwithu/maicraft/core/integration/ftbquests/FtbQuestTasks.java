@@ -4,16 +4,14 @@ package org.maiwithu.maicraft.core.integration.ftbquests;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.List;
-import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.server.machine.NativeApi;
 import static org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestApi.*;
 
 /** 读取任务目标与服务器同步的进度；展示需要收集或消耗什么，但不提交物品、不勾选任务。 */
 public final class FtbQuestTasks {
-    private static final Set<String> DEFINITIONS = Set.of("item", "xp", "dimension", "stat", "kill", "location",
-            "checkmark", "advancement", "observation", "biome", "structure", "gamestage", "fluid");
     private FtbQuestTasks() {}
 
     public static JsonObject read(Object task, Object team) {
@@ -26,15 +24,22 @@ public final class FtbQuestTasks {
         result.addProperty("completed", flag(team, "isCompleted", task));
         result.addProperty("optional_for_progression", flag(task, "isOptionalForProgression", team));
         result.addProperty("consumes_resources", flag(task, "consumesResources"));
-        result.addProperty("conditions_status", "unsupported");
-        if (!type.startsWith("ftbquests:") || !DEFINITIONS.contains(type.substring(10))) return result;
         try {
             // 原生写出接口只序列化当前目标定义，保留维度、实体、范围等条件和缺省值语义。
-            CompoundTag data = new CompoundTag();
-            call(task, "writeData", data, call(task, "holderLookup"));
+            CompoundTag data = FtbQuestData.definition(task);
             result.addProperty("definition_snbt", data.toString());
+            JsonObject conditions = FtbTaskConditions.read(type, data, result.get("required").getAsString());
+            result.add("conditions", conditions);
+            result.addProperty("formatted_required", call(task, "formatMaxProgress").toString());
+            result.addProperty("formatted_progress", call(task, "formatProgress", team, Long.parseLong(result.get("progress").getAsString())).toString());
             if (type.equals("ftbquests:item")) item(result, task, data);
-            result.addProperty("conditions_status", "native_definition");
+            if (type.equals("ftbquests:fluid")) conditions.addProperty("units_per_bucket",
+                    NativeApi.call(null, "dev.architectury.fluid.FluidStack", "bucketAmount").toString());
+            if (type.equals("ftbquests:custom")) {
+                conditions.addProperty("manual_button_enabled", (Boolean) FtbQuestData.field(task, "enableButton"));
+                conditions.addProperty("check_interval_ticks", (Number) FtbQuestData.field(task, "checkTimer"));
+            }
+            result.addProperty("conditions_status", conditions.get("interpretation").getAsString());
         } catch (RuntimeException | LinkageError unavailable) {
             // 第三方类型或版本接口失配时保留确实读到的名称与进度，不能猜一个物品目标冒充原条件。
             result.addProperty("conditions_status", "api_unavailable");
