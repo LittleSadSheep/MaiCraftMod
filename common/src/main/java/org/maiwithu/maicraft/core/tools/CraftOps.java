@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
 import org.maiwithu.maicraft.task.TaskResult;
 
-/** Read-only recipe planning for the receipt-owned crafting task. */
+/** 为持有操作回执的合成任务提供只读配方规划。 */
 public final class CraftOps {
 
     private static final int MAX_COUNT = 36 * 64;
@@ -42,7 +42,7 @@ public final class CraftOps {
     private static final int MAX_REPORTED_ACCEPTABLE_ITEMS = 64;
     private static final long TIMEOUT_TICKS = 60L * 20L;
 
-    /** Exactly one of task and immediate is non-null. */
+    /** task 与 immediate 中必须恰有一个非空。 */
     public record Plan(
             CraftTaskRecord task,
             TaskResult immediate,
@@ -122,7 +122,7 @@ public final class CraftOps {
         return plan(itemId, count, self, toolContext, null, Set.of());
     }
 
-    /** Cheap recipe-only guard so 2x2 recursion never scans the loaded world for a table. */
+    /** 仅查询配方的轻量保护，确保 2×2 递归合成不会扫描已加载世界寻找工作台。 */
     public static boolean requiresWorkstationForAny(
             Collection<ResourceLocation> outputIds, LocalPlayer player) {
         if (outputIds == null || outputIds.isEmpty()) return false;
@@ -152,7 +152,7 @@ public final class CraftOps {
         return false;
     }
 
-    /** Reuse one world snapshot while comparing several semantic output alternatives. */
+    /** 比较多个语义输出候选时复用同一份世界快照。 */
     public Plan plan(
             String itemId,
             Integer count,
@@ -162,7 +162,7 @@ public final class CraftOps {
         return plan(itemId, count, self, toolContext, workstation, Set.of());
     }
 
-    /** Re-plan after concrete recipe failures without blindly selecting the same recipe again. */
+    /** 遇到具体配方失败后重新规划，不盲目再次选择同一配方。 */
     public Plan plan(
             String itemId,
             Integer count,
@@ -183,8 +183,7 @@ public final class CraftOps {
         targetFacts.put("target_inventory_deficit",
                 Math.max(0, wantedInventoryCount - currentTargetCount));
 
-        // This is deliberately before recipe discovery. Recursive recovery must stop as soon as the
-        // semantic inventory condition has become true; it must not explore a more elaborate recipe.
+        // 有意在发现配方之前检查。背包满足语义条件后，递归恢复必须立即停止，不能继续搜索更复杂的配方。
         if (currentTargetCount >= wantedInventoryCount) {
             targetFacts.put("goal_satisfied", true);
             targetFacts.put("task_started", false);
@@ -390,8 +389,7 @@ public final class CraftOps {
     }
 
     /**
-     * Allocate live inventory stack capacities to recipe ingredients with a small max-flow graph.
-     * This avoids greedy false negatives when a broad tag ingredient overlaps a narrow ingredient.
+     * 使用小型最大流图将实时背包堆叠容量分配给配方材料，避免宽泛标签材料与精确材料重叠时被贪心算法误判为不满足。
      */
     private static Allocation allocate(
             List<IndexedIngredient> ingredients, LocalPlayer player, int batches) {
@@ -487,7 +485,7 @@ public final class CraftOps {
         return indexedIngredients(recipe).size() <= width * height;
     }
 
-    /** Small integral max-flow used only for at most nine ingredient nodes and 36 inventory slots. */
+    /** 仅处理最多九种材料节点和 36 个背包槽位的小型整数最大流。 */
     private static final class Flow {
         private final List<List<Edge>> graph;
         private int[] level;
