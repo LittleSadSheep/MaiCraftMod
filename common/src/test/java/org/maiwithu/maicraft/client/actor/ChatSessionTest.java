@@ -44,7 +44,7 @@ public final class ChatSessionTest {
             h.nextTick(true); session.tick(h.context, 0);
             h.nextTick(true); session.tick(h.context, 50_000_000L);
             h.nextTick(true);
-            if (!throwing) view.active = false; // Esc, manual input or replacement by another screen.
+            if (!throwing) view.active = false; // 模拟玩家按 Esc、手动输入或切换到其他界面，使当前聊天界面失效。
             try { session.tick(h.context, 300_000_000L); }
             catch (IllegalStateException expected) { check(throwing, "only native send can throw here"); }
             session.tick(h.context, 900_000_000L);

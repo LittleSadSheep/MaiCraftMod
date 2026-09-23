@@ -9,7 +9,7 @@ public final class SurvivalDecisions {
 
     private SurvivalDecisions() {}
 
-    // ---- fall thresholds ----
+    // ---- 坠落救助触发阈值：达到快速下坠条件且存在可用方案时，交由救援任务处理 ----
     /**
      * 竖直速度为负表示下落；低于这个数值时，这个简单判据把它视为快速坠落。
      * 实际落地自救入口还会通过 EmergencyLanding 检查当前身体状态和可用方案。

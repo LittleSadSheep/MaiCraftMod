@@ -23,7 +23,7 @@ import java.util.Set;
  */
 public final class InventoryOps {
 
-    private static final long EQUIP_TIMEOUT_TICKS = 5 * 20;   // instant; generous floor
+    private static final long EQUIP_TIMEOUT_TICKS = 5 * 20;   // 装备切换通常立即完成，仍为客户端确认和背包同步保留至少 5 秒预算。
 
     /** 采用宽裕时限，覆盖各类食物的进食时间（多数约 1.6 秒）并留有余量。 */
     private static final long EAT_TIMEOUT_TICKS = 15 * 20;
@@ -33,7 +33,7 @@ public final class InventoryOps {
 
     private static final int COLLECT_DEFAULT_RADIUS = 16;
     private static final int COLLECT_MAX_RADIUS = 48;
-    private static final long COLLECT_TIMEOUT_TICKS = 60 * 20;   // 1 min
+    private static final long COLLECT_TIMEOUT_TICKS = 60 * 20;   // 为角色接近掉落物并等待拾取结算预留 60 秒。
 
     // 穿戴和卸下共用这个入口；只有 action=unequip 走卸下分支，其他值在本层都按穿戴处理。
     public TaskRecord equipItem(

@@ -26,7 +26,7 @@ public final class BlockActionOps {
     private static final int MAX_COUNT = 256;
     /** 单方块预算留有余量；总预算随目标数量增长，避免大型任务超时。 */
     private static final long TICKS_PER_BLOCK = 30 * 20;   // 每个方块预留 30 秒。
-    private static final long MIN_TIMEOUT_TICKS = 60 * 20; // 1 min floor
+    private static final long MIN_TIMEOUT_TICKS = 60 * 20; // 为挖掘任务预留至少 60 秒，避免短名单或单个目标因时间预算过小而提前终止。
 
     // interact_at：包含走到瞄准位置所需时间。
     private static final long INTERACT_AT_TIMEOUT_TICKS = 30 * 20;

@@ -11,7 +11,7 @@ import java.util.List;
  */
 public final class UnequipTaskRecord extends TaskRecord {
 
-    /** Human-readable label for messages / debug overlay: "armor" 或单个槽位名。 */
+    /** 消息和调试叠层使用的可读标签：可为“armor”或单个槽位名。 */
     public final String label;
     public final List<EquipmentSlot> slots;
 

@@ -80,7 +80,7 @@ public final class RecoveryLadder {
                 return true;
             }
         }
-        index = rungs.size();          // exhausted
+        index = rungs.size();          // 标记所有恢复策略均已尝试，后续不再重置到下一轮。
         cached = null;
         return false;
     }

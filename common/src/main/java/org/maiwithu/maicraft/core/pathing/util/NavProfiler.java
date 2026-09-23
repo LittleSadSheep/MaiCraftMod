@@ -243,7 +243,7 @@ public final class NavProfiler {
                 PathPlannerPool.peakThreads(), completed - lastCompletedTasks));
         lastCompletedTasks = completed;
 
-        // GC:JVM 级、全线程 stop-the-world。窗口内 GC 停顿占墙钟越高,越是"全实体一起顿"的直接来源
+        // GC：JVM 级的全线程停顿（Stop-the-World）。窗口内 GC 停顿占墙钟时间越高，越可能是“全实体一起顿”的直接来源。
         // ——且它落在寻路计时之外,所以上面 goal.compile/core.tick 看着干净也不能排除它。
         long[] gc = gcTotals();
         long gcCount = gc[0];

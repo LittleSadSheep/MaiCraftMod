@@ -733,7 +733,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             double mid = (low + high) * 0.5;
             double height = trajectoryHeightAtDistance(horizontalDistance, mid);
             if (height > targetHeight) {
-                low = mid;  // trajectory is high: aim farther down
+                low = mid;  // 模拟轨迹高于目标水面时，继续增大下俯角。
             } else {
                 high = mid;
             }

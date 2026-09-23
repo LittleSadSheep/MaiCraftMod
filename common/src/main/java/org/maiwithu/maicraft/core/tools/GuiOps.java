@@ -33,7 +33,7 @@ public final class GuiOps {
         // 若存在合成网格，则通用识别：由 CraftingContainer 支持的槽位就是网格格子（原版 2×2/3×3 或模组 NxM），ResultSlot 则是输出槽。
         // 按二维布局呈现格子及可点击槽位编号，使模型能直接将配方字符图填入对应位置，避免容易算错的行优先步长和空隙偏移。
         int gridW = 0, gridH = 0, resultIndex = -1;
-        Slot[] gridCells = null;   // indexed by position-in-container (row-major)
+        Slot[] gridCells = null;   // 容器槽位按行优先索引映射到配方网格，保留空格位置以免材料落入错误格子。
         for (int i = 0; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
             boolean playerSide = slot.container == self.getInventory();

@@ -164,8 +164,8 @@ public final class BlockSearch {
         }
         while (true) {
             if (currentChunk == null && !nextColumn(level)) {
-                if (!stoppedEarly && ring <= maxRing) return false; // column-check budget exhausted
-                finish(level.getGameTime(), false);   // spiral exhausted
+                if (!stoppedEarly && ring <= maxRing) return false; // 本刻检查预算耗尽且搜索范围尚未走完，保留任务供下一刻续扫。
+                finish(level.getGameTime(), false);   // 螺旋范围已走完，或已证明下一环不会出现更近目标，结算本次扫描。
                 return true;
             }
             // 每次按预算扫描当前柱列的一层区块，并从最近层开始。

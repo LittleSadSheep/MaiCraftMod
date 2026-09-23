@@ -69,7 +69,7 @@ public final class MobDefenseChain implements Task, Reflex {
      * 链子自然不会醒,冷却在这里没有作用,只有副作用:那几秒里新出现的危险她一动不动。
      * 实测四次重伤都发生在这个窗口里。
      *
-     * <p>冷却原本管的是"退无可退"(老注释:hands the body back to the LLM),但那件事的正解
+     * <p>冷却原本管的是"退无可退"（旧注释：把角色控制权交还给 LLM），但那件事的正解
      * 不是等几秒再试一次,而是{@code cornered} 那一维——退不掉就打。
      */
     @Override
@@ -199,7 +199,7 @@ public final class MobDefenseChain implements Task, Reflex {
         return ID;
     }
 
-    // ---- Reflex roster paperwork (constitution §6) ----
+    // ---- 自卫链登记信息：供本能任务表稳定识别此链并向调度器提供说明 ----
 
     @Override
     public String id() {

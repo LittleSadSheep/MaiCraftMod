@@ -211,7 +211,7 @@ String item_id,
         if (recipe instanceof ShapedRecipe shaped) {
             int w = shaped.getWidth();
             int h = shaped.getHeight();
-            var cells = shaped.getIngredients();   // 1.21.1: NonNullList<Ingredient>, gaps = Ingredient.EMPTY
+            var cells = shaped.getIngredients();   // 1.21.1：返回 NonNullList<Ingredient>；配方空格用 Ingredient.EMPTY 表示。
             StringBuilder sb = new StringBuilder("shaped " + w + "x" + h + ", makes " + count + ":");
             for (int r = 0; r < h; r++) {
                 sb.append("\n  ");
@@ -257,7 +257,7 @@ String item_id,
     /** 描述材料时，单个物品直接给名称；共享后缀标签写作“任意木板”；否则列出少量成员，避免模型误以为类别材料只接受某一种物品。
      *  对包内可见，合成工具也使用同一套词汇说明材料缺口。 */
     static String describeIngredient(Ingredient ing) {
-        List<String> paths = Arrays.stream(ing.getItems())   // 1.21.1: getItems() -> ItemStack[]
+        List<String> paths = Arrays.stream(ing.getItems())   // 1.21.1：getItems() 返回 ItemStack[]，随后提取候选物品的注册路径。
                 .map(s -> BuiltInRegistries.ITEM.getKey(s.getItem()).getPath())
                 .distinct()
                 .toList();

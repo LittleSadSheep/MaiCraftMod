@@ -153,7 +153,7 @@ public final class BlockHelper {
     public static boolean isFlowingWater(BlockGetter level, BlockPos pos) {
         FluidState fluid = level.getBlockState(pos).getFluidState();
         if (!fluid.is(FluidTags.WATER)) return false;
-        if (!fluid.isSource()) return true;                 // amount < 8 → flowing
+        if (!fluid.isSource()) return true;                 // 非水源方块的含量低于 8，表示水正在流动并可能推动角色。
         for (Direction d : HORIZONTAL) {
             FluidState n = level.getBlockState(pos.relative(d)).getFluidState();
             if (n.is(FluidTags.WATER) && !n.isSource()) return true;
@@ -309,7 +309,7 @@ public final class BlockHelper {
             if (dir == Direction.DOWN) continue;
             FluidState fluid = level.getBlockState(pos.relative(dir)).getFluidState();
             if (fluid.isEmpty()) continue;
-            if (fluid.is(FluidTags.LAVA)) return dir;   // worst hazard wins
+            if (fluid.is(FluidTags.LAVA)) return dir;   // 同时发现水和熔岩时优先报告熔岩方向，避免挖掘后引入更高风险。
             if (water == null) water = dir;
         }
         return water;

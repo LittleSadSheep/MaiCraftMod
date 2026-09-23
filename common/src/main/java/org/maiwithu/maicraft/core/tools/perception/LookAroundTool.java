@@ -38,11 +38,11 @@ public final class LookAroundTool implements MaiCraftTool {
     private static final char YOU = '@';
     private static final char FLAT = '.';       // 同高度可行走。
     private static final char STEP_UP = '^';    // 可通过向上跳一格抵达。
-    private static final char STEP_DOWN = ',';  // walkable, 1-2 blocks down
+    private static final char STEP_DOWN = ',';  // 可步行到达，且比当前位置低 1 至 2 格。
     private static final char DROP = 'v';        // 下落高度达到 DROP_DEPTH 或以上。
-    private static final char WALL = '#';        // blocked / step up >= 2
+    private static final char WALL = '#';        // 通道被阻挡，或需要上升至少 2 格。
     private static final char WATER = '~';
-    private static final char HAZARD = '!';      // lava / fire
+    private static final char HAZARD = '!';      // 标记熔岩或火焰，避免把危险格当作普通通道。
     private static final char CAUTION = 'x';     // 危险方块旁的膨胀缓冲区。
     private static final char TREE = 'T';
     private static final char UNLOADED = '?';
@@ -100,9 +100,9 @@ public final class LookAroundTool implements MaiCraftTool {
         int size = 2 * radius + 1;
         char[][] grid = new char[size][size];
         for (int r = 0; r < size; r++) {
-            int dz = r - radius;                 // r=0 is north (-Z), top
+            int dz = r - radius;                 // 第 0 行位于北侧（-Z），也就是图示顶部。
             for (int c = 0; c < size; c++) {
-                int dx = c - radius;             // c=0 is west (-X), left
+                int dx = c - radius;             // 第 0 列位于西侧（-X），也就是图示左侧。
                 grid[r][c] = (dx == 0 && dz == 0)
                         ? YOU
                         : classify(view, loaded, cx + dx, cy, cz + dz);

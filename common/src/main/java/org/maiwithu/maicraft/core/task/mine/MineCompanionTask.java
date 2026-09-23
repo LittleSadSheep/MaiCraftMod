@@ -480,7 +480,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.RUNNING;
     }
 
-    // ---- goals ----
+    // ---- 矿物寻路目标：只追踪当前批次；批次为空时退化为原地目标，避免无效寻路 ----
 
     /** 只包含矿物目标；掉落实体不混入此目标，一旦生成便由 {@link #collectDrops()} 独占移动，直到结算完成。 */
     // 有掉落物等待收集时，尽量只继续当前小批目标；没有候选时用原地站立目标结束本次寻路。

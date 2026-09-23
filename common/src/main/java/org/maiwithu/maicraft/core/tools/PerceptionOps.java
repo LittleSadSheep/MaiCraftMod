@@ -19,8 +19,7 @@ public final class PerceptionOps {
     /** 玩家原版 {@code block_interaction_range} 为 4.5 格。 */
     private static final double REACH_SQR = 4.5 * 4.5;
 
-    @SuppressWarnings("deprecation")  // BlockBehaviour.isSolid() carries Mojang's
-                                     // 标记为“建议覆写”，不代表该方法已废弃。
+    @SuppressWarnings("deprecation")  // Mojang 为 BlockBehaviour.isSolid() 标注“建议覆写”，不代表该方法已废弃。
     public String inspectBlock(int x, int y, int z, LocalPlayer self) {
         BlockPos pos = new BlockPos(x, y, z);
         if (!self.level().isLoaded(pos)) {
