@@ -7,7 +7,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import java.util.Arrays;
 
-/** Data-driven private loadout policy for progression; never serialized to the model. */
+/** 由数据驱动的进度任务内部装备策略；永不序列化给大模型。 */
 public final class ProgressionRequirementProfile {
     public record Requirement(
             String key,
@@ -54,8 +54,7 @@ public final class ProgressionRequirementProfile {
                     "minecraft:iron_leggings", "minecraft:diamond_leggings", "minecraft:netherite_leggings"),
             equipped("foot_protection", EquipmentSlot.FEET,
                     "minecraft:iron_boots", "minecraft:diamond_boots", "minecraft:netherite_boots"),
-            // Passive-animal hunting is intentionally disabled for food. Craft/cook/storage/farming
-            // evidence may satisfy this family without silently killing owned or wild livestock.
+            // 有意禁止为了食物狩猎被动动物；合成、烹饪、储存和耕作证据也可满足此类需求，不会悄悄杀死玩家拥有或野外的牲畜。
             requirement("safe_food", 16, false,
                     "minecraft:bread", "minecraft:baked_potato", "minecraft:cooked_beef",
                     "minecraft:cooked_porkchop", "minecraft:cooked_mutton",
