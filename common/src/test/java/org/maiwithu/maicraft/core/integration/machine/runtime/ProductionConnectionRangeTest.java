@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import static org.maiwithu.maicraft.core.integration.machine.runtime.ProductionConnectionFixture.*;
 
-/** Every longer segment must remain jointly observable under all of its native per-target limits. */
+/** 每段更长的连接都必须同时满足其所有原生单目标观测距离限制。 */
 public final class ProductionConnectionRangeTest {
     public static void main(String[] args) {
         var generic = ProductionConnectionPath.split(line(0, 40), "items", ignored -> 16);
@@ -39,7 +39,7 @@ public final class ProductionConnectionRangeTest {
 
     private static void fourStationManifestGeometry() {
         var paths = new ArrayList<List<BlockPos>>(); var create = new HashSet<BlockPos>();
-        // Same authored path geometry as the four-station acceptance manifest; no path shortcuts.
+        // 使用与四站点验收清单相同的手工路径几何，不添加路径捷径。
         for (int z : new int[]{0, 6, 12, 18}) {
             var feed = new ArrayList<BlockPos>(); for (int x = 0; x <= 20; x++) feed.add(new BlockPos(x, 1, z)); paths.add(feed);
             var output = new ArrayList<BlockPos>(); for (int x = 20; x <= 41; x++) output.add(new BlockPos(x, 1, z));

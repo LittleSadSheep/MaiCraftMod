@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.function.UnaryOperator;
 
-/** Native wire shapes for orchestration tests; these fixtures never claim a running Minecraft server. */
+/** 编排测试使用的原生连线形状；这些夹具不会冒充正在运行的 Minecraft 服务器。 */
 final class ProductionConnectionFixture implements ProductionWork {
     static final String WORLD = "minecraft:overworld";
     final List<JsonObject> sent = new ArrayList<>();
@@ -68,7 +68,7 @@ final class ProductionConnectionFixture implements ProductionWork {
             for (var raw : body.getAsJsonArray("path")) {
                 BlockPos point = position(raw.getAsJsonObject());
                 check(ProductionConnectionPath.near(observed, point), "Path point exceeds four blocks from observation target");
-                // work.observe may settle at the outer 12-block edge, not at the machine.
+                // work.observe 可能在最外侧 12 格边界结算，而不是在机器位置结算。
                 double x = point.getX() - observed.getX() + 12.0, y = point.getY() - observed.getY(), z = point.getZ() - observed.getZ();
                 check(x * x + y * y + z * z <= 256.0000001, "A legal observe result would put a query point beyond server range");
             }

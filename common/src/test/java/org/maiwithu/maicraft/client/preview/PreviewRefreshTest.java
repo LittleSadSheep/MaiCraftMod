@@ -13,7 +13,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.function.IntSupplier;
 import static org.maiwithu.maicraft.client.preview.PreviewSectionRefresh.Work.*;
 
-/** Refresh decisions and Minecraft's retained-quad sorting run without an OpenGL context. */
+/** 刷新决策和 Minecraft 保留四边形排序无需 OpenGL 上下文即可运行。 */
 public final class PreviewRefreshTest {
     public static void main(String[] args) {
         sectionRefresh(); independentBudgets(); retainedQuadSorting(); modelFallbacks();
@@ -86,7 +86,7 @@ public final class PreviewRefreshTest {
                         "initial transparency order starts with the more distant second quad");
             }
         }
-        // The original vertex staging memory has closed, just as after a GPU vertex upload.
+        // 原始顶点暂存内存已关闭，与上传到 GPU 顶点缓冲后的情况一致。
         try (ByteBufferBuilder memory = new ByteBufferBuilder(1024);
              var indices = retained.buildSortedIndexBuffer(memory, PreviewMeshSection.sorting(origin, back))) {
             check(Short.toUnsignedInt(indices.byteBuffer().getShort(0)) == 0

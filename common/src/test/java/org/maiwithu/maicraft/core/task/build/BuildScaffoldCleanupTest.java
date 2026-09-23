@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import sun.misc.Unsafe;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 
-/** Native Minecraft clip/collision regression; candidate geometry does not claim that navigation already walked it. */
+/** 原生 Minecraft 射线与碰撞回归测试；候选几何不能证明导航已实际走过该处。 */
 public final class BuildScaffoldCleanupTest {
     private static final BlockPos TARGET = new BlockPos(8, 1, 8);
     private BuildScaffoldCleanupTest() {}
@@ -160,7 +160,7 @@ public final class BuildScaffoldCleanupTest {
 
     private static InteractionWorldTestHarness scene(Vec3 feet) throws Exception {
         var world = new InteractionWorldTestHarness(); world.position(feet);
-        // Native reach queries consult cached game mode; no network connection exists in this fixture.
+        // 原生距离查询会读取缓存的游戏模式；此夹具不建立网络连接。
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         Object info = memory.allocateInstance(PlayerInfo.class);
         field(PlayerInfo.class, "gameMode").set(info, GameType.SURVIVAL);

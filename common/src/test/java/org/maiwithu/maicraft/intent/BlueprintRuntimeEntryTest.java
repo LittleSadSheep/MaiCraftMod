@@ -11,7 +11,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 
-/** Exercise the same runtime entry used by MCP plan/execute, including retry and persistence. */
+/** 测试 MCP 计划/执行使用的同一运行时入口，包括重试和持久化。 */
 public final class BlueprintRuntimeEntryTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -68,7 +68,7 @@ public final class BlueprintRuntimeEntryTest {
             blocks.add(cell);
         }
         blueprint.add("blocks", blocks);
-        // These names describe observed data and must not be interpreted as live execution handles.
+        // 这些名称描述观察数据，不能解释为实时执行句柄。
         blueprint.add("evidence", JsonParser.parseString("{\"observed_entities\":[{\"entity_id\":\"create:super_glue\",\"position\":[0,0,0]}],\"observed_nbt\":{\"inventory_slots\":[]}}"));
         JsonObject parameters = new JsonObject(); parameters.add("blueprint", blueprint);
         Goal.SemanticTarget target = null;
