@@ -202,8 +202,7 @@ public final class NavProfiler {
         long now = System.currentTimeMillis();
         if (windowStartMs == 0L) {
             windowStartMs = now;
-            // Snapshot the running-total baselines so the FIRST window reports window deltas, not the
-            // JVM's lifetime GC / completed-task totals (which would make the first line read absurd).
+            // 快照累计计数基线，使第一个窗口报告窗口增量，而不是 JVM 生命周期内的 GC 或完成任务总数，避免首行日志出现荒谬数值。
             lastCompletedTasks = PathPlannerPool.completedTasks();
             long[] gc = gcTotals();
             lastGcCount = gc[0];
