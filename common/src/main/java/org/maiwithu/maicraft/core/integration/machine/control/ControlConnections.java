@@ -10,7 +10,7 @@ import net.minecraft.world.phys.Vec3;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
-/** Uses native frequency identity and kinetic ports; physical coordinates are projected before radio tests. */
+/** 使用原生频率身份和动力端口；执行无线测试前先将物理坐标投影到对应空间。 */
 public final class ControlConnections {
     private ControlConnections() {}
     public static void connect(Level level,Map<BlockPos,Cell> cells,List<Link> links,

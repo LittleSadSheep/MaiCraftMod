@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Observed, directed signal paths. A physical structure or a seat alone proves no driving capability. */
+/** 通过观察得到的有向信号路径；仅有实体结构或座位并不能证明具备驾驶能力。 */
 public final class ControlCircuit {
     public enum Kind { KEY, THROTTLE, STEERING_WHEEL, TRANSMITTER, RECEIVER, WIRE, RELAY,
         TRANSMISSION, WHEEL, PROPELLER, JOINT, SEAT, OTHER }

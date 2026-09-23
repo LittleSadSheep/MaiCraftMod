@@ -20,7 +20,7 @@ import net.minecraft.world.phys.AABB;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 
-/** Reads synchronized controls and their native frequency objects without changing them. */
+/** 读取已同步的控制器和原生频率对象，不修改其状态。 */
 public final class ControlComponents {
     public static final String CREATE = "com.simibubi.create.content.";
     public static final String SIM = "dev.simulated_team.simulated.content.blocks.";
@@ -72,7 +72,7 @@ public final class ControlComponents {
                     String id=cell.id()+"/key/"+code;
                     circuit.add(new ControlCircuit.Node(id,KEY,keyFacts)); links.add(new Link(id,key,frequency,false));
                 }
-                // The housing is separate from its independently bound controls.
+                // 外壳方块与其独立绑定的控制器相互分开。
                 kind=OTHER;
             } else if (kind==RECEIVER || kind==TRANSMITTER) {
                 Object behavior=call(type("com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour"),"get",

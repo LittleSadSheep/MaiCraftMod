@@ -4,7 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 
-/** Optional mod API calls; a missing member is an observation error, never an empty circuit. */
+/** 调用可选模组 API；成员缺失属于观察错误，不能视为空回路。 */
 public final class ControlReflection {
     private ControlReflection() {}
     public static Class<?> type(String name) {

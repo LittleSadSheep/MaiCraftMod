@@ -9,7 +9,7 @@ import net.minecraft.world.level.Level;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 
-/** Models Simulated's shaft and internal cog as different ports: signal 15 does not cut the through-shaft. */
+/** 将 Simulated 的传动轴和内部齿轮建模为不同端口：信号值 15 不会切断贯穿传动轴。 */
 final class ControlKineticPorts {
     private record Port(String id,Cell cell,Object entity,Object rotation) {}
     private ControlKineticPorts() {}
