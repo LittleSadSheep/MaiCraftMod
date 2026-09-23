@@ -3,13 +3,13 @@ package org.maiwithu.maicraft.core.integration.create.transmission;
 
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Rejects insufficient or destructive rotation before materials or construction are committed. */
+/** 在提交材料或施工前，拒绝转速不足或会造成破坏的动力方案。 */
 public final class KineticRpmBudget {
     public record Check(double targetRpm, double maximumNewRpm) {}
     private static final double EPSILON = 1e-6;
     private KineticRpmBudget() {}
 
-    /** Reads the installed/synchronized Create setting; absence is not replaced by an assumed default. */
+    /** 读取已安装并同步的 Create 设置；设置缺失时不使用假定默认值代替。 */
     public static int maximumRotationSpeed() {
         try {
             Object config = NativeApi.call(null, "com.simibubi.create.infrastructure.config.AllConfigs", "server");
@@ -27,7 +27,7 @@ public final class KineticRpmBudget {
         try { validate(plan, sourceRpm, targetMinimumRpm, maximumRpm); return true; }
         catch (IllegalArgumentException invalid) { return false; }
     }
-    /** sourceRpm must describe the chosen outlet; existing directional shafts need their native outlet correction. */
+    /** sourceRpm 必须表示所选输出端的转速；已有定向传动轴还需应用其原生输出修正。 */
     public static Check validate(KineticRouteGeometry.Plan plan, double sourceRpm, double targetMinimumRpm, double maximumRpm) {
         if (plan == null || !Double.isFinite(sourceRpm) || sourceRpm == 0) throw bad("kinetic_source_rpm_unavailable");
         if (!Double.isFinite(targetMinimumRpm) || targetMinimumRpm < 0) throw bad("kinetic_target_rpm_requirement_invalid");

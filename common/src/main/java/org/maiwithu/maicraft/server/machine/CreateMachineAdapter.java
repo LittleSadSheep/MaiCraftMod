@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import net.minecraft.nbt.CompoundTag;
 
-/** Public Create 6.0.10 APIs: actual rotation state, behaviours and native configuration callbacks. */
+/** 使用 Create 6.0.10 的公开 API 读取真实转速状态、行为和原生配置回调。 */
 final class CreateMachineAdapter {
     private static final String KINETIC = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
     private static final String SMART = "com.simibubi.create.foundation.blockEntity.SmartBlockEntity";
@@ -111,8 +111,8 @@ final class CreateMachineAdapter {
             if (!NativeApi.truth(NativeApi.call(filter, FILTER, "canShortInteract", sample))) {
                 throw ServerAccess.denied("unsupported_filter", "Native filter rejected these item criteria");
             }
-            // Native clipboard paste supports ordinary ghost criteria and consumes/returns actual advanced
-            // FilterItem material itself. Calling setFilter directly would duplicate a droppable filter item.
+            // 原生剪贴板粘贴支持普通虚影条件，并会实际消耗或归还高级 FilterItem 材料本身。
+            // 直接调用 setFilter 会额外生成一件可掉落的过滤器物品。
             CompoundTag clipboard = new CompoundTag();
             clipboard.put("Filter", sample.saveOptional(player.registryAccess()));
             boolean accepted = NativeApi.truth(NativeApi.call(filter, FILTER, "readFromClipboard",

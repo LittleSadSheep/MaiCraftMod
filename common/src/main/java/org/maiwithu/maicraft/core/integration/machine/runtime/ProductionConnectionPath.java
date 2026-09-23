@@ -10,7 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import java.util.HashMap;
 
-/** Partition the authored route without shortcuts; a shared edge retains AE2 boundary-node evidence. */
+/** 按手工指定路线进行分段，不添加捷径；共享边会保留 AE2 边界节点证据。 */
 final class ProductionConnectionPath {
     static final int MAX_POINTS = 128;
     static final int MAX_OFFSET_SQUARED = 16;
@@ -23,7 +23,7 @@ final class ProductionConnectionPath {
         return splitServiceable(path, medium, points -> near(points.getFirst(), points.getLast()));
     }
 
-    /** Keep room for a nearby standing cell while checking every target's own native read radius. */
+    /** 核查每个目标自身的原生读取范围时，额外预留相邻可站立格。 */
     static List<Segment> split(List<BlockPos> path, String medium, ToDoubleFunction<BlockPos> radius) {
         var observedRadii = new HashMap<BlockPos, Double>();
         return splitServiceable(path, medium, points -> {
@@ -56,7 +56,7 @@ final class ProductionConnectionPath {
                     && serviceable.test(path.subList(start, end + 2))) end++;
             segments.add(new Segment(start, end));
             if (end == path.size() - 1) break;
-            // A nonfinal segment must advance while retaining a complete shared edge.
+            // 非最终路线段必须在保留完整共享边的同时向前推进。
             if (end - start < 2) throw new IllegalArgumentException("connection_segment_cannot_preserve_boundary_evidence");
             start = end - 1;
         }

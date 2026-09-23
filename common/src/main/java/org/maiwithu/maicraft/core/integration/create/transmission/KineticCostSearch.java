@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
-/** Bounded recipe search; batch leftovers and carried stock are shared across one BOM, never between candidates. */
+/** 有界配方搜索；同一份材料清单内共享批次余料和随身库存，但不同候选之间互不共享。 */
 final class KineticCostSearch {
     private final Snapshot snapshot;
     private final Set<String> issues = new LinkedHashSet<>(), usedRecipes = new LinkedHashSet<>();
@@ -38,7 +38,7 @@ final class KineticCostSearch {
             var row = new JsonObject(); row.addProperty("item_id", id); row.addProperty("count", required); row.addProperty("carried_reserved", held);
             row.addProperty("unit_material_value", unit.value()); row.addProperty("material_value", required * unit.value()); rows.add(row);
         }
-        // Direct building stock is reserved first so a recipe cannot accidentally consume another final BOM item.
+        // 先预留直接用于建筑的库存，避免合成配方误消耗材料清单中的其他最终物品。
         for (var demand : missing.entrySet()) {
             Stock acquired = acquire(demand.getKey(), demand.getValue(), stock, new LinkedHashSet<>(), 0);
             if (acquired == null) { acquired = new Stock(stock); acquired.need(demand.getKey(), demand.getValue(), UNKNOWN_UNIT_VALUE); acquired.issues.add("recipe_cycle_or_no_acyclic_path:" + demand.getKey()); }
@@ -90,7 +90,7 @@ final class KineticCostSearch {
         }
         return best;
     }
-    /** Raw commodities may be recovered from actual carried ingredients; do not recursively manufacture things merely to recycle them. */
+    /** 可从实际携带的原料中回收基础商品；不能为了回收而递归制造物品。 */
     private static boolean directlyStocked(Recipe recipe, long batches, Stock stock) {
         Map<String, Long> remaining = new LinkedHashMap<>(stock.available);
         for (Ingredient ingredient : recipe.ingredients()) {
