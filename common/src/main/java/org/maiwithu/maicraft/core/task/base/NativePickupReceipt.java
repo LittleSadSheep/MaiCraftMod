@@ -15,13 +15,13 @@ import org.maiwithu.maicraft.core.PlayerInv;
 public final class NativePickupReceipt {
 
     public enum State {
-        /** The tracked entity is still loaded. */
+        /** 正在跟踪的掉落实体仍处于加载状态。 */
         LIVE,
-        /** It disappeared; allow the inventory packet a bounded synchronization window. */
+        /** 实体已消失；留出有界时间等待背包数据包同步。 */
         AWAITING_INVENTORY_SYNC,
-        /** Entity disappearance and a full synchronized inventory delta agree. */
+        /** 实体消失与完整的同步背包增量相互吻合。 */
         RECEIVED,
-        /** The synchronization window elapsed without a matching inventory delta. */
+        /** 同步窗口已结束，但没有出现匹配的背包增量。 */
         DISAPPEARED_WITHOUT_RECEIPT
     }
 
@@ -42,14 +42,14 @@ public final class NativePickupReceipt {
         return new NativePickupReceipt(player, entity);
     }
 
-    /** Resolve the same entity identity in the current synchronized client world. */
+    /** 在当前已同步客户端世界中解析同一实体身份。 */
     public ItemEntity liveEntity(LocalPlayer player) {
         Entity entity = player.clientLevel.getEntity(entityId);
         return entity instanceof ItemEntity itemEntity && !itemEntity.isRemoved()
                 ? itemEntity : null;
     }
 
-    /** Observe one tick of entity/inventory synchronization. */
+    /** 观察一刻内实体与背包的同步变化。 */
     // 实体还在就继续等；看不到实体后，要求同种同组件物品的背包增加量达到最大观察堆量。
     // 背包暂未对上时再给一段同步等待，不立刻把消失当成拾取。
     public State poll(LocalPlayer player, int inventorySyncTicks) {
@@ -68,38 +68,37 @@ public final class NativePickupReceipt {
                 : State.DISAPPEARED_WITHOUT_RECEIPT;
     }
 
-    /** Positive main-inventory delta for the tracked item and data-component identity. */
+    /** 与目标物品及数据组件身份匹配的主背包正向增量。 */
     public int inventoryGain(LocalPlayer player) {
         return Math.max(0, carriedMatching(player, prototype) - inventoryBefore);
     }
 
-    /** Quantity safely attributable to this entity when {@link State#RECEIVED}. */
+    /** 状态为 {@link State#RECEIVED} 时，可安全归属此实体的物品数量。 */
     // 最多按记录里的最大观察数量报告，避免背包别处的大幅增加直接放大本次数字。
     public int confirmedUnits(LocalPlayer player) {
         return Math.min(largestObservedStack, inventoryGain(player));
     }
 
-    /** Largest complete stack size observed before this entity disappeared. */
+    /** 实体消失前观察到的最大完整堆叠数量。 */
     public int expectedUnits() {
         return largestObservedStack;
     }
 
-    /** Whether another live entity can be the same component-sensitive stack after a merge. */
+    /** 是否存在另一仍存活的实体，可能是按数据组件区分后与该堆叠合并的物品。 */
     public boolean sameStackKind(ItemEntity candidate) {
         return candidate != null
                 && ItemStack.isSameItemSameComponents(
                         prototype, candidate.getItem());
     }
 
-    /** Non-mutating form used as a navigator's reached predicate. */
+    /** 不修改状态的检测形式，供导航器的到达判定使用。 */
     public boolean received(LocalPlayer player) {
         return liveEntity(player) == null && inventoryGain(player) >= largestObservedStack;
     }
 
     /**
-     * Mirrors the exact candidate box used by vanilla {@code Player#aiStep} when
-     * it invokes {@code ItemEntity#playerTouch}; this is evidence that pickup was
-     * actually attempted, not a guessed spherical radius.
+     * 与原版 {@code Player#aiStep} 调用 {@code ItemEntity#playerTouch} 时使用的候选箱完全一致；
+     * 这能证明游戏确实尝试拾取，而非根据猜测的球形半径推断。
      */
     // 按原版拾取查询的身体范围判断是否接触；乘坐时还合并载具范围，不只是比较两点距离。
     public static boolean insideVanillaTouchEnvelope(LocalPlayer player, ItemEntity item) {
@@ -114,8 +113,7 @@ public final class NativePickupReceipt {
     }
 
     /**
-     * Concrete local capacity evidence for a pickup. A full inventory is only
-     * reported when no main-inventory slot can accept any of this exact stack.
+     * 判断当前是否有实际槽位可接收该掉落物。只有主背包所有槽位都无法接纳此精确堆叠中的任何物品时，才报告背包已满。
      */
     // 只要有一个空格或同种堆叠还能加一件就返回 true；表示能接收一部分，不保证整堆全装得下。
     public static boolean canAccept(LocalPlayer player, ItemStack wanted) {
@@ -144,8 +142,7 @@ public final class NativePickupReceipt {
         return count;
     }
 
-    /** Total number of items in the main inventory, useful when a spawned drop
-     * is absorbed before the client ever renders an ItemEntity. */
+    /** 主背包中的物品总数；当新掉落在客户端渲染 ItemEntity 前就已被吸收时，可通过此值确认拾取。 */
     public static int carriedUnits(LocalPlayer player) {
         int total = 0;
         int limit = Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size());
