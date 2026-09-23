@@ -13,7 +13,7 @@ import org.spongepowered.asm.service.MixinService;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 
-/** Inspect optional class resources before native hooks; never define, transform or initialize target classes. */
+/** 在安装原生钩子前检查可选类资源；绝不定义、转换或初始化目标类。 */
 public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
     private static volatile ClassNode worldTransformClass;
     private static final Set<String> MEKANISM_HOOKS = Set.of("MekTransportDeliveryMixin", "MekSorterSourceMixin",
@@ -37,8 +37,7 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
     }
 
     private static boolean present(String name) {
-        // ModLauncher rejects untransformed bytecode requests. Both ModLauncher and Knot expose
-        // class resources directly through the active game loader without invoking transformers.
+        // ModLauncher 会拒绝未经转换的字节码请求。ModLauncher 和 Knot 都可通过当前游戏加载器直接读取类资源，不会调用转换器。
         try (var resource = MixinService.getService().getResourceAsStream(name.replace('.', '/') + ".class")) {
             return resource != null;
         } catch (IOException unreadable) { throw new IllegalStateException("Cannot inspect optional native hook " + name, unreadable); }
