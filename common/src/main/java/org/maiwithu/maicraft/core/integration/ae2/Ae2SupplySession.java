@@ -318,7 +318,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (serverSupply != null) serverSupply.requestSatisfiedSettlement();
     }
 
-    /** Drain the submitted cursor/inventory action, then use the existing native cleanup stages. */
+    /** 先结算已提交的游标或背包动作，再使用已有原生清理阶段。 */
     private boolean settleSatisfied(LocalPlayerContext context) {
         if (!settlingSatisfied || pendingTerminal != null || phase == Phase.SERVER_SUPPLY) return false;
         if (phase == Phase.DEPOSIT_ITEM) { deposit.requestSettlement(); depositItem(context); return true; }
@@ -379,7 +379,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 || !player.containerMenu.getCarried().isEmpty();
         if (ownsOpenMenu(context)) {
             try {
-                // Vanilla close returns a carried cursor stack through the authoritative menu path.
+                // 原版关闭界面时，会通过权威菜单路径将游标物品放回背包。
                 MenuReceipt closeReceipt = context.menus().closeForTaskBoundary(context, 20, "AE2 supply cancelled");
                 menuReceipt = closeReceipt;
                 uncertain |= !closeReceipt.terminal()
@@ -436,8 +436,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 nativeReceipt = context.actions().retireOneShotForTaskBoundary(context, nativeReceipt, reason);
             }
         }
-        // Closing the authoritative menu returns a carried extraction stack to inventory. Never
-        // repeat an already submitted AE packet or spend the remaining fall on slot restoration.
+        // 关闭权威菜单会将游标中提取的堆叠放回背包。绝不重复发送已提交的 AE 数据包，也不应在剩余坠落时间内耗费过多操作恢复槽位。
         if (inPlaceClose == null) {
             if (worldAccessAvailable(context) && player.containerMenu.getCarried().isEmpty()) {
                 finishStopped(reason);
@@ -530,8 +529,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         remembered = Ae2TerminalAccess.remembered(player);
         if (remembered != null && !fixedAccessAllowed(remembered.position())) remembered = null;
         if (remembered != null && !Ae2TerminalAccess.isLoaded(player, remembered.position())) {
-            // Unloaded is not evidence of removal. Travel to the last verified access point; the
-            // terminal is authoritatively revalidated only after its chunk becomes loaded.
+            // 区块未加载不代表终端已移除；先返回上次核实的访问点，等终端所在区块重新加载后再做权威复核。
             fixedCandidates = Ae2TerminalAccess.targetsFor(
                     player, remembered.position(), remembered.side());
         } else if (remembered != null && Ae2TerminalAccess.stillPresent(
@@ -672,9 +670,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                             .anyMatch(target -> target.approach().equals(player.blockPosition())));
         }
         PlayerNav.Status status = navigation.tick();
-        // Cleanup responsibility begins as soon as navigation has physically displaced the body,
-        // not only after a terminal is successfully revalidated. A stale remembered terminal or
-        // a path failure must still return the player to the semantic caller's worksite.
+        // 只要导航已经使角色实际离开原位，就开始承担清理责任，不必等终端重新核实成功。
+        // 即使记忆中的终端已过期或路线失败，也必须让玩家返回语义调用方的工作地点。
         movedForFixedTerminal |= !callerOrigin.equals(player.blockPosition());
         if (status == PlayerNav.Status.RUNNING) return;
         if (status == PlayerNav.Status.FAILED) {
@@ -707,7 +704,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return NavGoal.composite(candidates.stream().map(target -> NavGoal.exact(target.approach())).toList());
     }
 
-    /** A small native-reach cube, queried only through already loaded chunks. */
+    /** 一个处于原生交互距离内的小立方区域，仅查询已加载区块。 */
     private List<Ae2TerminalAccess.FixedTarget> inPlaceTargets() {
         double reach = player.blockInteractionRange();
         int radius = Math.min(6, Math.max(0, (int) Math.ceil(reach)));
@@ -768,7 +765,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
     }
 
-    // Both ordinary and in-place sessions open the observed terminal through the actual first-person ray.
+    // 普通会话和原地会话都通过真实第一人称射线打开已观察到的终端。
     private void openFixed(LocalPlayerContext context) {
         if (fixedTarget != null && !fixedAccessAllowed(fixedTarget.position())) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "ae2_deposit_access_denied", "The fixed terminal is outside the approved deposit access scope");
@@ -1004,7 +1001,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return inPlace && request.groups().size() == 1 && request.groups().getFirst().count() == 1;
     }
 
-    /** Rescue semantics stay outside the general-purpose inventory/capacity planner. */
+    /** 救援逻辑独立于通用库存与容量规划器。 */
     private Ae2SupplyPlanner.Result stockPlan(List<Ae2ReflectionBridge.Entry> entries, int tier) {
         return Ae2SupplyPlanner.build(player, request,
                 entries.stream().filter(entry -> landingTier(entry.itemId()) == tier).toList(), reservedInventorySlots());
@@ -1653,10 +1650,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             setPhase(Phase.PROCESS_ITEM);
             return;
         }
-        // A confirmed AE crafting job may legitimately run for an arbitrarily long time. Its
-        // submission is an acknowledged in-flight effect, so the scheduler renews a liveness
-        // lease while this phase keeps observing network stock. Cancellation remains explicit;
-        // never resubmit merely because no output has appeared yet.
+            // 已确认提交的 AE 合成任务可能合法运行很久；提交回执证明效果正在执行，因此调度器会在本阶段观察网络库存时续期存活期限。
+            // 取消仍需显式请求；不能仅因暂未出现产物就重新提交。
     }
 
     // 记住原结果并进入收尾；当前已有待结束结果时直接返回，这也会挡住收尾中后来出现的可重试失败。
@@ -1816,10 +1811,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (navigation == null) {
-            // Return to the caller's semantic worksite, not blindly to its exact old feet cell.
-            // That cell may have become task-scoped forbidden after an area investigation (for
-            // example an unplanted farmland cell). The path graph chooses a real safe stance;
-            // the outer material coordinator uses the same radius-two return contract.
+            // 返回调用方的语义工作地点，不要盲目回到旧脚位格。区域勘查后，该格可能已被任务标记为禁入，例如未种植的耕地格。
+            // 路径图会选择真实安全站位；外层材料协调器也使用相同的两格半径返程约定。
             navigation = PlayerNav.toGoal(
                     player, () -> NavGoal.near(callerOrigin, RETURN_RADIUS), 1.0,
                     () -> player.blockPosition().distSqr(callerOrigin)
@@ -1867,7 +1860,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             ClientRuntime.requireContext(player)
                     .body().releaseAll();
         } catch (RuntimeException ignored) {
-            // Body/control epoch may already have ended; no compensating packet is submitted.
+            // 身体或控制时段可能已经结束，不再补发任何数据包。
         }
         finishNow(Ae2ResourceSupply.Status.UNCERTAIN, code, message, true);
     }
@@ -2227,7 +2220,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return ItemStack.isSameItemSameComponents(left, right);
     }
 
-    /** Wireless charge components may change while its item identity remains the staged object. */
+    /** 无线充能组件可能发生变化，但物品身份仍是已准备的对象。 */
     private static boolean stagedItemMatches(ItemStack actual, ItemStack stagedBefore) {
         if (stagedBefore.isEmpty()) return actual.isEmpty();
         return !actual.isEmpty()
