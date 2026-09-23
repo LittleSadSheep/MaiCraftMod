@@ -13,8 +13,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * One bounded semantic entity-evidence search. Public semantic input contains no runtime handle or
- * position; an internal parent may attach transient excluded identities for safe handoff.
+ * 一次有界的语义实体证据搜索。公开语义输入不包含运行时句柄或位置；内部父任务可附加临时排除身份，以便安全交接。
  */
 public final class GenericEntitySearchTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "find_entity";
@@ -51,13 +50,13 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
     public final boolean mayAlterTerrain;
     public final List<String> protectedLabels;
 
-    /** Internal safety mode used when the observation will immediately authorize harm. */
+    /** 观察结果会立即授权伤害性动作时使用的内部安全模式。 */
     public final boolean harmIntent;
 
-    /** Runtime identities already rejected by the parent transaction; never public tool input. */
+    /** 已被父事务拒绝的运行时身份；绝不作为公开工具输入。 */
     private final transient Set<UUID> excludedEntityUuids;
 
-    /** Exact identities behind a successful observation; retained only for Java-side handoff. */
+    /** 成功观察结果对应的确切实体身份；仅在 Java 内部交接时保留。 */
     private transient List<UUID> internalVerifiedEntityUuids = List.of();
 
     static {
@@ -109,7 +108,7 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
         this.count = Math.clamp(count, 1, MAX_COUNT);
         this.maxDistance = Math.clamp(maxDistance, MIN_DISTANCE, MAX_DISTANCE);
         int rings = Math.max(1, (this.maxDistance + WAYPOINT_GRID - 1) / WAYPOINT_GRID);
-        // Cover the requested radius rather than silently truncating it after 128 legs.
+        // 覆盖调用方请求的整个半径，不能扫描 128 个移动片段后静默截断。
         this.maxWaypoints = Math.max(8, rings * rings * 4);
         this.mayAlterTerrain = mayAlterTerrain;
         this.protectedLabels = normalizeStrings(protectedLabels, 64, "protected labels");
@@ -137,12 +136,12 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
         internalVerifiedEntityUuids = List.copyOf(retained);
     }
 
-    /** Internal Java-only handoff; callers must revalidate the live entity before acting. */
+    /** 仅供 Java 内部交接；调用方必须在执行动作前重新核实实体仍然存在。 */
     public List<UUID> internalVerifiedEntityUuids() {
         return internalVerifiedEntityUuids == null ? List.of() : internalVerifiedEntityUuids;
     }
 
-    /** Calling this method forces static task registration during Mod initialization. */
+    /** 调用此方法会在 Mod 初始化期间强制完成静态任务注册。 */
     public static void ensureRegistered() {}
 
     @Override
