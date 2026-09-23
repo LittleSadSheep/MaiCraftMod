@@ -7,6 +7,8 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachineControlTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReviewTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraintsTest;
+import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometryTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyDocumentTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurveyModelTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintStateTest;
 import java.util.Map;
@@ -75,6 +77,8 @@ public final class MachineRegressionSuite {
         VehicleRegressionSuite.main(args);
         MachineDesignReviewTest.main(args);
         MachineDesignConstraintsTest.main(args);
+        CreateBeltGeometryTest.main(args);
+        MachineAssemblyDocumentTest.main(args);
         SemanticMachineLayoutTest.main(args);
         MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);

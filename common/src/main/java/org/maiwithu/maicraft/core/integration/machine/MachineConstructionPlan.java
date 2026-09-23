@@ -124,6 +124,10 @@ public final class MachineConstructionPlan {
             boolean replace, boolean replaceBlockEntities) {
         if (replaceBlockEntities && !replace) throw new IllegalArgumentException("replace_block_entities requires replace_existing");
         if (!layout.buildable()) throw new IllegalArgumentException("machine layout is not executable: " + layout.report());
+        // 原生装配声明不能被旧的逐格执行器忽略，缺少执行接线时必须在任何世界操作之前拒绝。
+        if (layout.blueprint().has("assembly") && (!layout.blueprint().getAsJsonObject("assembly").getAsJsonArray("installations").isEmpty()
+                || !layout.blueprint().getAsJsonObject("assembly").getAsJsonArray("processing").isEmpty()))
+            throw new IllegalArgumentException("native_machine_assembly_executor_unavailable");
         Map<BlockPos, BuildTaskRecord.Target> blocks = new LinkedHashMap<>();
         List<Part> parts = new ArrayList<>();
         Set<String> partSlots = new LinkedHashSet<>();

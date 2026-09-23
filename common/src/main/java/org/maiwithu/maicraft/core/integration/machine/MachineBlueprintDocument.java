@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.core.build.BuildingBudgets;
  * 允许保存观察资料，但资料里的 NBT 和实体不会自动成为可以执行的安装操作。
  */
 public final class MachineBlueprintDocument {
-    private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities", "external_inputs", "supply_preference", "onsite_reason", "constraints");
+    private static final Set<String> FIELDS = Set.of("schema_version", "blocks", "metadata", "evidence", "entities", "external_inputs", "supply_preference", "onsite_reason", "constraints", "assembly", "expected_output");
     private static final Set<String> BLOCK_FIELDS = Set.of("offset", "block_id", "properties", "nbt");
     private static final Set<String> PART_FIELDS = Set.of("offset", "item_id", "part");
     private static final Set<String> SIDES = Set.of("center", "up", "down", "north", "south", "east", "west");
@@ -29,7 +29,8 @@ public final class MachineBlueprintDocument {
     // 建筑和机器共用方块格式，但大型航站楼不能被机器自主规划的32768格或128格半径二次截断。
     public static void validateBuildingWire(JsonObject document) {
         // 普通建筑执行器尚不承接机器约束，必须拒绝而不是接收后静默丢弃。
-        if (document != null && document.has("constraints")) throw bad("machine constraints require design_machine/build_machine");
+        if (document != null && Set.of("constraints", "assembly", "expected_output").stream().anyMatch(document::has))
+            throw bad("machine constraints and assembly require design_machine/build_machine");
         var budget = BuildingBudgets.current();
         normalized(document, budget.maxTargets(), budget.maxRadius());
     }
@@ -59,6 +60,8 @@ public final class MachineBlueprintDocument {
         }
         if (blueprint.has("entities") && !blueprint.getAsJsonArray("entities").isEmpty())
             errors.add("unsupported_native_entity_installation: explicit entities require an installation adapter");
+        if (blueprint.has("expected_output") && !registry.itemExists(blueprint.get("expected_output").getAsString())) errors.add("unknown_expected_output");
+        MachineAssemblyDocument.review(blueprint, registry, errors);
         JsonObject report = new JsonObject();
         report.addProperty("compiler", "explicit_machine_blueprint_v1");
         report.addProperty("explicit_blueprint", true);
@@ -73,6 +76,11 @@ public final class MachineBlueprintDocument {
         report.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(blueprint));
         if (blueprint.has("onsite_reason")) report.add("onsite_reason", blueprint.get("onsite_reason").deepCopy());
         report.addProperty("utility_connection_verified", false);
+        // 关系通过只表示设备位置与原生接口兼容，不能提前宣称实际配方、产量或物流运行成功。
+        if (blueprint.has("assembly")) report.add("assembly", blueprint.get("assembly").deepCopy());
+        if (blueprint.has("expected_output")) report.add("expected_output", blueprint.get("expected_output").deepCopy());
+        report.addProperty("processing_relationships_compiled", errors.isEmpty() && blueprint.has("assembly"));
+        report.addProperty("processing_relationships_verified", false);
         JsonObject validation = new JsonObject(); validation.addProperty("valid", errors.isEmpty());
         JsonArray errorRows = new JsonArray(); errors.stream().limit(32).forEach(errorRows::add);
         validation.add("errors", errorRows); validation.addProperty("error_count", errors.size());
@@ -149,6 +157,13 @@ public final class MachineBlueprintDocument {
             result.add("entities", document.get("entities").deepCopy());
         }
         for (String field : Set.of("metadata", "evidence")) if (document.has(field)) result.add(field, document.get(field).deepCopy());
+        if (document.has("expected_output")) result.addProperty("expected_output", id(document.get("expected_output"), "expected_output"));
+        if (document.has("assembly")) {
+            result.add("assembly", document.get("assembly").deepCopy());
+            result.add("assembly", MachineAssemblyDocument.normalize(result, radius));
+            if (!result.getAsJsonObject("assembly").getAsJsonArray("processing").isEmpty() && !result.has("expected_output"))
+                throw bad("processing assembly requires an explicit expected_output");
+        }
         result.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(document));
         if (document.has("onsite_reason")) result.add("onsite_reason", document.get("onsite_reason").deepCopy());
         if (document.has("external_inputs")) result.add("external_inputs", document.get("external_inputs").deepCopy());
