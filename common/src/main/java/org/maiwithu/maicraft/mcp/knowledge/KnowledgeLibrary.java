@@ -182,7 +182,9 @@ public final class KnowledgeLibrary {
         source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
         var matches = new ArrayList<JsonObject>();
         for (var entry : candidates.values()) {
-            var match = matcher.match(entry.subjectId() == null ? entry.name() : entry.subjectId(), entry.title(), entry.searchable());
+            // 文档标题可能附有“材料与工艺”等说明，精确名称排序以原始注册名为准。
+            var match = matcher.match(entry.subjectId() == null ? entry.name() : entry.subjectId(),
+                    entry.subjectName() == null ? entry.title() : entry.subjectName(), entry.searchable());
             if (match == null) continue;
             var row = entry.metadata(); row.add("match", match.toJson()); matches.add(row);
         }

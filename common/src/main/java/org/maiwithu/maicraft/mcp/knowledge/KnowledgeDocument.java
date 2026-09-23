@@ -10,7 +10,10 @@ public record KnowledgeDocument(String uri, String name, String title, String de
     public KnowledgeDocument(String uri, String name, String title, String description, String text) {
         this(uri, name, title, description, text, "text/markdown");
     }
-    public record Entry(String uri, String name, String title, String description, String keywords, String mimeType, String subjectId) {
+    public record Entry(String uri, String name, String title, String description, String keywords, String mimeType, String subjectId, String subjectName) {
+        public Entry(String uri, String name, String title, String description, String keywords, String mimeType, String subjectId) {
+            this(uri, name, title, description, keywords, mimeType, subjectId, null);
+        }
         public Entry(String uri, String name, String title, String description, String keywords, String mimeType) {
             this(uri, name, title, description, keywords, mimeType, null);
         }
@@ -23,6 +26,7 @@ public record KnowledgeDocument(String uri, String name, String title, String de
             row.addProperty("description", description); row.addProperty("mimeType", mimeType);
             // 注册对象的真实标识随候选提供，拼写容错只用于查找，后续读取仍使用原始身份。
             if (subjectId != null) row.addProperty("subject_id", subjectId);
+            if (subjectName != null) row.addProperty("subject_name", subjectName);
             return row;
         }
         public String searchable() { return (uri + " " + title + " " + description + " " + keywords).toLowerCase(Locale.ROOT); }

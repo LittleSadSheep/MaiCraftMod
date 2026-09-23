@@ -39,7 +39,7 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
     public static String uri(ResourceLocation id) { return PREFIX + id.getNamespace() + "/" + id.getPath(); }
     static KnowledgeDocument.Entry entry(ResourceLocation id, String name) {
         return new KnowledgeDocument.Entry(uri(id), "recipes." + id, name + " · 材料与工艺",
-                "EMI 原料、产物、催化剂与工作站；按需读取，未验证机器执行能力。", id.toString(), "application/json", id.toString());
+                "EMI 原料、产物、催化剂与工作站；按需读取，未验证机器执行能力。", id.toString(), "application/json", id.toString(), name);
     }
 
     @Override public KnowledgeDocument read(String uri) {

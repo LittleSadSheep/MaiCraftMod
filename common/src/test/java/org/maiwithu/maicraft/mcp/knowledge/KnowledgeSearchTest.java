@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.client.resources.language.ClientLanguage;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.resources.ResourceLocation;
 
 /** 搜索只召回目录身份；真实注册表也必须走模糊候选链，不能先用精确过滤丢掉错字目标。 */
 public final class KnowledgeSearchTest {
@@ -32,6 +33,7 @@ public final class KnowledgeSearchTest {
                 && approximate.getAsJsonObject("match").get("kind").getAsString().equals("approximate"), "identifier typo match");
         library.read(approximate.get("uri").getAsString()); check(reads[0] == 1, "only selected body is read");
         verifyRegistryRecall();
+        verifyOriginalNameRanking();
         System.out.println("KnowledgeSearchTest: passed");
     }
 
@@ -46,6 +48,20 @@ public final class KnowledgeSearchTest {
             check(candidates.stream().anyMatch(entry -> entry.uri().equals("maicraft://knowledge/recipes/minecraft/paper")
                     && entry.subjectId().equals("minecraft:paper")), "real registry candidate survives typo recall");
         } finally { field.set(null, previous); }
+    }
+
+    private static void verifyOriginalNameRanking() {
+        // 配方标题自带后缀，不能因此让“齿轮机”与“齿轮”的精确名称命中混成同一等级。
+        var exact = RecipeKnowledgeSource.entry(ResourceLocation.parse("demo:z_exact"), "铜质齿轮");
+        var longer = RecipeKnowledgeSource.entry(ResourceLocation.parse("demo:a_longer"), "铜质齿轮机");
+        var library = new KnowledgeLibrary(new KnowledgeLibrary.Source() {
+            public List<KnowledgeDocument.Entry> entries() { return List.of(longer, exact); }
+            public KnowledgeDocument read(String uri) { throw new AssertionError("search must not read recipes"); }
+        });
+        var query = KnowledgeLibraryTest.request("search"); query.addProperty("approximate", true); query.addProperty("query", "铜质齿轮");
+        var first = library.request(query).getAsJsonArray("resources").get(0).getAsJsonObject();
+        check(first.get("subject_id").getAsString().equals("demo:z_exact")
+                && first.getAsJsonObject("match").get("kind").getAsString().equals("exact"), "registered name ranks independently of document title");
     }
 
     private static KnowledgeDocument.Entry entry(String id, String name) {

@@ -10,13 +10,17 @@
 - [从材料需求规划工艺和机器](maicraft://knowledge/recipes)：按物品读取 EMI 来源／用途、区分原料与工作站、查教程并复用或补建设备，再核验实际材料到账。
 - 方块说明：使用 `maicraft://knowledge/block/{namespace}/{path}`，例如 `maicraft://knowledge/block/create/deployer`。页面给出状态属性、普通物品说明、可用的 Create Shift/Ctrl 说明，以及该组件的 Ponder 场景链接。
 
-LLM 可调用 `perceive`，传入 `view="knowledge"`、`focus="物品 ID 或关键词"`，取得简短搜索结果；随后使用返回的 URI 调用 `resources/read`。如果客户端未开放资源读取，也可调用 `perceive(view="knowledge", resource_uri="返回的 URI")`。
+LLM 可调用 `perceive(view="knowledge", query="物品名称或关键词", limit=5)`，先取得少量候选，再按返回的 URI 读取正文。搜索只比较名称、注册 ID 和已有目录描述；名称与 ID 支持有限错字、漏字和相邻字母颠倒，输入不是正则表达式或 shell 命令。精确命中排在近似命中前，`match` 说明匹配依据；`ranking_score` 是排序值，不是概率。注册对象还提供 `subject_id`，后续按真实身份读取，不能因为近似匹配自动更改玩家目标。`total_matches` 与 `truncated` 说明候选是否读完，结果有歧义时继续缩小关键词。
+
+例如 `query="精密构建"` 可以通过近似名称发现“精密构件”的配方入口；这只是通用字符匹配，不是产品专用工作站。选定后调用 `resources/read`，或使用 `perceive(view="knowledge", resource_uri="返回的 URI")`。`query`、`focus`、`resource_uri` 分别用于近似发现、兼容的字面查询与精确读取，不能混用。
 
 `resources/list` 仅列元数据，并支持分页；材料配方正文通过 `maicraft://knowledge/recipes/{namespace}/{path}` 按需分页读取，搜索不会展开整棵配方树。读取 Ponder 组件页只返回它关联的场景列表，读取具体场景才编译说明文字。长场景会提供后续页链接。
 
 场景页还提供章节结构回放入口；主动读取后才创建独立演示世界并分批提取。进度页返回章节旁白及结构资源链接；完整 JSON 按需读取或通过 blueprint_uri 直接引用。
 
-机制知识不等于执行能力。施工前另读 `perceive(view="abilities")`，配方、库存、机器模式和实际产出仍需当前世界的证据。缺少 Ponder 教程不代表方块没有功能。
+操作能力使用 `perceive(view="abilities", query="build machine", limit=5)` 按 ID 和既有用途说明检索。候选只含标识与用途，`read_arguments` 可直接用于读取选中能力的完整契约；物品名应在 knowledge 中查，不能把每种产物当成一种专用能力。已知精确 ID 时直接用 `perceive(view="abilities", focus="maicraft:build_machine")`，无需先读全量能力目录。
+
+机制知识不等于执行能力。能力搜索不查询现场可用性；选定能力后读取完整契约，配方、库存、机器模式和实际产出仍需当前世界的证据。缺少 Ponder 教程或搜索无结果不代表方块没有功能。
 
 FTB 任务书页面是 JSON，只读当前客户端同步的数据，带有玩家、队伍、会话和读取时间。`available` 且目录为空表示目前没有可见章节；`not_installed`、`no_world`、`sync_pending`、`book_locked`、`book_disabled`、`api_unavailable` 各自说明无法读取的原因，不能当作空任务书。
 

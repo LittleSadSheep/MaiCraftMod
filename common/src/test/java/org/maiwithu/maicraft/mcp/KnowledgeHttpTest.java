@@ -40,12 +40,20 @@ public final class KnowledgeHttpTest {
         var quests = new FtbQuestFixture();
         var ponder = new PonderKnowledgeSource(PonderFixture.access(), id -> "测试插件");
         var ftb = new FtbQuestsKnowledgeSource(quests.access);
+        int[] selectedReads = {0};
+        String selectedUri = "maicraft://knowledge/test/precision";
         // 在同一服务中发现教程和任务书，验证两种入口都不会误走角色操作接口。
         var knowledge = new KnowledgeLibrary(new KnowledgeLibrary.Source() {
             public List<KnowledgeDocument.Entry> entries() {
-                var entries = new ArrayList<>(ponder.entries()); entries.addAll(ftb.entries()); return entries;
+                var entries = new ArrayList<>(ponder.entries()); entries.addAll(ftb.entries());
+                entries.add(new KnowledgeDocument.Entry(selectedUri, "test.part", "精密构件", "材料资料", "", "application/json", "demo:precision_part"));
+                return entries;
             }
             public KnowledgeDocument read(String uri) {
+                if (uri.equals(selectedUri)) {
+                    selectedReads[0]++;
+                    return new KnowledgeDocument(uri, "test.part", "精密构件", "材料资料", "{\"selected_body\":true}", "application/json");
+                }
                 return uri.startsWith(FtbQuestsKnowledgeSource.PREFIX) ? ftb.read(uri) : ponder.read(uri);
             }
             public JsonArray templates() { var templates = ponder.templates(); templates.addAll(ftb.templates()); return templates; }
@@ -76,6 +84,21 @@ public final class KnowledgeHttpTest {
             }
             check(attention && chatflow && scene != null && PonderFixture.compiled == 0,
                     "keep attention and chatflow, and discover foreign Ponder scenes");
+            // 穿过真实 HTTP 参数校验与分流：近似搜索只出目录，选定 URI 后才取正文。
+            var fuzzy = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\",\"query\":\"精密构建\",\"limit\":5}}"))
+                    .getAsJsonObject("result").getAsJsonObject("structuredContent");
+            var chosen = fuzzy.getAsJsonArray("resources").get(0).getAsJsonObject();
+            check(chosen.get("uri").getAsString().equals(selectedUri) && chosen.has("match")
+                    && !chosen.has("text") && !chosen.has("content") && selectedReads[0] == 0 && PonderFixture.compiled == 0,
+                    "HTTP fuzzy metadata discovery does not preload content");
+            var selected = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\",\"resource_uri\":\"" + selectedUri + "\"}}"))
+                    .getAsJsonObject("result");
+            check(selectedReads[0] == 1 && selected.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().equals("{\"selected_body\":true}"),
+                    "selected document is complete in the text channel");
+            var operationSearch = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"build machien\",\"limit\":3}}"))
+                    .getAsJsonObject("result").getAsJsonObject("structuredContent");
+            check(!operationSearch.get("contract_loaded").getAsBoolean()
+                    && !operationSearch.getAsJsonArray("semantic_abilities").isEmpty(), "HTTP operation metadata search");
             verifyQuests(quests, allResources);
             // 标准HTTP发现与资源读取必须保留完整Schema；纯资料查询不会委派世界感知或开始施工。
             var contract = BuildingModelContract.current();
@@ -188,7 +211,11 @@ public final class KnowledgeHttpTest {
 
     private record Runtime(KnowledgeLibrary library) implements RuntimeFacade {
         public CompletionStage<JsonElement> knowledge(JsonObject args) { return CompletableFuture.completedFuture(library.request(args)); }
-        public CompletionStage<JsonElement> perceive(JsonObject args) { throw new AssertionError("World perception must not be used for knowledge"); }
+        public CompletionStage<JsonElement> perceive(JsonObject args) {
+            if ("abilities".equals(args.get("view").getAsString()) && args.has("query"))
+                return CompletableFuture.completedFuture(AbilitySearch.search(args.get("query").getAsString(), args.get("limit").getAsInt()));
+            throw new AssertionError("World perception must not be used for knowledge");
+        }
         public CompletionStage<JsonElement> plan(JsonObject args) { throw new AssertionError("No planning"); }
         public CompletionStage<JsonElement> execute(JsonObject args) { throw new AssertionError("No execution"); }
         public CompletionStage<JsonElement> task(JsonObject args) { throw new AssertionError("No tasks"); }

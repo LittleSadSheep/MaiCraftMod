@@ -25,10 +25,11 @@ public final class KnowledgeRegressionSuite {
         MetadataSearchTest.main(args);
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        AbilitySearchTest.main(args);
         PublicTargetContractTest.main(args);
         KnowledgeLibraryTest.main(args);
-        BuildingModelContractResourcesTest.main(args);
         KnowledgeSearchTest.main(args);
+        BuildingModelContractResourcesTest.main(args);
         // 教材先跑实际建模与方块状态检查，避免把能解析但会堵门或填满屋顶的案例交给设计 Agent。
         BuildingTutorialResourcesTest.main(args);
         // 材料配方页只读取所选工艺页并链接设备教程，缺失知识不能伪装成可执行配方。

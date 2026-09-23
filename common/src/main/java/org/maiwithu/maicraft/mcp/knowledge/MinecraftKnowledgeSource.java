@@ -132,10 +132,11 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
     private KnowledgeDocument.Entry blockEntry(ResourceLocation id, Block block) {
         var description = tooltips.description(block.asItem());
         String summary = description.summary();
+        String name = block.getName().getString();
         if (summary.length() > 120) summary = summary.substring(0, 120) + "…";
         return new KnowledgeDocument.Entry(BLOCK + id.getNamespace() + "/" + id.getPath(), "block." + id,
-                block.getName().getString(), "实际方块状态与使用资料 · " + id + (summary.isBlank() ? "" : " · " + summary),
-                id + " " + description.searchText(), "text/markdown", id.toString());
+                name, "实际方块状态与使用资料 · " + id + (summary.isBlank() ? "" : " · " + summary),
+                id + " " + description.searchText(), "text/markdown", id.toString(), name);
     }
     private static String displayName(String value) {
         ResourceLocation id = ResourceLocation.tryParse(value);
