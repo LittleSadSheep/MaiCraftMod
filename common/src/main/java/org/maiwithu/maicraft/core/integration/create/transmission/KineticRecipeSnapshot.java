@@ -29,7 +29,7 @@ import java.util.stream.StreamSupport;
 import net.minecraft.world.item.Items;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
-/** One current synchronized recipe/inventory snapshot for all competing BOMs. Never caches across plans or datapack reloads. */
+/** 所有竞争材料清单共用同一份当前同步的配方/库存快照；不会跨计划或数据包重载缓存。 */
 public final class KineticRecipeSnapshot {
     public static final int MAX_NATIVE_RECIPES = 32768, MAX_REACHABLE_ITEMS = 512, MAX_INGREDIENT_ENTRIES = 8192;
     private static final Set<String> VANILLA = Set.of("ShapedRecipe", "ShapelessRecipe", "StonecutterRecipe",

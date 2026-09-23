@@ -212,7 +212,7 @@ final class ElevatorSurvey {
                 : deckCandidates(stances,originY,destination.getY());
     }
 
-    /** Re-read the actual two-ended association immediately before the normal native button gesture. */
+    /** 执行普通原生按钮操作前，重新读取真实的双端关联关系。 */
     static boolean callStillAssociated(LocalPlayerContext ctx, CreateElevatorBridge bridge, Cabin cabin, int floor, CallInput input) {
         BlockPos contact = cabin.column().at(floor);
         if (!bridge.isContact(ctx, contact, cabin.column()) || !ctx.level().hasChunkAt(input.position())) return false;
@@ -248,7 +248,7 @@ final class ElevatorSurvey {
         return best;
     }
 
-    /** A native button/receiver either weakly powers the contact or strongly powers its adjacent support. */
+    /** 原生按钮/接收器可能弱供能接触点，也可能强供能相邻支撑面。 */
     // 只解释直接相邻供电或通过按钮所附的导体供电；复杂红石线路不在这份关联判断中。
     static boolean feeds(BlockGetter world, BlockPos contact, BlockPos source, BlockState state, boolean button) {
         if (source.distManhattan(contact) == 1) return true;

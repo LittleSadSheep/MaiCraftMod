@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.Collections;
 import java.util.Comparator;
 
-/** Relative material value and additional acquisition are separate estimates, never currency or a crafting permission. */
+/** 材料相对价值和额外获取成本是两种独立估算，绝不是货币或合成许可。 */
 public final class KineticMaterialCosts {
     public static final int MAX_DEPTH = 12, MAX_SEARCH_ENTRIES = 8192, MAX_RECIPES_PER_ITEM = 8, MAX_ALTERNATIVES = 32;
     public static final double UNKNOWN_UNIT_VALUE = 8;

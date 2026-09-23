@@ -6,7 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 
-/** Labels synchronized native data explicitly; it is never substituted for a denied server request. */
+/** 明确标注同步原生数据；绝不会用其替代被拒绝的服务器请求。 */
 final class KineticPowerEvidence {
     private KineticPowerEvidence() {}
     static JsonObject client(KineticNativeView.Observation live) {

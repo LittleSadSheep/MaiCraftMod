@@ -12,7 +12,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
-/** Keeps material counts tied to actual targets and rejects undeclared kinetic attachments. */
+/** 将材料数量绑定到实际施工目标，并拒绝未声明的动力附加件。 */
 final class KineticGeometryWork {
     final Endpoint source, target;
     final Direction sourceFace, targetFace;

@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.Comparator;
 import java.util.List;
 
-/** Comparable complete plans, including pillars and native linking work; no distance-only family switch. */
+/** 可比较的完整方案，包含支柱和原生连接操作；不会仅按距离切换方案类别。 */
 public final class KineticRouteChoice {
     public record Scored(KineticRouteGeometry.Plan plan, KineticMaterialCosts.Quote materials,
                          double constructionWork, double distanceWork, double total) {

@@ -11,7 +11,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import net.minecraft.core.registries.BuiltInRegistries;
 
-/** One planning tick's loaded terrain cache; discarded before construction revalidation. */
+/** 保存单个规划 tick 中已加载地形的缓存；施工复核前会丢弃。 */
 final class KineticPlanningTerrain implements KineticRouteGeometry.Terrain {
     private final ClientLevel level;
     private final Map<BlockPos,BlockState> states=new HashMap<>();
@@ -36,7 +36,7 @@ final class KineticPlanningTerrain implements KineticRouteGeometry.Terrain {
     }
     public Integer groundHeight(int x,int z) {
         var chunk=level.getChunkSource().getChunk(x>>4,z>>4,ChunkStatus.FULL,false);
-        // NO_LEAVES is server-only: client LevelChunk still allocates an empty map for it, yielding minY-1.
+        // NO_LEAVES 只供服务器使用：客户端 LevelChunk 仍会为它分配空映射，导致 minY-1。
         if(chunk==null || !chunk.hasPrimedHeightmap(Heightmap.Types.MOTION_BLOCKING)) return null;
         int height=chunk.getHeight(Heightmap.Types.MOTION_BLOCKING,x&15,z&15);
         return height<level.getMinBuildHeight() || height>=level.getMaxBuildHeight() ? null : height;

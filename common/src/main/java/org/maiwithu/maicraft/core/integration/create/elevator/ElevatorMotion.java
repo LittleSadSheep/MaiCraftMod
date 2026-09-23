@@ -59,7 +59,7 @@ final class ElevatorMotion {
         if (!releaseNavigation()) return Progress.MOVING;
         Vec3 position = ctx.player().position();
         Vec3 local = cabin.local(position);
-        // A dock/door update or a transient failed search must not pin an empty or stale route.
+        // 靠站/门状态更新或一次临时搜索失败，都不能固化空路线或过期路线。
         if (!destination.equals(localGoal) || geometry != routeGeometry || route.isEmpty()) {
             localGoal = destination; routeGeometry = geometry; route.clear();
             route.addAll(geometry.path(local, destination, cabin.origin(), ctx.player().maxUpStep(), forbidden));

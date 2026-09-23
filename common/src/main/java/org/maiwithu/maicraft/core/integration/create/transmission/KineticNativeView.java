@@ -9,7 +9,7 @@ import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.List;
 
-/** Loaded synchronized native facts select candidates; server evidence is checked before enhanced work. */
+/** 使用已加载并同步的原生事实选择候选；执行增强操作前仍要核验服务器证据。 */
 final class KineticNativeView {
     private static final String KINETIC = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
