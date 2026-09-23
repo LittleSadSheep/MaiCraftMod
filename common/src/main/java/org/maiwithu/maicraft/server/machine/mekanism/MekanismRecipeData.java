@@ -7,7 +7,7 @@ import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Bounded input alternatives preserve amounts and never turn incomplete predicates into exact recipes. */
+/** 有界输入替代方案会保留数量信息，绝不会把不完整谓词误作精确配方。 */
 public final class MekanismRecipeData {
     private final ServerPlayer player;
     private final JsonObject report;

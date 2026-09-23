@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Constructs only a native-validated 3x3 recipe template, never a real crafting output inventory. */
+/** 只构造经过原生验证的 3×3 配方样板，绝不创建真实合成输出库存。 */
 final class Ae2CraftingPatternEncoding {
     private Ae2CraftingPatternEncoding() {}
 

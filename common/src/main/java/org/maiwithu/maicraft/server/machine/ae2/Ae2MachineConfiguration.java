@@ -7,7 +7,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.ServerMachineConfiguration;
 
-/** Called only after the common server registry has checked the real player's target interaction. */
+/** 只有公共服务器注册表核实真实玩家与目标的交互后才能调用。 */
 public final class Ae2MachineConfiguration {
     private Ae2MachineConfiguration() {}
 

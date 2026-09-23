@@ -13,7 +13,7 @@ import net.minecraft.world.level.material.Fluid;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Exact, count-independent identities for native Mekanism recipe and event resources. */
+/** 用于原生 Mekanism 配方和事件资源的精确身份标识，与数量无关。 */
 public final class MekanismResourceStacks {
     public static final String FLUID = "net.neoforged.neoforge.fluids.FluidStack";
     public static final String CHEMICAL = "mekanism.api.chemical.ChemicalStack";

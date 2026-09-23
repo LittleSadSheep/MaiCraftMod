@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Complete single-operation outputs are simulated against native output storage using INTERNAL access. */
+/** 使用 INTERNAL 访问模式，将单次操作的完整产物与原生输出库存进行模拟比较。 */
 public final class MekanismOutputSpace {
     private static final String MACHINES = "mekanism.common.tile.machine.";
     private static final String BASIC = "mekanism.api.recipes.basic.", RECIPES = "mekanism.api.recipes.";

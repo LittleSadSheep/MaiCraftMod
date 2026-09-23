@@ -9,7 +9,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Native upgraded costs are distinct from having input material or having already produced output. */
+/** 原生升级成本应与是否拥有输入材料、是否已产出分开判断。 */
 public final class MekanismRecipeConditions {
     private static final String MACHINE = "mekanism.common.tile.base.TileEntityMekanism";
     private static final String ENERGY = "mekanism.common.capabilities.energy.MachineEnergyContainer";
@@ -33,7 +33,7 @@ public final class MekanismRecipeConditions {
         } else if (NativeApi.is(entity, "mekanism.common.tile.factory.TileEntityFactory")) {
             duration = NativeApi.number(NativeApi.call(entity, "mekanism.common.tile.factory.TileEntityFactory", "getTicksRequired"));
         } else if (ONE_TICK_MACHINES.stream().anyMatch(name -> entity.getClass().getName().equals("mekanism.common.tile.machine." + name))) {
-            // These native builders retain CachedRecipe's one-tick default; the installed-jar test guards this contract.
+            // 这些原生构建器保留 CachedRecipe 的单 tick 默认值；已安装 JAR 的测试负责守护此契约。
             duration = 1;
         }
         if (duration <= 0) { result.getAsJsonArray("unknown").add("native_processing_duration_not_exposed"); return false; }

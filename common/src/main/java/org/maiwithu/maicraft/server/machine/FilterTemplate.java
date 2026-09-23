@@ -9,7 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
-/** Ghost filter criteria only. These stacks must never enter an inventory, entity or resource transfer. */
+/** 仅表示虚影过滤条件；这些堆叠绝不能进入背包、实体或资源转移流程。 */
 final class FilterTemplate {
     private FilterTemplate() {}
 
