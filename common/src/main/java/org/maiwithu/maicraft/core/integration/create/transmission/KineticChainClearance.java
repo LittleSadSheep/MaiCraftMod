@@ -7,13 +7,13 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-/** Sweeps installed Create's 1.25-radius wheel footprint and both straight tangent strands, not just endpoints. */
+/** 扫描已安装 Create 传动轮 1.25 格半径的占地，以及两条直线切向链条，不只检查端点。 */
 final class KineticChainClearance {
     private static final double RADIUS = 1.25, TANGENT_ANGLE = Math.toRadians(35), STRAND_PADDING = .2;
     private KineticChainClearance() {}
     static boolean clear(KineticGeometryWork work, List<BlockPos> wheels) {
         Set<BlockPos> wheelCenters = Set.copyOf(wheels), swept = new HashSet<>();
-        // The wheel projects out of its block into every neighboring horizontal cell, including diagonals.
+        // 传动轮会从自身方块格向外延伸到所有相邻水平格，包括对角格。
         for (BlockPos wheel : wheels) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) swept.add(wheel.offset(dx, 0, dz));
         for (int i = 1; i < wheels.size(); i++) {
             BlockPos a = wheels.get(i - 1), b = wheels.get(i);
@@ -22,7 +22,7 @@ final class KineticChainClearance {
             double ux = (b.getX() - a.getX()) / horizontal, uz = (b.getZ() - a.getZ()) / horizontal;
             double inward = RADIUS * Math.cos(TANGENT_ANGLE), sideways = RADIUS * Math.sin(TANGENT_ANGLE);
             for (int sign : new int[] {-1, 1}) {
-                // Mirrors ChainConveyorBlockEntity.calculateConnectionStats and forPointsAlongChains.
+                // 复现 ChainConveyorBlockEntity.calculateConnectionStats 与 forPointsAlongChains 的规则。
                 Vec3 from = new Vec3(a.getX() + .5 + ux * inward - uz * sideways * sign, a.getY() + .375,
                         a.getZ() + .5 + uz * inward + ux * sideways * sign);
                 Vec3 to = new Vec3(b.getX() + .5 - ux * inward - uz * sideways * sign, b.getY() + .375,
@@ -44,7 +44,7 @@ final class KineticChainClearance {
         int count = Math.max(1, (int) Math.ceil(from.distanceTo(to) * 2));
         for (int step = 1; step <= count; step++) {
             Vec3 a = from.lerp(to, (step - 1.0) / count), b = from.lerp(to, (double) step / count);
-            // The union of segment boxes covers the complete continuous strand, including sloped voxel crossings.
+            // 合并后的线段包围盒覆盖整条连续链条，包括穿过倾斜体素边界的部分。
             for (int x = (int) Math.floor(Math.min(a.x, b.x) - STRAND_PADDING); x <= (int) Math.floor(Math.max(a.x, b.x) + STRAND_PADDING); x++)
                 for (int y = (int) Math.floor(Math.min(a.y, b.y) - STRAND_PADDING); y <= (int) Math.floor(Math.max(a.y, b.y) + STRAND_PADDING); y++)
                     for (int z = (int) Math.floor(Math.min(a.z, b.z) - STRAND_PADDING); z <= (int) Math.floor(Math.max(a.z, b.z) + STRAND_PADDING); z++)

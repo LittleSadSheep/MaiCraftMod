@@ -73,7 +73,7 @@ final class CreateEndpointEvidenceSearch {
     Status tick(ClientLevel level) {
         if (status == Status.READY || status == Status.EXHAUSTED) return status;
         if (endpoint.exactFace() != null) {
-            // A declared utility interface must never drift to a nearby machine or another face.
+            // 已声明的功能接口绝不能漂移到附近另一台机器或另一侧面。
             if (!level.isLoaded(endpoint.center())) {
                 nextObservation = endpoint.center();
                 return Status.NEEDS_OBSERVATION;
@@ -250,7 +250,7 @@ final class CreateEndpointEvidenceSearch {
         return status;
     }
 
-    /** Returns exactly one non-duplicated expanding-shell probe covered by the tick budget. */
+    /** 返回一个由 tick 预算覆盖、且不会重复的扩展壳层探测点。 */
     private BlockPos nextFreeProbe(ClientLevel level) {
         if (freeRadius > freeWorldEvidenceRadius(level)) return null;
         if (freeRadius == 0) {
@@ -340,9 +340,7 @@ final class CreateEndpointEvidenceSearch {
                 BlockPos adjacent = position.relative(face);
                 if (level.isOutsideBuildHeight(adjacent)
                         || !level.getWorldBorder().isWithinBounds(adjacent)) continue;
-                // An unloaded adjacent cell is provisional evidence. The corridor survey must
-                // load and prove it empty before the first placement, so this never authorizes a
-                // blind mutation at a chunk boundary.
+                // 未加载的相邻格只提供暂定证据；走廊勘查必须先加载并确认其为空，之后才能首次放置，避免在区块边界盲目修改世界。
                 if (!chainLink && level.isLoaded(adjacent)
                         && !CreateMechanicalPlanner.isEmptyRouteCell(level, adjacent)) continue;
                 CreateMechanicalPlan.KineticEndpoint candidate =
