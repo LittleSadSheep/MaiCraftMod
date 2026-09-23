@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import java.util.HashSet;
 
-/** Shared, resource-agnostic interpretation of semantic entity relationships. */
+/** 供各资源类型共用、与具体资源无关的语义实体关系解释。 */
 public final class EntitySemanticSafety {
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int ENCLOSURE_RADIUS = 8;
@@ -41,7 +41,7 @@ public final class EntitySemanticSafety {
 
     private EntitySemanticSafety() {}
 
-    /** Whether this live entity satisfies the requested relationship before protection checks. */
+    /** 在检查保护条件前，判断此实时实体是否满足所请求的关系。 */
     public static boolean matchesRelation(
             Entity entity, GenericEntitySearchTaskRecord.Relation relation) {
         return switch (relation) {
@@ -52,7 +52,7 @@ public final class EntitySemanticSafety {
         };
     }
 
-    /** An empty list is the only authorization to use the entity. */
+    /** 只有空列表才授权使用此实体。 */
     public static List<String> protectionReasons(
             LocalPlayer player,
             Entity entity,
@@ -104,9 +104,8 @@ public final class EntitySemanticSafety {
         String dimension = player.level().dimension().location().toString();
         for (String label : protectedLabels == null ? List.<String>of() : protectedLabels) {
             IntentRuntime.Landmark landmark = runtime.landmark(label);
-            // A label without a resolved location proves nothing about this entity. Likewise, a
-            // remembered landmark is only area context: the point/radius is not itself a fence.
-            // Physical enclosure evidence below is what turns that context into protection.
+            // 标签没有解析出具体位置时，不能证明此实体受保护。同样，记忆中的地标只能提供区域背景，点和半径本身并不是围栏。
+            // 只有下方实际观察到的物理围护证据，才能将区域背景转化为保护条件。
             if (landmark != null
                     && landmark.areaRole()
                             == IntentRuntime.LandmarkAreaRole.MANAGED_SETTLEMENT
@@ -115,9 +114,8 @@ public final class EntitySemanticSafety {
             }
         }
         /*
-         * Human labels are never policy.  Only a caller-selected protected label carrying the
-         * durable managed-settlement role can establish area context; physical enclosure remains
-         * independently required by the caller above.
+         * 人类可读标签不能直接作为策略。只有调用方选中的受保护标签同时带有持久化管理聚落角色时，才能建立区域背景；
+         * 调用方仍必须独立核实上方所需的物理围护证据。
          */
         return new ProtectedAreaEvidence(
                 List.of(), List.copyOf(containingAreas));
@@ -134,8 +132,7 @@ public final class EntitySemanticSafety {
     }
 
     /**
-     * Loaded-only physical enclosure evidence.  Callers must additionally prove that the entity is
-     * inside a known semantic area; an arbitrary local terrain pocket is never protection by itself.
+     * 仅依据已加载地形检查实际物理围护。调用方还必须证明实体处于已知语义区域内；任意局部地形凹处本身都不能构成保护。
      */
     private static ManagedArea enclosureAt(ClientLevel level, BlockPos origin) {
         int y = origin.getY();
