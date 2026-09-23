@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
-/** Actual production approach/observe paths; only walking arrival and fixture movement are controlled. */
+/** 运行真实生产接近与观察路径；仅控制步行到达和夹具移动。 */
 public final class ProductionInteractionNavigationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -32,7 +32,7 @@ public final class ProductionInteractionNavigationTest {
             MachineProductionTask task = new MachineProductionTask(h.player, record(), (stance, reached) -> {
                 routes.add(stance);
                 arrivalChecks.add(reached);
-                // First route finishes at its real stance; later routes expose a premature native ARRIVED.
+                // 第一条路线在真实站位完成；后续路线会暴露原生 ARRIVED 过早返回的问题。
                 if (routes.size() == 1) {
                     try { h.position(Vec3.atBottomCenterOf(stance)); }
                     catch (Exception failure) { throw new IllegalStateException(failure); }

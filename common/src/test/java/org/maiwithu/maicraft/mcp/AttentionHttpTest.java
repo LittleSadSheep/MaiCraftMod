@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Real transport, cancellation and SSE reconnect, with an inert event-driven runtime. */
+/** 使用真实传输、取消和 SSE 重连，并搭配惰性的事件驱动运行时。 */
 public final class AttentionHttpTest {
     public static void main(String[] args) throws Exception {
         FakeRuntime runtime = new FakeRuntime();
@@ -38,7 +38,7 @@ public final class AttentionHttpTest {
                     "host discovery prioritizes attention and mentions chatflow");
             JsonObject resource = json("{\"uri\":\"maicraft://attention\"}");
             client.send(post(uri, session, 2, "resources/subscribe", resource), HttpResponse.BodyHandlers.ofString());
-            // No publication is needed to catch up when the initial SSE stream opens.
+            // 初始 SSE 流打开时无需发布新内容即可追上当前状态。
             receiveUpdate(client, uri, session);
             runtime.reason = "task_terminal";
             runtime.publish(); runtime.publish();

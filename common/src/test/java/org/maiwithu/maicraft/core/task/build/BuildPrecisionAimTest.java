@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Replays the reported sub-degree slab mismatch through real outline hits and the AIM state. */
+/** 通过真实轮廓命中和 AIM 状态回放已报告的亚度级半砖视角偏差。 */
 public final class BuildPrecisionAimTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -29,7 +29,7 @@ public final class BuildPrecisionAimTest {
             var task = new FirstPersonBuildCompanionTask(h.player, record, (player, reach) ->
                     h.level.getBlockState(support).getShape(h.level, support).clip(player.getEyePosition(),
                             player.getEyePosition().add(player.getViewVector(1).scale(reach)), support));
-            // Leave enough margin for Minecraft's quantized view vector once the view converges.
+            // 为 Minecraft 量化后的视线向量留出足够余量，确保镜头收敛后仍可命中。
             var point = new Vec3(3.9999, 1.49, 4.5);
             var gesture = new BuildPlacementGeometry.Gesture(h.player.blockPosition(), support, Direction.EAST,
                     point, AimGeometry.yawTo(h.player.getEyePosition(), point),

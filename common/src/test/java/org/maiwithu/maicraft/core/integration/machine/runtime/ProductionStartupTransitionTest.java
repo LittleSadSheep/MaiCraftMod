@@ -10,7 +10,7 @@ import java.io.File;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 
-/** Drive the real startup transition after admission, without opening a server session. */
+/** 在通过准入后驱动真实启动转换，不打开服务器会话。 */
 public final class ProductionStartupTransitionTest {
     public static void main(String[] args) throws Exception {
         verify("START",false); verify("START",true); verify("SUPPLY",false); verify("SUPPLY",true);
@@ -41,7 +41,7 @@ public final class ProductionStartupTransitionTest {
                 supplied.set(task,new ProductionInputSupply(world.player,record,plan,task,List.of()));
             }
             var index = MachineProductionTask.class.getDeclaredField("configuration"); index.setAccessible(true);
-            // An authored action is already settled here; the transition must still invalidate its previous admission scan.
+            // 手工指定动作在此处已经结算；转换仍必须使先前的准入扫描失效。
             index.setInt(task,plan.manifest().configurations().size());
             if (task.tick(world.player) != TaskState.RUNNING) throw new AssertionError("Startup unexpectedly terminated");
             String expected = startAction ? entryPhase.equals("SUPPLY") ? "ADMIT_START" : "REFRESH" : "OBSERVE";

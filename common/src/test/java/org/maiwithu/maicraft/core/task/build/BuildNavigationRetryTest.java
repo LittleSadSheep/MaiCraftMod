@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Map;
 
-/** The production failure branch must skip every aim variant at an unreachable stance. */
+/** 正式失败分支必须跳过不可达站位下的所有瞄准变体。 */
 public final class BuildNavigationRetryTest {
     public static void main(String[] args) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
@@ -38,7 +38,7 @@ public final class BuildNavigationRetryTest {
             var routes = (BuildStanceNavigation) field(task, "stanceNavigation").get(task);
             routes.startAt(PlayerNav.playerFeet(h.player));
             routes.forTarget(target.pos(), PlayerNav.playerFeet(h.player)); routes.attempted();
-            // An already terminated native navigator produces FAILED without bootstrapping a live route.
+            // 已终止的原生导航器会直接返回 FAILED，不会启动实时路线。
             var nav = PlayerNav.toGoal(h.player, () -> NavGoal.exact(stance), 1, () -> false, routes.contextFor(stance));
             Object transport = field(nav, "navigator").get(nav); field(transport, "stopped").setBoolean(transport, true);
             field(task, "nav").set(task, nav);
