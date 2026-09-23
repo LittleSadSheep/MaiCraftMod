@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.network.ServerOperationException;
 import java.util.Comparator;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** All callers run on the game thread, with loaded chunks and the real player's authority. */
+/** 所有调用方均在游戏线程执行，使用已加载区块和真实玩家权限。 */
 public final class ServerAccess {
     public static final int OBSERVATION_RADIUS = 16;
     private ServerAccess() {}
@@ -60,7 +60,7 @@ public final class ServerAccess {
         return check(player, pos, mutate, mutate);
     }
 
-    /** Same physical/owner preflight as a transfer, without posting a real interaction event. */
+    /** 执行与物品转移相同的物理和所有者预检，但不发送真实交互事件。 */
     public static BlockEntity preview(ServerPlayer player, BlockPos pos) {
         return check(player, pos, true, false);
     }
@@ -94,7 +94,7 @@ public final class ServerAccess {
         }
         if (interactive) {
             if (!player.mayBuild()) throw denied("permission_denied", "Player cannot modify machines");
-            // A real menu opening already traversed the native use event; menu operations keep its exact target and access checks.
+            // 真实打开菜单时已经经过原生使用事件；菜单操作会保留其精确目标和访问检查结果。
             if (ServerMenuAccess.permits(player, pos)) return entity;
             if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
                 throw denied("menu_busy", "Close the active menu before a server transaction");
@@ -105,8 +105,7 @@ public final class ServerAccess {
                 if (player.serverLevel() != level || !player.isAlive() || !level.isLoaded(pos)
                         || level.getBlockEntity(pos) != entity || !player.canInteractWithBlock(pos, 0)
                         || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
-                    // An event listener may itself change the world. Never operate on a removed target
-                    // or call that event-bearing request "not applied" and authorize a replay.
+                    // 事件监听器本身也可能改变世界。不能继续操作已移除的目标，也不能把已触发事件的请求判为“未应用”并授权重放。
                     throw new IllegalStateException("Interaction event changed player or target context; effect is uncertain");
                 }
             }
@@ -118,7 +117,7 @@ public final class ServerAccess {
         var level = player.serverLevel();
         var eye = player.getEyePosition();
         BlockPos origin = BlockPos.containing(eye);
-        // A short interaction ray must not cause chunk loads while traversing a boundary.
+        // 穿过区块边界时，短距离交互射线不能触发区块加载。
         for (int x = Math.min(origin.getX(), pos.getX()) >> 4; x <= (Math.max(origin.getX(), pos.getX()) >> 4); x++) {
             for (int z = Math.min(origin.getZ(), pos.getZ()) >> 4; z <= (Math.max(origin.getZ(), pos.getZ()) >> 4); z++) {
                 if (!level.isLoaded(new BlockPos(x << 4, pos.getY(), z << 4))) throw denied("unloaded", "An interaction ray crosses unloaded chunks");
@@ -135,7 +134,7 @@ public final class ServerAccess {
     }
 
     private static void checkInteractionEvent(ServerPlayer player, BlockPos pos, BlockHitResult hit) {
-        // Use an actually empty hand when one exists; never replace, move or impersonate held stacks.
+        // 有空手可用时必须使用真实空手；绝不替换、移动或冒充玩家手持堆叠。
         InteractionHand hand = player.getMainHandItem().isEmpty() ? InteractionHand.MAIN_HAND
                 : player.getOffhandItem().isEmpty() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         String hooks = "net.neoforged.neoforge.common.CommonHooks";

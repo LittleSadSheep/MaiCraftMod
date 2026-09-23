@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import java.util.UUID;
 
-/** Only native processing hooks append events; RPC clients cannot submit production evidence. */
+/** 只有原生加工钩子可以追加事件；RPC 客户端不能提交生产证据。 */
 public final class ServerProductionEvents {
     private static final Map<ServerLevel, ProductionEventJournal> JOURNALS = new WeakHashMap<>();
     private ServerProductionEvents() {}
@@ -29,7 +29,7 @@ public final class ServerProductionEvents {
         recordProduction(level, producer.getBlockPos(), recipe, inputs, actualOutputs, 1, "create.press.tryProcessOnBelt");
     }
 
-    /** Amounts already describe this actual native operation; operations is metadata, never a multiplier. */
+    /** 数量字段已表示此次真实原生操作的数量；operations 只是元数据，绝不是数量乘数。 */
     public static void recordProduction(ServerLevel level, BlockPos producer, String recipeId, JsonArray inputs,
                                         JsonArray outputs, long operations, String nativeCall) {
         recordProduction(level, producer, recipeId, inputs, outputs, operations, nativeCall, null, null);
@@ -58,7 +58,7 @@ public final class ServerProductionEvents {
         event.addProperty("delivery_confirmed", false);
         if (consumedEntities != null) event.add("consumed_entities", consumedEntities);
         if (outputEntity != null) event.addProperty("output_entity_uuid", outputEntity.toString());
-        // append validates depth/size and immediately encodes an immutable payload; no recursive pre-copy.
+        // append 会校验深度和大小，并立即编码不可变载荷；不需要递归预拷贝。
         event.add("outputs", outputs);
         event.add("inputs", inputs);
         if (inputs.size() == 1) {
@@ -93,7 +93,7 @@ public final class ServerProductionEvents {
         recordTransfer(level, source, destination, identity, amount, provenance, null);
     }
 
-    /** Only native successful extraction callbacks may freeze this marker, never the later delivery callback. */
+    /** 只有原生成功提取回调能冻结此标记，不能使用之后的交付回调。 */
     public static ProductionEventJournal.OrderingMarker markExtraction(ServerLevel level) {
         if (!level.getServer().isSameThread()) throw new IllegalStateException("Extraction marker requires the server thread");
         return journal(level).markExtraction(level.getGameTime());
@@ -140,7 +140,7 @@ public final class ServerProductionEvents {
         ProductionEventJournal journal = journal(player.serverLevel());
         Object connection = connection(player);
         if (body.has("release_watch") && ServerAccess.bool(body, "release_watch")) {
-            // Only this connection's prior reservation is removed. Cleanup reads no target/world data.
+            // 只移除当前连接先前的预留；清理过程不读取目标或世界数据。
             return journal.release(connection, producers, expected);
         }
         for (BlockPos pos : targets) ServerAccess.check(player, pos, false);
@@ -160,7 +160,7 @@ public final class ServerProductionEvents {
         return result;
     }
 
-    /** Called for logout, respawn or world change; replacement players can share the same connection. */
+    /** 在登出、重生或世界变化时调用；替换后的玩家可能共用同一连接。 */
     public static void disconnected(ServerPlayer player) {
         Object connection = connection(player);
         for (ProductionEventJournal journal : JOURNALS.values()) journal.disconnected(connection);
@@ -168,7 +168,7 @@ public final class ServerProductionEvents {
 
     private static Object connection(ServerPlayer player) { return player.connection == null ? player : player.connection; }
 
-    /** Server modules may read native history; this is not an RPC event ingestion endpoint. */
+    /** 服务器模块可以读取原生历史记录；此方法不是 RPC 事件写入入口。 */
     public static ProductionEventJournal trustedJournal(ServerLevel level) {
         if (!level.getServer().isSameThread()) throw new IllegalStateException("Native history requires the server thread");
         return journal(level);
