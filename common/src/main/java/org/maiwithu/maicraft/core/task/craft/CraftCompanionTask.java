@@ -58,11 +58,11 @@ import org.maiwithu.maicraft.core.Constants;
 /** 实际合成：找或摆工作台，打开合成界面，一批批摆配方、拿成品、放回剩料并关界面，最后尝试收回自己的临时工作台。 */
 public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRecord> {
     private static final double AIM_CONVERGENCE_DOT = Math.cos(Math.toRadians(1.0D));
-    /** Network synchronization windows, not total task caps. */
+    /** 网络同步等待窗口，不是整个任务的执行上限。 */
     private static final int STATION_DROP_SYNC_TICKS = 12;
     private static final int STATION_PICKUP_SYNC_TICKS = 20;
     private static final double STATION_DROP_SCAN_RADIUS = 4.0D;
-    /** Renewed only after concrete state progress; this is a no-progress lease, not a total cap. */
+    /** 只有出现明确状态进展后才续期；这是无进展期限，不是任务总时长上限。 */
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
 
     private enum Stage {
@@ -240,9 +240,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             stationAimRequestedRevision = Long.MIN_VALUE; stage = Stage.OPEN;
             return TaskState.RUNNING;
         }
-        // Keep one exact station identity for the lifetime of its active route. Re-running the
-        // coordinator mid-route could switch to a newly carried/nearer table while the old nav
-        // still owns the body.
+        // 整条活动路线始终绑定同一工作台身份。中途重新运行协调器可能切换到新拿出或更近的工作台，而旧导航仍占有角色控制权。
         if (nav != null && CraftingWorkstationCoordinator.usableTable(player, station)) {
             var block = player.level().getBlockState(station).getBlock();
             return prepareExistingStation(new CraftingWorkstationCoordinator.Directive(
@@ -283,10 +281,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
 
     /**
-     * Approach the exact station selected by the coordinator. A block-id FIND child may silently
-     * walk to a different table when several exist, so the physical route is compiled against this
-     * concrete target and keeps that cell sacred. If its nearest interaction goal lands at a bad
-     * first-person stance, finite visible stance candidates are tried without condemning the table.
+     * 前往协调器选定的那一张具体工作台。若通过方块 ID 的 FIND 子任务，附近有多张工作台时可能悄悄换目标；
+     * 因此物理路线直接针对此工作台编译，并将其格子设为 sacred。若最近的交互目标导致第一人称站位不合适，则尝试有限个可见站位，不因此判定工作台不可用。
      */
     private TaskState prepareExistingStation(
             CraftingWorkstationCoordinator.Directive directive) {
@@ -440,8 +436,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private TaskState openStation() {
         // 先解除摆方块时的潜行，真正转头看准同一张工作台，再右键并等对应合成界面出现。
         var context = ClientRuntime.requireContext(player);
-        // Building deliberately sneaks while clicking support. Opening a station must explicitly
-        // release that one-tick posture or vanilla treats right-click as bypass-use.
+        // 建造支撑物时会有意保持潜行；打开工作台前必须显式释放这一刻的姿态，否则原版会把右键识别为潜行使用。
         InputDriver.halt(player);
         if (player.isCrouching()) {
             if (standingPoseFits()) {
@@ -692,9 +687,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                         "the main inventory cannot safely accept one exact recipe batch",
                         FailureType.NO_SPACE);
             }
-            // ResultSlot QUICK_MOVE repeatedly consumes every recipe still represented by the
-            // grid. PICKUP authorizes exactly one result-slot take, which is this task's batch
-            // boundary; the cursor is then stowed through exact inventory destinations below.
+            // 对结果槽使用 QUICK_MOVE 会连续取走网格中仍可合成的所有配方。PICKUP 只授权取出一个结果，正好作为本任务的批次边界；
+            // 随后再按下方精确库存位置收起鼠标游标物品。
             menuReceipt = context.menus().click(context, resultSlot, 0, ClickType.PICKUP,
                     (fresh, ignored) -> {
                         ItemStack cursor = fresh.player().containerMenu.getCarried();
@@ -719,8 +713,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                 player.containerMenu.getCarried(), plannedOutput, outputPerBatch);
         boolean inventoryUntouched = componentInventoryCount(player, plannedOutput)
                 == batchInventoryBefore;
-        // Exact live facts outrank a receipt timeout: continuing stows the one already-taken batch
-        // and never submits a second result click.
+        // 实时确认的事实优先于回执超时：继续处理已取出的一批物品并收起游标，绝不再次提交结果槽点击。
         if (!exactCursor || !inventoryUntouched) {
             return beginGridReturnFailure(
                     "crafted result was not received as one exact batch: " + detail,
@@ -870,8 +863,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         // 任务每次动槽位前都要求实际界面已显示，并等前一个菜单操作稳定；仅存在隐藏的 InventoryMenu 不够。
         InputDriver.halt(player);
         var context = ClientRuntime.requireContext(player);
-        // InventoryMenu exists even with no screen. Every batch and grid/cursor move must wait
-        // for the actual matching GUI and its previous transaction to have been rendered.
+        // 没有界面时 InventoryMenu 仍然存在。每次合成批次以及网格、游标移动都必须等待匹配的实际 GUI 显示，并等待之前的交易渲染完成。
         return context.menus().ensureVisible(context);
     }
 
@@ -904,8 +896,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             return TaskState.SUCCESS;
         }
         if (!player.level().isLoaded(temporaryStation)) {
-            // Ownership stays in the live-level ledger. A later craft can reuse it after the chunk
-            // is loaded; an unloaded cell is never guessed at or broken speculatively.
+            // 所有权保留在当前世界的账本中；区块之后重新加载时，后续合成可继续使用该工作台。绝不猜测未加载位置，也不试探性破坏方块。
             stationRecoveryDetail = "the temporary crafting table left the loaded client world";
             return TaskState.SUCCESS;
         }
@@ -948,8 +939,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                         == temporaryStationBlock;
         BlockDigger.DigResult dig;
         if (!exactTableStillPresent) {
-            // Once the synchronized block cell changes, the ray can no longer hit it. Settle the
-            // already-submitted native break receipt instead of starting or abandoning an action.
+            // 方块格同步变化后，射线已无法再次命中它；此时结算已提交的原生破坏回执，不要重启或放弃该动作。
             if (stationDigger.current() != null
                     && stationDigger.current().equals(temporaryStation)) {
                 dig = stationDigger.settleGone(true);
@@ -1102,11 +1092,9 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     @Override
     public boolean mustSettleBeforeSatisfiedCancellation() {
         // 已经往合成格放料或拿结果后，总取物任务即使数量已够也要先让这里归还物品、关菜单并处理临时工作台。
-        // Before the result click there is no committed craft to finish: an externally satisfied
-        // parent may cancel and cleanup will simply return the grid. Once the click is submitted,
-        // however, its receipt, menu close, and recovery of a self-placed temporary workstation
-        // form one indivisible terminal tail. Otherwise the inventory fact becomes true first and
-        // the semantic parent can strand the table immediately before a gathering child departs.
+        // 点击结果槽之前，还没有已提交的合成需要收尾：父任务若因外部条件已满足而取消，只需清理并归还网格物品。
+        // 一旦提交点击，其回执、菜单关闭和回收本任务放置的临时工作台就构成不可拆分的结束流程；否则背包数量会先满足条件，
+        // 语义父任务可能在采集子任务离开前把工作台遗留在现场。
         return gridCommitmentStarted
                 || stage == Stage.STOW_RESULT
                 || stage == Stage.RETURN_GRID
