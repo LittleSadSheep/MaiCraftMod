@@ -24,7 +24,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Client lifecycle and presentation bridge; the catalog and discovery never acquire the player's body. */
+/** 客户端生命周期与展示桥接；目录和发现流程绝不会接管玩家身体。 */
 public final class ClientMachineCatalog {
     private static final LoadedMachineDiscovery discovery = new LoadedMachineDiscovery();
     private static MachineCatalog catalog;

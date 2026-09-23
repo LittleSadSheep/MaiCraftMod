@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.Locale;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Public views omit absolute positions unless the caller explicitly requests internal location data. */
+/** 公开视图默认省略绝对坐标，除非调用方明确请求内部定位数据。 */
 final class CatalogViews {
     private CatalogViews() {}
     static JsonObject position(Position position) {

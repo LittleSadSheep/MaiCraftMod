@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 
-/** Durable descriptions and historical proofs. None of these records grants a world-operation capability. */
+/** 持久化说明和历史证明；这些记录均不授予世界操作权限。 */
 public final class MachineCatalogModels {
     private MachineCatalogModels() {}
     public enum EvidenceStatus { NATIVE_OBSERVED, INFERRED, UNKNOWN }

@@ -19,7 +19,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.CompletionException;
 
-/** Background bounded JSON loading and coalesced atomic saves. File failures leave the previous catalog intact. */
+/** 在后台有界读取 JSON，并合并请求执行原子保存；文件操作失败时保留上一份目录。 */
 final class MachineCatalogStore {
     record Loaded(CatalogCodec.Snapshot snapshot, boolean needsSave) {}
     private record Pending(CatalogCodec.Snapshot snapshot, CompletableFuture<Void> completion) {}

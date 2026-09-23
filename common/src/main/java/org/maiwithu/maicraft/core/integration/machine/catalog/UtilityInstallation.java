@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInpu
 import java.util.Objects;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Remembered boundary ports and historical construction, independent of any production manifest. */
+/** 记录边界端口和历史施工信息，不依赖任何生产清单。 */
 public record UtilityInstallation(String id, String label, String dimension, Position anchor, String inputsJson,
                                   String inputsFingerprint, long registeredAtMillis, long builtAtMillis) {
     public UtilityInstallation {

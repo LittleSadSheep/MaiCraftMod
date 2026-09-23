@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Set;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
-/** Strict bounded file format. Current-session observations and operation permissions are never serialized. */
+/** 严格且有界的文件格式；当前会话观察结果和操作许可永不序列化。 */
 final class CatalogCodec {
     record Snapshot(String identityKey, List<Device> devices, List<Line> lines, List<UtilityInstallation> installations) {
         Snapshot(String identityKey, List<Device> devices, List<Line> lines) { this(identityKey,devices,lines,List.of()); }

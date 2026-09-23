@@ -35,7 +35,7 @@ public final class MekanismMatrixTemplate {
                 throw new IllegalArgumentException("unknown matrix module option: " + key);
             }
         }
-        // Mekanism CuboidStructureValidator's own bounds are 3..18 on each axis.
+        // Mekanism CuboidStructureValidator 对每个轴的原生限制为 3 至 18 格。
         int width = integer(options, "width", 3, 3, 18), height = integer(options, "height", 3, 3, 18);
         int depth = integer(options, "depth", 4, 3, 18);
         int capacity = (width - 2) * (height - 2) * (depth - 2);
@@ -47,7 +47,7 @@ public final class MekanismMatrixTemplate {
         JsonObject blueprint = new JsonObject();
         JsonArray blocks = new JsonArray();
         int internalIndex = 0;
-        // Layer order places both internals before the roof seals access to the interior.
+        // 按层施工可确保在屋顶封闭内部空间前，先安装两个内部部件。
         for (int y = 0; y < height; y++) for (int z = 0; z < depth; z++) for (int x = 0; x < width; x++) {
             String id;
             if (x > 0 && x < width - 1 && y > 0 && y < height - 1 && z > 0 && z < depth - 1) {
