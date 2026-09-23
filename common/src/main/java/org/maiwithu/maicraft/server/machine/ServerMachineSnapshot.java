@@ -13,7 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import java.util.List;
 
-/** Native state snapshots are observations; neither geometry nor inventory presence proves production. */
+/** 原生状态快照仅代表观察结果；几何结构或库存存在都不能单独证明正在生产。 */
 public final class ServerMachineSnapshot {
     private ServerMachineSnapshot() {}
 

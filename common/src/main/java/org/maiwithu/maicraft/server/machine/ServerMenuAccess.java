@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.CompoundContainer;
 import net.minecraft.world.Container;
 
-/** One RPC may operate through its actual open native menu; the scope cannot authorise another machine. */
+/** 一个 RPC 只能通过当前真实打开的原生菜单操作；其作用域不能授权操作另一台机器。 */
 public final class ServerMenuAccess {
     private record Binding(ServerPlayer player, BlockPos position, BlockEntity entity, AbstractContainerMenu menu) {}
     private static final ThreadLocal<Binding> ACTIVE = new ThreadLocal<>();

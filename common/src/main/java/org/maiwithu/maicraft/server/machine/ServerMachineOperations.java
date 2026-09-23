@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.server.machine.ae2.Ae2MachineConfiguration;
 import org.maiwithu.maicraft.server.machine.ae2.TransformProductionCapture;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
-/** Common loader bootstrap; each advertised operation has a callable authoritative implementation. */
+/** 公共加载器引导入口；每个已公布操作都有可调用的权威实现。 */
 public final class ServerMachineOperations {
     private static boolean registered;
     private ServerMachineOperations() {}

@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import org.maiwithu.maicraft.server.machine.create.CreateGrindingRecipes;
 import org.maiwithu.maicraft.server.machine.create.CreatePressInputInspection;
 
-/** Exact installed recipe data. Equipment compatibility is checked through its native recipe selection. */
+/** 已安装配方的精确数据；工具兼容性通过原生配方选择进行核验。 */
 public final class ServerMachineRecipe {
     private static final String PROCESSING = "com.simibubi.create.content.processing.recipe.ProcessingRecipe";
     private static final String PRESS = "com.simibubi.create.content.kinetics.press.MechanicalPressBlockEntity";

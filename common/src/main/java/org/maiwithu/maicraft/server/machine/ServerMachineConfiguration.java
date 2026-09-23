@@ -7,7 +7,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.network.ServerOperationException;
 import org.maiwithu.maicraft.server.machine.ae2.Ae2MachineConfiguration;
 
-/** Refreshes current configuration evidence without replaying a writer, consuming tools or posting use events. */
+/** 刷新当前配置证据，不重放写入操作、不消耗工具，也不发送使用事件。 */
 public final class ServerMachineConfiguration {
     private ServerMachineConfiguration() {}
 

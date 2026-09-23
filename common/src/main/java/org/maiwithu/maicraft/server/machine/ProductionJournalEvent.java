@@ -8,7 +8,7 @@ import java.util.ArrayDeque;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** Immutable encoded payload shared by all participating endpoint histories. */
+/** 由所有相关端点历史共用的不可变编码载荷。 */
 record ProductionJournalEvent(long sequence, String encoded, int nodes) {
     static final int MAX_CHARS = 24_000;
     static final int MAX_NODES = 4096;

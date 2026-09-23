@@ -54,7 +54,7 @@ public final class StockEvidence {
         return player != null && synchronizedPlayer == player && synchronizedMenu == menu && player.containerMenu == menu;
     }
 
-    /** Passive client-tick observation. This opens no screens and submits no packets. */
+    /** 被动观察客户端 tick；不会打开界面，也不会提交数据包。 */
     // 每刻检查玩家与世界是否仍相同；只在真实显示外部容器界面时，约每秒读取一次库存。
     public static void observe(LocalPlayer player) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) {
@@ -87,7 +87,7 @@ public final class StockEvidence {
         observation.ifPresent(stock -> CACHE.record(player, player.clientLevel, inventory(player), stock));
     }
 
-    /** Planning hint only: carried gains debit the matching stock; actual supply must revalidate it. */
+    /** 仅作为规划提示：背包增加会扣减对应库存，但实际供料前必须重新核实。 */
     public static Optional<Snapshot> latest(LocalPlayer player) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) return Optional.empty();
         return CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());
@@ -105,7 +105,7 @@ public final class StockEvidence {
                 if (index >= 0 && index < 36) playerSlots.add(index);
                 continue;
             }
-            // Same proof used for generic container transfer: one backing and ordinary real slots.
+            // 与通用容器转移使用同一证明：单一后端容器和普通真实槽位。
             if (slot.getClass() != Slot.class || index < 0 || index >= slot.container.getContainerSize()
                     || !externalSlots.add(index) || (backing != null && backing != slot.container))
                 return Optional.empty();
