@@ -101,8 +101,7 @@ public final class SemanticSourceKnowledge {
         for (ResourceLocation itemId : requestedItemIds) {
             Profile profile = PROFILES.get(itemId.toString());
             if (profile == null) {
-                // Acquire can mine a requested BlockItem directly even without a knowledge entry.
-                // Such an alternative must keep the combined MINE plan dimension-independent.
+                // 即使知识库没有对应条目，Acquire 也能直接挖掘请求的 BlockItem；这种候选必须让组合挖掘计划保持维度无关。
                 if (BuiltInRegistries.ITEM.get(itemId) instanceof BlockItem) {
                     unrestricted.add(SemanticAcquireTaskRecord.Source.MINE);
                     dimensions.remove(SemanticAcquireTaskRecord.Source.MINE);
@@ -210,8 +209,8 @@ public final class SemanticSourceKnowledge {
     public static ToolRequirement missingTool(LocalPlayer player, Set<Block> sourceBlocks) {
         List<BlockState> states = sourceBlocks.stream()
                 .map(Block::defaultBlockState).toList();
-        // The acquisition need accepts alternatives. One genuinely harvestable ungated source is
-        // enough; forcing a tool for a different alternative would create unnecessary work.
+        // 获取需求允许多个替代来源；只要其中一个来源确实可采且未被门槛限制，就足以满足需求。
+        // 为另一种替代来源强制准备工具只会增加不必要的工作。
         if (states.stream().anyMatch(state -> !state.requiresCorrectToolForDrops())) return null;
         List<BlockState> gated = states.stream()
                 .filter(BlockState::requiresCorrectToolForDrops)
@@ -225,8 +224,7 @@ public final class SemanticSourceKnowledge {
             if (hasCorrectTool(player, state)) return null;
         }
 
-        // MineBlockTask can prune unharvestable alternatives, so prepare for the easiest real
-        // source family rather than requiring one tool to harvest every alternative.
+        // MineBlockTask 可剔除无法采集的替代来源，因此只为最容易获取的真实来源族准备工具，而不是要求同一把工具采集所有候选。
         BlockState selected = gated.getFirst();
         Map<ResourceLocation, Integer> candidates = new LinkedHashMap<>();
         for (Item item : BuiltInRegistries.ITEM) {
@@ -276,7 +274,7 @@ public final class SemanticSourceKnowledge {
         if (incorrect.equals(BlockTags.INCORRECT_FOR_IRON_TOOL)) return 2;
         if (incorrect.equals(BlockTags.INCORRECT_FOR_DIAMOND_TOOL)) return 3;
         if (incorrect.equals(BlockTags.INCORRECT_FOR_NETHERITE_TOOL)) return 4;
-        // Gold has wooden-tier harvesting reach but a materially harder acquisition chain.
+        // 金矿石可由木制镐采集，但取得它的完整材料链难度明显更高。
         if (incorrect.equals(BlockTags.INCORRECT_FOR_GOLD_TOOL)) return 5;
         return 100;
     }
