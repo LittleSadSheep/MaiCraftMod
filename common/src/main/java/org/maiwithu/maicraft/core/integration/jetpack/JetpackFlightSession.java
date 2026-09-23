@@ -374,7 +374,7 @@ public final class JetpackFlightSession implements TransportSession {
                     .min(Comparator.comparingDouble(p -> Math.hypot(p.x - position.x, p.z - position.z))).orElse(null);
         }
         if (landing == null || !JetpackRoute.supportsLanding(space, landing)) {
-            // Retain native hover and braking while searching next tick, instead of releasing an airborne body.
+            // 下一 tick 继续搜索时，保留原生悬停和制动状态，不要让空中身体失去控制。
             failure = "jetpack_landing_support_changed"; detail = "the selected platform no longer has its observed support";
             if (power.controllable()) { escape(ctx, space); if (phase == Phase.FLY) return; }
             steer(ctx, new Vec3(position.x, approachHeight, position.z), false); return;
@@ -386,8 +386,7 @@ public final class JetpackFlightSession implements TransportSession {
         Vec3 deckMotion = movingTarget != null && !stopping && !exiting ? movingTarget.velocity() : Vec3.ZERO;
         boolean centered = Math.hypot(position.x - landing.x, position.z - landing.z) < 0.25
                 && ctx.player().getDeltaMovement().subtract(deckMotion.x,0,deckMotion.z).horizontalDistance() < 0.08;
-        // Hold the verified staging height while braking and crossing the platform edge.
-        // Using position.y here would continually lower the target as native hover sinks.
+        // 制动并越过平台边缘时保持已核实的准备高度；若使用实时 position.y，原生悬停下沉会让目标不断降低。
         Vec3 approach = landingAim(position, landing, approachHeight, centered);
         if (!space.clear(position, approach)) {
             obstruction(ctx, space, approach); return;
@@ -426,8 +425,8 @@ public final class JetpackFlightSession implements TransportSession {
                 && !JetpackMotion.clearTrajectory(space(ctx), position, velocity,
                         aim, player.getYRot(), requestedYaw, settings);
         if (clearanceBraking) {
-            // At a narrow aperture, looking around the next corner can quantize input toward its rim.
-            // Face this leg and reassess before braking; otherwise a stopped body can never resume.
+            // 狭窄开口处，提前看向下一个拐角可能使量化后的输入偏向边缘。先面向当前路线段并重新评估，再开始制动；
+            // 否则停下的身体可能永远无法恢复前进。
             lookAt(ctx, aim, landingNow);
             clearanceBraking = !JetpackMotion.clearTrajectory(space(ctx), position, velocity,
                     aim, player.getYRot(), requestedYaw, settings);
@@ -567,7 +566,7 @@ public final class JetpackFlightSession implements TransportSession {
         if (receipt != null) { result.put("mode_receipt", receipt.status().name()); result.put("mode_confirmation", "observed client mode; no server acknowledgement"); }
         return result;
     }
-    /** Keep changes and their time spans; repeated per-tick native dictionaries do not fill MCP context. */
+    /** 只保留状态变化及其持续时间，避免逐 tick 重复记录原生字典、占满 MCP 上下文。 */
     static List<Map<String,Object>> compactTrace(Collection<Map<String,Object>> source) {
         var rows = new ArrayList<Map<String,Object>>();
         Map<String,Object> previous = null;
