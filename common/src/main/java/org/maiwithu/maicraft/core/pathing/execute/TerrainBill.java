@@ -30,10 +30,8 @@ public final class TerrainBill {
     private final Map<Block, List<BlockPos>> places = new LinkedHashMap<>();
 
     /**
-     * Terrain budget for an embedded Baritone path, evaluated against the same frozen block
-     * snapshot that produced the path. No live-world lookup is allowed here: doing so after an
-     * asynchronous search would mix two different world states and could name the wrong block in
-     * a failure receipt.
+     * 为内嵌 Baritone 路线计算地形预算，并使用生成路线时的同一份冻结方块快照。
+     * 此处禁止查询实时世界：异步搜索完成后再读取实时状态会混用两个世界版本，并可能在失败回执中报告错误方块。
      */
     public static TerrainBill planned(IPath path, BlockStateInterface frozenBlocks) {
         Objects.requireNonNull(path, "path");
@@ -49,8 +47,7 @@ public final class TerrainBill {
                 bill.addBreak(pos, frozenBlocks.get0(pos));
             }
             for (BlockPos pos : movement.toPlace(frozenBlocks)) {
-                // The planner knows the cell but intentionally does not choose a concrete
-                // throwaway material. Material selection belongs to the later semantic task.
+                // 规划器知道需要放置的格子，但有意不选择具体临时材料；材料选择由后续语义任务负责。
                 bill.addPlace(pos, null);
             }
         }
@@ -80,7 +77,7 @@ public final class TerrainBill {
         return breaks.values().stream().mapToInt(List::size).sum();
     }
 
-    /** Whether execution has recorded a native break at this exact world cell. */
+    /** 执行过程是否已记录此世界格的原生破坏。 */
     public boolean broke(BlockPos pos) {
         if (pos == null) return false;
         for (List<BlockPos> cells : breaks.values()) {
