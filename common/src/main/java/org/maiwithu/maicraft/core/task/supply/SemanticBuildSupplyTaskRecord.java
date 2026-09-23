@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Retains one reviewed build while generic semantic supply and carried-material batches execute. */
+/** 在通用语义供料和随身材料批次执行期间，保留一份已审核建筑方案。 */
 public final class SemanticBuildSupplyTaskRecord extends TaskRecord
         implements InternalPositionReceipt {
     public final BuildTaskRecord plan;
@@ -17,7 +17,7 @@ public final class SemanticBuildSupplyTaskRecord extends TaskRecord
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
     public final List<String> protectedLabels;
-    /** False only when the player explicitly requested the concrete preferred palette. */
+    /** 仅当玩家明确指定了具体优先材料方案时为 false。 */
     public final boolean broadenMaterialFamilies;
     private Position verifiedPosition;
 
