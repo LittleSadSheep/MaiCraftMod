@@ -11,7 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 
-/** Exact permanent materials remain reserved even when a spare scaffold is only in cold inventory. */
+/** 即使多余脚手架只在尚未选中的背包槽位中，永久材料仍须精确保留。 */
 public final class BuildTemporarySupportMaterialsTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -37,7 +37,7 @@ public final class BuildTemporarySupportMaterialsTest {
         check(BuildTemporarySupportMaterials.choose(allowed, required, item -> item == Items.STONE ? 40 : 64, 1, false) == Items.COBBLESTONE,
                 "Non-permanent material wins even when permanent material has a surplus");
 
-        // SemanticBuildSupply hands every child the complete source.targets, not only its affordable prefix.
+        // SemanticBuildSupply 会将完整 source.targets 交给每个子任务，而不只是当前负担得起的前缀。
         var laterBatch = BuildTemporarySupportMaterials.remaining(targets, target -> target.pos().getX() < 18);
         check(laterBatch.get(Items.STONE) == 18, "Only genuinely satisfied permanent targets leave the reservation");
         check(BuildTemporarySupportMaterials.inventoryChoice(inventory(18, 64), allowed, laterBatch).item() == Items.COBBLESTONE,

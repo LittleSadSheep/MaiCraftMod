@@ -31,8 +31,7 @@ public final class MachineBlueprintStateTest {
         rejectState("minecraft:oak_slab", Map.of("waterlogged", "true"), "runtime state");
         check(MachinePlacementRules.resolveState("minecraft:oak_leaves", Map.of()).getValue(BlockStateProperties.PERSISTENT),
                 "ordinary item-placement normalization may fill unspecified runtime defaults");
-        // POWERED is deliberately absent from BuildValidity's authored-property whitelist,
-        // exercising the same generic name lookup used for optional-mod custom properties.
+        // POWERED 有意不在 BuildValidity 的手工属性白名单中，以此验证可选模组自定义属性使用的通用名称查找逻辑。
         BlockState disabled = Blocks.LEVER.defaultBlockState().setValue(BlockStateProperties.POWERED, false);
         BlockState enabled = disabled.setValue(BlockStateProperties.POWERED, true);
         BuildTaskRecord.Target exact = new BuildTaskRecord.Target(enabled, Items.STONE, BlockPos.ZERO,

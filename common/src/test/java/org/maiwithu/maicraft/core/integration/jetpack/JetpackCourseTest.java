@@ -65,7 +65,7 @@ public final class JetpackCourseTest {
             var input = JetpackSteering.toward(position, velocity, aim, 0, centered, POWER);
             check(!input.sneaking(), "controller must not select native fast descent");
             double dy = tick == 0 ? .42 : JetpackDynamics.nextVertical(velocity.y, input.jumping(), POWER);
-            // Native hover horizontal impulse plus vanilla non-sprinting air movement; yaw is fixed.
+            // 使用原生悬停水平冲量和原版非疾跑空中移动；偏航角保持不变。
             double dx = velocity.x + input.strafe() * (POWER.horizontal() + .02);
             double dz = velocity.z + input.forward() * (POWER.horizontal() * (input.forward() < 0 ? .8 : 1.2) + .02);
             Vec3 next = position.add(dx, dy, dz);
@@ -98,7 +98,7 @@ public final class JetpackCourseTest {
                 new Vec3(1, 12, 0), new Vec3(1, 10, 0)), List.of(), 100);
         check(JetpackRoute.nextWaypoint(open, ascending, new Vec3(0, 12.8, 0), 1, POWER) == 2,
                 "native upward coasting above the cruise minimum remains an arrived ascent");
-        // Actual failed sweep from the cross-floor trial: turning early intersected the Y114 floor.
+        // 来自跨楼层测试的真实失败扫掠轨迹：过早转向会撞上 Y=114 的地板。
         var floor = new AABB(-78, 114, -13, -77, 115, -12);
         JetpackRoute.Space scene = new JetpackRoute.Space() {
             public boolean clear(Vec3 a, Vec3 b) {

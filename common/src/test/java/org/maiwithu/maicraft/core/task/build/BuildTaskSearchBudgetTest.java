@@ -19,7 +19,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 
-/** The production task must retain an unfinished search across ticks instead of draining or deferring it. */
+/** 正式施工任务必须跨 tick 保留未完成的搜索，不能一次耗尽预算或将其延后遗失。 */
 public final class BuildTaskSearchBudgetTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -121,7 +121,7 @@ public final class BuildTaskSearchBudgetTest {
             checkCleared(task, "late nearby support invalidates completed positive candidates too");
             check(field("gesture").get(task) == boundGesture && field("nav").get(task) == boundNavigation,
                     "invalidating candidates must not retarget or restart the walk already bound to a gesture");
-            // The navigation object has not been ticked; release the fixture's binding to model its settled boundary.
+            // 导航对象尚未推进 tick；释放夹具的绑定，以模拟已结算边界。
             field("nav").set(task, null); field("gesture").set(task, null);
             h.nextTick();
             check(invoke(task, "placeNavTick") == TaskState.RUNNING

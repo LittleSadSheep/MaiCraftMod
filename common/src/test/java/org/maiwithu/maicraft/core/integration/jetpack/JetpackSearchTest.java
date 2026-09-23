@@ -59,7 +59,7 @@ public final class JetpackSearchTest {
         Vec3 target = new Vec3(4.5, 0, .5);
         JetpackRoute.Space rooms = new JetpackRoute.Space() {
             public boolean clear(Vec3 from, Vec3 to) {
-                // Two disconnected narrow rooms, both with a valid departure/arrival column.
+                // 两个彼此隔离的狭窄房间，各自都有有效的出发与到达柱列。
                 return inRoom(from, to, 0, 1) || inRoom(from, to, 4, 5);
             }
             private boolean inRoom(Vec3 from, Vec3 to, double low, double high) {
@@ -88,7 +88,7 @@ public final class JetpackSearchTest {
     private static void incrementalGeometry() {
         var open = new ShapeSpace(List.of());
         var search = new JetpackRoute.Search(START, DECK, POWER);
-        // Landing, approach and departure each consume an operation; no complete template yet.
+        // 着陆、接近和起飞各消耗一次操作；此时尚无完整路线模板。
         search.advance(open, 3, Long.MAX_VALUE);
         check(!search.done() && search.expanded() == 0, "initial queries must yield before full route validation");
         JetpackRoute.Space changed = new ShapeSpace(List.of()) {
