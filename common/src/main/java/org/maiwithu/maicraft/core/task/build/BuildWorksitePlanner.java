@@ -39,7 +39,7 @@ final class BuildWorksitePlanner {
         double overhead() { return placements.stream().mapToDouble(p -> Math.max(0,
                 p.target().pos().getY() + (constructionAccess ? 0 : 1) - feet.y)).average().orElse(0); }
     }
-    /** A partial result may be used immediately, but an unfinished empty result is never no-path. */
+    /** 部分结果可以立即使用；尚未完成且结果为空时，绝不能判定为无路可走。 */
     record Progress(boolean complete, Worksite best, int candidateChecks, int placementChecks) {}
 
     private BuildWorksitePlanner() {}
@@ -68,7 +68,7 @@ final class BuildWorksitePlanner {
         private List<BuildTaskRecord.Target> nearby = List.of();
         private final List<Placement> placements = new ArrayList<>();
 
-        /** Restart after confirmed placement/world change; proofs are observations, never action receipts. */
+        /** 放置或世界变化确认后重新开始；证明来自观察，不使用动作回执替代。 */
         Search(LocalPlayer player, List<BuildTaskRecord.Target> pending,
                Map<Long, BuildTaskRecord.Target> targets, Predicate<BlockPos> allowed,
                LongSet forbidden, Set<BlockPos> rejected,
@@ -144,7 +144,7 @@ final class BuildWorksitePlanner {
         private List<BuildTaskRecord.Target> nearby(Vec3 feet) {
             List<BuildTaskRecord.Target> result = new ArrayList<>();
             BlockPos base = bucket(BlockPos.containing(feet));
-            // Five-block reach plus the clicked neighboring shape; buckets avoid rescanning the entire blueprint.
+            // 五格交互距离再加上被点击邻格的形状范围；按区块分桶可避免重复扫描整个蓝图。
             for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) for (int z = -2; z <= 2; z++)
                 for (var target : buckets.getOrDefault(base.offset(x, y, z), List.of()))
                     if (target.pos().distToCenterSqr(feet.add(0, 1.62, 0)) <= 36) result.add(target);
@@ -168,7 +168,7 @@ final class BuildWorksitePlanner {
         }
     }
 
-    /** Merge overlapping candidate squares as row intervals before enumerating any stance. */
+    /** 在枚举站位前，先按行区间合并重叠的候选方形区域。 */
     private static final class CandidateRows {
         private final Map<BlockPos, TreeMap<Integer, Integer>> rows = new LinkedHashMap<>();
         private Iterator<Map.Entry<BlockPos, TreeMap<Integer, Integer>>> rowIterator;
