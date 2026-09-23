@@ -107,7 +107,7 @@ public final class MachineBlueprintDocument {
             if (document.has(field) && !document.get(field).isJsonObject()) throw bad(field + " must be an object");
         if (!document.has("blocks") || !document.get("blocks").isJsonArray()) throw bad("blueprint.blocks must be an array");
         JsonArray cells = document.getAsJsonArray("blocks");
-        if (cells.isEmpty() || cells.size() > limit) throw bad("blueprint.blocks must contain 1.." + limit + " targets");
+        if (cells.size() > limit) throw bad("blueprint.blocks exceeds " + limit + " targets");
         JsonObject result = new JsonObject(); result.addProperty("schema_version", 1);
         if (document.has("constraints")) {
             // 显式机器只接收已能执行的约束，未知字段不能被悄悄忽略。
@@ -162,6 +162,9 @@ public final class MachineBlueprintDocument {
             result.add("assembly", document.get("assembly").deepCopy());
             result.add("assembly", MachineAssemblyDocument.normalize(result, radius));
         }
+        // 纯运输蓝图可以由原生安装展开出准备轴，但最终仍须有实体目标，生成材料也不能绕过预算。
+        int entities = result.has("entities") ? result.getAsJsonArray("entities").size() : 0;
+        if (blocks.isEmpty() || (long) blocks.size() + entities > limit) throw bad("blueprint.blocks must expand to 1.." + limit + " targets");
         result.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(document));
         if (document.has("onsite_reason")) result.add("onsite_reason", document.get("onsite_reason").deepCopy());
         if (document.has("external_inputs")) result.add("external_inputs", document.get("external_inputs").deepCopy());

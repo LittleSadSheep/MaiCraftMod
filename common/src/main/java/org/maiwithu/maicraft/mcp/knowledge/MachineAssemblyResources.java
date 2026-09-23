@@ -27,7 +27,7 @@ public final class MachineAssemblyResources {
         result.addProperty("design_policy", "The author selects every component, work surface and transport technology. No product-specific workstation or implicit pipe/sorter/depot is inserted.");
         JsonObject belt = new JsonObject(); belt.addProperty("type", "create:belt"); belt.addProperty("available", CreateBeltAccess.available());
         belt.addProperty("item_id", CreateBeltAccess.ITEM.toString()); belt.addProperty("connector_count_per_link", 1);
-        belt.addProperty("preparation", "Declare both endpoint create:shaft blocks with the same explicit axis. Every intermediate position must be empty or an explicitly declared shaft/air target. Undeclared obstacles are not removed.");
+        belt.addProperty("preparation", "Choose first/second positions; omitted endpoint shafts are generated with an axis perpendicular to belt travel. Explicit endpoint shafts are checked, never silently rotated. Intermediate positions must be empty or declared matching shaft/air targets. Undeclared obstacles are not removed.");
         belt.addProperty("native_action", "Select a plain unmarked connector; use first shaft then second shaft through the actual crosshair; verify the complete chain and one-item consumption. Never place belt blocks one by one.");
         belt.addProperty("processing_surface", "Only horizontal belts support the external-workpiece processing relation; dry prepared spans only.");
         belt.addProperty("transport_direction", "First/second define connector geometry, not guaranteed item flow. Verify actual motion and signed kinetic speed before claiming the intended transport direction.");
@@ -44,7 +44,7 @@ public final class MachineAssemblyResources {
                 {"type":"object","required":["blocks"],"additionalProperties":false,
                  "properties":{
                    "schema_version":{"const":1},"expected_output":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9/._-]+$"},
-                   "blocks":{"type":"array","minItems":1,"items":{"oneOf":[
+                   "blocks":{"type":"array","minItems":0,"items":{"oneOf":[
                      {"type":"object","required":["offset","block_id"],"additionalProperties":false,"properties":{
                        "offset":{"$ref":"#/$defs/position"},"block_id":{"type":"string"},"properties":{"type":"object","additionalProperties":{"type":"string"}},"nbt":{"type":"object"}}},
                      {"type":"object","required":["offset","item_id","part"],"additionalProperties":false,"properties":{
@@ -57,6 +57,7 @@ public final class MachineAssemblyResources {
                        "processor":{"$ref":"#/$defs/position"},"surface":{"$ref":"#/$defs/position"}}}}}},
                    "external_inputs":{"type":"array"},"supply_preference":{"enum":["external","onsite"]},"onsite_reason":{"type":"string"},
                    "metadata":{"type":"object"},"evidence":{"type":"object"},"entities":{"type":"array"}},
+                 "anyOf":[{"properties":{"blocks":{"minItems":1}}},{"required":["assembly"],"properties":{"assembly":{"required":["installations"],"properties":{"installations":{"minItems":1}}}}}],
                  "$defs":{"position":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"integer"}}}}
                 """).getAsJsonObject();
         var budget = MachinePlanningBudget.current();

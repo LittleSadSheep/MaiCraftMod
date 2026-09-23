@@ -24,6 +24,8 @@ public final class MachineAssemblyDocument {
         JsonObject source = blueprint.has("assembly") ? object(blueprint.get("assembly"), "assembly") : new JsonObject();
         keys(source, Set.of("installations", "processing"));
         JsonArray installations = array(source, "installations"), processing = array(source, "processing");
+        // 作者只给带段时先推导端轴，再让原有占格、加工与禁用模组检查审查完整展开结果。
+        MachineBeltAssembly.prepareShafts(blueprint, installations, radius);
         JsonArray installs = new JsonArray(), relations = new JsonArray();
         Map<BlockPos, JsonObject> blocks = blocks(blueprint); Set<BlockPos> occupied = new LinkedHashSet<>(), parts = new LinkedHashSet<>();
         for (var raw : blueprint.getAsJsonArray("blocks")) if (raw.getAsJsonObject().has("part")) parts.add(position(raw.getAsJsonObject().get("offset")));
@@ -127,7 +129,7 @@ public final class MachineAssemblyDocument {
         return Direction.Axis.valueOf(axis.toUpperCase(Locale.ROOT));
     }
     public static BlockPos position(JsonElement value) { return position(value, MachinePlanningBudget.current().maxRadius()); }
-    private static BlockPos position(JsonElement value, int radius) {
+    public static BlockPos position(JsonElement value, int radius) {
         if (value == null || !value.isJsonArray() || value.getAsJsonArray().size() != 3) throw bad("assembly_position_requires_three_integers");
         int[] axes = new int[3];
         for (int i = 0; i < 3; i++) try {
