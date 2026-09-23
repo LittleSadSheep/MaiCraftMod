@@ -14,16 +14,16 @@ public final class CollectItemsTaskRecord extends TaskRecord {
 
     public static final String TOOL_NAME = "collect_items";
 
-    /** Item types to collect; empty = collect every dropped item. */
+    /** 要收集的物品类型；为空时收集所有掉落物。 */
     public final Set<Item> filter;
-    /** Search radius in blocks. */
+    /** 搜索半径，单位为方块。 */
     public final int radius;
-    /** Human-readable label for messages (e.g. "all items" or "diamond"). */
+    /** 用于消息的可读标签，例如“所有物品”或“钻石”。 */
     public final String label;
     /** 内部任务已证明归属的实体身份；空集合沿用普通拾取的不限身份语义。 */
     public final Set<UUID> targetUuids;
 
-    /** Live progress, updated by the goal as items are absorbed. */
+    /** 实时进度；目标物品被收入背包时更新。 */
     private int collected = 0;
 
     public CollectItemsTaskRecord(String toolCallId, long deadlineGameTime,
