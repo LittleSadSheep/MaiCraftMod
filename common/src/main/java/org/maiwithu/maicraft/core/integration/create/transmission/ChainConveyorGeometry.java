@@ -8,7 +8,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Native pair limits plus a conservative clear envelope around both exposed chain runs. */
+/** 原生链条端点间距限制，以及环绕两段外露链条的保守净空范围。 */
 public final class ChainConveyorGeometry {
     public record Strand(Vec3 start, Vec3 end) {}
     private ChainConveyorGeometry() {}
@@ -27,7 +27,7 @@ public final class ChainConveyorGeometry {
                 checkBox(world, first, second, around(strand.start.lerp(strand.end, samples == 0 ? 0 : (double) index / samples), .2));
         }
     }
-    /** Mirrors the two native ConnectionStats tangents: 1.25-block radius, +/-35 degrees, height .375. */
+    /** 复现原生两条 ConnectionStats 切线：半径 1.25 格，角度 ±35 度，高度 0.375 格。 */
     public static List<Strand> strands(BlockPos first, BlockPos second) {
         BlockPos delta = second.subtract(first); double theta = Math.atan2(delta.getX(), delta.getZ());
         Vec3 a = Vec3.atBottomCenterOf(first).add(0, .375, 0), b = Vec3.atBottomCenterOf(second).add(0, .375, 0);

@@ -10,7 +10,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 import java.util.List;
 
-/** Current swept-volume checks accept only air or exactly matching owned targets, including their real post height. */
+/** 实时扫掠体积检查只接受空气或完全匹配且归属明确的目标，包括其真实支柱高度。 */
 final class KineticClearanceRevalidation {
     private static final int MAX_GROUND_SCAN = 256;
     private KineticClearanceRevalidation() {}
@@ -29,7 +29,7 @@ final class KineticClearanceRevalidation {
             var work = new KineticGeometryWork(plan.source(), plan.sourceFace(), plan.target(), plan.targetFace(), remaining,
                     new Limits(1024, clearance, Math.max(1, plan.placements().size()), 512));
             work.blocks.putAll(planned);
-            // Individual explicit links may form a path without matching insertion-order adjacency.
+            // 单独声明的连接可能组成路线，但不一定符合插入顺序的相邻关系。
             for (ChainLink link : plan.chainLinks()) if (!KineticChainClearance.clear(work, List.of(link.from(), link.to()))) return false;
         }
         return KineticCogwheelGeometry.clearanceValid(plan, remaining);

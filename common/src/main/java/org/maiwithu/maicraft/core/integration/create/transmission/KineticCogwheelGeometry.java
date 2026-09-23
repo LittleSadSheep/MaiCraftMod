@@ -14,7 +14,7 @@ import java.util.Collections;
 import java.util.Locale;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 
-/** One audited radial gear takeoff, then an ordinary bounded shaft/gearbox or conveyor alternative. */
+/** 使用一个经过审计的径向齿轮输出接口，再接普通有界轴/齿轮箱或输送机候选。 */
 final class KineticCogwheelGeometry {
     private record Takeoff(BlockPos at, String family, Direction.Axis axis, String kind) {}
     private KineticCogwheelGeometry() {}

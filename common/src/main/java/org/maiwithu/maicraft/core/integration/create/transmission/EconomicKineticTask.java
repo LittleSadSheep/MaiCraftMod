@@ -26,7 +26,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** Chooses a complete economical transmission, then constructs and checks its real native outcome. */
+/** 先选择完整且经济的传动方案，再进行施工并核实真实原生结果。 */
 final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTaskRecord> {
     private enum Phase { DISCOVER, PLAN, SOURCE, TARGET, EXISTING, MATERIALS, BUILD, LINKS, SOURCE_AFTER, TARGET_AFTER, DONE }
     private final Level world;
@@ -256,8 +256,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(!KineticRouteBuild.matches(player,selected))return failure("kinetic_built_geometry_changed");
         KineticRouteContinuations.retain(player,r,selected,costReport);
         if(linkIndex>=selected.chainLinks().size()) {
-            // The source entity is retained throughout construction. Reuse its admitted network identity;
-            // the destination's fresh native rotation proves the newly attached network still runs.
+            // 施工期间一直保留来源实体；复用其已准入的网络身份，并通过目标端新鲜的原生旋转证据确认新连接仍在运行。
             var live=KineticNativeView.read(world,selected.source().position(),selected.sourceFace(),selected.source().chainInterface());
             if(live==null||!live.powered())return failure("kinetic_source_lost_power_after_construction");
             if(!KineticPowerEvidence.sameNetwork(live,sourceBefore)){phase=Phase.SOURCE_AFTER;return TaskState.RUNNING;}

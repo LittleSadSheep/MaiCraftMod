@@ -52,7 +52,7 @@ final class CreateMechanicalContinuations {
         return entry;
     }
 
-    /** A continuation is consumed before execution so two callers cannot replay the same prefix. */
+    /** 续接凭证会在执行前消费，避免两个调用方重放同一前缀。 */
     static synchronized Entry take(UUID token) {
         purgeExpired();
         return ENTRIES.remove(token);

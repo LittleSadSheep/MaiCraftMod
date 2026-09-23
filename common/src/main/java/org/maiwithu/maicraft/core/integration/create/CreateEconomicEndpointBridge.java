@@ -5,7 +5,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord;
 
-/** Resolves semantic anchors before handing concrete, freshly observed machines to economical routing. */
+/** 先解析语义锚点，再将具体且新鲜观察到的机器交给经济路线规划。 */
 final class CreateEconomicEndpointBridge {
     private CreateEconomicEndpointBridge() {}
     static boolean direct(Level world, CreateMechanicalPower.Request request) {

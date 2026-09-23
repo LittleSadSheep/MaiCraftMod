@@ -6,7 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 
-/** Straight horizontal chain-drive bridges between exact parallel vertical shaft interfaces. */
+/** 在精确平行的竖直传动轴接口之间，构建水平直线链传动桥。 */
 final class KineticEncasedGeometry {
     private KineticEncasedGeometry() {}
     static Plan candidate(Endpoint source, Direction sourceFace, Endpoint target, Direction targetFace, Terrain terrain, Limits limits) {

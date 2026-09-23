@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-/** Real view samples and existing dry stances, including ground below elevated shaft posts. */
+/** 真实视野采样和已有干燥站位，包括高架传动轴支柱下方的地面。 */
 final class ChainConveyorInteraction {
     private ChainConveyorInteraction() {}
     static Vec3 aim(LocalPlayer player, BlockPos target, Vec3 eye) {

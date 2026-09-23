@@ -63,7 +63,7 @@ final class CreateKineticsBridge {
                     Object value = IS_OVERSTRESSED.invoke(blockEntity);
                     if (value instanceof Boolean bool) overstressed = bool;
                 } catch (ReflectiveOperationException | RuntimeException ignored) {
-                    // Optional evidence only: speed/network inspection remains authoritative.
+                    // 仅为可选证据；速度和网络检查仍是权威依据。
                 }
             }
             return Float.isFinite(speed) ? new Facts(speed, network, overstressed) : null;

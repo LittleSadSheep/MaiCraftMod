@@ -8,7 +8,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
-/** Read-only Create 6 chain-conveyor API; no connection setters or packet constructors are exposed. */
+/** 只读访问 Create 6 链条输送机 API；不暴露连接设置器或数据包构造器。 */
 public final class ChainConveyorBridge {
     public static final String BLOCK_ID = "create:chain_conveyor";
     public static final String ENTITY = "com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity";
@@ -72,7 +72,7 @@ public final class ChainConveyorBridge {
         if (outward != inward) throw new IllegalArgumentException("chain_conveyor_one_sided_link_requires_inspection");
         return outward;
     }
-    /** Native connection coordinates are relative to this conveyor; snapshots never grant mutation permission. */
+    /** 原生连接坐标相对于此输送机；快照永不授予修改权限。 */
     public static Set<BlockPos> connections(BlockEntity entity) {
         if (!isConveyor(entity)) throw new IllegalArgumentException("chain_conveyor_endpoint_changed");
         try {

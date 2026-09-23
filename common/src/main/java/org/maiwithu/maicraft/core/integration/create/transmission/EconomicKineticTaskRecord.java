@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 
-/** A specified source remains fixed; omission requests bounded nearest suitable-source discovery. */
+/** 指定来源后保持固定；省略来源时才启动有界的最近合适来源搜索。 */
 public final class EconomicKineticTaskRecord extends TaskRecord {
     static { TaskFactory.register(EconomicKineticTaskRecord.class,EconomicKineticTask::new); }
     public final String dimension,sourceLabel,targetLabel,targetBlockId;

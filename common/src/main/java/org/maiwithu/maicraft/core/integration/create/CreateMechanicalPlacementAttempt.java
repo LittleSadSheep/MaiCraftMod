@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
-/** One placement approach and at most one observed jump; reports physical evidence on failure. */
+/** 执行一次放置接近和最多一次已观察到的跳跃；失败时报告物理证据。 */
 final class CreateMechanicalPlacementAttempt {
     private boolean jumpRequested, airborne;
     private int jumpTicks, jumpCommands, centerTicks, exactHits;
