@@ -621,7 +621,7 @@ public final class SemanticContainerCompanionTask
             AbstractContainerMenu menu, List<ItemStack> simulated) {
         List<Allocation> result = new ArrayList<>();
         int remaining = amount;
-        // Fill compatible stacks before consuming empty slots.
+        // 先填充可兼容的已有堆叠，再占用空槽位。
         for (int pass = 0; pass < 2 && remaining > 0; pass++) {
             for (int destinationIndex : destinations) {
                 if (remaining <= 0) break;

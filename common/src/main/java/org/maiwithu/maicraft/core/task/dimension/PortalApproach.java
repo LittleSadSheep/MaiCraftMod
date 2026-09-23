@@ -11,7 +11,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Choose a real exterior stance with a visible top face, before ignition or eye insertion. */
+/** 点燃传送门或放入末影之眼前，先选择一个真实的外侧站位，确保能看见目标顶面。 */
 final class PortalApproach {
     private PortalApproach() {}
 

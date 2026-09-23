@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.core.task.dimension;
 import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 
-/** Private preparation child; actual portal cells never become model-supplied coordinates. */
+/** 内部传送门准备子任务；真实传送门方块格绝不会作为坐标交由模型指定。 */
 public final class PortalPreparationTaskRecord extends TaskRecord {
     final String destination;
     final int radius;

@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
 
-/** Explicit portal permission is independent of route excavation and rare-item consumption. */
+/** 传送门操作授权与路线挖掘许可及稀有物品消耗许可相互独立。 */
 public record PortalPreparationPolicy(boolean enabled, boolean allowRareConsumables, boolean allowCombat,
                                       int maxStructureDistance, MaterialPolicy materialPolicy,
                                       List<Source> allowedSources, List<String> protectedLabels) {

@@ -30,7 +30,7 @@ import java.util.Locale;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
-/** Observe -> obtain materials -> build/repair -> use native items -> verify the actual portal. */
+/** 按顺序执行：观察 → 获取材料 → 建造/修复 → 使用原生物品 → 核实真实传送门。 */
 public final class PortalPreparationTask extends AbstractCompanionTask<PortalPreparationTaskRecord> {
     private enum Phase { SURVEY, SUPPLY, RETURN, BUILD, LOCATE, MOVE, ACTIVATE, VERIFY }
     private final ClientLevel world;

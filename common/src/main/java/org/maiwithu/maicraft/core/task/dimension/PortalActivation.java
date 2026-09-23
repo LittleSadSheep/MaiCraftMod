@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** One aimed block use. Never falls through to throwing an eye, and never retries an uncertain click. */
+/** 一次瞄准方块使用操作；绝不回退为投掷末影之眼，也不会重试结果不确定的点击。 */
 final class PortalActivation {
     private final Item item;
     private final BlockPos target;

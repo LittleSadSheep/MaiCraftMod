@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 
-/** Counts real completed recipe-output events for each declared process, including upstream intermediates. */
+/** 统计每个声明工艺真实完成的配方输出事件，包括上游中间产物。 */
 final class ProductionProcessProgress {
     private record Process(String producer, String recipe) {}
     private final Map<Process, List<String>> processes = new LinkedHashMap<>();
@@ -40,7 +40,7 @@ final class ProductionProcessProgress {
                 || !ProductionFlowPaths.text(event, "provenance").equals("native_recipe_output") || !completed(event)) return;
         String producer = ProductionFlowPaths.text(event, "producer"), recipe = ProductionFlowPaths.text(event, "recipe_id");
         List<String> matching = processes.getOrDefault(new Process(producer, recipe), List.of());
-        // Aliased identical processes cannot both claim ownership of one physical completion.
+        // 别名相同的工艺不能同时认领同一个实际完成事件。
         if (matching.size() != 1) return;
         String id = matching.getFirst(); counts.put(id, Math.incrementExact(counts.get(id)));
         latestTick = Math.max(latestTick, ProductionEventCursor.number(event, "tick"));

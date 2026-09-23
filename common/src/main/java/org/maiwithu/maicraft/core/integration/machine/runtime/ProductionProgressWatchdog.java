@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.machine.runtime;
 
-/** Bounds complete native observation rounds while allowing fresh input and longer physical delivery paths. */
+/** 限制完整原生观察轮次，同时允许新输入到达和较长的实体交付路线。 */
 final class ProductionProgressWatchdog {
     private final long initialLimit, processingLimit, deliveryLimit;
     private long mutationTick = -1;

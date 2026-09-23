@@ -9,7 +9,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 
-/** Only live shortages become acquire tasks; frame materials are reserved from scaffolding supply. */
+/** 只有实时确认的缺料才会创建获取任务；门框材料会从脚手架供料中预留出来。 */
 final class PortalPreparationSupplies {
     record Need(List<Item> alternatives, int count, String purpose) {
         boolean satisfied(LocalPlayer player) {
