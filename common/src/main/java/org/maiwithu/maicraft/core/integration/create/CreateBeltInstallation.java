@@ -42,6 +42,14 @@ public final class CreateBeltInstallation implements MachineNativeInstallation {
     @Override public Map<BlockPos, BlockState> preparation() { return preparation; }
     @Override public Map<BlockPos, BlockState> targets() { return targets; }
     @Override public Map<ResourceLocation, Integer> materials() { return Map.of(CreateBeltAccess.ITEM, 1); }
+    @Override public Map<ResourceLocation, Integer> materials(Level world) {
+        var missing = CreateBeltAccess.pulleysToAdd(world, span, pulleys);
+        return missing == null ? materials() : missing.isEmpty() ? Map.of() : Map.of(CreateBeltAccess.SHAFT, missing.size());
+    }
+    @Override public boolean reusesPreparation(Level world) { return CreateBeltAccess.pulleysToAdd(world, span, pulleys) != null; }
+    @Override public Set<BlockPos> mutationPositions(Level world) {
+        var missing = CreateBeltAccess.pulleysToAdd(world, span, pulleys); return missing == null ? targets.keySet() : missing;
+    }
     @Override public boolean matches(Level world) { return CreateBeltAccess.matches(world, span, pulleys); }
     @Override public TaskRecord task(String id, long deadline, List<BlockPos> installation, List<String> protectedLabels) {
         return new CreateBeltInstallTaskRecord(id, deadline, span, pulleys, installation, protectedLabels);

@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.core.integration.create;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Comparator;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
@@ -26,7 +29,7 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /** 准备连接器 -> 点击第一轴 -> 确认端点标记 -> 点击第二轴 -> 核对整段与消耗；任何未确认点击都不重放。 */
 final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstallTaskRecord> {
-    private enum Phase { EQUIP, FIRST, FIRST_CONFIRM, SECOND, SECOND_CONFIRM, DONE }
+    private enum Phase { EQUIP, FIRST, FIRST_CONFIRM, SECOND, SECOND_CONFIRM, PULLEY, PULLEY_CONFIRM, DONE }
     private final FirstPersonActionGate selection = new FirstPersonActionGate();
     private final Level world;
     private final boolean creative;
@@ -38,6 +41,10 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
     private int source = -1, countBefore, countAfter;
     private boolean firstSubmitted, secondSubmitted, verified, noChange, pendingSelection;
     private String failure;
+    private boolean supplement, pulleySubmitted;
+    private List<BlockPos> missingPulleys = List.of();
+    private final Set<BlockPos> currentPulleys = new LinkedHashSet<>();
+    private int pulleyIndex, pulleyConsumed;
     CreateBeltInstallTask(LocalPlayer player, CreateBeltInstallTaskRecord record) {
         super(player, record); world = player.level(); creative = player.hasInfiniteMaterials();
     }
@@ -45,6 +52,15 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
         try {
             CreateBeltGeometry.between(r.span.first(), r.span.second(), r.span.axis(), CreateBeltAccess.maximumLength());
             if (CreateBeltAccess.matches(world, r.span, r.pulleys)) { verified = noChange = true; phase = Phase.DONE; return; }
+            var missing = CreateBeltAccess.pulleysToAdd(world, r.span, r.pulleys);
+            if (missing != null) {
+                if (missing.isEmpty()) { verified = noChange = true; phase = Phase.DONE; return; }
+                supplement = true;
+                missingPulleys = missing.stream().sorted(Comparator.comparingInt((BlockPos at) -> at.getX()).thenComparingInt(BlockPos::getY).thenComparingInt(BlockPos::getZ)).toList();
+                currentPulleys.addAll(r.pulleys); currentPulleys.removeAll(missing);
+                for (BlockPos at : r.span.cells()) identities.put(at, world.getBlockEntity(at));
+                findShaft(); return;
+            }
             validatePrepared();
             for (BlockPos at : r.pulleys) identities.put(at, world.getBlockEntity(at));
             for (int slot = 0; slot < player.getInventory().items.size(); slot++)
@@ -64,6 +80,8 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
                 case FIRST_CONFIRM -> confirm(true);
                 case SECOND -> click(false);
                 case SECOND_CONFIRM -> confirm(false);
+                case PULLEY -> addPulley();
+                case PULLEY_CONFIRM -> confirmPulley();
                 case DONE -> TaskState.SUCCESS;
             };
         } catch (RuntimeException changed) { return stop("belt_native_state_unavailable: " + changed.getMessage()); }
@@ -86,6 +104,10 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
         var status = selection.select(player, source);
         if (status == FirstPersonActionGate.Status.FAILED) return stop("belt_connector_equip_failed: " + selection.failure());
         if (status != FirstPersonActionGate.Status.READY) return TaskState.RUNNING;
+        if (supplement) {
+            if (!CreateBeltAccess.plainShaft(player.getMainHandItem())) return stop("belt_plain_shaft_missing");
+            countBefore = CreateBeltAccess.shaftCount(player); phase = Phase.PULLEY; return TaskState.RUNNING;
+        }
         if (!CreateBeltAccess.unselected(player.getMainHandItem())) return stop("belt_foreign_selection_preserved");
         countBefore = CreateBeltAccess.count(player); evidence = new BeltLinkReceipt(r.span.first(), countBefore, creative);
         phase = Phase.FIRST; return TaskState.RUNNING;
@@ -144,6 +166,46 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
             throw new IllegalArgumentException("belt_endpoint_unreachable");
         return false;
     }
+    private void findShaft() {
+        source = -1; selection.reset();
+        for (int slot = 0; slot < player.getInventory().items.size(); slot++) if (CreateBeltAccess.plainShaft(player.getInventory().getItem(slot))) { source = slot; break; }
+        if (source < 0) stop("belt_plain_shaft_missing");
+        phase = Phase.EQUIP;
+    }
+    private TaskState addPulley() {
+        BlockPos at = missingPulleys.get(pulleyIndex);
+        if (!CreateBeltAccess.matches(world, r.span, currentPulleys) || NavigationSafetyContext.protectsMutation(at)
+                || !ContainerSupplySources.accessAllowed(player, at, r.protectedLabels)) return stop("belt_pulley_precondition_changed");
+        for (var identity : identities.entrySet()) if (world.getBlockEntity(identity.getKey()) != identity.getValue()) return stop("belt_pulley_chain_replaced");
+        if (!CreateBeltAccess.plainShaft(player.getMainHandItem()) || CreateBeltAccess.shaftCount(player) != countBefore) return stop("belt_shaft_inventory_changed");
+        if (!near(at)) return TaskState.RUNNING;
+        var context = ClientRuntime.requireContext(player);
+        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) return stop("belt_foreign_menu_open");
+        if (!context.mutationAvailable() || player.getCooldowns().isOnCooldown(player.getMainHandItem().getItem())) return TaskState.RUNNING;
+        InputDriver.halt(player); InputDriver.sneak(player, false);
+        if (player.isShiftKeyDown()) return TaskState.RUNNING;
+        var point = AssemblyBlockAim.point(player, at, player.getEyePosition()); if (point == null) return TaskState.RUNNING;
+        InputDriver.lookAt(player, point); var hit = AssemblyBlockAim.trace(player, player.getEyePosition(), player.getViewVector(1));
+        if (hit == null || !hit.getBlockPos().equals(at)) return TaskState.RUNNING;
+        if (pulleySubmitted) return stop("belt_pulley_click_replay_blocked");
+        Set<BlockPos> expected = new LinkedHashSet<>(currentPulleys); expected.add(at); pulleySubmitted = true;
+        // 单次右键补轴，原生带轮状态与一根轴的消耗同时成立才算完成；未确认动作不补发。
+        action = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit, fresh -> {
+            if (fresh.player() != player || fresh.level() != world) return NativeConfirmation.Verdict.DIVERGED;
+            return BeltLinkReceipt.consumedOne(countBefore, CreateBeltAccess.shaftCount(player), creative, CreateBeltAccess.matches(world, r.span, expected));
+        }, 100);
+        phase = Phase.PULLEY_CONFIRM; return TaskState.RUNNING;
+    }
+    private TaskState confirmPulley() {
+        var context = ClientRuntime.requireContext(player); action = context.actions().poll(context, action);
+        if (!action.terminal()) return TaskState.RUNNING;
+        if (action.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) return stop("belt_pulley_click_unconfirmed_no_replay");
+        countAfter = CreateBeltAccess.shaftCount(player); pulleyConsumed += countBefore - countAfter;
+        BlockPos completed = missingPulleys.get(pulleyIndex++); currentPulleys.add(completed);
+        identities.put(completed, world.getBlockEntity(completed)); pulleySubmitted = false; action = null;
+        if (pulleyIndex == missingPulleys.size()) { verified = true; phase = Phase.DONE; return TaskState.SUCCESS; }
+        findShaft(); return TaskState.RUNNING;
+    }
     private TaskState stop(String code) { failure = code; fail(code, FailureType.UNKNOWN); return TaskState.FAILED; }
     @Override protected void cleanup() {
         // 停止任务后不补发第二次连接；本任务留下的端点标记会进入回执，外来标记绝不清除。
@@ -155,17 +217,18 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
         }
         selection.reset(); InputDriver.halt(player); super.cleanup();
     }
-    @Override public boolean mustSettleBeforeSatisfiedCancellation() { return firstSubmitted && !verified; }
+    @Override public boolean mustSettleBeforeSatisfiedCancellation() { return firstSubmitted && !verified || pulleySubmitted; }
     @Override public Map<String, Object> progress() { return Map.of("task", name(), "phase", phase.name().toLowerCase(), "native_link_verified", verified); }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> result = new LinkedHashMap<>(); result.put("native_link_verified", verified); result.put("no_change", noChange);
-        result.put("connector_consumed", verified && !noChange ? countBefore - countAfter : 0);
-        result.put("connector_selection_pending", pendingSelection); result.put("effects_started", firstSubmitted);
-        result.put("outcome_uncertain", !verified && firstSubmitted);
-        result.put("effects_settled", verified || !firstSubmitted);
-        result.put("world_change_uncertain", secondSubmitted && !verified);
+        result.put("connector_consumed", !supplement && verified && !noChange ? countBefore - countAfter : 0);
+        result.put("pulleys_added", pulleyIndex); result.put("shafts_consumed", pulleyConsumed);
+        result.put("connector_selection_pending", pendingSelection); result.put("effects_started", firstSubmitted || pulleyIndex > 0 || pulleySubmitted);
+        result.put("outcome_uncertain", !verified && firstSubmitted || pulleySubmitted);
+        result.put("effects_settled", (verified || !firstSubmitted) && !pulleySubmitted);
+        result.put("world_change_uncertain", secondSubmitted && !verified || pulleySubmitted);
         if (failure != null) result.put("failure_code", failure);
         return result;
     }
-    @Override protected String successMessage() { return "传送带整段原生结构与连接器消耗已确认。"; }
+    @Override protected String successMessage() { return supplement ? "原有传送带保留，中间带轮与传动杆消耗已确认。" : "传送带整段原生结构与连接器消耗已确认。"; }
 }

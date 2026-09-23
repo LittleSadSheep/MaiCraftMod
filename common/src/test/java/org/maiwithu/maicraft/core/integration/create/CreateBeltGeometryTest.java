@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.create;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.Set;
 
 /** 检验连接器占地和加工平面，不用某种产品的固定尺寸或工位数量推导布局。 */
 public final class CreateBeltGeometryTest {
@@ -13,6 +14,11 @@ public final class CreateBeltGeometryTest {
         check(forward.properties(start, false).get("part").equals("start")
                 && forward.properties(start.east(5), false).get("part").equals("end"), "native endpoints retain their exact part roles");
         check(forward.properties(start.east(2), true).get("part").equals("pulley"), "declared intermediate shafts remain powered pulleys");
+        // 复用已有带时只补缺少的中间轴；不接受拆掉额外带轮或用相邻但不同的链冒充旧结构。
+        Set<BlockPos> endpoints = Set.of(start, start.east(5)), expanded = Set.of(start, start.east(2), start.east(5));
+        check(CreateBeltAccess.pulleyChanges(expanded, endpoints, true).equals(Set.of(start.east(2))), "only missing pulley needs a shaft click");
+        check(CreateBeltAccess.pulleyChanges(endpoints, expanded, true) == null, "existing pulleys are preserved");
+        check(CreateBeltAccess.pulleyChanges(expanded, endpoints, false) == null, "native chain identity must match");
         var reverse = CreateBeltGeometry.between(start.east(5), start, Direction.Axis.Z, 20);
         check(reverse.facing() == Direction.WEST && reverse.cells().getLast().equals(start), "reverse belt preserves author direction");
         var slope = CreateBeltGeometry.between(start, start.offset(3, 3, 0), Direction.Axis.Z, 20);

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.create;
 
 import java.util.Set;
+import java.util.LinkedHashSet;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentType;
@@ -17,6 +18,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 /** 只读原生连接许可、物品端点标记和整段带的同步状态；实际连接必须交给玩家右键。 */
 public final class CreateBeltAccess {
     public static final ResourceLocation ITEM = ResourceLocation.parse("create:belt_connector");
+    public static final ResourceLocation SHAFT = ResourceLocation.parse("create:shaft");
     private static final String CONNECTOR = "com.simibubi.create.content.kinetics.belt.item.BeltConnectorItem";
     private static final String ENTITY = "com.simibubi.create.content.kinetics.belt.BeltBlockEntity";
     private static final ResourceLocation SELECTION = ResourceLocation.parse("create:belt_first_shaft");
@@ -46,6 +48,26 @@ public final class CreateBeltAccess {
     public static int count(LocalPlayer player) {
         return player.getInventory().items.stream().filter(CreateBeltAccess::connector).mapToInt(ItemStack::getCount).sum()
                 + (connector(player.getOffhandItem()) ? player.getOffhandItem().getCount() : 0);
+    }
+    public static boolean plainShaft(ItemStack stack) { return !stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(SHAFT) && stack.getComponentsPatch().isEmpty(); }
+    public static int shaftCount(LocalPlayer player) {
+        return player.getInventory().items.stream().filter(CreateBeltAccess::plainShaft).mapToInt(ItemStack::getCount).sum()
+                + (plainShaft(player.getOffhandItem()) ? player.getOffhandItem().getCount() : 0);
+    }
+    public static Set<BlockPos> pulleysToAdd(Level world, CreateBeltGeometry.Span span, Set<BlockPos> desired) {
+        Set<BlockPos> current = new LinkedHashSet<>();
+        for (BlockPos at : span.cells()) {
+            if (!world.isLoaded(at)) return null;
+            var state = world.getBlockState(at); var part = state.getBlock().getStateDefinition().getProperty("part");
+            if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("create:belt") || part == null) return null;
+            if (!propertyMatches(state, part, "middle")) current.add(at);
+        }
+        return pulleyChanges(desired, current, matches(world, span, current));
+    }
+    static Set<BlockPos> pulleyChanges(Set<BlockPos> desired, Set<BlockPos> current, boolean chainMatches) {
+        // 只允许在同一条原生链上加轴，已有额外带轮和不同控制器都需要重新调查，绝不隐式拆除。
+        if (!chainMatches || !desired.containsAll(current)) return null;
+        Set<BlockPos> remaining = new LinkedHashSet<>(desired); remaining.removeAll(current); return Set.copyOf(remaining);
     }
     public static boolean shaft(BlockState state, CreateBeltGeometry.Span span) {
         return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("create:shaft")

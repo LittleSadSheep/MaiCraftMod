@@ -58,7 +58,12 @@ final class MachineBuildSurvey {
             for (BlockPos at : installation.targets().keySet()) if (!world.isLoaded(at)) return new Progress(false, at, null);
             try {
                 if (installation.matches(world)) completedInstallations.addAll(installation.targets().keySet());
-                else for (BlockPos at : installation.targets().keySet()) {
+                else if (installation.reusesPreparation(world)) {
+                    // 原有带只需补中间带轮时保留整段，开工前只检查新增轴点的修改权限。
+                    for (BlockPos at : installation.mutationPositions(world)) if (NavigationSafetyContext.protectsMutation(at))
+                        return new Progress(false, null, "Native pulley addition intersects a protected area.");
+                    completedInstallations.addAll(installation.targets().keySet());
+                } else for (BlockPos at : installation.targets().keySet()) {
                     if (NavigationSafetyContext.protectsMutation(at)) return new Progress(false, null, "Native installation intersects a protected area.");
                     if (BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString().equals("create:belt"))
                         return new Progress(false, null, "An existing belt has a different native chain; inspect it before replacing any segment.");

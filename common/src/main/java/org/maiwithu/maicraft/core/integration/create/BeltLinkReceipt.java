@@ -11,9 +11,14 @@ public record BeltLinkReceipt(BlockPos first, int beforeCount, boolean creative)
         return first.equals(selected) ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING;
     }
     public NativeConfirmation.Verdict second(int currentCount, BlockPos selected, boolean linked) {
-        int expected = beforeCount - (creative ? 0 : 1);
-        if (currentCount != beforeCount && currentCount != expected || selected != null && !first.equals(selected))
+        if (selected != null && !first.equals(selected))
             return NativeConfirmation.Verdict.DIVERGED;
-        return currentCount == expected && selected == null && linked ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING;
+        return consumedOne(beforeCount, currentCount, creative, selected == null && linked);
+    }
+    public static NativeConfirmation.Verdict consumedOne(int before, int now, boolean creative, boolean changed) {
+        // 连接器或补轴都必须同时确认原生结构变化与单件材料守恒，创造模式沿用零消耗语义。
+        int expected = before - (creative ? 0 : 1);
+        if (now != before && now != expected) return NativeConfirmation.Verdict.DIVERGED;
+        return now == expected && changed ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING;
     }
 }

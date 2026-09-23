@@ -171,7 +171,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (installationIndex >= r.plan.installations().size()) { phase = Phase.ATTACHMENTS; return TaskState.RUNNING; }
         var installation = r.plan.installations().get(installationIndex);
         if (installation.matches(world)) { installationIndex++; return TaskState.RUNNING; }
-        for (var material : installation.materials().entrySet()) if (!ensureItem(material.getKey(), material.getValue())) return TaskState.RUNNING;
+        for (var material : installation.materials(world).entrySet()) if (!ensureItem(material.getKey(), material.getValue())) return TaskState.RUNNING;
         start(installation.task(id(), deadline(), plannedPositions, r.protectedLabels)); return TaskState.RUNNING;
     }
 
