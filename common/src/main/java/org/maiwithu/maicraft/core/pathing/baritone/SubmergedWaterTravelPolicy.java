@@ -66,8 +66,7 @@ public final class SubmergedWaterTravelPolicy {
         }
         double rise = Math.max(0, waterSurface - player.getEyeY());
         int reserve = SwimAirBudget.requiredAirForAscent(rise, airBudget.airPerTick());
-        // Only the distance physically needed to rise before land matters. No arbitrary minimum
-        // river length is required, and lookahead stops once enough water has been proved.
+        // 只考虑在抵达陆地前实际需要的上浮距离；不要求任意的最小河流长度，并在水深证据充分后立即停止前瞻。
         double speed = Math.max(0.15, player.getDeltaMovement().horizontalDistance());
         double runway = rise / 0.12 * speed + player.getBbWidth();
         boolean approachingShore = deepRoute && routeY >= surface.getY()
@@ -149,7 +148,7 @@ public final class SubmergedWaterTravelPolicy {
         return true;
     }
 
-    /** Accept both a water node and the air node above it, then locate its actual surface. */
+    /** 同时接受水中节点和其上方空气节点，再定位真实水面。 */
     // 本类两处 hasChunkAt 在原版客户端恒为真，不能凭它们证明游泳列已加载。
     private BlockPos findWaterSurface(BlockPos route) {
         if (!context.world().hasChunkAt(route)) return null;
@@ -166,7 +165,7 @@ public final class SubmergedWaterTravelPolicy {
         return cursor;
     }
 
-    /** Two clear water cells and a breathable surface provide the body and its exit corridor. */
+    /** 两格畅通水域和可呼吸水面共同构成角色通行空间与出口走廊。 */
     private boolean safeSurfaceColumn(BlockPos surface) {
         if (!context.world().hasChunkAt(surface)) return false;
         return safeSurfaceColumn(context.world(), surface)
