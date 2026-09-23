@@ -31,8 +31,7 @@ import net.minecraft.world.level.BlockGetter;
 public abstract class Movement {
 
     /**
-     * Null while a worker assembles the path; bound exactly once when the path reaches the client
-     * thread for execution.
+     * 工作线程组装路线期间为空；路线送达客户端线程开始执行时才绑定一次。
      */
     protected LocalPlayer player;
 
@@ -253,15 +252,12 @@ public abstract class Movement {
      * 旧水中移动规则：先让刚露出水面的角色继续换气，再按目标是否更高、更低、是否有深水选择上浮、下潜或游泳。
      */
     protected final void swimTowards(MovementState state, BlockPos target) {
-        // Use the planned edge's vertical intent, not the live feet cell. Entering the real
-        // swimming pose puts the feet one cell below the abstract surface node; comparing to
-        // that live cell would misread every horizontal swim as an ascent and instantly bob
-        // back to the surface.
+        // 依据规划边的垂直意图判断，不读实时脚位：进入真实游泳姿态时，脚位会比抽象水面节点低一格；
+        // 若比较实时脚位，每次水平游泳都会被误认为正在上升，并立刻让角色浮回水面。
         int vertical = Integer.compare(target.getY(), src.getY());
         float yaw = AimGeometry.yawTo(player.getEyePosition(), AimGeometry.blockCenter(target));
-        // BreathChain owns the emergency ascent. Once the eyes clear the surface, keep that
-        // surface stroke until vanilla has replenished the authoritative air value; immediately
-        // sneaking under again would make navigation and the breath reflex alternate every tick.
+        // 紧急上浮由 BreathChain 负责。眼睛露出水面后继续游过水面，直到原版权威空气值恢复；
+        // 否则马上潜回水下会使寻路与呼吸反射每刻来回切换。
         if (!player.isEyeInFluid(FluidTags.WATER)
                 && player.isInWater()
                 && player.getAirSupply() < player.getMaxAirSupply()) {
@@ -276,11 +272,8 @@ public abstract class Movement {
         boolean targetHasWaterBelow = targetWater
                 && MovementHelper.isWater(player.level().getBlockState(target.below()));
 
-        // A horizontal surface-lattice edge ending on land or one-block-deep water is a wade-out,
-        // not a request to dive.  If the physical body is already in the swimming pose, rise while
-        // advancing so it can regain standing height at the bank.  Every movement tick rebuilds
-        // its input map, and the explicit false below also makes the release visible within this
-        // tick if an earlier preparation branch requested sneak.
+        // 水面网格上的水平边若终点是陆地或仅一格深的水，代表上岸而不是下潜。若角色已处于游泳姿态，就边前进边上浮，
+        // 以便在岸边恢复站立高度。每个移动 tick 都会重建输入映射；显式写入 false 可确保本刻立即释放准备分支先前按下的潜行键。
         boolean surfaceOrWade = vertical > 0 || (vertical == 0 && !targetHasWaterBelow);
         if (surfaceOrWade) {
             boolean submerged = player.isUnderWater() || player.isSwimming()
@@ -295,12 +288,9 @@ public abstract class Movement {
             return;
         }
 
-        // Sneak can lower a body only when its current physical column contains at least two
-        // consecutive water cells.  In two-block-deep water an upright floating body may report
-        // its feet in either the upper or lower water cell, hence the symmetric above/below test.
-        // A one-block-deep column has water on neither side of the feet; holding sneak there while
-        // aiming at a deeper neighbour pins a crouching body at the lip (especially below a low
-        // ceiling). Wade forward first, then enter the swim pose after crossing into deep water.
+        // 只有当前竖直水柱至少连续两格水，潜行才能让角色下沉。两格深的水中，直立漂浮的脚位可能落在上层或下层，
+        // 因此要同时检查脚位上下。只有一格深时，脚位两侧都不是水；此时按住潜行并瞄向更深处会让蹲伏角色卡在水边，
+        // 低矮天花板下尤其明显。先向前走入深水，再切换为游泳姿态。
         boolean feetInWater = MovementHelper.isWater(player.level().getBlockState(feet));
         boolean canDescendHere = feetInWater
                 && (MovementHelper.isWater(player.level().getBlockState(feet.below()))
@@ -319,9 +309,8 @@ public abstract class Movement {
                 .setInput(Input.MOVE_FORWARD, true)
                 .setInput(Input.SNEAK, false);
         if (enteringSwim || (vertical < 0 && targetWater && canDescendHere)) {
-            // Vanilla cancels sprint while the eyes are at the surface. Sink first; on the tick
-            // isUnderWater becomes true this releases shift and the sprint request below starts
-            // the real horizontal swimming pose.
+            // 原版会在眼睛处于水面时取消疾跑。先下沉；当 isUnderWater 变为 true 的那一刻释放潜行键，
+            // 下方疾跑请求随即进入真正的水平游泳姿态。
             state.setInput(Input.SNEAK, true);
         } else if (player.isUnderWater() || player.isSwimming()) {
             state.setInput(Input.SPRINT, true);
@@ -446,7 +435,7 @@ public abstract class Movement {
 
         /** 这次导航对地形的许可:执行期"顺手"的放置(跑酷落点补块)只在可改地形时做。 */
 
-        /** Select or stage one matching stack through receipt-backed client ports. */
+        /** 通过带回执的客户端操作接口选择或准备一个匹配堆叠。 */
         ItemSelection selectItem(Predicate<ItemStack> desired);
         TerrainPermit permit();
     }
@@ -492,14 +481,14 @@ public abstract class Movement {
         return executionDelegate != null && executionDelegate.permit().mayAlter();
     }
 
-    /** Receipt-aware material selection for movement helpers. */
+    /** 供移动辅助逻辑使用、能够跟踪回执的材料选择器。 */
     protected ItemSelection selectItem(Predicate<ItemStack> desired) {
         return executionDelegate == null
                 ? ItemSelection.UNAVAILABLE
                 : executionDelegate.selectItem(desired);
     }
 
-    /** Callback form used by the shared placement helper. */
+    /** 由共用放置辅助逻辑调用的回调形式。 */
     protected ItemSelector itemSelector() {
         return this::selectItem;
     }
