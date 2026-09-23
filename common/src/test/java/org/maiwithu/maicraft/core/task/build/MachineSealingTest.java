@@ -10,7 +10,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 
-/** A two-high hatch can be closed only from its declared exterior, with the interior protected. */
+/** 两格高的舱口只能从其声明的外侧封闭，同时保护内部区域。 */
 public final class MachineSealingTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();

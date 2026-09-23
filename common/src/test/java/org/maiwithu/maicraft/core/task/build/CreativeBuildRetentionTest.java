@@ -18,7 +18,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Drive real construction cell completion: retained materials are not cleaned after every block. */
+/** 推进真实施工方块的完成流程，核实保留材料不会在每个方块放置后被清理。 */
 public final class CreativeBuildRetentionTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
