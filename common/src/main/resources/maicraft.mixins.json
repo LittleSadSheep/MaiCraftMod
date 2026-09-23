@@ -26,6 +26,7 @@
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",
     "UltimineInputMixin",
+    "FtbQuestSyncMixin",
     "ItemUseInputMixin"
   ],
   "server": [],

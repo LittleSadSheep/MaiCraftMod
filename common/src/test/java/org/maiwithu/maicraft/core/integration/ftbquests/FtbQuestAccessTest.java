@@ -10,6 +10,13 @@ import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture.Task;
 /** 验证同步时机、玩家身份和原生可见性，确保读取任务书不会改变任务或通过旁路揭示隐藏内容。 */
 public final class FtbQuestAccessTest {
     public static void main(String[] args) {
+        // 切服时即使旧文件仍有效，也必须等待新连接的原生任务书同步。
+        Object file = new Object(), connection = new Object();
+        FtbQuestSync.received(file, connection);
+        check(FtbQuestSync.matches(file, connection) && !FtbQuestSync.matches(file, new Object())
+                && !FtbQuestSync.matches(new Object(), connection), "同步回执同时绑定文件与连接");
+        FtbQuestSync.received(null, null);
+        check(!FtbQuestSync.matches(file, connection), "失效的同步回执不能沿用");
         var fixture = new FtbQuestFixture();
         var hidden = new Quest(4, "隐藏目标", fixture.chapter); hidden.visible = false;
         fixture.chapter.quests.add(hidden); fixture.quest.dependencies.add(hidden);
@@ -17,6 +24,7 @@ public final class FtbQuestAccessTest {
         var linked = new Quest(6, "可见链接", hiddenChapter); hiddenChapter.quests.add(linked);
         fixture.file.chapters.add(hiddenChapter); fixture.chapter.links.add(new Link(linked));
         var first = fixture.access.snapshot();
+        check(first.context().get("session_id").equals(fixture.access.snapshot().context().get("session_id")), "同一连接的连续读取保留分页身份");
         check(first.status().equals("available") && first.chapters().size() == 1, "遵守章节可见性");
         check(first.chapters().getFirst().quests().size() == 2, "隐藏任务不列出，可见任务链接保留");
         var quest = first.chapters().getFirst().quests().getFirst();
@@ -47,6 +55,8 @@ public final class FtbQuestAccessTest {
         String session = first.context().get("session_id").getAsString();
         fixture.file.selfTeamData.id = UUID.randomUUID();
         check(!fixture.access.snapshot().context().get("session_id").getAsString().equals(session), "换队伍产生新的快照身份");
+        session = fixture.access.snapshot().context().get("session_id").getAsString(); fixture.connection = new Object();
+        check(!fixture.access.snapshot().context().get("session_id").getAsString().equals(session), "即使队伍相同，重新连接也撤销旧分页身份");
         fixture.file.selfTeamData.id = new UUID(0, 0); status(fixture, "sync_pending");
         fixture.file.selfTeamData.id = UUID.randomUUID(); fixture.file.selfTeamData.locked = true; status(fixture, "book_locked");
         fixture.file.selfTeamData.locked = false; fixture.file.disabled = true; status(fixture, "book_disabled");

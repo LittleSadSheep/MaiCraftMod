@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.ftbquests;
 
 import com.google.gson.JsonObject;
+import java.lang.ref.WeakReference;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -23,19 +24,28 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
     record Environment(Object file, UUID player, String dimension, Object connection) {}
     private static final class NotInstalled extends RuntimeException {}
     private final Supplier<Environment> environment;
-    private Object lastFile, lastConnection;
+    // 玩家退出后不能靠知识入口的会话标识留住整张任务书和连接对象，游戏自身决定其生命周期。
+    private WeakReference<Object> lastFile = new WeakReference<>(null), lastConnection = new WeakReference<>(null);
     private UUID lastPlayer, lastTeam;
     private String session;
 
     public ReflectiveFtbQuestsAccess() { this(ReflectiveFtbQuestsAccess::current); }
     ReflectiveFtbQuestsAccess(Supplier<Environment> environment) { this.environment = environment; }
 
+    /** 在 FTB 完成原生同步的游戏线程记录接收方；接口失配只让知识不可用，不打断玩家收包。 */
+    public static void recordSync() {
+        try { FtbQuestSync.received(NativeApi.call(null, CLIENT, "getInstance"), Minecraft.getInstance().getConnection()); }
+        catch (RuntimeException | LinkageError unavailable) { FtbQuestSync.received(null, null); }
+    }
+
     private static Environment current() {
         try { Class.forName(CLIENT, false, ReflectiveFtbQuestsAccess.class.getClassLoader()); }
         catch (ClassNotFoundException absent) { throw new NotInstalled(); }
         Minecraft client = Minecraft.getInstance();
         if (client.player == null || client.level == null || client.getConnection() == null) return null;
-        return new Environment(NativeApi.call(null, CLIENT, "getInstance"), client.player.getUUID(),
+        Object file = NativeApi.call(null, CLIENT, "getInstance");
+        // FTB 退出服务器时未必清空旧文件，必须同时核对原生同步回执中的连接身份。
+        return new Environment(FtbQuestSync.matches(file, client.getConnection()) ? file : null, client.player.getUUID(),
                 client.level.dimension().location().toString(), client.getConnection());
     }
 
@@ -54,8 +64,8 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
             if (teamId.equals(new UUID(0, 0)) || call(team, "getFile") != file)
                 return unavailable(context, "sync_pending", "队伍进度仍是占位数据或属于旧任务书");
             // 切服、任务书重载、切玩家或换队伍后更换会话号；任何旧页码都不能接到新的任务书。
-            if (file != lastFile || env.connection() != lastConnection || !env.player().equals(lastPlayer) || !teamId.equals(lastTeam)) {
-                session = UUID.randomUUID().toString(); lastFile = file; lastConnection = env.connection();
+            if (file != lastFile.get() || env.connection() != lastConnection.get() || !env.player().equals(lastPlayer) || !teamId.equals(lastTeam)) {
+                session = UUID.randomUUID().toString(); lastFile = new WeakReference<>(file); lastConnection = new WeakReference<>(env.connection());
                 lastPlayer = env.player(); lastTeam = teamId;
             }
             context.addProperty("session_id", session); context.addProperty("player_id", env.player().toString());
@@ -76,7 +86,7 @@ public final class ReflectiveFtbQuestsAccess implements FtbQuestBook {
 
     private Snapshot unavailable(JsonObject context, String status, String detail) {
         // 暂时断线也撤销旧身份；重连后重新发现，不能沿用断线前的目录和进度。
-        lastFile = null; context.addProperty("status", status); context.addProperty("detail", detail);
+        lastFile.clear(); lastConnection.clear(); context.addProperty("status", status); context.addProperty("detail", detail);
         return new Snapshot(context, List.of());
     }
 
