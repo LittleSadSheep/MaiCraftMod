@@ -18,7 +18,7 @@ public final class PathPlannerPool {
 
     private static final AtomicInteger COUNTER = new AtomicInteger();
 
-    /** One active search is normal; a second worker only covers brief cancellation overlap. */
+    /** 通常只运行一个搜索；第二个 worker 仅用于处理取消过程中的短暂重叠。 */
     private static final int POOL_SIZE = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors() - 2));
 
     private static final ThreadPoolExecutor POOL = createPool();
@@ -36,18 +36,18 @@ public final class PathPlannerPool {
         return pool;
     }
 
-    /** Run {@code task} on the planner pool; the result lands in the returned future. */
+    /** 在规划线程池中执行 {@code task}，并将结果写入返回的 future。 */
     // 把计算排到后台并立即返回一个等待结果的对象；如果连队列也进不去，返回的对象直接带失败原因。
     public static <T> CompletableFuture<T> submit(Supplier<T> task) {
         try {
             return CompletableFuture.supplyAsync(task, POOL);
         } catch (RejectedExecutionException rejected) {
-            // Never fall back to CallerRunsPolicy: the submitter is the Minecraft client thread.
+            // 绝不能回退到 CallerRunsPolicy，因为提交者就是 Minecraft 客户端线程。
             return CompletableFuture.failedFuture(rejected);
         }
     }
 
-    // ==================== 性能探针用的池快照(见 NavProfiler)====================
+    // ==================== 性能探针使用的线程池快照（见 NavProfiler）====================
 
     /** 当前存活线程数(有界:上限 {@link #POOL_SIZE};空闲会超时回收)。 */
     public static int liveThreads() {
