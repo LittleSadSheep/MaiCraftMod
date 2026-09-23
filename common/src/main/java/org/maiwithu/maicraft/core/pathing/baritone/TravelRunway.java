@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
 
-/** The remaining straight part of the chosen route, independent of its movement segmentation. */
+/** 所选路线中剩余的直线路径，与移动分段方式无关。 */
 record TravelRunway(Vec3 start, Vec3 heading, List<IMovement> movements) {
     static boolean accepts(IMovement movement) {
         return (movement instanceof MovementTraverse || movement instanceof MovementDiagonal

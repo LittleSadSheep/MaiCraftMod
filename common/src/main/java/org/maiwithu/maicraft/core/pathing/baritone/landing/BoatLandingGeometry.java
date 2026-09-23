@@ -30,7 +30,7 @@ final class BoatLandingGeometry {
         Vec3 spawn = new Vec3(landing.getX()+0.5, landing.getY()-1+height, landing.getZ()+0.5);
         return safeFloor(view,landing.below(),height) ? spawn : null;
     }
-    /** Fresh spawn packets omit onGround; verify support at the boat's actual, possibly off-center position. */
+    /** 新生成的数据包可能没有 onGround 状态；必须在船只实际位置（可能偏离中心）核实支撑面。 */
     static boolean supportedAt(BlockGetter view,Predicate<BlockPos> loaded,Vec3 at) {
         AABB contact=new AABB(at.x-.6874,at.y-.02,at.z-.6874,at.x+.6874,at.y+.001,at.z+.6874);
         for(BlockPos cell:BlockPos.betweenClosed(BlockPos.containing(contact.minX-1,at.y-2,contact.minZ-1),

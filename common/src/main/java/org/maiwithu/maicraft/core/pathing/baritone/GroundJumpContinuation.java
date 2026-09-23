@@ -33,7 +33,7 @@ public final class GroundJumpContinuation {
                 && movement.getSrc().getY() == floor && movement.getDest().getY() == floor;
     }
 
-    // Only the movements whose whole flight corridor was checked inherit this temporary floor.
+    // 只有完整飞行走廊已通过检查的移动，才能继承此临时地面支撑。
     public BetterBlockPos feet(IMovement movement, BetterBlockPos actual) {
         if (!controls(movement)) return actual;
         return new BetterBlockPos(actual.x, floor, actual.z);

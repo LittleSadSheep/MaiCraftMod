@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 
-/** Cold inventory scaffolds use the same visible, receipt-confirmed selection flow as construction. */
+/** 从未选中的背包槽位取用脚手架时，复用与施工相同的可见选择流程并等待回执确认。 */
 final class EmbeddedBuildScaffoldSelection {
     private final FirstPersonActionGate gate = new FirstPersonActionGate();
     private EmbeddedBaritoneNavigator owner;

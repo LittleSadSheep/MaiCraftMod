@@ -24,8 +24,7 @@ final class NavigationCameraCourse {
             turning = false;
             return yaw;
         }
-        // Recompute from the tick's initial course: a later target replaces an earlier
-        // movement's target instead of spending another 9 degrees of angular budget.
+        // 始终依据本 tick 初始航向重新计算；后续目标会替换前一移动目标，而不会再额外消耗 9 度转向预算。
         float error = Mth.wrapDegrees(requestedYaw - tickStartYaw);
         turning = Math.abs(error) > 25 || (tickStartTurning && Math.abs(error) > 15);
         yaw = turning ? Mth.wrapDegrees(tickStartYaw + Mth.clamp(error, -9, 9)) : tickStartYaw;

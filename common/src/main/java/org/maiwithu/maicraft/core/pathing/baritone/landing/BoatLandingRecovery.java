@@ -89,13 +89,12 @@ final class BoatLandingRecovery {
         return false;
     }
     private boolean eligible(LocalPlayerContext ctx, Boat boat) {
-        // Creative destroys vehicles without their ordinary item drop; leave the boat intact.
+        // 创造模式破坏载具时不会掉落普通物品，因此保留船只。
         if (ctx.player().isCreative()) return false;
         if (!boatId.equals(boat.getUUID()) || !boat.getPassengers().isEmpty() || !BoatLandingSnapshot.stationary(boat)
                 || !ctx.player().onGround() || ctx.player().isPassenger() || ctx.player().distanceToSqr(boat) > 4
                 || !room(ctx, new ItemStack(item))) return false;
-        // The vanilla item drop can scatter before its pickup delay expires; prove the nearby
-        // pickup area is dry and walkable before dismantling anything.
+        // 原版物品掉落可能在拾取延迟结束前散落；拆除任何方块前，先证明附近拾取区域干燥且可行走。
         // 拆船前当前要求周围九个位置都能从玩家处安全走到，用来降低掉落物落在无法回收位置的风险。
         for (int x=-1;x<=1;x++) for (int z=-1;z<=1;z++) {
             if (!walkable(ctx, new Vec3(boat.getX()+x, boat.getY(), boat.getZ()+z))) return false;

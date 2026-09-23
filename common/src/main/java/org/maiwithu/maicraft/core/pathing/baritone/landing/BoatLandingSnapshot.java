@@ -28,7 +28,7 @@ public record BoatLandingSnapshot(BlockPos source, Vec3 eye, double blockReach, 
     }
     public BoatLandingSnapshot { source = source.immutable(); boats = List.copyOf(boats); }
     public static BoatLandingSnapshot empty() { return new BoatLandingSnapshot(BlockPos.ZERO, Vec3.ZERO, 0, 0, 0.6, 1.8, null, List.of()); }
-    /** Planned departure needs time for native spawn and mount feedback; an ongoing fall still tries its best. */
+    /** 计划出发时需预留时间等待原生实体生成和上船反馈；正在进行的坠落仍会尽力执行。 */
     // 按下落过程估算能否先放船、下一次更新上船、再留一次更新确认；每一步都要在撞上船体前留得出时间。
     public boolean airborneWindow(double drop, double gravity, double downwardSpeed) {
         if (!Double.isFinite(drop) || !Double.isFinite(gravity) || !Double.isFinite(downwardSpeed)

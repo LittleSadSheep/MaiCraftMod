@@ -66,7 +66,7 @@ public final class BoatLandingAssist {
         phase = boatId == null ? Phase.ITEM : Phase.MOUNT;
     }
     public static BoatLandingSnapshot capture(LocalPlayer player) { return BoatLandingSnapshot.capture(player); }
-    /** Opportunistic only: caller must retain its nonfatal/other proven fallback for this airborne plan. */
+    /** 仅作机会式救援：调用方必须为此空中计划保留非致命或其他已核实的回退方案。 */
     public static BoatLandingSnapshot.Plan airbornePlan(LocalPlayerContext ctx, BlockPos landing) {
         if (ctx.player().onGround() || ctx.player().isPassenger()) return null;
         var snapshot = capture(ctx.player());
@@ -234,7 +234,7 @@ public final class BoatLandingAssist {
         boatId=fresh.getFirst();
         if(spawnTick<0) spawnTick=ctx.tickRevision();
         owned|=evidence.verdict()==NativeConfirmation.Verdict.APPLIED;
-        // A real unique entity is already usable. Inventory acknowledgement only controls ownership/recovery.
+        // 已存在唯一且真实的实体时即可使用；背包确认只决定所有权和回收流程。
         return NativeConfirmation.Verdict.APPLIED;
     }
     record PlacementEvidence(NativeConfirmation.Verdict verdict, UUID uuid) {}
