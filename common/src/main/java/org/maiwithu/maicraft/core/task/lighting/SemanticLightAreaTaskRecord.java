@@ -10,14 +10,14 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** A semantic lighting outcome; placement cells are deliberately absent. */
+/** 语义照明任务结果；有意不包含放置方块的坐标格。 */
 public final class SemanticLightAreaTaskRecord extends TaskRecord
         implements InternalAreaProtectionReceipt {
     public static final String TOOL_NAME = "light_area";
     public static final int MIN_RADIUS = 1;
-    /** Minecraft's practical world border, not a work or exploration budget. */
+    /** Minecraft 实际世界边界，不代表施工或探索预算。 */
     public static final int MAX_EXPLICIT_RADIUS = 29_999_984;
-    /** Explicit user-authored placement budgets may cover the whole observed sample set. */
+    /** 用户明确指定的放置预算可覆盖全部已观察样本。 */
     public static final int MAX_EXPLICIT_PLACEMENTS = 24_000;
 
     static {
@@ -93,11 +93,11 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
     }
 
     public final BlockPos center;
-    /** Optional semantic area label retained for evidence/result reporting, never parsed as coordinates. */
+    /** 可选语义区域标签，仅保留用于证据与结果报告，绝不解析为坐标。 */
     public final String semanticTarget;
-    /** Resolve and close the matching connected component seeded around {@link #center}. */
+    /** 以 {@link #center} 附近为起点，解析并闭合匹配的连通区域。 */
     public final boolean resolveLoadedComponent;
-    /** Optional player-authored geometric boundary. Zero means discover the semantic boundary. */
+    /** 玩家可选指定的几何边界；为零表示由语义探索发现区域边界。 */
     public final int radius;
     public final int minimumLight;
     public final Coverage coverage;
@@ -108,9 +108,9 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
     public final SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy;
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
-    /** Zero means no user-authored total placement budget. */
+    /** 为零表示用户没有指定总放置预算。 */
     public final int maxPlacements;
-    /** Exact live-world protection retained only for the semantic parent. */
+    /** 保留实时世界中的精确保护条件，仅供语义父任务使用。 */
     private List<Footprint> internalAreaProtections = List.of();
 
     public SemanticLightAreaTaskRecord(
@@ -183,7 +183,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
                 .toList();
     }
 
-    /** Forces task registration at Mod initialization. */
+    /** 强制在模组初始化阶段注册任务。 */
     public static void ensureRegistered() {}
 
     @Override public String describe() {
