@@ -575,7 +575,7 @@ public final class MovementHelper {
     }
 
     /**
-     * Live client-thread overload for direct execution-time geometry checks.
+     * 供执行阶段直接检查几何时调用的实时客户端线程重载。
      */
     public static boolean placeableWithinBorder(WorldBorder border,
                                                 int x, int z) {

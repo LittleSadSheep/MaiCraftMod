@@ -57,8 +57,7 @@ public final class TransportLanding {
                     List<AABB> boxes = state.getCollisionShape(view, pos, CollisionContext.empty()).toAabbs()
                             .stream().map(box -> box.move(pos)).toList();
                     cells.add(new Cell(pos, state, boxes));
-                    // Node feet represent the cell above support. An occupied target's own
-                    // partial machine shape must not silently become a different landing floor.
+                    // 节点脚位表示支撑方块上方的格子；目标自身的部分机器形状不能被静默改判为另一处着陆面。
                     if (by >= feet.getY() || unsafe(view, pos, state)) continue;
                     for (AABB box : boxes) {
                         if (box.maxX > x - half + EPS && box.minX < x + half - EPS

@@ -122,7 +122,7 @@ public final class RegionalTerrain {
         }
         return List.copyOf(merged);
     }
-    /** Bounds summarize samples, not continuous free space or a promise that a route exists. */
+    /** 边界仅概括采样结果，不代表连续空间畅通，也不保证路线存在。 */
     // 按方位、高度段和材质分组，最多展示十二组；先留不同材质的平台候选，再补较近的组。
     public Map<String,Object> summary() {
         var groups=new LinkedHashMap<String,List<Surface>>();

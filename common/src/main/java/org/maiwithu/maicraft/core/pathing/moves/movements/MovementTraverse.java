@@ -163,8 +163,7 @@ public class MovementTraverse extends Movement {
     @Override
     protected Set<BlockPos> calculateValidPositions() {
         if (player != null && waterRoute(player.level())) {
-            // Sprint-swimming puts the physical feet one cell below the planner's safe
-            // surface lattice. Both representations belong to this same horizontal edge.
+            // 疾跑游泳时，实际脚位比规划器的安全水面网格低一格；这两种表示都属于同一条水平移动边。
             return Set.of(src, dest, src.below(), dest.below());
         }
         return Set.of(src, dest);

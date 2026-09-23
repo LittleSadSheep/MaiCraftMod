@@ -255,7 +255,7 @@ final class MovementPlacement {
         return new Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
     }
 
-    /** Pick a configured scaffold by priority; selection/staging is delegated to the actor. */
+    /** 按优先级选择配置中的脚手架材料；实际选择和暂存由角色层负责。 */
     static Movement.ItemSelection selectThrowaway(
             LocalPlayer player, boolean select, Movement.ItemSelector selector) {
         List<Item> acceptable = ScaffoldMaterials.of(player);

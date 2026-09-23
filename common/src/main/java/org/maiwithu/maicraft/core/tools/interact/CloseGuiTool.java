@@ -12,7 +12,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Close the active block menu through a confirmed client transaction. */
+/** 通过已确认的客户端事务关闭当前方块菜单。 */
 public final class CloseGuiTool implements MaiCraftTool {
 
     private static final long TIMEOUT_TICKS = 5L * 20L;

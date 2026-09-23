@@ -19,7 +19,7 @@ public final class CraftTaskRecord extends TaskRecord {
     public boolean inPlace;
     public CraftTaskRecord inPlace() { inPlace = true; return this; }
 
-    /** Compatibility constructor for callers created before exact batch boundaries were recorded. */
+    /** 为尚未记录精确批次边界的旧调用方保留兼容构造器。 */
     public CraftTaskRecord(String callId, long deadline, ResourceLocation recipeId,
                            int count, BlockPos station) {
         this(callId, deadline, recipeId, count, 0, 0, station);
