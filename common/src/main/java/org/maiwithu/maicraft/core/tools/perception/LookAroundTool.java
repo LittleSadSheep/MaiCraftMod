@@ -18,31 +18,23 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Egocentric spatial view: renders the blocks around the companion as an
- * agent-centred character grid (top-down, one cell per block, North up) rather
- * than a flat coordinate list. Each cell is semantic-pooled to the movement
- * class AND the vertical affordance at the companion's Y band — flat / step-up /
- * step-down / drop / wall / water / lava — so the model reads terrain, obstacles,
- * gaps and jumpable ledges as a map instead of probing single cells.
+ * 自我中心的空间视图：将同伴周围方块呈现为角色中心字符网格（俯视、每格对应一个方块、北向朝上），而不是扁平坐标列表。
+ * 每个格子都按移动类型和同伴当前高度带的垂直通行能力归类：平地、上台阶、下台阶、落差、墙、水或熔岩；
+ * 这样模型可以直接读图理解地形、障碍、缺口和可跳越台阶，无需逐格探测。
  *
- * <p>The representation follows the egocentric semantic grid shown to help LLM
- * spatial reasoning in Gao et al., "Exploring Spatial Representation to Enhance
- * LLM Reasoning in Aerial Vision-Language Navigation" (arXiv:2410.08500). The
- * vertical affordance encoding (collapsing a few height slices into one movement
- * symbol) and the hazard "inflation" buffer follow the occupancy-grid / layered
- * costmap practice in autonomous-driving navigation (e.g. Occ3D; ROS Nav2
- * costmap_2d). Sparse far-field objects are left to {@code scan_blocks} /
- * {@code scan_nearby_entities}; this tool is the dense near-field map half.
+ * <p>此表示方式参考 Gao 等人的自我中心语义网格研究："Exploring Spatial Representation to Enhance LLM Reasoning in Aerial Vision-Language Navigation"（arXiv:2410.08500）。
+ * 将多个高度切片合并为一个移动符号的垂直通行能力编码，以及危险区域“膨胀”缓冲区，参考自动驾驶导航中的占据栅格和分层代价地图做法（例如 Occ3D、ROS Nav2 costmap_2d）。
+ * 稀疏的远距离对象由 {@code scan_blocks} 和 {@code scan_nearby_entities} 查询；本工具专注于密集的近场地图。
  */
 public final class LookAroundTool implements MaiCraftTool {
 
     private static final int DEFAULT_RADIUS = 8;
     private static final int MIN_RADIUS = 4;
     private static final int MAX_RADIUS = 16;
-    /** How far below foot level a floor may sit before the cell reads as a drop. */
+    /** 地面低于脚位多少格后，该格才显示为落差。 */
     private static final int DROP_DEPTH = 3;
 
-    // Cell glyphs.
+    // 地图格子符号。
     private static final char YOU = '@';
     private static final char FLAT = '.';       // walkable, same level
     private static final char STEP_UP = '^';    // walkable by a 1-block jump up
@@ -138,7 +130,7 @@ public final class LookAroundTool implements MaiCraftTool {
         return sb.toString();
     }
 
-    /** Semantic-pool the column at (x,z) to one movement-affordance glyph at the companion's Y band. */
+    /** 将 (x,z) 柱列汇总为一个位于同伴当前 Y 高度带的语义移动能力符号。 */
     private static char classify(BlockGetter view, LoadedOnlyView loaded, int x, int feetY, int z) {
         if (loaded != null && !loaded.isLoaded(x, z)) {
             return UNLOADED;
@@ -153,7 +145,7 @@ public final class LookAroundTool implements MaiCraftTool {
             return WATER;
         }
 
-        // Highest surface you could stand on within a jump-up / short-drop band.
+        // 在可跳上或短距离下落范围内，选择角色能够站立的最高表面。
         Integer standY = null;
         for (int y = feetY + 1; y >= feetY - DROP_DEPTH; y--) {
             if (canStandAt(view, x, y, z)) {
@@ -191,7 +183,7 @@ public final class LookAroundTool implements MaiCraftTool {
                 && MovementHelper.fullyPassable(view, new BlockPos(x, y + 1, z));
     }
 
-    /** Layered-costmap style: ring a caution buffer around lava/fire so the model keeps clear of edges. */
+    /** 按分层代价地图方式在熔岩和火焰周围加入谨慎缓冲区，让模型与危险边缘保持距离。 */
     private static void inflateHazards(char[][] grid, int size) {
         boolean[][] near = new boolean[size][size];
         for (int r = 0; r < size; r++) {
