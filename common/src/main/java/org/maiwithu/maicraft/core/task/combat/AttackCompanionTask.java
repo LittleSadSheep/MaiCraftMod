@@ -81,7 +81,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     private static final double FLEE_SCAN_RADIUS = 40.0;
 
-    /** A health decrease or confirmed defeat renews combat without making missed swings progress. */
+    /** 只有生命值下降或确认击败目标才续期战斗任务，不把未命中的挥击当作进展。 */
     private static final long COMBAT_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
     /**
@@ -101,7 +101,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * 会走,那么远基本射不中。十二格是"稳稳能中、又够得开"的量级:太远就往回走。
      */
     private static final double BOW_MAX_DISTANCE = 12.0;
-    /** Strict end-crystal work must stay outside the complete blast span. */
+    /** 严格处理末影水晶时，角色必须始终离开完整爆炸范围。 */
     private static final double STRICT_CRYSTAL_MAX_DISTANCE = 96.0;
     private static final double STRICT_CRYSTAL_BLAST_MARGIN = 1.0;
 
@@ -123,7 +123,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private boolean defensiveInterruption;
     private Entity target;
     private Vec3 lastTargetPosition;
-    /** Last synchronized position per authorized target, used to bind a loot sweep to its kill. */
+    /** 每个获准攻击目标的上次同步位置，用于将战利品清扫与对应击杀关联。 */
     private final Map<Integer, Vec3> lastTargetPositions = new HashMap<>();
     /**
      * 这一刻 {@link #FIELD_RADIUS} 内活着的敌对生物——<b>一刻只扫一次</b>,在 {@link #surveyField}
@@ -592,7 +592,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         meleeAction = Interaction.attackEntity(player, victim);
     }
 
-    /** A vanilla sweeping sword hit must not splash an unlisted living entity. */
+    /** 原版横扫剑击不能波及未列入目标的生物。 */
     // 严格授权时，目标周围若有其他未授权的活生物就暂不挥击，防止横扫伤到旁边的实体。
     private boolean strictMeleeClear(Entity victim) {
         return player.level().getEntities(player, victim.getBoundingBox().inflate(1.5D),
@@ -801,9 +801,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         double firingRange = strictCrystalTarget()
                 ? STRICT_CRYSTAL_MAX_DISTANCE : BOW_MAX_DISTANCE;
         if (strictCrystalTarget() && player.distanceTo(target) < skirmishInner()) {
-            // Navigation is not an authorization boundary: it may still be walking away when
-            // the hand layer gets a clear ballistic solution. Never release inside the complete
-            // crystal blast span, even for a single tick.
+            // 寻路不是授权边界：手部操作层可能在角色仍向外移动时就得到清晰弹道解。即使只是一刻，也绝不能进入末影水晶的完整爆炸范围。
             abortShot();
             return TaskState.RUNNING;
         }
@@ -990,8 +988,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         loot.discover();
         boolean deathStreamOpen = loot.settling();
         loot.prune();
-        // Do not wait beside visible loot for the corpse lifecycle to finish. Continue collecting
-        // every already-attributed entity while keeping admission open for later packets.
+        // 尸体生命周期尚未结束时，不要站在可见掉落物旁等待；继续收集所有已归属实体，同时保持入口开放以接纳后续数据包。
         if (deathStreamOpen && loot.live().isEmpty()) {
             InputDriver.halt(player);
             return TaskState.RUNNING;
@@ -1061,9 +1058,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         if (loot.needsFineApproach()) {
             stopNav();
-            // A* works in feet cells. Within the same cell the player and a sliding ItemEntity can
-            // still be on opposite edges, so finish the last fraction with ordinary first-person
-            // forward input instead of repeatedly accepting ARRIVED for the unchanged cell.
+            // A* 以脚位格为节点；即使角色与滑动的 ItemEntity 处于同一格，也可能分别位于格子的两侧。
+            // 因此用普通第一人称前进输入走完最后一小段，避免目标格没变却反复接受 ARRIVED。
             InputDriver.stepToward(player, loot.nearestPosition(), false);
             return TaskState.RUNNING;
         }
@@ -1132,8 +1128,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     @Override
     protected Map<String, Object> resultData() {
-        // Runtime entity ids are an internal execution handle, not semantic output.  Aggregate
-        // receipts preserve everything the caller can act on without teaching the LLM ids.
+        // 运行时实体 ID 是内部执行句柄，不属于语义输出。聚合回执保留调用方可采取行动所需的信息，不向大模型暴露实体编号。
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("mode", r.indiscriminate ? "nearby_hostiles" : "authorized_targets");
         data.put("requested_targets", r.entityIds.size());
@@ -1156,10 +1151,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 只要已经发起过攻击／射击或进入拾取，即使上层材料够了也要求本战斗先继续收尾；
     // 这里的范围包含后续战斗和战利品，不只是等待已发出的一次点击，见 D08。
     public boolean mustSettleBeforeSatisfiedCancellation() {
-        // A native attack/use packet can already be in flight while the confirmed strike ledger is
-        // still zero.  Treat the first concrete hand action as the transaction boundary; otherwise
-        // a parent could retarget/cancel in that acknowledgement gap even though the old target is
-        // about to take damage.  Once committed, combat + causal drop settlement remain one unit.
+        // 原生攻击或使用数据包可能已经发出，而确认命中账本仍为零。把第一次具体手部操作作为事务边界；
+        // 否则父任务可能在回执间隙改换目标或取消任务，尽管旧目标即将受到伤害。提交后，战斗与因果掉落结算视为一个整体。
         return meleeAction != null
                 || shot != null
                 || r.strikes() > 0
