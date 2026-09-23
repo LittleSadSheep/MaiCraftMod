@@ -68,10 +68,10 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private static final int COOLDOWN_TICKS = 10;
     private static final int MAX_FAILED_CASTS = 5;
 
-    /** Vanilla reels the loot toward the player, but terrain can stop it short. */
+    /** 原版会将钓获物拉向玩家，但地形可能使其提前停下。 */
     private static final double LOOT_SEARCH_RADIUS = 18.0;
     private static final int LOOT_DISCOVERY_TICKS = 10;
-    /** Let vanilla's reel impulse bring the catch back before chasing it. */
+    /** 先让原版收线冲量将钓获物拉回，再决定是否需要追赶。 */
     private static final int LOOT_RETURN_GRACE_TICKS = 20;
     private static final int LOOT_CLOSE_WAIT_TICKS = 20;
     private static final int LOOT_COLLECTION_TIMEOUT = 20 * 20;
@@ -200,8 +200,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         if (isDryStance(current) && !rejectedStances.contains(current)) {
             BlockPos water = findCastTarget(current, player.getEyePosition());
             if (water != null) return new FishingSetup(current, water);
-            // Already safely on land but no water is in casting range. Long-distance
-            // water discovery belongs to the model's locate/move step, not this job.
+            // 角色已安全站在陆地，但抛竿范围内没有水。远距离寻找水域属于模型的定位与移动步骤，不属于当前钓鱼任务。
             return null;
         }
 
@@ -251,9 +250,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             target = findCastTarget(stance, player.getEyePosition());
         }
         if (target == null && !rejectedTargets.isEmpty()) {
-            // A tiny pond may expose only one valid landing cell. After trying all
-            // distinct candidates, permit another ballistic attempt instead of
-            // converting one unlucky cast into a permanent "no water" verdict.
+            // 小池塘可能只有一个有效落点。尝试完所有不同候选后，允许再次计算弹道，不要因一次不走运的抛竿就永久判定“没有水”。
             rejectedTargets.clear();
             target = findCastTarget(stance, player.getEyePosition());
         }
@@ -335,10 +332,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     /**
-     * Finish the semantic catch, not merely the rod interaction: walk to every
-     * ItemEntity created by this reel until vanilla pickup absorbs it. Fishing
-     * loot is launched toward the owner, but a bank, slab or ledge can intercept
-     * it several blocks away (the exact failure seen in ordinary play-testing).
+     * 完成语义上的“钓到并取得物品”，而不只是完成鱼竿动作：走到本次收线生成的每个 ItemEntity 旁，直到原版拾取将其收入背包。
+     * 钓获物通常会被抛向玩家，但岸边、半砖或台阶可能将其拦在数格外，这是普通游戏中实际会出现的失败情况。
      */
     // 先等收竿确认，再等战利品飞回身边；必要时走近拾取，并检查物品消失是否对应背包增加。
     private TaskState collectCaughtLoot() {
@@ -362,10 +357,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             return TaskState.FAILED;
         }
 
-        // A vanilla reel launches its loot toward the owner. Planning against that
-        // still-moving entity makes the body step off the bank to "meet" a catch
-        // that would have arrived by itself. Hold the known-safe stance briefly;
-        // genuine stranded loot is still path-found after this grace period.
+        // 原版收线会把战利品抛向玩家。若对仍在飞行的实体立即规划，角色可能离开岸边去“接住”本来会自行飞来的物品。
+        // 先在已知安全站位短暂等待；宽限期结束后，真正滞留的物品仍会被寻路发现。
         boolean returningLoot = !liveCaught().isEmpty();
         if (returningLoot && phaseTicks <= LOOT_RETURN_GRACE_TICKS) {
             return TaskState.RUNNING;
@@ -443,9 +436,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             return TaskState.RUNNING;
         }
 
-        // A freshly spawned catch can be absorbed on the same tick or become
-        // query-visible one tick later. Keep the short discovery window before
-        // deciding that there is nothing left to retrieve.
+        // 新生成的钓获物可能在同一 tick 被吸收，也可能下一 tick 才进入查询结果；先保留短暂发现窗口，再判断是否还有物品待取。
         if (phaseTicks < LOOT_DISCOVERY_TICKS) return TaskState.RUNNING;
         if (unreachableLoot > 0) {
             fail("reeled in fishing loot but could not reach " + unreachableLoot
@@ -702,7 +693,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         if (directDistance < 1.0e-6) return false;
         double ux = dx / directDistance;
         double uz = dz / directDistance;
-        // Vanilla spawns the bobber 0.3 blocks in front of the player's eyes.
+        // 原版将浮标生成在玩家眼部前方 0.3 格处。
         Vec3 pos = eye.add(ux * 0.3, 0.0, uz * 0.3);
         double distance = Math.sqrt((tx - pos.x) * (tx - pos.x) + (tz - pos.z) * (tz - pos.z));
         double pitch = Math.toRadians(solvePitchDegrees(distance, waterSurfaceY(target) - eye.y));
@@ -789,8 +780,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         super.stop(companion, why);
         discardHook();
         if (wasCollecting) {
-            // Survival preemption may stop the navigator, but the already-caught
-            // drops remain the same bounded sub-goal when the LLM task resumes.
+            // 生存反射可能暂停导航，但模型任务恢复后，已钓获物品仍保留为同一有界子目标。
             stopNav();
         } else if (!wasPositioning) {
             resetPositioning();
