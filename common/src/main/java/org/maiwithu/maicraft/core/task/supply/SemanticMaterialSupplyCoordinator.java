@@ -31,7 +31,7 @@ import net.minecraft.client.Minecraft;
  * 它只负责材料和返程；房子怎么建、管线怎么接、原计划是否仍有效，仍由调用它的总任务判断。
  */
 public final class SemanticMaterialSupplyCoordinator {
-    /** Initial no-progress lease; the active acquire record may extend it from verified progress. */
+    /** 初始无进展期限；活动的材料获取记录可依据已核实进展延长。 */
     public static final long SUPPLY_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
     private static final long RETURN_PROGRESS_LEASE_TICKS = 30L * 20L;
     private static final int RETURN_PROGRESS_GRACE_TICKS = 100;
@@ -156,9 +156,8 @@ public final class SemanticMaterialSupplyCoordinator {
     }
 
     /**
-     * Start one exact shortage while carrying the parent's observed no-step cells through every
-     * nested acquisition and return-navigation tick.  The child receives positions internally;
-     * they never become part of the public semantic tool contract.
+     * 针对一种精确缺料启动获取任务，并在整个嵌套获取和返程导航过程中传递父任务已观察到的禁行格。
+     * 子任务仅在内部接收这些位置，它们不会成为公开语义工具契约的一部分。
      */
     public void begin(
             LocalPlayer player,
@@ -216,8 +215,7 @@ public final class SemanticMaterialSupplyCoordinator {
     }
 
     /**
-     * Advance the current child through the parent's normal child-task lifecycle.
-     * The callback is normally {@code this::runChild} from an AbstractCompanionTask.
+     * 通过父任务的常规子任务生命周期推进当前子任务；回调通常来自 AbstractCompanionTask 中的 {@code this::runChild}。
      */
     public Tick tick(LocalPlayer player, Function<Task, TaskState> childRunner) {
         // 让总任务按原来的子任务机制推进取料，结束后还要现场数一次背包，不只信子任务一句成功。
@@ -290,7 +288,7 @@ public final class SemanticMaterialSupplyCoordinator {
         result.add(SemanticAcquireTaskRecord.Source.INVENTORY);
         if (storage) {
             result.add(SemanticAcquireTaskRecord.Source.STORAGE);
-            // Acquire's STORAGE branch uses this permission to request AE network crafting.
+            // Acquire 的 STORAGE 分支会依据此许可请求应用能源网络合成。
             result.add(SemanticAcquireTaskRecord.Source.CRAFT);
         }
         List<SemanticAcquireTaskRecord.Source> defaults = storage
@@ -357,7 +355,7 @@ public final class SemanticMaterialSupplyCoordinator {
                                 "server_supply_receipts_truncated")) {
                             if (evidence.containsKey(key)) entry.put(key, evidence.get(key));
                         }
-                        // Publish completed material transfers, not the internal action/slot receipts.
+                        // 发布已完成的材料转移结果，而不是内部动作或槽位回执。
                         if (evidence.get("server_supply_receipts") instanceof List<?> raw) {
                             List<Map<String, Object>> transfers = new ArrayList<>();
                             for (Object item : raw) {
@@ -487,7 +485,7 @@ public final class SemanticMaterialSupplyCoordinator {
             try {
                 return FailureType.valueOf(raw.toString().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException ignored) {
-                // Fall through to the prerequisite-safe default.
+                // 继续使用不会绕过前置条件的默认分支。
             }
         }
         return FailureType.NO_MATERIAL;
