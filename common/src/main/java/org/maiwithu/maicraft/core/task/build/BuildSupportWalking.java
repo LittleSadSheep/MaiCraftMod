@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import java.util.function.Predicate;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 
-/** Existing/proposed footing only: cardinal walking and one-block steps, never digging or extra supports. */
+/** 只使用现有或计划中的落脚面：仅允许直线步行和一格高差，不挖掘或增加额外支撑。 */
 final class BuildSupportWalking {
     private static final double EPS = 1e-5;
     private final BlockGetter world;

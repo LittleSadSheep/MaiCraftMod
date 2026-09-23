@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 
-/** One semantic request to reach another dimension through an observed physical portal. */
+/** 通过已观察到的实体传送门前往另一维度的语义请求。 */
 public final class DimensionTravelTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "dimension_travel";
     public static final int MIN_RADIUS = 16;

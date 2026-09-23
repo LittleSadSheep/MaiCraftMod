@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
-/** A bounded, read-only projection; assumptions never enter the live level or grant scaffold ownership. */
+/** 有界只读投影；任何假设都不会写入实时世界，也不会授予脚手架所有权。 */
 final class BuildSupportWorld implements BlockGetter {
     private static final int MAX_READS = 8192;
     private final BlockGetter live;

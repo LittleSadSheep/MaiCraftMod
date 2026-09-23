@@ -48,7 +48,7 @@ public final class BuildTraversabilityVerifier {
         BlockState getBlockState(BlockPos pos) { return level.getBlockState(pos); }
     }
 
-    /** One task keeps one session. A null tick result means the scan has yielded, not failed. */
+    /** 一个任务只保留一个会话；tick 返回 null 表示扫描已让出执行权，不是失败。 */
     public static final class Verification {
         private enum Phase { INITIAL, ENTRANCE, BOUNDS, VERTICAL, FLOOD, WAYPOINTS, DOCK, DONE }
         private static final int CELLS_PER_TICK = 128;

@@ -43,7 +43,7 @@ public final class BuildPreviewGate {
         PreviewSession session = PreviewController.current();
         if (session != null && session.owner().equals(owner.publicId())
                 && session.decision() == Decision.CANCELLED) return Decision.CANCELLED;
-        // Dev toggled on during an already-started construction never suspends an in-flight receipt.
+        // 建造开始后即使开发预览被打开，也不能挂起正在等待的操作回执。
         if (resolved.containsKey(owner)) return resolved.get(owner);
         var level = Minecraft.getInstance().level;
         if (level == null) return Decision.CANCELLED;

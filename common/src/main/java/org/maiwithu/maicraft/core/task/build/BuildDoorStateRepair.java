@@ -116,7 +116,7 @@ final class BuildDoorStateRepair {
             };
         }
         stopNav(); InputDriver.halt(player);
-        // Avoid held axes, buckets and other item-specific effects on wooden or copper doors.
+        // 修复木门或铜门状态时避免手持斧头、水桶等物品触发专属效果。
         if (!menu.worldReady(context)) return TaskState.RUNNING;
         // 当前主手有物品时会优先用空副手；但原版木门的空手开关分支只处理主手，这个选择可能使收尾点击不生效。
         InteractionHand hand = player.getMainHandItem().isEmpty() ? InteractionHand.MAIN_HAND
