@@ -6,7 +6,7 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-/** Local continuity is a preference within the active region/layer, never a block-state exemption. */
+/** 局部连续性只是在当前区域或施工层内的偏好，不能豁免方块状态检查。 */
 final class BuildPlacementPreference {
     private BuildPlacementPreference() {}
 

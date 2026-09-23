@@ -10,7 +10,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 
-/** Successful placement candidates must survive two physical ticks with the same settled view and facts. */
+/** 放置成功候选必须在两个物理 tick 内保持相同且稳定的视角和事实，才算确认完成。 */
 final class BuildPlacementSettling {
     private record Witness(BuildPlacementGeometry.Gesture gesture, BlockPos target, BlockPos support,
                            Direction face, BlockState supportState, BlockState before, BlockState predicted, boolean sneak) {}
