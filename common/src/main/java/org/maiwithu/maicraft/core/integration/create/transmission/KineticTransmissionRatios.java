@@ -14,7 +14,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 import java.util.Locale;
 
-/** Installed Create 6.0.10 RotationPropagator gear ratios and directional gearbox propagation. */
+/** 使用已安装的 Create 6.0.10 RotationPropagator 齿轮倍率和定向齿轮箱传动规则。 */
 final class KineticTransmissionRatios {
     record Mesh(BlockPos from, BlockPos to, String fromFamily, String toFamily, Direction.Axis fromAxis, Direction.Axis toAxis, double multiplier) {}
     record Result(Double multiplier, List<Mesh> meshes, Map<BlockPos, Double> nodeMultipliers) {

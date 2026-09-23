@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.Comparator;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 
-/** Reuses finite acyclic price proofs by dependency depth instead of recursively revisiting recycling recipes. */
+/** 按依赖深度复用有限无环价格证明，避免递归重新访问回收配方。 */
 final class KineticUnitValues {
     private static final int MAX_VALUE_ITEMS = 1024;
     record Value(double value, Set<String> recipes, Set<String> issues, Set<String> dependencies, int depth) {}
@@ -59,7 +59,7 @@ final class KineticUnitValues {
         while (!pending.isEmpty()) {
             if (seen.size() >= MAX_VALUE_ITEMS) { limited = true; break; }
             String id = pending.removeFirst(); if (!seen.add(id)) continue;
-            // Anchors define material value; decompression/recycling only belongs to the separate real-stock calculation.
+            // 锚点定义材料价值；解压和回收只参与单独的真实库存计算。
             if (snapshot.rawUnitValues().containsKey(id)) continue;
             for (Recipe recipe : snapshot.recipes().getOrDefault(id, List.of()))
                 for (Ingredient ingredient : recipe.ingredients()) for (String alternative : ingredient.alternatives())

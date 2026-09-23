@@ -6,7 +6,7 @@ import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Inventory;
 
-/** Detects reversible recipe loops that merely consume another still-required construction item. */
+/** 检测可逆配方循环，以免只消耗另一项仍需用于施工的物品。 */
 final class KineticSupplyProgress {
     private final Set<String> inventories=new HashSet<>();
     boolean begin(Inventory inventory) {
