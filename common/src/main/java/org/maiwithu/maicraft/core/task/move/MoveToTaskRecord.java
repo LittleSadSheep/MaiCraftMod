@@ -17,26 +17,26 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
 
     public enum Kind { BLOCK, COLUMN, YLEVEL, FIND }
 
-    /** Nullable: {@code null} means the LLM did not supply this axis. */
+    /** 可空；{@code null} 表示大模型未提供此坐标轴。 */
     public final Double x;
     public final Double y;
     public final Double z;
-    /** Namespaced block id to walk to the nearest of; null when coordinates drive. */
+    /** 要前往最近实例的带命名空间方块 ID；由坐标指定目标时为空。 */
     public final String block;
     public final Kind kind;
-    /** Consent to dig / bridge / pillar en route; temporary bucket water has a separate flag. */
+    /** 是否授权途中挖掘、搭桥或垫高；临时桶装水另有独立开关。 */
     public final boolean mayAlterTerrain;
-    /** Permit temporary bucket water for a fall without authorizing excavation or scaffolding. */
+    /** 允许使用桶中临时水处理坠落，但不授权挖掘或搭设脚手架。 */
     public final boolean allowWaterBucketFall;
-    /** Temporary landing items only; independent of excavation and scaffolding permission. */
+    /** 仅允许使用临时落地物品；与挖掘及搭设脚手架的许可相互独立。 */
     public final boolean allowLandingAssists;
-    /** Transport preference is independent of terrain and temporary water permission. */
+    /** 交通方式偏好与地形修改及临时用水许可相互独立。 */
     public final TransportMode transportMode;
-    /** Public travel may accept a region; internal workstation/build stances remain exact. */
+    /** 公开移动任务可接受一个区域；内部工作台或建筑站位仍要求精确到点。 */
     public final boolean exact;
     public final double horizontalRadius;
     public final double verticalTolerance;
-    /** Successful live body receipt; never copied into the public TaskResult. */
+    /** 成功的实时身体操作回执；不会复制到公开的 TaskResult。 */
     private Position verifiedPosition;
 
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
