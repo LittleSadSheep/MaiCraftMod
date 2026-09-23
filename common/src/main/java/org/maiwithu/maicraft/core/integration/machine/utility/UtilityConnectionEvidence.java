@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
@@ -64,6 +65,11 @@ public final class UtilityConnectionEvidence {
     static boolean shaft(JsonObject observed, Direction face) {
         for (var raw : array(kinetic(observed), "shaft_faces")) if (raw.getAsString().equals(face.getSerializedName())) return true;
         return false;
+    }
+    static Direction exposedKineticFace(JsonObject observed, Predicate<Direction> open) {
+        // 六个方向都允许，但必须同时具备原生轴面证据与可接近的空格，不能仅凭蓝图轴向猜接口。
+        return List.of(Direction.UP, Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST)
+                .stream().filter(face -> shaft(observed, face) && open.test(face)).findFirst().orElse(null);
     }
     public static boolean sameKineticNetwork(JsonObject source, JsonObject target) {
         String first = text(kinetic(source), "network_id"), second = text(kinetic(target), "network_id");

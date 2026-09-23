@@ -18,7 +18,6 @@ public final class UtilityConnectionTaskGuardTest {
         try (var h = new InteractionWorldTestHarness()) {
             stoppedBeforeMutation(h, "fluids", Direction.UP, "minecraft:water", "utility_medium_connection_unsupported");
             stoppedBeforeMutation(h, "chemicals", Direction.NORTH, "mekanism:hydrogen", "utility_medium_connection_unsupported");
-            stoppedBeforeMutation(h, "kinetic", Direction.EAST, "", "utility_kinetic_vertical_interface_required");
             stoppedBeforeMutation(h, "energy", Direction.WEST, "mekanism:joules", "utility_energy_standard_unsupported");
             check(h.blockUses() == 0 && h.itemUses() == 0, "unsupported utility requests must not navigate, configure or place anything");
         }
@@ -26,6 +25,11 @@ public final class UtilityConnectionTaskGuardTest {
         existingKineticConnection(true, true);
         existingKineticConnection(false, true);
         existingKineticConnection(true, false);
+        // 水平带轮接入与竖直轴复用同一条连接核验，已供电也不能绕过声明接入面的原生边确认。
+        for (Direction face : List.of(Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST)) {
+            existingKineticConnection(true, true, face);
+            existingKineticConnection(true, false, face);
+        }
         existingAdjacentEnergy(true, true, false);
         existingAdjacentEnergy(false, true, false);
         existingAdjacentEnergy(true, false, false);
@@ -69,10 +73,15 @@ public final class UtilityConnectionTaskGuardTest {
         }
     }
     private static void existingKineticConnection(boolean sameNetwork, boolean connectedFace) throws Exception {
+        existingKineticConnection(sameNetwork, connectedFace, Direction.UP);
+    }
+    private static void existingKineticConnection(boolean sameNetwork, boolean connectedFace, Direction face) throws Exception {
         try (var fixture = new UtilityConnectionReplayFixture(true)) {
+            fixture.kineticFaces = List.of(face, face.getOpposite());
+            fixture.world.set(fixture.target.relative(face), Blocks.STONE.defaultBlockState());
             if (!sameNetwork) fixture.targetNetwork = "independent-b";
             fixture.edgeConnected = connectedFace;
-            var task = kineticTask(fixture); task.start(fixture.world.player);
+            var task = kineticTask(fixture, face); task.start(fixture.world.player);
             TaskState state = TaskState.RUNNING;
             for (int i = 0; i < 40 && !state.isTerminal(); i++) { state = task.tick(fixture.world.player); fixture.advance(); }
             var result = task.result(state);
@@ -88,7 +97,10 @@ public final class UtilityConnectionTaskGuardTest {
         }
     }
     private static UtilityConnectionTask kineticTask(UtilityConnectionReplayFixture fixture) {
-        var request = new UtilityConnectionTaskRecord.Request(fixture.source, fixture.target, Direction.UP, "minecraft:stone", "kinetic", 32, 0, "");
+        return kineticTask(fixture, Direction.UP);
+    }
+    private static UtilityConnectionTask kineticTask(UtilityConnectionReplayFixture fixture, Direction face) {
+        var request = new UtilityConnectionTaskRecord.Request(fixture.source, fixture.target, face, "minecraft:stone", "kinetic", 32, 0, "");
         return new UtilityConnectionTask(fixture.world.player, new UtilityConnectionTaskRecord("utility-existing", 1000, "minecraft:overworld", "city", "input",
                 request, MaterialPolicy.INVENTORY_ONLY, List.of()));
     }

@@ -71,6 +71,11 @@ public final class UtilityConnectionPlannerTest {
         check(UtilityConnectionEvidence.energyFaces(observed, true).isEmpty(), "unknown direction cannot authorize cable construction");
     }
     private static void kineticPowerAndMembership() {
+        // 源轴只有水平接面时必须可选；占用面和未证实的空闲方向都不能成为施工起点。
+        JsonObject horizontal = json("{native:{create:{shaft_faces:['west','east']}}}");
+        check(UtilityConnectionEvidence.exposedKineticFace(horizontal, face -> face == Direction.EAST) == Direction.EAST, "horizontal source face must be usable");
+        check(UtilityConnectionEvidence.exposedKineticFace(horizontal, face -> face == Direction.UP) == null, "open air cannot invent a shaft face");
+        check(UtilityConnectionEvidence.exposedKineticFace(horizontal, face -> false) == null, "occupied source faces must be refused");
         JsonObject source = json("{native:{create:{hasNetwork:true,isOverStressed:false,getSpeed:64,network_id:'grid-a'}}}");
         JsonObject target = json("{native:{create:{hasNetwork:true,isOverStressed:false,getSpeed:32,network_id:'grid-b'}}}");
         check(UtilityConnectionEvidence.kineticPowered(source, 32), "live non-overstressed source can meet explicit RPM");

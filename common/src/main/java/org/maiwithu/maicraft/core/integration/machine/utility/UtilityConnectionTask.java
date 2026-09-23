@@ -15,7 +15,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.core.FailureType;
-import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
+import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismConfigureTaskRecord;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
@@ -59,9 +59,6 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
     @Override protected void onStart() {
         if (!List.of("kinetic", "energy").contains(r.request.medium())) {
             failure("utility_medium_connection_unsupported"); return;
-        }
-        if (r.request.medium().equals("kinetic") && r.request.targetFace().getAxis() != Direction.Axis.Y) {
-            failure("utility_kinetic_vertical_interface_required"); return;
         }
         if (r.request.medium().equals("energy") && !r.request.resource().isEmpty()
                 && !r.request.resource().equals("neoforge:energy")) { failure("utility_energy_standard_unsupported"); return; }
@@ -157,16 +154,17 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
                 sourceFace = List.of(Direction.values()).stream().filter(face -> shaft(source, face)).findFirst().orElse(Direction.UP);
                 phase = Phase.EXISTING_CONNECTION; return TaskState.RUNNING;
             }
-            sourceFace = List.of(Direction.UP, Direction.DOWN).stream().filter(face -> shaft(source, face)
-                    && world.isLoaded(r.request.sourceAnchor().relative(face))
-                    && world.getBlockState(r.request.sourceAnchor().relative(face)).isAir()).findFirst().orElse(null);
-            if (sourceFace == null) return failure("utility_source_needs_exposed_vertical_shaft");
-            var request = CreateMechanicalPower.Request.preserving(
-                    new CreateMechanicalPower.Endpoint(r.sourceLabel, r.request.sourceAnchor(), sourceFace),
-                    new CreateMechanicalPower.Endpoint(r.inputId, r.request.target(), r.request.targetFace()));
+            // 带轮通常露出水平轴面；从服务端确认的所有轴面选空闲入口，再交给通用传动规划器接线。
+            sourceFace = exposedKineticFace(source, face -> world.isLoaded(r.request.sourceAnchor().relative(face))
+                    && !NavigationSafetyContext.protectsMutation(r.request.sourceAnchor().relative(face))
+                    && world.getBlockState(r.request.sourceAnchor().relative(face)).isAir());
+            if (sourceFace == null) return failure("utility_source_needs_exposed_native_shaft");
             phase = Phase.BUILD;
-            start(CreateMechanicalPower.task(r.getToolCallId() + "-shaft", r.getDeadlineGameTime(), request,
-                    r.materialPolicy, List.of(), false, r.protectedLabels));
+            // 精确绑定已观察的轴面、最终方块与最低转速，比较路线时就淘汰转速不足的方案。
+            start(new EconomicKineticTaskRecord(r.getToolCallId() + "-shaft", r.getDeadlineGameTime(), r.dimension,
+                    r.sourceLabel, r.request.sourceAnchor(), sourceFace, r.inputId, r.request.target(),
+                    r.request.targetFace(), r.request.targetBlockId(), r.request.minRpm(), 64, true,
+                    r.materialPolicy, r.protectedLabels));
         } else {
             if (!energyFaces(target, false).contains(r.request.targetFace())) return failure("utility_target_face_not_native_energy_input");
             var faces = energyFaces(source, true).stream().filter(face -> storedEnergy(source, face) > 0).toList();

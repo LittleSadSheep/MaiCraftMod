@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -30,6 +31,7 @@ final class UtilityConnectionReplayFixture implements AutoCloseable {
     String targetNetwork = "city-a";
     boolean edgeConnected = true;
     boolean sourceExports = true;
+    List<Direction> kineticFaces = List.of(Direction.UP, Direction.DOWN);
     int cursor;
     long tick;
 
@@ -93,6 +95,9 @@ final class UtilityConnectionReplayFixture implements AutoCloseable {
                                 + (atSource ? "east" : "west") + "',amount:40}]"));
                     } else {
                         observed.add("native", JsonParser.parseString("{create:{hasNetwork:true,isOverStressed:false,getSpeed:64,shaft_faces:['up','down']}}"));
+                        // 同一回放覆盖水平带轮与旧竖直轴，轴面来自独立的服务端模拟回执。
+                        JsonArray faces = new JsonArray(); kineticFaces.forEach(face -> faces.add(face.getSerializedName()));
+                        observed.getAsJsonObject("native").getAsJsonObject("create").add("shaft_faces", faces);
                         observed.getAsJsonObject("native").getAsJsonObject("create").addProperty("network_id",
                                 position.equals(UtilityConnectionEvidence.position(source)) ? "city-a" : targetNetwork);
                     }

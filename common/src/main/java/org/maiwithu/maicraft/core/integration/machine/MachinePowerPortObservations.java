@@ -33,7 +33,8 @@ public final class MachinePowerPortObservations {
                         && NativeApi.truth(NativeApi.call(state.getBlock(), ROTATE, "hasShaftTowards", world, at, state, face));
                 port.addProperty("installed", installed);
                 if (!installed) { port.addProperty("powered", false); continue; }
-                double speed = NativeApi.number(NativeApi.call(entity, KINETIC, "getSpeed"));
+                // 齿轮减速可能产生小于 1 RPM 的转速，保留原生小数，不能截断为零后误报停机。
+                double speed = ((Number) NativeApi.call(entity, KINETIC, "getSpeed")).doubleValue();
                 if (!Double.isFinite(speed)) { port.addProperty("unknown", "non_finite_native_speed"); continue; }
                 boolean powered = speed != 0 && NativeApi.truth(NativeApi.call(entity, KINETIC, "hasNetwork"))
                         && !NativeApi.truth(NativeApi.call(entity, KINETIC, "isOverStressed"));
