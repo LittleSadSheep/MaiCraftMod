@@ -261,12 +261,8 @@ public final class ContainerTransferCompanionTask
                     boolean exactDestination = ItemStack.isSameItemSameComponents(
                                     destination, sourceKind)
                             && destination.getCount() == destinationBefore.getCount() + requested;
-                    // Some synchronized workstations consume or transform a deposited stack in
-                    // the same server tick. Furnace fuel is the common case: one fuel item can
-                    // leave the destination slot as burn time before the placement echo arrives.
-                    // The exact source debit plus an empty cursor still proves that the explicit
-                    // destination click settled; a rejected click restores the source/cursor and
-                    // therefore cannot satisfy this postcondition.
+                    // 某些同步工作站会在同一服务器 tick 内消耗或转换放入的物品。常见情况是熔炉燃料：燃料物品可能在放置回显到达前已转成燃烧时间并离开目标槽。
+                    // 若来源槽确切减少且游标为空，仍可证明指定目标点击已结算；被拒绝的点击会恢复来源槽和游标，因此无法满足此后置条件。
                     boolean consumedAfterDeposit = move.destinationMode()
                                     == ContainerTransferTaskRecord.DestinationMode.MAY_MUTATE_AFTER_DEPOSIT
                             && sourceDebitConfirmed(source);
