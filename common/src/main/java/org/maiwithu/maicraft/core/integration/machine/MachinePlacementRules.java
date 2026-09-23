@@ -20,7 +20,7 @@ import net.minecraft.world.level.block.LiquidBlock;
  * 校验机器方块能否按现有安装规则表达：解析注册状态、保留明确属性，并核对多格效果。
  * 蓝图格式由 MachineBlueprintDocument 校验，计划与现场勘察共同使用这里的安装规则。
  */
-final class MachinePlacementRules {
+public final class MachinePlacementRules {
     private MachinePlacementRules() {}
 
     private static <T extends Comparable<T>> BlockState withProperty(BlockState state, Property<T> property, String value) {
@@ -31,7 +31,7 @@ final class MachinePlacementRules {
 
     /** Registry/state compilation is separately testable without constructing a player or a world. */
     // 当前机器规划仍共用此方法：名字和属性必须存在；若建造会重置明确给出的属性，立即报不支持，不静默换值。
-    static BlockState resolveState(String blockId, Map<String, String> properties) {
+    public static BlockState resolveState(String blockId, Map<String, String> properties) {
         ResourceLocation id = ResourceLocation.tryParse(blockId);
         if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
             throw new IllegalArgumentException("unknown block registry ID: " + blockId);
