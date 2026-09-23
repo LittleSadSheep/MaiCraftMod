@@ -25,7 +25,7 @@ public final class InventoryOps {
 
     private static final long EQUIP_TIMEOUT_TICKS = 5 * 20;   // instant; generous floor
 
-    /** Generous — covers any food's eat duration (most ~1.6s) plus buffer. */
+    /** 采用宽裕时限，覆盖各类食物的进食时间（多数约 1.6 秒）并留有余量。 */
     private static final long EAT_TIMEOUT_TICKS = 15 * 20;
 
     private static final int DROP_MAX_COUNT = 999;
@@ -56,7 +56,7 @@ String slot,
         return new EquipTaskRecord(ctx.toolCallId(), ctx.deadline(EQUIP_TIMEOUT_TICKS), item, equipSlot, label);
     }
 
-    /** Parse the optional slot; {@code null} means auto-route. */
+    /** 解析可选槽位；{@code null} 表示自动选择转移路径。 */
     private static EquipmentSlot readSlot(String slot) {
         if (slot == null) {
             return null;
@@ -115,8 +115,7 @@ int count,
 List<String> item_ids,
 Integer radius,
             ToolContext ctx) {
-        // Lenient set from the id list: unparseable / unknown ids are skipped, and
-        // an absent list yields an empty set — the "match everything" filter.
+        // 从 ID 列表宽松构造筛选集合：无法解析或未知的 ID 会跳过；未提供列表则得到空集合，即“匹配所有物品”。
         Set<Item> filter = new LinkedHashSet<>();
         if (item_ids != null) {
             for (String el : item_ids) {
