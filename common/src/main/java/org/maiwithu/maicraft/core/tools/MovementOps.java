@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
  */
 public final class MovementOps {
 
-    /** Base budget: 30 seconds at vanilla 20 tps (the goal extends it by distance at runtime). */
+    /** 基础预算按原版 20 tps 计算为 30 秒；运行时会依据目标距离延长。 */
     private static final long DEFAULT_TIMEOUT_TICKS = 30 * 20;
 
     /**
@@ -33,15 +33,13 @@ public final class MovementOps {
 
     public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
                              Boolean allowWaterBucketFall, String transportMode, Boolean allowLandingAssists, ToolContext ctx) {
-        // MoveToTaskRecord validates the x/y/z/block combination, throwing a
-        // teaching error for an ambiguous one (e.g. only x given, or block
-        // combined with coordinates).
+        // MoveToTaskRecord 会验证 x/y/z 与方块目标的组合；若参数有歧义（例如只提供 x，或同时提供方块和坐标），就返回教学性错误。
         return new MoveToTaskRecord(ctx.toolCallId(), ctx.deadline(DEFAULT_TIMEOUT_TICKS),
                 x, y, z, block, Boolean.TRUE.equals(mayAlterTerrain), Boolean.TRUE.equals(allowWaterBucketFall),
                 TransportMode.parse(transportMode), Boolean.TRUE.equals(allowLandingAssists));
     }
 
-    /** Public travel keeps any supplied height as a hint unless exact standing was requested. */
+    /** 除非明确要求精确站位，公开移动任务会将提供的高度仅作为参考。 */
     public TaskRecord moveTo(Double x, Double y, Double z, String block, Boolean mayAlterTerrain,
                              Boolean allowWaterBucketFall, String transportMode, Boolean allowLandingAssists,
                              Boolean exact, Double horizontalRadius, Double verticalTolerance, ToolContext ctx) {
