@@ -38,12 +38,11 @@ import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource;
 
 /**
- * Query tool implementations — the business half of {@code LookupRecipeTool},
- * {@code ScanNearbyEntitiesTool} and {@code InspectBlockStorageTool}.
+ * 查询工具的具体实现：承载 {@code LookupRecipeTool}、{@code ScanNearbyEntitiesTool} 和 {@code InspectBlockStorageTool} 的业务逻辑。
  */
 public final class QueryExtraOps {
 
-    // ---- scan_nearby_entities ----
+    // ---- scan_nearby_entities：扫描附近实体 ----
 
     private static final int MAX_RESULTS = 20;
     private static final double MIN_RADIUS = 1.0;
@@ -123,9 +122,9 @@ String type_filter,
         return v;
     }
 
-    // ---- lookup_recipe ----
+    // ---- lookup_recipe：查询配方 ----
 
-    /** Cap recipes per lookup — enough variants to choose from without a token bomb. */
+    /** 限制每次查询返回的配方数，保留足够候选供选择，又避免结果占用过多上下文。 */
     private static final int MAX_RECIPES = 4;
 
     public String lookupRecipe(
@@ -226,7 +225,7 @@ String item_id,
             }
             return sb.toString();
         }
-        // Shapeless: order doesn't matter, place anywhere.
+        // 无序配方不要求材料顺序，可放入任意槽位。
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (Ingredient ing : recipe.getIngredients()) {
             if (ing.isEmpty()) continue;
@@ -238,7 +237,7 @@ String item_id,
         return "shapeless, makes " + count + ": " + list + " (place anywhere in the grid)";
     }
 
-    /** A cooking recipe (one input → one output) labelled by its station. */
+    /** 单输入、单输出的烹饪配方，并标明使用的工作站。 */
     private static String formatCooking(AbstractCookingRecipe recipe, ItemStack result) {
         RecipeType<?> type = recipe.getType();
         String station = type == RecipeType.BLASTING ? "blasting (blast furnace)"
@@ -249,15 +248,14 @@ String item_id,
                 + result.getCount() + " (" + recipe.getCookingTime() + " ticks)";
     }
 
-    /** A smithing recipe (smithing table). 1.21.1's SmithingRecipe exposes only is*Ingredient(stack)
-     *  tests — no ingredient getters — so we can't enumerate the inputs; describe the station + result. */
+    /** 锻造台配方。1.21.1 的 SmithingRecipe 只提供 is*Ingredient(stack) 测试，没有材料读取器，
+     *  因此无法枚举输入材料，只能描述工作站和结果。 */
     private static String formatSmithing(SmithingRecipe recipe, ItemStack result) {
         return "[smithing] (smithing table: template + base + addition) -> makes " + result.getCount();
     }
 
-    /** Name an ingredient: a single item directly, a shared-suffix tag as "planks (any)", else a few
-     *  members — so a category ingredient doesn't mislead the model into one specific item.
-     *  Package-visible: the craft tool names its material shortfalls with the same vocabulary. */
+    /** 描述材料时，单个物品直接给名称；共享后缀标签写作“任意木板”；否则列出少量成员，避免模型误以为类别材料只接受某一种物品。
+     *  对包内可见，合成工具也使用同一套词汇说明材料缺口。 */
     static String describeIngredient(Ingredient ing) {
         List<String> paths = Arrays.stream(ing.getItems())   // 1.21.1: getItems() -> ItemStack[]
                 .map(s -> BuiltInRegistries.ITEM.getKey(s.getItem()).getPath())
@@ -291,7 +289,7 @@ String item_id,
         return token;
     }
 
-    // ---- inspect_block_storage ----
+    // ---- inspect_block_storage：检查方块存储 ----
 
     public String inspectBlockStorage(int x,
 int y,
