@@ -53,7 +53,7 @@ final class CreateMechanicalPowerTask
     private static final int NETWORK_CONFIRM_TICKS = 80;
     private static final int READY_TICKS = 2;
     private static final float LOOK_EPSILON = 1.5f;
-    /** Renewable liveness window; this is deliberately not a maximum task duration. */
+    /** 可续期的存活期限；有意不将其设为任务总时长上限。 */
     private static final long PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
     private static final int PROGRESS_GRACE_TICKS = 100;
 
@@ -431,8 +431,7 @@ final class CreateMechanicalPowerTask
         }
 
         if (initialInventoryCount <= 0) {
-            // A resumed/partially built route may have a staged hotbar transaction. Restore that
-            // exact transaction before acquisition, then continue the same confirmed prefix.
+            // 恢复或部分完成的路线可能留有快捷栏准备交易；先准确恢复该交易，再获取材料并继续同一已确认前缀。
             if (cursor > 0 || resumedConstructionPrefix) {
                 phase = Phase.RESTOCK_RESTORE;
             } else {
@@ -441,10 +440,8 @@ final class CreateMechanicalPowerTask
             return false;
         }
 
-        // Before the first mutation, fill the currently available carrying capacity and then
-        // investigate again. After a confirmed prefix exists, use what is already carried and
-        // restock at the exact batch boundary; requiring the entire route in one inventory would
-        // be an arbitrary 36-slot gate on otherwise valid long construction.
+        // 首次修改世界前，先尽量装满当前可用携带容量，再继续勘查。
+        // 已确认部分路线后，优先使用现有携带物资，并在明确批次边界补货；要求一次携带整条路线的材料，会给本来可行的长距离施工增加任意的 36 槽限制。
         if (cursor == 0 && !resumedConstructionPrefix
                 && initialInventoryCount < desiredBatch) {
             startMaterialSupply(desiredBatch, false);
@@ -625,8 +622,7 @@ final class CreateMechanicalPowerTask
         int expectedInventory = initialInventoryCount - (cursor - startCursor);
         int actualInventory = inventoryCount(player, chainItem);
         if (expectedInventory == 0) {
-            // The prior batch is exactly accounted for. Restore staging before accepting any
-            // newly observed items or asking the internal supplier for the next finite batch.
+            // 上一批次的数量已精确核算；在接纳新观察到的物品或向内部供料器请求下一批有界材料前，先恢复槽位准备状态。
             phase = Phase.RESTOCK_RESTORE;
             return TaskState.RUNNING;
         }
@@ -989,9 +985,7 @@ final class CreateMechanicalPowerTask
         CreateMechanicalPlan.KineticEndpoint source = plan.source();
         boolean sourceLoaded = level.isLoaded(source.position());
         if (!sourceLoaded && plan.progressive() && cursor > 0) {
-            // The exact source was revalidated after returning from survey and immediately before
-            // the first mutation. Once a long route advances beyond its loaded window, only the
-            // frozen source fact is available; every newly loaded route cell is still rechecked.
+            // 首次修改前，已在勘查返回后重新核实具体动力源。长路线离开已加载窗口后只能使用冻结的源信息；新加载的每个路线格仍会重新核查。
         } else if (!sourceLoaded || !level.getBlockState(source.position()).equals(source.state())) {
             return new Validation("source_changed", "the selected source block changed or unloaded",
                     FailureType.TARGET_LOST, List.of("inspect_source", "cancel"));
@@ -1006,7 +1000,7 @@ final class CreateMechanicalPowerTask
         boolean destinationLoaded = destination == null
                 || level.isLoaded(destination.position());
         if (destination != null && !destinationLoaded && plan.progressive()) {
-            // Frozen during destination survey; revalidated when its corridor window loads again.
+            // 在目标勘查期间冻结；其走廊窗口重新加载时再核实。
         } else if (destination != null && (!destinationLoaded
                 || !level.getBlockState(destination.position()).equals(destination.state()))) {
             return new Validation("destination_changed", "the selected destination block changed or unloaded",
@@ -1207,7 +1201,7 @@ final class CreateMechanicalPowerTask
         return total;
     }
 
-    /** Maximum final count that the current 36-slot inventory can physically carry. */
+    /** 当前 36 槽背包实际能够携带的最大最终数量。 */
     private static int carryingCapacity(LocalPlayer player, Item item) {
         int capacity = 0;
         int defaultStack = new ItemStack(item).getMaxStackSize();
