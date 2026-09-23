@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.network;
 
 import com.google.gson.JsonObject;
 
-/** Reserves request identity before invoking native code and preserves uncertain outcomes. */
+/** 调用原生代码前预留请求身份，并保留结果不确定的状态。 */
 final class ProtocolRequests {
     private ProtocolRequests() {}
 
@@ -52,7 +52,7 @@ final class ProtocolRequests {
             result = ProtocolReplies.response("receipt", request, "succeeded", mutating ? "applied" : "not_applied", peer.tick());
             result.addProperty("remainingRequests", session.ledger.remainingRequests());
             result.add("result", body);
-            // Business outcomes remain in result; a protocol success only means the handler returned.
+            // 业务结果保留在 result 中；协议成功只表示处理器已返回。
             ProtocolJson.encode(result);
         } catch (ServerOperationException rejected) {
             result = ProtocolReplies.reject(request, rejected.code(), rejected.getMessage(), peer.tick());
@@ -78,7 +78,7 @@ final class ProtocolRequests {
         JsonObject receipt = session.ledger.lookup(requestId);
         if (receipt != null) return receipt;
         if (session.ledger.full()) {
-            // Closing the entire scope prevents a late request even when no tombstone fits.
+            // 关闭整个作用域即可阻止迟到请求，即使无法记录墓碑状态也不例外。
             session.closed = true;
             session.allowed = false;
             return ProtocolReplies.reject(request, "cancelled", "Session closed to preserve cancellation", tick);
