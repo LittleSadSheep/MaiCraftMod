@@ -8,7 +8,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
-/** Adds an exact component-sensitive native item filter; existing filters are never overwritten. */
+/** 添加一个按数据组件精确匹配的原生物品过滤器；不会覆盖现有过滤器。 */
 final class MekanismSorterAdapter {
     private static final String SORTER = "mekanism.common.tile.TileEntityLogisticalSorter";
     private static final String FILTER = "mekanism.common.content.transporter.SorterItemStackFilter";
@@ -45,7 +45,7 @@ final class MekanismSorterAdapter {
         String action = ServerAccess.text(body, "action");
         JsonObject result = new JsonObject();
         if (action.equals("mekanism.sorter_filter")) {
-            // PacketNewFilter accepts native serialized ghost criteria; it does not consume sample items.
+            // PacketNewFilter 接受原生序列化的虚影条件，不会消耗样本物品。
             ItemStack sample = FilterTemplate.resolve(player, body);
             if (sample.isEmpty()) throw ServerAccess.denied("invalid_argument", "An item filter must name a nonempty item");
             Object manager = NativeApi.call(entity, SORTER, "getFilterManager");
@@ -57,7 +57,7 @@ final class MekanismSorterAdapter {
             catch (ReflectiveOperationException missing) { throw ServerAccess.denied("unsupported", "Native sorter filter constructor unavailable"); }
             NativeApi.call(filter, FILTER, "setItemStack", sample.copyWithCount(1));
             NativeApi.call(filter, "mekanism.common.content.filter.BaseFilter", "setEnabled", true);
-            // The native constructor defaults to fuzzyMode=false, so full components remain significant.
+            // 原生构造器默认 fuzzyMode=false，因此完整数据组件会参与精确匹配。
             if (NativeApi.truth(NativeApi.field(filter, FILTER, "fuzzyMode"))) {
                 throw ServerAccess.denied("unsupported", "Native filter unexpectedly defaults to fuzzy matching");
             }

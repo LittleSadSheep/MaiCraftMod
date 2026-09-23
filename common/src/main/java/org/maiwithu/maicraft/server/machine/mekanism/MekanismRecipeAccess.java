@@ -10,7 +10,7 @@ import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Native machine recipe lists include generated smelting recipes absent from vanilla's manager. */
+/** 原生机器配方列表包含自动生成的熔炼配方，而原版管理器中没有这些配方。 */
 public final class MekanismRecipeAccess {
     public static final String LOOKUP = "mekanism.common.recipe.lookup.IRecipeLookupHandler";
     public static final String PROVIDER = "mekanism.common.recipe.IMekanismRecipeTypeProvider";
@@ -28,7 +28,7 @@ public final class MekanismRecipeAccess {
             Object smelting = NativeApi.call(NativeApi.constant("mekanism.common.recipe.MekanismRecipeType", "SMELTING"),
                     PROVIDER, "getRecipeType");
             if (actualType == smelting) {
-                // Invoke the same native alias function used by Mekanism's server recipe-list conversion.
+                // 调用 Mekanism 服务端配方列表转换所使用的同一个原生别名函数。
                 generated = (ResourceLocation) NativeApi.call(null, "mekanism.client.recipe_viewer.RecipeViewerUtils",
                         "synthetic", requested, "mekanism_generated");
             }
@@ -45,7 +45,7 @@ public final class MekanismRecipeAccess {
     public static boolean compatible(BlockEntity entity, RecipeHolder<?> holder) {
         if (!NativeApi.is(entity, LOOKUP)) return false;
         Object provider = NativeApi.call(entity, LOOKUP, "getRecipeType");
-        // No getRecipe(currentInput) call: empty inventories do not alter supported recipe types.
+        // 不调用 getRecipe(currentInput)：空库存不会改变受支持的配方类型。
         return NativeApi.call(provider, PROVIDER, "getRecipeType") == holder.value().getType();
     }
 }
