@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.core.tools.RecipeProbe;
 
 /** 生存预检只识别已核实的创造物品；没有普通配方不等于普通机器无法获取。 */
 public final class MachineSurvivalMaterials {
-    // Exact installed IDs audited against Create 6.0.10, Mekanism 10.7.19.85 and AE2 19.2.17.
+    // 精确物品 ID 已对照 Create 6.0.10、Mekanism 10.7.19.85 和 AE2 19.2.17 的已安装版本审核。
     private static final Map<String, String> KNOWN_CREATIVE = Map.ofEntries(
             Map.entry("create:creative_motor", "kinetic"), Map.entry("create:creative_fluid_tank", "fluids"),
             Map.entry("create:creative_crate", "items"), Map.entry("create:creative_blaze_cake", "heat"),
@@ -117,7 +117,7 @@ public final class MachineSurvivalMaterials {
             JsonObject cell = element.getAsJsonObject();
             for (String field : Set.of("block_id", "item_id")) if (cell.has(field)) ids.add(cell.get(field).getAsString());
         }
-        // The compiler adds consumables and drive contents here; filters and tutorial evidence are not inventory requirements.
+        // 编译器会在此加入消耗品和驱动内容物；过滤器和教程证据都不是背包材料要求。
         if (report.has("logical_material_counts")) ids.addAll(report.getAsJsonObject("logical_material_counts").keySet());
         if (report.has("initial_contents")) for (var element : report.getAsJsonArray("initial_contents")) {
             JsonObject content = element.getAsJsonObject(); if (content.has("item_id")) ids.add(content.get("item_id").getAsString());

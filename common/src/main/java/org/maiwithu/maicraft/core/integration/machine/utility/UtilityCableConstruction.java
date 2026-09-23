@@ -40,7 +40,7 @@ final class UtilityCableConstruction {
                 || !world.getWorldBorder().isWithinBounds(position) || NavigationSafetyContext.protectsMutation(position)
                 || !world.getBlockState(position).isAir() || world.getBlockEntity(position) != null
                 || !world.getBlockState(position).getFluidState().isEmpty()) return false;
-        // Avoid accidentally merging a new cable into an unrelated device/network along the route.
+        // 避免新线缆意外并入路线上的无关设备或网络。
         for (Direction face : Direction.values()) {
             BlockPos adjacent = position.relative(face);
             if (endpoints.contains(adjacent)) continue;
@@ -53,14 +53,14 @@ final class UtilityCableConstruction {
         BlockItem item = (BlockItem) BuiltInRegistries.ITEM.get(CABLE);
         var targets = route.cables().stream().map(position -> new BuildTaskRecord.Target(item.getBlock().defaultBlockState(),
                 item, position, "external energy cable", null, null, null, true, Set.of(), true, Set.of())).toList();
-        // Real carried materials are required even when the caller happens to be in creative mode.
+        // 即使调用方当前处于创造模式，也必须实际携带所需材料。
         BuildTaskRecord plan = new BuildTaskRecord(callId + "-cables", deadline,
                 targets, ReplaceMode.DONT_REPLACE, false, true, false, Map.of(), List.of(), false);
         List<BlockPos> endpoints = List.of(route.path().getFirst(), route.path().getLast());
         plan.materialSupplyProtection(route.path());
         plan.executionGuards(endpoints, actor -> endpointsCurrent.getAsBoolean(), (actor, position) -> {
             if (!endpointsCurrent.getAsBoolean() || !actor.level().isLoaded(position)) return false;
-            // Scaffold cells remain owned by the normal builder; planned cables may only replace air.
+            // 脚手架格仍由普通施工器负责；规划中的线缆只能替换空气格。
             if (endpoints.contains(position)) return false;
             if (!route.cables().contains(position)) return true;
             if (!actor.level().getBlockState(position).isAir()) return false;

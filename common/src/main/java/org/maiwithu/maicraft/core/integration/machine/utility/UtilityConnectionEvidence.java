@@ -11,7 +11,7 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
-/** Native observations distinguish powered storage from transfer rate and production attribution. */
+/** 原生观察分别确认带电储存、传输速率和生产来源归属。 */
 public final class UtilityConnectionEvidence {
     private UtilityConnectionEvidence() {}
     public static JsonObject position(BlockPos at) {

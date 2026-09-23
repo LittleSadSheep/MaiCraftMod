@@ -10,7 +10,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
-/** One operation in flight for a production task. A response never authorizes replaying an unknown effect. */
+/** 生产任务中唯一正在执行的操作；收到响应后绝不重放结果未知的副作用。 */
 final class ProductionRequestSlot {
     interface Backend {
         boolean supported(String operation);

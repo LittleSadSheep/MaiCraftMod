@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import java.util.function.BooleanSupplier;
 import static org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionEvidence.*;
 
-/** Establishes utility availability; commissioning the machine's recipe remains a separate task. */
+/** 建立公用设施可用性；机器配方投产仍由独立任务负责。 */
 final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectionTaskRecord> {
     private enum Phase { SOURCE, TARGET, PREPARE, BUILD, TOOL, CONFIGURE, CONNECTIONS, EXISTING_CONNECTION, SOURCE_AFTER, TARGET_AFTER, DONE }
     private final Level world;
@@ -207,7 +207,7 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
     }
     private TaskState tool() {
         if (!UtilityCableConstruction.matches(player, route.cables())) return failure("utility_cable_route_changed");
-        // Transmitter-to-transmitter networks join natively; only a new cable beside a machine needs pull mode.
+        // 传输器之间可由原生网络自动连接；只有机器旁新建线缆时才需要设置 PULL 模式。
         if (BuiltInRegistries.BLOCK.getKey(sourceBlock).getPath().endsWith("universal_cable")) { phase = Phase.CONNECTIONS; return TaskState.RUNNING; }
         ResourceLocation configurator = ResourceLocation.parse("mekanism:configurator");
         boolean carried = player.getInventory().items.stream().anyMatch(stack -> !stack.isEmpty()

@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
 import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 
-/** Read-only requests remain immutable until their response is consumed. */
+/** 只读请求在响应被消费前保持不可变。 */
 final class UtilityConnectionReads {
     private ClientRequestReceipt receipt;
     private String operation;

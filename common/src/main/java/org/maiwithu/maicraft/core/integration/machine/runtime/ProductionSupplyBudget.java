@@ -7,7 +7,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import java.util.Set;
 
-/** Finite allocation survives refill passes; consumed source stock is never credited again. */
+/** 有限分配量会跨补货轮次保留；已经消耗的来源库存绝不会再次记账。 */
 final class ProductionSupplyBudget {
     record Key(String source, String medium, String resource) {}
     private final long total;

@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** One batch boundary at a time; only new native events from the first consumers release later batches. */
+/** 一次只处理一个批次边界；只有首批消耗者产生新的原生事件后才放行后续批次。 */
 final class ProductionSupplyPacer {
     private final ProductionSupplyBudget budget;
     private final long batch, batches, initialObserved, initialAllowance, refillRounds;
@@ -40,7 +40,7 @@ final class ProductionSupplyPacer {
         }
     }
 
-    /** Independent consumers each advance a round; a process already at its authored count cannot block later rounds. */
+    /** 各独立消耗者分别推进一轮；已达到手工指定数量的工艺不能阻塞后续轮次。 */
     private long allowance() {
         long rounds = refillRounds;
         for (String consumer : consumerBatches.keySet()) {

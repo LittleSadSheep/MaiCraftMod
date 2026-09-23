@@ -167,7 +167,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                 || !MachineMenu.transferable(source)) {
             return failure("machine_source_changed", "The observed source changed before pickup.", FailureType.TARGET_LOST);
         }
-        // The native whole/half pickup amount must still be exactly the reviewed amount.
+        // 原生整堆或半堆拾取数量仍必须与审核通过的数量完全一致。
         int livePickup = pickupButton == 0 ? stack.getCount() : (stack.getCount() + 1) / 2;
         if (livePickup != pickupAmount) return failure("machine_source_count_changed",
                 "The source count changed before native pickup; inspect it again.", FailureType.TARGET_LOST);
@@ -230,8 +230,7 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         receipt = context.menus().click(context, entryIndex, button, ClickType.PICKUP,
                 (fresh, nativeReceipt) -> {
                     if (!sameSession()) return MenuConfirmation.Verdict.DIVERGED;
-                    // Withdrawal also requires the physical machine entry's exact debit. A
-                    // virtual output that merely copies an item to the cursor cannot pass.
+                    // 提取还必须确认机器物理入口中的数量精确扣减；仅把物品复制到游标的虚拟输出无法通过。
                     boolean sourceDebited = expectedMachineSource == null
                             || MachineMenu.same(entry.getItem(), expectedMachineSource);
                     if (sourceDebited && MachineMenu.same(menu.getCarried(), expected)

@@ -9,7 +9,7 @@ import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
 import java.util.Set;
 
-/** Allocates one authored sided view; other sides may expose the same physical slots with different indices. */
+/** 为一侧手工声明的视图分配库存；其他侧面可能以不同索引暴露相同的物理槽位。 */
 final class ProductionSupplyStock {
     record View(long amount, String allocationKey, String fingerprint) {}
     private ProductionSupplyStock() {}
@@ -70,7 +70,7 @@ final class ProductionSupplyStock {
         if (memberships.size() > 1) throw new IllegalStateException("production_source_ambiguous_membership");
         String owner = memberships.isEmpty() ? "storage:" + storages : "membership:" + memberships.first();
         if (storages.isEmpty() && memberships.isEmpty()) owner = "empty_position:" + position.toShortString();
-        // Contents/count may change normally. A changed block, inventory topology or network invalidates this source view.
+        // 内容或数量可正常变化；方块、库存拓扑或网络变化时，此来源视图失效。
         String fingerprint = text(selected, "block_id") + "/" + owner + "/" + side + "/" + storages;
         return new View(total, owner + "/" + medium + "/" + exactResource, fingerprint);
     }

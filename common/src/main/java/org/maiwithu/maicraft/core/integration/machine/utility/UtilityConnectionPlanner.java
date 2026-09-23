@@ -12,7 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import java.util.Collections;
 
-/** Finite loaded-world routing; unknown or occupied cells are never silently cleared. */
+/** 仅在有限已加载世界内规划路线；未知格或已占据格绝不会被静默清除。 */
 public final class UtilityConnectionPlanner {
     public static final int MAX_PATH = 128, MAX_VISITED = 8192, MAX_SPAN = 96;
     public record Route(Direction sourceFace, List<BlockPos> path) {

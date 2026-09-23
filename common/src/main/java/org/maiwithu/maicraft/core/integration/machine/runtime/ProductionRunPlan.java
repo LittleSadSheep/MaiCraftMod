@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionStage
 import com.google.gson.JsonParser;
 import java.util.Objects;
 
-/** Frozen authored production intent anchored to the exact reviewed build, never to the player's later position. */
+/** 冻结的手工生产意图绑定到已审核的准确建筑，不会随玩家后续位置改变。 */
 public final class ProductionRunPlan {
     private final BlockPos anchor;
     private final String dimension;
@@ -35,7 +35,7 @@ public final class ProductionRunPlan {
         this.nodes = Map.copyOf(nodes); this.ports = Map.copyOf(ports);
     }
 
-    /** Accept only a compiler report admitted to supply; authored geometry and budgets remain immutable. */
+    /** 只接受已获供料准入的编译器报告；手工几何和预算保持不可变。 */
     public synchronized void bindResolved(JsonObject compilationReport) {
         if (!ProductionStageReadiness.canEnter(compilationReport, "supply"))
             throw new IllegalArgumentException("production_binding_not_ready_for_supply");
@@ -62,7 +62,7 @@ public final class ProductionRunPlan {
     public JsonObject authoredJson() { return JsonParser.parseString(json).getAsJsonObject(); }
     public Resource resolvedResource(Resource selector) { Bound state = bound; return state == null ? selector : state.bindings().resolve(selector); }
     public String registryId(Resource selector) { return bindings().registryId(selector); }
-    /** Null is reserved for the non-inventory kinetic RPM unit. */
+    /** null 专用于非库存类动力 RPM 单位。 */
     public JsonObject resourceIdentity(Resource selector) { return bindings().identity(selector); }
     public long supplyBatch(String sourceId, Resource selector) { return hints().batch(sourceId, resolvedResource(selector)); }
     public Set<String> supplyConsumers(String sourceId, Resource selector) { return hints().consumers(sourceId, resolvedResource(selector)); }

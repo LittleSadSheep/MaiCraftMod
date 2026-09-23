@@ -5,7 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-/** Shared native membership is charged once even when several authored sources are aliases. */
+/** 多个手工来源若指向同一原生成员，也只扣除一次数量。 */
 final class ProductionSupplyAllocations {
     private final Map<ProductionSupplyBudget.Key, ProductionSupplyStock.View> sources = new LinkedHashMap<>();
     private final Map<String, Long> charged = new LinkedHashMap<>();
