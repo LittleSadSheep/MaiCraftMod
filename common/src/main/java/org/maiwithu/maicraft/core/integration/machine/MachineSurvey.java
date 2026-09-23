@@ -43,7 +43,7 @@ public final class MachineSurvey {
 
     private MachineSurvey() {}
 
-    /** Radius is defensively clamped; callers should reject invalid user arguments first. */
+    /** 半径会被防御性限制；调用方应先拒绝无效用户参数。 */
     // 半径限制到 0..8，先扫描完整小立方体，再按输出预算挑选显示项；被省略的数量会在报告中说明。
     public static JsonObject inspect(LocalPlayer self, BlockPos center, int requestedRadius) {
         Objects.requireNonNull(self, "local player");
@@ -75,7 +75,7 @@ public final class MachineSurvey {
         capture.mods.forEach(mods::add);
         report.add("detected_mods", mods);
 
-        // Prefer machine blocks and nearby useful blocks when a terrain-heavy volume exceeds the budget.
+        // 地形量过大、超过预算时，优先读取机器方块和附近有用方块。
         // 先展示名称上像机器的组件，再按离中心远近排列；普通地形也参与结构观察，但可能在输出中被截断。
         capture.blocks.sort(Comparator.comparingInt((ObservedBlock block) -> block.hint.relevant() ? 0 : 1)
                 .thenComparingInt(block -> distanceSquared(block.relative))
@@ -171,7 +171,7 @@ public final class MachineSurvey {
         return report;
     }
 
-    /** Re-observe the same bounded structure, without transient kinetic telemetry or a full JSON report. */
+    /** 重新观察同一有界结构，不读取瞬态动力遥测，也不生成完整 JSON 报告。 */
     public static String fingerprint(LocalPlayer self, BlockPos center, int radius) {
         Objects.requireNonNull(self, "local player");
         Objects.requireNonNull(center, "machine center");
@@ -185,7 +185,7 @@ public final class MachineSurvey {
         MessageDigest digest = digest();
         hash(digest, "machine-survey-v1", result.worldScope, level.dimension().location().toString(),
                 center.toShortString(), Integer.toString(radius));
-        // Fixed traversal includes air and missing cells in the digest, even when the public payload truncates.
+        // 摘要中的固定遍历会计入空气格和缺失格，即使公开载荷被截断也一样。
         for (int dy = -radius; dy <= radius; dy++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
@@ -211,7 +211,7 @@ public final class MachineSurvey {
                     ordered.sort(Comparator.comparing(Property::getName));
                     for (int index = 0; index < ordered.size(); index++) {
                         Property<?> property = ordered.get(index);
-                        // Hash every property even if the public representation must be cut short.
+                        // 即使公开表示必须截断，也要对所有属性进行哈希。
                         String value = propertyValue(state, property);
                         hash(digest, property.getName(), value);
                         if (index < MAX_PROPERTIES) properties.addProperty(property.getName(), value);
@@ -291,7 +291,7 @@ public final class MachineSurvey {
     private static void hash(MessageDigest digest, String... values) {
         for (String value : values) {
             byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            // Length-prefix fields, so arbitrary registry/property text cannot create ambiguous concatenations.
+            // 对字段添加长度前缀，避免任意注册表或属性文本拼接出歧义结果。
             digest.update((byte) (bytes.length >>> 24)); digest.update((byte) (bytes.length >>> 16));
             digest.update((byte) (bytes.length >>> 8)); digest.update((byte) bytes.length);
             digest.update(bytes);
@@ -312,7 +312,7 @@ public final class MachineSurvey {
         Capture(int radius, String worldScope) { this.radius = radius; this.worldScope = worldScope; }
     }
 
-    /** Exact, read-only API whitelist already used by the existing Create/AE2 integrations. */
+    /** 与现有 Create/AE2 集成共用的精确只读 API 白名单。 */
     // 可选模组不存在、接口变了或读取失败时返回未知；不会为了读取这份报告去调用写入方法。
     private static final class OptionalReads {
         private static final Class<?> KINETIC = load("com.simibubi.create.content.kinetics.base.KineticBlockEntity");

@@ -18,7 +18,7 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 
-/** Finite read jobs grouped by position; a chosen request remains frozen until its original receipt settles. */
+/** 按位置分组的有限只读作业；已选请求保持冻结，直到其原始回执结算。 */
 final class ProductionReadSchedule {
     record Read(String operation, BlockPos position, JsonObject body, List<String> nodes, List<String> ports, String subject, List<BlockPos> positions) {
         Read(String operation, BlockPos position, JsonObject body, List<String> nodes, List<String> ports, String subject) {
@@ -111,7 +111,7 @@ final class ProductionReadSchedule {
     void complete(ProductionNativeEvidence evidence, JsonObject result) {
         if (!pending || active == null) throw new IllegalStateException("production_read_without_pending_request");
         if (truncated(result) && batches.containsKey(active)) {
-            // The 128-row/resource and envelope budgets are shared. Re-read each original site once; never relabel partial rows as complete.
+            // 128 行/资源和包络预算由所有站点共享；每个原始站点只重新读取一次，绝不把部分行数改标为完整结果。
             var singles = batches.remove(active); remaining.remove(active); remaining.addAll(singles);
             all.remove(active); all.addAll(singles); total += singles.size(); batchSplits++;
             lastPosition = active.position(); active = null; pending = false; completed++; return;
@@ -131,7 +131,7 @@ final class ProductionReadSchedule {
                 && fact.status() != ProductionNativeEvidence.FreshnessStatus.INVALIDATED) return false;
         Read read = all.stream().filter(value -> value.affects(fact)).findFirst().orElse(null);
         if (read == null || remaining.contains(read) || read.factKeys().stream().anyMatch(refreshedFacts::contains)) return false;
-        // Every co-located fact shares this one refresh allowance, even if only one had expired.
+        // 所有共址事实共用这一次刷新额度，即使只有其中一项已经过期。
         if (remaining.isEmpty()) lastPosition = null;
         refreshedFacts.addAll(read.factKeys()); refreshes++; remaining.add(read); return true;
     }
@@ -148,7 +148,7 @@ final class ProductionReadSchedule {
     }
 
     private void batchSnapshots() {
-        // This runs at the first PREPARE read, after construction/configuration, not while the planned cells may still be air.
+        // 此逻辑在施工和配置完成后的首次 PREPARE 读取时运行，不能在计划方块格仍为空气时执行。
         var singles = new ArrayList<>(remaining.stream().filter(read -> read.operation().equals("machine.snapshot")).toList());
         var grouped = new ArrayList<Read>();
         while (!singles.isEmpty()) {
