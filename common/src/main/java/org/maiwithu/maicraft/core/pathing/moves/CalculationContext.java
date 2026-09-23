@@ -95,7 +95,7 @@ public class CalculationContext {
     public final LongSet sacred;
     /** 执行层证明无支撑放不上的格:放置成本直接 INF。 */
     public final LongSet deniedPlace;
-    /** Task-scoped cells the first-person body must never occupy. */
+    /** 当前任务禁止第一人称角色进入的专属格子。 */
     public final LongSet forbiddenBodyCells;
 
     /** 世界可建高度下界(含)与上界(不含)。 */
@@ -193,7 +193,7 @@ public class CalculationContext {
         this.searchConfig = SearchConfig.capture(settings);
     }
 
-    /** Immutable world-border facts safe for a background search. */
+    /** 可安全用于后台搜索的不可变世界边界信息。 */
     public record BorderSnapshot(double minX, double maxX, double minZ, double maxZ) {
 
         static BorderSnapshot from(WorldBorder border) {
@@ -210,7 +210,7 @@ public class CalculationContext {
         }
     }
 
-    /** Search-loop and post-processing knobs captured before publication to the worker. */
+    /** 发布给 worker 前捕获的搜索循环与后处理参数。 */
     public record SearchConfig(
             int mapDefaultSize,
             float mapLoadFactor,
@@ -268,7 +268,7 @@ public class CalculationContext {
         return false;
     }
 
-    /** Water bucket availability matching the receipt-backed hotbar staging rules. */
+    /** 按带回执的快捷栏准备规则判断是否可用水桶。 */
     // 检查快捷栏、按设置允许的普通背包，以及能腾主手的副手桶；这只是携带能力估计，不会真的切换物品。
     private static boolean hasUsableWaterBucket(LocalPlayer player, NavSettings settings) {
         var inventory = player.getInventory();
