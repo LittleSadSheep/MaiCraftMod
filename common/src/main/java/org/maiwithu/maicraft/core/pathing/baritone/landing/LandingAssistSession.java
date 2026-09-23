@@ -216,7 +216,7 @@ public final class LandingAssistSession {
         complete=boat.complete(context); failed|=boat.failed();
     }
 
-    /** The fall owner retains steering and its flight-mode handoff until actual landing. */
+    /** 坠落所属者会持续持有转向和飞行模式交接，直到角色实际着陆。 */
     public void tick(LocalPlayerContext context) {
         if (complete || lastTick == context.tickRevision()) return;
         lastTick = context.tickRevision();
@@ -227,8 +227,7 @@ public final class LandingAssistSession {
         if (Float.isFinite(previousHealth)) healthLost += Math.max(0, previousHealth - context.player().getHealth());
         if (Float.isFinite(previousAbsorption)) absorptionLost += Math.max(0, previousAbsorption - context.player().getAbsorptionAmount());
         rememberHealth(context);
-        // Receipt polling can span the physical impact. Sample native fluid contact even while
-        // awaiting placement evidence, so a dry, damage-free touchdown cannot prove a clutch.
+        // 回执轮询期间角色可能已经撞击地面。等待放置证据时也要采样原生液体接触，避免把干燥且无伤害的着陆误当作水桶救援成功。
         if (plan.kind() == LandingAssistPlan.Kind.WATER
                 && context.player().isInWater() && context.player().fallDistance == 0
                 && touchesPlannedWater(context))
@@ -258,8 +257,7 @@ public final class LandingAssistSession {
             preparation.continueCleanup(context);
             if (preparation.cleanupPending()) return;
         }
-        // Ending an off-target fall is independent of proving this plan succeeded. Water flow,
-        // knockback or a missed aid can leave the body safely supported elsewhere indefinitely.
+        // 结束偏离目标的坠落，和证明本救援方案成功是两件事。水流、击退或救援未命中都可能让角色安全地停在其他支撑面上。
         if (airborneObserved && !nearLanding(context) && settledElsewhere(context)
                 && !(plan.kind() == LandingAssistPlan.Kind.WATER && touchesPlannedWater(context))) {
             if (materialSupply != null && !materialSupply.result().finished()) {
@@ -422,7 +420,7 @@ public final class LandingAssistSession {
         }
         if (!LandingAssistPlan.canRecover(submitted && !plan.existing() && placed != null, placed,
                 context.level().getBlockState(plan.cell()), EmbeddedBaritonePolicy.protects(plan.cell()))) {
-            // Growth, replacement or a new protection claim revokes attribution for removal.
+            // 方块长大、被替换或新出现保护声明时，撤销移除该方块的归属。
             finish("landed; temporary aid left because its exact state or protection changed");
             return;
         }
@@ -458,7 +456,7 @@ public final class LandingAssistSession {
 
     public Vec3 aimPoint() { return boat!=null ? boat.aimPoint() : placed == null ? plan.aimPoint() : Vec3.atCenterOf(plan.cell()); }
     public BodyControlPort.Movement movementOverride() { return boat==null ? null : boat.movementOverride(); }
-    /** Hold the landing cell against generic water bobbing while its source is being recovered. */
+    /** 回收水源期间固定着陆格，防止通用水中浮动逻辑改变站位。 */
     public boolean holdingForRecovery(LocalPlayerContext context) {
         if(boat!=null) return context.player().isPassenger() || boat.movementOverride()!=null;
         return !complete && plan.kind() == LandingAssistPlan.Kind.WATER && nearLanding(context)
@@ -472,7 +470,7 @@ public final class LandingAssistSession {
         if (!submitted && !plan.existing() && plan.kind() != LandingAssistPlan.Kind.WATER
                 && !context.player().onGround()) return true;
         if (plan.kind() != LandingAssistPlan.Kind.SLIME) return false;
-        // Suppress only the final small rebound. Suppressing a high initial fall restores ordinary damage.
+        // 只抑制最后一段轻微反弹；若从高处开始就抑制下落，会恢复普通坠落伤害。
         return context.player().getDeltaMovement().y <= 0 && context.player().getY() - plan.cell().getY() < 3
                 && context.player().fallDistance + 1 < context.player().getAttributeValue(Attributes.SAFE_FALL_DISTANCE);
     }
@@ -486,7 +484,7 @@ public final class LandingAssistSession {
         if (preparation != null) preparation.continueCleanup(context);
         if (materialSupply != null && materialSupply.cleanupPending()) materialSupply.finish(context,"landing preparation ended");
     }
-    /** Retire native receipts at an explicit body/task boundary; never assume a pickup happened. */
+    /** 在明确的身体或任务边界回收原生回执；绝不假设物品已经拾取。 */
     public void stop(LocalPlayerContext context, String reason) {
         if (complete) return;
         if(boat!=null) { boat.stop(context); fail(reason); return; }
