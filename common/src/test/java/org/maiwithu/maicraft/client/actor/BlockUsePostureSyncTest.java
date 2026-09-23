@@ -13,7 +13,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
 
-/** The real action port must put current body facts before a block-use path with no look fields. */
+/** 即使方块使用路径没有视角字段，真实动作端口也必须先发送当前身体状态。 */
 public final class BlockUsePostureSyncTest {
     private static final BlockHitResult HIT = new BlockHitResult(
             new Vec3(1.5, 1, 1.5), Direction.UP, new BlockPos(1, 0, 1), false);
@@ -29,7 +29,7 @@ public final class BlockUsePostureSyncTest {
         try (var world = new InteractionWorldTestHarness()) {
             var h = world.h;
             var ctx = ClientRuntime.requireContext(world.player);
-            // The previous physical tick could have sent SOUTH; camera control now faces EAST.
+            // 上一个物理 tick 可能已发送朝南的姿态，但当前镜头控制方向已转为朝东。
             world.player.setYRot(0); world.player.setXRot(0);
             ctx.body().requestImmediateLook(-90, 12.5F, ctx.tickRevision());
             world.player.input.shiftKeyDown = sneak;

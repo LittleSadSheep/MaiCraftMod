@@ -8,7 +8,7 @@ import java.util.Random;
 import net.minecraft.core.BlockPos;
 import java.util.HashSet;
 
-/** Dense and sparse terrain must return the same nearest cells regardless of visit order. */
+/** 无论扫描顺序如何，稠密和稀疏地形都必须返回相同的最近目标格。 */
 public final class SearchGeometryTest {
     public static void main(String[] args) {
         BlockPos center = new BlockPos(15, 79, -1);
@@ -43,7 +43,7 @@ public final class SearchGeometryTest {
         }
         boundary.offer(BlockPos.ZERO);
         if (!boundary.canStopAfterRing(0)) throw new AssertionError("Zero-distance candidate should finish");
-        // A full old window of individually rejected targets must not hide farther usable ore.
+        // 旧窗口中的候选即使全部单独被拒绝，也不能遮住更远处可用的矿石。
         var rejected = new HashSet<BlockPos>();
         for (int x = 1; x <= 64; x++) rejected.add(new BlockPos(x, 0, 0));
         var usable = new SearchGeometry.NearestPositions(BlockPos.ZERO, 64, rejected);

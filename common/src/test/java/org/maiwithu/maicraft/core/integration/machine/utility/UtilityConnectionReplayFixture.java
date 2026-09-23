@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.server.*;
 import java.util.HashMap;
 
-/** Simulated server observations exercise the real router and task states, not Create's physical APIs. */
+/** 使用模拟服务器观察测试真实路由器和任务状态，不调用 Create 的物理 API。 */
 final class UtilityConnectionReplayFixture implements AutoCloseable {
     final InteractionWorldTestHarness world = new InteractionWorldTestHarness();
     final BlockPos source = new BlockPos(2, 0, 2), target;
@@ -46,7 +46,7 @@ final class UtilityConnectionReplayFixture implements AutoCloseable {
         field(chunk.getClass(), "level").set(chunk, world.level);
         field(ChunkAccess.class, "levelHeightAccessor").set(chunk, world.level);
         field(chunk.getClass(), "blockEntities").set(chunk, new HashMap<>());
-        // Native absent-BE lookup consults this queue before deciding that a plain block has no entity.
+        // 原生缺失方块实体查询会先检查此队列，再判断普通方块是否没有实体。
         field(chunk.getClass(), "pendingBlockEntities").set(chunk, new HashMap<>());
         if (!energy) world.set(target.above(), Blocks.STONE.defaultBlockState());
         router = new ClientRequestRouter(() -> enhanced, envelope -> { sent.add(envelope.deepCopy()); return true; },

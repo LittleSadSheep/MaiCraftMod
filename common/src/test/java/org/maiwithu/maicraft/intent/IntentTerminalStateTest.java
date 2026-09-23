@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.Task;
 
-/** Cancelling a decision-waiting task must expose one terminal state through get, list and restore. */
+/** 取消等待决策的任务后，get、list 和恢复操作必须都能看到同一个终态。 */
 public final class IntentTerminalStateTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -31,7 +31,7 @@ public final class IntentTerminalStateTest {
             JsonObject waiting = read(snapshot, task);
             check(waiting.get("state").getAsString().equals("waiting_for_decision")
                             && waiting.has("decision") && waiting.has("pause"), "active decisions retain their public contract");
-            // TaskSlot marks the record terminal before asking the task to build its final receipt.
+            // TaskSlot 会先将记录标记为终态，再要求任务构建最终回执。
             task.setState(state);
             assertTerminal(read(snapshot, task), state);
             check(!task.answer(decision.id(), "retry", new JsonObject()), "a stale decision cannot revive a terminal task");

@@ -76,8 +76,8 @@ public final class WaterSurfaceExecutionTest {
                         && !f.session.failed() && !f.session.complete() && uses[0] == 1,
                 "high-source contact outside the old two-block feet radius remains an active correct landing");
 
-        // Native downward flow replaces the upper plant; DoublePlantBlock's real neighbor rule
-        // removes its unsupported pair. Recovery owns the water source, not restoration of grass.
+        // 原生向下水流会替换上方植物；DoublePlantBlock 的真实邻接规则会移除失去支撑的另一半。
+        // 救援只负责控制水源，不负责恢复草地。
         var flow = Blocks.WATER.defaultBlockState().setValue(BlockStateProperties.LEVEL,8);
         f.world.scene.blocks.put(BlockPos.ZERO.above(),flow);
         f.world.scene.blocks.put(BlockPos.ZERO,lower.updateShape(Direction.UP,flow,null,BlockPos.ZERO,BlockPos.ZERO.above()));

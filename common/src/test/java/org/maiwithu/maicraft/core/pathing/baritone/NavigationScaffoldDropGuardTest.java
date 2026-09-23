@@ -28,7 +28,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
-/** The real unprotected-support right-click path must consult the provider's positional policy. */
+/** 真实的未保护支撑右键路径必须查询提供器的位置策略。 */
 public final class NavigationScaffoldDropGuardTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -37,7 +37,7 @@ public final class NavigationScaffoldDropGuardTest {
         Object oldBackend = backend.get(null), oldOwner = owner.get(null), oldProvider = provider.get(null);
         var oldPolicy = EmbeddedBaritonePolicy.snapshot(); Boolean oldPlace = null;
         try (var h = new InteractionWorldTestHarness()) {
-            // Baritone boot reads its settings path and creates its private backend directory.
+            // Baritone 启动时会读取设置路径并创建私有后端目录。
             field(Minecraft.class, "gameDirectory").set(Minecraft.getInstance(),
                     Path.of("navigation-scaffold-settings-fixture").toAbsolutePath().toFile());
             oldPlace = BaritoneAPI.getSettings().allowPlace.value;

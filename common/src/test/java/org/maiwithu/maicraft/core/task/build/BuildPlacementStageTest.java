@@ -17,7 +17,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-/** An 18-cube machine is assembled from the bottom up; its future roof cannot seal today's workspace. */
+/** 从下往上装配 18 格机器；未来才会建成的屋顶不能提前封死当前工作区。 */
 public final class BuildPlacementStageTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -77,7 +77,7 @@ public final class BuildPlacementStageTest {
         BlockPos clicked = active.pos().below();
         BlockPos left = new BlockPos(1, 65, 2), right = new BlockPos(2, 65, 1);
         var stage = new BuildPlacementStage(world, pos -> true, Map.of(), active, false);
-        // Feet are at (1.5, 64, 1.5): both the standing and crouching rays cross the upper wall corner.
+        // 脚位在 (1.5, 64, 1.5)：站立和潜行射线都会穿过上方墙角。
         Vec3 point = new Vec3(2.5, 64.9999, 2.5);
         world.cells.put(left, Blocks.STONE.defaultBlockState());
         world.cells.put(right, Blocks.STONE.defaultBlockState());

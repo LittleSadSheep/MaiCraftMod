@@ -24,8 +24,7 @@ public final class SubmergedWaterTravelPolicyTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        // Bootstrap creates registry values, but a headless test never reloads vanilla data
-        // packs. Bind the same fluid tags a real level provides before exercising fluid queries.
+        // Bootstrap 会创建注册表值，但无头测试不会重载原版数据包；执行液体查询前，先绑定真实世界提供的同一组流体标签。
         BuiltInRegistries.FLUID.bindTags(Map.of(
                 FluidTags.WATER, List.of(BuiltInRegistries.FLUID.wrapAsHolder(Fluids.WATER),
                         BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_WATER)),

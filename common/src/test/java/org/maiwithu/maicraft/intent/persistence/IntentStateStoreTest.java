@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
-/** Real file storage and the production mailbox, with worker dispatch held until assertions run. */
+/** 使用真实文件存储和生产邮件箱，并让工作线程派发等待到断言执行。 */
 public final class IntentStateStoreTest {
     public static void main(String[] args) throws Exception {
         Path workspace = Path.of("").toAbsolutePath().normalize();
@@ -96,7 +96,7 @@ public final class IntentStateStoreTest {
         store.saveAsync(previousWorld, root(previousWorld, 7));
         store.saveAsync(identity, root(identity, 1));
         IntentRuntime runtime = runtime(store, identity, false);
-        // The body is already detached, so shutdown must wait for its captured handoff, not recapture cancelled records.
+        // 身体状态已分离，因此关闭时必须等待已捕获的交接内容，而不是重新读取已取消记录。
         CountDownLatch entered = new CountDownLatch(1);
         CompletableFuture<Void> shutdown = CompletableFuture.runAsync(() -> {
             entered.countDown(); runtime.shutdownPersistence();
