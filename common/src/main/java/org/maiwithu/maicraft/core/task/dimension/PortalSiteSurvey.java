@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
-/** Bounded observation: intact frames first, compact repairs second, a nearby new site last. */
+/** 有界观察策略：优先完整传送门框，其次小型修复，最后考虑附近新建场地。 */
 final class PortalSiteSurvey implements AutoCloseable {
     private final ClientLevel world;
     private final BlockPos origin;
@@ -56,7 +56,7 @@ final class PortalSiteSurvey implements AutoCloseable {
         if (!observed.complete()) return null;
         if (repair != null && repair.valid(world)) return repair;
         if (end || !mayBuild) { complete = true; return null; }
-        // At most 32 small site checks per tick, within eight blocks horizontally and four vertically.
+        // 每 tick 最多检查 32 个小型场地，水平范围为八格、垂直范围为四格。
         for (int n = 0; n < 32 && newSiteCursor < 17 * 17 * 9 * 2; n++, newSiteCursor++) {
             int index = newSiteCursor / 2;
             int dy = index % 9 - 4; index /= 9;
