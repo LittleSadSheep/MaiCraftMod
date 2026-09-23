@@ -84,10 +84,8 @@ public final class FirstPersonInteractionTargeting {
     }
 
     /**
-     * Rehearse the same block ray a converged first-person camera will cast: aim at the target
-     * centre, but extend the ray through it to the full native reach. Extending matters for thin
-     * outline shapes (doors, trapdoors and similar blocks) whose surface can lie just beyond the
-     * centre along the approach direction.
+     * 预演第一人称镜头稳定后将发出的同一条方块射线：瞄准目标中心，并将射线延长至完整原生交互距离。
+     * 对门、活板门等薄选择形状而言，表面可能沿接近方向刚好位于中心之后，因此必须延长射线。
      */
     // 实心目标要找到真正可见的面；空气／流体目标先检查视线能否穿过那一格。
     // 射线延伸到全部触及距离，避免薄门板的表面在整格中心后方时被漏掉。
@@ -117,14 +115,11 @@ public final class FirstPersonInteractionTargeting {
     }
 
     /**
-     * Resolve a concrete first-person hit on any visible part of a loaded block.
+     * 在已加载方块的任一可见部位解析出具体第一人称命中。
      *
-     * <p>A centre-only ray is not enough: a workstation below a leaf canopy, a chest below a
-     * shelf, or a partially exposed machine can have its centre ray blocked while an ordinary
-     * player can still click a side. Try the outline centre and then all six face centres, keeping
-     * the point slightly inside the outline so an exact boundary never aliases to a neighbour.
-     * The returned hit is proof that the target itself is the first block on that native-reach
-     * line; callers still converge the real camera and perform a final native ray before use.</p>
+     * <p>只检测中心射线并不足够：叶棚下的工作台、架子下的箱子或部分暴露的机器，中心可能被挡住，但玩家仍可点击侧面。
+     * 先试选择形状中心，再试六个面中心，并将瞄准点稍微放在形状内部，避免精确边界被判到相邻方块。
+     * 返回的命中证明目标本身是原生交互距离内射线遇到的第一个方块；调用方仍需让真实镜头收敛，并在使用前执行最终原生射线。</p>
      */
     // 先取方块形状的边界，试中心和靠近六个面的点；命中必须属于指定格且在触及距离内。
     public static BlockHitResult visibleBlockHit(
@@ -179,8 +174,8 @@ public final class FirstPersonInteractionTargeting {
     }
 
     /**
-     * Pick the nearest loaded, standable feet cell from which some face of {@code target} is
-     * genuinely clickable. This is shared physical interaction geometry, not a workstation rule.
+     * 选择最近的已加载可站立脚位格，确保能从该处实际点击 {@code target} 的某个表面。
+     * 这是通用的物理交互几何判定，不是工作台专用规则。
      */
     // 只在目标水平三格、上下有限高度内找干燥站位；要有落脚支撑、身体两格空且能看到目标。
     // 最后按与玩家的直线距离选择，不在这里证明有路能走到。
@@ -239,9 +234,8 @@ public final class FirstPersonInteractionTargeting {
     }
 
     /**
-     * The common obstruction verdict used both before travel and after the real camera converges.
-     * Air aims intentionally pass through. Non-bucket liquid use keeps the Fluid.NONE crosshair
-     * policy; buckets instead require {@link #acceptsBucketHit} on their own item ray.
+     * 在开始移动前和真实镜头收敛后共用的遮挡判定。瞄准空气时有意允许射线穿过。
+     * 非桶类液体交互沿用 Fluid.NONE 准星规则；水桶则必须通过自身物品射线的 {@link #acceptsBucketHit} 检查。
      */
     // 空气坐标目前只被当作朝向提示，直接放行，前方即使有别的命中也不会在这里拒绝。
     // 流体坐标比较先到目标格还是先碰阻挡物；普通方块则必须实际命中目标自身。
