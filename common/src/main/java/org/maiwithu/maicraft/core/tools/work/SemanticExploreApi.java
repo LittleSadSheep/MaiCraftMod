@@ -5,7 +5,7 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
-/** Registration and direct-record API for semantic exploration. */
+/** 语义探索的注册入口和直接任务记录 API。 */
 public final class SemanticExploreApi {
     public static final int DEFAULT_MAX_DISTANCE = 768;
     private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
@@ -13,15 +13,14 @@ public final class SemanticExploreApi {
 
     private SemanticExploreApi() {}
 
-    /** Root registration point: call once from the existing tool-registration method. */
+    /** 根注册入口：从现有工具注册方法中调用一次。 */
     public static void register() {
         SemanticExploreTaskRecord.ensureRegistered();
         ToolRegistry.register(new SemanticExploreTool());
     }
 
     /**
-     * Intent/runtime entry point when a tool wrapper is not needed. Dispatch the returned record
-     * through TaskDispatch; no route or waypoint is exposed to the model.
+     * 不需要工具封装器时，供意图或运行时直接调用的入口。返回的记录通过 TaskDispatch 派发；不会向模型暴露路线或航点。
      */
     public static SemanticExploreTaskRecord newRecord(
             ToolContext context, String target, Integer maxDistance, Boolean mayAlterTerrain) {

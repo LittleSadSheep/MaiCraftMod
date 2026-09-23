@@ -1,10 +1,7 @@
 /**
- * LLM-facing tools grouped by intent domain. Root-level classes are read-only planners and shared
- * parsers; wrappers either answer from the current loaded client snapshot or emit one task record.
+ * 按意图域组织面向大模型的工具。包根目录类是只读规划器和共享解析器；封装器要么基于当前客户端已加载快照回答，要么发出一个任务记录。
  *
- * <p>World, inventory and menu mutations are never performed by a wrapper. Their task owns native
- * action/menu receipts across ticks and reports success only after synchronized client facts confirm
- * the outcome. Long goals remain semantic tasks: the model supplies the goal and constraints, while
- * the runtime owns movement, targeting, retries within one attempt and concrete actions.
+ * <p>封装器绝不直接修改世界、背包或菜单。相应任务会跨多个 tick 持有原生动作或菜单回执，并仅在同步客户端事实确认结果后报告成功。
+ * 长期目标仍作为语义任务处理：模型提供目标和约束，运行时负责移动、瞄准、单次尝试内重试和具体动作。
  */
 package org.maiwithu.maicraft.core.tools;
