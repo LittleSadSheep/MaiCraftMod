@@ -48,9 +48,9 @@ public final class Interaction {
      */
     public static final class Timing {
         final boolean hold;
-        final int limit;     // discrete fires (>=1); ignored for hold
-        final int interval;  // ticks between discrete fires (>=1)
-        final int maxHold;   // hold: release after this many ticks; 0 = until self-complete
+        final int limit;     // 重复操作至少执行一次；持续按住时忽略此值。
+        final int interval;  // 重复点击之间的游戏刻数，至少为一。
+        final int maxHold;   // 持续按住的最大游戏刻数；0 表示等待物品自行完成。
 
         private Timing(boolean hold, int limit, int interval, int maxHold) {
             this.hold = hold;
@@ -82,13 +82,13 @@ public final class Interaction {
 
     private final LocalPlayer player;
     private final Button button;
-    private final BlockPos block;     // non-null → block target
-    private final Entity entity;      // non-null → entity target
+    private final BlockPos block;     // 非空时表示方块目标。
+    private final Entity entity;      // 非空时表示实体目标。
     private final InteractionHand hand;
     private final Timing timing;
 
-    private final BlockDigger digger; // only for ATTACK + block
-    private BlockHitResult presetHit; // USE+block: an exact hit the caller already resolved (placement)
+    private final BlockDigger digger; // 仅左键破坏方块时使用。
+    private BlockHitResult presetHit; // 右键方块时可携带调用方已解析的精确命中，供放置使用。
     private BlockPos requiredBlockPos;
     private Block requiredBlock;
     /**
@@ -103,14 +103,14 @@ public final class Interaction {
     private boolean releasing;
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
     private int fires;
-    private int cooldown;             // ticks until the next discrete press
-    private int held;                 // USE+air: ticks held so far
+    private int cooldown;             // 距下一次重复点击还需等待的游戏刻数。
+    private int held;                 // 右键空气时，物品已持续使用的游戏刻数。
     private ItemStack heldUseBefore;
-    private boolean hardFail;         // a fire hit an unrecoverable error
+    private boolean hardFail;         // 一次点击遇到不可恢复错误时阻止后续操作。
     private String failReason = "interaction failed";
     private FailureType failType = FailureType.UNKNOWN;
     private String lastUseOutcome = "not fired";
-    /** Low-pass aim point retained only by one entity interaction instance. */
+    /** 仅在单次实体交互实例中保留并平滑瞄准点。 */
     private Vec3 trackedEntityAim;
 
     private Interaction(LocalPlayer player, Button button, BlockPos block, Entity entity,
@@ -124,14 +124,14 @@ public final class Interaction {
         this.digger = (button == Button.ATTACK && block != null) ? new BlockDigger(player) : null;
     }
 
-    // ---- factories (default timings; overloads take an explicit Timing) ----
+    // ---- 创建操作：默认时序与显式 Timing 重载 ----
 
-    /** Left-click a block: break it (held until gone; creative insta / survival timed). */
+    /** 左键破坏方块：按住直至方块消失；创造模式立即破坏，生存模式按时间推进。 */
     public static Interaction attackBlock(LocalPlayer p, BlockPos pos) {
         return new Interaction(p, Button.ATTACK, pos, null, InteractionHand.MAIN_HAND, Timing.hold());
     }
 
-    /** Left-click an entity once (cooldown-gated native attack). */
+    /** 左键攻击实体一次，并遵循原版攻击冷却。 */
     public static Interaction attackEntity(LocalPlayer p, Entity target) {
         return attackEntity(p, target, Timing.once());
     }
@@ -140,34 +140,31 @@ public final class Interaction {
         return new Interaction(p, Button.ATTACK, null, target, InteractionHand.MAIN_HAND, timing);
     }
 
-    /** Right-click a block: place / activate with the held item (raycasts to {@code pos}). */
+    /** 右键 {@code pos} 方块，用手持物品放置方块或激活目标。 */
     public static Interaction useBlock(LocalPlayer p, BlockPos pos, InteractionHand hand) {
         return new Interaction(p, Button.USE, pos, null, hand, Timing.once());
     }
 
-    /** Right-click a pre-resolved block hit — placement / precise activation supplies
-     *  the exact support face, so this skips the raycast and presses against {@code hit}. */
+    /** 右键调用方预先解析的方块命中；放置或精确激活已提供支撑面，因此跳过重新射线并直接对 {@code hit} 操作。 */
     public static Interaction useBlock(LocalPlayer p, BlockHitResult hit, InteractionHand hand) {
         Interaction i = new Interaction(p, Button.USE, hit.getBlockPos(), null, hand, Timing.once());
         i.presetHit = hit;
         return i;
     }
 
-    /** Right-click in the air with the held item, on the given {@link Timing}
-     *  ({@code hold()} eats food / {@code hold(n)} draws and looses a bow). */
+    /** 按给定 {@link Timing} 在空气中右键使用手持物品；{@code hold()} 用于吃完食物，{@code hold(n)} 用于拉弓后放箭。 */
     public static Interaction useInAir(LocalPlayer p, InteractionHand hand, Timing timing) {
         return new Interaction(p, Button.USE, null, null, hand, timing);
     }
 
-    /** vanilla {@code Minecraft.rightClickDelay} — held right-click re-fires this often. */
+    /** 原版 {@code Minecraft.rightClickDelay}：持续右键时每经过此间隔会重新触发一次。 */
     private static final int RIGHT_CLICK_DELAY = 4;
-    /** A "hold forever" fire count; the owning task stops us after hold_ticks / on completion. */
+    /** 表示持续按住的高重复次数；拥有该操作的任务会在时限到达或行为完成后停止它。 */
     private static final int CONTINUOUS = 1_000_000;
 
     /**
-     * The vanilla crosshair pick: one ray from the eyes along the CURRENT
-     * look, resolving the CLOSER of a block or an entity (else MISS). A wall occludes a mob behind
-     * it (entities are searched only as near as the block hit). {@code reach} 4.5 = survival.
+     * 按原版准星规则从眼部沿当前视线发出一条射线，返回更近的方块或实体，否则为 MISS。
+     * 墙会遮住后方生物，实体只在方块命中位置以内搜索；{@code reach} 为 4.5 时对应生存模式距离。
      */
     // 沿玩家当前准星看出去。先找到挡路方块，再看前面是否有更近的可点击实体，不能点穿墙。
     public static HitResult nativeRaytrace(LocalPlayer player, double reach) {
@@ -182,7 +179,7 @@ public final class Interaction {
         AABB box = player.getBoundingBox().expandTowards(reachVec).inflate(1.0);
         EntityHitResult ent = ProjectileUtil.getEntityHitResult(
                 player, eye, end, box, e -> !e.isSpectator() && e.isPickable(), maxSq);
-        return ent != null ? ent : block;   // entity (closer than the block) wins, else the block/miss
+        return ent != null ? ent : block;   // 实体比方块命中更近时优先返回实体，否则返回方块命中或未命中。
     }
 
     /**
@@ -205,7 +202,7 @@ public final class Interaction {
                 Interaction i = new Interaction(p, Button.USE, bh.getBlockPos(), null,
                         InteractionHand.MAIN_HAND,
                         hold ? Timing.repeat(CONTINUOUS, RIGHT_CLICK_DELAY) : Timing.once());
-                i.presetHit = bh;   // use the robust native hit, no re-raycast
+                i.presetHit = bh;   // 复用原生已确认的命中，避免重新计算射线。
                 i.itemFallthrough = itemFallthrough;
                 return i;
             }
@@ -219,7 +216,7 @@ public final class Interaction {
                 i.itemFallthrough = itemFallthrough;
                 return i;
             }
-            default -> {   // MISS = air
+            default -> {   // MISS 表示准星指向空气。
                 if (button == Button.ATTACK) {
                     return null;
                 }
@@ -233,7 +230,7 @@ public final class Interaction {
         return failReason;
     }
 
-    /** Freeze semantic target identity without mistaking an expected resulting block for an input. */
+    /** 固定语义目标身份，避免把预计放置后的方块误当成新的输入目标。 */
     public Interaction requireBlock(BlockPos position, Block required) {
         if (required != null && position == null) throw new IllegalArgumentException("required block needs a position");
         requiredBlockPos = position == null ? null : position.immutable();
@@ -251,7 +248,7 @@ public final class Interaction {
         return false;
     }
 
-    /** Structured cause of a {@link Status#FAILED}, for the reactive task layer to branch on. */
+    /** {@link Status#FAILED} 的结构化原因，供反应式任务层据此选择后续处理分支。 */
     public FailureType failType() {
         return failType;
     }
@@ -268,15 +265,15 @@ public final class Interaction {
             }
         }
         if (button == Button.ATTACK && block != null) {
-            return breakBlock();                       // inherently continuous
+            return breakBlock();                       // 方块破坏本身就是持续操作。
         }
         if (button == Button.USE && block == null && entity == null) {
             return useAir();
         }
-        return discrete();                             // attack entity / use block / use entity
+        return discrete();                             // 攻击实体或使用方块、实体。
     }
 
-    /** World buttons cannot be pressed through an open container screen. */
+    /** 容器界面打开时不向世界发送攻击或使用按键，避免点击穿过菜单。 */
     // 发一次关闭菜单请求，然后逐刻等它完成；关闭失败就不能继续向世界点击。
     private Status awaitWorldInputReady() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
@@ -301,7 +298,7 @@ public final class Interaction {
         return Status.FAILED;
     }
 
-    // ---- ATTACK + block: continuous break ----
+    // ---- 左键方块：持续破坏 ----
 
     // 目标已经是空气就算挖完；否则交给 BlockDigger 逐刻挖。看不到可挖面时区分太远还是被挡住。
     private Status breakBlock() {
@@ -327,7 +324,7 @@ public final class Interaction {
         return Status.RUNNING;
     }
 
-    // ---- USE + air: tap or hold (food / bow) ----
+    // ---- 右键空气：点按或持续使用食物、弓等物品 ----
 
     // 例如吃东西：先按一次右键，观察手中物品、菜单或使用状态，再决定继续按住还是松开。
     // 点一下只要求这次使用得到确认；持续使用才会等到吃完或到达按住时限。
@@ -397,7 +394,7 @@ public final class Interaction {
         return Status.RUNNING;
     }
 
-    // ---- discrete: attack entity / use block / use entity (once or repeat) ----
+    // ---- 离散操作：攻击实体或使用方块、实体（单次或重复） ----
 
     // 一次点击没确认完就不计次；确认一次后先等间隔，再开始下一次。
     private Status discrete() {
@@ -410,7 +407,7 @@ public final class Interaction {
             case USE -> entity != null ? fireUseEntity() : fireUseBlock();
         };
         if (hardFail) return Status.FAILED;
-        if (!fired) return Status.RUNNING;             // soft wait (attack cooldown not ready)
+        if (!fired) return Status.RUNNING;             // 攻击冷却未结束时等待，不将其视为失败。
         if (++fires >= timing.limit) return Status.DONE;
         cooldown = timing.interval;
         return Status.RUNNING;
@@ -639,9 +636,8 @@ public final class Interaction {
     }
 
     /**
-     * Aim inside the target's current hit box, slightly toward its measured motion. The retained
-     * point damps packet-to-packet velocity noise; clamping it back into an inset box guarantees
-     * that prediction can never lead so far that the native crosshair intentionally misses.
+     * 瞄准目标当前碰撞箱内部，并沿测得的移动方向稍作提前。保留上次瞄准点可平滑数据包间的速度噪声；
+     * 每次都将预测点限制在内缩碰撞箱中，防止提前量过大而使原生准星错过目标。
      */
     // 近战目标在移动时稍微朝它前方瞄，并把瞄点留在身体框内。
     // 相邻帧只移动一部分瞄点，避免怪物小幅晃动就带着镜头猛抖。
@@ -673,7 +669,7 @@ public final class Interaction {
                 Mth.clamp(point.z, box.minZ + insetZ, box.maxZ - insetZ));
     }
 
-    /** Raycast from the eyes along the current look; the hit must be the target block. */
+    /** 从眼部沿当前视线发射射线，并确认首先命中指定方块。 */
     private BlockHitResult raycastBlock() {
         Level level = player.level();
         Vec3 eye = player.getEyePosition();
@@ -687,7 +683,7 @@ public final class Interaction {
         return null;
     }
 
-    /** Stop issuing work. Native use release still owns a receipt and must be drained by the runtime. */
+    /** 停止发出操作；原生使用动作的松开仍有回执，必须交由运行时完成结算。 */
     // 挖掘交给 digger 取消；正在持续使用物品就发出松开，然后停止移动。
     // 普通方块／实体点击的未确认记录没有在此退役，外层结束时仍需处理它；否则会留下 A28 同类等待。
     public void stop() {

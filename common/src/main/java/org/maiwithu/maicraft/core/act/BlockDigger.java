@@ -40,8 +40,7 @@ public final class BlockDigger {
     private static final int BREAK_TIMEOUT_TICKS = 20 * 60 * 5;
     private static final int TOOL_TIMEOUT_TICKS = 20 * 5;
 
-    /** Ticks to wait after a survival break before starting another; follows the
-     *  blockBreakSpeed setting (period = the setting, delay = setting − 1). */
+    /** 生存模式破坏一个方块后，到下一次开挖前等待的游戏刻数；遵循 blockBreakSpeed 设置（周期等于设置值，延迟为设置值减一）。 */
     private static int postBreakDelay() {
         return Math.max(0,
                 NavSettings.get().blockBreakSpeed - 1);
@@ -72,21 +71,20 @@ public final class BlockDigger {
         this.player = player;
     }
 
-    /** The block currently being dug, or {@code null} when idle. */
+    /** 当前正在挖掘的方块；空闲时为 {@code null}。 */
     public BlockPos current() {
         return pos;
     }
 
-    /** Outcome of one {@link #digStep} tick — lets callers distinguish "still working"
-     *  from "physically can't get at it", which the old boolean folded together. */
+    /** 一次 {@link #digStep} 的结果，让调用方区分“仍在挖掘”和“当前无法实际命中”；旧布尔值把两种情况混在一起。 */
     public enum DigResult {
-        /** Break in progress, cooling down, or begun this tick — keep calling. */
+        /** 破坏仍在进行、处于冷却，或本刻刚开始；调用方应继续推进。 */
         PROGRESSING,
-        /** The TARGET block's break committed this tick. */
+        /** 本刻已确认目标方块破坏完成。 */
         BROKE_TARGET,
-        /** An OCCLUDER in the way broke this tick (not the target) — a step toward it. */
+        /** 本刻只破坏了挡路方块而非目标，这是继续接近目标的一步。 */
         BROKE_OCCLUDER,
-        /** No face of the target is reachable and nothing safe occludes it — stuck (maps to OCCLUDED). */
+        /** 目标所有面都不可命中，且没有可安全清除的遮挡；当前无法继续，映射为 OCCLUDED。 */
         NO_SHOT;
 
         /** 本 tick 有方块真的没了(目标或遮挡物)。 */
@@ -95,23 +93,19 @@ public final class BlockDigger {
         }
     }
 
-    /** Legacy boolean shim: {@code true} only on the tick the TARGET breaks. Kept so
-     *  pre-migration callers ({@link Interaction}) compile unchanged; delete once every
-     *  caller consumes {@link #digStep}. */
+    /** 兼容旧布尔接口：只有目标方块破坏的那一刻才返回 {@code true}。
+     *  保留它是为了让迁移前的 {@link Interaction} 调用方继续编译；所有调用方改用 {@link #digStep} 后即可移除。 */
     public boolean dig(BlockPos target) {
         return digStep(target) == DigResult.BROKE_TARGET;
     }
 
     /**
-     * Advance the dig of {@code target} by one tick (restarting cleanly if the
-     * target changed): face it, drive the native break action, swing.
+     * 将 {@code target} 的挖掘推进一刻；目标变化时先干净地重启，再转向方块、驱动原生破坏动作并挥手。
      *
-     * @return the {@link DigResult} for this tick.
+     * @return 本刻对应的 {@link DigResult}。
      */
     /**
-     * Advance the dig one tick using an ALREADY-RESOLVED crosshair hit: dig
-     * exactly the block (and face) the caller's view ray landed on, no internal
-     * aim-point search. The hit block is always treated as the target.
+     * 使用调用方已解析的准星命中结果推进一刻：只挖视线射线实际命中的方块和面，不在内部另找瞄准点；命中方块就是本次目标。
      */
     // 调用方已经选好准星命中面时，直接挖这一格，不再找别的方块，也不自动选工具。
     public DigResult digStep(BlockHitResult crosshairHit) {
@@ -143,17 +137,13 @@ public final class BlockDigger {
     }
 
     /**
-     * Finish a native break after the client world has already synchronized the
-     * effective cell to air. At that point no raycast can hit the vanished block,
-     * so callers must poll the existing receipt instead of submitting another
-     * {@link #digStep(BlockPos)}.
+     * 客户端世界已将有效方块同步为空气后，完成一次原生破坏结算。此时射线无法再命中已消失的方块，
+     * 因此调用方必须轮询现有回执，而不是再次提交 {@link #digStep(BlockPos)}。
      */
     // 方块从画面上消失后，仍要核对之前发出的挖掘记录。没有本次记录，不能把别人挖掉算作自己挖成。
     public DigResult settleGone(boolean targetBreak) {
         if (receipt == null) {
-            // The target can disappear while this digger is still selecting/staging its tool.
-            // reset() would orphan that actor/menu receipt; cancel() retires every transaction
-            // owned by this digger before clearing the local state.
+            // 选择或准备工具期间，目标也可能先消失；reset() 会遗留角色或菜单回执，cancel() 则先结束本挖掘器拥有的所有交易再清本地状态。
             cancel();
             return DigResult.NO_SHOT;
         }
@@ -187,12 +177,8 @@ public final class BlockDigger {
             InputDriver.halt(player);
             return DigResult.PROGRESSING;
         }
-        // Resolve what to actually swing at this tick. First try a raycast-VERIFIED face on the
-        // target. If the target is OCCLUDED — no face in line of
-        // sight (leaves in front, a tight column overhead) — fall back to breaking the
-        // occluder: aim at the target's centre and break whatever the
-        // crosshair actually hits, opening the way, instead of holding forever for a clear angle.
-        // One guard: never grind a do_not_break / container block as the occluder.
+        // 决定本刻实际挥向哪里：先尝试射线确认可见的目标表面；若目标被树叶或狭窄顶棚遮挡，则瞄准目标中心并破坏准星实际命中的遮挡物来开路。
+        // 这样角色不必永远等待理想角度；但 do_not_break 或容器方块绝不能作为遮挡物破坏。
         BlockHitResult hit = reachableHit(target);
         BlockPos effective = target;
         if (hit == null) {
@@ -213,9 +199,7 @@ public final class BlockDigger {
                 return DigResult.PROGRESSING;
             }
         }
-        // dig() may be clearing an OCCLUDER this tick, not the target; report the break (true) ONLY
-        // when the TARGET itself goes, so callers that count mined targets / treat the cell as cleared
-        // aren't fooled by a leaf we broke just to open the line of sight.
+        // 本刻可能只清除了遮挡物而未破坏目标；只有目标本身消失才报告 true，避免调用方把为了打开视线而砍掉的树叶计作已采集目标。
         return advance(hit, effective.equals(target));
     }
 
@@ -244,7 +228,7 @@ public final class BlockDigger {
         }
         return advance(hit, true);
     }
-    /** Shared per-tick dig advance against a resolved hit (face + aim point). */
+    /** 使用已解析的命中面和瞄准点，统一推进本刻挖掘。 */
     // 真正开挖前再次检查保护格，接着按顺序等工具搬运、关闭背包、快捷栏选择完成。
     // 这些步骤都是跨刻等待；中途失败就不继续挖。
     private DigResult advance(BlockHitResult hit, boolean targetBreak) {
@@ -382,13 +366,10 @@ public final class BlockDigger {
         }
     }
     /**
-     * End every actor transaction owned by this digger.
+     * 结束此挖掘器拥有的所有角色操作交易。
      *
-     * <p>A digger may be cancelled before the first swing while it is still selecting/staging a
-     * tool.  Those receipts occupy the same serialized actor/menu slots as the eventual break;
-     * merely nulling the local fields strands the actor slot and makes the next task fail with
-     * "already awaiting confirmation".  Breaks are physically stopped, submitted one-shot hotbar
-     * selections are retired as uncertain, and pending menu staging is closed at the task boundary.
+     * <p>挖掘器可能在第一次挥动之前、仍处于选择或准备工具阶段时被取消。这些回执占用与破坏动作相同的角色或菜单串行槽位；
+     * 只清空本地字段会遗留占用，使下一任务因“仍在等待确认”而失败。因此要实际停止破坏，将已提交的一次性快捷栏选择标记为结果不确定，并在任务边界关闭待处理的菜单准备操作。
      */
     // 取消不只是清变量：要通知游戏停止挖掘，结束未确认的切工具操作，并处理还开着的背包。
     // 这些停止动作交给公共动作／菜单接口收尾，最后才清掉本对象记录。
@@ -423,7 +404,7 @@ public final class BlockDigger {
         reset();
     }
 
-    /** Clear logical state. Deliberately does not touch the post-break cooldown. */
+    /** 清除逻辑状态，但有意保留破坏后的冷却计时。 */
     // 只清本次挖掘的局部记录；挖完后的冷却仍保留，避免连续挖掘绕过速度设置。
     private void reset() {
         pos = null;
@@ -445,11 +426,9 @@ public final class BlockDigger {
     }
 
     /**
-     * The first point ON {@code pos} the eye can
-     * actually raycast to — the block's shape centre first, then its six face centres. The
-     * returned {@link BlockHitResult} carries the exact aim point ({@code getLocation}) AND
-     * the face the ray hits ({@code getDirection}), so the dig looks at the real interaction
-     * face like a player would. {@code null} if nothing on the block is in line of sight.
+     * 返回眼部视线在 {@code pos} 上能命中的第一个点：先试方块形状中心，再试六个面中心。
+     * 返回的 {@link BlockHitResult} 保存精确瞄准点（{@code getLocation}）和命中面（{@code getDirection}），
+     * 使挖掘器能像玩家一样对准实际交互面；若整个方块都不在视线内则返回 {@code null}。
      */
     // 从方块实际形状的中心和六个方向找可见点，射线必须真的落到目标格。
     // 门、楼梯等不是完整立方体，不能只拿整格中心判断能不能挖。
@@ -465,8 +444,7 @@ public final class BlockDigger {
         if (shape.isEmpty()) {
             shape = Shapes.block();
         }
-        // Collision-shape centre first (empty collision → whole-cell centre),
-        // then the six face centres on the outline shape.
+        // 先检查碰撞形状中心（形状为空时改用整个方块中心），再检查选择形状的六个面中心。
         Vec3[] aims = {
                 AimGeometry.collisionCenter(level, pos, state),
                 offsetOn(pos, shape, 0.5, 0.0, 0.5),
@@ -494,11 +472,9 @@ public final class BlockDigger {
     }
 
     /**
-     * A single ray from the eye to {@code target}'s shape centre — the break-the-occluder
-     * fallback when {@link #reachableHit} finds no clear face: the ray lands on the
-     * occluder (a leaf / a tight overhead), and we break THAT to open the way. Null on a miss / out
-     * of reach. ({@link #reachableHit} already tries the centre first, so if that hit the target it
-     * would have returned it; reaching here means the centre ray hits something else.)
+     * 从眼部向 {@code target} 形状中心发出单条射线；当 {@link #reachableHit} 找不到可见面时，作为清除遮挡物的后备方案。
+     * 若射线命中树叶或狭窄顶棚，就破坏该遮挡以打开通路；未命中或超出距离时返回空。
+     * {@link #reachableHit} 已先检查中心，因此到达此处代表中心射线命中了其他方块。
      */
     // 朝目标整格中心看过去，返回最先挡住视线的方块，供允许拆遮挡物的入口选择。
     private BlockHitResult centerRaycast(BlockPos target) {
@@ -519,8 +495,7 @@ public final class BlockDigger {
         return res.getType() == HitResult.Type.BLOCK ? res : null;
     }
 
-    /** A point on the block's shape:
-     *  {@code min*m + max*(1-m)} on each axis. */
+    /** 方块形状上的一点：每个轴都按 {@code min*m + max*(1-m)} 计算。 */
     // 把 0、0.5、1 映射到方块形状的两端和中间；这里 0 取最大边，1 取最小边。
     private static Vec3 offsetOn(BlockPos pos, VoxelShape shape, double mx, double my, double mz) {
         double x = shape.min(Direction.Axis.X) * mx + shape.max(Direction.Axis.X) * (1 - mx);
