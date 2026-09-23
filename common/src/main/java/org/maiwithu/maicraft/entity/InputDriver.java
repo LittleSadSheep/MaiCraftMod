@@ -79,9 +79,8 @@ public final class InputDriver {
     }
 
     public static void halt(LocalPlayer player) {
-        // MCP cancellation runs on the client thread but may arrive between actor ticks. Stopping
-        // an existing input lease needs no native-action slot; requiring one made ordinary
-        // cancellation throw and falsely report that its movement effects were uncertain.
+        // MCP 取消请求在客户端线程执行，但可能到达于两个角色 tick 之间。释放已有输入租约不需要原生动作槽；
+        // 若强制申请该槽，会让普通取消抛错并误报移动效果不确定。
         var boundary = ClientRuntime.actor();
         if (boundary.activeContext().isEmpty()) {
             if (Minecraft.getInstance().player == player
@@ -120,14 +119,13 @@ public final class InputDriver {
         flush(context);
     }
 
-    /** In water, Shift descends; it must not cancel the sprinting swimming pose. */
+    /** 在水中按 Shift 会下潜，因此不能用它取消疾跑游泳姿态。 */
     static boolean permitsSprint(boolean requested, boolean sneak, boolean inWater) {
         return requested && (!sneak || inWater);
     }
 
     /**
-     * Submit a bounded native hotbar selection. The caller retains and polls the returned receipt
-     * on following ticks before performing an action with the selected item.
+     * 提交有界的原生快捷栏选择。调用方必须保留返回的回执，并在后续 tick 轮询确认后，才能使用选中的物品执行动作。
      */
     public static NativeActionReceipt selectHotbar(LocalPlayer player, int slot) {
         LocalPlayerContext context = context(player);
