@@ -23,46 +23,33 @@ import java.util.HashSet;
 import org.maiwithu.maicraft.core.Constants;
 
 /**
- * Autonomous surface-for-air survival chain — the player-body equivalent of the
- * float instinct every vanilla Mob gets for free. Automated LocalPlayer input does not have a
- * holding the jump key: navigation strokes it afloat only while a move is being
- * executed, so a body left idle in deep water (a task that ended mid-swim, an
- * owner Stop, plain wandering) sinks, runs out of air, and drowns. This chain
- * polls submersion and the air needed to reach the surface. When navigation is not already
- * managing a deliberate swim, it takes the body before ascent reserves are exhausted,
- * and keeps ownership after the head clears until the authoritative air value
- * is full.  That recovery hysteresis prevents the interrupted navigation edge
- * from immediately diving again on the first breathable tick.
+ * 自主上浮补气生存链，为玩家角色补上原版 Mob 自带的浮水本能。自动化 LocalPlayer 输入不会持续按住跳跃键：寻路只会在执行移动时让角色划水上浮，
+ * 因此若任务在游泳中结束、玩家发出 Stop 或角色只是闲置漂浮，深水中的身体会下沉、耗尽空气并溺水。
+ * 本链持续检查浸水状态和抵达水面所需空气；若寻路尚未主动管理游泳，就在上浮余量耗尽前接管角色，
+ * 并在头部露出水面后继续持有控制，直到权威空气值恢复满格。恢复迟滞可防止寻路在刚能呼吸的第一刻立刻重新潜水。
  *
- * <p>Straight-up handles the open-water cases. Under a sealed ceiling (frozen
- * ocean, flooded cave — the terrain that actually drowned a body while it
- * pressed uselessly against pack ice) it BFS-walks the connected water for the
- * nearest column with breathable space above and swims toward that opening,
- * still stroking upward. Only when no opening exists within the search budget
- * does it fall back to best-effort straight-up and diaries the entrapment so
- * the cognition layer hears about it while there is still air to act on.
+ * <p>水面上方开阔时直接上浮即可。若头顶被封闭（例如冰封海洋或洪水洞穴，角色可能一直顶着浮冰却无法上升），
+ * 则通过 BFS 遍历连通水域，寻找上方有可呼吸空间的最近柱列，并一边持续上浮一边游向开口。
+ * 只有预算范围内找不到开口时，才退回尽力直线上浮，并立即记录受困情况，让认知层趁角色还有空气时采取行动。
  */
 public final class BreathChain implements Task, Reflex {
 
-    /** How high the straight-up column is probed before calling the ceiling sealed;
-     *  deeper unbroken water than this means "open ocean, just keep rising". */
+    /** 直线上探测到多高后才判定头顶封闭；连续水深超过此值代表开阔海洋，应继续上浮。 */
     private static final int CEILING_PROBE = 16;
-    /** BFS budget over connected water cells when hunting a breathable opening. */
+    /** 搜索可呼吸开口时，BFS 遍历连通水格的预算。 */
     private static final int AIR_SEARCH_BUDGET = 400;
-    /** Horizontal cap of that hunt (per axis, blocks from the start column). */
+    /** 开口搜索的水平范围上限，按轴计算与起始柱列的方块距离。 */
     private static final int AIR_SEARCH_RADIUS = 16;
-    /** Ticks between re-validating/re-picking the opening being swum toward. */
+    /** 重新验证或选择游向开口的间隔游戏刻数。 */
     private static final int RETARGET_TICKS = 20;
 
-    /** Lowest air seen during the current episode (drives the one diary line). */
+    /** 本次受困期间观察到的最低空气值，用于唯一一条受困记录。 */
     private int worstAir = Integer.MAX_VALUE;
     private boolean episodeActive;
-    /** Water cell with breathable space above it — the opening being swum toward
-     *  while a ceiling seals the straight-up column (null = rising straight). */
+    /** 上方有可呼吸空间的水格；直线上方封闭时作为游泳目标，空值表示直接上浮。 */
     private BlockPos airColumn;
     private int retargetCooldown;
-    /** One trapped-diary line per episode, written the moment the search comes up
-     *  empty — while there is still air left for the cognition layer to act on. */
+    /** 每次受困最多写一条记录；搜索无果时立即写入，确保认知层仍有剩余空气可采取行动。 */
     private boolean trappedNoted;
     private final SwimAirBudget airBudget = new SwimAirBudget();
     private float attentionStartHealth;
@@ -109,7 +96,7 @@ public final class BreathChain implements Task, Reflex {
             }
             break;
         }
-        // Unknown depth or a sealed roof needs time to search for an opening as well as rise.
+        // 深度未知或顶部封闭时，既要搜索开口又要上浮，因此延长处理时间。
         return SwimAirBudget.requiredAirForAscent(CEILING_PROBE, airBudget.airPerTick());
     }
 
@@ -126,9 +113,7 @@ public final class BreathChain implements Task, Reflex {
         swimTicks++;
         worstAir = Math.min(worstAir, companion.getAirSupply());
         InputDriver.halt(companion);
-        // Straight up is the cheap common rescue (open water). Only a sealed column
-        // engages the lateral hunt: swim through connected water toward the nearest
-        // opening with air above it (an ice hole, the cave mouth), still stroking up.
+        // 开阔水域中直接上浮是最简单的救援方式。只有水柱封闭时才横向搜寻：持续上浮并穿过连通水域，游向上方有空气的最近开口，例如冰洞或洞穴入口。
         if (!ceilingSealed(companion)) {
             airColumn = null;
         } else {
@@ -144,17 +129,13 @@ public final class BreathChain implements Task, Reflex {
                 InputDriver.stepToward(companion, Vec3.atCenterOf(airColumn), false);
             }
         }
-        // While the body is still touching water this both surfaces and holds the
-        // eyes above the interface during the refill phase.  Once fully ashore,
-        // canRun() releases immediately instead of making the player hop on land.
+        // 角色仍接触水面时，此动作既能上浮，也能在补气阶段让眼睛保持露出水面；完全上岸后，canRun() 会立即释放控制，避免角色在陆地上跳跃。
         InputDriver.jump(companion);
         return TaskState.RUNNING;
     }
 
     /**
-     * Is the column straight above the head sealed before it reaches breathable
-     * space? Unbroken water deeper than {@link #CEILING_PROBE} counts as open —
-     * that is the deep-ocean case where rising is exactly right.
+     * 判断头顶正上方的水柱是否在到达可呼吸空间前被封住。连续水深超过 {@link #CEILING_PROBE} 时按开阔水域处理，深海中应直接上浮。
      */
     private static boolean ceilingSealed(LocalPlayer companion) {
         Level level = companion.level();
@@ -169,12 +150,12 @@ public final class BreathChain implements Task, Reflex {
         return false;
     }
 
-    /** A cell the head could breathe in: no fluid, nothing to collide with. */
+    /** 头部可呼吸的格子：没有液体，也没有碰撞物。 */
     private static boolean breathable(Level level, BlockPos pos, BlockState state) {
         return state.getFluidState().isEmpty() && state.getCollisionShape(level, pos).isEmpty();
     }
 
-    /** Is {@code waterCell} still a valid opening: water with breathable space above? */
+    /** {@code waterCell} 是否仍是有效开口：该格有水且上方有可呼吸空间。 */
     private static boolean breathableAbove(Level level, BlockPos waterCell) {
         if (!level.getFluidState(waterCell).is(FluidTags.WATER)) return false;
         BlockPos above = waterCell.above();
@@ -182,11 +163,8 @@ public final class BreathChain implements Task, Reflex {
     }
 
     /**
-     * BFS through connected water from the head for the nearest cell with
-     * breathable space directly above — nearest-by-swim-distance, so the body
-     * heads for the closest real opening, not a straight-line mirage behind a
-     * wall. Bounded by {@link #AIR_SEARCH_BUDGET}/{@link #AIR_SEARCH_RADIUS}:
-     * ~400 block reads once per {@link #RETARGET_TICKS} during an episode.
+     * 从头部出发，通过 BFS 遍历连通水格，寻找上方有可呼吸空间的最近位置。按实际游泳距离排序，角色会前往最近的真实开口，而不会误追墙后直线距离很近的假目标。
+     * 搜索受 {@link #AIR_SEARCH_BUDGET} 和 {@link #AIR_SEARCH_RADIUS} 限制；受困期间每经过 {@link #RETARGET_TICKS} 最多读取约 400 个方块。
      */
     private static BlockPos findAirColumn(LocalPlayer companion) {
         Level level = companion.level();
@@ -218,7 +196,7 @@ public final class BreathChain implements Task, Reflex {
         return null;
     }
 
-    /** Diary the entrapment the moment it is diagnosed — not post-mortem. */
+    /** 一旦诊断出受困就立即记录，不等到溺水后才上报。 */
     private void noteTrapped(LocalPlayer companion) {
         if (trappedNoted) return;
         trappedNoted = true;
@@ -230,7 +208,7 @@ public final class BreathChain implements Task, Reflex {
                 Math.max(0, companion.getAirSupply() / 20), AIR_SEARCH_RADIUS);
     }
 
-    /** One diary line per near-drowning, stamped with how close it got (in seconds of air left). */
+    /** 每次险些溺水只写一条记录，并标注剩余空气对应的秒数。 */
     private void noteEpisode(LocalPlayer companion) {
         int worst = worstAir;
         float healthLost = Math.max(0.0F, attentionStartHealth - companion.getHealth());
@@ -252,8 +230,7 @@ public final class BreathChain implements Task, Reflex {
 
     @Override
     public void stop(LocalPlayer companion, StopReason why) {
-        // No cross-tick body state to unwind; the episode bookkeeping closes on the
-        // next dormant read (or is superseded by a fresh dip).
+        // 没有需要跨 tick 释放的身体状态；本次事件记录会在下次休眠检查时关闭，或由新一次入水事件替代。
         if (episodeActive && why != StopReason.PREEMPTED) {
             float healthLost = Math.max(0.0F, attentionStartHealth - companion.getHealth());
             GameplayAttentionMonitor.reflexFinished(
@@ -273,7 +250,7 @@ public final class BreathChain implements Task, Reflex {
         return "breath";
     }
 
-    // ---- Reflex roster paperwork (constitution §6) ----
+    // ---- 反射链登记信息（章程 §6）----
 
     @Override
     public String id() {
