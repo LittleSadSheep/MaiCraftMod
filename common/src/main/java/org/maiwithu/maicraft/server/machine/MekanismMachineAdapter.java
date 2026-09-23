@@ -8,7 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import java.util.Locale;
 
-/** Native side configuration and processing state, without mutating recipe caches during observation. */
+/** 读取原生侧面配置和加工状态，观察期间不会修改配方缓存。 */
 final class MekanismMachineAdapter {
     private static final String TILE = "mekanism.common.tile.base.TileEntityMekanism";
     private static final String SIDE = "mekanism.common.tile.interfaces.ISideConfiguration";

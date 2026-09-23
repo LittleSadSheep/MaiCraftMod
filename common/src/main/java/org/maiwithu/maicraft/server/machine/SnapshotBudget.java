@@ -5,7 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 
-/** One response-wide resource page, bounded before adding arbitrary component payloads. */
+/** 单个响应共享的资源页预算；在添加任意数据组件载荷前先做限制。 */
 public final class SnapshotBudget {
     private final int offset;
     private final int limit;
@@ -24,7 +24,7 @@ public final class SnapshotBudget {
         if (pageFull) { truncated = true; return; }
         int size = resource.toString().getBytes(StandardCharsets.UTF_8).length;
         if (size > 24_000) {
-            // Retain the full identity hash without allowing a component payload to stall every future page.
+            // 保留完整身份哈希，同时避免数据组件载荷过大而阻塞后续所有页面。
             resource = resource.deepCopy();
             resource.remove("identity");
             resource.addProperty("identity_details", "omitted_payload_limit");

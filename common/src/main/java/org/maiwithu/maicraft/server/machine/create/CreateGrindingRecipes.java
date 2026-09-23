@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Complete ordinary Create 6.0.10 milling/crushing recipes; native calls, never recipe-name guesses. */
+/** 完整读取普通 Create 6.0.10 磨石和粉碎轮配方；使用原生调用，不根据配方名称猜测。 */
 public final class CreateGrindingRecipes {
     private static final String PROCESSING = "com.simibubi.create.content.processing.recipe.ProcessingRecipe";
     private CreateGrindingRecipes() {}

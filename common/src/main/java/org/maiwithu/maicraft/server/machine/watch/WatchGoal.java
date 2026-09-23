@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import java.util.ArrayList;
 
-/** Immutable, finite observation intent. Positions are authorized separately on the actual server player. */
+/** 不可变且范围有限的观察意图；位置授权由真实服务器玩家单独执行。 */
 public record WatchGoal(String dimension, List<Process> processes, BlockPos sink, Direction sinkSide,
                         JsonObject identity, String resourceId, long minimumOutput, long idleTicks,
                         long maximumTicks, JsonObject specification) {

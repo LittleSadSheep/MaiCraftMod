@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorB
 import org.maiwithu.maicraft.network.ServerOperationException;
 import java.util.Comparator;
 
-/** The local endpoint is already authorized; optional peer reads retain ordinary native access checks. */
+/** 本地端点已获得授权；可选的相邻端点读取仍遵循普通原生访问检查。 */
 final class CreateChainConveyorObservation {
     private CreateChainConveyorObservation() {}
     static void inspect(ServerPlayer player, BlockEntity entity, JsonObject create) {

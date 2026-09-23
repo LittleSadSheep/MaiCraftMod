@@ -13,7 +13,7 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Native item predicates and crusher's crushing-before-milling precedence, without replacing live machine input. */
+/** 使用原生物品谓词和粉碎机先粉碎、后研磨的优先顺序，不替换机器当前输入。 */
 final class CreateGrindingRecipeAccess {
     static final String MILL = "com.simibubi.create.content.kinetics.millstone.MillstoneBlockEntity";
     static final String CRUSH = "com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlockEntity";
@@ -39,7 +39,7 @@ final class CreateGrindingRecipeAccess {
             var recipe = holder.value();
             if (!type.equals(BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType()).toString())) continue;
             if (!NativeApi.truth(NativeApi.call(recipe, null, "matches", input, level))) continue;
-            // A millstone can retain a matching cached recipe. Ambiguous predicates cannot identify that private cache.
+            // 磨石可能保留匹配的缓存配方；条件含糊时无法识别这份私有缓存。
             if (found != null) return new Selection(null, false);
             found = holder;
         }

@@ -7,7 +7,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 
-/** Consumes existing native history only. A current stock count alone never establishes production. */
+/** 只使用已有原生历史；当前库存数量本身不能证明发生过生产。 */
 public final class WatchProgress {
     private final WatchGoal goal;
     private final Map<String,Long> completed = new LinkedHashMap<>();
@@ -92,7 +92,7 @@ public final class WatchProgress {
     private boolean matches(JsonObject value) { return goal.resourceId().equals(text(value,"resource_id")) && goal.identity().equals(value.get("identity")); }
     private void progressed(long tick) { nativeProgress = true; progressTick = Math.max(progressTick,tick); revision++; }
 
-    /** Call only after a fully loaded, identity-checked native sink read; unknown time never accrues idle evidence. */
+    /** 仅在完全加载且已核对身份的原生输出端读取后调用；时间未知时绝不累计空闲证据。 */
     public void observedSink(long stock, long tick, long loadedElapsed) {
         if (!armed() || stopped()) return;
         if (stock < 0 || tick < observedTick || loadedElapsed < 0) { attention("native_snapshot_unverifiable",true); return; }

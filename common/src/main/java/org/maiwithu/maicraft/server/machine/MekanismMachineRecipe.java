@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.server.machine.mekanism.MekanismRecipeAccess;
 import org.maiwithu.maicraft.server.machine.mekanism.MekanismRecipeConditions;
 import org.maiwithu.maicraft.server.machine.mekanism.MekanismRecipeData;
 
-/** One Mekanism normalizer, using actual basic recipe classes and native machine recipe types. */
+/** Mekanism 配方统一规范器，使用真实基础配方类和原生机器配方类型。 */
 final class MekanismMachineRecipe {
     private static final String BASIC = "mekanism.api.recipes.basic.";
     private static final String API = "mekanism.api.recipes.";

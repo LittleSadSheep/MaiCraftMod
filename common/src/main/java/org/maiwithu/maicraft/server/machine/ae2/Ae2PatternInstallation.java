@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Converts one genuine blank pattern and inserts into a native empty provider slot, with exact idempotency. */
+/** 转换一张真实空白样板，并幂等地插入原生空供应器槽位。 */
 final class Ae2PatternInstallation {
     private static final String HOST = "appeng.helpers.patternprovider.PatternProviderLogicHost";
     private static final String LOGIC = "appeng.helpers.patternprovider.PatternProviderLogic";
@@ -33,8 +33,8 @@ final class Ae2PatternInstallation {
         if (empty < 0) throw ServerAccess.denied("configuration_full", "No native empty pattern slot is available; existing patterns are preserved");
         int source = blankSlot(player);
         ItemStack blank = player.getInventory().getItem(source).copyWithCount(1);
-        // Preserve the real blank's patch, then restore the authoritative encoded recipe component.
-        // A blank's pre-existing data can never replace recipe-validated pattern IO.
+        // 保留真实空白样板的补丁数据，再写回权威编码的配方组件。
+        // 空白样板原有数据绝不能覆盖经过配方验证的样板输入输出。
         ItemStack completed = encoded.copy();
         completed.applyComponents(blank.getComponentsPatch()); completed.applyComponents(encoded.getComponentsPatch());
         ResourceIdentity.item(completed, player.registryAccess());

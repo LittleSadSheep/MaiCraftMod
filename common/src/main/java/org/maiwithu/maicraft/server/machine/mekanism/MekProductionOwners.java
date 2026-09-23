@@ -11,7 +11,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Native monitor ownership and recipe-holder identity, including Mekanism's generated smelting recipes. */
+/** 原生监控所有权和配方持有者身份，包括 Mekanism 自动生成的熔炼配方。 */
 final class MekProductionOwners {
     private static final int LIMIT = 4096, RECIPE_LIMIT = 8192;
     private static final String LOOKUP = "mekanism.common.recipe.lookup.IRecipeLookupHandler";

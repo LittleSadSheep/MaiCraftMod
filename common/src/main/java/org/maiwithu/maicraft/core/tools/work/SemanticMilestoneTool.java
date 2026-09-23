@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.progression.ReachMilestoneTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** Hidden executor behind the single semantic reach-milestone ability. */
+/** 单一语义里程碑能力背后的隐藏执行器。 */
 public final class SemanticMilestoneTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
 

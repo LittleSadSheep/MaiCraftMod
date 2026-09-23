@@ -11,7 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** A recipe-validated in-memory definition; this never reads material stock or writes a provider. */
+/** 经配方验证的内存定义；不读取材料库存，也不写入供应器。 */
 record Ae2PatternDefinition(ItemStack pattern, String mode, String requestedId, String recipeId) {
     static Ae2PatternDefinition resolve(ServerPlayer player, JsonObject body) {
         for (String field : body.keySet()) if (!Set.of("position", "action", "side", "recipe_id", "mode").contains(field)) {

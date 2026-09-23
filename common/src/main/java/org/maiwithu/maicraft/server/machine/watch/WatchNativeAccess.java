@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.ServerMachineRecipe;
 
-/** Registration uses nearby native access. The resulting finite lease permits only these loaded identities to be read. */
+/** 注册阶段使用附近原生访问检查；之后得到的有限租约只允许读取这些已加载且身份匹配的对象。 */
 final class WatchNativeAccess {
     record Endpoint(BlockState state, BlockEntity entity) {}
     record Recipe(String id, boolean targetOutput) {}
@@ -43,7 +43,7 @@ final class WatchNativeAccess {
         return new Recipe(WatchGoal.text(recipe,"recipe_id",256),target);
     }
 
-    /** No distance/menu check: registration granted this read lease; current ownership protection is still respected. */
+    /** 无需再次检查距离或菜单：注册时已授予读取租约，但仍遵守当前所有权保护。 */
     static String available(ServerPlayer player, ServerLevel level, Map<BlockPos,Endpoint> endpoints) {
         for (BlockPos position : endpoints.keySet()) if (!level.isLoaded(position)) return "waiting_loaded";
         for (var entry : endpoints.entrySet()) {

@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
-/** Read-only Create 6 depot occupancy and native press recipe selection; no insertion or cleanup. */
+/** 只读检查 Create 6 仓库占用和原生压机配方选择；不插入物品或执行清理。 */
 public final class CreatePressInputInspection {
     private static final String DEPOT = "com.simibubi.create.content.logistics.depot.DepotBlockEntity";
     private static final String PRESS = "com.simibubi.create.content.kinetics.press.MechanicalPressBlockEntity";
@@ -37,7 +37,7 @@ public final class CreatePressInputInspection {
         return result;
     }
 
-    /** Native stack/ingredient rules with a recipe lookup seam for deterministic policy regressions. */
+    /** 使用原生堆叠和材料规则，并提供配方查找替换点供确定性策略回归测试使用。 */
     static JsonObject inspect(ItemStack held, List<Ingredient> inputs, List<ItemStack> outputs,
                               HolderLookup.Provider registries, Function<ItemStack, Optional<?>> recipes) {
         try {

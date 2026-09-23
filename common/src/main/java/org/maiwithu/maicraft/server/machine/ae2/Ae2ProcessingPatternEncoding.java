@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.ServerMachineRecipe;
 
-/** Processing IO comes exclusively from the server's complete native recipe normalizer. */
+/** 加工输入输出信息完全取自服务器完整的原生配方规范器。 */
 final class Ae2ProcessingPatternEncoding {
     record Result(ItemStack pattern, String recipeId) {}
     private Ae2ProcessingPatternEncoding() {}

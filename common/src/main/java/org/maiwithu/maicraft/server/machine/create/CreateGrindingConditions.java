@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Read-only operating diagnostics are separate from recipe and equipment compatibility. */
+/** 只读运行诊断独立于配方兼容性和装备兼容性。 */
 final class CreateGrindingConditions {
     private static final String KINETIC = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
     private static final String WHEEL = "com.simibubi.create.content.kinetics.crusher.CrushingWheelBlockEntity";

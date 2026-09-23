@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 
-/** Native completion scopes and actual mutation receipts; never infers processing from inventory polling. */
+/** 原生完成作用域和实际修改回执；绝不根据背包轮询推断加工发生。 */
 public final class CreateGrindingCapture {
     private static final ThreadLocal<ArrayDeque<Scope>> SCOPES = ThreadLocal.withInitial(ArrayDeque::new);
     public static final class Scope {

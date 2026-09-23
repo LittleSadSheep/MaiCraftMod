@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.maiwithu.maicraft.network.ServerOperationRegistry;
 
-/** Connection/level-scoped read leases. Background ticks never transfer items, configure machines or load chunks. */
+/** 按连接和维度划分的读取租约；后台 tick 不会转移物品、配置机器或加载区块。 */
 public final class MachineWatchService {
     public static final int MAX_JOBS = 16, MAX_JOBS_PER_PLAYER = 4, JOBS_PER_TICK = 2;
     private static final long REGISTRATION_TICKS = 6000, HISTORY_TICKS = 6000;

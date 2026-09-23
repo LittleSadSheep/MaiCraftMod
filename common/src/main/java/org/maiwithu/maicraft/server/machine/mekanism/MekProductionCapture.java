@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerProductionEvents;
 
-/** Scoped actual resource effects. No predicted output, activity flag or inventory polling can append an event. */
+/** 具有作用域的真实资源效果；预测产出、活动标志或背包轮询都不能追加事件。 */
 public final class MekProductionCapture {
     private static final int MAX_DEPTH = 8, MAX_TRANSFERS = 64, MAX_EVENT_CHARS = 16_384;
     private static final String CACHE = "mekanism.api.recipes.cache.CachedRecipe";
@@ -80,7 +80,7 @@ public final class MekProductionCapture {
                     scope.ready.inputs, scope.ready.outputs, scope.ready.operations,
                     "mekanism.CachedRecipe.finishProcessing.cache_" + scope.index);
         } catch (RuntimeException | LinkageError ignored) {
-            // Missing attribution or a failed completion must never become successful production evidence.
+            // 缺少归属信息或完成失败时，绝不能生成成功生产证据。
         } finally {
             scope.closed = true;
             if (state != null) {

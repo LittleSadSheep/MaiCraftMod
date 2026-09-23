@@ -11,7 +11,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
-/** The same connection callbacks as the native configurator, applied to an explicit semantic side/mode. */
+/** 对明确指定的语义侧面和模式，调用与原生配置器相同的连接回调。 */
 final class MekanismConnectionConfiguration {
     private static final String TILE = "mekanism.common.tile.transmitter.TileEntityTransmitter";
     private static final String TRANSMITTER = "mekanism.common.content.network.transmitter.Transmitter";
