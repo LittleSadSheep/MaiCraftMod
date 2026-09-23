@@ -16,12 +16,9 @@ public final class ModItemTagData {
     private ModItemTagData() {}
 
     /**
-     * Loader-agnostic adapter: each loader's tag provider implements this to
-     * return an {@link Appender} for a given key. The only MC appender with a
-     * {@code add(T)} sink is {@code protected}, and the public
-     * {@code TagsProvider.TagAppender} only takes {@code ResourceKey}s, so common
-     * defines its own neutral sink and each loader wraps its native builder via
-     * {@link #appender}.
+     * 与加载器无关的适配接口：每个加载器的标签提供器实现此接口，并为给定键返回 {@link Appender}。
+     * Minecraft 中唯一提供 {@code add(T)} 接口的追加器是 protected；公开的 {@code TagsProvider.TagAppender} 只接受 {@code ResourceKey}，
+     * 因此公共模块定义中立追加接口，由各加载器通过 {@link #appender} 包装原生构建器。
      */
     @FunctionalInterface
     public interface TagAppenderProvider<T> {
@@ -29,10 +26,8 @@ public final class ModItemTagData {
     }
 
     /**
-     * Minimal fluent sink — the {@code .add(T)} chaining the tag lists use, plus
-     * {@code .addTag} for referencing another tag ({@code #minecraft:banners} and
-     * friends). Naming a vanilla tag beats copying its current members: the
-     * members change between versions, the tag's meaning does not.
+     * 最小化的链式追加接口：支持标签列表使用的 {@code .add(T)}，以及引用其他标签的 {@code .addTag}（例如 {@code #minecraft:banners}）。
+     * 引用原版标签优于复制当前成员列表，因为成员会随版本改变，而标签语义保持不变。
      */
     public interface Appender<T> {
         Appender<T> add(T value);
@@ -40,9 +35,8 @@ public final class ModItemTagData {
         Appender<T> addTag(TagKey<T> tag);
     }
 
-    /** Adapt a native MC tag builder to an {@link Appender}; loaders pass explicit
-     *  lambdas (not method refs) to dodge the {@code add(T)} vs {@code add(T...)}
-     *  overload ambiguity. */
+    /** 将加载器原生 Minecraft 标签构建器适配为 {@link Appender}；加载器使用显式 lambda 而非方法引用，
+     *  以避免 {@code add(T)} 与 {@code add(T...)} 重载产生歧义。 */
     // 把“加入单个成员”和“引用另一个标签”两种写入函数包装成链式接口，具体写到哪里由调用方提供。
     public static <T> Appender<T> appender(Consumer<T> add, Consumer<TagKey<T>> addTag) {
         return new Appender<>() {
@@ -60,7 +54,7 @@ public final class ModItemTagData {
         };
     }
 
-    /** Foods that may be used to feed/heal a companion (vanilla foods only, no mod cross-deps). */
+    /** 可用于喂养或治疗同伴的食物，只包含原版食物，不依赖其他模组。 */
     // 描述默认食物与脚手架物品清单。必须有数据提供器调用并输出标签，单独存在这个方法不会生效。
     public static void addItemTags(TagAppenderProvider<Item> tags) {
         tags.tag(InitTag.TAME_FOODS)
@@ -88,8 +82,7 @@ public final class ModItemTagData {
                 .add(Items.RABBIT_STEW)
                 .add(Items.SWEET_BERRIES);
 
-        // Cheap, common blocks the pathfinder may expend as scaffolding —
-        // never the player's valuables. Packs can extend this tag freely.
+        // 供寻路器消耗并用作脚手架的常见廉价方块，绝不使用玩家贵重物品；整合包可自由扩展此标签。
         tags.tag(InitTag.SCAFFOLDS)
                 .add(Items.COBBLESTONE)
                 .add(Items.DIRT)
@@ -101,9 +94,8 @@ public final class ModItemTagData {
                 .add(Items.GRANITE)
                 .add(Items.TUFF)
                 .add(Items.DEEPSLATE)
-                // Dirt-family variants players actually hand the companion ("here,
-                // 128 dirt") — a stack of coarse dirt must count as scaffolding,
-                // or hasScaffold=false silently disables every pillar/bridge move.
+                // 玩家实际会交给同伴的泥土类方块（例如“给你 128 个泥土”）也必须算作脚手架材料。
+                // 否则一组砂土不会被识别，hasScaffold=false 会悄悄禁用所有垫高和搭桥移动。
                 .add(Items.COARSE_DIRT)
                 .add(Items.ROOTED_DIRT)
                 .add(Items.PODZOL)
