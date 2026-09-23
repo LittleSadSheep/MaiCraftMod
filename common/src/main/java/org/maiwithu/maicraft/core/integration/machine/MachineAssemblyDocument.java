@@ -30,7 +30,7 @@ public final class MachineAssemblyDocument {
         Map<BlockPos, JsonObject> blocks = blocks(blueprint); Set<BlockPos> occupied = new LinkedHashSet<>(), parts = new LinkedHashSet<>();
         for (var raw : blueprint.getAsJsonArray("blocks")) if (raw.getAsJsonObject().has("part")) parts.add(position(raw.getAsJsonObject().get("offset")));
         for (var raw : installations) {
-            JsonObject input = object(raw, "installation"); keys(input, Set.of("type", "first", "second"));
+            JsonObject input = object(raw, "installation"); keys(input, Set.of("type", "first", "second", "pulleys", "flow"));
             if (!input.has("type") || !input.get("type").isJsonPrimitive() || !input.getAsJsonPrimitive("type").isString()
                     || !input.get("type").getAsString().equals("create:belt"))
                 throw bad("unsupported_native_installation; read the machine assembly capability contract");
@@ -45,7 +45,15 @@ public final class MachineAssemblyDocument {
                     throw bad("belt_path_requires_declared_matching_shafts_or_clearance");
             }
             JsonObject row = new JsonObject(); row.addProperty("type", "create:belt");
-            row.add("first", json(first)); row.add("second", json(second)); installs.add(row);
+            row.add("first", json(first)); row.add("second", json(second));
+            if (input.has("pulleys")) row.add("pulleys", input.get("pulleys").deepCopy());
+            if (input.has("flow")) {
+                // first/second 是连接器动作顺序，期望物流另外声明，不能把几何朝向当成实测转向。
+                if (!input.get("flow").isJsonPrimitive() || !input.getAsJsonPrimitive("flow").isString()
+                        || !Set.of("first_to_second", "second_to_first").contains(input.get("flow").getAsString())) throw bad("invalid_belt_flow");
+                row.add("flow", input.get("flow").deepCopy());
+            }
+            installs.add(row);
         }
         if (occupied.size() + blocks.keySet().stream().filter(at -> !occupied.contains(at)).count() > MachinePlanningBudget.current().maxTargets())
             throw bad("native_installation_target_budget_exceeded");

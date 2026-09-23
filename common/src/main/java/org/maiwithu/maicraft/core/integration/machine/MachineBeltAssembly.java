@@ -31,9 +31,21 @@ public final class MachineBeltAssembly {
             if (authored != null && other != null && authored != other) throw bad("belt_endpoint_axes_mismatch");
             Direction.Axis chosen = authored != null ? authored : other != null ? other : inferredAxis(first, second);
             // 先检查带长与轴向，再补两端准备轴；作者写错的显式朝向不能被自动展开偷偷覆盖。
-            CreateBeltGeometry.between(first, second, chosen, Math.min(2 * radius + 1, MachinePlanningBudget.current().maxTargets()));
+            var span = CreateBeltGeometry.between(first, second, chosen, Math.min(2 * radius + 1, MachinePlanningBudget.current().maxTargets()));
             shaft(blueprint, blocks, parts, first, chosen);
             shaft(blueprint, blocks, parts, second, chosen);
+            // 中间接动力时只在指定位置增加带轮，不把整条带每格都铺满传动杆。
+            if (entry.has("pulleys")) {
+                if (!entry.get("pulleys").isJsonArray() || entry.getAsJsonArray("pulleys").size() > span.cells().size()) throw bad("invalid_belt_pulleys");
+                Set<BlockPos> seen = new HashSet<>();
+                for (var pulley : entry.getAsJsonArray("pulleys")) {
+                    BlockPos at = MachineAssemblyDocument.position(pulley, radius);
+                    if (!span.cells().contains(at) || !seen.add(at)) throw bad("belt_pulley_must_be_unique_and_on_span");
+                    Direction.Axis present = axis(blocks.get(at));
+                    if (present != null && present != chosen) throw bad("belt_pulley_axis_mismatch");
+                    shaft(blueprint, blocks, parts, at, chosen);
+                }
+            }
         }
     }
 

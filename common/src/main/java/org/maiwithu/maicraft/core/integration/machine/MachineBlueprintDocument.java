@@ -76,6 +76,7 @@ public final class MachineBlueprintDocument {
         report.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(blueprint));
         if (blueprint.has("onsite_reason")) report.add("onsite_reason", blueprint.get("onsite_reason").deepCopy());
         report.addProperty("utility_connection_verified", false);
+        report.add("power_ports", MachineAssemblyPorts.describe(blueprint));
         // 关系通过只表示设备位置与原生接口兼容，不能提前宣称实际配方、产量或物流运行成功。
         if (blueprint.has("assembly")) report.add("assembly", blueprint.get("assembly").deepCopy());
         if (blueprint.has("expected_output")) report.add("expected_output", blueprint.get("expected_output").deepCopy());
