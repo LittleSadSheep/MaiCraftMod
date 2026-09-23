@@ -6,7 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.TreeMap;
 
-/** All position groups must cover an event before the shared world cursor advances past it. */
+/** 所有位置分组都覆盖某个事件后，共享世界游标才可越过该事件。 */
 public final class ProductionEventCursor {
     public record Batch(long sequence, long tick, List<JsonObject> events, boolean complete) {}
     private final long[] next;
@@ -30,7 +30,7 @@ public final class ProductionEventCursor {
         if (after < 0 || tick < 0) throw invalid("invalid_baseline");
     }
 
-    /** Later watch groups join the first group's cursor, without advancing past unconsumed early events. */
+    /** 后续观察组接续首组游标，同时不越过尚未消费的早期事件。 */
     public void baselineGroup(JsonObject page) {
         if (scope == null || !scope.equals(page.get("scope").getAsString()) || page.get("gap").getAsBoolean())
             throw invalid("baseline_group_gap_or_scope_changed");
@@ -58,7 +58,7 @@ public final class ProductionEventCursor {
         for (long value : next) if (value < 0) return null;
         long watermark = Arrays.stream(next).min().orElseThrow();
         List<JsonObject> accepted = events.headMap(watermark, true).values().stream().map(JsonObject::deepCopy).toList();
-        // Later events are queried again from the safe watermark, including those seen by only one group.
+        // 后续会从安全水位线重新查询事件，包括仅被一个分组观察到的事件。
         boolean caughtUp = complete;
         after = watermark; tick = roundTick; events.clear(); bufferedChars = 0; complete = true;
         Arrays.fill(next, -1); roundTick = Long.MAX_VALUE;

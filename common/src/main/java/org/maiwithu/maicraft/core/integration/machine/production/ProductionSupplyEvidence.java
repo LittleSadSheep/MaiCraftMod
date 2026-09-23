@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvide
 import com.google.gson.JsonArray;
 import java.util.Collection;
 
-/** Current stock and confirmed window injections remain separate; aliased sided views are never added together. */
+/** 当前库存和窗口内确认注入量分别记录；别名侧向视图绝不重复合计。 */
 final class ProductionSupplyEvidence {
     private record Injection(String link, String resource, long amount) {}
     private record Stock(long amount, String membership) {}
@@ -35,7 +35,7 @@ final class ProductionSupplyEvidence {
         initial.put(key,credited); initialByAlias.put(alias,shared);
     }
 
-    /** Caller already binds a successful native DEPOSIT response to its request/player/world and exact link ingress. */
+    /** 调用方已将成功的原生 DEPOSIT 响应绑定到其请求、玩家、世界和精确连接入口。 */
     void confirmed(String linkId, String requestId, JsonObject result) {
         Link link = graph.outgoing.values().stream().flatMap(Collection::stream).filter(l -> l.id().equals(linkId)).findFirst().orElseThrow();
         confirmedSource(graph.nodes.get(graph.ports.get(link.from()).node()),resolve.apply(link.resource()),requestId,result);
@@ -74,7 +74,7 @@ final class ProductionSupplyEvidence {
         String detail = "current_stock_lower_bound=" + stock.amount + "; shared_window_budget=" + reserved + "; confirmed_window_injection=" + injected
                 + "; initial_stock_credited_once=" + credited + "; first_batch_requirement=" + firstBatch
                 + "; remaining_injection_budget=" + Math.max(0,reserved-injected-credited) + "; admitted inputs are not future inventory";
-        // Historical admission is bounded separately. Never add it to the current stock view.
+        // 历史准入量单独设限；绝不并入当前库存视图。
         return new Check(Math.addExact(injected,credited) >= firstBatch || stock.amount >= firstBatch ? Status.VERIFIED : Status.PLANNED,
                 "server_native_stock_and_confirmed_deposit_receipts",detail);
     }

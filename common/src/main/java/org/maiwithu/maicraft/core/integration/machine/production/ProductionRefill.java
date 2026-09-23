@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionManif
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.Recipe;
 import java.util.LinkedHashSet;
 
-/** A window budget need not fit a source buffer; admit one batch, while retaining the finite cumulative cap. */
+/** 单个窗口预算不必一次塞满来源缓存；允许分批进入，同时保留有限的累计上限。 */
 final class ProductionRefill {
     private ProductionRefill() {}
     static long firstBatch(Link link, ProductionGraph graph, Map<String,Recipe> recipes, Function<Resource,Resource> resolve) {

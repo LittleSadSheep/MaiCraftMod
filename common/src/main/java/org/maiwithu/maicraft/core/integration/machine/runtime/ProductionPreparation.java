@@ -19,7 +19,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
 
-/** Resolves native facts incrementally, using the exact anchor and operation receipts of this task. */
+/** 使用本任务的精确锚点和操作回执，逐步解析原生事实。 */
 final class ProductionPreparation {
     private static final long MAX_STAGE_TICKS = 3_600;
     private final LocalPlayer player;

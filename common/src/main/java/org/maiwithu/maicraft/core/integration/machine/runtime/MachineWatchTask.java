@@ -25,7 +25,7 @@ import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.watch.WatchGoal;
 
-/** Authorize known endpoints once, then return the body; server-native observations own future completion. */
+/** 一次性授权已知端点后归还玩家身体；服务器原生观察负责后续完成通知。 */
 final class MachineWatchTask extends AbstractCompanionTask<MachineWatchTaskRecord> {
     private final UUID job = UUID.randomUUID();
     private final ProductionRequestSlot requests = new ProductionRequestSlot();

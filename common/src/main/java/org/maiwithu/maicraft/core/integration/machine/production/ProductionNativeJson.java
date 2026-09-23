@@ -13,7 +13,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.StringJoiner;
 
-/** Strict decoders: a string such as "unknown" never becomes a false boolean or a numeric zero. */
+/** 严格解码：字符串 "unknown" 绝不会被转换为 false 或数字 0。 */
 final class ProductionNativeJson {
     private ProductionNativeJson() {}
     static String text(JsonObject o, String key) {

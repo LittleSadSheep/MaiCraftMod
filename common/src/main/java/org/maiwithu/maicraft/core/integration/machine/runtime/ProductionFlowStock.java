@@ -8,7 +8,7 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 
-/** One sided native view is a sink-stock measurement, never a production or transfer event. */
+/** 单侧原生视图只测量接收端库存，绝不代表生产或转移事件。 */
 final class ProductionFlowStock {
     private ProductionFlowStock() {}
 

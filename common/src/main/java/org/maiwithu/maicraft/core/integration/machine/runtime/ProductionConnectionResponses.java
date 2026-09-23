@@ -10,7 +10,7 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
-/** Local conjunction of individually authorized native observations; never an atomic world snapshot. */
+/** 将多个分别获准的原生观察在本地合并；这不是原子世界快照。 */
 final class ProductionConnectionResponses {
     private static final long MAX_AGE = 1200;
     private final List<BlockPos> path;
@@ -78,7 +78,7 @@ final class ProductionConnectionResponses {
 
     void failure(String code) { if (failure == null) failure = code; }
 
-    /** Only ticks from a fully decoded, context-matching native segment advance this clock. */
+    /** 只有完整解码且上下文匹配的原生分段，才会推进此时钟。 */
     long latestTick() { return latest; }
 
     JsonObject finish(long now) {

@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import java.util.Set;
 import java.util.ArrayList;
 
-/** Mutation admission and live-running diagnostics; a false observe gate never forbids reading historical native evidence. */
+/** 控制修改准入和实时运行诊断；观察门控为 false 时，仍允许读取历史原生证据。 */
 public final class ProductionStageReadiness {
     private ProductionStageReadiness() {}
     public static boolean canEnter(JsonObject report, String stage) {
@@ -18,7 +18,7 @@ public final class ProductionStageReadiness {
         return true;
     }
 
-    /** A bounded failure message; the complete authored plan stays in the structured result. */
+    /** 有界失败消息；完整手工方案保留在结构化结果中。 */
     public static String failureSummary(JsonObject report, String stage) {
         if (!Set.of("supply","start","observe").contains(stage)) throw new IllegalArgumentException("Unknown production admission stage");
         if (!Boolean.TRUE.equals(ProductionNativeJson.bool(report,"valid")))

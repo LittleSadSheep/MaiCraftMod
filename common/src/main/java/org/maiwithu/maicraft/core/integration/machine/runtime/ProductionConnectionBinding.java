@@ -6,7 +6,7 @@ import java.util.function.Function;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 
-/** Freeze one verified native identity; opaque resource keys are never parsed into registry IDs. */
+/** 冻结一个已核实的原生身份；绝不将不透明资源键解析为注册表 ID。 */
 record ProductionConnectionBinding(String exactId, String registryId, String status, String reason) {
     static ProductionConnectionBinding resolve(Resource selector, Function<Resource, ProductionEvidence.Binding> resolver) {
         if (selector.medium().equals("kinetic")) return new ProductionConnectionBinding(null, null, "not_required", "kinetic_unit_has_no_inventory_identity");

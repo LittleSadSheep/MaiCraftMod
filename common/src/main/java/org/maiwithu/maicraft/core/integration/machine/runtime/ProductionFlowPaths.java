@@ -12,7 +12,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 
-/** Endpoint attribution can cover one unique declared chain; it never asserts the route actually traversed. */
+/** 端点归属可覆盖一条唯一声明的链路；不声称这就是实际经过的路线。 */
 final class ProductionFlowPaths {
     private final ProductionRunPlan plan;
     final List<Link> links;

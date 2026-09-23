@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.client.server.ServerAssistClient;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Configuration;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** Prepares real tools and consumables using the declared material policy after current configuration was checked. */
+/** 核实当前配置后，按声明的材料策略准备真实工具和消耗品。 */
 final class ProductionConfigurationSupply {
     private final LocalPlayer player;
     private final MachineProductionTaskRecord owner;

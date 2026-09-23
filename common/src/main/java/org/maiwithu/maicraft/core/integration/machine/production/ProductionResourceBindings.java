@@ -10,7 +10,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 
-/** Binds public registry selectors to observed complete identities, never by splitting an opaque resource hash. */
+/** 将公开注册表选择器绑定到已观察到的完整身份；绝不拆解不透明资源哈希来推断。 */
 final class ProductionResourceBindings {
     private final Map<Resource,JsonObject> identities = new LinkedHashMap<>();
     private final Map<Resource,Binding> pinned = new LinkedHashMap<>();

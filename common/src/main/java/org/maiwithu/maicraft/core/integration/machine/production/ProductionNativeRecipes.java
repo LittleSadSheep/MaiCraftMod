@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvide
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Resource;
 import java.math.BigDecimal;
 
-/** Decodes machine.recipe v1, retaining opaque component-sensitive resource IDs and recipe completeness. */
+/** 解码 machine.recipe v1，同时保留不透明、受数据组件影响的资源 ID 和配方完整性。 */
 final class ProductionNativeRecipes {
     private ProductionNativeRecipes() {}
     static Recipe decode(JsonObject result) {

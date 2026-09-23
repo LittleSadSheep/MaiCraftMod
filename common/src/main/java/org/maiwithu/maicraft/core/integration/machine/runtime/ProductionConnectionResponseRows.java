@@ -10,7 +10,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.network.MachineConnectionSystems;
 
-/** Strict wire decoding: compressed indices remain bound to the exact request path. */
+/** 严格解码传输数据；压缩索引必须继续绑定到精确请求路径。 */
 final class ProductionConnectionResponseRows {
     record Segment(long tick, boolean connected, boolean operational, boolean truncated, String status,
                    List<JsonObject> edges, List<JsonObject> intermediate) {}
