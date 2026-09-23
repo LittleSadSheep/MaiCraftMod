@@ -35,13 +35,13 @@ final class LootSweep {
     enum PickupContact { NONE, WAITING, NO_CAPACITY, REFUSED_WITH_CAPACITY }
     enum VanishState { CLEAR, WAITING_FOR_INVENTORY_SYNC, UNCONFIRMED }
 
-    /** Packet ordering may expose a newly spawned item one client tick before the death update. */
+    /** 数据包顺序可能使新掉落物比死亡更新早一个客户端 tick 出现。 */
     private static final int SPAWN_TICK_SKEW = 1;
-    /** Require repeated synchronized capacity evidence before diagnosing a full inventory. */
+    /** 必须多次观察到同步后的容量证据，才判定背包已满。 */
     private static final int NO_CAPACITY_CONFIRM_TICKS = 3;
-    /** True vanilla contact plus free capacity should settle promptly; beyond this it is not full. */
+    /** 已进入原版拾取接触范围且背包有空位时，应很快完成拾取；超时后不能再归因于背包已满。 */
     private static final int CAPABLE_CONTACT_SETTLE_TICKS = 20;
-    /** Entity removal can precede the matching inventory packet by several client ticks. */
+    /** 掉落实体消失可能比对应背包数据包早数个客户端 tick。 */
     private static final int VANISH_RECONCILE_TICKS = 10;
 
     private final LocalPlayer player;
@@ -51,7 +51,7 @@ final class LootSweep {
     private final Map<Integer, Vec3> preexistingPositions = new HashMap<>();
     private final Set<Integer> observedPreexistingDisappearances = new HashSet<>();
     private final Map<Item, Integer> vanishedPreexistingByItem = new HashMap<>();
-    /** Unmatched portion of vanished old stacks, consumed once when a surviving new id grows. */
+    /** 旧实体消失后尚未匹配的物品数量；后续新实体堆叠增长时只消费一次。 */
     private final Map<Item, Integer> unmatchedVanishedPreexistingByItem = new HashMap<>();
     private final Map<Integer, Integer> trackedCounts = new HashMap<>();
     private final Set<Integer> tracked = new LinkedHashSet<>();
@@ -103,8 +103,7 @@ final class LootSweep {
     }
 
     /**
-     * Snapshot every item the client already knows before a lethal hit.  Scoping this snapshot to
-     * an arbitrary corpse radius made an old item crossing that radius look newly spawned.
+     * 致命一击前记录客户端已知的所有物品。若只按任意尸体半径建立快照，旧物品移动穿过半径时会被误判为新生成。
      */
     // 记下当前客户端能渲染的所有地上物品，不只死亡地点附近；后来看到同一编号就知道它不是刚出现。
     void rememberPreexisting() {
@@ -117,7 +116,7 @@ final class LootSweep {
         }
     }
 
-    /** Begin a new post-kill synchronization window. */
+    /** 击杀后开启新的同步观察窗口。 */
     // 开始一轮死亡掉落收集：清掉上一轮的临时等待和候选，保留整个战斗的累计统计，并记下此刻背包。
     void begin(int sourceEntityId, BlockPos where) {
         Set<Integer> staleBaseline = new HashSet<>();
@@ -149,7 +148,7 @@ final class LootSweep {
         addDeath(sourceEntityId, where);
     }
 
-    /** Sweeping/ranged damage can settle more than one target in the same tick. */
+    /** 横扫或远程伤害可能在同一 tick 内结算多个目标。 */
     void addDeath(int sourceEntityId, BlockPos where) {
         DeathWitness witness = new DeathWitness(sourceEntityId, where.immutable(),
                 player.level().getGameTime());
@@ -164,29 +163,23 @@ final class LootSweep {
         long now = player.level().getGameTime();
         for (DeathWitness death : deaths) {
             Entity source = player.clientLevel.getEntity(death.sourceEntityId());
-            // LivingEntity death animation/removal is the server-backed end marker. For entities
-            // already removed when first observed, one subsequent world tick is enough to see all
-            // packets from that update without inventing a ten-tick attribution window.
+            // LivingEntity 的死亡动画或移除状态是服务器确认的生命周期终点。若首次观察时实体已经移除，再等一个世界 tick 即可接收该更新的全部数据包，
+            // 无需人为延长十刻的掉落归属窗口。
             boolean lifecycleActive = source != null && !source.isRemoved()
                     && (!(source instanceof LivingEntity living)
                     || !living.isDeadOrDying() || living.deathTime < 20);
             if (lifecycleActive) return true;
             if (death.lifecycleEndedAt == Long.MIN_VALUE) death.lifecycleEndedAt = now;
-            // Observe one complete client-world update after the source lifecycle ended. This is
-            // a packet boundary, not an attribution timeout; spawn age and trajectory still decide
-            // which item entities are causal.
+            // 来源实体结束生命周期后，完整观察一个客户端世界更新周期。这只是数据包边界，不是掉落归属超时；仍由生成时间和轨迹判断哪些实体由本次击杀造成。
             if (now <= death.lifecycleEndedAt + 1) return true;
         }
         return false;
     }
 
     /**
-     * Admit new item ids observed while the defeated entity's synchronized lifecycle is settling.
-     * In 1.21.1 neither ItemEntity.thrower
-     * nor its pickup target is synchronized to the client, so {@code getOwner()==null} is not
-     * evidence of a wild/mob drop and must not reject legitimate loot.  The usable client proof is
-     * the pre-kill id/count snapshot plus spawn-time and trajectory evidence. A simultaneous local
-     * inventory decrease for the same item type is specific evidence that this body dropped it.
+     * 接纳被击败实体的同步生命周期尚未结束时观察到的新物品 ID。在 1.21.1 中，ItemEntity.thrower 和拾取目标不会同步给客户端，
+     * 因此 {@code getOwner()==null} 不能证明物品来自野外或其他生物，也不能据此拒绝正常战利品。客户端可用证据是击杀前 ID/数量快照、生成时间和运动轨迹；
+     * 若同类型物品同时从角色背包减少，则可明确证明该实体掉出了角色持有的物品。
      */
     // 在接收窗口内，用出现时间、位置和速度寻找本轮产物。只算可能相关但证据不够的，记为待解释而不直接拾取。
     void discover() {
@@ -218,8 +211,7 @@ final class LootSweep {
                 }
             // 旧物品堆变大时，当前直接记成与本轮产物合堆，没有检查它离死亡地点多远；会误计远处无关变化（A41）。
             } else if (admissionOpen && item.getItem().getCount() > before) {
-                // A causal drop may have merged into an old stack, but the units cannot be
-                // separated. Never take the old stack; expose the uncertain causal units.
+                // 本次掉落可能并入旧堆叠，但无法分离各自数量。不能拾走旧堆叠，只报告归属不确定的本次掉落数量。
                 int growth = item.getItem().getCount() - before;
                 ambiguousMergedCount++;
                 account(ambiguousByItem, item.getItem().getItem(), growth);
@@ -294,8 +286,7 @@ final class LootSweep {
             double horizontal = Math.hypot(delta.x, delta.z);
             double observedHorizontalSpeed = Math.hypot(
                     item.getDeltaMovement().x, item.getDeltaMovement().z);
-            // Reverse the observed drag only far enough to establish a conservative physical
-            // envelope. This expands with actual age and motion instead of using a corpse radius.
+            // 只反推已观察到的运动距离，以建立保守的物理边界；该边界随实际年龄和位移扩展，不使用固定尸体半径。
             double physicalReach = 1.0 + age * Math.max(0.12, observedHorizontalSpeed * 1.25);
             double verticalReach = 1.5 + age * (0.25 + Math.abs(item.getDeltaMovement().y));
             double margin = Math.min(physicalReach - horizontal,
@@ -303,9 +294,7 @@ final class LootSweep {
             boolean weakMotion = horizontal <= physicalReach * 2.0
                     && Math.abs(delta.y) <= verticalReach * 2.0;
             weaklyCompatible |= weakMotion;
-            // Target loot and the death update are produced by the same server event. A new item
-            // whose first visible tick is much later is nearby new loot, but not provably this
-            // target's loot; keep it unresolved instead of silently annexing it.
+            // 目标掉落和死亡更新由同一服务器事件产生。首次可见时间晚很多的新物品虽是附近新掉落，却无法证明属于此目标；保留未归属状态，不要静默收编。
             if (temporalOffset > SPAWN_TICK_SKEW) continue;
             if (margin > bestMargin) {
                 bestMargin = margin;
@@ -403,7 +392,7 @@ final class LootSweep {
         });
     }
 
-    /** Aim for the exact live item cells; item motion is revalidated by trackGoal. */
+    /** 以仍存在的物品格为目标；物品移动会由 trackGoal 重新核实。 */
     NavGoal goal() {
         List<NavGoal> goals = live().stream()
                 .map(item -> NavGoal.exact(item.blockPosition()))
@@ -412,9 +401,8 @@ final class LootSweep {
     }
 
     /**
-     * Mirror the server's exact Player.aiStep touch query: horizontal expansion 1.0, vertical
-     * expansion 0.5.  The previous all-axis {@code inflate(1)} stopped a full block too early on
-     * uneven ground and then misdiagnosed the perfectly free inventory as full.
+     * 与服务器的 Player.aiStep 接触检测保持一致：水平扩展 1.0 格，垂直扩展 0.5 格。
+     * 之前各轴统一 {@code inflate(1)} 会在不平地面提前一整格停止，进而把明明有空间的背包误报为已满。
      */
     // 靠近到原版拾取范围后，先等拾取延迟；连续三次确认无容量才报背包满。
     // 有容量却连续二十次仍未入包，则报告拾取未发生。
@@ -478,8 +466,7 @@ final class LootSweep {
     }
 
     /**
-     * Do not treat a removed ItemEntity as collected until item conservation balances against
-     * synchronized inventory gain or another still-live attributed stack (the normal merge case).
+     * 只有物品守恒关系能由已同步的背包增加量或另一仍存活的归属堆叠（正常合并情况）解释时，才把已移除的 ItemEntity 视为已拾取。
      */
     // 物品没了但背包还没对上数量时，再等十刻同步；仍对不上就报告未确认，不能直接说捡到了。
     VanishState vanishState() {
@@ -547,7 +534,7 @@ final class LootSweep {
 
     // 结算本轮背包新增量并保留累计数，再关闭窗口、清掉追踪列表；不是把剩余实体自动收进背包。
     void finish() {
-        // Keep the baseline: an unreachable/ambiguous stack remains pre-existing for later kills.
+        // 保留旧物基线：无法抵达或归属不明的堆叠，在后续击杀窗口中仍视为已有物品。
         settleCurrentSweepCollection();
         active = false;
         Map<String, Object> receipt = report();
