@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** Second phase: one explicitly selected city outlet to one already constructed machine input. */
+/** 第二阶段：将一个明确选定的城市输出端连接到一台已建成机器的输入端。 */
 public final class UtilityConnectionTaskRecord extends TaskRecord {
     public record Request(BlockPos sourceAnchor, BlockPos target, Direction targetFace,
             String targetBlockId, String medium, double minRpm, double minCapacity, String resource) {
