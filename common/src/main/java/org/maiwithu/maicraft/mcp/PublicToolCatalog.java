@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.intent.MachineDesignBindings;
 
 /**
  * MCP 对外的四个入口及 JSON 格式校验。它检查数据形状，不负责理解自然语言。
@@ -78,7 +80,10 @@ final class PublicToolCatalog {
             """).getAsJsonObject();
 
     // 生成公开工具前注入地点规则，模型看到的坐标/标签组合与实际请求入口完全一致。
-    static { PublicTargetContract.describe(GOAL_DEFINITIONS.getAsJsonObject("semanticTarget")); }
+    static {
+        PublicTargetContract.describe(GOAL_DEFINITIONS.getAsJsonObject("semanticTarget"));
+        MachineDesignBindings.describe(GOAL_DEFINITIONS.getAsJsonObject("goal"));
+    }
 
     private static final List<JsonObject> TOOLS = List.of(
             tool(PERCEIVE,
@@ -342,6 +347,7 @@ final class PublicToolCatalog {
         constraints.forEach(item -> validateConstraint(asObject(item, "constraint")));
         JsonArray children = array(goal, "children", 32);
         for (JsonElement child : children) validateGoal(asObject(child, "child goal"), depth + 1);
+        if (ability.equals("maicraft:design_machine")) MachineDesignBindings.validate(Goal.fromJson(goal));
         boolean sequence = "maicraft:sequence".equals(ability);
         if (sequence && children.isEmpty()) throw bad("maicraft:sequence requires at least one child");
         if (!sequence && !children.isEmpty()) throw bad("only maicraft:sequence may contain children");

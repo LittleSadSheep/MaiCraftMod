@@ -100,10 +100,7 @@ final class MachineAbilityAdapter {
                 only(p, "design", "blueprint", "blueprint_uri", "snapshot_id", "production");
                 validateLayoutSource(p, true);
                 if (p.has("production")) MachineProductionIntent.validate(p);
-                if (p.has("snapshot_id")) {
-                    requiredString(p, "snapshot_id", 36);
-                    requireMachineTarget(goal);
-                } else if (goal.target() != null) throw bad("A site-specific design review needs snapshot_id from a machine/site inspection");
+                MachineDesignBindings.validate(goal);
             }
             case OPERATE -> {
                 String operation = requiredString(p, "operation", 64);

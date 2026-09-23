@@ -50,11 +50,11 @@ public final class SemanticAbilityCatalog {
                             field("structure_id", "string", "Observed physical-structure UUID. Inspects its native blocks and control circuits; omit target and radius. Does not assume the structure can be driven.")));
             case MachineAbilityAdapter.DESIGN -> contract(
                     "Review a machine without construction. Supply exactly one of blueprint, blueprint_uri or legacy design. New composite machines should use an explicit blueprint with assembly: the author chooses components, work surfaces and transport technology. Read maicraft://knowledge/machine_assembly and each block's native capability document first. Preserve the exact expected_output and forbidden_mods. Successful review does not prove construction, production or optimal throughput.",
-                    targets("landmark", "area"),
+                    targets(MachineDesignBindings.TARGET_KINDS.toArray(String[]::new)),
                     fields(field("design", "object",
                             "Legacy logical-layout compatibility: components [{name,block_id,count,role}], connections [{from,to,medium,purpose}], optional expected_output and constraints.forbidden_mods. It does not give the author full control over work surfaces or transport choice. Use explicit blueprint assembly for new composite machines rather than selecting a product/workstation template. " + utilityInputs(false)),
                             blueprintField(), blueprintUriField(), productionField(),
-                            field("snapshot_id", "string", "Optional fresh site/machine observation that grounds site-specific analysis; requires the exact surveyed target label. Blueprint offsets are relative to this anchor.")));
+                            field("snapshot_id", "string", "For a generic review omit both target and snapshot_id. For a site review first inspect_machine, then supply its snapshot_id and exact landmark/area label without coordinates or relation. Blueprint offsets are relative to that observed anchor.")));
             case MachineAbilityAdapter.BUILD -> contract(
                     "Construct a machine at an observed anchor using design, blueprint or blueprint_uri. MaiCraft supplies construction materials and verifies native placement. With production and allow_use=true, then run the same v1 network or v2 native process; v1 requires server production evidence, v2 uses its mechanism's requirements. Dev mode waits for local preview confirmation.",
                     targets("landmark", "area"),
