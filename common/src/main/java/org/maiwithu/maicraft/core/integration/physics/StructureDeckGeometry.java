@@ -53,8 +53,7 @@ public final class StructureDeckGeometry {
             if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
             int x = cx + dx, z = cz + dz;
             if (x < storageBounds.minX || x >= storageBounds.maxX || z < storageBounds.minZ || z >= storageBounds.maxZ) continue;
-            // Spend the finite surface budget near the gaze, including its height. Scanning
-            // from the roof would discard a viewed lower deck on a tall multi-floor vessel.
+            // 有限表面预算应优先用于视线附近的位置，并计入高度；若从屋顶开始扫描，多层高船体下方已观察到的甲板会被排除。
             for (int yi = 0; yi <= verticalRadius * 2; yi++) {
                 int y = cy + (yi % 2 == 0 ? -yi / 2 : (yi + 1) / 2);
                 if (y < low || y > high) continue;
@@ -78,7 +77,7 @@ public final class StructureDeckGeometry {
         return new Sample(surfaces, view.reads, view.unknown, shapeErrors, skippedSlopes, truncated, view.limited);
     }
 
-    /** Recheck a retained local face against the new pose and current native voxel/body geometry. */
+    /** 根据新姿势和当前原生体素／身体几何，重新核实已保留的局部表面。 */
     public static Surface probe(BlockGetter world, Predicate<BlockPos> loaded, StructurePose pose,
                                 AABB bounds, Surface previous, double width, double height) {
         GuardedView view = new GuardedView(world, loaded, bounds);
@@ -111,7 +110,7 @@ public final class StructureDeckGeometry {
             view.unknown++; return false;
         }
         int unknown = view.unknown;
-        // Include neighboring origins for shapes which protrude beyond their own block cell.
+        // 形状可能伸出所属方块格，因此还要检查相邻格的碰撞体起点。
         for (int x = (int)Math.floor(body.minX) - 1; x <= (int)Math.floor(body.maxX) + 1; x++)
             for (int y = (int)Math.floor(body.minY) - 1; y <= (int)Math.floor(body.maxY) + 1; y++)
                 for (int z = (int)Math.floor(body.minZ) - 1; z <= (int)Math.floor(body.maxZ) + 1; z++) {
