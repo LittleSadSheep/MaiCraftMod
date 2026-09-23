@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import java.util.LinkedHashSet;
 import net.minecraft.world.level.block.BaseFireBlock;
 
-/** Read-only cleanup stances. The native navigator still has to prove and walk each route. */
+/** 只读清理站位规划；实际导航仍须核实并走完每条路线。 */
 final class BuildScaffoldCleanup {
     record Candidate(BlockPos cell, Vec3 feet) {}
     private final LocalPlayer player;
@@ -99,7 +99,7 @@ final class BuildScaffoldCleanup {
         var physical = PhysicalObstacleSnapshot.capture(player.clientLevel, player.position());
         var forbidden = forbidden();
         Vec3 feet = player.position();
-        // Both the live body and its support after removal must be safe, including cell seams.
+        // 必须同时保证角色当前身体位置和移除脚手架后的支撑位置安全，并检查格子交界处。
         return ground(world(false), forbidden, physical).clear(feet, feet)
                 && ground(world(true), forbidden, physical).clear(feet, feet)
                 && visible(world(false), player.getEyePosition());
@@ -142,8 +142,7 @@ final class BuildScaffoldCleanup {
             VoxelShape shape = state.getShape(world, target);
             if (shape.isEmpty()) shape = Shapes.block();
             VoxelShape collision = state.getCollisionShape(world, target);
-            // Keep the exact seven probes used by BlockDigger.digTargetStep. A denser search
-            // would promise a shot that the native digger cannot subsequently reproduce.
+            // 与 BlockDigger.digTargetStep 保持完全相同的七个探测点；更密集的搜索会承诺原生挖掘器之后无法复现的射击角度。
             List<Vec3> aims = new ArrayList<>();
             Vec3 center = collision.isEmpty() ? Vec3.atCenterOf(target) : point(collision, .5, .5, .5);
             if (!collision.isEmpty() && state.getBlock() instanceof BaseFireBlock)
