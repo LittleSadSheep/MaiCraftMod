@@ -20,25 +20,23 @@ public final class TargetSet<T> {
         this.key = key;
     }
 
-    /** Permanently exclude {@code t} (mine's "unreachable ore" sense). */
+    /** 永久排除 {@code t}，例如挖矿任务中确认不可达的矿物。 */
     public void blacklist(T t) {
         excluded.add(key.apply(t));
     }
 
-    /** Permanently exclude {@code t}. */
+    /** 永久排除 {@code t}。 */
     public void skip(T t) {
         excluded.add(key.apply(t));
     }
 
-    /** Is {@code t} currently excluded? */
+    /** 当前是否排除了 {@code t}？ */
     public boolean isExcluded(T t) {
         return excluded.contains(key.apply(t));
     }
 
     /**
-     * The best non-excluded candidate from {@code candidates} by {@code preference}
-     * (the smallest under the comparator), or empty if all are excluded or the
-     * list is empty.
+     * 按 {@code preference} 从 {@code candidates} 中选择最优的未排除候选（比较器下最小者）；若列表为空或所有候选均被排除则返回空。
      */
     // 先按调用方给的键排除被跳过的目标，再按偏好选最小者；这里不改变原候选列表。
     public Optional<T> pick(List<T> candidates, Comparator<T> preference) {
@@ -47,7 +45,7 @@ public final class TargetSet<T> {
                 .min(preference);
     }
 
-    /** Forget every exclusion. */
+    /** 清除所有排除记录。 */
     public void reset() {
         excluded.clear();
     }
