@@ -47,7 +47,7 @@ public final class SearchGeometryTest {
         var rejected = new HashSet<BlockPos>();
         for (int x = 1; x <= 64; x++) rejected.add(new BlockPos(x, 0, 0));
         var usable = new SearchGeometry.NearestPositions(BlockPos.ZERO, 64, rejected);
-        rejected.clear(); // selection owns its exclusion snapshot across ticks
+        rejected.clear(); // 目标选择器会在各 tick 之间持有自己的排除快照。
         for (int x = 128; x >= 1; x--) usable.offer(new BlockPos(x, 0, 0));
         if (usable.sorted().size() != 64 || !usable.sorted().getFirst().equals(new BlockPos(65, 0, 0))) {
             throw new AssertionError("An exhausted nearest window hid the next usable targets");

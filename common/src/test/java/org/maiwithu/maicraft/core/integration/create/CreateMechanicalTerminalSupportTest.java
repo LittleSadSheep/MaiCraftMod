@@ -34,7 +34,7 @@ public final class CreateMechanicalTerminalSupportTest {
         try (var h = new InteractionWorldTestHarness()) {
             var border = Level.class.getDeclaredField("worldBorder"); border.setAccessible(true); border.set(h.level, new WorldBorder());
             h.set(destination.below(), Blocks.STONE.defaultBlockState()); h.set(destination, Blocks.END_ROD.defaultBlockState());
-            h.set(destination.east(), Blocks.STONE.defaultBlockState()); // Existing machine beside the receiving shaft.
+            h.set(destination.east(), Blocks.STONE.defaultBlockState()); // 接收传动轴旁已有机器。
             BlockPos elevated = CreateMechanicalPlanner.findPlacementStand(h.level, positions.getLast(), Set.copyOf(positions), true);
             check(elevated != null && elevated.getY() > h.player.blockPosition().getY(),
                     "distance-only sorting reproduces the unwanted machine-roof stance: " + elevated);
@@ -42,7 +42,7 @@ public final class CreateMechanicalTerminalSupportTest {
             check(stand != null && stand.getY() == h.player.blockPosition().getY()
                             && stand.getX() == destination.getX() && stand.getZ() != destination.getZ(),
                     "working-floor stance must avoid the machine roof, built prefix and old diagonal: " + stand);
-            h.set(positions.get(5), Blocks.STONE.defaultBlockState()); // Sixth native chain cube now exists.
+            h.set(positions.get(5), Blocks.STONE.defaultBlockState()); // 第六个原生链条方块此时已经存在。
             Vec3 eye = Vec3.atBottomCenterOf(stand).add(0, 2.87, 0), top = Vec3.atCenterOf(destination).add(0, .5, 0);
             var hit = h.level.clip(new ClipContext(eye, eye.add(top.subtract(eye).normalize().scale(4.5)), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, h.player));
             check(hit.getBlockPos().equals(destination) && hit.getDirection() == Direction.UP,

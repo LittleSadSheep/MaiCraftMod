@@ -68,13 +68,13 @@ public final class ProductionSessionRolloverTest {
     private static void uncertainMutationKeepsItsOriginalIdentity() {
         var fixture = new Fixture(); fixture.welcome(); fixture.fill(503);
         check(fixture.slot.call(WRITE, new JsonObject(), true) == null, "Mutation did not queue");
-        fixture.advance(false); // The server performs it once; deliberately withhold its authoritative receipt.
+        fixture.advance(false); // 服务器只执行一次；测试故意扣留权威回执。
         fixture.tick += 101; fixture.router.observe(fixture.tick);
         check(fixture.writes == 1 && fixture.hellos == 1 && !fixture.router.renegotiating(WRITE),
                 "Uncertain mutation permitted scope rotation");
         rejects(() -> fixture.slot.call(WRITE, new JsonObject(), true), "production_effect_uncertain");
         check(fixture.requests.size() == 504 && fixture.slot.pending(), "Uncertain submission lost its original slot");
-        fixture.welcome(); // This drains the original receipt and its read-only reconciliation, not a replay.
+        fixture.welcome(); // 此步骤结算原始回执及其只读核对，不会重放操作。
         check(fixture.slot.call(WRITE, new JsonObject(), true) != null && fixture.writes == 1,
                 "Original receipt failed to settle or mutation was replayed");
     }

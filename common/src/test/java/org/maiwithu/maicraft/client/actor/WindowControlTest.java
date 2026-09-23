@@ -46,7 +46,7 @@ public final class WindowControlTest {
         boundary.updateWindowControl(true);
         minecraft.screen = (MenuVisibility.PlayerInventoryScreen)
                 memory.allocateInstance(MenuVisibility.PlayerInventoryScreen.class);
-        minecraft.screen = null; // Native container close attempts grab before F8 completes handoff.
+        minecraft.screen = null; // 原生容器关闭会先尝试抓取鼠标，然后 F8 才完成交接。
         mouse.grabMouse();
         check(boundary.preventsMouseGrab() && !mouse.grabbed, "menu cleanup retains the takeover cursor guard");
         boundary.updateWindowControl(false);

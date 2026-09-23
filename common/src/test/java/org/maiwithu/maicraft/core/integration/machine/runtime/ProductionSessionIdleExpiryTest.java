@@ -41,7 +41,7 @@ public final class ProductionSessionIdleExpiryTest {
 
     private static void repeatedExpiryStopsTheSameLogicalRead() {
         var fixture = expiredRead(); fixture.slot.call(READ, new JsonObject(), false);
-        fixture.advance(true); // New welcome, with no replacement request submitted yet.
+        fixture.advance(true); // 收到新的欢迎消息，但尚未提交替代请求。
         check(fixture.slot.call(READ, new JsonObject(), false) == null, "Replacement read did not queue");
         fixture.serverOffset += 6001; fixture.advance(true);
         rejects(() -> fixture.slot.call(READ, new JsonObject(), false), "production_request_session_expired");

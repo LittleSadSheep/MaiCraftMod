@@ -91,7 +91,7 @@ public final class BoatCatchReplayTest {
                 check(mounted[0]==0 && !controller.ready(),"a boat arriving after the ground report must not be credited as a clutch");
                 return;
             }
-            entity[0]=spawn(f,spawn); // Server entity packet arrives, inventory/vehicle packets follow later.
+            entity[0]=spawn(f,spawn); // 服务器实体数据包先到，背包和载具数据包稍后才到。
             field(Entity.class,"onGround").setBoolean(entity[0],false);
             f.position(.5625,0,true); f.time++;
             controller.beforePositionPacket(context);

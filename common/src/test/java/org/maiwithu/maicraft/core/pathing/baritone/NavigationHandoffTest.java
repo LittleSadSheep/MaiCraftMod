@@ -43,7 +43,7 @@ public final class NavigationHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        ClientRuntime.actor(); // Preserve its original binding before the fixture swaps Minecraft.
+        ClientRuntime.actor(); // 夹具替换 Minecraft 前，先保留原有角色绑定。
         pollingYieldRetainsDrive();
         abandonedCallerStillReachesTheSafeBoundary(false);
         abandonedCallerStillReachesTheSafeBoundary(true);
@@ -190,7 +190,7 @@ public final class NavigationHandoffTest {
         private Fixture(LocalPlayer suppliedPlayer) throws Exception {
             memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
             Minecraft minecraft = suppliedPlayer == null ? allocate(Minecraft.class) : Minecraft.getInstance();
-            if (suppliedPlayer == null) minecraft.player = allocate(LocalPlayer.class); // Unused by the pure navigation cases.
+            if (suppliedPlayer == null) minecraft.player = allocate(LocalPlayer.class); // 纯导航用例不会使用此玩家。
             set(minecraft, "gameThread", Thread.currentThread());
             field(Minecraft.class, "instance").set(null, minecraft);
             field(ClientRuntime.actor().getClass(), "minecraft").set(ClientRuntime.actor(), minecraft);

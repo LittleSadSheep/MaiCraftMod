@@ -76,7 +76,7 @@ public final class WaterLandingReplayTest {
         double height = drop, velocity = 0;
         while (height > 0) {
             f.position(height, velocity, false);
-            f.player.setXRot(90); // Precision camera has settled while descending toward the face.
+            f.player.setXRot(90); // 朝向表面下降时，精确镜头已完成稳定。
             f.tick();
             check(!f.session.complete(), "fall coordinates cannot complete the active landing session");
             height = Math.max(0, height + velocity);
@@ -151,7 +151,7 @@ public final class WaterLandingReplayTest {
                     if(method.getName().equals("requestImmediateLook")) {
                         urgent[0]++; f.player.setYRot((Float)args[0]); f.player.setXRot((Float)args[1]);
                     }
-                    return null; // No render frame is available to advance ordinary camera smoothing.
+                    return null; // 当前没有渲染帧可用于推进普通镜头平滑。
                 });
         var context=(LocalPlayerContext)Proxy.newProxyInstance(LocalPlayerContext.class.getClassLoader(),new Class<?>[]{LocalPlayerContext.class},
                 (proxy,method,args)->method.getName().equals("body") ? body : method.invoke(f.context,args));

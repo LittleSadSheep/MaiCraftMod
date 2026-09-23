@@ -22,7 +22,7 @@ public final class ChatAbilityTest {
         for (String text : List.of("你好 👋", "/home")) {
             JsonObject parameters = new JsonObject(); parameters.addProperty("text", text);
             Goal goal = goal(parameters);
-            IntentRuntime.get().compile(goal, 0); // Planning validates content without touching a GUI.
+            IntentRuntime.get().compile(goal, 0); // 规划阶段只验证内容，不会触碰 GUI。
             check(!IntentRuntime.isReadOnlyDesign(goal), "chat requires explicit execute authority");
             var action = AbilityAdapter.adapt(goal, null, null);
             check(action instanceof IntentAction.Native nativeAction && nativeAction.record() instanceof ChatTaskRecord,

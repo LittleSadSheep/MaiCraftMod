@@ -163,7 +163,7 @@ public final class LandingAssistTest {
     // 故意保留未完成的选栏和库存操作，确认离地后先结清记录、关闭自己的界面，再报告准备失败。
     private static void interruptedPreparation() throws Exception {
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
-        LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class); // onGround=false
+        LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class); // onGround 为 false。
         int[] closes = {0}, retired = {0};
         MenuReceipt[] closing = {null};
         var menuCtor = MenuReceipt.class.getDeclaredConstructors()[0]; menuCtor.setAccessible(true);

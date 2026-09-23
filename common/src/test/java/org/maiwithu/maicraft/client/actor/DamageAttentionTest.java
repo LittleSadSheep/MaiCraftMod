@@ -66,7 +66,7 @@ public final class DamageAttentionTest {
             var events = new ArrayList<String>();
             try (var subscription = IntentRuntime.get().subscribeAttention(e -> events.add(e.toString()))) {
                 brainField.set(null, brain);
-                f.hit(null, visitor); // Arrow packet already names its shooter even without a live projectile.
+                f.hit(null, visitor); // 即使真实弹体已不存在，箭矢数据包仍会标明射手。
                 check(f.h.player.getLastHurtByMob() == null, "client AI attacker fields must stay empty");
                 check(GameplayAttentionMonitor.observeDamagePackets(f.h.player, 20, 20) && task.paused(),
                         "a real player damage packet pauses the task even before its separate health update");

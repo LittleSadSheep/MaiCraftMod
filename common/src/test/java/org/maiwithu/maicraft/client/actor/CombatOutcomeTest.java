@@ -82,7 +82,7 @@ public final class CombatOutcomeTest {
 
     private static void selectableLoadout() throws Exception {
         try (var f = new CombatThreatsTest.Fixture()) {
-            f.h.player.getAbilities().instabuild = true; // Creative players supply arrows without loading item tags in this fixture.
+            f.h.player.getAbilities().instabuild = true; // 此夹具中，创造模式玩家自带箭矢，不会读取物品标签。
             var charged = new ItemStack(Items.CROSSBOW);
             charged.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(new ItemStack(Items.ARROW)));
             f.h.inventory.setItem(40, charged);

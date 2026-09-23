@@ -62,7 +62,7 @@ public final class CreativeBuildSupplyMenuTest {
                     new Class<?>[]{MenuPort.class}, (proxy, method, args) -> switch (method.getName()) {
                         case "ensureVisible" -> {
                             if (visible) yield true;
-                            opens++; visible = true; yield false; // a newly opened GUI must render first
+                            opens++; visible = true; yield false; // 新打开的 GUI 必须先完成渲染。
                         }
                         case "close" -> {
                             check(visible, "cannot close a GUI that was not opened"); closes++;

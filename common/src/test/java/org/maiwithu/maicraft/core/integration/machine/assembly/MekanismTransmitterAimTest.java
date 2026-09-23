@@ -68,7 +68,7 @@ public final class MekanismTransmitterAimTest {
         for (int index = 0; index < shapes.size(); index++) {
             var part = shapes.get(index).clip(eye, end, TARGET);
             if (part != null && part.getLocation().distanceToSqr(eye) < closest) {
-                closest = part.getLocation().distanceToSqr(eye); subHit = index - 1; // MultipartUtils native indexing starts at -1.
+                closest = part.getLocation().distanceToSqr(eye); subHit = index - 1; // MultipartUtils 的原生索引从 -1 开始。
             }
         }
         return new Selection(aim, hit.getDirection(), MekanismInteractionGeometry.selectedFace(subHit, mask, hit.getDirection()));

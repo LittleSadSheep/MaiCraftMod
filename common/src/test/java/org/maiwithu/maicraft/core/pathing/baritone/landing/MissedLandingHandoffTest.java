@@ -131,7 +131,7 @@ public final class MissedLandingHandoffTest {
             var orphan = EmbeddedBaritoneNavigator.class.getDeclaredMethod("requiresOrphanContinuation"); orphan.setAccessible(true);
             check(!(Boolean) orphan.invoke(navigator) && !field(EmbeddedBaritoneNavigator.class, "started").getBoolean(navigator),
                     "old orphan continuation is disabled and the original goal will be replanned");
-            navigator.pause(); // The semantic holder's real PREEMPTED callback follows physical release.
+            navigator.pause(); // 身体控制实际释放后，语义持有者才会收到真实的 PREEMPTED 回调。
             f.time++; EmergencyLanding.tick(f.context, rescue);
             int writes = f.bodyWrites;
             check(writes > 0, "rescue owns actual body steering in the handoff tick");

@@ -51,7 +51,7 @@ public final class LoadedMachineDiscoveryTest {
             discovery.tick(h.player, sink);
             check(discovery.status().indexedThisTick() == 24, "the native index must remain active across ticks");
             for (BlockPos pos : new ArrayList<>(entities.keySet())) h.set(pos, Blocks.AIR.defaultBlockState());
-            entities.clear(); // A retained fastutil iterator now has stale remaining entries and a null wrapped list.
+            entities.clear(); // 保留的 fastutil 迭代器此时包含过期剩余项，且其包装列表为 null。
             BlockPos newMachine = new BlockPos(15, 8, 15); addBarrel(h, entities, newMachine);
             sink.seen.clear();
             for (int tick = 0; tick < 40; tick++) { h.nextTick(); discovery.tick(h.player, sink); }
@@ -74,7 +74,7 @@ public final class LoadedMachineDiscoveryTest {
             var remaining = new HashSet<>(entities.keySet()); remaining.removeAll(indexedPositions(sink));
             BlockPos removed = remaining.iterator().next(); remaining.remove(removed);
             h.set(removed, Blocks.AIR.defaultBlockState()); entities.remove(removed);
-            for (int i = 64; i < 600; i++) addBarrel(h, entities, position(i)); // Force real fastutil rehashes.
+            for (int i = 64; i < 600; i++) addBarrel(h, entities, position(i)); // 强制触发真实 fastutil 重哈希。
             sink.seen.clear();
             for (int tick = 0; tick < 2; tick++) {
                 h.nextTick(); discovery.tick(h.player, sink);
