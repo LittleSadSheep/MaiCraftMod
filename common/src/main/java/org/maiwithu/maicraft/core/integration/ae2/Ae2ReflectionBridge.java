@@ -181,7 +181,7 @@ final class Ae2ReflectionBridge {
         catch (NoSuchMethodException missing) { throw new Ae2ProtocolException("AE2 storage menu host identity is unavailable", missing); }
     }
 
-    /** Returns {@code null} until the synchronized client repository exists. */
+    /** 同步客户端仓库尚未建立时返回 {@code null}。 */
     Object repositoryIdentity(Object menu) {
         requireStorageMenu(menu);
         return invoke(getClientRepo, menu);
@@ -226,7 +226,7 @@ final class Ae2ReflectionBridge {
         return (Boolean) invoke(linkConnected, status);
     }
 
-    /** AE uses different native fluid units across loaders; its bucket constant is authoritative. */
+    /** AE 在不同加载器上使用不同原生流体单位；以其水桶常量为权威值。 */
     FluidEntry waterEntry(Object menu) {
         requireStorageMenu(menu);
         Object repository = invoke(getClientRepo, menu);
@@ -291,8 +291,7 @@ final class Ae2ReflectionBridge {
         if (!isCraftAmountMenu(menu)) {
             throw new Ae2ProtocolException("the active menu is not AE2 CraftAmountMenu");
         }
-        // Auto-start stays disabled. The state machine waits for plan/CPU synchronization and
-        // submits exactly one job itself.
+        // 保持自动启动关闭；状态机等待计划和 CPU 同步完成后，自行准确提交一次作业。
         requireVisibleMenu(menu);
         invoke(confirmCraftAmount, menu, amount, false, false);
     }
@@ -313,7 +312,7 @@ final class Ae2ReflectionBridge {
         invoke(craftConfirmStartJob, menu);
     }
 
-    /** Returns {@code null} while no synchronized submission failure exists. */
+    /** 尚无同步提交失败信息时返回 {@code null}。 */
     String craftConfirmSubmitFailure(Object menu) {
         requireCraftConfirmMenu(menu);
         Object wrapper = read(craftConfirmSubmitError, menu);
