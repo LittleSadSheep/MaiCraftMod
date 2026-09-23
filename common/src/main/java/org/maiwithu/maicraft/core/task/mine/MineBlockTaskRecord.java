@@ -21,7 +21,7 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final Set<Block> targets;
     /** 希望新获得的物品数量；没有掉落物的模式由执行器改数确认挖掉的块。 */
     public final int count;
-    /** Human-readable target label for messages / debug overlay (e.g. "iron_ore"). */
+    /** 供消息和调试覆盖层显示的可读目标名称，例如 "iron_ore"。 */
     public final String label;
     /** 明确哪些物品才算目标产物，例如挖铁矿只数粗铁。空集合表示由执行器观察背包变化来猜产物。 */
     public final Set<Item> progressItems;
@@ -30,9 +30,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
     /** 只把通过天然树外观检查的原木当作材料，避免顺手拆木屋。 */
     public final boolean naturalLogsOnly;
 
-    /** Live progress = matching ITEMS gathered since the task started (counted in the inventory,
-     *  not blocks broken — multi-drop ores like redstone yield several items per block). Set each tick
-     *  by the task; drives the stop condition + the debug overlay text. */
+    /** 实时进度表示任务开始后收集到的匹配物品数，按背包物品计而非破坏方块数；红石等矿石每格会掉落多个物品。
+     *  由任务每个 tick 设置，用于结束条件和调试覆盖层文字。 */
     private int mined = 0;
 
     public MineBlockTaskRecord(String toolCallId, long deadlineGameTime,
@@ -64,7 +63,7 @@ public final class MineBlockTaskRecord extends TaskRecord {
         this.naturalLogsOnly = naturalLogsOnly;
     }
 
-    /** Matches the native tool selector's main-inventory reach, including tools not yet staged. */
+    /** 与原生工具选择器的主背包扫描范围一致，包括尚未切换到手上的工具。 */
     public static boolean hasEfficientTool(LocalPlayer player, Set<Block> targets) {
         return hasEfficientTool(player.getInventory().items, targets);
     }
@@ -89,7 +88,7 @@ public final class MineBlockTaskRecord extends TaskRecord {
         return mined;
     }
 
-    /** Set the running item-gathered tally (the task recomputes it from the inventory each tick). */
+    /** 设置当前累计采集物品数；任务每个 tick 都会根据背包重新计算。 */
     public void setMined(int gathered) {
         this.mined = gathered;
     }
