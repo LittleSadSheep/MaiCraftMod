@@ -12,7 +12,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Plan a client-known recipe and dispatch its receipt-owned crafting task. */
+/** 规划客户端已知的配方，并派发由任务持有回执的合成流程。 */
 public final class CraftTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

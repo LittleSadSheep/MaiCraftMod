@@ -10,7 +10,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Query tool (raw MaiCraftTool): read a block's stored items / fluid / energy without opening it. */
+/** 查询工具（原始 MaiCraftTool）：不打开方块界面，直接读取其中存放的物品、流体或能量。 */
 public final class InspectBlockStorageTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

@@ -15,7 +15,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.core.task.endgame.DragonFightTaskRecord;
 
-/** Internal semantic Ender Dragon encounter capability. */
+/** 内部语义末影龙战斗能力。 */
 public final class SemanticDragonFightTool implements MaiCraftTool {
     private static final long INITIAL_LIVENESS_LEASE_TICKS = 90L * 60L * 20L;
 

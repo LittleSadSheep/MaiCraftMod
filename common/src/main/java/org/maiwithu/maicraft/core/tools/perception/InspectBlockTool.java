@@ -10,7 +10,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Query tool (raw MaiCraftTool): inspect the single block at the given coordinates. */
+/** 查询工具（原始 MaiCraftTool）：检查给定坐标处的单个方块。 */
 public final class InspectBlockTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

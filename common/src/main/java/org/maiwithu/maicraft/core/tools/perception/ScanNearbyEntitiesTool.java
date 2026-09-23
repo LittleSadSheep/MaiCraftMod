@@ -10,7 +10,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Query tool (raw MaiCraftTool): list nearby entities, sorted by distance. */
+/** 查询工具（原始 MaiCraftTool）：按距离排序列出附近实体。 */
 public final class ScanNearbyEntitiesTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

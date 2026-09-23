@@ -9,7 +9,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Compatibility query for installations that still expose the historical tool name. */
+/** 为仍公开历史工具名称的安装版本保留的兼容查询。 */
 public final class GetOwnerStatusTool implements MaiCraftTool {
 
     private final PerceptionOps impl = new PerceptionOps();

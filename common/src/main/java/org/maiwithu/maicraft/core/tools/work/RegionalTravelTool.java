@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.task.move.RegionalTravelTaskRecord;
 import org.maiwithu.maicraft.task.TaskDispatch;
 
-/** Internal implementation of platform discovery through the existing public travel ability. */
+/** 通过现有公开移动能力执行平台发现的内部实现。 */
 public final class RegionalTravelTool implements MaiCraftTool {
     public String name() { return "travel_region"; }
     public String description() { return "Discover and reach a platform in a direction using incremental observation and native travel."; }

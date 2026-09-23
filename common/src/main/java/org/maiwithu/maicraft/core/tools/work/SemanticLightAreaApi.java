@@ -11,9 +11,9 @@ import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord;
 
-/** Registration and typed-record seam for verified semantic-area lighting. */
+/** 已核实语义区域照明的注册入口和类型化记录接口。 */
 public final class SemanticLightAreaApi {
-    /** Initial liveness lease; verified child/coverage progress renews it across ticks. */
+    /** 初始存活期限；子任务或覆盖范围取得已核实进展后，可跨 tick 续期。 */
     private static final long INITIAL_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
     private SemanticLightAreaApi() {}

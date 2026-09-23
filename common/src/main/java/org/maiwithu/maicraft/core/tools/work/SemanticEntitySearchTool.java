@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 
-/** Semantic entity discovery; concrete identities, positions and route legs stay inside the Mod. */
+/** 语义实体发现；具体身份、位置和路线分段均保留在 Mod 内部。 */
 public final class SemanticEntitySearchTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
 

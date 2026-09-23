@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.dimension.DimensionTravelTaskRecord;
 import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
 
-/** Hidden executor for semantic dimension travel; portal cells remain a Mod concern. */
+/** 语义维度旅行的隐藏执行器；传送门方块格由 Mod 内部负责。 */
 public final class SemanticDimensionTravelTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
     private static final long INITIAL_LIVENESS_LEASE_TICKS = 10L * 60L * 20L;

@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.endgame.SemanticElytraTaskRecord;
 
-/** Hidden execution tool; public callers express only the semantic obtain-elytra intent. */
+/** 隐藏的执行工具；公开调用方只表达“取得鞘翅”的语义意图。 */
 public final class SemanticElytraTool implements MaiCraftTool {
     @Override public String name() { return SemanticElytraTaskRecord.TOOL_NAME; }
 

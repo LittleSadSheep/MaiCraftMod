@@ -9,7 +9,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Query tool (raw MaiCraftTool): read the current world state. */
+/** 查询工具（原始 MaiCraftTool）：读取当前世界状态。 */
 public final class GetWorldInfoTool implements MaiCraftTool {
 
     private final PerceptionOps impl = new PerceptionOps();

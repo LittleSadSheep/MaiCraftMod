@@ -10,7 +10,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Query tool (raw MaiCraftTool): look up how to make an item (JEI-style). */
+/** 查询工具（原始 MaiCraftTool）：查找物品的制作方式，类似 JEI。 */
 public final class LookupRecipeTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

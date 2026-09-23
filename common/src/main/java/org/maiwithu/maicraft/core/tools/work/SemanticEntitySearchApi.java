@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 
-/** Registration and typed-record seam for generic semantic entity search. */
+/** 通用语义实体搜索的注册入口和类型化任务记录接口。 */
 public final class SemanticEntitySearchApi {
     private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
     private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
@@ -33,7 +33,7 @@ public final class SemanticEntitySearchApi {
                 mayAlterTerrain, protectedLabels, false);
     }
 
-    /** Internal overload: acquisition may request the stricter pre-harm protection boundary. */
+    /** 内部重载：获取流程可请求更严格的伤害前保护边界。 */
     public static GenericEntitySearchTaskRecord newRecord(
             ToolContext context,
             List<String> entityTypeIds,

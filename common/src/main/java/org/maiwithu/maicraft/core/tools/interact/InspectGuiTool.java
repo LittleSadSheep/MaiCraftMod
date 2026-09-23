@@ -9,7 +9,7 @@ import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Query tool (raw MaiCraftTool): look at the currently open GUI / inventory menu. */
+/** 查询工具（原始 MaiCraftTool）：检查当前打开的界面或背包菜单。 */
 public final class InspectGuiTool implements MaiCraftTool {
 
     private final GuiOps impl = new GuiOps();

@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** World-action tool (raw MaiCraftTool): pick up dropped items off the ground nearby. */
+/** 世界操作工具（原始 MaiCraftTool）：拾取附近地面上的掉落物。 */
 public final class CollectItemsTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();

@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Bounded local query: bulk-find matching blocks in currently loaded client chunks.
+ * 有界本地查询：在当前客户端已加载区块中批量查找匹配方块。
  */
 public final class ScanBlocksTool implements MaiCraftTool {
 

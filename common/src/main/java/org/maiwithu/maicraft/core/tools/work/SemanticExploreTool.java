@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 
-/** High-level semantic exploration; all concrete route decisions remain inside the Mod. */
+/** 高层语义探索；所有具体路线决策都保留在 Mod 内部。 */
 public final class SemanticExploreTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
     private record Args(String target, Integer max_distance, Boolean may_alter_terrain, String transport_mode) {}
