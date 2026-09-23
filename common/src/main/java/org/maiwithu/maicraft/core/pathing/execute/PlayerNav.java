@@ -99,7 +99,7 @@ public final class PlayerNav {
         return this;
     }
 
-    /** Transport adapters use this for their own ground approach, avoiding recursive boarding. */
+    /** 交通适配器使用此方法执行自身的地面接近路线，避免递归地再次登乘。 */
     public PlayerNav walkingOnly() { return withTransportMode(TransportMode.GROUND); }
 
     public interface ContextProvider {
@@ -124,24 +124,23 @@ public final class PlayerNav {
         TerrainPermit permit();
 
         /**
-         * Extra cells the embedded backend must never break or place in. The compiled goal's
-         * sacred cells are added separately; this hook preserves task-specific policies such as
-         * a construction footprint without recreating the retired pathfinder's cost context.
+         * 内嵌后端绝不能破坏或放置方块的额外格子。编译目标的 sacred 格会另行添加；此钩子保留施工占地等任务专属规则，
+         * 不必重新构建已退役寻路器的成本上下文。
          */
         default LongSet embeddedProtectedMutationCells() {
             return NavigationSafetyContext.protectedMutationCells();
         }
 
-        /** Extra cells the embedded first-person body must never occupy. */
+        /** 内嵌第一人称角色绝不能进入的额外格子。 */
         default LongSet embeddedForbiddenBodyCells() {
             return NavigationSafetyContext.forbiddenBodyCells();
         }
 
-        /** Optional task-local floor for a route that must retain an existing construction height. */
+        /** 可选的任务局部地面高度，用于保持既有建筑路线的施工高度。 */
         default int minimumFeetY() { return Integer.MIN_VALUE; }
     }
 
-    /** Shared feet convention for navigation and interaction stances. */
+    /** 导航和交互站位共用的脚位约定。 */
     public static BlockPos playerFeet(LocalPlayer player) {
         return Movement.feet(player);
     }
