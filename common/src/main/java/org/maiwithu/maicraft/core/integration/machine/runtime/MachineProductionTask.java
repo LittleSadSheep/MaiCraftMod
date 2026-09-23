@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.entity.InputDriver;
 
-/** Coordinates native construction, bounded input budgets and production evidence without duplicating their executors. */
+/** 协调原生施工、有界输入预算和生产证据，不重复实现各自的执行器。 */
 final class MachineProductionTask extends AbstractCompanionTask<MachineProductionTaskRecord> implements ProductionWork {
     @FunctionalInterface interface InteractionNavigation {
         PlayerNav to(BlockPos stance, BooleanSupplier reached);
@@ -90,7 +90,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         if (!player.level().dimension().location().toString().equals(r.plan.dimension()))
             return failure("production_world_changed", "Production cannot continue in a different dimension");
         try {
-            // The construction child owns its target permissions; planned machine cells are not yet protected assets.
+            // 施工子任务持有其目标权限；计划中的机器格尚不是受保护资产。
             if (phase == Phase.CHECK || phase == Phase.BUILD) return advance();
             return NavigationSafetyContext.withPreservedStructures(
                     r.plan.positions(), this::advance);
@@ -137,7 +137,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                 if (supply.tick()) {
                     if (started) phase = Phase.OBSERVE;
                     else if (!hasStartActions()) {
-                        // An already running installation needs observation/refill after its first tranche, not admission for an absent action.
+                        // 已运行的安装完成首批材料后需要观察或补充，而不是为尚未发生的动作重新申请准入。
                         started = true; watchdog.noteInput(player.level().getGameTime()); phase = Phase.OBSERVE;
                     }
                     else { preparation.refresh(); phase = Phase.ADMIT_START; }
@@ -156,7 +156,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                     if (hasStartActions()) {
                         preparation.refresh(); phase = Phase.REFRESH;
                     } else {
-                        // ADMIT_START just read the installation, and this stage performed no native operation.
+                        // ADMIT_START 刚读取过安装情况，且当前阶段没有执行原生操作。
                         phase = Phase.OBSERVE;
                     }
                 }
@@ -165,7 +165,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                 if (preparation.tick()) {
                     if (!preparation.compilation().valid())
                         return failure("production_running_design_changed", ProductionStageReadiness.failureSummary(preparation.compilation().report(), "observe"));
-                    // Reading completed native events remains useful after a finite batch becomes idle.
+                    // 即使有限批次已空闲，读取已完成的原生事件仍然有用。
                     phase = Phase.OBSERVE;
                 }
             }
@@ -177,7 +177,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                 }
                 if (observedRound && !requests.pending() && supply.needsRefill()) {
                     supply.refill(); phase = Phase.SUPPLY;
-                    // Start actions have already run; do not toggle or submit them again after refilling.
+                    // 启动动作已经执行；补充材料后不要再次切换状态或重复提交启动动作。
                     configuration = r.plan.manifest().configurations().size();
                 } else if (observedRound && !requests.pending()) {
                     String stalled = watchdog.failure(output.processingCoverageTick(), output.processingIdleTicks(),
@@ -256,7 +256,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
             observe(position); return false;
         }
         if (interactionReady(position)) { stopNav(); return true; }
-        // An observation-range route cannot serve as the close interaction route for the same target.
+        // 用于观察范围的路线不能代替对同一目标进行近距离交互的路线。
         if (nav != null && interactionStance == null) stopNav();
         if (nav == null) {
             if (interactionStance == null) interactionStance =
@@ -371,7 +371,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         }
     }
     @Override protected String successMessage() { return "Machine production and delivery verified over the declared observation window"; }
-    /** Live stage/receipt metadata only; native inventories, coordinates and the authored plan remain in their dedicated reports. */
+    /** 仅返回实时阶段和回执元数据；原生库存、坐标及手工指定方案仍由各自报告提供。 */
     @Override public Map<String, Object> progress() {
         var result = new LinkedHashMap<String, Object>(super.progress());
         result.put("task", name()); result.put("phase", phase.name().toLowerCase(Locale.ROOT));
