@@ -5,8 +5,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 
 /**
- * Candidate-angle equivalent of Minecraft 1.21.1 Direction.orderedByNearest and BlockPlaceContext
- * (Mojang mappings). Keep their float comparisons and tie order without rotating the real player.
+ * 复现 Minecraft 1.21.1 的 Direction.orderedByNearest 与 BlockPlaceContext（Mojang mappings）所用候选角度。
+ * 保持相同浮点比较和并列排序，而不实际转动玩家角色。
  */
 final class NativePlacementDirections {
     private NativePlacementDirections() {}
@@ -34,7 +34,7 @@ final class NativePlacementDirections {
 
     static Direction vertical(float pitch) { return pitch < 0F ? Direction.UP : Direction.DOWN; }
 
-    /** Only the plural native query prioritizes the supporting face when placing beside a solid block. */
+    /** 仅原生多方向查询会在实心方块旁放置时优先考虑支撑面。 */
     static Direction[] forPlacement(Direction[] ordered, Direction clickedFace, boolean replacingClicked) {
         Direction[] result = ordered.clone();
         if (!replacingClicked) {
