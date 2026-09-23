@@ -14,7 +14,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.EmptyBlockGetter;
 import java.util.TreeMap;
 
-/** Geometric work regions: vertical bodies remain separate across shared floors and roof plates. */
+/** 几何施工区域：即使共用地板或屋顶板，竖向建筑主体仍保持分离。 */
 final class BuildRegions {
     private record Column(BlockPos base, List<BlockPos> run) {
         int bottom() { return run.getFirst().getY(); }
@@ -27,7 +27,7 @@ final class BuildRegions {
 
     BuildRegions(Map<Long, BuildTaskRecord.Target> targets) {
         var columns = columns(targets);
-        // A flat collection has no distinct vertical bodies to pin; retain flexible layer-local work.
+        // 平坦结构没有需要固定的独立竖向主体，因此保留可灵活分层施工的方式。
         if (columns.isEmpty()) {
             cells.put(1, new ArrayList<>());
             for (var target : targets.values()) {
@@ -57,7 +57,7 @@ final class BuildRegions {
             int id = cells.size() + 1; cells.put(id, new ArrayList<>());
             for (var column : group) for (BlockPos pos : column.run()) assign(pos, id, wave);
         }
-        // Plates inherit their nearest body's region; they never merge two already separate bodies.
+        // 板状结构归入最近主体的区域，绝不合并两个已经分离的主体。
         expand(targets, wave);
         var ordered = targets.values().stream().filter(t -> !BuildCellRules.isAirTarget(t))
                 .sorted(BuildOrder.BUILD_ORDER).toList();
@@ -86,7 +86,7 @@ final class BuildRegions {
     }
     int count() { return cells.size(); }
 
-    /** Finish the selected body before allowing another body's lower cells to change the layer gate. */
+    /** 先完成当前主体，再允许其他主体的低层格影响施工层门槛。 */
     int choose(List<BuildTaskRecord.Target> pending, int active) {
         var counts = new HashMap<Integer, Integer>();
         for (var target : pending) counts.merge(region(target), 1, Integer::sum);
@@ -139,7 +139,7 @@ final class BuildRegions {
             }
             if (bestSize >= 2) out.put(key, new Column(BlockPos.of(key), List.copyOf(stack.subList(bestStart, bestStart + bestSize))));
         });
-        // Seed bodies at their shared base band. Skylights and roof ornaments inherit the body below.
+        // 在共用基座高度标记建筑主体；天窗和屋顶装饰继承其下方主体所在区域。
         int base = out.values().stream().mapToInt(Column::bottom).min().orElse(0);
         out.values().removeIf(column -> (long) column.bottom() > (long) base + 1);
         return out;
