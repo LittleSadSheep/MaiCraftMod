@@ -99,7 +99,7 @@ public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskR
      */
     private Entity target(LocalPlayer companion) {
         if (r.entityId == null) {
-            return null; // the real LocalPlayer runtime has no synthetic owner relationship
+            return null; // 真实 LocalPlayer 运行时没有合成所有者关系。
         }
         Entity e = companion.clientLevel.getEntity(r.entityId);
         if (e == null || e.isRemoved() || e == companion) {

@@ -38,7 +38,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
             if (support.is(Blocks.HAY_BLOCK) || support.is(Blocks.HONEY_BLOCK)) return CUSHIONED;
             // 仅接受确切的原版类别：未知模组子类可能覆写 fallOn。
             if (support.getBlock().getClass() == BedBlock.class) return BED;
-            return ORDINARY; // In particular, sneaking on slime does not cushion a fall.
+            return ORDINARY; // 特别是，在黏液块上潜行并不会减缓坠落。
         }
     }
 

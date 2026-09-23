@@ -57,8 +57,8 @@ public final class BlockHelper {
         Block block = state.getBlock();
         FluidState fluid = state.getFluidState();
         if (!fluid.isEmpty()) {
-            if (!fluid.is(FluidTags.WATER)) return false;       // lava etc. — never
-            if (isFlowingWater(level, pos)) return false;        // current shoves us
+            if (!fluid.is(FluidTags.WATER)) return false;       // 熔岩等其他液体一律禁止。
+            if (isFlowingWater(level, pos)) return false;        // 水流会将角色推开。
             // 只走水面：上方有液体或睡莲叶时，角色会处于水下或被覆盖，不是自由水面。
             BlockState up = level.getBlockState(pos.above());
             if (!up.getFluidState().isEmpty()) return false;
@@ -135,7 +135,7 @@ public final class BlockHelper {
         } else if (fromPos.east().equals(doorPos) || fromPos.west().equals(doorPos)) {
             approach = Direction.Axis.X;
         } else {
-            return true;   // not cardinally adjacent (diagonal / wrong Y) → don't toggle
+            return true;   // 不是水平正交相邻（对角或高度不同），不切换门状态。
         }
         return (facing == approach) == open;
     }
@@ -171,7 +171,7 @@ public final class BlockHelper {
         BlockState state = level.getBlockState(pos);
         FluidState fluid = state.getFluidState();
         if (!fluid.isEmpty()) {
-            if (!fluid.is(FluidTags.WATER)) return false;   // lava is never a floor
+            if (!fluid.is(FluidTags.WATER)) return false;   // 熔岩永远不能作为地面。
             // 只有上方仍有水时才在此格站立，表示角色处于水下并向水面浮起。
             return isWater(level, pos.above());
         }

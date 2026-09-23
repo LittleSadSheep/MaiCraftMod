@@ -1011,7 +1011,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return total;
     }
 
-    // ---- ore list maintenance ----
+    // ---- 矿物列表维护 ----
 
     /** 按需查询:名单快吃完 / 进入新 chunk / 慢心跳到点 / 上次覆盖不完整,才碰索引。 */
     // 至少隔一段时间才查一次。候选快用完、换了区块、定期刷新或上次没查完时，再向索引要一批。

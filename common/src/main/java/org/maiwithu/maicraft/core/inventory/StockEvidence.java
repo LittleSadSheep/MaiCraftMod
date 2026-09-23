@@ -72,7 +72,7 @@ public final class StockEvidence {
             return;
         }
         long tick = player.level().getGameTime();
-        if (tick % 20 != 0) return; // A large network repository is sampled once per second, not every frame.
+        if (tick % 20 != 0) return; // 大型网络仓库每秒采样一次，不在每帧重复读取。
         Optional<Snapshot> observation;
         // Create 专用界面优先走自己的读取方式；其他界面先尝试 AE2，最后才尝试普通容器。
         if (CreateStockObservation.supports(menu)) {

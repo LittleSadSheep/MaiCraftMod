@@ -40,7 +40,7 @@ public final class GuiOps {
             ItemStack it = slot.getItem();
             if (slot instanceof ResultSlot) {
                 resultIndex = slot.index;
-                continue;   // shown as part of the crafting-grid section, not the generic dump
+                continue;   // 已在合成网格部分显示，不再重复写入通用清单。
             }
             if (slot.container instanceof CraftingContainer cc) {
                 if (gridCells == null) {
@@ -59,10 +59,10 @@ public final class GuiOps {
             String line = "  " + i + ": " + describe(it) + (output ? " [output]" : "") + "\n";
             if (playerSide) {
                 if (!it.isEmpty()) {
-                    mine.append(line);   // only your filled slots — the items you can move in
+                    mine.append(line);   // 只显示玩家已填充的槽位，即可供转移的物品。
                 }
             } else {
-                container.append(line);  // all container slots, empty included (placement targets)
+                container.append(line);  // 显示容器全部槽位，包括空槽（可放置目标）。
             }
         }
         // 数据槽是菜单中与物品槽并行的另一条同步通道，包含真实界面用于绘制进度、燃料和能量条的整数值。

@@ -187,7 +187,7 @@ public final class MekProductionCapture {
         return switch (cached.getClass().getName()) {
             case "mekanism.api.recipes.cache.OneInputCachedRecipe", "mekanism.api.recipes.cache.RotaryCachedRecipe" -> 1;
             case "mekanism.api.recipes.cache.TwoInputCachedRecipe", "mekanism.api.recipes.cache.ChemicalChemicalToChemicalCachedRecipe" -> 2;
-            default -> 0; // Constant chemical usage and custom caches need an explicit complete input accounting adapter.
+            default -> 0; // 持续化学品消耗及自定义缓存需要提供完整的输入核算适配器。
         };
     }
     private static void invalidate(State state) { state.processes.forEach(scope -> scope.invalid = true); }

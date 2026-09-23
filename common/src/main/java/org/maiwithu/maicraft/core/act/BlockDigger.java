@@ -63,7 +63,7 @@ public final class BlockDigger {
     public boolean hasPendingBreak() { return receipt != null && !receipt.terminal(); }
     private boolean preferTopFace;
     public void preferTopFace(boolean value) { preferTopFace = value; }
-    private int blockHitDelay;    // post-break cooldown (survives reset())
+    private int blockHitDelay;    // 方块破坏后的冷却时间（reset() 后保留）。
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private ItemStack destroyingItem;
 
@@ -109,7 +109,7 @@ public final class BlockDigger {
      */
     // 调用方已经选好准星命中面时，直接挖这一格，不再找别的方块，也不自动选工具。
     public DigResult digStep(BlockHitResult crosshairHit) {
-        if (blockHitDelay > 0) {                    // let the previous break land first
+        if (blockHitDelay > 0) {                    // 先等待上一次破坏效果生效。
             blockHitDelay--;
             InputDriver.halt(player);
             return DigResult.PROGRESSING;
@@ -172,7 +172,7 @@ public final class BlockDigger {
             InputDriver.halt(player);
             return DigResult.NO_SHOT;
         }
-        if (blockHitDelay > 0) {                    // let the previous break land first
+        if (blockHitDelay > 0) {                    // 先等待上一次破坏效果生效。
             blockHitDelay--;
             InputDriver.halt(player);
             return DigResult.PROGRESSING;
@@ -192,7 +192,7 @@ public final class BlockDigger {
         }
         InputDriver.halt(player);
         if (hit == null) {
-            return DigResult.NO_SHOT;                // no clear shot, nothing safe in the way — stuck
+            return DigResult.NO_SHOT;                // 没有清晰射线，也没有安全可清除的遮挡——当前卡住。
         }
         if (pos == null || !pos.equals(effective)) {
             if (!start(effective, true)) {

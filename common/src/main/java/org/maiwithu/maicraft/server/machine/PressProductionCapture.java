@@ -19,7 +19,7 @@ public final class PressProductionCapture {
     public static void begin(BlockEntity producer, Object transported, List<ItemStack> output, boolean simulate) {
         if (!(producer.getLevel() instanceof ServerLevel)) return;
         ArrayDeque<Capture> calls = CALLS.get();
-        if (calls.size() >= 32) calls.clear(); // Bound abandoned frames if a third-party native call threw.
+        if (calls.size() >= 32) calls.clear(); // 第三方原生调用抛错时，限制未完成帧的累积数量。
         Capture capture = new Capture(producer, output, output == null ? 0 : output.size(), ItemStack.EMPTY, null);
         if (!simulate && output != null) {
             try {

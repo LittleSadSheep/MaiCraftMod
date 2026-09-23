@@ -163,7 +163,7 @@ public final class BoatLandingAssist {
                     ctx.player().getBbWidth(), ctx.player().getBbHeight(), ctx.player().getYRot());
             if (exit == null) {
                 for (int offset=-90; offset<=90; offset+=30) {
-                    float yaw = boat.getYRot()+offset; // native Boat.clampRotation limits a passenger to +/-105 degrees
+                    float yaw = boat.getYRot()+offset; // 原生 Boat.clampRotation 将乘客转向限制在 ±105 度。
                     if (BoatLandingGeometry.exit(ctx.level(), ctx.level()::isLoaded,
                         boat.position(), boat.getBbWidth(), ctx.player().getBbWidth(), ctx.player().getBbHeight(), yaw) != null) {
                     aim = ctx.player().getEyePosition().add(-Math.sin(Math.toRadians(yaw))*2, 0, Math.cos(Math.toRadians(yaw))*2);

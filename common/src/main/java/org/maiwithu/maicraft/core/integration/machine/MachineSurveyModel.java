@@ -103,7 +103,7 @@ final class MachineSurveyModel {
         return false;
     }
 
-    /** Only geometric touching-face evidence. Inspect each unordered pair once with linear work. */
+    /** 仅提供几何相接面的证据；每个无序配对只检查一次，保证线性复杂度。 */
     // 每格只检查东、上、南三个方向，避免同一对相邻格重复列两遍；超过输出上限就累计省略数量。
     static Adjacencies adjacent(List<Component> components, int maxEdges) {
         Map<Point, Integer> lookup = new HashMap<>();

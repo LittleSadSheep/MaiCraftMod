@@ -359,7 +359,7 @@ public interface NavGoal {
         }
 
         @Override public BlockPos center() {
-            return new BlockPos(x, 0, z);   // y irrelevant — goal is XZ-only
+            return new BlockPos(x, 0, z);   // y 不影响目标，此目标只约束 X/Z。
         }
     }
 
@@ -385,7 +385,7 @@ public interface NavGoal {
         }
 
         @Override public BlockPos center() {
-            return new BlockPos(0, level, 0);   // x/z irrelevant — goal is Y-only
+            return new BlockPos(0, level, 0);   // x/z 不影响目标，此目标只约束 Y。
         }
     }
 
@@ -755,7 +755,7 @@ public interface NavGoal {
         }
 
         @Override public boolean isAt(BlockPos feet) {
-            return false;   // never done — keep exploring outward
+            return false;   // 永不判定到达，以便继续向外探索。
         }
 
         @Override public double heuristic(BlockPos fromPos) {

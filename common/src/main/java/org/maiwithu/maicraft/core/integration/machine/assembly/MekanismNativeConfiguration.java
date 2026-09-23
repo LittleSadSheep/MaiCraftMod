@@ -135,7 +135,7 @@ public final class MekanismNativeConfiguration {
      * 发送 Mekanism 原生的“主手工具模式前进一步”请求。调用者必须先取得动作额度，发送后等待服务器同步，不能直接认定切换成功。
      */
     public static void advanceToolMode(LocalPlayer player) {
-        toolMode(player.getMainHandItem()); // Bind the native mode operation to a real held configurator.
+        toolMode(player.getMainHandItem()); // 将原生模式操作绑定到玩家实际持有的配置器。
         try {
             Object packet = Class.forName("mekanism.common.network.to_server.PacketModeChange")
                     .getConstructor(EquipmentSlot.class, int.class).newInstance(EquipmentSlot.MAINHAND, 1);

@@ -179,7 +179,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             case WATER -> state.getFluidState().isSource();
             case BERRIES -> state.getValue(BlockStateProperties.AGE_3) == 0;
             case COBWEB, TWISTING_VINES, WEEPING_VINES -> state.is(BlockTags.FALL_DAMAGE_RESETTING);
-            case SLIME, HAY -> true; // Slime needs a safe rebound; hay needs a nonfatal damage budget.
+            case SLIME, HAY -> true; // 黏液块需要安全反弹空间，干草则需要满足非致命伤害预算。
             case BOAT -> false;
         };
     }

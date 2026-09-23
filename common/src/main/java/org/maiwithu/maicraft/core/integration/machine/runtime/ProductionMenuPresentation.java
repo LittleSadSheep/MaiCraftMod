@@ -41,7 +41,7 @@ final class ProductionMenuPresentation {
             var state = player.level().getBlockState(position);
             boolean hasMenu = state.getMenuProvider(player.level(), position) != null
                     || player.level().getBlockEntity(position) instanceof Container;
-            if (!required && !hasMenu) return true; // World-facing ports such as a depot have no container screen.
+            if (!required && !hasMenu) return true; // 仓库等面向世界的端口没有容器界面。
             if (player.containerMenu != player.inventoryMenu || ClientRuntime.requireContext(player).minecraft().screen != null)
                 throw new IllegalStateException("production_menu_busy: preserve the existing screen");
             target = position.immutable(); face = requestedFace; work.stopMovement();

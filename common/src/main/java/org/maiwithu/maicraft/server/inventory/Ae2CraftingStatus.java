@@ -36,7 +36,7 @@ final class Ae2CraftingStatus {
         }
         if (job.submissionStarted || job.plan != null || !job.calculation.isDone()) return;
         try {
-            job.plan = job.calculation.get(); // Non-blocking: done was established above, on the server thread.
+            job.plan = job.calculation.get(); // 非阻塞调用：上方已在服务器线程确认计算完成。
             if (job.plan == null) { job.status = "failed"; job.error = "empty_plan"; return; }
             job.status = NativeApi.truth(NativeApi.call(job.plan, Ae2Crafting.PLAN, "simulation")) ? "missing_materials" : "ready";
         } catch (CancellationException cancelled) { job.status = "cancelled"; }

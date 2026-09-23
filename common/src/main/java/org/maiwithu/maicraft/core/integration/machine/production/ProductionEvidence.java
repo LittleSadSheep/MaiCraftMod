@@ -7,7 +7,7 @@ import java.util.Set;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 
-/** Trusted adapter seam. User-authored manifests cannot assert these native capabilities or observations. */
+/** 受信任的适配器接口；用户手工编写的清单不能声明这些原生能力或观察结果。 */
 public interface ProductionEvidence {
     enum Status { VERIFIED, PLANNED, UNKNOWN, UNSUPPORTED }
     record Check(Status status, String provenance, String detail) {

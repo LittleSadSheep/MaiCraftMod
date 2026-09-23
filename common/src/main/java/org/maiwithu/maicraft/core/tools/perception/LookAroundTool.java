@@ -36,14 +36,14 @@ public final class LookAroundTool implements MaiCraftTool {
 
     // 地图格子符号。
     private static final char YOU = '@';
-    private static final char FLAT = '.';       // walkable, same level
-    private static final char STEP_UP = '^';    // walkable by a 1-block jump up
+    private static final char FLAT = '.';       // 同高度可行走。
+    private static final char STEP_UP = '^';    // 可通过向上跳一格抵达。
     private static final char STEP_DOWN = ',';  // walkable, 1-2 blocks down
-    private static final char DROP = 'v';        // drop of DROP_DEPTH+ blocks
+    private static final char DROP = 'v';        // 下落高度达到 DROP_DEPTH 或以上。
     private static final char WALL = '#';        // blocked / step up >= 2
     private static final char WATER = '~';
     private static final char HAZARD = '!';      // lava / fire
-    private static final char CAUTION = 'x';     // inflation buffer next to a hazard
+    private static final char CAUTION = 'x';     // 危险方块旁的膨胀缓冲区。
     private static final char TREE = 'T';
     private static final char UNLOADED = '?';
 
@@ -159,7 +159,7 @@ public final class LookAroundTool implements MaiCraftTool {
             if (!bodyClear) {
                 return (isTree(feetState) || isTree(headState)) ? TREE : WALL;
             }
-            return DROP; // body clear but no floor within reach -> open pit/void
+            return DROP; // 身体可通过但附近没有地面支撑，表示深坑或虚空。
         }
         int delta = standY - feetY;
         if (delta >= 2) {

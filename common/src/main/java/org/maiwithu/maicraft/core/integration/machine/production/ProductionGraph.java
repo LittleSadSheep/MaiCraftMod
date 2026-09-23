@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 
-/** Validates explicit directed topology and path endpoints before querying any live capability adapter. */
+/** 查询实时能力适配器前，先验证显式有向拓扑和路线端点。 */
 final class ProductionGraph {
     final Map<String, Node> nodes = new LinkedHashMap<>();
     final Map<String, Port> ports = new LinkedHashMap<>();

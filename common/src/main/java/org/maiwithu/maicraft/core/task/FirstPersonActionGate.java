@@ -61,7 +61,7 @@ public final class FirstPersonActionGate {
             staging = null;
             confirmedSwap = pendingSwap; pendingSwap = null;
             stagedToHotbar = true;
-            return Status.RUNNING; // keep selection as a separate, later-tick native mutation
+            return Status.RUNNING; // 将选择操作作为后续 tick 的独立原生修改执行。
         }
 
         // 这里只支持背包和快捷栏前 36 格；副手、盔甲栏位不能经此方法搬到主手。

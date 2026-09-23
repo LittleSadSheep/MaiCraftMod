@@ -18,7 +18,7 @@ public final class InteractEntityTaskRecord extends TaskRecord {
     public final MouseButton button;
     public final int entityId;
     public final int holdTicks;
-    public final Item item;        // null → use whatever is in hand; else equip this first (food / shears / weapon)
+    public final Item item;        // null 表示使用当前手持物；否则先装备指定物品（食物、剪刀或武器）。
 
     public InteractEntityTaskRecord(String toolCallId, long deadlineGameTime,
                                     MouseButton button, int entityId, int holdTicks, Item item) {

@@ -6,7 +6,7 @@ package org.maiwithu.maicraft.core.pathing.util;
  */
 public final class SwimAirBudget {
     private static final double ASCENT_BLOCKS_PER_TICK = 0.12D;
-    /** Keep three seconds beyond the ascent estimate for an obstruction, hit or delayed input. */
+    /** 在上浮估算之外额外保留三秒，用于应对遮挡、受击或输入延迟。 */
     private static final int REACTION_TICKS = 60;
     private long lastTick = Long.MIN_VALUE;
     private int lastAir;

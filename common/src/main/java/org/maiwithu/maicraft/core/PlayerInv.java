@@ -68,6 +68,6 @@ public final class PlayerInv {
      */
     public static ItemStack add(Inventory inv, ItemStack stack) {
         inv.add(stack);
-        return stack;   // Inventory.add consumed what fit; remainder stays here
+        return stack;   // Inventory.add 放入了可容纳的物品，剩余部分仍留在此处。
     }
 }

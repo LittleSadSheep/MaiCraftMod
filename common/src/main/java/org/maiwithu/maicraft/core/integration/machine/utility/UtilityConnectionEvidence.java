@@ -49,7 +49,7 @@ public final class UtilityConnectionEvidence {
                     && text(resource, "side").equals(face.getSerializedName()))
                 greatest = Math.max(greatest, number(resource, "amount"));
         }
-        return greatest; // Sided storage views overlap; never sum them.
+        return greatest; // 不同侧面的存储视图可能重叠，不能相加。
     }
     static JsonObject kinetic(JsonObject observed) {
         if (!observed.has("native") || !observed.getAsJsonObject("native").has("create"))

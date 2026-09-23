@@ -307,7 +307,7 @@ public final class LandingAssistSession {
             }
         }
         if(!failed && !submitted && !context.player().onGround() && (plan.existing() || preparation!=null && preparation.ready()))
-            groundFlight.prepare(context); // Do not wait for a mode receipt instead of placing urgent protection.
+            groundFlight.prepare(context); // 不能等待模式回执而延误紧急保护放置。
         if (!failed) aim(context);
         if (receipt != null) {
             settle(context);
@@ -367,7 +367,7 @@ public final class LandingAssistSession {
                     ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING;
         };
         beforePlacement = context.level().getBlockState(plan.cell());
-        submitted = true; // Any exception after submission starts forbids a repeated clutch.
+        submitted = true; // 一旦提交，后续任何异常都不能再次尝试水桶救援。
         placementSubmissions++;
         placementGate = "submitted";
         detail = "native landing item submitted; awaiting block and inventory evidence";
@@ -568,7 +568,7 @@ public final class LandingAssistSession {
         if (!submitted && !player.onGround() && preparation != null && preparation.ready()
                 && plan.kind() == LandingAssistPlan.Kind.WATER && acceptWaterHit(context,trace(context,false))) {
             context.body().requestImmediateLook(player.getYRot(),player.getXRot(),context.tickRevision());
-            return; // Freeze a usable native ray instead of leaving a queued turn active.
+            return; // 冻结当前可用的原生射线，不再保留待执行转向。
         }
         var delta = aimPoint().subtract(eye);
         float yaw = Math.hypot(delta.x,delta.z) < .001 ? player.getYRot()
@@ -604,7 +604,7 @@ public final class LandingAssistSession {
     private boolean acceptWaterHit(LocalPlayerContext context, BlockHitResult hit) {
         if (hit.getType() != HitResult.Type.BLOCK) return false;
         var water = WaterBucketFall.waterCell(context.level(),hit,false);
-        if (water.equals(plan.cell())) { // Waterlogging accepts every native hit face.
+        if (water.equals(plan.cell())) { // 含水方块接受任意原生命中面。
             plan = new LandingAssistPlan(plan.kind(),plan.feet(),water,hit.getBlockPos(),hit.getDirection(),false,hit.getLocation());
             return true;
         }
@@ -620,7 +620,7 @@ public final class LandingAssistSession {
         if (!LandingAssistGeometry.safe(context.level(),context.level()::isLoaded,actual,
                 context.player().getBbWidth(),Math.max(1.8,context.player().getBbHeight()),
                 EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells())) return false;
-        plan = actual; // Bind the actual native water cell before submitting the one owned use.
+        plan = actual; // 提交本次唯一拥有的使用操作前，先绑定真实原生水格。
         return true;
     }
     private void refreshWaterAim(LocalPlayerContext context) {

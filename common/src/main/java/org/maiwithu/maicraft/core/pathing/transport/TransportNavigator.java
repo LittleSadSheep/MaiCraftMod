@@ -73,7 +73,7 @@ public final class TransportNavigator {
         LongSet currentForbidden = policy.embeddedForbiddenBodyCells();
         if (session != null && !compatibleGoal(currentGoal, activeDestination, targetFingerprint, forbidden, currentForbidden)) {
             replanning = true;
-            TransportRuntime.cancel(this); // finish the old leg's safe exit before adopting new intent
+            TransportRuntime.cancel(this); // 先安全退出旧路段，再接管新意图。
         }
         if (lastPosition == null || player.position().distanceToSqr(lastPosition) > 0.01) {
             lastPosition = player.position(); progressTick = player.level().getGameTime();
@@ -106,7 +106,7 @@ public final class TransportNavigator {
                 }
                 ground = newGround(); progressTick = player.level().getGameTime();
                 offers = List.of(); targets = null; attempted = false;
-                return PlayerNav.Status.RUNNING; // hand native receipts/input back on the next actor tick
+                return PlayerNav.Status.RUNNING; // 下一角色 tick 再交接原生回执和输入。
             }
             failure = result.detail();
         }
@@ -117,7 +117,7 @@ public final class TransportNavigator {
         }
         if (reached.getAsBoolean()) {
             targets = null;
-            return ground.tick(); // preserve its airborne boundary and native owner release
+            return ground.tick(); // 保留其空中边界处理和原生所有权释放。
         }
         if (failureType == FailureType.UNKNOWN && failure != null) return PlayerNav.Status.FAILED;
         if (targets != null) {
@@ -188,8 +188,7 @@ public final class TransportNavigator {
                                   GoalCompiler.CompiledFingerprint original,
                                    LongSet previousForbidden, LongSet currentForbidden) {
         // 原目标没变，或新目标仍接受这次交通终点，才可继续这一段；禁止进入的格子变化也要重新规划。
-        // Elevator hints name an intermediate floor, including an occupied workstation cell.
-        // The original goal remains valid while the final ground approach is still pending.
+        // 电梯提示会指定中间楼层，其中可能包含被工作站占据的格子；最终地面接近尚未完成时，原始目标仍然有效。
         return current != null && destination != null
                 && (current.semanticFingerprint().equals(original) || current.goal().isAt(destination))
                 && previousForbidden.equals(currentForbidden);

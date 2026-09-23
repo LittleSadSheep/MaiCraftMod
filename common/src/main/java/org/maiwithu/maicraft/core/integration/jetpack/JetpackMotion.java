@@ -16,7 +16,7 @@ final class JetpackMotion {
                            float yaw, float requestedYaw, boolean grounded, JetpackNativeAdapter.Snapshot power) {
         double rise = JetpackDynamics.riseEnvelope(velocity.y, true, power);
         if (space.clear(position, position.add(0, rise, 0))) return true;
-        if (grounded) return false; // Native ground jumps are outside the dry-air model.
+        if (grounded) return false; // 原生地面跳跃不属于干燥空中运动模型。
         // 移动中的身体可能在上升脉冲到达峰值前就离开半砖支撑范围。
         // 即使配置推力超过通常的五 tick 预测，也要覆盖完整脉冲和滑行时间。
         double raw = JetpackDynamics.rawAfterStep(JetpackDynamics.nextVertical(velocity.y, true, power), power);

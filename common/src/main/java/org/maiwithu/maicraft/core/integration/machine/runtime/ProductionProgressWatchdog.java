@@ -28,7 +28,7 @@ final class ProductionProgressWatchdog {
     }
 
     String deliveryFailure(long now, long processingIdle, long lastDeliveryTick) {
-        if (processingIdle < 0) return null; // An incomplete round cannot support a no-progress conclusion.
+        if (processingIdle < 0) return null; // 观察轮次未完成时，不能据此得出无进展结论。
         long idle = processingIdle;
         if (lastDeliveryTick >= 0) idle = Math.min(idle, Math.max(0, now - lastDeliveryTick));
         return idle > deliveryLimit ? "production_native_delivery_stalled_after_processing" : null;

@@ -99,7 +99,7 @@ public final class GoalCompiler {
             members.add(NavGoal.mineStance(ore));
         }
         for (BlockPos drop : drops) {
-            members.add(NavGoal.exact(drop));     // items, not blocks
+            members.add(NavGoal.exact(drop));     // 目标是物品实体位置，而不是方块。
         }
         return new Compiled(NavGoal.composite(members), LongSets.emptySet());
     }

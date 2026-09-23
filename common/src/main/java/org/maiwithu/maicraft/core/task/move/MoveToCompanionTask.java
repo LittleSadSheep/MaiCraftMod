@@ -54,10 +54,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private final int bx;
     private final int by;
     private final int bz;
-    private final BlockPos blockTarget;   // only meaningful for BLOCK kind
+    private final BlockPos blockTarget;   // 仅在 BLOCK 目标类型下有意义。
 
-    private double bestDist = Double.MAX_VALUE;   // closest we've gotten to the goal
-    private int settleTicks = 0;                  // ticks of no progress after the planner gave up
+    private double bestDist = Double.MAX_VALUE;   // 到目标曾达到的最近距离。
+    private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
     private long landingBaseline = Long.MAX_VALUE;
@@ -463,7 +463,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         };
     }
 
-    // ==================== FIND(就近方块)驱动 ====================
+    // ==================== FIND（最近方块）驱动 ====================
 
     /**
      * 候选发现期(导航尚未建立)推进一步:收割扫描 -> 有候选即建导航

@@ -124,7 +124,7 @@ public final class TransportTargets {
             region(goal, new BlockPos(column.x, currentY, column.z), radius, minY + 1, maxY - 1);
         } else if (goal instanceof NavGoal.YLevel level) {
             region(goal, BlockPos.containing(origin.x, level.level, origin.z), MAX_RADIUS, level.level, level.level);
-            truncated = true; // A Y plane has no finite exhaustive neighborhood.
+            truncated = true; // Y 平面没有有限的穷尽式邻域。
         } else if (goal instanceof NavGoal.GetToBlock || goal instanceof NavGoal.MineStance) {
             region(goal, goal.center(), 1, goal.center().getY() - 2,
                     goal.center().getY() + (goal instanceof NavGoal.GetToBlock ? 1 : 0));
@@ -141,7 +141,7 @@ public final class TransportTargets {
             truncated |= near.verticalTolerance > 512;
             near(goal, near.radius, vertical);
         } else {
-            unknown = true; // Custom/moving/avoidance goals cannot become a guessed static center.
+            unknown = true; // 自定义、移动或避让目标不能被猜成静态中心点。
         }
     }
 

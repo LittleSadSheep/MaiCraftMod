@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
  */
 public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEntityTaskRecord> {
 
-    private static final double REACH = 3.0;            // vanilla entity interaction range
+    private static final double REACH = 3.0;            // 原版实体交互距离。
     private static final double REACH_SQR = REACH * REACH;
     private static final double WALK_SPEED = 1.0;
     /**
@@ -59,7 +59,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     private PressReceipt receipt;
     private List<String> changes = List.of();
     private long holdUntil = -1;
-    private boolean acted = false;     // landed at least one press (death then = success, not failure)
+    private boolean acted = false;     // 至少有一次按键命中；之后目标死亡应算成功，而非失败。
     private String successMsg = "done";
 
     public InteractEntityCompanionTask(LocalPlayer player, InteractEntityTaskRecord record) {
@@ -141,7 +141,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         boolean onTarget = hit.getType() == HitResult.Type.ENTITY
                 && ((EntityHitResult) hit).getEntity() == entity;
         if (!onTarget) {
-            return TaskState.RUNNING;   // settling / something briefly in the line — re-aim next tick
+            return TaskState.RUNNING;   // 正在稳定或有物体短暂挡住视线，下个 tick 重新瞄准。
         }
 
         if (interaction == null) {

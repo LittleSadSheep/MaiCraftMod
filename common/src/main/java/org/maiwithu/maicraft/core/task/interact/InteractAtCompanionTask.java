@@ -57,7 +57,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     /**
      * 固定时长的按住动作在这个游戏刻松开；-1 表示没有固定结束刻。
      */
-    private long holdUntil = -1;       // game tick to release a fixed-duration hold (holdTicks > 0)
+    private long holdUntil = -1;       // 固定时长按住（holdTicks > 0）时的松开游戏 tick。
     private String successMsg = "done";
     // 右键实际激活的方块（例如打开工作台界面）会被记录，供结果报告并让智能体循环写入 <known_blocks>。
     private BlockPos activatedBlock;
@@ -183,7 +183,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                             : r.holdTicks > 0 ? Interaction.Timing.hold(r.holdTicks) : Interaction.Timing.hold())
                     : Interaction.forHit(player, hit, button(), r.holdTicks, true);
             if (interaction != null) interaction.requireBlock(r.aim, r.requiredBlock);
-            if (interaction == null) {       // left-click on air — a swing, nothing to do
+            if (interaction == null) {       // 左键点击空气只会挥击，没有后续动作。
                 successMsg = "nothing under the aim (left-click in the air)";
                 return TaskState.SUCCESS;
             }

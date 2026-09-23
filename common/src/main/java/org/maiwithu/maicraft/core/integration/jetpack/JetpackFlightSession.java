@@ -353,7 +353,7 @@ public final class JetpackFlightSession implements TransportSession {
         route = escape; waypoint = 1; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY; exiting = true; phase = Phase.FLY;
         landing = route.points().getLast();
         if (power.fuelTicks() < route.requiredTicks()) { uncertain = true; detail = "continuing toward the cheapest observed exit after fuel loss"; }
-        brake(ctx); // the next tick validates the exit segment before producing its motion
+        brake(ctx); // 下一个 tick 会先核实出口路线段，再产生移动。
     }
 
     // 先对准平台并消掉相对横向速度，再下降；移动平台还要确认真实接触和连续站稳。

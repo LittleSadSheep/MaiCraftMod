@@ -12,7 +12,7 @@ import java.util.function.Supplier;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionEvidence.*;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.*;
 
-/** Compiles production dependencies using adapter evidence; neither geometry nor inventory presence is production proof. */
+/** 使用适配器证据编译生产依赖；几何结构或库存存在都不能单独证明发生生产。 */
 public final class ProductionDesignCompiler {
     public record Compilation(boolean valid, boolean ready, JsonObject report) {
         public Compilation { report = report.deepCopy(); }
@@ -25,7 +25,7 @@ public final class ProductionDesignCompiler {
         Report report = new Report();
         try {
             ProductionManifest manifest = ProductionManifest.parse(input);
-            new ProductionGraph(manifest); // Shape/topology errors remain errors even before identity discovery.
+            new ProductionGraph(manifest); // 即使尚未发现身份信息，形状和拓扑错误仍必须报错。
             JsonObject resolved = bindResources(input,manifest,evidence,report);
             bindRecipes(resolved,manifest,evidence,report);
             report.json.add("resolved_manifest",resolved);
@@ -201,7 +201,7 @@ public final class ProductionDesignCompiler {
         if (arrival < manifest.observation().minimumOutput()) report.error("target_underfunded", manifest.target().node());
         if (manifest.nodes().stream().noneMatch(n -> n.kind().equals("process")))
             report.error("no_processing_stage", "A source-to-sink transfer alone cannot establish production");
-        // Trace this exact output identity. An unrelated process cannot legitimize delivery of pre-existing finished stock.
+        // 追踪此输出物的精确身份；无关工艺不能使预先存在的成品库存变成交付证明。
         Map<String, Boolean> origins = new LinkedHashMap<>();
         Set<String> producers = new LinkedHashSet<>();
         for (Link link : graph.incoming.get(manifest.target().node())) if (link.resource().equals(manifest.target().resource())
@@ -227,7 +227,7 @@ public final class ProductionDesignCompiler {
         Node node = graph.nodes.get(id);
         if (node.kind().equals("process")) { producers.add(id); return true; }
         if (!node.kind().equals("transport")) return false;
-        // Mark before traversal so unknown energy feedback cannot recurse indefinitely.
+        // 遍历前先标记，避免未知能源反馈导致无限递归。
         memo.put(id, false);
         List<Link> inputs = graph.incoming.get(id).stream().filter(l -> l.resource().equals(resource)).toList();
         boolean result = !inputs.isEmpty() && inputs.stream().allMatch(l -> processedOrigin(graph.ports.get(l.from()).node(), resource, graph, memo, producers));

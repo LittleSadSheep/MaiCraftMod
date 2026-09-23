@@ -78,7 +78,7 @@ final class ProductionConnectionResponseRows {
     private static boolean rowFlag(JsonObject row, String key, boolean aggregate, boolean truncated) {
         if (row.has(key)) return flag(row, key);
         require(truncated, "missing_uncompressed_edge_flag");
-        return aggregate; // A false aggregate never creates positive evidence for an omitted individual flag.
+        return aggregate; // 汇总值为 false 时，不能为被省略的单项标志生成肯定证据。
     }
     static String status(JsonObject value) {
         String status = text(value, "status");

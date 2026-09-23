@@ -110,7 +110,7 @@ public final class MachineSnapshots {
         return snapshot;
     }
 
-    /** Attach native observation pages without extending structural freshness or changing its fingerprint. */
+    /** 附加原生观察分页，但不延长结构信息的新鲜度，也不改变其指纹。 */
     public static Snapshot enrich(LocalPlayer player, Snapshot anchor, JsonObject serverEvidence) {
         bind(player);
         Snapshot current = SNAPSHOTS.get(anchor.id());

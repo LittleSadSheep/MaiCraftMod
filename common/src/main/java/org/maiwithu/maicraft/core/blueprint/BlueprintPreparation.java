@@ -122,7 +122,7 @@ public final class BlueprintPreparation implements Task {
         try {
             if (listing != null) {
                 if (!listing.isDone()) return TaskState.RUNNING;
-                List<Map<String, Object>> entries = listing.get(); // isDone: never waits on IO
+                List<Map<String, Object>> entries = listing.get(); // isDone：不会等待 I/O。
                 outcome = TaskResult.ok(entries.isEmpty()
                         ? "no blueprints yet; drop blueprint files into the schematics folder"
                         : entries.size() + " blueprint(s) available", Map.of("blueprints", entries));

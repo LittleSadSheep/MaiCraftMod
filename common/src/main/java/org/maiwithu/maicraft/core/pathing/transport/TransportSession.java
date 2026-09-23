@@ -39,10 +39,10 @@ public interface TransportSession {
 
     String phase();
 
-    /** Current measured state and limitations; an estimate must not claim a completed journey. */
+    /** 当前实测状态和限制；估算不得声称旅程已完成。 */
     Map<String, Object> diagnostics();
 
-    /** Selected route for the optional developer overlay; null means no route is active. */
+    /** 供可选开发者覆盖层显示的已选路线；null 表示当前没有活动路线。 */
     default NavigationPathSnapshot debugPath() { return null; }
 
     /** 普通界面会暂停交通；实现可为自己正在处理的物品栏操作开放例外。 */

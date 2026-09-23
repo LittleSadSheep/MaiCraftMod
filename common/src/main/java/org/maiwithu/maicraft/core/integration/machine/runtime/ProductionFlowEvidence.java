@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest.Link;
 
-/** Keeps exact resource identity separate from authored registry selectors and unattributed sink growth. */
+/** 将精确资源身份与手工填写的注册表选择器、以及来源未归属的接收端库存增长分开处理。 */
 final class ProductionFlowEvidence {
     private final ProductionRunPlan plan;
     private final ProductionFlowPaths paths;

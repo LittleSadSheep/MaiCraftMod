@@ -68,7 +68,7 @@ public final class RecoveryLadder {
             Rung r = rungs.get(index);
             if (r.handles().contains(lastFail) && attempts < r.maxAttempts()) {
                 attempts++;
-                cached = null;         // rebuild the strategy for the retry
+                cached = null;         // 重试时重新构建策略。
                 return true;
             }
         }

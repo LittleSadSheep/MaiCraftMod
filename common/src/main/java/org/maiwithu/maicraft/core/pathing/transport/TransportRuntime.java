@@ -55,7 +55,7 @@ public final class TransportRuntime {
     public static boolean owns(Object owner) { return active != null && active.owner == owner; }
     public static boolean occupied() { return active != null; }
 
-    /** Client-thread observation only; never acquires or ticks a transport. */
+    /** 仅在客户端线程观察，不会接管或推进交通工具。 */
     public static NavigationPathSnapshot debugPath() {
         return active == null ? null : active.session.debugPath();
     }

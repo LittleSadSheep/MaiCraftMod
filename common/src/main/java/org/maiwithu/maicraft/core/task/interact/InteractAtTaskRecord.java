@@ -16,9 +16,9 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "interact_at";
 
     public final MouseButton button;
-    public final BlockPos aim;     // null → current facing (in-air use)
+    public final BlockPos aim;     // null 表示沿当前朝向使用物品（对空气使用）。
     public final int holdTicks;
-    public final Item item;        // null → use whatever is already in hand; else equip this first
+    public final Item item;        // null 表示使用当前手持物；否则先装备指定物品。
     public final Block expectedBlock;
     /**
      * 执行原版使用前再确认目标身份；它不是操作后的结果要求。

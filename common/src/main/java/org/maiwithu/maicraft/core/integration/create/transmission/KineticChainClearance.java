@@ -33,7 +33,7 @@ final class KineticChainClearance {
         for (BlockPos at : swept) {
             KineticRouteGeometry.checkpoint();
             if (!work.terrain.loaded(at) || work.terrain.protectedCell(at)) return false;
-            if (wheelCenters.contains(at)) continue; // Exact planned or observed wheel centers are the only occupied exceptions.
+            if (wheelCenters.contains(at)) continue; // 仅精确规划或观察到的轮中心可作为占用例外。
             if (work.blocks.containsKey(at) || !work.terrain.passable(at) || work.terrain.kinetic(at)) return false;
             Integer ground = work.ground(at.getX(), at.getZ());
             if (ground == null || !endpointColumn(work, at) && at.getY() - ground - 1 < work.limits.clearance()) return false;
