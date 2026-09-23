@@ -71,7 +71,7 @@ public final class TargetIndex {
         }
     }
 
-    /** A cold query resumes at its next section instead of repeatedly walking its warm prefix. */
+    /** 冷查询会从下一 section 继续，而不重复遍历已扫描的热前缀。 */
     private static final class QueryProgress {
         final int[] sectionOrder;
         final SearchGeometry.NearestPositions nearest;
@@ -138,7 +138,7 @@ public final class TargetIndex {
         }
     }
 
-    /** At most the requested nearest hits, in distance order; incomplete scans resume next tick. */
+    /** 最多返回请求数量的最近命中，并按距离排序；未完成的扫描会在下个 tick 继续。 */
     public record Result(List<BlockPos> hits, boolean complete) {}
 
     // ==================== 注册 ====================
@@ -161,7 +161,7 @@ public final class TargetIndex {
         anyActive = true;
     }
 
-    /** Release ownership; the next eviction sweep retires a cache unused for 200 ticks. */
+    /** 释放所有权；下一次清除扫描会回收连续 200 tick 未使用的缓存。 */
     // 释放任务的使用计数，暂留类型供跨刻登记／注销的查询复用；整个维度闲置后按清扫周期退出。
     public static void unregister(ClientLevel level, Collection<Block> blocks) {
         LevelIndex idx = INDEXES.get(level.dimension());
@@ -174,15 +174,14 @@ public final class TargetIndex {
                 idx.activeRefs--;
             }
         }
-        // Keep a short-lived warm cache, including zero-reference target kinds. Planning probes
-        // register/unregister between ticks and must be able to finish their pending scan.
+        // 保留短期热缓存，包括当前引用数为零的目标类型。规划探测可能在相邻 tick 之间注册并注销，仍需有机会完成待处理扫描。
         idx.lastUseTick = level.getGameTime();
         anyActive = !INDEXES.isEmpty();
     }
 
     // ==================== 供给:方块变更钩子 ====================
 
-    /** Optional client observation hook for keeping an already-built section entry fresh. */
+    /** 可选的客户端观察钩子，用于刷新已构建的 section 条目。 */
     // 客户端观察到关心的方块种类变化时更新索引；这也可能是客户端预测，使用位置前仍需核对实际世界。
     // 零引用类型仍可能被跨刻查询复用，因此维护其段缓存；只重置目标和范围确实受影响的查询。
     public static void onBlockChange(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
@@ -234,7 +233,7 @@ public final class TargetIndex {
         return query(level, center, targets, want, maxChunkRadius, buildBudget, Set.of());
     }
 
-    /** Exclusions participate in the nearest selection, not after truncating the result window. */
+    /** 排除条件必须参与最近目标选择，不能在结果窗口截断后才应用。 */
     // 按起点、目标、数量、半径和排除位置复用扫描进度；一刻最多约两毫秒，未完成时返回当前已找到的部分。
     public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded) {
@@ -373,7 +372,7 @@ public final class TargetIndex {
                 continue;
             }
             if (arr == SATURATED) {
-                // Dense cells are compared by distance too; y/z/x iteration order is not proximity.
+                // 密集格子也按距离比较；不能将 y/z/x 遍历顺序误当作距离顺序。
                 var states = section.getStates();
                 BlockPos.MutableBlockPos cell = new BlockPos.MutableBlockPos();
                 for (int y = 0; y < 16; y++) {
@@ -395,7 +394,7 @@ public final class TargetIndex {
 
     // ==================== 生命周期 ====================
 
-    /** Called from END_CLIENT_TICK; periodically evicts entries for chunks no longer loaded. */
+    /** 在 END_CLIENT_TICK 调用，定期回收所属区块已卸载的条目。 */
     // 周期性清理没人使用的维度索引与已卸载区块；活动索引的零引用类型目前不在这里单独清理。
     public static void clientTick(ClientLevel level) {
         if (INDEXES.isEmpty() || ++sweepTimer < EVICT_SWEEP_TICKS) {
@@ -429,7 +428,7 @@ public final class TargetIndex {
         }
     }
 
-    /** Clear all observations when the local body or world disappears. */
+    /** 本地角色或世界退出时清除所有观察结果。 */
     // 世界会话结束时清空全部索引和查询时钟；客户端运行时负责在相应边界调用。
     public static void dropAll() {
         INDEXES.clear();
