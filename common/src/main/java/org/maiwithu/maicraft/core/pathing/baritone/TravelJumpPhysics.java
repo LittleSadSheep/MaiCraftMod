@@ -5,7 +5,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.Vec3;
 
-/** Projects a sprint hop with vanilla's takeoff friction, airborne acceleration and ceiling collision. */
+/** 按原版起跳摩擦、空中加速和顶棚碰撞规则预测疾跑跳跃轨迹。 */
 final class TravelJumpPhysics {
     private TravelJumpPhysics() {}
 
@@ -35,8 +35,7 @@ final class TravelJumpPhysics {
         double height = 0, apex = 0, distance = 0, dragSum = 0, drag = 1;
         double vertical = launch.jumpSpeed, forward = launch.forwardSpeed;
         for (int tick = 1; tick <= 40; tick++) {
-            // jumpFromGround leaves onGround true until move(), so the first tick uses
-            // ground acceleration/friction. Full input bounds the actual 0.98-scaled input.
+            // jumpFromGround 会将 onGround 保持为 true，直到 move() 执行，因此第一刻仍使用地面加速和摩擦；完整输入幅度用于界定实际 0.98 缩放后的输入。
             forward += tick == 1 ? launch.groundAcceleration : 0.026;
             distance += forward;
             dragSum += drag;
@@ -49,7 +48,7 @@ final class TravelJumpPhysics {
                 vertical = 0;
             }
             apex = Math.max(apex, height);
-            // Native travel applies gravity even on the tick that hits the ceiling.
+            // 原生移动会在撞到顶棚的同一 tick 继续施加重力。
             vertical = (vertical - launch.gravity) * 0.98;
             if (height <= 0) return new JumpProjection(distance, dragSum, apex, tick);
         }
