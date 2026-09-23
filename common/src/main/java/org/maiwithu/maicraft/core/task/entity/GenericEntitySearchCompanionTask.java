@@ -33,15 +33,15 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.Constants;
 
-/** Loaded evidence first, then bounded first-person frontier travel and another loaded scan. */
+/** 先检查已加载证据，再以第一人称有界移动到边界，并重复扫描新加载区域。 */
 public final class GenericEntitySearchCompanionTask
         extends AbstractCompanionTask<GenericEntitySearchTaskRecord> {
     public static final int LOADED_EVIDENCE_RADIUS = 112;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    /** A frontier should expose another chunk-width of terrain, not circle in place. */
+    /** 边界点应能多观察一个区块宽度的地形，避免角色原地打转。 */
     private static final int MIN_FRONTIER_PROGRESS = 16;
-    /** Hard synchronous-computation budget, not a task time/distance gate. */
+    /** 同步计算的硬预算，不用于限制任务时间或移动距离。 */
     private static final int MAX_SURFACE_PROBES_PER_SELECTION = 160;
     private static final int MAX_SHORE_SURFACE_PROBES = 176;
     private static final int FRONTIER_DIRECTION_PROBES = 16;
@@ -54,7 +54,7 @@ public final class GenericEntitySearchCompanionTask
     };
     private static final int SHORE_REFINE_RADIUS = 4;
     private static final int SHORE_REFINE_STRIDE = 2;
-    /** Initial leg lease. MoveTo renews its own record while verified route progress continues. */
+    /** 初始路段期限；只要路线持续取得已核实进展，MoveTo 就会续期自己的任务记录。 */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
@@ -233,9 +233,8 @@ public final class GenericEntitySearchCompanionTask
     }
 
     private TaskState tickFrontierTravel() {
-        // A frontier leg exists only to load more evidence. Newly loaded acceptable evidence
-        // therefore invalidates the leg immediately; waiting until the waypoint was reached made
-        // the body visibly walk past the very entity it was searching for.
+        // 前往边界只为加载更多证据；一旦发现新加载区域中有符合条件的实体，就立即取消此路段。
+        // 若等到航点到达才取消，角色会明显走过正在搜索的实体。
         scanCycles++;
         scanLoadedEntities();
         if (observedSafe.size() >= r.count) {
@@ -251,8 +250,7 @@ public final class GenericEntitySearchCompanionTask
         } else {
             terminal = runChild(moveChild);
             if (terminal == null) {
-                // The child owns the liveness signal. Carry its renewed progress lease to this
-                // semantic parent instead of imposing an unrelated wall-clock leg timeout.
+                // 子任务负责发出存活进度信号；将其续期后的进度期限传给语义父任务，不要另加无关的墙上时间路段超时。
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
                 return TaskState.RUNNING;
             }
@@ -326,14 +324,13 @@ public final class GenericEntitySearchCompanionTask
         return null;
     }
 
-    /** Choose a dry sampled endpoint; actual reachability is proved by the navigation child. */
+    /** 选择已抽样确认的干燥终点；实际可达性由导航子任务证明。 */
     private BlockPos nextGroundSpawnFrontier(ClientLevel level) {
         BlockPos current = player.blockPosition();
         if (player.isInWater()) {
             BlockPos shore = nearestLoadedDryLand(level, current, groundDirectionPass);
             if (shore == null) return deferGroundDirectionPass();
-            // Returning from water is recovery, not exploration. The nearest observed shore must
-            // remain eligible even when it was the last frontier we left.
+            // 从水中返回属于恢复，不是探索；即使最近观察到的海岸正是刚离开的边界，也必须允许再次选择它。
             attemptedFrontiers.add(BlockPos.asLong(shore.getX(), 0, shore.getZ()));
             shoreReturnFrontiers++;
             logGroundFrontier("return_to_loaded_shore", shore);
@@ -408,10 +405,8 @@ public final class GenericEntitySearchCompanionTask
     }
 
     /**
-     * Sample one bounded ray. Dry samples provide endpoint evidence; the real first-person
-     * navigator remains the authority on height, obstacles and route connectivity. Open water is
-     * never a fallback: only a fully observed water run followed by at least the same amount of
-     * sampled dry runway can produce a crossing endpoint.
+     * 对一条有界射线进行抽样。干燥样本只能提供终点证据；高度、障碍和路线连通性仍由真实第一人称导航核实。
+     * 开放水域不能作为回退终点；只有完整观察到整段水域，并且其后至少有同等长度的已抽样干燥路面，才可选择跨水终点。
      */
     private FrontierChoice sampledGroundFrontierToward(
             ClientLevel level,
@@ -507,8 +502,7 @@ public final class GenericEntitySearchCompanionTask
         }
         if (best == null) return null;
 
-        // A small fixed refinement improves the sampled shoreline point without turning shore
-        // recovery back into a radius-wide scan. Recovery deliberately ignores novelty.
+        // 用少量固定采样细化海岸点，但不把返岸恢复重新扩大成半径扫描；恢复过程有意忽略新颖度。
         BlockPos coarse = best;
         for (int dx = -SHORE_REFINE_RADIUS;
                 dx <= SHORE_REFINE_RADIUS && budget.remaining > 0;
