@@ -10,7 +10,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 import java.util.Arrays;
 
-/** Orthogonal shaft candidates turn through real gearboxes, whose axis is the unused axis. */
+/** 正交传动轴候选通过真实齿轮箱转向；齿轮箱轴线采用未使用的轴向。 */
 final class KineticShaftGeometry {
     static final List<List<Direction.Axis>> ORDERS = List.of(
             List.of(Direction.Axis.X, Direction.Axis.Y, Direction.Axis.Z), List.of(Direction.Axis.X, Direction.Axis.Z, Direction.Axis.Y),
@@ -24,7 +24,7 @@ final class KineticShaftGeometry {
             append(path, b, order, limits.maxPlacements()); path.add(target.position());
             add(plans, compile(source, sourceFace, target, targetFace, terrain, limits, path));
         }
-        // Small explicit detours allow two same-facing outlets and obstacles to compete against an overhead chain route.
+        // 少量明确绕行路线可让同向输出端和障碍路线与高架链传动方案公平竞争。
         for (Direction detour : Direction.values()) {
             var path = new ArrayList<BlockPos>(); path.add(source.position()); path.add(a);
             append(path, a.relative(detour, 2), ORDERS.getFirst(), limits.maxPlacements());
@@ -42,7 +42,7 @@ final class KineticShaftGeometry {
         String family = turning ? "shaft_gearbox" : source.family().contains("cogwheel") || target.family().contains("cogwheel") ? "gear_shaft" : "axial_shaft";
         return work.finish(family);
     }
-    /** Endpoints already exist or are installed separately; only interior cells are materialized. */
+    /** 两端点已经存在或会单独安装；这里只生成中间方块格。 */
     static void installPath(KineticGeometryWork work, List<BlockPos> path) {
         if (path.size() < 2 || path.size() > work.limits.maxPlacements() + 2 || new HashSet<>(path).size() != path.size()) { work.valid = false; return; }
         for (int i = 1; i < path.size(); i++) work.join(path.get(i - 1), path.get(i));

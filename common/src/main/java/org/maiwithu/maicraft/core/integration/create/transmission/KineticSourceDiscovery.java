@@ -10,7 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** Bounded local source discovery: no travel, forced chunks or live map iterators retained between ticks. */
+/** 有界本地动力来源发现：不会移动角色、强制加载区块或跨 tick 保留实时映射迭代器。 */
 final class KineticSourceDiscovery {
     private final BlockPos target;
     private final int radius;
