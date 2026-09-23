@@ -17,8 +17,8 @@ final class JetpackMotion {
         double rise = JetpackDynamics.riseEnvelope(velocity.y, true, power);
         if (space.clear(position, position.add(0, rise, 0))) return true;
         if (grounded) return false; // Native ground jumps are outside the dry-air model.
-        // A moving body can leave a slab's footprint before reaching its UP peak.
-        // Include the full pulse/coast duration, even when configured thrust exceeds the usual five-tick forecast.
+        // 移动中的身体可能在上升脉冲到达峰值前就离开半砖支撑范围。
+        // 即使配置推力超过通常的五 tick 预测，也要覆盖完整脉冲和滑行时间。
         double raw = JetpackDynamics.rawAfterStep(JetpackDynamics.nextVertical(velocity.y, true, power), power);
         int ticks = 1;
         while (raw > 0 && ticks < 32) { raw = JetpackDynamics.rawAfterStep(raw, power); ticks++; }
@@ -33,7 +33,7 @@ final class JetpackMotion {
     // 分别估计镜头不转和每刻最多转十二度两种情况，都通畅才接受；按键在每一步重新计算。
     private static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
                                            float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power, int ticks) {
-        // Cover both a stationary camera and its maximum next-tick turn (240 degrees/second).
+        // 同时覆盖静止镜头和下一 tick 最大转向速度（每秒 240 度）。
         for (boolean turning : new boolean[]{false, true}) {
             Vec3 p = position, v = velocity;
             float heading = yaw;
@@ -48,7 +48,7 @@ final class JetpackMotion {
         return true;
     }
 
-    /** FlightLib 3.2.1 applies each native direction separately; vanilla alone normalizes diagonal input. */
+    /** FlightLib 3.2.1 会分别应用每个原生方向；只有原版会归一化对角输入。 */
     // 合计背包横向推力与普通空中按键，再计算本次位置和受阻力影响的下一刻速度。
     static Step step(Vec3 position, Vec3 velocity, BodyControlPort.Movement command, float yaw,
                      JetpackNativeAdapter.Snapshot power) {
