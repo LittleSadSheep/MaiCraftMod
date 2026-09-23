@@ -62,6 +62,8 @@ public final class MachineAssemblyDocument {
         if (!blueprint.has("assembly")) return;
         Map<BlockPos, JsonObject> blocks = blocks(blueprint);
         Map<BlockPos, JsonObject> finalBlocks = new LinkedHashMap<>(blocks);
+        Set<BlockPos> parts = new LinkedHashSet<>();
+        for (var raw : blueprint.getAsJsonArray("blocks")) if (raw.getAsJsonObject().has("part")) parts.add(position(raw.getAsJsonObject().get("offset")));
         Set<String> forbidden = MachineDesignConstraints.forbiddenMods(blueprint);
         for (var span : belts(blueprint)) {
             // 连接器和整条带都是计划的一部分，不能只审查用来准备端点的两根轴。
@@ -89,6 +91,7 @@ public final class MachineAssemblyDocument {
             // 检查适配器声明的动作净空，不能把所有模组的加工位置都固定成“下方两格”。
             for (BlockPos relative : action.clearance()) {
                 BlockPos gapAt = at.offset(relative); JsonObject gap = finalBlocks.get(gapAt);
+                if (parts.contains(gapAt)) errors.add("processing_clearance_contains_native_part: " + gapAt);
                 if (gap != null && !registry.processingSpaceClear(gap.get("block_id").getAsString(), properties(gap))) errors.add("processing_space_occupied: " + gapAt);
             }
         }

@@ -6,12 +6,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineInstallation;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
 
 /**
  * 开工前分批检查世界边界、AE2 部件宿主和临时洞口。普通方块的替换与材料检查另交给建筑子任务。
@@ -26,9 +28,14 @@ final class MachineBuildSurvey {
     private int boundsIndex, partIndex;
     private int sealIndex;
     private int fluidIndex;
+    private int installationIndex;
+    private int processingIndex;
+    private final Set<BlockPos> completedInstallations = new HashSet<>();
+    private final Set<BlockPos> declaredPositions = new HashSet<>();
 
     MachineBuildSurvey(MachineConstructionPlan plan) {
         this.plan = plan; positions = plan.positions();
+        plan.blocks().forEach(target -> declaredPositions.add(target.pos()));
         sealTargets = plan.seals().stream().flatMap(seal -> seal.targets().stream()).toList();
         plan.parts().stream().filter(part -> part.spec().side() == null).forEach(part -> centers.add(part.position()));
     }
@@ -42,6 +49,34 @@ final class MachineBuildSurvey {
                 return new Progress(false, null, "The compiled installation crosses the world's build boundary.");
         }
         if (boundsIndex < positions.size()) return new Progress(false, null, null);
+        // 整条原生结构已正确时保留它，不能为了复用准备轴目标把完成的传送带拆回轴。
+        while (installationIndex < plan.installations().size() && budget-- > 0) {
+            var installation = plan.installations().get(installationIndex);
+            for (BlockPos at : installation.targets().keySet()) if (!world.isLoaded(at)) return new Progress(false, at, null);
+            try {
+                if (installation.matches(world)) completedInstallations.addAll(installation.targets().keySet());
+                else for (BlockPos at : installation.targets().keySet()) {
+                    if (NavigationSafetyContext.protectsMutation(at)) return new Progress(false, null, "Native installation intersects a protected area.");
+                    if (BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString().equals("create:belt"))
+                        return new Progress(false, null, "An existing belt has a different native chain; inspect it before replacing any segment.");
+                    if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir())
+                        return new Progress(false, null, "Native installation needs an empty path; undeclared obstacles will not be removed.");
+                }
+            } catch (RuntimeException unavailable) { return new Progress(false, null, "Native installation observation unavailable: " + unavailable.getMessage()); }
+            installationIndex++;
+        }
+        if (installationIndex < plan.installations().size()) return new Progress(false, null, null);
+        // 加工净空同样只读检查；原图没有声明拆除时，不会为了摆得下设备自动挖空附近结构。
+        while (processingIndex < plan.processing().size() && budget-- > 0) {
+            for (BlockPos gap : plan.processing().get(processingIndex).clearance()) {
+                if (!world.isLoaded(gap)) return new Progress(false, gap, null);
+                if (!declaredPositions.contains(gap)
+                        && !CreateProcessingCapabilities.openProcessingSpace(world.getBlockState(gap), world, gap))
+                    return new Progress(false, null, "A required processing space is occupied outside the declared blueprint targets.");
+            }
+            processingIndex++;
+        }
+        if (processingIndex < plan.processing().size()) return new Progress(false, null, null);
         // 源流体不进入普通方块任务；只把有明确替换许可的普通占用记入准备清空，已有正确源格原样保留。
         while (fluidIndex < plan.fluidTargets().size() && budget-- > 0) {
             var target = plan.fluidTargets().get(fluidIndex); BlockPos at = target.pos();
@@ -87,6 +122,7 @@ final class MachineBuildSurvey {
         }
         return new Progress(sealIndex == sealTargets.size(), null, null);
     }
+    Set<BlockPos> completedInstallations() { return Set.copyOf(completedInstallations); }
 
     List<BlockPos> partClears() { return new ArrayList<>(clears); }
     Set<BlockPos> openings() { return Set.copyOf(openings); }

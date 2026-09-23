@@ -23,6 +23,8 @@ public final class MachineAssemblyDocumentTest {
     };
     public static void main(String[] args) {
         var input = sample();
+        var reusable = sample(); reusable.remove("expected_output");
+        check(MachineBlueprintDocument.compile(reusable, REGISTRY).buildable(), "a reusable workstation need not invent a product merely to describe its geometry");
         for (String output : List.of("example:precision_part", "example:assembled_track")) {
             input.addProperty("expected_output", output);
             var compiled = MachineBlueprintDocument.compile(input, REGISTRY);
@@ -30,7 +32,7 @@ public final class MachineAssemblyDocumentTest {
             check(compiled.blueprint().getAsJsonArray("blocks").size() == 3, "compiler does not silently add a depot, sorter or pipe");
             check(!compiled.report().get("machine_production_verified").getAsBoolean(), "structural review does not invent production evidence");
             try { MachineConstructionPlan.compile(BlockPos.ZERO, compiled, false); throw new AssertionError("unbound native assembly reached ordinary placement"); }
-            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("native_machine_assembly_executor"), "unsupported executor is rejected before world work"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("native_belt_installation_unavailable"), "synthetic registry claims cannot invent an installed native adapter"); }
         }
         var horizontal = sample(); horizontal.getAsJsonArray("blocks").get(2).getAsJsonObject().getAsJsonObject("properties").addProperty("facing", "north");
         check(!MachineBlueprintDocument.compile(horizontal, REGISTRY).buildable(), "processor orientation follows the native contract");

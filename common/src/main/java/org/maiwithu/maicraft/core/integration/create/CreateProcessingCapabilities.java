@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.BlockGetter;
 import org.maiwithu.maicraft.core.integration.machine.MachineProcessingCapabilities;
 
 /** 从原生行为接口描述加工与承载能力，不按精密构件、铁板等产品名称挑选工作站。 */
@@ -57,18 +58,21 @@ public final class CreateProcessingCapabilities {
     }
 
     public static JsonObject descriptor(BlockState state) {
-        JsonObject result = describe(state).json();
+        var features = describe(state); JsonObject result = features.json();
         result.addProperty("block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
-        result.addProperty("evidence", "installed_native_behaviour_interfaces");
+        result.addProperty("evidence", features.issue() == null ? "installed_native_behaviour_interfaces" : "unavailable");
         return result;
     }
 
     /** 原生加工间隙允许漏斗及无碰撞形状；最终施工仍会在真实世界重复核对。 */
     public static boolean openProcessingSpace(BlockState state) {
+        return openProcessingSpace(state, EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+    }
+    public static boolean openProcessingSpace(BlockState state, BlockGetter world, BlockPos at) {
         if (state.isAir()) return true;
         try {
             return Class.forName("com.simibubi.create.content.logistics.funnel.AbstractFunnelBlock").isInstance(state.getBlock())
-                    || state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
+                    || state.getCollisionShape(world, at).isEmpty();
         } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return false; }
     }
 }

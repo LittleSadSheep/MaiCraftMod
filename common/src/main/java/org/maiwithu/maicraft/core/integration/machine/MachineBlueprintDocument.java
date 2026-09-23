@@ -161,8 +161,6 @@ public final class MachineBlueprintDocument {
         if (document.has("assembly")) {
             result.add("assembly", document.get("assembly").deepCopy());
             result.add("assembly", MachineAssemblyDocument.normalize(result, radius));
-            if (!result.getAsJsonObject("assembly").getAsJsonArray("processing").isEmpty() && !result.has("expected_output"))
-                throw bad("processing assembly requires an explicit expected_output");
         }
         result.addProperty("supply_preference", MachineUtilityInputs.supplyPreference(document));
         if (document.has("onsite_reason")) result.add("onsite_reason", document.get("onsite_reason").deepCopy());

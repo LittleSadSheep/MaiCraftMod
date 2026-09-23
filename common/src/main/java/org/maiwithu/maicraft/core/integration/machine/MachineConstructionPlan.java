@@ -28,6 +28,8 @@ import java.util.Comparator;
 import net.minecraft.world.level.block.LiquidBlock;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
+import org.maiwithu.maicraft.core.integration.create.CreateBeltInstallation;
+import org.maiwithu.maicraft.core.integration.machine.assembly.MachineNativeInstallation;
 
 /**
  * 把机器布局或逐格蓝图变成固定的装配计划：普通方块、AE2 部件、维护通道，以及最后要封闭的施工洞口。
@@ -44,15 +46,22 @@ public final class MachineConstructionPlan {
     private final boolean replace;
     private final boolean replaceBlockEntities;
     private final List<Seal> seals;
+    private final List<MachineNativeInstallation> installations;
+    private final List<MachineProcessingRelation> processing;
+    private final Set<BlockPos> nativePositions;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
-            List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities) {
+            List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
+            List<MachineNativeInstallation> installations, List<MachineProcessingRelation> processing) {
         this.anchor = anchor.immutable(); this.blocks = List.copyOf(blocks); this.parts = List.copyOf(parts);
         fluidTargets = blocks.stream().filter(MachineConstructionPlan::isFluid)
                 .sorted(Comparator.comparingInt((BuildTaskRecord.Target target) -> target.pos().getY())
                         .thenComparingInt(target -> target.pos().getZ()).thenComparingInt(target -> target.pos().getX())).toList();
         this.components = List.copyOf(components); this.report = report.deepCopy(); this.replace = replace;
         this.replaceBlockEntities = replaceBlockEntities;
+        this.installations = List.copyOf(installations); this.processing = List.copyOf(processing);
+        Set<BlockPos> nativeCells = new LinkedHashSet<>(); installations.forEach(step -> nativeCells.addAll(step.targets().keySet()));
+        nativePositions = Set.copyOf(nativeCells);
         Map<BlockPos, BuildTaskRecord.Target> byPosition = new LinkedHashMap<>();
         blocks.forEach(target -> byPosition.put(target.pos(), target));
         List<Seal> closures = new ArrayList<>();
@@ -103,6 +112,9 @@ public final class MachineConstructionPlan {
             // 设计评审同时给出原生安装材料，源流体按真实满桶计费，而不是列出无法拿在手中的液体方块。
             report.add("native_material_counts", compiled.report.get("native_material_counts").deepCopy());
             report.addProperty("source_fluid_targets", compiled.fluidTargets().size());
+            report.addProperty("native_installation_count", compiled.installations().size());
+            report.addProperty("processing_relation_count", compiled.processing().size());
+            report.addProperty("physical_target_count", compiled.positions().size());
             report.addProperty("native_installation_validated", true);
             report.addProperty("site_and_material_preflight_pending", true);
             return new SemanticMachineLayout.Result(true, layout.blueprint(), report);
@@ -124,10 +136,10 @@ public final class MachineConstructionPlan {
             boolean replace, boolean replaceBlockEntities) {
         if (replaceBlockEntities && !replace) throw new IllegalArgumentException("replace_block_entities requires replace_existing");
         if (!layout.buildable()) throw new IllegalArgumentException("machine layout is not executable: " + layout.report());
-        // 原生装配声明不能被旧的逐格执行器忽略，缺少执行接线时必须在任何世界操作之前拒绝。
-        if (layout.blueprint().has("assembly") && (!layout.blueprint().getAsJsonObject("assembly").getAsJsonArray("installations").isEmpty()
-                || !layout.blueprint().getAsJsonObject("assembly").getAsJsonArray("processing").isEmpty()))
-            throw new IllegalArgumentException("native_machine_assembly_executor_unavailable");
+        // 原生操作与普通方块共用作者蓝图；先冻结安装原语，不能把整条带当成逐格放置。
+        List<MachineNativeInstallation> installations = new ArrayList<>();
+        var authored = MachineAssemblyDocument.blocks(layout.blueprint());
+        for (var belt : MachineAssemblyDocument.belts(layout.blueprint())) installations.add(new CreateBeltInstallation(anchor, belt, authored));
         Map<BlockPos, BuildTaskRecord.Target> blocks = new LinkedHashMap<>();
         List<Part> parts = new ArrayList<>();
         Set<String> partSlots = new LinkedHashSet<>();
@@ -164,6 +176,14 @@ public final class MachineConstructionPlan {
             if (!occupied.add(position)) throw new IllegalArgumentException("overlapping machine targets");
             blocks.put(position, new BuildTaskRecord.Target(state, placementItem,
                     position, id, null, null, null, false, properties.keySet(), true));
+        }
+        // 原生动作的空闲路径是先决条件，不会自动转成拆除目标；清障必须由作者显式声明空气格。
+        Map<BlockPos, BlockState> finalStates = new LinkedHashMap<>(); blocks.values().forEach(target -> finalStates.put(target.pos(), target.desiredState()));
+        installations.forEach(step -> finalStates.putAll(step.targets()));
+        List<MachineProcessingRelation> processing = new ArrayList<>();
+        if (layout.blueprint().has("assembly")) for (var raw : layout.blueprint().getAsJsonObject("assembly").getAsJsonArray("processing")) {
+            var row = raw.getAsJsonObject(); var relation = MachineProcessingRelation.compile(offset(anchor, row.get("processor")), offset(anchor, row.get("surface")), finalStates);
+            processing.add(relation);
         }
         // Generated halves must be declared even for model-authored blueprints.
         Map<Long, BuildTaskRecord.Target> cells = new LinkedHashMap<>();
@@ -202,6 +222,7 @@ public final class MachineConstructionPlan {
         blocks.values().forEach(target -> { int count = isFluid(target) ? 1 : target.materialCount();
             if (count > 0) nativeMaterials.merge(BuiltInRegistries.ITEM.getKey(target.item()).toString(), count, Math::addExact); });
         parts.forEach(part -> nativeMaterials.merge(part.spec().itemId(), 1, Math::addExact));
+        installations.forEach(step -> step.materials().forEach((item, count) -> nativeMaterials.merge(item.toString(), count, Math::addExact)));
         if (report.has("initial_contents")) report.getAsJsonArray("initial_contents").forEach(raw -> {
             var value = raw.getAsJsonObject(); nativeMaterials.merge(value.get("item_id").getAsString(), value.get("count").getAsInt(), Math::addExact); });
         JsonObject materialCounts = new JsonObject(); nativeMaterials.forEach(materialCounts::addProperty);
@@ -209,7 +230,7 @@ public final class MachineConstructionPlan {
         MachineDesignConstraints.verifyMaterials(layout.blueprint(), report);
         report.addProperty("source_fluid_targets", blocks.values().stream().filter(MachineConstructionPlan::isFluid).count());
         report.addProperty("native_material_scope", "full installation upper bound; already matching blocks and source fluids are reused");
-        return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities);
+        return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities, installations, processing);
     }
 
     /** The survey anchor denotes the floor of the installation, including below-machine drives. */
@@ -241,9 +262,12 @@ public final class MachineConstructionPlan {
 
     // 普通施工先保留临时洞口为空，再加入为部件腾位的清空目标；封洞另在角色走到外面之后完成。
     public BuildTaskRecord blockTask(String callId, long deadline, boolean consume, List<BlockPos> partClears, Set<BlockPos> openings) {
+        return blockTask(callId, deadline, consume, partClears, openings, Set.of());
+    }
+    public BuildTaskRecord blockTask(String callId, long deadline, boolean consume, List<BlockPos> partClears, Set<BlockPos> openings, Set<BlockPos> completedInstallations) {
         List<BuildTaskRecord.Target> placement = new ArrayList<>();
         // 源流体留给封洞后的桶操作，不能变成空气施工目标而把已经正确的水源重新挖掉。
-        for (var target : blocks) if (!isFluid(target)) placement.add(openings.contains(target.pos())
+        for (var target : blocks) if (!isFluid(target) && !completedInstallations.contains(target.pos())) placement.add(openings.contains(target.pos())
                 ? new BuildTaskRecord.Target(Blocks.AIR.defaultBlockState(), Items.AIR, target.pos(),
                     "temporary machine entrance", null, null, null, false, Set.of(), true)
                 : placementTarget(target));
@@ -272,6 +296,7 @@ public final class MachineConstructionPlan {
     public Map<BlockPos, BlockState> preview() {
         Map<BlockPos, BlockState> result = new LinkedHashMap<>();
         blocks.forEach(target -> result.put(target.pos(), target.desiredState()));
+        installations.forEach(step -> result.putAll(step.targets()));
         return Map.copyOf(result);
     }
     public BlockPos anchor() { return anchor; }
@@ -279,6 +304,9 @@ public final class MachineConstructionPlan {
     public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
     public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof LiquidBlock; }
     public List<Part> parts() { return parts; }
+    public List<MachineNativeInstallation> installations() { return installations; }
+    public List<MachineProcessingRelation> processing() { return processing; }
+    public Set<BlockPos> nativePositions() { return nativePositions; }
     public List<Seal> seals() { return seals; }
     // 找出临时洞口内外要留给身体通行的空气格，供普通施工阶段保护。
     public List<BlockPos> constructionAccess(BuildTaskRecord bulk) {
@@ -296,6 +324,8 @@ public final class MachineConstructionPlan {
     public List<BlockPos> positions() {
         Set<BlockPos> positions = new LinkedHashSet<>();
         blocks.forEach(target -> positions.add(target.pos())); parts.forEach(part -> positions.add(part.position()));
+        installations.forEach(step -> positions.addAll(step.targets().keySet()));
+        processing.forEach(relation -> positions.addAll(relation.clearance()));
         return List.copyOf(positions);
     }
     public JsonObject report() { return report.deepCopy(); }

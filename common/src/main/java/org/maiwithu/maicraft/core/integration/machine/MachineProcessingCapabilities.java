@@ -17,8 +17,8 @@ public record MachineProcessingCapabilities(boolean processor, boolean surface, 
         return new MachineProcessingCapabilities(false, false, false, BlockPos.ZERO, List.of(), Map.of(), reason);
     }
     public JsonObject json() {
-        JsonObject result = new JsonObject(); result.addProperty("processes_workpieces", processor);
-        result.addProperty("holds_workpieces", surface); result.addProperty("transports_workpieces", moving);
+        JsonObject result = new JsonObject(); result.addProperty("external_workpiece_processor", issue == null ? processor : null);
+        result.addProperty("external_workpiece_surface", issue == null ? surface : null); result.addProperty("surface_transports_workpieces", issue == null && surface ? moving : null);
         JsonObject state = new JsonObject(); requiredState.forEach(state::addProperty); result.add("required_processing_state", state);
         if (processor) {
             result.add("work_position_offset", offset(workOffset));
