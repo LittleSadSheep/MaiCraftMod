@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 
-/** Serialized native inputs. Analog changes await server block-entity updates; motion is a separate receipt. */
+/** 串行化原生输入；模拟控制变化等待服务器方块实体更新，移动效果则使用独立回执。 */
 public final class NativeVehicleControls {
     private static final String PACKETS="dev.simulated_team.simulated.network.packets.";
     private final MachineControlInspection.Observation observation;
@@ -73,7 +73,7 @@ public final class NativeVehicleControls {
             if(input.kind()==KEY) {
                 int keyCode=((Number)observation.circuit().node(input.id()).facts().get("key")).intValue();
                 submit=()->send(ctx,construct(PACKETS+"linked_typewriter.TypewriterKeyInteractionPacket",pos,keyCode,0,target>0?1:0));
-                // This protocol has no per-key server acknowledgement. Only dispatch settles here.
+                // 此协议没有逐键服务器确认；这里只能确认请求已派发。
                 confirmation=c->c.tickRevision()>tick ? NativeConfirmation.Verdict.APPLIED:NativeConfirmation.Verdict.PENDING;
             } else {
                 if(input.kind()==STEERING_WHEEL && !Boolean.TRUE.equals(call(ctx.level().getBlockState(pos).getBlock(),
@@ -118,7 +118,7 @@ public final class NativeVehicleControls {
         InputDriver.lookAt(ctx.player(),point);
         return DriverStation.hit(ctx.player(),structure,pos)!=null;
     }
-    /** Release only this session's held gestures; persistent throttle position belongs to the real machine. */
+    /** 仅释放本会话按住的操作；持续油门状态属于真实机器，不能由此随意更改。 */
     public void releaseGestures() {
         if(receipt!=null && last!=null) {
             ClientRuntime.actor().activeContext()

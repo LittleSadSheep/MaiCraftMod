@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import java.util.HashSet;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
-/** Inspect the actual control circuit in fixed-world or physical-structure coordinates. */
+/** 在固定世界坐标或实际结构坐标中检查真实控制回路。 */
 public final class MachineControlInspection {
     private static final int MAX_CELLS=32768, MAX_COMPONENTS=2048;
     public record Observation(UUID structureId, Map<BlockPos,Cell> cells, ControlCircuit circuit,

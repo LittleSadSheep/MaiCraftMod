@@ -9,7 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
-/** Directed ports, including strong power through one conductor; never floods through solid blocks. */
+/** 具有方向性的端口，包括通过单个导体的强电信号；信号不会穿过实心方块扩散。 */
 public final class ControlSignals {
     private ControlSignals() {}
     public static void connect(Level level, Map<BlockPos,Cell> cells, ControlCircuit circuit) {
@@ -56,7 +56,7 @@ public final class ControlSignals {
         }
         graph.connect(new ControlCircuit.Edge(source.id(),targetId,"redstone",path+"/"+behavior,true));
     }
-    /** Side is the face of the consumer towards the signal source. */
+    /** side 表示用电设备朝向信号源的那一面。 */
     static String input(Cell target,Direction side) {
         var kind=kind(target); var block=target.state().getBlock();
         if(kind==TRANSMITTER || kind==WIRE) return "signal";
@@ -73,7 +73,7 @@ public final class ControlSignals {
         if(ControlReflection.is(target.entity(),SIM+"analog_transmission.AnalogTransmissionBlockEntity")) return "analog_disconnect_at_15";
         if(ControlReflection.is(target.entity(),CREATE+"kinetics.transmission.ClutchBlockEntity")) return "clutch_disconnect_when_powered";
         if(ControlReflection.is(target.entity(),CREATE+"kinetics.transmission.GearshiftBlockEntity")) return "reverse_when_powered";
-        // Unknown consumers are evidence, but cannot be used to prove an actuator connection.
+        // 未知用电设备只能作为观察证据，不能用于证明执行器已连接。
         return null;
     }
     static Direction facing(BlockState state) {

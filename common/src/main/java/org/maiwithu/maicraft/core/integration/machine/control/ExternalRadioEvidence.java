@@ -15,7 +15,7 @@ import java.util.LinkedHashMap;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 
-/** Reports observed shared radio channels beyond the selected hull instead of treating them as private wires. */
+/** 报告在选定船体外部观察到的共享无线频道，不会将其误当成私有导线。 */
 final class ExternalRadioEvidence {
     private ExternalRadioEvidence() {}
     static void inspect(LocalPlayer player,MachineControlInspection.Observation observation,List<Link> internal) {

@@ -12,7 +12,7 @@ import java.util.TreeMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
-/** Detects rewiring, frequency changes and altered configuration before continued control. */
+/** 继续控制前先检查接线、频率及配置是否发生变化。 */
 public final class VehicleCircuitGuard {
     private final MachineControlInspection.Observation original;
     private final Map<BlockPos,String> states=new LinkedHashMap<>();

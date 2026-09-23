@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlComponents.*;
 
-/** Associates a real seat with reachable controls; proximity to an arbitrary structure is insufficient. */
+/** 将真实座位与可达控制装置关联；仅仅靠近某个任意结构并不足够。 */
 public record DriverStation(BlockPos seat,List<BlockPos> controls) {
     public DriverStation { seat=seat.immutable(); controls=List.copyOf(controls); }
     public static DriverStation select(LocalPlayer player,MachineControlInspection.Observation observation,VehicleControlPlan plan) {

@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 
-/** Derives control ranges and neutral signals from the connected mechanism, never from key names. */
+/** 根据已连接的机构推导控制范围和中性信号，不依赖按键名称。 */
 public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
     public record Input(String id,ControlCircuit.Kind kind,double neutral,double minimum,double maximum,
                         List<String> actuators,boolean propulsion) {
@@ -57,7 +57,7 @@ public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
                     : ((Number)node.facts().getOrDefault("angle_limit",0)).doubleValue();
             if(maximum<=0) { issues.add(node.id()+": unavailable control limits"); continue; }
             double neutral=disconnected ? maximum : 0;
-            // Releasing a typewriter key must not restart a powered transmission during handoff.
+            // 交接过程中释放类似打字机的按键时，不能重新启动已通电的传动机构。
             if(node.kind()==KEY && disconnected) issues.add(node.id()+": hold-to-stop circuit needs an independent persistent brake");
             inputs.add(new Input(node.id(),node.kind(),neutral,node.kind()==STEERING_WHEEL ? -maximum:0,maximum,
                     routes.stream().map(ControlCircuit.Route::actuator).distinct().toList(),propulsion));
