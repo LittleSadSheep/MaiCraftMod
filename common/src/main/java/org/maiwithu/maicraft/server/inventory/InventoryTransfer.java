@@ -8,7 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** One real player slot and one native machine slot; no remote block-to-block teleportation. */
+/** 在一个真实玩家槽位与一个原生机器槽位之间转移物品；不允许远程方块到方块传送。 */
 public final class InventoryTransfer {
     private InventoryTransfer() {}
 
@@ -56,8 +56,7 @@ public final class InventoryTransfer {
         validateRemainder(offer, simulated);
         int allowed = offer.getCount() - simulated.getCount();
         if (allowed == 0) return 0;
-        // Reserve genuine items before invoking the native writer. An exception leaves an unknown effect,
-        // never a fabricated rollback of a possibly accepted stack.
+        // 调用原生写入器前先预留真实物品。若调用抛出异常，结果应标记为未知，不能伪造回滚，因为目标槽可能已接收物品。
         ItemStack reserved = player.getInventory().removeItem(playerSlot, allowed);
         ItemStack remainder = port.insert(slot, reserved.copy(), false);
         validateRemainder(reserved, remainder);
@@ -75,7 +74,7 @@ public final class InventoryTransfer {
                 || simulated.getCount() > requested) throw new IllegalStateException("Native extraction simulation violated its contract");
         ItemStack extracted = port.extract(slot, simulated.getCount(), false);
         if (extracted.isEmpty()) return 0;
-        // Even a misbehaving provider's returned real stack must be retained, not replaced by the sample.
+        // 即使提供器行为异常，也必须保留其返回的真实堆叠，不能用样本堆叠替换。
         restore(player, playerSlot, extracted);
         if (!ItemStack.isSameItemSameComponents(sample, extracted) || extracted.getCount() > simulated.getCount()) {
             throw new IllegalStateException("Native extraction changed identity or amount; inspect the player inventory");
