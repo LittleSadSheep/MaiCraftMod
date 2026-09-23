@@ -11,9 +11,9 @@ public final class EatItemTaskRecord extends TaskRecord {
 
     public static final String TOOL_NAME = "eat";
 
-    /** The food item to eat (one is consumed on completion). */
+    /** 要食用的食物，任务完成时消耗一个。 */
     public final Item item;
-    /** Human-readable label for messages / debug overlay (e.g. "golden_apple"). */
+    /** 消息和调试覆盖层使用的可读标签，例如 "golden_apple"。 */
     public final String label;
 
     public EatItemTaskRecord(String toolCallId, long deadlineGameTime, Item item, String label) {
