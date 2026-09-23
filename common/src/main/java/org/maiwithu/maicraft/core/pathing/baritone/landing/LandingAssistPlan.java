@@ -58,7 +58,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         return hitPoint != null ? hitPoint : Vec3.atCenterOf(clicked).add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5));
     }
 
-    /** Native outline height of the face used by the bucket, including plants and partial blocks. */
+    /** 水桶实际命中面的原生选择形状高度，包含植物和非完整方块。 */
     public double placementHeight(BlockGetter view) {
         if (hitPoint != null) return hitPoint.y;
         var shape = view.getBlockState(clicked).getShape(view,clicked);
@@ -145,8 +145,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
             if (WaterBucketFall.sourceWater(view.getBlockState(source)))
                 return new LandingAssistPlan(Kind.WATER,feet,source,clicked,Direction.UP,true);
             if (!carried || protectedCell.test(source) || !canPlace(Kind.WATER,view,source)) return null;
-            // Replacing/flowing through one half of a tall plant can remove its paired half.
-            // Keep the whole observed plant column under the same terrain authorization.
+            // 替换或流经高大植物的一半可能会移除配对的另一半；整根已观察到的植物柱都必须遵守同一地形授权。
             for (int y=feet.getY();source.getY() >= feet.getY() && y<plantTop.getY();y++)
                 if (protectedCell.test(new BlockPos(feet.getX(),y,feet.getZ()))) return null;
             return new LandingAssistPlan(Kind.WATER,feet,source,clicked,
@@ -154,7 +153,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
                     floorHit == null ? null : floorHit.getLocation());
         }
 
-        /** Carried aids come first; missing supplies remain conditional plans, never inventory evidence. */
+        /** 优先使用已携带的救援用品；缺失材料只作为条件性计划，不能当成已在背包中的证据。 */
         // 允许补料时，额外列出“材料还可尝试取得”的方案；因此被列为候选不表示目前已经拿着该物品。
         public List<LandingAssistPlan> automaticCandidates(BlockGetter view, BlockPos feet,
                                                           Predicate<BlockPos> protectedCell, boolean maySupply) {
@@ -198,8 +197,7 @@ public record LandingAssistPlan(Kind kind, BlockPos feet, BlockPos cell, BlockPo
         if (kind != Kind.WATER && !kind.solidSupport() && !kind.block.defaultBlockState().is(BlockTags.FALL_DAMAGE_RESETTING)) return false;
         if (view instanceof LevelReader level)
             return kind.block.defaultBlockState().canSurvive(level,feet);
-        // Vanilla Block.canSurvive is unconditional for web/slime/hay. BushBlock and
-        // GrowingPlantBlock use these neighboring-block rules, also available in A* snapshots.
+        // 原版 Block.canSurvive 对蜘蛛网、黏液块和干草没有额外条件；BushBlock 与 GrowingPlantBlock 则采用此邻块规则，A* 快照也可读取。
         BlockState support = view.getBlockState(feet.below());
         return switch (kind) {
             case COBWEB, SLIME, HAY -> true;
