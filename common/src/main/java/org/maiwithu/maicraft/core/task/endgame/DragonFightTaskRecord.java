@@ -8,9 +8,8 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * Semantic permission and safety envelope for one observed Ender Dragon encounter.
- * Concrete entities, routes, block cells and inventory choices never cross this record's
- * tool boundary; the first-person executor derives them again from the live client world.
+ * 一次已观察到的末影龙战斗的语义许可与安全约束。
+ * 具体实体、路线、方块格和背包选择都不会越过此记录的工具边界；第一人称执行器会从客户端实时世界重新推导这些信息。
  */
 public final class DragonFightTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "dragon_fight";
