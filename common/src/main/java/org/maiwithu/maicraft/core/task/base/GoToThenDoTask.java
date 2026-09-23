@@ -18,7 +18,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         super(player, record);
     }
 
-    /** Build the navigation toward this task's target. Assigned to {@link #nav} on start.
+    /** 创建前往本任务目标的导航，并在任务开始时赋给 {@link #nav}。
      *  方块目标的动作任务返回 null——它们不再自带任何到场导航,身体必须已在
      *  工作距离内({@link #reached()}),否则直接教学失败让调用方先 goto。 */
     protected abstract PlayerNav buildNav();
@@ -31,7 +31,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         return null;
     }
 
-    /** Are we within reach to {@link #act()} this tick? */
+    /** 本 tick 是否已到达 {@link #act()} 的交互距离？ */
     protected abstract boolean reached();
 
     /**
@@ -44,7 +44,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         return player.onGround() || player.isInWater() || player.isPassenger();
     }
 
-    /** Do the bounded thing at the target; return {@link TaskState#RUNNING} or a terminal state. */
+    /** 在目标处执行有界动作；返回 {@link TaskState#RUNNING} 或终态。 */
     protected abstract TaskState act();
 
     @Override
@@ -52,10 +52,9 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         nav = buildNav();
     }
 
-    /** Consecutive nav-ARRIVED ticks with {@link #reached()} still false. */
+    /** 导航连续报告 ARRIVED，但 {@link #reached()} 仍为 false 的游戏刻数。 */
     private int dudTicks = 0;
-    /** Grace before arrived-but-not-reached is declared a stance dud — landing,
-     *  settling and onGround can lag goal membership by a few ticks. */
+    /** 判定到达但站位无效前的宽限时间；落地、稳定和 onGround 状态可能比目标成员关系晚几刻更新。 */
     private static final int DUD_GRACE_TICKS = 10;
 
     @Override
@@ -85,12 +84,9 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
             }
             // 导航到终点而实际操作条件还没满足时，先等十次更新，再报告站位不合用，交给子类选择是否换位。
             case ARRIVED -> {
-                // reached() said no above, so the nav's arrival is a stance-dud
-                // candidate: the search's membership is satisfied but the work
-                // still can't start from here (out of reach, no sight line).
-                // Route it through the SAME recovery ladder a failed path uses —
-                // it is just one more way this bounded goal failed to yield a
-                // working stance. The grace window absorbs settle transients.
+                // 上方的 reached() 检查未通过，因此导航到达可能是无效站位：搜索目标成员关系虽已满足，
+                // 但当前仍无法开始操作（超出交互距离或没有视线）。将其交给与寻路失败相同的恢复阶梯；
+                // 这只是有界目标未能提供可用站位的另一种情况，宽限期用于吸收落地稳定过程中的短暂状态。
                 if (++dudTicks < DUD_GRACE_TICKS) {
                     yield TaskState.RUNNING;
                 }
@@ -110,9 +106,8 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     }
 
     /**
-     * React to the nav giving up. Default: {@code fail(reason, type)} and
-     * terminate FAILED. Override to interpose a {@link RecoveryLadder} that offers
-     * an alternative approach to the same bounded goal before conceding.
+     * 处理导航放弃的情况。默认调用 {@code fail(reason, type)} 并以 FAILED 终止。
+     * 子类可插入 {@link RecoveryLadder}，在放弃前为同一有界目标提供另一种接近方式。
      */
     protected TaskState handleNavFailure(FailureType type, String reason) {
         fail(reason, type);
