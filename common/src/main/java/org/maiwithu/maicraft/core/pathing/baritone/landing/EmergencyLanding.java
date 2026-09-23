@@ -28,8 +28,7 @@ public final class EmergencyLanding {
         boolean grounded = player.onGround() || player.isInWater() || player.isSwimming() || player.onClimbable();
         if (grounded || WorkProfile.of(player).fearless()
                 || player.getDeltaMovement().y >= 0) return false;
-        // Start acquiring protection on the first descending tick when impact would hurt.
-        // Fast descent remains an independent fallback if a synced/modded estimate is stale.
+        // 首次检测到会造成伤害的下落时，就从下降 tick 开始准备着陆保护；若同步或模组估算过时，快速下降仍是独立的回退方案。
         if (SurvivalDecisions.mlgTriggered(false,
                 player.getDeltaMovement().y, true)) return true;
         BlockPos ground = groundBelow(player);
@@ -56,8 +55,7 @@ public final class EmergencyLanding {
         LandingAssistSession best = direct;
         double score = direct != null && (vertical || AirLandingControl.reachable(player,preferred))
                 ? 100 + player.position().distanceToSqr(Vec3.atBottomCenterOf(preferred)) : Double.POSITIVE_INFINITY;
-        // Small local alternatives are enough to steer around a hatch, plant bed or machine.
-        // Every candidate still needs a loaded native floor and a reachable full-body trajectory.
+        // 少量局部候选足以绕过活板门、种植床或机器；每个候选仍须有已加载的原生地面，并且角色完整身体的轨迹可达。
         for (int x=-2;x<=2;x++) for (int z=-2;z<=2;z++) {
             if (x == 0 && z == 0) continue;
             var feet = nearbyGround(context,ground.offset(x,0,z));
@@ -81,7 +79,7 @@ public final class EmergencyLanding {
                 && new AABB(hit.getBlockPos()).inflate(.00001).contains(hit.getLocation())
                 ? hit.getBlockPos().above() : null;
     }
-    /** A running fall keeps its already selected support and steering while adopting self-rescue. */
+    /** 持续下落时接管自救，但保留已选支撑点和转向。 */
     // 紧急救援使用落地辅助许可，并允许检查是否能补到材料；候选还要通过身体空间和干草减伤后能否生存的检查。
     public static LandingAssistSession find(LocalPlayerContext context, BlockPos feet) {
         if (!context.level().isLoaded(feet) || !context.level().isLoaded(feet.below())) return null;
@@ -90,8 +88,7 @@ public final class EmergencyLanding {
         var candidates = new ArrayList<LandingAssistPlan>();
         var rejected = new LinkedHashMap<String,String>();
         var player = context.player();
-        // A new physical fall gets its own bounded supply attempt; a previous route's failed
-        // search must not suppress emergency access after the player's situation changes.
+        // 每次新的实际坠落都有独立的有界材料获取机会；先前路线搜索失败不能因玩家处境改变而继续抑制紧急取物。
         var offered = inventory.automaticCandidates(context.level(), feet, EmbeddedBaritonePolicy::protects, true);
         if (offered.stream().noneMatch(plan -> plan.kind() == LandingAssistPlan.Kind.WATER))
             rejected.put("WATER",inventory.ultraWarm() ? "water evaporates in this dimension" : "native water placement or support is unavailable");
@@ -105,14 +102,13 @@ public final class EmergencyLanding {
                     && !plan.survives(FallDamageBudget.capture(player), player.getY(), true)) {
                 rejected.put("HAY","remaining damage would be fatal"); continue;
             }
-            // The fall has already happened: a useful native bucket-use tick need not be
-            // guaranteed for every possible departure phase. The session tests the actual
-            // ray and reach each tick; planned departures retain their stricter admission.
+            // 坠落已经发生，因此不能保证任意起跳阶段都存在有效的原生水桶使用 tick。会话会逐 tick 检查真实射线和距离；
+            // 对计划中的起跳仍使用更严格的准入条件。
             candidates.add(plan);
         }
         return candidates.isEmpty() ? null : LandingAssistSession.automatic(candidates, true).rejectedCandidates(rejected);
     }
-    /** Apply the shared session's aim and fall steering through the same native body lease. */
+    /** 通过同一原生身体租约，应用共享会话的瞄准和坠落转向。 */
     public static void tick(LocalPlayerContext context, LandingAssistSession session) {
         var player = context.player();
         session.tick(context);
@@ -127,7 +123,7 @@ public final class EmergencyLanding {
             return AirLandingControl.movement(player,session.plan().feet(),cameraYaw,sneak);
         }, player.getYRot(), context.tickRevision());
     }
-    /** Center plus four body corners, preserving the original closest native-collider probe. */
+    /** 检查身体中心和四角，并保留原本最近原生碰撞体探测逻辑。 */
     // 从身体中心和四个角向下读碰撞，选最先可能接触的地面；不能只看中心射线而漏掉擦到的台阶或边缘。
     private static BlockPos groundBelow(LocalPlayer player) {
         var level = player.level();
@@ -136,8 +132,8 @@ public final class EmergencyLanding {
         double span = top - bottom;
         if (!Double.isFinite(span) || span <= 0) return null;
         var box = player.getBoundingBox();
-        // Skip world-exterior air even when a mod places the player far above build height.
-        // Vertical rays stay in one loaded column and cover its effective build range.
+        // 即使模组把玩家放到远超建筑高度的区域，也要跳过世界范围外的空气。
+        // 竖直射线始终限制在同一已加载柱列，并覆盖其有效建筑高度范围。
         Vec3[] origins = {new Vec3(player.getX(), top, player.getZ()), new Vec3(box.minX, top, box.minZ),
                 new Vec3(box.maxX, top, box.minZ), new Vec3(box.minX, top, box.maxZ),
                 new Vec3(box.maxX, top, box.maxZ)};
@@ -149,8 +145,7 @@ public final class EmergencyLanding {
                     ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
             if (hit.getType() != HitResult.Type.BLOCK) continue;
             double drop = from.y - hit.getLocation().y;
-            // Sable's native clip may return plot-storage coordinates. Neither its location nor
-            // its block cell may be treated as a world-space landing without a matching world ray.
+            // Sable 原生 clip 可能返回地块存储坐标；在配对的世界射线验证通过前，不能将其位置或方块格用作世界着陆点。
             if (!Double.isFinite(drop) || drop < -1.0E-5 || drop > span + 1.0E-5
                     || Math.abs(hit.getLocation().x - from.x) > 1.0E-5
                     || Math.abs(hit.getLocation().z - from.z) > 1.0E-5
