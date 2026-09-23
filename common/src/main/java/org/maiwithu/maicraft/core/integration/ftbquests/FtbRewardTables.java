@@ -9,15 +9,19 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
+import org.maiwithu.maicraft.server.machine.NativeApi;
 import static org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestApi.*;
 
 /** 奖励表只列候选、权重和抽取规则；子奖励另读，既不展开循环引用，也不调用随机生成器。 */
 final class FtbRewardTables {
     private static final Set<String> TYPES = Set.of("ftbquests:choice", "ftbquests:random", "ftbquests:loot", "ftbquests:all_table");
     private FtbRewardTables() {}
-    static boolean isTable(String type) { return TYPES.contains(type); }
+    static boolean isTable(Object reward) {
+        // 扩展奖励也可能继承原生奖池，不能因类型 ID 不认识就用序列化间接遍历其隐藏内容。
+        return TYPES.contains(FtbQuestRewards.type(reward)) || NativeApi.is(reward, "dev.ftb.mods.ftbquests.quest.reward.RandomReward");
+    }
     static Object visibleTable(Object reward, boolean canChoose) {
-        if (!isTable(FtbQuestRewards.type(reward))) return null;
+        if (!isTable(reward)) return null;
         Object table = call(reward, "getTable");
         // 隐藏提示的选择奖励只有在当前玩家可打开选择界面时才展示候选；其他隐藏奖池保持隐藏。
         return table != null && (flag(table, "shouldShowTooltip") || canChoose && FtbQuestRewards.type(reward).equals("ftbquests:choice")) ? table : null;
@@ -37,11 +41,15 @@ final class FtbRewardTables {
     }
     static JsonObject read(Object reward, Object table, String path, int offset) {
         JsonObject out = identity(table); String type = FtbQuestRewards.type(reward), revision = revision(table);
-        boolean random = !type.equals("ftbquests:choice") && !type.equals("ftbquests:all_table");
+        boolean random = type.equals("ftbquests:random") || type.equals("ftbquests:loot");
         boolean includeEmpty = type.equals("ftbquests:loot");
         double total = ((Number) call(table, "getTotalWeight", includeEmpty)).doubleValue();
-        out.addProperty("mode", type.substring(10)); out.addProperty("revision", revision);
+        out.addProperty("mode", TYPES.contains(type) ? type.substring(10) : "native_table_definition"); out.addProperty("revision", revision);
         out.addProperty("loot_size", (Number) FtbQuestData.field(table, "lootSize"));
+        // 选择奖励固定选一项，全表奖励直接发全部；只有随机模式才使用 lootSize 作为抽取次数。
+        if (random) out.addProperty("draws", (Number) FtbQuestData.field(table, "lootSize"));
+        else if (type.equals("ftbquests:choice")) out.addProperty("selection_count", 1);
+        else if (type.equals("ftbquests:all_table")) out.addProperty("grants_all_entries", true);
         out.addProperty("total_weight", total);
         if (includeEmpty) out.addProperty("empty_weight", (Number) FtbQuestData.field(table, "emptyWeight"));
         List<?> rows = rows(table); JsonArray entries = new JsonArray();

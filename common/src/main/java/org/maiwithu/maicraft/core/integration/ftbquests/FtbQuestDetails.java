@@ -76,7 +76,13 @@ final class FtbQuestDetails {
         }
         result.add("dependencies", dependencies); result.addProperty("hidden_dependency_count", hidden);
         JsonArray tasks = new JsonArray();
-        for (Object task : (Iterable<?>) call(quest, "getTasks")) tasks.add(FtbQuestTasks.read(task, team));
+        boolean previousCompleted = true; int index = 0;
+        // 顺序任务只报告前一项是否满足门槛；材料是否匹配、能否提交仍由该原生任务判定。
+        for (Object task : (Iterable<?>) call(quest, "getTasks")) {
+            JsonObject row = FtbQuestTasks.read(task, team); row.addProperty("sequence_index", index++);
+            row.addProperty("sequence_requirement_satisfied", !result.get("sequential_tasks").getAsBoolean() || previousCompleted);
+            tasks.add(row); previousCompleted = flag(team, "isCompleted", task);
+        }
         result.add("tasks", tasks);
         result.add("rewards", FtbQuestRewards.read(quest, team, player, "", 0));
         return result;

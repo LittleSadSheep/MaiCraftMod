@@ -54,6 +54,12 @@ public final class FtbQuestTasks {
         result.addProperty("only_from_crafting", flag(task, "isOnlyFromCrafting"));
         result.addProperty("task_screen_only", flag(task, "isTaskScreenOnly"));
         result.addProperty("match_components", data.contains("match_components") ? data.getString("match_components") : "none");
+        // 原生收集任务只在不消耗物品时检查合成来源，保留配置值并单独给出实际生效条件。
+        JsonObject conditions = result.getAsJsonObject("conditions"); conditions.addProperty("unit", "items");
+        conditions.add("matching_stack", FtbQuestData.json(data.get("item")));
+        conditions.add("item_id", result.get("item_id")); conditions.add("consume_items", result.get("consumes_resources"));
+        conditions.addProperty("crafting_only_effective", !flag(task, "consumesResources") && flag(task, "isOnlyFromCrafting"));
+        conditions.add("task_screen_only", result.get("task_screen_only")); conditions.add("match_components", result.get("match_components"));
         // 过滤器可能匹配很多材料；只列展示样例并标明总数，真实匹配仍由 FTB 的任务定义决定。
         List<?> items = (List<?>) call(task, "getValidDisplayItems");
         JsonArray examples = new JsonArray();

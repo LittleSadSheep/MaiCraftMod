@@ -21,6 +21,7 @@ final class FtbRewardContents {
                 out.addProperty("item_name", item.getHoverName().getString());
                 out.addProperty("count_min", Long.toString(count)); out.addProperty("count_max", Long.toString(count + data.getInt("random_bonus")));
                 out.addProperty("only_one", data.getBoolean("only_one"));
+                out.addProperty("grant_condition", data.getBoolean("only_one") ? "matching_item_not_already_in_inventory" : "none");
                 out.add("item_stack", FtbQuestData.json(data.get("item")));
             }
             case "ftbquests:xp" -> { out.addProperty("unit", "xp_points"); out.addProperty("amount", data.getInt("xp")); }

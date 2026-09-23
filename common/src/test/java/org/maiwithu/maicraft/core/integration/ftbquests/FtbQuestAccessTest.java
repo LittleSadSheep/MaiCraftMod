@@ -40,6 +40,7 @@ public final class FtbQuestAccessTest {
                 && task.get("consumes_resources").getAsBoolean() && task.get("only_from_crafting").getAsBoolean()
                 && task.get("task_screen_only").getAsBoolean() && task.get("match_components").getAsString().equals("exact"),
                 "保留消耗、合成来源、任务屏幕和组件匹配条件");
+        check(!task.getAsJsonObject("conditions").get("crafting_only_effective").getAsBoolean(), "消耗型提交不额外要求合成事件");
         // 隐藏详情时连任务条件都不展开，隐藏正文时保留允许玩家查看的任务目标。
         fixture.quest.hideDetails = true; fixture.quest.startable = false;
         check(!fixture.access.snapshot().chapters().getFirst().quests().getFirst().details().get().has("tasks"), "锁定详情不读条件");

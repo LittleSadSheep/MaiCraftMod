@@ -338,7 +338,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 "and read them on updates; notifications themselves do not run the model. " +
                 "For block behavior and Ponder tutorials, start with maicraft://knowledge/index. " +
                 // 主 Agent 可经既有工具读任务书，完成相关行动后再核实队伍进度，不要求宿主新增 FTB 连接。
-                "For FTB Quests, read maicraft://knowledge/ftbquests/index, then chapter and quest URIs for visible requirements and current team progress. " +
+                "For FTB Quests, read maicraft://knowledge/ftbquests/index for filtered quest lists, then returned chapter, quest and reward URIs for visible conditions, rewards and current player/team progress. " +
                 "For building design formats and validation revisions, read maicraft://building/index. " +
                 "Discover metadata using resources/list or perceive(view=knowledge, focus=item ID/name), " +
                 "then read one returned URI using resources/read or perceive(view=knowledge, resource_uri=...). " +

@@ -57,7 +57,7 @@ final class FtbQuestRewards {
         out.add("claim", rootState); out.addProperty("claim_scope", parts.length == 1 ? "quest_reward" : "parent_reward");
         JsonObject content = identity(reward); String type = type(reward); content.addProperty("type", type);
         out.add("reward", content);
-        if (FtbRewardTables.isTable(type)) {
+        if (FtbRewardTables.isTable(reward)) {
             Object table = FtbRewardTables.visibleTable(reward, parts.length == 1 && rootState.get("can_claim").getAsBoolean());
             content.addProperty("content_status", table == null ? "hidden_or_unavailable" : "structured");
             if (table != null) out.add("table", FtbRewardTables.read(reward, table, path, offset));
