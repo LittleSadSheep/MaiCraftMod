@@ -28,8 +28,7 @@ public final class DropTracker {
     private final Set<Integer> preexisting = new HashSet<>();
     private final Map<Integer, Integer> preexistingCounts = new HashMap<>();
     private final Set<Integer> tracked = new LinkedHashSet<>();
-    /** First-seen type and largest attributable unit count survive entity pruning,
-     *  so a later inventory packet can still prove where a vanished drop went. */
+    /** 首次观察到的类型和最大可归属数量会在实体剪枝后保留，因此后续背包数据包仍可证明已消失掉落物的去向。 */
     private final Map<Integer, Item> observedItems = new HashMap<>();
     private final Map<Integer, Integer> observedCounts = new HashMap<>();
     private final Map<Item, Integer> inventoryBaseline = new HashMap<>();
@@ -45,7 +44,7 @@ public final class DropTracker {
         }
     }
 
-    /** Snapshot the authoritative main inventory before the causal drop-producing action. */
+    /** 在产生因果掉落的动作前，快照记录权威主背包。 */
     public void rememberInventory(Player player) {
         inventoryBaseline.clear();
         inventoryUnitsBefore = 0;
@@ -108,7 +107,7 @@ public final class DropTracker {
         return !live(level, Set.of()).isEmpty();
     }
 
-    /** Number of causally attributed units represented by every observed drop id. */
+    /** 所有已观察掉落 ID 代表的、可因果归属的物品总数。 */
     public int attributableUnits() {
         return observedCounts.values().stream().mapToInt(Integer::intValue).sum();
     }
@@ -118,9 +117,7 @@ public final class DropTracker {
     }
 
     /**
-     * Positive synchronized main-inventory deltas for the item types this tracker
-     * actually observed. This remains valid after {@link #prune} removes vanished
-     * entity ids from the live set.
+     * 返回该追踪器实际观察到的物品类型在同步主背包中的正向增量。即使 {@link #prune} 将已消失实体 ID 从活动集合中移除，此证据仍然有效。
      */
     // 按曾观察到的物品种类累计背包正增量；同种物品若从别处增加，也会进入这份数值。
     public int receivedTrackedUnits(Player player) {
@@ -132,7 +129,7 @@ public final class DropTracker {
                 .sum();
     }
 
-    /** Fallback receipt for a drop absorbed before it was ever render-visible. */
+    /** 掉落物在客户端渲染前被直接吸收时使用的备用回执。 */
     // 所有主背包物品的总件数相比开始时增加多少；这不是某次掉落事件的来源证明。
     public int totalInventoryUnitGain(Player player) {
         if (!inventoryRemembered) return 0;
