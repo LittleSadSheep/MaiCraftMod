@@ -58,8 +58,7 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
     }
 
     /**
-     * Internal composition constructor. Exclusions are typed world evidence owned by the Mod,
-     * never MCP arguments and never included in the public result.
+     * 内部组合构造器。排除项是 Mod 自有且类型明确的世界证据，既不是 MCP 参数，也不会包含在公开结果中。
      */
     public PhysicalStructureSearchTaskRecord(
             String toolCallId,
@@ -75,7 +74,7 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
                 excludedEvidenceAnchors, evidenceExclusionRadius);
     }
 
-    /** Internal composition constructor with an explicit rare-consumable permission. */
+    /** 带有明确稀有消耗品许可的内部组合构造器。 */
     public PhysicalStructureSearchTaskRecord(
             String toolCallId,
             long deadlineGameTime,
@@ -110,7 +109,7 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
         this.evidenceExclusionRadius = Math.clamp(evidenceExclusionRadius, 0, 256);
     }
 
-    /** Calling this method forces static task registration during Mod initialization. */
+    /** 调用此方法会在 Mod 初始化期间强制完成静态任务注册。 */
     public static void ensureRegistered() {}
 
     @Override
