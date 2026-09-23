@@ -23,7 +23,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.integration.physics.StructurePresentation;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 
-/** Read-only physical-sublevel observation; block storage positions never masquerade as world targets. */
+/** 只读观察物理子层级；方块存储位置绝不会冒充世界目标坐标。 */
 final class PhysicalStructurePerception {
     private static final int RANGE = 128;
     private PhysicalStructurePerception() {}
@@ -40,7 +40,7 @@ final class PhysicalStructurePerception {
         Vec3 eye = player.getEyePosition();
         BlockHitResult hit;
         try {
-            // Sable's own Level.clip transforms the ray into sublevels and compares occlusion.
+            // Sable 自身的 Level.clip 会将射线转换到子层级并检查遮挡。
             hit = player.level().clip(new ClipContext(eye, eye.add(player.getViewVector(1F).scale(RANGE)),
                     ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         } catch (RuntimeException | LinkageError failure) {
@@ -165,7 +165,7 @@ final class PhysicalStructurePerception {
     static String mainWorldClearance(AABB body,
                                     BiPredicate<BlockPos, BlockPos> loaded,
                                     BooleanSupplier clear) {
-        // BlockCollisions also visits adjacent origins for shapes protruding across chunk edges.
+        // BlockCollisions 也会检查相邻起点，以处理碰撞形状伸入区块边界另一侧的情况。
         var origins = body.inflate(1.0000001);
         if (!loaded.test(BlockPos.containing(origins.minX, origins.minY, origins.minZ),
                 BlockPos.containing(origins.maxX, origins.maxY, origins.maxZ))) return "unknown_unloaded";
