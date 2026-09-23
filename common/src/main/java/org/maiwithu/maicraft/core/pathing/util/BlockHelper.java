@@ -47,16 +47,10 @@ public final class BlockHelper {
             Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
 
     /**
-     * Can the entity's body occupy this cell (no collision, not a fluid we
-     * refuse to enter)? True for air, grass, flowers, etc.
+     * 判断角色身体能否占据此格：格内无碰撞，且不是禁止进入的液体。空气、草和花等均可通行。
      *
-     * <p>Water is handled here, in the passability predicate itself, rather than
-     * as a bolt-on swim move. Flowing
-     * water is refused (the current shoves us off-path); still water is passable
-     * ONLY as the SURFACE cell — i.e. nothing fluid directly above it — so the
-     * move graph contains the water surface plane but never a submerged corridor.
-     * Lava is never passable. This is what lets the generic traverse/ascend/
-     * descend route across water with no dedicated swim edge.
+     * <p>水面直接纳入通行判定，不另造游泳移动。流动水会把角色推离路线，因此拒绝进入；静水只允许占据水面格，
+     * 即其上方没有液体，从而让移动图沿水面通行而不会规划水下走廊。熔岩始终不可通行，因此普通前进、上升和下降路线无需专设游泳边。
      */
     public static boolean canWalkThrough(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
@@ -65,16 +59,13 @@ public final class BlockHelper {
         if (!fluid.isEmpty()) {
             if (!fluid.is(FluidTags.WATER)) return false;       // lava etc. — never
             if (isFlowingWater(level, pos)) return false;        // current shoves us
-            // Surface only: a fluid (or a lily pad) directly above means we'd be
-            // submerged / capped here, not at a free surface.
+            // 只走水面：上方有液体或睡莲叶时，角色会处于水下或被覆盖，不是自由水面。
             BlockState up = level.getBlockState(pos.above());
             if (!up.getFluidState().isEmpty()) return false;
             return !up.is(Blocks.LILY_PAD);
         }
-        // Explicit deny-list: blocks we must never path through.
-        // Many have an EMPTY/partial collision shape (fire, cobweb, sweet-berry, powder
-        // snow, open trapdoor, big dripleaf…) so the raw shape test below would wrongly
-        // pass them; the explicit list is what stops the body walking into them.
+        // 明确列出角色绝不能穿过的方块。火、蜘蛛网、甜浆果丛、细雪、打开的活板门和大叶草等碰撞形状可能为空或不完整，
+        // 单靠下方形状检测会误判为可通行，因此必须先用此名单拦截。
         if (block instanceof BaseFireBlock
                 || state.is(Blocks.COBWEB) || state.is(Blocks.END_PORTAL)
                 || state.is(Blocks.COCOA) || block instanceof AbstractSkullBlock
@@ -87,14 +78,11 @@ public final class BlockHelper {
                 || block instanceof CauldronBlock) {
             return false;
         }
-        // Wooden doors / fence gates are passable even when shut — the path
-        // executor opens them by hand. Iron doors stay a hard
-        // obstruction: no redstone, can't open. So they fall through to the
-        // collision test below and read as solid.
+        // 木门和栅栏门即使关闭也可规划通过，执行器会亲手打开；铁门没有红石无法打开，因此继续进入碰撞检测并视为实心障碍。
         if (isOpenableDoor(state)) {
             return true;
         }
-        // A thin carpet floor cover is always walkable over.
+        // 薄地毯不会阻止角色行走。
         if (block instanceof CarpetBlock) {
             return true;
         }
@@ -103,9 +91,8 @@ public final class BlockHelper {
     }
 
     /**
-     * A wooden door or fence gate the body can open by hand — NOT an iron door
-     * (needs redstone). The path treats these as passable (no breaking) and the
-     * executor right-clicks them open when shut.
+     * 判断门是否能由角色徒手打开：木门和栅栏门可以，铁门需要红石而不可开。寻路将可手动打开的门视为可通过且不破坏，
+     * 到达关闭的门前后由执行器右键打开。
      */
     // 这里当前按具体的原版铁门排除，其他 DoorBlock 都归入可打开类；并没有逐个读取门材质的手动开启能力。
     public static boolean isOpenableDoor(BlockState state) {
@@ -116,21 +103,17 @@ public final class BlockHelper {
                 || state.getBlock() instanceof FenceGateBlock;
     }
 
-    /** Is this door/gate currently open (OPEN blockstate property true)? */
+    /** 查询门或栅栏门当前是否打开，即方块状态的 OPEN 属性是否为 true。 */
     public static boolean isDoorOpen(BlockState state) {
         return state.hasProperty(BlockStateProperties.OPEN)
                 && state.getValue(BlockStateProperties.OPEN);
     }
 
     /**
-     * Can a body approaching the
-     * door/gate at {@code doorPos} from the adjacent cell {@code fromPos} pass through it
-     * AS IT CURRENTLY STANDS? A fence gate is passable iff open. A door is
-     * orientation-aware: passable iff {@code (facingAxis == approachAxis) == open}
-     * — so an open door perpendicular to the approach still BLOCKS (its panel swung across the
-     * gap), and a closed door flush with the approach does not. The executor toggles (right-clicks)
-     * any door/gate this reports as NOT passable, which both opens a blocking-closed one and
-     * closes a blocking-open one. Non-door/gate blocks read as passable (not our concern).
+     * 判断角色能否从相邻的 {@code fromPos} 穿过 {@code doorPos} 上当前形态的门或栅栏门。栅栏门只有打开时可通行；
+     * 门还要结合朝向：{@code (facingAxis == approachAxis) == open} 才能通过。打开但门板横挡路线的门仍不可通行，
+     * 与接近方向平行的关闭门则可通过。若此处判为不可通行，执行器会右键切换门状态，以打开挡路的关闭门或关闭横挡路线的打开门。
+     * 非门类方块一律视为可通过，由其他判定负责。
      */
     public static boolean isDoorwayPassable(BlockGetter level, BlockPos doorPos, BlockPos fromPos) {
         BlockState state = level.getBlockState(doorPos);
@@ -157,18 +140,15 @@ public final class BlockHelper {
         return (facing == approach) == open;
     }
 
-    /** Is this cell water (source or flowing)? */
+    /** 判断此格是否为水源或流动水。 */
     public static boolean isWater(BlockGetter level, BlockPos pos) {
         return level.getBlockState(pos).getFluidState()
                 .is(FluidTags.WATER);
     }
 
     /**
-     * Is this a FLOWING water cell?
-     * A non-source level is flowing; a source block is "flowing" too when it
-     * feeds a horizontal non-source neighbour (edge of a pool) — unsafe to
-     * walk because the current there pushes you. Used to keep the
-     * route on still water only.
+     * 判断此格是否属于流动水。非水源方块一定在流动；水源若向水平相邻的非水源格供水（池塘边缘）也视为流动，
+     * 因为水流会推开角色。此判定让路线只沿静水区域前进。
      */
     public static boolean isFlowingWater(BlockGetter level, BlockPos pos) {
         FluidState fluid = level.getBlockState(pos).getFluidState();
@@ -182,26 +162,21 @@ public final class BlockHelper {
     }
 
     /**
-     * Can the entity stand on TOP of this block (i.e. is it a solid floor)?
+     * 判断角色能否站在此方块顶部，也就是它是否构成稳定地面。
      *
-     * <p>Water: a water
-     * cell is "walkable on" iff there is water directly ABOVE it — i.e. you
-     * float at the surface, treading on the submerged column, never on the very
-     * top (air-headed) cell. Combined with {@link #canWalkThrough}'s surface
-     * rule, this pins the body to the water surface plane.
+     * <p>水格只有在其正上方仍有水时才算可站立面，角色因此浮在水面并踩在水下水柱上，而不是站在最上层空气格。
+     * 配合 {@link #canWalkThrough} 的水面通行限制，可将角色约束在水面高度。
      */
     public static boolean canWalkOn(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         FluidState fluid = state.getFluidState();
         if (!fluid.isEmpty()) {
             if (!fluid.is(FluidTags.WATER)) return false;   // lava is never a floor
-            // Walk on water only where water is above (submerged → float here).
+            // 只有上方仍有水时才在此格站立，表示角色处于水下并向水面浮起。
             return isWater(level, pos.above());
         }
         if (state.isAir()) return false;
-        // Explicit allow-list: blocks that are NOT full collision
-        // cubes but are still safe to stand on. The generic full-cube test below would
-        // miss these (farmland/path are 15/16 tall, chests/ladders/azalea aren't cubes).
+        // 明确允许站立的非完整碰撞方块名单；下方完整方块检测会漏掉农田、道路（高度为 15/16 格）、箱子、梯子和杜鹃等安全支撑面。
         if (state.is(Blocks.FARMLAND) || state.is(Blocks.DIRT_PATH) || state.is(Blocks.SOUL_SAND)) return true;
         if (state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.ENDER_CHEST)) return true;
         if (state.is(Blocks.GLASS) || state.getBlock() instanceof StainedGlassBlock) return true;
@@ -209,22 +184,18 @@ public final class BlockHelper {
         if (state.getBlock() instanceof AzaleaBlock) return true;
         if (state.getBlock() instanceof StairBlock) return true;
         if (state.getBlock() instanceof SlabBlock) {
-            // ALL slabs are a floor. Standing
-            // on a bottom slab is reconciled by playerFeet() returning the cell ABOVE it.
+            // 所有半砖都视为地面；若角色站在下半砖上，playerFeet() 会将脚位统一表示为其上方格。
             return true;
         }
-        // Magma / honey are full cubes but refused as floors (damage / stickiness).
+        // 岩浆块和蜂蜜块虽然是完整方块，但会造成伤害或粘滞，因此不能作为地面。
         if (state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.HONEY_BLOCK)) return false;
-        // Everything else: a normal full collision cube.
+        // 其他情况按普通完整碰撞方块处理。
         return state.isCollisionShapeFullBlock(level, pos);
     }
 
     /**
-     * The body's feet cell for pathing — the
-     * position nudged up 0.1251 (so sinking on soul sand / farmland doesn't read a block
-     * low) and, when that cell is a slab or stair, taken as the cell ABOVE it. This mirrors
-     * {@code Movement.feet}: both partial-height supports are represented by the move graph as
-     * standing in the cell above them.
+     * 返回寻路使用的脚位：将实际位置上移 0.1251，避免角色陷入灵魂沙或农田后被读成更低一格；若所在格为半砖或楼梯，则取其上方格。
+     * 这与 {@code Movement.feet} 一致，让移动图将两种非整高支撑面都表示为站在其上一格。
      */
     public static BlockPos playerFeet(BlockGetter level, double x, double y, double z) {
         BlockPos f = BlockPos.containing(x, y + 0.1251, z);
@@ -235,7 +206,7 @@ public final class BlockHelper {
         return f;
     }
 
-    /** A slab occupying the bottom half of its cell. */
+    /** 判断半砖是否占据所在方块格的下半部。 */
     public static boolean isBottomSlab(BlockState state) {
         return state.getBlock() instanceof SlabBlock
                 && state.getValue(SlabBlock.TYPE) == SlabType.BOTTOM;
@@ -246,8 +217,7 @@ public final class BlockHelper {
     }
 
     /**
-     * A "feet" cell is a valid standing spot: 2 cells of clearance above a
-     * solid floor.
+     * 判断脚位格是否可站立：下方有坚实地面，且上方留有两个方块格的空间。
      */
     public static boolean isStandable(BlockGetter level, BlockPos feet) {
         return canWalkOn(level, feet.below())
@@ -256,12 +226,8 @@ public final class BlockHelper {
     }
 
     /**
-     * A genuinely dry standing cell. Unlike {@link #isStandable}, this deliberately excludes
-     * the water-surface lattice used by ordinary navigation: the feet and head must be fluid-free
-     * and passable, and the support must be stable.
-     * Semantic destinations that promise a land stance (a coast approach, build survey point,
-     * fishing stance, and so on) should use this predicate instead of treating swimmable water as
-     * land.
+     * 判断是否为真正干燥的站立格。与 {@link #isStandable} 不同，此判定排除普通寻路使用的水面网格：脚部和头部必须无液体且可通行，支撑面也必须稳定。
+     * 海岸接近点、建筑勘查点、钓鱼站位等明确要求陆地位置的语义目标应使用此谓词，不能把可游泳水域当作陆地。
      */
     public static boolean isDryStandable(BlockGetter level, BlockPos feet) {
         BlockPos head = feet.above();
@@ -274,19 +240,16 @@ public final class BlockHelper {
     }
 
     /**
-     * Is this block a hazard the bot must never stand in / next to break?
-     * Lava and fire are hard hazards; we keep it minimal for the MVP.
+     * 判断此方块是否为角色绝不能站入或贴近破坏的危险物。熔岩和火焰属于硬性危险；当前只纳入明确会造成伤害的情形。
      */
     public static boolean isHazard(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         FluidState fluid = state.getFluidState();
         if (!fluid.isEmpty()) {
-            // Lava is the dangerous fluid. Water we simply don't enter (above),
-            // but it isn't a damage hazard.
+            // 熔岩属于危险液体；水在上方通行判定中已被排除，但本身不是伤害危险。
             return fluid.getType().getBucket() == Items.LAVA_BUCKET;
         }
-        // The non-fluid hazard set — blocks we must never
-        // path into (magma included: it damages on contact).
+        // 非液体危险方块名单，角色绝不能寻路进入；岩浆块也会因接触造成伤害。
         return state.is(Blocks.MAGMA_BLOCK)
                 || state.is(Blocks.CACTUS)
                 || state.is(Blocks.SWEET_BERRY_BUSH)
@@ -297,10 +260,8 @@ public final class BlockHelper {
     }
 
     /**
-     * A cell we shouldn't walk/sprint
-     * INTO — ANY fluid (incl. water, unlike {@link #isHazard}) plus the same block set.
-     * Used for "is it safe to keep moving into the cell ahead" checks (walk-while-break
-     * suppressor, descend safeMode), where even water counts (the current shoves us).
+     * 判断角色不应步行或冲刺进入的格子：任意液体（包括 {@link #isHazard} 未视为伤害危险的水）及同一危险方块集合。
+     * 用于继续走向前方格子的安全检查，例如边走边挖抑制器和安全下降模式；水流也会推开角色，因此同样要拦截。
      */
     public static boolean avoidWalkingInto(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
@@ -315,19 +276,12 @@ public final class BlockHelper {
     }
 
     /**
-     * Can we aim at the given {@code face} of this block and place against it. The face must
-     * be sturdy — the same face test vanilla uses to judge whether a block is supported —
-     * so a full cube, glass, a TOP slab's top face, a stair's solid back, or soul sand's top
-     * all qualify, while a bottom slab's top (the face sits inside the cell, a ray at the
-     * boundary misses it) does not. Judged per shared face, not per block, so a half-height
-     * platform is real support from above even though its sides are not.
+     * 判断能否瞄准此方块的 {@code face} 并以它为支撑面放置。该面必须坚固，遵循原版判断方块是否获得支撑的规则。
+     * 完整方块、玻璃、上半砖顶部、楼梯实心背面和灵魂沙顶部均可支撑；下半砖的顶面位于方块格内部，边界射线无法命中，因此不接受。
+     * 判定针对共享的具体面而非整个方块，所以半高平台可从上方提供支撑，即使其侧面不够坚固。
      *
-     * <p>A handful of behaviour-special blocks are refused outright regardless of face
-     * sturdiness: bamboo and pointed dripstone snap, a moving piston is mid-teleport,
-     * scaffolding shifts, shulker boxes animate their lid into the click, amethyst clusters
-     * shatter — none is a face worth aiming a placement at. GUI blocks (crafting tables,
-     * chests, hoppers) need no refusal here: placement always sneaks, and a sneaked click
-     * places against the block instead of opening it.
+     * <p>少数具有特殊行为的方块无论表面多坚固都拒绝作为放置目标：竹子和滴水石会折断，活塞移动时会改变位置，脚手架会移动，
+     * 潜影盒会在点击时开盖，紫水晶簇会碎裂。工作台、箱子和漏斗等界面方块无需在此排除，因为放置总会潜行，潜行点击会贴方块放置而不会打开界面。
      */
     public static boolean canPlaceAgainst(BlockGetter level, BlockPos pos, Direction face) {
         BlockState state = level.getBlockState(pos);
@@ -341,16 +295,12 @@ public final class BlockHelper {
     }
 
     /**
-     * The neighbour direction whose fluid would pour into {@code pos} if it
-     * were broken — {@link Direction#UP} or a horizontal, never {@code DOWN}
-     * (vanilla fluids spread to the cardinals + down, so only an overhead or
-     * sideways source can fill a cell you just emptied; a fluid below can't
-     * flow up into it). Lava is returned in preference to water as the worse
-     * hazard. Returns {@code null} when breaking releases no flow.
+     * 返回破坏 {@code pos} 后会流入该格的相邻方向：仅可能是 {@link Direction#UP} 或水平方向，绝不会是 {@code DOWN}。
+     * 原版液体会沿水平四向及向下扩散，因此上方或侧面的液源会填入刚腾空的格子，下方液体不会向上流入。
+     * 熔岩危险性高于水，若两者都可能流入则优先返回熔岩方向；不会引发流动时返回 {@code null}。
      *
-     * <p>The single source of truth for "breaking this unleashes a fluid",
-     * consulted by the A* break cost ({@link #breakWouldCreateFlow}) so
-     * "safe to route through" and "safe to mine on purpose" never disagree.
+     * <p>这是判断“破坏方块会释放液体”的唯一依据；A* 破坏成本通过 {@link #breakWouldCreateFlow} 使用它，
+     * 确保“可安全穿过”和“可安全主动挖掘”采用一致规则。
      */
     // 检查上方和四周会不会放出流体，优先返回岩浆方向；不检查下方，因为下方流体不会因挖上面一格而向上灌。
     public static Direction fluidReleasedByBreaking(BlockGetter level, BlockPos pos) {
@@ -366,17 +316,14 @@ public final class BlockHelper {
     }
 
     /**
-     * Boolean form of {@link #fluidReleasedByBreaking} for the A* break cost:
-     * would breaking {@code pos} expose the cell to an adjacent fluid that
-     * then floods or lava-bathes the route?
+     * {@link #fluidReleasedByBreaking} 的布尔形式，供 A* 破坏成本使用：破坏 {@code pos} 是否会让相邻液体流入并淹没路线或灌入熔岩？
      */
     public static boolean breakWouldCreateFlow(BlockGetter level, BlockPos pos) {
         return fluidReleasedByBreaking(level, pos) != null;
     }
 
     /**
-     * Is this block breakable at all? Bedrock / unbreakable (hardness < 0) are
-     * never breakable; air is a no-op (return false — nothing to break).
+     * 判断方块是否能够被破坏。基岩和硬度小于零的方块不可破坏；空气没有可破坏目标，因此返回 false。
      */
     public static boolean isBreakable(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
@@ -387,23 +334,17 @@ public final class BlockHelper {
     }
 
     /**
-     * {@code getDestroySpeed} takes a {@code BlockGetter}; this is just an
-     * identity pass-through kept as a seam in case we need to adapt the
-     * argument type per loader/version.
+     * {@code getDestroySpeed} 接受 {@code BlockGetter}；此方法仅透传参数并保留适配边界，以便未来按加载器或版本转换参数类型。
      */
     private static BlockGetter asBlockGetterLevel(BlockGetter level) {
         return level;
     }
 
     /**
-     * Can {@code inv}'s tools actually HARVEST {@code state}'s drops — i.e. break it and get the
-     * item, not just destroy it? True when the block drops without a tool, or ANY inventory slot
-     * holds the correct tool. Mining a {@code requiresCorrectToolForDrops} block with the wrong
-     * tool removes it for nothing, so the cost model vetoes it and the break/mine tools refuse it.
-     * Single source of truth — paired with {@code switchToBestTool}, which can swap a backpack
-     * tool into the hand. DELIBERATELY scans the WHOLE inventory, not just the
-     * hotbar (a real player's quick-switch set): a companion can dig into its own pack, so the
-     * gate + cost + execution all scan the whole inventory together.
+     * 判断 {@code inv} 中的工具能否采集 {@code state} 的掉落物，即破坏方块后能否获得物品，而不只是将其摧毁。
+     * 方块无需工具即可掉落，或任一背包槽位持有正确工具时才返回 true。对 {@code requiresCorrectToolForDrops} 方块使用错误工具会空手破坏且无掉落，
+     * 因此成本模型会拒绝该目标，break/mine 工具也会阻止操作。此处与 {@code switchToBestTool} 共用全背包扫描；后者可把背包里的工具换到手上，
+     * 所以判定、成本和实际执行都检查完整背包，而不只检查快捷栏。
      */
     // 看是否具备取得正常掉落物的工具；背包扫描范围由传入容器决定，这里不负责把该物品装备到手上。
     public static boolean canHarvest(Container inv, BlockState state) {
@@ -418,7 +359,7 @@ public final class BlockHelper {
         return false;
     }
 
-    /** Convenience: full-block solid we are happy to place scaffolding against. */
+    /** 便捷判定：可安全用作脚手架支撑的完整实心方块。 */
     public static boolean isReplaceableForPlacement(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         return state.isAir() || state.canBeReplaced();
@@ -440,9 +381,7 @@ public final class BlockHelper {
     }
 
     /**
-     * Would breaking {@code pos} drop a {@link FallingBlock} (sand / gravel /
-     * anvil / concrete powder) sitting directly above it onto the bot? Refuse so
-     * we never bury or suffocate ourselves.
+     * 破坏 {@code pos} 是否会使正上方的 {@link FallingBlock}（沙子、砂砾、铁砧或混凝土粉末）落到角色身上？若会则拒绝破坏，避免被埋住或窒息。
      */
     public static boolean breakReleasesFallingBlock(BlockGetter level, BlockPos pos) {
         return level.getBlockState(pos.above()).getBlock() instanceof FallingBlock;
