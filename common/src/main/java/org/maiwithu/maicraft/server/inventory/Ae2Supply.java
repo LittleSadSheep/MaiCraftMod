@@ -10,7 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Uses AE2's powered player-source transaction, retaining components and charging native network energy. */
+/** 使用 AE2 的供电玩家来源交易，保留物品组件并扣除原生网络能量。 */
 public final class Ae2Supply {
     private Ae2Supply() {}
 
@@ -51,7 +51,7 @@ public final class Ae2Supply {
             } else {
                 actual = access.powered(key, simulated, false, false);
                 validateAmount(actual, simulated);
-                // Creation follows a confirmed native extraction of this exact key and amount.
+                // 只有确认按该精确键和数量完成原生提取后，才能创建对应物品。
                 InventoryTransfer.restore(player, slot, (ItemStack) NativeApi.call(key, Ae2Access.ITEM, "toStack", (int) actual));
             }
         }

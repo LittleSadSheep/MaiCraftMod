@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord;
 
-/** Hidden execution tool for semantic lighting; placements never enter its arguments. */
+/** 语义照明的隐藏执行工具；放置坐标不会作为参数传入。 */
 public final class SemanticLightAreaTool implements MaiCraftTool {
     @Override public String name() {
         return SemanticLightAreaTaskRecord.TOOL_NAME;

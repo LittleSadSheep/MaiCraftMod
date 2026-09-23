@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.server.machine.ServerAccess;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Sorters are directional active ejectors, not transmitter-network members. */
+/** 分拣器是有方向的主动输出设备，不属于传输网络成员。 */
 final class MekSorterConnectionInspection {
     static final String SORTER = "mekanism.common.tile.TileEntityLogisticalSorter";
     private static final String BASE = "mekanism.common.tile.base.TileEntityMekanism";

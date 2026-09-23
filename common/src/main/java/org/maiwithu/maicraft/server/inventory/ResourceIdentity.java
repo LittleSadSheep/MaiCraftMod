@@ -17,7 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import com.google.gson.JsonPrimitive;
 import java.util.StringJoiner;
 
-/** Counts are excluded; all persisted data components participate in identity. */
+/** 数量不参与身份判定；所有持久化数据组件均纳入身份比较。 */
 public final class ResourceIdentity {
     private ResourceIdentity() {}
 

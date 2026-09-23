@@ -9,7 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 
-/** Finds a legal slot through the same sided native simulation used by the eventual transaction. */
+/** 使用最终交易会调用的同一侧向原生模拟，寻找合法槽位。 */
 public final class InventoryQuote {
     private InventoryQuote() {}
 

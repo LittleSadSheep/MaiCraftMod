@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Sided insertion/extraction, always retaining the native ItemStack data components. */
+/** 按侧面执行插入和提取，并始终保留原生 ItemStack 的数据组件。 */
 public interface NativeItemPort {
     String API = "net.neoforged.neoforge.items.IItemHandler";
     int slots();

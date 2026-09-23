@@ -9,7 +9,7 @@ import java.util.UUID;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** AE2 standalone submissions return no requester link; bind the unique link created inside the native CPU. */
+/** AE2 独立提交不会返回请求方链接；需绑定原生 CPU 内创建的唯一链接。 */
 final class Ae2SubmissionTracking {
     private static final String CPU = "appeng.me.cluster.implementations.CraftingCPUCluster";
     private static final String LOGIC = "appeng.crafting.execution.CraftingCpuLogic";
@@ -35,7 +35,7 @@ final class Ae2SubmissionTracking {
     Object completedSubmission(Object returnedLink) {
         if (returnedLink != null) return returnedLink;
         Object found = null;
-        // This read immediately follows the single synchronous native submit, before another server tick.
+        // 此读取紧跟唯一一次同步原生提交，不会跨越到下一个服务器 tick。
         for (Before snapshot : before) {
             Object link = NativeApi.call(snapshot.logic(), LOGIC, "getLastLink");
             if (link == null || Objects.equals(snapshot.linkId(), id(link))

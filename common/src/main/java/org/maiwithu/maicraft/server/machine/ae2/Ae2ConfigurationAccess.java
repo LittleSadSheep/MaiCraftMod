@@ -7,7 +7,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Helpers for the physical target already authorized by ServerMachineOperations. */
+/** 为已由 ServerMachineOperations 授权的实际目标提供辅助方法。 */
 final class Ae2ConfigurationAccess {
     static final String PART_HOST = "appeng.api.parts.IPartHost";
     static final String INTERNAL = "appeng.api.inventories.InternalInventory";

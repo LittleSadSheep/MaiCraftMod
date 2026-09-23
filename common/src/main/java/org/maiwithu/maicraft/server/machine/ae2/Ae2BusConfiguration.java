@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
-/** Exact item ghost filters in native unlocked config slots; no real inventory contents are created. */
+/** 在原生已解锁配置槽中设置精确物品虚影过滤器；不会创建真实背包物品。 */
 final class Ae2BusConfiguration {
     private static final String BUS = "appeng.parts.automation.IOBusPart";
     private static final String INVENTORY = "appeng.helpers.externalstorage.GenericStackInv";
@@ -40,7 +40,7 @@ final class Ae2BusConfiguration {
         int capacity = (int) NativeApi.number(NativeApi.call(part, UPGRADES, "getInstalledUpgrades",
                 NativeApi.constant("appeng.core.definitions.AEItems", "CAPACITY_CARD")));
         if (capacity < 0 || capacity > 64) throw ServerAccess.denied("unsupported", "Unexpected native capacity-card count");
-        // IOBusPart.availableSlots in AE2 19.2.17: min(config.size, 18 + 9 * installed capacity cards).
+        // AE2 19.2.17 中 IOBusPart.availableSlots 的计算方式：min(config.size, 18 + 9 * 已安装容量卡数量)。
         int limit = Math.min((int) NativeApi.number(NativeApi.call(config, INVENTORY, "size")), 18 + 9 * capacity);
         int empty = -1;
         for (int slot = 0; slot < Math.min(limit, 128); slot++) {

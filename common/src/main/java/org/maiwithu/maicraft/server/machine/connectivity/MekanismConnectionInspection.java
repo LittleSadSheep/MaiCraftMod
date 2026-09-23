@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Set;
 import org.maiwithu.maicraft.network.ServerOperationException;
 
-/** Mekanism 10.7: actual transmitter edges and directional, sided acceptor attachments. */
+/** Mekanism 10.7：读取真实传输器边和有方向、按侧面设置的接收器连接。 */
 final class MekanismConnectionInspection {
     private static final String TILE = "mekanism.common.tile.transmitter.TileEntityTransmitter";
     private static final String TRANSMITTER = "mekanism.common.content.network.transmitter.Transmitter";
@@ -63,7 +63,7 @@ final class MekanismConnectionInspection {
             result.details().addProperty("endpoint_role", source ? "source" : "destination");
             return result;
         }
-        // The network caches outbound acceptors only; a PULL source must not be rejected for absence there.
+        // 网络只缓存向外的接收器；不能因缓存中没有 PULL 来源而拒绝它。
         if (!source && NativeApi.call(network, NETWORK, "getCachedAcceptor", machinePos.asLong(), pipeSide.getOpposite()) != acceptor) {
             return evidence("unknown", false, false, "destination_acceptor_cache_not_current");
         }

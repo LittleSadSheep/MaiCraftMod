@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerMachineConfiguration;
 
-/** Current AE2 settings readback. No insert/set/update/save, blank stock lookup, or interaction dispatch. */
+/** 回读当前 AE2 设置；不执行插入、设置、更新或保存，不查询空条件库存，也不派发交互。 */
 final class Ae2ConfigurationReading {
     private Ae2ConfigurationReading() {}
 
