@@ -103,7 +103,7 @@ public final class MekanismFilterBridge {
             Class<?> filterClass = Class.forName("mekanism.common.content.transporter.SorterItemStackFilter");
             Object desired = filterClass.getConstructor().newInstance();
             filterClass.getMethod("setItemStack", ItemStack.class).invoke(desired, new ItemStack(BuiltInRegistries.ITEM.get(itemId)));
-            // Defaults are enabled, strict components, unrestricted amount, no color and no default-flow bypass.
+            // 默认设置为启用、严格匹配组件、不限数量、不指定颜色，且不绕过默认流量策略。
             Class<?> api = Class.forName("mekanism.common.content.filter.IFilter");
             Object packet = decision == Decision.ADD
                     ? Class.forName("mekanism.common.network.to_server.filter.PacketNewFilter")

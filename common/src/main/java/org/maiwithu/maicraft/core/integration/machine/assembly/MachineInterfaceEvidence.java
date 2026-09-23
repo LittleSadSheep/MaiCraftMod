@@ -33,7 +33,7 @@ public final class MachineInterfaceEvidence {
             Method getter = level.getClass().getMethod("getCapability", capability, BlockPos.class, Object.class);
             Object port = getter.invoke(level, type, position, face);
             if (port == null) {
-                // Many providers deliberately return null client-side; absence here cannot prove no server interface.
+                // 许多提供器会在客户端主动返回 null，因此客户端缺失不能证明服务器端也没有接口。
                 result.addProperty("status", "no_client_capability_observed");
                 return result;
             }

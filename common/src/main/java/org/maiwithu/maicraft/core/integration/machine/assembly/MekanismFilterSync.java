@@ -39,7 +39,7 @@ public final class MekanismFilterSync {
             if (!(raw instanceof List<?> data) || data.size() < 5) return;
             // 当前依赖 Mekanism 跟踪属性列表末尾五项的类型和顺序；版本改了排列时会停止认定同步成功。
             int last = data.size() - 1;
-            // TileEntityLogisticalSorter.addContainerTrackers appends auto/roundRobin/single/color/filters.
+            // TileEntityLogisticalSorter.addContainerTrackers 会依次添加 auto、roundRobin、single、color 和 filters。
             if (!named(data.get(last), "list.SyncableFilterList") || !named(data.get(last - 1), "SyncableInt")
                     || !named(data.get(last - 2), "SyncableBoolean") || !named(data.get(last - 3), "SyncableBoolean")
                     || !named(data.get(last - 4), "SyncableBoolean")) return;
@@ -47,7 +47,7 @@ public final class MekanismFilterSync {
             if (filterList && property == last) RECEIVED.put(menu, new Snapshot(++sequence, previous.autoEjectRevision()));
             else if (!filterList && property == last - 4) RECEIVED.put(menu, new Snapshot(previous.filtersRevision(), ++sequence));
         } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
-            // Optional API drift means no evidence; the task reports its bounded synchronization failure.
+            // 可选 API 发生变化时无法取得证据；任务会报告此次有界同步失败。
         }
     }
     private static boolean named(Object value, String suffix) {
