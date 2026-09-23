@@ -6,7 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Deterministic connection-scoped protocol engine; no Minecraft classes are needed to test it. */
+/** 按连接隔离且行为确定的协议引擎；无需 Minecraft 类即可测试。 */
 public final class ServerProtocolDispatcher {
     public static final int MAX_REQUESTS_PER_TICK = 8;
     public static final int MAX_SESSIONS = 8;
@@ -70,7 +70,7 @@ public final class ServerProtocolDispatcher {
         }
         if (limited(peer.tick())) return failure(request, "hello", "rate_limited", "Per-tick request budget exhausted", peer.tick());
         if (sessions.size() >= MAX_SESSIONS) {
-            // Retiring a whole read-only scope invalidates its IDs; it cannot enable a replay.
+            // 整体撤销只读作用域会使其中所有 ID 失效，不会允许重放请求。
             var oldRead = sessions.values().stream().filter(session -> session.closed && session.ledger.readOnlyHistory())
                     .map(session -> session.id).findFirst();
             oldRead.ifPresent(sessions::remove);
@@ -80,7 +80,7 @@ public final class ServerProtocolDispatcher {
         ProtocolSession session = new ProtocolSession(request, peer);
         JsonObject welcome = session.welcome(peer.tick());
         ProtocolJson.encode(welcome);
-        // A new scope revokes existing mutation authority while leaving its receipts queryable.
+        // 新作用域会撤销已有修改权限，同时保留回执的查询能力。
         invalidateWorld();
         sessions.put(session.id, session);
         return welcome;
