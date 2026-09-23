@@ -20,7 +20,7 @@ final class JetpackSteering {
         double radians = Math.toRadians(yaw), sin = Math.sin(radians), cos = Math.cos(radians);
         float forward = pulse(-x * sin + z * cos), strafe = pulse(x * cos + z * sin);
         boolean up = !landing && JetpackDynamics.shouldRise(position.y, velocity.y, target.y, power);
-        // Shift selects native fast descent. Retain slow hover descent by releasing UP instead.
+        // Shift 会触发原生快速下降；若要保留悬停缓慢下降，应改为释放 UP。
         return new BodyControlPort.Movement(forward, strafe, up, false, false);
     }
     private static float pulse(double acceleration) { return acceleration > 0.015 ? 1 : acceleration < -0.015 ? -1 : 0; }

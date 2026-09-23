@@ -34,11 +34,11 @@ public final class JetpackDynamics {
             rise += rawVy;
             rawVy = rawAfterStep(rawVy, power);
         }
-        // Extremely small configured gravity may leave a tail: ignoring gravity bounds it above.
+        // 配置重力极小时，轨迹尾部可能持续很久；忽略重力可为其建立上界。
         return rise + Math.max(0, rawVy) / (1 - AIR_DRAG);
     }
 
-    /** Peak rise of this input pulse and subsequent released-UP coasting, relative to current feet. */
+    /** 相对于当前脚位，计算本次输入脉冲及随后释放 UP 滑行所能达到的最高上升高度。 */
     public static double riseEnvelope(double rawVy, boolean up, JetpackNativeAdapter.Snapshot power) {
         double step = nextVertical(rawVy, up, power);
         return Math.max(0, step) + coastRise(rawAfterStep(step, power), power);
@@ -50,7 +50,7 @@ public final class JetpackDynamics {
     public static boolean shouldRise(double height, double rawVy, double minimumHeight, JetpackNativeAdapter.Snapshot power) {
         if (!Double.isFinite(height) || !Double.isFinite(minimumHeight)) throw new IllegalArgumentException("finite flight heights required");
         double releasedStep = nextVertical(rawVy, false, power);
-        // During an externally induced fast fall, hover clamps descent immediately; UP may not.
+        // 外力造成快速下坠时，悬停会立即限制下降速度，UP 则不一定能做到。
         if (nextVertical(rawVy, true, power) <= releasedStep) return false;
         double releasedReach = releasedStep > 0 ? coastRise(rawVy, power) : releasedStep;
         return height + releasedReach < minimumHeight;

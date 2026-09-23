@@ -36,7 +36,7 @@ final class JetpackView {
     static Vec3 focus(Vec3 position, Vec3 aim, Vec3 ahead) {
         Vec3 step = aim.subtract(position), glance = ahead.subtract(position);
         if (step.horizontalDistance() < 0.3) return ahead;
-        // Keep the current leg inside the 55-degree steering gate until we reach the corner.
+        // 当前路线段未抵达拐角前，保持航向位于 55 度转向门限内。
         double dot = step.x * glance.x + step.z * glance.z;
         return dot >= Math.cos(Math.PI / 4) * step.horizontalDistance() * glance.horizontalDistance()
                 && glance.horizontalDistance() > 0.3 ? ahead : aim;
@@ -48,7 +48,7 @@ final class JetpackView {
         if (!landing && delta.horizontalDistance() > 0.3) {
             float bearing = (float) Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
             if (Math.abs(Mth.wrapDegrees(bearing - actualYaw)) > 55) {
-                // Turn toward the course while holding height and braking existing sideways motion.
+                // 保持高度并制动现有侧向速度，同时转向预定航线。
                 aim = new Vec3(position.x, aim.y, position.z);
             }
         }
