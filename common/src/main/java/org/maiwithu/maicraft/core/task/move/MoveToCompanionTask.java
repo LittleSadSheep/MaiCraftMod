@@ -39,23 +39,16 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     private static final long TICKS_PER_BLOCK = 20;
     private static final long MAX_EXTRA_TICKS = 5 * 60 * 20;
-    /** Progress lease: while the journey is consuming its plan, the deadline is kept
-     *  this far ahead — a healthy multi-minute dig route never times out mid-stride,
-     *  and a stalled one still returns the body within one lease. */
+    /** 行进期间将截止时间保持在此期限之后，使健康的多分钟挖掘路线不会半途超时；若路线卡住，也会在一个期限内结束并归还角色控制。 */
     private static final long PROGRESS_LEASE_TICKS = 30 * 20;
-    /** How recent "progress" must be to renew the lease. Generous enough to span one
-     *  slow legitimate move (a long bare-hand dig holds the executor's progress clock
-     *  at 0 anyway; this covers place maneuvers and replan gaps). */
+    /** 进展必须在多近的时间内发生，才会续期。预留一段较宽松的间隔以容纳缓慢但合法的移动；长时间徒手挖掘会将执行器进度时钟保持为 0，
+     *  此间隔主要覆盖放置动作和路线重规划空档。 */
     private static final int PROGRESS_GRACE_TICKS = 100;
-    /** When the planner CAN'T reach the exact goal, a stop within this of the
-     *  requested column still counts as "got there" (a teaching success, not a
-     *  thrash). This is the only tolerance — arrival itself is exact. */
+    /** 规划器无法抵达精确目标时，若停在请求柱列附近此距离内，仍视为到达（教学性成功，避免反复抖动）。这是唯一容差；真正的精确到达仍按原目标判定。 */
     private static final double WALK_SPEED = 1.0;
     private static final double NEAR_SUCCESS_RADIUS = 3.0;
-    /** Once the planner can't get closer (e.g. it stopped at the water surface above an
-     *  underwater goal), keep the task alive this many ticks of NO progress before giving
-     *  up — long enough for the body to passively drift onto a reachable underwater target,
-     *  short enough to bail under an out-of-reach above-water one. */
+    /** 规划器无法再接近时（例如停在水下目标上方的水面），等待此数量的无进展 tick 再放弃：
+     *  时间足以让角色被水流带到可达的水下目标附近，也能及时放弃水面上方不可达的目标。 */
     private static final int MAX_SETTLE_TICKS = 60;
 
     private final int bx;
@@ -65,7 +58,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     private double bestDist = Double.MAX_VALUE;   // closest we've gotten to the goal
     private int settleTicks = 0;                  // ticks of no progress after the planner gave up
-    /** The one near-retry recovery rung has been consumed (ladder state — survives suspend). */
+    /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
@@ -143,8 +136,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      * 两个入口一份逻辑。
      */
     private void startWalkingNav() {
-        // Initial budget from straight-line distance (terrain difficulty is unknowable
-        // here — the progress lease below takes over once the journey is under way).
+        // 初始预算按直线距离估算（此处还无法得知地形难度）；旅程开始后改由下方的进度期限续期。
         long extra = Math.min(MAX_EXTRA_TICKS, 600 + (long) (repDistance() * TICKS_PER_BLOCK));
         r.extendDeadlineTo(player.level().getGameTime() + extra);
         // 完整坐标与只给水平坐标使用各自的到达范围；BLOCK 在此表示坐标目标，不是 FIND 的方块类型搜索。
@@ -168,25 +160,24 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         };
     }
 
-    /** The same coordinate region drives planning and live arrival. */
+    /** 规划和实时到达检查共用同一坐标范围。 */
     private NavGoal blockGoal() {
         return blockCompiled().goal();
     }
 
-    /** Exact internal stances and tolerant public destinations keep their own membership. */
+    /** 内部精确站位与允许容差的公开目的地分别使用各自的成员判定。 */
     private GoalCompiler.Compiled blockCompiled() {
         return new GoalCompiler.Compiled(
                 r.coordinateGoal(), LongSets.emptySet());
     }
 
-    /** Does a collision shape occupy the target cell (feet can't go there)? */
+    /** 目标格是否有碰撞形状占据，导致角色脚位不能进入？ */
     private boolean targetCellSolid() {
         return !player.level().getBlockState(blockTarget)
                 .getCollisionShape(player.level(), blockTarget).isEmpty();
     }
 
-    /** Slab-aware feet cell — the pathing node, not raw blockPosition (standing on a
-     *  bottom slab counts as the cell above it, like the planner sees it). */
+    /** 返回识别半砖后的脚位节点，而非原始 blockPosition；站在下半砖上时按规划器约定视作处于其上方格。 */
     private BlockPos feet() {
         return BlockHelper.playerFeet(
                 player.level(), player.getX(), player.getY(), player.getZ());
@@ -225,9 +216,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 player.level(), blockTarget);
     }
 
-    /** ONE membership definition per kind, shared with the search:
-     *  BLOCK (cell == target per arrival mode), COLUMN (x/z match),
-     *  YLEVEL (y match + on the ground). */
+    /** 每种目标只保留一套成员判定并与搜索共用：BLOCK 按到达模式要求脚位格等于目标，COLUMN 比较 x/z，YLEVEL 比较 y 并要求角色落地。 */
     private boolean inGoalCell(BlockPos cell) {
         return switch (r.kind) {
             case BLOCK -> blockGoal().isAt(cell);
@@ -241,8 +230,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected TaskState onTick() {
         // 先处理已经开始的交通和导航，再判断是否到达；飞行刚碰地、电梯刚到楼层，都可能还没完成收尾。
         observeLanding();
-        // An existing nav must consume its native completion before task cleanup can stop it.
-        // Cabin floor contact or jetpack touchdown alone does not finish exit/mode restoration.
+        // 现有导航必须先消费其原生完成回执，之后任务清理才可停止它；仅仅碰到船舱地板或喷气背包触地，不代表退出或模式恢复已经完成。
         if (nav == null && reached()) return successAtBody();
         if (boatLeg != null) {
             return tickBoatLeg();
@@ -329,7 +317,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         && player.isInWater() && settleTicks < MAX_SETTLE_TICKS) {
                     yield TaskState.RUNNING;
                 }
-                // Otherwise: as close as the terrain allows → (teaching) success or fail.
+                // 否则按地形允许的最近位置处理，再判断是否满足教学性成功或必须失败。
                 if (!r.requiresStrictStance() && closeEnoughToSucceed()) {
                     yield successAtBody();
                 }
@@ -396,8 +384,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (r.kind == MoveToTaskRecord.Kind.BLOCK) {
             return blockGoal();
         }
-        // COLUMN: within the radius HORIZONTALLY at any height (NavGoal.near is 3D and
-        // needs a Y this kind doesn't have; heuristic/center reuse the column's own).
+        // COLUMN 在任意高度按水平半径判断；NavGoal.near 是三维球体，需要此目标没有的 Y 值，因此复用柱列自身的估价和中心点。
         final int targetX = bx;
         final int targetZ = bz;
         final NavGoal column = NavGoal.column(targetX, targetZ);
@@ -462,7 +449,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (observation.revision() > landingBaseline) landingFacts = observation.facts();
     }
 
-    /** Representative remaining distance (blocks) for the deadline estimate. */
+    /** 返回截止时间估算所用的代表性剩余距离，单位为方块。 */
     private double repDistance() {
         return switch (r.kind) {
             case BLOCK -> Math.sqrt(player.distanceToSqr(bx + 0.5, by, bz + 0.5));
@@ -567,9 +554,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
     }
 
-    /** The give-up message for a planner failure that wasn't close enough to count as arrival.
-     *  Captured at the fail site (nav still alive) so its {@code failReason} is readable before
-     *  the base's {@code cleanup()} releases the nav. */
+    /** 规划失败且未接近到可视为到达时使用的放弃消息。必须在失败位置、导航尚未释放时捕获，
+     *  这样才能在父类 {@code cleanup()} 停止导航前读取 {@code failReason}。 */
     private String blockedMessage(String failReason) {
         int gy = player.blockPosition().getY();
         double remaining = repDistance();
