@@ -26,7 +26,7 @@ public final class EmbeddedBaritonePolicy {
         return installSnapshot(capture(sacred, protectedMutations, forbiddenBodyCells, minimumFeetY));
     }
 
-    /** Freeze a queued owner's policy without changing the body that is still executing. */
+    /** 冻结排队所有者的策略，但不更改仍在执行中的身体控制。 */
     public static Snapshot capture(
             LongSet sacred, LongSet protectedMutations, LongSet forbiddenBodyCells) {
         return capture(sacred, protectedMutations, forbiddenBodyCells, Integer.MIN_VALUE);
@@ -45,7 +45,7 @@ public final class EmbeddedBaritonePolicy {
                 LongSets.unmodifiable(forbidden), minimumFeetY);
     }
 
-    /** Install a snapshot previously detached by {@link #capture}. */
+    /** 安装先前由 {@link #capture} 分离出的快照。 */
     static boolean installSnapshot(Snapshot next) {
         boolean changed = !next.equals(current);
         current = next;
@@ -56,12 +56,12 @@ public final class EmbeddedBaritonePolicy {
         return current;
     }
 
-    /** Live execution guard used after a worker's frozen calculation snapshot has aged. */
+    /** worker 的冻结计算快照过期后，供实时执行阶段使用的保护检查。 */
     public static boolean protects(BlockPos pos) {
         return pos != null && current.protects(pos.getX(), pos.getY(), pos.getZ());
     }
 
-    /** Live execution guard for first-person stance/movement code. */
+    /** 第一人称站位和移动代码使用的实时保护检查。 */
     public static boolean forbidsBody(BlockPos pos) {
         return pos != null && current.forbidsBody(pos.getX(), pos.getY(), pos.getZ());
     }
