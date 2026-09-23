@@ -32,8 +32,7 @@ final class MachineLayoutItemOutputs {
             Map<Pos,Cell> withSorter=new LinkedHashMap<>(work.cells);withSorter.put(at,sorter);
             var route=MachineLayoutRouting.route(at,target,List.of(facing),targetSides,"items","mekanism:basic_logistical_transporter",owner,withSorter,work.clearance,bounds);
             if(route==null)continue;
-            // The constrained source side guarantees the first pipe is directly in front of the
-            // sorter. Letting an unconstrained route turn on its first cell would not receive items.
+            // 受约束的来源侧确保第一段管道正对分拣器；若无约束路线在第一格就转向，分拣器将无法收到物品。
             JsonObject filter=new JsonObject();filter.add("offset",SemanticMachineLayout.position(at));filter.addProperty("item_id",itemId);work.filters.add(filter);
             return new Output(sorter,route);
         }

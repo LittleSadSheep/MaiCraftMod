@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInpu
 import java.util.Arrays;
 import static org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout.position;
 
-/** One passive entry feeds its declared internal network; utility production stays outside the machine. */
+/** 一个被动入口为其声明的内部网络供料；公用设施生产仍位于机器之外。 */
 final class MachineLayoutUtilityInputs {
     record Consumer(String name, String instanceId, String blockId, Pos position, List<Side> sides) {}
     private MachineLayoutUtilityInputs() {}
@@ -38,7 +38,7 @@ final class MachineLayoutUtilityInputs {
             gearbox = new Cell(source, "create:gearbox", Map.of("axis", face.x != 0 ? "z" : "x"), false, "component:" + owner);
             work.add(gearbox); exits = List.of(Side.UP, Side.DOWN);
         }
-        // Keep internal routes out of the exterior ray; only the adjoining hookup cell needs construction clearance.
+        // 内部路线不得进入外部射线范围；只有相邻的接线格需要施工净空。
         for (Pos clear = port.step(face); bounds.contains(clear); clear = clear.step(face)) work.utilityRays.add(clear);
         if (bounds.contains(port.step(face))) work.clearance.add(port.step(face));
         var concrete = input.at(new BlockPos(port.x(), port.y(), port.z()));
@@ -77,7 +77,7 @@ final class MachineLayoutUtilityInputs {
         if (!medium.equals("kinetic")) {
             if (consumer.blockId.startsWith("mekanism:") && !consumer.blockId.endsWith("_fluid_tank") && !consumer.blockId.equals("mekanism:induction_port"))
                 work.configure(consumer.position, route.destinationSide(), medium, "input");
-            // The item boundary is a real barrel; only its declared internal network may pull from it.
+            // 物品边界是真实木桶；只有该木桶声明的内部网络才可从中拉取物品。
             if (medium.equals("items")) work.configure(route.cells().getFirst().position(), opposite(route.sourceSide()), medium, "pull");
         }
         work.pending("external_input_commissioning", input.id() + ":" + consumer.instanceId,

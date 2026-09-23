@@ -120,7 +120,7 @@ final class MachineLayoutRouting {
                 if (!available(nextPos, from, to, transport, owner, occupied, clearance, bounds)) continue;
                 Node onward = new Node(nextPos, at.alongX);
                 if (!kinetic || compatibleAxis(onward, occupied)) offer(onward, at, open, parents, costs, end);
-                // Chain drives turn by changing their horizontal connection axis on a vertical shaft step.
+                // 链传动通过竖直轴向步进并切换水平连接轴来转向。
                 Node turned = new Node(nextPos, !at.alongX);
                 if (kinetic && direction.y != 0 && compatibleAxis(turned, occupied)) offer(turned, at, open, parents, costs, end);
             }
@@ -149,14 +149,14 @@ final class MachineLayoutRouting {
     private static boolean available(Pos at, Pos source, Pos destination, String transport, String owner,
                                      Map<Pos, Cell> occupied, Set<Pos> clearance, Bounds bounds) {
         if (!bounds.contains(at) || occupied.containsKey(at) && !reusable(occupied.get(at),transport,owner) || clearance.contains(at)) return false;
-        // A reused cell was already isolated when installed; retain its intentional connection to earlier consumers.
+        // 重用格子在安装时已完成隔离，因此保留其与先前消耗端之间的预期连接。
         if (reusable(occupied.get(at), transport, owner)) return true;
         for (Side side : Side.values()) {
             Pos neighbor = at.step(side);
             Cell cell = occupied.get(neighbor);
             if (cell == null || neighbor.equals(source) || neighbor.equals(destination)) continue;
             if (reusable(cell,transport,owner)) continue;
-            // Any adjacent equipment could accept resources; any equal conduit could cross-connect.
+            // 相邻设备可能接收资源，相同导管也可能发生交叉连接。
             if (cell.owner.startsWith("component:") || cell.id.equals(transport)) return false;
         }
         return true;

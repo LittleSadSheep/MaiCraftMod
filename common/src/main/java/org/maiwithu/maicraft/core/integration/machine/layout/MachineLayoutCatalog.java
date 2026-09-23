@@ -57,7 +57,7 @@ final class MachineLayoutCatalog {
         }
         out.put("create:millstone", new Profile(Map.of(), Set.of("items", "kinetic"), Set.of("items"),
                 List.of(MachineLayoutRouting.Side.DOWN), "MillstoneBlock.hasShaftTowards(DOWN); MillstoneBlockEntity item capability"));
-        // Mixers have NO shaft interface; a cogwheel coupling compiler is required for their drive.
+        // 搅拌机没有轴接口；其驱动必须使用齿轮耦合编译器。
         add(out, "create:mechanical_mixer", Map.of(), Set.of(), Set.of(),
                 "MechanicalMixerBlock.hasShaftTowards returns false; process basin needs a dedicated station template");
         add(out, "create:mechanical_press", north, Set.of(), Set.of(),
