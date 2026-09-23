@@ -60,8 +60,8 @@ final class MachineLayoutModules {
         String receiver = basin ? "create:basin" : "create:depot";
         b.block(0, 0, 0, receiver, Map.of());
         b.block(0, 2, 0, b.core, Map.of("facing", "east"));
-        // RotationPropagator.isLargeToLargeGear: perpendicular X/Y axes and a (1,1,0) offset.
-        // This converts the press's horizontal shaft to a vertical external input with real cogwheels.
+        // 对应 RotationPropagator.isLargeToLargeGear：X/Y 轴互相垂直，偏移为 (1,1,0)。
+        // 通过真实齿轮将压机的水平轴转换为垂直外部输入。
         b.block(1, 2, 0, "create:large_cogwheel", Map.of("axis", "x"));
         b.block(2, 3, 0, "create:large_cogwheel", Map.of("axis", "y"));
         b.clear.add(new Pos(0, 1, 0));
@@ -79,8 +79,8 @@ final class MachineLayoutModules {
         b.core = "create:mechanical_mixer";
         b.block(0, 0, 0, "create:basin", Map.of());
         b.block(0, 2, 0, b.core, Map.of());
-        // MechanicalMixerBlock is a small cogwheel with a Y axis, not a shaft endpoint.
-        // RotationPropagator connects adjacent parallel small cogs at a 1:1 opposite rotation.
+        // MechanicalMixerBlock 是 Y 轴小齿轮，不是传动轴端点。
+        // RotationPropagator 会将相邻且轴线平行的小齿轮按 1:1 反向转速连接。
         b.block(1, 2, 0, "create:cogwheel", Map.of("axis", "y"));
         b.clear.add(new Pos(0, 1, 0));
         for (String medium : List.of("items", "fluids")) {

@@ -110,13 +110,11 @@ final class MachineLayoutAeNetworks {
             MachineLayoutRouting.checkpoint();if(used.contains(face))continue;
             Map<Pos,Cell> attempt=new LinkedHashMap<>(work.cells);JsonArray paths=new JsonArray();boolean found=true;
             Set<Pos> clearance=new LinkedHashSet<>(work.clearance);
-            // Reserve other face exits before routing the first branch, so it cannot wrap around
-            // the controller and make every subsequent independent branch physically impossible.
+            // 路由第一条分支前先预留其他面的出口，避免分支绕过控制器并使后续独立分支在物理上无法布置。
             for(Side other:Side.values())if(other!=face){Pos exit=controller;for(int n=0;n<3;n++){
                 exit=exit.step(other);clearance.add(exit);for(Side side:Side.values())clearance.add(exit.step(side));
             }}
-            // Future leaves also need an uncontaminated entry; passing over their upward port
-            // would otherwise make that port adjacent to the wrong controller-face branch.
+            // 后续叶节点也需要未被占用的入口；若线路经过其向上端口，该端口就会错误地邻接到另一个控制器面的分支。
             for(Leaf other:networkMembers)if(!members.contains(other)&&!other.blockId.equals("ae2:controller")){
                 for(Side entry:other.sides){Pos exit=other.position;for(int n=0;n<3;n++){
                     exit=exit.step(entry);clearance.add(exit);for(Side side:Side.values())clearance.add(exit.step(side));
