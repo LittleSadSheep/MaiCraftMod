@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSourceTest;
 // 验证知识资源库与 HTTP 的只读行为，先初始化原版注册信息以便检查真实方块属性。
 public final class KnowledgeRegressionSuite {
     public static void main(String[] args) throws Exception {
+        MetadataSearchTest.main(args);
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         PublicTargetContractTest.main(args);
