@@ -11,9 +11,9 @@ import org.maiwithu.maicraft.task.TaskRecord;
 public final class ContainerTransferTaskRecord extends TaskRecord {
     static { TaskFactory.register(ContainerTransferTaskRecord.class, ContainerTransferCompanionTask::new); }
     public enum DestinationMode {
-        /** The destination stack itself must show the exact deposited amount. */
+        /** 目标堆叠本身必须显示精确的存入数量。 */
         EXACT,
-        /** A synchronized machine may consume or transform the deposit immediately. */
+        /** 已同步的机器可能立刻消耗或转换存入物品。 */
         MAY_MUTATE_AFTER_DEPOSIT
     }
     // from 和 to 都是菜单槽号；to=-1 表示让原版快速移动，count=0 表示整堆。
@@ -36,7 +36,7 @@ public final class ContainerTransferTaskRecord extends TaskRecord {
                                        List<Move> moves) {
         this(callId, deadline, expectedContainerId, moves, true);
     }
-    /** Composed tasks retain the visible menu until their complete transaction finishes. */
+    /** 组合任务会保留可见菜单，直到整笔交易完整结束。 */
     public ContainerTransferTaskRecord(String callId, long deadline, int expectedContainerId,
                                        List<Move> moves, boolean closeAfter) {
         super("container_transfer", callId, deadline);
