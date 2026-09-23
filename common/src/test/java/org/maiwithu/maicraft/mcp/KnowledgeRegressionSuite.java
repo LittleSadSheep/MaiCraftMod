@@ -18,6 +18,7 @@ public final class KnowledgeRegressionSuite {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        PublicTargetContractTest.main(args);
         KnowledgeLibraryTest.main(args);
         BuildingModelContractResourcesTest.main(args);
         // 教材先跑实际建模与方块状态检查，避免把能解析但会堵门或填满屋顶的案例交给设计 Agent。

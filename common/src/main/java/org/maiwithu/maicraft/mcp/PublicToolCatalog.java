@@ -28,9 +28,6 @@ final class PublicToolCatalog {
     private static final Set<String> VIEWS = Set.of(
             "situation", "surroundings", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
     );
-    private static final Set<String> TARGET_KINDS = Set.of(
-            "current_place", "coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"
-    );
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
     private static final JsonObject GOAL_DEFINITIONS = JsonParser.parseString("""
@@ -79,6 +76,9 @@ final class PublicToolCatalog {
               }
             }
             """).getAsJsonObject();
+
+    // 生成公开工具前注入地点规则，模型看到的坐标/标签组合与实际请求入口完全一致。
+    static { PublicTargetContract.describe(GOAL_DEFINITIONS.getAsJsonObject("semanticTarget")); }
 
     private static final List<JsonObject> TOOLS = List.of(
             tool(PERCEIVE,
@@ -364,7 +364,6 @@ final class PublicToolCatalog {
         // 坐标目标必须有位置，其他目标不能夹带位置；地标、人物等要有名字，引用前一步要说明引用关系。
         only(target, "kind", "label", "position", "relation");
         String kind = string(target, "kind", 1, 32, false);
-        if (!TARGET_KINDS.contains(kind)) throw bad("target kind has an unsupported value");
         nullableString(target, "label", 1, 160);
         nullableString(target, "relation", 1, 120);
         boolean hasPosition = present(target, "position");
@@ -376,16 +375,7 @@ final class PublicToolCatalog {
             integer(position, "z", Integer.MIN_VALUE, Integer.MAX_VALUE);
             nullableResource(position, "dimension");
         }
-        if ("coordinates".equals(kind) != hasPosition) {
-            throw bad("position is required only for a coordinates target");
-        }
-        boolean hasLabel = present(target, "label");
-        if (!Set.of("current_place", "coordinates", "prior_result").contains(kind) && !hasLabel) {
-            throw bad("this target kind requires label");
-        }
-        if ("prior_result".equals(kind) && !present(target, "relation")) {
-            throw bad("prior_result requires relation");
-        }
+        PublicTargetContract.validate(target, kind);
     }
 
     private static void validateConstraint(JsonObject constraint) {
