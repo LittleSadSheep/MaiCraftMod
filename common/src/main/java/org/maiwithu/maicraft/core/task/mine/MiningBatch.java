@@ -26,8 +26,7 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
         while (!pending.isEmpty()) {
             BlockPos current = pending.removeFirst();
             for (Direction direction : Direction.values()) {
-                // A natural trunk can be followed vertically, but a touching wall/roof or a
-                // neighbouring tree must not become extra work merely to postpone pickup.
+                // 可沿天然树干竖向继续砍伐，但不能把相邻墙顶或另一棵树纳入本批任务，只为推迟拾取掉落物。
                 if (uprightLogs && direction.getAxis() != Direction.Axis.Y) continue;
                 BlockPos next = current.relative(direction);
                 if (sameMaterial.contains(next) && selected.add(next)) pending.addLast(next);
@@ -39,8 +38,7 @@ record MiningBatch(Set<BlockPos> targets, boolean followTrunk) {
     // 背包已经够、加上地上物品就够、掉落物等了一分钟或有风险时，都应先捡。地上数量本身不算已获得。
     static boolean shouldCollect(int carried, int requested, int ownedLoose,
                                  long waitingTicks, boolean riskyDrop) {
-        // Loose output is only a reason to stop producing more. It never increases the
-        // reported gathered count, which remains the synchronized inventory delta.
+        // 地面散落产物只用于决定是否暂停继续生产；报告采集数量仍只按已同步的背包增量计算。
         return carried >= requested || (long) carried + ownedLoose >= requested
                 || waitingTicks >= 20L * 60L || riskyDrop;
     }
