@@ -5,7 +5,7 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
-/** One bounded semantic search-and-travel goal. */
+/** 一个有界的语义搜索与移动目标。 */
 public final class SemanticExploreTaskRecord extends TaskRecord
         implements InternalPositionReceipt {
     public static final String TOOL_NAME = "explore";
@@ -47,13 +47,12 @@ public final class SemanticExploreTaskRecord extends TaskRecord
         this.target = target.trim();
         this.maxDistance = Math.clamp(maxDistance, MIN_DISTANCE, MAX_DISTANCE);
         int rings = Math.max(1, (this.maxDistance + WAYPOINT_GRID - 1) / WAYPOINT_GRID);
-        // Scope-derived coverage, not an arbitrary attempt ceiling. At MAX_DISTANCE this is
-        // still a small finite grid, and the runtime de-duplicates every visited frontier.
+        // 覆盖范围由目标区域决定，不使用任意尝试次数上限。在 MAX_DISTANCE 下仍是较小的有限网格，运行时会对已访问边界去重。
         this.maxWaypoints = Math.max(8, rings * rings * 4);
         this.mayAlterTerrain = mayAlterTerrain;
     }
 
-    /** Calling this method forces static task registration during Mod initialization. */
+    /** 调用此方法会在 Mod 初始化期间强制完成静态任务注册。 */
     public static void ensureRegistered() {}
 
     void retainVerifiedPosition(Position position) {
