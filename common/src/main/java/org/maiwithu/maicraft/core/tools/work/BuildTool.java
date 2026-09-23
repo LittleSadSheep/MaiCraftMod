@@ -41,7 +41,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
 import org.maiwithu.maicraft.core.task.build.BuildOrder;
 import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 
-/** Build a bounded set of explicit block cells as one background task. */
+/** 将有界的显式方块格施工请求作为一个后台任务执行。 */
 public final class BuildTool implements MaiCraftTool {
 
     private static final Gson GSON = new Gson();
@@ -353,15 +353,13 @@ public final class BuildTool implements MaiCraftTool {
     }
 
     /**
-     * Expand and de-duplicate an internal semantic op stream through the same parser used at
-     * execution time. This gives planners an exact bounded-cell count instead of a second,
-     * inevitably drifting geometry estimate.
+     * 使用执行阶段的同一解析器展开并去重内部语义操作流。规划器因此能取得准确且有界的方块格数量，而不必再维护一套必然逐渐偏离的几何估算。
      */
     public static int resolvedCellCount(JsonArray ops) {
         return resolvedTargets(ops).size();
     }
 
-    /** The actual deduplicated construction plan, shared by geometry checks and estimates. */
+    /** 实际去重后的施工方案，由几何检查和预算估算共用。 */
     public static List<BuildTaskRecord.Target> resolvedTargets(JsonArray ops) {
         return resolvedTargets(ops, false);
     }
