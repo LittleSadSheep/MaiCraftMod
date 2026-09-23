@@ -16,7 +16,7 @@ import java.util.List;
 import org.maiwithu.maicraft.core.mixin.MenuDataSlotsAccessor;
 
 /**
- * Read-only GUI inspection used by {@code InspectGuiTool}. Mutations are receipt-owned tasks.
+ * 供 {@code InspectGuiTool} 使用的只读界面检查；所有修改均由持有回执的任务执行。
  */
 public final class GuiOps {
 
@@ -25,16 +25,13 @@ public final class GuiOps {
         if (menu == null) {
             return TaskResult.fail("no GUI open.").toJson();
         }
-        // InventoryMenu always exists, even when its screen is closed. Expose the read-only
-        // inventory facts without claiming an invisible menu is an open GUI.
+        // 即使界面关闭，InventoryMenu 也始终存在。可以读取背包事实，但不能因此声称不可见的菜单仍处于打开状态。
         boolean ownInventory = menu == self.inventoryMenu;
         boolean visible = MenuVisibility.matches(Minecraft.getInstance(), menu);
         StringBuilder container = new StringBuilder();
         StringBuilder mine = new StringBuilder();
-        // Crafting grid (if any). Detect generically: a slot backed by a CraftingContainer IS a grid
-        // cell (vanilla 2x2/3x3 AND modded NxM), the ResultSlot IS the output. We lay the cells out in
-        // 2D with their click-able slot numbers so the model can drop the recipe ascii straight onto it
-        // — no "row-major + stride + gaps" arithmetic, which is exactly where it kept misplacing.
+        // 若存在合成网格，则通用识别：由 CraftingContainer 支持的槽位就是网格格子（原版 2×2/3×3 或模组 NxM），ResultSlot 则是输出槽。
+        // 按二维布局呈现格子及可点击槽位编号，使模型能直接将配方字符图填入对应位置，避免容易算错的行优先步长和空隙偏移。
         int gridW = 0, gridH = 0, resultIndex = -1;
         Slot[] gridCells = null;   // indexed by position-in-container (row-major)
         for (int i = 0; i < menu.slots.size(); i++) {
@@ -57,7 +54,7 @@ public final class GuiOps {
                 }
                 continue;
             }
-            // Output-only = a non-empty machine slot that won't take its own item back (result slot).
+            // 仅输出槽是指非空且拒绝放回自身物品的机器槽位（例如结果槽）。
             boolean output = !playerSide && !it.isEmpty() && !slot.mayPlace(it);
             String line = "  " + i + ": " + describe(it) + (output ? " [output]" : "") + "\n";
             if (playerSide) {
@@ -68,10 +65,8 @@ public final class GuiOps {
                 container.append(line);  // all container slots, empty included (placement targets)
             }
         }
-        // Data slots = the menu's OTHER synced channel, parallel to the item slots: the ints a real
-        // screen reads to draw progress / fuel / energy bars. Read them generically (no per-menu
-        // special-casing) — meaning is GUI-specific, the model/skill interprets (e.g. a furnace's are
-        // [litTime, litDuration, cookProgress, cookTotal], so cook% = cookProgress/cookTotal).
+        // 数据槽是菜单中与物品槽并行的另一条同步通道，包含真实界面用于绘制进度、燃料和能量条的整数值。
+        // 通用读取而不按菜单特判；具体含义由模型或技能解释，例如熔炉数据为 [litTime, litDuration, cookProgress, cookTotal]，烹饪百分比为 cookProgress/cookTotal。
         String dataLine = "";
         List<DataSlot> data = ((MenuDataSlotsAccessor) (Object) menu).maicraft$dataSlots();
         if (!data.isEmpty()) {
@@ -84,8 +79,7 @@ public final class GuiOps {
             dataLine = d.append("]\n").toString();
         }
 
-        // Render the crafting grid as a 2D map of click-able slot numbers, so the recipe ascii from
-        // lookup_recipe overlays cell-for-cell (a smaller recipe goes in the TOP-LEFT — same as here).
+        // 将合成网格呈现为可点击槽位编号的二维地图，使 lookup_recipe 返回的配方字符图能逐格对齐；较小配方从左上角开始，与此处布局一致。
         String gridSection = "";
         if (gridCells != null) {
             StringBuilder g = new StringBuilder("crafting grid " + gridW + "x" + gridH
