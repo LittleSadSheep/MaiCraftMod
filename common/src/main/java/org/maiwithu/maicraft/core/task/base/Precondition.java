@@ -9,13 +9,12 @@ import org.maiwithu.maicraft.core.FailureType;
 public interface Precondition {
 
     /**
-     * Evaluate the gate.
+     * 执行前置检查。
      *
-     * @return {@code null} when satisfied (the task may start); otherwise the
-     *         {@link Failure} to report as the task's terminal result.
+     * @return 条件满足时返回 {@code null}（任务可以开始）；否则返回应作为任务终态报告的 {@link Failure}。
      */
     Failure check();
 
-    /** A precondition's verdict when it is NOT satisfied. */
+    /** 前置条件不满足时返回的判定结果。 */
     record Failure(String message, FailureType type) {}
 }
