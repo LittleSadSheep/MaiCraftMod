@@ -12,12 +12,12 @@ import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.HashSet;
 
-/** Owner-thread native-response accumulator. Protocol/session/authorization checks remain the runtime router's responsibility. */
+/** 在所有者线程中累积原生响应；协议、会话和授权校验仍由运行时路由器负责。 */
 public final class ProductionNativeEvidence implements ProductionEvidence {
     private static final long MAX_AGE = 1200;
     public enum ObservationKind { NODE, PORT, RECIPE, CONFIGURATION, LINK }
     public enum FreshnessStatus { FRESH, EXPIRED, INVALIDATED, MISSING, INVALID }
-    /** Freshness describes bound observations; a fresh negative native fact still fails its domain checks. */
+    /** 新鲜度仅说明观察结果仍有效；新鲜的否定原生事实仍须通过对应领域校验。 */
     public record ObservationFreshness(ObservationKind kind, String id, FreshnessStatus status, Long tick, long ageTicks) {}
     private record ObservationKey(ObservationKind kind, String id) {}
     private final ProductionManifest manifest;
@@ -81,12 +81,12 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         configurations.put(configurationId,result.deepCopy()); advance(number(result,"tick"));
         if (configurationResult(configuration, result, false).status() == Status.VERIFIED) {
             changedAt = Math.max(changedAt,number(result,"tick"));
-            // Direction/filter changes invalidate earlier path proofs, even if their geometry remains unchanged.
+            // 即使几何形状未变，方向或过滤器变化仍会使先前的路线证明失效。
             links.forEach((id, value) -> { Long tick = number(value,"tick"); if (tick != null) invalidatedLinkTicks.put(id,tick); });
             links.clear();
         }
     }
-    /** Current configuration readback is evidence only: it neither replays the action nor invalidates other observations. */
+    /** 当前配置回读只作为证据：既不会重放动作，也不会使其他观察失效。 */
     public void observeConfiguration(String id, JsonObject result) {
         Configuration configuration = manifest.configurations().stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
         attempted.add(new ObservationKey(ObservationKind.CONFIGURATION,id));
@@ -100,7 +100,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         JsonObject result = configurations.get(id);
         return sameWorld(result) && configurationResult(c,result,false).status() == Status.VERIFIED;
     }
-    /** Bounded by the manifest's existing node/port/link budgets; never replaces historical supply or recipe bindings. */
+    /** 受清单中现有节点、端口和连接预算限制；绝不替代历史供料或配方绑定。 */
     public List<ObservationFreshness> freshness(long serverTick) {
         advance(serverTick);
         var result = new ArrayList<ObservationFreshness>();
@@ -127,7 +127,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         return new ObservationFreshness(kind,id,status,tick,tick == null || tick > now ? -1 : now-tick);
     }
 
-    /** Current installation proof after an independently verified finite run; empty fuel/input and idle speed are allowed. */
+    /** 独立核实有限运行后得到的当前安装证明；允许燃料或输入为空，也允许转速为零。 */
     public Check finalVerification() {
         for (Node node : manifest.nodes()) {
             Check geometry = geometry(node);
@@ -152,7 +152,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         }
         return verified("Current native installation and settings remain verified; future production capacity is not required");
     }
-    /** Only a router-confirmed deposit into the declared ingress may call this; withdrawal/quotes are not injection evidence. */
+    /** 只有路由器确认物品存入指定入口后才能调用；提取或报价不能作为注入证据。 */
     public void confirmedSupply(String linkId, String requestId, JsonObject result) {
         if (anchor == null || number(result,"tick") == null) throw new IllegalArgumentException("Supply evidence requires a bound native result tick");
         supply.confirmed(linkId,requestId,result); advance(number(result,"tick")); changedAt = Math.max(changedAt,number(result,"tick"));
@@ -238,7 +238,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
             if ("observed".equals(text(row,"status")) && (Boolean.TRUE.equals(bool(row,port.direction())) || "verified".equals(text(row,port.direction()))))
                 return verified("Native sided capability confirms the requested direction");
         }
-        // Some devices (e.g. sorters) expose behavior rather than an IItemHandler at that face.
+                // 某些设备（例如分拣器）在该面暴露的是行为接口，而不是 IItemHandler。
         List<Link> incident = manifest.links().stream().filter(l -> l.from().equals(port.id()) || l.to().equals(port.id())).toList();
         if (!incident.isEmpty() && incident.stream().allMatch(l -> link(l,graph.ports.get(l.from()),graph.ports.get(l.to())).status() == Status.VERIFIED))
             return verified("Exact native path and resource checks establish this endpoint direction");
@@ -368,7 +368,7 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
         }
         if (observation == null) return;
         observation = observation.deepCopy();
-        // Individual rows inherit the context already validated by the router and this instance's binding.
+        // 各行继承路由器和本实例绑定中已经核实的上下文。
         if (!observation.has("dimension")) observation.addProperty("dimension",dimension);
         if (bound(observation,offset) && "server_native".equals(text(observation,"provenance"))) { destination.put(id,observation); advance(number(observation,"tick")); }
     }
