@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.CancellationException;
 
-/** Bounded physical alternatives; selection, materials and native connection verification belong to the caller. */
+/** 有界的物理路线候选；候选选择、材料供给和原生连接核验均由调用方负责。 */
 public final class KineticRouteGeometry {
     public static final int MAX_CANDIDATES = 64;
     public record Endpoint(BlockPos position, Direction.Axis axis, List<Direction> shaftFaces, String family) {
@@ -30,13 +30,13 @@ public final class KineticRouteGeometry {
     }
     public interface Terrain {
         boolean loaded(BlockPos position);
-        /** Empty or otherwise explicitly safe to replace without clearing existing structures. */
+        /** 目标格为空，或已明确证明可替换且无需清除现有结构。 */
         boolean passable(BlockPos position);
         boolean protectedCell(BlockPos position);
         boolean kinetic(BlockPos position);
-        /** Exact ID and every declared state property; default never adopts an existing block as our work. */
+        /** 精确 ID 及所有声明的状态属性；默认不会把现有方块认作本任务已完成的工作。 */
         default boolean matches(Placement placement) { return false; }
-        /** Highest observed solid bearing surface Y in this column; null means unknown. Never loads chunks. */
+        /** 此柱列中观察到的最高坚实承重表面 Y 值；null 表示未知。此处绝不加载区块。 */
         Integer groundHeight(int x, int z);
     }
     public record Limits(int maxChainSpan, int clearance, int maxPlacements, int maxSpan) {
@@ -61,7 +61,7 @@ public final class KineticRouteGeometry {
         public Plan {
             placements = List.copyOf(placements); chainLinks = List.copyOf(chainLinks); bom = Map.copyOf(bom);
         }
-        /** Explicit block targets only; chain links are native interactions, never fake block/NBT placements. */
+        /** 仅表示显式方块目标；链条连接属于原生交互，不是伪造的方块或 NBT 放置。 */
         public JsonObject blueprint(BlockPos anchor) {
             JsonObject result = new JsonObject(); result.addProperty("schema_version", 1); JsonArray blocks = new JsonArray();
             for (Placement placement : placements) {
@@ -84,7 +84,7 @@ public final class KineticRouteGeometry {
     }
     private KineticRouteGeometry() {}
 
-    /** Re-read an admitted plan with current terrain; callers also retain endpoint identity/permission guards. */
+    /** 使用当前地形重新读取已准入方案；调用方仍须保留端点身份和许可检查。 */
     public static boolean clearanceValid(Plan plan, Terrain terrain) { return clearanceValid(plan, terrain, 3); }
     public static boolean clearanceValid(Plan plan, Terrain terrain, int clearance) {
         return KineticClearanceRevalidation.valid(plan, terrain, clearance);
@@ -120,7 +120,7 @@ public final class KineticRouteGeometry {
         candidates.putIfAbsent(key, plan);
     }
     static int chainCost(BlockPos a, BlockPos b) {
-        // Installed Create ChainConveyorBlockEntity.getChainCost: max(1, round(distance / 2.5)).
+        // 与已安装 Create 的 ChainConveyorBlockEntity.getChainCost 相同：max(1, round(distance / 2.5))。
         return Math.toIntExact(Math.max(1L, Math.round(Math.sqrt(a.distSqr(b)) / 2.5)));
     }
     static boolean validLink(BlockPos a, BlockPos b, int maxSpan) {
