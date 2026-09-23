@@ -25,7 +25,7 @@ public final class WaterBucketFall {
         return target.isAir() || target.getFluidState().isEmpty() && target.canBeReplaced(Fluids.WATER);
     }
 
-    /** Source-water collision can be checked without pretending a waterlogged solid disappeared. */
+    /** 可直接检查水源格的碰撞状态，无需假设含水实心方块已经消失。 */
     // 只为检查地形把水临时视为排掉；含水半砖等仍保留其实体外形，不把它们整个当空气。
     public static BlockState dryGeometry(BlockState state) {
         if (state.is(Blocks.WATER)) return Blocks.AIR.defaultBlockState();
@@ -49,7 +49,7 @@ public final class WaterBucketFall {
                 && container.canPlaceLiquid(null,world,pos,state,Fluids.WATER);
     }
 
-    /** The POV bucket ray hits a plant's outline, so the source is above its exposed top. */
+    /** 第一人称水桶射线命中植物轮廓，因此水源位于其暴露顶部上方。 */
     // 脚下有会被水冲走的低矮植物时，最多向上越过两格，找实际可见的放水位置。
     public static BlockPos exposedWaterCell(BlockGetter world, BlockPos feet) {
         BlockPos source = feet;
@@ -63,7 +63,7 @@ public final class WaterBucketFall {
         return source;
     }
 
-    /** Find a real exposed floor face around a plant's outline; this does not destroy the plant. */
+    /** 在植物轮廓附近寻找真实暴露的地面面；此操作不会破坏植物。 */
     public static BlockHitResult floorHit(BlockGetter world, BlockPos feet, Vec3 eye) {
         BlockPos floor = feet.below();
         var shape = world.getBlockState(floor).getShape(world,floor);
@@ -73,8 +73,7 @@ public final class WaterBucketFall {
         for (double x : offsets) for (double z : offsets) {
             Vec3 point = new Vec3(floor.getX()+bounds.minX+(bounds.maxX-bounds.minX)*x,
                     floor.getY()+bounds.maxY,floor.getZ()+bounds.minZ+(bounds.maxZ-bounds.minZ)*z);
-            // Only the local approach matters for choosing an aim point. Submission still
-            // traces the real eye and native interaction range; do not scan high-altitude air.
+            // 选择瞄准点只需考虑局部接近方向。提交操作时仍会按真实眼位和原生交互范围进行射线检测，不要扫描高空空气。
             Vec3 from = eye.y-point.y > 4 ? point.add(eye.subtract(point).scale(4/(eye.y-point.y))) : eye;
             var hit = world.clip(new ClipContext(from,point.add(0,-.001,0),ClipContext.Block.OUTLINE,
                     ClipContext.Fluid.NONE,CollisionContext.empty()));
