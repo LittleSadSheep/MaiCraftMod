@@ -16,40 +16,35 @@ import java.util.function.Supplier;
 public final class RecoveryLadder {
 
     /**
-     * One fallback approach.
+     * 一种回退策略。
      *
-     * @param strategy    builds a fresh task for this rung each time it is
-     *                    (re)entered — a {@link Supplier} so a retry gets a clean
-     *                    instance and the ladder never touches Minecraft itself.
-     * @param handles     the {@link FailureType}s this rung is willing to catch;
-     *                    a cause outside this set is not handled by this rung.
-     * @param maxAttempts total number of executions allowed on this rung
-     *                    (≥ 1); reaching it advances to the next matching rung.
+     * @param strategy    每次进入或重试此策略时创建新的任务；使用 {@link Supplier} 确保重试获得干净实例，且阶梯本身不直接操作 Minecraft。
+     * @param handles     此策略愿意处理的 {@link FailureType} 集合；不在集合中的失败原因不会由此策略接管。
+     * @param maxAttempts 此策略最多执行次数（≥ 1）；达到上限后前进到下一个匹配策略。
      */
     public record Rung(Supplier<Task> strategy, Set<FailureType> handles, int maxAttempts) {}
 
     private final List<Rung> rungs;
 
-    /** Index of the current rung; {@code == rungs.size()} once exhausted. */
+    /** 当前策略索引；阶梯耗尽时等于 {@code rungs.size()}。 */
     private int index;
-    /** Executions committed on the current rung so far (starts at 1 when a rung is entered). */
+    /** 当前策略已提交的执行次数；进入策略时从 1 开始计数。 */
     private int attempts = 1;
-    /** The lazily-built task for the current rung; nulled on retry / advance so it is rebuilt. */
+    /** 当前策略按需构建的任务；重试或推进时清空，以便重新创建。 */
     private Task cached;
 
     public RecoveryLadder(List<Rung> rungs) {
         this.rungs = List.copyOf(rungs);
     }
 
-    /** Convenience varargs factory. */
+    /** 便捷的可变参数工厂方法。 */
     public static RecoveryLadder of(Rung... rungs) {
         return new RecoveryLadder(List.of(rungs));
     }
 
     /**
-     * The task for the current rung, lazily built via its {@link Rung#strategy()}
-     * and cached until the ladder retries or advances (so per-tick calls reuse the
-     * same instance). {@code null} once the ladder is {@link #exhausted()}.
+     * 返回当前策略的任务，首次通过 {@link Rung#strategy()} 按需创建，并缓存到阶梯重试或推进为止，因此每刻调用都会复用同一实例。
+     * 阶梯 {@link #exhausted()} 后返回 {@code null}。
      */
     // 第一次使用当前策略时才创建任务，并缓存同一个实例；不会每次查询都重新开始。
     public Task current() {
@@ -59,17 +54,11 @@ public final class RecoveryLadder {
     }
 
     /**
-     * Decide what to do after the current rung failed with {@code lastFail}.
+     * 根据当前策略的失败原因 {@code lastFail} 决定后续处理。
      * <ul>
-     *   <li>If the current rung {@link Rung#handles() handles} {@code lastFail}
-     *       and it has attempts left ({@code attempts < maxAttempts}): retry the
-     *       SAME rung (rebuild its strategy) and return {@code true}.</li>
-     *   <li>Otherwise advance to the next LATER rung whose {@code handles}
-     *       contains {@code lastFail}, reset its attempt counter, and return
-     *       {@code true}.</li>
-     *   <li>If neither applies — no remaining rung handles the cause — the ladder
-     *       is exhausted: return {@code false} (the parent gives up carrying
-     *       {@code lastFail}).</li>
+     *   <li>若当前策略的 {@link Rung#handles()} 包含 {@code lastFail} 且仍有重试次数（{@code attempts < maxAttempts}），则重建并重试同一策略，返回 {@code true}。</li>
+     *   <li>否则前进到后续第一个能处理 {@code lastFail} 的策略，重置其尝试计数并返回 {@code true}。</li>
+     *   <li>若没有后续策略能处理此原因，阶梯耗尽并返回 {@code false}；父任务将携带 {@code lastFail} 放弃。</li>
      * </ul>
      */
     // 当前策略接受这类失败且次数没满就再试；否则往后找能处理这种失败的策略。
@@ -96,17 +85,17 @@ public final class RecoveryLadder {
         return false;
     }
 
-    /** Index of the current rung (or the rung count once exhausted). */
+    /** 当前策略索引；耗尽后等于策略总数。 */
     public int currentRung() {
         return index;
     }
 
-    /** Executions committed on the current rung so far (1-based). */
+    /** 当前策略已提交的执行次数，从 1 开始计数。 */
     public int currentAttempt() {
         return attempts;
     }
 
-    /** True once no rung remains to run. */
+    /** 没有可执行策略时返回 true。 */
     public boolean exhausted() {
         return index >= rungs.size();
     }
