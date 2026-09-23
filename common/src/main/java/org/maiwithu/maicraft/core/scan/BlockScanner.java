@@ -24,12 +24,9 @@ public final class BlockScanner {
     private BlockScanner() {}
 
     /**
-     * The fully-loaded chunk at ({@code cx},{@code cz}), or {@code null} if it isn't loaded — a pure
-     * cache read through the client chunk cache that <b>never</b>
-     * forces a load, generates, or bounces to the main thread. Every scan in this package reads terrain
-     * through here: {@code getChunk} with a status would block the server thread on chunk I/O or
-     * generation, and a scan is a perception query — it reports what is loaded and says so, it does not
-     * make the world bigger to answer.
+     * 返回 ({@code cx},{@code cz}) 处完整加载的区块；若尚未加载则返回 {@code null}。此方法只读客户端区块缓存，<b>绝不</b>强制加载、生成区块或切换到主线程。
+     * 本包中的所有扫描都通过这里读取地形；带状态参数的 {@code getChunk} 可能因区块 I/O 或生成而阻塞服务器线程。
+     * 扫描只是感知查询，只报告当前已加载内容，不会为了回答而扩展世界。
      */
     static ChunkAccess loadedChunk(Level level, int cx, int cz) {
         return level instanceof ClientLevel clientLevel
@@ -37,7 +34,7 @@ public final class BlockScanner {
                 : null;
     }
 
-    /** One match: world position, its state, and Euclidean distance from the search centre. */
+    /** 一个命中结果：世界坐标、方块状态以及到搜索中心的欧几里得距离。 */
     public record Hit(BlockPos pos, BlockState state, double distance) {}
 
     /**
@@ -69,7 +66,7 @@ public final class BlockScanner {
     }
 
     /**
-     * 扫一节:已解析好的 chunk 里的一个 section,调色板短路 + 球面裁剪,命中追加进
+     * 扫描一个 section：它属于已经解析的 chunk；先用调色板快速跳过无关内容，再进行球形范围裁剪，并将命中加入
      * {@code out}。全仓找方块最终都落到这里——{@link BlockSearch} 一个配额换一节,
      * {@link #scanRings} 一口气走完一串。公开是因为前者要按这个粒度计费。
      */
@@ -83,8 +80,7 @@ public final class BlockScanner {
         if (idx < 0 || idx >= chunk.getSectionsCount()) return;
         LevelChunkSection section = chunk.getSection(idx);
         if (section == null || section.hasOnlyAir()) return;
-        // Palette short-circuit: skip all 4096 inner blocks when the
-        // section's palette holds no target.
+        // 调色板预筛短路：若 section 调色板中没有目标类型，就跳过内部全部 4096 个方块。
         if (!section.maybeHas(filter)) return;
         scanSection(section, chunkX, sectionY, chunkZ, center, radius, radiusSq, filter, out);
     }
