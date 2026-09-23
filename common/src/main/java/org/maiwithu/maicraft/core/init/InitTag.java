@@ -16,48 +16,31 @@ import net.minecraft.resources.ResourceKey;
 public final class InitTag {
 
     /**
-     * Foods that may be used to feed/heal a companion. Datapack-driven so server
-     * admins can extend the list without code changes — see
-     * {@code data/maicraft/tags/item/tame_foods.json}.
+     * 可用于喂养或治疗同伴的食物。由数据包提供内容，服务器管理员无需修改代码即可扩充，见 {@code data/maicraft/tags/item/tame_foods.json}。
      */
     public static final TagKey<Item> TAME_FOODS = item("tame_foods");
 
     /**
-     * Throwaway building blocks the pathfinder may consume as scaffolding while
-     * travelling — bridging gaps, stepping up, and pillaring. The pathfinder only
-     * ever places a block in this tag, so it never burns the player's valuables.
-     * Datapack-driven so packs can add their own cheap blocks — see
-     * {@code data/maicraft/tags/item/scaffolds.json}.
+     * 寻路时允许消耗并用作脚手架的廉价方块，可用于跨越缺口、垫高和搭柱。寻路器只会放置此标签内的方块，因此不会耗掉玩家的贵重物品。
+     * 内容由数据包提供，整合包可加入自定义廉价方块，见 {@code data/maicraft/tags/item/scaffolds.json}。
      */
     public static final TagKey<Item> SCAFFOLDS = item("scaffolds");
 
     /**
-     * Blocks the pathfinder must never break while travelling — the player's
-     * functional/valuable furniture. Any block in this tag gets {@code COST_INF},
-     * so it's routed around (and a {@code goto} onto one relaxes to "stand
-     * adjacent" rather than digging it). This tag carries the no-BlockEntity work
-     * stations (crafting table, stonecutter, smithing table, …) that the
-     * BlockEntity proxy can't catch; container blocks are still covered by that
-     * proxy on top. Datapack-driven so packs extend it freely — see
-     * {@code data/maicraft/tags/block/do_not_break.json}.
+     * 寻路途中绝不能破坏的方块，主要是玩家仍在使用或具有价值的家具。标签内方块的破坏成本设为 {@code COST_INF}，路线会绕行；
+     * 若 {@code goto} 目标正是这类方块，则放宽为站在旁边而不是挖掉它。此标签补充 BlockEntity 代理无法识别的工作站方块（工作台、切石机、锻造台等）；
+     * 容器方块仍由 BlockEntity 代理保护。内容可由数据包扩展，见 {@code data/maicraft/tags/block/do_not_break.json}。
      */
     public static final TagKey<Block> DO_NOT_BREAK = block("do_not_break");
 
     /**
-     * Blocks whose block-entity data a blueprint may carry into the world — sign
-     * text, banner patterns, and whatever a pack chooses to add.
+     * 蓝图获准复制其方块实体数据的方块，例如告示牌文字、旗帜图案，以及整合包主动加入的其他类型。
      *
-     * <p>The tag <b>is</b> the authorisation. A blueprint is a file: editable,
-     * downloadable. Copying a chest's contents out of one would print items from
-     * nothing, so nothing is copied unless it is named here. Being a datapack tag
-     * rather than a list in code means a pack that adds decorative block entities
-     * can declare them safe without touching the mod — but it also means adding a
-     * container here lets blueprints print its contents. That is the pack author's
-     * call to make, deliberately, and it should be made knowing that.
+     * <p>标签本身就是授权依据。蓝图是可编辑、可下载的文件；若允许复制箱子内容，就可能凭空复制物品，因此未列入此标签的方块实体数据一律不复制。
+     * 使用数据包标签而非代码清单，让新增装饰性方块实体的整合包无需修改模组即可声明安全；但把容器加入标签也会允许蓝图复制其中内容。
+     * 是否授予这项能力由整合包作者有意决定，并应充分了解后果。
      *
-     * <p>Named vanilla tags are preferred over listing members: {@code
-     * #minecraft:banners} keeps meaning "banners" across versions. See
-     * {@code data/maicraft/tags/block/safe_block_entity_data.json}.
+     * <p>优先引用原版已有标签而非逐项枚举成员：{@code #minecraft:banners} 可在不同版本中持续表示“旗帜”。见 {@code data/maicraft/tags/block/safe_block_entity_data.json}。
      */
     public static final TagKey<Block> SAFE_BLOCK_ENTITY_DATA = block("safe_block_entity_data");
 
