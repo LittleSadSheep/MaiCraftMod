@@ -69,13 +69,13 @@ public final class NavigationSafetyContext {
         }
     }
 
-    /** Current immutable set; ContextFactory copies it before threaded search dispatch. */
+    /** 当前不可变集合；ContextFactory 在线程化搜索派发前会复制它。 */
     public static LongSet protectedMutationCells() {
         LongSet cells = PROTECTED_MUTATION_CELLS.get();
         return cells == null ? LongSets.emptySet() : cells;
     }
 
-    /** Current immutable set; ContextFactory copies it before threaded search dispatch. */
+    /** 当前不可变集合；ContextFactory 在线程化搜索派发前会复制它。 */
     public static LongSet forbiddenBodyCells() {
         LongSet cells = FORBIDDEN_BODY_CELLS.get();
         return cells == null ? LongSets.emptySet() : cells;
@@ -86,7 +86,7 @@ public final class NavigationSafetyContext {
         return pos != null && protectedMutationCells().contains(pos.asLong());
     }
 
-    /** Preserve the installation while navigating; an explicitly authorised menu operation may still use it. */
+    /** 导航期间保护此处安装；已获明确授权的菜单操作仍可使用它。 */
     public static <T> T withPreservedStructures(Iterable<BlockPos> cells, Supplier<T> operation) {
         LongSet previous = PROTECTED_MUTATION_CELLS.get();
         LongSet next = combined(previous, packed(cells));
@@ -97,7 +97,7 @@ public final class NavigationSafetyContext {
         }
     }
 
-    /** Explicit user/task protection still blocks use, including overlap with a preserved machine. */
+    /** 用户或任务明确指定的保护始终阻止操作，即使该格与受保护机器重叠也一样。 */
     public static boolean protectsUse(BlockPos pos) {
         LongSet cells = PROTECTED_USE_CELLS.get();
         return pos != null && cells != null && cells.contains(pos.asLong());
