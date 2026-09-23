@@ -42,19 +42,19 @@ public final class BuildPlacementRegistry {
             return desired != null && BuildValidity.valid(state, desired, true);
         }
 
-        /** Narrow native exception for a build's temporary support against its own finished block. */
+        /** 允许建筑任务以自己已完成的方块作为临时支撑时，使用的狭义原生例外。 */
         default boolean permitsScaffoldSupport(BlockPos clicked, BlockPos placeAt, BlockState support) { return false; }
 
-        /** Positional cleanup/debris policy applies even when the clicked support is unprotected. */
+        /** 即使点击支撑未受保护，仍要按其位置执行临时方块清理和碎屑策略。 */
         default boolean permitsTemporaryScaffold(BlockPos placeAt) { return true; }
 
-        /** Called only after the owning embedded navigator obtains a confirmed placement receipt. */
+        /** 仅当所属内嵌导航器取得确认放置回执后调用。 */
         default void confirmedScaffold(BlockPos placeAt, BlockState state) {}
         default void confirmedScaffoldRemoval(BlockPos placeAt) {}
         default Map<Item, Integer> scaffoldReservations() { return Map.of(); }
     }
 
-    /** One first-person client body exists in a process; never retain that LocalPlayer here. */
+    /** 每个进程只有一个第一人称客户端角色；此处绝不能长期保留该 LocalPlayer。 */
     private static Provider activeProvider;
     private static final Set<BlockPos> SCAFFOLD = new LinkedHashSet<>();
 
@@ -68,7 +68,7 @@ public final class BuildPlacementRegistry {
                 player.getInventory().items, ScaffoldMaterials.of(player), activeProvider.scaffoldReservations());
     }
 
-    /** Recheck actual inventory and permanent requirements immediately before a navigation placement. */
+    /** 导航即将放置前，重新核实实际背包材料和永久性要求。 */
     public static boolean scaffoldUseAllowed(LocalPlayer player, ItemStack held) {
         if (activeProvider == null) return true;
         var choice = scaffoldChoice(player);
