@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.server.ClientRequestReceipt;
 import org.maiwithu.maicraft.client.server.ServerAssistClient;
 
-/** Optional fixed-terminal transactions inside the existing supply session, planner and cleanup. */
+/** 在现有供料会话、规划器和清理流程中执行可选固定终端交易。 */
 final class Ae2ServerSupply {
     enum State { RUNNING, FALLBACK, SUCCEEDED, FAILED, UNCERTAIN }
     record Progress(State state, String code, String message) {}
@@ -273,7 +273,7 @@ final class Ae2ServerSupply {
     Ae2SupplyPlanner.Plan plan() { return plan; }
     int craftPlans() { return craftPlans + (craft != null && craft.planned() ? 1 : 0); }
     int craftStarts() { return craftStarts + (craft != null && craft.started() ? 1 : 0); }
-    /** Called only after exact native result and the corresponding client inventory delta agree. */
+    /** 只有精确原生结果与对应的客户端库存增量一致后才调用。 */
     private void recordConfirmed(ClientRequestReceipt.Snapshot receipt, int playerSlot) {
         Map<String, Object> row = confirmedReceipt(receipt, playerSlot);
         confirmedRequests++;

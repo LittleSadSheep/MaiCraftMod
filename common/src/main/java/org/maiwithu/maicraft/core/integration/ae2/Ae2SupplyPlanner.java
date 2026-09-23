@@ -90,7 +90,7 @@ final class Ae2SupplyPlanner {
         InventorySlot copy() { return new InventorySlot(sample, count); }
     }
 
-    /** Exact capacity simulator; empty slots become bound to a concrete component-exact sample. */
+    /** 精确模拟可用容量；空槽会绑定到某个数据组件完全匹配的具体样本。 */
     // 在一份背包副本上试放物品；只扣计划容量，不改真实背包，试选失败的候选可丢掉这份副本。
     private static final class Allocator {
         private final List<InventorySlot> slots;

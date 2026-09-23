@@ -11,7 +11,7 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
-/** Converts authoritative exact-key pages into the existing AE2 capacity/allocation planner inputs. */
+/** 将权威精确键分页转换为现有 AE2 容量/分配规划器的输入。 */
 final class Ae2ServerStock {
     private final Map<String, Ae2ReflectionBridge.Entry> entries = new LinkedHashMap<>();
     private final Map<Long, String> identities = new LinkedHashMap<>();

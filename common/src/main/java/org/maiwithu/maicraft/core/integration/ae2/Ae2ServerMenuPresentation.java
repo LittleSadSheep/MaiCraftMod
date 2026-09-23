@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import java.util.Objects;
 
-/** The actual terminal menu is the interaction context, held through native receipts and inventory synchronization. */
+/** 真实终端菜单就是交互上下文，并会一直保留到原生回执和库存同步完成。 */
 final class Ae2ServerMenuPresentation {
     private final AbstractContainerMenu menu;
     private final BooleanSupplier sameTerminal;

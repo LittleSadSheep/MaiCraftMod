@@ -9,7 +9,7 @@ import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 
-/** Native CPU planning and submission are distinct one-shot requests; status never resubmits a job. */
+/** 原生 CPU 规划和作业提交是两次彼此独立的一次性请求；状态轮询绝不会重新提交作业。 */
 final class Ae2ServerCraftJob {
     interface Port {
         ClientRequestReceipt submit(String operation, JsonObject arguments, boolean mutating);
@@ -125,7 +125,7 @@ final class Ae2ServerCraftJob {
         if (pending != null) port.cancel(pending.id());
         if (jobId != null && !status.equals("completed") && !status.equals("cancelled")
                 && port.mayCancel()) {
-            // Cleanup has no task owner: retiring the original task must not delete its queued cancellation.
+            // 清理操作没有任务所有者；注销原始任务时不能删除已经排队的取消请求。
             JsonObject body = jobBody();
             if (body.has("container_id")) {
                 var minecraft = Minecraft.getInstance();
