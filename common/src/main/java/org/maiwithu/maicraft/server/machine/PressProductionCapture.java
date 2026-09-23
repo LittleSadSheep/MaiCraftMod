@@ -9,7 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
-/** Captures the native call's own output suffix, including rolled and sequenced data components. */
+/** 捕获原生调用自身产生的输出后缀，包括卷制和序列化数据组件。 */
 public final class PressProductionCapture {
     private record Capture(BlockEntity producer, List<ItemStack> output, int start, ItemStack input, String recipe) {}
     private static final ThreadLocal<ArrayDeque<Capture>> CALLS = ThreadLocal.withInitial(ArrayDeque::new);
@@ -31,7 +31,7 @@ public final class PressProductionCapture {
                     capture = new Capture(producer, output, output.size(), input, holder.id().toString());
                 }
             } catch (RuntimeException | LinkageError unsupported) {
-                // Instrumentation must never affect gameplay. Missing native evidence cannot prove production.
+                // 埋点绝不能影响游戏行为；缺少原生证据时不能证明发生了生产。
             }
         }
         calls.addLast(capture);
@@ -47,7 +47,7 @@ public final class PressProductionCapture {
             ServerProductionEvents.pressed(producer, capture.recipe(), capture.input(),
                     output.subList(capture.start(), output.size()).stream().map(ItemStack::copy).toList());
         } catch (RuntimeException | LinkageError unsupported) {
-            // Output delivery remains native; a failed observer is not allowed to interrupt it.
+            // 输出交付仍由原生逻辑负责；观察器失败时不能中断交付。
         }
     }
 }

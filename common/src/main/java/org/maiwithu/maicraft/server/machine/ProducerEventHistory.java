@@ -5,7 +5,7 @@ import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Loss watermarks belong to one endpoint, never to unrelated world traffic. */
+/** 丢失水位线属于单个端点，不应受无关世界流量影响。 */
 final class ProducerEventHistory {
     final ArrayDeque<ProductionJournalEvent> events = new ArrayDeque<>();
     final Map<String, Long> losses = new LinkedHashMap<>();

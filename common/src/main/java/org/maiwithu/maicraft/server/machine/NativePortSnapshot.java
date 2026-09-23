@@ -146,7 +146,7 @@ final class NativePortSnapshot {
     }
 
     private static String storage(BlockPos pos, String medium, Direction side, int slot) {
-        // Sided wrappers can remap slot indices. Distinct views must not be summed as disjoint stores.
+        // 有侧面包装器可能会重映射槽位索引；不同视图不能直接合计为互不重叠的库存。
         return pos.toShortString() + "/" + medium + "/view:" + side.getSerializedName() + "/" + slot;
     }
 }

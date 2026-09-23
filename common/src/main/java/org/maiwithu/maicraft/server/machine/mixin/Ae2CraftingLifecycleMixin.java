@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Standalone AE2 19.2 links have no Nexus, so markDone does not make isDone true. Observe the decision itself. */
+/** AE2 19.2 的独立链接没有 Nexus，因此 markDone 不会让 isDone 返回 true；直接观察其判定结果。 */
 @Pseudo
 @Mixin(targets = "appeng.crafting.CraftingLink", remap = false)
 public abstract class Ae2CraftingLifecycleMixin {

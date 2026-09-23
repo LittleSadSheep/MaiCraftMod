@@ -8,7 +8,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** Optional, public mod APIs only. Never links a client class or accesses private fields. */
+/** 仅使用可选模组的公开 API；绝不链接客户端类或访问私有字段。 */
 public final class NativeApi {
     private static final ClassValue<Map<String, List<Method>>> METHODS = new ClassValue<>() {
         @Override protected Map<String, List<Method>> computeValue(Class<?> type) {
@@ -62,7 +62,7 @@ public final class NativeApi {
         if (found == null) throw new Unavailable(owner.getName() + "." + method, null);
         try { return found.invoke(target, arguments); }
         catch (InvocationTargetException failed) {
-            // A mod may have changed state before throwing. Callers must never report this as not applied.
+            // 模组可能在抛出异常前已改变状态；调用方绝不能将其报告为“未应用”。
             throw new NativeFailure(owner.getName() + "." + method, failed.getCause());
         } catch (ReflectiveOperationException | LinkageError missing) {
             throw new Unavailable(owner.getName() + "." + method, missing);
