@@ -16,7 +16,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import java.util.Collections;
 
-/** Incremental existing-footing graph; turning and one-block steps need no hypothetical floor. */
+/** 增量构建已有支撑面连通图；转向和一格高差均无需假设有新地板。 */
 final class BuildFootingSearch {
     record Route(Vec3 feet, double distance, double lowestY, List<Vec3> points) {}
     private record Node(Vec3 feet, double distance, double lowestY, Node previous) {}
@@ -77,8 +77,7 @@ final class BuildFootingSearch {
                 && pos.getY() >= minY && pos.getY() <= maxY;
     }
     Route route(BlockPos cell) {
-        // An admitted edge already proves its destination reachable. The expansion budget
-        // only limits where we look next; it must not erase verified lower fallback routes.
+        // 已接纳的边已经证明终点可达。扩展预算只限制下一步搜索范围，不能抹除已核实的较低处回退路线。
         Node node = best.get(cell); if (node == null) return null;
         var points = new ArrayList<Vec3>();
         for (Node step = node; step != null; step = step.previous()) points.add(step.feet());
