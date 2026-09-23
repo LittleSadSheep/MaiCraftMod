@@ -13,7 +13,7 @@ import net.minecraft.core.Direction;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCosts.*;
 import static org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 
-/** Full geometric BOMs compete under the same effective recipe snapshot, including posts and consumed native chains. */
+/** 完整几何材料清单在同一份有效配方快照下竞争，包含支柱以及会被消耗的原生链条。 */
 public final class KineticRouteChoiceTest {
     public static void main(String[] args) {
         shortAxialAndTurnedRunsChooseTheirActualLowCostGeometry();
@@ -96,7 +96,7 @@ public final class KineticRouteChoiceTest {
                 "economic ranking never becomes a native connection or production claim");
     }
     private static Snapshot prices(Map<String, Integer> carried) {
-        // Installed Create 6.0.10 crafting ratios; commodity anchors are injected relative units, not universal prices.
+        // 已安装的 Create 6.0.10 合成倍率；商品锚点是注入的相对单位，不代表通用市场价格。
         var recipes = Map.of(
                 "create:shaft", List.of(recipe("shaft", 8, ingredient("create:andesite_alloy", 2))),
                 "create:cogwheel", List.of(recipe("cogwheel", 1, ingredient("create:shaft", 1), ingredient("minecraft:oak_planks", 1))),

@@ -23,7 +23,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import sun.misc.Unsafe;
 
-/** Test-only native loading and inert player bridge; no game boot, packet sender or production Mixin application. */
+/** 仅供测试使用的原生加载器和惰性玩家桥；不会启动游戏、发送数据包或应用生产环境 Mixin。 */
 final class BuildPlacementSneakCreateHarness implements AutoCloseable {
     private static final String MOTOR = "com.simibubi.create.content.kinetics.motor.CreativeMotorBlock";
     final URLClassLoader loader;
@@ -49,7 +49,7 @@ final class BuildPlacementSneakCreateHarness implements AutoCloseable {
     static FixturePlayer player(LocalPlayer template, boolean actualSneak) throws Exception {
         Unsafe unsafe = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         FixturePlayer player = (FixturePlayer) unsafe.allocateInstance(FixturePlayer.class);
-        // Both objects belong to this standalone test. Copy inert state, never change the original fixture player.
+        // 两个对象都属于此独立测试。复制惰性状态，绝不修改原始夹具玩家。
         for (Class<?> type = LocalPlayer.class; type != Object.class; type = type.getSuperclass()) {
             for (Field member : type.getDeclaredFields()) {
                 if (Modifier.isStatic(member.getModifiers())) continue;
@@ -63,7 +63,7 @@ final class BuildPlacementSneakCreateHarness implements AutoCloseable {
     static final class FixturePlayer extends LocalPlayer {
         private FixturePlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isShiftKeyDown() {
-            // Explicit test bridge: validates the shared helper with real Create bytecode, not Mixin transformation.
+            // 明确使用测试桥：通过真实 Create 字节码验证共享辅助逻辑，而不是依赖 Mixin 转换。
             // 无启动器夹具复用同一只读潜行投影，仍由真实 Create 放置逻辑解释候选姿态。
             return PlacementPlayerProjection.project(this, super.isShiftKeyDown());
         }

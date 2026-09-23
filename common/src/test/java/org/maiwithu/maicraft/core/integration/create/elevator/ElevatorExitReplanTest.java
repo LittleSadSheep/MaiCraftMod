@@ -36,7 +36,7 @@ public final class ElevatorExitReplanTest {
     private static void failedSearchRetries() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             Scene scene = corridor(); var geometry = scene.geometry(); var motion = new ElevatorMotion();
-            // A dock tick can report feet slightly inside the synchronized moving floor.
+            // 靠站 tick 可能会把脚位报告在已同步的移动地板内部一点点。
             h.position(START.add(ORIGIN).add(0, -.001, 0));
             check(inside(h, motion, scene, geometry) == ElevatorMotion.Progress.BLOCKED,
                     "penetrating floor must fail its actual collision search");
@@ -59,7 +59,7 @@ public final class ElevatorExitReplanTest {
         try (var h = new InteractionWorldTestHarness()) {
             Scene scene = corridor(); var motion = new ElevatorMotion(); h.position(START.add(ORIGIN));
             check(inside(h, motion, scene, scene.geometry()) == ElevatorMotion.Progress.MOVING, "initial route unavailable");
-            // Preserve the exit and starting pose, but replace the cached middle support with a detour.
+            // 保留出口和起始姿势，但将缓存的中间支撑替换为绕行位置。
             scene.blocks.remove(new BlockPos(1, 0, 0));
             for (int x = 0; x < 3; x++) scene.put(new BlockPos(x, 0, 1), Blocks.IRON_BLOCK.defaultBlockState());
             h.nextTick();

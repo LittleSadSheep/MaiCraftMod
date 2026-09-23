@@ -27,7 +27,7 @@ import org.maiwithu.maicraft.core.task.inventory.EquipTaskRecord;
 import org.maiwithu.maicraft.core.tools.InventoryOps;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** Actual equip task and action receipts, with inert native use effects and no world/network. */
+/** 使用真实装备任务和动作回执，并禁用原生使用效果；无需世界或网络。 */
 public final class EquipRoutingTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -153,7 +153,7 @@ public final class EquipRoutingTest {
         }
     }
 
-    /** Record native selection packets without opening a network connection. */
+    /** 记录原生选择数据包，但不打开网络连接。 */
     private static final class SelectionConnection extends ClientPacketListener {
         int selections;
         private SelectionConnection() { super(null, null, null); }
@@ -163,7 +163,7 @@ public final class EquipRoutingTest {
         }
     }
 
-    /** Simulate only the synchronized inventory outcome; the production action port owns receipts. */
+    /** 仅模拟同步后的背包结果；生产动作端口负责持有回执。 */
     private static final class UseMode extends MultiPlayerGameMode {
         int uses;
         EquipmentSlot observedSlot;

@@ -190,8 +190,7 @@ public final class WaterLandingReplayTest {
         check(new WaterLandingWindow(0.08, 6, 1.62, 0).permits(200), "real extended reach permits tall falls");
         check(new WaterLandingWindow(0.01, 4.5, 1.62, 0).permits(200), "real lower gravity changes the admissible window");
         check(!new WaterLandingWindow(0.08, 4.5, 1.62, 3.9).permits(4), "ongoing high speed cannot be treated as a fresh fall");
-        // Sweep fractional departure heights independently using native gravity and exact voxel
-        // rays. Every admitted sample must expose a use ray before the subsequent ground step.
+        // 使用原生重力和精确体素射线，逐一测试不同的小数离水高度。每个获准样本都必须先出现可用射线，才能继续执行后续落地步骤。
         Scene scene = new Scene();
         for (int offset = 0; offset < 100; offset++) {
             double y = 20 + offset / 100.0, speed = 0; boolean reachable = false;
