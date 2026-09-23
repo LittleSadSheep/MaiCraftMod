@@ -18,6 +18,12 @@ import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.PonderKnowledgeSource;
 import java.util.HashMap;
 import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
+import com.google.gson.JsonArray;
+import java.util.ArrayList;
+import java.util.List;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture;
+import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSource;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
 
 /** Real JSON-RPC/HTTP checks against the actual embedded service, with no Minecraft world. */
 public final class KnowledgeHttpTest {
@@ -30,7 +36,19 @@ public final class KnowledgeHttpTest {
 
     private void run() throws Exception {
         PonderFixture.compiled = 0;
-        var knowledge = new KnowledgeLibrary(new PonderKnowledgeSource(PonderFixture.access(), id -> "测试插件"));
+        var quests = new FtbQuestFixture();
+        var ponder = new PonderKnowledgeSource(PonderFixture.access(), id -> "测试插件");
+        var ftb = new FtbQuestsKnowledgeSource(quests.access);
+        // 在同一服务中发现教程和任务书，验证两种入口都不会误走角色操作接口。
+        var knowledge = new KnowledgeLibrary(new KnowledgeLibrary.Source() {
+            public List<KnowledgeDocument.Entry> entries() {
+                var entries = new ArrayList<>(ponder.entries()); entries.addAll(ftb.entries()); return entries;
+            }
+            public KnowledgeDocument read(String uri) {
+                return uri.startsWith(FtbQuestsKnowledgeSource.PREFIX) ? ftb.read(uri) : ponder.read(uri);
+            }
+            public JsonArray templates() { var templates = ponder.templates(); templates.addAll(ftb.templates()); return templates; }
+        });
         try (var server = new EmbeddedMcpService(McpConfig.local(0), new Runtime(knowledge))) {
             server.start(); endpoint = URI.create("http://127.0.0.1:" + server.port() + "/mcp");
             var initialized = send("initialize", json("{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"knowledge-test\",\"version\":\"1\"}}"));
@@ -57,6 +75,7 @@ public final class KnowledgeHttpTest {
             }
             check(attention && chatflow && scene != null && PonderFixture.compiled == 0,
                     "keep attention and chatflow, and discover foreign Ponder scenes");
+            verifyQuests(quests, allResources);
             // 标准HTTP发现与资源读取必须保留完整Schema；纯资料查询不会委派世界感知或开始施工。
             var contract = BuildingModelContract.current();
             check(allResources.asList().stream().anyMatch(value ->
@@ -118,6 +137,27 @@ public final class KnowledgeHttpTest {
             check(invalid.getAsJsonObject("result").get("isError").getAsBoolean(), "knowledge fields cannot be silently ignored by other views");
         }
         System.out.println("KnowledgeHttpTest: passed");
+    }
+
+    private void verifyQuests(FtbQuestFixture fixture, JsonArray resources) throws Exception {
+        String quest = FtbQuestsKnowledgeSource.QUEST + "FEDCBA9876543210";
+        check(resources.asList().stream().anyMatch(value -> value.getAsJsonObject().get("uri").getAsString().equals(quest))
+                && fixture.quest.bodyReads == 0, "HTTP 列举可见任务但不加载正文");
+        var content = send("resources/read", uri(quest)).getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
+        check(content.get("mimeType").getAsString().equals("application/json"), "FTB Resource 是结构化 JSON");
+        var request = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\"}}");
+        request.getAsJsonObject("arguments").addProperty("resource_uri", quest);
+        var result = send("tools/call", request).getAsJsonObject("result");
+        var fallback = json(result.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+        check(!result.get("isError").getAsBoolean() && fallback.getAsJsonObject("quest")
+                .equals(json(content.get("text").getAsString()).getAsJsonObject("quest")), "工具与资源入口返回相同任务事实");
+        fixture.quest.visible = false;
+        check(send("resources/read", uri(quest)).getAsJsonObject("error").get("code").getAsInt() == -32002,
+                "任务隐藏后不能用旧 URI 继续读正文");
+        check(send("tools/call", request).getAsJsonObject("result").get("isError").getAsBoolean(), "兼容工具同样拒绝隐藏任务");
+        fixture.quest.visible = true;
+        check(send("resources/subscribe", uri(FtbQuestsKnowledgeSource.INDEX)).getAsJsonObject("error").get("code").getAsInt() == -32602,
+                "任务书明确按需读取，不假装支持订阅更新");
     }
 
     private JsonObject send(String method, JsonObject params) throws Exception {
