@@ -5,11 +5,14 @@ import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.piston.PistonMovingBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 
@@ -29,6 +32,12 @@ public final class KineticSourceScopeTest {
         check(!KineticSourceScope.visible(world, pos -> true, eye, 1, outlet), "隔墙的动力不能因直线距离近而被选中");
         world.blocks.keySet().removeIf(pos -> pos.getX() == 3);
         check(!KineticSourceScope.visible(world, pos -> pos.getX() != 3, eye, 1, outlet), "未加载的途中区块不能当作空气透视");
+        // 用已注册的移动活塞重现实体依赖的动态遮挡，不在冻结后的注册表中另造测试方块。
+        BlockPos dynamicWall = new BlockPos(3, 2, 0);
+        var moving = Blocks.MOVING_PISTON.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.EAST);
+        world.blocks.put(dynamicWall, moving);
+        world.entities.put(dynamicWall, new PistonMovingBlockEntity(dynamicWall, moving, Blocks.STONE.defaultBlockState(), Direction.EAST, true, false));
+        check(!KineticSourceScope.visible(world, pos -> true, eye, 1, outlet), "不能丢弃实体数据后透过动态遮挡找到别的网络");
         for (int y : new int[]{-60, 60}) {
             BlockPos remoteFloor = new BlockPos(6, y, 0); world.blocks.put(remoteFloor, Blocks.STONE.defaultBlockState());
             check(!KineticSourceScope.visible(world, pos -> true, eye, 1, remoteFloor), "不会沿地井或高空跨楼层搜索其他网络");
@@ -37,7 +46,8 @@ public final class KineticSourceScopeTest {
     }
     private static final class World implements BlockGetter {
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
-        public BlockEntity getBlockEntity(BlockPos pos) { return null; }
+        final Map<BlockPos, BlockEntity> entities = new HashMap<>();
+        public BlockEntity getBlockEntity(BlockPos pos) { return entities.get(pos); }
         public BlockState getBlockState(BlockPos pos) { return blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
         public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         public int getHeight() { return 384; }

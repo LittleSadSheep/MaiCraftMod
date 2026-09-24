@@ -31,7 +31,8 @@ final class KineticSourceScope {
         BlockGetter bounded = new BlockGetter() {
             public BlockState getBlockState(BlockPos pos) { return loaded.test(pos) ? world.getBlockState(pos) : Blocks.BARRIER.defaultBlockState(); }
             public FluidState getFluidState(BlockPos pos) { return loaded.test(pos) ? world.getFluidState(pos) : Fluids.EMPTY.defaultFluidState(); }
-            public BlockEntity getBlockEntity(BlockPos pos) { return null; }
+            // 动态墙体可能依赖方块实体生成碰撞形状，不能因丢掉实体而把遮挡误判为空气。
+            public BlockEntity getBlockEntity(BlockPos pos) { return loaded.test(pos) ? world.getBlockEntity(pos) : null; }
             public int getHeight() { return world.getHeight(); }
             public int getMinBuildHeight() { return world.getMinBuildHeight(); }
         };
