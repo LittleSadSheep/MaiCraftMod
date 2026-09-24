@@ -29,6 +29,9 @@ public final class MachineSurvivalMaterials {
 
     private MachineSurvivalMaterials() {}
 
+    /** 已核实的无限资源演示物品共用同一份介质事实；教程中的它们表示外部资源条件，不是默认建材。 */
+    public static String demonstrationSupplyMedium(String itemId) { return KNOWN_CREATIVE.get(itemId); }
+
     /** 注入的是实物与已安装配方证据，不能用蓝图 metadata 自报“可获取”绕过预检。 */
     public static JsonObject review(boolean instabuild, Collection<String> materialIds,
             Predicate<String> actuallyCarried, Predicate<String> installedRecipeResultKnown) {

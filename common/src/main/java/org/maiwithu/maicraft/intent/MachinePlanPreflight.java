@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignRejection;
 import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineSurvivalMaterials;
 
 /** plan 直接检查显式机器蓝图；不领取材料、不占用角色，也不把尚未供电当作设计失败。 */
 public final class MachinePlanPreflight {
@@ -39,12 +40,14 @@ public final class MachinePlanPreflight {
                         : PonderBlueprintStore.resolve(parameters.get("blueprint_uri").getAsString());
                 var layout = MachineConstructionPlan.reviewExplicit(
                         MachineBlueprintDocument.compile(blueprint, MachineConstructionPlan.registry()));
+                // 在线规划提前识别已知创造资源误用；普通建材缺口仍交给开工后的统一补料，不恢复全面备料门槛。
+                if (layout.buildable() && player != null) layout = MachineSurvivalMaterials.requireSurvivalBlueprint(player, layout);
                 valid &= layout.buildable();
                 check.addProperty("valid", layout.buildable());
                 // 返回诊断、材料清单与动力接口即可决定下一步；逐格放置依赖留给 Mod，避免再抄整张图。
                 for (String field : List.of("validation", "native_material_counts", "power_ports", "item_handoffs",
                         "physical_layout_compiled", "native_installation_validated", "physical_target_count",
-                        "site_and_material_preflight_pending", "external_inputs"))
+                        "site_and_material_preflight_pending", "external_inputs", "survival_materials"))
                     if (layout.report().has(field)) check.add(field, layout.report().get(field).deepCopy());
                 if (layout.buildable() && player != null) {
                     issuePath = "goal.parameters.snapshot_id";
@@ -64,7 +67,7 @@ public final class MachinePlanPreflight {
         JsonObject result = new JsonObject();
         result.addProperty("valid", valid);
         result.add("checks", checks);
-        result.addProperty("scope", "Declared machine blueprints and native installation only; site, material supply and actual production are checked during execution. Other goal types retain their own execution checks.");
+        result.addProperty("scope", "Declared machine blueprints, native installation, bound site and known creative-resource eligibility; ordinary material supply and actual production remain execution checks. Other goal types retain their own checks.");
         return result;
     }
 }

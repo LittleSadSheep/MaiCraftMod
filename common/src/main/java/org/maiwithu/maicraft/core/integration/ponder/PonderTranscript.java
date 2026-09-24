@@ -23,6 +23,7 @@ public record PonderTranscript(String sceneId, String title, List<Step> steps,
                 .append("- 场景：`").append(sceneId).append("`；演示结构：`").append(entry.schematic()).append("`\n")
                 .append("- 来源：当前注册的 Ponder 故事板；说明按游戏语言读取，缺失时回退作者原文。\n")
                 .append("- 提取方式：只编译说明，不播放、不 tick、不创建演示世界，也不修改玩家世界。\n\n")
+                .append("- 教程里的创造马达、无限物品/流体/能量源表示演示环境提供的资源 IN；学习接入关系，不把演示发生器直接加入正式蓝图。\n\n")
                 .append("## 原始说明与操作提示\n\n");
         for (int i = offset; i < end; i++) {
             Step step = steps.get(i);

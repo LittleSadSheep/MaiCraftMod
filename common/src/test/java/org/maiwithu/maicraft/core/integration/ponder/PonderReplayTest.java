@@ -11,8 +11,33 @@ import org.maiwithu.maicraft.mcp.knowledge.PonderKnowledgeSource;
 // 用给定演示状态检查平移投影、旋转拒绝、章节切分、拆除前保留和旧资源失效；不运行实际 Ponder 动画世界。
 public final class PonderReplayTest {
     private static final PonderAccess.Entry ENTRY = new PonderAccess.Entry("fixture", "addon:machine", "addon:usage", List.of(), null);
+    /** 创造资源仅保留原始教学证据，投影中的两种介质分别成为待绑定的 IN。 */
+    private static void demonstrationResourcesBecomeInputs() {
+        var motor = new PonderStructureSnapshot.Block(BlockPos.ZERO, "create:creative_motor", Map.of("facing", "east"), "{Speed:256f}");
+        var shaft = new PonderStructureSnapshot.Block(new BlockPos(1, 0, 0), "create:shaft", Map.of("axis", "x"), null);
+        var tank = new PonderStructureSnapshot.Block(new BlockPos(3, 0, 0), "create:creative_fluid_tank", Map.of(), null);
+        var pipe = new PonderStructureSnapshot.Block(new BlockPos(4, 0, 0), "create:fluid_pipe", Map.of(), null);
+        var blocks = List.of(motor, shaft, tank, pipe);
+        var section = new PonderStructureSnapshot.Section("supply-demo", blocks.stream().map(PonderStructureSnapshot.Block::position).toList(),
+                true, new Vec3(0, 1, 0), Vec3.ZERO, Vec3.ZERO, null, 1, Vec3.ZERO);
+        var blueprint = new PonderStructureSnapshot(blocks, List.of(section), new JsonArray()).blueprint(ENTRY, "addon:resource-demo");
+        check(blueprint.getAsJsonArray("blocks").size() == 2, "only receiver structures remain as build blocks");
+        var evidence = blueprint.getAsJsonObject("evidence");
+        check(evidence.getAsJsonArray("source_blocks").size() == 4, "unmodified demonstration sources remain inspectable");
+        var inputs = evidence.getAsJsonArray("resource_inputs");
+        check(inputs.size() == 2 && inputs.get(0).getAsJsonObject().get("medium").getAsString().equals("kinetic")
+                && inputs.get(1).getAsJsonObject().get("medium").getAsString().equals("fluids"), "resource IN projection is shared across media");
+        var input = inputs.get(0).getAsJsonObject();
+        check(input.get("direction").getAsString().equals("in") && !input.get("place_demonstration_source").getAsBoolean(), "a demonstration generator is not requested construction");
+        var receiver = input.getAsJsonArray("adjacent_receiver_candidates").get(0).getAsJsonObject();
+        check(receiver.getAsJsonArray("offset").get(1).getAsInt() == 1 && !receiver.get("interface_verified").getAsBoolean(),
+                "receiver follows the visible transform without inventing a native connection");
+        rejects(() -> PonderBlueprintStore.resolve(PonderBlueprintStore.put(ENTRY.key(), blueprint)), "unbound resource inputs cannot be silently imported as a complete machine");
+    }
+
     public static void main(String[] args) throws Exception {
         PonderBlueprintStore.clear();
+        demonstrationResourcesBecomeInputs();
         var source = snapshot(true, Vec3.ZERO, Vec3.ZERO, 1);
         var moved = snapshot(true, new Vec3(0, 0, 1), Vec3.ZERO, 1);
         var blueprint = moved.blueprint(ENTRY, "addon:scene");

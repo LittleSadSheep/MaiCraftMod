@@ -51,6 +51,9 @@ public final class PonderBlueprintStore {
             throw new IllegalArgumentException("Ponder snapshot contains unresolved transforms or overlaps; inspect evidence and submit an edited blueprint");
         if (result.getAsJsonArray("blocks").isEmpty())
             throw new IllegalArgumentException("Ponder snapshot has no visible placeable blocks; choose another chapter");
+        // 资源 IN 尚未绑定真实接收口时只供设计参考，不能让直接导入把“去掉演示马达”误当成已经获得动力。
+        if (evidence.has("resource_inputs") && !evidence.getAsJsonArray("resource_inputs").isEmpty())
+            throw new IllegalArgumentException("ponder_resource_input_binding_required: read evidence.resource_inputs and submit an authored blueprint with real external_inputs; demonstration resource producers are IN boundaries, not build materials");
         return result;
     }
 

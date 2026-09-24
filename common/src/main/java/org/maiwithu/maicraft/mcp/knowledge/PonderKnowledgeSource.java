@@ -77,7 +77,8 @@ public final class PonderKnowledgeSource implements KnowledgeLibrary.Source {
             if (scenes.isEmpty()) return null;
             String title = displayName.apply(scenes.getFirst().component());
             StringBuilder text = new StringBuilder("# ").append(title).append(" 的 Ponder 场景\n\n")
-                    .append("组件：`").append(scenes.getFirst().component()).append("`。以下仅列目录，读取一个场景才展开正文。\n\n");
+                    .append("组件：`").append(scenes.getFirst().component()).append("`。以下仅列目录，读取一个场景才展开正文。\n\n")
+                    .append("教程中的无限资源提供者表示资源 IN：创造马达表示外部旋转动力输入，应连接真实网络，不照搬为正式建材。\n\n");
             for (var scene : scenes) text.append("- [").append(scene.schematic()).append("](").append(SCENE).append(scene.key()).append(")\n");
             text.append("\n来源：当前 Ponder 注册表。场景名称来自注册的演示结构标识，正式标题在读取该场景时提取。\n");
             return new KnowledgeDocument(uri, "ponder.component", title, "Registered scene index", text.toString());

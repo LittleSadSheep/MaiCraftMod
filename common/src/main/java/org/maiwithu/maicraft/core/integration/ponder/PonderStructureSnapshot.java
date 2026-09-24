@@ -75,11 +75,14 @@ public record PonderStructureSnapshot(List<Block> blocks, List<Section> sections
                 if (previous != null && !previous.equals(value)) { complete = false; warnings.add("Conflicting blocks at " + target.toShortString()); }
             }
         }
+        // 先提取演示环境提供的资源 IN，再投影要建的机构；不把创造资源方块混进施工材料清单。
+        JsonArray resourceInputs = PonderResourceInputs.project(placed);
         placed.values().forEach(projected::add); result.add("blocks", projected);
         JsonObject evidence = new JsonObject(); evidence.addProperty("source", "ponder"); evidence.addProperty("scene_id", sceneId);
         evidence.addProperty("component", entry.component()); evidence.addProperty("schematic", entry.schematic());
         evidence.addProperty("projection_complete", complete); evidence.add("source_blocks", raw); evidence.add("sections", sectionData);
         evidence.add("observed_entities", entities.deepCopy()); evidence.add("warnings", warnings);
+        evidence.add("resource_inputs", resourceInputs);
         // 转速、物品和实体附加数据只作观察记录，不自动变成施工配置或生产成功的证明。
         evidence.addProperty("interpretation", "Demonstration evidence. Raw NBT and entities are observations, not desired build configuration. Speed, inventory, output and attachment behavior require separate use/modification steps. Camera transforms are excluded.");
         result.add("evidence", evidence); return result;

@@ -12,6 +12,7 @@ import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineSurvivalMaterials;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledge;
@@ -96,10 +97,15 @@ public final class MinecraftKnowledgeSource implements KnowledgeLibrary.Source {
         StringBuilder text = new StringBuilder("# ").append(entry.title()).append("\n\n")
                 .append("- 注册 ID：`").append(id).append("`\n")
                 .append("- 物品形式：`").append(BuiltInRegistries.ITEM.getKey(block.asItem())).append("`\n")
-                .append("- 普通 BlockItem：").append(block.asItem() instanceof BlockItem).append("。这只说明物品类型，不证明全部放置副作用可由现有施工接口完成。\n\n")
+                .append("- 方块物品（BlockItem）：").append(block.asItem() instanceof BlockItem).append("。仅表示物品形式，不代表生存可获取、已获使用许可或全部放置副作用受支持。\n\n")
                 .append("## 实际状态属性\n\n| 属性 | 默认值 | 允许值 |\n| --- | --- | --- |\n");
         for (Property<?> property : block.getStateDefinition().getProperties()) appendProperty(text, block, property);
         if (block.getStateDefinition().getProperties().isEmpty()) text.append("该方块没有方块状态属性。\n");
+        // 已核实的创造资源方块不能因命名空间符合要求就成为默认动力方案；教程中解释为资源输入边界。
+        String demonstrationMedium = MachineSurvivalMaterials.demonstrationSupplyMedium(id.toString());
+        if (demonstrationMedium != null) text.append("\n## 资源性质\n\n这是已知的创造资源提供者（")
+                .append(demonstrationMedium).append("）。Ponder 示例中表示资源 IN，不是正式生产蓝图应照搬的建材。")
+                .append("通常保留接收端，连接现有真实网络；模组限制不等于创造权限。实际放置仍需创造模式、已有实物或已安装配方证据。\n");
         text.append("\n属性来自当前注册表。属性名称不自动证明其物理含义；库存、过滤器、模式等也可能属于方块实体配置。\n\n");
         // 提供组件的外部工件接口，供模型比较传送带、置物台等承载方式；未知适配不能冒充运行证明。
         text.append("## 原生工件加工接口\n\n```json\n").append(CreateProcessingCapabilities.descriptor(block.defaultBlockState()))
