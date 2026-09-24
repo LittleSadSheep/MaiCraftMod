@@ -46,6 +46,11 @@ public final class MachineSurvey {
     /** 半径会被防御性限制；调用方应先拒绝无效用户参数。 */
     // 半径限制到 0..8，先扫描完整小立方体，再按输出预算挑选显示项；被省略的数量会在报告中说明。
     public static JsonObject inspect(LocalPlayer self, BlockPos center, int requestedRadius) {
+        return inspect(self, center, requestedRadius, false);
+    }
+
+    /** 施工场地在 Mod 内保留完整有界几何；呈现层随后压缩地面行，不让显示预算使锚点失效。 */
+    public static JsonObject inspect(LocalPlayer self, BlockPos center, int requestedRadius, boolean fullGeometry) {
         Objects.requireNonNull(self, "local player");
         Objects.requireNonNull(center, "machine center");
         Capture capture = capture(self.level(), center, requestedRadius, true);
@@ -91,7 +96,7 @@ public final class MachineSurvey {
         int omittedDetails = 0;
         for (ObservedBlock block : capture.blocks) {
             Integer paletteIndex = paletteLookup.get(block.stateKey);
-            if (relativeBlocks.size() >= MAX_BLOCKS || (paletteIndex == null && palette.size() >= MAX_PALETTE)) {
+            if (!fullGeometry && (relativeBlocks.size() >= MAX_BLOCKS || (paletteIndex == null && palette.size() >= MAX_PALETTE))) {
                 omitted++;
                 continue;
             }

@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildingSceneInspectionTest;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneStoreTest;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneV2StoreTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocumentTest;
+import org.maiwithu.maicraft.core.integration.machine.ConstructionSiteGeometryTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBuildCompletionTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlanTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest;
@@ -81,6 +82,7 @@ public final class MachineRegressionSuite {
         try { TargetIndexInvalidationTest.main(args); }
         catch (Exception failure) { throw new AssertionError(failure); }
         MachineSurveyModelTest.main(args);
+        ConstructionSiteGeometryTest.main(args);
         VehicleRegressionSuite.main(args);
         MachineDesignReviewTest.main(args);
         MachineDesignConstraintsTest.main(args);

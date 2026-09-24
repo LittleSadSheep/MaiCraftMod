@@ -425,7 +425,7 @@ final class MachineAbilityAdapter {
         if (layout == null) return IntentAction.Pending.INSTANCE;
         if (p.has("production") && !MachineUtilityInputs.parse(layout.blueprint()).isEmpty())
             throw bad("external_utility_connection_is_separate: build without production, connect_external_input, then run_production");
-        MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
+        MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime, true);
         if (layout.buildable()) {
             boolean replace = bool(p, "replace_existing", false);
             JsonObject design = p.getAsJsonObject("design");
@@ -527,9 +527,14 @@ final class MachineAbilityAdapter {
     }
 
     private static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        return boundSnapshot(goal, player, runtime, false);
+    }
+
+    private static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime, boolean construction) {
         // 同时核对观察编号、机器名字和位置，不能用甲机器的观察去授权修改乙机器。
-        MachineSnapshots.Snapshot snapshot = MachineSnapshots.requireFresh(player,
-                requiredString(goal.parameters(), "snapshot_id", 36));
+        String id = requiredString(goal.parameters(), "snapshot_id", 36);
+        MachineSnapshots.Snapshot snapshot = construction ? MachineSnapshots.requireForConstruction(player, id)
+                : MachineSnapshots.requireFresh(player, id);
         Goal.WorldPosition target = resolve(goal.target(), player, runtime);
         if (!snapshot.center().equals(block(target)) || !snapshot.label().equalsIgnoreCase(goal.target().label())) {
             throw bad("machine_snapshot_target_mismatch: use the exact machine label measured by this snapshot");

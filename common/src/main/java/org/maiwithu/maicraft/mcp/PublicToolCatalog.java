@@ -28,7 +28,7 @@ final class PublicToolCatalog {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     );
     private static final Set<String> VIEWS = Set.of(
-            "situation", "surroundings", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
+            "situation", "surroundings", "construction_site", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
     );
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
@@ -93,7 +93,9 @@ final class PublicToolCatalog {
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"knowledge searches reference metadata or reads resource_uri; it does not authorize actions or prove runtime capabilities. landmarks returns labels, machines lists observations, machine_menu returns native menu evidence."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"construction_site surveys around the player and returns compact platform geometry, obstacles, interfaces, target and reusable snapshot_id for plan/execute build_machine. knowledge searches reference metadata or reads resource_uri. landmarks returns labels, machines lists observations, machine_menu returns native menu evidence."},
+                                "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
+                                "radius":{"type":"integer","minimum":1,"maximum":8,"description":"construction_site only: bounded survey radius, default 8; full geometry stays in the Mod."},
                                 "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"knowledge or abilities only: concise search keywords, names or IDs. Prefer this to loading a full catalogue. Searches metadata without recipe bodies or complete ability contracts; exact matches rank before bounded spelling corrections. Use knowledge for products/materials/tutorials, abilities for operations. Select an exact returned URI or ability ID next. Mutually exclusive with focus and resource_uri. Literal keywords, not regex or shell commands."},
                                 "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, legacy literal item ID or search words; use query for spelling-tolerant discovery. With abilities, an exact namespaced ability ID; use query for keywords. Omit focus when passing query or resource_uri. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:travel or maicraft:elevators adds the elevator floor list; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"knowledge only: an exact discovered maicraft://knowledge/... or maicraft://building/... URI. Read maicraft://building/index for the current model contract and content-addressed JSON Schema; resources are read in full without loading unrelated documents."},
@@ -211,12 +213,20 @@ final class PublicToolCatalog {
 
     private static void validatePerceive(JsonObject value) {
         // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
-        only(value, "view", "focus", "query", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit",
+        only(value, "view", "focus", "query", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "label", "radius",
                 "sections", "server_id");
         defaults(value, "view", "situation", "after_cursor", 0, "wait_ms", 0,
                 "limit", 10, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
+        // 场地参数只服务这一次有界观察，不悄悄改变其他视图的范围或过滤语义。
+        if ("construction_site".equals(view)) {
+            defaults(value, "radius", 8);
+            integer(value, "radius", 1, 8);
+            nullableString(value, "label", 1, 160);
+            if (present(value, "label") && value.get("label").getAsString().isBlank()) throw bad("label must not be blank");
+            if (present(value, "focus")) throw bad("construction_site uses label and radius, not focus");
+        } else if (present(value, "label") || present(value, "radius")) throw bad("label and radius are only supported by construction_site");
         // 模糊发现与精确读取明确分开，不能把产品名传给只接受能力标识的 focus。
         nullableString(value, "query", 1, 256);
         if (present(value, "query")) {

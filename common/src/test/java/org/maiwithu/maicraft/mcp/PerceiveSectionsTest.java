@@ -24,6 +24,7 @@ public final class PerceiveSectionsTest {
         catalogAcceptsAndRejectsSectionRequests();
         advertisedSectionsAgreeWithValidation();
         crossViewErrorsExplainHowToCorrectTheRequest();
+        constructionSiteHasItsOwnBoundedArguments();
         System.out.println("PerceiveSectionsTest: passed");
     }
 
@@ -51,6 +52,21 @@ public final class PerceiveSectionsTest {
                 "an elevator-only request must not wait for terrain sampling");
         check(PerceiveSections.wants(List.of("elevators", "terrain_overview"), "terrain_overview"),
                 "asking for the sampled terrain explicitly must still wait for it");
+    }
+
+    /** 场地感知公开可直接复用的参数，不把半径或标签静默用于普通身体感知。 */
+    private static void constructionSiteHasItsOwnBoundedArguments() {
+        var plain = PublicToolCatalog.validateAndNormalize("perceive", request("construction_site", "{}"));
+        check(plain.get("radius").getAsInt() == 8, "site survey defaults to a bounded eight-block radius");
+        PublicToolCatalog.validateAndNormalize("perceive", request("construction_site", "{\"radius\":4,\"label\":\"platform\"}"));
+        rejects("unbounded survey", "construction_site", "{\"radius\":999}");
+        rejects("blank site label", "construction_site", "{\"label\":\" \"}");
+        rejects("unrelated radius", "situation", "{\"radius\":4}");
+        rejects("unrelated label", "surroundings", "{\"label\":\"platform\"}");
+        rejects("ambiguous site selector", "construction_site", "{\"focus\":\"maicraft:build_machine\"}");
+        var schema = PublicToolCatalog.definitions().get(0).getAsJsonObject().getAsJsonObject("inputSchema");
+        check(schema.getAsJsonObject("properties").getAsJsonObject("view").getAsJsonArray("enum").toString().contains("construction_site"),
+                "the callable site view is advertised to models");
     }
 
     private static void projectionNamesWhatItCouldNotProduce() {

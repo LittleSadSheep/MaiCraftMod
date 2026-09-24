@@ -1,5 +1,8 @@
 package org.maiwithu.maicraft.mcp;
 
+import org.maiwithu.maicraft.core.integration.machine.ConstructionSiteGeometry;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -253,6 +256,16 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             case "surroundings" -> PerceiveSections.select(surroundings(player, nullableString(arguments, "focus"),
                     arguments.has("limit") ? arguments.get("limit").getAsInt() : 16), sections);
             case "abilities" -> abilities(nullableString(arguments, "focus"));
+            case "construction_site" -> {
+                // 同一次只读感知保留场地锚点与完整结构；规划后可直接交给施工，不另派勘察任务。
+                BlockPos anchor = player.blockPosition();
+                String label = nullableString(arguments, "label");
+                if (label == null) label = "site_" + Integer.toHexString(player.level().dimension().hashCode())
+                        + "_" + anchor.getX() + "_" + anchor.getY() + "_" + anchor.getZ();
+                var snapshot = MachineSnapshots.constructionSite(player, label, anchor, arguments.get("radius").getAsInt());
+                intents.remember(label, new Goal.WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), snapshot.dimension()));
+                yield ConstructionSiteGeometry.describe(snapshot);
+            }
             case "tasks" -> {
                 String rawTaskId = nullableString(arguments, "task_id");
                 if (rawTaskId != null) {
