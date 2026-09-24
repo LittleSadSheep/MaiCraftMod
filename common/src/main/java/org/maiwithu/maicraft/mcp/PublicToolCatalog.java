@@ -67,7 +67,7 @@ final class PublicToolCatalog {
                 "type":"object",
                 "properties": {
                   "ability":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
-                  "outcome":{"type":"string","minLength":1,"maxLength":500},
+                  "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Required goal.outcome: a plain-language description of the requested result, not an object or a top-level tool argument."},
                   "target":{"anyOf":[{"$ref":"#/$defs/semanticTarget"},{"type":"null"}]},
                   "parameters":{"type":"object","default":{},"description":"Only keys declared by the selected ability in perceive(view=abilities) are accepted."},
                   "preferences":{"type":"object","default":{},"description":"Must be empty unless the selected ability explicitly declares accepted_preferences."},
@@ -98,7 +98,7 @@ final class PublicToolCatalog {
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
                                 "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"knowledge, abilities or kinetic_sources: concise keywords, names or IDs. kinetic_sources filters actual visible powered block interfaces in loaded chunks. Other searches read reference metadata only. Prefer short terms to loading a full catalogue; exact names rank before bounded spelling corrections. Mutually exclusive with focus/resource_uri. Literal keywords, not regex or shell commands."},
                                 "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, legacy literal item ID or search words; use query for spelling-tolerant discovery. With abilities, an exact namespaced ability ID; use query for keywords. Omit focus when passing query or resource_uri. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:travel or maicraft:elevators adds the elevator floor list; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
-                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"knowledge only: an exact discovered maicraft://knowledge/... or maicraft://building/... URI. Read maicraft://building/index for the current model contract and content-addressed JSON Schema; resources are read in full without loading unrelated documents."},
+                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"An exact discovered maicraft://knowledge/... or maicraft://building/... URI; selects knowledge when view is omitted. Building scenes use maicraft://building/index; machine assemblies use maicraft://knowledge/machine_assembly. Read the selected document without loading unrelated manuals."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For attention, filter task events while retaining important body events and include authoritative task state. For tasks, read one full task."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
@@ -215,7 +215,8 @@ final class PublicToolCatalog {
         // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
         only(value, "view", "focus", "query", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "label", "radius",
                 "sections", "server_id");
-        defaults(value, "view", "situation", "after_cursor", 0, "wait_ms", 0,
+        // 已选中文档 URI 就直接读知识；调用者明确指定的其他视图仍会校验，避免先做一次无关身体观察。
+        defaults(value, "view", present(value, "resource_uri") ? "knowledge" : "situation", "after_cursor", 0, "wait_ms", 0,
                 "limit", 10, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
@@ -360,7 +361,12 @@ final class PublicToolCatalog {
                 "constraints", new JsonArray(), "children", new JsonArray());
         String ability = string(goal, "ability", 1, 256, false);
         resource(ability, "ability");
-        string(goal, "outcome", 1, 500, false);
+        // 目标描述填错时直接指出字段位置和类型，避免模型为修正请求外壳重新查询整本能力目录。
+        try { string(goal, "outcome", 1, 500, false); }
+        catch (IllegalArgumentException invalid) {
+            throw bad("goal.outcome must be a non-empty string (1..500 characters) describing the requested result; "
+                    + "keep it inside goal, not beside goal: " + invalid.getMessage());
+        }
         if (present(goal, "target")) validateTarget(object(goal, "target"));
         object(goal, "parameters");
         // 这里仅确认 parameters 是对象，不检查里面 count 等各能力参数的整数类型或数值范围。

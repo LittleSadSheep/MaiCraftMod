@@ -830,8 +830,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 suggestions.add("Query current task and world state before deciding whether to retry.");
             }
         } else if (code.equals("invalid_arguments") || code.equals("invalid_semantic_goal")) {
-            // 确定性的设计错误需要修改请求；新设计使用新去重键，避免无意义观察和复用旧请求身份。
-            suggestions.add("Revise the rejected request using its diagnostics; a changed execute request needs a new request_key. Review the revised blueprint before construction. Repeated unchanged rejection requires a new approach or an escalation.");
+            // 参数错误只修正当前请求；读取知识或编译计划报错时，不额外要求角色勘察世界、审阅蓝图或填写执行键。
+            suggestions.add("Correct the reported fields using this tool's input schema, then resubmit the corrected request.");
+            if (requestKey != null) suggestions.add("A changed execute request needs a new request_key.");
         } else if (retryable) {
             suggestions.add("Re-observe current facts, then retry with the same request_key when present.");
         }

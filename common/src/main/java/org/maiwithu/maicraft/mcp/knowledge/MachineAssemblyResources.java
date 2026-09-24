@@ -24,7 +24,8 @@ public final class MachineAssemblyResources {
         result.addProperty("component_contract", MinecraftKnowledgeSource.BLOCK + "{namespace}/{path}");
         result.addProperty("recipe_contract", RecipeKnowledgeSource.PREFIX + "{namespace}/{path}");
         result.addProperty("production_contract", KnowledgeLibrary.PROCESSES);
-        result.addProperty("installation_guide", KnowledgeLibrary.BLUEPRINT);
+        // 机器蓝图已有完整格式和安装原语，直接说明提交外壳，不引导角色先遍历无关的建筑场景教材。
+        result.addProperty("submission", "Call plan with goal.ability=maicraft:build_machine, goal.outcome=a non-empty result description, goal.target=construction_site.target, and goal.parameters={snapshot_id:construction_site.snapshot_id, blueprint:the authored blueprint, allow_modify:true}. Put external_inputs and supply_preference inside blueprint. Then execute with plan_id and request_key; request_key is not a plan field.");
         result.addProperty("configuration_contract", "production.configurations uses installed native operations; keep filters, mode and input setup explicit, never copy observed NBT into placement");
         result.add("native_configuration_operations", CreateConfigurationContract.describe());
         // 教程与主流程保持一致：资源 IN 可直接按接收方块、偏移和轴面声明，生成端口编号不是额外的开工门槛。

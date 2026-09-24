@@ -26,7 +26,22 @@ public final class PerceiveSectionsTest {
         crossViewErrorsExplainHowToCorrectTheRequest();
         constructionSiteHasItsOwnBoundedArguments();
         designAvailabilityDoesNotDemandExecutionResources();
+        selectedResourceDefaultsToKnowledge();
         System.out.println("PerceiveSectionsTest: passed");
+    }
+
+    private static void selectedResourceDefaultsToKnowledge() {
+        // 模型已有工艺地址时直接读正文；显式指定冲突视图仍报错，不悄悄改写调用者选择。
+        JsonObject request = new JsonObject();
+        request.addProperty("resource_uri", "maicraft://knowledge/machine_assembly");
+        var normalized = PublicToolCatalog.validateAndNormalize("perceive", request);
+        check(normalized.get("view").getAsString().equals("knowledge") && !request.has("view"),
+                "a selected resource must load without an extra view argument or changing the original request");
+        check(PublicToolCatalog.validateAndNormalize("perceive", new JsonObject()).get("view").getAsString().equals("situation"),
+                "an unqualified observation still defaults to the current situation");
+        request.addProperty("view", "situation");
+        try { PublicToolCatalog.validateAndNormalize("perceive", request); throw new AssertionError("conflicting explicit view was ignored"); }
+        catch (IllegalArgumentException expected) { check(expected.getMessage().contains("resource_uri"), "conflicting view names the rejected resource field"); }
     }
 
     private static void projectionKeepsTheRequestedSection() {
