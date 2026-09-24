@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.phys.Vec3;
@@ -63,6 +66,9 @@ public final class StorageSupplyRadiusTest {
     private static void coordinatorSearchesWarehouseAndRecipeEvidenceAtThirtyOneBlocks() throws Exception {
         var runners = runners(); var before = runners.get(SemanticContainerTaskRecord.class);
         try (var h = new InteractionWorldTestHarness()) {
+            // 没有现货时也会检查下层配方；夹具应提供真实空索引，不能留下未初始化的客户端连接字段。
+            var recipes = ClientPacketListener.class.getDeclaredField("recipeManager"); recipes.setAccessible(true);
+            recipes.set(h.player.connection, new RecipeManager(RegistryAccess.EMPTY));
             TaskFactory.register(SemanticContainerTaskRecord.class, SemanticContainerCompanionTask::new);
             var entities = ContainerSupplySourcesTest.worldEntities(h); BlockPos barrel = new BlockPos(1, 1, 1);
             ContainerSupplySourcesTest.addBarrel(h, entities, barrel);

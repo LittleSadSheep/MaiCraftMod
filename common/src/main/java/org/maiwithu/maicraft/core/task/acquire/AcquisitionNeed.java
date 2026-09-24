@@ -41,6 +41,10 @@ final class AcquisitionNeed {
     boolean toolPrerequisite;
     boolean efficientBatchStarted;
     boolean effectsObserved;
+    /** 随身无线终端只扩展现货入口，不额外授予普通箱子访问或网络合成许可。 */
+    boolean wirelessInventory;
+    /** 配方树边界还没有采集依据时，应交回工序／来源问题，不能按加工品名字盲搜世界。 */
+    boolean unresolvedMaterialSource;
     final Set<BlockPos> visitedContainers = new LinkedHashSet<>();
     int containerAttempts;
     boolean decisionRequired;
@@ -75,6 +79,7 @@ final class AcquisitionNeed {
 
     boolean canTry(SemanticAcquireTaskRecord.Source source) {
         // 只为仍允许、尚未用尽的来源继续观察和准备，避免已经放弃的工序反复扫描世界。
-        return allowedSources.contains(source) && !exhaustedSources.contains(source);
+        return (allowedSources.contains(source) || source == SemanticAcquireTaskRecord.Source.STORAGE && wirelessInventory)
+                && !exhaustedSources.contains(source);
     }
 }

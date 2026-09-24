@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.core.task.acquire;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.Optional;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.NonNullList;
@@ -20,6 +23,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
+import net.minecraft.world.item.crafting.CookingBookCategory;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
@@ -37,6 +42,8 @@ public final class AcquisitionRecipePlanningTest {
             completeRecoveryCandidates(world);
             finiteMaterialRoutes(world);
             prerequisiteSelection(world);
+            stockAwareMaterialTree(world);
+            includeCookingInputsWithoutConversionLoops(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -81,6 +88,67 @@ public final class AcquisitionRecipePlanningTest {
 
     private static CraftOps.Plan plan(InteractionWorldTestHarness world) {
         return new CraftOps().plan("minecraft:stick", 4, world.player, new ToolContext("recipe-test", 0));
+    }
+
+    /** 粗铁已经存在时，材料树必须看见烧炼这条路，而不是被铁块与铁锭的往返配方绕住。 */
+    private static void includeCookingInputsWithoutConversionLoops(InteractionWorldTestHarness world) throws Exception {
+        world.inventory.clearContent();
+        var iron = BuiltInRegistries.ITEM.getKey(Items.IRON_INGOT);
+        var goalItem = BuiltInRegistries.ITEM.getKey(Items.STICK);
+        var smelting = new RecipeHolder<>(ResourceLocation.parse("test:smelt_iron"), new SmeltingRecipe("", CookingBookCategory.MISC,
+                Ingredient.of(Items.RAW_IRON), new ItemStack(Items.IRON_INGOT), 0, 200));
+        install(world, List.of(smelting));
+        world.inventory.setItem(0, new ItemStack(Items.RAW_IRON));
+        var sources = List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT, SemanticAcquireTaskRecord.Source.COOK);
+        var root = new AcquisitionNeed(List.of(goalItem), 1, 0, Set.of(goalItem), Set.of(), Set.of(), sources);
+        var plan = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
+        var candidate = candidate(goalItem, "use-iron", List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(iron), 1, 1)));
+        check(plan.materialPlan(candidate, root).supplies().isEmpty() && plan.materialPlan(candidate, root).crafts().getFirst().alternatives().equals(List.of(iron)),
+                "已有粗铁覆盖下层烧炼原料，备料清单不应再要求铁锭现货");
+        var ironNeed = new AcquisitionNeed(List.of(iron), 1, 0, Set.of(iron), Set.of(), Set.of(), sources);
+        check(plan.cookingCost(ironNeed) == 10, "直接烧炼按工序代价与当前材料账比较");
+        var forbidden = new AcquisitionNeed(List.of(iron), 1, 0, Set.of(iron), Set.of(), Set.of(), List.of(SemanticAcquireTaskRecord.Source.CRAFT));
+        check(plan.cookingCost(forbidden) == RecipeMaterialPlan.UNREACHABLE, "未允许烧炼时不能靠规划自动扩展许可");
+    }
+
+    /** 复现木种枚举：共同缺金属时，仍应识别背包或 AE 里可用的那条木料路线，先补真正的缺口。 */
+    private static void stockAwareMaterialTree(InteractionWorldTestHarness world) throws Exception {
+        world.inventory.clearContent();
+        install(world, List.of(recipe("oak", Items.OAK_PLANKS, Ingredient.of(Items.OAK_LOG)),
+                recipe("birch", Items.BIRCH_PLANKS, Ingredient.of(Items.BIRCH_LOG))));
+        var output = BuiltInRegistries.ITEM.getKey(Items.STICK);
+        var iron = BuiltInRegistries.ITEM.getKey(Items.IRON_INGOT);
+        var oak = BuiltInRegistries.ITEM.getKey(Items.OAK_PLANKS);
+        var birch = BuiltInRegistries.ITEM.getKey(Items.BIRCH_PLANKS);
+        var root = new AcquisitionNeed(List.of(output), 4, 0, Set.of(output), Set.of(), Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT));
+        var oakRoute = candidate(output, "oak-route", List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(oak), 4, 4),
+                new CraftRecoveryCandidate.IngredientDemand(List.of(iron), 1, 1)));
+        var birchRoute = candidate(output, "birch-route", List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(birch), 4, 4),
+                new CraftRecoveryCandidate.IngredientDemand(List.of(iron), 1, 1)));
+        world.inventory.setItem(0, new ItemStack(Items.BIRCH_LOG));
+        var carried = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
+        check(carried.materialPlan(birchRoute, root).cost() < carried.materialPlan(oakRoute, root).cost(),
+                "普通补料也应根据深层已有原木选择木种，共同缺铁不能抹掉这项优势");
+        check(carried.chooseFrontier(birchRoute, List.of(birchRoute), root).ingredient().itemIds().equals(List.of(iron)),
+                "备料先指向真正缺少的铁，不先去找另一种木头或消耗已预留材料");
+        world.inventory.clearContent();
+        var snapshot = new StockEvidence.Snapshot(StockEvidence.Source.AE2, Map.of(birch, 4L), Set.of(), world.level.getGameTime());
+        root.wirelessInventory = true;
+        check(root.canTry(SemanticAcquireTaskRecord.Source.STORAGE)
+                && !root.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
+                && AcquisitionSources.order(root, new AcquisitionSources.Readiness(false, false, false, false)).get(1)
+                    == SemanticAcquireTaskRecord.Source.STORAGE,
+                "随身网络作为现货入口排在制造前，原有普通容器许可保持独立");
+        var network = new AcquisitionRecipePlanner(world.player, false, 16, List.of(), ignored -> Optional.of(snapshot));
+        check(network.materialPlan(birchRoute, root).supplies().stream().allMatch(need -> need.alternatives().equals(List.of(iron))),
+                "无线终端网络的中间件作为现货终止展开，不能再要求制造那四块木板");
+        long networkCost = network.materialPlan(birchRoute, root).cost();
+        root.wirelessInventory = false;
+        check(!root.canTry(SemanticAcquireTaskRecord.Source.STORAGE), "移除无线入口立即撤销自动网络来源");
+        var forbidden = new AcquisitionRecipePlanner(world.player, false, 16, List.of(), ignored -> Optional.of(snapshot));
+        check(forbidden.materialPlan(birchRoute, root).cost() > networkCost && network.materialPlan(birchRoute, root).cost() > networkCost,
+                "没有适用网络入口时不能借旧 AE 观察把库存算足");
     }
 
     private static RecipeHolder<?> recipe(String id, Ingredient... ingredients) {

@@ -11,16 +11,21 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
+import java.util.function.Function;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
@@ -33,19 +38,30 @@ final class AcquisitionRecipePlanner {
     private final boolean allowHarm;
     private final int storageSearchRadius;
     private final List<String> protectedLabels;
+    private final Function<LocalPlayer, Optional<StockEvidence.Snapshot>> networkStock;
+    private final AcquisitionProcessRecipes processes;
     private AcquisitionNeed stockHintNeed;
     private long stockHintTick = Long.MIN_VALUE;
+    private boolean stockHintWireless;
     private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
-    private final Map<String, Integer> recipeStockPriorities = new HashMap<>();
+    private final Map<String, RecipeMaterialPlan.Result> materialPlans = new HashMap<>();
 
     private Map<ResourceLocation, List<CraftingRecipe>> recipeIndex;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> stockRecipes = new HashMap<>();
 
     AcquisitionRecipePlanner(LocalPlayer player, boolean allowHarm, int storageSearchRadius, List<String> protectedLabels) {
+        this(player, allowHarm, storageSearchRadius, protectedLabels, StockEvidence::latestNetwork);
+    }
+
+    /** 库存读取与配方推演分开；测试可提供已确认网络快照，实际运行使用同一份终端观察缓存。 */
+    AcquisitionRecipePlanner(LocalPlayer player, boolean allowHarm, int storageSearchRadius, List<String> protectedLabels,
+                             Function<LocalPlayer, Optional<StockEvidence.Snapshot>> networkStock) {
         this.player = player;
         this.allowHarm = allowHarm;
         this.storageSearchRadius = storageSearchRadius;
         this.protectedLabels = List.copyOf(protectedLabels);
+        this.networkStock = networkStock;
+        this.processes = new AcquisitionProcessRecipes(player);
     }
 
     private List<ObservedRecipeStockCost.Recipe> stockRecipes(ResourceLocation output) {
@@ -249,19 +265,29 @@ final class AcquisitionRecipePlanner {
     record Frontier(
             IngredientNeed ingredient,
             Set<String> recipeIds,
-            List<ResourceLocation> outputItemIds) {}
+            List<ResourceLocation> outputItemIds, boolean unknownSource) {
+        Frontier(IngredientNeed ingredient, Set<String> recipeIds, List<ResourceLocation> outputItemIds) {
+            this(ingredient, recipeIds, outputItemIds, false);
+        }
+    }
 
-    /** 只用已授权仓库的近期观察给路线排序；真正开做仍要求材料进入背包。 */
-    int stockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
-        if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)) return 1;
+    /** 每层都使用同一本现货账；普通补料也必须考虑背包里能继续合成的原料。 */
+    private void refreshStock(AcquisitionNeed parent) {
         long tick = player.level().getGameTime();
-        if (stockHintNeed != parent || stockHintTick != tick) {
+        if (stockHintNeed != parent || stockHintTick != tick || stockHintWireless != parent.wirelessInventory) {
             stockHintNeed = parent;
             stockHintTick = tick;
-            recipeStockPriorities.clear();
-            // 已打开仓库的库存提示与实际开箱候选共用同一范围，避免远处已有材料被错误排除、转去重新生产。
-            recipeObservedStock = ContainerSupplySources.observedCounts(
-                    player, player.blockPosition(), storageSearchRadius, protectedLabels);
+            stockHintWireless = parent.wirelessInventory;
+            materialPlans.clear();
+            Map<ResourceLocation, Long> observed = new LinkedHashMap<>();
+            // 普通容器继续要求原许可与材料线索；随身无线终端只把自己的网络库存加到账本。
+            if (parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE))
+                observed.putAll(ContainerSupplySources.observedCounts(player, player.blockPosition(), storageSearchRadius, protectedLabels));
+            if (parent.wirelessInventory || parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE))
+                networkStock.apply(player).filter(stock -> stock.source() == StockEvidence.Source.AE2)
+                        .ifPresent(stock -> stock.stored().forEach((id, amount) -> observed.merge(id, amount,
+                                (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b)));
+            recipeObservedStock = Map.copyOf(observed);
             Map<ResourceLocation, Long> carried = new LinkedHashMap<>();
             for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
                 ItemStack stack = player.getInventory().items.get(slot);
@@ -271,17 +297,77 @@ final class AcquisitionRecipePlanner {
             }
             recipeCarriedStock = Map.copyOf(carried);
         }
-        if (recipeObservedStock.isEmpty()) return 1;
-        return recipeStockPriorities.computeIfAbsent(candidate.recipeId(), ignored -> {
+    }
+
+    RecipeMaterialPlan.Result materialPlan(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
+        refreshStock(parent);
+        return materialPlans.computeIfAbsent(candidate.recipeId(), ignored -> {
             List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
             for (var ingredient : candidate.ingredients()) {
-                if (ingredient.required() > 32768) return 1;
+                if (ingredient.required() > 32768)
+                    return new RecipeMaterialPlan.Result(false, false, RecipeMaterialPlan.UNREACHABLE, List.of(), List.of(), Map.of());
                 ingredients.add(new ObservedRecipeStockCost.Need(
                         ingredient.itemIds(), ingredient.required()));
             }
-            return ObservedRecipeStockCost.priority(true, recipeObservedStock, recipeCarriedStock, ingredients,
-                    this::stockRecipes, parent.lineageItems);
+            Map<ResourceLocation, Long> pool = new HashMap<>(recipeCarriedStock);
+            recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount,
+                    (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
+            return RecipeMaterialPlan.estimate(ingredients, pool, item -> processRecipes(item, parent),
+                    item -> sourceCost(item, parent), parent.lineageItems);
         });
+    }
+
+    private List<ObservedRecipeStockCost.Recipe> processRecipes(ResourceLocation output, AcquisitionNeed parent) {
+        List<ObservedRecipeStockCost.Recipe> recipes = new ArrayList<>();
+        if (parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.CRAFT)) recipes.addAll(stockRecipes(output));
+        if (parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.COOK)) recipes.addAll(processes.cooking(output));
+        return recipes;
+    }
+
+    /** 比较直接烧炼与绕远的拆包合成；不能为了一个铁锭先追九件铁装备来熔成铁粒。 */
+    long cookingCost(AcquisitionNeed parent) {
+        if (!parent.canTry(SemanticAcquireTaskRecord.Source.COOK)) return RecipeMaterialPlan.UNREACHABLE;
+        refreshStock(parent);
+        int missing = parent.requiredFinalCount - parent.itemIds.stream().mapToInt(id -> recipeCarriedStock.getOrDefault(id, 0L).intValue()).sum();
+        long best = RecipeMaterialPlan.UNREACHABLE;
+        Map<ResourceLocation, Long> pool = new HashMap<>(recipeCarriedStock);
+        recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
+        for (var output : parent.itemIds) for (var recipe : processes.cooking(output)) {
+            int batches = (int) (((long) Math.max(1, missing) + recipe.outputCount() - 1) / recipe.outputCount());
+            if (recipe.ingredients().stream().anyMatch(input -> (long) input.count() * batches > 32768)) continue;
+            var inputs = recipe.ingredients().stream().map(input -> new ObservedRecipeStockCost.Need(input.alternatives(), input.count() * batches)).toList();
+            var estimate = RecipeMaterialPlan.estimate(inputs, pool, item -> processRecipes(item, parent), item -> sourceCost(item, parent), parent.lineageItems);
+            if (estimate.feasible()) best = Math.min(best, estimate.cost() + (long) batches * recipe.batchCost());
+        }
+        return best;
+    }
+
+    /** 来源分值表示取得方式的相对难度，不声称未观察的野外一定有目标。 */
+    private RecipeMaterialPlan.Source sourceCost(ResourceLocation id, AcquisitionNeed parent) {
+        var source = SemanticSourceKnowledge.inferPlan(List.of(id));
+        var hint = source.hint();
+        Item item = BuiltInRegistries.ITEM.get(id);
+        boolean mine = parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.MINE)
+                && (source.allowedDimensions(SemanticAcquireTaskRecord.Source.MINE).isEmpty()
+                    || source.allowedDimensions(SemanticAcquireTaskRecord.Source.MINE).contains(player.level().dimension().location()));
+        if (mine && (!hint.blockRefs().isEmpty() || item instanceof BlockItem block && block.getBlock().defaultBlockState().is(BlockTags.LOGS)))
+            return new RecipeMaterialPlan.Source(true, 40);
+        if (allowHarm && parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT) && !hint.entityTypeIds().isEmpty())
+            return new RecipeMaterialPlan.Source(true, 100);
+        return new RecipeMaterialPlan.Source(false, 10000);
+    }
+
+    int stockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
+        var plan = materialPlan(candidate, parent);
+        return plan.feasible() && plan.supplies().isEmpty() ? 0 : 1;
+    }
+
+    Map<String, Object> preparation(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
+        var plan = materialPlan(candidate, parent);
+        // 只报告本次所需的备料项与合成顺序，完整 AE 网络清单留在 Mod，避免再次灌满模型上下文。
+        return Map.of("feasible", plan.feasible(), "search_complete", plan.searchComplete(), "estimated_cost", plan.cost(),
+                "supply_list", plan.supplies().stream().map(need -> Map.of("item_ids", need.alternatives().stream().map(ResourceLocation::toString).toList(), "count", need.count())).toList(),
+                "craft_chain", plan.crafts().stream().map(need -> Map.of("item_ids", need.alternatives().stream().map(ResourceLocation::toString).toList(), "required_output", need.count())).toList());
     }
 
     /** 各条路线都只差一件时可合并替代原料；否则保留一条完整配方，不能从两条路线各凑一半。 */
@@ -289,6 +375,39 @@ final class AcquisitionRecipePlanner {
             CraftRecoveryCandidate chosen,
             List<CraftRecoveryCandidate> viableCandidates,
             AcquisitionNeed parent) {
+        var preparation = materialPlan(chosen, parent);
+        if (preparation.feasible() && !preparation.supplies().isEmpty()) {
+            // 先把完整树选出的补料项凑齐，再回来做中间件；已经预留给其他分支的现货不能重复花掉。
+            var supply = preparation.supplies().stream().sorted(Comparator
+                    .comparing((ObservedRecipeStockCost.Need row) -> ingredientRequiresDecision(row.alternatives(), parent)).reversed())
+                    .findFirst().orElseThrow();
+            long externalStock = supply.alternatives().stream().mapToLong(id -> recipeObservedStock.getOrDefault(id, 0L)).sum();
+            long deficit = supply.count() + externalStock;
+            if (deficit == 1 && preparation.supplies().size() == 1) {
+                // 任一整条树只需再补一件时可共同寻找原料；拿到的那件会选定可完成的完整配方。
+                Set<ResourceLocation> items = new LinkedHashSet<>(supply.alternatives());
+                Set<String> alternatives = new LinkedHashSet<>(Set.of(chosen.recipeId()));
+                Set<ResourceLocation> outputs = new LinkedHashSet<>(List.of(chosen.outputItem()));
+                for (var candidate : viableCandidates) {
+                    if (candidate.cost().surface() != chosen.cost().surface()) continue;
+                    var plan = materialPlan(candidate, parent);
+                    if (!plan.feasible() || plan.cost() != preparation.cost() || plan.supplies().size() != 1 || plan.supplies().getFirst().count() != 1) continue;
+                    var next = plan.supplies().getFirst();
+                    if (next.alternatives().stream().anyMatch(id -> recipeObservedStock.getOrDefault(id, 0L) > 0)) continue;
+                    items.addAll(next.alternatives()); alternatives.add(candidate.recipeId()); outputs.add(candidate.outputItem());
+                }
+                return new Frontier(new IngredientNeed(List.copyOf(items), 1), Set.copyOf(alternatives), List.copyOf(outputs),
+                        items.stream().noneMatch(id -> sourceCost(id, parent).known()));
+            }
+            if (deficit <= 32768) return new Frontier(new IngredientNeed(supply.alternatives(), (int) deficit), Set.of(chosen.recipeId()), List.of(chosen.outputItem()),
+                    supply.alternatives().stream().noneMatch(id -> sourceCost(id, parent).known()));
+        }
+        if (preparation.feasible() && preparation.supplies().isEmpty() && !preparation.crafts().isEmpty()) {
+            // 备料齐后按依赖顺序从最下层制造，避免每次再向下压一长串需求，或先花掉别支预留的料。
+            var next = preparation.crafts().getFirst();
+            long needed = next.count() + next.alternatives().stream().mapToLong(id -> recipeObservedStock.getOrDefault(id, 0L)).sum();
+            if (needed <= 32768) return new Frontier(new IngredientNeed(next.alternatives(), (int) needed), Set.of(chosen.recipeId()), List.of(chosen.outputItem()));
+        }
         // 多个配方若各只差一件，任意拿到其中一种原料就能完成一个配方，可以合成一组替代需求一起寻找。
         // 各差多件时不能这样混，因为从两个配方各凑一半，并不保证任何一个能做。
         IngredientNeed primary = chooseIngredient(chosen, parent);
