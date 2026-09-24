@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTe
 import org.maiwithu.maicraft.core.inventory.StockEvidenceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
+import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
@@ -231,6 +232,7 @@ public final class GuiRegressionSuite {
         FirstPersonGateExtendedHotbarTest.main(args);
         ItemUseTimingTest.main(args);
         ObservedRecipeStockCostTest.main(args);
+        RecipeMaterialPlanTest.main(args);
         ObservedContainerStockTest.main(args);
         ContainerDepositCapacityTest.main(args);
         BuildRegionsTest.main(args);
