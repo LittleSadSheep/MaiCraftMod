@@ -29,16 +29,30 @@ public final class RecipeMaterialPlan {
         boolean exhausted;
         boolean spend() { if (--remaining < 0) { exhausted = true; return false; } return true; }
     }
+    /** 分支只复制发生变化的物品账，不为每条配方复制整个 AE 网络。 */
+    private static final class Pool {
+        final Map<ResourceLocation, Long> stock, changed;
+        Pool(Map<ResourceLocation, Long> stock) { this.stock = stock; changed = new HashMap<>(); }
+        Pool(Pool other) { stock = other.stock; changed = new HashMap<>(other.changed); }
+        long get(ResourceLocation item) { return Math.max(0, changed.getOrDefault(item, stock.getOrDefault(item, 0L))); }
+        void put(ResourceLocation item, long count) { changed.put(item, count); }
+        void add(ResourceLocation item, long count) { put(item, Math.addExact(get(item), count)); }
+        Map<ResourceLocation, Long> remaining() { var all = new HashMap<>(stock); all.putAll(changed); return all; }
+    }
     private static final class State {
-        final Map<ResourceLocation, Long> pool;
+        final Pool pool;
         final List<Need> supplies, crafts;
         long cost;
-        State(Map<ResourceLocation, Long> stock) { pool = new HashMap<>(stock); supplies = new ArrayList<>(); crafts = new ArrayList<>(); }
+        State(Map<ResourceLocation, Long> stock) { pool = new Pool(stock); supplies = new ArrayList<>(); crafts = new ArrayList<>(); }
         State(State source) {
-            pool = new HashMap<>(source.pool); supplies = new ArrayList<>(source.supplies);
+            pool = new Pool(source.pool); supplies = new ArrayList<>(source.supplies);
             crafts = new ArrayList<>(source.crafts); cost = source.cost;
         }
     }
+    private record Allocation(State state, int missing) {}
+    private record StateKey(Map<ResourceLocation, Long> changed, List<Need> supplies) {}
+    private static final Comparator<State> ORDER = Comparator.comparingLong((State state) -> state.cost)
+            .thenComparingInt(state -> state.supplies.size()).thenComparingInt(state -> state.crafts.size());
     private RecipeMaterialPlan() {}
 
     public static Result estimate(List<Need> needs, Map<ResourceLocation, Long> stock,
@@ -46,92 +60,98 @@ public final class RecipeMaterialPlan {
                                   Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked) {
         Budget budget = new Budget();
         State initial = new State(stock);
-        State planned = expand(needs, initial, recipes, sources, blocked, Set.of(), 32, budget);
+        State planned = expand(needs, initial, recipes, sources, blocked, Set.of(), 32, budget).stream().min(ORDER).orElse(null);
         return planned == null ? new Result(false, !budget.exhausted, UNREACHABLE, List.of(), List.of(), stock)
-                : new Result(true, !budget.exhausted, planned.cost, merge(planned.supplies), planned.crafts, planned.pool);
+                : new Result(true, !budget.exhausted, planned.cost, merge(planned.supplies), planned.crafts, planned.pool.remaining());
     }
 
-    private static State expand(List<Need> needs, State state, Function<ResourceLocation, List<Recipe>> recipes,
-                                Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
-                                Set<ResourceLocation> visiting, int depth, Budget budget) {
-        if (!budget.spend()) return null;
-        List<Need> missing = new ArrayList<>();
-        // 同层的窄替代组先占用现货，再展开任何子树；不能先做配件而吃掉另一项已经够用的材料。
+    private static List<State> expand(List<Need> needs, State initial, Function<ResourceLocation, List<Recipe>> recipes,
+                                      Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
+                                      Set<ResourceLocation> visiting, int depth, Budget budget) {
+        if (!budget.spend()) return List.of();
+        List<State> states = List.of(initial);
+        // 窄替代组先安排；同价分支保留各自库存账，避免先吃掉另一支唯一能用的材料而误报缺料。
         for (Need need : needs.stream().sorted(Comparator.comparingInt(row -> row.alternatives().size())).toList()) {
-            int deficit = need.count();
-            for (ResourceLocation item : need.alternatives()) {
-                if (blocked.contains(item)) continue;
-                long available = Math.max(0, state.pool.getOrDefault(item, 0L));
-                int used = (int) Math.min(deficit, available);
-                state.pool.put(item, available - used); deficit -= used;
-                if (deficit == 0) break;
-            }
-            if (deficit > 0) missing.add(new Need(need.alternatives(), deficit));
-        }
-        for (Need need : missing) {
-            // 合成的整批余料可跨后续替代组混用；先扣全部可用余料，再比较需要新增的那部分。
-            State reserved = new State(state);
-            int shortage = need.count();
-            for (ResourceLocation item : need.alternatives()) {
-                if (blocked.contains(item)) continue;
-                long available = Math.max(0, reserved.pool.getOrDefault(item, 0L));
-                int used = (int) Math.min(shortage, available);
-                reserved.pool.put(item, available - used); shortage -= used;
-            }
-            if (shortage == 0) { state = reserved; continue; }
-            State best = null;
-            for (ResourceLocation item : need.alternatives()) {
-                if (blocked.contains(item)) continue;
-                State base = new State(reserved);
-                int deficit = shortage;
-                List<Recipe> choices = recipes.apply(item);
-                Source source = sources.apply(item);
-                // 只有明确的直接来源可以在中间层切入；无配方的边界允许列为未知缺料，但绝不算零成本。
-                if (source.known() || choices.isEmpty()) {
-                    State direct = new State(base);
-                    direct.supplies.add(new Need(List.of(item), deficit));
-                    direct.cost = Math.min(UNREACHABLE, direct.cost + (long) deficit * source.unitCost());
-                    best = better(best, direct);
-                }
-                if (visiting.contains(item)) continue;
-                if (depth <= 0) { budget.exhausted = true; continue; }
-                Set<ResourceLocation> path = new HashSet<>(visiting); path.add(item);
-                for (Recipe recipe : choices) {
-                    if (!budget.spend()) break;
-                    int batches = (deficit + recipe.outputCount() - 1) / recipe.outputCount();
-                    List<Need> inputs = new ArrayList<>();
-                    boolean bounded = true;
-                    for (Need input : recipe.ingredients()) {
-                        long count = (long) input.count() * batches;
-                        if (count > 32768) { bounded = false; budget.exhausted = true; break; }
-                        inputs.add(new Need(input.alternatives(), (int) count));
+            List<State> candidates = new ArrayList<>();
+            for (State state : states) for (Allocation allocation : allocate(need, state, blocked)) {
+                State base = allocation.state(); int deficit = allocation.missing();
+                if (deficit == 0) { candidates.add(base); continue; }
+                for (ResourceLocation item : need.alternatives()) {
+                    if (blocked.contains(item)) continue;
+                    List<Recipe> choices = recipes.apply(item); Source source = sources.apply(item);
+                    // 已知获取方式可在中间层切入；无配方边界只列为高成本未知需求，不宣称它是免费原料。
+                    if (source.known() || choices.isEmpty()) {
+                        State direct = new State(base); direct.supplies.add(new Need(List.of(item), deficit));
+                        direct.cost = Math.min(UNREACHABLE, direct.cost + (long) deficit * source.unitCost());
+                        candidates.add(direct);
                     }
-                    if (!bounded) continue;
-                    State crafted = expand(inputs, new State(base), recipes, sources, blocked, path, depth - 1, budget);
-                    if (crafted == null) continue;
-                    long remainder = (long) batches * recipe.outputCount() - deficit;
-                    crafted.pool.merge(item, remainder, Long::sum);
-                    crafted.crafts.add(new Need(List.of(item), deficit));
-                    crafted.cost = Math.min(UNREACHABLE, crafted.cost + batches);
-                    best = better(best, crafted);
+                    if (visiting.contains(item)) continue;
+                    if (depth <= 0) { budget.exhausted = true; continue; }
+                    Set<ResourceLocation> path = new HashSet<>(visiting); path.add(item);
+                    for (Recipe recipe : choices) {
+                        if (!budget.spend()) break;
+                        int batches = (int) (((long) deficit + recipe.outputCount() - 1) / recipe.outputCount());
+                        List<Need> inputs = new ArrayList<>(); boolean bounded = true;
+                        for (Need input : recipe.ingredients()) {
+                            long count = (long) input.count() * batches;
+                            if (count > 32768) { bounded = false; budget.exhausted = true; break; }
+                            inputs.add(new Need(input.alternatives(), (int) count));
+                        }
+                        if (!bounded) continue;
+                        for (State crafted : expand(inputs, new State(base), recipes, sources, blocked, path, depth - 1, budget)) {
+                            crafted.pool.add(item, (long) batches * recipe.outputCount() - deficit);
+                            crafted.crafts.add(new Need(List.of(item), deficit));
+                            crafted.cost = Math.min(UNREACHABLE, crafted.cost + (long) batches * recipe.batchCost());
+                            candidates.add(crafted);
+                        }
+                    }
                 }
             }
-            if (best == null) return null;
-            state = best;
+            states = prune(candidates, budget);
+            if (states.isEmpty()) break;
         }
-        return state;
+        return states;
     }
 
-    private static State better(State previous, State candidate) {
-        if (previous == null || candidate.cost < previous.cost
-                || candidate.cost == previous.cost && candidate.supplies.size() < previous.supplies.size()) return candidate;
-        return previous;
+    private static List<Allocation> allocate(Need need, State state, Set<ResourceLocation> blocked) {
+        List<ResourceLocation> available = need.alternatives().stream()
+                .filter(item -> !blocked.contains(item) && state.pool.get(item) > 0).toList();
+        if (available.isEmpty()) return List.of(new Allocation(new State(state), need.count()));
+        List<Allocation> allocations = new ArrayList<>(); Set<Map<ResourceLocation, Long>> seen = new HashSet<>();
+        // 替代材料分别优先试一次；例如铁和金都能做配件时，也保留把铁留给另一个固定配方的选择。
+        for (ResourceLocation first : available) {
+            List<ResourceLocation> order = new ArrayList<>(); order.add(first);
+            available.stream().filter(item -> !item.equals(first)).forEach(order::add);
+            State trial = new State(state); int missing = need.count();
+            for (ResourceLocation item : order) {
+                long amount = trial.pool.get(item); int use = (int) Math.min(missing, amount);
+                trial.pool.put(item, amount - use); missing -= use;
+                if (missing == 0) break;
+            }
+            if (seen.add(Map.copyOf(trial.pool.changed))) allocations.add(new Allocation(trial, missing));
+        }
+        return allocations;
+    }
+
+    private static List<State> prune(List<State> candidates, Budget budget) {
+        Map<StateKey, State> distinct = new LinkedHashMap<>();
+        for (State candidate : candidates.stream().sorted(ORDER).toList())
+            distinct.putIfAbsent(new StateKey(Map.copyOf(candidate.pool.changed), List.copyOf(candidate.supplies)), candidate);
+        // 极宽的模组配方树保留有限候选并明确标为未穷尽；留下的每条路线仍各有完整数量账。
+        if (distinct.size() > 24) budget.exhausted = true;
+        return distinct.values().stream().limit(24).toList();
     }
 
     private static List<Need> merge(List<Need> needs) {
         // 汇总的是同一套选中配方的缺口，不把不同候选的半套材料拼成貌似可行的备料单。
         Map<List<ResourceLocation>, Integer> counts = new LinkedHashMap<>();
         needs.forEach(need -> counts.merge(need.alternatives(), need.count(), Math::addExact));
-        return counts.entrySet().stream().map(entry -> new Need(entry.getKey(), entry.getValue())).toList();
+        List<Need> result = new ArrayList<>();
+        counts.forEach((items, count) -> {
+            // 大备料单按取物批次保留全部数量，不因展示模型的单项上限截掉后半份需求。
+            for (int remaining = count; remaining > 0; remaining -= Math.min(remaining, 32768))
+                result.add(new Need(items, Math.min(remaining, 32768)));
+        });
+        return List.copyOf(result);
     }
 }

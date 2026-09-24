@@ -19,8 +19,10 @@ public final class ObservedRecipeStockCost {
     public record Need(List<ResourceLocation> alternatives, int count) {
         public Need { alternatives = List.copyOf(alternatives); if (count < 1 || count > 32768) throw new IllegalArgumentException("recipe_hint_quantity"); }
     }
-    public record Recipe(int outputCount, List<Need> ingredients) {
-        public Recipe { ingredients = List.copyOf(ingredients); if (outputCount < 1 || ingredients.isEmpty()) throw new IllegalArgumentException("recipe_hint_recipe"); }
+    public record Recipe(int outputCount, List<Need> ingredients, int batchCost) {
+        public Recipe { ingredients = List.copyOf(ingredients); if (outputCount < 1 || ingredients.isEmpty() || batchCost < 1) throw new IllegalArgumentException("recipe_hint_recipe"); }
+        /** 普通合成按一次操作估价；其他原生工序可提供自己的批次代价。 */
+        public Recipe(int outputCount, List<Need> ingredients) { this(outputCount, ingredients, 1); }
     }
     private static final class Budget { int remaining = 2048; boolean spend() { return remaining-- > 0; } }
     private ObservedRecipeStockCost() {}

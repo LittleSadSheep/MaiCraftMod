@@ -30,6 +30,11 @@ public final class RecipeMaterialPlanTest {
                 LOG, List.of(new Recipe(1, List.of(need(PLANK, 1)))));
         check(!plan(List.of(need(PLANK, 1)), Map.of(), cycle, Map.of()).feasible(), "closed conversion cycles cannot manufacture free resources");
         check(plan(List.of(need(IRON, 1)), Map.of(), Map.of(), Map.of()).cost() >= 10000, "missing recipe is an unknown material source, not zero cost");
+        // 第一支可用铁或木，第二支只能用铁；不能因先取铁而错误要求用户再补一块铁。
+        var coupled = Map.of(PLANK, List.of(new Recipe(1, List.of(new Need(List.of(IRON, LOG), 1)))),
+                PART, List.of(new Recipe(1, List.of(need(IRON, 1)))));
+        var shared = plan(List.of(need(PLANK, 1), need(PART, 1)), Map.of(IRON, 1L, LOG, 1L), coupled, Map.of());
+        check(shared.feasible() && shared.supplies().isEmpty(), "alternative allocation must preserve the other branch's unique ingredient");
         System.out.println("RecipeMaterialPlanTest: passed");
     }
 
