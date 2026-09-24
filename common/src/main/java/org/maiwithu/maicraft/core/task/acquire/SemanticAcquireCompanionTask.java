@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.acquire;
 
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2SupplyTaskRecord;
+import java.util.function.Predicate;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -114,6 +118,7 @@ public final class SemanticAcquireCompanionTask
     private Map<String, Object> processPlanning = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private final AcquisitionRecipePlanner recipePlanner;
+    private final Predicate<LocalPlayer> wirelessAvailable;
     private Map<ResourceLocation, Integer> initialCounts = Map.of();
     private AcquisitionNeed rootNeed;
     private Task activeChild;
@@ -134,11 +139,19 @@ public final class SemanticAcquireCompanionTask
     private AcquisitionNeed failureNeed;
     private DimensionBarrier failureDimension;
     private boolean outcomeUncertain;
+    private boolean wirelessStockChecked;
+    private long wirelessStockQueryTick;
 
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
+        this(player, record, Ae2ResourceSupply::hasCarriedWirelessTerminal);
+    }
+
+    /** 网络入口判断单独注入；实际操作仍交给同一 AE 会话，测试无需真的连接外部游戏服务器。 */
+    SemanticAcquireCompanionTask(LocalPlayer player, SemanticAcquireTaskRecord record, Predicate<LocalPlayer> wirelessAvailable) {
         super(player, record);
         recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm, record.storageSearchRadius, record.protectedLabels);
+        this.wirelessAvailable = wirelessAvailable;
     }
 
     @Override
@@ -187,6 +200,17 @@ public final class SemanticAcquireCompanionTask
 
         if (activeChild != null) {
             return tickActiveChild();
+        }
+
+        // 先一次性读随身终端的网络库存，再比较材料树；查询不领取物品，也不替玩家提交网络合成。
+        if (wirelessInventoryAllowed() && (!wirelessStockChecked
+                || player.level().getGameTime() - wirelessStockQueryTick >= StockEvidence.MAX_AGE_TICKS)) {
+            wirelessStockChecked = true;
+            wirelessStockQueryTick = player.level().getGameTime();
+            var request = new Ae2ResourceSupply.Request(List.of(), false, Ae2ResourceSupply.Operation.OBSERVE);
+            return startChild(rootNeed, SemanticAcquireTaskRecord.Source.INVENTORY,
+                    Ae2ResourceSupply.taskRecord(childId("wireless-stock"), wirelessStockQueryTick + STORAGE_TICKS, request),
+                    "read wireless network stock for the material tree");
         }
 
         if (needs.isEmpty()) {
@@ -288,7 +312,8 @@ public final class SemanticAcquireCompanionTask
     private TaskState attemptStorage(AcquisitionNeed need) {
         int missing = missing(need);
         if (missing <= 0 || !takePlannerStep()) return TaskState.RUNNING;
-        if (need.containerAttempts < ContainerSupplySources.MAX_ATTEMPTS) {
+        boolean explicitStorage = need.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE);
+        if (explicitStorage && need.containerAttempts < ContainerSupplySources.MAX_ATTEMPTS) {
             // 仓库使用独立的有界半径；找得到主城箱子并不意味着可以在同样大的区域内挖矿。
             var ordinary = ContainerSupplySources.candidates(player, player.blockPosition(), r.storageSearchRadius,
                     need.itemIds, need.visitedContainers, r.protectedLabels);
@@ -302,7 +327,7 @@ public final class SemanticAcquireCompanionTask
             }
         }
         // 普通箱子与 AE2 共用仓库许可；切换后端不会获得挖矿许可，也不能绕过真实取物流程。
-        if (!Ae2ResourceSupply.available()) {
+        if (!need.wirelessInventory && !Ae2ResourceSupply.available()) {
             addIssue("storage", "storage_adapter_unavailable",
                     "no further safe ordinary container or supported storage-network adapter is available",
                     Map.of("detail", Ae2ResourceSupply.availabilityDetail()));
@@ -310,14 +335,25 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
         need.attempted(SemanticAcquireTaskRecord.Source.STORAGE);
+        if (need.wirelessInventory) {
+            // 自动网络现货只拿已经查到的数量，先取部分现货，再对余下缺口拆配方；不顺便搜索普通容器。
+            var stock = StockEvidence.latestNetwork(player);
+            if (stock.isEmpty()) {
+                addIssue("storage", "wireless_stock_unknown", "wireless inventory could not be verified; it is not known empty", Map.of());
+                advanceSource(need); return TaskState.RUNNING;
+            }
+            long available = need.itemIds.stream().mapToLong(stock.get()::storedCount).reduce(0L, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
+            if (available <= 0) { advanceSource(need); return TaskState.RUNNING; }
+            missing = (int) Math.min(missing, available);
+        }
         Ae2ResourceSupply.Group group = new Ae2ResourceSupply.Group(
                 need.itemIds.getFirst(), need.itemIds, missing,
                 Ae2ResourceSupply.SelectionMode.AGGREGATE);
         // 网络制造也受当前前置需求约束，不能从顶层任务重新取回已经收窄的制造许可。
-        boolean allowNetworkCrafting = need.allowedSources.contains(
+        boolean allowNetworkCrafting = explicitStorage && !need.wirelessInventory && need.allowedSources.contains(
                 SemanticAcquireTaskRecord.Source.CRAFT);
         Ae2ResourceSupply.Request request = new Ae2ResourceSupply.Request(
-                List.of(group), allowNetworkCrafting);
+                List.of(group), allowNetworkCrafting, Ae2ResourceSupply.Operation.SUPPLY, need.wirelessInventory);
         long now = player.level().getGameTime();
         TaskRecord record = Ae2ResourceSupply.taskRecord(
                 childId("storage"), now + STORAGE_TICKS, request);
@@ -398,17 +434,25 @@ public final class SemanticAcquireCompanionTask
                 .filter(candidate -> candidate.cost().missingMaterials() > 0)
                 // 某个必需原料组只剩祖先物品时，整条配方都绕回原需求，不能继续为它制造其他配件。
                 .filter(candidate -> recipePlanner.chooseIngredient(candidate, need) != null)
+                .filter(candidate -> recipePlanner.materialPlan(candidate, need).feasible())
                 .sorted(Comparator
-                        .comparingInt((CraftRecoveryCandidate candidate) ->
-                                candidate.cost().surface().ordinal())
-                        .thenComparingInt(candidate -> recipePlanner.stockPriority(candidate, need))
-                        .thenComparingInt(candidate ->
-                                recipePlanner.structureCost(candidate, need))
+                        // 先比较扣除各层现货后的整条补料成本，再比较工作面；无来源的短配方不能抢到前面。
+                        .comparingLong((CraftRecoveryCandidate candidate) -> recipePlanner.materialPlan(candidate, need).cost())
+                        .thenComparingInt(candidate -> candidate.cost().surface().ordinal())
                         .thenComparing(CraftRecoveryCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
         // 还缺原料时，排除循环和已失败配方，再比较所需转换层数与成本，挑一个值得继续补材料的方案。
         CraftRecoveryCandidate chosen = viableCandidates.isEmpty()
                 ? null : viableCandidates.getFirst();
+        long craftCost = chosen == null ? RecipeMaterialPlan.UNREACHABLE : recipePlanner.materialPlan(chosen, need).cost();
+        if (recipePlanner.cookingCost(need) < craftCost) {
+            // 直接烧炼的材料树更便宜时切到已有 COOK 执行器；配方比较本身不开始炼制或扣库存。
+            var order = new ArrayList<>(executionSourceOrder(need));
+            order.remove(SemanticAcquireTaskRecord.Source.COOK);
+            order.addFirst(SemanticAcquireTaskRecord.Source.COOK);
+            need.plannedSourceOrder = List.copyOf(order);
+            return TaskState.RUNNING;
+        }
         if (chosen == null) {
             if (!need.committedRecipeIds.isEmpty()) {
                 // 选定配方后已实际动过库存或世界，却发现做不下去时先询问，不自动切到另一条未完成的生产链。
@@ -468,6 +512,7 @@ public final class SemanticAcquireCompanionTask
         AcquisitionNeed childNeed = new AcquisitionNeed(
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
                 lineageItems, lineageRecipes, frontier.recipeIds(), childSources);
+        childNeed.unresolvedMaterialSource = frontier.unknownSource();
         childNeed.lastObservedCount = count(childNeed.itemIds);
         recipeTrace.add(Map.of(
                 "recipe_id", chosen.recipeId(),
@@ -478,6 +523,7 @@ public final class SemanticAcquireCompanionTask
                 "missing_item_ids", itemStrings(ingredient.itemIds()),
                 "missing_count", ingredient.missing(),
                 "observed_stock_material_hint", recipePlanner.stockPriority(chosen, need) == 0,
+                "preparation_plan", recipePlanner.preparation(chosen, need),
                 "allowed_sources", childSources.stream()
                         .map(source -> source.name().toLowerCase(Locale.ROOT))
                         .toList()));
@@ -488,6 +534,11 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptMine(AcquisitionNeed need) {
+        if (need.unresolvedMaterialSource) {
+            // 工艺缺口不等于地上有同名方块；仍可使用现货，但不能盲找木板、设备等加工品来掩盖缺失步骤。
+            addIssue("mine", "material_source_unestablished", "the material tree needs a verified process or acquisition source for this item", needFacts(need));
+            advanceSource(need); return TaskState.RUNNING;
+        }
         // 从物品对应方块或来源提示找可挖目标；先检查工具要求，再让采矿任务去找实际方块并取回掉落物。
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.MINE)) {
             return TaskState.RUNNING;
@@ -846,8 +897,32 @@ public final class SemanticAcquireCompanionTask
             if (terminal == null) return TaskState.RUNNING;
         }
         TaskResult result = activeChild.result(terminal);
+        if (activeRecord instanceof Ae2SupplyTaskRecord supply
+                && supply.request.operation() == Ae2ResourceSupply.Operation.OBSERVE) {
+            // 库存查询成功只更新规划事实，不要求背包增加；其界面收尾结果仍须明确，不能忽略未结清操作。
+            clearActive();
+            if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
+                StockEvidence.forgetNetwork(player);
+                if (result != null && result.data() != null && Boolean.TRUE.equals(result.data().get("outcome_uncertain")))
+                    return failAcquisition("wireless_stock_query_uncertain", result.message(), FailureType.UNKNOWN);
+                // 数据源不可读时明确交回连接问题，不能把未知网络当作空仓后展开新的采集任务。
+                failureNeed = needs.isEmpty() ? rootNeed : needs.peek();
+                return failAcquisition("wireless_stock_unknown", result == null ? "wireless stock query did not settle" : result.message(), FailureType.TARGET_LOST);
+            }
+            needs.forEach(value -> value.plannedSourceOrder = null);
+            return TaskState.RUNNING;
+        }
+        if (activeRecord instanceof Ae2SupplyTaskRecord supply && supply.request.wirelessOnly()
+                && (terminal != TaskState.SUCCESS || result == null || !result.success())) {
+            // 取物失败后不继续使用旧网络数量估算缺口；真实背包进展仍由下方原有回执结算。
+            StockEvidence.forgetNetwork(player);
+        }
         int after = count(activeNeed.itemIds);
         int progress = Math.max(0, after - activeBeforeCount);
+        if (progress > 0 && !(activeRecord instanceof Ae2SupplyTaskRecord)) {
+            // 合成、采集带来的同名物品增长不等于从 AE 取出；重新观察后再比较剩余缺口，避免把网络库存扣错。
+            wirelessStockChecked = false;
+        }
         markActiveEffectsIfObserved(terminal, result, progress);
         if (progress > 0) renewProgressLease();
         activeNeed.lastObservedCount = after;
@@ -1735,6 +1810,9 @@ public final class SemanticAcquireCompanionTask
 
     private List<SemanticAcquireTaskRecord.Source> executionSourceOrder(AcquisitionNeed need) {
         // 许可只决定能用哪些来源；每次库存进展或来源耗尽后，再根据现场条件重排剩余来源。
+        boolean wireless = wirelessInventoryAllowed();
+        if (need.wirelessInventory != wireless) need.plannedSourceOrder = null;
+        need.wirelessInventory = wireless;
         if (need.plannedSourceOrder != null) return need.plannedSourceOrder;
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
         boolean naturalMine = !hint.blockRefs().isEmpty();
@@ -1744,6 +1822,12 @@ public final class SemanticAcquireCompanionTask
         need.plannedSourceOrder = AcquisitionSources.order(need,
                 new AcquisitionSources.Readiness(craftReady, cookReady, naturalMine, directHunt));
         return need.plannedSourceOrder;
+    }
+
+    private boolean wirelessInventoryAllowed() {
+        // 明确只准用背包的请求保持原边界；通常补料则把持有的无线终端作为随身现货入口。
+        return r.allowedSources.stream().anyMatch(source -> source != SemanticAcquireTaskRecord.Source.INVENTORY)
+                && wirelessAvailable.test(player);
     }
 
     private boolean craftExecutableNow(AcquisitionNeed need) {
