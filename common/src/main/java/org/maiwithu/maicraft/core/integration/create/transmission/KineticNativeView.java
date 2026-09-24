@@ -29,9 +29,9 @@ final class KineticNativeView {
                     ? "large_cogwheel" : id.equals("create:cogwheel") ? "cogwheel" : "shaft";
             var axis = (Direction.Axis) NativeApi.call(state.getBlock(),ROTATE,"getRotationAxis",state);
             var faces = new ArrayList<Direction>();
-            if (!family.equals("chain_conveyor") || !chainInterface || exactFace != null)
-                for (Direction side : Direction.values()) if ((exactFace == null || side == exactFace)
-                        && NativeApi.truth(NativeApi.call(state.getBlock(),ROTATE,"hasShaftTowards",level,at,state,side))) faces.add(side);
+            // 锁链连接与轴口是并存的原生接口；比较路线时也保留上下轴口，不能强迫所有来源再拉一条锁链。
+            for (Direction side : Direction.values()) if ((exactFace == null || side == exactFace)
+                    && NativeApi.truth(NativeApi.call(state.getBlock(),ROTATE,"hasShaftTowards",level,at,state,side))) faces.add(side);
             if (faces.isEmpty() && !(family.equals("chain_conveyor") && chainInterface && exactFace == null)) return List.of();
             double speed = ((Number) NativeApi.call(entity,KINETIC,"getSpeed")).doubleValue();
             boolean powered = Double.isFinite(speed) && Math.abs(speed) > .0001
@@ -39,8 +39,9 @@ final class KineticNativeView {
                     && !NativeApi.truth(NativeApi.call(entity,KINETIC,"isOverStressed"));
             var result = new ArrayList<Observation>();
             Object network=NativeApi.field(entity,KINETIC,"network");String networkId=network==null?"":network.toString();
-            if (faces.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,faces,family),id,speed,powered,networkId));
-            else for (Direction.Axis portAxis : Direction.Axis.values()) {
+            if (family.equals("chain_conveyor") && chainInterface && exactFace == null)
+                result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,List.of(),family),id,speed,powered,networkId));
+            for (Direction.Axis portAxis : Direction.Axis.values()) {
                 var onAxis = faces.stream().filter(face -> face.getAxis() == portAxis).toList();
                 if (!onAxis.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,portAxis,onAxis,family),id,speed,powered,networkId));
             }

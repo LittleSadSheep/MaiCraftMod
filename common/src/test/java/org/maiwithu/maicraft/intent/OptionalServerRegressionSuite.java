@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateEconomicEndpointBridg
 import org.maiwithu.maicraft.core.integration.create.CreateExactUtilityEndpointTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorContractTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticClearanceRevalidationTest;
+import org.maiwithu.maicraft.core.integration.create.transmission.KineticSourceScopeTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticClientHeightmapTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticCogwheelGeometryTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticMaterialCostsTest;
@@ -139,6 +140,7 @@ public final class OptionalServerRegressionSuite {
         KineticClientHeightmapTest.main(args);
         MachinePlacementItemsTest.main(args);
         KineticClearanceRevalidationTest.main(args);
+        KineticSourceScopeTest.main(args);
         KineticRouteContinuationTest.main(args);
         ChainConveyorContractTest.main(args);
         ChainConveyorConnectionPathTest.main(args);

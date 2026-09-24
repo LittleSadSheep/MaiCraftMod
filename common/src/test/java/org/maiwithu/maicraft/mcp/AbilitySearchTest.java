@@ -16,6 +16,15 @@ public final class AbilitySearchTest {
             PublicToolCatalog.validateAndNormalize("perceive", row.get("read_arguments"));
         }
         var limited = AbilitySearch.search("machine", 1);
+        // 动力候选由专用只读视图在区块索引内筛选，参数范围不能顺带放宽施工几何勘测。
+        var power = new JsonObject(); power.addProperty("view", "kinetic_sources"); power.addProperty("query", "锁链传动轮");
+        var normalizedPower = PublicToolCatalog.validateAndNormalize("perceive", power);
+        check(normalizedPower.get("radius").getAsInt() == 32, "native power search has its own horizontal scope");
+        for (String view : new String[]{"kinetic_sources", "construction_site"}) {
+            var invalid = new JsonObject(); invalid.addProperty("view", view); invalid.addProperty("radius", view.equals("kinetic_sources") ? 65 : 9);
+            try { PublicToolCatalog.validateAndNormalize("perceive", invalid); throw new AssertionError("unbounded survey accepted"); }
+            catch (IllegalArgumentException expected) { /* 明确拒绝超界，不替模型扩大到别的楼层或整个世界。 */ }
+        }
         // 原生产请求中的接线子操作须能从契约参数召回；过长的零命中查询则提示分开搜索。
         var operations = AbilitySearch.search("connect_external_input", 20).getAsJsonArray("semantic_abilities");
         check(operations.asList().stream().anyMatch(row -> row.getAsJsonObject().get("ability").getAsString().equals("maicraft:modify_machine")), "nested operation is discoverable without loading every ability");

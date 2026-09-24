@@ -63,7 +63,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             var preserved=new ArrayList<BlockPos>(List.of(selected.source().position(),r.target));selected.placements().forEach(cell->preserved.add(cell.position()));
             routeProtection=List.copyOf(preserved);resumingRoute=true;phase=Phase.MATERIALS;return;}
         if(r.source!=null) sources=KineticNativeView.variants(world,r.source,r.sourceFace,true).stream().filter(KineticNativeView.Observation::powered).toList();
-        else discovery=new KineticSourceDiscovery(r.target,r.sourceRadius,0);
+        // 未点名来源时仅在角色当前作业层寻找可见接口，不能因为球形距离够近就连接地下或隔墙的网络。
+        else discovery=new KineticSourceDiscovery(r.target,r.sourceRadius,0,player.getEyePosition(),player.blockPosition().getY(),state->true);
     }
     @Override protected TaskState onTick() {
         try {

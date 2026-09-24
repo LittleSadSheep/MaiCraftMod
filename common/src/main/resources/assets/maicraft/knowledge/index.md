@@ -22,6 +22,8 @@ LLM 可调用 `perceive(view="knowledge", query="物品名称或关键词", limi
 
 机制知识不等于执行能力。能力搜索不查询现场可用性；选定能力后读取完整契约，配方、库存、机器模式和实际产出仍需当前世界的证据。缺少 Ponder 教程或搜索无结果不代表方块没有功能。
 
+查找现场旋转动力用 `perceive(view="kinetic_sources", query="锁链", radius=32)`，省略 query 可查看当前范围的原生动力接口。Mod 在已加载区块索引内筛选，最多返回八个候选，不把全部方块交给模型；默认高度差不超过四格，隔墙、未加载路径和受保护的出口不入选。候选不证明取用权限；接线须属于用户施工范围或已知共用网络。跨层来源应明确点名获准使用的接点。
+
 FTB 任务书页面是 JSON，只读当前客户端同步的数据，带有玩家、队伍、会话和读取时间。`available` 且目录为空表示目前没有可见章节；`not_installed`、`no_world`、`sync_pending`、`book_locked`、`book_disabled`、`api_unavailable` 各自说明无法读取的原因，不能当作空任务书。
 
 任务 ID 和进度数量使用字符串，避免大整数失真。任务的 `can_start_tasks`、`dependencies_satisfied` 和 `completed` 是不同的 FTB 原生判断；前置规则由 `dependency_requirement` 与 `min_required_dependencies` 表示，规则为 `unknown` 时只采用原生满足判定；进度达到要求数量也不能代替完成记录。`details_visible`、`text_visible` 为假时保留隐藏状态，不推测未解锁内容。物品任务同时给出消耗、合成来源、任务屏幕限制、组件匹配与有限展示样例；`definition_snbt` 是原生条件定义，缺省值仍遵循 FTB。任务的 `conditions` 提供动作、目标和单位；`structured` 表示已解释原生条件，`server_defined` 表示条件来自服务器脚本，`native_definition_only` 表示保留了扩展类型的原生定义，`api_unavailable` 表示接口读取失败。后两类不可猜测成已知操作；服务器脚本判定函数不在客户端数据中。

@@ -28,7 +28,7 @@ final class PublicToolCatalog {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     );
     private static final Set<String> VIEWS = Set.of(
-            "situation", "surroundings", "construction_site", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
+            "situation", "surroundings", "construction_site", "kinetic_sources", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
     );
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
@@ -93,10 +93,10 @@ final class PublicToolCatalog {
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"construction_site surveys around the player and returns compact platform geometry, obstacles, interfaces, target and reusable snapshot_id for plan/execute build_machine. knowledge searches reference metadata or reads resource_uri. landmarks returns labels, machines lists observations, machine_menu returns native menu evidence."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"construction_site returns bounded building geometry and an anchor for plan/execute. kinetic_sources searches loaded chunk indexes for up to 8 powered native interfaces, optionally filtered by query or exact block ID in focus; only visible outlets within 4 blocks of current work height. It never inventories all blocks for the model. knowledge reads reference metadata/documents; machines lists remembered observations."},
                                 "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
-                                "radius":{"type":"integer","minimum":1,"maximum":8,"description":"construction_site only: bounded survey radius, default 8; full geometry stays in the Mod."},
-                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"knowledge or abilities only: concise search keywords, names or IDs. Prefer this to loading a full catalogue. Searches metadata without recipe bodies or complete ability contracts; exact matches rank before bounded spelling corrections. Use knowledge for products/materials/tutorials, abilities for operations. Select an exact returned URI or ability ID next. Mutually exclusive with focus and resource_uri. Literal keywords, not regex or shell commands."},
+                                "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
+                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"knowledge, abilities or kinetic_sources: concise keywords, names or IDs. kinetic_sources filters actual visible powered block interfaces in loaded chunks. Other searches read reference metadata only. Prefer short terms to loading a full catalogue; exact names rank before bounded spelling corrections. Mutually exclusive with focus/resource_uri. Literal keywords, not regex or shell commands."},
                                 "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, legacy literal item ID or search words; use query for spelling-tolerant discovery. With abilities, an exact namespaced ability ID; use query for keywords. Omit focus when passing query or resource_uri. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:travel or maicraft:elevators adds the elevator floor list; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"knowledge only: an exact discovered maicraft://knowledge/... or maicraft://building/... URI. Read maicraft://building/index for the current model contract and content-addressed JSON Schema; resources are read in full without loading unrelated documents."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For attention, filter task events while retaining important body events and include authoritative task state. For tasks, read one full task."},
@@ -226,11 +226,15 @@ final class PublicToolCatalog {
             nullableString(value, "label", 1, 160);
             if (present(value, "label") && value.get("label").getAsString().isBlank()) throw bad("label must not be blank");
             if (present(value, "focus")) throw bad("construction_site uses label and radius, not focus");
-        } else if (present(value, "label") || present(value, "radius")) throw bad("label and radius are only supported by construction_site");
+        } else if ("kinetic_sources".equals(view)) {
+            // 动力检索与建造几何分开，水平扩大不会同时向地底扩大；观察只能命名真实可见出口。
+            defaults(value, "radius", 32); integer(value, "radius", 8, 64);
+            if (present(value, "label")) throw bad("kinetic_sources returns observed source labels; it does not accept an invented label");
+        } else if (present(value, "label") || present(value, "radius")) throw bad("radius is only supported by construction_site and kinetic_sources; label is construction_site only");
         // 模糊发现与精确读取明确分开，不能把产品名传给只接受能力标识的 focus。
         nullableString(value, "query", 1, 256);
         if (present(value, "query")) {
-            if (!Set.of("knowledge", "abilities").contains(view)) throw bad("query is only supported by knowledge and abilities");
+            if (!Set.of("knowledge", "abilities", "kinetic_sources").contains(view)) throw bad("query is only supported by knowledge, abilities and kinetic_sources");
             if (value.get("query").getAsString().isBlank()) throw bad("query must contain search keywords");
             if (present(value, "focus") || present(value, "resource_uri")) throw bad("Use query to discover candidates, then focus or resource_uri to read one; do not combine them");
         }
@@ -440,6 +444,11 @@ final class PublicToolCatalog {
         // 字段清单由感知校验器提供，公开给模型的说明与运行时受理条件一起更新。
         JsonObject result = schema(json);
         result.getAsJsonObject("properties").add(PerceiveSections.SECTIONS, PerceiveSections.schema());
+        // 一个 radius 字段供两种观察使用，但模型可见 Schema 仍明确各自界限，不能放宽施工勘测到六十四格。
+        result.add("allOf", JsonParser.parseString("""
+                [{"if":{"properties":{"view":{"const":"construction_site"}},"required":["view"]},"then":{"properties":{"radius":{"minimum":1,"maximum":8}}}},
+                 {"if":{"properties":{"view":{"const":"kinetic_sources"}},"required":["view"]},"then":{"properties":{"radius":{"minimum":8,"maximum":64}}}}]
+                """));
         return result;
     }
 

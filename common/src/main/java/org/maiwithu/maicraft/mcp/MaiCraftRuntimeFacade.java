@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.mcp;
 
+import org.maiwithu.maicraft.core.integration.create.transmission.KineticSourceQueries;
+
 import org.maiwithu.maicraft.core.integration.machine.ConstructionSiteGeometry;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.intent.MachinePlanPreflight;
@@ -268,6 +270,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             case "surroundings" -> PerceiveSections.select(surroundings(player, nullableString(arguments, "focus"),
                     arguments.has("limit") ? arguments.get("limit").getAsInt() : 16), sections);
             case "abilities" -> abilities(nullableString(arguments, "focus"));
+            case "kinetic_sources" -> KineticSourceQueries.observe(player, arguments.get("radius").getAsInt(),
+                    arguments.get("limit").getAsInt(), nullableString(arguments, "query"), nullableString(arguments, "focus"),
+                    (label, at) -> intents.remember(label, new Goal.WorldPosition(at.getX(), at.getY(), at.getZ(), player.level().dimension().location().toString())));
             case "construction_site" -> {
                 // 同一次只读感知保留场地锚点与完整结构；规划后可直接交给施工，不另派勘察任务。
                 BlockPos anchor = player.blockPosition();
