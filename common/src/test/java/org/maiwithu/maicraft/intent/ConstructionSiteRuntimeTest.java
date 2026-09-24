@@ -45,6 +45,13 @@ public final class ConstructionSiteRuntimeTest {
             check(planned.get("valid").getAsBoolean() && planned.getAsJsonArray("checks").get(0).getAsJsonObject()
                     .get("site_anchor_verified").getAsBoolean(), "plan validates the real snapshot binding");
             check(MachineSnapshots.requireForConstruction(world.player, site.id()).id().equals(site.id()), "plan leaves the receipt available to execute");
+            // 施工任务创建后尚未放置任何方块：补料失败再改材料策略，仍应复用并重验原场地。
+            check(MachineAbilityAdapter.adapt(goal, world.player, runtime, null) instanceof IntentAction.Native,
+                    "the first construction attempt creates its native task");
+            request.getAsJsonObject("parameters").addProperty("material_policy", "storage_available");
+            Goal retried = Goal.fromJson(request);
+            check(MachineAbilityAdapter.adapt(retried, world.player, runtime, null) instanceof IntentAction.Native,
+                    "a supply-only retry can reuse unchanged construction geometry");
             try { MachineSnapshots.requireFresh(world.player, site.id()); throw new AssertionError("native action reused an old site receipt"); }
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("expired"), "native actions retain their freshness rule"); }
             world.set(anchor.below(), Blocks.GOLD_BLOCK.defaultBlockState());

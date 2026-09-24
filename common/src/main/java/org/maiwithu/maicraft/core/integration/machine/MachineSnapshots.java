@@ -112,7 +112,7 @@ public final class MachineSnapshots {
             // 设计耗时不代表场地已经变化；同一会话内保留锚点，实际使用时重验完整结构指纹。
             report.addProperty("construction_site", true);
             report.remove("receipt_lifetime_ticks");
-            report.addProperty("validity", "same session and unchanged observed geometry; consumed when construction starts");
+            report.addProperty("validity", "same session and unchanged observed geometry; rechecked for every construction attempt");
         }
         report.addProperty("observation_only", true);
         report.addProperty("ownership", "unknown; observing or naming a machine grants no permission to change it");

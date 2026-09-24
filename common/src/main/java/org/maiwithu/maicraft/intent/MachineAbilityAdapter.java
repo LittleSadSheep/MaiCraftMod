@@ -451,8 +451,9 @@ final class MachineAbilityAdapter {
                     player, anchor, snapshot.dimension(), p.getAsJsonObject("production"), task, protectedLabels, task.materialPolicy);
             if (execution instanceof MachineProductionTaskRecord production)
                 ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
-            MachineSnapshots.consume(snapshot);
-            // 一份观察只用于发起一次修改，即使后面的施工失败，也要重新观察才可另开一份修改任务。
+            // 施工场地在零放置的补料失败后仍可重试；下次使用继续检查结构指纹，已改变的现场仍须重新观察。
+            // 普通机器操作观察保持一次性消费，不把施工锚点的复用扩大到菜单、库存或设备控制。
+            if (!snapshot.report().has("construction_site")) MachineSnapshots.consume(snapshot);
             return new IntentAction.Native(execution);
         }
         JsonObject context = new JsonObject();
