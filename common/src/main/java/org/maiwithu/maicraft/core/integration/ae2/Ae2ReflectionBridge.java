@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -185,6 +186,16 @@ final class Ae2ReflectionBridge {
     Object repositoryIdentity(Object menu) {
         requireStorageMenu(menu);
         return invoke(getClientRepo, menu);
+    }
+
+    /** 库存查询等待条目目录稳定时只读集合大小，避免每刻复制整个大型网络里的物品样本。 */
+    int repositoryEntryCount(Object menu) {
+        Object repository = repositoryIdentity(menu);
+        if (repository == null) return -1;
+        Object entries = invoke(getAllEntries, repository);
+        if (!(entries instanceof Collection<?> collection))
+            throw new Ae2ProtocolException("AE2 repository entries have no observable size");
+        return collection.size();
     }
 
     /** 逐次重读同一客户端仓库；存入会话另外保留仓库对象身份，换界面不能沿用旧数量。 */

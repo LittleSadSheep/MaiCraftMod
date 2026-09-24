@@ -35,6 +35,7 @@ public final class StockEvidence {
     }
 
     private static final Cache CACHE = new Cache();
+    private static final Cache NETWORK_CACHE = new Cache();
     private static AbstractContainerMenu synchronizedMenu;
     private static LocalPlayer synchronizedPlayer;
     private StockEvidence() {}
@@ -57,8 +58,19 @@ public final class StockEvidence {
     /** 被动观察客户端 tick；不会打开界面，也不会提交数据包。 */
     // 每刻检查玩家与世界是否仍相同；只在真实显示外部容器界面时，约每秒读取一次库存。
     public static void observe(LocalPlayer player) {
+        observe(player, false);
+    }
+
+    /** 任务已打开终端时立即读取本刻库存，不等待周期采样，也不把旧观察当成本次读取成功。 */
+    public static Optional<Snapshot> refreshOpenMenu(LocalPlayer player) {
+        observe(player, true);
+        return latest(player).filter(stock -> stock.observedGameTick() == player.level().getGameTime());
+    }
+
+    private static void observe(LocalPlayer player, boolean immediate) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) {
             CACHE.clear();
+            NETWORK_CACHE.clear();
             synchronizedMenu = null;
             synchronizedPlayer = null;
             CreateStockObservation.reset();
@@ -72,7 +84,7 @@ public final class StockEvidence {
             return;
         }
         long tick = player.level().getGameTime();
-        if (tick % 20 != 0) return; // 大型网络仓库每秒采样一次，不在每帧重复读取。
+        if (!immediate && tick % 20 != 0) return; // 被动观察每秒采样；显式库存查询只在终端准备好时读取一次。
         Optional<Snapshot> observation;
         // Create 专用界面优先走自己的读取方式；其他界面先尝试 AE2，最后才尝试普通容器。
         if (CreateStockObservation.supports(menu)) {
@@ -84,13 +96,28 @@ public final class StockEvidence {
                     && synchronizedPlayer == player && synchronizedMenu == menu)
                 observation = containerStock(player, menu, tick);
         }
-        observation.ifPresent(stock -> CACHE.record(player, player.clientLevel, inventory(player), stock));
+        observation.ifPresent(stock -> {
+            CACHE.record(player, player.clientLevel, inventory(player), stock);
+            // 打开普通容器不能抹掉仍有效的无线网络观察；两本缓存都按背包实际增加量扣减已取出的库存。
+            if (stock.source() == Source.AE2) NETWORK_CACHE.record(player, player.clientLevel, inventory(player), stock);
+        });
     }
 
     /** 仅作为规划提示：背包增加会扣减对应库存，但实际供料前必须重新核实。 */
     public static Optional<Snapshot> latest(LocalPlayer player) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) return Optional.empty();
         return CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());
+    }
+
+    public static Optional<Snapshot> latestNetwork(LocalPlayer player) {
+        if (player == null || player.clientLevel != Minecraft.getInstance().level) return Optional.empty();
+        return NETWORK_CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());
+    }
+
+    /** 明确查询失败后撤销旧网络提示；未知连接不能继续拿上次库存给新合成树担保。 */
+    public static void forgetNetwork(LocalPlayer player) {
+        NETWORK_CACHE.clear();
+        if (latest(player).filter(stock -> stock.source() == Source.AE2).isPresent()) CACHE.clear();
     }
 
     // 普通容器只接受一个外部 Container、普通 Slot 类、无重复槽号且带齐玩家 36 格的菜单。

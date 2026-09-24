@@ -49,6 +49,8 @@ public final class Ae2ResourceSupply {
     public enum Operation {
         SUPPLY,
         PREPARE,
+        /** 只读取随身无线终端连接的库存，再按原流程收好界面；不取物、不提交合成。 */
+        OBSERVE,
         /** 把指定数量的普通物品经可见终端存入网络，不合成、不通过服务器供料接口写库存。 */
         DEPOSIT
     }
@@ -106,14 +108,18 @@ public final class Ae2ResourceSupply {
     }
 
     /** 完整且已获准的请求；不同组之间的可接受物品 ID 不得重叠。 */
-    public record Request(List<Group> groups, boolean allowCrafting, Operation operation) {
+    public record Request(List<Group> groups, boolean allowCrafting, Operation operation, boolean wirelessOnly) {
         public Request {
             Objects.requireNonNull(groups, "groups");
             Objects.requireNonNull(operation, "operation");
-            if (groups.isEmpty() || groups.size() > 128) {
+            if (groups.size() > 128 || groups.isEmpty() && operation != Operation.OBSERVE) {
                 throw new IllegalArgumentException("an AE2 request needs between 1 and 128 groups");
             }
             groups = List.copyOf(groups);
+            if (operation == Operation.OBSERVE && (!groups.isEmpty() || allowCrafting))
+                throw new IllegalArgumentException("AE2 observation has no item demand and cannot request crafting");
+            if (operation == Operation.OBSERVE && !wirelessOnly)
+                throw new IllegalArgumentException("AE2 stock observation requires wireless access");
             if (operation == Operation.DEPOSIT && (allowCrafting || groups.stream().anyMatch(group -> group.acceptableItemIds().size() != 1)
                     || groups.stream().mapToLong(Group::count).sum() > 65_536))
                 throw new IllegalArgumentException("AE2 deposit requires exact single item IDs, no crafting and at most 65536 items");
@@ -137,6 +143,11 @@ public final class Ae2ResourceSupply {
 
         public Request(List<Group> groups, boolean allowCrafting) {
             this(groups, allowCrafting, Operation.SUPPLY);
+        }
+
+        /** 旧请求保留原访问方式；只读网络查询明确绑定随身无线终端。 */
+        public Request(List<Group> groups, boolean allowCrafting, Operation operation) {
+            this(groups, allowCrafting, operation, operation == Operation.OBSERVE);
         }
 
         public long totalCount() {
@@ -325,6 +336,11 @@ public final class Ae2ResourceSupply {
 
     public static boolean available() {
         return Ae2ReflectionBridge.availability().available();
+    }
+
+    /** 与实际打开终端复用相同识别规则；持有终端只表示有访问入口，联网状态还须原生界面确认。 */
+    public static boolean hasCarriedWirelessTerminal(LocalPlayer player) {
+        return Ae2TerminalAccess.findWireless(player) != null;
     }
 
     public static String availabilityDetail() {

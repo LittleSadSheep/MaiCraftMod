@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.ae2;
 
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -157,6 +159,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private Ae2SupplyPlanner.Plan plan;
     private int groupIndex;
     private boolean effectsStarted;
+    private boolean networkStockObserved;
+    private int stockEntryCount = -1;
+    private int stockEntryStableTicks;
     private boolean settlingSatisfied;
     private String terminalAccess = "unavailable";
     private Ae2TerminalAccess.Wireless wireless;
@@ -477,6 +482,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     // 鼠标拿着物品时先拒绝。可复用已打开的终端，否则先找无线终端，再尝试已记住或附近的固定终端。
     private void start(LocalPlayerContext context) {
+        // 库存查询只使用随身无线入口；找不到或已掉线时报告未知，不转去搜索别人的固定终端。
+        if (request.wirelessOnly() && !Ae2ResourceSupply.hasCarriedWirelessTerminal(player)) {
+            finishNow(Ae2ResourceSupply.Status.FAILED, "wireless_terminal_missing", "stock observation requires a carried wireless terminal", false);
+            return;
+        }
         if (!ServerAssistClient.nativeFallbackAllowed("inventory.ae2_supply")) {
             finishNow(Ae2ResourceSupply.Status.FAILED, "server_supply_blocked",
                     "known server denial or an unresolved mutation prevents native supply fallback", false);
@@ -489,6 +499,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (bridge.isStorageMenu(player.containerMenu)) {
+            if (request.wirelessOnly() && Ae2DepositAccess.read(player.containerMenu, player, bridge, null).itemSlot() == null) {
+                preserveUnrelatedMenu = true;
+                finishNow(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "wireless_access_scope_mismatch", "the open terminal belongs to another access scope", false); return;
+            }
             terminalAccess = "preopened_storage_menu";
             setPhase(Phase.WAIT_REPOSITORY);
             return;
@@ -499,7 +513,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
 
-        if (request.operation() != Ae2ResourceSupply.Operation.DEPOSIT && !inPlace && !serverRouteConsidered && Ae2ServerSupply.available()) {
+        if (request.operation() != Ae2ResourceSupply.Operation.DEPOSIT
+                && !request.wirelessOnly()
+                && !inPlace && !serverRouteConsidered && Ae2ServerSupply.available()) {
             var reachable = inPlaceTargets();
             if (!reachable.isEmpty()) {
                 fixedCandidates = reachable; prepareFixedAccess(context); return;
@@ -817,6 +833,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     private boolean tryServerSupply(LocalPlayerContext context, Ae2TerminalAccess.FixedTarget target, Phase fallback) {
+        // 自动计入的无线库存只能从该无线入口取用，不能换到附近另一个固定网络。
+        if (request.wirelessOnly()) return false;
         if (inPlace || serverRouteConsidered || request.operation() != Ae2ResourceSupply.Operation.SUPPLY
                 || !Ae2ServerSupply.available()) return false;
         if (serverMenu == null) {
@@ -918,18 +936,42 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             }
         }
         if (!bridge.connected(menu)) {
+            // 新开的无线菜单先于服务器连接状态抵达；给初次同步留出同一有界等待期，不立即误报断网。
+            if (request.wirelessOnly() && phaseTicks <= REPOSITORY_READY_TICKS) {
+                stockRepositorySettled(-1); return;
+            }
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
                     "ae2_network_disconnected", "the AE2 terminal is not connected to a storage network");
             return;
         }
         if (fixedTarget != null && tryServerSupply(ClientRuntime.requireContext(player),
                 fixedTarget, Phase.WAIT_REPOSITORY)) return;
+        if (request.operation() == Ae2ResourceSupply.Operation.OBSERVE
+                && !stockRepositorySettled(bridge.repositoryEntryCount(menu))) {
+            if (phaseTicks > REPOSITORY_READY_TICKS)
+                beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "network_stock_sync_pending", "wireless inventory synchronization has not settled");
+            return;
+        }
         List<Ae2ReflectionBridge.Entry> entries = bridge.entries(menu);
         if (entries == null) {
             if (phaseTicks > REPOSITORY_READY_TICKS) {
                 beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
                         "ae2_repository_pending", "the AE2 client repository did not become ready");
             }
+            return;
+        }
+        if (request.operation() == Ae2ResourceSupply.Operation.OBSERVE) {
+            // 读取的菜单必须确实由玩家随身终端持有；不能拿另一个固定网络的库存给这条合成树做预算。
+            var access = Ae2DepositAccess.read(player.containerMenu, player, bridge, null);
+            if (access.itemSlot() == null) {
+                beginFinish(Ae2ResourceSupply.Status.FAILED, "wireless_stock_scope_mismatch", "the open storage menu is not a carried wireless terminal"); return;
+            }
+            networkStockObserved = StockEvidence.refreshOpenMenu(player)
+                    .filter(stock -> stock.source() == StockEvidence.Source.AE2).isPresent();
+            if (!networkStockObserved && phaseTicks <= REPOSITORY_READY_TICKS) return;
+            beginFinish(networkStockObserved ? Ae2ResourceSupply.Status.SUCCEEDED : Ae2ResourceSupply.Status.RETRYABLE_FAILURE,
+                    networkStockObserved ? "network_stock_observed" : "network_stock_unknown",
+                    networkStockObserved ? "observed currently synchronized wireless entries without extraction or crafting" : "wireless stock observation is unavailable");
             return;
         }
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) {
@@ -1118,6 +1160,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     // 逐组检查剩余数量，优先取当前计划的现货，缺少且允许时才打开合成数量界面。
     private void processItem(LocalPlayerContext context) {
         if (groupIndex >= request.groups().size()) {
+            // 取物结清时记住取出后的网络数量与背包基线，后续材料树不能把同一批物品再算一遍。
+            StockEvidence.refreshOpenMenu(player);
             beginFinish(Ae2ResourceSupply.Status.SUCCEEDED,
                     request.operation() == Ae2ResourceSupply.Operation.PREPARE
                             ? "resources_prepared" : "resources_supplied",
@@ -2153,6 +2197,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
 
     // 取物模式最终再核对真实背包增量；存入使用双边已确认量；准备模式保留原来的网络准备检查。
     private boolean finalAuditPasses() {
+        if (request.operation() == Ae2ResourceSupply.Operation.OBSERVE)
+            return networkStockObserved && player.containerMenu.getCarried().isEmpty();
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) return deposit != null && deposit.complete() && player.containerMenu.getCarried().isEmpty();
         if (waterBucketRoute) return player.containerMenu.getCarried().isEmpty()
                 && waterFillReceipts.size() == request.groups().getFirst().count()
@@ -2170,6 +2216,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     || groupProgress(group.group()) != group.group().count()) return false;
         }
         return true;
+    }
+
+    /** 连接通知先于条目到达；至少观察一秒的稳定目录，再读取客户端现货，实际取物仍重新核实数量。 */
+    private boolean stockRepositorySettled(int count) {
+        if (count < 0 || count != stockEntryCount) {
+            stockEntryCount = count; stockEntryStableTicks = 0; return false;
+        }
+        return ++stockEntryStableTicks >= 20;
     }
 
     private void clearCraftingTarget() {

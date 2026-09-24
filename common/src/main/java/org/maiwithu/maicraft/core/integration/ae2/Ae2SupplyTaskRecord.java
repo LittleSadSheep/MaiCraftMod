@@ -33,6 +33,7 @@ public final class Ae2SupplyTaskRecord extends TaskRecord {
 
     @Override
     public String describe() {
+        if (request.operation() == Ae2ResourceSupply.Operation.OBSERVE) return "ae2_wireless_stock_observation";
         return (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT ? "ae2_deposit " : "ae2_supply ") + request.totalCount() + " item(s) in "
                 + request.groups().size() + " group(s)";
     }
