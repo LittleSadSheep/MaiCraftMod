@@ -89,7 +89,7 @@ final class PublicToolCatalog {
             // 直接调用者用注意流等待；任务书经同一知识入口按需读，剧情资料不会直接触发角色动作。
             tool(PERCEIVE,
                     "For direct task monitoring, use view=attention with execute/task's next_attention arguments, then each response's next_attention. It waits for task or important body events and includes authoritative task state, pending decisions and terminal results. If the host already tracks tasks and delivers verified snapshots, reuse that monitor and yield through the host when nothing else is actionable; do not duplicate its waits or queries. A wait timeout only means no event arrived: the monitoring host continues waiting without requiring another model decision. Direct callers may continue waiting themselves. On decision/paused/unavailable, act or report. Received game chat is not part of attention; subscribe to maicraft://chatflow instead. Prefer query with knowledge to find product/tutorial candidates, or with abilities to find operation summaries, before requesting large catalogues. query tolerates limited name misspellings and loads metadata only. Select an exact returned URI or ability ID, then use resource_uri to read one document or focus to inspect one ability. For quest books start at maicraft://knowledge/ftbquests/index, read chapter and quest URIs, and re-read progress after relevant actions. FTB progress requires a synchronized world and is separate from MaiCraft execution tasks; bundled guides can be read offline. surroundings includes sampled terrain_overview with complete or partial coverage and synchronized elevator floors; needs_sync means unknown, not empty.",
-                    schema("""
+                    perceiveSchema("""
                             {
                               "type":"object",
                               "properties": {
@@ -102,7 +102,6 @@ final class PublicToolCatalog {
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":10},
-                                "sections":{"type":"array","maxItems":32,"items":{"type":"string","minLength":1,"maxLength":48},"description":"situation or surroundings only: return just these top-level sections instead of the whole snapshot, so a long observation cannot be truncated before the section you need. Section names are the keys of the full response; an unknown name is rejected. surroundings accepts position, dimension, sky_light, biome, nearby_entities, nearby_signs, sign_observation, local_decision_summary, terrain_overview, elevators, view, physical_structures; situation accepts those plus inventory, equipment, health and the focus diagnostics. terrain_overview is the sampled terrain: a request that does not name it skips the sampling wait, so a narrow request answers immediately. A requested section this request produced nothing for is named in sections_unavailable; an absent section means unknown, not empty."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -265,7 +264,7 @@ final class PublicToolCatalog {
                 String name = section.getAsString();
                 if (name.length() < 1 || name.length() > 48) throw bad("sections entries have an invalid length");
                 if (name.equals(PerceiveSections.UNAVAILABLE) || !known.contains(name)) {
-                    throw bad("unknown " + view + " section: " + name);
+                    throw bad(PerceiveSections.invalidSection(view, name));
                 }
             }
         }
@@ -425,6 +424,13 @@ final class PublicToolCatalog {
 
     private static JsonObject schema(String json) {
         return JsonParser.parseString(json).getAsJsonObject();
+    }
+
+    private static JsonObject perceiveSchema(String json) {
+        // 字段清单由感知校验器提供，公开给模型的说明与运行时受理条件一起更新。
+        JsonObject result = schema(json);
+        result.getAsJsonObject("properties").add(PerceiveSections.SECTIONS, PerceiveSections.schema());
+        return result;
     }
 
     private static JsonObject goalSchema(String json) {

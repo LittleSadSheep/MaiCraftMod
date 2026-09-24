@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * perceive 响应的逐段投影：调用方声明只要哪些段，响应就只保留这些段。
@@ -58,6 +59,43 @@ final class PerceiveSections {
         if ("situation".equals(view)) return SITUATION;
         if ("surroundings".equals(view)) return SURROUNDINGS;
         return Set.of();
+    }
+
+    /** 模型选观察段之前，从校验所用的同一清单生成说明，避免把周围环境当成身体状态查询。 */
+    static JsonObject schema() {
+        var names = new TreeSet<>(SITUATION);
+        names.addAll(SURROUNDINGS);
+        var choices = new JsonArray();
+        names.forEach(choices::add);
+        var items = new JsonObject();
+        items.addProperty("type", "string");
+        items.add("enum", choices);
+        var result = new JsonObject();
+        result.addProperty("type", "array");
+        result.addProperty("minItems", 1);
+        result.addProperty("maxItems", 32);
+        result.add("items", items);
+        result.addProperty("description", "Select top-level sections for one view only. "
+                + "situation: " + sectionNames("situation") + ". "
+                + "surroundings: " + sectionNames("surroundings") + ". "
+                + "Use separate requests for sections belonging to different views. "
+                + "Focus diagnostics still require the corresponding focus. "
+                + "Omitting sections returns the full snapshot. Omitting terrain_overview from a surroundings "
+                + "selection skips the terrain sampling wait. Requested but unproduced sections are listed in "
+                + UNAVAILABLE + "; absence means unknown, not empty.");
+        return result;
+    }
+
+    /** 拒绝错误段名时同时返回合法选择，让角色下一轮能改正请求而不必重读完整快照。 */
+    static String invalidSection(String view, String name) {
+        String other = "situation".equals(view) ? "surroundings" : "situation";
+        String hint = known(other).contains(name) ? "; request view=" + other + " for " + name : "";
+        return "unknown " + view + " section: " + name + hint + "; valid sections: " + sectionNames(view);
+    }
+
+    private static String sectionNames(String view) {
+        // 固定顺序也固定工具说明，避免集合迭代顺序改变模型的缓存前缀。
+        return String.join(", ", new TreeSet<>(known(view)));
     }
 
     /**

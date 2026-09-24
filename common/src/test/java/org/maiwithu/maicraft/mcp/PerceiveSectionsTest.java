@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 逐段投影的回归：调用方点名的段必须完整拿到，且投影结果要小到任何下游预算都装得下。
@@ -21,6 +22,8 @@ public final class PerceiveSectionsTest {
         projectionKeepsTheRequestedSection();
         projectionNamesWhatItCouldNotProduce();
         catalogAcceptsAndRejectsSectionRequests();
+        advertisedSectionsAgreeWithValidation();
+        crossViewErrorsExplainHowToCorrectTheRequest();
         System.out.println("PerceiveSectionsTest: passed");
     }
 
@@ -92,6 +95,37 @@ public final class PerceiveSectionsTest {
             return;
         }
         throw new AssertionError(what + " must be rejected before it reaches the runtime");
+    }
+
+    private static void advertisedSectionsAgreeWithValidation() {
+        // 模拟模型只看公开工具说明选字段；每个被推荐的段都必须能被对应视图受理。
+        JsonObject perceive = PublicToolCatalog.definitions().get(0).getAsJsonObject();
+        String description = perceive.getAsJsonObject("inputSchema").getAsJsonObject("properties")
+                .getAsJsonObject("sections").get("description").getAsString();
+        for (String view : List.of("situation", "surroundings")) {
+            String declaration = description.split(view + ": ", 2)[1].split("\\.", 2)[0];
+            Set<String> advertised = Set.of(declaration.split(", "));
+            check(advertised.equals(PerceiveSections.known(view)), "description must list exactly the accepted sections");
+            for (String section : advertised) {
+                PublicToolCatalog.validateAndNormalize("perceive",
+                        request(view, "{\"sections\":[\"" + section + "\"]}"));
+            }
+        }
+    }
+
+    private static void crossViewErrorsExplainHowToCorrectTheRequest() {
+        // 复现现场的三个跨视图字段：明确指向 surroundings，修正后的窄查询应立即通过校验。
+        for (String section : List.of("nearby_entities", "terrain_overview", "local_decision_summary")) {
+            String extra = "{\"sections\":[\"position\",\"" + section + "\"]}";
+            try {
+                PublicToolCatalog.validateAndNormalize("perceive", request("situation", extra));
+                throw new AssertionError("surroundings-only sections must not be accepted by situation");
+            } catch (IllegalArgumentException expected) {
+                check(expected.getMessage().contains("view=surroundings"), "error must identify the correct view");
+                check(expected.getMessage().contains("valid sections:"), "error must offer local correction choices");
+            }
+            PublicToolCatalog.validateAndNormalize("perceive", request("surroundings", extra));
+        }
     }
 
     private static JsonObject request(String view, String extra) {
