@@ -22,7 +22,7 @@ public final class KineticSourceQueries {
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             return (focus == null || focus.equals(id)) && (matcher == null || matcher.match(id, state.getBlock().getName().getString(),
                     id + " " + state.getBlock().getName().getString() + " 应力源 动力源 kinetic stress rotational source input") != null);
-        });
+        }, false);
         // 单次只读请求按时间与实体样本双重限额收尾；部分扫描必须明说，不能把预算截止解释为附近没有网络。
         long deadline = System.nanoTime() + 20_000_000L;
         boolean complete;

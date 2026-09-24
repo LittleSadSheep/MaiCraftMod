@@ -19,6 +19,11 @@ public final class KineticSourceScopeTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         World world = new World(); Vec3 eye = new Vec3(.5, 2.6, .5); BlockPos outlet = new BlockPos(6, 1, 0);
         world.blocks.put(outlet, Blocks.STONE.defaultBlockState());
+        // 纯查询可以包含角色脚下的轮子，真正接线仍禁止把接收端本身伪装成外部来源。
+        var query = new KineticSourceDiscovery(outlet, 16, 0, eye, 1, state -> true, false);
+        var connection = new KineticSourceDiscovery(outlet, 16, 0, eye, 1, state -> true);
+        check(query.acceptsPosition(outlet) && !connection.acceptsPosition(outlet), "区分观察中心与接线目标");
+        check(query.acceptsPosition(outlet.offset(16, 4, 0)) && !query.acceptsPosition(outlet.below(5)), "水平半径不会扩大楼层范围");
         check(KineticSourceScope.visible(world, pos -> true, eye, 1, outlet), "同层可见出口可以成为候选");
         for (int y = 0; y <= 4; y++) world.blocks.put(new BlockPos(3, y, 0), Blocks.STONE.defaultBlockState());
         check(!KineticSourceScope.visible(world, pos -> true, eye, 1, outlet), "隔墙的动力不能因直线距离近而被选中");

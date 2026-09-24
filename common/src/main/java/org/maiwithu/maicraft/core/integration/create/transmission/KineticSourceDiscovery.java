@@ -25,13 +25,19 @@ final class KineticSourceDiscovery {
     private final Vec3 observer;
     private final int workY;
     private final Predicate<BlockState> filter;
+    private final boolean excludeTarget;
     KineticSourceDiscovery(BlockPos target, int radius, double minimumRpm) {
         this(target, radius, minimumRpm, Vec3.atCenterOf(target).add(0, 1, 0), target.getY(), state -> true);
     }
     /** 来源搜索共享身体所在层与可见范围，过滤注册名不会扩大这份现场权限。 */
     KineticSourceDiscovery(BlockPos target, int radius, double minimumRpm, Vec3 observer, int workY, Predicate<BlockState> filter) {
+        this(target, radius, minimumRpm, observer, workY, filter, true);
+    }
+    /** 接线要排除接收端自身；纯查询没有接收端，角色正站在轮子上也应看见该接口。 */
+    KineticSourceDiscovery(BlockPos target, int radius, double minimumRpm, Vec3 observer, int workY, Predicate<BlockState> filter, boolean excludeTarget) {
         this.target=target.immutable(); this.radius=radius; this.minimumRpm=minimumRpm;
         this.observer=observer; this.workY=workY; this.filter=filter;
+        this.excludeTarget=excludeTarget;
         int reach=(radius+15)/16;
         for(int x=-reach;x<=reach;x++) for(int z=-reach;z<=reach;z++) chunks.add(new int[]{x,z});
         chunks.sort(Comparator.comparingInt(p -> p[0]*p[0]+p[1]*p[1]));
@@ -49,8 +55,8 @@ final class KineticSourceDiscovery {
             }
             if(!active.hasNext()) { active=null; continue; }
             BlockPos at=active.next(); read++; samples++;
-            if(at.equals(target) || !withinHorizontalRadius(at) || NavigationSafetyContext.protectsUse(at)) continue;
-            if (Math.abs((long) at.getY() - workY) > KineticSourceScope.HEIGHT_DELTA || !filter.test(level.getBlockState(at))) continue;
+            if(!acceptsPosition(at) || NavigationSafetyContext.protectsUse(at)) continue;
+            if (!filter.test(level.getBlockState(at))) continue;
             // 先确认属于可见作业范围，再读取网络和转速；隔墙的机器不进入动力证据采集。
             if (!KineticNativeView.kinetic(level, at) || !KineticSourceScope.allows(level, observer, workY, at)) continue;
             var value=KineticNativeView.read(level,at,null,true);
@@ -68,6 +74,11 @@ final class KineticSourceDiscovery {
                 .filter(value -> value.powered() && Math.abs(value.rpm()) >= minimumRpm).toList();
     }
     int samples() { return samples; }
+    /** 索引位置先按意图、水平和楼层筛选，尚不读取动力网络。 */
+    boolean acceptsPosition(BlockPos at) {
+        return (!excludeTarget || !at.equals(target)) && withinHorizontalRadius(at)
+                && Math.abs((long) at.getY() - workY) <= KineticSourceScope.HEIGHT_DELTA;
+    }
     /** 水平范围与楼层分开约束，扩大搜索半径不会连带深入地底。 */
     private boolean withinHorizontalRadius(BlockPos at) {
         double x=(long)at.getX()-target.getX(), z=(long)at.getZ()-target.getZ();
