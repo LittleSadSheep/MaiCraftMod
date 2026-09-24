@@ -49,6 +49,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     /** 记录哪次待确认的物品使用已松开，以及首次观察到松开的时间。 */
     private NativeActionReceipt abandonedItemUse;
     private long abandonedItemUseSinceTick = -1;
+    /** 只有确实进入过举盾、进食等持续持用，松手后才适用提前收尾；瞬时右键等待自身的原生回执。 */
+    private boolean activeItemUseWasHeld;
 
     // 持用按键只能绑定仍是本端口当前动作的回执；新动作接管后，旧吃饭任务不能继续按住或松开。
     public boolean ownsItemUse(NativeActionReceipt receipt) {
@@ -202,6 +204,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                 NativeActionReceipt.Kind.USE_ITEM, current, confirmation, timeoutTicks);
         try {
             var result = current.gameMode().useItem(current.player(), hand);
+            activeItemUseWasHeld = current.player().isUsingItem();
             if (result.shouldSwing()) current.player().swing(hand);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
@@ -503,6 +506,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     private void install(NativeActionReceipt receipt) {
         active = receipt;
+        // 新的一次点击不继承上一次举盾的持用状态，避免无线终端被当作已经松开的盾牌。
+        activeItemUseWasHeld = false;
         activeProtocolUsesMenu = false;
         pendingBreakCancellationReason = null;
     }
@@ -542,6 +547,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             abandonedItemUseSinceTick = -1;
             return;
         }
+        // 持用可能在服务器确认后才开始；持续记录真实状态，瞬时开菜单则一直等待菜单或截止时间。
+        if (receipt.kind() == NativeActionReceipt.Kind.USE_ITEM && context.player().isUsingItem())
+            activeItemUseWasHeld = true;
         if (pendingBreakCancellationReason == null) {
             poll(context, receipt);
             retireAbandonedItemUse(context, receipt);
@@ -588,7 +596,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
      * 挖掘和仍然在手上的持用不归这里管：它们得由专门的动作去物理停止。
      */
     private void retireAbandonedItemUse(LocalPlayerContext context, NativeActionReceipt receipt) {
-        if (receipt.terminal() || receipt.kind() != NativeActionReceipt.Kind.USE_ITEM
+        if (receipt.terminal() || receipt.kind() != NativeActionReceipt.Kind.USE_ITEM || !activeItemUseWasHeld
                 || context.player().isUsingItem()) {
             abandonedItemUse = null;
             abandonedItemUseSinceTick = -1;

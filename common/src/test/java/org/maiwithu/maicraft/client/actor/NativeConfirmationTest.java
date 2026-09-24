@@ -6,6 +6,10 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** 测试原生挖掘回执轮询实际使用的替换判定。 */
 public final class NativeConfirmationTest {
@@ -38,7 +42,41 @@ public final class NativeConfirmationTest {
                 NativeConfirmation.serverObservedEntity(observed),10);
         if(h.actions.poll(h.context,entity).status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED)
             throw new AssertionError("a server-observed entity does not wait an extra render or actor tick");
+        delayedInstantUseIsNotAbandoned();
         System.out.println("NativeConfirmationTest: passed");
+    }
+
+    private static void delayedInstantUseIsNotAbandoned() throws Exception {
+        // 无线终端等瞬时右键不进入持续持用；模拟服务端六刻后确认，期间只能等待，不能误报松手。
+        try (var world = new InteractionWorldTestHarness()) {
+            world.inventory.setItem(0, new ItemStack(Items.STICK));
+            var context = ClientRuntime.requireContext(world.player);
+            long observedAt = context.tickRevision() + 6;
+            var receipt = context.actions().useItem(context, InteractionHand.MAIN_HAND,
+                    current -> current.tickRevision() >= observedAt
+                            ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING, 12);
+            advanceNative(world, 4);
+            if (receipt.terminal()) throw new AssertionError("instant item use was retired before its confirmation window");
+            advanceNative(world, 4);
+            if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED || world.itemUses() != 1)
+                throw new AssertionError("delayed confirmation must settle exactly one native click");
+            // 真正没有回执时仍在原有期限内结束，不把瞬时使用改成无限等待。
+            context = ClientRuntime.requireContext(world.player);
+            var expired = context.actions().useItem(context, InteractionHand.MAIN_HAND,
+                    current -> NativeConfirmation.Verdict.PENDING, 4);
+            advanceNative(world, 6);
+            if (expired.status() != NativeActionReceipt.Status.UNCERTAIN
+                    || !expired.detail().contains("confirmation window expired"))
+                throw new AssertionError("unconfirmed instant use must retain its bounded deadline");
+        }
+    }
+
+    private static void advanceNative(InteractionWorldTestHarness world, int ticks) throws Exception {
+        // 模拟客户端每刻先推进动作端口，再让持有任务读取同一份回执。
+        for (int tick = 0; tick < ticks; tick++) {
+            world.nextTick();
+            world.h.actions.advance(ClientRuntime.requireContext(world.player));
+        }
     }
 
     private static void expect(BlockState before, BlockState live, NativeConfirmation.Verdict expected) {
