@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
 import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionWirelessInventoryTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2StockObservationTest;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentityTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
@@ -237,6 +238,8 @@ public final class GuiRegressionSuite {
         RecipeMaterialPlanTest.main(args);
         AcquisitionWirelessInventoryTest.main(args);
         Ae2StockObservationTest.main(args);
+        // 终端交换遇到原生耗电仍应确认，身份或数量改变则保留不确定结果。
+        Ae2TerminalIdentityTest.main(args);
         ObservedContainerStockTest.main(args);
         ContainerDepositCapacityTest.main(args);
         BuildRegionsTest.main(args);

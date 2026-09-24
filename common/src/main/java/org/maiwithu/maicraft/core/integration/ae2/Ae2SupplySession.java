@@ -619,15 +619,14 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void stage(LocalPlayerContext context) {
         inventoryGuiOwned = true;
         if (!context.menus().ensureVisible(context)) return;
-        if (!same(player.getInventory().getItem(inventorySwap.sourceSlot()), inventorySwap.sourceBefore())
+        if (!stagedItemMatches(player.getInventory().getItem(inventorySwap.sourceSlot()), inventorySwap.sourceBefore())
                 || !same(player.getInventory().getItem(inventorySwap.hotbarSlot()), inventorySwap.hotbarBefore())) {
             inventorySwap = null;
             beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "inventory_changed_before_stage",
                     "the terminal staging slots changed while the inventory GUI was opening");
             return;
         }
-        menuReceipt = context.menus().swapInventoryToHotbar(
-                context, inventorySwap.sourceSlot(), inventorySwap.hotbarSlot(), INVENTORY_CONFIRM_TICKS);
+        menuReceipt = swapTerminalSlots(context, inventorySwap);
         setPhase(Phase.WAIT_STAGE);
     }
 
@@ -1815,8 +1814,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
         inventoryGuiOwned = true;
         if (!context.menus().ensureVisible(context)) return;
-        menuReceipt = context.menus().swapInventoryToHotbar(
-                context, swap.sourceSlot(), swap.hotbarSlot(), INVENTORY_CONFIRM_TICKS);
+        menuReceipt = swapTerminalSlots(context, swap);
         setPhase(Phase.CLEAN_WAIT_RESTORE);
     }
 
@@ -1832,6 +1830,15 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
         inventorySwap = null;
         setPhase(Phase.CLEAN_CLOSE);
+    }
+
+    /** 原生 SWAP 前后都按终端身份确认；无线供料的电量同步不能被通用精确组件比较误判为物品被替换。 */
+    private MenuReceipt swapTerminalSlots(LocalPlayerContext context, InventorySwap swap) {
+        var confirmation = MenuConfirmation.inventorySwap(swap.sourceSlot(), swap.hotbarSlot(),
+                player.getInventory().getItem(swap.sourceSlot()), player.getInventory().getItem(swap.hotbarSlot()),
+                Ae2TerminalIdentity::same);
+        return context.menus().click(context, swap.sourceSlot(), swap.hotbarSlot(), ClickType.SWAP,
+                confirmation, INVENTORY_CONFIRM_TICKS);
     }
 
     // 恢复原快捷栏选择；普通供料若离开过出发位置，再尝试走回附近后才给出最终结果。
@@ -1968,10 +1975,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (!receipt.terminal()) return false;
         menuReceipt = null;
         if (receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) return true;
+        // 将失败的原生操作及确认状态带进外部回执，区分已取到材料与界面恢复仍不确定。
+        String detail = receipt.kind() + "/" + receipt.status() + ": " + receipt.detail();
         if (receipt.status() == MenuReceipt.Status.CONFIRMED_NOT_APPLIED) {
-            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, code, receipt.detail());
+            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, code, detail);
         } else {
-            finishUncertain(code, receipt.detail());
+            finishUncertain(code, detail);
         }
         return false;
     }
@@ -2274,12 +2283,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         return ItemStack.isSameItemSameComponents(left, right);
     }
 
-    /** 无线充能组件可能发生变化，但物品身份仍是已准备的对象。 */
+    /** 归还的终端只允许原生电量变化；网络绑定和自定义物品身份仍按交换前核对。 */
     private static boolean stagedItemMatches(ItemStack actual, ItemStack stagedBefore) {
-        if (stagedBefore.isEmpty()) return actual.isEmpty();
-        return !actual.isEmpty()
-                && BuiltInRegistries.ITEM.getKey(actual.getItem())
-                .equals(BuiltInRegistries.ITEM.getKey(stagedBefore.getItem()));
+        return Ae2TerminalIdentity.same(actual, stagedBefore);
     }
 
     private static final int INVENTORY_CONFIRM_TICKS = 60;

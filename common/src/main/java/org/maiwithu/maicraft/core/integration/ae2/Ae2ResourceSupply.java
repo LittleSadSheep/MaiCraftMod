@@ -271,6 +271,8 @@ public final class Ae2ResourceSupply {
             }
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("failure_code", code);
+            // 失败详情随结构化回执传给补料父任务，不能只留下“恢复未确认”而丢掉原生原因。
+            if (status != Status.SUCCEEDED) data.put("detail", message);
             data.put("status", status.name().toLowerCase(Locale.ROOT));
             data.put("operation", operation.name().toLowerCase(Locale.ROOT));
             data.put("actual_delta", List.copyOf(deltas));
