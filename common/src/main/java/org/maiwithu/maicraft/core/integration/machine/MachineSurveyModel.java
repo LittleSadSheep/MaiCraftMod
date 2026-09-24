@@ -20,6 +20,16 @@ final class MachineSurveyModel {
 
     private MachineSurveyModel() {}
 
+    /** 按实际旋转接口识别既有网络候选；名称分类仅在缺少原生接口证据时兜底。 */
+    static Hint classify(String registryId, boolean nativeKinetic) {
+        Hint named = classify(registryId);
+        if (!nativeKinetic) return named;
+        var roles = new ArrayList<>(named.roles());
+        roles.removeIf(role -> role.startsWith("unclassified_"));
+        roles.add("possible_existing_kinetic_input");
+        return new Hint("create", List.copyOf(roles), true);
+    }
+
     // 例如名字含 shaft 推测为转动传递，含 tank 推测为存储；未知模组保留命名空间但不强行猜用途。
     static Hint classify(String registryId) {
         String id = registryId.toLowerCase(Locale.ROOT);

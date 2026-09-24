@@ -12,6 +12,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import java.util.Objects;
+import org.maiwithu.maicraft.core.integration.create.CreateKineticCapabilities;
 
 /** 原生适配器只读取现有客户端区块索引；不会请求区块、移动角色、打开菜单或修改服务器。 */
 public final class LoadedMachineDiscovery {
@@ -57,7 +58,7 @@ public final class LoadedMachineDiscovery {
             if (entity != null) container = entity instanceof Container;
             else if (!state.hasBlockEntity()) container = false;
             return new MachineDiscoveryScanner.BlockSample(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
-                    type == null ? null : type.toString(), container);
+                    type == null ? null : type.toString(), container, CreateKineticCapabilities.isKinetic(state));
         }
     }
 }

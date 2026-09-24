@@ -12,8 +12,10 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 public final class CreateKineticCapabilities {
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
     private CreateKineticCapabilities() {}
+    /** 传动部件也可能连接既有动力网；按原生旋转接口识别，不以发生器名称白名单决定是否值得调查。 */
+    public static boolean isKinetic(BlockState state) { return NativeApi.is(state.getBlock(), ROTATE); }
     public static JsonObject describe(BlockState state) {
-        if (!NativeApi.is(state.getBlock(), ROTATE)) return null;
+        if (!isKinetic(state)) return null;
         JsonObject result = new JsonObject(); JsonArray variants = new JsonArray(); result.add("state_variants", variants);
         var states = state.getBlock().getStateDefinition().getPossibleStates();
         result.addProperty("total_states", states.size()); result.addProperty("truncated", states.size() > 64);

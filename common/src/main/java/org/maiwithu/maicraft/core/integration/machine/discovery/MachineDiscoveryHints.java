@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.machine.discovery;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /** 注册表名称只能提示部件用途，不能证明配方、工厂边界或有效连接。 */
 final class MachineDiscoveryHints {
@@ -9,6 +10,18 @@ final class MachineDiscoveryHints {
     private MachineDiscoveryHints() {}
 
     static Hint classify(MachineDiscoveryScanner.BlockSample sample) {
+        // 原生旋转接口优先于名字猜测，锁链传动轮等传动件也可作为既有网络接入候选；转速与余量仍需现场核验。
+        Hint named = classifyName(sample);
+        if (!sample.nativeKinetic()) return named;
+        var roles = new ArrayList<String>(named == null ? List.of() : named.roles());
+        roles.removeIf(role -> role.startsWith("unclassified_"));
+        roles.add("possible_existing_kinetic_input");
+        return new Hint("create", List.copyOf(roles), "native_rotation_interface_not_power_verified"
+                + (named == null ? "" : "; " + named.basis()));
+    }
+
+    /** 旋转接口补充接入能力，不覆盖加工、容器等已有用途线索。 */
+    private static Hint classifyName(MachineDiscoveryScanner.BlockSample sample) {
         String id = sample.blockId(); int colon = id.indexOf(':');
         String namespace = colon < 0 ? "" : id.substring(0, colon), path = colon < 0 ? id : id.substring(colon + 1);
         String family = namespace.startsWith("create") ? "create"

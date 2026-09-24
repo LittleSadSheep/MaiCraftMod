@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.machine;
 
+import org.maiwithu.maicraft.core.integration.create.CreateKineticCapabilities;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.lang.reflect.Method;
@@ -224,7 +226,8 @@ public final class MachineSurvey {
                     }
                     hash(digest, id, "properties_end");
                     if (state.isAir()) { result.air++; continue; }
-                    MachineSurveyModel.Hint hint = MachineSurveyModel.classify(id);
+                    // 现场传动件按原生旋转接口入选；链传动和未知附属模组部件不再被名称白名单遗漏。
+                    MachineSurveyModel.Hint hint = MachineSurveyModel.classify(id, CreateKineticCapabilities.isKinetic(state));
                     if (hint.family().equals("create") || hint.family().equals("ae2")
                             || hint.family().equals("mekanism")) result.mods.add(hint.family());
                     BlockEntity entity = state.hasBlockEntity() ? level.getBlockEntity(absolute) : null;

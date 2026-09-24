@@ -22,7 +22,9 @@ public final class MachineDiscoveryScanner {
     public static final long NANOS_PER_TICK = 2_000_000;
     private static final List<int[]> CHUNKS = chunkOffsets();
 
-    public record BlockSample(String blockId, String blockEntityType, Boolean nativeContainer) {
+    public record BlockSample(String blockId, String blockEntityType, Boolean nativeContainer, boolean nativeKinetic) {
+        // 旧只读提供者没有旋转接口证据时保持未知；不能根据它的名字补造已接通的动力网络。
+        public BlockSample(String blockId, String blockEntityType, Boolean nativeContainer) { this(blockId, blockEntityType, nativeContainer, false); }
         public BlockSample { Objects.requireNonNull(blockId); }
     }
     public record Session(long epoch, String dimension, UUID playerId) {}

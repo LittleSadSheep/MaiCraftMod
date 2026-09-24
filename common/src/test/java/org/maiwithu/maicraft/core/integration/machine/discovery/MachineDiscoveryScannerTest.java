@@ -16,6 +16,12 @@ import net.minecraft.core.BlockPos;
 public final class MachineDiscoveryScannerTest {
     private static final MachineDiscoveryScanner.BlockSample SHAFT = sample("create:shaft", "create:shaft", false);
     public static void main(String[] args) throws Exception {
+        // 任意附属模组的原生旋转件均可作为接入候选，不为锁链传动轮添加一个孤立名称特例。
+        var kinetic = MachineDiscoveryHints.classify(new MachineDiscoveryScanner.BlockSample("addon:unfamiliar_device", "addon:device", false, true));
+        check(kinetic.roles().contains("possible_existing_kinetic_input") && kinetic.basis().contains("native_rotation_interface"),
+                "native rotation evidence survives an unknown registry name");
+        var processor = MachineDiscoveryHints.classify(new MachineDiscoveryScanner.BlockSample("create:deployer", "create:deployer", false, true));
+        check(processor.roles().contains("possible_processing_or_actuation"), "kinetic discovery preserves processing hints");
         rotatesWithoutRestartingTheChunkPrefix();
         loadedEvidenceAloneCanRemoveCandidates();
         explicitDetailIsBoundedAndContextScoped();
