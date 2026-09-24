@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.mcp;
 
 import org.maiwithu.maicraft.core.integration.machine.ConstructionSiteGeometry;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
+import org.maiwithu.maicraft.intent.MachinePlanPreflight;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -117,9 +118,20 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             Minecraft minecraft = requireWorld();
             intents.bindForRequest(minecraft, minecraft.player);
             Goal goal = Goal.fromJson(arguments.getAsJsonObject("goal"));
+            // 模型提交蓝图后由 plan 运行原生编译检查；已知错误直接反馈，不要求先单独 design_machine。
+            JsonObject validation = MachinePlanPreflight.review(goal, minecraft.player, intents);
+            if (!validation.get("valid").getAsBoolean()) {
+                JsonObject rejected = new JsonObject();
+                rejected.addProperty("status", "needs_revision");
+                rejected.addProperty("ready_to_execute", false);
+                rejected.add("validation", validation);
+                return rejected;
+            }
             Plan plan = intents.compile(goal, minecraft.level.getGameTime());
             JsonObject result = plan.toJson();
             result.addProperty("status", "compiled");
+            result.addProperty("ready_to_execute", true);
+            result.add("validation", validation);
             return result;
         });
     }

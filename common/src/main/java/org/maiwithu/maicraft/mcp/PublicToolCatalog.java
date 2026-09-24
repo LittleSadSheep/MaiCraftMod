@@ -111,7 +111,7 @@ final class PublicToolCatalog {
                             """), annotations(true, false, true)),
             tool(PLAN,
                     // 建造前先提供模型或蓝图；提前说明对象的孔洞不会擦掉独立格栅，实体相交仍按声明的覆盖策略结算。
-                    "Compile a goal without starting it. maicraft:build and maicraft:design_build require an LLM-authored Blender-style scene, saved scene_id or explicit block blueprint; natural-language outcomes alone cannot generate a building. Modelling operations inspect/edit/preview/export named objects; use project_id to resume frozen construction. In v2 scenes, Boolean/hollow/default pattern holes never erase other objects' solid cells; solids can fill holes, while solid overlaps follow overlap_policy. Read the build ability contract first.",
+                    "Compile a goal without starting it. For build_machine, submit the authored blueprint with construction_site's target and snapshot_id: plan checks block states and native installation, returning ready_to_execute and diagnostics. When ready, execute the returned plan_id; materials and current-site checks belong to execution. A separate design_machine review is optional. maicraft:build and maicraft:design_build require an LLM-authored scene, scene_id or explicit blueprint. Modelling operations inspect/edit/preview/export named objects; use project_id to resume frozen construction. In v2 scenes, holes do not erase other objects' solid cells; solid overlaps follow overlap_policy.",
                     goalSchema("""
                             {
                               "type":"object",

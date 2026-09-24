@@ -96,6 +96,9 @@ public final class MachineRegressionSuite {
         MachineLayoutModulesTest.main(args);
         MachineLayoutJobsTest.main(args);
         MachineBlueprintAbilityTest.main(args);
+        MachinePlanPreflightTest.main(args);
+        try { ConstructionSiteRuntimeTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("construction site receipt regression", failure); }
         BlueprintRuntimeEntryTest.main(args);
         BuildingStatePolicyTest.main(args);
         BuildingSceneCompilerTest.main(args);

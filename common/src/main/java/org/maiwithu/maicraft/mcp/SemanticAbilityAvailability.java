@@ -21,9 +21,11 @@ final class SemanticAbilityAvailability {
         JsonArray preconditions = new JsonArray();
         preconditions.add("valid_goal_arguments");
         if (!readOnly) preconditions.add("current_body_control_and_native_action_conditions");
-        if (id.contains("machine") || id.equals("maicraft:connect_mechanical_power"))
+        // 资源与改动权限属于实际操作；只读观察和方案审阅不能被同名机器条件提前挡住。
+        if (!readOnly && (id.contains("machine") || id.equals("maicraft:connect_mechanical_power")))
             preconditions.add("selected_machine_resources_range_and_permissions");
         ability.add("preconditions", preconditions);
+        ability.addProperty("precondition_scope", readOnly ? "requested_read_or_review" : "execution; not a prerequisite to draft a blueprint");
         if (!supported) {
             ability.addProperty("available", false);
             ability.addProperty("unavailable_reason", "create_integration_not_installed");
@@ -42,6 +44,7 @@ final class SemanticAbilityAvailability {
         JsonObject production = new JsonObject();
         // 这些服务器依赖属于旧网络生产；原生菜单或水中过程按实际匹配机制单独报告可用性。
         production.addProperty("when", "production.schema_version=1");
+        production.addProperty("scope", "optional production execution and verification; not required to draft or plan a structural blueprint");
         production.addProperty("native_process_availability", "inspect_machine supplies matched v2 mechanism contracts and availability");
         JsonArray required = new JsonArray();
         boolean supported = true;

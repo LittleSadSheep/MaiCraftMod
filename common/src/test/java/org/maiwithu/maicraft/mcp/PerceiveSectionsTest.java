@@ -25,6 +25,7 @@ public final class PerceiveSectionsTest {
         advertisedSectionsAgreeWithValidation();
         crossViewErrorsExplainHowToCorrectTheRequest();
         constructionSiteHasItsOwnBoundedArguments();
+        designAvailabilityDoesNotDemandExecutionResources();
         System.out.println("PerceiveSectionsTest: passed");
     }
 
@@ -67,6 +68,15 @@ public final class PerceiveSectionsTest {
         var schema = PublicToolCatalog.definitions().get(0).getAsJsonObject().getAsJsonObject("inputSchema");
         check(schema.getAsJsonObject("properties").getAsJsonObject("view").getAsJsonArray("enum").toString().contains("construction_site"),
                 "the callable site view is advertised to models");
+    }
+
+    /** 目录不能要求角色先有材料和现场动力才开始设计；实际建造仍公开自己的执行条件。 */
+    private static void designAvailabilityDoesNotDemandExecutionResources() {
+        JsonObject design = new JsonObject(), build = new JsonObject();
+        SemanticAbilityAvailability.describe(design, "maicraft:design_machine", true, true);
+        SemanticAbilityAvailability.describe(build, "maicraft:build_machine", true, true);
+        check(!design.getAsJsonArray("preconditions").toString().contains("resources_range_and_permissions"), "read-only review has no construction-resource prerequisite");
+        check(build.getAsJsonArray("preconditions").toString().contains("resources_range_and_permissions"), "actual execution retains native action guards");
     }
 
     private static void projectionNamesWhatItCouldNotProduce() {

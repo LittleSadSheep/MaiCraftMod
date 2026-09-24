@@ -530,7 +530,7 @@ final class MachineAbilityAdapter {
         return boundSnapshot(goal, player, runtime, false);
     }
 
-    private static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime, boolean construction) {
+    static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime, boolean construction) {
         // 同时核对观察编号、机器名字和位置，不能用甲机器的观察去授权修改乙机器。
         String id = requiredString(goal.parameters(), "snapshot_id", 36);
         MachineSnapshots.Snapshot snapshot = construction ? MachineSnapshots.requireForConstruction(player, id)
