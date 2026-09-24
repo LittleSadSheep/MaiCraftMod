@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.mcp;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import java.util.List;
 
@@ -17,6 +18,7 @@ public final class PublicTargetContractTest {
             check(tool, "{\"kind\":\"prior_result\",\"relation\":\"刚建好的工厂\"}", true);
             check(tool, "{\"kind\":\"prior_result\"}", false);
             check(tool, "{\"kind\":\"current_place\"}", true);
+            check(tool, "{\"kind\":\"nearest\"}", true);
             // 机器设计可以完全脱离场地，但带场地的调用必须先取得勘察编号。
             var generic = JsonParser.parseString("{\"goal\":{\"ability\":\"maicraft:design_machine\",\"outcome\":\"审阅布局\"}}").getAsJsonObject();
             PublicToolCatalog.validateAndNormalize(tool, generic);
@@ -26,6 +28,13 @@ public final class PublicTargetContractTest {
             var parameters = new JsonObject(); parameters.addProperty("snapshot_id", "observed-site"); generic.getAsJsonObject("goal").add("parameters", parameters);
             PublicToolCatalog.validateAndNormalize(tool, generic);
         }
+        // 玩家在施工恢复中请求取物时，公开 answer 必须接受能力声明的不带名字的 nearest 目标。
+        var acquire = JsonParser.parseString("{\"ability\":\"maicraft:acquire_items\",\"outcome\":\"取到建材\",\"target\":{\"kind\":\"nearest\"},\"parameters\":{\"item_id\":\"minecraft:stone\",\"count\":1}}").getAsJsonObject();
+        var sequence = new JsonObject(); sequence.addProperty("ability", "maicraft:sequence"); sequence.addProperty("outcome", "备齐材料");
+        var children = new JsonArray(); children.add(acquire); sequence.add("children", children);
+        var recovery = JsonParser.parseString("{\"action\":\"answer\",\"task_id\":\"00000000-0000-4000-8000-000000000001\",\"answer\":{\"decision_id\":\"00000000-0000-4000-8000-000000000002\",\"choice\":\"recover\",\"details\":{}}}").getAsJsonObject();
+        recovery.getAsJsonObject("answer").getAsJsonObject("details").add("goal", sequence);
+        PublicToolCatalog.validateAndNormalize("task", recovery);
         // 三个携带目标的公开入口都要发布条件，而非只在服务器拒绝时才透露规则。
         for (var raw : PublicToolCatalog.definitions()) {
             var schema = raw.getAsJsonObject().getAsJsonObject("inputSchema");

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.mcp;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,17 @@ public final class MetadataSearch {
                 throw new IllegalArgumentException("query must contain 1..256 characters of search keywords");
             normalized = normalize(text);
             terms = List.of(normalized.split("\\s+"));
+        }
+
+        /** 零命中时给出独立短词，避免把多个备选名称连成更长的查询，反复读取无关目录。 */
+        public void describe(JsonObject result, boolean empty) {
+            result.addProperty("query_mode", "all_keywords_with_name_typo_tolerance");
+            if (empty && terms.size() > 1) {
+                JsonArray suggestions = new JsonArray();
+                terms.stream().distinct().limit(4).forEach(suggestions::add);
+                result.add("suggested_queries", suggestions);
+                result.addProperty("search_hint", "All keywords must match. Retry ONE suggested keyword or exact operation ID; do not concatenate alternatives or load the entire catalog.");
+            }
         }
 
         /** 先精确标识与名称，再按词匹配；仅名称和标识接受有限错字，描述正文不做模糊扫描。 */

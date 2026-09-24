@@ -191,6 +191,8 @@ public final class KnowledgeLibrary {
         JsonArray hits = new JsonArray(); MetadataSearch.ranked(matches, "uri").stream().limit(limit).forEach(hits::add);
         JsonObject result = new JsonObject(); result.add("resources", hits);
         result.addProperty("query", query); result.addProperty("total_matches", matches.size());
+        // 与能力搜索共用零命中反馈，调用者可以收缩关键词而不必重载整份配方目录。
+        matcher.describe(result, matches.isEmpty());
         result.addProperty("truncated", matches.size() > limit); result.addProperty("content_loaded", false);
         result.addProperty("provider_status", source.status());
         result.addProperty("search_scope", "Names, identifiers and declared metadata only; recipe graphs and document bodies are not loaded.");

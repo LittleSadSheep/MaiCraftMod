@@ -9,10 +9,11 @@ import java.util.List;
 final class PublicTargetContract {
     private record Shape(List<String> kinds, String required, boolean position) {}
     private static final List<Shape> SHAPES = List.of(
-            new Shape(List.of("current_place"), null, false),
+            // nearest 可以只表示从当前位置选择；是否需要名字交给具体能力，不能先挡住通用取物和烧炼。
+            new Shape(List.of("current_place", "nearest"), null, false),
             new Shape(List.of("coordinates"), "position", true),
             new Shape(List.of("prior_result"), "relation", false),
-            new Shape(List.of("landmark", "player", "entity", "nearest", "area"), "label", false));
+            new Shape(List.of("landmark", "player", "entity", "area"), "label", false));
     private PublicTargetContract() {}
 
     static void describe(JsonObject schema) {
@@ -31,7 +32,7 @@ final class PublicTargetContract {
         }
         schema.getAsJsonObject("properties").getAsJsonObject("kind").add("enum", kinds);
         schema.add("oneOf", branches);
-        schema.addProperty("description", "Only coordinates carries position. Named targets including area require label; prior_result requires relation. Null optional fields count as absent.");
+        schema.addProperty("description", "Only coordinates carries position. Named targets including area require label; prior_result requires relation. nearest may be unqualified; follow the selected ability's label rules. Null optional fields count as absent.");
     }
 
     static void validate(JsonObject target, String kind) {

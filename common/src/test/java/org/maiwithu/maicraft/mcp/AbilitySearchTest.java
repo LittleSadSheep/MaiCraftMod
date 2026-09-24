@@ -16,6 +16,12 @@ public final class AbilitySearchTest {
             PublicToolCatalog.validateAndNormalize("perceive", row.get("read_arguments"));
         }
         var limited = AbilitySearch.search("machine", 1);
+        // 原生产请求中的接线子操作须能从契约参数召回；过长的零命中查询则提示分开搜索。
+        var operations = AbilitySearch.search("connect_external_input", 20).getAsJsonArray("semantic_abilities");
+        check(operations.asList().stream().anyMatch(row -> row.getAsJsonObject().get("ability").getAsString().equals("maicraft:modify_machine")), "nested operation is discoverable without loading every ability");
+        var empty = AbilitySearch.search("notrealxyz missingabcdef", 5);
+        check(empty.get("total_matches").getAsInt() == 0 && empty.getAsJsonArray("suggested_queries").size() == 2,
+                "zero results recommend individual terms, not another catalog dump");
         check(limited.get("total_matches").getAsInt() > 1 && limited.get("truncated").getAsBoolean(), "candidate limit is explicit");
         var query = new JsonObject(); query.addProperty("view", "abilities"); query.addProperty("query", "build machien");
         PublicToolCatalog.validateAndNormalize("perceive", query);
