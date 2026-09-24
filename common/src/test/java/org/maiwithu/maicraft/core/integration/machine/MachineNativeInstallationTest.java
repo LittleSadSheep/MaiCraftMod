@@ -85,6 +85,22 @@ public final class MachineNativeInstallationTest {
             check(actual.tick(h.player) == TaskState.FAILED, "missing native API or invalid shafts reject the real belt actor before interaction");
             actual.result(TaskState.FAILED);
             check(h.blockUses() == 0 && h.itemUses() == 0, "rejected real installation performs no native click");
+            // 原生供料因容量停下时，经过真实机器父任务结算后仍须保留 no_space 与容量缺口。
+            var capacity = Map.of("empty_main_slots", 0, "minimum_additional_slots", 1);
+            TaskFactory.register(ProbeRecord.class, (player, probe) -> new Task() {
+                public TaskState tick(LocalPlayer actor) { return TaskState.FAILED; }
+                public void stop(LocalPlayer actor, StopReason reason) {}
+                public String name() { return "模拟原生容量不足"; }
+                public TaskResult result(TaskState state) { return TaskResult.fail("没有取料空间", Map.of(
+                        "failure_type", "no_space", "failure_code", "inventory_capacity_blocked", "inventory_capacity", capacity)); }
+            });
+            var failed = new MachineBuildTask(h.player, record);
+            var childRecord = new ProbeRecord("capacity-child", 1000);
+            field("childRecord").set(failed, childRecord); field("child").set(failed, TaskFactory.create(h.player, childRecord));
+            check(invoke(failed, "tickChild") == TaskState.FAILED, "容量失败由父任务停止，不能派出另一份取料");
+            var failure = failed.result(TaskState.FAILED).data();
+            check(failure.get("failure_type").equals("no_space") && failure.get("cause_code").equals("inventory_capacity_blocked")
+                    && failure.get("inventory_capacity").equals(capacity), "公开失败保留具体原因，不包装成不明缺料");
         }
     }
     private static final class ProbeRecord extends TaskRecord { ProbeRecord(String id, long deadline) { super("fixture_native", id, deadline); } }

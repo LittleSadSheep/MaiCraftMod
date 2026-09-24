@@ -385,8 +385,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             ensureItem(ResourceLocation.parse(initialContents.get(contentsIndex).getAsJsonObject().get("item_id").getAsString()), missing.intValue());
             return TaskState.RUNNING;
         }
-        if (result == null || !result.success()) return failure("machine_assembly_stage_failed",
-                result == null ? "Native assembly did not produce a receipt." : result.message());
+        if (result == null || !result.success()) {
+            // 机器包装保留原生阶段的失败类别；背包装不下时应先处理容量，而不是重新设计或重复补料。
+            failureCode = "machine_assembly_stage_failed";
+            fail(result == null ? "Native assembly did not produce a receipt." : result.message(), childFailure(lastChild));
+            return TaskState.FAILED;
+        }
         if (!acquiringItem && phase == Phase.PARTS) partIndex++;
         if (!acquiringItem && phase == Phase.INSTALLATIONS) installationIndex++;
         if (!acquiringItem && phase == Phase.ATTACHMENTS) attachmentIndex++;
@@ -418,6 +422,16 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private long deadline() { return player.level().getGameTime() + 3 * 60 * 20; }
     private String id() { return r.getToolCallId() + "-assembly-" + (++serial); }
     private TaskState failure(String code, String message) { failureCode = code; fail(message, FailureType.UNKNOWN); return TaskState.FAILED; }
+
+    /** 子任务的稳定失败词表向上传递；没有类别或协议外值仍保留未知，不能推断为普通缺料。 */
+    static FailureType childFailure(Map<String, Object> data) {
+        Object type = data.get("failure_type");
+        if (type instanceof String text) {
+            try { return FailureType.valueOf(text.toUpperCase(Locale.ROOT)); }
+            catch (IllegalArgumentException unknown) { return FailureType.UNKNOWN; }
+        }
+        return FailureType.UNKNOWN;
+    }
     private void rememberInstallation() { ClientMachineCatalog.installationBuilt(player,r.plan); }
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
@@ -457,6 +471,10 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         data.put("configured_output_filters", filterIndex);
         data.put("verified_source_fluid_targets", fluidIndex);
         if (!lastChild.isEmpty()) data.put("last_native_stage", lastChild);
+        // 常见恢复事实直接放在任务信封，注意流无需展开整份蓝图才能解释为什么停工。
+        for (String key : List.of("inventory_capacity", "recovery_options"))
+            if (lastChild.containsKey(key)) data.put(key, lastChild.get(key));
+        if (lastChild.containsKey("failure_code")) data.put("cause_code", lastChild.get("failure_code"));
         // 恢复策略读取任务信封顶层：桶可能已倒出时直接保留不确定与禁重试，不能只藏在原生阶段详情里。
         if (Boolean.TRUE.equals(lastChild.get("outcome_uncertain"))) {
             data.put("outcome_uncertain", true); data.put("mechanical_retry_allowed", false);

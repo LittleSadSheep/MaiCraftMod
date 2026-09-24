@@ -68,6 +68,8 @@ public final class IntentRuntime {
             "item_ids", "required_final_count", "observed_final_count", "missing",
             // 材料路线耗尽时让外部规划者看见卡住的子材料和按需工艺入口，不塞入整棵配方树。
             "blocked_need", "planning_handoff",
+            // 容量与原生收尾原因必须随失败通知保留，不让上层靠再查整份施工记录猜测恢复方向。
+            "inventory_capacity", "cause_code", "detail",
             "allowed_sources", "achieved_coverage",
             "required_coverage", "dark_cell_count", "site_verified",
             "waterfront_required", "max_distance", "farthest_body_distance",

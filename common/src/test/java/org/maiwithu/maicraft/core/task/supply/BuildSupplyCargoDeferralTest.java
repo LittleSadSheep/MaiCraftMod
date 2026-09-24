@@ -40,6 +40,7 @@ public final class BuildSupplyCargoDeferralTest {
             noWarehouseDoesNotBlockFundedConstruction();
             unchangedConditionsDoNotRetryButNewStorageCan();
             fullInventoryCannotFetchAnotherBatch();
+            narrowInventoryStartsMaterialSupply();
             uncertainTransfersAndUnsettledMenusStop();
             receiptAdmissionRequiresExplicitNoEffects();
         } finally {
@@ -89,6 +90,22 @@ public final class BuildSupplyCargoDeferralTest {
         }
     }
 
+    /** 复现背包只剩两个空格但缺少一份成品：应进入原供料流程，不能先要求四个空槽。 */
+    private static void narrowInventoryStartsMaterialSupply() throws Exception {
+        for (boolean surplus : List.of(false, true)) try (var h = new InteractionWorldTestHarness()) {
+            ContainerSupplySourcesTest.worldEntities(h); var task = task(h);
+            for (int slot = 0; slot < 34; slot++) h.inventory.setItem(slot, new ItemStack(Items.BREAD, 64));
+            // 带少量土料且没有已授权仓库时，也不能经延期清包分支再次把两个可用槽位判成零容量。
+            if (surplus) h.inventory.setItem(0, new ItemStack(Items.DIRT, 64));
+            var supply = (SemanticMaterialSupplyCoordinator) field(task, "supply").get(task);
+            task.start(h.player);
+            for (int tick = 0; tick < 8 && !supply.active(); tick++) task.tick(h.player);
+            check(supply.active() && !task.resultData().containsKey("failure_code"), "成品有真实容积时派发取料");
+            check(h.itemUses() == 0 && h.blockUses() == 0, "仅交接需求，不假造取料或施工完成");
+            task.result(TaskState.CANCELLED);
+        }
+    }
+
     private static void fullInventoryCannotFetchAnotherBatch() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             var entities = ContainerSupplySourcesTest.worldEntities(h); var task = task(h);
@@ -101,6 +118,9 @@ public final class BuildSupplyCargoDeferralTest {
             var data = task.resultData();
             check(state == TaskState.FAILED && "inventory_capacity_blocked".equals(data.get("failure_code"))
                     && Boolean.TRUE.equals(data.get("requires_decision")), "箱子全满且背包放不进第一份建材时必须明确暂停");
+            var capacity = (Map<?, ?>) data.get("inventory_capacity");
+            check(capacity.get("empty_main_slots").equals(0L) && capacity.get("minimum_additional_slots").equals(1),
+                    "真正满包时带回空槽和缺口，提示先腾空间");
             check(!((SemanticMaterialSupplyCoordinator) field(task, "supply").get(task)).active()
                     && field(task, "activeChild").get(task) == null, "满包不能继续派发取料或无材料施工");
             task.result(TaskState.FAILED);

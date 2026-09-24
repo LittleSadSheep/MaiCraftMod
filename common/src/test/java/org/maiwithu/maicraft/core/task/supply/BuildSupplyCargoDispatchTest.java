@@ -84,7 +84,8 @@ public final class BuildSupplyCargoDispatchTest {
                     && count(h.player, Items.DIRT) == 64 && count(h.player, Items.BREAD) == 704,
                     "只存多余泥土，默认一组支撑及全部食物工具仍在背包");
             var capacity = SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("capacityFor", Item.class); capacity.setAccessible(true);
-            check((int) capacity.invoke(task, Items.OAK_PLANKS) == 19 * 64, "清出的二十三格中至少保留四格给掉落与中间材料");
+            // 只读取成品容量；实际取料子任务再检查交换格和中间材料，建筑不凭空扣掉四个槽位。
+            check((int) capacity.invoke(task, Items.OAK_PLANKS) == 23 * 64, "清出的二十三格都能容纳待取成品");
             task.tick(h.player);
             check(supply.active() && !spoil.active(), "完成整理后才请求缺少的九块木板");
             var rounds = (List<?>) task.resultData().get("batches");

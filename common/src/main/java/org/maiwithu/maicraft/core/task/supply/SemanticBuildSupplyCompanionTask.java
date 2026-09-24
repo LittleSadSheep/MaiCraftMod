@@ -440,7 +440,7 @@ final class SemanticBuildSupplyCompanionTask
 
     private boolean canContinueWithCargo() {
         if (allMatched() && !activePlan.hasTrackedScaffolds()) return true;
-        if (emptySlots() < 4) return false;
+        // 余料暂存失败后仍按下一批实际容积和可消耗建材判断；不能在这里重新引入四格预留而绕过统一容量判断。
         BatchNeed need = nextNeed();
         return need == null || need.fetch() > 0 || need.consumableBeforeBlock() > 0;
     }
@@ -625,11 +625,11 @@ final class SemanticBuildSupplyCompanionTask
 
     private int capacityFor(Item item) {
         ItemStack sample = new ItemStack(item);
-        int capacity = 0, empty = 0;
+        int capacity = 0;
         for (int slot = 0; slot <= 35; slot++) {
             ItemStack stack = player.getInventory().getItem(slot);
-            // 取建材不能立即塞回满包；留四个空格给挖掘掉落、工具和合成中间产物。
-            if (stack.isEmpty()) { if (++empty > 4) capacity += sample.getMaxStackSize(); }
+            // 建筑只按本批成品的实际容积取料；终端交换格、合成中间品和拾取容量由执行这些动作的子任务核验。
+            if (stack.isEmpty()) capacity += sample.getMaxStackSize();
             else if (stack.is(item)) capacity += Math.max(0, stack.getMaxStackSize() - stack.getCount());
         }
         return capacity;
@@ -686,6 +686,15 @@ final class SemanticBuildSupplyCompanionTask
         data.put("initial_remaining_material_ledger", stringLedger(initialRemaining));
         data.put("remaining_material_ledger", stringLedger(ledger(true)));
         data.put("remaining_cells", remainingCellCount());
+        // 容量不足时公开真正的空槽与本批缺口，不能让上层把“装不下”误当成“再找一条合成路线”。
+        if ("inventory_capacity_blocked".equals(failureCode)) {
+            BatchNeed need = nextNeed();
+            long empty = player.getInventory().items.stream().limit(36).filter(ItemStack::isEmpty).count();
+            data.put("inventory_capacity", need == null ? Map.of("empty_main_slots", empty) : Map.of(
+                    "item_id", itemId(need.item()).toString(), "empty_main_slots", empty,
+                    "available_item_capacity", capacityFor(need.item()), "reserved_main_slots", 0,
+                    "minimum_additional_slots", capacityFor(need.item()) > 0 ? 0 : 1));
+        }
         data.put("cleanup_deferred", cleanupDeferredReason != null);
         if (cleanupDeferredReason != null) {
             Map<String, Integer> remaining = new LinkedHashMap<>();
