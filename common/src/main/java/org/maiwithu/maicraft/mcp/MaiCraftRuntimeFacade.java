@@ -119,6 +119,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return onClient(() -> {
             Minecraft minecraft = requireWorld();
             intents.bindForRequest(minecraft, minecraft.player);
+            // 找回旧计划只读冻结输入，不重新编译、不再次领取角色控制权，也不把旧验证当作现场新验证。
+            String savedId = nullableString(arguments, "plan_id");
+            if (savedId != null) {
+                Plan saved = intents.plan(UUID.fromString(savedId));
+                if (saved == null) throw new IllegalArgumentException("unknown or expired plan_id: " + savedId);
+                return PlanView.read(saved, arguments);
+            }
             Goal goal = Goal.fromJson(arguments.getAsJsonObject("goal"));
             // 模型提交蓝图后由 plan 运行原生编译检查；已知错误直接反馈，不要求先单独 design_machine。
             JsonObject validation = MachinePlanPreflight.review(goal, minecraft.player, intents);
@@ -130,7 +137,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 return rejected;
             }
             Plan plan = intents.compile(goal, minecraft.level.getGameTime());
-            JsonObject result = plan.toJson();
+            JsonObject result = PlanView.summary(plan, arguments.get("limit").getAsInt());
             result.addProperty("status", "compiled");
             result.addProperty("ready_to_execute", true);
             result.add("validation", validation);
@@ -230,6 +237,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         // 查找能力名称无需读取身体或场地；精确 focus 仍走下方完整契约与真实可用性检查。
         if ("abilities".equals(arguments.get("view").getAsString()) && nullableString(arguments, "query") != null)
             return AbilitySearch.search(nullableString(arguments, "query"), arguments.get("limit").getAsInt());
+        if ("abilities".equals(arguments.get("view").getAsString()) && nullableString(arguments, "focus") == null)
+            return AbilitySearch.index(arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
         Minecraft minecraft = requireWorld();
         LocalPlayer player = minecraft.player;
         intents.bindForRequest(minecraft, player);
@@ -289,13 +298,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 if (rawTaskId != null) {
                     yield TaskView.status(requireTask(UUID.fromString(rawTaskId)));
                 }
-                JsonArray tasks = new JsonArray();
-                for (IntentTaskRecord record : intents.tasks(arguments.get("limit").getAsInt())) {
-                    tasks.add(taskSummary(record));
-                }
-                JsonObject result = new JsonObject();
-                result.add("tasks", tasks);
-                yield result;
+                yield TaskView.list(intents.tasks(256), arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
             }
             case "landmarks" -> landmarks(player);
             case "machines" -> {
@@ -500,6 +503,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private JsonObject abilities(String focus) {
         // 注册、已实现的后端和当前目标的执行条件分开报告；未知前置条件不能写成可执行。
         JsonObject serverAssistance = ServerAssistClient.capabilityReport();
+        if ("maicraft:server_assistance".equals(focus)) return serverAssistance;
+        if (!IntentRuntime.KNOWN_ABILITIES.contains(focus)) throw new IllegalArgumentException("Unknown ability; discover one with abilities query");
         JsonArray abilities = new JsonArray();
         for (String ability : IntentRuntime.KNOWN_ABILITIES.stream().sorted().toList()) {
             if (focus != null && !focus.equals(ability)) continue;
@@ -517,7 +522,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
         JsonObject result = new JsonObject();
         result.add("semantic_abilities", abilities);
-        result.add("server_assistance", serverAssistance);
+        // 能力契约只附全局控制限制；所有底层操作的诊断表由专用 focus 按需读取。
+        JsonObject support = new JsonObject();
+        for (String key : List.of("state", "control_allowed")) if (serverAssistance.has(key)) support.add(key, serverAssistance.get(key));
+        if (serverAssistance.has("unresolved_mutations")) support.addProperty("unresolved_mutation_count", serverAssistance.getAsJsonArray("unresolved_mutations").size());
+        result.add("server_assistance", support);
         result.addProperty(
                 "boundary",
                 "Use fields declared by each ability. Machine design/build accept a semantic design, an explicit blueprint with block offsets and states, or an exported Ponder blueprint_uri. modify_machine applies blueprint changes; operate_machine performs native use and checks its effects separately. MaiCraft owns routes, gestures, retries and confirmation; never submit click scripts.");

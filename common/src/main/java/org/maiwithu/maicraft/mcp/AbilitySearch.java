@@ -11,6 +11,21 @@ import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
 final class AbilitySearch {
     private AbilitySearch() {}
 
+    static JsonObject index(int offset, int limit) {
+        var ids = IntentRuntime.KNOWN_ABILITIES.stream().filter(id -> !SemanticAbilityCatalog.compatibilityAlias(id)).sorted().toList();
+        if (offset < 0 || offset > ids.size() || limit < 1 || limit > 20) throw new IllegalArgumentException("Invalid ability page");
+        JsonArray rows = new JsonArray(); int end = Math.min(ids.size(), offset + limit);
+        // 尚未选能力时只展示用途；完整参数、例子和后端检查属于一次明确的 focus 读取。
+        for (int i = offset; i < end; i++) {
+            JsonObject row = new JsonObject(); row.addProperty("ability", ids.get(i));
+            row.add("summary", SemanticAbilityCatalog.describe(ids.get(i)).get("summary")); rows.add(row);
+        }
+        JsonObject result = new JsonObject(); result.add("semantic_abilities", rows);
+        result.addProperty("total", ids.size()); result.addProperty("contract_loaded", false);
+        if (end < ids.size()) result.addProperty("next_offset", end);
+        return result;
+    }
+
     static JsonObject search(String query, int limit) {
         if (limit < 1 || limit > 20) throw new IllegalArgumentException("Ability search limit must be 1..20");
         var matcher = new MetadataSearch.Query(query);

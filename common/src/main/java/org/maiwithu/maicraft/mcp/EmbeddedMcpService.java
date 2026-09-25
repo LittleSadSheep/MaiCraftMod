@@ -893,7 +893,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private static boolean mutatesSemanticState(String toolName, JsonObject arguments) {
         if (PublicToolCatalog.PERCEIVE.equals(toolName)) return false;
-        if (PublicToolCatalog.PLAN.equals(toolName) || PublicToolCatalog.EXECUTE.equals(toolName)) {
+        if (PublicToolCatalog.PLAN.equals(toolName)) return nullableString(arguments, "plan_id") == null;
+        if (PublicToolCatalog.EXECUTE.equals(toolName)) {
             return true;
         }
         if (!PublicToolCatalog.TASK.equals(toolName)) return false;

@@ -104,6 +104,7 @@ final class PublicToolCatalog {
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
+                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"abilities/tasks index only: copy next_offset. Use focus/query or task_id for selected detail."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -117,9 +118,13 @@ final class PublicToolCatalog {
                               "type":"object",
                               "properties": {
                                 "goal":{"$ref":"#/$defs/goal"},
+                                "plan_id":{"type":"string","description":"Read a retained plan instead of compiling goal."},
+                                "path":{"type":"string","maxLength":1024,"description":"With plan_id: JSON Pointer to frozen input; empty string lists fields."},
+                                "offset":{"type":"integer","minimum":0,"default":0},
+                                "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
-                              "required":["goal"], "additionalProperties":false
+                              "additionalProperties":false
                             }
                             """), annotations(false, false, false)),
             tool(EXECUTE,
@@ -216,10 +221,10 @@ final class PublicToolCatalog {
     private static void validatePerceive(JsonObject value) {
         // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
         only(value, "view", "focus", "query", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "label", "radius",
-                "sections", "server_id");
+                "sections", "offset", "server_id");
         // 已选中文档 URI 就直接读知识；调用者明确指定的其他视图仍会校验，避免先做一次无关身体观察。
         defaults(value, "view", present(value, "resource_uri") ? "knowledge" : "situation", "after_cursor", 0, "wait_ms", 0,
-                "limit", 5, "server_id", "minecraft-server");
+                "limit", 5, "offset", 0, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
         // 场地参数只服务这一次有界观察，不悄悄改变其他视图的范围或过滤语义。
@@ -252,6 +257,10 @@ final class PublicToolCatalog {
         long cursor = longInteger(value, "after_cursor", 0, 9_007_199_254_740_991L);
         int waitMs = integer(value, "wait_ms", 0, 60_000);
         integer(value, "limit", 1, 20);
+        int offset = integer(value, "offset", 0, Integer.MAX_VALUE);
+        if (offset != 0 && (!Set.of("abilities", "tasks").contains(view)
+                || present(value, "focus") || present(value, "query") || present(value, "task_id")))
+            throw bad("offset is only supported by the abilities or tasks index");
         string(value, "server_id", 1, 128, false);
         boolean hasTask = present(value, "task_id");
         if (hasTask && !Set.of("tasks", "attention").contains(view)) {
@@ -288,11 +297,19 @@ final class PublicToolCatalog {
     }
 
     private static void validatePlan(JsonObject value) {
-        // 计划请求必须给完整目标；这里先查结构，能力自己的参数名和值规则还会在 IntentRuntime 检查。
-        only(value, "goal", "server_id");
-        defaults(value, "server_id", "minecraft-server");
-        require(value, "goal");
-        validateGoal(object(value, "goal"), 0);
+        // 编译新目标与找回旧设计二选一；读取旧计划只接受定位和分页，不触发再次登记。
+        only(value, "goal", "plan_id", "path", "offset", "limit", "server_id");
+        defaults(value, "server_id", "minecraft-server", "offset", 0, "limit", 5);
+        boolean goal = present(value, "goal"), plan = present(value, "plan_id");
+        if (goal == plan) throw bad("exactly one of goal and plan_id is required");
+        if (goal) validateGoal(object(value, "goal"), 0);
+        else nullableUuid(value, "plan_id");
+        int offset = integer(value, "offset", 0, Integer.MAX_VALUE);
+        integer(value, "limit", 1, 20);
+        if (present(value, "path")) {
+            String path = string(value, "path", 0, 1024, false);
+            if (!plan || !path.isEmpty() && !path.startsWith("/")) throw bad("path requires plan_id and a JSON Pointer");
+        } else if (offset != 0) throw bad("offset requires a plan detail path");
         string(value, "server_id", 1, 128, false);
     }
 

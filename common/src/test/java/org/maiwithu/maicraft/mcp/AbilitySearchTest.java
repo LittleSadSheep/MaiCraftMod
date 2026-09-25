@@ -2,10 +2,22 @@
 package org.maiwithu.maicraft.mcp;
 
 import com.google.gson.JsonObject;
+import java.util.HashSet;
 
 /** 验证能力搜索只交付小候选，不把所有参数契约或现场可用性混入发现结果。 */
 public final class AbilitySearchTest {
     public static void main(String[] args) {
+        // 初次发现能力只读小目录，逐页仍能找到全部能力；完整契约只随选定 focus 返回。
+        var discovered = new HashSet<String>(); int offset = 0, total;
+        do {
+            var page = AbilitySearch.index(offset, 5); total = page.get("total").getAsInt();
+            for (var row : page.getAsJsonArray("semantic_abilities")) {
+                check(!row.getAsJsonObject().has("contract"), "default discovery is metadata only");
+                check(discovered.add(row.getAsJsonObject().get("ability").getAsString()), "no duplicate ability across pages");
+            }
+            offset = page.has("next_offset") ? page.get("next_offset").getAsInt() : total;
+        } while (offset < total);
+        check(discovered.size() == total, "all default abilities remain discoverable");
         var result = AbilitySearch.search("maicraft:build_machien", 5);
         var rows = result.getAsJsonArray("semantic_abilities");
         check(!rows.isEmpty() && rows.get(0).getAsJsonObject().get("ability").getAsString().equals("maicraft:build_machine"), "typo resolves to the exact registered operation");
