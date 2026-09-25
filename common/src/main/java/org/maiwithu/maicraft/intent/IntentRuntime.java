@@ -63,6 +63,8 @@ public final class IntentRuntime {
             "delivery_status", "effects_started", "mechanical_retry_allowed",
             "task_id", "failure_code", "failure_type", "requires_decision",
             "build_diagnostics", "support_access", "construction_region", "construction_access", "construction_navigation",
+            // 清障失败的具体坐标和最近选址建议是观察证据，必须送达外部 LLM 才能改变场地。
+            "clearance_report",
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
             "requires_narration", "outcome_uncertain", "recoverable", "goal",
             "item_ids", "required_final_count", "observed_final_count", "missing",

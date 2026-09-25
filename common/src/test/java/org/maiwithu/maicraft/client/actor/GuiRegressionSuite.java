@@ -92,6 +92,7 @@ import org.maiwithu.maicraft.core.task.build.BuildScaffoldLedgerTest;
 import org.maiwithu.maicraft.core.task.build.BuildSharedWorksiteTest;
 import org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceSurveyTest;
+import org.maiwithu.maicraft.core.task.build.BuildClearanceExecutionTest;
 import org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupportAccessTest;
@@ -206,6 +207,8 @@ public final class GuiRegressionSuite {
         BuildSiteConstraintsTest.main(args);
         // 施工遇到人工障碍时只给出经过整份蓝图核对的最近选址偏移，不在未知地形上猜测空地。
         BuildClearanceSurveyTest.main(args);
+        // 现场在开工前或开挖途中出现人工方块时，实际施工任务也要停手并回报原坐标。
+        BuildClearanceExecutionTest.main(args);
         BuildExcavationFrontierTest.main(args);
         ContainerBatchReplanTest.main(args);
         ContainerSplitPlannerTest.main(args);

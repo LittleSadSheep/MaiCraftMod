@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -33,8 +35,16 @@ public final class BuildClearanceSurvey {
     private boolean done, limited;
 
     public static BuildClearanceSurvey forPlan(LocalPlayer player, BuildTaskRecord plan) {
+        return forPlan(player, plan, NavigationSafetyContext.protectedMutationCells());
+    }
+
+    public static BuildClearanceSurvey forPlan(LocalPlayer player, BuildTaskRecord plan, LongSet inheritedProtection) {
         var level = player.level();
-        var protectedArea = NavigationSafetyContext.protectedMutationCells();
+        // 候选新址也避开任务继承的保护区和机器其他层，不能因跨刻离开原作用域就丢失这些限制。
+        var protectedArea = new LongOpenHashSet(inheritedProtection);
+        protectedArea.addAll(NavigationSafetyContext.protectedMutationCells());
+        plan.protectedNavigationCells().forEach(at -> protectedArea.add(at.asLong()));
+        plan.materialSupplyProtection().forEach(at -> protectedArea.add(at.asLong()));
         var forbidden = NavigationSafetyContext.forbiddenBodyCells();
         return new BuildClearanceSurvey(plan.targets, plan.replaceMode, plan.replaceBlockEntities,
                 level.dimension().location().toString(), at -> {

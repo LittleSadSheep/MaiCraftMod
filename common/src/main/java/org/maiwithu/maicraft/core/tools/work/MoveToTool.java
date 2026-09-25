@@ -45,7 +45,7 @@ public final class MoveToTool implements MaiCraftTool {
                 • x+y+z — reach nearby ground with a height hint, within horizontal_radius (default 3) and vertical_tolerance (default 2). Keep a known height to distinguish floors; it does not require standing in one exact cell.
                 • exact=true with x+y+z — stand in that exact cell. Use only when precise standing matters, never for the occupied cell of a machine you want to use.
                 • y — climb/descend to that specified elevation.
-                TERRAIN: by default the walk never breaks or places a block — walls, floors, other people's builds and the landscape stay exactly as they were. If the only route would need digging, bridging or pillaring, the call FAILS and lists exactly which blocks that route would break or place; read the list (planks/glass/bricks near the surface are usually someone's build; stone/dirt underground usually are not) and, if altering them is acceptable, re-send the SAME call with may_alter_terrain=true. Underground travel and climbing out of pits usually need it. Every call reports what it actually broke or placed.
+                TERRAIN: by default the walk never breaks or places a block. may_alter_terrain=true permits digging, bridging and pillaring subject to the client clearance whitelist (natural terrain types by default). Non-whitelisted obstacles must be routed around; if no route exists the call fails. A terrain probe may describe permitted changes before consent. Every call reports what it actually broke or placed.
                 VEHICLES: start a goto while sitting in a boat (see <riding>) and she pilots it over the water toward the target — a destination on the water keeps her aboard, a destination ashore has her step off at the shore and finish on foot. Any other vehicle is stepped off the moment walking begins. Boarding is interact_entity right on the boat.
                 BACKGROUND: a successful call means movement is already running. Do not call goto again or launch another body action while <current_task> exists; wait for matching task_finished. status=done means that destination is complete, so advance the plan and never resend identical coordinates. Only status=timeout permits the same call to resume.""";
     }
@@ -65,6 +65,8 @@ public final class MoveToTool implements MaiCraftTool {
                         + "she picks the one easiest to reach. ALWAYS use this form for a block you intend "
                         + "to use or mine.")
                 .optionalBool("may_alter_terrain", "Consent to dig through, bridge or pillar on the way. "
+                        // 路线修改仍受白名单约束，不能让上层误以为打开地形许可就能拆穿人工建筑。
+                        + "The clearance whitelist remains mandatory; other blocks are routed around. "
                         + "Omit/false = leave every block untouched (default). Set true only after a failed "
                         + "goto listed the blocks a route would alter and you judge that acceptable, or "
                         + "when you already know the way is underground/through natural terrain.")

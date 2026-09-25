@@ -58,6 +58,7 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSession;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
@@ -70,7 +71,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private static final int USE_TIMEOUT = 40;
 
     // 刨坑 -> 出坑 -> 拿材料 -> 建房；每一步都等真实游戏操作确认后，再交给下一步接管角色。
-    private enum Phase { PREFLIGHT, EXCAVATE, EXCAVATE_EXIT, SELECT, CLEAR_NAV, CLEAR, CLEAR_RELEASE, PLACE_NAV, WORKSITE, SELECT_ITEM,
+    private enum Phase { PREFLIGHT, CLEARANCE_REPORT, EXCAVATE, EXCAVATE_EXIT, SELECT, CLEAR_NAV, CLEAR, CLEAR_RELEASE, PLACE_NAV, WORKSITE, SELECT_ITEM,
         AIM, WAIT_USE, EDGE_RETURN, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, SCAFFOLD_DESCENT, SCAFFOLD_ACCESS, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
@@ -197,6 +198,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastScaffoldAccess = Map.of();
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
+    private BuildClearanceSurvey clearanceSurvey;
+    private BlockPos clearanceDeniedAt;
+    private Map<String, Object> clearanceTrigger = Map.of();
 
     FirstPersonBuildCompanionTask(LocalPlayer player, BuildTaskRecord record) {
         this(player, record, Interaction::nativeRaytrace);
@@ -318,6 +322,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState stepPhase() {
         return switch (phase) {
             case PREFLIGHT -> preflightTick(); case EXCAVATE -> excavationTick(); case SELECT -> selectTick();
+            case CLEARANCE_REPORT -> clearanceReportTick();
             case EXCAVATE_EXIT -> excavationExitTick();
             case CLEAR_NAV -> clearNavTick(); case CLEAR -> clearTick();
             case CLEAR_RELEASE -> nextClear();
@@ -454,6 +459,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState finishPreflight() {
+        // 全场加载核对后先检查清障名单，再给出最近选址；遇到人工障碍时不能先拆掉其余半栋再报告。
+        if (clearanceSurvey == null) clearanceSurvey = BuildClearanceSurvey.forPlan(player, r, inheritedProtectedMutationCells);
+        if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
+        if (clearanceSurvey.blocked()) {
+            failPreflight("Clearance whitelist excludes site obstacles; inspect clearance_report and consider a nearby site.",
+                    FailureType.NO_SUPPORT, BuildClearanceSurvey.FAILURE);
+            return TaskState.FAILED;
+        }
         var terrain = BuildSiteConstraints.conflicts(player, r.targets);
         if (!terrain.isEmpty()) {
             failPreflight("The design intersects terrain that cannot be excavated: " + String.join("; ", terrain)
@@ -674,6 +687,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearNavTick() {
+        // 还没开始补工具时先看眼前障碍，避免为名单外建筑跑一趟仓库之后才告知需要换场地。
+        if (!excavationTools.active() && player.level().isLoaded(clearing)) {
+            var live = player.level().getBlockState(clearing);
+            var declared = targets.get(clearing.asLong());
+            if (!ClearanceWhitelist.allows(live) && (declared == null || !declared.constructionMatches(live))) {
+                beginClearanceReport(clearing); return TaskState.RUNNING;
+            }
+        }
         if (excavating && !excavationTools.active() && player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir()
                 && r.toolSupply().policy() != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
@@ -707,7 +728,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.TARGET_LOST, "site_changed_after_preflight", false);
             return TaskState.FAILED;
         }
-        if (!clearingPermitted(live)) return TaskState.FAILED;
+        if (!clearingPermitted(live)) return phase == Phase.CLEARANCE_REPORT ? TaskState.RUNNING : TaskState.FAILED;
         if (excavating && BuildExcavationFrontier.safeDescent(player, clearing) && digger.reachableHit(clearing) != null) {
             stopNav(); phase = Phase.CLEAR; return TaskState.RUNNING;
         }
@@ -735,6 +756,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState clearTick() {
         if (ultimineArmed && digger.hasPendingBreak()) {
             var decision = ultimine.tickInFlight(ClientRuntime.requireContext(player));
+            // 连锁九格中的任一格变成人工障碍都先松键停挖，再报告实际遇到的位置。
+            if (clearanceDeniedAt != null) { beginClearanceReport(clearanceDeniedAt); return TaskState.RUNNING; }
             if (decision.ready()) ultimineHeldTicks++;
             var holding = new LinkedHashMap<>(ultimineEvidence);
             holding.putAll(ultimine.holdEvidence()); holding.put("status", "holding_native_break");
@@ -766,11 +789,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 }
             };
         }
+        // 先留下新出现的名单外障碍和选址证据，再检查机器观察守卫；任一条件不符都不会继续挖掘。
+        if (!clearingPermitted(player.level().getBlockState(clearing)))
+            return phase == Phase.CLEARANCE_REPORT ? TaskState.RUNNING : TaskState.FAILED;
         if (!r.mutationGuardMatches(player, clearing)) {
             failAt(clearing, "observed target changed before breaking", FailureType.TARGET_LOST,
                     "build_target_changed", false); return TaskState.FAILED;
         }
-        if (!clearingPermitted(player.level().getBlockState(clearing))) return TaskState.FAILED;
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> ultimineFailure == null ? TaskState.RUNNING : TaskState.FAILED;
             case BROKE_TARGET -> {
@@ -830,6 +855,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private boolean clearingPermitted(BlockState live) {
         var declared = targets.get(clearing.asLong());
+        // 每次实际下手仍重读类型，预检后新出现的建筑也必须留在现场交回 LLM 重新选址。
+        if (!ClearanceWhitelist.allows(live) && (declared == null || !declared.constructionMatches(live))) {
+            beginClearanceReport(clearing); return false;
+        }
         BlockState desired = declared == null ? Blocks.AIR.defaultBlockState() : declared.desiredState();
         if (inheritedProtectedMutationCells.contains(clearing.asLong())
                 || !r.replaceMode.allows(live, desired) || live.getDestroySpeed(player.level(), clearing) < 0
@@ -848,11 +877,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (ultimine == null) ultimine = new UltimineSession();
         var decision = ultimine.prepare(ClientRuntime.requireContext(player), hit, excavationAuthority, at -> {
             var target = targets.get(at.asLong());
+            // 原生连锁可能一次选中多格；把名单外格记为触发证据，绝不能让副目标绕过单格清障检查。
+            if (target != null && !ClearanceWhitelist.allows(player.level().getBlockState(at))
+                    && !r.scaffoldLedger().owns(at, player.level().getBlockState(at))
+                    && !target.constructionMatches(player.level().getBlockState(at))) {
+                clearanceDeniedAt = at.immutable(); return true;
+            }
             return r.hasExecutionGuards() || target == null || at.equals(player.blockPosition().below())
                     || inheritedProtectedMutationCells.contains(at.asLong()) || r.scaffoldLedger().contains(at)
                     || !r.replaceMode.allows(player.level().getBlockState(at), target.desiredState())
                     || !BuildCellRules.isAirTarget(target) && target.constructionMatches(player.level().getBlockState(at));
         });
+        if (clearanceDeniedAt != null) { beginClearanceReport(clearanceDeniedAt); return false; }
         ultimineEvidence = Map.of("status", decision.status().name().toLowerCase(Locale.ROOT),
                 "reason", decision.code(), "native_selected_cells", decision.completeSelection().size(),
                 "confirmed_native_batches", ultimineBatches);
@@ -866,6 +902,25 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 yield false;
             }
         };
+    }
+
+    // 清障过程中发现新障碍时先交还身体和挖掘控制；只读选址检查可跨刻完成，不会让角色继续挥镐。
+    private void beginClearanceReport(BlockPos at) {
+        uncertain |= digger.hasPendingBreak();
+        clearanceDeniedAt = at.immutable();
+        clearanceTrigger = Map.of("at", List.of(at.getX(), at.getY(), at.getZ()),
+                "block_id", BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock()).toString());
+        stopNav(); digger.cancel();
+        if (ultimine != null) { ultimine.close(); ultimine = null; }
+        ultimineArmed = false;
+        clearanceSurvey = BuildClearanceSurvey.forPlan(player, r, inheritedProtectedMutationCells); phase = Phase.CLEARANCE_REPORT;
+    }
+
+    private TaskState clearanceReportTick() {
+        if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
+        failAt(clearanceDeniedAt, "Clearance whitelist excludes this obstacle; consider the site offsets in clearance_report.",
+                FailureType.NO_SUPPORT, BuildClearanceSurvey.FAILURE, uncertain);
+        return TaskState.FAILED;
     }
 
     private TaskState placeNavTick() {
@@ -2472,6 +2527,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("food_preparation", foodPreparation.progress(player));
         if (!foodPreparation.receipts().isEmpty()) data.put("completed_food_receipts", foodPreparation.receipts());
         if ("build_terrain_conflict".equals(failureCode)) data.put("mechanical_retry_allowed", false);
+        if (BuildClearanceSurvey.FAILURE.equals(failureCode)) {
+            // 顶层回报携带坐标和选址偏移，供料父任务及 Attention 都能直接转给 LLM；禁止原地机械重试。
+            var report = new LinkedHashMap<>(clearanceSurvey.report());
+            if (!clearanceTrigger.isEmpty()) report.put("trigger", clearanceTrigger);
+            data.put("clearance_report", report); data.put("mechanical_retry_allowed", false);
+        }
         if (!excavationTools.receipts().isEmpty()) data.put("excavation_tool_receipts", excavationTools.receipts());
         if (!spoilReceipts.isEmpty()) data.put("excavation_spoil_receipts", List.copyOf(spoilReceipts));
         data.put("confirmed_ultimine_batches", ultimineBatches);

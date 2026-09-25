@@ -24,9 +24,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.task.build.BuildClearanceSurvey;
 import org.maiwithu.maicraft.task.TaskState;
 import sun.misc.Unsafe;
 import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.level.Level;
 
 /** 真实供料启动流程必须先到达冻结审核阶段，之后才能创建材料或获取子任务。 */
 public final class BuildSupplyPreviewTest {
@@ -44,6 +46,8 @@ public final class BuildSupplyPreviewTest {
         Unsafe memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
         constructionReuseKeepsFinalStateObligations(memory);
         FlatLevel level = (FlatLevel) memory.allocateInstance(FlatLevel.class);
+        // 场地诊断需要真实的维度名，空构造夹具也要提供它，不能让预检依赖未初始化的世界字段。
+        field(Level.class, "dimension").set(level, Level.OVERWORLD);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
         field(Entity.class, "level").set(player, level);
         field(LocalPlayer.class, "clientLevel").set(player, level);
@@ -76,6 +80,15 @@ public final class BuildSupplyPreviewTest {
                 "waiting review must not start supply even after inventory changes");
         decision.set(Decision.CANCELLED);
         check(task.onTick() == TaskState.CANCELLED, "cancel before approval prevents all acquisition");
+        // 建筑占地已有箱子时，备料父任务应在获取材料前回报位置与选址建议，不能等施工子任务才发现。
+        level.blocks = Map.of(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
+        var obstructed = new SemanticBuildSupplyCompanionTask(player, record, (owner, frozen) -> Decision.CONFIRMED);
+        obstructed.onStart();
+        check(obstructed.onTick() == TaskState.FAILED, "non-whitelisted occupied site stops before supply");
+        check(BuildClearanceSurvey.FAILURE.equals(obstructed.resultData().get("failure_code"))
+                        && obstructed.resultData().containsKey("clearance_report"), "supply parent exposes location report");
+        check(!((SemanticMaterialSupplyCoordinator) field(obstructed.getClass(), "supply").get(obstructed)).active(),
+                "whitelist failure cannot start material acquisition");
         System.out.println("BuildSupplyPreviewTest: frozen review precedes all supply actions");
     }
 
@@ -102,6 +115,8 @@ public final class BuildSupplyPreviewTest {
 
     private static void constructionReuseKeepsFinalStateObligations(Unsafe memory) throws Exception {
         FlatLevel level = (FlatLevel) memory.allocateInstance(FlatLevel.class);
+        // 复用已有门的检查与新建采用同一个维度明确的测试世界。
+        field(Level.class, "dimension").set(level, Level.OVERWORLD);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
         field(Entity.class, "level").set(player, level);
         field(LocalPlayer.class, "clientLevel").set(player, level);

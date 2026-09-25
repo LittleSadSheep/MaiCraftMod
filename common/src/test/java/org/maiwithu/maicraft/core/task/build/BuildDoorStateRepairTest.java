@@ -170,9 +170,10 @@ public final class BuildDoorStateRepairTest {
             setField(LevelChunk.class, "level", chunk, h.level);
             setField(ChunkAccess.class, "levelHeightAccessor", chunk, h.level);
             var task = new FirstPersonBuildCompanionTask(h.player, modelRecord(true));
+            // 换成另一种木门会涉及拆除名单外建筑，优先给出清障选址报告；仍不得绕过 replace=false。
             check(invoke(task, "preflightTick") == TaskState.FAILED
-                            && field(task, "failureCode").equals("blocked_site_cells"),
-                    "a true material mismatch still respects replace=false");
+                            && field(task, "failureCode").equals(BuildClearanceSurvey.FAILURE) && h.blockUses() == 0,
+                    "a true material mismatch preserves the door and reports whitelist obstruction");
             invoke(task, "cleanup");
         }
     }

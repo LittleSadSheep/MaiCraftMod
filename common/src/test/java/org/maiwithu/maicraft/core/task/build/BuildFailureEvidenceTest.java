@@ -23,7 +23,11 @@ public final class BuildFailureEvidenceTest {
                 ignored -> true, ignored -> target.desiredState().setValue(BlockStateProperties.OPEN, true));
         var raw = TaskResult.fail("Cannot continue", Map.of("build_diagnostics", List.of(evidence), "placed", 5,
                 "completed", 410, "temporary_supports_remaining", 3, "blocked_cells", List.of(Map.of("x", 307)),
-                "construction_navigation", Map.of("route_attempts", 3, "failed_stances", 2, "target_index", 17)));
+                "construction_navigation", Map.of("route_attempts", 3, "failed_stances", 2, "target_index", 17),
+                // 人工障碍的位置和整栋偏移必须传过对外结果与 Attention 两层过滤，才能让 LLM 选择新址。
+                "clearance_report", Map.of("dimension", "minecraft:overworld", "obstacles",
+                        List.of(Map.of("block_id", "minecraft:bricks", "at", List.of(307, -59, -460))),
+                        "suggested_offsets", List.of(Map.of("offset", List.of(1, 0, 0))))));
         // 施工失败事实先转成对外结果，再进入简短通知，不能在任一层丢掉已施工的部分。
         var clean = JsonParser.parseString(SemanticResultView.result(raw).toJson()).getAsJsonObject();
         var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult", JsonObject.class);
@@ -34,6 +38,11 @@ public final class BuildFailureEvidenceTest {
         check(data.get("placed").getAsInt() == 5 && data.get("completed").getAsInt() == 410
                 && data.get("temporary_supports_remaining").getAsInt() == 3, "attention cannot hide partial effects or scaffolds");
         check(!data.has("blocked_cells") && !row.has("position"), "raw routes and coordinates remain outside this model-level receipt");
+        var clearance = data.getAsJsonObject("clearance_report");
+        check(clearance.getAsJsonArray("obstacles").get(0).getAsJsonObject().getAsJsonArray("at").get(1).getAsInt() == -59,
+                "observed obstruction coordinates survive both filters");
+        check(clearance.getAsJsonArray("suggested_offsets").get(0).getAsJsonObject().getAsJsonArray("offset").get(0).getAsInt() == 1,
+                "minimum relocation advice reaches the LLM");
         check(data.getAsJsonObject("construction_navigation").get("target_index").getAsInt() == 17
                 && data.getAsJsonObject("construction_navigation").get("failed_stances").getAsInt() == 2,
                 "active navigation evidence survives compact attention separately from historical target failures");

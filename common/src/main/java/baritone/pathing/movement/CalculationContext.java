@@ -329,6 +329,8 @@ public class CalculationContext {
     }
 
     public double costOfPlacingAt(int x, int y, int z, BlockState current) {
+        // 搭路也不能借覆盖软方块绕过清障名单；只有空气或允许清除的地形可成为落块位置。
+        if (!ClearanceWhitelist.allows(current)) return COST_INF;
         if (!hasThrowaway) { // only true if allowPlace is true, see constructor
             return COST_INF;
         }

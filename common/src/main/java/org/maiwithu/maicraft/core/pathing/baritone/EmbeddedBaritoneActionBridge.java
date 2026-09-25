@@ -295,6 +295,8 @@ final class EmbeddedBaritoneActionBridge {
         }
         if (!BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) return;
         BlockPos actual = placementCell(clicked, clickedState, hit);
+        // 放支撑会覆盖草、雪等软方块，原生点击前对实际落块格重查名单，名单外格直接交回绕行。
+        if (!ClearanceWhitelist.allows(context.level().getBlockState(actual))) { navigator.rejectedClearance(actual); return; }
         if (!navigator.permitsTemporaryScaffold(actual)) { navigator.rejectedTemporaryScaffold(actual); return; }
         boolean protectedSupport = EmbeddedBaritonePolicy.protects(clicked);
         if (EmbeddedBaritonePolicy.protects(actual) || protectedSupport

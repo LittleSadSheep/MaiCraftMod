@@ -36,6 +36,7 @@ import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
 import org.maiwithu.maicraft.core.task.build.BuildSiteConstraints;
+import org.maiwithu.maicraft.core.task.build.BuildClearanceSurvey;
 
 /** 大建筑的供料父任务：先确定整份方案的材料，确认预览，再循环“取一批材料、建一批”，直到成品验收通过。 */
 final class SemanticBuildSupplyCompanionTask
@@ -66,6 +67,9 @@ final class SemanticBuildSupplyCompanionTask
     private boolean cargoEffectsSeen, buildOutcomeUncertain, supplyOutcomeUncertain, spoilOutcomeUncertain;
     private String failureCode;
     private Map<String, Object> finalBuildData = Map.of();
+    private BuildClearanceSurvey clearanceSurvey;
+    private boolean clearanceChecked;
+    private Map<String, Object> clearanceReport = Map.of();
     private BuildTraversabilityVerifier.Result traversabilityResult;
     private BuildTraversabilityVerifier.Verification traversabilityScan;
     private BuildTaskRecord activePlan;
@@ -94,13 +98,6 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected void onStart() {
-        var terrain = BuildSiteConstraints.conflicts(player, activePlan.targets);
-        if (!terrain.isEmpty()) {
-            stopWith("build_terrain_conflict", "The design intersects terrain that cannot be excavated: "
-                    + String.join("; ", terrain) + ". Revise basement depth, raise the building or choose another site.",
-                    FailureType.NO_SUPPORT);
-            return;
-        }
         // 普通分批供料只接方块物品计划；摆设、箱内数据等组合效果要走专用流程。
         if (!activePlan.cellNeeds().isEmpty() || !activePlan.blockEntityData.isEmpty()
                 || !activePlan.entities.isEmpty()) {
@@ -136,16 +133,33 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected TaskState onTick() {
+        if (!prepared) {
+            advanceMaterialBinding();
+            return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
+        }
+        // 先绑定最终建材，再检查这份实际图纸；原地可复用的同族方块不能被旧材料方案误判成清障对象。
+        if (!clearanceChecked) {
+            if (clearanceSurvey == null) clearanceSurvey = BuildClearanceSurvey.forPlan(player, activePlan);
+            if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
+            if (clearanceSurvey.blocked()) {
+                clearanceReport = clearanceSurvey.report();
+                stopWith(BuildClearanceSurvey.FAILURE, "Clearance whitelist excludes site obstacles; consider clearance_report site offsets.",
+                        FailureType.NO_SUPPORT);
+                return TaskState.FAILED;
+            }
+            clearanceSurvey = null; clearanceChecked = true;
+            var terrain = BuildSiteConstraints.conflicts(player, activePlan.targets);
+            if (!terrain.isEmpty()) {
+                stopWith("build_terrain_conflict", "The design intersects terrain that cannot be excavated: "
+                        + String.join("; ", terrain) + ". Revise basement depth, raise the building or choose another site.", FailureType.NO_SUPPORT);
+                return TaskState.FAILED;
+            }
+        }
         // 正在取料或施工就先推进那件事；不能看见目标方块恰好都存在，就跳过尚未结束的点击和支撑清理。
         if (supply.active()) return tickSupply();
         if (spoilSupply.active()) return tickSpoilSupply();
         if (activeChild != null) return tickChild();
         if (traversabilityScan != null) return finishMatched();
-        if (!prepared) {
-            advanceMaterialBinding();
-            return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
-        }
-
         var preview = previewGate.apply(r, activePlan);
         // 材料型号先定好给玩家看，但真正获取材料要等玩家确认，避免还没同意方案就出去采集。
         if (preview == PreviewSession.Decision.WAITING)
@@ -678,6 +692,11 @@ final class SemanticBuildSupplyCompanionTask
     protected Map<String, Object> resultData() {
         // 汇总材料账和每批结果；必须全部匹配、通行通过、无遗留支撑且最后施工批次确认成功，才报告目标满足。
         Map<String, Object> data = new LinkedHashMap<>();
+        // 原地预检和施工中止都把同一份定位报告提到顶层，让 LLM 无需展开材料批次就能重新选址。
+        if (!clearanceReport.isEmpty() || finalBuildData.containsKey("clearance_report")) {
+            data.put("clearance_report", clearanceReport.isEmpty() ? finalBuildData.get("clearance_report") : clearanceReport);
+            data.put("mechanical_retry_allowed", false);
+        }
         data.put("material_policy", r.materialPolicy.id());
         data.put("material_palette_bound_before_construction", prepared);
         data.put("material_family_count",
