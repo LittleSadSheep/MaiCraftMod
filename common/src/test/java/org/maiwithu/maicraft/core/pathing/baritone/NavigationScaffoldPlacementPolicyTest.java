@@ -29,7 +29,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 
 /** 真实的未保护支撑右键路径必须查询提供器的位置策略。 */
-public final class NavigationScaffoldDropGuardTest {
+public final class NavigationScaffoldPlacementPolicyTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var backend = field(EmbeddedBaritoneRuntime.class, "backend"); var owner = field(EmbeddedBaritoneRuntime.class, "owner");
@@ -57,8 +57,9 @@ public final class NavigationScaffoldDropGuardTest {
             var use = bridge.getClass().getDeclaredMethod("startUse", LocalPlayerContext.class,
                     EmbeddedBaritoneNavigator.class, boolean.class); use.setAccessible(true);
             use.invoke(bridge, ClientRuntime.requireContext(h.player), nav, false);
+            // 导航准备右键搭路时仍读取落点的施工许可，不能把普通放置入口当成修改保护区域的捷径。
             check(policy.checked.equals(hit.getBlockPos().above()) && h.blockUses() == 0,
-                    "unprotected support cannot bypass the exact destination's debris policy");
+                    "unprotected support cannot bypass the exact destination's placement policy");
             var frozen = EmbeddedBaritonePolicy.capture(null, nav.protectedMutationCells(), null);
             Field unsafe = Unsafe.class.getDeclaredField("theUnsafe"); unsafe.setAccessible(true);
             var calculation = (CalculationContext) ((Unsafe) unsafe.get(null))
@@ -77,7 +78,7 @@ public final class NavigationScaffoldDropGuardTest {
             EmbeddedBaritonePolicy.installSnapshot(oldPolicy);
             if (oldPlace != null) BaritoneAPI.getSettings().allowPlace.value = oldPlace;
         }
-        System.out.println("NavigationScaffoldDropGuardTest: positional denial also covers unprotected native placement");
+        System.out.println("NavigationScaffoldPlacementPolicyTest: positional denial also covers unprotected native placement");
     }
 
     private static final class Policy implements PlayerNav.ContextProvider, BuildPlacementRegistry.Provider {

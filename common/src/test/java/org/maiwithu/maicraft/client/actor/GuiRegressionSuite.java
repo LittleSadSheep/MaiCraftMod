@@ -87,7 +87,7 @@ import org.maiwithu.maicraft.core.task.build.BuildScaffoldCleanupTest;
 import org.maiwithu.maicraft.core.task.build.BuildScaffoldDescentBoundsTest;
 import org.maiwithu.maicraft.core.task.build.BuildScaffoldDescentStopTest;
 import org.maiwithu.maicraft.core.task.build.BuildScaffoldDescentTest;
-import org.maiwithu.maicraft.core.task.build.BuildScaffoldDropSafetyTest;
+import org.maiwithu.maicraft.core.task.build.BuildScaffoldNearMachineTest;
 import org.maiwithu.maicraft.core.task.build.BuildScaffoldLedgerTest;
 import org.maiwithu.maicraft.core.task.build.BuildSharedWorksiteTest;
 import org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest;
@@ -253,7 +253,8 @@ public final class GuiRegressionSuite {
         BuildProjectScaffoldPersistenceTest.main(args);
         // 明确采用新场景时保留旧项目支撑，并拒绝不匹配父版本或改变过的原生证据。
         BuildProjectRevisionTest.main(args);
-        BuildScaffoldDropSafetyTest.main(args);
+        // 机器旁需要垫块时先进入施工，验证不再因预计拆除掉落而拒绝支撑。
+        BuildScaffoldNearMachineTest.main(args);
         BuildTemporarySupportMaterialsTest.main(args);
         BuildScaffoldCleanupTest.main(args);
         BuildScaffoldCleanupGuardTest.main(args);

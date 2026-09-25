@@ -189,7 +189,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildPlacementFooting placementFooting = new BuildPlacementFooting();
     private Vec3 placementProofFeet;
     private BuildPlacementGeometry.Gesture placementProofGesture;
-    private Map<String, Object> scaffoldDropRisk = Map.of();
     private final LinkedHashSet<Long> verifyFailed = new LinkedHashSet<>();
     private final List<ObservedCell> verifyFailureStates = new ArrayList<>();
     private List<BlockPos> scaffoldQueue = List.of();
@@ -1678,15 +1677,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 只为获得可点击表面而放置的临时支撑，不得成为最终生存结构的必需方块。
         if (supportedCell != null || isTemporary(cell) || cell.target().block() instanceof FallingBlock
                 || !cell.target().desiredState().canSurvive(player.level(), cell.target().pos())) return null;
-        scaffoldDropRisk = Map.of();
+        // 目标缺少点击面时直接寻找可搭建的支撑，不因预计拆除后的掉落物会靠近机器而提前停工。
         List<BlockPos> chain = BuildTemporarySupportPlan.find(player.level(), player.level()::isLoaded,
                 cell.target().pos(), pos -> scaffoldPermitted(pos, null));
-        if (chain.isEmpty()) {
-            if (scaffoldDropRisk.isEmpty()) return null;
-            failAt(cell.target().pos(), "temporary support alternatives exhausted; cleanup drops may reach a machine or container",
-                    FailureType.NO_PATH, "temporary_support_drop_risk", false);
-            return TaskState.FAILED;
-        }
+        if (chain.isEmpty()) return null;
         Item material = BuildTemporarySupportMaterials.choose(
                 ScaffoldMaterials.of(player), scaffoldReservations(),
                 inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
@@ -2431,13 +2425,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 || forbiddenBodyCells.contains(pos.asLong())
                 || additionalProtection != null && additionalProtection.contains(pos.asLong())
                 || NavigationSafetyContext.protectsMutation(pos) || NavigationSafetyContext.forbidsBody(pos);
-        if (!r.mutationGuardMatches(player, pos)
-                || !r.scaffoldLedger().permits(targets.get(pos.asLong()), player.level().getBlockState(pos), hard)) return false;
-        var risk = BuildScaffoldDropSafety.check(player.level(), player.level()::isLoaded,
-                at -> targets.containsKey(at.asLong()) ? targets.get(at.asLong()).desiredState() : null,
-                at -> r.scaffoldLedger().contains(at), pos);
-        if (risk != null) { scaffoldDropRisk = risk.evidence(); return false; }
-        return true;
+        // 施工和寻路共用当前落点的许可；附近有机器或容器仍允许搭垫块，实际操作结果由放置和清理流程处理。
+        return r.mutationGuardMatches(player, pos)
+                && r.scaffoldLedger().permits(targets.get(pos.asLong()), player.level().getBlockState(pos), hard);
     }
     private void registerProvider() {
         if (!providerRegistered) { BuildPlacementRegistry.register(player, this); providerRegistered = true; }
@@ -2495,7 +2485,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         if (placementAccess != null) data.put("placement_access", placementAccess.evidence());
-        if (!scaffoldDropRisk.isEmpty()) data.put("scaffold_drop_risk", scaffoldDropRisk);
         if (layerKnown && constructionLayer != Integer.MAX_VALUE) data.put("construction_layer", constructionLayer);
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
         data.put("construction_access", stanceNavigation.stage());
@@ -2615,7 +2604,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 失败回执也保留对齐或贴边时的实际位置证据，供后续修复判断真实半格差异。
         if (placementAccess != null) data.put("placement_access", placementAccess.evidence());
         if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
-        if (!scaffoldDropRisk.isEmpty()) data.put("scaffold_drop_risk", scaffoldDropRisk);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         data.put("scaffold_cleanup_passes", scaffoldCleanupPasses);

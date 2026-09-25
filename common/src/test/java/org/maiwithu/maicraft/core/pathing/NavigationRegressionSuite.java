@@ -46,7 +46,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationPolicySnapshotTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest;
-import org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldDropGuardTest;
+import org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldPlacementPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPhysicsTest;
 import org.maiwithu.maicraft.core.pathing.baritone.TravelRunwayTest;
@@ -113,7 +113,8 @@ public final class NavigationRegressionSuite {
         BaritonePlayerFeetTest.main(args);
         // 跌落路径只查已有缓冲物时先筛选候选，保留真实水面、伤害和碰撞验证。
         ExistingLandingQueryTest.main(args);
-        NavigationScaffoldDropGuardTest.main(args);
+        // 寻路搭路继续遵守目标位置的修改许可，附近机器不再额外触发掉落预测检查。
+        NavigationScaffoldPlacementPolicyTest.main(args);
         MiningBatchTest.main(args);
         NaturalTreeSourceTest.main(args);
         NoPathVerdictTest.main(args);
