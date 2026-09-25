@@ -29,8 +29,11 @@ public final class UtilityInstallationCatalogTest {
         check(built.builtAtMillis() == 2000 && built.inputs().getFirst().face() == Direction.DOWN,"port geometry and historical build survive reconnect");
         var view = built.json(false); var port = view.getAsJsonArray("external_inputs").get(0).getAsJsonObject();
         check(!view.get("current_connection_verified").getAsBoolean() && !view.get("machine_production_verified").getAsBoolean()
-                && !view.get("operation_authorized").getAsBoolean() && !view.has("anchor") && !port.has("offset")
+                && view.get("operation_authorization").getAsString().equals("not_evaluated")
+                && !view.get("observation_grants_authority").getAsBoolean() && !view.has("anchor") && !port.has("offset")
                 && port.get("location_ref").getAsString().equals("Press/main_drive"),"historical metadata is neither current proof nor operation authority");
+        // 玩家已委托的机器不能被历史目录伪报为明确禁用，观察也不能自行扩大本次操作范围。
+        check(!view.has("operation_authorized"), "observation does not manufacture an authorization denial");
         check(built.json(true).getAsJsonArray("external_inputs").get(0).getAsJsonObject().getAsJsonObject("position").get("y").getAsInt() == 65,
                 "relative port resolves against the frozen anchor");
         var changedJson = JsonParser.parseString(built.inputsJson()).getAsJsonArray();

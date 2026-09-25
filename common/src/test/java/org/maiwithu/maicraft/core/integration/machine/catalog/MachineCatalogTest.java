@@ -35,6 +35,7 @@ public final class MachineCatalogTest {
         check(current.currentState() == CurrentState.CURRENT_PRESENT && current.device().label().equals("Press"), "Observation lost current state or custom label");
         check(current.device().roles().getFirst().status() == EvidenceStatus.INFERRED, "Native block observation certified an inferred purpose");
         check(!current.operationAuthorized() && !current.json(false).has("position") && current.json(true).has("position"), "Public catalog view exposed coordinates or operation authority");
+        observationDoesNotJudgeUserPermission(current.json(false));
         check(catalog.findLabel("press", 11).size() == 1 && catalog.nearby("minecraft:the_nether", PRESS, 20, 10, 11).isEmpty(), "Label/world query boundary failed");
         check(catalog.device(id, 1212).orElseThrow().currentState() == CurrentState.STALE, "Old current-session observation stayed fresh forever");
         catalog.bind(IDENTITY, "session-2");
@@ -57,11 +58,13 @@ public final class MachineCatalogTest {
         check(node.position().equals(PRESS) && node.declaredKind().equals("process") && node.ports().getFirst().position().equals(new Position(102, 64, 100)),
                 "Node/port absolute locations lost their authored anchor offsets");
         check(node.device() != null && !node.json(false).has("position") && !node.operationAuthorized(), "Node lookup could not join the observed device safely");
+        observationDoesNotJudgeUserPermission(node.json(false));
         var proof = new CommissionEvidence("native_recipe_and_delivery_window", "items:create:iron_sheet#test", 10, 50, 4, 4, 4, 2000);
         catalog.recordCommission(lineId, proof);
         check(catalog.line(lineId).orElseThrow().commissionMatchesManifest() && !catalog.lineView(lineId, false).get("current_production_verified").getAsBoolean(),
                 "Historical commissioning became a current production guarantee");
         check(!catalog.lineView(lineId, false).has("anchor") && !catalog.lineView(lineId, false).has("manifest"), "Public line view exposed absolute layout data");
+        observationDoesNotJudgeUserPermission(catalog.lineView(lineId, false));
         manifest.getAsJsonObject("observation").addProperty("window_ticks", 40);
         check(catalog.line(lineId).orElseThrow().manifest().getAsJsonObject("observation").get("window_ticks").getAsInt() == 20,
                 "Caller mutated the registered manifest through a shared JSON reference");
@@ -69,6 +72,12 @@ public final class MachineCatalogTest {
         check(changed.equals(lineId) && catalog.lines().size() == 1 && !catalog.line(lineId).orElseThrow().commissionMatchesManifest(),
                 "Layout update duplicated its anchor or reused the old proof for new design data");
         check(catalog.lineView(lineId, false).getAsJsonObject("last_commission").get("historical_only").getAsBoolean(), "Historical commissioning was lost");
+    }
+
+    private static void observationDoesNotJudgeUserPermission(JsonObject view) {
+        // 设备、节点与整线都只提供世界证据；已授权任务不会因看到一个固定 false 而被误判禁止。
+        check(!view.has("operation_authorized") && "not_evaluated".equals(view.get("operation_authorization").getAsString())
+                && !view.get("observation_grants_authority").getAsBoolean(), "catalog leaves user permission to the caller");
     }
 
     private static void persistenceAndCorruption() throws Exception {

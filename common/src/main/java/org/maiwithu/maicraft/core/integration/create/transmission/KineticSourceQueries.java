@@ -40,7 +40,9 @@ public final class KineticSourceQueries {
                 row.addProperty("rpm", value.rpm()); row.addProperty("powered", true);
                 row.addProperty("distance", Math.sqrt(key.distSqr(origin))); row.addProperty("height_delta", key.getY() - origin.getY());
                 row.addProperty("additional_stress_capacity", "requires_runtime_check");
-                row.addProperty("operation_authorized", false); row.add("ports", new JsonArray()); return row;
+                // 动力扫描没有读取对话里的授权，未判断不能写成禁止使用；现有任务授权仍由调用者按范围核对。
+                row.addProperty("operation_authorization", "not_evaluated");
+                row.addProperty("observation_grants_authority", false); row.add("ports", new JsonArray()); return row;
             });
             var port = new JsonObject(); port.addProperty("axis", value.endpoint().axis().getName());
             var faces = new JsonArray(); value.endpoint().shaftFaces().forEach(face -> faces.add(face.getName()));
@@ -54,7 +56,7 @@ public final class KineticSourceQueries {
         out.addProperty("candidate_limit", Math.min(limit, 8)); out.addProperty("radius", radius);
         out.addProperty("maximum_height_delta", KineticSourceScope.HEIGHT_DELTA);
         out.addProperty("scope", "loaded chunk block-entity index; visible outlets near current work height; protected uses excluded; ownership not inferred");
-        out.addProperty("next_step", "Use a candidate source_label only within the player's authorized work area or known shared network. Otherwise request a known authorized outlet. No candidates in a bounded/partial search do not prove the surrounding world has no power. Native connection checks stress and interfaces again.");
+        out.addProperty("next_step", "Permission is not evaluated by this observation; existing user authorization still applies. Use a candidate source_label within the player's authorized work area or known shared network. If the existing request does not cover that source, request a known authorized outlet. No candidates in a bounded/partial search do not prove the surrounding world has no power. Native connection checks stress and interfaces again.");
         out.addProperty("observation_only", true); return out;
     }
 }

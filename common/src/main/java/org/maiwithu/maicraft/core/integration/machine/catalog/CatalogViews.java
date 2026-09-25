@@ -9,6 +9,11 @@ import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCata
 /** 公开视图默认省略绝对坐标，除非调用方明确请求内部定位数据。 */
 final class CatalogViews {
     private CatalogViews() {}
+    /** 目录只认识物理设备；它既不授予操作权，也没有依据把玩家已给的任务授权判成拒绝。 */
+    static void observationAuthority(JsonObject result) {
+        result.addProperty("operation_authorization", "not_evaluated");
+        result.addProperty("observation_grants_authority", false);
+    }
     static JsonObject position(Position position) {
         var result = new JsonObject(); result.addProperty("x", position.x()); result.addProperty("y", position.y()); result.addProperty("z", position.z()); return result;
     }
@@ -21,7 +26,7 @@ final class CatalogViews {
         result.addProperty("last_observed_at_ms", device.lastObservedAtMillis()); result.addProperty("last_observed_game_tick", device.lastObservedGameTick());
         var roles = new JsonArray();
         for (RoleEvidence role : device.roles()) { var row = new JsonObject(); row.addProperty("role", role.role()); row.addProperty("evidence", role.status().name().toLowerCase(Locale.ROOT)); row.addProperty("provenance", role.provenance()); roles.add(row); }
-        result.add("roles", roles); result.addProperty("operation_authorized", false);
+        result.add("roles", roles); observationAuthority(result);
         if (includeLocation) result.add("position", position(device.position())); return result;
     }
     static JsonObject node(NodeView view, boolean includeLocation) {
@@ -30,11 +35,11 @@ final class CatalogViews {
         var ports = new JsonArray();
         for (PortView port : view.ports()) { var row = new JsonObject(); row.addProperty("id", port.id()); row.addProperty("medium", port.medium()); row.addProperty("direction", port.direction()); row.addProperty("face", port.face()); if (includeLocation) row.add("position", position(port.position())); ports.add(row); }
         result.add("ports", ports); if (view.device() != null) result.add("observed_device", device(view.device(), includeLocation));
-        result.addProperty("operation_authorized", false); if (includeLocation) result.add("position", position(view.position())); return result;
+        observationAuthority(result); if (includeLocation) result.add("position", position(view.position())); return result;
     }
     static JsonObject line(Line line, boolean includeLocation) {
         var result = new JsonObject(); result.addProperty("id", line.id()); result.addProperty("label", line.label()); result.addProperty("dimension", line.dimension());
-        result.addProperty("manifest_fingerprint", line.manifestFingerprint()); result.addProperty("operation_authorized", false);
+        result.addProperty("manifest_fingerprint", line.manifestFingerprint()); observationAuthority(result);
         result.addProperty("current_production_verified", false);
         var manifest = line.manifest(); var nodes = new JsonArray(); var links = new JsonArray();
         manifest.getAsJsonArray("nodes").forEach(value -> { var node = value.getAsJsonObject(); var row = new JsonObject(); for (String key : new String[]{"id", "kind", "recipe_id"}) if (node.has(key)) row.add(key, node.get(key).deepCopy()); nodes.add(row); });

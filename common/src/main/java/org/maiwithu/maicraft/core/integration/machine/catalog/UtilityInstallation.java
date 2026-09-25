@@ -30,7 +30,8 @@ public record UtilityInstallation(String id, String label, String dimension, Pos
         result.addProperty("dimension", dimension); result.addProperty("inputs_fingerprint", inputsFingerprint);
         result.addProperty("construction_status", builtAtMillis == 0 ? "planned" : "historically_verified");
         result.addProperty("last_construction_at_ms", builtAtMillis); result.addProperty("current_connection_verified", false);
-        result.addProperty("machine_production_verified", false); result.addProperty("operation_authorized", false);
+        // 历史建造记录不能决定本次使用权限；调用者继续按玩家当前任务范围判断。
+        result.addProperty("machine_production_verified", false); CatalogViews.observationAuthority(result);
         var entries = new JsonArray();
         for (var input : inputs()) {
             var entry = input.json(); entry.addProperty("location_ref", label + "/" + input.id());
