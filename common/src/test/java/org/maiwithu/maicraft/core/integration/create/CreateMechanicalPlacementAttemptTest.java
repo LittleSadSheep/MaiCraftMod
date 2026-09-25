@@ -9,18 +9,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 
 public final class CreateMechanicalPlacementAttemptTest {
     public static void main(String[] args) throws Exception {
-        BlockPos stand = new BlockPos(-4, -60, -5);
-        Vec3 edge = new Vec3(-3.0457348874, -60, -4.2888724116);
-        check(BlockPos.containing(edge).equals(stand), "recorded failed jump already belonged to the planned grid cell");
-        check(!CreateMechanicalPlacementAttempt.centered(edge, Vec3.ZERO, stand), "grid membership must not stand in for centered jump geometry");
-        for (float yaw : new float[]{0, 29.9351f, 90, -120}) {
-            var movement = CreateMechanicalPlacementAttempt.centerMovement(edge, stand, yaw);
-            double angle = Math.toRadians(yaw);
-            Vec3 world = new Vec3(-movement.forward() * Math.sin(angle) + movement.strafe() * Math.cos(angle), 0,
-                    movement.forward() * Math.cos(angle) + movement.strafe() * Math.sin(angle));
-            check(world.dot(Vec3.atBottomCenterOf(stand).subtract(edge)) > 0, "centering must move toward the stance for any actual camera yaw");
-            check(world.length() <= .301 && !movement.jumping(), "centering remains a slow grounded input");
-        }
+        // 不要求角色先对齐格心；本记录只跟踪真正起跳后的身体和准星结果。
         var attempt = new CreateMechanicalPlacementAttempt();
         observe(attempt, true, 1.62, false); attempt.requestJump();
         for (int tick = 0; tick < 4; tick++) {
@@ -38,7 +27,7 @@ public final class CreateMechanicalPlacementAttemptTest {
         for (int tick = 0; tick < 31; tick++) observe(attempt, true, 1.62, false);
         check(attempt.expired(), "one unsuccessful jump stays finite");
         actorInputLease();
-        System.out.println("CreateMechanicalPlacementAttemptTest: exact stance, observed takeoff, bounded diagnostics and actor jump lease passed");
+        System.out.println("CreateMechanicalPlacementAttemptTest: observed takeoff, bounded diagnostics and actor jump lease passed");
     }
     private static void actorInputLease() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {

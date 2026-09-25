@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -99,6 +100,10 @@ public final class BuildScaffoldCleanupAccessTest {
             check(access.tick() == BuildScaffoldCleanupAccess.Status.RUNNING && !(boolean) access.evidence().get("route_created"),
                     "no terrain-changing route starts before the complete finite snapshot");
             ready.set(true);
+            // 触距被装备提升、累计观察超过旧阈值时仍继续清理，不能凭内部统计拒绝角色动作。
+            h.player.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).setBaseValue(8);
+            Field reads = BuildScaffoldCleanupAccess.class.getDeclaredField("totalReads"); reads.setAccessible(true);
+            reads.setInt(access, 2_500_001);
             for (int i = 0; i < 10 && access.tick() == BuildScaffoldCleanupAccess.Status.RUNNING; i++) h.nextTick();
             check(access.tick() == BuildScaffoldCleanupAccess.Status.READY && !(boolean) access.evidence().get("route_created"),
                     "an actually ready cleanup stance finishes without manufacturing a navigation result");

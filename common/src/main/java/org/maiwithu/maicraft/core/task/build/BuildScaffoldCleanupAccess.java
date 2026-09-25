@@ -30,7 +30,7 @@ import org.maiwithu.maicraft.core.build.BuildingBudgets;
 /** 一次有界回收接近：原生搭垫脚块到已验证站位，途中所有观察到的现成方块均禁止拆改。 */
 final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, BuildPlacementRegistry.Provider {
     enum Status { RUNNING, READY, FAILED }
-    private static final int DEADLINE_TICKS = 600, SNAPSHOT_PER_TICK = 512, MAX_TOTAL_READS = 2_500_000;
+    private static final int DEADLINE_TICKS = 600, SNAPSHOT_PER_TICK = 512;
     private final LocalPlayer player;
     private final Level level;
     private final NavGoal goal;
@@ -67,14 +67,12 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
         }
         if (finishing != null) return settleStop();
         if (level.getGameTime() >= deadline) return fail("cleanup_access_deadline");
-        if (totalReads >= MAX_TOTAL_READS) return fail("cleanup_access_read_budget");
         if (!scope.inside(PlayerNav.playerFeet(player))) return fail("cleanup_access_left_observed_scope");
         if (!scope.complete()) {
             if (lastSnapshotTick == level.getGameTime()) return Status.RUNNING;
             if (!EmbeddedBaritoneRuntime.yieldActiveForExternalAction(player)) return Status.RUNNING;
             acquiredBody = true;
             InputDriver.halt(player);
-            if (totalReads + SNAPSHOT_PER_TICK > MAX_TOTAL_READS) return fail("cleanup_access_read_budget");
             totalReads += scope.scan(SNAPSHOT_PER_TICK);
             lastSnapshotTick = level.getGameTime();
             if (scope.failure != null) return fail(scope.failure);
@@ -83,9 +81,8 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
         // 每刻先刷新整个原生交互半径，再让导航取动作；旧空气变成外来墙或机器时也立刻列为不可拆。
         if (lastObservation != level.getGameTime()) {
             double reach = AimGeometry.blockReachDistance(player);
-            if (!Double.isFinite(reach) || reach <= 0 || reach > 6) return fail("cleanup_access_interaction_radius_unsupported");
-            int radius = (int) Math.ceil(reach) + 1, side = radius * 2 + 1;
-            if (totalReads + side * side * side > MAX_TOTAL_READS) return fail("cleanup_access_read_budget");
+            // 装备增加触距时照常清理；局部观察保持有限范围，累计读格数量不再决定是否允许角色继续动作。
+            int radius = Math.max(1, Math.min(8, (int) Math.ceil(reach) + 1));
             int reads = scope.refresh(BlockPos.containing(player.getEyePosition()), radius);
             totalReads += reads; lastObservation = level.getGameTime();
             if (scope.failure != null) return fail(scope.failure);

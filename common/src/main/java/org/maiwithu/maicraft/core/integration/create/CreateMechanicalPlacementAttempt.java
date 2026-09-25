@@ -6,12 +6,11 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.client.actor.BodyControlPort;
 
 /** 执行一次放置接近和最多一次已观察到的跳跃；失败时报告物理证据。 */
 final class CreateMechanicalPlacementAttempt {
     private boolean jumpRequested, airborne;
-    private int jumpTicks, jumpCommands, centerTicks, exactHits;
+    private int jumpTicks, jumpCommands, exactHits;
     private double firstEyeY = Double.NaN, maximumEyeY = -Double.MAX_VALUE;
     private Map<String, Object> latest = Map.of();
 
@@ -36,24 +35,11 @@ final class CreateMechanicalPlacementAttempt {
     boolean holdJump() { return jumpRequested && !airborne && jumpTicks < 12; }
     void jumpCommand() { jumpCommands++; }
     boolean expired() { return jumpRequested && jumpTicks > 30; }
-    boolean centerExpired() { return ++centerTicks > 100; }
-    static boolean centered(Vec3 feet, Vec3 velocity, BlockPos stand) {
-        Vec3 target = Vec3.atBottomCenterOf(stand);
-        return Math.abs(feet.y - target.y) < .1 && Math.hypot(feet.x - target.x, feet.z - target.z) <= .12
-                && Math.hypot(velocity.x, velocity.z) <= .025;
-    }
-    static BodyControlPort.Movement centerMovement(Vec3 feet, BlockPos stand, float yaw) {
-        Vec3 delta = Vec3.atBottomCenterOf(stand).subtract(feet); double distance = Math.hypot(delta.x, delta.z);
-        if (distance <= .12) return BodyControlPort.Movement.STOPPED;
-        double scale = Math.min(.3, distance * 2) / distance, angle = Math.toRadians(yaw);
-        double x = delta.x * scale, z = delta.z * scale;
-        return new BodyControlPort.Movement((float) (-x * Math.sin(angle) + z * Math.cos(angle)),
-                (float) (x * Math.cos(angle) + z * Math.sin(angle)), false, false, false);
-    }
     Map<String, Object> report() {
         var result = new LinkedHashMap<>(latest);
         result.put("jump_requested", jumpRequested); result.put("airborne_observed", airborne);
-        result.put("jump_ticks", jumpTicks); result.put("jump_command_ticks", jumpCommands); result.put("centering_ticks", centerTicks);
+        // 只记录真正发生的跳跃和准星命中，不保留格心对齐这项前置门槛。
+        result.put("jump_ticks", jumpTicks); result.put("jump_command_ticks", jumpCommands);
         result.put("exact_support_hit_ticks", exactHits);
         if (!Double.isNaN(firstEyeY)) { result.put("first_eye_y", firstEyeY); result.put("maximum_eye_y", maximumEyeY); }
         return result;

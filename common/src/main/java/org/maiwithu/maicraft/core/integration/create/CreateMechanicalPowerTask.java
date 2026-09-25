@@ -729,21 +729,12 @@ final class CreateMechanicalPowerTask
         InputDriver.halt(player);
         InputDriver.sneak(player, false);
         if (player.isShiftKeyDown() || !placementAttempt.jumpRequested() && !player.onGround()) return TaskState.RUNNING;
-        if (!placementAttempt.jumpRequested() && !CreateMechanicalPlacementAttempt.centered(player.position(), player.getDeltaMovement(), cell.stand())) {
-            if (placementAttempt.centerExpired() || !context.level().noCollision(player,
-                    player.getBoundingBox().move(Vec3.atBottomCenterOf(cell.stand()).subtract(player.position())))) {
-                beginFailure("placement_stance_not_centered", "the physical body could not settle at the surveyed placement stance",
-                        FailureType.STANCE_DUD, List.of("inspect_placement_diagnostics", "cancel"), false);
-                return TaskState.RUNNING;
-            }
-            context.body().applyMovement(CreateMechanicalPlacementAttempt.centerMovement(player.position(), cell.stand(), player.getYRot()), context.tickRevision());
-            return TaskState.RUNNING;
-        }
+        // 到达可操作的位置就直接转头放置，偏离格子中心不再额外阻止原生右键。
         InputDriver.lookAt(player, point);
         if (placementAttempt.holdJump()) { InputDriver.jump(player); placementAttempt.jumpCommand(); }
         if (placementAttempt.expired()) {
             beginFailure("placement_jump_unsettled", "the native jump did not expose the declared support face",
-                    FailureType.STANCE_DUD, List.of("make_alternate_stance", "cancel"), false);
+                    FailureType.STANCE_DUD, List.of(), false);
             return TaskState.RUNNING;
         }
         if (!lookReady(player, look[0], look[1]) && !(placementAttempt.airborne() && exactHit)) {
@@ -752,11 +743,7 @@ final class CreateMechanicalPowerTask
         }
         if (CreateMechanicalPlacementGeometry.needsTopFaceJump(player.getEyePosition(), point, cell.supportFace())) {
             if (!placementAttempt.jumpRequested() && player.onGround()) {
-                if (!CreateMechanicalPlacementGeometry.clearForJump(context.level(), PlayerNav.playerFeet(player))) {
-                    beginFailure("placement_jump_blocked", "the support top needs a native jump but its headroom is blocked",
-                            FailureType.STANCE_DUD, List.of("make_alternate_stance", "cancel"), false);
-                    return TaskState.RUNNING;
-                }
+                // 需要抬高视线时实际跳一次，能否命中顶面由跳跃后的准星决定，不先预测头顶净空。
                 placementAttempt.requestJump(); InputDriver.jump(player); placementAttempt.jumpCommand();
             }
             return TaskState.RUNNING;
@@ -786,7 +773,7 @@ final class CreateMechanicalPowerTask
         if (expected == null || expected.getBlock() != chainBlock || !"y".equals(axisName(expected))) {
             beginFailure("endpoint_orientation_unsupported",
                     "native placement would not produce a vertical-axis encased chain drive",
-                    FailureType.STANCE_DUD, List.of("choose_other_endpoint", "make_alternate_stance", "cancel"), false);
+                    FailureType.STANCE_DUD, List.of("choose_other_endpoint", "cancel"), false);
             return TaskState.RUNNING;
         }
         BlockState targetBefore = context.level().getBlockState(cell.position());
