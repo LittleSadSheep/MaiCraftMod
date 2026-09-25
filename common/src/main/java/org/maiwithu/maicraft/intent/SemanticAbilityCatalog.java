@@ -153,6 +153,12 @@ public final class SemanticAbilityCatalog {
                     targets("current_place"), fields(
                             field("item_id", "resource_id", "Required carried item to select and use through its own native behavior."),
                             field("expected_output_item_id", "resource_id", "Optional carried output whose count must increase after this one use; the receipt reports before and after counts.")));
+            case GeneralAbilityAdapter.HARVEST_BLOCK -> contract(
+                    "Harvest one exact observed resource block through native breaking and pickup. Stops after one source break even if it regenerates; reports source position and carried output increase. Approaches without altering surrounding terrain. No inventory-source substitution.",
+                    targets("coordinates"), fields(
+                            field("block_id", "resource_id", "Required observed source block; the loaded state must still match. Block entities and fluids are excluded."),
+                            field("expected_output_item_id", "resource_id", "Required expected drop; success requires this carried output to increase after a confirmed source break."),
+                            field("may_alter_terrain", "boolean", "Required true for breaking this one cell, including its native neighbor updates. Does not permit breaking surrounding structures.")));
             case GeneralAbilityAdapter.FOLLOW -> contract(
                     "Follow one semantic player or entity while MaiCraft continuously resolves movement.",
                     targets("player", "entity", "nearest"),

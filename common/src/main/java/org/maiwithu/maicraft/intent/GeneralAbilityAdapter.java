@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -39,6 +40,7 @@ import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
+import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 
 /**
  * 把战斗、跟随、吃东西、装备和交互等目标，转换成已经实现的具体工具调用。
@@ -50,6 +52,7 @@ public final class GeneralAbilityAdapter {
     public static final String COMBAT = "maicraft:combat";
     public static final String INTERACT = "maicraft:interact";
     public static final String USE_ITEM = "maicraft:use_item";
+    public static final String HARVEST_BLOCK = "maicraft:harvest_block";
     public static final String FOLLOW = "maicraft:follow";
     public static final String CONSUME = "maicraft:consume";
     public static final String EQUIP = "maicraft:equip";
@@ -61,7 +64,7 @@ public final class GeneralAbilityAdapter {
 
     private static final Set<String> ABILITIES = Set.of(
             COMBAT, INTERACT, FOLLOW, CONSUME, EQUIP, FISH, DROP, CONTAINER, MANAGE_CONTAINER,
-            FIND_ENTITY, USE_ITEM);
+            FIND_ENTITY, USE_ITEM, HARVEST_BLOCK);
     private static final Set<String> EXECUTION_FIELDS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "x", "y", "z", "button",
             "hold_ticks", "slot_index", "source_slot", "destination_slot", "from_slot",
@@ -97,6 +100,7 @@ public final class GeneralAbilityAdapter {
             case COMBAT -> combat(goal, player);
             case INTERACT -> interact(goal, player, runtime, false);
             case USE_ITEM -> useItem(goal, player);
+            case HARVEST_BLOCK -> harvestBlock(goal, player);
             case FOLLOW -> follow(goal, player);
             case CONSUME -> consume(goal, player);
             case EQUIP -> equip(goal, player);
@@ -128,6 +132,28 @@ public final class GeneralAbilityAdapter {
         // 这里只准备一项有界原生持用；主手选择由任务完成，副手可由已有equip语义预先准备，绝不直接修改物品数量。
         return new IntentAction.Native(new InteractAtTaskRecord("semantic-item-use-" + UUID.randomUUID(),
                 player.level().getGameTime() + 1200, MouseButton.RIGHT, null, -1, item).useHeldItemOnly(output));
+    }
+
+    private static IntentAction harvestBlock(Goal goal, LocalPlayer player) {
+        // 精确采收把观察到的方块状态冻结到原生采矿任务；不能改走AE取材或顺手挖相邻格。
+        if (!exactBlockTarget(goal) || !sameDimension(goal.target().position(), player))
+            return exactBlockUnavailable(goal, "Harvest needs exact coordinates in the current dimension.", null);
+        var p = goal.parameters();
+        if (!bool(p, "may_alter_terrain", false))
+            return exactBlockUnavailable(goal, "Harvest needs may_alter_terrain=true for this single source block.", null);
+        ResourceLocation blockId = ResourceLocation.tryParse(Objects.toString(string(p, "block_id"), ""));
+        ResourceLocation outputId = ResourceLocation.tryParse(Objects.toString(string(p, "expected_output_item_id"), ""));
+        if (blockId == null || !BuiltInRegistries.BLOCK.containsKey(blockId) || outputId == null
+                || !BuiltInRegistries.ITEM.containsKey(outputId) || BuiltInRegistries.ITEM.get(outputId) == Items.AIR)
+            return exactBlockUnavailable(goal, "Harvest needs installed block_id and expected_output_item_id.", null);
+        var position = goal.target().position(); BlockPos at = new BlockPos(position.x(), position.y(), position.z());
+        if (!player.level().isLoaded(at)) return exactBlockUnavailable(goal, "The exact harvest target is not loaded.", null);
+        var state = player.level().getBlockState(at);
+        if (!state.is(BuiltInRegistries.BLOCK.get(blockId)) || state.isAir() || !state.getFluidState().isEmpty() || state.hasBlockEntity())
+            return exactBlockUnavailable(goal, "The target must match block_id and be a solid resource without a block entity.", null);
+        return new IntentAction.Native(new MineBlockTaskRecord("semantic-harvest-" + UUID.randomUUID(),
+                player.level().getGameTime() + 1200, Set.of(state.getBlock()), 1, blockId.toString(),
+                Set.of(BuiltInRegistries.ITEM.get(outputId))).onlyAt(at, state));
     }
 
     private static IntentAction manageContainer(Goal goal) {

@@ -6,6 +6,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Set;
 import java.util.List;
@@ -32,6 +33,7 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final boolean naturalLogsOnly;
     private BlockPos searchCenter;
     private int searchRadius;
+    private BlockState exactState;
 
     /** 实时进度表示任务开始后收集到的匹配物品数，按背包物品计而非破坏方块数；红石等矿石每格会掉落多个物品。
      *  由任务每个 tick 设置，用于结束条件和调试覆盖层文字。 */
@@ -68,11 +70,20 @@ public final class MineBlockTaskRecord extends TaskRecord {
 
     /** 语义取材把本次附近范围冻结给采矿子任务；走向目标后不能把搜索中心一起带走，越找越远。 */
     public MineBlockTaskRecord withinRadius(BlockPos center, int radius) {
+        if (exactState != null) throw new IllegalStateException("exact harvest cannot widen its scope");
         if (center == null || radius < 1 || radius > 512) throw new IllegalArgumentException("invalid mining search scope");
         searchCenter = center.immutable(); searchRadius = radius; return this;
     }
     public BlockPos searchCenter() { return searchCenter; }
     public int searchRadius() { return searchRadius; }
+    /** 定点采收只处理接单时这一格的状态；即使机器随后再生相同方块，也不自动开始第二次破坏。 */
+    public MineBlockTaskRecord onlyAt(BlockPos target, BlockState observed) {
+        if (target == null || observed == null || !targets.contains(observed.getBlock()) || count != 1 || progressItems.isEmpty())
+            throw new IllegalArgumentException("exact harvest needs one observed source and an expected output");
+        searchCenter = target.immutable(); searchRadius = 0; exactState = observed; return this;
+    }
+    public boolean exactHarvest() { return exactState != null; }
+    public BlockState exactState() { return exactState; }
     /** 先缩小索引的区块环，再按方块距离筛选命中；区块边界的取整不能扩大实际候选范围。 */
     int queryChunkRadius(int fallback) { return searchCenter == null ? fallback : (searchRadius + 15) / 16; }
     public boolean inSearchScope(BlockPos pos) { return searchCenter == null || pos.distSqr(searchCenter) <= (double) searchRadius * searchRadius; }

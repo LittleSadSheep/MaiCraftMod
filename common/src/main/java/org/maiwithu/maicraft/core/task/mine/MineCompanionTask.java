@@ -239,7 +239,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         snapshotPreexistingDrops();
         // 登记目标进共享索引并立即首查;冷区域的索引构建由每次查询的预算分摊,
         // 覆盖完整前 onTick 的终局判定会等着(lastQueryComplete)。
-        TargetIndex.register(player.clientLevel, r.targets);
+        if (!r.exactHarvest()) TargetIndex.register(player.clientLevel, r.targets);
         runQuery();
         lastProgressTick = player.level().getGameTime();
         lastProgressPos = feet();
@@ -261,6 +261,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                         ? rawItemProgress()
                         : Math.max(0, progressItemCount() - progressItemBaseline))
                 : brokenTargets;
+        // 定点来源尚未确认破坏时，路上偶然收到同种物品也不能满足本次采收。
+        if (r.exactHarvest()) gathered = brokenTargets == 0 ? 0 : Math.max(0, progressItemCount() - progressItemBaseline);
         r.setMined(gathered);
         if (gathered > lastVerifiedGathered) {
             lastVerifiedGathered = gathered;
@@ -276,6 +278,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (activeTarget != null && effective != null && level.getBlockState(effective).isAir()) {
             acceptDigResult(activeTarget, digger.settleGone(effective.equals(activeTarget)));
             return TaskState.RUNNING;
+        }
+        // 接单之后被换成别的方块或卸载时，停止原生挖掘；不能按坐标误拆新放入的机器。
+        if (r.exactHarvest() && brokenTargets == 0 && (!level.isLoaded(r.searchCenter())
+                || level.getBlockState(r.searchCenter()) != r.exactState())) {
+            digger.cancel(); fail("exact harvest source changed or unloaded before confirmed break", FailureType.TARGET_LOST);
+            return TaskState.FAILED;
         }
         observeNavigationBreakOrigins();
         long tDrops = NavProfiler.begin();
@@ -510,6 +518,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      * {@code pos} 是否属于当前挖掘范围：已知目标、筛选器匹配项，或竖井延续处已经挖空的格子？{@link #coalesce} 用此判断读取方块所在的竖向连续段。
      */
     private boolean internalMiningGoal(CalculationContext ctx, BlockPos pos) {
+        if (r.exactHarvest()) return r.inSearchScope(pos) && brokenTargets == 0;
         if (knownOres.contains(pos)) return true;
         BlockState state = player.level().getBlockState(pos);
         if (state.isAir()) return true;                         // 刚挖通的空气格仍视为同一竖向树干延伸。
@@ -807,7 +816,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (ore.distSqr(feet) > IN_PLACE_FILTER_SQR) {
                 break;   // 候选已按距离从近到远排序，后续位置只会更远。
             }
-            if ((ore.equals(support) && !safeSupportDescent(level, support))
+            if ((ore.equals(support) && (r.exactHarvest() || !safeSupportDescent(level, support)))
                     || level.getBlockState(ore).isAir()) {
                 continue;
             }
@@ -893,13 +902,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (activeTarget == null) {
             activeTarget = pos.immutable();
         }
-        acceptDigResult(activeTarget, naturalLogSource
+        acceptDigResult(activeTarget, naturalLogSource || r.exactHarvest()
                 ? digger.digTargetStep(activeTarget) : digger.digStep(activeTarget));
     }
 
     // 天然树供料使用普通行走规则；其他采矿使用允许挖路、垫路的导航规则。
     private PlayerNav.ContextProvider travelContext() {
-        return naturalLogSource ? PlayerNav.ContextProvider.DEFAULT : PlayerNav.ContextProvider.TERRAFORM;
+        // 单格采收的授权不覆盖通道和周围机架；接近产物也只能走现有安全路线。
+        return naturalLogSource || r.exactHarvest() ? PlayerNav.ContextProvider.DEFAULT : PlayerNav.ContextProvider.TERRAFORM;
     }
 
     private TaskState exhaustedPath() {
@@ -1036,6 +1046,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         lastQueryChunk = ChunkPos.asLong(feet());
         heartbeatTimer = QUERY_HEARTBEAT_TICKS;
         queryCooldown = QUERY_MIN_GAP_TICKS;
+        if (r.exactHarvest()) {
+            // 不查索引、不选附近同种方块；第一次确认破坏后只收尾掉落，不追着再生格继续挖。
+            lastQueryComplete = true; knownOres.clear();
+            if (brokenTargets == 0 && exactSourceUsable()) mergeHits(List.of(r.searchCenter()));
+            return;
+        }
         Set<BlockPos> excluded = new HashSet<>(unworkable);
         excluded.addAll(naturalTrees.rejected);
         int rejectedBefore = naturalTrees.rejected.size();
@@ -1072,6 +1088,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private void prune() {
         Level level = player.level();
         BlockPos feet = feet();
+        if (r.exactHarvest()) {
+            knownOres.removeIf(p -> brokenTargets > 0 || !r.inSearchScope(p) || unworkable.contains(p) || !exactSourceUsable());
+            return;
+        }
         // 问的是"挖不挖得成",按可改地形算——这是挖矿任务,许可本来就是 TERRAFORM
         CalculationContext ctx = ContextFactory.forExecution(player,
                 TerrainPermit.TERRAFORM);
@@ -1094,6 +1114,20 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (knownOres.size() > MAX_ORES) {
             knownOres.subList(MAX_ORES, knownOres.size()).clear();
         }
+    }
+
+    private boolean exactSourceUsable() {
+        BlockPos at = r.searchCenter(); Level level = player.level();
+        if (!level.isLoaded(at)) return false;
+        BlockState state = level.getBlockState(at);
+        // 明确采收可以触发生成格旁的液体更新，但不能挖流体、容器、受保护方块或让落沙砸下；导航仍完全保留地形。
+        if (state != r.exactState() || state.isAir() || !state.getFluidState().isEmpty() || state.hasBlockEntity()
+                || state.getDestroySpeed(level, at) < 0 || BlockHelper.shouldAvoidBreaking(level, at)
+                || !level.isLoaded(at.above()) || BlockHelper.breakReleasesFallingBlock(level, at)) return false;
+        if (!WorkProfile.of(player).instaBreak() && !BlockHelper.canHarvest(player.getInventory(), state)) {
+            unharvestable.add(at); return false;
+        }
+        return true;
     }
 
     /** 返回离脚位最近的已知矿物；没有矿物时返回 null，供“附近有矿却越走越远”诊断使用。 */
@@ -1260,7 +1294,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         super.cleanup();
         digger.cancel();
         activeTarget = null;
-        TargetIndex.unregister(player.clientLevel, r.targets);
+        if (!r.exactHarvest()) TargetIndex.unregister(player.clientLevel, r.targets);
     }
 
     @Override
@@ -1270,6 +1304,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        if (r.exactHarvest()) {
+            data.put("exact_source", true); data.put("confirmed_source_breaks", brokenTargets);
+            data.put("expected_output_items", r.progressItems.stream().map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).toList());
+            data.put("source_now", player.level().isLoaded(r.searchCenter()) ? player.level().getBlockState(r.searchCenter()).toString() : "unloaded");
+            if (brokenTargets > 0) data.put("mechanical_retry_allowed", false);
+        }
         // 失败回执说明实际查过的固定范围，不能把附近没有来源说成整个世界都没有。
         if (r.searchCenter() != null) data.put("search_scope", Map.of(
                 "center", List.of(r.searchCenter().getX(), r.searchCenter().getY(), r.searchCenter().getZ()),
