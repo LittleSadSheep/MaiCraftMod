@@ -25,6 +25,7 @@ import baritone.utils.BlockStateInterface;
 import baritone.utils.ToolSet;
 import baritone.utils.pathing.BetterWorldBorder;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -347,6 +348,8 @@ public class CalculationContext {
     }
 
     public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
+        // 名单外障碍不作为可挖路线候选，让搜索直接选择绕行；地形许可和例外名单不能越过这道限制。
+        if (!ClearanceWhitelist.allows(current)) return COST_INF;
         if (!allowBreak && !allowBreakAnyway.contains(current.getBlock())) {
             return COST_INF;
         }

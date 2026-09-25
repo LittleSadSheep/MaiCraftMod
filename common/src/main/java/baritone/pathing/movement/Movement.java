@@ -25,6 +25,7 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import baritone.utils.BlockStateInterface;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 import java.util.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -144,7 +145,8 @@ public abstract class Movement implements IMovement, MovementHelper {
         }
         if (ctx.player().isInWall()) {
             ctx.getSelectedBlock().ifPresent(pos -> {
-                if (!EmbeddedBaritonePolicy.protects(pos)) {
+                // 身体卡墙也不能擅自拆名单外建筑，仍由正常路线重新寻找出口。
+                if (!EmbeddedBaritonePolicy.protects(pos) && ClearanceWhitelist.allows(BlockStateInterface.get(ctx, pos))) {
                     MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, pos));
                     currentState.setInput(Input.CLICK_LEFT, true);
                 }
@@ -195,7 +197,9 @@ public abstract class Movement implements IMovement, MovementHelper {
             }
             if (!MovementHelper.canWalkThrough(ctx, blockPos)) { // can't break air, so don't try
                 // Protection forbids mutation, not walking through air or using a doorway.
-                if (EmbeddedBaritonePolicy.protects(blockPos)) {
+                // 路线算好后有人换上名单外方块时，立即使这一段失效并重算绕路，不继续挥镐。
+                if (EmbeddedBaritonePolicy.protects(blockPos)
+                        || !ClearanceWhitelist.allows(BlockStateInterface.get(ctx, blockPos))) {
                     state.setStatus(MovementStatus.UNREACHABLE);
                     return true;
                 }

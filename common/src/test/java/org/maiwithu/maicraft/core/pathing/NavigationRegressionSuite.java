@@ -72,6 +72,7 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportIntentTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntimeTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportTargetsTest;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelistTest;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionProtectionTest;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest;
@@ -97,6 +98,8 @@ public final class NavigationRegressionSuite {
     // 从输入预算到路径、落地、飞行和交通依次检查；异常直接向外传给 Gradle，让 check 失败。
     public static void main(String[] args) throws Exception {
         InputDriverTest.main(args);
+        // 清障权限先检查实际路线费用和客户端配置，确保名单外建筑始终留给绕行。
+        ClearanceWhitelistTest.main(args);
         NavigationUseProtectionTest.main(args);
         PacketTickBudgetTest.main(args);
         RegionalTerrainTest.main(args);

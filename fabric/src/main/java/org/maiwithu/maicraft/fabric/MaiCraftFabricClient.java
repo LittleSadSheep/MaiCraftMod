@@ -18,6 +18,7 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 
 /**
  * Fabric 的客户端接线入口，把加载器事件连接到公共运行时、预览和消息观察。
@@ -30,6 +31,8 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         // 先读取本实例的建筑预算，再登记工具；大模型的公开限制与随后施工使用同一份启动配置。
         BuildingBudgets.initialize(
                 Minecraft.getInstance().gameDirectory.toPath());
+        // 接单前载入清障类型白名单，让挖路和施工第一次下手就遵守同一份玩家配置。
+        ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
         FabricOptionalServerClient.install();
         // 先建立工具和任务执行器的对应关系，客户端启动后再开放 MCP 接单。
         MaiCraftCore.init();

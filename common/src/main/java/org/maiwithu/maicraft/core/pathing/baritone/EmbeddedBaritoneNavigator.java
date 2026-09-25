@@ -42,6 +42,7 @@ public final class EmbeddedBaritoneNavigator {
     private final TerrainBill ledger = new TerrainBill();
     private final EnumMap<PathEvent, Integer> events = new EnumMap<>(PathEvent.class);
     private final LongOpenHashSet rejectedScaffolds = new LongOpenHashSet();
+    private final LongOpenHashSet rejectedClearance = new LongOpenHashSet();
 
     private GoalCompiler.Compiled compiled;
     private GoalCompiler.CompiledFingerprint compiledFingerprint;
@@ -83,6 +84,7 @@ public final class EmbeddedBaritoneNavigator {
     LongSet protectedMutationCells() {
         var cells = new LongOpenHashSet(contextProvider.embeddedProtectedMutationCells());
         cells.addAll(rejectedScaffolds);
+        cells.addAll(rejectedClearance);
         return cells;
     }
 
@@ -127,6 +129,13 @@ public final class EmbeddedBaritoneNavigator {
         if (rejectedScaffolds.size() < 64) rejectedScaffolds.add(pos.asLong());
         else if (!rejectedScaffolds.contains(pos.asLong()))
             failWhenSafe(FailureType.NO_PATH, "temporary scaffold placement exclusions exhausted the bounded navigation alternatives");
+    }
+
+    // 原生准星发现不可清除的遮挡后更新保护策略；下一刻 refreshPolicy 会重新规划可绕过它的路线。
+    void rejectedClearance(BlockPos pos) {
+        if (rejectedClearance.size() < 64) rejectedClearance.add(pos.asLong());
+        else if (!rejectedClearance.contains(pos.asLong()))
+            failWhenSafe(FailureType.NO_PATH, "clearance whitelist exclusions exhausted navigation alternatives");
     }
 
     void recordConfirmedNativeAction() {

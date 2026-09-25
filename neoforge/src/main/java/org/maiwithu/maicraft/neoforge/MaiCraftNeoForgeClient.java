@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 
 /**
  * NeoForge 的客户端入口，作用与 Fabric 入口相同，只是事件类型和注册方式不同。
@@ -46,6 +47,8 @@ public final class MaiCraftNeoForgeClient {
         event.enqueueWork(() -> {
             // 客户端接单前读取本实例的建筑预算，避免工具注册时缓存旧的目标数和请求大小。
             BuildingBudgets.initialize(Minecraft.getInstance().gameDirectory.toPath());
+            // 与 Fabric 一样在接单前载入清障名单，缺少有效配置时不允许自动挖路。
+            ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
             NeoForgeOptionalServerClient.install();
             MaiCraftCore.init();
             ClientRuntime.start(MaiCraftRuntimeFacade.instance());

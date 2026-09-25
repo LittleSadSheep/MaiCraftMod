@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BucketItem;
@@ -202,6 +203,8 @@ final class EmbeddedBaritoneActionBridge {
         }
         BlockState before = context.level().getBlockState(hit.getBlockPos());
         if (before.isAir()) return;
+        // 准星偶然打到路线障碍前面的建筑时也要拒绝，并把这一格反馈给导航重算绕行。
+        if (!ClearanceWhitelist.allows(before)) { navigator.rejectedClearance(hit.getBlockPos()); return; }
         float destroyProgress = before.getDestroyProgress(
                 context.player(), context.level(), hit.getBlockPos());
         if (!(destroyProgress > 0.0F) || !Float.isFinite(destroyProgress)) return;
@@ -228,7 +231,10 @@ final class EmbeddedBaritoneActionBridge {
                 && trace.getType() == HitResult.Type.BLOCK
                 && hit.getBlockPos().equals(breakTarget);
         boolean allowed = BaritoneAPI.getSettings().allowBreak.value
-                && !EmbeddedBaritonePolicy.protects(breakTarget);
+                && !EmbeddedBaritonePolicy.protects(breakTarget)
+                && ClearanceWhitelist.allows(context.level().getBlockState(breakTarget));
+        // 持续挖掘期间现场改变也先停手；把新障碍交回寻路，不重复攻击原路线。
+        if (!allowed && receiptOwner != null) receiptOwner.rejectedClearance(breakTarget);
         if (stopBreakingRequested || !leftRequested || !sameTarget || !allowed) {
             if (!context.mutationAvailable()) return;
             try {
