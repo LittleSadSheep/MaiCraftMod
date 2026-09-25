@@ -62,6 +62,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 原生多物品放置映射需要临时注册模拟模组；独占进程避免改变其他组对未安装模组的判断。
+    nativeProjectMaterialsRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.NativeBuildProjectMaterialsTest',
+        heap: '512m', directory: 'native-project-materials-regression', timeoutSeconds: 45,
+        purpose: '验证原生变体物品的施工项目恢复'
+    ],
     machineRegression: [
         entry: 'org.maiwithu.maicraft.intent.MachineRegressionSuite',
         heap: '512m', directory: 'machine-regression',

@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 import java.util.Set;
 
 /**
@@ -80,7 +81,9 @@ public final class BuildProjectTargets {
             }
             ResourceLocation item = ResourceLocation.parse(row.get("item_id").getAsString());
             if (!BuiltInRegistries.ITEM.containsKey(item)) throw new IllegalArgumentException("saved build item is unavailable");
-            if (BuiltInRegistries.ITEM.get(item) != target.item())
+            // Create竖直齿轮箱等用不同物品放置同一种方块；恢复时复用施工器的原生映射，仍拒绝任意换材料。
+            if (BuiltInRegistries.ITEM.get(item) != target.item()
+                    && BuiltInRegistries.ITEM.get(item) != MachinePlacementItems.itemFor(target.desiredState()))
                 throw new IllegalArgumentException("saved build material does not match its block");
             // 普通解析完成后，再恢复原来明确要求精确比较的属性及物品放置模式，避免续建时验收标准变宽。
             LinkedHashSet<String> exact = new LinkedHashSet<>();
