@@ -19,13 +19,17 @@ final class JsonReadback {
     }
 
     static JsonObject page(JsonElement root, String path, int offset, int limit, Function<String, String> uri) {
-        if (offset < 0 || limit < 1 || limit > 50) throw new IllegalArgumentException("Invalid detail page");
+        // 模型容易把文本字符数当成集合条数；错误直接说明两种单位，避免反复换快照却重复同一非法分页。
+        if (offset < 0) throw new IllegalArgumentException("detail offset must be non-negative; copy next_offset from the previous page");
+        if (limit < 1 || limit > 50) throw new IllegalArgumentException(
+                "detail limit must be 1..50 collection entries; text pages contain up to 4000 UTF-16 code units regardless of limit. Copy next_offset or next_uri.");
         JsonElement value = resolve(root, path);
         JsonObject page = reference(value, path);
         page.remove("detail_path"); page.addProperty("path", path);
         page.addProperty("offset", offset);
         // 大文本按字符连续读取，边界避开代理对；调用者复制 next_offset 就不会漏掉中文或表情。
         if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+            page.addProperty("offset_unit", "utf16_code_units");
             String text = value.getAsString();
             if (offset > text.length() || offset > 0 && offset < text.length()
                     && Character.isLowSurrogate(text.charAt(offset)) && Character.isHighSurrogate(text.charAt(offset - 1)))

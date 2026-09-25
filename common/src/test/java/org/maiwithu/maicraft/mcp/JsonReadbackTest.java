@@ -24,6 +24,11 @@ public final class JsonReadbackTest {
         check(recovered.equals(rows), "no gap or duplicate across pages");
         String text = "中".repeat(3999) + "🌲" + "文".repeat(4500);
         root.addProperty("text", text); StringBuilder restored = new StringBuilder(); offset = 0;
+        // 请求正文页时传入四千不是合法集合 limit；回执要明确解释单位，而不是只报一个无法修正的分页错误。
+        try { JsonReadback.page(root, "/text", 0, 4000); throw new AssertionError("字符数误作条数被接受"); }
+        catch (IllegalArgumentException expected) {
+            check(expected.getMessage().contains("1..50") && expected.getMessage().contains("UTF-16"), "分页错误提供可修正的单位与范围");
+        }
         while (true) {
             var page = JsonReadback.page(root, "/text", offset, 1);
             restored.append(page.get("value").getAsString());
