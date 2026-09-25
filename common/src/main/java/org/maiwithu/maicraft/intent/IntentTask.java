@@ -418,7 +418,7 @@ final class IntentTask implements Task {
     }
 
     private TaskState failStep(TaskState state, TaskResult result) {
-        // 记下这次为什么失败，再询问接下来怎么办；保留总目标，等待重试、补条件、换目标或取消。
+        // 原生动作失败就结束这次执行并保留现场结果，不把内部站位、支撑或菜单故障转成 LLM 的选择题。
         TaskState failureState = state == null ? TaskState.FAILED : state;
         // 当前步骤失败或被放弃后，其位置不能再成为后续 prior_result 的依据。
         record.discardInternalStepPosition(record.stepIndex());
@@ -433,11 +433,12 @@ final class IntentTask implements Task {
                 failure.message(),
                 failure.toJson(),
                 player.level().getGameTime()));
-        terminalResult = null;
+        var data = new LinkedHashMap<String, Object>(failure.data());
+        data.put("requires_decision", false);
+        terminalResult = new TaskResult(false, failure.message(), failure.timedOut(), failure.interrupted(), data);
         chain = List.of();
         chainIndex = 0;
-        return requestDecision(RecoveryAdvisor.afterFailure(
-                failedGoal, failureState, failure));
+        return failureState == TaskState.TIMEOUT ? TaskState.TIMEOUT : TaskState.FAILED;
     }
 
     /** 失败离开 Mod 前，统一附上已经发生和仍未完成的语义效果。 */

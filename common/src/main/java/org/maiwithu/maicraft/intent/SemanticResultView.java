@@ -34,6 +34,8 @@ public final class SemanticResultView {
     /** 计划路线、操作槽位和运行时实体编号留在 Mod 内部，不作为下一次动作指令公开。 */
     private static boolean internalKey(String raw) {
         String key = raw.toLowerCase(Locale.ROOT);
+        // 失败格和未拆支撑是已经观察到的诊断事实，保留它们不会开放新的方块操作入口。
+        if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return false;
         return INTERNAL_RESULT_KEYS.contains(key)
                 || key.endsWith("_cells")
                 || key.endsWith("_ops")
@@ -172,6 +174,8 @@ public final class SemanticResultView {
     }
 
     private static Object sanitizeEntry(String key, Object value) {
+        // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。
+        if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return value;
         // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。
         if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
         var json = new Gson().toJsonTree(value);

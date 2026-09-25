@@ -716,12 +716,10 @@ final class SemanticBuildSupplyCompanionTask
         if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
         if (failureCode != null) {
             data.put("failure_code", failureCode);
-            data.put("requires_decision", true);
-            data.put("recovery_options", List.of(
-                    Map.of("id", "free_inventory_space", "risk", "none"),
-                    Map.of("id", "inspect_material_supply", "risk", "none"),
-                    Map.of("id", "change_material_policy", "risk", "design_change"),
-                    Map.of("id", "stop", "risk", "none")));
+            // 施工失败直接携带实际子任务结果返回，不再给站位和支撑故障附上清背包、改配方等无关指令。
+            data.put("requires_decision", false);
+            if (finalBuildData.containsKey("failure_code")) data.put("cause_code", finalBuildData.get("failure_code"));
+            if (finalBuildData.containsKey("failure_type")) data.put("failure_type", finalBuildData.get("failure_type"));
             if ("build_terrain_conflict".equals(failureCode)) {
                 data.put("mechanical_retry_allowed", false);
                 data.put("recovery_options", List.of(

@@ -116,8 +116,9 @@ public final class BuildSupplyCargoDeferralTest {
             task.start(h.player); TaskState state = TaskState.RUNNING;
             for (int i = 0; i < 8 && state == TaskState.RUNNING; i++) state = task.tick(h.player);
             var data = task.resultData();
+            // 实际背包和仓库都放不下时返回容量失败及缺口，不挂起等待供料器之外的决策流程。
             check(state == TaskState.FAILED && "inventory_capacity_blocked".equals(data.get("failure_code"))
-                    && Boolean.TRUE.equals(data.get("requires_decision")), "箱子全满且背包放不进第一份建材时必须明确暂停");
+                    && Boolean.FALSE.equals(data.get("requires_decision")), "箱子全满且背包放不进第一份建材时直接报告实际失败");
             var capacity = (Map<?, ?>) data.get("inventory_capacity");
             check(capacity.get("empty_main_slots").equals(0L) && capacity.get("minimum_additional_slots").equals(1),
                     "真正满包时带回空槽和缺口，提示先腾空间");

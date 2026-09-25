@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 /** 取消等待决策的任务后，get、list 和恢复操作必须都能看到同一个终态。 */
 public final class IntentTerminalStateTest {
@@ -101,7 +102,29 @@ public final class IntentTerminalStateTest {
         check(!read(snapshot, changed).has("current_goal") && !read(summary, changed).has("current_outcome"),
                 "a terminal task must not advertise active work");
         activeExecutionIsObservedWithoutPersisting(goal, snapshot);
+        nativeFailureReturnsWithoutDecision(goal);
         System.out.println("IntentTerminalStateTest: passed");
+    }
+
+    // 支撑实际失败时结束总任务，保留已放方块与临时支撑位置，不再挂起等待不存在的微操答复。
+    private static void nativeFailureReturnsWithoutDecision(Goal goal) throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            var task = new IntentTask(h.player, record, null);
+            var failure = TaskResult.fail("support placement failed", Map.of("placed", 3,
+                    "failure_position", Map.of("x", 3, "y", 4, "z", 5),
+                    "remaining_scaffolds", List.of(Map.of("x", 3, "y", 3, "z", 5))));
+            var method = IntentTask.class.getDeclaredMethod("failStep", TaskState.class, TaskResult.class); method.setAccessible(true);
+            check(method.invoke(task, TaskState.FAILED, failure) == TaskState.FAILED && record.decisionSnapshot() == null,
+                    "native failure must return instead of requesting semantic micro-management");
+            var field = IntentTask.class.getDeclaredField("terminalResult"); field.setAccessible(true);
+            var result = (TaskResult) field.get(task);
+            check(!result.success() && result.data().get("placed").equals(3)
+                            && result.data().get("failure_position").equals(failure.data().get("failure_position"))
+                            && result.data().get("remaining_scaffolds").equals(failure.data().get("remaining_scaffolds"))
+                            && Boolean.FALSE.equals(result.data().get("requires_decision")),
+                    "failed execution retains effects and read-only diagnostic positions");
+        }
     }
 
     private static void activeExecutionIsObservedWithoutPersisting(Goal goal, Method snapshot) throws Exception {
