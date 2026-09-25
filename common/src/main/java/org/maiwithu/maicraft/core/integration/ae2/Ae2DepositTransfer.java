@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.ae2;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.gui.screens.Screen;
@@ -55,6 +56,7 @@ final class Ae2DepositTransfer {
     private Task staging;
     private ContainerTransferTaskRecord stagingRecord;
     private boolean stagingStarted;
+    private Map<String, Object> lastShiftObservation = Map.of();
 
     Ae2DepositTransfer(LocalPlayerContext context, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge,
                        Set<Integer> reserved, Map<ResourceLocation, Integer> baseline, Integer terminalSlot) {
@@ -157,15 +159,28 @@ final class Ae2DepositTransfer {
         return status;
     }
     private MenuConfirmation.Verdict observeShift(LocalPlayerContext context, MenuReceipt ignored) {
-        if (!sameMenu(context) || !view.connected(menu)) return MenuConfirmation.Verdict.DIVERGED;
+        if (!sameMenu(context)) {
+            lastShiftObservation = Map.of("reason", "menu_or_repository_changed"); return MenuConfirmation.Verdict.DIVERGED;
+        }
+        if (!view.connected(menu)) {
+            lastShiftObservation = Map.of("reason", "network_disconnected"); return MenuConfirmation.Verdict.DIVERGED;
+        }
         var entries = view.entries(menu);
         if (entries == null) return MenuConfirmation.Verdict.PENDING;
         ItemStack source = player.getInventory().getItem(shiftSource);
         if (!source.isEmpty() && !matches(source, item)) return MenuConfirmation.Verdict.DIVERGED;
         long after = Ae2DepositLedger.networkCount(entries, item);
-        var observation = Ae2DepositLedger.observe(batch, source.getCount(), Ae2DepositLedger.inventory(shiftBefore).getOrDefault(item, 0),
-                Ae2DepositLedger.inventory(inventory()).getOrDefault(item, 0), networkBefore, after, menu.getCarried().isEmpty(),
-                unchangedOutside(shiftBefore, Set.of(shiftSource)));
+        int beforeInventory = Ae2DepositLedger.inventory(shiftBefore).getOrDefault(item, 0);
+        int afterInventory = Ae2DepositLedger.inventory(inventory()).getOrDefault(item, 0);
+        boolean unchanged = unchangedOutside(shiftBefore, Set.of(shiftSource));
+        var observation = Ae2DepositLedger.observe(batch, source.getCount(), beforeInventory, afterInventory,
+                networkBefore, after, menu.getCarried().isEmpty(), unchanged);
+        // 真实存入未确认时保留两边数量与拒绝门槛；仅背包减少不能补造入网成功，也不能再盲发一次 Shift。
+        lastShiftObservation = Map.of("item_id", item.toString(), "source_before", batch, "source_after", source.getCount(),
+                "inventory_before", beforeInventory, "inventory_after", afterInventory,
+                "network_before", networkBefore, "network_after", after,
+                "cursor_empty", menu.getCarried().isEmpty(), "other_inventory_unchanged", unchanged,
+                "verdict", observation.verdict().name().toLowerCase(Locale.ROOT));
         if (observation.verdict() == Ae2DepositLedger.Verdict.DIVERGED) return MenuConfirmation.Verdict.DIVERGED;
         if (observation.verdict() != Ae2DepositLedger.Verdict.CONFIRMED) { stableCount = 0; stableTick = -1; return MenuConfirmation.Verdict.PENDING; }
         if (stableAmount != observation.deposited()) { stableAmount = observation.deposited(); stableCount = 0; }
@@ -244,6 +259,11 @@ final class Ae2DepositTransfer {
     Map<String, Object> evidence() {
         Map<String, Object> result = new LinkedHashMap<>(ledger.evidence());
         result.put("deposit_shift_clicks_submitted", shifts); result.put("deposit_split_clicks_confirmed", splitClicks);
+        if (!lastShiftObservation.isEmpty()) result.put("last_shift_observation", lastShiftObservation);
+        if (receipt != null) {
+            result.put("menu_receipt_status", receipt.status().name().toLowerCase(Locale.ROOT));
+            result.put("menu_receipt_detail", receipt.detail());
+        }
         result.put("deposit_outcome_uncertain", status == Status.UNCERTAIN || pending()); return Map.copyOf(result);
     }
     private Status fail(String code, boolean uncertain) {

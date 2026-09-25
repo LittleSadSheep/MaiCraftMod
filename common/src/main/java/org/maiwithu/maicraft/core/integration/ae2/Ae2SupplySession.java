@@ -941,7 +941,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         }
         if (fixedTarget != null && tryServerSupply(ClientRuntime.requireContext(player),
                 fixedTarget, Phase.WAIT_REPOSITORY)) return;
-        if (request.operation() == Ae2ResourceSupply.Operation.OBSERVE
+        // 存入也需要先取得稳定的网络数量基线；刚连上的空目录不能直接当成零库存参与存入守恒核验。
+        if ((request.operation() == Ae2ResourceSupply.Operation.OBSERVE || request.operation() == Ae2ResourceSupply.Operation.DEPOSIT)
                 && !stockRepositorySettled(bridge.repositoryEntryCount(menu))) {
             if (phaseTicks > REPOSITORY_READY_TICKS)
                 beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "network_stock_sync_pending", "wireless inventory synchronization has not settled");

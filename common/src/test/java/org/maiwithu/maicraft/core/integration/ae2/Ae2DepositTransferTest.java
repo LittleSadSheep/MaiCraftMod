@@ -32,7 +32,25 @@ public final class Ae2DepositTransferTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         independentNetworkUpdateRequired(); partialCapacityStopsAfterConfirmedQuantity(); tailUsesFastSplit(); namedAndForeignStayUntouched(); disconnectedAndFullNetworkStop();
+        unconfirmedDebitKeepsBothSidesOfEvidence();
         System.out.println("Ae2DepositTransferTest: native player-slot shifts, delayed network evidence, bounded partials and ownership passed");
+    }
+
+    private static void unconfirmedDebitKeepsBothSidesOfEvidence() throws Exception {
+        // 重现圆石减少三十七却没有确认入网的现场：保留数量对照，结果仍未知且只提交一次原生点击。
+        try (var f = new Fixture(37, 37)) {
+            f.ready(); f.menu.getSlot(f.clicked).remove(37);
+            Ae2DepositTransfer.Status status = Ae2DepositTransfer.Status.RUNNING;
+            for (int tick = 0; tick < 101 && status == Ae2DepositTransfer.Status.RUNNING; tick++) status = f.step();
+            var evidence = f.transfer.evidence();
+            var observation = (Map<?, ?>) evidence.get("last_shift_observation");
+            check(status == Ae2DepositTransfer.Status.UNCERTAIN && f.shifts == 1 && f.transfer.deposited().isEmpty(),
+                    "背包扣减不能单独证明网络存入");
+            check(observation.get("inventory_before").equals(37) && observation.get("inventory_after").equals(0)
+                    && observation.get("network_before").equals(observation.get("network_after"))
+                    && evidence.get("menu_receipt_detail").toString().contains("timed out"),
+                    "失败证据保留真实两侧数量与原生确认结束原因");
+        }
     }
     private static void independentNetworkUpdateRequired() throws Exception {
         try (var f = new Fixture(64, 64)) {
