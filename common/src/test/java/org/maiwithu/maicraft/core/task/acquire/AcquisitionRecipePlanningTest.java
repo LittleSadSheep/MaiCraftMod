@@ -121,7 +121,7 @@ public final class AcquisitionRecipePlanningTest {
         var oak = BuiltInRegistries.ITEM.getKey(Items.OAK_PLANKS);
         var birch = BuiltInRegistries.ITEM.getKey(Items.BIRCH_PLANKS);
         var root = new AcquisitionNeed(List.of(output), 4, 0, Set.of(output), Set.of(), Set.of(),
-                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT));
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.WIRELESS, SemanticAcquireTaskRecord.Source.CRAFT));
         var oakRoute = candidate(output, "oak-route", List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(oak), 4, 4),
                 new CraftRecoveryCandidate.IngredientDemand(List.of(iron), 1, 1)));
         var birchRoute = candidate(output, "birch-route", List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(birch), 4, 4),
@@ -135,17 +135,17 @@ public final class AcquisitionRecipePlanningTest {
         world.inventory.clearContent();
         var snapshot = new StockEvidence.Snapshot(StockEvidence.Source.AE2, Map.of(birch, 4L), Set.of(), world.level.getGameTime());
         root.wirelessInventory = true;
-        check(root.canTry(SemanticAcquireTaskRecord.Source.STORAGE)
+        check(root.canTry(SemanticAcquireTaskRecord.Source.WIRELESS)
                 && !root.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE)
                 && AcquisitionSources.order(root, new AcquisitionSources.Readiness(false, false, false, false)).get(1)
-                    == SemanticAcquireTaskRecord.Source.STORAGE,
-                "随身网络作为现货入口排在制造前，原有普通容器许可保持独立");
+                    == SemanticAcquireTaskRecord.Source.WIRELESS,
+                "获准的无线现货排在制造前，不能同时获得普通容器许可");
         var network = new AcquisitionRecipePlanner(world.player, false, 16, List.of(), ignored -> Optional.of(snapshot));
         check(network.materialPlan(birchRoute, root).supplies().stream().allMatch(need -> need.alternatives().equals(List.of(iron))),
                 "无线终端网络的中间件作为现货终止展开，不能再要求制造那四块木板");
         long networkCost = network.materialPlan(birchRoute, root).cost();
         root.wirelessInventory = false;
-        check(!root.canTry(SemanticAcquireTaskRecord.Source.STORAGE), "移除无线入口立即撤销自动网络来源");
+        check(!root.canTry(SemanticAcquireTaskRecord.Source.WIRELESS), "移除无线入口立即撤销自动网络来源");
         var forbidden = new AcquisitionRecipePlanner(world.player, false, 16, List.of(), ignored -> Optional.of(snapshot));
         check(forbidden.materialPlan(birchRoute, root).cost() > networkCost && network.materialPlan(birchRoute, root).cost() > networkCost,
                 "没有适用网络入口时不能借旧 AE 观察把库存算足");

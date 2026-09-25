@@ -296,6 +296,8 @@ public final class SemanticMaterialSupplyCoordinator {
                         SemanticAcquireTaskRecord.Source.COOK,
                         SemanticAcquireTaskRecord.Source.MINE)
                 : List.of(SemanticAcquireTaskRecord.Source.NEARBY,
+                        // 默认施工保留随身网络现货；调用者显式指定来源时不加入该项。
+                        SemanticAcquireTaskRecord.Source.WIRELESS,
                         SemanticAcquireTaskRecord.Source.CRAFT,
                         SemanticAcquireTaskRecord.Source.COOK,
                         SemanticAcquireTaskRecord.Source.MINE);

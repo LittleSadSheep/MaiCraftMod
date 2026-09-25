@@ -354,7 +354,7 @@ public final class SemanticAbilityCatalog {
                             field("item_tag", "resource_id", "A semantic item tag such as minecraft:beds or minecraft:planks; the Mod resolves live members."),
                             field("item_tags", "array<resource_id>", "Several semantic item tags combined as acceptable alternatives."),
                             field("count", "integer", "Required final aggregate main-inventory count, from 1 to 2304; default 1."),
-                            field("allowed_sources", "array<string>", "Permitted inventory, nearby, storage, craft, cook, mine, trade or hunt sources. This is not execution order; prerequisites inherit these permissions."),
+                            field("allowed_sources", "array<string>", "Permitted inventory, nearby, wireless, storage, craft, cook, mine, trade or hunt sources. wireless only uses observed stock from a carried terminal, without ordinary containers or network crafting. Defaults include wireless; an explicit list cannot gain unlisted sources. This is not execution order; prerequisites inherit these permissions."),
                             field("allow_harm", "boolean", "Whether acquiring may harm living entities; default false."),
                             field("protected_labels", "array<string>", "Named entities, areas or possessions that must not be touched."),
                             field("radius", "integer", "Optional bounded loaded-world evidence radius."),

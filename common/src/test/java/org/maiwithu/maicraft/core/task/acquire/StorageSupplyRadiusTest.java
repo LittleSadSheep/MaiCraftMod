@@ -85,8 +85,8 @@ public final class StorageSupplyRadiusTest {
             check(ContainerSupplySources.candidates(h.player, h.player.blockPosition(), record.searchRadius,
                     record.itemIds, Set.of(), List.of()).isEmpty(), "the old sixteen-block query must reproduce the missed warehouse");
             var task = (SemanticAcquireCompanionTask) get(coordinator, "child"); task.onStart(); Object need = get(task, "rootNeed");
-            Method attempt = task.getClass().getDeclaredMethod("attemptStorage", need.getClass()); attempt.setAccessible(true);
-            check(attempt.invoke(task, need) == TaskState.RUNNING, "ordinary storage acquisition starts through the actual expanded call site");
+            Method attempt = task.getClass().getDeclaredMethod("attemptStorage", need.getClass(), SemanticAcquireTaskRecord.Source.class); attempt.setAccessible(true);
+            check(attempt.invoke(task, need, SemanticAcquireTaskRecord.Source.STORAGE) == TaskState.RUNNING, "ordinary storage acquisition starts through the actual expanded call site");
             var selected = (SemanticContainerTaskRecord) get(task, "activeRecord");
             check(selected.storageSupply() && selected.supplyPosition.equals(barrel), "the thirty-one-block warehouse is selected before a manufacturing fallback");
 

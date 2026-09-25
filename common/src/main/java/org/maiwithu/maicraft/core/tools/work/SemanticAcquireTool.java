@@ -55,7 +55,7 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 "Required final aggregate main-inventory count (default 1).", 1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT));
         properties.put("allowed_sources", arrayProperty("string",
                 "Permitted source families; the Mod chooses their order from current inventory and source facts.",
-                List.of("inventory", "nearby", "storage", "craft", "cook", "mine", "trade", "hunt")));
+                List.of("inventory", "nearby", "wireless", "storage", "craft", "cook", "mine", "trade", "hunt")));
         properties.put("allow_harm", property("boolean",
                 "Explicit semantic consent to harm living entities. Default false."));
         properties.put("protected_labels", arrayProperty("string",

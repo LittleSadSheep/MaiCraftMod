@@ -36,8 +36,8 @@ public final class OrdinaryStorageAcquireTest {
             var r = new SemanticAcquireTaskRecord("ordinary-storage", 1000, List.of(ResourceLocation.parse("minecraft:iron_ingot")), 10,
                     List.of(SemanticAcquireTaskRecord.Source.STORAGE), false, SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
             var task = new SemanticAcquireCompanionTask(h.player, r); task.onStart(); Object need = get(task, "rootNeed");
-            var attempt = task.getClass().getDeclaredMethod("attemptStorage", need.getClass()); attempt.setAccessible(true);
-            check(attempt.invoke(task, need) == TaskState.RUNNING, "STORAGE did not begin ordinary container supply");
+            var attempt = task.getClass().getDeclaredMethod("attemptStorage", need.getClass(), SemanticAcquireTaskRecord.Source.class); attempt.setAccessible(true);
+            check(attempt.invoke(task, need, SemanticAcquireTaskRecord.Source.STORAGE) == TaskState.RUNNING, "STORAGE did not begin ordinary container supply");
             var selected = (SemanticContainerTaskRecord) get(task, "activeRecord");
             check(selected.storageSupply() && selected.supplyPosition.equals(first) && selected.targetCount == 10,
                     "ordinary warehouse was skipped or its exact target/count was lost to the AE2 path");
@@ -45,7 +45,7 @@ public final class OrdinaryStorageAcquireTest {
             var tick = task.getClass().getDeclaredMethod("tickActiveChild"); tick.setAccessible(true); tick.invoke(task);
             check(!((Set<?>) get(need, "exhaustedSources")).contains(SemanticAcquireTaskRecord.Source.STORAGE),
                     "one empty ordinary container must not exhaust the entire storage source family");
-            set(task, "plannerStepsThisTick", 0); attempt.invoke(task, need);
+            set(task, "plannerStepsThisTick", 0); attempt.invoke(task, need, SemanticAcquireTaskRecord.Source.STORAGE);
             selected = (SemanticContainerTaskRecord) get(task, "activeRecord");
             check(selected.supplyPosition.equals(second), "the acquisition frontier repeated the empty first container instead of checking the next warehouse");
             check(h.blockUses() == 0 && h.itemUses() == 0, "source planning performed inventory/world operations before its GUI child");

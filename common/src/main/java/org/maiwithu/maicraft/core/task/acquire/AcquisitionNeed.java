@@ -79,7 +79,8 @@ final class AcquisitionNeed {
 
     boolean canTry(SemanticAcquireTaskRecord.Source source) {
         // 只为仍允许、尚未用尽的来源继续观察和准备，避免已经放弃的工序反复扫描世界。
-        return (allowedSources.contains(source) || source == SemanticAcquireTaskRecord.Source.STORAGE && wirelessInventory)
+        return allowedSources.contains(source)
+                && (source != SemanticAcquireTaskRecord.Source.WIRELESS || wirelessInventory)
                 && !exhaustedSources.contains(source);
     }
 }

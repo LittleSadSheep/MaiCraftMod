@@ -29,6 +29,7 @@ public final class AcquisitionWirelessInventoryTest {
         scenario(2, false);
         scenario(3, false);
         scenario(2, true);
+        explicitMiningCannotOpenWireless();
         System.out.println("AcquisitionWirelessInventoryTest: passed");
     }
 
@@ -61,7 +62,7 @@ public final class AcquisitionWirelessInventoryTest {
                 }
             });
             var record = new SemanticAcquireTaskRecord("wireless-inventory", 1000, List.of(ITEM), wanted,
-                    List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.MINE), false,
+                    List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.WIRELESS), false,
                     SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8);
             var task = new SemanticAcquireCompanionTask(world.player, record, ignored -> true);
             task.onStart();
@@ -81,6 +82,28 @@ public final class AcquisitionWirelessInventoryTest {
             task.stop(world.player, Task.StopReason.REPLACED);
         } finally {
             if (previous == null) runners.remove(Ae2SupplyTaskRecord.class); else runners.put(Ae2SupplyTaskRecord.class, previous);
+        }
+    }
+
+    private static void explicitMiningCannotOpenWireless() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            // 复现“只许mine却从无线库存领货”：终端确实可用，第一刻仍只能盘点主背包，不能派发AE子任务。
+            var record = new SemanticAcquireTaskRecord("mine-only", 1000, List.of(ITEM), 1,
+                    List.of(SemanticAcquireTaskRecord.Source.MINE), false,
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8);
+            var task = new SemanticAcquireCompanionTask(world.player, record, ignored -> true); task.onStart();
+            check(task.onTick() == TaskState.RUNNING, "mine-only begins with ordinary inventory observation");
+            var active = task.getClass().getDeclaredField("activeRecord"); active.setAccessible(true);
+            check(active.get(task) == null && world.blockUses() == 0 && world.itemUses() == 0,
+                    "carrying a wireless terminal cannot start a read or withdrawal for unlisted sources");
+            var rootField = task.getClass().getDeclaredField("rootNeed"); rootField.setAccessible(true);
+            var root = (AcquisitionNeed) rootField.get(task);
+            root.wirelessInventory = true;
+            check(!root.canTry(SemanticAcquireTaskRecord.Source.WIRELESS) && !root.canTry(SemanticAcquireTaskRecord.Source.STORAGE),
+                    "even stale availability evidence cannot enlarge the current need permissions");
+            check(SemanticAcquireTaskRecord.DEFAULT_SOURCES.contains(SemanticAcquireTaskRecord.Source.WIRELESS),
+                    "unspecified ordinary acquisition retains explicitly represented wireless stock access");
+            task.stop(world.player, Task.StopReason.REPLACED);
         }
     }
 

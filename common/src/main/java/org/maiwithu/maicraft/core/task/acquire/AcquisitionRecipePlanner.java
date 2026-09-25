@@ -283,7 +283,8 @@ final class AcquisitionRecipePlanner {
             // 普通容器继续要求原许可与材料线索；随身无线终端只把自己的网络库存加到账本。
             if (parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE))
                 observed.putAll(ContainerSupplySources.observedCounts(player, player.blockPosition(), storageSearchRadius, protectedLabels));
-            if (parent.wirelessInventory || parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE))
+            if (parent.wirelessInventory && parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.WIRELESS)
+                    || parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE))
                 networkStock.apply(player).filter(stock -> stock.source() == StockEvidence.Source.AE2)
                         .ifPresent(stock -> stock.stored().forEach((id, amount) -> observed.merge(id, amount,
                                 (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b)));
