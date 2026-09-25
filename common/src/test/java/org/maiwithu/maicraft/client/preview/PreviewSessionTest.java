@@ -14,6 +14,19 @@ import net.minecraft.world.level.block.state.BlockState;
 /** 无需游戏或图形上下文即可核对审核状态和不可变手工几何。 */
 public final class PreviewSessionTest {
     public static void main(String[] args) {
+        // 独立测试进程关闭人工审图时不修改保存开关，清除启动覆盖后立即恢复原来的玩家设置。
+        String prior = System.getProperty("maicraft.preview.enabled");
+        boolean before = PreviewConfig.enabled();
+        try {
+            System.setProperty("maicraft.preview.enabled", "false");
+            check(!PreviewConfig.enabled(), "自动验收启动覆盖关闭人工预览");
+            System.setProperty("maicraft.preview.enabled", "true");
+            check(PreviewConfig.enabled(), "显式人工审图覆盖仍可启用");
+        } finally {
+            if (prior == null) System.clearProperty("maicraft.preview.enabled");
+            else System.setProperty("maicraft.preview.enabled", prior);
+        }
+        check(PreviewConfig.enabled() == before, "启动覆盖不改写原来的预览开关");
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos(1, 64, 2);

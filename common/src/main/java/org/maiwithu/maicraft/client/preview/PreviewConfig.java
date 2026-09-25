@@ -27,10 +27,16 @@ public final class PreviewConfig {
         enabled = Boolean.parseBoolean(values.getProperty("devMode", "false"));
     }
 
-    static boolean enabled() { return enabled; }
+    static boolean enabled() {
+        // 自动验收进程可显式选择是否人工审图，覆盖只作用于本次启动，不写回玩家的配置文件。
+        String override = System.getProperty("maicraft.preview.enabled");
+        if ("true".equalsIgnoreCase(override)) return true;
+        if ("false".equalsIgnoreCase(override)) return false;
+        return enabled;
+    }
     public static boolean enabled(Path gameDirectory) {
         if (file == null) load(gameDirectory);
-        return enabled;
+        return enabled();
     }
     // 先改变本次运行的开关，再写文件。写入失败时调用方会提示，但本次运行的新值仍然生效。
     static void enabled(boolean value) throws IOException {

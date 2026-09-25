@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.intent;
 
+import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -864,6 +866,8 @@ final class IntentTask implements Task {
                 : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
                 : wait != null ? "waiting_for_condition" : "preparing_step"));
         addBuildProjects(progress);
+        // 内部机器任务等待人工蓝图确认时，总任务同步展示真实等待原因，供调用者结束无效轮询。
+        progress.putAll(BuildPreviewGate.waitingProgress(record));
         return Map.copyOf(progress);
     }
 

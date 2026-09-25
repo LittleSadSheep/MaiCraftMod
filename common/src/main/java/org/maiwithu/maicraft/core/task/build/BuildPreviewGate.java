@@ -23,6 +23,21 @@ public final class BuildPreviewGate {
     private static final Map<TaskRecord, Decision> resolved = new IdentityHashMap<>();
     private BuildPreviewGate() {}
 
+    /** 人工审图会冻结施工；查询必须明确告诉调用者需要玩家确认，而不能继续显示普通勘测或施工中。 */
+    public static Map<String, Object> waitingProgress(TaskRecord queried) {
+        return reviewProgress(PreviewController.current(), reviewOwner, reviewRoot, queried);
+    }
+
+    static Map<String, Object> reviewProgress(PreviewSession session, TaskRecord owner, TaskRecord root, TaskRecord queried) {
+        if (session == null || session.designOnly() || session.decision() != Decision.WAITING || owner == null
+                || queried == null || queried.getState().isTerminal() || !session.owner().equals(owner.publicId())
+                || queried != owner && queried != root) return Map.of();
+        // 只公开当前任务的确认要求，普通 resume 不会冒充玩家看过并确认蓝图。
+        return Map.of("phase", "waiting_for_blueprint_confirmation", "requires_player_confirmation", true,
+                "automatic_progress", false, "confirmation_command", "/maicraft preview confirm",
+                "required_user_action", "Confirm the blueprint in the client, or cancel it. Resuming a task does not confirm its blueprint.");
+    }
+
     public static Decision await(TaskRecord owner, BuildTaskRecord plan) {
         // 上层已经负责整份蓝图的预览时，小批次不再另开预览。
         if (plan.previewManaged()) return Decision.DISABLED;

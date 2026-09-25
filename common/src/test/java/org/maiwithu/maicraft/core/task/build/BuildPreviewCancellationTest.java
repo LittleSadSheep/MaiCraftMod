@@ -20,9 +20,15 @@ public final class BuildPreviewCancellationTest {
         var session = new PreviewSession(child.publicId(), "minecraft:overworld", "review",
                 Map.of(BlockPos.ZERO, Blocks.STONE.defaultBlockState()));
         List<String> cancelled = new ArrayList<>();
+        // 复现机器停在 survey 但实际等人工确认：总任务能看到等待原因，其他任务不能串用这一预览。
+        var waiting = BuildPreviewGate.reviewProgress(session, child, root, root);
+        check(waiting.get("phase").equals("waiting_for_blueprint_confirmation")
+                && Boolean.TRUE.equals(waiting.get("requires_player_confirmation")), "人工审核直接呈现在总任务进度");
+        check(BuildPreviewGate.reviewProgress(session, child, root, replacement).isEmpty(), "其他任务不继承审核状态");
         check(!BuildPreviewGate.cancelReviewedTask(session, child, root, root, cancelled::add),
                 "waiting review cannot cancel its root");
         session.cancel();
+        check(BuildPreviewGate.reviewProgress(session, child, root, root).isEmpty(), "取消后不再报告待确认");
         check(!BuildPreviewGate.cancelReviewedTask(session, child, root, replacement, cancelled::add),
                 "replacing the active task invalidates old cancellation authority");
         check(!BuildPreviewGate.cancelReviewedTask(session, replacement, root, root, cancelled::add),
