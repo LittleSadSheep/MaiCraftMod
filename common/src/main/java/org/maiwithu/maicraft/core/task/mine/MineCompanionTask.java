@@ -1040,8 +1040,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         excluded.addAll(naturalTrees.rejected);
         int rejectedBefore = naturalTrees.rejected.size();
         naturalTrees.beginQuery();
-        TargetIndex.Result res = TargetIndex.query(sl, feet(), r.targets,
-                MAX_ORES, QUERY_MAX_CHUNK_RADIUS, QUERY_BUILD_BUDGET, excluded);
+        // 语义取材只扫描冻结的附近范围；直接采矿调用未声明范围时继续使用原有最大区块环。
+        BlockPos queryCenter = r.searchCenter() == null ? feet() : r.searchCenter();
+        TargetIndex.Result res = TargetIndex.query(sl, queryCenter, r.targets,
+                MAX_ORES, r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS), QUERY_BUILD_BUDGET, excluded);
         lastQueryComplete = res.complete();
         Constants.LOG.debug(
                 "[maicraft-task] mine query feet={} raw={} complete={} known(before merge)={}",
@@ -1057,7 +1059,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         Set<BlockPos> seen = new HashSet<>(knownOres);
         for (BlockPos hit : hits) {
             BlockPos p = hit.immutable();
-            if (unworkable.contains(p) || !seen.add(p)) continue;
+            if (!r.inSearchScope(p) || unworkable.contains(p) || !seen.add(p)) continue;
             if (r.naturalLogsOnly && player.level().getBlockState(p).is(BlockTags.LOGS)
                     && !naturalTrees.accepts(p, player.level(), player.level()::hasChunkAt)) continue;
             knownOres.add(p);
@@ -1268,6 +1270,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        // 失败回执说明实际查过的固定范围，不能把附近没有来源说成整个世界都没有。
+        if (r.searchCenter() != null) data.put("search_scope", Map.of(
+                "center", List.of(r.searchCenter().getX(), r.searchCenter().getY(), r.searchCenter().getZ()),
+                "radius_blocks", r.searchRadius(), "index_complete", lastQueryComplete));
         if (naturalLogSource) data.put("excluded_unverified_logs", naturalTrees.rejected.size());
         if (naturalLogSource) data.put("unloaded_tree_evidence", naturalTrees.unloadedEvidence);
         data.put("confirmed_harvests", List.copyOf(confirmedHarvests));

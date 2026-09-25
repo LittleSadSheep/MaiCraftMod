@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.core.task.acquire.AcquisitionWirelessInventoryTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2StockObservationTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentityTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
+import org.maiwithu.maicraft.core.task.mine.MiningSearchScopeTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
 import org.maiwithu.maicraft.core.task.cook.CookingBatchTest;
@@ -133,6 +134,8 @@ public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
         TaskSlotFailureTest.main(args);
+        // 嵌套取材只扫描已声明的附近范围，空搜加工设备不能把整片已加载世界都扫一遍。
+        MiningSearchScopeTest.main(args);
         // 聊天在真实发送前必须取得持久许可，重启后的旧编号不能变成第二条消息。
         ChatSubmissionHistoryTest.main(args);
         ChatTypingTest.main(args);

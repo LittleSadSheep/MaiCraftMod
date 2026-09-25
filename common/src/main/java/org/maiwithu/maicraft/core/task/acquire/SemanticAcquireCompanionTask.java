@@ -627,7 +627,8 @@ public final class SemanticAcquireCompanionTask
         need.efficientBatchStarted |= efficient && bootstrap == 0 && missing(need) >= WorkToolPreparation.BATCH_SIZE;
         MineBlockTaskRecord record = new MineBlockTaskRecord(
                 childId("mine"), now + budget, blocks, deficit, blockLabel(blocks),
-                progressItems, efficient, true);
+                progressItems, efficient, true).withinRadius(player.blockPosition(), r.searchRadius);
+        // 附近取材沿用本需求声明的方块半径；找不到加工品时不能退化成扫描整片已加载世界的长等待。
         return startChild(need, SemanticAcquireTaskRecord.Source.MINE,
                 record, "mine BlockItem-derived or semantic source blocks");
     }

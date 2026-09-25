@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
+import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 真实采矿准备可以追加工具需求，但看到仓库有货不能替主人开放新的取材方式。 */
@@ -38,6 +39,7 @@ public final class AcquisitionSourceInheritanceTest {
         // 铁已经带在身上也不等于允许合成；背包观察与制造权限是两件事。
         prepareTool(List.of(Source.MINE), false, 64, "iron_shovel", Set.of(Source.INVENTORY));
         inventoryOnlyDoesNotPrepareCrafting();
+        miningKeepsLocalSearchRadius();
         sourceOrderUsesCurrentFacts();
         System.out.println("AcquisitionSourceInheritanceTest: passed");
     }
@@ -69,6 +71,24 @@ public final class AcquisitionSourceInheritanceTest {
             var clear = cache.getClass().getDeclaredMethod("clear");
             clear.setAccessible(true);
             clear.invoke(cache);
+        }
+    }
+
+    private static void miningKeepsLocalSearchRadius() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            // 准备好工具后真正派生采矿任务；父需求的三格范围必须进入子任务，不能回退为三十二区块。
+            world.inventory.setItem(0, new ItemStack(Items.DIAMOND_SHOVEL));
+            var record = new SemanticAcquireTaskRecord("local-mining", 1000,
+                    List.of(ResourceLocation.withDefaultNamespace("dirt")), 1, List.of(Source.MINE), false,
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 3);
+            var task = new SemanticAcquireCompanionTask(world.player, record); task.onStart();
+            Object root = field(task, "rootNeed");
+            var attempt = task.getClass().getDeclaredMethod("attemptMine", root.getClass()); attempt.setAccessible(true);
+            check(attempt.invoke(task, root) == TaskState.RUNNING, "mining source is prepared");
+            var child = (MineBlockTaskRecord) field(task, "activeRecord");
+            check(child.searchRadius() == 3 && child.searchCenter().equals(world.player.blockPosition())
+                    && child.inSearchScope(child.searchCenter().east(3)) && !child.inSearchScope(child.searchCenter().east(4)),
+                    "semantic mining preserves its declared local radius");
         }
     }
 

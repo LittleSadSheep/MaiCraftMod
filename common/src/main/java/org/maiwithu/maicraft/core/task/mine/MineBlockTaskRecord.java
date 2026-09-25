@@ -5,6 +5,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.core.BlockPos;
 
 import java.util.Set;
 import java.util.List;
@@ -29,6 +30,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final boolean requireEfficientTool;
     /** 只把通过天然树外观检查的原木当作材料，避免顺手拆木屋。 */
     public final boolean naturalLogsOnly;
+    private BlockPos searchCenter;
+    private int searchRadius;
 
     /** 实时进度表示任务开始后收集到的匹配物品数，按背包物品计而非破坏方块数；红石等矿石每格会掉落多个物品。
      *  由任务每个 tick 设置，用于结束条件和调试覆盖层文字。 */
@@ -62,6 +65,17 @@ public final class MineBlockTaskRecord extends TaskRecord {
         this.requireEfficientTool = requireEfficientTool;
         this.naturalLogsOnly = naturalLogsOnly;
     }
+
+    /** 语义取材把本次附近范围冻结给采矿子任务；走向目标后不能把搜索中心一起带走，越找越远。 */
+    public MineBlockTaskRecord withinRadius(BlockPos center, int radius) {
+        if (center == null || radius < 1 || radius > 512) throw new IllegalArgumentException("invalid mining search scope");
+        searchCenter = center.immutable(); searchRadius = radius; return this;
+    }
+    public BlockPos searchCenter() { return searchCenter; }
+    public int searchRadius() { return searchRadius; }
+    /** 先缩小索引的区块环，再按方块距离筛选命中；区块边界的取整不能扩大实际候选范围。 */
+    int queryChunkRadius(int fallback) { return searchCenter == null ? fallback : (searchRadius + 15) / 16; }
+    public boolean inSearchScope(BlockPos pos) { return searchCenter == null || pos.distSqr(searchCenter) <= (double) searchRadius * searchRadius; }
 
     /** 与原生工具选择器的主背包扫描范围一致，包括尚未切换到手上的工具。 */
     public static boolean hasEfficientTool(LocalPlayer player, Set<Block> targets) {
