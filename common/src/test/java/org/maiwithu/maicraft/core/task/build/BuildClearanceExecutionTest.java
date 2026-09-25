@@ -6,7 +6,9 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.task.TaskState;
@@ -17,6 +19,7 @@ public final class BuildClearanceExecutionTest {
 
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        fluidPartitionSkipsExcavation();
         for (int changeStage : List.of(0, 1, 2)) {
             boolean changedAfterPreflight = changeStage > 0;
             try (var h = new InteractionWorldTestHarness()) {
@@ -54,6 +57,27 @@ public final class BuildClearanceExecutionTest {
             }
         }
         System.out.println("BuildClearanceExecutionTest: passed");
+    }
+
+    private static void fluidPartitionSkipsExcavation() throws Exception {
+        for (var fluid : List.of(Blocks.WATER, Blocks.LAVA)) try (var h = new InteractionWorldTestHarness()) {
+            // 复现刷石机补隔断：身体站在干燥外侧，流水格底下已有可点击的地板，不应拿镐子尝试挖水。
+            h.position(new Vec3(5.5, 1, 3.5)); h.set(AT, fluid.defaultBlockState());
+            h.inventory.setItem(0, new ItemStack(Items.COBBLESTONE, 8));
+            var target = new BuildTaskRecord.Target(Blocks.COBBLESTONE, Items.COBBLESTONE, AT, "partition", null, null, null);
+            var record = new BuildTaskRecord("fluid-partition", 1000, List.of(target), true); record.previewManaged(true);
+            var task = new FirstPersonBuildCompanionTask(h.player, record); task.start(h.player);
+            check(invoke(task, "preflightTick") == TaskState.RUNNING, "fluid replacement reaches ordinary construction");
+            var plansField = task.getClass().getDeclaredField("plans"); plansField.setAccessible(true);
+            Object plan = ((List<?>) plansField.get(task)).getFirst();
+            var clear = task.getClass().getDeclaredMethod("clearCells", plan.getClass()); clear.setAccessible(true);
+            check(((List<?>) clear.invoke(task, plan)).isEmpty(), "fluid partition has no excavation cells");
+            check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of()) != null,
+                    "a native placement gesture still proves the actual destination and block state");
+            check(record.broken() == 0 && h.blockUses() == 0 && h.level.getBlockState(AT).is(fluid),
+                    "preflight only proves the gesture and does not mutate the world");
+            task.result(TaskState.CANCELLED);
+        }
     }
 
     private static TaskState invoke(Object task, String name) throws Exception {

@@ -673,16 +673,17 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private List<BlockPos> clearCells(CellPlan plan) {
-        // 收集蓝图主格及门、床另一半的现存阻挡；真正下手时还会重读替换许可和保护条件。
+        // 收集确实需要先挖除的主格及双格阻挡；可被原生放置覆盖的水草交给放置预测，不能送去挖掘队列。
         LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
         if (player.level().isLoaded(plan.target().pos())) {
             BlockState live = player.level().getBlockState(plan.target().pos());
-            if (!live.isAir() && !plan.target().constructionMatches(live)) out.add(plan.target().pos());
+            if (BuildClearanceSurvey.needsClearance(plan.target(), live)) out.add(plan.target().pos());
         }
         for (BuildPlacementGeometry.GeneratedCell generated : plan.generated()) {
             if (!player.level().isLoaded(generated.pos())) continue;
             BlockState live = player.level().getBlockState(generated.pos());
-            if (!live.isAir() && !generatedConstructionMatches(plan.target(), generated, live)) out.add(generated.pos());
+            if (!live.isAir() && !live.canBeReplaced()
+                    && !generatedConstructionMatches(plan.target(), generated, live)) out.add(generated.pos());
         }
         return List.copyOf(out);
     }

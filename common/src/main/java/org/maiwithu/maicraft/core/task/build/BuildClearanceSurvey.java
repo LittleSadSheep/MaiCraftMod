@@ -105,13 +105,18 @@ public final class BuildClearanceSurvey {
         if (target.constructionMatches(seen.state())) return true;
         if (!seen.mutable()) return false;
         if (seen.state().isAir()) return true;
+        // 隔断可直接覆盖流水或草，选址不能要求先挖掉它们；原生放置仍会验证具体物品、支撑面与目标状态。
+        if (!needsClearance(target, seen.state())) return replace.allows(seen.state(), target.desiredState())
+                && (replaceEntities || !seen.state().hasBlockEntity());
         return seen.breakable() && ClearanceWhitelist.allows(seen.state())
                 && replace.allows(seen.state(), target.desiredState())
                 && (replaceEntities || !seen.state().hasBlockEntity());
     }
 
     static boolean needsClearance(BuildTaskRecord.Target target, BlockState live) {
-        return !live.isAir() && !target.constructionMatches(live);
+        // 实心隔断放进流水是放置动作，不是挖水；明确要求空气的格子仍需清场，含水实体方块也不能绕过清障。
+        return !live.isAir() && !target.constructionMatches(live)
+                && (target.desiredState().isAir() || !live.canBeReplaced());
     }
     private void nextCandidate() { candidate++; candidateCell = 0; }
     public boolean blocked() { return conflicts > 0; }

@@ -10,11 +10,13 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /** 用完整空气房间检验选址：最近偏移仍撞墙时继续搜索，未知区块不能证明更近位置可用。 */
 public final class BuildClearanceSurveyTest {
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        replaceableCellsNeedNoExcavation();
         var targets = List.of(air(0, 64, 0), air(1, 64, 0));
         Map<BlockPos, BlockState> blocks = new HashMap<>();
         // 相邻两格蓝图的五个方向都撞到砖墙，只有整体向东平移两格才最先完全避开。
@@ -61,6 +63,24 @@ public final class BuildClearanceSurveyTest {
                 "minecraft:overworld", at -> seen(Blocks.COBBLESTONE.defaultBlockState()), (at, state) -> true);
         check(scaffold.advance(2) && !scaffold.blocked(), "owned temporary scaffolds remain available for cleanup");
         System.out.println("BuildClearanceSurveyTest: passed");
+    }
+
+    private static void replaceableCellsNeedNoExcavation() {
+        var partition = new BuildTaskRecord.Target(Blocks.COBBLESTONE, Items.COBBLESTONE,
+                BlockPos.ZERO, "channel_partition", null, null, null);
+        // 水源、流水、岩浆与草都可被真实方块覆盖；这里仅取消挖掘要求，不代替后续原生放置证明。
+        for (var live : List.of(Blocks.WATER.defaultBlockState(),
+                Blocks.WATER.defaultBlockState().setValue(BlockStateProperties.LEVEL, 3),
+                Blocks.LAVA.defaultBlockState(), Blocks.SHORT_GRASS.defaultBlockState())) {
+            var survey = new BuildClearanceSurvey(List.of(partition), ReplaceMode.DONT_REPLACE, false,
+                    "minecraft:overworld", at -> seen(live), (at, state) -> false);
+            check(survey.advance(2) && !survey.blocked(), "replaceable cells do not require whitelist excavation");
+        }
+        check(BuildClearanceSurvey.needsClearance(air(0, 0, 0), Blocks.WATER.defaultBlockState()),
+                "explicit air cannot erase water through a block-placement exemption");
+        check(BuildClearanceSurvey.needsClearance(partition,
+                Blocks.OAK_SLAB.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true)),
+                "waterlogged construction still requires real demolition permission");
     }
 
     private static BuildTaskRecord.Target air(int x, int y, int z) {
