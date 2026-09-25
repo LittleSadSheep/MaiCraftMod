@@ -66,6 +66,8 @@ final class SemanticBuildSupplyCompanionTask
     private long cargoRetryAt;
     private boolean cargoEffectsSeen, buildOutcomeUncertain, supplyOutcomeUncertain, spoilOutcomeUncertain;
     private String failureCode;
+    private Item supportItem;
+    private int supportFinalCount;
     private Map<String, Object> finalBuildData = Map.of();
     private BuildClearanceSurvey clearanceSurvey;
     private boolean clearanceChecked;
@@ -173,7 +175,7 @@ final class SemanticBuildSupplyCompanionTask
 
         boolean excavationNeeded = activePlan.targets.stream().anyMatch(target -> player.level().isLoaded(target.pos())
                 && !player.level().getBlockState(target.pos()).isAir() && !constructionMatches(target));
-        if (excavationNeeded && !activePlan.hasTrackedScaffolds()) {
+        if (excavationNeeded && !activePlan.hasTrackedScaffolds() && supportItem == null) {
             startBuild();
             return TaskState.RUNNING;
         }
@@ -243,6 +245,10 @@ final class SemanticBuildSupplyCompanionTask
         if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return TaskState.RUNNING;
         String childCode = result == null || result.data() == null
                 ? null : String.valueOf(result.data().get("failure_code"));
+        // 尚未放下永久方块也可能先缺点击支撑；原生回执给出明确物品和最终数量时，补这一项再续作，不重编整机。
+        if (terminal == TaskState.FAILED && !buildOutcomeUncertain
+                && "temporary_support_materials_missing".equals(childCode) && requestSupportSupply(result))
+            return TaskState.RUNNING;
         int remainingNow = remainingCellCount();
         boolean progress = remainingNow < remainingCellsBeforeBuild || result != null && result.data() != null
                 && result.data().get("cleared") instanceof Number count && count.intValue() > 0;
@@ -518,6 +524,12 @@ final class SemanticBuildSupplyCompanionTask
 
     /** 根据最新背包事实，找出阻塞共享 BuildOrder 的首个材料。 */
     private BatchNeed nextNeed() {
+        // 先兑现施工现场发现的支撑需求；到货后恢复原队列，其余永久材料仍按原账本保留。
+        if (supportItem != null) {
+            int missing = supportFinalCount - inventoryCount(supportItem);
+            if (missing > 0) return new BatchNeed(supportItem, Math.min(capacityFor(supportItem), missing), 0);
+            supportItem = null; supportFinalCount = 0;
+        }
         // 按实际施工顺序假算现有材料能做多少，找到第一种会卡住的材料，再按剩余需求和背包容量决定取多少。
         Map<Item, Integer> simulated = inventoryCounts();
         List<BuildTaskRecord.Target> ordered = activePlan.targets.stream()
@@ -544,6 +556,21 @@ final class SemanticBuildSupplyCompanionTask
         return null;
     }
 
+    private boolean requestSupportSupply(TaskResult result) {
+        // 只接受当前子施工确认的单一支撑物品；若背包早已满足数量，再次失败不能变成循环取料。
+        if (result == null || result.data() == null
+                || !(result.data().get("temporary_support_demand") instanceof Map<?, ?> demand)
+                || !(demand.get("item_id") instanceof String itemName)
+                || !(demand.get("required_final_count") instanceof Number count)) return false;
+        ResourceLocation id = ResourceLocation.tryParse(itemName);
+        Item item = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+        long required = count.longValue();
+        if (item == null || required < 1 || required > SemanticAcquireTaskRecord.MAX_FINAL_COUNT
+                || inventoryCount(item) >= required) return false;
+        supportItem = item; supportFinalCount = (int) required;
+        return true;
+    }
+
     private Map<Item, Integer> ledger(boolean onlyOutstanding) {
         // 剩余材料账跳过施工时可复用的方块；重要属性仍由子任务收尾，不为调整状态另取替换材料。
         Map<Item, Integer> result = new LinkedHashMap<>();
@@ -552,6 +579,8 @@ final class SemanticBuildSupplyCompanionTask
             int count = target.materialCount();
             if (count > 0) result.merge(target.item(), count, Integer::sum);
         }
+        // 等待补支撑期间把这份预留交给清包流程，已有两块、缺一块时不能先把两块当余料存回仓库。
+        if (onlyOutstanding && supportItem != null) result.merge(supportItem, supportFinalCount, Math::max);
         return result;
     }
 

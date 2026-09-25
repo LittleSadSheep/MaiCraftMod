@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.FallingBlock;
 /** 对完整具体建筑方案执行只读材料预留，包括后续语义供料批次。 */
 public final class BuildTemporarySupportMaterials {
     public record Choice(Item item, int inventorySlot) {}
+    public record SupplyNeed(Item item, int requiredFinalCount) {}
     private BuildTemporarySupportMaterials() {}
 
     public static Map<Item, Integer> remaining(List<BuildTaskRecord.Target> targets, Predicate<BuildTaskRecord.Target> satisfied) {
@@ -48,6 +49,29 @@ public final class BuildTemporarySupportMaterials {
         Item material = choose(allowed, reserved, item -> counts.getOrDefault(item, 0), 1, false);
         if (material == null) return null;
         for (int slot = 0; slot < Math.min(36, main.size()); slot++) if (main.get(slot).is(material)) return new Choice(material, slot);
+        return null;
+    }
+
+    /** 缺垫块时选择一种确实允许的材料，供料按永久预留加整条支撑链计算，不能把几种零散方块凑成一条单材质支撑。 */
+    public static SupplyNeed supplyNeed(List<Item> allowed, Map<Item, Integer> reserved,
+                                       ToIntFunction<Item> carried, int required) {
+        if (required < 1) throw new IllegalArgumentException("support quantity must be positive");
+        SupplyNeed best = null;
+        long smallestMissing = Long.MAX_VALUE;
+        for (int tier = 0; tier < 2; tier++) {
+            for (Item item : allowed) {
+                int permanent = reserved.getOrDefault(item, 0);
+                if ((permanent == 0) != (tier == 0) || !eligible(item)) continue;
+                long total = (long) permanent + required;
+                if (total > Integer.MAX_VALUE) continue;
+                long missing = Math.max(0L, total - carried.applyAsInt(item));
+                if (missing < smallestMissing) {
+                    best = new SupplyNeed(item, (int) total);
+                    smallestMissing = missing;
+                }
+            }
+            if (best != null) return best;
+        }
         return null;
     }
 

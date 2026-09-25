@@ -160,6 +160,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BuildPlacementAccessDrive placementAccess;
     private BlockPos placementAccessTarget;
     private String edgeReturnFailure, edgeReturnFailureCode;
+    private Map<String, Object> temporarySupportDemand = Map.of();
     private boolean layerKnown;
     private int constructionLayer = Integer.MAX_VALUE;
     private BuildRegions regions;
@@ -1712,6 +1713,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 ScaffoldMaterials.of(player), scaffoldReservations(),
                 inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
         if (material == null) {
+            // 原生施工准确告诉供料父任务缺哪种垫块；补齐后继续这份目标和支撑账，不让模型猜一个不在白名单里的方块。
+            var demand = BuildTemporarySupportMaterials.supplyNeed(ScaffoldMaterials.of(player), scaffoldReservations(),
+                    inventory::mainInventoryCount, chain.size());
+            if (demand != null) temporarySupportDemand = Map.of(
+                    "item_id", BuiltInRegistries.ITEM.getKey(demand.item()).toString(),
+                    "required_final_count", demand.requiredFinalCount(), "support_blocks", chain.size(),
+                    "allowed_items", ScaffoldMaterials.effectiveIds(player));
             failAt(cell.target().pos(), "placement needs " + chain.size()
                             + " spare full temporary support blocks after reserving every remaining permanent build target",
                     FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
@@ -2523,6 +2531,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("requested", r.targets.size());
         data.put("completed", r.completed());
         data.put("placed", r.placed());
+        // 永久建材缺口和临时支撑缺口分别保留，后者必须带可执行的选料结论才能自动补给。
+        if (!temporarySupportDemand.isEmpty()) data.put("temporary_support_demand", temporarySupportDemand);
         data.put("cleared", r.broken());
         data.put("food_preparation", foodPreparation.progress(player));
         if (!foodPreparation.receipts().isEmpty()) data.put("completed_food_receipts", foodPreparation.receipts());

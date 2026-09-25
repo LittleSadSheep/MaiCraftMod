@@ -48,6 +48,14 @@ public final class BuildTemporarySupportMaterialsTest {
         check(BuildTemporarySupportMaterials.inventoryChoice(inventory(1, 0), allowed, lastCell) == null,
                 "A later batch cannot quietly borrow its last permanent block");
         check(BuildTemporarySupportMaterials.remaining(targets, target -> true).isEmpty(), "Confirmed construction releases its reservation");
+        // 已拿到光滑石仍不能充当默认垫块；需求只能从白名单选取，并优先补齐已有的同一种支撑材料。
+        var need = BuildTemporarySupportMaterials.supplyNeed(List.of(Items.DIRT, Items.COBBLESTONE), Map.of(),
+                item -> item == Items.COBBLESTONE ? 2 : 0, 3);
+        check(need.item() == Items.COBBLESTONE && need.requiredFinalCount() == 3, "补齐已有圆石到三块而不猜光滑石");
+        var reservedNeed = BuildTemporarySupportMaterials.supplyNeed(List.of(Items.STONE), Map.of(Items.STONE, 36), item -> 36, 3);
+        check(reservedNeed.requiredFinalCount() == 39, "保留三十六块永久石头后再补三块临时支撑");
+        check(BuildTemporarySupportMaterials.supplyNeed(List.of(Items.SAND), Map.of(), item -> 0, 3) == null,
+                "不能给会掉落的方块发出支撑供料需求");
         System.out.println("BuildTemporarySupportMaterialsTest: passed");
     }
 
