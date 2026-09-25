@@ -41,6 +41,7 @@ public final class BuildEdgeMotion {
     private String failure = "";
     private boolean released, observedSneak, alignment, requestedSneak = true;
     private String postureReason = "partial_support_edge";
+    private Map<String, Object> geometryCheck = Map.of();
 
     public BuildEdgeMotion(Vec3 approachFeet, Vec3 edgeFeet, LongSet forbidden, Predicate<BlockPos> permittedBody) {
         if (!finite(approachFeet) || !finite(edgeFeet) || Math.abs(approachFeet.y - edgeFeet.y) > 1e-5
@@ -91,7 +92,12 @@ public final class BuildEdgeMotion {
         requestedSneak = !standingSafe;
         postureReason = !alignment || !fullSupport ? "partial_support_edge" : standingSafe ? "full_support_standing" : "low_clearance_crouch";
         double requiredHeight = player.getDimensions(requestedSneak ? Pose.CROUCHING : Pose.STANDING).height();
-        if (!bounded(drift) || !standingSafe && !safe(player, observed, target, drift, requiredHeight)) return fail(context, "edge_support_or_sweep_changed");
+        if (!bounded(drift)) {
+            // 惯性会把身体带出已证明的短段时保留这项具体原因，不误报成需要再垫一层方块。
+            geometryCheck = Map.of("reason", "projected_drift_outside_proven_segment");
+            return fail(context, "edge_support_or_sweep_changed");
+        }
+        if (!standingSafe && !safe(player, observed, target, drift, requiredHeight)) return fail(context, "edge_support_or_sweep_changed");
         // 姿态必须由原生玩家刻兑现后才移动；普通重力 vy=-0.0784 不算漂浮，停止输入仍靠真实摩擦减速。
         boolean postureReady = requestedSneak ? observedSneak : !player.isShiftKeyDown() && player.getPose() == Pose.STANDING;
         if (!postureReady || horizontal(velocity) > .08) {
@@ -151,27 +157,39 @@ public final class BuildEdgeMotion {
         if (observed != null) out.put("actual_feet", coordinates(observed));
         out.put("velocity", coordinates(velocity)); out.put("observed_sneak", observedSneak);
         out.put("stable_ticks", stableTicks); out.put("elapsed_ticks", owner == null ? 0 : Math.max(0, lastTick - startedTick));
-        out.put("released", released); return Map.copyOf(out);
+        out.put("released", released);
+        if (!geometryCheck.isEmpty()) out.put("geometry_check", geometryCheck);
+        return Map.copyOf(out);
     }
 
     private boolean safe(LocalPlayer player, Vec3 from, Vec3 to, Vec3 drift, double height) {
         try {
             var world = player.level(); double width = player.getBbWidth();
-            if (!dimensions(width, height)) return false;
+            if (!dimensions(width, height)) { geometryCheck = Map.of("reason", "invalid_body_dimensions"); return false; }
             var physical = PhysicalObstacleSnapshot.capture(player.clientLevel, from);
-            if (!Set.of("not_installed", "ready", "ready_empty").contains(physical.state())) return false;
+            if (!Set.of("not_installed", "ready", "ready_empty").contains(physical.state())) {
+                geometryCheck = Map.of("reason", "physical_observation_unavailable", "state", physical.state()); return false;
+            }
             var boxes = new ArrayList<>(physical.boxes());
             AABB sweep = body(from, width, height).minmax(body(to, width, height)).minmax(body(drift, width, height));
             for (var shape : world.getEntityCollisions(player, sweep)) {
-                boxes.addAll(shape.toAabbs()); if (boxes.size() > 256) return false;
+                boxes.addAll(shape.toAabbs());
+                if (boxes.size() > 256) { geometryCheck = Map.of("reason", "entity_collision_budget_exceeded"); return false; }
             }
             var dynamic = new PhysicalObstacleSnapshot(boxes, physical.blockReads(), physical.conservativeStructures(), physical.state());
             var hard = new LongOpenHashSet(forbidden); hard.addAll(NavigationSafetyContext.forbiddenBodyCells());
             Predicate<BlockPos> loaded = pos -> world.isLoaded(pos) && world.getWorldBorder().isWithinBounds(pos);
-            if (alignment) return BuildAnchorStepGeometry.safe(player, loaded, hard, permittedBody, dynamic, from, to, drift, height);
-            return safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, to)
+            if (alignment) {
+                // 搜索已找到可达站位后，具体的末段拒绝仍应交回施工回执，供角色选择另一个真实站位。
+                var checked = BuildAnchorStepGeometry.check(player, loaded, hard, permittedBody, dynamic, from, to, drift, height);
+                geometryCheck = checked.evidence(); return checked.allowed();
+            }
+            boolean safe = safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, to)
                     && safeSweep(world, loaded, width, height, hard, permittedBody, dynamic, from, drift);
-        } catch (RuntimeException | LinkageError unavailable) { return false; }
+            geometryCheck = Map.of("reason", safe ? "verified" : "edge_support_or_collision_unverified"); return safe;
+        } catch (RuntimeException | LinkageError unavailable) {
+            geometryCheck = Map.of("reason", "geometry_observation_failed", "exception", unavailable.getClass().getSimpleName()); return false;
+        }
     }
     // GroundCorridor 按解析区间证明全程支撑，能接受真实的窄边接触，但任何中间缺口、撞身或危险格都拒绝。
     static boolean safeSweep(BlockGetter world, Predicate<BlockPos> loaded, double width, double height, LongSet forbidden,

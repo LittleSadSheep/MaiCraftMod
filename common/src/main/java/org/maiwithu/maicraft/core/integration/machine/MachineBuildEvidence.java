@@ -26,6 +26,8 @@ public final class MachineBuildEvidence {
             // 首层保留决定恢复方向的站位结论，完整身体轨迹继续从原回执查询。
             for (String key : List.of("reason", "posture_reason", "checked_stances", "reachable_stances"))
                 copy(access, result, key, key);
+            if (access.get("anchor_alignment") instanceof Map<?, ?> alignment)
+                copy(alignment, result, "geometry_check", "anchor_geometry_check");
         }
         if (evidence.get("build_diagnostics") instanceof List<?> diagnostics && !diagnostics.isEmpty()
                 && diagnostics.getFirst() instanceof Map<?, ?> first) {
