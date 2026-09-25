@@ -453,6 +453,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
             }
             boolean outcomeKnown = !mutatesSemanticState(name, arguments);
+            // 只读分页的参数错误不要求重新勘察世界；变更请求已经进入运行时则仍保留结果未知，不能据此安全重放。
+            if (outcomeKnown && failure instanceof IllegalArgumentException)
+                return toolError("invalid_arguments", message(failure), true, true, requestKey);
             return toolError("runtime_error", message(failure), true,
                     outcomeKnown, requestKey);
         } finally {

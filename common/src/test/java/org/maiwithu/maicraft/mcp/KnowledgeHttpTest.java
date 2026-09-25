@@ -131,6 +131,20 @@ public final class KnowledgeHttpTest {
             check(documentText(schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject()
                     .get("text").getAsString(), false).equals(contract.schemaText()),
                     "frozen receipt pages also remain readable through the standard resource channel");
+            // 模拟模型把文本字符数当成分页条数；读取归档失败必须提示修参，不要诱导重新扫描工地。
+            var schemaManifest = json(schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+            var badPage = json("{\"name\":\"perceive\",\"arguments\":{}}");
+            badPage.getAsJsonObject("arguments").addProperty("resource_uri", schemaManifest.getAsJsonObject("text")
+                    .get("resource_uri").getAsString().replaceAll("limit=\\d+", "limit=4000"));
+            var pageError = payload(send("tools/call", badPage)).getAsJsonObject("error");
+            check(pageError.get("code").getAsString().equals("invalid_arguments") && pageError.get("outcome_known").getAsBoolean()
+                    && pageError.get("message").getAsString().contains("1..50"), "只读分页失败明确为可修正参数错误");
+            // 相同异常来自已进入运行时的执行调用时，协议不能谎称世界肯定未变化。
+            var executionError = payload(send("tools/call", json("""
+                    {"name":"execute","arguments":{"goal":{"ability":"maicraft:travel","outcome":"reach a destination"},"request_key":"invalid-after-start"}}
+                    """))).getAsJsonObject("error");
+            check(executionError.get("code").getAsString().equals("runtime_error") && !executionError.get("outcome_known").getAsBoolean(),
+                    "执行异常保留结果未知，不能照搬只读修参语义");
             var templates = send("resources/templates/list", new JsonObject()).getAsJsonObject("result");
             var templateMimes = new HashMap<String, String>();
             templates.getAsJsonArray("resourceTemplates").forEach(element -> {
@@ -247,7 +261,12 @@ public final class KnowledgeHttpTest {
             throw new AssertionError("World perception must not be used for knowledge");
         }
         public CompletionStage<JsonElement> plan(JsonObject args) { throw new AssertionError("No planning"); }
-        public CompletionStage<JsonElement> execute(JsonObject args) { throw new AssertionError("No execution"); }
+        public CompletionStage<JsonElement> execute(JsonObject args) {
+            // 仅构造运行时失败回执，不连接世界、不执行任何游戏动作。
+            if ("invalid-after-start".equals(args.get("request_key").getAsString()))
+                return CompletableFuture.failedFuture(new IllegalArgumentException("late native argument rejection"));
+            throw new AssertionError("No execution");
+        }
         public CompletionStage<JsonElement> task(JsonObject args) { throw new AssertionError("No tasks"); }
         public CompletionStage<JsonElement> readAttention() { return CompletableFuture.completedFuture(new JsonObject()); }
         public AutoCloseable subscribeAttention(Consumer<JsonElement> listener) { return () -> {}; }
