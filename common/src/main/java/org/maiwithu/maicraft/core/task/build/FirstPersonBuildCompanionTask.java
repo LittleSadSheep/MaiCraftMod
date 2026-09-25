@@ -71,7 +71,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     // 刨坑 -> 出坑 -> 拿材料 -> 建房；每一步都等真实游戏操作确认后，再交给下一步接管角色。
     private enum Phase { PREFLIGHT, EXCAVATE, EXCAVATE_EXIT, SELECT, CLEAR_NAV, CLEAR, CLEAR_RELEASE, PLACE_NAV, WORKSITE, SELECT_ITEM,
-        AIM, WAIT_USE, EDGE_RETURN, SUPPORT_APPROACH, SUPPORT_VERIFY, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, SCAFFOLD_DESCENT, SCAFFOLD_ACCESS, FINAL_STATE, ROUTE_VERIFY }
+        AIM, WAIT_USE, EDGE_RETURN, CLEAR_CREATIVE, VERIFY, SCAFFOLD_SELECT, SCAFFOLD_NAV, SCAFFOLD_BREAK, SCAFFOLD_DESCENT, SCAFFOLD_ACCESS, FINAL_STATE, ROUTE_VERIFY }
     private record CellPlan(BuildTaskRecord.Target target,
                             List<BuildPlacementGeometry.GeneratedCell> generated) {
         CellPlan { generated = List.copyOf(generated); }
@@ -118,14 +118,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private CellPlan supportedCell;
     private List<BlockPos> supportChain = List.of();
     private BlockState supportMaterial;
-    private BuildSupportAccess supportAccess;
-    private final BuildSupportSettling supportSettling = new BuildSupportSettling();
-    private List<BlockPos> supportVerificationRemaining = List.of();
-    private int supportBodyReproofs;
-    private BuildPlacementGeometry.Gesture supportWitness;
-    private boolean supportProposal, supportStepApproved;
-    private Map<String, Object> supportAccessEvidence = Map.of();
-    private long supportApproachDeadline;
     private final Map<Item, Integer> required = new LinkedHashMap<>();
     private final Map<Item, Integer> missing = new LinkedHashMap<>();
     private final List<Map<String, Object>> unsupported = new ArrayList<>();
@@ -333,8 +325,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             case WORKSITE -> worksiteTick();
             case AIM -> aimTick(); case WAIT_USE -> waitUseTick();
             case EDGE_RETURN -> returnFromPlacementEdge();
-            case SUPPORT_VERIFY -> supportVerifyTick();
-            case SUPPORT_APPROACH -> supportApproachTick();
             case CLEAR_CREATIVE -> clearCreativeTick(); case VERIFY -> verifyTick();
             case SCAFFOLD_SELECT -> scaffoldSelectTick(); case SCAFFOLD_NAV -> scaffoldNavTick();
             case SCAFFOLD_BREAK -> scaffoldBreakTick();
@@ -915,19 +905,16 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 一种放法不通就试下一种；站位必须精确到指定格，不能像长途旅行那样“附近就算到了”。
         if (currentPlacementComplete()) { finishPlaced(); return TaskState.RUNNING; }
         if (placementAccess == null && nav == null) {
-            var known = supportAccess == null ? null : isTemporary(cell) ? supportAccess.placementFor(cell.target().pos())
-                    : cell == supportedCell ? supportAccess.targetPlacement() : null;
             // 同层楼梯也可先登上已建台阶再贴边续放；这里只筛近处，最终脚位、碰撞与原生朝向仍由实际搜索证明。
             boolean edgeCandidate = !BuildCellRules.isAirTarget(cell.target()) && Math.abs(player.getY() - cell.target().pos().getY()) <= 3
                     && cell.target().pos().distToCenterSqr(player.position()) <= 144
                     && (!seekBetterFooting(cell.target()) || worksite != null && worksite.constructionAccess());
-            // 已证明的实地工作站可直接继续；尚无路线或原方案需要搭路时，再检查能否利用现有边缘减少支撑。
-            if (known != null || edgeCandidate && (worksite == null || worksite.constructionAccess())) {
-                // 先试现有檐边直接放正式方块；支撑则使用逐前缀证明的可达见证，不再枚举没有地板的格心。
+            // 正式方块和垫块都使用当前脚下的边缘接近，不等待预先生成的整链站位。
+            if (edgeCandidate && (worksite == null || worksite.constructionAccess())) {
                 var accessTarget = cell.target();
                 placementAccess = new BuildPlacementAccessDrive(player, accessTarget, stanceNavigation.walkingContext(Integer.MIN_VALUE),
                         () -> r.mutationGuardMatches(player, accessTarget.pos())
-                                && !inheritedProtectedMutationCells.contains(accessTarget.pos().asLong()), known,
+                                && !inheritedProtectedMutationCells.contains(accessTarget.pos().asLong()), null,
                         () -> switch (prepareHeldItem()) {
                             case SUCCESS -> BuildPlacementAccessDrive.Status.READY;
                             case FAILED -> BuildPlacementAccessDrive.Status.FAILED;
@@ -941,8 +928,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (worksite != null) return walkToWorksite();
         if (nav == null) {
-            if (cell == supportedCell && supportWitness != null && liveGestures.isEmpty())
-                liveGestures = List.of(supportWitness);
             if (liveGestures.isEmpty()) {
                 if (gestureSearch == null) {
                     gestureSearch = new BuildPlacementGeometry.PlanSearch(player, cell.target(), targets);
@@ -1684,92 +1669,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return enqueueSupports();
     }
 
-    private TaskState supportApproachTick() {
-        BlockPos target=supportedCell.target().pos();
-        // 不仅横向靠近，还回到目标下方一层附近；不能停在上层柱顶后再次让只读局部搜索负责拆柱下楼。
-        if (nav==null) nav=PlayerNav.toGoal(player,()->NavGoal.nearGround(target.below(),3,1),BuildStanceNavigation.PRECISE_WALK,
-                ()->player.onGround() && Math.abs(player.getY()-target.getY()+1)<=1.01
-                        && target.distToCenterSqr(player.position())<=16,this).walkingOnly();
-        var context=ClientRuntime.requireContext(player);
-        boolean stalled=worksiteMovement.observe(player.position(),target.getCenter(),context.tickRevision(),nav.executionStep(context.tickRevision()));
-        // 规划消息不续期；有实际动作也保留本次半分钟上限，腾空时先让导航安全落地再报告失败。
-        if ((stalled || player.level().getGameTime()>=supportApproachDeadline) && nav.isSafeToCancel()) {
-            stopNav(); failAt(target,"Could not reach local support work within the bounded approach",FailureType.NO_PATH,"support_approach_no_progress",false);
-            return TaskState.FAILED;
-        }
-        return switch(nav.tick()) {
-            case RUNNING -> TaskState.RUNNING;
-            case FAILED -> {
-                String reason=nav.failReason();stopNav();failAt(target,"Could not approach the next support work: "+reason,FailureType.NO_PATH,"support_approach_failed",false);
-                yield TaskState.FAILED;
-            }
-            case ARRIVED -> {
-                stopNav();drainScaffolds();
-                if(!player.onGround() || Math.abs(player.getY()-target.getY()+1)>1.01 || target.distToCenterSqr(player.position())>25) {
-                    failAt(target,"The body has not reached the next local support area",FailureType.NO_PATH,"support_approach_not_reached",false);
-                    yield TaskState.FAILED;
-                }
-                beginSupportVerification(supportChain,true);yield TaskState.RUNNING;
-            }
-        };
-    }
-
-    private void beginSupportVerification(List<BlockPos> remaining, boolean proposal) {
-        stopNav(); InputDriver.halt(player); supportProposal = proposal;
-        // 停键不等于停住：先让角色自然落地、消退惯性，再以实际稳定身体位置创建支撑快照。
-        supportVerificationRemaining = List.copyOf(remaining); supportAccess = null; supportWitness = null;
-        supportBodyReproofs = 0; supportSettling.reset();
-        phase = Phase.SUPPORT_VERIFY;
-    }
-
-    private TaskState supportVerifyTick() {
-        InputDriver.halt(player);
-        if (supportAccess == null) {
-            var settled = supportSettling.observe(player.position(), player.getDeltaMovement(), player.onGround(),
-                    !player.isInWater() && !player.isPassenger(), player.level().getGameTime());
-            if (settled != BuildSupportSettling.Status.READY) {
-                supportAccessEvidence = Map.of("reason", settled == BuildSupportSettling.Status.FAILED
-                                ? "support_body_settle_timeout" : "waiting_for_support_body_settle", "verified", false,
-                        "proposed_supports", supportVerificationRemaining.size(), "body_reproofs", supportBodyReproofs,
-                        "body_settling", supportSettling.evidence());
-                if (settled != BuildSupportSettling.Status.FAILED) return TaskState.RUNNING;
-                failAt(supportedCell.target().pos(), "The body did not naturally settle before support verification; no support was submitted",
-                        FailureType.NO_PATH, "temporary_support_access_unproven", false); return TaskState.FAILED;
-            }
-            supportAccess = new BuildSupportAccess(player, supportedCell.target(), supportVerificationRemaining, supportMaterial,
-                    pos -> scaffoldPermitted(pos, null), unionForbidden(NavigationSafetyContext.forbiddenBodyCells()),
-                    EmbeddedBaritoneRuntime.physicalObstacles());
-        }
-        boolean done = supportAccess.advance(16);
-        var evidence = new LinkedHashMap<>(supportAccess.evidence());
-        evidence.put("body_reproofs", supportBodyReproofs); evidence.put("body_settling", supportSettling.evidence());
-        supportAccessEvidence = Map.copyOf(evidence);
-        if (!done) return TaskState.RUNNING;
-        if (!supportAccess.accepted() || !supportAccess.current()) {
-            String invalidation = supportAccess.invalidationReason();
-            if (invalidation != null) {
-                var changed = new LinkedHashMap<>(supportAccessEvidence);
-                changed.put("verified", false); changed.put("invalidation", invalidation);
-                if (supportAccess.accepted()) changed.put("reason", "support_access_observation_changed");
-                supportAccessEvidence = Map.copyOf(changed);
-            }
-            // 尚未点击且只有起点变化时，丢弃旧见证，有限等站稳后完整重证；世界、支撑和保护变化仍直接拒绝。
-            if ("support_access_body_moved".equals(invalidation)
-                    && "support_access_observation_changed".equals(supportAccessEvidence.get("reason"))
-                    && supportBodyReproofs < 2 && useReceipt == null && !selection.pending() && !digger.hasPendingBreak()) {
-                supportBodyReproofs++; supportAccess = null; supportWitness = null; supportStepApproved = false;
-                supportSettling.reset(); return TaskState.RUNNING;
-            }
-            failAt(supportedCell.target().pos(), "temporary supports have no verified post-placement access: "
-                            + supportAccessEvidence.get("reason") + "; no additional support was submitted",
-                    FailureType.NO_PATH, "temporary_support_access_unproven", false);
-            return TaskState.FAILED;
-        }
-        supportWitness = supportAccess.witness();
-        if (!supportProposal) { supportStepApproved = true; phase = Phase.AIM; return TaskState.RUNNING; }
-        return enqueueSupports();
-    }
-
     // 从接地端开始把支撑排进普通施工队列，实际放置成功后才记账，再继续原来的目标。
     private TaskState enqueueSupports() {
         List<CellPlan> prepared = new ArrayList<>();
@@ -1829,15 +1728,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         markComplete(cell); queueAt++; resetCell(); phase = Phase.SELECT;
     }
     private void releaseSupportPlan() {
-        supportedCell = null; supportWitness = null; supportChain = List.of(); supportAccessEvidence = Map.of();
-        supportAccess = null; supportVerificationRemaining = List.of(); supportSettling.reset(); supportBodyReproofs = 0;
+        supportedCell = null; supportChain = List.of(); supportMaterial = null;
     }
     private void resetCell() {
         worksitePass = 0; worksiteAttempts = 0; worksiteMovement.reset();
         if (worksite != null && worksite.heightLoss() > 1e-5) worksite = null;
-        // 切换到支撑队列的下一格时保留整链的移动见证；每块真正点击前仍清除批准标记，重新证明剩余支撑。
-        supportStepApproved = false;
-        if (supportedCell == null) supportAccess = null;
         layerKnown = false;
         stanceNavigation.startAt(PlayerNav.playerFeet(player));
         placementWalkTarget = null;
@@ -2470,7 +2365,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "placed_blocks", r.placed(), "cleared_blocks", r.broken(),
                 "temporary_supports_remaining", r.scaffoldLedger().snapshot().size()));
         if (phase == Phase.AIM) data.put("placement", placementDiagnostics());
-        if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         if (placementAccess != null) data.put("placement_access", placementAccess.evidence());
         if (layerKnown && constructionLayer != Integer.MAX_VALUE) data.put("construction_layer", constructionLayer);
         if (regions != null) data.put("construction_region", Map.of("id", constructionRegion, "count", regions.count()));
@@ -2590,7 +2484,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("construction_navigation", navigationDiagnostics());
         // 失败回执也保留对齐或贴边时的实际位置证据，供后续修复判断真实半格差异。
         if (placementAccess != null) data.put("placement_access", placementAccess.evidence());
-        if (!supportAccessEvidence.isEmpty()) data.put("support_access", supportAccessEvidence);
         data.put("temporary_supports_remaining", r.scaffoldLedger().snapshot().size());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         data.put("scaffold_cleanup_passes", scaffoldCleanupPasses);

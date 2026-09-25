@@ -36,40 +36,6 @@ public final class BuildSupportAccessTest {
         System.out.println("BuildSupportAccessTest: projected access, no-mutation rejection and existing footing passed");
     }
 
-    private static void rejectsSealedTargetWithoutEnqueueing() throws Exception {
-        try (var h = world()) {
-            h.position(new Vec3(9.5, 1, 6.5));
-            var target = stone(6, 2, 6);
-            for (Direction direction : Direction.values()) if (direction != Direction.DOWN)
-                h.set(target.pos().relative(direction), Blocks.STONE.defaultBlockState());
-            var chain = BuildTemporarySupportPlan.find(h.level, h.level::isLoaded, target.pos(), ignored -> true);
-            check(chain.equals(List.of(target.pos().below())), "old adjacency-only planner chooses the last open side");
-            var proof = search(h, target, chain);
-            check(!proof.advance(0), "zero work budget may not start a blocking search");
-            finish(proof);
-            check(!proof.accepted() && proof.evidence().get("reason").equals("target_enclosed_after_supports"),
-                    "filling the sixth side must be rejected before taking or placing materials");
-            check(h.level.getBlockState(target.pos().below()).isAir() && h.blockUses() == 0,
-                    "hypothetical supports must never be written to the world");
-
-            h.inventory.setItem(0, new ItemStack(Items.DIRT, 64));
-            var record = new BuildTaskRecord("sealed-support", 1000, List.of(target), false);
-            var task = new FirstPersonBuildCompanionTask(h.player, record);
-            var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");
-            var ctor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); ctor.setAccessible(true);
-            Object cell = ctor.newInstance(target, List.of());
-            field("cell").set(task, cell); field("queue").set(task, new ArrayList<>(List.of(cell)));
-            check(invoke(task, "prepareTemporarySupports") == TaskState.RUNNING, "support preparation must yield to verification");
-            check(((Map<?, ?>) field("temporaryTargets").get(task)).isEmpty(), "no proposed cell becomes executable before proof");
-            check(finishTaskSupport(h, task) == TaskState.FAILED, "sealed support proposal must fail without world work");
-            check(record.placed() == 0 && h.blockUses() == 0 && record.scaffoldLedger().isEmpty(),
-                    "rejected proposals grant neither mutation nor cleanup ownership");
-            @SuppressWarnings("unchecked") var data = (Map<String, Object>) invoke(task, "resultData");
-            check(data.get("failure_code").equals("temporary_support_access_unproven") && data.containsKey("support_access"),
-                    "failure reports concrete projected access evidence");
-        }
-    }
-
     private static void acceptsUsefulSupportAndInvalidatesChanges() throws Exception {
         try (var h = world()) {
             h.position(new Vec3(3.5, 1, 6.5));
@@ -103,38 +69,6 @@ public final class BuildSupportAccessTest {
             var proof = search(h, target, List.of(below)); finish(proof);
             check(!proof.accepted(), "a floating stance across missing floor is not a reachable proof");
             check(h.blockUses() == 0 && h.level.getBlockState(below).isAir(), "access search never builds its own unapproved bridge");
-        }
-    }
-
-    private static void rechecksBeforeUsingTheSupportItem() throws Exception {
-        try (var h = world()) {
-            h.position(new Vec3(3.5, 1, 6.5)); h.inventory.setItem(0, new ItemStack(Items.DIRT, 64));
-            var target = stone(6, 2, 6);
-            var task = new FirstPersonBuildCompanionTask(h.player,
-                    new BuildTaskRecord("support-recheck", 1000, List.of(target), false));
-            var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");
-            var ctor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); ctor.setAccessible(true);
-            Object original = ctor.newInstance(target, List.of());
-            field("cell").set(task, original); field("queue").set(task, new ArrayList<>(List.of(original)));
-            invoke(task, "prepareTemporarySupports");
-            finishTaskSupport(h, task);
-            check(field("phase").get(task).toString().equals("SELECT"), "a useful proposal becomes executable only after proof");
-            var queue = (List<?>) field("queue").get(task);
-            field("cell").set(task, queue.getFirst());
-            check(invoke(task, "aimTick") == TaskState.RUNNING
-                    && field("phase").get(task).toString().equals("SUPPORT_VERIFY"),
-                    "arriving to place each support requires fresh projected access before right-click");
-            for (Direction direction : Direction.values()) if (direction != Direction.DOWN)
-                h.set(target.pos().relative(direction), Blocks.STONE.defaultBlockState());
-            check(finishTaskSupport(h, task) == TaskState.FAILED && h.blockUses() == 0,
-                    "a newly sealed target invalidates the approved plan without a support click");
-        }
-        try (var h = world()) {
-            h.position(new Vec3(12.5, 1, 6.5));
-            var target = stone(15, 2, 6);
-            var proof = search(h, target, List.of(target.pos().below())); finish(proof);
-            check(!proof.accepted() && proof.evidence().get("reason").equals("support_access_unloaded"),
-                    "an unknown neighboring face is not reported as a proven closed wall");
         }
     }
 
@@ -206,14 +140,6 @@ public final class BuildSupportAccessTest {
     private static void finish(BuildSupportAccess proof) {
         for (int i = 0; i < 4096; i++) if (proof.advance(16)) return;
         throw new AssertionError("support validation did not terminate within its finite budget");
-    }
-    private static TaskState finishTaskSupport(InteractionWorldTestHarness h, FirstPersonBuildCompanionTask task) throws Exception {
-        // 施工入口现在先等实际连续站稳，夹具也推进独立游戏刻，不能在同一刻反复调用来绕过稳定检查。
-        for (int i = 0; i < 4096; i++) {
-            h.nextTick(); TaskState state = (TaskState) invoke(task, "supportVerifyTick");
-            if (state != TaskState.RUNNING || !field("phase").get(task).toString().equals("SUPPORT_VERIFY")) return state;
-        }
-        throw new AssertionError("support task failed to finish its bounded settling and proof");
     }
     private static Field field(String name) throws Exception {
         Field field = FirstPersonBuildCompanionTask.class.getDeclaredField(name); field.setAccessible(true); return field;
