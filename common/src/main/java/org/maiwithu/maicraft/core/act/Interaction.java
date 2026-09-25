@@ -350,6 +350,11 @@ public final class Interaction {
                     context, hand, confirmation, timing.hold
                             ? Math.max(CONFIRM_TIMEOUT_TICKS, (int) Math.min(1200L, (long) before.getUseDuration(player) + CONFIRM_TIMEOUT_TICKS))
                             : CONFIRM_TIMEOUT_TICKS);
+            // 砂纸等原生物品在起手时会写入加工中的组件；租约绑定这次原生调用实际启动的物品状态，之后仍严格拒绝外部换物。
+            if (timing.hold && player.isUsingItem() && player.getUsedItemHand() == hand
+                    && ItemStack.isSameItem(before, player.getUseItem())
+                    && ItemStack.isSameItemSameComponents(player.getUseItem(), player.getItemInHand(hand)))
+                heldUseBefore = player.getUseItem().copy();
             if (timing.hold) ItemUseInputLease.renew(this, context, receipt, hand, heldUseBefore);
             return Status.RUNNING;
         }

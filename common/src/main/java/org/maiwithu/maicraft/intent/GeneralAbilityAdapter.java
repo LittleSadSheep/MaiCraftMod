@@ -37,6 +37,8 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
+import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
+import org.maiwithu.maicraft.core.task.MouseButton;
 
 /**
  * 把战斗、跟随、吃东西、装备和交互等目标，转换成已经实现的具体工具调用。
@@ -47,6 +49,7 @@ public final class GeneralAbilityAdapter {
 
     public static final String COMBAT = "maicraft:combat";
     public static final String INTERACT = "maicraft:interact";
+    public static final String USE_ITEM = "maicraft:use_item";
     public static final String FOLLOW = "maicraft:follow";
     public static final String CONSUME = "maicraft:consume";
     public static final String EQUIP = "maicraft:equip";
@@ -58,7 +61,7 @@ public final class GeneralAbilityAdapter {
 
     private static final Set<String> ABILITIES = Set.of(
             COMBAT, INTERACT, FOLLOW, CONSUME, EQUIP, FISH, DROP, CONTAINER, MANAGE_CONTAINER,
-            FIND_ENTITY);
+            FIND_ENTITY, USE_ITEM);
     private static final Set<String> EXECUTION_FIELDS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "x", "y", "z", "button",
             "hold_ticks", "slot_index", "source_slot", "destination_slot", "from_slot",
@@ -93,6 +96,7 @@ public final class GeneralAbilityAdapter {
         return switch (goal.ability()) {
             case COMBAT -> combat(goal, player);
             case INTERACT -> interact(goal, player, runtime, false);
+            case USE_ITEM -> useItem(goal, player);
             case FOLLOW -> follow(goal, player);
             case CONSUME -> consume(goal, player);
             case EQUIP -> equip(goal, player);
@@ -103,6 +107,27 @@ public final class GeneralAbilityAdapter {
             case FIND_ENTITY -> findEntity(goal);
             default -> throw new IllegalArgumentException("unsupported general ability: " + goal.ability());
         };
+    }
+
+    private static IntentAction useItem(Goal goal, LocalPlayer player) {
+        String itemId = itemId(goal.parameters());
+        if (itemId == null) return decision(goal, "Use one named carried item through its native item action.",
+                List.of(option("retry", "Provide item_id."), option("cancel", "Cancel item use.")), null);
+        IntentAction missing = requireInventoryItem(goal, player, itemId); if (missing != null) return missing;
+        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
+        if (new ItemStack(item).getUseDuration(player) > 1200)
+            return decision(goal, "This sustained charging item needs its dedicated activity rather than a finite item use.",
+                    List.of(option("replace_goal", "Choose the corresponding activity."), option("cancel", "Cancel item use.")), null);
+        String outputId = string(goal.parameters(), "expected_output_item_id"); Item output = null;
+        if (outputId != null) {
+            ResourceLocation id = ResourceLocation.tryParse(outputId);
+            if (id == null || !BuiltInRegistries.ITEM.containsKey(id) || BuiltInRegistries.ITEM.get(id) == Items.AIR)
+                throw new IllegalArgumentException("expected_output_item_id must name an installed item");
+            output = BuiltInRegistries.ITEM.get(id);
+        }
+        // 这里只准备一项有界原生持用；主手选择由任务完成，副手可由已有equip语义预先准备，绝不直接修改物品数量。
+        return new IntentAction.Native(new InteractAtTaskRecord("semantic-item-use-" + UUID.randomUUID(),
+                player.level().getGameTime() + 1200, MouseButton.RIGHT, null, -1, item).useHeldItemOnly(output));
     }
 
     private static IntentAction manageContainer(Goal goal) {

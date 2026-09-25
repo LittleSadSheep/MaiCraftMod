@@ -8,6 +8,8 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
@@ -59,7 +61,25 @@ public final class ExactInteractionTargetTest {
         }
         changedAfterCompilation(false);
         changedAfterCompilation(true);
+        heldItemUseHasItsOwnSemanticEntry();
         System.out.println("ExactInteractionTargetTest: passed");
+    }
+
+    private static void heldItemUseHasItsOwnSemanticEntry() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 有副手加工机制的物品无需虚构实体或方块目标，公开接口也不接收鼠标键和持用刻数。
+            h.inventory.setItem(0, new ItemStack(Items.HONEY_BOTTLE));
+            var p = new JsonObject(); p.addProperty("item_id", "minecraft:honey_bottle"); p.addProperty("expected_output_item_id", "minecraft:glass_bottle");
+            var goal = new Goal(GeneralAbilityAdapter.USE_ITEM, "use carried item", new Goal.SemanticTarget("current_place", null, null, null), p.toString(), "{}", List.of(), List.of());
+            SemanticGoalContract.validate(goal, GeneralAbilityAdapter.abilities());
+            var action = (IntentAction.Native) AbilityAdapter.adapt(goal, h.player, null);
+            var r = (InteractAtTaskRecord) action.record();
+            check(r.heldItemUseOnly && r.aim == null && r.expectedOutputItem == Items.GLASS_BOTTLE && h.itemUses() == 0,
+                    "semantic adaptation prepares native item use without clicking");
+            p.addProperty("hold_ticks", 32);
+            try { SemanticGoalContract.validate(goal.withParameters(p), GeneralAbilityAdapter.abilities()); throw new AssertionError("raw hold ticks accepted"); }
+            catch (IllegalArgumentException expected) { }
+        }
     }
 
     private static Goal goal(String kind, BlockPos at, String blockId, String selection) {

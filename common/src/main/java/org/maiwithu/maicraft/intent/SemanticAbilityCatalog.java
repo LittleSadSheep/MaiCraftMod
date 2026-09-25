@@ -148,6 +148,11 @@ public final class SemanticAbilityCatalog {
                             field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));
+            case GeneralAbilityAdapter.USE_ITEM -> contract(
+                    "Perform one finite native use of a carried main-hand item and wait for completion. The item may use the currently equipped offhand; equip prepares that semantic location. No block or entity click is substituted.",
+                    targets("current_place"), fields(
+                            field("item_id", "resource_id", "Required carried item to select and use through its own native behavior."),
+                            field("expected_output_item_id", "resource_id", "Optional carried output whose count must increase after this one use; the receipt reports before and after counts.")));
             case GeneralAbilityAdapter.FOLLOW -> contract(
                     "Follow one semantic player or entity while MaiCraft continuously resolves movement.",
                     targets("player", "entity", "nearest"),

@@ -13,12 +13,15 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.act.Interaction;
 import net.minecraft.util.RandomSource;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 
 /** 真正推进原版面包持用倒计时；屏蔽渲染副作用，不用手动扣食物或计数假动作代替 32 刻过程。 */
 public final class ItemUseTimingTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         breadSurvivesVanillaReleaseCheck(); foreignUseAndRevocationStayUntouched(); staleFoodSlotIsNotRebound();
+        nativeStartComponentBelongsToThisUse();
         System.out.println("ItemUseTimingTest: native bread countdown, scoped held input, single completion and ownership guards passed");
     }
 
@@ -74,6 +77,23 @@ public final class ItemUseTimingTest {
             check(!ItemUseInputLease.project(f.h.h.minecraft, false), "identical food in another hotbar slot is still another held selection");
             f.h.nextTick(); check(owned.tick() == Interaction.Status.FAILED, "renewing cannot silently rebind the old use to a new slot");
             owned.stop(); check(f.h.mode.releases == 0, "the stale food task leaves the replacement hand alone");
+        }
+    }
+
+    private static void nativeStartComponentBelongsToThisUse() throws Exception {
+        try (var f = new Fixture()) {
+            // 重现砂纸起手附加加工组件的时序；改名只是独立夹具的可见组件，真正持用与倒计时仍由原版管理。
+            f.h.mode.itemUse = p -> {
+                p.getMainHandItem().use(f.h.level, p, InteractionHand.MAIN_HAND);
+                p.getMainHandItem().set(DataComponents.CUSTOM_NAME, Component.literal("native working state"));
+            };
+            var use = Interaction.useInAir(f.player, InteractionHand.MAIN_HAND, Interaction.Timing.hold());
+            use.tick();
+            check(ItemUseInputLease.project(f.h.h.minecraft, false), "native start mutations are part of the owned use");
+            f.h.nextTick(); check(use.tick() == Interaction.Status.RUNNING && f.h.mode.items == 1, "native use continues without a second submission");
+            f.player.getMainHandItem().set(DataComponents.CUSTOM_NAME, Component.literal("foreign replacement"));
+            check(!ItemUseInputLease.project(f.h.h.minecraft, false), "later unrelated component changes still revoke the old projection");
+            use.stop();
         }
     }
 

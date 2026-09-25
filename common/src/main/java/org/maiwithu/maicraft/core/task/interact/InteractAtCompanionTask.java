@@ -62,6 +62,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     // 右键实际激活的方块（例如打开工作台界面）会被记录，供结果报告并让智能体循环写入 <known_blocks>。
     private BlockPos activatedBlock;
     private String activatedBlockId;
+    private boolean heldUseStarted, heldUseCompleted;
+    private int expectedItemBefore = -1, outputWaitTicks;
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -95,6 +97,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected TaskState act() {
+        if (r.heldItemUseOnly) return useHeldItem();
         // 到达交互位置后再解析准星命中，并据此执行动作。
         if (interaction == null) {
             if (r.requiredBlock != null && (!player.level().isLoaded(r.aim)
@@ -213,6 +216,38 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         };
     }
 
+    private TaskState useHeldItem() {
+        // 选物也不能打断其他已开始的持用；本次尚未创建交互时，任何正在使用的物品都属于外部流程。
+        if (interaction == null && player.isUsingItem()) {
+            fail("another native item use is already active", FailureType.UNKNOWN); return TaskState.FAILED;
+        }
+        if (!itemSelected) {
+            var status = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
+            if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
+            if (status == FirstPersonActionGate.Status.FAILED) {
+                fail("could not select the carried item: " + selection.failure(), FailureType.UNKNOWN); return TaskState.FAILED;
+            }
+            itemSelected = true;
+        }
+        if (interaction == null) {
+            // 砂纸等物品要由原生use入口读取副手或自身目标；不制造一个不可选中的掉落物实体点击。
+            receipt = PressReceipt.before(player, null);
+            if (r.expectedOutputItem != null) expectedItemBefore = PlayerInv.count(player.getInventory(), r.expectedOutputItem);
+            interaction = Interaction.useInAir(player, InteractionHand.MAIN_HAND, Interaction.Timing.hold());
+            heldUseStarted = true;
+        }
+        var state = interaction.tick();
+        if (state == Interaction.Status.FAILED) { fail(interaction.failReason(), interaction.failType()); return TaskState.FAILED; }
+        if (state != Interaction.Status.DONE) return TaskState.RUNNING;
+        heldUseCompleted = true;
+        // 使用动画结束与服务端产物槽更新可能分包到达；只等一小段同步窗口，绝不再自动使用一次物品。
+        if (r.expectedOutputItem != null && PlayerInv.count(player.getInventory(), r.expectedOutputItem) <= expectedItemBefore) {
+            if (++outputWaitTicks <= 40) return TaskState.RUNNING;
+            fail("native item use completed but the expected carried output did not increase", FailureType.TARGET_LOST); return TaskState.FAILED;
+        }
+        successMsg = "native held item use completed" + settle(); return TaskState.SUCCESS;
+    }
+
     // 如果调用方要求操作后出现某种方块，再检查一次；未提供这项要求时，这里直接接受执行结束。
     private TaskState verifiedOutcome() {
         if (r.expectedBlock != null && (r.aim == null || !player.level().getBlockState(r.aim).is(r.expectedBlock))) {
@@ -282,6 +317,17 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        if (r.heldItemUseOnly) {
+            data.put("held_item_use_started", heldUseStarted); data.put("native_use_completed", heldUseCompleted);
+            data.put("outcome_uncertain", heldUseStarted && !heldUseCompleted);
+            if (expectedItemBefore >= 0) {
+                int after = PlayerInv.count(player.getInventory(), r.expectedOutputItem);
+                data.put("expected_output", Map.of("item_id", BuiltInRegistries.ITEM.getKey(r.expectedOutputItem).toString(),
+                        "before", expectedItemBefore, "after", after, "observed_increase", after - expectedItemBefore));
+                if (after <= expectedItemBefore) data.put("mechanical_retry_allowed", false);
+            }
+            if (heldUseStarted && !heldUseCompleted) data.put("mechanical_retry_allowed", false);
+        }
         if (r.aim != null) {
             data.put("x", r.aim.getX());
             data.put("y", r.aim.getY());

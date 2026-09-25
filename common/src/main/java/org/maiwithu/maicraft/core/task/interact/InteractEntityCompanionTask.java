@@ -61,6 +61,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     private long holdUntil = -1;
     private boolean acted = false;     // 至少有一次按键命中；之后目标死亡应算成功，而非失败。
     private String successMsg = "done";
+    private int aimTicks;
 
     public InteractEntityCompanionTask(LocalPlayer player, InteractEntityTaskRecord record) {
         super(player, record);
@@ -78,6 +79,9 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
                                     FailureType.TARGET_LOST)
                             : null;
                 },
+                // 掉落物等实体不参与原版实体准星选择，不能让角色永远等一个不存在的命中；物品自身机制走use_item。
+                () -> entity != null && !entity.isPickable()
+                        ? new Precondition.Failure("entity_not_pickable: this entity cannot receive native entity clicks; use the carried item's own mechanic when appropriate", FailureType.UNSUPPORTED) : null,
                 () -> r.item == null || PlayerInv.count(player.getInventory(), r.item) > 0 ? null
                         : new Precondition.Failure("don't have "
                                 + BuiltInRegistries.ITEM.getKey(r.item).getPath() + " to use on it",
@@ -141,8 +145,13 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         boolean onTarget = hit.getType() == HitResult.Type.ENTITY
                 && ((EntityHitResult) hit).getEntity() == entity;
         if (!onTarget) {
+            if (++aimTicks > 80) {
+                fail("native entity aim did not reach the selected target within the bounded alignment window", FailureType.OCCLUDED);
+                return TaskState.FAILED;
+            }
             return TaskState.RUNNING;   // 正在稳定或有物体短暂挡住视线，下个 tick 重新瞄准。
         }
+        aimTicks = 0;
 
         if (interaction == null) {
             if (r.item != null && !itemSelected) {
@@ -261,6 +270,9 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         data.put("entity_id", r.entityId);
+        if (entity != null && !entity.isPickable()) {
+            data.put("failure_code", "entity_not_pickable"); data.put("mechanical_retry_allowed", false);
+        }
         if (!changes.isEmpty()) {
             data.put("changes", changes);
         }

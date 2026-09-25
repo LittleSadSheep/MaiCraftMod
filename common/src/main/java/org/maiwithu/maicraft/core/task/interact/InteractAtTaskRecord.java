@@ -24,6 +24,15 @@ public final class InteractAtTaskRecord extends TaskRecord {
      * 执行原版使用前再确认目标身份；它不是操作后的结果要求。
      */
     public final Block requiredBlock;
+    public boolean heldItemUseOnly;
+    public Item expectedOutputItem;
+
+    /** 使用物品自身逻辑时不先点击准星后的方块；副手材料由原生物品处理，产物仍须读真实背包。 */
+    public InteractAtTaskRecord useHeldItemOnly(Item expectedOutput) {
+        if (aim != null || button != MouseButton.RIGHT || item == null || expectedBlock != null)
+            throw new IllegalArgumentException("held item use needs a named item and no block target");
+        heldItemUseOnly = true; expectedOutputItem = expectedOutput; return this;
+    }
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
                                 MouseButton button, BlockPos aim, int holdTicks, Item item) {
