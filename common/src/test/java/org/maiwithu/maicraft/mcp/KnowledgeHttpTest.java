@@ -107,7 +107,7 @@ public final class KnowledgeHttpTest {
                     .getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
             var contractIndex = json(contractContent.get("text").getAsString());
             check(contractIndex.get("design_schema_uri").getAsString().equals(contract.schemaUri()),"HTTP index must identify the exact current schema");
-            // 每篇教材经标准 MCP 与四工具回退通道读出的正文完全相同，不能截成摘要或另套模板。
+            // 每篇教材的长正文经两条入口逐页找回，首份回执保持小巧，原文仍可完整核对。
             for (var tutorial : contractIndex.getAsJsonArray("resources")) {
                 String tutorialUri = tutorial.getAsJsonObject().get("uri").getAsString();
                 String expected = knowledge.read(tutorialUri).text();
@@ -115,18 +115,18 @@ public final class KnowledgeHttpTest {
                 var fallbackRequest = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\"}}");
                 fallbackRequest.getAsJsonObject("arguments").addProperty("resource_uri", tutorialUri);
                 var fallbackResult = send("tools/call", fallbackRequest).getAsJsonObject("result");
-                check(document.get("text").getAsString().equals(expected) && !fallbackResult.get("isError").getAsBoolean()
-                        && fallbackResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().equals(expected), "full tutorial over both HTTP routes");
+                check(documentText(document.get("text").getAsString(), false).equals(expected) && !fallbackResult.get("isError").getAsBoolean()
+                        && documentText(fallbackResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString(), true).equals(expected), "recover full tutorial over both HTTP routes");
             }
             var schemaContent = send("resources/read",uri(contract.schemaUri())).getAsJsonObject("result")
                     .getAsJsonArray("contents").get(0).getAsJsonObject();
-            check(schemaContent.get("text").getAsString().equals(contract.schemaText())
-                    && schemaContent.get("mimeType").getAsString().equals("application/schema+json"),"HTTP resource must retain the full versioned schema");
+            check(documentText(schemaContent.get("text").getAsString(), false).equals(contract.schemaText()),
+                    "HTTP pages retain the exact full versioned schema");
             var schemaRequest = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\"}}");
             schemaRequest.getAsJsonObject("arguments").addProperty("resource_uri",contract.schemaUri());
             var schemaFallback = send("tools/call",schemaRequest).getAsJsonObject("result");
-            check(!schemaFallback.get("isError").getAsBoolean() && schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject()
-                    .get("text").getAsString().equals(contract.schemaText()),"perceive fallback must return the same complete JSON schema");
+            check(!schemaFallback.get("isError").getAsBoolean() && documentText(schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject()
+                    .get("text").getAsString(), true).equals(contract.schemaText()),"perceive pages return the same complete JSON schema");
             var templates = send("resources/templates/list", new JsonObject()).getAsJsonObject("result");
             var templateMimes = new HashMap<String, String>();
             templates.getAsJsonArray("resourceTemplates").forEach(element -> {
@@ -203,7 +203,29 @@ public final class KnowledgeHttpTest {
         response.headers().firstValue("MCP-Session-Id").ifPresent(value -> session = value);
         return JsonParser.parseString(response.body()).getAsJsonObject();
     }
-    // 知识搜索和能力发现从唯一文本载荷取结构；正文读取仍直接取得原文。
+    private String documentText(String text, boolean viaTool) throws Exception {
+        check(text.length() <= 8500, "initial document response stays bounded");
+        JsonObject manifest;
+        try { manifest = json(text); } catch (RuntimeException ordinaryText) { return text; }
+        if (!manifest.has("details_uri")) return text;
+        check(manifest.has("source_mime_type"), "paged document identifies the source format");
+        String next = manifest.getAsJsonObject("text").get("resource_uri").getAsString();
+        StringBuilder full = new StringBuilder();
+        while (next != null) {
+            JsonObject page;
+            if (viaTool) {
+                JsonObject call = json("{\"name\":\"perceive\",\"arguments\":{}}");
+                call.getAsJsonObject("arguments").addProperty("resource_uri", next);
+                page = payload(send("tools/call", call));
+            } else page = json(send("resources/read", uri(next)).getAsJsonObject("result")
+                    .getAsJsonArray("contents").get(0).getAsJsonObject().get("text").getAsString());
+            check(page.get("snapshot_only").getAsBoolean(), "later pages are the same frozen document");
+            full.append(page.get("value").getAsString()); next = page.has("next_uri") ? page.get("next_uri").getAsString() : null;
+        }
+        return full.toString();
+    }
+
+    // 知识搜索和能力发现从唯一文本载荷取结构；正文按需取得原文。
     private static JsonObject payload(JsonObject rpc) {
         JsonObject result = rpc.getAsJsonObject("result");
         check(!result.has("structuredContent"), "metadata payload is not duplicated");

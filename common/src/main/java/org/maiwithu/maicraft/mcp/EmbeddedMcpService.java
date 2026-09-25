@@ -73,6 +73,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private final McpConfig config;
     private final RuntimeFacade runtime;
+    private final ResponseArchive responseArchive = new ResponseArchive();
     private final ConcurrentMap<String, Session> sessions = new ConcurrentHashMap<>();
     private final AtomicBoolean stopping = new AtomicBoolean();
 
@@ -92,6 +93,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     public synchronized void start() throws IOException {
         if (server != null) return;
         stopping.set(false);
+        responseArchive.reopen();
 
         ExecutorService newExecutor = Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual().name("maicraft-mcp-", 0).factory()
@@ -176,6 +178,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             currentExecutor.shutdownNow();
         }
         removeShutdownHook();
+        responseArchive.close();
     }
 
     @Override
@@ -399,6 +402,10 @@ public final class EmbeddedMcpService implements AutoCloseable {
         CompletionStage<JsonElement> stage = null;
         try {
             boolean knowledge = PublicToolCatalog.PERCEIVE.equals(name) && "knowledge".equals(nullableString(arguments, "view"));
+            // 临时回执复用原观察，不重新调用知识提供者或让玩家执行一次旧目标。
+            String resource = nullableString(arguments, "resource_uri");
+            if (knowledge && resource != null && resource.startsWith(ResponseArchive.PREFIX))
+                return toolResult(responseArchive.read(resource), false);
             stage = switch (name) {
                 case PublicToolCatalog.PERCEIVE -> knowledge ? runtime.knowledge(
                         KnowledgeLibrary.perceptionRequest(arguments)) : runtime.perceive(arguments);
@@ -413,7 +420,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             }
             JsonElement value = await(stage, requestTimeout(name, arguments));
             return knowledge && arguments.has("resource_uri") && !arguments.get("resource_uri").isJsonNull()
-                    ? knowledgeToolResult(value.getAsJsonObject()) : toolResult(value, false);
+                    ? knowledgeToolResult(presentDocuments(value.getAsJsonObject())) : toolResult(value, false);
         } catch (CancellationException cancelled) {
             return toolError("attention_wait_cancelled", "Attention wait cancelled; the game task is unchanged.",
                     false, true, null);
@@ -468,6 +475,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         only(params, "uri", "_meta");
         optionalMeta(params);
         String uri = requiredString(params, "uri");
+        if (uri.startsWith(ResponseArchive.PREFIX)) {
+            JsonObject content = new JsonObject(); content.addProperty("uri", uri);
+            content.addProperty("mimeType", "application/json"); content.addProperty("text", responseArchive.read(uri).toString());
+            JsonArray contents = new JsonArray(); contents.add(content);
+            JsonObject result = new JsonObject(); result.add("contents", contents); return result;
+        }
         if (ATTENTION_URI.toString().equals(uri)) {
             return jsonResource(ATTENTION_URI, runtime.readAttention());
         }
@@ -475,7 +488,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             return jsonResource(CHATFLOW_URI, runtime.readChat());
         }
         JsonObject request = new JsonObject(); request.addProperty("action", "read"); request.addProperty("uri", uri);
-        return knowledgeRequest(request);
+        return presentDocuments(knowledgeRequest(request));
     }
 
     private JsonObject jsonResource(URI uri, CompletionStage<JsonElement> stage) {
@@ -484,7 +497,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             JsonObject content = new JsonObject();
             content.addProperty("uri", uri.toString());
             content.addProperty("mimeType", "application/json");
-            content.addProperty("text", GSON.toJson(nonNull(snapshot)));
+            content.addProperty("text", GSON.toJson(responseArchive.present(nonNull(snapshot))));
             JsonArray contents = new JsonArray();
             contents.add(content);
             JsonObject result = new JsonObject();
@@ -543,6 +556,24 @@ public final class EmbeddedMcpService implements AutoCloseable {
         JsonObject structured = new JsonObject(); structured.add("resources", metadata);
         JsonObject result = new JsonObject(); result.add("content", content); result.add("structuredContent", structured);
         result.addProperty("isError", false); return result;
+    }
+
+    private JsonObject presentDocuments(JsonObject source) {
+        // 选中的短文档直接读；长教材保留原文与可定位的 JSON 结构，调用方按实际问题读取相应部分。
+        JsonObject result = source.deepCopy();
+        for (JsonElement value : result.getAsJsonArray("contents")) {
+            JsonObject document = value.getAsJsonObject(); String text = document.get("text").getAsString();
+            if (text.length() <= ResponseArchive.INLINE_CHARS) continue;
+            JsonObject body = new JsonObject(); body.add("source_uri", document.get("uri"));
+            body.add("source_mime_type", document.get("mimeType")); body.addProperty("text", text);
+            if (document.get("mimeType").getAsString().contains("json")) {
+                try { body.add("json", JsonParser.parseString(text)); }
+                catch (RuntimeException invalid) { /* 非标准资料仍可逐字找回，不把解析失败当成空文档。 */ }
+            }
+            document.addProperty("mimeType", "application/json");
+            document.addProperty("text", responseArchive.present(body).toString());
+        }
+        return result;
     }
 
     private JsonObject unsubscribeResource(Session session, JsonObject params) {
@@ -775,9 +806,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
     }
 
-    private static JsonObject toolResult(JsonElement value, boolean isError) {
+    private JsonObject toolResult(JsonElement value, boolean isError) {
         // 角色状态和任务回执只发送一份 JSON 文本，旧版 MCP 客户端也能读取；避免宿主把两份相同证据都放进上下文。
-        JsonElement payload = nonNull(value);
+        JsonElement payload = responseArchive.present(nonNull(value));
         String text = GSON.toJson(payload);
         JsonObject contentItem = new JsonObject();
         contentItem.addProperty("type", "text");
@@ -791,12 +822,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         return result;
     }
 
-    private static JsonObject toolError(
+    private JsonObject toolError(
             String code, String message, boolean retryable, boolean outcomeKnown, String requestKey) {
         return toolError(code, message, retryable, outcomeKnown, requestKey, null);
     }
 
-    private static JsonObject toolError(
+    private JsonObject toolError(
             String code, String message, boolean retryable, boolean outcomeKnown,
             String requestKey, JsonObject details) {
         // 分清“能否重试”和“知不知道上次结果”；结果不明时优先建议按 request_key 查原任务。
@@ -839,7 +870,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         return toolResult(payload, true);
     }
 
-    private static JsonObject semanticContractError(
+    private JsonObject semanticContractError(
             SemanticContractException violation, String requestKey, JsonObject diagnostics) {
         JsonObject details = diagnostics == null ? new JsonObject() : diagnostics.deepCopy();
         details.addProperty("violation", violation.violationCode());

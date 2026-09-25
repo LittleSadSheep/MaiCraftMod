@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.mcp;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
@@ -32,6 +33,17 @@ public final class AttentionHttpTest {
             URI uri = URI.create("http://127.0.0.1:" + service.port() + "/mcp");
             var init = client.send(post(uri, null, 1, "initialize", new JsonObject()), HttpResponse.BodyHandlers.ofString());
             String session = init.headers().firstValue("MCP-Session-Id").orElseThrow();
+            // 大回执经真实 HTTP 归档；读取详情只能访问已冻结的输出，不能再次委派一次执行。
+            var start = json(client.send(post(uri, session, 90, "tools/call", json("{\"name\":\"execute\",\"arguments\":{\"goal\":{\"ability\":\"maicraft:travel\",\"outcome\":\"test accepted receipt\"}}}")),
+                    HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject("result");
+            JsonObject accepted = json(start.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+            check(accepted.get("accepted").getAsBoolean() && start.toString().length() < 8500, "large accepted receipt stays bounded");
+            String detailUri = accepted.getAsJsonObject("observation").get("resource_uri").getAsString();
+            JsonObject detailCall = json("{\"name\":\"perceive\",\"arguments\":{}}"); detailCall.getAsJsonObject("arguments").addProperty("resource_uri", detailUri);
+            var detailResult = json(client.send(post(uri, session, 91, "tools/call", detailCall), HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject("result");
+            var detailPage = json(detailResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+            check(detailPage.get("snapshot_only").getAsBoolean() && detailPage.has("next_uri") && runtime.executions == 1,
+                    "perceive receipt pages never execute or re-observe the world");
             String instructions = json(init.body()).getAsJsonObject("result").get("instructions").getAsString();
             check(instructions.contains("Attention is the primary") && instructions.contains("next_attention")
                             && instructions.contains("maicraft://chatflow"),
@@ -150,6 +162,7 @@ public final class AttentionHttpTest {
         final CopyOnWriteArrayList<Consumer<JsonElement>> chatListeners = new CopyOnWriteArrayList<>();
         final LinkedBlockingQueue<AttentionWait> waits = new LinkedBlockingQueue<>();
         volatile String reason = "idle";
+        int executions;
 
         private JsonObject snapshot() {
             JsonObject result = new JsonObject(); result.addProperty("wake_reason", reason); return result;
@@ -173,7 +186,12 @@ public final class AttentionHttpTest {
             chatListeners.add(listener); return () -> chatListeners.remove(listener);
         }
         public CompletionStage<JsonElement> plan(JsonObject args) { throw new AssertionError("no planning"); }
-        public CompletionStage<JsonElement> execute(JsonObject args) { throw new AssertionError("no execution"); }
+        public CompletionStage<JsonElement> execute(JsonObject args) {
+            executions++; JsonObject result = new JsonObject(); result.addProperty("accepted", true);
+            result.addProperty("task_id", "fixture-accepted"); var rows = new JsonArray();
+            for (int i = 0; i < 800; i++) rows.add("observed-cell-" + i);
+            result.add("observation", rows); return CompletableFuture.completedFuture(result);
+        }
         public CompletionStage<JsonElement> task(JsonObject args) { throw new AssertionError("no task polling"); }
     }
 

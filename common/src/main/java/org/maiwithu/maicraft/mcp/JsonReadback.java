@@ -67,6 +67,7 @@ final class JsonReadback {
     static JsonElement preview(JsonElement value, String path, int budget, Function<String, String> uri) {
         if (size(value, budget) <= budget) return value.deepCopy();
         JsonObject reference = reference(value, path);
+        reference.addProperty("omitted", true);
         if (uri != null) reference.addProperty("resource_uri", uri.apply(path));
         // 证据过大时只带直接状态事实，完整数据仍由原任务或资源提供；不抽取任意前几行冒充代表性样本。
         if (value.isJsonObject()) {

@@ -34,6 +34,7 @@ final class ResponseArchive implements AutoCloseable {
     private final LongSupplier clock;
     private Path directory;
     private long bytes;
+    private boolean closed;
     private record Entry(Path file, long bytes, long usedAt) {}
 
     ResponseArchive() { this(32, 64L << 20, System::currentTimeMillis); }
@@ -43,7 +44,7 @@ final class ResponseArchive implements AutoCloseable {
     }
 
     synchronized JsonElement present(JsonElement value) {
-        if (JsonReadback.fits(value, INLINE_CHARS)) return value;
+        if (closed || JsonReadback.fits(value, INLINE_CHARS)) return value;
         try {
             String uri = retain(value); JsonObject result = new JsonObject();
             // 接单编号、当前状态、问题和下一次等待参数都优先留在外层；大几何、配方与教材改为可读取的引用。
@@ -60,6 +61,7 @@ final class ResponseArchive implements AutoCloseable {
                 result = smaller;
             }
             result.addProperty("details_uri", uri); result.addProperty("details_temporary", true);
+            result.addProperty("partial", true);
             return result;
         } catch (IOException failure) {
             // 暂存失败不能把已接单或已完成的游戏动作报成失败；保留原始回执，让宿主仍能取得确定结果。
@@ -128,8 +130,11 @@ final class ResponseArchive implements AutoCloseable {
         return uri + "?path=" + URLEncoder.encode(path, StandardCharsets.UTF_8) + "&offset=" + offset + "&limit=" + limit;
     }
 
+    synchronized void reopen() { closed = false; }
+
     @Override public synchronized void close() {
         // 只清理本服务创建的临时文件；游戏任务和世界检查点不属于回执缓存。
+        closed = true;
         for (String id : entries.keySet().toArray(String[]::new)) remove(id);
         if (directory != null) try { Files.deleteIfExists(directory); directory = null; }
         catch (IOException failure) { Constants.LOG.warn("[maicraft-mcp] Could not remove receipt directory", failure); }
