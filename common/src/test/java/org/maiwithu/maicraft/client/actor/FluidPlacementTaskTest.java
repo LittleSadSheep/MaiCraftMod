@@ -36,7 +36,24 @@ public final class FluidPlacementTaskTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         originalBucketAndAcknowledgement(); reuseAndFailures(); openFlowChannels(); cancellationDoesNotPourAgain();
         replayOffsetStance(); arrivedStanceCannotWaitForever();
+        newlyUsableFootingReplacesStaleNavigation();
         System.out.println("FluidPlacementTaskTest: passed");
+    }
+
+    private static void newlyUsableFootingReplacesStaleNavigation() throws Exception {
+        try (var f = fixture()) {
+            // 上次站位被拒绝后，角色已来到能点到源格的新位置；不应仍强求到达旧的高处候选格。
+            f.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET)); installUse(f);
+            var running = new FluidPlacementTask(f.player, task()); running.start(f.player);
+            ActorControlTestHarness.field(FluidPlacementTask.class, "relocate").setBoolean(running, true);
+            ActorControlTestHarness.field(FluidPlacementTask.class, "stance").set(running, new BlockPos(10, 8, 10));
+            submit(f, running);
+            check(f.itemUses() == 1 && ((Number) running.progress().get("stance_attempts")).intValue() == 0,
+                    "实际眼位可倒桶时直接提交原生动作，不再围绕旧候选寻路");
+            f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS, "新脚位仍经过完整源格与桶账核验");
+            running.result(TaskState.SUCCESS);
+        }
     }
 
     private static void originalBucketAndAcknowledgement() throws Exception {

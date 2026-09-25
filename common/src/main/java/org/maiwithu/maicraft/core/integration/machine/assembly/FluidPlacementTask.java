@@ -33,6 +33,7 @@ import java.util.Locale;
 
 /** 拿真实满桶 -> 在已有结构内找可达站位 -> 等视线同步 -> 只倒一次 -> 核对服务器源格与桶账。 */
 public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlacementTaskRecord> {
+    private static final int STANCE_STALL_TICKS = 100, MAX_STANCE_ATTEMPTS = 32;
     private final Level world;
     private final FirstPersonActionGate selection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
@@ -43,6 +44,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     private Vec3 aim;
     private int aimTicks;
     private int stanceAttempts;
+    private int navigationTicks;
+    private String lastStanceRejection = "";
     private long waitingSince;
     private String stage = "preflight";
     private boolean actualRayAvailable, bodyOverTarget, actionAvailable;
@@ -86,7 +89,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (player.containerMenu != player.inventoryMenu || context.minecraft().screen != null) return failure("fluid_menu_busy");
         BlockHitResult visible = visibleFrom(player.getEyePosition());
         actualRayAvailable = visible != null; bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
-        if (relocate || visible == null || bodyOverTarget) return approach();
+        // 沿路已走到另一个能实际倒桶的脚位就直接使用；旧候选格不可达时，不应继续绕路去满足旧导航终点。
+        boolean currentRejected = relocate && rejected.contains(PlayerNav.playerFeet(player).asLong());
+        if (currentRejected || visible == null || bodyOverTarget) return approach();
+        relocate = false;
         stopNav(); aim = visible.getLocation(); InputDriver.halt(player); InputDriver.lookAt(player, aim);
         // 只把真正等待转头的刻数记入瞄准超时；动作端口忙时不应反复丢弃已经正确的站位。
         if (!aimGate.ready(player, aim.subtract(player.getEyePosition()))) {
@@ -118,10 +124,12 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         return NavigationSafetyContext.withProtectedArea(r.installation, List.of(r.target), () -> {
             waiting("approaching_stance");
             if (stance == null) {
+                if (stanceAttempts >= MAX_STANCE_ATTEMPTS) return failure("fluid_stance_budget_exhausted");
                 stance = AssemblyInteractionGeometry.nearestStand(player, r.target, rejected, eye -> {
                     var hit = visibleFrom(eye); return hit == null ? null : hit.getLocation();
                 }, Pose.STANDING);
                 stanceAttempts++;
+                navigationTicks = 0;
             }
             if (stance == null) return failure("fluid_target_has_no_native_bucket_stance");
             // 路线只负责抵达格子，不会保证站在中心小数坐标；实际眼位点不到时换格，不能在已到达的格里永远寻路。
@@ -130,8 +138,14 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
                     this::atStance,
                     PlayerNav.ContextProvider.DEFAULT);
             var status = nav.tick();
-            if (status == PlayerNav.Status.FAILED) rejectStand();
+            navigationTicks++;
+            if (status == PlayerNav.Status.FAILED) rejectStand("navigation_failed:" + nav.failReason());
             else if (status == PlayerNav.Status.ARRIVED) return settleStance();
+            else if (navigationTicks >= STANCE_STALL_TICKS && !nav.hasRecentPhysicalProgress(STANCE_STALL_TICKS)
+                    && nav.isSafeToCancel()) {
+                // 几何上站得下不代表能从平台走上去；身体五秒没有推进时安全结束这条路线，再试另一个候选。
+                rejectStand("stance_without_physical_progress");
+            }
             return TaskState.RUNNING;
         });
     }
@@ -144,6 +158,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         return TaskState.RUNNING;
     }
     private void rejectStand() {
+        rejectStand("native_bucket_ray_unavailable");
+    }
+    private void rejectStand(String reason) {
+        lastStanceRejection = reason;
         rejected.add(PlayerNav.playerFeet(player).asLong()); if (stance != null) rejected.add(stance.asLong());
         stance = null; relocate = true; aimTicks = 0; aimGate.reset(); stopNav();
         waiting("reselecting_stance");
@@ -162,7 +180,12 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
             return failure("fluid_placement_not_confirmed_no_retry");
         verified = true; waiting("complete"); return TaskState.SUCCESS;
     }
-    private TaskState failure(String code) { failureCode = code; fail(code, FailureType.UNSUPPORTED); return TaskState.FAILED; }
+    private TaskState failure(String code) {
+        failureCode = code;
+        fail(code, code.startsWith("fluid_stance_") || code.equals("fluid_target_has_no_native_bucket_stance")
+                ? FailureType.NO_PATH : FailureType.UNSUPPORTED);
+        return TaskState.FAILED;
+    }
     private void waiting(String next) { if (!stage.equals(next)) { stage = next; waitingSince = world.getGameTime(); } }
 
     @Override protected void cleanup() {
@@ -192,6 +215,12 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         data.put("native_action_available",actionAvailable); data.put("aim_wait_ticks",aimTicks);
         data.put("stance_attempts",stanceAttempts); data.put("rejected_stances",rejected.size());
         data.put("navigation_active",nav!=null); data.put("in_selected_stance_cell",atStance());
+        // 让模型看到这次候选导航为何结束，以及是否只是在原地计算路线；这些事实不会授权重复倒桶。
+        data.put("navigation_ticks", navigationTicks); data.put("last_stance_rejection", lastStanceRejection);
+        if (nav != null) {
+            data.put("navigation_stall_ticks", nav.stallTicks());
+            data.put("navigation_physical_progress_recent", nav.hasRecentPhysicalProgress(STANCE_STALL_TICKS));
+        }
         data.put("native_reach",player.blockInteractionRange());
         if (aim!=null) {
             Vec3 direction=aim.subtract(player.getEyePosition()); data.put("aim_distance",direction.length());
