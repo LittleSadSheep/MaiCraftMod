@@ -102,6 +102,8 @@ final class TaskView {
             if (raw.has(key)) result.add(key, JsonReadback.preview(raw.get(key), path + "/" + key, 600));
         if (!raw.has("data") || !raw.get("data").isJsonObject()) return result;
         JsonObject data = raw.getAsJsonObject("data").deepCopy();
+        // 机器大蓝图被折叠时仍直接携带施工恢复事实，读取失败位置不必逐层穿过蓝图和批次归档。
+        if (data.has("construction_progress")) result.add("construction_progress", data.get("construction_progress").deepCopy());
         // 汇总账本不复印每个已完成步骤的全部结果；保留数量和定位路径，供恢复时核对实际发生的效果。
         for (String key : List.of("steps", "completed_effects", "remaining_effects", "skipped_steps")) {
             if (data.has(key) && data.get(key).isJsonArray()) {

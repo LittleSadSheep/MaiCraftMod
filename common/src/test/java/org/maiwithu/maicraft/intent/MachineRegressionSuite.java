@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBeltRoutesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementDependenciesTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDiffTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineCompletionArchiveTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineBuildEvidenceTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineWorldBlueprintTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignRejectionTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineNativeInstallationTest;
@@ -143,6 +144,7 @@ public final class MachineRegressionSuite {
         // 地图差异是只读现场事实，不能因未加载或只读了一页就宣称整机匹配蓝图。
         try { MachineBlueprintDiffTest.main(args); }
         catch (Exception failure) { throw new AssertionError("machine blueprint comparison", failure); }
+        MachineBuildEvidenceTest.main(args);
         try { MachineCompletionArchiveTest.main(args); }
         catch (Exception failure) { throw new AssertionError("automatic machine archive", failure); }
         try { MachineWorldBlueprintTest.main(args); }

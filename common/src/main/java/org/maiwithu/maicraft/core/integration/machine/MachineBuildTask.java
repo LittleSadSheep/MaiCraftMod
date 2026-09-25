@@ -472,6 +472,9 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             data.put("next_phase","connect_external_input_then_run_production");
         }
         data.put("commissioning", commissioning); data.put("installed_parts", partIndex);
+        // 附加部件与方块准备分别计数，失败时直接给出缺失格及原生站位结论，供模型继续原项目。
+        data.put("installed_parts_scope", "addon parts only; excludes blocks, belts and attachment layers");
+        if (!lastChild.isEmpty()) data.put("construction_progress", MachineBuildEvidence.summarize(phase.name().toLowerCase(Locale.ROOT), lastChild));
         data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         data.put("initialized_containers", contentsIndex);
         data.put("configured_output_filters", filterIndex);
