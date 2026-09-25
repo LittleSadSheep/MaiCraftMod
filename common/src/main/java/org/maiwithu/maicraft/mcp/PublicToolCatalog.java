@@ -149,6 +149,8 @@ final class PublicToolCatalog {
                                 "action":{"type":"string","enum":["get","list","pause","resume","cancel","answer"]},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
                                  "request_key":{"type":["string","null"],"minLength":1,"maxLength":128,"description":"With action=list, look up the task accepted for an execute request key after an uncertain transport outcome."},
+                                 "path":{"type":"string","maxLength":1024,"description":"get only: JSON Pointer into retained task evidence. Empty string lists fields. Omit for current status. Follow detail_path; history pages never repeat game actions."},
+                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"list or get+path: copy next_offset for the next page."},
                                  "answer":{
                                   "anyOf":[
                                     {"type":"null"},
@@ -170,7 +172,7 @@ final class PublicToolCatalog {
                                     }
                                   ]
                                 },
-                                "limit":{"type":"integer","minimum":1,"maximum":50,"default":20},
+                                "limit":{"type":"integer","minimum":1,"maximum":50,"default":5},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "required":["action"], "additionalProperties":false
@@ -309,8 +311,8 @@ final class PublicToolCatalog {
 
     private static void validateTask(JsonObject value) {
         // list 无需任务编号；控制单项任务必须有编号；answer 还要说明正在回答哪个问题、选哪一项。
-        only(value, "action", "task_id", "request_key", "answer", "limit", "server_id");
-        defaults(value, "limit", 20, "server_id", "minecraft-server");
+        only(value, "action", "task_id", "request_key", "answer", "limit", "offset", "path", "server_id");
+        defaults(value, "limit", 5, "offset", 0, "server_id", "minecraft-server");
         String action = string(value, "action", 1, 16, false);
         if (!TASK_ACTIONS.contains(action)) throw bad("action has an unsupported value");
         integer(value, "limit", 1, 50);
@@ -318,8 +320,18 @@ final class PublicToolCatalog {
         boolean hasTask = present(value, "task_id");
         boolean hasRequestKey = present(value, "request_key");
         boolean hasAnswer = present(value, "answer");
+        // 读取历史只允许 get 指定路径；暂停、重试等控制请求不能夹带会被忽略的分页参数。
+        integer(value, "offset", 0, Integer.MAX_VALUE);
+        boolean hasPath = present(value, "path");
+        if (hasPath) {
+            String path = string(value, "path", 0, 1024, false);
+            if (!action.equals("get") || !path.isEmpty() && !path.startsWith("/")) throw bad("path requires get and a JSON Pointer");
+        }
+        if (value.get("offset").getAsInt() != 0 && !action.equals("list") && !(action.equals("get") && hasPath))
+            throw bad("offset requires list or get with path");
         if ("list".equals(action)) {
             if (hasTask || hasAnswer) throw bad("list does not accept task_id or answer");
+            if (hasRequestKey && value.get("offset").getAsInt() != 0) throw bad("request_key lookup has no offset");
             nullableString(value, "request_key", 1, 128);
             return;
         }

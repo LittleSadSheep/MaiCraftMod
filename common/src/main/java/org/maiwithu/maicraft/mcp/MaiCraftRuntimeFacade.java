@@ -286,7 +286,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             case "tasks" -> {
                 String rawTaskId = nullableString(arguments, "task_id");
                 if (rawTaskId != null) {
-                    yield taskSnapshot(requireTask(UUID.fromString(rawTaskId)));
+                    yield TaskView.status(requireTask(UUID.fromString(rawTaskId)));
                 }
                 JsonArray tasks = new JsonArray();
                 for (IntentTaskRecord record : intents.tasks(arguments.get("limit").getAsInt())) {
@@ -319,11 +319,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             String requestKey = nullableString(arguments, "request_key");
             if (requestKey != null) {
                 IntentTaskRecord record = intents.taskForRequestKey(requestKey);
-                if (record != null) tasks.add(taskSnapshot(record));
+                if (record != null) tasks.add(TaskView.status(record));
             } else {
-                for (IntentTaskRecord record : intents.tasks(arguments.get("limit").getAsInt())) {
-                    tasks.add(taskSnapshot(record));
-                }
+                // 列表只提供任务身份与当前进度，完整证据由 get+path 分页读取。
+                return TaskView.list(intents.tasks(256), arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
             }
             JsonObject result = new JsonObject();
             if (requestKey != null) result.addProperty("request_key", requestKey);
@@ -413,7 +412,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             default -> throw new IllegalArgumentException("unknown task action: " + action);
         }
-        JsonObject result = taskSnapshot(record);
+        JsonObject result = TaskView.read(record, arguments);
         result.add("next_attention", AttentionSnapshot.continuation(
                 intents.attentionCheckpoint(), record.externalId().toString()));
         return result;
