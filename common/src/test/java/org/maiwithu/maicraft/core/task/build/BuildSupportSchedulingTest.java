@@ -26,10 +26,17 @@ public final class BuildSupportSchedulingTest {
     private static final BlockPos TARGET = new BlockPos(8, 1, 6), SUPPORT = TARGET.west();
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        landedBodyProducesOneFreshProof();
-        onlyBodyInvalidationMayReprove(false);
-        onlyBodyInvalidationMayReprove(true);
-        selectingASupportRetainsItsPrerequisite();
+        // 刚走下台阶也先安排真实的下一块支撑；身体移动与放置由普通施工动作处理，不额外等整链证明。
+        try (var h = world()) {
+            Vec3 before = h.player.position(), velocity = h.player.getDeltaMovement();
+            var task = prepared(h);
+            check(field("phase").get(task).toString().equals("SELECT")
+                            && ((Map<?, ?>) field("temporaryTargets").get(task)).size() == 1,
+                    "support preparation immediately queues ordinary placement");
+            check(h.player.position().equals(before) && h.player.getDeltaMovement().equals(velocity)
+                            && h.blockUses() == 0 && h.itemUses() == 0,
+                    "queueing neither teleports the body nor claims an unperformed placement");
+        }
         System.out.println("BuildSupportSchedulingTest: passed");
     }
     private static void landedBodyProducesOneFreshProof() throws Exception {

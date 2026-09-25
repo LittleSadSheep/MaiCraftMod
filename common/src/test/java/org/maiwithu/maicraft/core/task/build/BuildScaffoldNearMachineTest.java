@@ -51,10 +51,7 @@ public final class BuildScaffoldNearMachineTest {
             field("cell").set(task, cell); field("queue").set(task, new ArrayList<>(List.of(cell)));
             check(invoke(task, "prepareTemporarySupports") == TaskState.RUNNING, "the builder prepares a support chain");
             check(field("supportChain").get(task).equals(List.of(support)), "the nearest support remains usable beside the intake");
-            for (int i = 0; i < 4096 && field("phase").get(task).toString().equals("SUPPORT_VERIFY"); i++) {
-                h.nextTick();
-                check(invoke(task, "supportVerifyTick") == TaskState.RUNNING, "support preparation reaches placement without a debris veto");
-            }
+            // 准备好材料和垫块顺序后立即进入普通施工，不再等待整链站位证明。
             check(field("phase").get(task).toString().equals("SELECT")
                             && ((List<?>) field("queue").get(task)).size() == 2,
                     "the builder queues the support before the original target");

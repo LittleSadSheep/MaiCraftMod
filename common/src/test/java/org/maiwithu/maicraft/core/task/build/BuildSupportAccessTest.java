@@ -28,9 +28,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 public final class BuildSupportAccessTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        rejectsSealedTargetWithoutEnqueueing();
         acceptsUsefulSupportAndInvalidatesChanges();
-        rechecksBeforeUsingTheSupportItem();
         rejectsVisibleButUnreachableStance();
         existingStepsRemainWalkable();
         projectedPredictionKeepsNativeDestinations();
@@ -198,7 +196,6 @@ public final class BuildSupportAccessTest {
             Object original = ctor.newInstance(target, List.of());
             field("cell").set(task, original); field("queue").set(task, new ArrayList<>(List.of(original)));
             invoke(task, "prepareTemporarySupports");
-            finishTaskSupport(h, task);
             h.set(target.pos().below(), Blocks.DIRT.defaultBlockState());
             h.set(target.pos(), target.desiredState());
             invoke(task, "selectTick");

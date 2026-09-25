@@ -76,10 +76,10 @@ public final class BuildSharedWorksiteTest {
             field(task,"worksitePass").setInt(task,2);field(task,"worksiteAttempts").setInt(task,4);
             var advance=FirstPersonBuildCompanionTask.class.getDeclaredMethod("nextWorksitePass",String.class);advance.setAccessible(true);
             Object state=advance.invoke(task,"bounded shared routes exhausted");
-            // 当前身体离浮空工程较远，支撑回退先到施工区域；之后仍须经过独立的完整放置证明。
-            check(state==TaskState.RUNNING&&field(task,"phase").get(task).toString().equals("SUPPORT_APPROACH"),
-                    "four failed route attempts retain the support fallback, beginning with its remote approach");
-            check(h.blockUses()==0&&h.itemUses()==0,"support fallback must be proved before placing anything");
+            // 共享站位用完后，支撑直接交给普通施工队列逐块接近并放置，不再额外证明全程通路。
+            check(state==TaskState.RUNNING&&field(task,"phase").get(task).toString().equals("SELECT"),
+                    "four failed route attempts enqueue the support fallback for ordinary placement");
+            check(h.blockUses()==0&&h.itemUses()==0,"queueing a support must not claim an actual placement");
         }
     }
     private static BuildWorksitePlanner.Progress finish(BuildWorksitePlanner.Search search) {

@@ -917,10 +917,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (placementAccess == null && nav == null) {
             var known = supportAccess == null ? null : isTemporary(cell) ? supportAccess.placementFor(cell.target().pos())
                     : cell == supportedCell ? supportAccess.targetPlacement() : null;
-            if (isTemporary(cell) && known == null) {
-                failAt(cell.target().pos(), "No reachable placement prerequisite was retained for this support", FailureType.NO_PATH,
-                        "support_step_witness_missing", false); return TaskState.FAILED;
-            }
             // 同层楼梯也可先登上已建台阶再贴边续放；这里只筛近处，最终脚位、碰撞与原生朝向仍由实际搜索证明。
             boolean edgeCandidate = !BuildCellRules.isAirTarget(cell.target()) && Math.abs(player.getY() - cell.target().pos().getY()) <= 3
                     && cell.target().pos().distToCenterSqr(player.position()) <= 144
@@ -1322,11 +1318,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (placementAccess != null && placementAccess.edgeActive()
                 && placementAccess.hold() == BuildPlacementAccessDrive.Status.FAILED)
             return failAfterEdgeReturn(placementAccess.failure(), "placement_edge_hold_failed");
-        if (isTemporary(cell) && supportedCell != null && !supportStepApproved) {
-            List<BlockPos> remaining = queue.subList(queueAt, queue.size()).stream().filter(this::isTemporary)
-                    .map(plan -> plan.target().pos()).toList();
-            beginSupportVerification(remaining, false); return TaskState.RUNNING;
-        }
         if (!player.getMainHandItem().is(cell.target().item())) {
             selection.reset(); phase = Phase.SELECT_ITEM; return TaskState.RUNNING;
         }
@@ -1374,10 +1365,6 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         LocalPlayerContext ctx = ClientRuntime.requireContext(player);
         if (isTemporary(cell) && !scaffoldPermitted(cell.target().pos(), null))
             return failAfterEdgeReturn("The next support position changed before the native click", "support_step_site_changed");
-        if (isTemporary(cell) && supportedCell != null && (supportAccess == null || !supportAccess.environmentCurrent())) {
-            supportStepApproved = false;
-            phase = Phase.AIM; return TaskState.RUNNING;
-        }
         aimWaitReason = "placement_submitted";
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
                 confirmation(cell, frozen, placedPrimary), USE_TIMEOUT);
@@ -1692,14 +1679,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         supportedCell = cell; supportChain = chain;
         supportMaterial = ((BlockItem) material).getBlock().defaultBlockState();
-        // 上一楼层或清障高台不是下一段楼梯的局部起点；先用原施工导航回到目标附近，之后才证明各块支撑。
-        if (cell.target().pos().distToCenterSqr(player.position()) > 36
-                || Math.abs(cell.target().pos().getY() - player.getY()) > 3) {
-            stopNav(); worksiteMovement.reset(); supportApproachDeadline=player.level().getGameTime()+600;
-            phase=Phase.SUPPORT_APPROACH; return TaskState.RUNNING;
-        }
-        beginSupportVerification(chain, true);
-        return TaskState.RUNNING;
+        // 垫块 -> 原目标逐块执行；每块沿用普通导航和右键，不预先证明整条支撑放完后还能走到哪里。
+        stopNav();
+        return enqueueSupports();
     }
 
     private TaskState supportApproachTick() {
@@ -1785,6 +1767,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         supportWitness = supportAccess.witness();
         if (!supportProposal) { supportStepApproved = true; phase = Phase.AIM; return TaskState.RUNNING; }
+        return enqueueSupports();
+    }
+
+    // 从接地端开始把支撑排进普通施工队列，实际放置成功后才记账，再继续原来的目标。
+    private TaskState enqueueSupports() {
         List<CellPlan> prepared = new ArrayList<>();
         for (BlockPos pos : supportChain) {
             var target = new BuildTaskRecord.Target(supportMaterial, supportMaterial.getBlock().asItem(),
@@ -1796,7 +1783,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         for (int i = queueAt + 1; i < queue.size(); i++) prepared.add(queue.get(i));
         queue = prepared; queueAt = 0; phase = Phase.SELECT;
         worksite = null; worksiteSearch = null; worksiteProgress = null;
-        note = "placing " + supportChain.size() + " supports with verified final access";
+        note = "placing " + supportChain.size() + " supports before the original target";
         return TaskState.RUNNING;
     }
 

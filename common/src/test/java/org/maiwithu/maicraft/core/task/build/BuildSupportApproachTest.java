@@ -15,7 +15,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 不同楼层先回施工点，再证明局部支撑；阶段交接不能提前发方块或声称通路已经完成。 */
+/** 远处支撑直接进入逐块施工，由普通导航接近每一格，不另加回到指定楼层的前置阶段。 */
 public final class BuildSupportApproachTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();Bootstrap.bootStrap();
@@ -27,16 +27,11 @@ public final class BuildSupportApproachTest {
             var type=Class.forName(FirstPersonBuildCompanionTask.class.getName()+"$CellPlan");
             var constructor=type.getDeclaredConstructor(BuildTaskRecord.Target.class,List.class);constructor.setAccessible(true);
             Object cell=constructor.newInstance(target,List.of());field("cell").set(task,cell);field("queue").set(task,new ArrayList<>(List.of(cell)));
-            check(invoke(task,"prepareTemporarySupports")==TaskState.RUNNING && field("phase").get(task).toString().equals("SUPPORT_APPROACH"),
-                    "远处的下一段工程先进入通行准备，不从原站位误报局部支撑无路");
-            check(field("supportAccess").get(task)==null && ((Map<?,?>)field("temporaryTargets").get(task)).isEmpty(),
-                    "通行尚未确认时不生成可执行支撑格或放置证明");
-            // 只注入已经到达附近实地的观察，检验真实状态机交接；这不是导航实机证据。
-            h.position(new Vec3(10.5,1,7.5));h.nextTick();
-            check(invoke(task,"supportApproachTick")==TaskState.RUNNING && field("phase").get(task).toString().equals("SUPPORT_VERIFY"),
-                    "实际到达后才从新身体位置开始完整支撑验证");
-            check(field("supportAccess").get(task)==null && h.inventory.getItem(0).getCount()==16 && h.blockUses()==0 && h.itemUses()==0,
-                    "换区域和启动证明本身不消耗支撑材料或发送放置");
+            check(invoke(task,"prepareTemporarySupports")==TaskState.RUNNING && field("phase").get(task).toString().equals("SELECT"),
+                    "远处支撑直接进入普通逐块施工，不先证明全程通路");
+            check(!((Map<?,?>)field("temporaryTargets").get(task)).isEmpty()
+                            && h.inventory.getItem(0).getCount()==16 && h.blockUses()==0 && h.itemUses()==0,
+                    "排入队列尚未消耗材料，成功数量仍必须来自实际动作");
         }
         System.out.println("BuildSupportApproachTest: passed");
     }
