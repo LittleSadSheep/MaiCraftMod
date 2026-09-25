@@ -325,24 +325,22 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.addProperty("protocolVersion", negotiated);
         result.add("capabilities", capabilities);
         result.add("serverInfo", serverInfo);
+        // 先给模型完整的施工短流程；材料、寻路与放置由 Mod 接手，按需资料不再成为开工前的固定关卡。
         result.addProperty("instructions",
-                "Use perceive to understand the current situation, plan to compile a goal, " +
-                "execute to start it, and task to inspect or control the returned task. " +
-                "Attention is the primary execution monitor. After execute or a task control action, pass " +
-                "next_attention to perceive and continue using the response's next_attention. It includes " +
-                "authoritative task state, decisions and terminal results; routine task/get polling is unnecessary. " +
-                "Timeout only ends a wait; continue quietly while running. Handle decisions, pauses and " +
-                "runtime/task unavailability rather than waiting forever. Inspect resync_required and current " +
-                "task state after lost history or a stream reset. Hosts may subscribe to maicraft://attention " +
-                "(task monitor) and maicraft://chatflow (received game chat for a dedicated companion agent) " +
-                "and read them on updates; notifications themselves do not run the model. " +
-                "For block behavior and Ponder tutorials, start with maicraft://knowledge/index. " +
-                // 主 Agent 可经既有工具读任务书，完成相关行动后再核实队伍进度，不要求宿主新增 FTB 连接。
-                "For FTB Quests, read maicraft://knowledge/ftbquests/index for filtered quest lists, then returned chapter, quest and reward URIs for visible conditions, rewards and current player/team progress. " +
-                "For building design formats and validation revisions, read maicraft://building/index. " +
-                "Discover metadata using resources/list or perceive(view=knowledge, focus=item ID/name), " +
-                "then read one returned URI using resources/read or perceive(view=knowledge, resource_uri=...). " +
-                "Reference knowledge is not an execution capability or a live-world observation.");
+                "Construction workflow: perceive(view=construction_site), author a blueprint, plan build_machine " +
+                "with the returned target and snapshot_id, then execute the plan_id. MaiCraft supplies materials " +
+                "and performs native construction. inspect_machine and design_machine are optional for this workflow. " +
+                "Reuse an unchanged site receipt; refresh observations only for a concrete site diagnostic. " +
+                "Read maicraft://knowledge/machine_assembly when machine blueprint details are needed; " +
+                "maicraft://building/index is for building scene modelling. " +
+                "Attention is the primary execution monitor. After execute or task control, pass next_attention " +
+                "to perceive and continue with its next_attention. " +
+                "A wait timeout does not stop the task; handle decisions, pauses, unavailability and resync_required. " +
+                "Use task get/list for inspection or recovery. Subscriptions: maicraft://attention for tasks, " +
+                "maicraft://chatflow for game chat. " +
+                "Discover optional reference material with perceive(view=knowledge,query=keywords) or " +
+                "maicraft://knowledge/index, then read the selected resource_uri. FTB Quests start at " +
+                "maicraft://knowledge/ftbquests/index. Reference text is not live evidence or action authorization.");
         sendJson(exchange, 200, success(id, result), session);
     }
 

@@ -306,9 +306,16 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 `design_machine` 和 `build_machine` 的参数中，在 `design`（旧组件图）、`blueprint`（上述对象）、`blueprint_uri`（返回的 Ponder 结构 URI）中选择且仅选择一个。资源 URI 必须先由 Ponder 回放资源生成；过期时重新读取场景提取。
 
-纯结构 `design_machine` 同时省略 `target` 和 `snapshot_id`。针对实地时先 `inspect_machine`，再同时提供勘察编号与对应的 `landmark` / `area` 标签，不在命名目标里夹带坐标。校验失败先按 `design_diagnostics` 或 `validation.issues` 修改原图并重新审阅；改变请求时使用新的 `request_key`，保留目标产物和禁用模组。相同拒绝反复出现时应换方案或报告明确缺口，不靠无关观察轮询推进。
+新建机器使用四步流程：
 
-`build_machine` 继续使用 `inspect_machine` 返回的 `snapshot_id`、对应语义 `target`、`allow_modify: true`、材料策略与保护标签。Dev 模式会显示完整预览。范围使用可配置的机器规划预算，不沿用旧蓝图的 512 格与 8 格半径限制。
+1. `perceive(view="construction_site")` 勘测场地；`label` 可选，返回地形、已观察范围、`target` 与 `snapshot_id`。
+2. 按地形和玩家要求生成蓝图，偏移相对于返回的 `anchor`。需要具体格式或组件规则时，按需读取 `maicraft://knowledge/machine_assembly` 与相关组件页。
+3. 调用 `plan`，设置 `goal.ability="maicraft:build_machine"`、文字 `goal.outcome`，原样使用场地返回的 `goal.target`，在 `goal.parameters` 中填写 `snapshot_id`、`blueprint` 和已获施工授权对应的 `allow_modify: true`。
+4. `ready_to_execute=true` 后将 `plan_id` 交给 `execute`；Mod 负责备料、寻路、放置和施工核验。用返回的 `next_attention` 跟踪结果。
+
+同一会话内场地未变化就继续复用观察；参数填错只修改参数，蓝图报错只按诊断改图并重新 `plan`。只有明确的场地诊断或会话变化才重新勘测。修改执行请求时使用新的 `request_key`；这个字段属于 `execute`，不属于 `plan`。
+
+`inspect_machine` 用于已有机器的深入观察，`design_machine` 是可选的独立审阅，两者都不是新建机器的前置步骤。纯结构审阅同时省略 `target` 和 `snapshot_id`；可选现场审阅则成对提供同一份当前观察的编号和目标。建造所需的材料与运行时条件由 Mod 在执行中检查，无需先调查全部库存。Dev 模式会显示完整预览；蓝图范围使用可配置的机器规划预算，场地的已观察范围不代表整个蓝图的尺寸上限。
 
 `modify_machine` 使用 `operation: "apply_blueprint"`，提供 `blueprint` 或 `blueprint_uri`，以及同样的现场与替换参数。修改是稀疏目标补丁：只声明要改变或确保存在的格子，删除必须写空气；不会清空整个包围盒。
 

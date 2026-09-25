@@ -6,14 +6,14 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
 
-/** 纯结构审阅无需场地；指向实际场地时必须同时绑定最新勘察编号和同名目标。 */
+/** 纯结构审阅无需场地；可选现场审阅成对携带观察编号和目标，正常施工直接使用场地感知与 plan。 */
 public final class MachineDesignBindings {
     public static final List<String> TARGET_KINDS = List.of("landmark", "area");
     private MachineDesignBindings() {}
     public static void validate(Goal goal) {
         if (!goal.ability().equals(MachineAbilityAdapter.DESIGN)) return;
         JsonObject parameters = goal.parameters(); boolean snapshot = parameters.has("snapshot_id");
-        if ((goal.target() != null) != snapshot) throw new IllegalArgumentException("machine_design_site_binding: omit both target and snapshot_id for a generic review; otherwise inspect_machine first and supply both");
+        if ((goal.target() != null) != snapshot) throw new IllegalArgumentException("machine_design_site_binding: omit both target and snapshot_id for a generic review, or copy both from the same current observation; ordinary construction uses construction_site then plan build_machine directly");
         if (!snapshot) return;
         var value = parameters.get("snapshot_id");
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString() || value.getAsString().isBlank() || value.getAsString().length() > 36)

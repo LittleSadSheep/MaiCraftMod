@@ -20,16 +20,18 @@ public final class MachineAssemblyResources {
     public static KnowledgeDocument read(String uri) {
         if (!URI.equals(uri)) return null;
         var metadata = entries().getFirst(); JsonObject result = new JsonObject();
-        result.addProperty("protocol", "explicit_machine_assembly_v1"); result.add("blueprint_schema", schema());
+        result.addProperty("protocol", "explicit_machine_assembly_v1");
+        // 先呈现勘测、出图和提交顺序，再展开较长的组件格式，避免模型尚未看到入口就被细节淹没。
+        result.addProperty("review_workflow", "perceive(view=construction_site) -> author blueprint -> plan build_machine -> execute plan_id. Use the returned target and snapshot_id unchanged. MaiCraft supplies materials and owns routes, placement order and native gestures. Read process/component references only for concrete design gaps. inspect_machine and design_machine are optional. Reuse unchanged site observations; fix blueprint diagnostics in place before planning again.");
+        result.addProperty("submission", "Call plan with goal.ability=maicraft:build_machine, goal.outcome=a non-empty result description, goal.target=construction_site.target, and goal.parameters={snapshot_id:construction_site.snapshot_id, blueprint:the authored blueprint, allow_modify:true}. Put external_inputs and supply_preference inside blueprint. Then execute with plan_id and request_key; request_key is not a plan field.");
+        result.add("blueprint_schema", schema());
         result.addProperty("component_contract", MinecraftKnowledgeSource.BLOCK + "{namespace}/{path}");
         result.addProperty("recipe_contract", RecipeKnowledgeSource.PREFIX + "{namespace}/{path}");
         result.addProperty("production_contract", KnowledgeLibrary.PROCESSES);
-        // 机器蓝图已有完整格式和安装原语，直接说明提交外壳，不引导角色先遍历无关的建筑场景教材。
-        result.addProperty("submission", "Call plan with goal.ability=maicraft:build_machine, goal.outcome=a non-empty result description, goal.target=construction_site.target, and goal.parameters={snapshot_id:construction_site.snapshot_id, blueprint:the authored blueprint, allow_modify:true}. Put external_inputs and supply_preference inside blueprint. Then execute with plan_id and request_key; request_key is not a plan field.");
         result.addProperty("configuration_contract", "production.configurations uses installed native operations; keep filters, mode and input setup explicit, never copy observed NBT into placement");
         result.add("native_configuration_operations", CreateConfigurationContract.describe());
         // 教程与主流程保持一致：资源 IN 可直接按接收方块、偏移和轴面声明，生成端口编号不是额外的开工门槛。
-        result.addProperty("review_workflow", "Read the selected process and component contracts, survey construction_site, author blueprint and external_inputs, then plan and execute. Declare known receiver offsets/faces directly; generated power_ports are optional binding references. Treat Ponder creative supplies as resource IN boundaries, prefer existing world networks and keep the requested product/mod constraints. Revise only concrete diagnostics; design_machine is optional.");
+        result.addProperty("external_input_design", "Declare known receiver offsets/faces directly; generated power_ports are optional binding references. Treat Ponder creative supplies as resource IN boundaries, prefer existing world networks and keep the requested product/mod constraints.");
         result.addProperty("existing_power_discovery", "perceive(view=kinetic_sources, query=short name or ID, radius=32) searches loaded chunk indexes in the backend and returns at most 8 source_labels with native interfaces. Only visible outlets near the work floor are candidates. Partial/empty results do not prove no network exists; observed candidates still require authorized use. connect_external_input rechecks interfaces and stress.");
         result.addProperty("design_policy", "The author selects every component, work surface and transport technology. No product-specific workstation or implicit pipe/sorter/depot is inserted.");
         JsonObject belt = new JsonObject(); belt.addProperty("type", "create:belt"); belt.addProperty("available", CreateBeltAccess.available());
