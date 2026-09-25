@@ -67,9 +67,9 @@ final class PublicToolCatalog {
                 "type":"object",
                 "properties": {
                   "ability":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
-                  "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Required goal.outcome: a plain-language description of the requested result, not an object or a top-level tool argument."},
+                  "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Requested result in plain language; required inside goal."},
                   "target":{"anyOf":[{"$ref":"#/$defs/semanticTarget"},{"type":"null"}]},
-                  "parameters":{"type":"object","default":{},"description":"Only keys declared by the selected ability in perceive(view=abilities) are accepted."},
+                  "parameters":{"type":"object","default":{},"description":"Fields from perceive(view=abilities,focus=ability)."},
                   "preferences":{"type":"object","default":{},"description":"Must be empty unless the selected ability explicitly declares accepted_preferences."},
                   "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Only parameter-free hard constraints explicitly declared by the selected ability are accepted."},
                   "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered child outcomes; accepted only by maicraft:sequence."}
@@ -82,24 +82,24 @@ final class PublicToolCatalog {
     // 生成公开工具前注入地点规则，模型看到的坐标/标签组合与实际请求入口完全一致。
     static {
         PublicTargetContract.describe(GOAL_DEFINITIONS.getAsJsonObject("semanticTarget"));
-        MachineDesignBindings.describe(GOAL_DEFINITIONS.getAsJsonObject("goal"));
+        // 特定机器审阅条件按能力读取，入口校验仍执行同一规则，不在三个目标 Schema 中重复展开。
     }
 
     private static final List<JsonObject> TOOLS = List.of(
             // 建造先勘测并沿用返回的锚点，避免为找工具参数先遍历任务历史或整套教材；执行后再等注意流。
             tool(PERCEIVE,
-                    "For construction, start with view=construction_site (label optional). It returns terrain, observed bounds, target and snapshot_id. Author the blueprint within the observed conditions and player's scope, then pass that target and snapshot_id unchanged to plan build_machine. No separate inspection task or material survey is needed. Use situation for the player and inventory, surroundings for nearby observations. For a specific knowledge or capability gap, search query with knowledge or abilities, then read one resource_uri or exact ability focus. After execute/task, use next_attention to wait for state, decisions and results. Reuse an existing host monitor; otherwise continue waiting while running. On decision, pause, unavailable or resync_required, inspect the returned state. Game chat uses maicraft://chatflow.",
+                    "Read current facts or wait with next_attention. abilities defaults to a paged index; focus reads one contract. query searches abilities/knowledge. resource_uri reads knowledge or frozen receipt pages. Construction starts with construction_site; reuse its target and snapshot_id in the authored build_machine goal.",
                     perceiveSchema("""
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"construction_site returns bounded building geometry and an anchor for plan/execute. kinetic_sources searches loaded chunk indexes for up to 8 powered native interfaces, optionally filtered by query or exact block ID in focus; only visible outlets within 4 blocks of current work height. It never inventories all blocks for the model. knowledge reads reference metadata/documents; machines lists remembered observations."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: up to 8 visible powered interfaces near work height. machines: remembered observations."},
                                 "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
-                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"knowledge, abilities or kinetic_sources: concise keywords, names or IDs. kinetic_sources filters actual visible powered block interfaces in loaded chunks. Other searches read reference metadata only. Prefer short terms to loading a full catalogue; exact names rank before bounded spelling corrections. Mutually exclusive with focus/resource_uri. Literal keywords, not regex or shell commands."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"With knowledge, legacy literal item ID or search words; use query for spelling-tolerant discovery. With abilities, an exact namespaced ability ID; use query for keywords. Omit focus when passing query or resource_uri. With situation, maicraft:physical_structures observes Sable ships, gaze hits, poses and support surfaces; maicraft:travel or maicraft:elevators adds the elevator floor list; maicraft:navigation or maicraft:transport also includes actor, collision, jetpack and elevator diagnostics. With surroundings, optional literal sign text; view direction and physical structures are also returned."},
-                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"An exact discovered maicraft://knowledge/... or maicraft://building/... URI; selects knowledge when view is omitted. Building scenes use maicraft://building/index; machine assemblies use maicraft://knowledge/machine_assembly. Read the selected document without loading unrelated manuals."},
-                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"For attention, filter task events while retaining important body events and include authoritative task state. For tasks, read one full task."},
+                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Short keywords for knowledge/abilities metadata or actual kinetic_sources. Exclusive with focus/resource_uri."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: exact ability ID or maicraft:server_assistance diagnostics. situation: maicraft:travel/maicraft:elevators for floors; maicraft:physical_structures for moving structures; maicraft:navigation/maicraft:transport for motion diagnostics. surroundings: sign text. kinetic_sources: exact block ID. knowledge: legacy search words."},
+                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Copy a discovered resource_uri, details_uri or next_uri. Implies knowledge. maicraft://receipts pages are frozen and temporary; omitted contents remain unknown until read."},
+                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"attention: this task plus important body events. tasks: current summary; use task get+path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
@@ -111,8 +111,8 @@ final class PublicToolCatalog {
                             }
                             """), annotations(true, false, true)),
             tool(PLAN,
-                    // 建造前先提供模型或蓝图；提前说明对象的孔洞不会擦掉独立格栅，实体相交仍按声明的覆盖策略结算。
-                    "Compile a goal without starting it. For build_machine, submit the authored blueprint with construction_site's target and snapshot_id: plan checks block states and native installation, returning ready_to_execute and diagnostics. When ready, execute the returned plan_id; materials and current-site checks belong to execution. A separate design_machine review is optional. maicraft:build and maicraft:design_build require an LLM-authored scene, scene_id or explicit blueprint. Modelling operations inspect/edit/preview/export named objects; use project_id to resume frozen construction. In v2 scenes, holes do not erase other objects' solid cells; solid overlaps follow overlap_policy.",
+                    // 规划入口只讲提交和找回设计；具体图元和机器条件留在选定能力的契约中。
+                    "Compile goal without starting it. build_machine uses construction_site target/snapshot_id and an authored blueprint; execute plan_id when ready_to_execute. Materials and current-site checks belong to execution. Alternatively pass plan_id without goal to recover a saved plan; path reads its frozen input.",
                     goalSchema("""
                             {
                               "type":"object",
@@ -128,7 +128,7 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, false, false)),
             tool(EXECUTE,
-                    "Start a goal or compiled plan asynchronously. Pass the returned next_attention to perceive to wait for authoritative task state and results; prefer Attention over polling task/get or wrapping execution as a synchronous call.",
+                    "Start goal OR plan_id asynchronously; accepted means registered. Reuse request_key for an identical retry. Continue with next_attention to observe completion, decisions or pauses.",
                     goalSchema("""
                             {
                               "type":"object",
@@ -142,11 +142,7 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, true, false)),
             tool(TASK,
-                    "Inspect or control a runtime task. Prefer perceive(view=attention) for waiting and completion; get/list are for explicit inspection and recovery. After a control action, continue with next_attention. When state=waiting_for_decision, answer with the exact "
-                            + "decision_id and one listed choice. retry may refine details.parameters; recover "
-                            + "and replace_goal require one semantic details.goal. Never provide internal tool "
-                              + "names, routes or click scripts. Machine design/build and apply_blueprint accept "
-                              + "the declared blueprint JSON or blueprint_uri; menu operations use observed receipts.",
+                    "Get/list current task summaries or control a task. get+path reads retained evidence; follow detail_path with the same task_id. Answer current decision_id with a listed choice; retry may refine details.parameters, recover/replace_goal require details.goal. Continue next_attention after control.",
                     goalSchema("""
                             {
                               "type":"object",

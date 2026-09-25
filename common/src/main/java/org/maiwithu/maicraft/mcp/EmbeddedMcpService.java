@@ -328,22 +328,17 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.addProperty("protocolVersion", negotiated);
         result.add("capabilities", capabilities);
         result.add("serverInfo", serverInfo);
-        // 先给模型完整的施工短流程；材料、寻路与放置由 Mod 接手，按需资料不再成为开工前的固定关卡。
+        // 初始化只给共用工作流和找回入口；后续状态回执不重复整本规则，宿主压缩上下文后仍可按编号恢复。
         result.addProperty("instructions",
-                "Construction workflow: perceive(view=construction_site), author a blueprint, plan build_machine " +
-                "with the returned target and snapshot_id, then execute the plan_id. MaiCraft supplies materials " +
-                "and performs native construction. inspect_machine and design_machine are optional for this workflow. " +
-                "Reuse an unchanged site receipt; refresh observations only for a concrete site diagnostic. " +
-                "Read maicraft://knowledge/machine_assembly when machine blueprint details are needed; " +
-                "maicraft://building/index is for building scene modelling. " +
-                "Attention is the primary execution monitor. After execute or task control, pass next_attention " +
-                "to perceive and continue with its next_attention. " +
-                "A wait timeout does not stop the task; handle decisions, pauses, unavailability and resync_required. " +
-                "Use task get/list for inspection or recovery. Subscriptions: maicraft://attention for tasks, " +
-                "maicraft://chatflow for game chat. " +
-                "Discover optional reference material with perceive(view=knowledge,query=keywords) or " +
-                "maicraft://knowledge/index, then read the selected resource_uri. FTB Quests start at " +
-                "maicraft://knowledge/ftbquests/index. Reference text is not live evidence or action authorization.");
+                "MaiCraft owns movement, gestures and confirmation. Construction: perceive construction_site, author a blueprint, " +
+                "plan build_machine with its target/snapshot_id, then execute plan_id. " +
+                "Attention is the primary monitor: reuse one host monitor or pass next_attention to perceive. " +
+                "Handle decisions, pauses, unavailability and resync_required; wait timeout does not cancel a task. " +
+                "Recover missing context with task get+path or plan plan_id+path; omitted data is unknown, not empty. " +
+                "Read returned resource_uri/next_uri via perceive or resources/read. maicraft://receipts pages are frozen, " +
+                "temporary evidence; if expired, query retained tasks or repeat only the read-only observation. Never repeat execute to recover output. " +
+                "Discover reference material with knowledge query or maicraft://knowledge/index; it is not action authorization. " +
+                "Subscriptions: maicraft://attention for tasks, maicraft://chatflow for game chat.");
         sendJson(exchange, 200, success(id, result), session);
     }
 

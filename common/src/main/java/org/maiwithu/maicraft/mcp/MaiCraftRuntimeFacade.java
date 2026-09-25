@@ -90,7 +90,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private CompletionStage<JsonElement> observeSurroundings(JsonObject arguments) {
         // 逐段声明里没要地形缩略图就不必等采样：采样是这次请求最贵的一步（分帧扫半径 128 格、
         // 向下 256 格），而只要电梯楼层这类窄查询与地形无关，不要就不做，立即返回。
-        // 未声明 sections 时 wants 返回 true，仍然照旧等待采样，既有调用方的行为不变。
+        // 普通周边查询默认不取大范围地形；需要规划远路时显式点名 terrain_overview 再等待采样。
         if (!PerceiveSections.wants(PerceiveSections.requested(arguments), "terrain_overview")) {
             return onClient(() -> perceiveOnClient(arguments));
         }
@@ -276,9 +276,16 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 // 段已全部装完（含 focus 追加的诊断段）再裁剪：没点名的段不进响应，点名的段一定在。
                 yield PerceiveSections.select(situation, sections);
             }
-            // 周边快照先整份装出来（含电梯楼层等段），再按声明裁剪；未声明时原样返回，行为与改动前一致。
-            case "surroundings" -> PerceiveSections.select(surroundings(player, nullableString(arguments, "focus"),
-                    arguments.has("limit") ? arguments.get("limit").getAsInt() : 16), sections);
+            case "surroundings" -> {
+                JsonObject observed = surroundings(player, nullableString(arguments, "focus"), arguments.get("limit").getAsInt(),
+                        PerceiveSections.wants(sections, "terrain_overview"));
+                JsonObject selected = PerceiveSections.select(observed, sections);
+                // 默认省略的段仍可发现；未看到地形不能推断外面没有可走平台。
+                if (!arguments.has("sections") || arguments.get("sections").isJsonNull()) {
+                    JsonArray extra = new JsonArray(); extra.add("terrain_overview"); selected.add("additional_sections", extra);
+                }
+                yield selected;
+            }
             case "abilities" -> abilities(nullableString(arguments, "focus"));
             case "kinetic_sources" -> KineticSourceQueries.observe(player, arguments.get("radius").getAsInt(),
                     arguments.get("limit").getAsInt(), nullableString(arguments, "query"), nullableString(arguments, "focus"),
@@ -456,7 +463,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    private JsonObject surroundings(LocalPlayer player, String focus, int limit) {
+    private JsonObject surroundings(LocalPlayer player, String focus, int limit, boolean terrain) {
         // 汇总附近实体、告示牌、可走区域和船／电梯；大范围地形来自此前分刻准备的采样。
         JsonObject result = new JsonObject();
         result.add("position", position(player));
@@ -481,7 +488,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("nearby_signs", signs.remove("signs"));
         result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
-        result.add("terrain_overview",navigationOverview.describe(player));
+        if (terrain) result.add("terrain_overview",navigationOverview.describe(player));
         result.add("elevators",new Gson().toJsonTree(
                 ElevatorFloors.overview(player)));
         result.add("view", PhysicalStructurePerception.view(player));
@@ -529,7 +536,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("server_assistance", support);
         result.addProperty(
                 "boundary",
-                "Use fields declared by each ability. Machine design/build accept a semantic design, an explicit blueprint with block offsets and states, or an exported Ponder blueprint_uri. modify_machine applies blueprint changes; operate_machine performs native use and checks its effects separately. MaiCraft owns routes, gestures, retries and confirmation; never submit click scripts.");
+                "Submit declared semantic fields; MaiCraft owns routes, gestures and confirmation. Registration/support is not proof of current executability.");
         return result;
     }
 

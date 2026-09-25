@@ -10,18 +10,9 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * perceive 响应的逐段投影：调用方声明只要哪些段，响应就只保留这些段。
- *
- * <p>执行顺序：调用方传 {@code sections} 点名 → 校验段名属于该视图 → 运行时装完完整响应
- * → {@link #select} 按声明裁剪 → 返回只含点名段的响应。
- *
- * <p>存在的理由：完整快照是给"什么都不知道"的调用方用的，单次响应可以到上万字符。
- * 任何下游都必然有上下文预算，于是完整的快照会被按字节截断，而截断点落在哪一段
- * 取决于字段顺序——调用方要的段可能正好被切掉，还会把"没读到"误当成"没有"。
- * 让调用方点名所需段，是唯一能保证"要的段一定读得到"的做法。
- *
- * <p>段名就是响应对象的顶层键：调用方从默认的完整响应里直接看得到可用段名，
- * 不需要另建一份清单。校验拒收未知段名（fail-closed），避免拼错后静默返回空。
+ * 感知先决定需要哪些事实，再等待相关采样并投影回执。
+ * 普通周边只读附近安全、告示牌与设备；大范围地形须显式点名。
+ * 段名和视图由同一清单校验，未产出的指定段明确列出，不能把缺少观察当作世界里不存在。
  */
 final class PerceiveSections {
 
@@ -63,13 +54,9 @@ final class PerceiveSections {
 
     /** 模型选观察段之前，从校验所用的同一清单生成说明，避免把周围环境当成身体状态查询。 */
     static JsonObject schema() {
-        var names = new TreeSet<>(SITUATION);
-        names.addAll(SURROUNDINGS);
-        var choices = new JsonArray();
-        names.forEach(choices::add);
         var items = new JsonObject();
         items.addProperty("type", "string");
-        items.add("enum", choices);
+        // 段名按视图只声明一次；运行时仍拒绝跨视图或未知段，避免 Schema 重复列出同一批名字。
         var result = new JsonObject();
         result.addProperty("type", "array");
         result.addProperty("minItems", 1);
@@ -78,11 +65,8 @@ final class PerceiveSections {
         result.addProperty("description", "Select top-level sections for one view only. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
-                + "Use separate requests for sections belonging to different views. "
-                + "Focus diagnostics still require the corresponding focus. "
-                + "Omitting sections returns the full snapshot. Omitting terrain_overview from a surroundings "
-                + "selection skips the terrain sampling wait. Requested but unproduced sections are listed in "
-                + UNAVAILABLE + "; absence means unknown, not empty.");
+                + "Default surroundings omits terrain_overview; request it explicitly to sample terrain. "
+                + "Focus diagnostics require focus. Unproduced requested sections appear in " + UNAVAILABLE + ".");
         return result;
     }
 
@@ -101,12 +85,16 @@ final class PerceiveSections {
     /**
      * 读出这次的逐段声明并去重保序。
      *
-     * <p>未声明（字段缺失或为 null）返回 null，语义是"要完整快照"——保持既有调用方行为不变；
+     * <p>周边默认只读就近事实，地形缩略按需等待采样；其他视图未声明时保留已有完整分段。
      * 去重保序让同一段名重复出现时只算一段，返回顺序跟随调用方书写顺序，便于对照排查。
      */
     static List<String> requested(JsonObject arguments) {
         JsonElement element = arguments.get(SECTIONS);
-        if (element == null || element.isJsonNull()) return null;
+        if (element == null || element.isJsonNull()) {
+            if (arguments.has("view") && arguments.get("view").getAsString().equals("surroundings"))
+                return SURROUNDINGS.stream().filter(section -> !section.equals("terrain_overview")).sorted().toList();
+            return null;
+        }
         JsonArray names = element.getAsJsonArray();
         var unique = new LinkedHashSet<String>();
         for (JsonElement item : names) unique.add(item.getAsString());
@@ -117,8 +105,7 @@ final class PerceiveSections {
      * 这一次请求是否要某一段：未声明逐段选择时视为全都要。
      *
      * <p>调用方用它跳过只为某段准备的昂贵工作。已确认的口径：没点名 terrain_overview 就不需要
-     * 地形数据——地形缩略图是分帧采样、可能要等几十个客户端帧，而"只要电梯楼层"这类窄查询
-     * 与地形无关，等它纯属白付代价。未声明 sections 时仍然照旧等待，行为对既有调用方不变。
+     * 地形数据——地形缩略图需要多帧采样，查电梯楼层无需等待；默认段由 requested 先确定。
      */
     static boolean wants(List<String> requested, String section) {
         return requested == null || requested.contains(section);

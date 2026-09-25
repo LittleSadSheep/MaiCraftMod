@@ -90,7 +90,11 @@ public final class PerceiveSectionsTest {
                 "omitting the request must return the full response unchanged");
         // 窄查询不点地形段时，调用方据此跳过只为地形准备的分帧采样。
         check(PerceiveSections.wants(null, "terrain_overview"),
-                "no declared sections means every section is wanted, including the sampled terrain");
+                "the internal full projection still includes sampled terrain");
+        // 普通感知先给眼前事实；显式选择地形时才等待多帧采样，宿主无需为一个楼层问题读取整片地形。
+        var defaults = PerceiveSections.requested(PublicToolCatalog.validateAndNormalize("perceive", request("surroundings", "{}")));
+        check(!PerceiveSections.wants(defaults, "terrain_overview") && defaults.contains("elevators")
+                && defaults.contains("local_decision_summary"), "default surroundings keeps local safety and omits broad terrain");
         check(!PerceiveSections.wants(List.of("elevators"), "terrain_overview"),
                 "an elevator-only request must not wait for terrain sampling");
         check(PerceiveSections.wants(List.of("elevators", "terrain_overview"), "terrain_overview"),
