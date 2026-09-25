@@ -49,7 +49,7 @@ public final class AttentionSnapshotTest {
             check(result.get("history_lost").getAsBoolean() && result.get("wake_reason").getAsString().equals("task_terminal"),
                     "evicted event does not hide authoritative terminal state " + state);
             check(result.getAsJsonObject("task").equals(TaskView.status(finished))
-                            && result.getAsJsonObject("task").getAsJsonObject("terminal").getAsJsonObject("data")
+                            && result.getAsJsonObject("task").getAsJsonObject("terminal").getAsJsonObject("result").getAsJsonObject("data")
                             .get("preview_id").getAsString().equals("retained-result"),
                     "attention retains authoritative final evidence without echoing input and history");
             JsonObject again = normalize(result.getAsJsonObject("next_attention"));

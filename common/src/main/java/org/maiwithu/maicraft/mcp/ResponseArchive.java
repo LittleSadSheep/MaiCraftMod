@@ -50,7 +50,9 @@ final class ResponseArchive implements AutoCloseable {
             // 接单编号、当前状态、问题和下一次等待参数都优先留在外层；大几何、配方与教材改为可读取的引用。
             if (value.isJsonObject() && value.getAsJsonObject().size() <= 40) {
                 for (var field : value.getAsJsonObject().entrySet()) result.add(field.getKey(),
-                        JsonReadback.preview(field.getValue(), JsonReadback.childPath("", field.getKey()), 800, path -> link(uri, path, 0, 5)));
+                        JsonReadback.preview(field.getValue(), JsonReadback.childPath("", field.getKey()),
+                                field.getKey().equals("task") || field.getKey().equals("decision") ? 4500 : 800,
+                                path -> link(uri, path, 0, 5)));
             } else result.add("value", JsonReadback.preview(value, "", 3000, path -> link(uri, path, 0, 5)));
             if (!JsonReadback.fits(result, INLINE_CHARS - 400)) {
                 JsonObject smaller = new JsonObject();

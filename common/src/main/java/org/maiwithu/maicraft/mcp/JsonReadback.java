@@ -45,13 +45,16 @@ final class JsonReadback {
         if (offset > total) throw new IllegalArgumentException("Detail offset exceeds collection size");
         List<String> keys = value.isJsonObject() ? new ArrayList<>(value.getAsJsonObject().keySet()) : List.of();
         JsonArray rows = new JsonArray();
-        int end = Math.min(total, offset + limit), budget = Math.max(180, 5000 / limit);
-        for (int i = offset; i < end; i++) {
+        int end = offset, wanted = Math.min(total, offset + limit), budget = Math.max(180, 5000 / limit);
+        for (int i = offset; i < wanted; i++) {
             String key = value.isJsonArray() ? Integer.toString(i) : keys.get(i);
             JsonObject row = new JsonObject();
             if (value.isJsonArray()) row.addProperty("index", i); else row.addProperty("key", key);
             JsonElement child = value.isJsonArray() ? value.getAsJsonArray().get(i) : value.getAsJsonObject().get(key);
             row.add("value", preview(child, childPath(path, key), budget, uri)); rows.add(row);
+            // 长路径和 URI 也占上下文；达到本页预算就沿 next_offset 续读，不跳过尚未交付的一项。
+            if (rows.size() > 1 && !fits(rows, 5500)) { rows.remove(rows.size() - 1); break; }
+            end = i + 1;
         }
         page.add("items", rows);
         if (end < total) page.addProperty("next_offset", end);
@@ -92,7 +95,9 @@ final class JsonReadback {
         JsonElement current = root;
         if (path.isEmpty()) return current;
         for (String raw : path.substring(1).split("/", -1)) {
-            if (raw.matches(".*~([^01]|$).*")) throw new IllegalArgumentException("Invalid JSON Pointer escape");
+            for (int i = 0; i < raw.length(); i++) if (raw.charAt(i) == '~'
+                    && (i + 1 == raw.length() || raw.charAt(i + 1) != '0' && raw.charAt(i + 1) != '1'))
+                throw new IllegalArgumentException("Invalid JSON Pointer escape");
             String key = raw.replace("~1", "/").replace("~0", "~");
             if (current.isJsonObject() && current.getAsJsonObject().has(key)) current = current.getAsJsonObject().get(key);
             else if (current.isJsonArray() && key.matches("0|[1-9][0-9]*")) {

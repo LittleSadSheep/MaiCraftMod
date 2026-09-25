@@ -26,27 +26,33 @@ final class TaskView {
         JsonArray paths = new JsonArray(); paths.add("/goal");
         boolean terminal = record.getState().isTerminal() || record.terminalSnapshot() != null;
         if (!terminal && record.stepIndex() < record.steps().size()) paths.add("/current_goal");
-        // 成功证据只默认带最近一步；重复失败次数和历史入口足够提醒宿主，旧结果不随每次轮询重放。
+        // 结束后默认带最近一步的成功证据；执行中只列历史入口，避免把上一阶段的结果反复当作当前进度。
         List<IntentTaskRecord.StepSnapshot> steps = record.stepResults();
-        if (!steps.isEmpty()) {
+        if (!steps.isEmpty()) paths.add("/completed_steps");
+        if (terminal && !steps.isEmpty()) {
             var step = steps.getLast(); JsonObject last = new JsonObject();
             last.addProperty("index", step.index()); last.addProperty("ability", step.ability());
             last.addProperty("skipped", step.skipped());
             last.add("result", result(step.result(), "/completed_steps/" + (steps.size() - 1) + "/result"));
-            result.add("last_step", last); paths.add("/completed_steps");
+            result.add("last_step", last);
         }
         if (!record.attempts().isEmpty()) {
-            result.addProperty("attempt_count", record.attempts().size()); paths.add("/attempts");
+            result.addProperty("retained_attempt_count", record.attempts().size()); paths.add("/attempts");
         }
         if (terminal) {
             if (record.terminalSnapshot() != null) {
-                result.add("terminal", result(record.terminalSnapshot().result(), "/terminal/result"));
+                JsonObject finished = new JsonObject();
+                finished.addProperty("game_time", record.terminalSnapshot().gameTime());
+                finished.add("result", result(record.terminalSnapshot().result(), "/terminal/result"));
+                result.add("terminal", finished);
                 paths.add("/terminal");
             }
         } else {
             JsonObject execution = record.activeExecution();
             if (execution != null) {
-                result.add("active_execution", JsonReadback.preview(execution, "/active_execution", 1800));
+                // 待答问题已接替执行进度；旧诊断仍可按路径读取，但不与暂停原因争抢注意力。
+                if (record.decisionSnapshot() == null)
+                    result.add("active_execution", JsonReadback.preview(execution, "/active_execution", 1800));
                 paths.add("/active_execution");
             }
             if (record.pauseSnapshot() != null && record.decisionSnapshot() == null)
@@ -110,7 +116,13 @@ final class TaskView {
             JsonElement value = JsonReadback.preview(entry.getValue(), JsonReadback.childPath(path + "/data", entry.getKey()), 900);
             compact.add(entry.getKey(), value);
         }
-        if (!compact.isEmpty()) result.add("data", JsonReadback.preview(compact, path + "/data", 2100));
+        if (!compact.isEmpty()) {
+            JsonElement displayed = JsonReadback.preview(compact, path + "/data", 2100);
+            result.add("data", displayed);
+            // 产物已生成但尚未收回时，即使大诊断需要展开，也要保留待收取证据的直接入口。
+            if (displayed.isJsonObject() && displayed.getAsJsonObject().has("detail_path") && data.has("pending_output"))
+                result.add("pending_output", JsonReadback.preview(data.get("pending_output"), path + "/data/pending_output", 600));
+        }
         return result;
     }
 }

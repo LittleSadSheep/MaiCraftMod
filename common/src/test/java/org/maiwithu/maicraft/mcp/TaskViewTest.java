@@ -37,7 +37,7 @@ public final class TaskViewTest {
         decide.setAccessible(true); decide.invoke(task, decision, 90L);
         JsonObject compact = TaskView.status(task), full = MaiCraftRuntimeFacade.taskSnapshot(task);
         check(compact.toString().length() < 3500 && full.toString().length() > 70000, "large task status remains small");
-        check(!compact.has("goal") && !compact.has("attempts") && compact.get("attempt_count").getAsInt() == 64, "history is counted instead of replayed");
+        check(!compact.has("goal") && !compact.has("attempts") && compact.get("retained_attempt_count").getAsInt() == 64, "retained history is counted instead of replayed");
         var compactContext = compact.getAsJsonObject("decision").getAsJsonObject("context");
         check(!compactContext.get("ordinary_retry_allowed").getAsBoolean()
                 && compactContext.getAsJsonObject("failure").getAsJsonObject("data").get("outcome_uncertain").getAsBoolean(), "unsafe consumption is visible before answering");

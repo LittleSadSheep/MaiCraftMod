@@ -33,7 +33,8 @@ public final class JsonReadbackTest {
         check(restored.toString().equals(text), "text and surrogate pairs survive paging");
         root.add("", new JsonPrimitive(false));
         check(!JsonReadback.resolve(root, "/").getAsBoolean(), "empty object key is distinct from root");
-        for (String invalid : new String[]{"a", "/missing", "/a~2b", path + "/01", path + "/99999999999999999"}) {
+        root.addProperty("line\n~bad", true);
+        for (String invalid : new String[]{"a", "/missing", "/a~2b", "/line\n~bad", path + "/01", path + "/99999999999999999"}) {
             try { JsonReadback.resolve(root, invalid); throw new AssertionError("accepted " + invalid); }
             catch (IllegalArgumentException expected) { /* 找不到的证据明确失败，不回空值让调用者误判。 */ }
         }

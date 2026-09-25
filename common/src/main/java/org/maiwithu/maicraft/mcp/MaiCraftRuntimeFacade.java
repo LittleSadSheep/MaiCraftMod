@@ -243,8 +243,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         LocalPlayer player = minecraft.player;
         intents.bindForRequest(minecraft, player);
         String view = arguments.get("view").getAsString();
-        // 先读出这次的逐段声明（未声明 = 要完整快照）。裁剪只在这里做一次：各分支先把段完整装出来，
-        // 免得每个分支各写一套过滤，也免得将来加段时漏掉某个分支的裁剪。
+        // 先确定显式段或默认段，再按同一清单投影；周边默认不准备大范围地形，避免无关采样和重复上下文。
         List<String> sections = PerceiveSections.requested(arguments);
         return switch (view) {
             case "situation" -> {
