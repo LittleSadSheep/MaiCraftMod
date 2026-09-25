@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
 
 /** MCP 总任务的任务单：记住总目标、做到了哪一步、为什么暂停，以及正在等调用者回答什么。 */
 public final class IntentTaskRecord extends TaskRecord {
@@ -159,7 +160,12 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public JsonObject activeExecution() {
-        return activeExecution == null ? null : activeExecution.deepCopy();
+        // 人工审图时角色调度已经停刻，查询仍必须即时看到审核门禁，不能只读停刻前最后一帧 survey。
+        Map<String, Object> review = BuildPreviewGate.waitingProgress(this);
+        if (activeExecution == null && review.isEmpty()) return null;
+        JsonObject current = activeExecution == null ? new JsonObject() : activeExecution.deepCopy();
+        PROGRESS_JSON.toJsonTree(review).getAsJsonObject().entrySet().forEach(entry -> current.add(entry.getKey(), entry.getValue()));
+        return current;
     }
 
     void observeExecution(Map<String, Object> progress, long gameTime) {

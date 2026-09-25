@@ -11,6 +11,11 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.client.preview.PreviewController;
+import org.maiwithu.maicraft.client.preview.PreviewSession;
+import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
 
 /** 大蓝图与重复失败不应撑满轮询；失去旧上下文后仍能找回每一格输入和消费限制。 */
 public final class TaskViewTest {
@@ -60,7 +65,32 @@ public final class TaskViewTest {
         request.addProperty("action", "cancel");
         try { PublicToolCatalog.validateAndNormalize("task", request); throw new AssertionError("control accepted read path"); }
         catch (IllegalArgumentException expected) { /* 读取参数不能意外变成一条控制请求。 */ }
+        frozenTickStillReportsPreview(goal);
         System.out.println("TaskViewTest: full=" + full.toString().length() + " chars; status=" + compact.toString().length() + " chars; passed");
+    }
+
+    private static void frozenTickStillReportsPreview(Goal goal) throws Exception {
+        // 调度冻结后不再调用 observeExecution，仍通过真实 TaskView 查询审核状态，覆盖只测进度辅助方法漏掉的停刻分支。
+        var task = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        task.setState(TaskState.RUNNING);
+        var cached = IntentTaskRecord.class.getDeclaredField("activeExecution"); cached.setAccessible(true);
+        cached.set(task, JsonParser.parseString("{\"phase\":\"survey\",\"observed_game_time\":10}").getAsJsonObject());
+        var current = PreviewController.class.getDeclaredField("current"); current.setAccessible(true);
+        var owner = BuildPreviewGate.class.getDeclaredField("reviewOwner"); owner.setAccessible(true);
+        var root = BuildPreviewGate.class.getDeclaredField("reviewRoot"); root.setAccessible(true);
+        Object oldCurrent = current.get(null), oldOwner = owner.get(null), oldRoot = root.get(null);
+        try {
+            var review = new PreviewSession(task.publicId(), "minecraft:overworld", "review", Map.of(BlockPos.ZERO, Blocks.STONE.defaultBlockState()));
+            current.set(null, review); owner.set(null, task); root.set(null, task);
+            var state = TaskView.status(task).getAsJsonObject("active_execution");
+            check(state.get("phase").getAsString().equals("waiting_for_blueprint_confirmation")
+                    && state.get("requires_player_confirmation").getAsBoolean(), "停刻期间查询仍报告人工审核等待");
+            review.confirm();
+            check(!TaskView.status(task).getAsJsonObject("active_execution").has("requires_player_confirmation"),
+                    "玩家确认后不遗留过期审核标记");
+        } finally {
+            current.set(null, oldCurrent); owner.set(null, oldOwner); root.set(null, oldRoot);
+        }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }
