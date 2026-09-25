@@ -24,6 +24,18 @@ neoForge {
             client()
             jvmArgument('-Xmx3072M')
             programArguments.addAll '--width', '1280', '--height', '720'
+            // 自动验收只进入事先复制好的世界；拒绝模板名与目录穿越，防止快速启动写入原模板。
+            def testWorld = providers.gradleProperty('maicraftTestWorld')
+            if (testWorld.isPresent()) {
+                def worldName = testWorld.get()
+                if (worldName.equalsIgnoreCase('TEST-Template') || worldName in ['.', '..'] || worldName.contains('/') || worldName.contains('\\')) {
+                    throw new GradleException('maicraftTestWorld must name a copied test world, never TEST-Template')
+                }
+                if (!file("run/saves/${worldName}").isDirectory()) {
+                    throw new GradleException("Copied test world does not exist: ${worldName}")
+                }
+                programArguments.addAll '--quickPlaySingleplayer', worldName
+            }
         }
         // 这是数据生成的启动配置；还需要实际的数据提供器注册，声明 runData 不会自动调用任意 Java 数据清单。
         data {
