@@ -31,6 +31,16 @@ public final class JsonReadbackTest {
             offset = page.get("next_offset").getAsInt();
         }
         check(restored.toString().equals(text), "text and surrogate pairs survive paging");
+        String escaped = "\u0000\"\\".repeat(4000); root.addProperty("escaped", escaped);
+        restored.setLength(0); offset = 0;
+        while (true) {
+            var page = JsonReadback.page(root, "/escaped", offset, 5);
+            check(page.toString().length() < 5500, "page budget includes JSON escaping");
+            restored.append(page.get("value").getAsString());
+            if (!page.has("next_offset")) break;
+            offset = page.get("next_offset").getAsInt();
+        }
+        check(restored.toString().equals(escaped), "escaped text can be restored exactly");
         root.add("", new JsonPrimitive(false));
         check(!JsonReadback.resolve(root, "/").getAsBoolean(), "empty object key is distinct from root");
         root.addProperty("line\n~bad", true);

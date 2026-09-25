@@ -26,7 +26,7 @@ final class TaskView {
         JsonArray paths = new JsonArray(); paths.add("/goal");
         boolean terminal = record.getState().isTerminal() || record.terminalSnapshot() != null;
         if (!terminal && record.stepIndex() < record.steps().size()) paths.add("/current_goal");
-        // 结束后默认带最近一步的成功证据；执行中只列历史入口，避免把上一阶段的结果反复当作当前进度。
+        // 结束后默认带最近一步的结果并保留跳过标记；执行中只列历史入口，避免把上一阶段误当作当前进度。
         List<IntentTaskRecord.StepSnapshot> steps = record.stepResults();
         if (!steps.isEmpty()) paths.add("/completed_steps");
         if (terminal && !steps.isEmpty()) {

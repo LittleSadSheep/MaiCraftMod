@@ -31,6 +31,9 @@ final class JsonReadback {
                     && Character.isLowSurrogate(text.charAt(offset)) && Character.isHighSurrogate(text.charAt(offset - 1)))
                 throw new IllegalArgumentException("Invalid text offset");
             int end = Math.min(text.length(), offset + TEXT_PAGE);
+            // 引号、反斜杠和控制字符序列化后会变长；按 JSON 大小缩短当前页，避免一页正文又被外层二次归档。
+            while (end > offset && !fits(new JsonPrimitive(text.substring(offset, end)), 5000))
+                end = offset + (end - offset) / 2;
             if (end < text.length() && end > offset && Character.isHighSurrogate(text.charAt(end - 1))
                     && Character.isLowSurrogate(text.charAt(end))) end--;
             page.addProperty("value", text.substring(offset, end));

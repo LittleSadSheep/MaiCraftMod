@@ -49,6 +49,14 @@ public final class AttentionHttpTest {
                             && instructions.contains("maicraft://chatflow"),
                     "host discovery prioritizes attention and mentions chatflow");
             JsonObject resource = json("{\"uri\":\"maicraft://attention\"}");
+            // 报告里的字面标点必须逐字保留，HTTP JSON 不需要把每个尖括号再膨胀成六字符转义。
+            runtime.literal = "<>&".repeat(1400);
+            var literalRead = client.send(post(uri, session, 92, "resources/read", resource), HttpResponse.BodyHandlers.ofString());
+            String literalText = json(literalRead.body()).getAsJsonObject("result").getAsJsonArray("contents")
+                    .get(0).getAsJsonObject().get("text").getAsString();
+            check(literalRead.body().length() < 6000 && json(literalText).get("literal").getAsString().equals(runtime.literal),
+                    "wire encoding does not inflate ordinary markup characters");
+            runtime.literal = null;
             client.send(post(uri, session, 2, "resources/subscribe", resource), HttpResponse.BodyHandlers.ofString());
             // 初始 SSE 流打开时无需发布新内容即可追上当前状态。
             receiveUpdate(client, uri, session);
@@ -162,10 +170,13 @@ public final class AttentionHttpTest {
         final CopyOnWriteArrayList<Consumer<JsonElement>> chatListeners = new CopyOnWriteArrayList<>();
         final LinkedBlockingQueue<AttentionWait> waits = new LinkedBlockingQueue<>();
         volatile String reason = "idle";
+        volatile String literal;
         int executions;
 
         private JsonObject snapshot() {
-            JsonObject result = new JsonObject(); result.addProperty("wake_reason", reason); return result;
+            JsonObject result = new JsonObject(); result.addProperty("wake_reason", reason);
+            if (literal != null) result.addProperty("literal", literal);
+            return result;
         }
         private JsonObject chatSnapshot() {
             JsonObject result = new JsonObject(); result.addProperty("stream", "chat"); return result;

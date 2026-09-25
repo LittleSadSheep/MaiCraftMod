@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.mcp;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
@@ -58,7 +59,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
     public static final URI ATTENTION_URI = URI.create("maicraft://attention");
     public static final URI CHATFLOW_URI = URI.create("maicraft://chatflow");
 
-    private static final Gson GSON = new Gson();
+    // MCP 通过 application/json 传递游戏事实；只做 JSON 必需转义，避免物品说明中的尖括号等字符膨胀为六字符 HTML 转义。
+    private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final String ENDPOINT = "/mcp";
     private static final String SESSION_HEADER = "MCP-Session-Id";
     private static final String VERSION_HEADER = "MCP-Protocol-Version";

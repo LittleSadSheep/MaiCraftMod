@@ -63,7 +63,8 @@ final class ResponseArchive implements AutoCloseable {
                 result = smaller;
             }
             result.addProperty("details_uri", uri); result.addProperty("details_temporary", true);
-            result.addProperty("partial", true);
+            // 展示省略与游戏效果的部分完成是两件事，不能覆盖原报告中的 partial 等业务状态。
+            result.addProperty("response_partial", true);
             return result;
         } catch (IOException failure) {
             // 暂存失败不能把已接单或已完成的游戏动作报成失败；保留原始回执，让宿主仍能取得确定结果。

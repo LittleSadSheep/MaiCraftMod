@@ -10,10 +10,13 @@ public final class ResponseArchiveTest {
         AtomicLong clock = new AtomicLong(1);
         try (var archive = new ResponseArchive(2, 1 << 20, clock::get)) {
             JsonObject raw = new JsonObject(); raw.addProperty("task_id", "accepted-task"); raw.addProperty("accepted", true);
+            raw.addProperty("partial", false);
             JsonArray evidence = new JsonArray(); for (int i = 0; i < 900; i++) evidence.add("observed-block-" + i);
             raw.add("a/b~c", evidence);
             var compact = archive.present(raw).getAsJsonObject();
             check(compact.get("accepted").getAsBoolean() && compact.get("task_id").getAsString().equals("accepted-task"), "acceptance survives large receipts");
+            check(!compact.get("partial").getAsBoolean() && compact.get("response_partial").getAsBoolean(),
+                    "presentation omission cannot change a complete game result into a partial effect");
             check(compact.toString().length() < 1600 && !raw.has("details_uri"), "bounded presentation leaves source intact");
             String id = compact.get("details_uri").getAsString();
             String next = compact.getAsJsonObject("a/b~c").get("resource_uri").getAsString();
