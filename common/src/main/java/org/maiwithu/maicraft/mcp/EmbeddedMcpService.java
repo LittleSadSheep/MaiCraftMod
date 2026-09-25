@@ -485,7 +485,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
             return jsonResource(CHATFLOW_URI, runtime.readChat());
         }
         JsonObject request = new JsonObject(); request.addProperty("action", "read"); request.addProperty("uri", uri);
-        return presentDocuments(knowledgeRequest(request));
+        // 标准资源读取供宿主校验 Schema 和保存原件，必须保持所选 URI 的完整正文与 MIME；模型工具入口单独投影。
+        return knowledgeRequest(request);
     }
 
     private JsonObject jsonResource(URI uri, CompletionStage<JsonElement> stage) {
@@ -494,7 +495,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             JsonObject content = new JsonObject();
             content.addProperty("uri", uri.toString());
             content.addProperty("mimeType", "application/json");
-            content.addProperty("text", GSON.toJson(responseArchive.present(nonNull(snapshot))));
+            content.addProperty("text", GSON.toJson(nonNull(snapshot)));
             JsonArray contents = new JsonArray();
             contents.add(content);
             JsonObject result = new JsonObject();

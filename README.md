@@ -62,6 +62,8 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 普通业务载荷超过约 8,000 字符时提供冻结回执引用；这是 JSON 载荷的投影预算，不是包含转义的 HTTP 字符数硬上限。`maicraft://receipts/...` 只读取原快照，不重新观察世界、不延长游戏内 `snapshot_id` 的有效期。临时回执最多保留 32 份，闲置 30 分钟或服务重启后失效；压缩存储按 64 MiB 预算淘汰旧份，单份超大结果保留到后续淘汰。引用失效时查询仍保留的任务，或重新做对应的只读观察，不能为找回输出重复 `execute`。
 
+标准 `resources/read` 读取原始知识或 Schema URI 时保留完整正文和 MIME，供 Harness 程序校验与归档；模型通过 `perceive(resource_uri=...)` 按需查看摘要或页面。冻结回执 URI 自身仍使用分页格式，调用方须先取得需要的完整证据再确认事件游标或交付设计。
+
 协议消费者升级后应刷新工具列表：普通工具的 JSON 只放在 `content[0].text`，不再重复提供同一份 `structuredContent`；短知识正文保留原文，结构化部分仅附资源元数据。Attention 使用 `schema_version=3`，无任务编号时返回任务索引，指定任务后返回当前状态和必要证据摘要。
 
 四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。

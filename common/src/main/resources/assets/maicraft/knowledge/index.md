@@ -14,7 +14,7 @@ LLM 可调用 `perceive(view="knowledge", query="物品名称或关键词", limi
 
 例如 `query="精密构建"` 可以通过近似名称发现“精密构件”的配方入口；这只是通用字符匹配，不是产品专用工作站。选定后调用 `resources/read`，或使用 `perceive(view="knowledge", resource_uri="返回的 URI")`。`query`、`focus`、`resource_uri` 分别用于近似发现、兼容的字面查询与精确读取，不能混用。
 
-长文档和大报告可能先返回 `omitted=true` 的引用。按返回的 `resource_uri` 读取指定部分，按 `next_uri` 续页；JSON 资料可读取 `json` 中的结构，`text` 保留逐字原文。`maicraft://receipts/...` 是临时冻结快照，读取不会更新游戏观察的有效期；失效后重新做只读查询，不要为找回资料重复执行游戏任务。
+`perceive` 读取长文档和大报告时可能先返回 `omitted=true` 的引用。按返回的 `resource_uri` 读取指定部分，按 `next_uri` 续页；JSON 资料可读取 `json` 中的结构，`text` 保留逐字原文。标准 `resources/read` 对原始资料 URI 保留完整正文，供程序校验。`maicraft://receipts/...` 是临时冻结快照，读取不会更新游戏观察的有效期；失效后重新做只读查询，不要为找回资料重复执行游戏任务。
 
 `resources/list` 仅列元数据，并支持分页；材料配方正文通过 `maicraft://knowledge/recipes/{namespace}/{path}` 按需分页读取，搜索不会展开整棵配方树。读取 Ponder 组件页只返回它关联的场景列表，读取具体场景才编译说明文字。长场景会提供后续页链接。
 

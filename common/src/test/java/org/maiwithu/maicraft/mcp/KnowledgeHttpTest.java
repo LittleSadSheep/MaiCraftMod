@@ -107,7 +107,7 @@ public final class KnowledgeHttpTest {
                     .getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
             var contractIndex = json(contractContent.get("text").getAsString());
             check(contractIndex.get("design_schema_uri").getAsString().equals(contract.schemaUri()),"HTTP index must identify the exact current schema");
-            // 每篇教材的长正文经两条入口逐页找回，首份回执保持小巧，原文仍可完整核对。
+            // 程序经标准资源接口取得完整原件；模型工具入口按需分页，最终正文必须逐字相同。
             for (var tutorial : contractIndex.getAsJsonArray("resources")) {
                 String tutorialUri = tutorial.getAsJsonObject().get("uri").getAsString();
                 String expected = knowledge.read(tutorialUri).text();
@@ -115,18 +115,22 @@ public final class KnowledgeHttpTest {
                 var fallbackRequest = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\"}}");
                 fallbackRequest.getAsJsonObject("arguments").addProperty("resource_uri", tutorialUri);
                 var fallbackResult = send("tools/call", fallbackRequest).getAsJsonObject("result");
-                check(documentText(document.get("text").getAsString(), false).equals(expected) && !fallbackResult.get("isError").getAsBoolean()
+                check(document.get("text").getAsString().equals(expected) && !fallbackResult.get("isError").getAsBoolean()
                         && documentText(fallbackResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString(), true).equals(expected), "recover full tutorial over both HTTP routes");
             }
             var schemaContent = send("resources/read",uri(contract.schemaUri())).getAsJsonObject("result")
                     .getAsJsonArray("contents").get(0).getAsJsonObject();
-            check(documentText(schemaContent.get("text").getAsString(), false).equals(contract.schemaText()),
-                    "HTTP pages retain the exact full versioned schema");
+            check(schemaContent.get("text").getAsString().equals(contract.schemaText())
+                            && schemaContent.get("mimeType").getAsString().equals("application/schema+json"),
+                    "programmatic resource reads receive the exact versioned schema, never a summary manifest");
             var schemaRequest = json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\"}}");
             schemaRequest.getAsJsonObject("arguments").addProperty("resource_uri",contract.schemaUri());
             var schemaFallback = send("tools/call",schemaRequest).getAsJsonObject("result");
             check(!schemaFallback.get("isError").getAsBoolean() && documentText(schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject()
                     .get("text").getAsString(), true).equals(contract.schemaText()),"perceive pages return the same complete JSON schema");
+            check(documentText(schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject()
+                    .get("text").getAsString(), false).equals(contract.schemaText()),
+                    "frozen receipt pages also remain readable through the standard resource channel");
             var templates = send("resources/templates/list", new JsonObject()).getAsJsonObject("result");
             var templateMimes = new HashMap<String, String>();
             templates.getAsJsonArray("resourceTemplates").forEach(element -> {
