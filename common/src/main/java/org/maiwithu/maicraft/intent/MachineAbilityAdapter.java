@@ -456,7 +456,7 @@ final class MachineAbilityAdapter {
                     player, anchor, snapshot.dimension(), p.getAsJsonObject("production"), task, protectedLabels, task.materialPolicy);
             if (execution instanceof MachineProductionTaskRecord production)
                 ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
-            // 施工场地在零放置的补料失败后仍可重试；下次使用继续检查结构指纹，已改变的现场仍须重新观察。
+            // 施工继续使用原场地锚点；已经搭过的方块由执行器复用，不要求工地维持开工前的结构指纹。
             // 普通机器操作观察保持一次性消费，不把施工锚点的复用扩大到菜单、库存或设备控制。
             if (!snapshot.report().has("construction_site")) MachineSnapshots.consume(snapshot);
             return new IntentAction.Native(execution);

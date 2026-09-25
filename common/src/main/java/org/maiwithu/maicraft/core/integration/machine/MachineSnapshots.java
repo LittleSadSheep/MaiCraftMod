@@ -109,10 +109,10 @@ public final class MachineSnapshots {
         report.addProperty("label", label);
         report.addProperty("receipt_lifetime_ticks", MAX_AGE_TICKS);
         if (constructionSite) {
-            // 设计耗时不代表场地已经变化；同一会话内保留锚点，实际使用时重验完整结构指纹。
+            // 施工始终使用同一会话保存的锚点；放过方块后的续作直接读现场，不要求整片工地保持开工前的样子。
             report.addProperty("construction_site", true);
             report.remove("receipt_lifetime_ticks");
-            report.addProperty("validity", "same session and unchanged observed geometry; rechecked for every construction attempt");
+            report.addProperty("validity", "same-session construction anchor; execution uses current target blocks");
         }
         report.addProperty("observation_only", true);
         report.addProperty("ownership", "unknown; observing or naming a machine grants no permission to change it");
@@ -158,6 +158,8 @@ public final class MachineSnapshots {
         String refresh = construction ? "use perceive(view=construction_site) at the intended construction anchor"
                 : "use inspect_machine on the intended machine";
         if (snapshot == null) throw new IllegalArgumentException("machine_snapshot_missing: " + refresh + " in this session");
+        // 蓝图施工按冻结锚点直接执行；场地变动由逐格施工处理，不用旧区域指纹把续作挡回重新勘测。
+        if (construction) return snapshot;
         if (expired(snapshot, player.level().getGameTime(), construction)) {
             throw new IllegalArgumentException("machine_snapshot_expired: " + refresh);
         }
@@ -202,7 +204,8 @@ public final class MachineSnapshots {
         result.add("machines", entries);
         result.addProperty("cached_observations", true);
         // 列表同时含施工锚点和设备操作回执，不能一律要求每次重试都丢掉尚未变化的工地。
-        result.addProperty("guidance", "For construction reuse an unchanged construction_site receipt; refresh at the intended anchor after site diagnostics or session changes. Existing machine operations use fresh inspect_machine evidence and consume their receipts. Cached entries are not live network state.");
+        // 施工快照负责定位，不再把重读整片区域当成继续搭建的前提。
+        result.addProperty("guidance", "For construction reuse the same-session construction_site anchor; the executor handles current target blocks. Refresh the anchor after a session change. Existing machine operations use fresh inspect_machine evidence and consume their receipts. Cached entries are not live network state.");
         return result;
     }
 }
