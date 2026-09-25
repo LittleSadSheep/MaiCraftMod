@@ -57,6 +57,7 @@ final class Ae2DepositTransfer {
     private ContainerTransferTaskRecord stagingRecord;
     private boolean stagingStarted;
     private Map<String, Object> lastShiftObservation = Map.of();
+    private Map<String, Object> stockObservationLimit = Map.of();
 
     Ae2DepositTransfer(LocalPlayerContext context, Ae2ResourceSupply.Request request, Ae2ReflectionBridge bridge,
                        Set<Integer> reserved, Map<ResourceLocation, Integer> baseline, Integer terminalSlot) {
@@ -118,6 +119,13 @@ final class Ae2DepositTransfer {
         // 给刚显示的终端至少两个不同刻稳定画面；这是客户端观察，不冒充 AE 没有提供的全量同步完成证书。
         if (!readyStock.equals(visible)) { readyStock = Map.copyOf(visible); readySince = context.tickRevision(); return status; }
         if (context.tickRevision() - readySince < 2) return status;
+        // 无穷供给元件会接受物品却始终报告极大常数；客户端无法区分它与同量巨库存，不能点击后再等待不可能的数量增量。
+        // 在整批第一次拆叠或存入前检查所有物品，让普通仓库或保留余料的上层恢复路径仍有“没有搬动”的确定证据。
+        for (var stock : visible.entrySet()) if (stock.getValue() >= Integer.MAX_VALUE) {
+            stockObservationLimit = Map.of("item_id", stock.getKey().toString(), "reported_network_count", stock.getValue(),
+                    "reason", "stock_at_or_above_infinite_reporting_sentinel", "conservative_refusal", true);
+            return fail("ae2_deposit_quantity_not_finitely_observable", false);
+        }
         var group = request.groups().get(groupIndex); item = group.itemId();
         int remaining = group.count() - ledger.deposited(item);
         int source = stagedSlot >= 0 ? stagedSlot : source(remaining);
@@ -260,6 +268,7 @@ final class Ae2DepositTransfer {
         Map<String, Object> result = new LinkedHashMap<>(ledger.evidence());
         result.put("deposit_shift_clicks_submitted", shifts); result.put("deposit_split_clicks_confirmed", splitClicks);
         if (!lastShiftObservation.isEmpty()) result.put("last_shift_observation", lastShiftObservation);
+        if (!stockObservationLimit.isEmpty()) result.put("stock_observation_limit", stockObservationLimit);
         if (receipt != null) {
             result.put("menu_receipt_status", receipt.status().name().toLowerCase(Locale.ROOT));
             result.put("menu_receipt_detail", receipt.detail());

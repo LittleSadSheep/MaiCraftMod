@@ -157,6 +157,12 @@ public final class BuildSupplyCargoDeferralTest {
         child.remove("effects_started"); check(!SemanticBuildSupplyCompanionTask.storageUnavailableWithoutEffects(root), "缺少无副作用证明时保守停止");
         child.put("effects_started", false); root.put("confirmed_deposited", Map.of("minecraft:dirt", 1));
         check(!SemanticBuildSupplyCompanionTask.storageUnavailableWithoutEffects(root), "本次曾有实际搬运不能冒充完全未动过的失败");
+        // AE 在识别无穷库存后尚未拆叠或存入，保留全部余料可以回到已有的空间充分施工分支。
+        root.put("confirmed_deposited", Map.of());
+        root.put("last_container_receipt", Map.of("operation", "deposit", "deposited", Map.of(),
+                "confirmed_deposited_total", 0, "outcome_uncertain", false, "effects_started", false,
+                "failure_code", "ae2_deposit_quantity_not_finitely_observable"));
+        check(SemanticBuildSupplyCompanionTask.storageUnavailableWithoutEffects(root), "无穷库存的零动作拒绝可延期整理");
     }
 
     private static SemanticBuildSupplyCompanionTask task(InteractionWorldTestHarness h) {

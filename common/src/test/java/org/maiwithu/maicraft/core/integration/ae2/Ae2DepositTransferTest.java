@@ -33,7 +33,23 @@ public final class Ae2DepositTransferTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         independentNetworkUpdateRequired(); partialCapacityStopsAfterConfirmedQuantity(); tailUsesFastSplit(); namedAndForeignStayUntouched(); disconnectedAndFullNetworkStop();
         unconfirmedDebitKeepsBothSidesOfEvidence();
+        infiniteReportedStockStopsBeforeClick();
         System.out.println("Ae2DepositTransferTest: native player-slot shifts, delayed network evidence, bounded partials and ownership passed");
+    }
+
+    private static void infiniteReportedStockStopsBeforeClick() throws Exception {
+        // 模板的无限圆石元件固定报告整数上限；即使混入普通库存，仍须在拆叠和原生Shift前保留原物品。
+        for (long reported : new long[]{Integer.MAX_VALUE, (long) Integer.MAX_VALUE + 37, Long.MAX_VALUE}) {
+            try (var f = new Fixture(64, 37)) {
+                f.network = reported; f.ready();
+                check(f.step() == Ae2DepositTransfer.Status.FAILED && f.shifts == 0 && !f.transfer.effectsStarted()
+                        && f.world.inventory.getItem(0).getCount() == 64 && f.transfer.deposited().isEmpty(),
+                        "unobservable large stock does not consume or rearrange the requested surplus");
+                check(Boolean.FALSE.equals(f.transfer.evidence().get("deposit_outcome_uncertain"))
+                        && ((Map<?, ?>) f.transfer.evidence().get("stock_observation_limit")).get("reported_network_count").equals(reported),
+                        "the unchanged inventory has a definite observation-limit receipt");
+            }
+        }
     }
 
     private static void unconfirmedDebitKeepsBothSidesOfEvidence() throws Exception {
