@@ -206,7 +206,12 @@ final class MachineAbilityAdapter {
             }
             case BUILD -> {
                 only(p, "snapshot_id", "design", "blueprint", "blueprint_uri", "allow_modify", "material_policy", "replace_existing", "replace_block_entities", "protected_labels", "production", "allow_use");
-                requiredString(p, "snapshot_id", 36);
+                // 丢失场地编号只需补回观察给出的绑定，不为修正提交外壳重新派遣角色勘察机器。
+                try { requiredString(p, "snapshot_id", 36); }
+                catch (IllegalArgumentException invalid) {
+                    throw bad(invalid.getMessage() + ". Copy parameters.snapshot_id and target from the same "
+                            + "perceive(view=construction_site) result; reuse an existing site observation, or obtain one if none exists.");
+                }
                 validateLayoutSource(p, true);
                 validateSeparateUtilityConstruction(p);
                 if (p.has("production")) { MachineProductionIntent.validate(p); bool(p, "allow_use", false); }
@@ -538,7 +543,8 @@ final class MachineAbilityAdapter {
                 : MachineSnapshots.requireFresh(player, id);
         Goal.WorldPosition target = resolve(goal.target(), player, runtime);
         if (!snapshot.center().equals(block(target)) || !snapshot.label().equalsIgnoreCase(goal.target().label())) {
-            throw bad("machine_snapshot_target_mismatch: use the exact machine label measured by this snapshot");
+            throw bad("machine_snapshot_target_mismatch: copy target and snapshot_id from the same observation; "
+                    + "correct the mismatched request fields before obtaining another observation");
         }
         return snapshot;
     }
@@ -548,7 +554,10 @@ final class MachineAbilityAdapter {
         if (goal.target() == null || !Set.of("landmark", "area").contains(goal.target().kind())
                 || goal.target().label() == null || goal.target().label().isBlank()
                 || goal.target().position() != null || goal.target().relation() != null) {
-            throw bad("This machine operation requires one remembered machine label as target");
+            // 新建机器的目标由场地感知直接返回；已有设备的操作继续使用原本记住的地点。
+            throw bad(BUILD.equals(goal.ability())
+                    ? "build_machine requires target from the same perceive(view=construction_site) result as snapshot_id; reuse an existing observation if available"
+                    : "This machine operation requires one remembered machine label as target");
         }
     }
 

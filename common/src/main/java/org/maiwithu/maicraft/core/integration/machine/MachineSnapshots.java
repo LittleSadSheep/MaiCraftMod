@@ -154,16 +154,19 @@ public final class MachineSnapshots {
     private static Snapshot require(LocalPlayer player, String id, boolean construction) {
         bind(player);
         Snapshot snapshot = SNAPSHOTS.get(id);
-        if (snapshot == null) throw new IllegalArgumentException("machine_snapshot_missing: inspect the machine again in this session");
+        // 施工观察失效时引回同一工地的感知入口；已有机器的操作仍单独刷新设备证据。
+        String refresh = construction ? "use perceive(view=construction_site) at the intended construction anchor"
+                : "use inspect_machine on the intended machine";
+        if (snapshot == null) throw new IllegalArgumentException("machine_snapshot_missing: " + refresh + " in this session");
         if (expired(snapshot, player.level().getGameTime(), construction)) {
-            throw new IllegalArgumentException("machine_snapshot_expired: inspect the machine again");
+            throw new IllegalArgumentException("machine_snapshot_expired: " + refresh);
         }
         if (!snapshot.report().get("structure_complete").getAsBoolean()) {
             // 这里只要求方块结构完整，电力、流体等额外运行数据不完整，不会单独挡住这一步。
-            throw new IllegalArgumentException("machine_structure_incomplete: move closer or inspect a smaller area with complete block-state geometry; optional telemetry and adjacency details need not be complete");
+            throw new IllegalArgumentException("machine_structure_incomplete: " + refresh + "; load the intended area or reduce the observation radius; optional telemetry is not required");
         }
         if (!snapshot.fingerprint().equals(MachineSurvey.fingerprint(player, snapshot.center(), snapshot.radius()))) {
-            throw new IllegalArgumentException("machine_snapshot_changed: inspect and analyze the changed structure again");
+            throw new IllegalArgumentException("machine_snapshot_changed: " + refresh + " and check the changed geometry");
         }
         return snapshot;
     }
@@ -198,7 +201,8 @@ public final class MachineSnapshots {
         JsonObject result = new JsonObject();
         result.add("machines", entries);
         result.addProperty("cached_observations", true);
-        result.addProperty("guidance", "Use inspect_machine on a remembered label for fresh geometry and evidence. Mutation consumes a snapshot; inspect again after each operation, world change, or restart. Cached entries are not live network state.");
+        // 列表同时含施工锚点和设备操作回执，不能一律要求每次重试都丢掉尚未变化的工地。
+        result.addProperty("guidance", "For construction reuse an unchanged construction_site receipt; refresh at the intended anchor after site diagnostics or session changes. Existing machine operations use fresh inspect_machine evidence and consume their receipts. Cached entries are not live network state.");
         return result;
     }
 }

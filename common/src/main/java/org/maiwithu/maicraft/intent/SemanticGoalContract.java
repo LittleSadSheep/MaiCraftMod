@@ -151,9 +151,15 @@ final class SemanticGoalContract {
                 && Set.of("nearest", "area", "landmark", "prior_result").contains(kind)) return;
         if (restoredHistory && CookAbilityAdapter.ABILITY.equals(ability) && kind != null
                 && Set.of("nearest", "prior_result").contains(kind)) return;
-        if (kind == null || !SemanticAbilityCatalog.targetKinds(ability).contains(kind)) {
+        Set<String> accepted = SemanticAbilityCatalog.targetKinds(ability);
+        if (kind == null || !accepted.contains(kind)) {
+            // 地点填错时一次给出允许值；建造直接沿用场地观察，避免角色反复试探当前位置、最近地点和区域。
+            String correction = MachineAbilityAdapter.BUILD.equals(ability)
+                    ? " Copy target and snapshot_id from the same perceive(view=construction_site) result; reuse it if already observed."
+                    : " Read perceive(view=abilities,focus=" + ability + ") for this ability's fields.";
             throw violation("unsupported_target_kind", path + ".target.kind", ability,
-                    ability + " does not accept target kind '" + kind + "'.");
+                    ability + " does not accept target kind '" + kind + "'. Accepted target kinds: "
+                            + accepted.stream().sorted().toList() + "." + correction);
         }
     }
 

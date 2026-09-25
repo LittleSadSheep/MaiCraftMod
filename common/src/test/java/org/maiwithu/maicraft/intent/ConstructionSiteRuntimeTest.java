@@ -57,6 +57,11 @@ public final class ConstructionSiteRuntimeTest {
             world.set(anchor.below(), Blocks.GOLD_BLOCK.defaultBlockState());
             var changed = MachinePlanPreflight.review(goal, world.player, runtime);
             check(!changed.get("valid").getAsBoolean() && changed.toString().contains("snapshot_id"), "plan reports changed geometry at the receipt path before execution");
+            // 完整规划回执也必须把失效场地送回感知入口，不能要求重新审阅本来合法的方块蓝图。
+            var correction = changed.getAsJsonArray("checks").get(0).getAsJsonObject().getAsJsonArray("issues")
+                    .get(0).getAsJsonObject().get("next_action").getAsString();
+            check(correction.contains("perceive(view=construction_site)") && correction.contains("intended construction anchor"),
+                    "changed-site diagnostics preserve the intended construction anchor");
             try { MachineSnapshots.requireForConstruction(world.player, site.id()); throw new AssertionError("changed site was accepted"); }
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("changed"), "construction rechecks actual geometry"); }
             MachineSnapshots.consume(site);

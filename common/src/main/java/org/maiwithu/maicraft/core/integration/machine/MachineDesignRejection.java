@@ -26,7 +26,17 @@ public final class MachineDesignRejection extends IllegalArgumentException {
         String code = text.split("[:;\\s]", 2)[0];
         JsonObject row = new JsonObject(); row.addProperty("code", code.matches("[a-z][a-z0-9_]+") ? code : "invalid_blueprint");
         row.addProperty("path", path); row.addProperty("message", text.length() > 1024 ? text.substring(0, 1024) : text);
-        row.addProperty("next_action", "Revise the indicated design while preserving expected_output and forbidden_mods, then review it again. Runtime-only unknowns require targeted inspection.");
+        // 蓝图修订留在 plan；只有现场证据失效才回到原施工地点重新勘测，不能把参数错误变成整轮重做。
+        String next = "Correct the indicated field, preserve expected_output and forbidden_mods, then call plan again. Reuse any existing site observation; a blueprint error does not require a new survey.";
+        if (path != null && path.endsWith(".snapshot_id")) {
+            next = switch (code) {
+                case "machine_snapshot_target_mismatch" -> "Copy target and snapshot_id from the same existing observation, then call plan again; this mismatch alone does not require a new survey.";
+                case "machine_snapshot_missing", "machine_snapshot_expired", "machine_snapshot_changed", "machine_structure_incomplete" ->
+                        "At the intended construction anchor, call perceive(view=construction_site), check the authored footprint against the returned terrain, then plan with its target and snapshot_id.";
+                default -> "Correct the reported site binding using the existing observation and call plan again; refresh only if the site evidence is unavailable or changed.";
+            };
+        }
+        row.addProperty("next_action", next);
         return row;
     }
     public static JsonObject beltIssue(String message, String path, JsonElement raw, Map<BlockPos, JsonObject> blocks) {

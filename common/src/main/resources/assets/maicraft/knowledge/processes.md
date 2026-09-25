@@ -1,8 +1,8 @@
 # 统一机器生产与原生加工
 
-继续使用 `design_machine`、`build_machine` 与 `operate_machine`：生成结构、建造机器，再使用机器。结构设计或施工完成不证明已经产出；`operate_machine` 的 `operation="run_production"` 执行明确的生产意图，`build_machine` 也可在施工后运行同一 `production`。配方名称和教程文字本身不证明当前场地能够加工。
+新建机器使用 `perceive(view="construction_site")` 勘测、生成蓝图、`plan` 校验、`execute` 施工；`design_machine` 仅用于可选的独立审阅。结构设计或施工完成不证明已经产出；`operate_machine` 的 `operation="run_production"` 执行明确的生产意图，`build_machine` 也可在施工后运行同一 `production`。配方名称和教程文字本身不证明当前场地能够加工。
 
-先 `inspect_machine` 标记实际场地并取得新鲜 `snapshot_id`，后续使用同一目标标签。`native_processes` 只为标记位置实际匹配的机制提供契约和只读观察。其他位置可以重新观察，v2 的 `offset` 始终相对该次观察或建造锚点。
+操作已有机器时，使用 `inspect_machine` 取得新鲜 `snapshot_id`，后续使用同一目标标签；这不是新建机器的前置勘测。`native_processes` 只为标记位置实际匹配的机制提供契约和只读观察。其他位置可以重新观察，v2 的 `offset` 始终相对该次观察或建造锚点。
 
 ## v2：有限原生过程
 

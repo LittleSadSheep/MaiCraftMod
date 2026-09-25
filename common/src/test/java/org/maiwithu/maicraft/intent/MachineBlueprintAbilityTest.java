@@ -10,6 +10,7 @@ public final class MachineBlueprintAbilityTest {
     private static final String URI = "maicraft://knowledge/ponder/structure/create-deployer/0123456789abcdef";
 
     public static void main(String[] args) {
+        buildRequestsExplainSiteBinding();
         for (String ability : Set.of(MachineAbilityAdapter.DESIGN, MachineAbilityAdapter.BUILD, MachineAbilityAdapter.MODIFY)) {
             for (int sources = 0; sources < 8; sources++) {
                 JsonObject parameters = parameters(ability);
@@ -88,6 +89,36 @@ public final class MachineBlueprintAbilityTest {
         review.add("blueprint", blueprint());
         SemanticGoalContract.validate(goal(MachineAbilityAdapter.DESIGN, review, false), Set.of(MachineAbilityAdapter.DESIGN));
         System.out.println("MachineBlueprintAbilityTest: passed");
+    }
+
+    private static void buildRequestsExplainSiteBinding() {
+        // 复现模型把当前位置当施工目标、漏填编号或目标的三次试错；每次拒绝都应能直接补回同一份场地绑定。
+        JsonObject request = json("""
+                {"ability":"maicraft:build_machine","outcome":"在已勘测的平台上建造",
+                 "target":{"kind":"current_place"}}
+                """);
+        var parameters = parameters(MachineAbilityAdapter.BUILD);
+        parameters.add("blueprint", blueprint()); request.add("parameters", parameters);
+        rejectsWithCorrection(request, "unsupported_target_kind", "landmark", "area", "construction_site", "reuse");
+        request.add("target", json("{\"kind\":\"landmark\",\"label\":\"site\"}"));
+        parameters.remove("snapshot_id");
+        rejectsWithCorrection(request, "invalid_machine_contract", "parameters.snapshot_id", "construction_site", "reuse");
+        parameters.addProperty("snapshot_id", "receipt"); request.remove("target");
+        rejectsWithCorrection(request, "invalid_machine_contract", "target", "construction_site", "reuse");
+        request.add("target", json("{\"kind\":\"landmark\",\"label\":\"site\"}"));
+        SemanticGoalContract.validate(Goal.fromJson(request), Set.of(MachineAbilityAdapter.BUILD));
+    }
+
+    private static void rejectsWithCorrection(JsonObject request, String code, String... expected) {
+        // 只检查拒绝是否指向可执行的修正，不依赖完整提示措辞；修正后的请求必须仍由真实契约受理。
+        try { SemanticGoalContract.validate(Goal.fromJson(request), Set.of(MachineAbilityAdapter.BUILD)); }
+        catch (SemanticContractException rejected) {
+            if (!rejected.violationCode().equals(code)) throw new AssertionError("wrong rejection code", rejected);
+            for (String text : expected)
+                if (!rejected.getMessage().contains(text)) throw new AssertionError("missing correction: " + text, rejected);
+            return;
+        }
+        throw new AssertionError("invalid build request accepted");
     }
 
     private static JsonObject blueprint() {
