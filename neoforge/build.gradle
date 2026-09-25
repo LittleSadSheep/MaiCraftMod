@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     id 'multiloader-loader'
     id 'net.neoforged.moddev'
@@ -62,3 +64,26 @@ neoForge {
 
 // 若运行数据生成得到资源，这个目录会参与打包；当前是否真的生成了标签要检查提供器和输出文件。
 sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+// 开发客户端必须使用本次编译的 Mod；mods 里同名打包产物会遮蔽开发类，不能让测试误跑旧执行器。
+def checkDevelopmentMods = tasks.register('checkDevelopmentMods') {
+    group = 'verification'
+    description = '拒绝开发客户端 mods 目录中的重复 MaiCraft 打包产物'
+    doLast {
+        def duplicates = fileTree('run/mods').matching { include '*.jar' }.files.findAll { jar ->
+            new ZipFile(jar).withCloseable { zip ->
+                ['META-INF/neoforge.mods.toml', 'META-INF/mods.toml'].any { descriptor ->
+                    def entry = zip.getEntry(descriptor)
+                    def marker = /(?m)^\s*modId\s*=\s*["']@MOD_ID@["']/
+                    entry != null && zip.getInputStream(entry).withCloseable { input ->
+                        (input.getText('UTF-8') =~ marker.replace('@MOD_ID@', mod_id)).find()
+                    }
+                }
+            }
+        }
+        if (!duplicates.isEmpty()) {
+            throw new GradleException('Packaged ' + mod_id + ' jars shadow development classes. Move them out of run/mods: ' + duplicates*.name.join(', '))
+        }
+    }
+}
+tasks.named('runClient') { dependsOn checkDevelopmentMods }

@@ -51,6 +51,10 @@ public final class MaiCraftNeoForgeClient {
             ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
             NeoForgeOptionalServerClient.install();
             MaiCraftCore.init();
+            // 启动验收前可直接核对实际加载的类位置和人工审图开关，避免旧打包 Mod 冒充刚编译的修复。
+            var source = PreviewController.class.getProtectionDomain().getCodeSource();
+            Constants.LOG.info("MaiCraft client runtime source={} preview_review={}",
+                    source == null ? "unknown" : source.getLocation(), PreviewController.enabled());
             ClientRuntime.start(MaiCraftRuntimeFacade.instance());
         });
     }
