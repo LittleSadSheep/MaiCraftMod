@@ -17,13 +17,20 @@ public final class MachineBuildTaskRecord extends TaskRecord implements Internal
     public final String dimension;
     public final MaterialPolicy materialPolicy;
     public final List<String> protectedLabels;
+    public final String label;
     private Position verified;
 
     public MachineBuildTaskRecord(String callId, long deadline, MachineConstructionPlan plan,
             String dimension, MaterialPolicy materialPolicy, List<String> protectedLabels) {
+        this(callId, deadline, plan, dimension, materialPolicy, protectedLabels, null);
+    }
+    public MachineBuildTaskRecord(String callId, long deadline, MachineConstructionPlan plan,
+            String dimension, MaterialPolicy materialPolicy, List<String> protectedLabels, String label) {
         super("build_machine", callId, deadline);
         this.plan = Objects.requireNonNull(plan); this.dimension = Objects.requireNonNull(dimension);
         this.materialPolicy = Objects.requireNonNull(materialPolicy); this.protectedLabels = List.copyOf(protectedLabels);
+        // 工地名称跟随实际施工单，完工后自动成为机器档案名称，后续无需重新猜测坐标。
+        this.label = label;
     }
 
     // 记录已验收机器的锚点，表示结构所在位置，不表示角色正站在这个坐标。

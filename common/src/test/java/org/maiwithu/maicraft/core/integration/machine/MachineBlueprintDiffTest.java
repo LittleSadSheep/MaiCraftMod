@@ -43,6 +43,13 @@ public final class MachineBlueprintDiffTest {
             h.set(new BlockPos(1,1,8),Blocks.AIR.defaultBlockState());
             check(diff.page(h.level,"minecraft:overworld",0,1).get("missing").getAsInt() == 1,"inspection observes later damage");
             check(diff.page(h.level,"minecraft:the_nether",0,128).get("unknown").getAsInt() == 6,"another dimension cannot supply false observations");
+            // 完工后的默认比较只扫描一轮，读完不会转成后台持续监控；未加载仍然作为未知保留。
+            var comparison = new MachineBlueprintComparison(plan,"minecraft:overworld");
+            check(!comparison.advance(h.level,2) && comparison.report().get("examined").getAsInt() == 2,"completion diff yields between chunks of targets");
+            h.nextTick(); check(comparison.advance(h.level,128),"one complete comparison finishes");
+            int reads = h.level.blockReads; h.nextTick(); comparison.advance(h.level,128);
+            check(h.level.blockReads == reads && !comparison.report().get("comparison_complete").getAsBoolean(),
+                    "the completed scan stays frozen and does not turn unloaded cells into missing blocks");
             check(h.blockUses() == 0 && h.itemUses() == 0 && h.inventory.isEmpty(),"diff never places, removes, supplies or uses blocks");
         }
         System.out.println("MachineBlueprintDiffTest: current-world categories, paging, damage and unloaded state passed");

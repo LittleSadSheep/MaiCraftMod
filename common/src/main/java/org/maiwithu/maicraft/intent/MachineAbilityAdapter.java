@@ -449,7 +449,7 @@ final class MachineAbilityAdapter {
                     (long) (plan.blocks().size() + plan.parts().size()) * 100);
             var task = new MachineBuildTaskRecord("machine-" + UUID.randomUUID(), deadline, plan,
                     snapshot.dimension(), SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
-                            optionalString(p, "material_policy", 64)), protectedLabels);
+                            optionalString(p, "material_policy", 64)), protectedLabels, snapshot.label());
             TaskRecord execution = task;
             // 网络生产保留旧执行器；原生过程通过同一工厂包装建造顺序，不把v2误交给v1端口网络解析。
             if (p.has("production")) execution = MachineProductionIntent.createTask(task.getToolCallId(), deadline,

@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -40,6 +41,7 @@ import org.maiwithu.maicraft.core.integration.machine.assembly.MachineNativeInst
 public final class MachineConstructionPlan {
     public record Part(BlockPos position, MachineInstallation.PartSpec spec) {}
     private final BlockPos anchor;
+    private final String blueprintJson;
     private final List<BuildTaskRecord.Target> blocks;
     private final List<BuildTaskRecord.Target> fluidTargets;
     private final List<Part> parts;
@@ -58,7 +60,9 @@ public final class MachineConstructionPlan {
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
-            List<MachineNativeInstallation> installations, List<MachineProcessingRelation> processing) {
+            List<MachineNativeInstallation> installations, List<MachineProcessingRelation> processing, JsonObject blueprint) {
+        // 原蓝图随实际锚点冻结，建成后和重新连接时都能按同一份目标读取地图差异。
+        this.blueprintJson = blueprint.toString();
         this.anchor = anchor.immutable(); this.blocks = List.copyOf(blocks); this.parts = List.copyOf(parts);
         fluidTargets = blocks.stream().filter(MachineConstructionPlan::isFluid)
                 .sorted(Comparator.comparingInt((BuildTaskRecord.Target target) -> target.pos().getY())
@@ -263,7 +267,7 @@ public final class MachineConstructionPlan {
         MachineDesignConstraints.verifyMaterials(layout.blueprint(), report);
         report.addProperty("source_fluid_targets", blocks.values().stream().filter(MachineConstructionPlan::isFluid).count());
         report.addProperty("native_material_scope", "full installation upper bound; already matching blocks and source fluids are reused");
-        return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities, installations, processing);
+        return new MachineConstructionPlan(anchor, new ArrayList<>(blocks.values()), parts, components, report, replace, replaceBlockEntities, installations, processing, layout.blueprint());
     }
 
     /** 勘查锚点表示安装地面，包括机器下方的驱动装置。 */
@@ -343,6 +347,8 @@ public final class MachineConstructionPlan {
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
     public BlockPos anchor() { return anchor; }
+    public String blueprintJson() { return blueprintJson; }
+    public JsonObject blueprint() { return JsonParser.parseString(blueprintJson).getAsJsonObject(); }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
     public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
     public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof LiquidBlock; }

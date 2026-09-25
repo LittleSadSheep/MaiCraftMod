@@ -19,9 +19,13 @@ import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** 客户端生命周期与展示桥接；目录和发现流程绝不会接管玩家身体。 */
@@ -31,6 +35,10 @@ public final class ClientMachineCatalog {
     private static Object level;
     private static UUID playerId;
     private static String issue = "";
+    private record PendingBuilt(Object world, UUID player, String dimension, String label, MachineConstructionPlan plan) {}
+    private record CachedBlueprint(String fingerprint, MachineConstructionPlan plan) {}
+    private static final Map<String, PendingBuilt> pendingBuilt = new LinkedHashMap<>();
+    private static final Map<String, CachedBlueprint> compiledBlueprints = new LinkedHashMap<>();
     private static final MachineDiscoveryScanner.Sink sink = new MachineDiscoveryScanner.Sink() {
         public void observed(MachineDiscoveryCandidate value) {
             if (catalog == null || !catalog.ready()) return;
@@ -56,11 +64,19 @@ public final class ClientMachineCatalog {
             if (identity.isEmpty()) return;
             if (catalog == null) catalog = new MachineCatalog(identity.get().directory().resolveSibling("machines"));
             level = minecraft.level; playerId = minecraft.player.getUUID(); issue = "";
+            compiledBlueprints.clear();
+            pendingBuilt.values().removeIf(value -> value.world() != level || !Objects.equals(value.player(),playerId));
             catalog.bind(new Identity(identity.get().key(), playerId.toString()), UUID.randomUUID().toString());
             discovery.clear(sink);
         }
         catalog.tick(System.currentTimeMillis());
-        if (catalog.ready()) discovery.tick(minecraft.player, sink);
+        if (catalog.ready()) {
+            // 目录异步加载尚未结束时，先让建造成果正常返回；加载完成后再补存同一世界的完成记录。
+            for (var pending : List.copyOf(pendingBuilt.values())) {
+                if (pending.world() == level && Objects.equals(pending.player(),playerId)) saveBuilt(pending);
+            }
+            pendingBuilt.clear(); discovery.tick(minecraft.player, sink);
+        }
     }
 
     public static boolean ready(LocalPlayer player) {
@@ -96,9 +112,53 @@ public final class ClientMachineCatalog {
         return true;
     }
     public static void installationBuilt(LocalPlayer player, MachineConstructionPlan plan) {
-        if (plan.utilityInputs().isEmpty() || !ready(player)) return;
-        try { catalog.recordInstallationBuilt(player.level().dimension().location().toString(),position(plan.anchor()),plan.utilityInputs(),System.currentTimeMillis()); }
-        catch (RuntimeException unavailable) { reportIssue(unavailable); }
+        installationBuilt(player,plan,null);
+    }
+    public static JsonObject installationBuilt(LocalPlayer player, MachineConstructionPlan plan, String label) {
+        var value = new PendingBuilt(player.level(),player.getUUID(),player.level().dimension().location().toString(),label,plan);
+        if (ready(player)) return saveBuilt(value);
+        pendingBuilt.put(value.dimension()+"@"+plan.anchor(),value);
+        var result = new JsonObject(); result.addProperty("archive_status","pending_catalog_load"); return result;
+    }
+    private static JsonObject saveBuilt(PendingBuilt value) {
+        try {
+            var at = position(value.plan().anchor()); long now = System.currentTimeMillis();
+            String label = value.label();
+            if (label == null || label.isBlank()) label = catalog.blueprintAt(value.dimension(),at).map(MachineBlueprint::label)
+                    .orElse("机器@"+at.x()+","+at.y()+","+at.z());
+            String id = catalog.registerBlueprint(label,value.dimension(),at,value.plan().blueprint(),now);
+            var blueprint = catalog.blueprint(id).orElseThrow();
+            catalog.recordBlueprintState(id,blueprint.fingerprint(),"success",now);
+            compiledBlueprints.put(id,new CachedBlueprint(blueprint.fingerprint(),value.plan()));
+            if (!value.plan().utilityInputs().isEmpty()) {
+                catalog.registerInstallation(label,value.dimension(),at,value.plan().utilityInputs(),now);
+                catalog.recordInstallationBuilt(value.dimension(),at,value.plan().utilityInputs(),now);
+            }
+            catalog.saveAsync(); var result = catalog.blueprint(id).orElseThrow().summary();
+            result.addProperty("archive_status","recorded"); return result;
+        } catch (RuntimeException unavailable) {
+            // 留档失败只作为记录问题公开，不能把已经搭好的机器改判成施工失败。
+            reportIssue(unavailable); var result = new JsonObject(); result.addProperty("archive_status","unavailable"); result.addProperty("reason",issue); return result;
+        }
+    }
+    public static Optional<MachineBlueprint> blueprint(LocalPlayer player, String reference, BlockPos anchor) {
+        if (!ready(player)) return Optional.empty();
+        if (reference != null) {
+            var byId = catalog.blueprint(reference); if (byId.isPresent()) return byId;
+            var named = catalog.blueprints().stream().filter(value -> value.label().equalsIgnoreCase(reference)
+                    && value.dimension().equals(player.level().dimension().location().toString())).toList();
+            if (named.size() == 1) return Optional.of(named.getFirst());
+            if (named.size() > 1) throw new IllegalArgumentException("machine_label_ambiguous: use machine_id");
+        }
+        return anchor == null ? Optional.empty() : catalog.blueprintAt(player.level().dimension().location().toString(),position(anchor));
+    }
+    public static MachineConstructionPlan blueprintPlan(MachineBlueprint blueprint) {
+        var cached = compiledBlueprints.get(blueprint.id());
+        if (cached != null && cached.fingerprint().equals(blueprint.fingerprint())) return cached.plan();
+        // 重连后从存档蓝图恢复比较目标，不根据现在的地图反推或覆盖用户原来的设计。
+        var at = blueprint.anchor(); var plan = MachineConstructionPlan.compile(new BlockPos(at.x(),at.y(),at.z()),
+                MachineBlueprintDocument.compile(blueprint.blueprint(),MachineConstructionPlan.registry()),false);
+        compiledBlueprints.put(blueprint.id(),new CachedBlueprint(blueprint.fingerprint(),plan)); return plan;
     }
     public static UtilityInstallation requireInstallation(LocalPlayer player, BlockPos anchor) {
         if (!ready(player)) throw new IllegalArgumentException("machine_catalog_not_ready");
@@ -120,10 +180,15 @@ public final class ClientMachineCatalog {
         JsonObject result = MachineSnapshots.summaries(player); JsonArray devices = new JsonArray(), lines = new JsonArray(), installations = new JsonArray();
         result.add("remembered_devices", devices); result.add("production_lines", lines);
         result.add("utility_installations",installations);
+        var built = new JsonArray(); result.add("recorded_machines",built);
         result.addProperty("catalog_status", catalog == null ? "unbound" : catalog.status().state().name().toLowerCase(Locale.ROOT));
         result.addProperty("automatic_discovery", "loaded_nearby_chunks_only"); result.addProperty("automatic_factory_inference", false);
         if (!issue.isEmpty()) result.addProperty("catalog_issue", issue);
         if (!ready(player)) return result;
+        catalog.blueprints().stream().filter(value -> focus == null || focus.isBlank() || value.id().equals(focus)
+                || value.label().equalsIgnoreCase(focus)).limit(32).forEach(value -> built.add(value.summary()));
+        result.addProperty("catalog_save_pending",catalog.status().savePending());
+        if (!catalog.status().error().isEmpty()) result.addProperty("catalog_error",catalog.status().error());
         catalog.installations().stream().filter(value -> focus == null || focus.isBlank() || value.id().equals(focus)
                 || value.label().equalsIgnoreCase(focus) || value.inputs().stream().anyMatch(input -> (value.label()+"/"+input.id()).equals(focus)))
                 .limit(16).forEach(value -> installations.add(value.json(false)));
@@ -151,6 +216,8 @@ public final class ClientMachineCatalog {
     public static Goal.WorldPosition resolveLabel(LocalPlayer player, String label) {
         if (!ready(player) || label == null) return null;
         var utilityLocations = new LinkedHashSet<Goal.WorldPosition>();
+        for (var value : catalog.blueprints()) if (value.id().equals(label) || value.label().equalsIgnoreCase(label))
+            utilityLocations.add(world(value.dimension(),value.anchor()));
         for (var value : catalog.installations()) {
             if (value.id().equals(label) || value.label().equalsIgnoreCase(label)) utilityLocations.add(world(value.dimension(),value.anchor()));
             for (var input : value.inputs()) if ((value.label()+"/"+input.id()).equals(label) || (value.id()+"/"+input.id()).equals(label))

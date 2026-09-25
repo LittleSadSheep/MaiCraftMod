@@ -52,7 +52,7 @@ import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
  * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
  */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
-    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
+    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, BLUEPRINT_DIFF, DONE }
     private final Level world;
     private final Map<BlockPos, BlockState> preview;
     private final JsonArray configurations;
@@ -83,6 +83,9 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private boolean sealingStarted;
     private Map<String, Object> lastChild = Map.of();
     private String failureCode;
+    private JsonObject recordedMachine;
+    private MachineBlueprintComparison comparison;
+    private JsonObject comparisonIssue;
 
     MachineBuildTask(LocalPlayer player, MachineBuildTaskRecord record) {
         super(player, record); world = player.level(); preview = record.plan.preview();
@@ -130,6 +133,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             case CONFIGURE -> configure();
             case VERIFY -> verify();
             case COMMISSION -> commission();
+            case BLUEPRINT_DIFF -> compareCompletedMachine();
             case DONE -> TaskState.SUCCESS;
         };
     }
@@ -310,7 +314,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         }
         if (verifyConfigIndex >= configurations.size()) {
             if (completion.acceptGeometry()) {
-                phase = Phase.DONE; r.verified(); rememberInstallation(); return TaskState.SUCCESS;
+                return constructionCompleted();
             }
             phase = Phase.COMMISSION; commissioningDeadline = 0;
         }
@@ -341,7 +345,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             commissioning.add(evidence); requirementIndex++; commissioningDeadline = 0; return TaskState.RUNNING;
         }
         completion.acceptCommissioning();
-        phase = Phase.DONE; r.verified(); rememberInstallation(); return TaskState.SUCCESS;
+        return constructionCompleted();
     }
 
     private void start(TaskRecord record) { childRecord = record; child = TaskFactory.create(player, record); }
@@ -408,7 +412,29 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         }
         return FailureType.UNKNOWN;
     }
-    private void rememberInstallation() { ClientMachineCatalog.installationBuilt(player,r.plan); }
+    // 结构完成后才自动留档；保存不接管身体，也不在搭建过程中持续扫描蓝图差异。
+    private void rememberInstallation() { recordedMachine = ClientMachineCatalog.installationBuilt(player,r.plan,r.label); }
+    private TaskState constructionCompleted() {
+        r.verified(); rememberInstallation(); stopNav();
+        // 施工动作已经完成，随后默认附上一轮当前地图差异；差异不触发重建、补料或失败决策。
+        try { comparison = new MachineBlueprintComparison(r.plan,r.dimension); }
+        catch (RuntimeException | LinkageError unavailable) {
+            comparisonIssue = new JsonObject(); comparisonIssue.addProperty("comparison_complete",false);
+            comparisonIssue.addProperty("reason","comparison_unavailable:"+unavailable.getClass().getSimpleName());
+            phase = Phase.DONE; return TaskState.SUCCESS;
+        }
+        phase = Phase.BLUEPRINT_DIFF;
+        r.extendDeadlineTo(world.getGameTime() + 200L + (plannedPositions.size() + 127L) / 128);
+        return TaskState.RUNNING;
+    }
+    private TaskState compareCompletedMachine() {
+        try { if (!comparison.advance(world,128)) return TaskState.RUNNING; }
+        catch (RuntimeException | LinkageError unavailable) {
+            comparisonIssue = new JsonObject(); comparisonIssue.addProperty("comparison_complete",false);
+            comparisonIssue.addProperty("reason","observation_unavailable:"+unavailable.getClass().getSimpleName());
+        }
+        phase = Phase.DONE; return TaskState.SUCCESS;
+    }
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
     @Override protected void cleanup() {
@@ -425,12 +451,16 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     @Override public Map<String,Object> progress() {
         // 让上层建造/加工任务透出真正等待的原生阶段，避免站位或瞄准停滞只剩一个笼统的建造中状态。
         var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(Locale.ROOT));
+        if (comparison != null) { data.put("construction_complete",true); data.put("blueprint_diff",comparison.report()); }
         data.put("verified_source_fluid_targets",fluidIndex); data.put("source_fluid_targets",r.plan.fluidTargets().size());
         if(child!=null)data.put("native_stage",child.progress()); return Map.copyOf(data);
     }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
         data.put("machine_layout", r.plan.report());
+        if (recordedMachine != null) data.put("recorded_machine", recordedMachine.deepCopy());
+        if (comparisonIssue != null) data.put("blueprint_diff",comparisonIssue.deepCopy());
+        else if (comparison != null) data.put("blueprint_diff",comparison.report());
         JsonArray plannedPorts = r.plan.report().getAsJsonArray("power_ports");
         if (plannedPorts != null) data.put("power_port_observations", MachinePowerPortObservations.observe(player.level() == world ? world : null, r.plan.anchor(), plannedPorts));
         data.put("native_installations_completed", installationIndex);

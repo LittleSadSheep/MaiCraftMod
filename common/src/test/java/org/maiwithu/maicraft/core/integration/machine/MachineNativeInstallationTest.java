@@ -50,10 +50,10 @@ public final class MachineNativeInstallationTest {
                 public String name() { return "native installation fixture"; }
             });
             var constructor = MachineConstructionPlan.class.getDeclaredConstructor(BlockPos.class, List.class, List.class, List.class,
-                    JsonObject.class, boolean.class, boolean.class, List.class, List.class); constructor.setAccessible(true);
+                    JsonObject.class, boolean.class, boolean.class, List.class, List.class, JsonObject.class); constructor.setAccessible(true);
             var targets = List.of(new BuildTaskRecord.Target(Blocks.STONE, Items.STONE, AT, "prepared", null, null, null),
                     new BuildTaskRecord.Target(Blocks.STONE, Items.STONE, OTHER, "ordinary", null, null, null));
-            var plan = constructor.newInstance(BlockPos.ZERO, targets, List.of(), List.of(), new JsonObject(), false, false, List.of(installation), List.of());
+            var plan = constructor.newInstance(BlockPos.ZERO, targets, List.of(), List.of(), new JsonObject(), false, false, List.of(installation), List.of(), new JsonObject());
             check(plan.preview().get(AT).is(Blocks.GOLD_BLOCK) && plan.blocks().getFirst().desiredState().is(Blocks.STONE), "preview shows final structure while bulk building retains preparation targets");
             var record = new MachineBuildTaskRecord("native-parent", 1000, plan, "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of());
             var task = new MachineBuildTask(h.player, record); field("blocksStarted").setBoolean(task, true);
@@ -76,7 +76,7 @@ public final class MachineNativeInstallationTest {
                 public boolean matches(Level world) { return false; }
                 public TaskRecord task(String id, long deadline, List<BlockPos> footprint, List<String> labels) { throw new AssertionError("blocked installation must not start"); }
             };
-            var blockedPlan = constructor.newInstance(BlockPos.ZERO, targets, List.of(), List.of(), new JsonObject(), true, false, List.of(blocked), List.of());
+            var blockedPlan = constructor.newInstance(BlockPos.ZERO, targets, List.of(), List.of(), new JsonObject(), true, false, List.of(blocked), List.of(), new JsonObject());
             check(new MachineBuildSurvey(blockedPlan).tick(h.level).failure().contains("undeclared obstacles"), "even replacement permission does not invent extra demolition targets");
             check(blockedPlan.blockTask("blocked", 1000, false).targets.stream().noneMatch(target -> target.pos().equals(obstacle)), "implicit native path remains absent from ordinary demolition tasks");
             var belt = new CreateBeltInstallTaskRecord("unsupported-real-belt", 1000,
