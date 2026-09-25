@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -25,6 +26,7 @@ public final class PerceiveSectionsTest {
         advertisedSectionsAgreeWithValidation();
         crossViewErrorsExplainHowToCorrectTheRequest();
         constructionSiteHasItsOwnBoundedArguments();
+        publicToolsSurviveClientSchemaChecks();
         designAvailabilityDoesNotDemandExecutionResources();
         selectedResourceDefaultsToKnowledge();
         System.out.println("PerceiveSectionsTest: passed");
@@ -42,6 +44,31 @@ public final class PerceiveSectionsTest {
         request.addProperty("view", "situation");
         try { PublicToolCatalog.validateAndNormalize("perceive", request); throw new AssertionError("conflicting explicit view was ignored"); }
         catch (IllegalArgumentException expected) { check(expected.getMessage().contains("resource_uri"), "conflicting view names the rejected resource field"); }
+    }
+
+    private static void publicToolsSurviveClientSchemaChecks() {
+        // 复现宿主加载工具时的顶层组合检查：四个入口都必须留下，角色才能先勘测再提交施工。
+        Set<String> names = new HashSet<>();
+        for (var value : PublicToolCatalog.definitions()) {
+            var tool = value.getAsJsonObject();
+            String name = tool.get("name").getAsString();
+            names.add(name);
+            var schema = tool.getAsJsonObject("inputSchema");
+            check("object".equals(schema.get("type").getAsString()) && schema.has("properties"),
+                    name + " must expose ordinary object arguments");
+            for (String composition : List.of("allOf", "anyOf", "oneOf"))
+                check(!schema.has(composition), name + " would be hidden by client schema checks: " + composition);
+        }
+        check(names.equals(Set.of("perceive", "plan", "execute", "task")), "all four public tools must remain discoverable");
+
+        // 简化公开结构后仍按观察用途约束半径，不能把动力搜索的范围带进施工场地扫描。
+        for (int radius : new int[]{1, 8})
+            PublicToolCatalog.validateAndNormalize("perceive", request("construction_site", "{\"radius\":" + radius + "}"));
+        for (int radius : new int[]{8, 64})
+            PublicToolCatalog.validateAndNormalize("perceive", request("kinetic_sources", "{\"radius\":" + radius + "}"));
+        rejects("site radius exceeding its boundary", "construction_site", "{\"radius\":9}");
+        rejects("kinetic radius below its boundary", "kinetic_sources", "{\"radius\":7}");
+        rejects("kinetic radius exceeding its boundary", "kinetic_sources", "{\"radius\":65}");
     }
 
     private static void projectionKeepsTheRequestedSection() {

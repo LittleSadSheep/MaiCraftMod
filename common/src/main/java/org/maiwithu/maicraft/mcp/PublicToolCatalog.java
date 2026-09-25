@@ -450,11 +450,8 @@ final class PublicToolCatalog {
         // 字段清单由感知校验器提供，公开给模型的说明与运行时受理条件一起更新。
         JsonObject result = schema(json);
         result.getAsJsonObject("properties").add(PerceiveSections.SECTIONS, PerceiveSections.schema());
-        // 一个 radius 字段供两种观察使用，但模型可见 Schema 仍明确各自界限，不能放宽施工勘测到六十四格。
-        result.add("allOf", JsonParser.parseString("""
-                [{"if":{"properties":{"view":{"const":"construction_site"}},"required":["view"]},"then":{"properties":{"radius":{"minimum":1,"maximum":8}}}},
-                 {"if":{"properties":{"view":{"const":"kinetic_sources"}},"required":["view"]},"then":{"properties":{"radius":{"minimum":8,"maximum":64}}}}]
-                """));
+        // Claude Code 会整项过滤带顶层组合条件的工具；公开普通对象，角色勘测的分视图范围由 validatePerceive 校验。
+        // radius 的字段说明保留各自界限，避免施工入口因描述搜索半径而从模型的工具列表里消失。
         return result;
     }
 
