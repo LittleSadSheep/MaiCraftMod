@@ -91,12 +91,13 @@ public final class ChatDurableCheckpointTest {
             legacy.resume();
             runtime.restoredTaskAttached(legacy);
             var unknown = new IntentTask(world.player, legacy, runtime);
-            check(unknown.tick(world.player) == TaskState.RUNNING && legacy.decisionSnapshot() != null,
-                    "旧聊天应在创建输入会话前要求核对历史");
-            check(legacy.decisionSnapshot().options().stream().noneMatch(option -> option.choice().equals("retry")),
-                    "未知旧发送不能提供自动重试");
-            check(legacy.decisionSnapshot().context().getAsJsonObject("failure").getAsJsonObject("data")
-                    .get("outcome_uncertain").getAsBoolean(), "旧任务应明确保留未知结果");
+            // 缺失旧发送记录时直接返回未确认结果，不再挂起选择题，也不会重发可能已经发过的聊天。
+            check(unknown.tick(world.player) == TaskState.FAILED && legacy.decisionSnapshot() == null,
+                    "旧聊天缺少发送记录时直接报告失败");
+            var failed = unknown.result(TaskState.FAILED);
+            check(Boolean.FALSE.equals(failed.data().get("mechanical_retry_allowed"))
+                            && Boolean.TRUE.equals(failed.data().get("outcome_uncertain")),
+                    "实际返回仍保留旧发送结果未知及禁止重发的事实");
             var resaved = IntentStateCodec.encode(identity.key(), List.of(), List.of(legacy), Map.of(), List.of());
             check(!IntentStateCodec.decode(resaved).tasks().getFirst().chatSubmissionTracked(),
                     "另存旧记录不能凭空变成已跟踪的聊天任务");
