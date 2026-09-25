@@ -73,13 +73,22 @@ public final class TaskViewTest {
     private static void materialHandoffStaysVisible(JsonArray blocks) throws Exception {
         // 即使已有大蓝图和批次诊断，首次查询失败任务也能看见原料加工链接，而不是再次执行来探原因。
         var raw = JsonParser.parseString(TaskResult.fail("supply failed", Map.of("planning_handoff",
-                Map.of("knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz")))).toJson()).getAsJsonObject();
+                Map.of("knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"),
+                        "blocked_need", Map.of("item_ids", List.of("create:polished_rose_quartz"), "missing", 3,
+                                "required_final_count", 3, "observed_final_count", 0),
+                        "recipe_trace", "history".repeat(1000)))).toJson()).getAsJsonObject();
         raw.getAsJsonObject("data").add("machine_layout", blocks);
         var method = TaskView.class.getDeclaredMethod("result", JsonObject.class, String.class); method.setAccessible(true);
         var displayed = (JsonObject) method.invoke(null, raw, "/terminal/result");
         check(displayed.get("material_planning_required").getAsBoolean()
                 && displayed.getAsJsonObject("planning_handoff").getAsJsonArray("knowledge_uris").size() == 1,
                 "material planning facts survive default task compaction");
+        // 超大交接也必须首次显示精确缺口，模型无需按历史字段顺序翻页才能知道要加工磨制玫瑰石英。
+        var summary = displayed.getAsJsonObject("planning_handoff"); var need = summary.getAsJsonObject("blocked_need");
+        check(summary.get("summary_only").getAsBoolean() && need.get("missing").getAsInt() == 3
+                && need.getAsJsonArray("item_ids").get(0).getAsString().equals("create:polished_rose_quartz")
+                && summary.get("detail_path").getAsString().equals("/terminal/result/data/planning_handoff"),
+                "large handoff keeps the actual shortage and exact full-evidence path");
     }
 
     private static void frozenTickStillReportsPreview(Goal goal) throws Exception {

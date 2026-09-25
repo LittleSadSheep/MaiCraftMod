@@ -107,7 +107,7 @@ final class TaskView {
         // 大蓝图不能遮掉缺料的加工前置；超长交接仍给直接分页入口，不需要重做一次取材来找回原因。
         if (data.has("planning_handoff")) {
             result.addProperty("material_planning_required", true);
-            result.add("planning_handoff", JsonReadback.preview(data.get("planning_handoff"), path + "/data/planning_handoff", 1400));
+            result.add("planning_handoff", materialPlanning(data.get("planning_handoff"), path + "/data/planning_handoff"));
         }
         // 汇总账本不复印每个已完成步骤的全部结果；保留数量和定位路径，供恢复时核对实际发生的效果。
         for (String key : List.of("steps", "completed_effects", "remaining_effects", "skipped_steps")) {
@@ -130,6 +130,23 @@ final class TaskView {
             if (displayed.isJsonObject() && displayed.getAsJsonObject().has("detail_path") && data.has("pending_output"))
                 result.add("pending_output", JsonReadback.preview(data.get("pending_output"), path + "/data/pending_output", 600));
         }
+        return result;
+    }
+
+    private static JsonElement materialPlanning(JsonElement full, String path) {
+        if (!full.isJsonObject() || JsonReadback.fits(full, 1400)) return JsonReadback.preview(full, path, 1400);
+        // 历史配方链和通用边界说明不能挤掉眼前缺哪种原料、缺多少；完整交接仍按原路径读取。
+        JsonObject source = full.getAsJsonObject(), result = new JsonObject();
+        result.addProperty("summary_only", true); result.addProperty("detail_path", path);
+        if (source.has("kind")) result.add("kind", JsonReadback.preview(source.get("kind"), path + "/kind", 120));
+        if (source.has("blocked_need") && source.get("blocked_need").isJsonObject()) {
+            var blocked = source.getAsJsonObject("blocked_need"); var need = new JsonObject();
+            for (String key : List.of("item_ids", "required_final_count", "observed_final_count", "missing"))
+                if (blocked.has(key)) need.add(key, JsonReadback.preview(blocked.get(key), path + "/blocked_need/" + key, 500));
+            result.add("blocked_need", need);
+        }
+        for (String key : List.of("knowledge_uris", "final_inventory_goal"))
+            if (source.has(key)) result.add(key, JsonReadback.preview(source.get(key), path + "/" + key, 500));
         return result;
     }
 }
