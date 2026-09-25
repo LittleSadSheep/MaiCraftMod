@@ -776,7 +776,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static JsonObject toolResult(JsonElement value, boolean isError) {
-        // 普通工具结果同时提供 JSON 文本和结构化对象，兼容两种读取方式；错误标记由调用方给出。
+        // 角色状态和任务回执只发送一份 JSON 文本，旧版 MCP 客户端也能读取；避免宿主把两份相同证据都放进上下文。
         JsonElement payload = nonNull(value);
         String text = GSON.toJson(payload);
         JsonObject contentItem = new JsonObject();
@@ -787,9 +787,6 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         JsonObject result = new JsonObject();
         result.add("content", content);
-        JsonObject structured = payload.isJsonObject() ? payload.getAsJsonObject() : new JsonObject();
-        if (!payload.isJsonObject()) structured.add("value", payload);
-        result.add("structuredContent", structured);
         result.addProperty("isError", isError);
         return result;
     }

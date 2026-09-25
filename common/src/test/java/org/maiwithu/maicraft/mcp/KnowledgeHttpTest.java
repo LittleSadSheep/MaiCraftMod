@@ -85,8 +85,7 @@ public final class KnowledgeHttpTest {
             check(attention && chatflow && scene != null && PonderFixture.compiled == 0,
                     "keep attention and chatflow, and discover foreign Ponder scenes");
             // 穿过真实 HTTP 参数校验与分流：近似搜索只出目录，选定 URI 后才取正文。
-            var fuzzy = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\",\"query\":\"精密构建\",\"limit\":5}}"))
-                    .getAsJsonObject("result").getAsJsonObject("structuredContent");
+            var fuzzy = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\",\"query\":\"精密构建\",\"limit\":5}}")));
             var chosen = fuzzy.getAsJsonArray("resources").get(0).getAsJsonObject();
             check(chosen.get("uri").getAsString().equals(selectedUri) && chosen.has("match")
                     && !chosen.has("text") && !chosen.has("content") && selectedReads[0] == 0 && PonderFixture.compiled == 0,
@@ -95,8 +94,7 @@ public final class KnowledgeHttpTest {
                     .getAsJsonObject("result");
             check(selectedReads[0] == 1 && selected.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().equals("{\"selected_body\":true}"),
                     "selected document is complete in the text channel");
-            var operationSearch = send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"build machien\",\"limit\":3}}"))
-                    .getAsJsonObject("result").getAsJsonObject("structuredContent");
+            var operationSearch = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"build machien\",\"limit\":3}}")));
             check(!operationSearch.get("contract_loaded").getAsBoolean()
                     && !operationSearch.getAsJsonArray("semantic_abilities").isEmpty(), "HTTP operation metadata search");
             verifyQuests(quests, allResources);
@@ -204,6 +202,12 @@ public final class KnowledgeHttpTest {
         check(response.statusCode() == 200, "HTTP status " + response.statusCode());
         response.headers().firstValue("MCP-Session-Id").ifPresent(value -> session = value);
         return JsonParser.parseString(response.body()).getAsJsonObject();
+    }
+    // 知识搜索和能力发现从唯一文本载荷取结构；正文读取仍直接取得原文。
+    private static JsonObject payload(JsonObject rpc) {
+        JsonObject result = rpc.getAsJsonObject("result");
+        check(!result.has("structuredContent"), "metadata payload is not duplicated");
+        return json(result.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
     }
     private static JsonObject json(String value) { return JsonParser.parseString(value).getAsJsonObject(); }
     private static JsonObject uri(String uri) { JsonObject value = new JsonObject(); value.addProperty("uri", uri); return value; }

@@ -76,7 +76,9 @@ public final class AttentionHttpTest {
                     HttpResponse.BodyHandlers.ofString());
             check(cancel.statusCode() == 202, "cancellation notification accepted");
             JsonObject cancelled = json(waiting.get(3, TimeUnit.SECONDS).body()).getAsJsonObject("result");
-            check(cancelled.getAsJsonObject("structuredContent").getAsJsonObject("error").get("code")
+            // 取消等待的确定结果必须在唯一文本回执里读到，不再要求宿主额外接收一份同样的 JSON。
+            check(!cancelled.has("structuredContent"), "ordinary receipts have one payload representation");
+            check(json(cancelled.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString()).getAsJsonObject("error").get("code")
                     .getAsString().equals("attention_wait_cancelled"), "cancelled wait has an explicit non-mutating outcome");
             check(active.isCancelled() && runtime.listeners.size() == 1 && runtime.reason.equals("idle"),
                     "cancellation detaches only the wait, preserving the runtime and service listener");
