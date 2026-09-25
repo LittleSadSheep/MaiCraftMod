@@ -11,6 +11,12 @@ import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import org.maiwithu.maicraft.intent.SemanticResultView;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 
 /** 供料后来失败时仍保留已确认的原生到货事实，不能把部分到货当成目标已经凑齐。 */
 public final class MaterialSupplyReceiptTest {
@@ -31,8 +37,12 @@ public final class MaterialSupplyReceiptTest {
         var method = SemanticMaterialSupplyCoordinator.class.getDeclaredMethod(
                 "receipt", TaskResult.class, TaskState.class, int.class, boolean.class);
         method.setAccessible(true);
+        var handoff = Map.of("missing_materials", List.of(Map.of("item_id", "create:polished_rose_quartz", "count", 15)),
+                "knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
         var failed = (Map<?, ?>) method.invoke(coordinator,
-                TaskResult.fail("later shortage", Map.of("attempts", attempts)), TaskState.FAILED, 1, false);
+                TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff)), TaskState.FAILED, 1, false);
+        check(handoff.equals(failed.get("planning_handoff")), "supply keeps the material process handoff");
+        constructionKeepsMaterialHandoff(failed, handoff);
         var preserved = (List<?>) failed.get("storage_attempts");
         check(Boolean.FALSE.equals(failed.get("goal_satisfied")) && preserved.size() == 1,
                 "partial confirmed source effects survive failure without inventing goal success or inventory extraction");
@@ -45,6 +55,20 @@ public final class MaterialSupplyReceiptTest {
                 TaskResult.ok("carried", Map.of()), TaskState.SUCCESS, 4, true);
         check(!ordinary.containsKey("storage_attempts"), "carried materials cannot fabricate an AE server receipt");
         System.out.println("MaterialSupplyReceiptTest: passed");
+    }
+
+    private static void constructionKeepsMaterialHandoff(Map<?, ?> failed, Map<?, ?> handoff) throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 重放机器尚未开工、原料加工前置未满足；默认施工结果应直接给出交接，而不藏进历史批次。
+            var plan = new BuildTaskRecord("material-handoff", 1000, List.of(new BuildTaskRecord.Target(
+                    Blocks.DIRT, Items.DIRT, new BlockPos(5, 1, 5), "wall", null, null, null)), true);
+            var record = new SemanticBuildSupplyTaskRecord("material-parent", 1000, plan);
+            var task = new SemanticBuildSupplyCompanionTask(h.player, record, (owner, frozen) -> Decision.DISABLED);
+            task.start(h.player); set(task, "failedSupply", failed); set(task, "failureCode", "material_batch_supply_failed");
+            var result = task.result(TaskState.FAILED).data();
+            check(handoff.equals(result.get("planning_handoff")) && Boolean.TRUE.equals(result.get("material_planning_required"))
+                    && Boolean.FALSE.equals(result.get("goal_satisfied")), "construction preserves the unsatisfied process prerequisite");
+        }
     }
 
     private static void publicEvidenceSurvives(Map<?, ?> receipt) throws Exception {

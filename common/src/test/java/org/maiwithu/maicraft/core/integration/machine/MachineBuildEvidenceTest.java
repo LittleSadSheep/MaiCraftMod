@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 
 /** 复现机械手下方最后一根轴尚未放置的失败回执，首层必须保留已完成十九格的事实。 */
 public final class MachineBuildEvidenceTest {
@@ -19,6 +20,12 @@ public final class MachineBuildEvidenceTest {
         // 未取得原生结果时不伪造零进度，附加部件计数也不能混入方块完成数。
         if (MachineBuildEvidence.summarize("parts", Map.of("installed_parts", 0)).containsKey("verified_blocks"))
             throw new AssertionError("缺少方块证据不等于零格完成");
+        // 机械手缺磨制玫瑰石英时，保留加工交接与恢复选项，不能只有一层泛化的缺料错误。
+        var handoff = Map.of("knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
+        var supply = Map.of("planning_handoff", handoff, "recovery_options", List.of(Map.of("id", "plan_material_process")));
+        var visible = new LinkedHashMap<String, Object>(); MachineBuildEvidence.retainSupplyFailure(visible, supply);
+        if (!handoff.equals(visible.get("planning_handoff")) || !Boolean.TRUE.equals(visible.get("material_planning_required"))
+                || !supply.equals(visible.get("material_supply_failure"))) throw new AssertionError("机器丢失了原料加工交接");
         System.out.println("MachineBuildEvidenceTest: passed");
     }
 }

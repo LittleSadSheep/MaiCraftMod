@@ -66,7 +66,20 @@ public final class TaskViewTest {
         try { PublicToolCatalog.validateAndNormalize("task", request); throw new AssertionError("control accepted read path"); }
         catch (IllegalArgumentException expected) { /* 读取参数不能意外变成一条控制请求。 */ }
         frozenTickStillReportsPreview(goal);
+        materialHandoffStaysVisible(blocks);
         System.out.println("TaskViewTest: full=" + full.toString().length() + " chars; status=" + compact.toString().length() + " chars; passed");
+    }
+
+    private static void materialHandoffStaysVisible(JsonArray blocks) throws Exception {
+        // 即使已有大蓝图和批次诊断，首次查询失败任务也能看见原料加工链接，而不是再次执行来探原因。
+        var raw = JsonParser.parseString(TaskResult.fail("supply failed", Map.of("planning_handoff",
+                Map.of("knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz")))).toJson()).getAsJsonObject();
+        raw.getAsJsonObject("data").add("machine_layout", blocks);
+        var method = TaskView.class.getDeclaredMethod("result", JsonObject.class, String.class); method.setAccessible(true);
+        var displayed = (JsonObject) method.invoke(null, raw, "/terminal/result");
+        check(displayed.get("material_planning_required").getAsBoolean()
+                && displayed.getAsJsonObject("planning_handoff").getAsJsonArray("knowledge_uris").size() == 1,
+                "material planning facts survive default task compaction");
     }
 
     private static void frozenTickStillReportsPreview(Goal goal) throws Exception {

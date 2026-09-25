@@ -7,6 +7,16 @@ import java.util.Map;
 
 /** 把当前施工批次的真实完成数和失败格提到机器回执首层，避免用附加部件计数解释方块施工。 */
 public final class MachineBuildEvidence {
+    /** 供料失败的原料加工前置是恢复入口；它不是未完成的 task/decide，也不自动授权新的游戏动作。 */
+    public static void retainSupplyFailure(Map<String, Object> target, Map<?, ?> failure) {
+        if (failure.isEmpty()) return;
+        target.put("material_supply_failure", failure);
+        if (failure.containsKey("planning_handoff")) {
+            target.put("planning_handoff", failure.get("planning_handoff"));
+            target.put("material_planning_required", true);
+        }
+        if (failure.containsKey("recovery_options")) target.put("recovery_options", failure.get("recovery_options"));
+    }
     private MachineBuildEvidence() {}
 
     public static Map<String, Object> summarize(String phase, Map<String, Object> nativeStage) {

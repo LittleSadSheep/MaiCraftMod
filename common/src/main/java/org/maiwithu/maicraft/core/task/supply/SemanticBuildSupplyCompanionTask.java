@@ -69,6 +69,7 @@ final class SemanticBuildSupplyCompanionTask
     private Item supportItem;
     private int supportFinalCount;
     private Map<String, Object> finalBuildData = Map.of();
+    private Map<String, Object> failedSupply = Map.of();
     private BuildClearanceSurvey clearanceSurvey;
     private boolean clearanceChecked;
     private Map<String, Object> clearanceReport = Map.of();
@@ -331,6 +332,7 @@ final class SemanticBuildSupplyCompanionTask
                 && !(tick.status() == SemanticMaterialSupplyCoordinator.Status.SUPPLIED_REPLAN
                         && tick.receipt() != null && Boolean.TRUE.equals(tick.receipt().get("goal_satisfied")));
         if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED || supplyOutcomeUncertain) {
+            failedSupply = tick.receipt();
             stopWith("material_batch_supply_failed",
                     tick.message(), tick.failureType());
             return TaskState.FAILED;
@@ -761,6 +763,15 @@ final class SemanticBuildSupplyCompanionTask
                 && failureCode == null && !unresolvedOutcome() && !cargoCheckPending && !spoilSupply.active() && (buildRounds == 0 || batchVerified);
         data.put("goal_satisfied", complete);
         data.put("batches", List.copyOf(rounds));
+        // 施工尚未开始也要直接公开缺失加工前置；保留取材回执，不把它混成某个方块放置失败。
+        if (!failedSupply.isEmpty()) {
+            data.put("material_supply_failure", failedSupply);
+            if (failedSupply.containsKey("planning_handoff")) {
+                data.put("planning_handoff", failedSupply.get("planning_handoff"));
+                data.put("material_planning_required", true);
+            }
+            if (failedSupply.containsKey("recovery_options")) data.put("recovery_options", failedSupply.get("recovery_options"));
+        }
         if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
         if (failureCode != null) {
             data.put("failure_code", failureCode);

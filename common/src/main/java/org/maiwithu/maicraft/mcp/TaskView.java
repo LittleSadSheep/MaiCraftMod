@@ -104,6 +104,11 @@ final class TaskView {
         JsonObject data = raw.getAsJsonObject("data").deepCopy();
         // 机器大蓝图被折叠时仍直接携带施工恢复事实，读取失败位置不必逐层穿过蓝图和批次归档。
         if (data.has("construction_progress")) result.add("construction_progress", data.get("construction_progress").deepCopy());
+        // 大蓝图不能遮掉缺料的加工前置；超长交接仍给直接分页入口，不需要重做一次取材来找回原因。
+        if (data.has("planning_handoff")) {
+            result.addProperty("material_planning_required", true);
+            result.add("planning_handoff", JsonReadback.preview(data.get("planning_handoff"), path + "/data/planning_handoff", 1400));
+        }
         // 汇总账本不复印每个已完成步骤的全部结果；保留数量和定位路径，供恢复时核对实际发生的效果。
         for (String key : List.of("steps", "completed_effects", "remaining_effects", "skipped_steps")) {
             if (data.has(key) && data.get(key).isJsonArray()) {

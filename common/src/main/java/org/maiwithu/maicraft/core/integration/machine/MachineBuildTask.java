@@ -83,6 +83,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private boolean blocksStarted;
     private boolean sealingStarted;
     private Map<String, Object> lastChild = Map.of();
+    private Map<String, Object> failedSupply = Map.of();
     private String failureCode;
     private JsonObject recordedMachine;
     private MachineBlueprintComparison comparison;
@@ -116,8 +117,10 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             var tick = NavigationSafetyContext.withProtectedArea(
                     plannedPositions, List.of(), () -> supply.tick(player, this::runChild));
             r.extendDeadlineTo(supply.childDeadline());
-            if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED)
+            if (tick.status() == SemanticMaterialSupplyCoordinator.Status.FAILED) {
+                failedSupply = tick.receipt();
                 return failure("machine_material_supply_failed", tick.message());
+            }
             return TaskState.RUNNING;
         }
         if (child != null) return tickChild();
@@ -487,6 +490,10 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         data.put("configured_output_filters", filterIndex);
         data.put("verified_source_fluid_targets", fluidIndex);
         if (!lastChild.isEmpty()) data.put("last_native_stage", lastChild);
+        // 方块供料和后置部件供料都带回同一类加工前置，模型可直接安排已知工序后再续建机器。
+        if (!failedSupply.isEmpty()) MachineBuildEvidence.retainSupplyFailure(data, failedSupply);
+        else if (lastChild.get("material_supply_failure") instanceof Map<?, ?> supplyFailure)
+            MachineBuildEvidence.retainSupplyFailure(data, supplyFailure);
         // 常见恢复事实直接放在任务信封，注意流无需展开整份蓝图才能解释为什么停工。
         // 清障阻塞也透出坐标和整份蓝图的偏移建议，避免机器外层只报告笼统的施工失败。
         for (String key : List.of("inventory_capacity", "recovery_options", "clearance_report"))
