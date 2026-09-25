@@ -339,7 +339,8 @@ public final class SemanticMaterialSupplyCoordinator {
         if (result != null && result.data() != null) {
             Map<String, Object> childData = result.data();
             copy(childData, receipt, "failure_type", "failure_code", "requires_decision",
-                    "requires_narration", "outcome_uncertain", "world_change_uncertain", "planning_handoff");
+                    "requires_narration", "outcome_uncertain", "world_change_uncertain", "planning_handoff",
+                    "body_preparation_required", "food_preparation", "preparation_failure");
             // 加工前置和原生配方链接是下一次规划所需证据，不能在封装材料回执时丢掉，让模型再取同一种失败材料。
             Object options = childData.get("recovery_options");
             if (options instanceof List<?> list) receipt.put("recovery_options", safeOptions(list));

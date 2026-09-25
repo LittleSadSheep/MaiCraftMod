@@ -22,10 +22,12 @@ public final class MachineBuildEvidenceTest {
             throw new AssertionError("缺少方块证据不等于零格完成");
         // 机械手缺磨制玫瑰石英时，保留加工交接与恢复选项，不能只有一层泛化的缺料错误。
         var handoff = Map.of("knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
-        var supply = Map.of("planning_handoff", handoff, "recovery_options", List.of(Map.of("id", "plan_material_process")));
+        var supply = Map.of("planning_handoff", handoff, "recovery_options", List.of(Map.of("id", "plan_material_process")),
+                "body_preparation_required", true, "food_preparation", Map.of("food", 10));
         var visible = new LinkedHashMap<String, Object>(); MachineBuildEvidence.retainSupplyFailure(visible, supply);
         if (!handoff.equals(visible.get("planning_handoff")) || !Boolean.TRUE.equals(visible.get("material_planning_required"))
                 || !supply.equals(visible.get("material_supply_failure"))) throw new AssertionError("机器丢失了原料加工交接");
+        if (!Boolean.TRUE.equals(visible.get("body_preparation_required"))) throw new AssertionError("机器丢失了身体前置");
         System.out.println("MachineBuildEvidenceTest: passed");
     }
 }

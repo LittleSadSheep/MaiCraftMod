@@ -116,6 +116,7 @@ public final class SemanticAcquireCompanionTask
     private final List<Map<String, Object>> recipeTrace = new ArrayList<>();
     private final List<AcquisitionNeed> processPlanningNeeds = new ArrayList<>();
     private Map<String, Object> processPlanning = Map.of();
+    private Map<String, Object> bodyPreparationFailure = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private final AcquisitionRecipePlanner recipePlanner;
     private final Predicate<LocalPlayer> wirelessAvailable;
@@ -999,6 +1000,12 @@ public final class SemanticAcquireCompanionTask
             }
             renewProgressLease();
             return TaskState.RUNNING;
+        }
+        // 合成工作台因身体状态暂停时，其他配方或采矿来源也不能消除这个前提；保留原配方而不继续遍历来源。
+        if (result != null && result.data() != null && bool(result.data().get("body_preparation_required"))) {
+            bodyPreparationFailure = Map.copyOf(result.data()); failureNeed = completedNeed; completedNeed.decisionRequired = true;
+            addIssue("craft", "crafting_body_preparation_required", result.message(), result.data());
+            return failAcquisition("crafting_body_preparation_required", result.message(), childFailureType(terminal, result));
         }
         if (completedSource == SemanticAcquireTaskRecord.Source.HUNT) {
             return finishHuntChild(
@@ -2071,6 +2078,10 @@ public final class SemanticAcquireCompanionTask
     }
 
     private List<Map<String, Object>> recoveryOptions() {
+        // 身体前置必须先解决；换矿种、换配方或放开狩猎都不能修复同一个饥饿/健康门槛。
+        if (!bodyPreparationFailure.isEmpty()) return List.of(Map.of("id", "restore_body_condition",
+                "summary", "Resolve the reported hunger or health condition, then re-evaluate the unchanged inventory goal.",
+                "risk", "existing_authorization_required"), Map.of("id", "stop", "risk", "none"));
         // 根据未开放的来源和失败原因给出可选下一步，不在这里自动扩大采矿、交易或伤害许可。
         List<Map<String, Object>> options = new ArrayList<>();
         if (!processPlanning.isEmpty()) options.add(Map.of("id", MaterialProcessPlanning.KIND,
@@ -2190,6 +2201,10 @@ public final class SemanticAcquireCompanionTask
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
         if (!processPlanning.isEmpty()) data.put("planning_handoff", processPlanning);
+        if (!bodyPreparationFailure.isEmpty()) {
+            data.put("body_preparation_required", true); data.put("preparation_failure", bodyPreparationFailure);
+            if (bodyPreparationFailure.containsKey("food_preparation")) data.put("food_preparation", bodyPreparationFailure.get("food_preparation"));
+        }
         if (hasIssue("mining_loot_uncollected")) {
             data.put("collection_complete", false);
             data.put("requires_narration", true);

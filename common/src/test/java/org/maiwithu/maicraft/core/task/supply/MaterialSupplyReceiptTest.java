@@ -40,8 +40,10 @@ public final class MaterialSupplyReceiptTest {
         var handoff = Map.of("missing_materials", List.of(Map.of("item_id", "create:polished_rose_quartz", "count", 15)),
                 "knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
         var failed = (Map<?, ?>) method.invoke(coordinator,
-                TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff)), TaskState.FAILED, 1, false);
+                TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff,
+                        "body_preparation_required", true, "food_preparation", Map.of("food", 10, "health", 7))), TaskState.FAILED, 1, false);
         check(handoff.equals(failed.get("planning_handoff")), "supply keeps the material process handoff");
+        check(Boolean.TRUE.equals(failed.get("body_preparation_required")), "supply also preserves the body's independent prerequisite");
         constructionKeepsMaterialHandoff(failed, handoff);
         var preserved = (List<?>) failed.get("storage_attempts");
         check(Boolean.FALSE.equals(failed.get("goal_satisfied")) && preserved.size() == 1,
@@ -68,6 +70,8 @@ public final class MaterialSupplyReceiptTest {
             var result = task.result(TaskState.FAILED).data();
             check(handoff.equals(result.get("planning_handoff")) && Boolean.TRUE.equals(result.get("material_planning_required"))
                     && Boolean.FALSE.equals(result.get("goal_satisfied")), "construction preserves the unsatisfied process prerequisite");
+            check(Boolean.TRUE.equals(result.get("body_preparation_required"))
+                    && ((Map<?, ?>) result.get("food_preparation")).get("food").equals(10), "construction keeps the observed body condition");
         }
     }
 

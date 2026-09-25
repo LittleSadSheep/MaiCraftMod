@@ -114,6 +114,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private final Set<Long> rejectedStationStances = new LinkedHashSet<>();
     private String surfaceFailureCode;
     private String surfaceFailureDetail;
+    private Map<String, Object> surfaceFailureEvidence = Map.of();
     private final BlockDigger stationDigger;
     private final DropTracker stationDrops = new DropTracker();
     private BlockPos temporaryStation;
@@ -371,11 +372,22 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         surfaceDirective = null;
 
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
-            // 即使子任务失败，现场有工作台也可以继续使用；当前还会把它登记成自己的临时工作台，但存在不等于自己放的。
+            Map<String, Object> evidence = result == null || result.data() == null ? Map.of() : result.data();
+            String code = String.valueOf(evidence.get("failure_code"));
+            boolean bodyBlocked = code.startsWith("build_food_") || code.startsWith("build_health_") || code.equals("build_body_not_alive");
+            if (result == null || bodyBlocked || Boolean.TRUE.equals(evidence.get("outcome_uncertain"))
+                    || Boolean.TRUE.equals(evidence.get("world_change_uncertain"))) {
+                // 饥饿、失血和未结操作不会因换个工作台位置消失；立即交回原始原因，不能每刻新开一次建造重试。
+                surfaceFailureEvidence = result == null ? Map.of("outcome_uncertain", true) : Map.copyOf(evidence);
+                surfaceFailureCode = bodyBlocked ? code : "crafting_surface_effect_uncertain";
+                surfaceFailureDetail = result == null || result.message() == null ? "workstation placement ended without evidence" : result.message();
+                fail(surfaceFailureDetail, code.equals("build_food_unavailable") ? FailureType.NO_MATERIAL : FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
+            // 失败后已有工作台只说明可以复用，不证明本任务放置了它，因此不能据此获得回收所有权。
             if (completed.action() == CraftingWorkstationCoordinator.Action.PLACE_CARRIED
                     && CraftingWorkstationCoordinator.usableTable(
                             player, completed.position())) {
-                rememberTemporaryStation(completed.position());
                 bindStation(completed.position());
                 renewProgressLease();
                 stage = Stage.PREPARE_SURFACE;
@@ -1374,6 +1386,14 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         data.put("crafting_table_placed", stationPlaced);
         data.put("crafting_table_recovery_attempted", stationRecoveryAttempted);
         data.put("crafting_table_recovered", stationRecovered);
+        if (!surfaceFailureEvidence.isEmpty()) {
+            data.put("workstation_placement_failure", surfaceFailureEvidence);
+            data.put("mechanical_retry_allowed", false);
+            data.put("body_preparation_required", surfaceFailureCode.startsWith("build_food_")
+                    || surfaceFailureCode.startsWith("build_health_") || surfaceFailureCode.equals("build_body_not_alive"));
+            for (String key : List.of("food_preparation", "outcome_uncertain", "world_change_uncertain"))
+                if (surfaceFailureEvidence.containsKey(key)) data.put(key, surfaceFailureEvidence.get(key));
+        }
         if (stationRecoveryDetail != null) {
             data.put("crafting_table_recovery_detail", stationRecoveryDetail);
         }

@@ -16,6 +16,8 @@ public final class MachineBuildEvidence {
             target.put("material_planning_required", true);
         }
         if (failure.containsKey("recovery_options")) target.put("recovery_options", failure.get("recovery_options"));
+        for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure"))
+            if (failure.containsKey(key)) target.put(key, failure.get(key));
     }
     private MachineBuildEvidence() {}
 

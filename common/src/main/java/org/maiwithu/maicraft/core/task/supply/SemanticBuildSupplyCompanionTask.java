@@ -771,6 +771,9 @@ final class SemanticBuildSupplyCompanionTask
                 data.put("material_planning_required", true);
             }
             if (failedSupply.containsKey("recovery_options")) data.put("recovery_options", failedSupply.get("recovery_options"));
+            // 材料工序本身因身体状态停止时也要直达施工外层，不能再被误解为原料数量不够。
+            for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure"))
+                if (failedSupply.containsKey(key)) data.put(key, failedSupply.get(key));
         }
         if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
         if (failureCode != null) {

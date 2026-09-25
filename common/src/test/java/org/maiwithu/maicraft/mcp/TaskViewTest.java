@@ -78,6 +78,8 @@ public final class TaskViewTest {
                                 "required_final_count", 3, "observed_final_count", 0),
                         "recipe_trace", "history".repeat(1000)))).toJson()).getAsJsonObject();
         raw.getAsJsonObject("data").add("machine_layout", blocks);
+        raw.getAsJsonObject("data").addProperty("body_preparation_required", true);
+        raw.getAsJsonObject("data").add("food_preparation", JsonParser.parseString("{\"food\":10,\"health\":7}"));
         var method = TaskView.class.getDeclaredMethod("result", JsonObject.class, String.class); method.setAccessible(true);
         var displayed = (JsonObject) method.invoke(null, raw, "/terminal/result");
         check(displayed.get("material_planning_required").getAsBoolean()
@@ -89,6 +91,9 @@ public final class TaskViewTest {
                 && need.getAsJsonArray("item_ids").get(0).getAsString().equals("create:polished_rose_quartz")
                 && summary.get("detail_path").getAsString().equals("/terminal/result/data/planning_handoff"),
                 "large handoff keeps the actual shortage and exact full-evidence path");
+        check(displayed.get("body_preparation_required").getAsBoolean()
+                && displayed.getAsJsonObject("food_preparation").get("food").getAsInt() == 10,
+                "body requirements remain visible beside large material evidence");
     }
 
     private static void frozenTickStillReportsPreview(Goal goal) throws Exception {
