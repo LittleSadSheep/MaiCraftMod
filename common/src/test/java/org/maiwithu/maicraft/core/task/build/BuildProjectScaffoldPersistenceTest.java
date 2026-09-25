@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.UUID;
 
 /** 用明确模拟的原生确认事件检查磁盘恢复；不依据世界中的其他泥土推断所有权，也不实际执行施工。 */
 public final class BuildProjectScaffoldPersistenceTest {
@@ -34,7 +35,32 @@ public final class BuildProjectScaffoldPersistenceTest {
         ledgerWritesOnlyConfirmedChanges();
         restartKeepsNativeOwnershipAndObservedRemoval();
         staleOrForeignRecordsCannotOverwriteEvidence();
+        machineRetriesRestoreOnlyTheirOwnStage();
         System.out.println("BuildProjectScaffoldPersistenceTest: passed");
+    }
+
+    private static void machineRetriesRestoreOnlyTheirOwnStage() throws Exception {
+        // 新的执行任务号不代表新工地；已核实的垫块必须跟着实际机器目标恢复，而不是跟着调用号丢失。
+        try (var h = new InteractionWorldTestHarness()) {
+            var store = new BuildProjectStore(new StateIdentity(WORLD, Files.createTempDirectory("maicraft-machine-stage-")));
+            UUID actor = UUID.randomUUID();
+            var targets = List.of(new BuildTaskRecord.Target(Blocks.OAK_PLANKS, Items.OAK_PLANKS,
+                    new BlockPos(6, 1, 6), "machine base", null, null, null));
+            var first = new BuildTaskRecord("first-machine-attempt", 100, targets, false);
+            store.bindMachineStage(first, h.level, actor);
+            h.set(SUPPORT, LOG); first.scaffoldLedger().confirmed(SUPPORT, LOG);
+            var retry = new BuildTaskRecord("different-execute-id", 200, targets, false);
+            store.bindMachineStage(retry, h.level, actor);
+            check(first.projectId().equals(retry.projectId()) && retry.scaffoldLedger().owns(SUPPORT, LOG),
+                    "机器重试继承同一阶段的原生支撑身份");
+            var otherActor = new BuildTaskRecord("other-player", 200, targets, false);
+            store.bindMachineStage(otherActor, h.level, UUID.randomUUID());
+            check(otherActor.scaffoldLedger().isEmpty(), "其他玩家不能继承本角色的支撑所有权");
+            h.set(SUPPORT, Blocks.CHEST.defaultBlockState());
+            var changed = new BuildTaskRecord("changed-world", 200, targets, false);
+            rejects(() -> store.bindMachineStage(changed, h.level, actor));
+            check(h.blockUses() == 0 && h.itemUses() == 0, "不匹配的支撑只报告冲突，不能拆除替换后的箱子");
+        }
     }
 
     private static void codecKeepsExactStateAndRejectsInvalidRecords() {

@@ -46,6 +46,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.MachineSealingTaskRecord;
 import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
 
 /**
  * 整套机器装配的流程入口：观察现场、放普通方块、装部件、封洞、放初始物品、设过滤和接口，最后复查。
@@ -154,6 +155,9 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         blocksStarted = true;
         boolean consume = !WorkProfile.of(player).freeMaterials();
         var plan = r.plan.blockTask(id(), r.getDeadlineGameTime(), consume, survey.partClears(), survey.openings(), completedInstallations);
+        // 同一机器失败后再执行时接回原生确认的垫块；仍由现场核对决定已建格是否可复用。
+        try { BuildProjectStore.available().ifPresent(store -> store.bindMachineStage(plan, world, player.getUUID())); }
+        catch (RuntimeException unavailable) { return failure("machine_scaffold_recovery_failed", unavailable.getMessage()); }
         // 这份附加检查只确认世界对象和加载状态，没有保存并逐次比较场地旧方块；它不能代替施工器的替换许可。
         plan.executionGuards(r.plan.constructionAccess(plan), actor -> actor.level() == world,
                 (actor, pos) -> actor.level() == world && actor.level().isLoaded(pos)
@@ -193,6 +197,9 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         }
         boolean consume = !WorkProfile.of(player).freeMaterials();
         var task = r.plan.attachmentTask(attachmentIndex, id(), deadline(), consume);
+        // 漏斗等后置附件也保留自己的支撑账，重试这一层不收编其他机器或其他玩家的方块。
+        try { BuildProjectStore.available().ifPresent(store -> store.bindMachineStage(task, world, player.getUUID())); }
+        catch (RuntimeException unavailable) { return failure("machine_scaffold_recovery_failed", unavailable.getMessage()); }
         task.executionGuards(List.of(), actor -> actor.level() == world, (actor, at) -> actor.level() == world && world.isLoaded(at), (actor, at) -> {});
         if (consume) start(new SemanticBuildSupplyTaskRecord(id(), r.getDeadlineGameTime(), task, r.materialPolicy, List.of(), false, r.protectedLabels, false));
         else start(task);

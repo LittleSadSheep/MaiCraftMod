@@ -15,12 +15,14 @@ import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import java.util.HashMap;
+import java.util.Comparator;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +40,23 @@ public final class BuildProjectStore {
 
     public static BuildProjectStore current() {
         return available().orElseThrow(() -> new IllegalStateException("build project world is unavailable"));
+    }
+
+    /** 同一玩家在同一世界重试相同机器准备格时恢复原支撑账，不能把上一轮垫块变成无主障碍。 */
+    public void bindMachineStage(BuildTaskRecord plan, Level level, UUID playerId) {
+        if (plan.targets.isEmpty()) return;
+        String dimension = level.dimension().location().toString();
+        StringBuilder physical = new StringBuilder("machine-native-stage\n").append(playerId).append('\n').append(dimension);
+        // 作者重排蓝图条目或改显示名称不改变现场工程；真实坐标、状态或材料变化才创建不同阶段记录。
+        plan.targets.stream().sorted(Comparator.comparingLong(target -> target.pos().asLong())).forEach(target -> physical
+                .append('\n').append(target.pos().asLong()).append(':').append(target.desiredState())
+                .append(':').append(BuiltInRegistries.ITEM.getKey(target.item())));
+        String id = UUID.nameUUIDFromBytes(physical.toString().getBytes(StandardCharsets.UTF_8)).toString();
+        JsonObject arguments = new JsonObject(); arguments.addProperty("machine_native_stage", true);
+        // 已有档案先走严格恢复，损坏或被替换的支撑不能通过覆盖项目文件掩盖。
+        if (Files.notExists(file(id))) save(id, dimension, arguments, plan.targets);
+        plan.project(id, updated -> save(id, dimension, arguments, updated.targets));
+        bindScaffolds(plan, level);
     }
 
     public String save(String dimension, JsonObject arguments, List<BuildTaskRecord.Target> targets) {
