@@ -126,7 +126,14 @@ public final class ClientMachineCatalog {
             String label = value.label();
             if (label == null || label.isBlank()) label = catalog.blueprintAt(value.dimension(),at).map(MachineBlueprint::label)
                     .orElse("机器@"+at.x()+","+at.y()+","+at.z());
-            String id = catalog.registerBlueprint(label,value.dimension(),at,value.plan().blueprint(),now);
+            var positions = value.plan().positions();
+            if (positions.isEmpty()) positions = List.of(value.plan().anchor());
+            var xs = positions.stream().mapToInt(BlockPos::getX).summaryStatistics();
+            var ys = positions.stream().mapToInt(BlockPos::getY).summaryStatistics();
+            var zs = positions.stream().mapToInt(BlockPos::getZ).summaryStatistics();
+            // 保存实际编译后的整机范围，包含原生带子和生成的门上半部；读取现状时无需用旧方块数据补图。
+            String id = catalog.registerBlueprint(label,value.dimension(),at,value.plan().blueprint(),now,
+                    new Position(xs.getMin(),ys.getMin(),zs.getMin()),new Position(xs.getMax(),ys.getMax(),zs.getMax()));
             var blueprint = catalog.blueprint(id).orElseThrow();
             catalog.recordBlueprintState(id,blueprint.fingerprint(),"success",now);
             compiledBlueprints.put(id,new CachedBlueprint(blueprint.fingerprint(),value.plan()));

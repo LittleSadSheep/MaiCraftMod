@@ -159,13 +159,17 @@ public final class MachineCatalog {
     public List<Line> lines() { requireReady(); return List.copyOf(lines.values()); }
     // 所有机器都保存原蓝图，普通刷石机也不需要声明外部接口或生产清单才能留档。
     public String registerBlueprint(String label, String dimension, Position anchor, JsonObject blueprint, long now) {
+        return registerBlueprint(label,dimension,anchor,blueprint,now,null,null);
+    }
+    public String registerBlueprint(String label, String dimension, Position anchor, JsonObject blueprint, long now, Position captureMin, Position captureMax) {
         requireReady(); dimension = CatalogLimits.registry(dimension, "machine dimension");
         String id = MachineBlueprint.locationId(binding.identityKey(), dimension, anchor);
         if (!blueprints.containsKey(id) && blueprints.size() >= CatalogLimits.LINES) throw new IllegalStateException("catalog_blueprint_capacity");
         String encoded = blueprint.toString(), fingerprint = CatalogLimits.hash(encoded);
         var previous = blueprints.get(id); boolean same = previous != null && previous.fingerprint().equals(fingerprint);
         blueprints.put(id, new MachineBlueprint(id,label,dimension,anchor,encoded,fingerprint,
-                same ? previous.lastBuildState() : "planned", same ? previous.registeredAtMillis() : now, same ? previous.builtAtMillis() : 0));
+                same ? previous.lastBuildState() : "planned", same ? previous.registeredAtMillis() : now, same ? previous.builtAtMillis() : 0,
+                captureMin,captureMax));
         dirty = true; return id;
     }
     public Optional<MachineBlueprint> blueprint(String id) { requireReady(); return Optional.ofNullable(blueprints.get(id)); }
@@ -178,7 +182,7 @@ public final class MachineCatalog {
         requireReady(); var value = blueprints.get(id);
         if (value == null || !value.fingerprint().equals(fingerprint)) return;
         blueprints.put(id, new MachineBlueprint(id,value.label(),value.dimension(),value.anchor(),value.blueprintJson(),fingerprint,
-                state,value.registeredAtMillis(),state.equals("success") ? now : value.builtAtMillis())); dirty = true;
+                state,value.registeredAtMillis(),state.equals("success") ? now : value.builtAtMillis(),value.captureMin(),value.captureMax())); dirty = true;
     }
     public List<Line> linesByLabel(String label) {
         requireReady(); String key = CatalogLimits.labelKey(label); return lines.values().stream().filter(line -> CatalogLimits.labelKey(line.label()).equals(key)).toList();

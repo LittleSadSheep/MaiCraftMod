@@ -23,7 +23,7 @@ final class CatalogCodec {
     static String encode(Snapshot snapshot) {
         if (snapshot.devices().size() > CatalogLimits.DEVICES || snapshot.lines().size() > CatalogLimits.LINES || snapshot.installations().size() > CatalogLimits.LINES)
             throw new IllegalArgumentException("Catalog entry count exceeds budget");
-        var root = new JsonObject(); root.addProperty("version", 3); root.addProperty("identity_key", snapshot.identityKey());
+        var root = new JsonObject(); root.addProperty("version", 4); root.addProperty("identity_key", snapshot.identityKey());
         var devices = new JsonArray(); snapshot.devices().forEach(device -> devices.add(device(device)));
         var lines = new JsonArray(); snapshot.lines().forEach(line -> lines.add(line(line)));
         var installations = new JsonArray(); snapshot.installations().forEach(value -> installations.add(installation(value)));
@@ -39,7 +39,7 @@ final class CatalogCodec {
         CatalogLimits.jsonDepth(json);
         var root = JsonParser.parseString(json).getAsJsonObject(); keys(root, "version", "identity_key", "devices", "lines", "installations", "blueprints");
         long version = number(root,"version");
-        if (version < 1 || version > 3 || !identityKey.equals(text(root, "identity_key"))) throw new IllegalArgumentException("Catalog version or identity mismatch");
+        if (version < 1 || version > 4 || !identityKey.equals(text(root, "identity_key"))) throw new IllegalArgumentException("Catalog version or identity mismatch");
         var devices = new ArrayList<Device>(); var lines = new ArrayList<Line>(); Set<String> ids = new HashSet<>();
         for (var raw : array(root, "devices", CatalogLimits.DEVICES)) {
             var row = raw.getAsJsonObject();
@@ -81,7 +81,9 @@ final class CatalogCodec {
             var anchor = new Position(at.get(0).getAsBigDecimal().intValueExact(), at.get(1).getAsBigDecimal().intValueExact(), at.get(2).getAsBigDecimal().intValueExact());
             String fingerprint = text(row, "blueprint_fingerprint");
             var value = new MachineBlueprint(text(row,"machine_id"),text(row,"label"),text(row,"dimension"),anchor,
-                    blueprintsByFingerprint.apply(fingerprint),fingerprint,text(row,"last_build_state"),number(row,"registered_at_ms"),number(row,"last_built_at_ms"));
+                    blueprintsByFingerprint.apply(fingerprint),fingerprint,text(row,"last_build_state"),number(row,"registered_at_ms"),number(row,"last_built_at_ms"),
+                    row.has("capture_min") ? vector(row.getAsJsonArray("capture_min")) : null,
+                    row.has("capture_max") ? vector(row.getAsJsonArray("capture_max")) : null);
             if (!value.id().equals(MachineBlueprint.locationId(identityKey,value.dimension(),anchor)) || !ids.add(value.id()))
                 throw new IllegalArgumentException("Duplicate or foreign machine blueprint");
             blueprints.add(value);
@@ -119,6 +121,10 @@ final class CatalogCodec {
                 number(row, "native_events"), number(row, "produced"), number(row, "delivered"), number(row, "observed_at_ms")), text(row, "manifest_fingerprint"));
     }
     private static Position position(JsonObject row) { keys(row, "x", "y", "z"); return new Position(Math.toIntExact(number(row, "x")), Math.toIntExact(number(row, "y")), Math.toIntExact(number(row, "z"))); }
+    private static Position vector(JsonArray row) {
+        if (row == null || row.size() != 3) throw new IllegalArgumentException("Invalid machine capture bounds");
+        return new Position(row.get(0).getAsBigDecimal().intValueExact(),row.get(1).getAsBigDecimal().intValueExact(),row.get(2).getAsBigDecimal().intValueExact());
+    }
     private static String text(JsonObject row, String key) { var value = row.get(key); if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) throw new IllegalArgumentException("Invalid catalog string " + key); return value.getAsString(); }
     private static long number(JsonObject row, String key) { var value = row.get(key); if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) throw new IllegalArgumentException("Invalid catalog number " + key); return value.getAsBigDecimal().longValueExact(); }
     private static boolean bool(JsonObject row, String key) { var value = row.get(key); if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) throw new IllegalArgumentException("Invalid catalog boolean " + key); return value.getAsBoolean(); }
