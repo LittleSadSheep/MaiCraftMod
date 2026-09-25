@@ -48,12 +48,25 @@ public final class AttentionSnapshotTest {
             result = AttentionSnapshot.read(runtime, before, true);
             check(result.get("history_lost").getAsBoolean() && result.get("wake_reason").getAsString().equals("task_terminal"),
                     "evicted event does not hide authoritative terminal state " + state);
-            check(result.getAsJsonObject("task").equals(MaiCraftRuntimeFacade.taskSnapshot(finished)),
-                    "attention and task/get share the full authoritative terminal receipt");
+            check(result.getAsJsonObject("task").equals(TaskView.status(finished))
+                            && result.getAsJsonObject("task").getAsJsonObject("terminal").getAsJsonObject("data")
+                            .get("preview_id").getAsString().equals("retained-result"),
+                    "attention retains authoritative final evidence without echoing input and history");
             JsonObject again = normalize(result.getAsJsonObject("next_attention"));
             check(reason(runtime, again).equals("task_terminal"), "late wait after completion returns immediately");
         }
         request = request(runtime, task);
+        // 一份过期决策通知不应重发大蓝图；当前决策来自任务单，重要身体事件仍原样可见。
+        var publish = IntentRuntime.class.getDeclaredMethod("decision", IntentTaskRecord.class, IntentTaskRecord.DecisionSnapshot.class);
+        publish.setAccessible(true);
+        publish.invoke(runtime, task, new IntentTaskRecord.DecisionSnapshot(UUID.randomUUID(), "old decision",
+                List.of(new IntentTaskRecord.DecisionOption("retry", "retry")), "{\"goal\":\"" + "stone".repeat(15000) + "\"}"));
+        JsonObject injury = new JsonObject(); injury.addProperty("health", 3); injury.addProperty("source", "lava");
+        runtime.gameEvent("body.hurt", "Leave the lava", injury);
+        var changed = AttentionSnapshot.read(runtime, request, true);
+        check(changed.toString().length() < 6000, "large event context is not repeated in monitoring");
+        check(changed.getAsJsonArray("events").asList().stream().anyMatch(event -> event.getAsJsonObject()
+                .getAsJsonObject("data").equals(injury)), "body safety evidence survives compact task events");
         result = AttentionSnapshot.read(runtime, request, false);
         check(result.get("wake_reason").getAsString().equals("runtime_unavailable") && !result.has("task"),
                 "detached body cannot advertise stale task authority");

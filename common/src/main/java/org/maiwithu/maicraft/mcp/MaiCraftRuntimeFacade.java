@@ -199,7 +199,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     public CompletionStage<JsonElement> readAttention() {
         JsonObject args = new JsonObject();
         args.addProperty("after_cursor", 0);
-        args.addProperty("limit", 20);
+        // 资源订阅重连也只交付少量近期消息，避免每次门铃读取重复列出二十份任务记录。
+        args.addProperty("limit", 5);
         return onClient(() -> attentionOnClient(args));
     }
 

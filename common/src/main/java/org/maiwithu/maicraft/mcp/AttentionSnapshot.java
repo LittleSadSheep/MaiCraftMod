@@ -4,10 +4,11 @@ package org.maiwithu.maicraft.mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.UUID;
+import java.util.List;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 
-/** 把最近消息和任务的真实记录放在同一份回复里；即使“完成”消息已经被挤掉，也能读到任务最终结果。 */
+/** 事件只提示发生了什么，任务记录给当前处理依据；丢失旧消息后仍能凭任务编号找回证据。 */
 final class AttentionSnapshot {
     static JsonObject read(IntentRuntime runtime, JsonObject args, boolean available) {
         // 先取消息，再补任务当前状态；后面的判断优先级更高，例如已结束比“有普通消息”更值得唤醒调用者。
@@ -15,7 +16,8 @@ final class AttentionSnapshot {
         UUID taskId = rawTask == null ? null : UUID.fromString(rawTask);
         JsonObject result = runtime.attention(args.get("after_cursor").getAsLong(),
                 args.get("limit").getAsInt(), string(args, "stream_id"), taskId);
-        result.addProperty("schema_version", 2);
+        compactTaskEvents(result.getAsJsonArray("events"));
+        result.addProperty("schema_version", 3);
         result.addProperty("runtime_available", available);
         String reason = "idle";
         if (result.getAsJsonArray("events").size() > 0) reason = "events";
@@ -39,7 +41,8 @@ final class AttentionSnapshot {
             JsonArray tasks = new JsonArray();
             int limit = args.get("limit").getAsInt();
             var retained = runtime.tasks(256);
-            for (IntentTaskRecord record : retained.stream().limit(limit).toList()) tasks.add(project(record));
+            // 重新连接时先给任务索引；只有指定任务才附当前决策与结果，避免一口气重放多个旧任务。
+            for (IntentTaskRecord record : retained.stream().limit(limit).toList()) tasks.add(MaiCraftRuntimeFacade.taskSummary(record));
             result.add("tasks", tasks);
             result.addProperty("tasks_truncated", retained.size() > limit);
             result.addProperty("task_status_source", "runtime_task_record");
@@ -56,13 +59,36 @@ final class AttentionSnapshot {
     }
 
     private static JsonObject project(IntentTaskRecord record) {
-        // 平时只给简短进度；已经结束、暂停或需要回答时给完整信息，调用者才有依据做决定。
+        // 等待时始终保留状态；需处理问题或结束时补当前证据摘要，历史通过 task get 的 detail_path 找回。
         if (record.getState().isTerminal() || record.terminalSnapshot() != null
                 || record.decisionSnapshot() != null || record.pauseSnapshot() != null)
-            return MaiCraftRuntimeFacade.taskSnapshot(record);
+            return TaskView.status(record);
         JsonObject result = MaiCraftRuntimeFacade.taskSummary(record);
-        if (record.activeExecution() != null) result.add("active_execution", record.activeExecution());
+        if (record.activeExecution() != null) result.add("active_execution",
+                JsonReadback.preview(record.activeExecution(), "/active_execution", 1800));
         return result;
+    }
+
+    private static void compactTaskEvents(JsonArray events) {
+        for (var value : events) {
+            JsonObject event = value.getAsJsonObject();
+            if (!event.has("task_id") || !event.has("data") || !event.get("data").isJsonObject()) continue;
+            if (!List.of("decision", "completed", "failed", "cancelled", "plan_changed")
+                    .contains(event.get("type").getAsString())) continue;
+            JsonObject data = event.getAsJsonObject("data");
+            // 决策、目标修订和终态的完整内容在任务单中；通知保留身份与成败，游标和事件顺序照常推进。
+            JsonObject brief = new JsonObject();
+            for (String key : List.of("decision_id", "mode", "success", "timed_out", "interrupted",
+                    "completed_step_count", "step_count", "skipped", "reason"))
+                if (data.has(key)) brief.add(key, data.get(key));
+            // 未指定任务的订阅者也必须看到未决消费，随后按 task_id 查当前证据再决定是否继续。
+            if (data.has("data") && data.get("data").isJsonObject()) {
+                JsonObject facts = data.getAsJsonObject("data");
+                for (String key : List.of("outcome_uncertain", "mechanical_retry_allowed", "effects_started"))
+                    if (facts.has(key)) brief.add(key, facts.get(key));
+            }
+            event.add("data", brief);
+        }
     }
 
     static JsonObject continuation(JsonObject checkpoint, String taskId) {

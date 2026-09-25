@@ -103,7 +103,7 @@ final class PublicToolCatalog {
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
-                                 "limit":{"type":"integer","minimum":1,"maximum":20,"default":10},
+                                 "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -219,7 +219,7 @@ final class PublicToolCatalog {
                 "sections", "server_id");
         // 已选中文档 URI 就直接读知识；调用者明确指定的其他视图仍会校验，避免先做一次无关身体观察。
         defaults(value, "view", present(value, "resource_uri") ? "knowledge" : "situation", "after_cursor", 0, "wait_ms", 0,
-                "limit", 10, "server_id", "minecraft-server");
+                "limit", 5, "server_id", "minecraft-server");
         String view = string(value, "view", 1, 32, false);
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
         // 场地参数只服务这一次有界观察，不悄悄改变其他视图的范围或过滤语义。
