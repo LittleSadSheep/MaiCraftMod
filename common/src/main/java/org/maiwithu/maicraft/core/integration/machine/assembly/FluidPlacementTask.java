@@ -56,7 +56,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         waitingSince = world.getGameTime();
         if (!world.isLoaded(r.target)) { failure("fluid_target_unloaded"); return; }
         if (FluidPlacementRules.matches(world.getBlockState(r.target), r.expected)) { alreadyPresent = true; return; }
-        String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected, r.sourceRegion);
+        // 进入倒桶阶段只核对实际落桶格；相邻通道允许流水，不要求整片机器围成封闭水池。
+        String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
         if (issue != null) failure(issue);
     }
 
@@ -67,7 +68,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (!selection.pending() && world.isLoaded(r.target) && FluidPlacementRules.matches(world.getBlockState(r.target), r.expected)) {
             alreadyPresent = true; return TaskState.SUCCESS;
         }
-        String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected, r.sourceRegion);
+        // 角色拿桶与走近期间复查目标是否被占用，不推演周围流体以后会流到哪里。
+        String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
         if (issue != null) return failure(issue);
         if (!selected) {
             waiting("selecting_bucket");
@@ -95,7 +97,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
                 player.getEyePosition().add(player.getViewVector(1).scale(player.blockInteractionRange())), r.bucket);
         if (!FirstPersonInteractionTargeting.acceptsBucketHit(world, r.target, r.bucket, hit)) { rejectStand(); return TaskState.RUNNING; }
         if (!returnFits()) return failure("fluid_empty_bucket_return_space_missing");
-        issue = FluidPlacementRules.placementProblem(world, r.target, r.expected, r.sourceRegion);
+        // 出手前只确认本次落桶目标仍可用，提交后依靠原生桶回执核实实际结果。
+        issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
         if (issue != null) return failure(issue);
         actionAvailable = context.mutationAvailable();
         if (!actionAvailable) { waiting("awaiting_native_action"); return TaskState.RUNNING; }

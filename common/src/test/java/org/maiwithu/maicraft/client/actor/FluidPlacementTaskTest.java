@@ -17,6 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
@@ -33,13 +34,16 @@ public final class FluidPlacementTaskTest {
     private static final BlockPos AT = new BlockPos(3,1,3);
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        originalBucketAndAcknowledgement(); reuseAndFailures(); irregularContainment(); cancellationDoesNotPourAgain();
+        originalBucketAndAcknowledgement(); reuseAndFailures(); openFlowChannels(); cancellationDoesNotPourAgain();
         replayOffsetStance(); arrivedStanceCannotWaitForever();
         System.out.println("FluidPlacementTaskTest: passed");
     }
 
     private static void originalBucketAndAcknowledgement() throws Exception {
         try (var f = fixture()) {
+            // 复现刷石机的开放沟槽：水源旁留一格流水通道，另一端放岩浆；原生倒桶不能被未封闭围挡拦住。
+            f.set(AT.east(), Blocks.AIR.defaultBlockState());
+            f.set(AT.east(2), Blocks.LAVA.defaultBlockState());
             f.inventory.setItem(0,new ItemStack(Items.WATER_BUCKET)); installUse(f);
             var task = task(); var running = new FluidPlacementTask(f.player,task); running.start(f.player);
             submit(f,running);
@@ -77,16 +81,21 @@ public final class FluidPlacementTaskTest {
         }
     }
 
-    private static void irregularContainment() throws Exception {
+    private static void openFlowChannels() throws Exception {
         try(var f=fixture()) {
+            // 多源池和开放沟槽都按真实落桶格施工；拆掉一面侧壁不应令未倒出的水提前失败。
             Set<BlockPos> shape=Set.of(new BlockPos(6,1,6),new BlockPos(7,1,6),new BlockPos(7,1,7),new BlockPos(8,1,7));
             for(BlockPos at:shape) for(Direction side:Direction.Plane.HORIZONTAL)
                 if(!shape.contains(at.relative(side))) f.set(at.relative(side),Blocks.GLASS.defaultBlockState());
-            for(BlockPos at:shape) check(FluidPlacementRules.placementProblem(f.level,at,Blocks.WATER.defaultBlockState(),shape)==null,
-                    "不规则多格池应根据声明区域逐边检查，而不是只识别固定单格模板");
+            for(BlockPos at:shape) check(FluidPlacementRules.placementProblem(f.level,at,Blocks.WATER.defaultBlockState())==null,
+                    "不规则多格池的空源格应可直接倒桶");
             BlockPos boundary=new BlockPos(6,1,5); f.set(boundary,Blocks.AIR.defaultBlockState());
-            check(FluidPlacementRules.placementProblem(f.level,new BlockPos(6,1,6),Blocks.WATER.defaultBlockState(),shape)!=null,
-                    "缺少侧壁时必须先停，不能让桶向蓝图外漫流");
+            check(FluidPlacementRules.placementProblem(f.level,new BlockPos(6,1,6),Blocks.WATER.defaultBlockState())==null,
+                    "水应允许流入未声明为源格的开放通道");
+            // 第二桶岩浆落在空格时，相邻流动水也不能提前否决；水与岩浆的相遇结果留给游戏结算。
+            f.set(boundary,Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL,3));
+            check(FluidPlacementRules.placementProblem(f.level,new BlockPos(6,1,6),Blocks.LAVA.defaultBlockState())==null,
+                    "相邻水流不能阻止在空目标格倒岩浆");
         }
     }
 
@@ -121,7 +130,7 @@ public final class FluidPlacementTaskTest {
                     "真实偏心站位仍可命中近侧支撑面，并必须落到原声明源格");
             f.mode.itemUse=player->{f.level.blockSequence++;f.set(target,Blocks.WATER.defaultBlockState());f.inventory.setItem(0,new ItemStack(Items.BUCKET));};
             var running=new FluidPlacementTask(f.player,new FluidPlacementTaskRecord("offset-stance",1000,target,
-                    Blocks.WATER.defaultBlockState(),sources,installation)); running.start(f.player); submit(f,running);
+                    Blocks.WATER.defaultBlockState(),installation)); running.start(f.player); submit(f,running);
             check(f.itemUses()==1 && Boolean.TRUE.equals(running.progress().get("actual_bucket_ray_available")),
                     "实际站位应进入瞄准和原生桶提交，不能再次停在导航到达判断中");
             f.level.acknowledgedSequence=f.level.blockSequence;f.nextTick();
@@ -156,7 +165,7 @@ public final class FluidPlacementTaskTest {
     private static FluidPlacementTaskRecord task() {
         Set<BlockPos> installation=new HashSet<>(Set.of(AT,AT.below()));
         for(Direction side:Direction.Plane.HORIZONTAL) installation.add(AT.relative(side));
-        return new FluidPlacementTaskRecord("fluid-test",1000,AT,Blocks.WATER.defaultBlockState(),Set.of(AT),installation);
+        return new FluidPlacementTaskRecord("fluid-test",1000,AT,Blocks.WATER.defaultBlockState(),installation);
     }
     private static void installUse(InteractionWorldTestHarness f) {
         // 夹具模拟原版预测和分包同步；生产代码仍只通过 NativeActionPort 发出一次实际 useItem。

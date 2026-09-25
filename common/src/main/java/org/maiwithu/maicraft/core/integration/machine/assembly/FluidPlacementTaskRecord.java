@@ -10,22 +10,20 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.stream.Collectors;
 
-/** 固定一格源流体与同种流体的声明范围；桶物品由流体注册定义派生，不含专用水池或配方材料。 */
+/** 固定本次倒桶目标与机器占位；源格只描述桶放在哪里，不限制放下后的流动范围。 */
 public final class FluidPlacementTaskRecord extends TaskRecord {
     static { TaskFactory.register(FluidPlacementTaskRecord.class, FluidPlacementTask::new); }
     public final BlockPos target;
     public final BlockState expected;
     public final BucketItem bucket;
-    public final Set<BlockPos> sourceRegion;
     public final Set<BlockPos> installation;
     public FluidPlacementTaskRecord(String callId, long deadline, BlockPos target, BlockState expected,
-                                    Set<BlockPos> sourceRegion, Set<BlockPos> installation) {
+                                    Set<BlockPos> installation) {
         super("machine_place_source_fluid", callId, deadline);
         this.target = target.immutable(); this.expected = expected; bucket = MachinePlacementItems.fluidBucket(expected);
-        this.sourceRegion = sourceRegion.stream().map(BlockPos::immutable).collect(Collectors.toUnmodifiableSet());
         this.installation = installation.stream().map(BlockPos::immutable).collect(Collectors.toUnmodifiableSet());
-        if (!this.sourceRegion.contains(this.target)) throw new IllegalArgumentException("source fluid target is outside its declared region");
-        if (!this.installation.containsAll(this.sourceRegion)) throw new IllegalArgumentException("source fluid region is outside the installation");
+        // 桶仍只能放到本次机器蓝图指定的格子，周围水流不必逐格声明成水源。
+        if (!this.installation.contains(this.target)) throw new IllegalArgumentException("source fluid target is outside the installation");
     }
     @Override public String describe() { return "用真实桶填充声明的源流体格"; }
 }

@@ -37,7 +37,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.Fluid;
 import org.maiwithu.maicraft.client.preview.PreviewPart;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismFilterTaskRecord;
@@ -53,7 +52,7 @@ import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
  * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
  */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
-    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUID_CHECK, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
+    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, DONE }
     private final Level world;
     private final Map<BlockPos, BlockState> preview;
     private final JsonArray configurations;
@@ -61,7 +60,6 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private final List<BlockPos> plannedPositions;
     private final MachineBuildSurvey survey;
     private final Set<BlockPos> fluidPositions;
-    private final Map<Fluid, Set<BlockPos>> fluidRegions;
     private final JsonArray requirements;
     private final JsonArray initialContents;
     private final JsonArray filters;
@@ -75,7 +73,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int verifyConfigIndex, requirementIndex;
     private int contentsIndex;
     private int filterIndex;
-    private int fluidCheckIndex, fluidIndex;
+    private int fluidIndex;
     private int installationIndex, verifyInstallationIndex, verifyProcessingIndex;
     private int attachmentIndex;
     private boolean assemblyVerified;
@@ -90,12 +88,9 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         super(player, record); world = player.level(); preview = record.plan.preview();
         plannedPositions = record.plan.positions();
         survey = new MachineBuildSurvey(record.plan);
-        // 同种流体共享冻结区域，后续每格填充复用这份范围，避免大池每次重扫整份计划。
+        // 冻结待倒桶的目标位置，施工与补料继续识别这些源格，不把它们当成待挖空气。
         fluidPositions = record.plan.fluidTargets().stream().map(BuildTaskRecord.Target::pos)
                 .collect(Collectors.toUnmodifiableSet());
-        fluidRegions = record.plan.fluidTargets().stream().collect(Collectors.groupingBy(
-                target -> target.desiredState().getFluidState().getType(), Collectors.mapping(
-                        BuildTaskRecord.Target::pos, Collectors.toUnmodifiableSet())));
         previewParts = record.plan.parts().stream()
                 .map(part -> new PreviewPart(part.position(), part.spec().itemId(),
                         part.spec().side() == null ? "center" : part.spec().side().getSerializedName())).toList();
@@ -129,7 +124,6 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             case ATTACHMENTS -> installAttachments();
             case PARTS -> installPart();
             case SEAL -> seal();
-            case FLUID_CHECK -> checkFluids();
             case FLUIDS -> fillFluid();
             case CONTENTS -> contents();
             case FILTERS -> filters();
@@ -201,32 +195,13 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.RUNNING;
     }
 
-    // 临时出入口留到普通结构和部件完成后再封，封口任务负责先走到外面。
+    // 临时出入口在角色走到外面后封闭，随后直接逐格倒桶，不再整批预判流体是否会流出源格。
     private TaskState seal() {
-        if (sealingStarted || r.plan.seals().isEmpty()) { phase = Phase.FLUID_CHECK; return TaskState.RUNNING; }
+        if (sealingStarted || r.plan.seals().isEmpty()) { phase = Phase.FLUIDS; return TaskState.RUNNING; }
         sealingStarted = true;
         start(new MachineSealingTaskRecord(id(), r.getDeadlineGameTime(),
                 r.plan.seals(), r.materialPolicy, r.protectedLabels, plannedPositions));
         return TaskState.RUNNING;
-    }
-
-    // 固体、部件、施工洞口全部完成后，再分帧检查每个待填源格的围挡，避免未封好的池子向保护区或池外漫流。
-    private TaskState checkFluids() {
-        int budget = 64;
-        while (fluidCheckIndex < r.plan.fluidTargets().size() && budget-- > 0) {
-            var target = r.plan.fluidTargets().get(fluidCheckIndex);
-            if (!world.isLoaded(target.pos())) return load(target.pos());
-            String issue = FluidPlacementRules.placementProblem(
-                    world, target.pos(), target.desiredState(), fluidRegion(target.desiredState()));
-            if (issue != null) return failure("machine_fluid_site_blocked", issue);
-            fluidCheckIndex++;
-        }
-        if (fluidCheckIndex >= r.plan.fluidTargets().size()) phase = Phase.FLUIDS;
-        return TaskState.RUNNING;
-    }
-
-    private Set<BlockPos> fluidRegion(BlockState state) {
-        return fluidRegions.get(state.getFluidState().getType());
     }
 
     private TaskState fillFluid() {
@@ -237,8 +212,9 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (FluidPlacementRules.matches(world.getBlockState(target.pos()), target.desiredState())) {
             fluidIndex++; return TaskState.RUNNING;
         }
+        // 有真实满桶就交给原生放置任务，按落点和桶账判断结果，不预先要求相邻流水格也声明成源格。
         if (ensureItem(BuiltInRegistries.ITEM.getKey(target.item()))) start(new FluidPlacementTaskRecord(id(), deadline(),
-                target.pos(), target.desiredState(), fluidRegion(target.desiredState()), Set.copyOf(plannedPositions)));
+                target.pos(), target.desiredState(), Set.copyOf(plannedPositions)));
         return TaskState.RUNNING;
     }
 
