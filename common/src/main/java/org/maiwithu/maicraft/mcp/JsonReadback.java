@@ -7,6 +7,7 @@ import com.google.gson.JsonPrimitive;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Function;
 
 /** 大块游戏证据按 JSON Pointer 找回；摘要明确标记省略，分页不把截断当成完整事实。 */
 final class JsonReadback {
@@ -14,6 +15,10 @@ final class JsonReadback {
     private JsonReadback() {}
 
     static JsonObject page(JsonElement root, String path, int offset, int limit) {
+        return page(root, path, offset, limit, null);
+    }
+
+    static JsonObject page(JsonElement root, String path, int offset, int limit, Function<String, String> uri) {
         if (offset < 0 || limit < 1 || limit > 50) throw new IllegalArgumentException("Invalid detail page");
         JsonElement value = resolve(root, path);
         JsonObject page = reference(value, path);
@@ -46,7 +51,7 @@ final class JsonReadback {
             JsonObject row = new JsonObject();
             if (value.isJsonArray()) row.addProperty("index", i); else row.addProperty("key", key);
             JsonElement child = value.isJsonArray() ? value.getAsJsonArray().get(i) : value.getAsJsonObject().get(key);
-            row.add("value", preview(child, childPath(path, key), budget)); rows.add(row);
+            row.add("value", preview(child, childPath(path, key), budget, uri)); rows.add(row);
         }
         page.add("items", rows);
         if (end < total) page.addProperty("next_offset", end);
@@ -54,8 +59,15 @@ final class JsonReadback {
     }
 
     static JsonElement preview(JsonElement value, String path, int budget) {
+        return preview(value, path, budget, null);
+    }
+
+    static boolean fits(JsonElement value, int budget) { return size(value, budget) <= budget; }
+
+    static JsonElement preview(JsonElement value, String path, int budget, Function<String, String> uri) {
         if (size(value, budget) <= budget) return value.deepCopy();
         JsonObject reference = reference(value, path);
+        if (uri != null) reference.addProperty("resource_uri", uri.apply(path));
         // 证据过大时只带直接状态事实，完整数据仍由原任务或资源提供；不抽取任意前几行冒充代表性样本。
         if (value.isJsonObject()) {
             JsonObject summary = new JsonObject();

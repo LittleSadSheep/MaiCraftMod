@@ -22,6 +22,7 @@ public final class AttentionRegressionSuite {
         AttentionWaitTest.main(args);
         // 大份任务证据按路径与分页找回，不能因宿主压缩上下文而只能重新执行动作。
         JsonReadbackTest.main(args);
+        ResponseArchiveTest.main(args);
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         // 已存的大蓝图和失败历史可分页找回，常规状态须保留当前待答问题与消费不确定性。
