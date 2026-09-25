@@ -20,6 +20,8 @@ public final class AttentionRegressionSuite {
         AttentionFeedTest.main(args);
         ChatFlowTest.main(args);
         AttentionWaitTest.main(args);
+        // 大份任务证据按路径与分页找回，不能因宿主压缩上下文而只能重新执行动作。
+        JsonReadbackTest.main(args);
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         // 重复请求和恢复取消必须只改变对应任务记录，不能抢占玩家或打断另一件工作。
