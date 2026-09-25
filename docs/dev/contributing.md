@@ -72,6 +72,23 @@
 
 测试夹具会直接构造玩家、世界或菜单的必要部分，便于重复验证具体行为。夹具通过不等于实际整合包已经验收。实际联机、模组版本差异、画面和交互体验仍要在专用测试世界检查。
 
+## 单人世界自动验收
+
+从模板复制到新的存档目录，再通过快速启动参数进入副本。副本目录必须尚不存在，避免把新一轮测试混进旧施工现场：
+
+~~~powershell
+$trialWorldPath = '.\neoforge\run\saves\TEST-Run'
+if (Test-Path -LiteralPath $trialWorldPath) { throw '测试副本已存在，请换一个新名称' }
+Copy-Item -LiteralPath '.\neoforge\run\saves\TEST-Template' -Destination $trialWorldPath -Recurse
+.\gradlew.bat :neoforge:runClient '-PmaicraftTestWorld=TEST-Run'
+~~~
+
+这个参数要求指定已有副本，并拒绝模板名及目录穿越。测试进程使用 `--quickPlaySingleplayer` 自动进世界，并通过 JVM 参数关闭人工蓝图审核；保存的日常 Dev 开关继续保留。
+
+`runClient` 启动前运行 `checkDevelopmentMods`，拒绝 `run/mods` 中声明同一 Mod ID 的打包文件，确保使用开发编译。已经打包的 MaiCraft 应移到 `mods` 目录之外保存。
+
+开始模型验收前，核对启动日志中的 `MaiCraft client runtime source=… preview_review=false`：类来源应为开发输出目录，并且客户端已进入指定副本。任务成功要以实际施工、检查和使用的回执为依据。
+
 ## 一次重构怎样提交
 
 日常修改在 `dev`。每个可独立理解、已经验证的修改单独提交；完成一个完整功能后整合到 `main`，随后回到 `dev`。
