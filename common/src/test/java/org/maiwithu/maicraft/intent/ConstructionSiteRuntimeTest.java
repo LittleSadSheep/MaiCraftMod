@@ -45,6 +45,19 @@ public final class ConstructionSiteRuntimeTest {
             check(planned.get("valid").getAsBoolean() && planned.getAsJsonArray("checks").get(0).getAsJsonObject()
                     .get("site_anchor_verified").getAsBoolean(), "plan validates the real snapshot binding");
             check(MachineSnapshots.requireForConstruction(world.player, site.id()).id().equals(site.id()), "plan leaves the receipt available to execute");
+            // 玩家绕到工地另一侧后重复勘察，观察与执行旧计划都必须留在原工地，不能把整台机器平移。
+            world.position(new Vec3(10.5, 8, 9.5));
+            var fixed = runtime.constructionAnchor("site", new Goal.WorldPosition(10, 8, 9, site.dimension()));
+            check(fixed.x() == anchor.getX() && fixed.z() == anchor.getZ(), "同名工地不跟随角色移动");
+            var refreshed = MachineSnapshots.constructionSite(world.player, "site", new BlockPos(fixed.x(), fixed.y(), fixed.z()), 7);
+            check(refreshed.center().equals(site.center()) && MachinePlanPreflight.review(goal, world.player, runtime)
+                    .get("valid").getAsBoolean(), "刷新现场后旧计划仍绑定同一锚点");
+            try {
+                runtime.constructionAnchor("site", new Goal.WorldPosition(10, 8, 9, "minecraft:the_nether"));
+                throw new AssertionError("跨维度观察不应覆盖工地");
+            } catch (IllegalArgumentException expected) {
+                check(expected.getMessage().contains("dimension_mismatch"), "明确报告工地维度不匹配");
+            }
             // 施工任务创建后尚未放置任何方块：补料失败再改材料策略，仍应复用并重验原场地。
             check(MachineAbilityAdapter.adapt(goal, world.player, runtime, null) instanceof IntentAction.Native,
                     "the first construction attempt creates its native task");

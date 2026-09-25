@@ -295,8 +295,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 String label = nullableString(arguments, "label");
                 if (label == null) label = "site_" + Integer.toHexString(player.level().dimension().hashCode())
                         + "_" + anchor.getX() + "_" + anchor.getY() + "_" + anchor.getZ();
+                // 工地观察更新现场而不跟随取料后的脚位；旧蓝图与新观察继续共用相同的相对坐标原点。
+                var fixed = intents.constructionAnchor(label, new Goal.WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(),
+                        player.level().dimension().location().toString()));
+                anchor = new BlockPos(fixed.x(), fixed.y(), fixed.z());
                 var snapshot = MachineSnapshots.constructionSite(player, label, anchor, arguments.get("radius").getAsInt());
-                intents.remember(label, new Goal.WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), snapshot.dimension()));
                 yield ConstructionSiteGeometry.describe(snapshot);
             }
             case "tasks" -> {

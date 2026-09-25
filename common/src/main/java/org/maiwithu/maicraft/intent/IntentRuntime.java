@@ -280,6 +280,18 @@ public final class IntentRuntime {
         return location == null ? null : new Landmark(label,location,LandmarkAreaRole.ORDINARY);
     }
 
+    /** 角色取料或绕行后再看同一工地时沿用原锚点；显式记忆地点仍可另行修改地标。 */
+    public Goal.WorldPosition constructionAnchor(String label, Goal.WorldPosition observed) {
+        Landmark existing = landmark(label);
+        if (existing != null) {
+            if (!existing.position().dimension().equals(observed.dimension()))
+                throw new IllegalArgumentException("construction_site_dimension_mismatch: the named site belongs to another dimension");
+            return existing.position();
+        }
+        remember(label, observed);
+        return observed;
+    }
+
     public List<Landmark> landmarks() {
         return List.copyOf(landmarks.values());
     }
