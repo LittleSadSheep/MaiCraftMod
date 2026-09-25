@@ -174,6 +174,8 @@ public final class SemanticResultView {
     }
 
     private static Object sanitizeEntry(String key, Object value) {
+        // 地图蓝图和结构差异都是只读观测，保留真实状态属性与未知格子，不能再按动作字段名删掉其中的数据。
+        if (key.equals("as_built_blueprint") || key.equals("blueprint_diff")) return value;
         // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。
         if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return value;
         // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。

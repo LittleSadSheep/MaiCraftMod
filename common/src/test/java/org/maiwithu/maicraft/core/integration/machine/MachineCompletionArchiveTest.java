@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalog;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.Identity;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 
 /** 完工入口自动记录普通机器并附一次 diff；随后发生的差异不能把已完成施工改判成失败。 */
 public final class MachineCompletionArchiveTest {
@@ -50,11 +51,18 @@ public final class MachineCompletionArchiveTest {
             var result = task.result(TaskState.SUCCESS); var diff = (JsonObject) result.data().get("blueprint_diff");
             check(result.success() && diff.get("wrong_block").getAsInt() == 1 && result.data().containsKey("recorded_machine"),
                     "completion receipt includes the saved identity and a default current-world diff");
+            // 主动完工通知也必须带出这次差异，而不是只在深层任务记录中留一份需要额外发现的数据。
+            var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult",JsonObject.class); compact.setAccessible(true);
+            var notice = (JsonObject) compact.invoke(null,JsonParser.parseString(result.toJson()).getAsJsonObject());
+            check(notice.getAsJsonObject("data").has("recorded_machine") && notice.getAsJsonObject("data").has("blueprint_diff"),
+                    "the default completion notification exposes machine identity and diff");
             var built = catalog.blueprints().getFirst();
             check(built.label().equals("简易机器") && built.lastBuildState().equals("success")
                             && h.blockUses() == 0 && h.itemUses() == 0,"archiving and post-build comparison never mutate the world");
             var restored = new MachineCatalog(directory,Runnable::run); restored.bind(identity,"second");
-            check(restored.blueprint(built.id()).orElseThrow().blueprint().equals(plan.blueprint()),"automatic completion records survive reconnect");
+            var persisted = restored.blueprint(built.id()).orElseThrow();
+            check(persisted.blueprint().equals(plan.blueprint()) && persisted.captureMin().x() == 3 && persisted.captureMax().z() == 3,
+                    "automatic completion records preserve blueprint and exact capture bounds across reconnect");
         } finally {
             for (var entry : saved.entrySet()) entry.getKey().set(null,entry.getValue());
             cache.clear(); cache.putAll(oldCache); pending.clear(); pending.putAll(oldPending);

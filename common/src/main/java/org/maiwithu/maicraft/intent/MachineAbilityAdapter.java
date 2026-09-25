@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.core.integration.machine.MachineDesignReview;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 import org.maiwithu.maicraft.core.integration.machine.MachineRecipeEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
+import org.maiwithu.maicraft.core.integration.machine.MachineInspectionBlueprintView;
+import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprint;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import org.maiwithu.maicraft.core.integration.machine.MachineBuildTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
@@ -85,15 +87,18 @@ final class MachineAbilityAdapter {
         JsonObject p = goal.parameters();
         switch (goal.ability()) {
             case INSPECT -> {
-                only(p, "label", "radius", "structure_id", "component_offset", "resource_offset");
+                only(p, "label", "radius", "structure_id", "component_offset", "resource_offset", "machine_id", "mode", "offset", "limit");
                 optionalString(p, "label", 160);
+                String mode = optionalString(p,"mode",16);
+                if (mode != null && !Set.of("full","diff").contains(mode)) throw bad("inspect_machine mode must be full or diff");
+                optionalString(p,"machine_id",80); integer(p,"offset",0,0,Integer.MAX_VALUE); integer(p,"limit",256,1,512);
                 integer(p, "radius", 4, 0, 8);
                 integer(p, "component_offset", 0, 0, 768);
                 integer(p, "resource_offset", 0, 0, 4096);
                 if (p.has("structure_id")) {
                     UUID.fromString(requiredString(p,"structure_id",36));
-                    if (goal.target()!=null || p.has("radius") || p.has("component_offset") || p.has("resource_offset")) throw bad("structure_id inspects that whole observed physical structure; omit target, radius and paging offsets");
-                } else if (goal.target() == null) throw bad("inspect_machine requires a semantic target or observed structure_id");
+                    if (goal.target()!=null || p.has("radius") || p.has("component_offset") || p.has("resource_offset") || p.has("machine_id") || p.has("mode") || p.has("offset") || p.has("limit")) throw bad("structure_id inspects that whole observed physical structure; omit fixed-machine selectors and paging offsets");
+                } else if (goal.target() == null && !p.has("machine_id")) throw bad("inspect_machine requires a semantic target, machine_id or observed structure_id");
             }
             case DESIGN -> {
                 // 通用设计可以没有场地；如果指定某处机器，就要求带上那处机器的观察编号。
@@ -231,16 +236,26 @@ final class MachineAbilityAdapter {
             return new IntentAction.Report(TaskResult.ok("Physical structure control paths inspected; see verified connections, unresolved inputs and vehicle classification.",
                     Map.of("machine",inspection.report())),null);
         }
-        // 在指定位置读机器周围的方块并给观察结果一个编号，同时记住机器的地点名；命名不等于允许修改。
-        Goal.WorldPosition position = resolve(goal.target(), player, runtime);
         JsonObject p = goal.parameters();
+        MachineBlueprint saved = p.has("machine_id") ? ClientMachineCatalog.blueprint(player,p.get("machine_id").getAsString(),null)
+                .orElseThrow(() -> bad("machine_record_not_found")) : null;
+        Goal.WorldPosition position = saved == null ? resolve(goal.target(), player, runtime)
+                : new Goal.WorldPosition(saved.anchor().x(),saved.anchor().y(),saved.anchor().z(),saved.dimension());
+        BlockPos center = block(position);
+        if (saved == null) saved = ClientMachineCatalog.blueprint(player,null,center).orElse(null);
         String label = optionalString(p, "label", 160);
-        if (label == null) label = goal.target().label();
+        if (label == null) label = saved != null ? saved.label() : goal.target().label();
         if (label == null || label.isBlank()) throw bad("Give the machine a short label so subsequent analysis and operation refer to the same place");
         int radius = integer(p, "radius", 4, 0, 8);
-        BlockPos center = block(position);
-        if (!player.level().isLoaded(center)) throw bad("machine_anchor_unloaded: travel closer before inspecting; unloaded terrain is not empty space");
-        MachineSnapshots.Snapshot snapshot = MachineSnapshots.inspect(player, label, center, radius);
+        String mode = optionalString(p,"mode",16); if (mode == null) mode = "full";
+        // 默认导出当前地图，只有显式 diff 才拿存档设计比较；未知区块返回未知，不用旧设计填充现场。
+        var blueprintView = MachineInspectionBlueprintView.read(player,saved,center,radius,p.has("radius"),mode,
+                integer(p,"offset",0,0,Integer.MAX_VALUE),integer(p,"limit",256,1,512));
+        if (!player.level().isLoaded(center) || !player.level().dimension().location().toString().equals(position.dimension())) {
+            blueprintView.addProperty("label",label); blueprintView.addProperty("structure_complete",false);
+            return new IntentAction.Report(TaskResult.ok("Machine location retained; unloaded map data remains unknown.",Map.of("machine",blueprintView)),null);
+        }
+        MachineSnapshots.Snapshot snapshot = MachineSnapshots.withInspectionView(MachineSnapshots.inspect(player, label, center, radius),blueprintView);
         runtime.remember(label, position);
         ClientMachineCatalog.inspected(player,label,center,radius);
         return new IntentAction.Native(new ServerMachineObservationTaskRecord(

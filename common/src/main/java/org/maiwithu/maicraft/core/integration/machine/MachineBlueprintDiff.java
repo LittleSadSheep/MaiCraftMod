@@ -86,7 +86,7 @@ public final class MachineBlueprintDiff {
         return result;
     }
     private static JsonArray offset(BlockPos at) { var value = new JsonArray(); value.add(at.getX()); value.add(at.getY()); value.add(at.getZ()); return value; }
-    private static JsonObject state(BlockState value) {
+    static JsonObject state(BlockState value) {
         var result = new JsonObject(); result.addProperty("block_id", BuiltInRegistries.BLOCK.getKey(value.getBlock()).toString());
         var properties = new JsonObject(); value.getValues().forEach((property, setting) -> properties.addProperty(property.getName(), name(property, setting)));
         result.add("properties", properties); return result;

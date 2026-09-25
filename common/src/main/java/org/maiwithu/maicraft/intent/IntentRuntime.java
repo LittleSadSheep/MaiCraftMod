@@ -78,7 +78,9 @@ public final class IntentRuntime {
             "target", "requested", "gathered", "confirmed_target_breaks", "scope",
             "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps",
             "skipped_step_count", "skipped_steps", "all_steps_succeeded",
-            "completed_effects", "remaining_effects", "landing_assist", "landing_assist_observed");
+            "completed_effects", "remaining_effects", "landing_assist", "landing_assist_observed",
+            // 完工消息默认带出机器编号和差异；检查消息保留地图布局入口，完整内容仍可分页读取。
+            "recorded_machine", "blueprint_diff", "machine");
     private static final Set<String> ATTENTION_ISSUE_FACT_KEYS = Set.of(
             "failure_type", "recipe_id", "missing", "item_ids", "required_final_count",
             "observed_final_count", "target", "requested",

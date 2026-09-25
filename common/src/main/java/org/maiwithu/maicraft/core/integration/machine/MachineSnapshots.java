@@ -70,6 +70,13 @@ public final class MachineSnapshots {
     public static Snapshot inspect(LocalPlayer player, String label, BlockPos center, int radius) {
         return inspect(player, label, center, radius, false);
     }
+    // 给同一次现场观察附上地图导出或设计差异；后续原生证据补读继续沿用这份快照，不能丢掉实际布局。
+    public static Snapshot withInspectionView(Snapshot snapshot, JsonObject view) {
+        var report = snapshot.report(); view.entrySet().forEach(entry -> report.add(entry.getKey(),entry.getValue().deepCopy()));
+        var enriched = new Snapshot(snapshot.id(),snapshot.label(),snapshot.dimension(),snapshot.center(),snapshot.radius(),
+                snapshot.gameTime(),snapshot.fingerprint(),report.toString());
+        SNAPSHOTS.put(snapshot.id(),enriched); return enriched;
+    }
 
     /** 场地只读感知直接取得施工锚点；建造时仍核对实际结构，不要求模型另发勘察任务。 */
     public static Snapshot constructionSite(LocalPlayer player, String label, BlockPos center, int radius) {

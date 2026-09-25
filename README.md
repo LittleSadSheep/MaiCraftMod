@@ -174,6 +174,24 @@ Linux 或 macOS 使用：
 
 寻路遇到名单外方块会绕行；没有可行路线就失败。施工遇到名单外障碍会停止，并通过 `clearance_report` 向 LLM 返回维度、方块 ID、坐标、冲突数量和最近的水平选址偏移。偏移建议在已加载地形中核对整份蓝图，搜索半径 16 格；未知区块或预算不足会注明。建议仅证明目标格的清障条件，仍须重新检查地基、通路和新场地；不会自动搬迁已有工程。替换许可、保护区域、流体与不可破坏限制继续生效，自有临时支撑仍按原清理流程回收。
 
+### 已建机器的现状与差异
+
+`build_machine` 完成后会自动保存机器编号、名称、原地范围和设计蓝图，并在完成结果中附上一轮 `blueprint_diff`。该差异只报告观察结果，不触发重建或把完成的施工改判为失败；施工过程中不持续扫描。`perceive(view="machines")` 的 `recorded_machines` 可找回这些记录。
+
+`inspect_machine` 支持 `mode: "full" | "diff"`，默认 `full`。例如把下面的目标交给 `plan` / `execute`，并替换实际的机器编号：
+
+```json
+{
+  "ability": "maicraft:inspect_machine",
+  "outcome": "查看已建机器的实际布局",
+  "parameters": {"machine_id": "<完工结果中的 machine_id>", "mode": "full"}
+}
+```
+
+`full` 返回 `as_built_blueprint`，其中方块 ID、状态和相对位置全部从当前地图读取，包含范围内后来更换或添加的方块；不会复述存档中的旧设计。默认使用完工时记录的整机范围，也可用 `radius` 指定观察范围。它是地图方块状态的观察格式；库存、接口配置与生产证据仍在各自的原生观察中。
+
+`diff` 才与保存的设计比较，区分缺块、错块、状态不符、应为空的格子被占用，以及未加载的未知格子。没有设计记录的旧机器仍可读取 `full`，但不能凭空生成设计差异。两种模式均支持 `offset` / `limit`；有 `has_more` 时按 `next_offset` 继续。分页是分别读取的现场观察，未加载区域不会被当成空气或由旧蓝图补齐。
+
 ### 机器生产目标
 
 沿用“生成结构 → 建造机器 → 使用机器”：`design_machine` 设计结构，`build_machine` 施工，已有场地用 `operate_machine` 的 `operation: "run_production"` 执行工序。也可在 `build_machine` 中提供 `production` 与 `allow_use: true`，先完成施工，再运行同一工序。机器蓝图里的源流体最终通过原生桶操作装配，并核验源格与桶的变化。
