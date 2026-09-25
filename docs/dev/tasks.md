@@ -35,6 +35,16 @@
 
 任务表最多保留 256 条记录。接新目标前可以淘汰最旧的已结束记录；如果全是未完成的任务，就先拒绝接单，直到用户明确取消不再需要的旧事。保存端也会拒绝超量快照，不能只保存前半部分再宣称成功。
 
+### 查询只投影需要处理的事实
+
+[TaskView](../../common/src/main/java/org/maiwithu/maicraft/mcp/TaskView.java) 给普通查询和 Attention 提供当前状态、待答问题、消费限制及终态摘要。执行中的旧步骤结果不会每次重放；`retained_attempt_count` 是当前保留的尝试数，历史本身仍在任务单里。`task(get, path=...)` 通过 [JsonReadback](../../common/src/main/java/org/maiwithu/maicraft/mcp/JsonReadback.java) 逐项读取完整快照；投影不能修改任务单或调用执行器的 `result`。
+
+[PlanView](../../common/src/main/java/org/maiwithu/maicraft/mcp/PlanView.java) 避免在编译回执中复印原蓝图。`plan(plan_id=..., path=...)` 恢复保存的输入，明确标记没有重新验证现场；执行仍走原来的材料、场地和原生动作检查。
+
+[ResponseArchive](../../common/src/main/java/org/maiwithu/maicraft/mcp/ResponseArchive.java) 处理其余超大载荷，把原始数据冻结在服务拥有的临时压缩文件里。页面保留对象键、数组索引和连续文本偏移，省略值附上明确引用。宿主可自行缓存完整内容，模型只展开当前需要的部分。临时引用失效时明确报错，不把缺失当成空证据；临时文件写入失败则回退交付原回执，保留已经发生的游戏事实。
+
+传输只发送一份普通 JSON 文本；Attention v3 的任务事件保留游标、类型、身份和关键效果标记，当前决策从任务记录读取。身体伤害等事件继续保留自己的证据，过滤任务事件不能滤掉身体安全信息。
+
 ### 网络请求取消不等于游戏任务取消
 
 请求仍在客户端线程的队列里时，可以撤回，随后也不会接管玩家或登记任务。已经开始处理的请求只能报告“已经开始”，继续交付真实结果；要停止已经接到的游戏工作，调用 `task(cancel)`。等待 Attention 消息的挂起由独立等待器管理，不混在普通接单请求的状态里。

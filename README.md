@@ -28,7 +28,7 @@ MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需
 - **Dev 蓝图预览**：在世界中显示半透明待建结构和差异轮廓，支持逐层查看；确认前归还玩家操控，确认后执行冻结的方案。
 - **只读房屋设计**：`maicraft:design_build` 直接显示蓝图，不移动或施工；普通建造在 Dev 确认之后才开始供料。
 - **按需知识资源**：自动发现安装模组的 Ponder 教程，按组件和场景读取原始旁白、操作提示及方块状态；支持 MCP Resources 和 `perceive(view="knowledge")`。
-- **任务观察与控制**：优先通过 Attention 事件等待取得权威状态、决策和完整终态结果；支持暂停、恢复和取消。
+- **任务观察与控制**：通过 Attention 等待权威状态、当前决策和结果摘要，完整证据按需找回；支持暂停、恢复和取消。
 - **游戏聊天与命令**：打开原版聊天框逐字输入，再自动提交消息或 `/` 命令；支持后台运行和人工接管。
 
 MCP 客户端可以提供语义目标或声明式蓝图。MaiCraft 在游戏内负责路径、施工手法、菜单操作、重试和结果校验；调用方不提供远程点击脚本。
@@ -40,7 +40,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 | 工具 | 用途 |
 | --- | --- |
 | `perceive` | 以 Attention 为首选等待任务事件、决策和结果；也读取游戏状态、能力契约与世界证据 |
-| `plan` | 将语义目标编译为计划，但不立即执行 |
+| `plan` | 编译目标而不立即执行；也可凭 `plan_id` 找回已保存的设计 |
 | `execute` | 异步启动目标或计划，返回任务 ID 和可直接传给 `perceive` 的 `next_attention` |
 | `task` | 显式检查/恢复任务，暂停、恢复、取消，或回答问题；日常等待使用 Attention |
 
@@ -48,9 +48,25 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 执行后按返回的 `next_attention` 等待，读取响应中的 `task` 和 `wake_reason`，再按新的 `next_attention` 续等。Attention 直接引用任务记录，即使历史事件已被挤出缓存，也能返回仍保留的任务决策和最终结果；无需轮询 `task(get)` 或包装同步执行工具。原生资源订阅可使用 `maicraft://attention`（任务监控）和 `maicraft://chatflow`（收到的游戏内聊天，供专门对话的 Agent 使用），模型唤醒行为由宿主决定。
 
+日常回执保留当前目标、状态、必要的失败事实和下一步入口，原始蓝图、旧尝试和长报告按需读取。宿主可以缓存已读信息；上下文压缩后，用保留的编号找回所需证据，无需重新执行任务。
+
+| 需要的信息 | 调用方式 |
+| --- | --- |
+| 当前任务、待答问题与结果摘要 | `task(action="get", task_id=...)` |
+| 原始目标或某次失败证据 | `task(action="get", task_id=..., path="/goal")` 或 `path="/attempts"` |
+| 已保存的计划输入 | `plan(plan_id=..., path="/goal/parameters")`，不重新编译或执行 |
+| 更多任务或能力目录 | 同一查询复制 `next_offset` 到 `offset`；默认每页 5 项 |
+| 大份报告、长文档的指定部分 | `perceive(resource_uri=返回的 resource_uri)`，继续读取 `next_uri` |
+
+`detail_path` 指向保留的完整任务或计划，可能与摘要的字段结构不同。`path=""` 列出根字段；对象和数组分页返回 `items`，长文本返回连续的 `value`。出现 `omitted=true` 表示该值需要展开，`summary` 只包含部分事实，不能把未显示的内容当成空数据。
+
+普通业务载荷超过约 8,000 字符时提供冻结回执引用；这是 JSON 载荷的投影预算，不是包含转义的 HTTP 字符数硬上限。`maicraft://receipts/...` 只读取原快照，不重新观察世界、不延长游戏内 `snapshot_id` 的有效期。临时回执最多保留 32 份，闲置 30 分钟或服务重启后失效；压缩存储按 64 MiB 预算淘汰旧份，单份超大结果保留到后续淘汰。引用失效时查询仍保留的任务，或重新做对应的只读观察，不能为找回输出重复 `execute`。
+
+协议消费者升级后应刷新工具列表：普通工具的 JSON 只放在 `content[0].text`，不再重复提供同一份 `structuredContent`；短知识正文保留原文，结构化部分仅附资源元数据。Attention 使用 `schema_version=3`，无任务编号时返回任务索引，指定任务后返回当前状态和必要证据摘要。
+
 四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
-每项能力的参数和限制由 `perceive(view="abilities")` 动态公开。AI 客户端应先读取能力契约，再提交目标，而不是猜测方块坐标、物品栏槽位或内部动作。
+`perceive(view="abilities")` 默认返回能力用途的小目录；可先用 `query` 搜索，再用 `focus="maicraft:能力名"` 读取选定能力的参数和限制。AI 客户端据此提交语义目标，具体路径与原生操作由 Mod 执行。
 
 例如将以下参数交给 `execute`，会自动打开聊天框、逐字输入并发送；`plan` 只校验和规划，不打开界面：
 
@@ -77,7 +93,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 所有平台搜索都使用 `semantic_target="platform"`，通过 `direction` 选择方向（`up`、`down`、`forward`、`backward`、`left`、`right` 或四个英文方位，默认 `forward`）。相对方向在任务开始时固定；区域搜索半径 `max_distance` 默认 64，范围 8–128 格。普通坐标移动仍支持省略 Y 和到达容差，`exact=true` 用于需要准确站位的动作。
 
-`perceive(view="surroundings")` 的 `terrain_overview` 提供地形缩略信息：大致方位、相对高度、水平范围、`surface_material` 材质、支撑样本及未知区域。预览覆盖已加载地形的水平半径 128 格、向下 256 格，按距离使用 4／8／32 格采样间距。同一次请求会等待后续客户端帧补充结果；达到采样或响应预算后返回明确的完整／部分采样状态。远处不同材质的支撑面会优先保留，未采到的平台不代表不存在。
+`perceive(view="surroundings", sections=["terrain_overview"])` 提供地形缩略信息：大致方位、相对高度、水平范围、`surface_material` 材质、支撑样本及未知区域。预览覆盖已加载地形的水平半径 128 格、向下 256 格，按距离使用 4／8／32 格采样间距。同一次请求会等待后续客户端帧补充结果；达到采样或响应预算后返回明确的完整／部分采样状态。远处不同材质的支撑面会优先保留，未采到的平台不代表不存在。
 
 飞行航点允许高度偏差和观察区域内到达，后续路径仍检查真实身体碰撞。静止飞艇的已验证下降柱支持关包快速下降；确认无伤的短落可以直接关包到地面。地面移动会退出喷气背包飞行模式，落地保护也会在材料就绪后退出缓慢悬停；下一次飞行任务按需重新启用背包。
 
@@ -85,7 +101,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 使用 `elevator_floor="ask"`，或仅指定 `transport_mode="elevator"` 而不提供目的地，会先到电梯附近同步楼层，再返回 `waiting_for_decision`。LLM 用 `task(action="answer")` 的 `retry` 和 `details.parameters` 选择 `elevator_id`、`elevator_floor`。同步楼层是中间步骤，实际乘梯并出梯后才完成移动目标；`needs_sync` 表示信息未知，不代表没有楼层。
 
-`perceive` 的 `situation` 与 `surroundings` 支持用 `sections` 点名所需段，只返回这些顶层段而不再返回整份快照。完整快照可达上万字符，调用方按上下文预算截断时排在后面的段会被整段切掉，读不到的一方会把"没读到"读成"没有"；点名取段是唯一能保证所需段一定读得到的做法。段名就是完整响应里的顶层键，拼错会被拒绝；本次确实没有产出的段在 `sections_unavailable` 里点名。例如 `perceive(view="surroundings", sections=["elevators"])` 只取电梯楼层，且因为没点名 `terrain_overview`，这次请求不等待地形采样、立即返回。未声明 `sections` 时返回完整快照并照旧等待地形采样，行为与之前一致。
+`situation` 与 `surroundings` 支持用 `sections` 点名所需段。默认周边观察返回附近实体、告示牌、安全信息与设备，不等待大范围地形，并在 `additional_sections` 提示可选的 `terrain_overview`。例如 `sections=["elevators"]` 只取电梯楼层；点名地形才等待采样。本次未产出的指定段在 `sections_unavailable` 中列出，大段内容仍可通过冻结回执展开。
 
 `maicraft:travel_dimension` 和 `maicraft:reach_milestone` 可设置 `prepare_portal=true`，在没有观察到有效传送门时准备入口。下界门优先复用完整黑曜石框、补齐标准小门的缺块，或在附近已加载的安全空地新建十块黑曜石框，再使用打火石或已有火焰弹点火。建造和修复还需 `may_alter_terrain=true`；缺料按 `material_policy` 和 `allowed_sources` 获取，临时施工支撑也计入供料需求。
 
@@ -130,7 +146,7 @@ Linux 或 macOS 使用：
 
 要启用服务端增强，在服务器 `mods` 目录中安装对应加载器的 MaiCraft JAR；建议客户端与服务端使用相同版本。单人世界由同一个客户端安装提供集成服务端支持。连接未安装 MaiCraft 的服务器时，普通客户端感知、建造及已有原生操作继续可用。
 
-`perceive(view="abilities")` 返回 `server_assistance`：`ready` 表示已协商，`client_only` 表示客户端模式。具体操作仍需满足模组、权限、距离、材料和原生状态条件；超时或结果未知不会触发重复操作或擅自切换后端重做。
+选定能力的契约附带 `server_assistance` 概要：`ready` 表示已协商，`client_only` 表示客户端模式。完整后端诊断使用 `perceive(view="abilities", focus="maicraft:server_assistance")`。具体操作仍需满足模组、权限、距离、材料和原生状态条件；超时或结果未知不会触发重复操作或擅自切换后端重做。
 
 ### 建筑规模与资源配置
 
