@@ -9,29 +9,37 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** 严格且有界的文件格式；当前会话观察结果和操作许可永不序列化。 */
 final class CatalogCodec {
-    record Snapshot(String identityKey, List<Device> devices, List<Line> lines, List<UtilityInstallation> installations) {
-        Snapshot(String identityKey, List<Device> devices, List<Line> lines) { this(identityKey,devices,lines,List.of()); }
-        Snapshot { devices = List.copyOf(devices); lines = List.copyOf(lines); installations = List.copyOf(installations); }
+    record Snapshot(String identityKey, List<Device> devices, List<Line> lines, List<UtilityInstallation> installations, List<MachineBlueprint> blueprints) {
+        Snapshot(String identityKey, List<Device> devices, List<Line> lines) { this(identityKey,devices,lines,List.of(),List.of()); }
+        Snapshot(String identityKey, List<Device> devices, List<Line> lines, List<UtilityInstallation> installations) { this(identityKey,devices,lines,installations,List.of()); }
+        Snapshot { devices = List.copyOf(devices); lines = List.copyOf(lines); installations = List.copyOf(installations); blueprints = List.copyOf(blueprints); }
     }
     private CatalogCodec() {}
     static String encode(Snapshot snapshot) {
         if (snapshot.devices().size() > CatalogLimits.DEVICES || snapshot.lines().size() > CatalogLimits.LINES || snapshot.installations().size() > CatalogLimits.LINES)
             throw new IllegalArgumentException("Catalog entry count exceeds budget");
-        var root = new JsonObject(); root.addProperty("version", 2); root.addProperty("identity_key", snapshot.identityKey());
+        var root = new JsonObject(); root.addProperty("version", 3); root.addProperty("identity_key", snapshot.identityKey());
         var devices = new JsonArray(); snapshot.devices().forEach(device -> devices.add(device(device)));
         var lines = new JsonArray(); snapshot.lines().forEach(line -> lines.add(line(line)));
         var installations = new JsonArray(); snapshot.installations().forEach(value -> installations.add(installation(value)));
+        // 索引只保存版本引用；完整蓝图另存文件，避免一台大机器挤满设备目录。
+        var blueprints = new JsonArray(); snapshot.blueprints().forEach(value -> blueprints.add(value.summary()));
+        root.add("blueprints", blueprints);
         root.add("devices", devices); root.add("lines", lines); root.add("installations",installations); return root.toString();
     }
     static Snapshot decode(String json, String identityKey) {
+        return decode(json, identityKey, ignored -> { throw new IllegalArgumentException("machine_blueprint_file_required"); });
+    }
+    static Snapshot decode(String json, String identityKey, Function<String, String> blueprintsByFingerprint) {
         CatalogLimits.jsonDepth(json);
-        var root = JsonParser.parseString(json).getAsJsonObject(); keys(root, "version", "identity_key", "devices", "lines", "installations");
+        var root = JsonParser.parseString(json).getAsJsonObject(); keys(root, "version", "identity_key", "devices", "lines", "installations", "blueprints");
         long version = number(root,"version");
-        if (version < 1 || version > 2 || !identityKey.equals(text(root, "identity_key"))) throw new IllegalArgumentException("Catalog version or identity mismatch");
+        if (version < 1 || version > 3 || !identityKey.equals(text(root, "identity_key"))) throw new IllegalArgumentException("Catalog version or identity mismatch");
         var devices = new ArrayList<Device>(); var lines = new ArrayList<Line>(); Set<String> ids = new HashSet<>();
         for (var raw : array(root, "devices", CatalogLimits.DEVICES)) {
             var row = raw.getAsJsonObject();
@@ -66,7 +74,19 @@ final class CatalogCodec {
                 throw new IllegalArgumentException("Duplicate or foreign utility installation");
             installations.add(value);
         }
-        return new Snapshot(identityKey, devices, lines, installations);
+        var blueprints = new ArrayList<MachineBlueprint>(); ids.clear();
+        if (root.has("blueprints")) for (var raw : array(root, "blueprints", CatalogLimits.LINES)) {
+            var row = raw.getAsJsonObject(); var at = row.getAsJsonArray("anchor");
+            if (at == null || at.size() != 3) throw new IllegalArgumentException("machine_blueprint_anchor");
+            var anchor = new Position(at.get(0).getAsBigDecimal().intValueExact(), at.get(1).getAsBigDecimal().intValueExact(), at.get(2).getAsBigDecimal().intValueExact());
+            String fingerprint = text(row, "blueprint_fingerprint");
+            var value = new MachineBlueprint(text(row,"machine_id"),text(row,"label"),text(row,"dimension"),anchor,
+                    blueprintsByFingerprint.apply(fingerprint),fingerprint,text(row,"last_build_state"),number(row,"registered_at_ms"),number(row,"last_built_at_ms"));
+            if (!value.id().equals(MachineBlueprint.locationId(identityKey,value.dimension(),anchor)) || !ids.add(value.id()))
+                throw new IllegalArgumentException("Duplicate or foreign machine blueprint");
+            blueprints.add(value);
+        }
+        return new Snapshot(identityKey, devices, lines, installations, blueprints);
     }
     private static JsonObject installation(UtilityInstallation value) {
         var row = new JsonObject(); row.addProperty("id",value.id()); row.addProperty("label",value.label()); row.addProperty("dimension",value.dimension());

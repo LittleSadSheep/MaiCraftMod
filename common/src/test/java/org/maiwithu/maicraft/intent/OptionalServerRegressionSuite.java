@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.core.integration.create.transmission.KineticTransmi
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItemsTest;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogTest;
 import org.maiwithu.maicraft.core.integration.machine.catalog.UtilityInstallationCatalogTest;
+import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprintCatalogTest;
 import org.maiwithu.maicraft.core.integration.machine.discovery.MachineDiscoveryScannerTest;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutUtilityInputsTest;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionDesignCompilerTest;
@@ -126,6 +127,8 @@ public final class OptionalServerRegressionSuite {
         MachineSurvivalMaterialsTest.main(args);
         MachineLayoutUtilityInputsTest.main(args);
         UtilityInstallationCatalogTest.main(args);
+        // 已建机器的完整蓝图跨连接保存，后续地图比对不依赖原施工任务仍留在内存。
+        MachineBlueprintCatalogTest.main(args);
         UtilityConnectionPlannerTest.main(args);
         UtilityExistingCableRouteTest.main(args);
         UtilityConnectionTaskGuardTest.main(args);

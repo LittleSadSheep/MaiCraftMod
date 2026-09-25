@@ -27,6 +27,7 @@ public final class MachineCatalog {
     private final Map<String, Device> devices = new LinkedHashMap<>();
     private final Map<String, Line> lines = new LinkedHashMap<>();
     private final Map<String, UtilityInstallation> installations = new LinkedHashMap<>();
+    private final Map<String, MachineBlueprint> blueprints = new LinkedHashMap<>();
     private final Map<String, Long> currentTicks = new LinkedHashMap<>();
     private final ConcurrentLinkedQueue<Runnable> completed = new ConcurrentLinkedQueue<>();
     private Binding binding;
@@ -53,7 +54,7 @@ public final class MachineCatalog {
         binding = new Binding(key, sessionKey, ++generation); currentTicks.clear(); error = "";
         if (sameReadyIdentity) { observeSave(lastSave, generation, saveRevision); return binding; }
         // 同一进程重新连接时保留尚未保存的历史，但绝不保留当前观察状态。
-        devices.clear(); lines.clear(); installations.clear(); dirty = false; state = State.LOADING; lastSave = CompletableFuture.completedFuture(null);
+        devices.clear(); lines.clear(); installations.clear(); blueprints.clear(); dirty = false; state = State.LOADING; lastSave = CompletableFuture.completedFuture(null);
         long requestedGeneration = generation;
         try {
             store.load(key).whenComplete((loaded, failure) -> completed.add(() -> {
@@ -61,6 +62,7 @@ public final class MachineCatalog {
                 if (failure != null) { state = State.FAILED; error = "catalog_load_failed"; return; }
                 loaded.snapshot().devices().forEach(device -> devices.put(device.id(), device)); loaded.snapshot().lines().forEach(line -> lines.put(line.id(), line));
                 loaded.snapshot().installations().forEach(value -> installations.put(value.id(),value));
+                loaded.snapshot().blueprints().forEach(value -> blueprints.put(value.id(),value));
                 dirty = loaded.needsSave(); state = State.READY;
             }));
         } catch (RuntimeException unavailable) { state = State.FAILED; error = "catalog_load_failed"; }
@@ -68,7 +70,7 @@ public final class MachineCatalog {
     }
     public void unbind() {
         requireOwner(); poll(); if (state == State.READY && dirty) saveAsync();
-        generation++; binding = null; devices.clear(); lines.clear(); installations.clear(); currentTicks.clear(); state = State.UNBOUND; dirty = false; error = "";
+        generation++; binding = null; devices.clear(); lines.clear(); installations.clear(); blueprints.clear(); currentTicks.clear(); state = State.UNBOUND; dirty = false; error = "";
     }
     public void poll() { requireOwner(); for (int i = 0; i < 64; i++) { Runnable next = completed.poll(); if (next == null) break; next.run(); } }
     public boolean ready() { requireOwner(); poll(); return state == State.READY; }
@@ -155,6 +157,29 @@ public final class MachineCatalog {
         installations.put(value.id(),new UtilityInstallation(value.id(),value.label(),dimension,anchor,value.inputsJson(),value.inputsFingerprint(),value.registeredAtMillis(),now)); dirty = true;
     }
     public List<Line> lines() { requireReady(); return List.copyOf(lines.values()); }
+    // 所有机器都保存原蓝图，普通刷石机也不需要声明外部接口或生产清单才能留档。
+    public String registerBlueprint(String label, String dimension, Position anchor, JsonObject blueprint, long now) {
+        requireReady(); dimension = CatalogLimits.registry(dimension, "machine dimension");
+        String id = MachineBlueprint.locationId(binding.identityKey(), dimension, anchor);
+        if (!blueprints.containsKey(id) && blueprints.size() >= CatalogLimits.LINES) throw new IllegalStateException("catalog_blueprint_capacity");
+        String encoded = blueprint.toString(), fingerprint = CatalogLimits.hash(encoded);
+        var previous = blueprints.get(id); boolean same = previous != null && previous.fingerprint().equals(fingerprint);
+        blueprints.put(id, new MachineBlueprint(id,label,dimension,anchor,encoded,fingerprint,
+                same ? previous.lastBuildState() : "planned", same ? previous.registeredAtMillis() : now, same ? previous.builtAtMillis() : 0));
+        dirty = true; return id;
+    }
+    public Optional<MachineBlueprint> blueprint(String id) { requireReady(); return Optional.ofNullable(blueprints.get(id)); }
+    public Optional<MachineBlueprint> blueprintAt(String dimension, Position anchor) {
+        requireReady(); return blueprint(MachineBlueprint.locationId(binding.identityKey(),dimension,anchor));
+    }
+    public List<MachineBlueprint> blueprints() { requireReady(); return List.copyOf(blueprints.values()); }
+    // 被替换的旧施工任务结束时不能覆盖同一地点的新蓝图记录；仅更新它实际使用过的版本。
+    public void recordBlueprintState(String id, String fingerprint, String state, long now) {
+        requireReady(); var value = blueprints.get(id);
+        if (value == null || !value.fingerprint().equals(fingerprint)) return;
+        blueprints.put(id, new MachineBlueprint(id,value.label(),value.dimension(),value.anchor(),value.blueprintJson(),fingerprint,
+                state,value.registeredAtMillis(),state.equals("success") ? now : value.builtAtMillis())); dirty = true;
+    }
     public List<Line> linesByLabel(String label) {
         requireReady(); String key = CatalogLimits.labelKey(label); return lines.values().stream().filter(line -> CatalogLimits.labelKey(line.label()).equals(key)).toList();
     }
@@ -176,7 +201,7 @@ public final class MachineCatalog {
     }
     public CompletableFuture<Void> saveAsync() {
         requireReady(); long revision = ++saveRevision, expectedGeneration = generation;
-        lastSave = store.save(new CatalogCodec.Snapshot(binding.identityKey(), List.copyOf(devices.values()), List.copyOf(lines.values()),List.copyOf(installations.values())));
+        lastSave = store.save(new CatalogCodec.Snapshot(binding.identityKey(), List.copyOf(devices.values()), List.copyOf(lines.values()),List.copyOf(installations.values()),List.copyOf(blueprints.values())));
         dirty = false; CompletableFuture<Void> requested = lastSave;
         observeSave(requested, expectedGeneration, revision);
         return requested;

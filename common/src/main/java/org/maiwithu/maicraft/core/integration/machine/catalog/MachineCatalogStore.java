@@ -47,7 +47,7 @@ final class MachineCatalogStore {
                 if (bytes.length == 0 || bytes.length > CatalogLimits.FILE_BYTES) throw new IOException("catalog_file_size_invalid");
                 String json = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                         .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
-                return new Loaded(CatalogCodec.decode(json, key), false);
+                return new Loaded(CatalogCodec.decode(json, key, fingerprint -> readBlueprint(key, fingerprint)), false);
             } catch (IOException | RuntimeException failure) { throw new CompletionException("catalog_load_failed", failure); }
         }, executor);
     }
@@ -80,10 +80,18 @@ final class MachineCatalogStore {
         }
     }
     private void write(CatalogCodec.Snapshot snapshot) throws IOException {
+        // 先落地不可变蓝图再发布目录索引；中途写入失败时，上一份目录仍能找到原来的蓝图。
+        for (var blueprint : snapshot.blueprints()) {
+            Path target = blueprintPath(snapshot.identityKey(), blueprint.fingerprint());
+            if (!Files.exists(target)) writeAtomic(target, blueprint.blueprintJson().getBytes(StandardCharsets.UTF_8));
+        }
         byte[] bytes = CatalogCodec.encode(snapshot).getBytes(StandardCharsets.UTF_8);
         if (bytes.length > CatalogLimits.FILE_BYTES) throw new IOException("catalog_checkpoint_too_large");
-        Files.createDirectories(directory);
-        Path target = path(snapshot.identityKey()), temporary = Files.createTempFile(directory, snapshot.identityKey() + "-", ".tmp");
+        writeAtomic(path(snapshot.identityKey()), bytes);
+    }
+    private void writeAtomic(Path target, byte[] bytes) throws IOException {
+        Files.createDirectories(target.getParent());
+        Path temporary = Files.createTempFile(target.getParent(), target.getFileName() + "-", ".tmp");
         try {
             try (var channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
                 var buffer = ByteBuffer.wrap(bytes); while (buffer.hasRemaining()) channel.write(buffer); channel.force(true);
@@ -91,6 +99,19 @@ final class MachineCatalogStore {
             try { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
             catch (AtomicMoveNotSupportedException unavailable) { throw new IOException("catalog_atomic_move_unavailable", unavailable); }
         } finally { Files.deleteIfExists(temporary); }
+    }
+    private String readBlueprint(String key, String fingerprint) {
+        try (var input = Files.newInputStream(blueprintPath(key, fingerprint))) {
+            byte[] bytes = input.readNBytes(MachineBlueprint.MAX_BYTES + 1);
+            if (bytes.length == 0 || bytes.length > MachineBlueprint.MAX_BYTES) throw new IOException("machine_blueprint_archive_size");
+            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
+        } catch (IOException failure) { throw new CompletionException("machine_blueprint_read_failed", failure); }
+    }
+    private Path blueprintPath(String key, String fingerprint) {
+        path(key);
+        if (fingerprint == null || !fingerprint.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("Invalid blueprint fingerprint");
+        return directory.resolve(key + "-blueprints").resolve(fingerprint + ".json");
     }
     private Path path(String key) {
         if (key == null || !key.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("Invalid catalog identity key");
