@@ -80,8 +80,6 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         CLEAN_WAIT_CURSOR_RETURN,
         CLEAN_CLOSE,
         CLEAN_WAIT_CLOSE,
-        CLEAN_RESTORE,
-        CLEAN_WAIT_RESTORE,
         CLEAN_SELECT,
         RETURN_ORIGIN,
         FINISHED
@@ -282,8 +280,6 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 case CLEAN_WAIT_CURSOR_RETURN -> cleanWaitCursorReturn(context);
                 case CLEAN_CLOSE -> cleanClose(context);
                 case CLEAN_WAIT_CLOSE -> cleanWaitClose(context);
-                case CLEAN_RESTORE -> cleanRestore(context);
-                case CLEAN_WAIT_RESTORE -> cleanWaitRestore(context);
                 case CLEAN_SELECT -> cleanSelect(context);
                 case RETURN_ORIGIN -> returnOrigin();
                 case FINISHED -> { }
@@ -1772,7 +1768,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void cleanClose(LocalPlayerContext context) {
         if (worldAccessAvailable(context)) {
             serverMenu = null;
-            setPhase(Phase.CLEAN_RESTORE);
+            setPhase(Phase.CLEAN_SELECT);
             return;
         }
         if (!ownsOpenMenu(context)) {
@@ -1788,48 +1784,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (!settleMenuReceipt(context, "terminal_close_unconfirmed")) return;
         serverMenu = null;
         inventoryGuiOwned = false;
-        setPhase(Phase.CLEAN_RESTORE);
-    }
-
-    // 普通供料恢复临时交换的两个栏位；原地自救跳过交换恢复，以便尽快交还控制。
-    private void cleanRestore(LocalPlayerContext context) {
-        if (inPlace) { setPhase(Phase.CLEAN_SELECT); return; }
-        InventorySwap swap = inventorySwap;
-        if (swap == null) {
-            setPhase(Phase.CLEAN_SELECT);
-            return;
-        }
-        if (!DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen)
-                && !MenuVisibility.inventoryVisible(context.minecraft(), player)
-                || player.containerMenu != player.inventoryMenu
-                || !player.inventoryMenu.getCarried().isEmpty()) {
-            finishCleanupFailure("inventory_not_ready_for_restore");
-            return;
-        }
-        ItemStack source = player.getInventory().getItem(swap.sourceSlot());
-        ItemStack hotbar = player.getInventory().getItem(swap.hotbarSlot());
-        if (!same(source, swap.hotbarBefore()) || !stagedItemMatches(hotbar, swap.sourceBefore())) {
-            finishCleanupFailure("inventory_changed_before_restore");
-            return;
-        }
-        inventoryGuiOwned = true;
-        if (!context.menus().ensureVisible(context)) return;
-        menuReceipt = swapTerminalSlots(context, swap);
-        setPhase(Phase.CLEAN_WAIT_RESTORE);
-    }
-
-    private void cleanWaitRestore(LocalPlayerContext context) {
-        if (!settleMenuReceipt(context, "inventory_restore_unconfirmed")) return;
-        InventorySwap swap = inventorySwap;
-        if (swap == null
-                || !stagedItemMatches(player.getInventory().getItem(swap.sourceSlot()), swap.sourceBefore())
-                || !same(player.getInventory().getItem(swap.hotbarSlot()), swap.hotbarBefore())) {
-            finishUncertain("inventory_restore_diverged",
-                    "temporary terminal staging did not restore to the exact authoritative state");
-            return;
-        }
-        inventorySwap = null;
-        setPhase(Phase.CLEAN_CLOSE);
+        setPhase(Phase.CLEAN_SELECT);
     }
 
     /** 原生 SWAP 前后都按终端身份确认；无线供料的电量同步不能被通用精确组件比较误判为物品被替换。 */
@@ -1841,12 +1796,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 confirmation, INVENTORY_CONFIRM_TICKS);
     }
 
-    // 恢复原快捷栏选择；普通供料若离开过出发位置，再尝试走回附近后才给出最终结果。
+    // 取料后沿用当前背包布局和手持物，不为恢复原排序再换槽；实际离开工地时仍按原任务返回。
     private void cleanSelect(LocalPlayerContext context) {
-        if (player.getInventory().selected != originalSelected) {
-            requestSelect(context, originalSelected, Phase.CLEAN_SELECT);
-            return;
-        }
+        inventorySwap = null;
         if (movedForFixedTerminal && !callerOrigin.equals(player.blockPosition())
                 && pendingTerminal != null
                 && pendingTerminal.status() != Ae2ResourceSupply.Status.CANCELLED) {

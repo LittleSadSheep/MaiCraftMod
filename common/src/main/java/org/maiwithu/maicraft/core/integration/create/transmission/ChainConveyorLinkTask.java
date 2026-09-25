@@ -46,7 +46,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     private BlockPos navigating;
     private JsonObject firstProof, secondProof, firstAdmission;
     private int cost, countBefore, countAfter, approachTicks;
-    private boolean selectedByTask, secondSubmitted, effectSettled, verified, noChange, restored, ownedSelectionPending, geometryChecked;
+    private boolean selectedByTask, secondSubmitted, effectSettled, verified, noChange, inventoryClosed, ownedSelectionPending, geometryChecked;
     private String failure;
     private boolean serverAssisted, creativeExempt;
     private ChainConveyorBridge.Kinetic firstKinetic, secondKinetic;
@@ -54,7 +54,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     private BlockPos serverObservedEndpoint;
     private boolean bothServerVerified, firstSelectionConfirmed;
     ChainConveyorLinkTask(LocalPlayer player, ChainConveyorLinkTaskRecord record) {
-        super(player, record); world = player.level(); inventory = new ChainConveyorInventory(player);
+        super(player, record); world = player.level(); inventory = new ChainConveyorInventory();
     }
     @Override protected void onStart() {
         try {
@@ -235,7 +235,8 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         return false;
     }
     private TaskState restore() {
-        restored = inventory.restore(ClientRuntime.requireContext(player)); return restored ? TaskState.SUCCESS : TaskState.RUNNING;
+        // 连接和材料消耗已结算，直接结束使用；背包保持操作后的布局，不能再被原排序还原卡住。
+        inventory.finish(); inventoryClosed = true; return TaskState.SUCCESS;
     }
     private TaskState stop(String code) { failure = code; fail(code, FailureType.UNKNOWN); return TaskState.FAILED; }
     @Override protected void cleanup() {
@@ -245,7 +246,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
             var context = ClientRuntime.actor().activeContext().orElse(null);
             if (context != null) context.actions().retireOneShotForTaskBoundary(context, action, "chain connection outcome retained; never replay second click");
         }
-        reads.cancel(); supply.cancel(player); inventory.close(player); super.cleanup();
+        reads.cancel(); supply.cancel(player); inventory.finish(); super.cleanup();
     }
     @Override public Map<String, Object> progress() { return Map.of("task", name(), "phase", phase.name().toLowerCase(), "chain_cost", cost, "link_verified", verified); }
     @Override protected Map<String, Object> resultData() {
@@ -258,7 +259,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         result.put("placement_geometry_preflight_verified", geometryChecked); result.put("chain_selection_owned", firstSelectionConfirmed);
         result.put("required_new_chains", noChange || creativeExempt ? 0 : cost);
         result.put("outcome_uncertain", secondSubmitted && !effectSettled); result.put("second_click_replay_allowed", false);
-        result.put("inventory_restored", restored); result.put("owned_selection_pending", ownedSelectionPending);
+        result.put("inventory_cleanup_complete", inventoryClosed); result.put("owned_selection_pending", ownedSelectionPending);
         result.put("power_verified", false); result.put("production_verified", false);
         result.put("verification_scope", bothServerVerified ? "server_native_bidirectional_link" : serverAssisted
                 ? "server_local_endpoint_plus_client_synchronized_peer" : "client_synchronized_links_and_native_inventory_effects");
@@ -269,5 +270,5 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         if (failure != null) result.put("failure_code", failure);
         return result;
     }
-    @Override protected String successMessage() { return "Chain-conveyor link observed without a return trip; the receipt distinguishes server and client evidence, material effects, and inventory restoration from power and production."; }
+    @Override protected String successMessage() { return "Chain-conveyor link and material effects observed; inventory keeps its post-use layout. Power and production remain separate outcomes."; }
 }

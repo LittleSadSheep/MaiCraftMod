@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.client.actor.MenuPort;
 import sun.misc.Unsafe;
 
 /**
- * 检查聊天界面允许继续供料，暂停等无关界面会拦住新操作；恢复临时栏位仍要等真正的库存界面。
+ * 检查聊天界面允许继续供料，暂停等无关界面会拦住新操作；取料收尾不再为恢复原排序重新打开库存界面。
  */
 public final class Ae2ScreenAccessTest {
     public static void main(String[] args) throws Exception {
@@ -69,14 +69,9 @@ public final class Ae2ScreenAccessTest {
         minecraft.screen = (ChatScreen) memory.allocateInstance(ChatScreen.class);
         var cleanup = new Ae2SupplySession(player, request, bridge);
         invoke(cleanup, "cleanClose", context);
-        check(cleanup.phase().equals("clean_restore"), "chat needs no native menu close");
-        Class<?> swapClass = Class.forName(Ae2SupplySession.class.getName() + "$InventorySwap");
-        var constructor = swapClass.getDeclaredConstructor(int.class, int.class, ItemStack.class, ItemStack.class);
-        constructor.setAccessible(true);
-        field(Ae2SupplySession.class, "inventorySwap").set(cleanup,
-                constructor.newInstance(9, 0, ItemStack.EMPTY, ItemStack.EMPTY));
-        invoke(cleanup, "cleanRestore", context);
-        check(openings[0] == 1 && cleanup.outcome().isEmpty(), "restore from chat still awaits its real inventory GUI");
+        // 聊天界面下终端已经关闭，就直接进入交还控制，不为还原借槽重新开背包或发交换操作。
+        check(cleanup.phase().equals("clean_select") && openings[0] == 0 && cleanup.outcome().isEmpty(),
+                "completed terminal use does not reopen inventory for cosmetic restoration");
         field(Ae2ReflectionBridge.class, "storageMenuClass").set(bridge, InventoryMenu.class);
         minecraft.screen = (PauseScreen) memory.allocateInstance(PauseScreen.class);
         var ownership = Ae2SupplySession.class.getDeclaredMethod("ownsOpenMenu", LocalPlayerContext.class);
