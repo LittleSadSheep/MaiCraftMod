@@ -158,6 +158,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 无掉落画像(创造)下的进度计数:破坏的目标方块数——背包增量在
      *  这种画像下恒为 0,数拾取物会让任务铲平半径 32 chunk 后报败。 */
     private int brokenTargets;
+    private static final int MAX_BREAKS_WITHOUT_EXPECTED_OUTPUT = 32;
+    private int breaksAtLastOutput;
+    private boolean expectedOutputMissing;
 
     private boolean navIsBranch;
     private boolean navIsDrop;
@@ -232,9 +235,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 ? new HashSet<>()
                 : r.progressItems;
         progressItemBaseline = progressItemCount();
-        rawInventoryBaseline = r.progressItems.isEmpty()
-                ? inventoryCounts()
-                : Map.of();
+        // 期望产物不匹配时也保留真实背包变化，例如要石头却拿到圆石，交回给上层改走烧炼。
+        rawInventoryBaseline = inventoryCounts();
         lastVerifiedGathered = 0;
         snapshotPreexistingDrops();
         // 登记目标进共享索引并立即首查;冷区域的索引构建由每次查询的预算分摊,
@@ -266,6 +268,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         r.setMined(gathered);
         if (gathered > lastVerifiedGathered) {
             lastVerifiedGathered = gathered;
+            breaksAtLastOutput = brokenTargets;
             dropCloseTicks = 0;
             // 一条背包更新到达时不能立刻清掉破坏来源：方块的多组物品可能分散在相邻客户端数据包中出现。
             // 等 droppedItems() 看完整个已加载掉落批次后再回收来源；若物品先被拾取、实体尚未渲染，则由原有同步期限收尾。
@@ -306,7 +309,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     .anyMatch(origin -> origin.distManhattan(continuation) == 1)) beginBatch(continuation);
         }
         // 材料凑够、掉落物有危险、等得太久或工具耗尽时，先停挖去捡；否则同一批近处矿可继续挖。
-        if (!drops.isEmpty() && (toolExhausted || !canDeferPickup(gathered))) {
+        if (!drops.isEmpty() && (toolExhausted || expectedOutputAttemptLimitReached(gathered) || !canDeferPickup(gathered))) {
             if (activeTarget != null) {
                 digger.cancel();
                 activeTarget = null;
@@ -322,6 +325,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             progressNote = "gathered all requested and settled every loaded attributable matching drop";
             return TaskState.SUCCESS;
+        }
+        if (expectedOutputBudgetExhausted(gathered)) {
+            expectedOutputMissing = true;
+            fail("confirmed source breaks did not yield the expected inventory items within the bounded mining batch; review actual inventory changes and the processing or tool requirements", FailureType.NO_MATERIAL);
+            return TaskState.FAILED;
+        }
+        if (expectedOutputAttemptLimitReached(gathered)) {
+            // 已达到试采阈值后只结算在途破坏与掉落，不再选择新的矿块续期。
+            if (nav != null) nav.pause(); else InputDriver.halt(player);
+            return TaskState.RUNNING;
         }
 
         if (toolExhausted) {
@@ -786,6 +799,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         while (iterator.hasNext()) {
             Map.Entry<BlockPos, Long> entry = iterator.next();
             if (!nav.ledger().broke(entry.getKey())) continue;
+            // 寻路途中确实挖掉的目标也消耗同一产物预算；不能靠路径清障绕开无产出限制。
+            brokenTargets++;
             anticipatedDrops.put(entry.getKey(), Math.max(entry.getValue(), now + DROP_LOITER_TICKS));
             iterator.remove();
         }
@@ -996,6 +1011,17 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
         }
         return total;
+    }
+
+    private boolean expectedOutputBudgetExhausted(int gathered) {
+        // 先等本批已归属掉落与服务端背包同步；概率掉落保留32格尝试，定点采收仍只允许它声明的一格。
+        return expectedOutputAttemptLimitReached(gathered)
+                && drops.isEmpty() && anticipatedDrops.isEmpty() && pendingPathBreaks.isEmpty();
+    }
+
+    private boolean expectedOutputAttemptLimitReached(int gathered) {
+        return WorkProfile.of(player).dropsLoot() && !r.progressItems.isEmpty() && gathered < r.count
+                && brokenTargets - breaksAtLastOutput >= (r.exactHarvest() ? 1 : MAX_BREAKS_WITHOUT_EXPECTED_OUTPUT);
     }
 
     /** 不猜测方块到物品的对应关系，只在直接破坏窗口仍有效时，通过刚被拾取的普通挖矿结果学习掉落类型。 */
@@ -1304,6 +1330,17 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        if (expectedOutputMissing) {
+            data.put("failure_code", "expected_mining_output_not_observed");
+            data.put("confirmed_source_breaks_without_output", brokenTargets - breaksAtLastOutput);
+            data.put("expected_output_items", r.progressItems.stream().map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).sorted().toList());
+            var gains = new LinkedHashMap<String, Integer>();
+            inventoryCounts().entrySet().stream().filter(entry -> entry.getValue() > rawInventoryBaseline.getOrDefault(entry.getKey(), 0))
+                    .sorted(Comparator.comparing(entry -> BuiltInRegistries.ITEM.getKey(entry.getKey()).toString())).limit(16)
+                    .forEach(entry -> gains.put(BuiltInRegistries.ITEM.getKey(entry.getKey()).toString(), entry.getValue() - rawInventoryBaseline.getOrDefault(entry.getKey(), 0)));
+            data.put("observed_inventory_increases", gains);
+            data.put("inventory_change_scope", "observed since mining started; inventory changes alone do not prove drop origin");
+        }
         if (r.exactHarvest()) {
             data.put("exact_source", true); data.put("confirmed_source_breaks", brokenTargets);
             data.put("expected_output_items", r.progressItems.stream().map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).toList());

@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionBodyFailureTest;
 import org.maiwithu.maicraft.core.task.craft.CraftSurfaceFailureTest;
 import org.maiwithu.maicraft.core.task.mine.MiningSearchScopeTest;
+import org.maiwithu.maicraft.core.task.mine.MiningOutputBudgetTest;
 import org.maiwithu.maicraft.intent.ExactHarvestTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.cook.CookingFuelTest;
@@ -140,6 +141,7 @@ public final class GuiRegressionSuite {
         TaskSlotFailureTest.main(args);
         // 嵌套取材只扫描已声明的附近范围，空搜加工设备不能把整片已加载世界都扫一遍。
         MiningSearchScopeTest.main(args);
+        MiningOutputBudgetTest.main(args);
         ExactHarvestTest.main(args);
         // 身体门槛属于全局前置，不能被工作台选址和上层材料来源循环吞掉。
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
