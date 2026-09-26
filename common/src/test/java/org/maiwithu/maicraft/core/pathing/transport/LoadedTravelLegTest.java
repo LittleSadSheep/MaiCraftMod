@@ -16,11 +16,16 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import sun.misc.Unsafe;
 import java.util.OptionalLong;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
 
 /** 远程只交原终点；本地停点随安全地形改变，不能为中间坐标落入岩浆、虚空或地下空腔。 */
 public final class LoadedTravelLegTest {
@@ -38,6 +43,8 @@ public final class LoadedTravelLegTest {
                 && !local.goal().isAt(from.offset(-24, 0, 0)), "many forward positions qualify without fixing a midpoint");
         check(leg.resolve(requested, from.offset(4, 0, 0), p -> true, () -> true) == local,
                 "a flying segment is not retargeted merely because the final chunk just loaded");
+        check(leg.resolve(requested, from.offset(300, 0, 0), p -> true, () -> true, true) == local,
+                "ongoing continuous flight retains intent beyond the initial observation horizon");
         leg.complete();
         check(leg.resolve(requested, from.offset(24, 0, 0), p -> true, () -> true) == requested
                 && !requested.goal().isAt(new BlockPos(500, 77, 100)), "final precision and altitude are restored intact");
@@ -75,8 +82,27 @@ public final class LoadedTravelLegTest {
             world.set(new BlockPos(12, 0, 3), Blocks.STONE.defaultBlockState()); world.position(new Vec3(12.5, 1, 3.5)); world.nextTick();
             check(nav.tick() == PlayerNav.Status.RUNNING && nav.diagnostics().get("intermediate_landings_completed").equals(1),
                     "landing in the forward region does not report final arrival to the task");
+            // 跟随真实外层目标供应器移动三百格，不能把连续飞行自己的通道延伸误认成新任务并强制落地。
+            Object bound = effective.invoke(nav);
+            var session = TransportNavigator.class.getDeclaredField("session"); session.setAccessible(true);
+            session.set(nav, new JetpackFlightSession(new Vec3(40.5, 1, 3.5)));
+            // 远行中的脚下区块应已加载；原交互夹具只覆盖0号区块，这里换成多区块地面视图。
+            var memoryField = Unsafe.class.getDeclaredField("theUnsafe"); memoryField.setAccessible(true);
+            var far = ((Unsafe) memoryField.get(null)).allocateInstance(FarLevel.class);
+            var levelField = Entity.class.getDeclaredField("level"); levelField.setAccessible(true);
+            var clientField = LocalPlayer.class.getField("clientLevel"); clientField.setAccessible(true);
+            levelField.set(world.player, far); clientField.set(world.player, far);
+            world.position(new Vec3(312.5, 1, 3.5));
+            check(effective.invoke(nav) == bound, "transport driver retains the same intent while its live session crosses many chunks");
+            levelField.set(world.player, world.level); clientField.set(world.player, world.level);
+            world.position(new Vec3(12.5, 1, 3.5));
             nav.stop();
         }
+    }
+    private static final class FarLevel extends ClientLevel {
+        private FarLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
+        @Override public boolean isLoaded(BlockPos p) { return p.getX() < 400; }
+        @Override public BlockState getBlockState(BlockPos p) { return (p.getY() == 0 ? Blocks.STONE : Blocks.AIR).defaultBlockState(); }
     }
     // 直线上的岩浆池、无底悬崖和有地下空腔的高地；侧面始终保留正常地表，测试应自动选择安全范围。
     private record Scene(int scenario) implements BlockGetter {

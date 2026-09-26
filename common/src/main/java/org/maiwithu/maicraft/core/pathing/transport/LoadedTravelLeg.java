@@ -13,10 +13,14 @@ final class LoadedTravelLeg {
     private int completed;
 
     GoalCompiler.Compiled resolve(GoalCompiler.Compiled requested, BlockPos from, Predicate<BlockPos> loaded, BooleanSupplier surface) {
+        return resolve(requested, from, loaded, surface, false);
+    }
+    GoalCompiler.Compiled resolve(GoalCompiler.Compiled requested, BlockPos from, Predicate<BlockPos> loaded, BooleanSupplier surface, boolean travelling) {
         if (requested == null) { intermediate = null; destination = null; return null; }
         var fingerprint = requested.semanticFingerprint();
+        // 连续飞行自己延伸真实通道，越过最初观察圈不代表任务目标改变；只有调用方改总目标才触发换意图。
         if (intermediate != null && fingerprint.equals(destination)
-                && ((ForwardTravelGoal) intermediate.goal()).origin.distSqr(from) < 4 * ForwardTravelGoal.RANGE * ForwardTravelGoal.RANGE) return intermediate;
+                && (travelling || ((ForwardTravelGoal) intermediate.goal()).origin.distSqr(from) < 4 * ForwardTravelGoal.RANGE * ForwardTravelGoal.RANGE)) return intermediate;
         intermediate = null; destination = fingerprint;
         NavGoal goal = requested.goal();
         double radius;

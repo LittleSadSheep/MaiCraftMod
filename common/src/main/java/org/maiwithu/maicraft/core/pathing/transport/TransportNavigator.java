@@ -75,7 +75,7 @@ public final class TransportNavigator {
         boolean stagedTransport = transportApproach || mode != TransportMode.AUTO && mode != TransportMode.GROUND;
         return trackingGoal || !stagedTransport ? requested
                 : loadedTravel.resolve(requested, PlayerNav.playerFeet(player), player.level()::isLoaded,
-                        () -> player.level().dimensionType().hasSkyLight());
+                        () -> player.level().dimensionType().hasSkyLight(), session != null);
     }
 
     /** 交通恢复为步行时也保留移动目标语义，不能重新变成逐刻硬取消的静态目标。 */
