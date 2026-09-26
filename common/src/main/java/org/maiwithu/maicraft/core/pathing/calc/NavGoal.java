@@ -693,7 +693,11 @@ public interface NavGoal {
         }
 
         @Override public double heuristic(BlockPos fromPos) {
-            return engine.heuristic(fromPos.getX(), fromPos.getY(), fromPos.getZ());
+            // 长程撤离必须有到安全范围的距离估价；单靠近敌惩罚会过早衰减，部分路径可能不愿继续向外延伸。
+            double remaining = 0;
+            for (var threat : threats) remaining = Math.max(remaining, threat.clearance()
+                    - Math.hypot(fromPos.getX() + .5 - threat.x(), fromPos.getZ() + .5 - threat.z()));
+            return Math.max(0, remaining) * COST_HEURISTIC + engine.heuristic(fromPos.getX(), fromPos.getY(), fromPos.getZ());
         }
 
         /** 威胁群的重心:它一挪动就触发重规划,快照因此不会用旧太久。 */

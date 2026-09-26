@@ -10,7 +10,6 @@ import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.core.combat.RetreatProgress;
 import org.maiwithu.maicraft.core.combat.Loadout;
-import org.maiwithu.maicraft.core.combat.Haven;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
@@ -105,17 +104,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private static final double STRICT_CRYSTAL_MAX_DISTANCE = 96.0;
     private static final double STRICT_CRYSTAL_BLAST_MARGIN = 1.0;
 
-    /** 离落点这么近就算到了,该重新挑下一个。 */
-    private static final double HAVEN_ARRIVED = 2.0;
-
-    /**
-     * 逃跑路上多久重算一次路线(刻)。
-     *
-     * <p><b>落点不变,只重算路线</b>:重算时这一刻的怪会折进边成本,路径拐开而方向不变。
-     * 不重算的话整段路只算一次——她起跑之后路上冒出来的怪一只都看不见,直接撞过去。
-     *
-     * <p>二十刻(一秒)是怪走四五格的量级。再密就是把路径反复拆了重建,疾跑的加速起不来。
-     */
+    // 移动威胁由追踪目标持续重检；每秒只检查是否真的失去进展，不能周期性拆掉正在执行的逃生路径。
     private static final int FLEE_REPLAN_TICKS = 20;
 
     private Phase phase = Phase.COMBAT;
@@ -168,16 +157,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 上一刻的决定。判据靠它做迟滞与承诺,见 {@link AttackPlan#decide}。 */
     private AttackPlan.Move lastMove;
 
-    /**
-     * 逃跑的<b>落点</b>。一次挑定,跑到才换 —— 方向的连续性就是不绕圈的全部原因。
-     *
-     * <p>路径本身仍然每次重规划都重算,新冒出来的怪由边成本({@code Avoidance.forGoal})
-     * 折进去,路线会拐开而<b>目标不变</b>。以前重算连方向一起重掷,所以既反应了也绕圈了。
-     */
-    private BlockPos haven;
-
-    /** 这一段逃跑路线是哪一刻算的。到点就重算,见 {@link #FLEE_REPLAN_TICKS}。 */
-    private long havenPlannedAt;
+    // 撤离只保存当前是否在逃和最近开路时刻；安全终点由实际可达地形决定，不随机锁一个远处落点。
+    private boolean retreating;
+    private long retreatPlannedAt;
 
     public AttackCompanionTask(LocalPlayer player, AttackTaskRecord record) {
         super(player, record);
@@ -242,15 +224,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         if (blastEvading) {
             // 引信响起时先撤销尚未挥出的近战、拉弓和举盾，避免换武器或持用减速耽误撤离。
-            stopMelee(); lowerShield(); haven = null;
+            stopMelee(); lowerShield(); retreating = false;
             return closeIn();
         }
         // 攻击与移动<b>正交</b>:每刻先问一次"冷却好了吗、够得着谁吗",够得着就打 ——
         // 不管这一刻在靠近、在拉开、还是站着。攻击不影响寻路,最多让她回个头。
         tickShield(field);
         tickWeapon(field);
-        if (move.action() != AttackPlan.Action.DISENGAGE && haven != null) {
-            haven = null;   // 不再逃跑了:落点作废,下次要跑再重新挑
+        if (move.action() != AttackPlan.Action.DISENGAGE && retreating) {
+            retreating = false; // 恢复战斗站位后，结束之前的撤离导航。
             stopNav();
         }
         return switch (move.action()) {
@@ -895,26 +877,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 躲避 ====================
 
-    /**
-     * 脱离接触:她扛不住了,先活下来。
-     *
-     * <p>终止条件就是那 {@link Menace#FLEE_DISTANCE} 格 —— 与逃跑目标的到达条件同一个数。
-     */
-    /**
-     * 逃跑这一刻做什么:跑向落点。
-     *
-     * <p><b>它不是一个"状态"。</b>顶层每刻重判"还打不打得过",打不过就再走一次这里,
-     * 血回来了下一刻自然回到战斗——曾经这里是一个闩锁({@code fleeing}),进去就把判据
-     * 整个短路,于是血回满了也一直跑,实测一次 DISENGAGE 配四十七行逃跑采样。
-     *
-     * <p>三十二格是<b>跑的目标</b>,不是状态的出口:跑到了就没什么可跑的,判据自会改口。
-     */
+    /** 每刻按当前血量重新评估战斗；撤离以所有威胁的安全范围为目标，不绑定随机落点。 */
     // 近处危险和近期远程伤害都消失后才结束撤退；持续来袭的箭不能被近战扫描范围漏掉。
     private TaskState tickFlee() {
         retreat.observe(player.position());
-        var around = CombatThreats.around(player, Menace.FLEE_DISTANCE);
-        if (around.isEmpty()) {
-            clearHaven();
+        if (!retreatThreatsPresent()) {
+            clearRetreat();
             InputDriver.halt(player);
             Constants.LOG.info("[maicraft-attack] 脱离成功 —— {} 格内没有敌对生物",
                     (int) Menace.FLEE_DISTANCE);
@@ -925,70 +893,43 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                     FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
-        if (haven == null || player.blockPosition().closerThan(haven, HAVEN_ARRIVED)) {
-            haven = Haven.awayFrom(player, CombatThreats.around(player, FLEE_SCAN_RADIUS));
-            stopNav();
-            Constants.LOG.info("[maicraft-attack] 逃向 {} —— {} 格内 {} 只",
-                    haven, (int) Menace.FLEE_DISTANCE, around.size());
-        }
-        if (haven == null) {
-            Constants.LOG.info("[maicraft-attack] 没有可跑的方向");
-            return TaskState.RUNNING;
-        }
         long now = player.level().getGameTime();
-        if (nav != null && now - havenPlannedAt >= FLEE_REPLAN_TICKS
+        if (nav != null && now - retreatPlannedAt >= FLEE_REPLAN_TICKS
                 && !nav.planningInFlight() && !nav.hasRecentPhysicalProgress(40)) {
             // 动态威胁由追踪目标持续重检；只在确实没有身体进展时重开，不能每秒取消正在逃命的路线。
             stopNav();
         }
         if (nav == null) {
-            BlockPos landing = haven;
-            havenPlannedAt = now;
-            nav = PlayerNav.trackGoal(player, () -> NavGoal.approachAvoiding(
-                            NavGoal.nearGround(landing, HAVEN_ARRIVED),
-                            Menace.AVOID_PENALTY, roadHazards()),
-                    CHASE_SPEED, () -> false);
+            retreating = true; retreatPlannedAt = now;
+            // 把离开所有当前威胁作为目标；部分路径与动态重检由寻路器接续，地形不会被一个随机终点绑死。
+            nav = PlayerNav.trackGoal(player, this::retreatGoal, CHASE_SPEED, () -> false);
         }
         PlayerNav.Status status = nav.tick();
         if (status == PlayerNav.Status.FAILED) {
             stopNav();
-            haven = null;   // 这个方向走不通,下一刻换一个
             retreat.failed();
         } else {
             if (status == PlayerNav.Status.ARRIVED) {
                 stopNav();
-                haven = null;
             }
         }
         return TaskState.RUNNING;
     }
 
-    /** 丢掉落点与导航。跑到了、跑不动了、或者判据改口不跑了,都过这里。 */
-    private void clearHaven() {
-        haven = null;
+    /** 完成撤离时释放本趟逃生导航，后续战斗重新选择动作。 */
+    private void clearRetreat() {
+        retreating = false;
         stopNav();
     }
 
-    /**
-     * 路上要绕开谁。<b>间距给零</b>:它们只让经过的格子变贵(边成本 ×4)与影响估价,
-     * 不参与"到没到"——落点旁边站着一只怪也算到了,不然她永远到不了、也就永远不换落点。
-     */
-    private List<GoalAvoidEntities.Threat>
-            roadHazards() {
-        return Menace.field(player, CombatThreats.around(player, FLEE_SCAN_RADIUS)).stream()
-                .map(t -> t.withClearance(0.0))
-                .toList();
+    private NavGoal retreatGoal() {
+        var threats = Menace.field(player, CombatThreats.around(player, FLEE_SCAN_RADIUS)).stream()
+                .map(t -> t.withClearance(Menace.FLEE_DISTANCE)).toList();
+        // 最后一只威胁消失后由tickFlee确认脱离；目标供应器不构造没有成员的避让目标。
+        return threats.isEmpty() ? NavGoal.exact(PlayerNav.playerFeet(player)) : NavGoal.avoid(Menace.AVOID_PENALTY, threats);
     }
-
-    /**
-     * 脱离接触:她扛不住了,先活下来。
-     *
-     * <p>终止条件就是那 {@link Menace#FLEE_DISTANCE} 格 —— 与逃跑目标的到达条件同一个数。
-     *
-     * <p>势场收当前<b>所有</b>敌对生物:逃跑路上撞进第二只怪,是旧的单点逃离目标最典型的死法。
-     */
-
-
+    // 近期真实伤害来源即使在普通扫描半径外，也要等其威胁记录消失后才能结束本次撤离。
+    private boolean retreatThreatsPresent() { return !CombatThreats.around(player, Menace.FLEE_DISTANCE).isEmpty(); }
 
     // ==================== 拾荒 ====================
 

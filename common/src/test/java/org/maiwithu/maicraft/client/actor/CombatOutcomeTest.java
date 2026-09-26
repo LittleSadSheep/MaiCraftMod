@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 import java.util.List;
 import java.util.Arrays;
 import org.maiwithu.maicraft.core.combat.AttackPlan;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -26,6 +27,7 @@ public final class CombatOutcomeTest {
         selectableLoadout();
         retreatRequiresMovement();
         retreatPrecedesLootSettlement();
+        retreatAcceptsAnyReachableSafeDirection();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
     }
 
@@ -122,6 +124,16 @@ public final class CombatOutcomeTest {
             TaskState state = task.tick(f.h.player);
             check(state == TaskState.FAILED && task.result(state).message().contains("too hurt"),
                     "retreat settles through the wide-area safety check before any loot-only completion or failure");
+        }
+    }
+    private static void retreatAcceptsAnyReachableSafeDirection() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.mob(11, 2);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("directional-retreat", 1000, List.of(), true));
+            // 左右两侧的真实安全位置都能作为逃生出口，敌人身旁则不能宣称已脱离。
+            var goal = (NavGoal) invoke(task, "retreatGoal");
+            check(goal instanceof NavGoal.Avoid && goal.isAt(new BlockPos(-40, 1, 3)) && goal.isAt(new BlockPos(40, 1, 3))
+                    && !goal.isAt(new BlockPos(3, 1, 3)), "retreat goal describes safety rather than one randomly sampled endpoint");
         }
     }
 }

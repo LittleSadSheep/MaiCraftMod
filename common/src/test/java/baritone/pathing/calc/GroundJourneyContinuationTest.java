@@ -3,6 +3,7 @@ package baritone.pathing.calc;
 import baritone.Baritone;
 import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.pathing.goals.Goal;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.PathCalculationResult;
@@ -38,6 +39,8 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities;
 import sun.misc.Unsafe;
 
 /** 空背包沿唯一远端目标走路；原生 A* 绕危险地形、返回部分路径，再由原生调度同刻接续。 */
@@ -93,8 +96,20 @@ public final class GroundJourneyContinuationTest {
                 previous = path; scene.feet = path.getDest(); scene.loadedThrough += 16;
             }
             check(goal.isInGoal(scene.feet) && segments > 2, "one ground journey reaches the strict remote destination across multiple frontiers");
+            // 逃命只给威胁圈，仍用真正的地面A*绕开前方悬崖；没有喷气背包，也没有预选的32格落点。
+            scene.feet = new BetterBlockPos(64, 1, 3); scene.loadedThrough = 159; scene.wide = true;
+            field(CalculationContext.class, "collisionGeometry").set(calc, new CollisionGeometry(scene, true, Vec3.atBottomCenterOf(scene.feet), scene.feet));
+            var escape = NavGoal.avoid(40, List.of(new GoalAvoidEntities.Threat(62.5, 1, 3.5, 3, 32)));
+            Goal retreat = new Goal() {
+                public boolean isInGoal(int x, int y, int z) { return escape.isAt(new BlockPos(x, y, z)); }
+                public double heuristic(int x, int y, int z) { return escape.heuristic(new BlockPos(x, y, z)); }
+            };
+            var escaped = new AStarPathFinder(scene.feet, 64, 1, 3, retreat, new Favoring(null, calc), calc).calculate(200, 1000);
+            check(escaped.getType() == PathCalculationResult.Type.SUCCESS_TO_GOAL, "directional retreat finds a real route out of the threat circle");
+            for (BlockPos p : escaped.getPath().orElseThrow().positions()) check(p.getY() == 1 && scene.getBlockState(p.below()).is(Blocks.STONE),
+                    "retreat is grounded and cannot cross the unsupported straight-line shortcut");
             // 初次预计算失败后，相同边界不空转；新前方区块与计算期间到来的区块都会打开重试机会。
-            scene.loadedThrough = 15; var frontier = LoadedFrontier.capture(new BlockPos(14, 1, 3), scene::isLoaded);
+            scene.loadedThrough = 15; scene.wide = false; var frontier = LoadedFrontier.capture(new BlockPos(14, 1, 3), scene::isLoaded);
             check(!frontier.hasNewTerrain(scene::isLoaded), "unchanged evidence cannot retry every tick");
             scene.loadedThrough = 31; check(frontier.hasNewTerrain(scene::isLoaded), "new loaded terrain resumes speculative planning before arrival");
             scene.loadedThrough = -1; check(!frontier.hasNewTerrain(scene::isLoaded), "unloading alone is not new route evidence");
@@ -129,15 +144,17 @@ public final class GroundJourneyContinuationTest {
     }
     // 路中央依次放岩浆与无支撑悬崖，侧面留真实地面；未加载区域仅作不可穿越边界。
     private static final class Terrain extends ClientLevel {
-        int loadedThrough; BetterBlockPos feet;
+        int loadedThrough; BetterBlockPos feet; boolean wide;
         private Terrain() { super(null, null, null, null, 0, 0, null, null, false, 0); }
-        @Override public boolean isLoaded(BlockPos p) { return p.getX() >= 0 && p.getX() <= loadedThrough && p.getZ() >= 0 && p.getZ() < 16; }
+        // 长途接续场景逐条加载窄区块；撤退场景提供完整已知邻域，单独验证任选安全方向的路径。
+        @Override public boolean isLoaded(BlockPos p) { return p.getX() >= 0 && p.getX() <= loadedThrough && p.getZ() >= (wide ? -64 : 0) && p.getZ() < (wide ? 64 : 16); }
         @Override public BlockState getBlockState(BlockPos p) {
             if (!isLoaded(p)) return Blocks.BEDROCK.defaultBlockState();
             if (p.getY() != 0) return Blocks.AIR.defaultBlockState();
             if (p.getZ() >= 2 && p.getZ() <= 4) {
                 if (p.getX() >= 8 && p.getX() <= 11) return Blocks.LAVA.defaultBlockState();
                 if (p.getX() >= 24 && p.getX() <= 28) return Blocks.AIR.defaultBlockState();
+                if (wide && p.getX() >= 68 && p.getX() <= 72) return Blocks.AIR.defaultBlockState();
             }
             return Blocks.STONE.defaultBlockState();
         }

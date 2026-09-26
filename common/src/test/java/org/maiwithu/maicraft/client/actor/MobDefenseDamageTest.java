@@ -1,6 +1,13 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
+import java.util.LinkedHashMap;
+import baritone.api.IBaritone;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import java.util.List;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -68,7 +75,8 @@ public final class MobDefenseDamageTest {
             var task = fight(f);
             check(AttackPlan.decide(survey(task), null).action() == AttackPlan.Action.DISENGAGE,
                     "confirmed damage preserves the low-health retreat policy");
-            check(invoke(task, "tickFlee") == TaskState.RUNNING,
+            // 这里隔离远程伤害的退出判据；实际地面逃生路线由GroundJourneyContinuationTest运行原生A*验证。
+            check((Boolean) invoke(task, "retreatThreatsPresent"),
                     "a shooter beyond 32 blocks must not make retreat report immediate safety");
             f.h.level.entities.clear();
             check(invoke(task, "tickFlee") == TaskState.FAILED,
@@ -123,17 +131,17 @@ public final class MobDefenseDamageTest {
             Method beginLoot = AttackCompanionTask.class.getDeclaredMethod("beginLoot", int.class, Vec3.class);
             beginLoot.setAccessible(true); beginLoot.invoke(task, corpse.getId(), corpse.position());
             var attacker = f.mob(12, 2); f.hit(attacker, attacker);
-            check(task.tick(f.h.player) == TaskState.RUNNING && ((Integer) field(task, "meleeVictimId")) == attacker.getId(),
+            check(tickCombatOnly(task, f) == TaskState.RUNNING && ((Integer) field(task, "meleeVictimId")) == attacker.getId(),
                     "waiting for a previous kill's drops must not swallow a new attack");
             Vec3 aim = attacker.getBoundingBox().getCenter().subtract(f.h.player.getEyePosition());
             f.h.player.setYRot((float) Math.toDegrees(Math.atan2(-aim.x, aim.z)));
             f.h.player.setXRot((float) -Math.toDegrees(Math.atan2(aim.y, aim.horizontalDistance())));
-            f.h.nextTick(); task.tick(f.h.player);
+            f.h.nextTick(); tickCombatOnly(task, f);
             check(f.h.mode.attacks == 1, "self-defense must still reach the native attack while loot is pending");
             attacker.damage = 1;
-            f.h.nextTick(); task.tick(f.h.player); f.h.nextTick(); task.tick(f.h.player);
+            f.h.nextTick(); tickCombatOnly(task, f); f.h.nextTick(); tickCombatOnly(task, f);
             attacker.dead = true;
-            f.h.nextTick(); task.tick(f.h.player);
+            f.h.nextTick(); tickCombatOnly(task, f);
             var loot = field(task, "loot");
             check(((List<?>) field(loot, "deaths")).size() == 2 && record.defeated().size() == 2,
                     "resuming loot retains both the previous corpse and the newly defeated attacker");
@@ -141,6 +149,27 @@ public final class MobDefenseDamageTest {
             task.result(TaskState.CANCELLED);
         }
     }
+
+    // 本组验证原生手部与死亡记账，在移交寻路前停止；真实路径搜索与运行器交接有独立回归，不能靠随机找不到落点来绕过它们。
+    private static TaskState tickCombatOnly(AttackCompanionTask task, CombatThreatsTest.Fixture f) throws Exception {
+        var saved = new LinkedHashMap<Field, Object>();
+        for (String name : List.of("backend", "owner", "world", "pendingStart")) {
+            var field = ActorControlTestHarness.field(EmbeddedBaritoneRuntime.class, name); saved.put(field, field.get(null));
+        }
+        try {
+            var backend = Proxy.newProxyInstance(IBaritone.class.getClassLoader(), new Class<?>[]{IBaritone.class},
+                    (proxy, method, args) -> { throw new NavigationBoundary(); });
+            ActorControlTestHarness.field(EmbeddedBaritoneRuntime.class, "backend").set(null, backend);
+            ActorControlTestHarness.field(EmbeddedBaritoneRuntime.class, "world").set(null, f.h.level);
+            ActorControlTestHarness.field(EmbeddedBaritoneRuntime.class, "owner").set(null,
+                    new EmbeddedBaritoneNavigator(f.h.player, () -> null, () -> false, PlayerNav.ContextProvider.DEFAULT, false));
+            ActorControlTestHarness.field(EmbeddedBaritoneRuntime.class, "pendingStart").set(null, null);
+            try { return task.tick(f.h.player); }
+            catch (NavigationBoundary expected) { return TaskState.RUNNING; }
+        } finally { for (var entry : saved.entrySet()) entry.getKey().set(null, entry.getValue()); }
+    }
+    // 测试截断不属于游戏运行错误，使用专用Error越过任务的真实RuntimeException故障处理，再由夹具收回。
+    private static final class NavigationBoundary extends Error {}
 
     static AttackCompanionTask fight(CombatThreatsTest.Fixture f) {
         var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("self-defense", 1000, List.of(), true));
