@@ -68,6 +68,9 @@ public final class IntentRuntime {
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
             "requires_narration", "outcome_uncertain", "recoverable", "goal",
             "item_ids", "required_final_count", "observed_final_count", "missing",
+            // 批量加工的通知直接带出部分产量，外部规划者无需先把整批重发才能知道还缺多少。
+            "item_id", "ingredient_item_id", "expected_output_item_id", "target_output_count", "completed_output_count",
+            "remaining_output_count", "completed_uses", "carried_output_now", "output_before",
             // 材料路线耗尽时让外部规划者看见卡住的子材料和按需工艺入口，不塞入整棵配方树。
             "blocked_need", "planning_handoff",
             // 容量与原生收尾原因必须随失败通知保留，不让上层靠再查整份施工记录猜测恢复方向。

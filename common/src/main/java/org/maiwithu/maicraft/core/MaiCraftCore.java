@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
+import org.maiwithu.maicraft.core.task.interact.UseItemBatchCompanionTask;
+import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractEntityCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractEntityTaskRecord;
 import org.maiwithu.maicraft.core.task.locate.LocateBiomeCompanionTask;
@@ -237,6 +239,8 @@ public final class MaiCraftCore {
         TaskFactory.register(FishTaskRecord.class, (p, r) -> new FishCompanionTask(p, r));
         TaskFactory.register(BuildTaskRecord.class, (p, r) -> new BuildCompanionTask(p, r));
         TaskFactory.register(InteractAtTaskRecord.class, (p, r) -> new InteractAtCompanionTask(p, r));
+        // 批量打磨复用原生装备与持用任务，并在 Mod 内逐次核对产物。
+        TaskFactory.register(UseItemBatchTaskRecord.class, UseItemBatchCompanionTask::new);
         TaskFactory.register(InteractEntityTaskRecord.class, (p, r) -> new InteractEntityCompanionTask(p, r));
         TaskFactory.register(LocateStructureTaskRecord.class, (p, r) -> new LocateStructureCompanionTask(p, r));
         TaskFactory.register(LocateBiomeTaskRecord.class, (p, r) -> new LocateBiomeCompanionTask(p, r));

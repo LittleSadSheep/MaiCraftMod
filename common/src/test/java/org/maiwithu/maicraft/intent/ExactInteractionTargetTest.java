@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.SharedConstants;
@@ -13,6 +14,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
+import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.tools.interact.InteractAtTool;
 import org.maiwithu.maicraft.task.TaskDispatch;
 import org.maiwithu.maicraft.task.TaskState;
@@ -76,6 +78,17 @@ public final class ExactInteractionTargetTest {
             var r = (InteractAtTaskRecord) action.record();
             check(r.heldItemUseOnly && r.aim == null && r.expectedOutputItem == Items.GLASS_BOTTLE && h.itemUses() == 0,
                     "semantic adaptation prepares native item use without clicking");
+            // 一次语义请求携带产量和原料，编译器交给 Mod 批次执行，不展开成多条模型指令。
+            p.addProperty("count", 15); p.addProperty("ingredient_item_id", "minecraft:quartz");
+            SemanticGoalContract.validate(goal.withParameters(p), GeneralAbilityAdapter.abilities());
+            var batch = (UseItemBatchTaskRecord) ((IntentAction.Native) AbilityAdapter.adapt(goal.withParameters(p), h.player, null)).record();
+            check(batch.count == 15 && batch.ingredient == Items.QUARTZ && batch.output == Items.GLASS_BOTTLE && h.itemUses() == 0, "batch adaptation preserves semantic material and count without acting");
+            for (String invalid : new String[]{"0", "65", "1.5", "null", "\"3\""}) {
+                p.add("count", JsonParser.parseString(invalid));
+                try { AbilityAdapter.adapt(goal.withParameters(p), h.player, null); throw new AssertionError("invalid batch count accepted"); }
+                catch (IllegalArgumentException expected) { }
+            }
+            p.addProperty("count", 15);
             p.addProperty("hold_ticks", 32);
             try { SemanticGoalContract.validate(goal.withParameters(p), GeneralAbilityAdapter.abilities()); throw new AssertionError("raw hold ticks accepted"); }
             catch (IllegalArgumentException expected) { }

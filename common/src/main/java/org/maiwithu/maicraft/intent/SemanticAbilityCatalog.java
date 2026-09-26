@@ -149,10 +149,13 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));
             case GeneralAbilityAdapter.USE_ITEM -> contract(
-                    "Perform one finite native use of a carried main-hand item and wait for completion. The item may use the currently equipped offhand; equip prepares that semantic location. No block or entity click is substituted.",
+                    // 模型提交产物数量即可让原生持用批次自动准备双手、补料和换工具，失败时保留部分产物回执。
+                    "Perform finite native item use. For repeated processing, submit count plus expected_output_item_id and optionally ingredient_item_id once: the Mod prepares tool/material hands, repeats only after confirmed output, and replaces exhausted tools from carried stock. Stops with partial counts on missing supplies, interruption or unconfirmed output. No block/entity click is substituted.",
                     targets("current_place"), fields(
                             field("item_id", "resource_id", "Required carried item to select and use through its own native behavior."),
-                            field("expected_output_item_id", "resource_id", "Optional carried output whose count must increase after this one use; the receipt reports before and after counts.")));
+                            field("ingredient_item_id", "resource_id", "Optional carried ingredient to equip in offhand; the tool is prepared in main hand. Native item behavior must support this pairing."),
+                            field("count", "integer", "1..64 new output items to produce, default 1. Batch repeats are handled by the Mod, not a sequence of LLM requests."),
+                            field("expected_output_item_id", "resource_id", "Required for batch/material preparation, optional for single use. Each completed native use must increase this carried output; reports completed and remaining counts.")));
             case GeneralAbilityAdapter.HARVEST_BLOCK -> contract(
                     "Harvest one exact observed resource block through native breaking and pickup. Stops after one source break even if it regenerates; reports source position and carried output increase. Approaches without altering surrounding terrain. No inventory-source substitution.",
                     targets("coordinates"), fields(

@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
+import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 
@@ -129,7 +130,31 @@ public final class GeneralAbilityAdapter {
                 throw new IllegalArgumentException("expected_output_item_id must name an installed item");
             output = BuiltInRegistries.ITEM.get(id);
         }
-        // 这里只准备一项有界原生持用；工具与原料可由equip分别放在两只手里，任务按现有手别使用且等待原生结果。
+        // 批量请求按新增产物数设上限；原料是语义物品 ID，Mod 负责装备双手和替换耗尽工具。
+        int count = 1;
+        if (goal.parameters().has("count")) {
+            var raw = goal.parameters().get("count");
+            try {
+                if (!raw.isJsonPrimitive() || !raw.getAsJsonPrimitive().isNumber()) throw new ArithmeticException();
+                count = raw.getAsBigDecimal().intValueExact();
+            } catch (ArithmeticException | NumberFormatException invalid) { throw new IllegalArgumentException("count must be an integer from 1 to 64"); }
+            if (count < 1 || count > 64) throw new IllegalArgumentException("count must be an integer from 1 to 64");
+        }
+        String ingredientId = string(goal.parameters(), "ingredient_item_id");
+        if (count > 1 || ingredientId != null) {
+            if (output == null) throw new IllegalArgumentException("batch item use requires expected_output_item_id");
+            Item ingredient = null;
+            if (ingredientId != null) {
+                ResourceLocation id = ResourceLocation.tryParse(ingredientId);
+                if (id == null || !BuiltInRegistries.ITEM.containsKey(id) || BuiltInRegistries.ITEM.get(id) == Items.AIR)
+                    throw new IllegalArgumentException("ingredient_item_id must name an installed item");
+                ingredient = BuiltInRegistries.ITEM.get(id);
+            }
+            long duration = 1200L + count * (200L + new ItemStack(item).getUseDuration(player));
+            return new IntentAction.Native(new UseItemBatchTaskRecord("semantic-item-batch-" + UUID.randomUUID(),
+                    player.level().getGameTime() + duration, item, ingredient, output, count));
+        }
+        // 旧的单次请求保留当前双手配置；只有调用者明确要求批次或准备原料时才走自动准备流程。
         return new IntentAction.Native(new InteractAtTaskRecord("semantic-item-use-" + UUID.randomUUID(),
                 player.level().getGameTime() + 1200, MouseButton.RIGHT, null, -1, item).useHeldItemOnly(output));
     }
