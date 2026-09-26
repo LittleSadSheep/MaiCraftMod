@@ -72,6 +72,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterSurfaceExecution
 import org.maiwithu.maicraft.core.pathing.transport.TransportIntentTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntimeTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportTargetsTest;
+import org.maiwithu.maicraft.core.pathing.transport.LoadedTravelLegTest;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelistTest;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest;
@@ -161,6 +162,7 @@ public final class NavigationRegressionSuite {
         FallDamageBudgetTest.main(args);
         FallLandingTest.main(args);
         TransportTargetsTest.main(args);
+        LoadedTravelLegTest.main(args);
         TransportRuntimeTest.main(args);
         TransportIntentTest.main(args);
         JetpackFlightTest.main(args);

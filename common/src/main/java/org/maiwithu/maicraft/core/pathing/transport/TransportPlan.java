@@ -48,7 +48,10 @@ final class TransportPlan {
                 if (floors.add(hint.getY())) elevator(context, hint, forbidden, offers, unavailable);
             }
         }
-        offers.sort(Comparator.comparingDouble(Offer::estimatedTicks));
+        // 远端接近同时计入本段代价与到原终点的估价，不因一个中继点离身体最近就往侧后方折返。
+        offers.sort(goal instanceof ForwardTravelGoal forward
+                ? Comparator.comparingDouble(offer -> offer.estimatedTicks() + forward.remaining(offer.destination()))
+                : Comparator.comparingDouble(Offer::estimatedTicks));
         return new Options(List.copyOf(offers), unavailable.stream().distinct().toList());
     }
 
@@ -59,7 +62,8 @@ final class TransportPlan {
         int examined = 0;
         while (!pending.isEmpty() && examined++ < 256 && result.size() < 32) {
             NavGoal next = pending.removeFirst();
-            if (next instanceof NavGoal.Composite composite) {
+            if (next instanceof ForwardTravelGoal forward) pending.addLast(forward.destination);
+            else if (next instanceof NavGoal.Composite composite) {
                 composite.members.stream().limit(Math.max(0, 256 - examined - pending.size())).forEach(pending::addLast);
             } else if (next instanceof NavGoal.YLevel level) {
                 result.add(new BlockPos(origin.getX(), level.level, origin.getZ()));

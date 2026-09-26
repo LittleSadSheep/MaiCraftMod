@@ -53,7 +53,8 @@ public final class TransportNavigator {
     private FailureType failureType = FailureType.NO_PATH;
     private long progressTick = Long.MIN_VALUE;
     private Vec3 lastPosition;
-    private boolean trackingGoal;
+    private boolean trackingGoal, transportApproach;
+    private final LoadedTravelLeg loadedTravel = new LoadedTravelLeg();
 
     public TransportNavigator(LocalPlayer player, Supplier<GoalCompiler.Compiled> goals,
                               BooleanSupplier reached, PlayerNav.ContextProvider policy, boolean sprint) {
@@ -62,8 +63,19 @@ public final class TransportNavigator {
     }
 
     private EmbeddedBaritoneNavigator newGround() {
-        var next = new EmbeddedBaritoneNavigator(player, goals, reached, policy, sprint);
+        var next = new EmbeddedBaritoneNavigator(player, this::effectiveGoal, reached, policy, sprint);
+        // 分段或暂停后恢复步行时，继续使用原来的地形探测与移动目标约定。
+        if (probeRequested && mode == TransportMode.GROUND) next.withTerrainProbe();
         if (trackingGoal) next.trackMovingGoal(); return next;
+    }
+
+    private GoalCompiler.Compiled effectiveGoal() {
+        var requested = goals.get();
+        // 步行保留 Baritone 对原终点的全程启发式及部分路径；需要交通而远端未加载时，自动接续本地落点。
+        boolean stagedTransport = transportApproach || mode != TransportMode.AUTO && mode != TransportMode.GROUND;
+        return trackingGoal || !stagedTransport ? requested
+                : loadedTravel.resolve(requested, PlayerNav.playerFeet(player), player.level()::isLoaded,
+                        () -> player.level().dimensionType().hasSkyLight());
     }
 
     /** 交通恢复为步行时也保留移动目标语义，不能重新变成逐刻硬取消的静态目标。 */
@@ -76,7 +88,7 @@ public final class TransportNavigator {
         // 目标或禁止进入的区域变了，先让正在进行的交通安全停下，再按新要求规划，不能直接换终点。
         if (stopped) return PlayerNav.Status.FAILED;
         var context = ClientRuntime.requireContext(player);
-        var currentGoal = goals.get();
+        var currentGoal = effectiveGoal();
         LongSet currentForbidden = policy.embeddedForbiddenBodyCells();
         if (session != null && !compatibleGoal(currentGoal, activeDestination, targetFingerprint, forbidden, currentForbidden)) {
             replanning = true;
@@ -127,6 +139,17 @@ public final class TransportNavigator {
             return ground.tick(); // 保留其空中边界处理和原生所有权释放。
         }
         if (failureType == FailureType.UNKNOWN && failure != null) return PlayerNav.Status.FAILED;
+        if (loadedTravel.arrived(PlayerNav.playerFeet(player)) && (player.onGround() || player.isInWater())
+                && ground.isSafeToCancel()) {
+            // 到中继点只是加载下一段；收好旧路线，再沿原交通偏好继续，不能向调用者报告已回到工地。
+            journey.addAll(ground.ledger()); ground.stop(); loadedTravel.complete();
+            transportApproach = false;
+            ground = newGround(); targets = null; offers = List.of(); attempted = false; forceConsumed = false;
+            offersPrepared = false; triedOffers.clear(); failure = null; failureType = FailureType.NO_PATH;
+            progressTick = player.level().getGameTime();
+            return PlayerNav.Status.RUNNING;
+        }
+
         if (targets != null) {
             // 查找交通落点分多刻完成；目标改变时重查，查完才生成可尝试的飞行／电梯方案。
             if (currentGoal == null) { failure = "navigation destination disappeared"; return PlayerNav.Status.FAILED; }
@@ -138,7 +161,7 @@ public final class TransportNavigator {
             if (!offersPrepared) {
                 targets.tick(context);
                 if (!targets.complete()) return PlayerNav.Status.RUNNING;
-                var compiled = goals.get();
+                var compiled = effectiveGoal();
                 if (compiled == null) { failure = "navigation destination disappeared"; return PlayerNav.Status.FAILED; }
                 var options = TransportPlan.prepare(context, compiled.goal(), targets, mode, forbidden);
                 offers = options.offers(); unavailable = options.unavailable(); offerIndex = 0;
@@ -157,7 +180,13 @@ public final class TransportNavigator {
                 TransportRuntime.drive(this, context);
                 return PlayerNav.Status.RUNNING;
             }
+            boolean noLanding = targets.destinations().isEmpty();
             targets = null;
+            if (noLanding && loadedTravel.reject()) {
+                // 前进区域没有已验证落脚面时细化地表采样，仍沿原许可和交通偏好前进。
+                ground = newGround(); attempted = false; forceConsumed = false; offersPrepared = false;
+                offers = List.of(); failure = null; return PlayerNav.Status.RUNNING;
+            }
             if (mode != TransportMode.AUTO || !probeRequested) {
                 failure = exhaustedReason(attempts, unavailable);
                 return PlayerNav.Status.FAILED;
@@ -175,12 +204,15 @@ public final class TransportNavigator {
             return beginTransport(context);
         }
         if (status == PlayerNav.Status.FAILED) { failure = ground.failReason(); failureType = ground.failType(); }
+        // 中继格的到达不会完成总目标；下一刻确认落稳后再切换下一段。
+        if (status == PlayerNav.Status.ARRIVED && loadedTravel.active()) return PlayerNav.Status.RUNNING;
         return status;
     }
 
     private PlayerNav.Status beginTransport(LocalPlayerContext context) {
         // 停止旧步行并保存已改地形记录，重新开始找符合总目标且不侵入保护区的交通落点。
-        var compiled = goals.get();
+        transportApproach = true;
+        var compiled = effectiveGoal();
         if (compiled == null) { failure = "navigation destination is unavailable"; return PlayerNav.Status.FAILED; }
         journey.addAll(ground.ledger()); ground.stop(); ground = newGround();
         attempted = true; failure = null; failureType = FailureType.NO_PATH;
@@ -240,7 +272,8 @@ public final class TransportNavigator {
     public String outcomeSummary() { return ground.outcomeSummary() + "; transport=" + attempts + (targets == null ? "" : targets.diagnostic()); }
     public Map<String, Object> diagnostics() {
         return Map.of("mode", mode.name().toLowerCase(), "attempts", List.copyOf(attempts), "unavailable", unavailable,
-                "cleanup_pending", stopped && TransportRuntime.owns(this));
+                "cleanup_pending", stopped && TransportRuntime.owns(this),
+                "approaching_unloaded_destination", loadedTravel.active(), "intermediate_landings_completed", loadedTravel.completed());
     }
     public void stop() { stopped = true; ground.stop(); TransportRuntime.cancel(this); }
     public void pause() {

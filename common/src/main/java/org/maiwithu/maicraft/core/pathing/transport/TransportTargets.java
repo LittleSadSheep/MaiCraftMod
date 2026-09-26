@@ -8,6 +8,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.level.levelgen.Heightmap;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
@@ -19,6 +22,9 @@ public final class TransportTargets {
     private static final int MAX_GOALS = 256, MAX_CANDIDATES = 8192, MAX_RESULTS = 32;
     private static final int MAX_RADIUS = 8, MAX_PER_TICK = 128;
     private final ArrayDeque<Region> pending = new ArrayDeque<>();
+    private final ArrayDeque<SurfaceColumn> surfaceColumns = new ArrayDeque<>();
+    private ForwardTravelGoal forward;
+    private record SurfaceColumn(ForwardTravelGoal goal, BlockPos column) {}
     private final LongSet forbidden;
     private final LongSet visited = new LongOpenHashSet();
     private final List<Destination> destinations = new ArrayList<>();
@@ -74,25 +80,34 @@ public final class TransportTargets {
         // 每刻最多查一百二十八个位置并尽量控制在一毫秒内，总数也有限；达到预算会注明截断，不代表全世界已查完。
         long deadline = System.nanoTime() + 1_000_000L;
         int budget = 0;
-        while (!pending.isEmpty() && budget < MAX_PER_TICK && (budget == 0 || System.nanoTime() < deadline)) {
+        while ((!pending.isEmpty() || !surfaceColumns.isEmpty()) && budget < MAX_PER_TICK && (budget == 0 || System.nanoTime() < deadline)) {
             if (examined >= MAX_CANDIDATES) {
                 truncated = true;
-                pending.clear();
+                pending.clear(); surfaceColumns.clear();
                 break;
             }
-            Region region = pending.removeFirst();
-            BlockPos feet = region.next();
-            if (region.remaining()) pending.addLast(region);
-            examined++;
-            budget++;
-            if (!region.goal.isAt(feet) || !visited.add(feet.asLong())) continue;
+            examined++; budget++;
+            BlockPos feet; NavGoal goal;
+            if (!surfaceColumns.isEmpty()) {
+                var column = surfaceColumns.removeFirst(); goal = column.goal();
+                if (!loaded.test(column.column())) { unloaded = true; continue; }
+                int y = surfaceHeight(view, loaded, column.column());
+                if (y == Integer.MIN_VALUE) { unloaded = true; continue; }
+                if (y <= minY || y >= maxY) continue;
+                feet = new BlockPos(column.column().getX(), y, column.column().getZ());
+            } else {
+                Region region = pending.removeFirst(); feet = region.next(); goal = region.goal;
+                if (region.remaining()) pending.addLast(region);
+            }
+            if (!goal.isAt(feet) || !visited.add(feet.asLong())) continue;
             var probe = TransportLanding.inspect(view, loaded, feet, width, height, forbidden);
             unloaded |= probe.unloaded();
             unknown |= probe.unknown();
             if (probe.destination() != null) {
                 // 合格落点按离出发点的距离排列，最多保留三十二个，并记录还有候选被省略。
                 destinations.add(probe.destination());
-                destinations.sort(Comparator.comparingDouble(d -> d.landingPoint().distanceToSqr(origin)));
+                destinations.sort(forward == null ? Comparator.comparingDouble(d -> d.landingPoint().distanceToSqr(origin))
+                        : Comparator.comparingDouble((Destination d) -> forward.score(d.feet())).thenComparingDouble(d -> forward.remaining(d.feet())));
                 if (destinations.size() > MAX_RESULTS) {
                     destinations.removeLast();
                     truncated = true;
@@ -102,8 +117,19 @@ public final class TransportTargets {
         return complete();
     }
 
+    // 中继只读已加载列的真实表面，不能把悬空代表点或地底空腔选成飞行落点。
+    private int surfaceHeight(BlockGetter view, Predicate<BlockPos> loaded, BlockPos column) {
+        if (view instanceof ClientLevel level) return ClientSurfaceHeight.motionBlockingNoLeaves(level, column.getX(), column.getZ());
+        for (int y = maxY - 1; y >= minY; y--) {
+            BlockPos at = new BlockPos(column.getX(), y, column.getZ());
+            if (!loaded.test(at)) return Integer.MIN_VALUE;
+            if (Heightmap.Types.MOTION_BLOCKING_NO_LEAVES.isOpaque().test(view.getBlockState(at))) return y + 1;
+        }
+        return minY;
+    }
+
     public List<Destination> destinations() { return List.copyOf(destinations); }
-    public boolean complete() { return pending.isEmpty(); }
+    public boolean complete() { return pending.isEmpty() && surfaceColumns.isEmpty(); }
     public boolean hasUnloadedEvidence() { return unloaded; }
     public boolean hasUnknownEvidence() { return unknown; }
     public boolean truncated() { return truncated; }
@@ -116,7 +142,17 @@ public final class TransportTargets {
     private void add(NavGoal goal) {
         // 不同目标生成不同的检查范围：准确位置查一格，只给 x/z 则沿高度查，未知自定义目标不猜中心点。
         int currentY = Math.max(minY + 1, Math.min(maxY - 1, (int) Math.floor(origin.y)));
-        if (goal instanceof NavGoal.Exact exact) {
+        if (goal instanceof ForwardTravelGoal progress) {
+            forward = progress;
+            // 采样整片前向区域，空间越窄可逐轮细化；每个落点还必须过下方完整支撑/碰撞/液体校验。
+            for (int x = -ForwardTravelGoal.RANGE; x <= ForwardTravelGoal.RANGE; x += progress.sampleStep)
+                for (int z = -ForwardTravelGoal.RANGE; z <= ForwardTravelGoal.RANGE; z += progress.sampleStep) {
+                    BlockPos column = progress.origin.offset(x, 0, z);
+                    if (!progress.isAt(column)) continue;
+                    if (progress.surface) surfaceColumns.addLast(new SurfaceColumn(progress, column));
+                    else region(progress, column, 0, currentY - 8, currentY + 8);
+                }
+        } else if (goal instanceof NavGoal.Exact exact) {
             region(goal, exact.goal, 0, exact.goal.getY(), exact.goal.getY());
         } else if (goal instanceof NavGoal.Column column) {
             int radius = (int) Math.min(MAX_RADIUS, Math.ceil(column.radius));
