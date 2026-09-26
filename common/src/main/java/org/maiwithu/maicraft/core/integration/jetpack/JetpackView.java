@@ -44,6 +44,12 @@ final class JetpackView {
 
     static BodyControlPort.Movement command(Vec3 position, Vec3 velocity, Vec3 aim, float actualYaw,
                                             boolean landing, JetpackNativeAdapter.Snapshot power) {
+        return command(position, velocity, aim, actualYaw, landing, power, false);
+    }
+
+    // 镜头转向和实际按键共用疾跑资格，防止预测已经减速而最终输入仍在冲刺。
+    static BodyControlPort.Movement command(Vec3 position, Vec3 velocity, Vec3 aim, float actualYaw,
+                                            boolean landing, JetpackNativeAdapter.Snapshot power, boolean allowSprint) {
         Vec3 delta = aim.subtract(position);
         if (!landing && delta.horizontalDistance() > 0.3) {
             float bearing = (float) Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
@@ -52,6 +58,6 @@ final class JetpackView {
                 aim = new Vec3(position.x, aim.y, position.z);
             }
         }
-        return JetpackSteering.toward(position, velocity, aim, actualYaw, landing, power);
+        return JetpackSteering.toward(position, velocity, aim, actualYaw, landing, power, allowSprint);
     }
 }

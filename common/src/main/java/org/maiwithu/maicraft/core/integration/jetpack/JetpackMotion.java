@@ -14,6 +14,12 @@ final class JetpackMotion {
 
     static boolean canRise(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
                            float yaw, float requestedYaw, boolean grounded, JetpackNativeAdapter.Snapshot power) {
+        return canRise(space, position, velocity, aim, yaw, requestedYaw, grounded, power, false);
+    }
+
+    // 巡航疾跑会改变离开顶盖边缘的时机，完整上升脉冲必须使用实际输入速度检查身体碰撞。
+    static boolean canRise(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
+                           float yaw, float requestedYaw, boolean grounded, JetpackNativeAdapter.Snapshot power, boolean allowSprint) {
         double rise = JetpackDynamics.riseEnvelope(velocity.y, true, power);
         if (space.clear(position, position.add(0, rise, 0))) return true;
         if (grounded) return false; // 原生地面跳跃不属于干燥空中运动模型。
@@ -22,24 +28,30 @@ final class JetpackMotion {
         double raw = JetpackDynamics.rawAfterStep(JetpackDynamics.nextVertical(velocity.y, true, power), power);
         int ticks = 1;
         while (raw > 0 && ticks < 32) { raw = JetpackDynamics.rawAfterStep(raw, power); ticks++; }
-        return raw <= 0 && clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, Math.max(5, ticks));
+        return raw <= 0 && clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, Math.max(5, ticks), allowSprint);
     }
 
     static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
                                    float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power) {
-        return clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, 5);
+        return clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, false);
+    }
+
+    // 对实际允许的疾跑速度预检通道，不能用慢速预测去批准高速通过窄门。
+    static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
+                                   float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power, boolean allowSprint) {
+        return clearTrajectory(space, position, velocity, aim, yaw, requestedYaw, power, 5, allowSprint);
     }
 
     // 分别估计镜头不转和每刻最多转十二度两种情况，都通畅才接受；按键在每一步重新计算。
     private static boolean clearTrajectory(JetpackRoute.Space space, Vec3 position, Vec3 velocity, Vec3 aim,
-                                           float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power, int ticks) {
+                                           float yaw, float requestedYaw, JetpackNativeAdapter.Snapshot power, int ticks, boolean allowSprint) {
         // 同时覆盖静止镜头和下一 tick 最大转向速度（每秒 240 度）。
         for (boolean turning : new boolean[]{false, true}) {
             Vec3 p = position, v = velocity;
             float heading = yaw;
             for (int tick = 0; tick < ticks; tick++) {
                 if (turning) heading += Mth.clamp(Mth.wrapDegrees(requestedYaw - heading), -12, 12);
-                var command = JetpackView.command(p, v, aim, heading, false, power);
+                var command = JetpackView.command(p, v, aim, heading, false, power, allowSprint);
                 Step next = step(p, v, command, heading, power);
                 if (!space.clear(p, next.position())) return false;
                 p = next.position(); v = next.velocity();
@@ -60,7 +72,9 @@ final class JetpackMotion {
         double z = deadzone(velocity.z + nativeForward * cos + nativeSide * sin);
         double side = command.strafe() * .98F, forward = command.forward() * .98F;
         double length = Math.max(1, Math.hypot(side, forward));
-        side *= .02F / length; forward *= .02F / length;
+        // 当前原版 Player.getFlyingSpeed 在普通空中疾跑时使用 .026，其余为 .02。
+        float airSpeed = command.sprinting() ? .026F : .02F;
+        side *= airSpeed / length; forward *= airSpeed / length;
         x += side * cos - forward * sin;
         z += forward * cos + side * sin;
         double y = JetpackDynamics.nextVertical(velocity.y, command.jumping(), power);

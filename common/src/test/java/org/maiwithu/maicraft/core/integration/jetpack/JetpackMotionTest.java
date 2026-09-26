@@ -16,6 +16,17 @@ public final class JetpackMotionTest {
     public static void main(String[] args) {
         var forward = JetpackMotion.step(Vec3.ZERO, Vec3.ZERO, new Movement(1, 0, false, false, false), 0, POWER);
         check(Math.abs(forward.position().z - .0388) < 1e-7, "native and vanilla forward impulses must both be represented");
+        // 比对相同背包下的原版空中疾跑冲量，确保安全预测没有继续沿用普通移动速度。
+        var sprint = JetpackMotion.step(Vec3.ZERO, Vec3.ZERO, new Movement(1, 0, false, false, true), 0, POWER);
+        check(Math.abs(sprint.position().z - .04468) < 1e-7, "sprint prediction must include the vanilla .026 air impulse");
+        var cruise = JetpackView.command(Vec3.ZERO, new Vec3(0, 0, .3), new Vec3(0, 0, 20), 0, false, POWER, true);
+        check(cruise.sprinting() && cruise.forward() > 0, "long cruise must not be capped below available native plus vanilla thrust");
+        check(!JetpackView.command(Vec3.ZERO, Vec3.ZERO, new Vec3(0, 0, 20), 0, false, POWER, false).sprinting(),
+                "body restrictions must veto sprint");
+        check(!JetpackView.command(Vec3.ZERO, Vec3.ZERO, new Vec3(0, 0, 2), 0, false, POWER, true).sprinting()
+                && !JetpackView.command(Vec3.ZERO, Vec3.ZERO, new Vec3(0, 0, 20), 0, true, POWER, true).sprinting()
+                && !JetpackView.command(Vec3.ZERO, Vec3.ZERO, new Vec3(0, 0, 20), 180, false, POWER, true).sprinting(),
+                "approach, landing and facing away must release sprint");
         var diagonal = JetpackMotion.step(Vec3.ZERO, Vec3.ZERO, new Movement(1, 1, false, false, false), 0, POWER);
         check(Math.abs(diagonal.position().x - (.016 + .02 / Math.sqrt(2))) < 1e-7,
                 "only vanilla diagonal input is normalized, not the native side impulse");

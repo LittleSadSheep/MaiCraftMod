@@ -425,15 +425,18 @@ public final class JetpackFlightSession implements TransportSession {
         updateLook(ctx, aim, landingNow);
         Vec3 position = player.position(), velocity = player.getDeltaMovement();
         var settings = power;
+        // 地面起跳、入水、进食和低饥饿时不请求疾跑；空中巡航的碰撞预测与最终按键使用同一资格。
+        boolean sprint = !landingNow && !grounded && !player.isInWater() && !player.isUsingItem()
+                && player.getFoodData().getFoodLevel() > 6;
         clearanceBraking = phase == Phase.FLY && !grounded && !landingNow
                 && !JetpackMotion.clearTrajectory(space(ctx), position, velocity,
-                        aim, player.getYRot(), requestedYaw, settings);
+                        aim, player.getYRot(), requestedYaw, settings, sprint);
         if (clearanceBraking) {
             // 狭窄开口处，提前看向下一个拐角可能使量化后的输入偏向边缘。先面向当前路线段并重新评估，再开始制动；
             // 否则停下的身体可能永远无法恢复前进。
             lookAt(ctx, aim, landingNow);
             clearanceBraking = !JetpackMotion.clearTrajectory(space(ctx), position, velocity,
-                    aim, player.getYRot(), requestedYaw, settings);
+                    aim, player.getYRot(), requestedYaw, settings, sprint);
         }
         Vec3 motionAim = clearanceBraking ? new Vec3(position.x, aim.y, position.z) : aim;
         steeringTarget = motionAim;
@@ -443,12 +446,12 @@ public final class JetpackFlightSession implements TransportSession {
             controlVelocity = velocity.subtract(deckMotion.x, 0, deckMotion.z);
         }
         final Vec3 steeringVelocity = controlVelocity;
-        var command = JetpackView.command(position, steeringVelocity, motionAim, player.getYRot(), landingNow, settings);
+        var command = JetpackView.command(position, steeringVelocity, motionAim, player.getYRot(), landingNow, settings, sprint);
         if (command.jumping() && !JetpackMotion.canRise(space(ctx), position, velocity,
-                motionAim, player.getYRot(), requestedYaw, grounded, settings)) {
+                motionAim, player.getYRot(), requestedYaw, grounded, settings, sprint)) {
             brake(ctx); return false;
         }
-        ctx.body().applySteering(yaw -> JetpackView.command(position, steeringVelocity, motionAim, yaw, landingNow, settings),
+        ctx.body().applySteering(yaw -> JetpackView.command(position, steeringVelocity, motionAim, yaw, landingNow, settings, sprint),
                 player.getYRot(), ctx.tickRevision());
         effects = true;
         return true;
