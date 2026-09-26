@@ -40,6 +40,8 @@ public final class TaskFactory {
 
     @SuppressWarnings("unchecked")
     public static Task create(LocalPlayer player, TaskRecord record) {
+        // 部分子任务单在规划时已创建；真正创建执行器时补接当前父任务的暂停计时。
+        record.inheritDeadlineClock();
         Runner<TaskRecord> runner = (Runner<TaskRecord>) RUNNERS.get(record.getClass());
         return runner != null ? runner.create(player, record) : new UnsupportedTask(record);
     }

@@ -17,6 +17,7 @@ public final class TaskSlotFailureTest {
             startFailureSettlesOnce(world.player);
             tickFailureSettlesOnce(world.player);
         }
+        TaskDeadlinePauseTest.main(args);
         System.out.println("TaskSlotFailureTest: passed");
     }
 

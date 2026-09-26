@@ -28,6 +28,9 @@ public abstract class TaskRecord {
      * 开始时先给一个期限；发现路很远、仍在前进等情况时，任务可以把期限延后。
      */
     private long deadlineGameTime;
+    // 子任务创建时记住当前暂停刻数；之后只补它出生以后的暂停，不能重复享受此前的时间。
+    private TaskDeadlineClock deadlineClock = TaskDeadlineClock.inherit();
+    private long pausedBaseline = deadlineClock.pausedTicks;
 
     private TaskState state = TaskState.PENDING;
     private TaskResult result;
@@ -48,13 +51,30 @@ public abstract class TaskRecord {
     public final long getId() { return id; }
     public final String getToolName() { return toolName; }
     public final String getToolCallId() { return toolCallId; }
-    public final long getDeadlineGameTime() { return deadlineGameTime; }
+    public final long getDeadlineGameTime() {
+        long paused = deadlineClock.pausedTicks - pausedBaseline;
+        return deadlineGameTime > Long.MAX_VALUE - paused ? Long.MAX_VALUE : deadlineGameTime + paused;
+    }
     public final TaskState getState() { return state; }
     public final TaskResult getResult() { return result; }
 
     /** 只允许把截止时间推后，较早的时间会被忽略；游戏中在客户端主线程调用。 */
     public final void extendDeadlineTo(long gameTime) {
-        if (gameTime > deadlineGameTime) deadlineGameTime = gameTime;
+        if (gameTime > getDeadlineGameTime()) deadlineGameTime = gameTime - (deadlineClock.pausedTicks - pausedBaseline);
+    }
+
+    /** 调度器暂停总任务时，所有已经创建的子任务一同保留剩余执行时间。 */
+    final void freezeDeadline() { deadlineClock.pausedTicks++; }
+    final TaskDeadlineClock.Scope deadlineScope() { return deadlineClock.enter(); }
+    final void isolateDeadlineClock() { useDeadlineClock(new TaskDeadlineClock()); }
+    final void inheritDeadlineClock() {
+        TaskDeadlineClock active = TaskDeadlineClock.active();
+        if (active != null && active != deadlineClock) useDeadlineClock(active);
+    }
+    private void useDeadlineClock(TaskDeadlineClock clock) {
+        // 预先编译的任务单在真正交给父任务执行时再接入；保持已有绝对期限，不凭接入额外续命。
+        long deadline = getDeadlineGameTime();
+        deadlineClock = clock; pausedBaseline = clock.pausedTicks; deadlineGameTime = deadline;
     }
 
     /** 内部工具查任务时使用的 t 开头短编号；与 MCP 总任务的 UUID 是两套编号。 */

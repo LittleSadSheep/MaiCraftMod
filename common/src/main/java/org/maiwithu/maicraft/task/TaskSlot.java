@@ -46,7 +46,9 @@ final class TaskSlot {
         }
 
         record = next;
-        try {
+        // 新总任务拥有独立暂停时间；构造和启动中创建的小任务继承这份计时。
+        next.isolateDeadlineClock();
+        try (var scope = next.deadlineScope()) {
             // 创建和启动都属于接单过程；任一步失败都要交付失败结果并清空槽位，不能留下无人推进的任务单。
             task = TaskFactory.create(player, next);
             acceptedGameTime = player.level().getGameTime();
@@ -72,7 +74,7 @@ final class TaskSlot {
             if (player.level().getGameTime() >= record.getDeadlineGameTime()) {
                 record.setState(TaskState.TIMEOUT);
             } else {
-                try {
+                try (var scope = record.deadlineScope()) {
                     record.setState(task.tick(player));
                 } catch (RuntimeException exception) {
                     record.setState(TaskState.FAILED);
@@ -109,10 +111,8 @@ final class TaskSlot {
 
     /** 这次轮不到它做事，就把截止时间往后推一刻，避免“光等别人干活也算超时”。 */
     void freeze() {
-        // 这里只延长总任务的时间；总任务里面正在做的“小任务”不会跟着延长。
-        if (record != null && record.getState() == TaskState.RUNNING) {
-            record.extendDeadlineTo(record.getDeadlineGameTime() + 1L);
-        }
+        // 躲怪或自救期间整棵任务都未获得身体，内部施工、取材等任务也不能消耗执行期限。
+        if (record != null && record.getState() == TaskState.RUNNING) record.freezeDeadline();
     }
 
     void settleIfTerminal(LocalPlayer player) {
