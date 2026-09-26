@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyPorts;
 /** 声明被动公用设施的边界，绝不代表发电机或已连通证明。 */
 public final class MachineUtilityInputs {
     public static final Set<String> MEDIA = Set.of("kinetic", "energy", "fluids", "chemicals", "items");
+    public static final int MAX_INPUTS = 64;
     private static final Set<String> REQUIREMENTS = Set.of("id", "medium", "minimum_rpm", "resource", "reason", "face");
     private MachineUtilityInputs() {}
 
@@ -40,7 +41,11 @@ public final class MachineUtilityInputs {
             JsonArray names = new JsonArray(); consumers.forEach(names::add); row.add("consumers", names); return row;
         }
         public Input at(BlockPos position) {
-            return new Input(id, medium, position, face, connector(medium), minimumRpm, resource, reason);
+            return at(position, connector(medium));
+        }
+        /** 物品 IN 绑定工艺已有的接收端，不为供料需求额外生成箱体或指定物流模组。 */
+        public Input at(BlockPos position, String receiver) {
+            return new Input(id, medium, position, face, receiver, minimumRpm, resource, reason);
         }
     }
 
@@ -61,7 +66,7 @@ public final class MachineUtilityInputs {
         List<Declaration> result = new ArrayList<>();
         for (JsonElement element : rows(design)) {
             JsonObject row = object(element); keys(row, Set.of("consumers"));
-            Input common = fields(row, BlockPos.ZERO, connector(text(row, "medium", 32)), false);
+            Input common = fields(row, BlockPos.ZERO, "", false);
             JsonElement raw = row.get("consumers");
             if (raw == null || !raw.isJsonArray() || raw.getAsJsonArray().isEmpty()
                     || raw.getAsJsonArray().size() > MachinePlanningBudget.current().maxComponents())
@@ -74,7 +79,7 @@ public final class MachineUtilityInputs {
             }
             result.add(new Declaration(common.id, common.medium, consumers, common.face, common.minimumRpm, common.resource, common.reason));
         }
-        validateCounts(result.stream().map(d -> d.at(BlockPos.ZERO)).toList());
+        validateCounts(result.stream().map(d -> d.at(BlockPos.ZERO, "")).toList());
         return List.copyOf(result);
     }
 
@@ -107,6 +112,12 @@ public final class MachineUtilityInputs {
                 if (!state.has("axis") || !state.get("axis").isJsonPrimitive() || !state.get("axis").getAsString().equals(input.face.getAxis().getName()))
                     throw bad("kinetic input shaft axis must explicitly match its connection face");
             }
+            // 物品可人工递交或从局部运输器进入；只检查紧邻接口净空，不能要求机械手穿过下方工件的整条射线。
+            if (input.medium.equals("items")) {
+                JsonObject adjacent = cells.get(input.offset.relative(input.face));
+                if (adjacent != null && !air(adjacent)) throw bad("item input face needs a free handoff cell: " + input.id);
+                continue;
+            }
             for (var entry : cells.entrySet()) {
                 BlockPos delta = entry.getKey().subtract(input.offset);
                 int distance = delta.getX() * input.face.getStepX() + delta.getY() * input.face.getStepY() + delta.getZ() * input.face.getStepZ();
@@ -128,15 +139,17 @@ public final class MachineUtilityInputs {
     }
 
     private static List<Input> parseDeclarations(JsonArray declarations, boolean stored) {
-        if (declarations == null || declarations.size() > 8) throw bad("external_inputs must contain at most eight inputs");
-        List<Input> result = new ArrayList<>(); Set<BlockPos> positions = new HashSet<>();
+        if (declarations == null || declarations.size() > MAX_INPUTS) throw bad("external_inputs must contain at most " + MAX_INPUTS + " inputs");
+        List<Input> result = new ArrayList<>(); Set<String> endpoints = new HashSet<>();
         for (JsonElement element : declarations) {
             JsonObject row = object(element); keys(row, Set.of("offset", "block_id"));
             int bound = MachinePlanningBudget.current().maxRadius();
             BlockPos at = stored ? position(row.get("offset"), 30_000_000, 2048) : position(row.get("offset"), bound, bound);
             Input input = fields(row, at, identifier(row, "block_id"), true);
-            if (!positions.add(input.offset)) throw bad("external inputs must have distinct physical blocks");
-            if (!passiveConnector(input.medium, input.blockId)) throw bad("unsupported passive external input: " + input.blockId + " via " + input.medium);
+            // 一个料盆可接收多种原料；同一介质、面和资源的重复声明才是重复端点。
+            String endpoint = input.offset + ":" + input.face + ":" + input.medium + ":" + input.resource;
+            if (!endpoints.add(endpoint)) throw bad("external inputs must have distinct receiver/face/medium/resource bindings");
+            if (!supportedReceiver(input.medium, input.blockId)) throw bad("unsupported external receiver: " + input.blockId + " via " + input.medium);
             result.add(input);
         }
         validateCounts(result); return List.copyOf(result);
@@ -148,19 +161,23 @@ public final class MachineUtilityInputs {
             case "energy" -> "mekanism:basic_universal_cable";
             case "fluids" -> "mekanism:basic_mechanical_pipe";
             case "chemicals" -> "mekanism:basic_pressurized_tube";
-            case "items" -> "minecraft:barrel";
+            case "items" -> throw bad("item inputs bind an existing consumer; choose any storage or transport explicitly");
             default -> throw bad("unsupported external input medium: " + medium);
         };
     }
 
-    private static boolean passiveConnector(String medium, String id) {
-        if (id.equals(connector(medium))) return true;
+    private static boolean supportedReceiver(String medium, String id) {
+        if (!medium.equals("items") && id.equals(connector(medium))) return true;
         return switch (medium) {
             case "kinetic" -> id.equals("create:belt");
             case "energy" -> id.matches("mekanism:(basic|advanced|elite|ultimate)_universal_cable");
             case "fluids" -> id.equals("create:fluid_tank") || id.matches("mekanism:(basic|advanced|elite|ultimate)_(mechanical_pipe|fluid_tank)");
             case "chemicals" -> id.matches("mekanism:(basic|advanced|elite|ultimate)_(pressurized_tube|chemical_tank)");
-            case "items" -> id.equals("minecraft:chest") || id.matches("mekanism:(basic|advanced|elite|ultimate)_logistical_transporter");
+            // 原生库存、承载面和运输接口只说明可声明接收端；方向、过滤、余量与真正转移仍须现场验证。
+            case "items" -> Set.of("minecraft:chest", "minecraft:barrel", "minecraft:hopper", "create:deployer", "create:depot",
+                    "create:basin", "create:belt", "create:item_vault", "create:chute", "create:smart_chute", "create:millstone",
+                    "mekanism:enrichment_chamber", "mekanism:crusher", "mekanism:energized_smelter", "mekanism:metallurgic_infuser", "ae2:interface").contains(id)
+                    || id.matches("mekanism:(basic|advanced|elite|ultimate)_logistical_transporter");
             default -> false;
         };
     }
@@ -180,19 +197,21 @@ public final class MachineUtilityInputs {
     }
 
     private static void validateCounts(List<Input> inputs) {
+        if (inputs.size() > MAX_INPUTS) throw bad("external_inputs must contain at most " + MAX_INPUTS + " inputs");
         Set<String> ids = new HashSet<>(); Map<String, Integer> counts = new HashMap<>();
         for (Input input : inputs) {
             if (!ids.add(input.id)) throw bad("duplicate external input id: " + input.id);
-            if (counts.merge(input.medium, 1, Integer::sum) > 3) throw bad("at most three external inputs per medium are allowed");
+            if (counts.merge(input.medium, 1, Integer::sum) > 3 && !input.medium.equals("items")) throw bad("at most three external inputs per non-item medium are allowed");
         }
-        for (Input input : inputs) if (counts.get(input.medium) > 1 && input.reason == null)
-            throw bad("prefer one external input per medium; separate networks require a reason on each input");
+        // 配方原料和重复加工端可独立供料，不为了合并 IN 强加中心库存；其余公用网络仍要求拆分理由。
+        for (Input input : inputs) if (counts.get(input.medium) > 1 && input.reason == null && !(input.medium.equals("items") && input.resource != null))
+            throw bad("separate inputs require a reason; item inputs may instead identify the supplied resource");
     }
 
     private static JsonArray rows(JsonObject document) {
         if (!document.has("external_inputs")) return new JsonArray();
         JsonElement raw = document.get("external_inputs");
-        if (!raw.isJsonArray() || raw.getAsJsonArray().size() > 8) throw bad("external_inputs must be an array of at most eight inputs");
+        if (!raw.isJsonArray() || raw.getAsJsonArray().size() > MAX_INPUTS) throw bad("external_inputs must be an array of at most " + MAX_INPUTS + " inputs");
         return raw.getAsJsonArray();
     }
     private static JsonObject requirements(String id, String medium, Direction face, Integer rpm, String resource, String reason) {

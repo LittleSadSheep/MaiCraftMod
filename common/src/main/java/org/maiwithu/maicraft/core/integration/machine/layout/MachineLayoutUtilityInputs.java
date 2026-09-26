@@ -24,6 +24,8 @@ final class MachineLayoutUtilityInputs {
 
     static void compile(MachineLayoutWork work, MachineUtilityInputs.Declaration input, List<Consumer> consumers, Bounds bounds) {
         if (consumers.isEmpty()) { work.fail("external_input_without_consumer", input.id()); return; }
+        // 材料 IN 是对工艺接收端的需求，不默认变成木桶和跨模组管线；供料动作与运行验证单独执行。
+        if (input.medium().equals("items")) { bindItemReceivers(work, input, consumers); return; }
         Side face = Side.valueOf(input.face().name()); boolean kinetic = input.medium().equals("kinetic");
         Pos port = choosePosition(work, face, consumers.getFirst().position, kinetic, bounds);
         if (port == null) { work.fail("external_input_space_unavailable", input.id() + " needs an accessible exterior port and an internal relay within the site."); return; }
@@ -77,11 +79,27 @@ final class MachineLayoutUtilityInputs {
         if (!medium.equals("kinetic")) {
             if (consumer.blockId.startsWith("mekanism:") && !consumer.blockId.endsWith("_fluid_tank") && !consumer.blockId.equals("mekanism:induction_port"))
                 work.configure(consumer.position, route.destinationSide(), medium, "input");
-            // 物品边界是真实木桶；只有该木桶声明的内部网络才可从中拉取物品。
-            if (medium.equals("items")) work.configure(route.cells().getFirst().position(), opposite(route.sourceSide()), medium, "pull");
         }
         work.pending("external_input_commissioning", input.id() + ":" + consumer.instanceId,
                 "Internal topology is compiled; observe native " + medium + " delivery to " + consumer.name + " after the separate external hookup.");
+    }
+
+    /** 给每个既有原生接收口保留标识和面；不声称相邻摆放、声明资源或人工可达就已经完成供料。 */
+    private static void bindItemReceivers(MachineLayoutWork work, MachineUtilityInputs.Declaration input, List<Consumer> consumers) {
+        Side face = Side.valueOf(input.face().name()); int index = 0;
+        for (Consumer consumer : consumers) {
+            if (!consumer.sides.contains(face) || work.cells.containsKey(consumer.position.step(face))) {
+                work.fail("external_item_receiver_face_unavailable", input.id() + " -> " + consumer.instanceId + " requires an accessible supported receiver face.");
+                continue;
+            }
+            String id = consumers.size() == 1 ? input.id() : input.id() + "." + index++;
+            if (id.length() > 64) { work.fail("external_input_id_too_long", input.id()); continue; }
+            var at = new BlockPos(consumer.position.x(), consumer.position.y(), consumer.position.z());
+            var binding = new MachineUtilityInputs.Input(id, "items", at, input.face(), consumer.blockId, null, input.resource(),
+                    input.reason() == null && consumers.size() > 1 ? "Feed declared consumer " + consumer.instanceId : input.reason());
+            work.externalInputs.add(binding.json()); work.clearance.add(consumer.position.step(face));
+            work.pending("external_item_supply", id, "Supply " + consumer.instanceId + " through its declared native item interface. Choose manual delivery or explicitly authored transport, then observe transfer and production; no container or transporter is implied.");
+        }
     }
 
     private static Pos choosePosition(MachineLayoutWork work, Side face, Pos near, boolean kinetic, Bounds bounds) {

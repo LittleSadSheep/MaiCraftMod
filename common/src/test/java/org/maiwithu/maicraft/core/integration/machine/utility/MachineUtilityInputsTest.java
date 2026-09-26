@@ -20,6 +20,7 @@ public final class MachineUtilityInputsTest {
         historicalOffsetsDoNotDependOnTodaysPlanningBudget();
         rejectsImaginaryUnsafeOrMismatchedPorts();
         limitsSeparateNetworksAndChecksRequirements();
+        itemInputsBindLocalReceivers();
         keepsOnsiteChoicesExplicit();
         System.out.println("MachineUtilityInputsTest: " + checks + " checks passed");
     }
@@ -78,9 +79,31 @@ public final class MachineUtilityInputsTest {
         for (String rpm : new String[] {"0", "-32", "1.5", "\"32\"", "null"}) {
             JsonObject invalid = blueprint(); input(invalid).add("minimum_rpm", JsonParser.parseString(rpm)); rejects(invalid);
         }
-        JsonArray tooMany = new JsonArray(); for (int i = 0; i < 9; i++) tooMany.add(input(blueprint()));
+        JsonArray tooMany = new JsonArray(); for (int i = 0; i <= MachineUtilityInputs.MAX_INPUTS; i++) tooMany.add(input(blueprint()));
         try { MachineUtilityInputs.parseDeclarations(tooMany); throw new AssertionError("unbounded catalog declarations accepted"); }
         catch (IllegalArgumentException expected) { checks++; }
+    }
+    /** 多道加工可各自收料，向下机械手与两格下方工件之间只需保留交接空间。 */
+    private static void itemInputsBindLocalReceivers() {
+        JsonObject doc = withInputs(16);
+        for (int i = 0; i < 16; i++) {
+            var port = doc.getAsJsonArray("external_inputs").get(i).getAsJsonObject();
+            var block = doc.getAsJsonArray("blocks").get(i).getAsJsonObject();
+            JsonArray at = JsonParser.parseString("[" + i + ",2,0]").getAsJsonArray();
+            port.add("offset", at); block.add("offset", at.deepCopy());
+            port.addProperty("medium", "items"); port.addProperty("block_id", "create:deployer"); port.addProperty("face", "down");
+            port.addProperty("resource", "create:rose_quartz"); block.addProperty("block_id", "create:deployer");
+            block.add("properties", JsonParser.parseString("{\"facing\":\"down\"}"));
+        }
+        doc.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[0,0,0],\"block_id\":\"create:depot\"}"));
+        check(MachineUtilityInputs.parse(doc).size() == 16, "sixteen native item receivers need no central storage or straight exterior ray");
+        MachineBlueprintDocument.validateWire(doc);
+        var blocked = doc.deepCopy(); blocked.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[0,1,0],\"block_id\":\"minecraft:stone\"}")); rejects(blocked);
+        var imaginary = doc.deepCopy(); input(imaginary).addProperty("block_id", "create:mechanical_press"); cell(imaginary).addProperty("block_id", "create:mechanical_press"); rejects(imaginary);
+        var shared = doc.deepCopy(); var second = shared.getAsJsonArray("external_inputs").get(1).getAsJsonObject();
+        second.add("offset", input(shared).get("offset").deepCopy()); second.addProperty("resource", "minecraft:iron_ingot");
+        check(MachineUtilityInputs.parse(shared).size() == 16, "one native inventory may receive two declared resources");
+        second.addProperty("resource", "create:rose_quartz"); rejects(shared);
     }
     private static void keepsOnsiteChoicesExplicit() {
         JsonObject doc = blueprint();

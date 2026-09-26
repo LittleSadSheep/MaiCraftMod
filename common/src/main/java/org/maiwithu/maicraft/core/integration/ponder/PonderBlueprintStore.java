@@ -49,6 +49,9 @@ public final class PonderBlueprintStore {
         JsonObject evidence = result.getAsJsonObject("evidence");
         if (evidence == null || !evidence.get("projection_complete").getAsBoolean())
             throw new IllegalArgumentException("Ponder snapshot contains unresolved transforms or overlaps; inspect evidence and submit an edited blueprint");
+        // 尚未说明库存扮演的角色时，不把移出的候选当成已经确认可省略；纯库存场景也给出可操作诊断。
+        if (evidence.has("resource_boundary_candidates") && !evidence.getAsJsonArray("resource_boundary_candidates").isEmpty())
+            throw new IllegalArgumentException("ponder_resource_boundary_resolution_required: read evidence.resource_boundary_candidates and source_blocks; supply-only storage becomes resource IN, required internal/output storage must be explicitly retained in an authored blueprint");
         if (result.getAsJsonArray("blocks").isEmpty())
             throw new IllegalArgumentException("Ponder snapshot has no visible placeable blocks; choose another chapter");
         // 资源 IN 尚未绑定真实接收口时只供设计参考，不能让直接导入把“去掉演示马达”误当成已经获得动力。

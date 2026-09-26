@@ -21,8 +21,21 @@ public final class MachineLayoutUtilityInputsTest {
         oneKineticInputFeedsTwoConsumers();
         horizontalInputUsesAnActualGearbox();
         separateMediaHaveDistinctRealInputs();
+        itemInputsUseExistingConsumers();
         rejectsInvalidAbstractInputsAndMissingAdapters();
         System.out.println("MachineLayoutUtilityInputsTest: " + checks + " checks passed");
+    }
+    /** 对现有工件承载台声明供料，不得自动夹带木桶、物流管或其他模组设备。 */
+    private static void itemInputsUseExistingConsumers() {
+        JsonObject design = design("create:depot", 2, "items"); input(design).addProperty("face", "up");
+        input(design).addProperty("resource", "minecraft:iron_ingot");
+        var plan = SemanticMachineLayout.compile(design, 12, REGISTRY); buildable(plan);
+        var inputs = MachineUtilityInputs.parse(plan.blueprint());
+        check(inputs.size() == 2 && inputs.stream().allMatch(port -> port.blockId().equals("create:depot")), "each consumer retains its actual native receiver");
+        check(inputs.get(0).id().equals("city.0") && inputs.get(1).id().equals("city.1"), "expanded consumers have stable distinct input identifiers");
+        check(cells(plan).values().stream().allMatch(cell -> cell.get("block_id").getAsString().equals("create:depot")), "no implicit storage or cross-mod transporter is added");
+        check(plan.report().getAsJsonArray("connections").isEmpty(), "declared supply is not fabricated as a compiled route");
+        check(!plan.report().get("utility_connection_verified").getAsBoolean(), "item delivery still requires actual native evidence");
     }
     private static void oneKineticInputFeedsTwoConsumers() {
         JsonObject design = design("create:millstone", 2, "kinetic");

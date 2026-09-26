@@ -461,11 +461,13 @@ public final class SemanticAbilityCatalog {
         return "Fixed machines prefer shared city utility supply. external_inputs:[{id,medium,"
                 + (concrete ? "offset:[x,y,z],face,block_id" : "consumers:[component_name],face?")
                 + ",minimum_rpm?,resource?,reason?}]. Media: kinetic, energy, fluids, chemicals, items. "
-                + "Default one input per medium; at most three per medium with a reason on each, eight total. "
-                + "These are passive physical connection points, not generators. supply_preference defaults to external; "
+                // 物品允许按原料与工艺接收端分开声明，避免为满足端口数限制而强迫建造中心库存。
+                + "At most 64 inputs total; non-item media allow three each with reasons for separate networks. Multiple item inputs require resource or reason. "
+                + "Item inputs bind existing consumers without adding containers/transporters; supply via native manual interaction or explicitly authored transport. "
+                + "These declarations require actual transfer verification. supply_preference defaults to external; "
                 + "onsite requires onsite_reason explaining a deliberate local source. In survival, known creative-only "
                 + "materials require real carried items or installed recipe evidence; that evidence is not a complete acquisition plan. "
-                + "Build external-input machines without production, then inspect and connect_external_input; kinetic inputs may compare nearby loaded sources when source_label is omitted. "
+                + "Build first, then inspect; connect_external_input supports kinetic/energy, not item routing. Kinetic inputs may compare nearby loaded sources when source_label is omitted. "
                 + "run_production is separate. Read remembered ports from perceive(machines).";
     }
 

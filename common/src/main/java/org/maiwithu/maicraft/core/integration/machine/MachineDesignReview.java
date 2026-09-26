@@ -129,7 +129,9 @@ public final class MachineDesignReview {
         List<MachineUtilityInputs.Declaration> inputs = List.of();
         try {
             inputs = MachineUtilityInputs.parseDesign(design, byName.keySet());
-            for (var input : inputs) checkRegistry(blockExists, MachineUtilityInputs.connector(input.medium()), "$.external_inputs", "block", errors);
+            // 物品输入沿用组件自身接收口，不为它查验或强行增加一个默认木桶。
+            for (var input : inputs) if (!input.medium().equals("items"))
+                checkRegistry(blockExists, MachineUtilityInputs.connector(input.medium()), "$.external_inputs", "block", errors);
         } catch (IllegalArgumentException invalid) { error(errors, "$.external_inputs", "invalid_external_input", invalid.getMessage()); }
         if (!errors.isEmpty()) return invalid(errors);
         JsonObject result = report(components, connections, expectedOutput, style, constraints, (int) total, inputs);

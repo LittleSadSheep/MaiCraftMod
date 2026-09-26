@@ -23,7 +23,9 @@ public record PonderTranscript(String sceneId, String title, List<Step> steps,
                 .append("- 场景：`").append(sceneId).append("`；演示结构：`").append(entry.schematic()).append("`\n")
                 .append("- 来源：当前注册的 Ponder 故事板；说明按游戏语言读取，缺失时回退作者原文。\n")
                 .append("- 提取方式：只编译说明，不播放、不 tick、不创建演示世界，也不修改玩家世界。\n\n")
-                .append("- 教程里的创造马达、无限物品/流体/能量源表示演示环境提供的资源 IN；学习接入关系，不把演示发生器直接加入正式蓝图。\n\n")
+                // 供料保险库与创造马达都可扮演环境输入；是否保留实体库存取决于工艺所需的角色。
+                .append("- 按功能划分教程资源边界：创造马达表示应力 IN；仅用于演示供料的保险库、箱子或流体罐表示材料/流体 IN。识别接收接口和资源需求，再选择现场可用的供给方式；供料示例不要求照搬容器。\n")
+                .append("- 机器需要的内部缓存或产物收集仍须明确设计。静态库存形状不能证明流向，结合本页旁白、原生接口与实际转移证据判断；资源声明不证明已经接通。\n\n")
                 .append("## 原始说明与操作提示\n\n");
         for (int i = offset; i < end; i++) {
             Step step = steps.get(i);

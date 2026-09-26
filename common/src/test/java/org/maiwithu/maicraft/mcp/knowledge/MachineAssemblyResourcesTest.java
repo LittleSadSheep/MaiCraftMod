@@ -26,6 +26,11 @@ public final class MachineAssemblyResourcesTest {
         var unavailable = CreateProcessingCapabilities.descriptor(Blocks.STONE.defaultBlockState());
         check(unavailable.get("external_workpiece_processor").isJsonNull() && unavailable.has("unknown"), "missing adapter evidence is not reported as a complete capability inventory");
         check(!body.toString().contains("precision_mechanism_station"), "resource contains no product-specific factory template");
+        // 手动递交与原生物流各有真实动作，知识层不能把箱体和运输器说成机械手供料的必需品。
+        var deployer = NativeItemTransferContract.reference("create:deployer");
+        check(deployer.getAsJsonObject("manual_input").get("method").getAsString().equals("DeployerBlock.useItemOn"), "manual hand swap has a native source");
+        check(deployer.getAsJsonObject("manual_input").get("effect").getAsString().contains("entire held stack"), "manual interaction exchanges, rather than silently merges, stacks");
+        check(deployer.has("automated_input") && !deployer.has("transport_requirement") && !deployer.get("world_transfer_verified").getAsBoolean(), "transport is a supply choice and remains unverified");
     }
     private static void check(boolean value, String detail) { if (!value) throw new AssertionError(detail); }
 }

@@ -8,17 +8,20 @@ import com.google.gson.JsonParser;
 public final class NativeItemTransferContract {
     private NativeItemTransferContract() {}
     public static JsonObject reference(String blockId) {
-        // 接口能接收物品不等于相邻箱子会主动投料；运输器和被动库存必须分别说明。
+        // 接口能接收物品不等于相邻箱子会主动投料；自动运输与玩家直接交换机械手持物分别说明。
         String source = switch (blockId) {
             case "create:deployer" -> """
                     {"role":"passive_filtered_inventory","source_version":"Create 6.0.11 NeoForge",
-                     "source_methods":["DeployerBlockEntity.registerCapabilities","DeployerItemHandler.insertItem","DeployerItemHandler.extractItem"],
+                     "source_methods":["DeployerBlockEntity.registerCapabilities","DeployerItemHandler.insertItem","DeployerItemHandler.extractItem","DeployerBlock.useItemOn"],
                      "item_input":{"faces":["up","down","north","south","east","west"],
                        "registration":"The NeoForge item capability ignores the queried face; the block entity and native handler must be initialized.",
                        "destination":"held item used by the deployer; overflow slots reject insertion",
                        "acceptance":"Deployer FilteringBehaviour must accept the item; an occupied hand only stacks identical item and components up to its native limit."},
                      "item_output":"Overflow is extractable. A held item matching an active nonempty filter is protected from extraction.",
-                     "transport_requirement":"An external transporter must insert into the deployer's own block inventory. Adjacent buffers and create.filter alone do not transfer ingredients.",
+                     "manual_input":{"method":"DeployerBlock.useItemOn","target":"the hand/front end along FACING; side or rear clicks can pass without swapping",
+                       "effect":"The server swaps the player's selected hand stack with the deployer's entire held stack; this is not a merge into the filtered item handler.",
+                       "conditions":"A wrench passes to default interaction; holding a deployer may trigger its placement helper first. Verify the resulting hands and held inventory."},
+                     "automated_input":"Automatic supply needs an actual native transporter into this inventory. Manual hand swap is also supported; adjacent buffers and create.filter alone do not transfer ingredients. A vault, chest or hopper is not inherently required.",
                      "processing_distinction":"The held ingredient inventory is separate from the workpiece on the processing surface."}
                     """;
             case "minecraft:hopper" -> """

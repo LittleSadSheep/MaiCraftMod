@@ -38,6 +38,7 @@ public final class PonderReplayTest {
     public static void main(String[] args) throws Exception {
         PonderBlueprintStore.clear();
         demonstrationResourcesBecomeInputs();
+        ordinaryStorageRequiresRoleResolution();
         var source = snapshot(true, Vec3.ZERO, Vec3.ZERO, 1);
         var moved = snapshot(true, new Vec3(0, 0, 1), Vec3.ZERO, 1);
         var blueprint = moved.blueprint(ENTRY, "addon:scene");
@@ -83,6 +84,30 @@ public final class PonderReplayTest {
         check(failed.status().equals("failed") && failed.markdown("replay", 0).contains("custom callback failed"), "custom callback failure is explicit, not a successful partial capture");
         PonderReplayRuntime.invalidate(); rejects(() -> PonderBlueprintStore.resolve(uri), "reload invalidation rejects stale resource imports");
         System.out.println("PonderReplayTest: passed");
+    }
+
+    /** 同一保险库既能做演示供料也能是教学主体；投影只能提示资源边界，不能仅凭 ID 决定工艺。 */
+    private static void ordinaryStorageRequiresRoleResolution() {
+        var vault = new PonderStructureSnapshot.Block(BlockPos.ZERO, "create:item_vault", Map.of("axis", "z"), "{Inventory:{Size:20}}");
+        var machine = new PonderStructureSnapshot.Block(new BlockPos(1, 0, 0), "create:deployer", Map.of("facing", "down"), null);
+        var blocks = List.of(vault, machine);
+        var section = new PonderStructureSnapshot.Section("material-supply", blocks.stream().map(PonderStructureSnapshot.Block::position).toList(),
+                true, new Vec3(0, 2, 0), Vec3.ZERO, Vec3.ZERO, null, 1, Vec3.ZERO);
+        var snapshot = new PonderStructureSnapshot(blocks, List.of(section), new JsonArray());
+        var blueprint = snapshot.blueprint(ENTRY, "addon:process");
+        check(blueprint.getAsJsonArray("blocks").size() == 1, "incidental vault is not an automatic construction bill");
+        var evidence = blueprint.getAsJsonObject("evidence");
+        check(evidence.getAsJsonArray("resource_inputs").isEmpty(), "ordinary storage is not classified as a creative source");
+        var boundary = evidence.getAsJsonArray("resource_boundary_candidates").get(0).getAsJsonObject();
+        check(boundary.get("direction").getAsString().equals("unknown") && boundary.get("role_resolution_required").getAsBoolean(), "inventory geometry alone cannot establish flow");
+        check(boundary.getAsJsonArray("possible_roles").size() == 3, "input, output and internal storage remain explicit alternatives");
+        check(boundary.getAsJsonObject("demonstration_storage").getAsJsonArray("offset").get(1).getAsInt() == 2, "resource candidates follow the visible transform");
+        check(evidence.getAsJsonArray("source_blocks").toString().contains("Inventory"), "native inventory evidence remains readable");
+        rejects(() -> PonderBlueprintStore.resolve(PonderBlueprintStore.put(ENTRY.key(), blueprint)), "removing a candidate does not prove a complete build");
+        var vaultEntry = new PonderAccess.Entry("vault", "create:item_vault", "create:vault", List.of(), null);
+        var storageLesson = snapshot.blueprint(vaultEntry, "create:vault");
+        check(storageLesson.getAsJsonArray("blocks").size() == 2 && storageLesson.getAsJsonObject("evidence").getAsJsonArray("resource_boundary_candidates").isEmpty(), "storage tutorial retains its actual teaching subject");
+        check(PonderBlueprintStore.resolve(PonderBlueprintStore.put(vaultEntry.key(), storageLesson)).getAsJsonArray("blocks").size() == 2, "explicit storage subject still imports normally");
     }
 
     private static PonderStructureSnapshot snapshot(boolean visible, Vec3 offset, Vec3 rotation, double fade) {

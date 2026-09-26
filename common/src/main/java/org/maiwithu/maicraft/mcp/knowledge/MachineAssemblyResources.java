@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltAccess;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.server.machine.CreateConfigurationContract;
 
 /** 显式机器组合契约只描述组件与原生动作，不发布任何按产物选择的工作站模板。 */
@@ -33,7 +34,9 @@ public final class MachineAssemblyResources {
         result.addProperty("configuration_contract", "production.configurations uses installed native operations; keep filters, mode and input setup explicit, never copy observed NBT into placement");
         result.add("native_configuration_operations", CreateConfigurationContract.describe());
         // 教程与主流程保持一致：资源 IN 可直接按接收方块、偏移和轴面声明，生成端口编号不是额外的开工门槛。
-        result.addProperty("external_input_design", "Declare known receiver offsets/faces directly; generated power_ports are optional binding references. Treat Ponder creative supplies as resource IN boundaries, prefer existing world networks and keep the requested product/mod constraints.");
+        result.addProperty("external_input_design", "Declare known receiver offsets/faces directly; generated power_ports are optional binding references. Ponder supply-only vaults/containers and creative sources represent resource IN. Bind the process receiver and needed resource; choose available supply without copying demonstration storage. Required internal buffers/output collection remain explicit design choices. Keep the requested product/mod constraints.");
+        // 接收端声明与真正搬运分开；手工递交或显式物流都需执行原生动作，不能宣称已经自动接通物品网络。
+        result.addProperty("external_item_inputs", "Item IN may bind native receivers such as Create deployers, depots, basins, belts or chutes. Multiple ingredient/consumer inputs may identify resource instead of reason. Keep the adjacent handoff cell free; a whole straight ray to the exterior is not required. Manual feeding or an explicitly authored transporter must perform actual transfer. connect_external_input currently connects kinetic/energy only; an item declaration neither routes nor supplies items.");
         result.addProperty("existing_power_discovery", "perceive(view=kinetic_sources, query=short name or ID, radius=32) searches loaded chunk indexes in the backend and returns at most 8 source_labels with native interfaces. Only visible outlets near the work floor are candidates. Partial/empty results do not prove no network exists; observed candidates still require authorized use. connect_external_input rechecks interfaces and stress.");
         result.addProperty("design_policy", "The author selects every component, work surface and transport technology. No product-specific workstation or implicit pipe/sorter/depot is inserted.");
         JsonObject belt = new JsonObject(); belt.addProperty("type", "create:belt"); belt.addProperty("available", CreateBeltAccess.available());
@@ -88,6 +91,7 @@ public final class MachineAssemblyResources {
         var coordinate = schema.getAsJsonObject("$defs").getAsJsonObject("position").getAsJsonObject("items");
         coordinate.addProperty("minimum", -budget.maxRadius()); coordinate.addProperty("maximum", budget.maxRadius());
         schema.getAsJsonObject("properties").getAsJsonObject("blocks").addProperty("maxItems", budget.maxTargets());
+        schema.getAsJsonObject("properties").getAsJsonObject("external_inputs").addProperty("maxItems", MachineUtilityInputs.MAX_INPUTS);
         var assembly = schema.getAsJsonObject("properties").getAsJsonObject("assembly").getAsJsonObject("properties");
         for (String kind : List.of("installations", "processing")) assembly.getAsJsonObject(kind).addProperty("maxItems", budget.maxConnections());
         return schema;
