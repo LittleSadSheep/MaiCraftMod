@@ -15,6 +15,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
+import org.maiwithu.maicraft.core.pathing.util.BreathingRoute;
 
 /**
  * 沿已选路线控制水下游泳，快缺氧或快到岸边时上浮；路线换段后仍接着完成这一口气的恢复。
@@ -111,7 +112,11 @@ public final class SubmergedWaterTravelPolicy {
 
     public boolean active() { return control.recovering() || (control.active() && controlledMovement != null); }
     // 返回真会让尚未启动的换气自救暂不接管，因此上浮出口的判断直接影响自救能否启动。
-    public boolean managesAir() { return active() && breathingEscapeKnown; }
+    public boolean managesAir() {
+        // 水面本身畅通仍不够，身体到水面的整段上浮通道也必须可穿过，否则交给能绕行的换气链。
+        return active() && breathingEscapeKnown && BreathingRoute.ascent(BreathingRoute.observed(context.player(),
+                EmbeddedBaritonePolicy.snapshot().forbiddenBodyCells()), context.player().position()) != null;
+    }
     public boolean sprinting() { return control.sprinting(); }
     public int verticalIntent() { return control.verticalIntent(); }
     public float cameraPitch() { return control.cameraPitch(); }
@@ -149,25 +154,28 @@ public final class SubmergedWaterTravelPolicy {
     }
 
     /** 同时接受水中节点和其上方空气节点，再定位真实水面。 */
-    // 本类两处 hasChunkAt 在原版客户端恒为真，不能凭它们证明游泳列已加载。
+    // 只接受客户端已经收到的水列，未知区域不能替普通游泳担保上浮出口。
     private BlockPos findWaterSurface(BlockPos route) {
-        if (!context.world().hasChunkAt(route)) return null;
+        if (!context.world().isLoaded(route)) return null;
         return findWaterSurface(context.world(), route);
     }
 
-    // 当前沿水一直找最上层，含水半砖也算水；这一步没有证明中间每一格都能让身体穿过。
+    // 连续水列中出现含水实体就停止；不能越过中间的半砖，只凭上层水面可呼吸便声称有出口。
     static BlockPos findWaterSurface(BlockGetter world, BlockPos route) {
         BlockPos cursor = route;
         if (!world.getFluidState(cursor).is(FluidTags.WATER)) cursor = cursor.below();
         if (!world.getFluidState(cursor).is(FluidTags.WATER)) return null;
-        while (cursor.getY() + 1 < world.getMaxBuildHeight()
-                && world.getFluidState(cursor.above()).is(FluidTags.WATER)) cursor = cursor.above();
+        while (true) {
+            if (!clearWater(world, cursor, world.getBlockState(cursor))) return null;
+            if (cursor.getY() + 1 >= world.getMaxBuildHeight() || !world.getFluidState(cursor.above()).is(FluidTags.WATER)) break;
+            cursor = cursor.above();
+        }
         return cursor;
     }
 
     /** 两格畅通水域和可呼吸水面共同构成角色通行空间与出口走廊。 */
     private boolean safeSurfaceColumn(BlockPos surface) {
-        if (!context.world().hasChunkAt(surface)) return false;
+        if (!context.world().isLoaded(surface)) return false;
         return safeSurfaceColumn(context.world(), surface)
                 && !EmbeddedBaritonePolicy.forbidsBody(surface)
                 && !EmbeddedBaritonePolicy.forbidsBody(surface.below());

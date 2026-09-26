@@ -18,7 +18,7 @@ import net.minecraft.world.level.material.Fluids;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudget;
 
 /**
- * 检查潜水姿势、缺氧上浮、补满气后再走、换段保留换气和水面两层空间。测试没有覆盖更深处的含水障碍。
+ * 检查潜水姿势、缺氧上浮、补满气后再走、换段保留换气，以及中间含水障碍不能冒充畅通水柱。
  */
 public final class SubmergedWaterTravelPolicyTest {
     public static void main(String[] args) {
@@ -36,6 +36,7 @@ public final class SubmergedWaterTravelPolicyTest {
         segmentsShareRecoveryButBodiesDoNot();
         shorelineReleasesTheSwimPhase();
         surfaceGeometryMatchesBothRouteConventions();
+        submergedRoofCannotClaimAirManagement();
         System.out.println("SubmergedWaterTravelPolicyTest: passed");
     }
 
@@ -166,6 +167,15 @@ public final class SubmergedWaterTravelPolicyTest {
         world.blocks.put(top.above(), Blocks.ICE.defaultBlockState());
         check(!SubmergedWaterTravelPolicy.safeSurfaceColumn(world, top),
                 "a sealed surface must return breathing control to the rescue reflex");
+    }
+    private static void submergedRoofCannotClaimAirManagement() {
+        // 更高的水面虽然能呼吸，中间的含水顶板仍会截住角色，普通游泳必须让出低氧逃生控制。
+        var world = new TestWater();
+        for (int y = 58; y <= 63; y++) world.blocks.put(new BlockPos(0, y, 0), Blocks.WATER.defaultBlockState());
+        check(SubmergedWaterTravelPolicy.findWaterSurface(world, new BlockPos(0, 58, 0)).getY() == 63, "clear deep water retains the real surface");
+        world.blocks.put(new BlockPos(0, 60, 0), Blocks.OAK_SLAB.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true));
+        check(SubmergedWaterTravelPolicy.findWaterSurface(world, new BlockPos(0, 58, 0)) == null,
+                "a submerged waterlogged roof invalidates the direct ascent even with open water above");
     }
 
     private static void update(SwimTravelControl control, boolean swimming, boolean eyesWet,

@@ -211,7 +211,8 @@ public final class AssistedFallOwnershipTest {
     private static final class TestLevel extends ClientLevel {
         private TestLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         public long getGameTime() { return 0; }
-        public boolean hasChunkAt(BlockPos pos) { return false; }
+        // 此夹具只测试坠落所有权，周围区块明确未加载，水路查询应在读取原生维度前退出。
+        public boolean isLoaded(BlockPos pos) { return false; }
         public WorldBorder getWorldBorder() { throw new TerrainBoundary(); }
     }
     private static final class TerrainBoundary extends RuntimeException { }
