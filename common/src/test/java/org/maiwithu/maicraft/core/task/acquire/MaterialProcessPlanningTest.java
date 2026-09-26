@@ -34,6 +34,10 @@ public final class MaterialProcessPlanningTest {
                 page.addProperty("status", "changed_later");
                 check(query.get("status").equals(state), "后来的EMI对象变化不能改写已经冻结的查询证据");
                 check(facts.get("execution_authorization").toString().contains("unchanged"), "知识读取不授予额外游戏操作权限");
+                // 首次缺料回执就交代格子合成边界，外部规划者无需再试一次相同craft才知道需要原生加工动作。
+                check(facts.get("ordinary_crafting_scope").toString().contains("crafting-table grids")
+                        && facts.get("ordinary_crafting_scope").toString().contains("native item, block or machine"),
+                        "公开普通合成范围，同时保留物品、方块和机器工艺的区分");
             }
             var failed = MaterialProcessPlanning.capture(world.player, request, 1, need, List.of(), false,
                     "allowed_sources_exhausted", (player, item) -> { throw new IllegalStateException("optional API unavailable"); });

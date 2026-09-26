@@ -88,6 +88,8 @@ public final class MaterialProcessPlanning {
         result.put("recipe_lineage_field", "recipe_trace"); result.put("knowledge_uris", List.copyOf(links));
         result.put("recipe_query_evidence", List.copyOf(queries)); result.put("unqueried_item_count", Math.max(0, items.size() - queries.size()));
         result.put("absence_is_not_recipe_proof", true); result.put("machine_route_established", false);
+        // 缺料交接要说明格子合成的边界；外部规划者不能把已读到的打磨、充能等配方再次原样交给craft。
+        result.put("ordinary_crafting_scope", "Inventory/crafting-table grids using carried materials. Other recipe types require an independently selected native item, block or machine operation; recipe visibility alone does not make craft executable.");
         result.put("execution_authorization", "unchanged; EMI knowledge does not grant allow_use, construction, materials, harm or protection permissions");
         result.put("next_steps", List.of("discover_recipe_and_requirements", "inspect_and_reuse_compatible_equipment",
                 "review_and_build_only_if_needed_and_authorized", "operate_the_verified_process", "verify_final_main_inventory"));

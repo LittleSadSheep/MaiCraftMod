@@ -76,7 +76,7 @@ public final class TaskViewTest {
                 Map.of("knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"),
                         "blocked_need", Map.of("item_ids", List.of("create:polished_rose_quartz"), "missing", 3,
                                 "required_final_count", 3, "observed_final_count", 0),
-                        "recipe_trace", "history".repeat(1000)))).toJson()).getAsJsonObject();
+                        "recipe_trace", "history".repeat(1000), "ordinary_crafting_scope", "inventory/crafting-table grids"))).toJson()).getAsJsonObject();
         raw.getAsJsonObject("data").add("machine_layout", blocks);
         raw.getAsJsonObject("data").addProperty("body_preparation_required", true);
         raw.getAsJsonObject("data").add("food_preparation", JsonParser.parseString("{\"food\":10,\"health\":7}"));
@@ -91,6 +91,8 @@ public final class TaskViewTest {
                 && need.getAsJsonArray("item_ids").get(0).getAsString().equals("create:polished_rose_quartz")
                 && summary.get("detail_path").getAsString().equals("/terminal/result/data/planning_handoff"),
                 "large handoff keeps the actual shortage and exact full-evidence path");
+        check(summary.get("ordinary_crafting_scope").getAsString().contains("crafting-table grids"),
+                "ordinary crafting scope stays visible even beside a large recipe trace");
         check(displayed.get("body_preparation_required").getAsBoolean()
                 && displayed.getAsJsonObject("food_preparation").get("food").getAsInt() == 10,
                 "body requirements remain visible beside large material evidence");

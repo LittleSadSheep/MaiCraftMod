@@ -148,7 +148,8 @@ final class TaskView {
                 if (blocked.has(key)) need.add(key, JsonReadback.preview(blocked.get(key), path + "/blocked_need/" + key, 500));
             result.add("blocked_need", need);
         }
-        for (String key : List.of("knowledge_uris", "final_inventory_goal"))
+        // 合成范围也要随缺口一起呈现，不能被历史配方正文折叠后再次诱发同一入口的无效重试。
+        for (String key : List.of("knowledge_uris", "final_inventory_goal", "ordinary_crafting_scope"))
             if (source.has(key)) result.add(key, JsonReadback.preview(source.get(key), path + "/" + key, 500));
         return result;
     }

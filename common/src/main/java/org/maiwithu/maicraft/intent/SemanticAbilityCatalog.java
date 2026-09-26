@@ -304,7 +304,11 @@ public final class SemanticAbilityCatalog {
                             field("allow_rare_consumables", "boolean", "Explicitly permits the real ender-pearl use required for End Gateway traversal; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that must not be touched.")));
             case "maicraft:craft" -> contract(
-                    "Craft an item. Recipe choice, intermediate ingredients, workstation approach or bounded crafting-table preparation, placement and GUI slots belong to MaiCraft.",
+                    // 合成入口只在背包或工作台格子中制作；加工类配方即使能在EMI里读到，也不因此成为格子合成动作。
+                    "Craft through inventory or crafting-table grids using carried materials and recursively grid-craftable intermediates. "
+                            + "Does not withdraw stock, mine or execute other recipe types. Use acquire_items with permitted sources for material acquisition; "
+                            + "other processing requires the appropriate native item, block or machine operation. Recipe choice, workstation approach, "
+                            + "bounded crafting-table preparation and synchronized GUI slots belong to MaiCraft.",
                     targets("nearest", "prior_result"),
                     fields(
                             field("item_id", "resource_id", "Requested output."),
