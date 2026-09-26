@@ -317,6 +317,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         Loadout loadout = Loadout.forTarget(player, player);
         return new Battlefield(
                 Menace.effectiveHealth(player),
+                player.getHealth() + player.getAbsorptionAmount(),
                 reachToTarget(),
                 loadout.hasMelee(), loadout.hasRanged(),
                 retreat.failures() >= MAX_RETREAT_FAILURES, foes);
@@ -450,13 +451,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (move.action() == lastLoggedAction && player.tickCount - lastPlanLogTick < 40) return;
         lastLoggedAction = move.action();
         lastPlanLogTick = player.tickCount;
-        Constants.LOG.info("[maicraft-attack] {} foe={} dist={} melee={} ranged={} hp_eff={} 场上={}",
+        // 同时记录护甲折算值与真实可用生命，撤退阈值命中时能解释是哪一条生命边界触发。
+        Constants.LOG.info("[maicraft-attack] {} foe={} dist={} melee={} ranged={} hp_eff={} hp_available={} 场上={}",
                 move.action(),
                 move.foeId() == AttackPlan.NO_FOE ? "全场" : move.foeId(),
                 move.foeId() == AttackPlan.NO_FOE ? "-"
                         : String.format("%.1f", distanceOf(field, move.foeId())),
                 field.hasMelee(), field.hasRanged(),
-                String.format("%.0f", field.effectiveHealth()), field.foes().size());
+                String.format("%.0f", field.effectiveHealth()), String.format("%.1f", field.availableHealth()), field.foes().size());
     }
 
     private static double distanceOf(Battlefield field, int id) {

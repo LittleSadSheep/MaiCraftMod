@@ -18,6 +18,8 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.combat.AttackPlan;
+import org.maiwithu.maicraft.core.combat.Battlefield;
 import java.util.LinkedHashMap;
 import java.util.Optional;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -36,6 +38,7 @@ public final class CombatThreatsTest {
         rejectsUnrelatedDamage();
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();
+        armorCannotHideCriticalHealth();
         MobDefenseDamageTest.main(args);
         CreeperDefenseTest.main(args);
         CombatOutcomeTest.main(args);
@@ -70,6 +73,13 @@ public final class CombatThreatsTest {
             check(CombatThreats.attackers(f.h.player).equals(List.of(shooter)),
                     "a known projectile owner supplies missing causal attribution");
         }
+    }
+    private static void armorCannotHideCriticalHealth() {
+        // 同样穿着高护甲，真实生命低于四心就进入撤退；有效承伤估算高不能拖到下一箭已致命。
+        var low = new Battlefield(40, 6, 3, true, false, false, List.of());
+        check(AttackPlan.decide(low, null).action() == AttackPlan.Action.DISENGAGE, "armored low-health body retreats before near-death");
+        check(!AttackPlan.outmatched(40, 12), "sufficient real health retains ordinary combat selection");
+        check(AttackPlan.outmatched(6, 12), "low effective durability remains an independent retreat signal");
     }
 
     private static void rejectsUnrelatedDamage() throws Exception {

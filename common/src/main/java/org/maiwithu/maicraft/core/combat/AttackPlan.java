@@ -63,6 +63,11 @@ public final class AttackPlan {
         return effectiveHealth <= MIN_EFFECTIVE_HEALTH;
     }
 
+    /** 剩余红心与吸收值不足四颗心时提早撤离，不能因为高护甲倍率一直打到最后半颗心才行动。 */
+    public static boolean outmatched(double effectiveHealth, double availableHealth) {
+        return outmatched(effectiveHealth) || availableHealth <= MIN_EFFECTIVE_HEALTH;
+    }
+
     /**
      * @param last 上一刻的决定;第一次传 {@code null}
      */
@@ -71,7 +76,7 @@ public final class AttackPlan {
         // 已开始的引信优先于旧目标、武器准备和普通撤退选点；严格攻击名单也不能阻止避险。
         if (b.foes().stream().anyMatch(Foe::blastDanger)) return new Move(Action.EVADE_BLAST, NO_FOE);
         // ① 扛不住 —— 一切"怎么打"的讨论都以她还站得住为前提。
-        if (outmatched(b.effectiveHealth()) && !b.cornered()) {
+        if (outmatched(b.effectiveHealth(), b.availableHealth()) && !b.cornered()) {
             return new Move(Action.DISENGAGE, NO_FOE);
         }
         // ③ 手上没有能打的东西:赤手对上会还手的东西不是一条出路,退开。

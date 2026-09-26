@@ -7,11 +7,16 @@ import java.util.List;
  * Foe 里的 authorized 表示允许主动选择它；engaging 表示它正在攻击玩家。两者不是同一件事。
  */
 public record Battlefield(double effectiveHealth,
+                          double availableHealth,
                           double meleeReach,
                           boolean hasMelee,
                           boolean hasRanged,
                           boolean cornered,
                           List<Foe> foes) {
+    // 没有独立红心读数的既有调用沿用原始估计；真实战斗快照额外传入生命与吸收值，防止护甲掩盖濒死状态。
+    public Battlefield(double effectiveHealth, double meleeReach, boolean hasMelee, boolean hasRanged, boolean cornered, List<Foe> foes) {
+        this(effectiveHealth, effectiveHealth, meleeReach, hasMelee, hasRanged, cornered, foes);
+    }
 
     /**
      * 场上的一个。

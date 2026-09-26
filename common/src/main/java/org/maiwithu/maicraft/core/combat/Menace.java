@@ -210,7 +210,8 @@ public final class Menace {
 
     /** 她扛不住了吗。阈值在 {@link AttackPlan} 那一处,这里只是把它问一遍。 */
     public static boolean outmatched(LivingEntity self) {
-        return AttackPlan.outmatched(effectiveHealth(self));
+        // 选择退路与战斗决策使用同一条实际生命底线，黄心仍计入眼前能够承受的伤害。
+        return AttackPlan.outmatched(effectiveHealth(self), self.getHealth() + self.getAbsorptionAmount());
     }
 
     /**
