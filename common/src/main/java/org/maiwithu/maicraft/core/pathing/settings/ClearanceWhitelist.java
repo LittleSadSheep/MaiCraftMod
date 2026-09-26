@@ -20,7 +20,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.Constants;
 
-/** 寻路挖路与施工清场共用的方块类型白名单；默认自然地形不依赖服务端安装本模组。 */
+/** 寻路挖路与施工清场共用的方块类型白名单；默认包含自然地形与普通火把，不依赖服务端安装本模组。 */
 public final class ClearanceWhitelist {
     public static final String CONFIG = "config/maicraft-clearance.json";
     private static final List<String> DEFAULTS = Arrays.stream(("""
@@ -47,6 +47,7 @@ public final class ClearanceWhitelist {
             oxeye_daisy cornflower lily_of_the_valley sunflower lilac rose_bush peony pink_petals
             brown_mushroom red_mushroom sugar_cane cactus bamboo bamboo_sapling sweet_berry_bush
             pumpkin melon lily_pad seagrass tall_seagrass kelp kelp_plant chorus_plant chorus_flower
+            torch wall_torch
             """).trim().split("\\s+")).map(name -> "minecraft:" + name).toList();
     private static volatile Rules current = parse(DEFAULTS);
 

@@ -17,6 +17,9 @@ public final class ClearanceWhitelistTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         check(ClearanceWhitelist.allows(Blocks.STONE.defaultBlockState()), "stone without server tags");
         check(ClearanceWhitelist.allows(Blocks.OAK_LOG.defaultBlockState()), "natural log type");
+        // 同一种普通火把的站立和墙上方块均允许清场；红石装置仍按自定义策略处理。
+        check(ClearanceWhitelist.allows(Blocks.TORCH.defaultBlockState()) && ClearanceWhitelist.allows(Blocks.WALL_TORCH.defaultBlockState()), "ordinary torch variants are default clearance targets");
+        check(!ClearanceWhitelist.allows(Blocks.REDSTONE_TORCH.defaultBlockState()), "lighting clearance does not implicitly include redstone circuitry");
         for (var block : List.of(Blocks.BRICKS, Blocks.OAK_PLANKS, Blocks.CHEST, Blocks.GLASS, Blocks.OAK_DOOR))
             check(!ClearanceWhitelist.allows(block.defaultBlockState()), "preserve constructed obstacles");
         var unsafeField = Unsafe.class.getDeclaredField("theUnsafe"); unsafeField.setAccessible(true);
@@ -41,9 +44,12 @@ public final class ClearanceWhitelistTest {
         try {
             ClearanceWhitelist.initialize(directory);
             check(Files.isRegularFile(config), "first launch creates editable defaults");
+            // 新实例文件写入完整的普通火把形态；已存在的自定义覆盖仍按文件原意读取。
+            check(Files.readString(config).contains("minecraft:torch") && Files.readString(config).contains("minecraft:wall_torch"), "new default config includes both ordinary torch block IDs");
             Files.writeString(config, "[\"minecraft:bricks\"]"); ClearanceWhitelist.initialize(directory);
             check(ClearanceWhitelist.allows(Blocks.BRICKS.defaultBlockState()), "custom type whitelist");
             check(!ClearanceWhitelist.allows(Blocks.DIRT.defaultBlockState()), "custom list replaces defaults");
+            check(!ClearanceWhitelist.allows(Blocks.TORCH.defaultBlockState()), "custom whitelist does not silently gain new default torches");
             Files.writeString(config, "[]"); ClearanceWhitelist.initialize(directory);
             check(!ClearanceWhitelist.allows(Blocks.DIRT.defaultBlockState()), "empty whitelist disables clearance");
             Files.writeString(config, "[123]"); ClearanceWhitelist.initialize(directory);
