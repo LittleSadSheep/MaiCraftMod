@@ -141,13 +141,14 @@ public final class MaiCraftCore {
      * 登记生存反射的工厂；实际运行的实例由 CompanionBrain 创建并参加身体调度。
      */
     private static void registerReflexes() {
-        // 数字越小越先检查，固定顺序为落地救援、换气、自卫；这些数字不参与动态评分。
+        // 数字越小越先检查：入水低氧时先换气，尚在坠落时由落地救援接管，之后才考虑自卫。
         //
         // 卡住后的绕路、挖路或垫脚交给当前寻路任务处理：它知道这次允不允许改地形、哪些格不能碰。
         // 这里不另加一条见到卡住就抢身体乱走的自救行为，以免打断本来正在完成的挖掘或跳跃。
         BrainChains.register(10,
                 MLGChain::new);
-        BrainChains.register(20,
+        // 已经入水且缺氧时，换气优先于水桶落地后的回收收尾；仍在空中坠落时换气链不会触发。
+        BrainChains.register(5,
                 BreathChain::new);
         BrainChains.register(30,
                 MobDefenseChain::new);

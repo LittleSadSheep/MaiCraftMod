@@ -407,6 +407,16 @@ public final class EmbeddedBaritoneRuntime {
         return true;
     }
 
+    /** 水已经终止坠落伤害后，允许低氧自救替换尚在等待水底落稳的路线；保留原任务以便补气后重新寻路。 */
+    public static boolean handOffForBreathing(LocalPlayer player) {
+        requireClientThread();
+        if (player == null || !player.isInWater() || player.fallDistance != 0
+                || player.getDeltaMovement().y < -.3 || TransportRuntime.occupied()) return false;
+        if (owner == null) return true;
+        if (backend == null || world != player.clientLevel || backend.getPlayerContext().player() != player) return false;
+        var previous = owner; previous.detachForLandingRescue(); release(previous); return true;
+    }
+
     static void release(EmbeddedBaritoneNavigator navigator) {
         requireClientThread();
         if (owner != navigator) return;

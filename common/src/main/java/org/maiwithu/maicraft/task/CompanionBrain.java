@@ -10,6 +10,7 @@ import java.util.Deque;
 import java.util.List;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
+import org.maiwithu.maicraft.core.task.chain.BreathChain;
 
 /** 决定玩家这一刻做哪件事：先考虑自救，再考虑临时动作和当前任务；不能让两件事同时按键。 */
 final class CompanionBrain {
@@ -50,7 +51,10 @@ final class CompanionBrain {
                     && EmbeddedBaritoneRuntime.canHandOffMissedLanding(player)
                     && mlg.prepareMissedLandingTakeover(player)
                     && EmbeddedBaritoneRuntime.handOffMissedLanding(player);
-            if (!rescue) winner = holder;
+            // 坠落已被水缓冲后，低氧逃生可以接手；不能继续以“尚未落地”为由把角色压在水下。
+            boolean breathing = winner instanceof BreathChain && !TransportRuntime.occupied()
+                    && EmbeddedBaritoneRuntime.handOffForBreathing(player);
+            if (!rescue && !breathing) winner = holder;
         }
         if (holder != null && holder != winner) {
             // 先停掉旧任务的自动走路和交通控制，再通知它暂停，避免旧路线继续按键干扰新任务。

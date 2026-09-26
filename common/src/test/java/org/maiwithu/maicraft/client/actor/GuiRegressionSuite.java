@@ -137,6 +137,8 @@ import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 /** 验证真实可见性策略和架构边界；实际界面点击仍需在游戏中测试。 */
 public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
+        // 水下低顶逃生先检查实际换气链的输入，避免单独路径测试掩盖持续顶墙上浮。
+        BreathChainControlTest.main(args);
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
         TaskSlotFailureTest.main(args);
         // 嵌套取材只扫描已声明的附近范围，空搜加工设备不能把整片已加载世界都扫一遍。
