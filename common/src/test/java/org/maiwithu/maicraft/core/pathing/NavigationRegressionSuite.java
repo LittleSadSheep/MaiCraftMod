@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.pathing;
 
 import baritone.pathing.calc.HeightPolicyTest;
+import baritone.pathing.calc.GroundJourneyContinuationTest;
 import baritone.pathing.calc.PathSearchRegressionTest;
 import baritone.pathing.movement.CollisionGeometryTest;
 import baritone.pathing.movement.DiagonalHazardTest;
@@ -131,6 +132,8 @@ public final class NavigationRegressionSuite {
         MoveToContractTest.main(args);
         MoveToTransportCompletionTest.main(args);
         PathSearchRegressionTest.main(args);
+        // 空背包在逐步加载的地形里自动续路，危险直线必须让位于有支撑的绕行。
+        GroundJourneyContinuationTest.main(args);
         HeightPolicyTest.main(args);
         PathTickBudgetTest.main(args);
         DoorPassageTest.main(args);

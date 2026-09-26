@@ -29,6 +29,7 @@ import baritone.api.utils.PathCalculationResult;
 import baritone.api.utils.interfaces.IGoalRenderPos;
 import baritone.pathing.calc.AStarPathFinder;
 import baritone.pathing.calc.AbstractNodeCostSearch;
+import baritone.pathing.calc.LoadedFrontier;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.path.PathExecutor;
@@ -70,6 +71,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private CompletableFuture<PathCalculationResult> pendingCalculation;
     private BlockPos calculationStart;
     private BlockPos failedPlanAheadStart;
+    private LoadedFrontier calculationFrontier, failedPlanAheadFrontier;
     private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
 
     private boolean lastAutoJump;
@@ -236,9 +238,9 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             // and this path doesn't get us all the way there
             return;
         }
-        // A failed speculative route from this endpoint will have the same inputs while we are
-        // still following this segment. Retry from the real position when the segment finishes.
-        if (current.getPath().getDest().equals(failedPlanAheadStart)) return;
+        // 提前续路失败时先继续走；接续口附近一旦加载新地形，就可再次后台计算，不必等旧路走完才重新起步。
+        if (current.getPath().getDest().equals(failedPlanAheadStart)
+                && (failedPlanAheadFrontier == null || !failedPlanAheadFrontier.hasNewTerrain(ctx.world()::isLoaded))) return;
         if (ticksRemainingInSegment(false).get() < Baritone.settings().planningTickLookahead.value) {
             // and this path has 7.5 seconds or less left
             // don't include the current movement so a very long last movement (e.g. descend) doesn't trip it up
@@ -497,6 +499,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (talkAboutIt) logDebug("Searching from " + start + " to " + goal);
         if (current == null) failedPlanAheadStart = null;
         calculationStart = start.immutable();
+        // 记搜索开始时的边界，避免计算期间加载的区块被失败回执吞掉而失去重试机会。
+        calculationFrontier = LoadedFrontier.capture(start, ctx.world()::isLoaded);
         inProgress = pathfinder;
         pendingCalculation = PathPlannerPool.submit(() -> pathfinder.calculate(primaryTimeout, failureTimeout));
     }
@@ -542,6 +546,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                 }
             } else {
                 failedPlanAheadStart = start;
+                failedPlanAheadFrontier = calculationFrontier;
                 queuePathEvent(PathEvent.NEXT_CALC_FAILED);
             }
         }
@@ -555,6 +560,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         pendingCalculation = null;
         calculationStart = null;
         failedPlanAheadStart = null;
+        calculationFrontier = null; failedPlanAheadFrontier = null;
     }
 
     private AbstractNodeCostSearch createPathfinder(BlockPos start, Goal goal, IPath previous, CalculationContext context) {
