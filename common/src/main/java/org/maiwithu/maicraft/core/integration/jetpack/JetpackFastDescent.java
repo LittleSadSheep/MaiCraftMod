@@ -12,7 +12,7 @@ import java.util.Locale;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
 
 /**
- * 沿已对准的落点加快下降：短且无伤时暂时关背包，较高时提前重启悬停，最后用潜行下降。
+ * 沿已对准的落点关背包下降，按速度与延迟提前重启制动；实际减速后才允许下一次自由下降。
  * 地形改变或请求停止时转入恢复飞行模式，已经开始的恢复不能因超时就丢掉。
  */
 public final class JetpackFastDescent {
@@ -36,6 +36,7 @@ public final class JetpackFastDescent {
     private double lowestHeight = Double.POSITIVE_INFINITY;
     private boolean stopping, recovering, effects, touchdown = true;
     private boolean shortDrop, modeChanges;
+    private int stableBrakeTicks;
     private String detail = "awaiting an aligned descent column";
     private double restartHeight;
 
@@ -78,9 +79,9 @@ public final class JetpackFastDescent {
             column &= exit != null && descentExit != null && exit.distanceToSqr(descentExit) < 0.0001;
         }
         var info = ctx.connection().getPlayerInfo(player.getUUID());
-        // 当前把已下落距离先加进参数，伤害预算又因最后的 true 再加一次；短落差可能因此被误判为有伤害。
+        // 已下落距离由伤害预算内部累加一次；速度变慢不代表累计摔落距离已经清零。
         boolean harmless=landing!=null && FallDamageBudget.capture(player).damage(
-                player.fallDistance+Math.max(0,player.getY()-landing.y),
+                Math.max(0,player.getY()-landing.y),
                 FallDamageBudget.Landing.ORDINARY,true)<=0;
         var observation = new Observation(ctx.tickRevision(), player.position(), player.getDeltaMovement(), landing,
                 power, column, JetpackNativeAdapter.uprightActive(JetpackNativeAdapter.activeEvidence(player)),
@@ -99,15 +100,13 @@ public final class JetpackFastDescent {
             effects = modeChanges = true;
         }
         Vec3 position = player.position(), velocity = player.getDeltaMovement();
-        // 重启窗口期间不按 UP：释放 UP 会使原生悬停逻辑钳制高速向下速度。
-        boolean sneak = phase == Phase.BRAKING;
-        if (sneak) effects = true;
+        // 重启时释放 UP 才能立即钳制下坠速度；全程不以潜行慢降替代开关制动，避免积累高度伤害。
         ctx.body().applySteering(yaw -> {
             var brake = power.controllable()
-                    ? sneak ? shiftSteering(position, velocity, landing, yaw, power)
+                    ? phase == Phase.BRAKING ? descentSteering(position, velocity, landing, yaw, power)
                             : JetpackSteering.toward(position, velocity, position, yaw, true, power)
                     : BodyControlPort.Movement.STOPPED;
-            return new BodyControlPort.Movement(brake.forward(), brake.strafe(), false, sneak, false);
+            return new BodyControlPort.Movement(brake.forward(), brake.strafe(), false, false, false);
         }, player.getYRot(), ctx.tickRevision());
         return true;
     }
@@ -133,14 +132,15 @@ public final class JetpackFastDescent {
             double height = o.position().y - o.landing().y;
             shortDrop=touchdown && height>=.35 && height<3 && o.harmlessDrop();
             boolean freeDrop = shortDrop || height >= Math.max(3, restartHeight + 0.75);
-            if (o.velocity().y > 0.1 || !freeDrop && height <= (touchdown ? .1 : shiftReleaseHeight(power, o.ping()))) {
+            if (o.velocity().y > 0.1 || !freeDrop && height <= (touchdown ? .1 : hoverReleaseHeight(power, o.ping()))) {
                 detail = "coasting upward or inside the final hover-braking margin"; return Command.NONE;
             }
             this.touchdown = touchdown;
             descentLanding = o.landing();
             lowestHeight = height; progressTick = o.tick();
-            enter(freeDrop ? Phase.DISABLING : Phase.BRAKING, o.tick(), freeDrop
-                    ? "disabling over the aligned landing column" : "native shift descent without a mode toggle");
+            // 高度不够一次安全关开时仍重发原生 ON，不能仅凭客户端 active 位就信任旧悬停状态。
+            enter(freeDrop ? Phase.DISABLING : Phase.ENABLING, o.tick(), freeDrop
+                    ? "disabling over the aligned landing column" : "resynchronizing native power before the final braking approach");
         }
         boolean columnChanged = !o.clearColumn() || !aligned || o.landing() == null
                 || o.landing().distanceToSqr(descentLanding) > 0.0001;
@@ -170,22 +170,35 @@ public final class JetpackFastDescent {
             case ENABLING -> {
                 if (!power.hover()) return pending(o, Command.HOVER) ? Command.NONE : Command.HOVER;
                 if (confirmed(o, Command.ON) && power.active() && (o.upright() || o.grounded())) {
-                    boolean atCruiseHeight = !this.touchdown && height <= shiftReleaseHeight(power, o.ping());
-                    enter(recovering || o.grounded() || atCruiseHeight ? Phase.DONE : Phase.BRAKING, o.tick(),
-                            recovering || atCruiseHeight ? "hover restored; returning to normal altitude control"
-                                    : "upright native restart observed; shift descent");
+                    // 开关回执仅来自客户端；再观察实际竖直减速，避免把预测的 active 当成已经刹住。
+                    if (brakingObserved(o)) stableBrakeTicks++; else stableBrakeTicks = 0;
+                    if (o.grounded() || stableBrakeTicks >= brakeObservationTicks(o.ping())) {
+                        boolean atCruiseHeight = !this.touchdown && height <= hoverReleaseHeight(power, o.ping());
+                        enter(recovering || o.grounded() || atCruiseHeight ? Phase.DONE : Phase.BRAKING, o.tick(),
+                                recovering || atCruiseHeight ? "native restart and reduced descent observed; returning altitude control"
+                                        : "native restart and reduced descent observed; evaluating the remaining drop");
+                    } else if (o.tick() - phaseTick >= Math.max(10, brakeObservationTicks(o.ping()) + 4)) {
+                        enter(Phase.ENABLING, o.tick(), "mode is locally enabled but descent is not braked; resending native ON");
+                        return Command.ON;
+                    }
+                    return Command.NONE;
                 } else if (!pending(o, Command.ON)) return Command.ON;
                 if (o.tick() - phaseTick >= 60) detail = "recovery_stalled: retaining control until the native pack is enabled";
             }
             case BRAKING -> {
                 if (!power.active() || !o.upright() && !o.grounded()) {
-                    recovering = true; enter(Phase.ENABLING, o.tick(), "restart context changed; release shift and restore hover");
+                    recovering = true; enter(Phase.ENABLING, o.tick(), "restart context changed; restore native hover");
                 } else if (o.grounded()) enter(Phase.DONE, o.tick(), "platform touchdown observed");
-                else if (!this.touchdown && height <= shiftReleaseHeight(power, o.ping())) {
-                    enter(Phase.DONE, o.tick(), "releasing shift above the cruise height; returning to normal altitude control");
+                else if (!this.touchdown && height <= hoverReleaseHeight(power, o.ping())) {
+                    enter(Phase.DONE, o.tick(), "braked above the cruise height; returning to normal altitude control");
+                } else if (brakingObserved(o) && height >= Math.max(3, restartHeight + .75)) {
+                    // 高速制动可能提早发生；充分减速后再关背包缩短剩余落差，不能留一段漫长潜行尾程。
+                    shortDrop = false;
+                    enter(Phase.DISABLING, o.tick(), "continuing the verified column after observed native braking");
+                    return Command.OFF;
                 }
                 else if (o.tick() - progressTick >= 40) {
-                    recovering = true; enter(Phase.ENABLING, o.tick(), "native shift descent stopped making height progress; restoring hover");
+                    recovering = true; enter(Phase.ENABLING, o.tick(), "braking approach stopped making height progress; restoring hover");
                 }
             }
             default -> {}
@@ -203,7 +216,7 @@ public final class JetpackFastDescent {
                 && velocity.horizontalDistance() < 0.06;
     }
     /** 仅当下一次原生冲量仍落在已核实的下降对齐范围内时，才修正漂移。 */
-    static BodyControlPort.Movement shiftSteering(Vec3 position, Vec3 velocity, Vec3 landing, float yaw,
+    static BodyControlPort.Movement descentSteering(Vec3 position, Vec3 velocity, Vec3 landing, float yaw,
                                                   JetpackNativeAdapter.Snapshot power) {
         var correction = JetpackSteering.toward(position, velocity, landing, yaw, true, power);
         var next = JetpackMotion.step(position, velocity, correction, yaw, power);
@@ -221,12 +234,18 @@ public final class JetpackFastDescent {
         return observed != null && (touchdown ? observed.distanceToSqr(directlyBelow) < 0.0001 : observed.y <= landing.y + 0.01)
                 && space.clear(position, directlyBelow) && space.clear(position, landing);
     }
-    /** 已安装的 FlightLib 3.2.1 会将 DOWN 位移限制为 max(rawVy, -hoverVerticalSpeed)。
-     * 释放 DOWN 前应预留实测 RTT、越过阈值的一刻以及两次输入 tick。
-     */
-    static double shiftReleaseHeight(JetpackNativeAdapter.Snapshot power, int pingMillis) {
+    /** 中途下降只保留原生悬停的一小段观察余量，下一段飞行仍由普通高度控制接管。 */
+    static double hoverReleaseHeight(JetpackNativeAdapter.Snapshot power, int pingMillis) {
         int ticks = 3 + (int)Math.ceil((pingMillis < 0 ? 150 : Math.min(10000, pingMillis)) / 50D);
-        return 0.1 + power.vertical() * ticks - power.hoverDescent();
+        return .1 - power.hoverDescent() * ticks;
+    }
+    // 这里只确认符合原生悬停的身体速度；不伪造服务器确认，也不改写 fallDistance。
+    private static boolean brakingObserved(Observation o) {
+        return o.velocity().y >= JetpackDynamics.rawAfterStep(o.power().hoverDescent(), o.power()) - .02
+                && o.velocity().y <= .1;
+    }
+    private static int brakeObservationTicks(int pingMillis) {
+        return 3 + (int)Math.ceil((pingMillis < 0 ? 150 : Math.min(2000, pingMillis)) / 50D);
     }
     /** Minecraft 空中移动先按原始速度位移，再应用重力和 0.98 阻力。原生悬停制动前要预留完整实测 RTT、两次回执观察和两个 tick 顺序余量。
      */
@@ -246,5 +265,7 @@ public final class JetpackFastDescent {
     private static boolean pending(Observation o, Command command) {
         return o.receiptCommand() == command && o.receiptStatus() == NativeActionReceipt.Status.PENDING;
     }
-    private void enter(Phase next, long tick, String message) { phase = next; phaseTick = tick; detail = message; }
+    private void enter(Phase next, long tick, String message) {
+        phase = next; phaseTick = tick; detail = message; stableBrakeTicks = 0;
+    }
 }

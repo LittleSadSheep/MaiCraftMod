@@ -18,9 +18,9 @@ public final class JetpackFastDescentTest {
     public static void main(String[] args) {
         normalSequence();
         harmlessShortDrop();
-        nativeShiftWithoutModeCycle();
+        shortApproachResynchronizesPower();
         longDescentKeepsMakingProgress();
-        shiftCorrectsDriftWithinColumn();
+        brakingCorrectsDriftWithinColumn();
         cancellationRestartsImmediately();
         changedColumnRestoresHover();
         failedReceiptDoesNotReleaseDisabledPack();
@@ -47,26 +47,28 @@ public final class JetpackFastDescentTest {
         check(descent.finished(),"short touchdown returns directly to the flight owner's mode restoration");
     }
 
-    private static void nativeShiftWithoutModeCycle() {
+    // 累计高度仍可能造成摔落伤害时，短距离也先确认重启及真实减速，不能直接潜行到底。
+    private static void shortApproachResynchronizesPower() {
         var descent = new JetpackFastDescent();
-        check(descent.advance(at(0, 2.9, -.1078, true, true, true, Command.NONE, null), true) == Command.NONE
-                        && descent.phase().equals("braking"),
-                "an aligned ordinary descent should use native Shift without requiring an OFF/ON cycle");
+        check(descent.advance(at(0, 2.9, -.1078, true, true, true, Command.NONE, null), true) == Command.ON
+                        && descent.phase().equals("enabling"),
+                "an accumulated fall must resynchronize native power even near the platform");
         var intermediate = new JetpackFastDescent();
         intermediate.advance(at(0, 2, -.1078, true, true, true, Command.NONE, null), true, false);
-        check(intermediate.phase().equals("braking"), "a short cruise descent should not wait for the old three-block gate");
-        intermediate.advance(at(4, 1, -.392, true, true, true, Command.NONE, null), false, false);
-        check(intermediate.finished(), "direct Shift must release early enough to preserve the next cruise height");
+        check(intermediate.phase().equals("enabling"), "a short cruise descent must also confirm native power");
+        for (int tick = 1; tick <= 3; tick++)
+            intermediate.advance(at(tick, .1, -.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false, false);
+        check(intermediate.finished(), "observed braking near the cruise height must hand back altitude control");
         var low = new JetpackFastDescent();
-        low.advance(at(0, .5, -.1078, true, true, true, Command.NONE, null), true, false);
+        low.advance(at(0, .1, -.1078, true, true, true, Command.NONE, null), true, false);
         check(!low.active(), "an intermediate target inside the release window must retain ordinary hover");
         descent.requestStop();
         check(descent.advance(at(1, 2.8, -.392, true, true, true, Command.NONE, null), false) == Command.ON,
-                "cancelling direct Shift must release descent and confirm enabled hover");
+                "cancelling the approach must confirm enabled hover");
         var stalled = new JetpackFastDescent();
         stalled.advance(at(0, 2, -.1078, true, true, true, Command.NONE, null), true);
-        check(stalled.advance(at(41, 2, -.1078, true, true, true, Command.NONE, null), false) == Command.ON,
-                "a descent without actual height progress must still recover");
+        check(stalled.advance(at(41, 2, -1, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false) == Command.ON
+                        && !stalled.finished(), "a local ON receipt without physical braking must resend ON and retain responsibility");
     }
 
     private static void longDescentKeepsMakingProgress() {
@@ -74,21 +76,20 @@ public final class JetpackFastDescentTest {
         double height = 180, velocity = -.1078;
         boolean active = true;
         Command receipt = Command.NONE;
-        int shiftTicks = 0, ticks = 0;
+        int offCycles = 0, ticks = 0;
         for (; ticks < 700 && !descent.finished(); ticks++) {
             Command command = descent.advance(at(ticks, height, velocity, active, active, true, receipt,
                     receipt == Command.NONE ? null : Status.CONFIRMED_APPLIED), true);
             if (command != Command.NONE) { active = command != Command.OFF; receipt = command; }
-            boolean shift = descent.phase().equals("braking");
-            if (shift) shiftTicks++;
-            double step = !active ? velocity : shift ? Math.max(velocity, -POWER.vertical())
-                    : JetpackDynamics.nextVertical(velocity, false, POWER);
+            if (command == Command.OFF) offCycles++;
+            // 回放只允许原生重力与重启悬停；不给旧潜行分支任何额外下降速度。
+            double step = !active ? velocity : JetpackDynamics.nextVertical(velocity, false, POWER);
             height = Math.max(0, height + step);
             velocity = height == 0 ? 0 : JetpackDynamics.rawAfterStep(step, POWER);
         }
-        check(shiftTicks > 40, "long-descent replay must cover more than the previous fixed Shift timeout");
+        check(offCycles >= 2, "early braking must permit another verified free descent instead of a long hover tail");
         check(descent.finished() && height == 0 && ticks < 500,
-                "a progressing long descent must keep native Shift until touchdown, not retire above the platform");
+                "controlled OFF/ON descent must reach the supported platform without retiring in midair");
     }
 
     private static void normalSequence() {
@@ -104,7 +105,10 @@ public final class JetpackFastDescentTest {
         descent.advance(at(11, 1.8, -0.1, true, true, true, Command.ON, Status.PENDING), false);
         check(descent.phase().equals("enabling"), "client prediction permitted shift before mode receipt");
         descent.advance(at(12, 1.77, -0.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
-        check(descent.phase().equals("braking"), "confirmed upright restart did not permit native shift descent");
+        check(descent.phase().equals("enabling"), "one client receipt must not replace physical braking observation");
+        descent.advance(at(13, 1.74, -0.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
+        descent.advance(at(14, 1.71, -0.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
+        check(descent.phase().equals("braking"), "stable native restart should enter the final braking approach");
         descent.advance(at(16, 0, 0, true, false, true, Command.ON, Status.CONFIRMED_APPLIED), false);
         check(descent.finished(), "grounded touchdown did not complete");
     }
@@ -114,22 +118,24 @@ public final class JetpackFastDescentTest {
         descent.requestStop();
         check(descent.advance(at(1, 11.9, -0.18, false, false, true, Command.OFF, Status.PENDING), false) == Command.ON,
                 "cancellation waited for old OFF receipt instead of reversing it");
-        descent.advance(at(2, 11.7, -0.1, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
+        for (int tick = 2; tick <= 4; tick++)
+            descent.advance(at(tick, 11.7, -0.1, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
         check(descent.finished(), "cancellation did not hand back an enabled upright hover");
     }
 
-    private static void shiftCorrectsDriftWithinColumn() {
+    private static void brakingCorrectsDriftWithinColumn() {
         for (float yaw : new float[]{0, 35, 90, 170}) {
             Vec3 position = LANDING.add(.17, 20, 0), velocity = Vec3.ZERO;
             for (int tick = 0; tick < 80; tick++) {
-                var input = JetpackFastDescent.shiftSteering(position, velocity, LANDING, yaw, POWER);
+                var input = JetpackFastDescent.descentSteering(position, velocity, LANDING, yaw, POWER);
+                check(!input.sneaking() && !input.sprinting(), "descent alignment must not sneak or sprint");
                 var next = JetpackMotion.step(position, velocity, input, yaw, POWER);
                 position = next.position(); velocity = next.velocity();
                 check(JetpackFastDescent.aligned(position, velocity, LANDING),
                         "horizontal correction must not accelerate itself outside the descent column");
             }
             check(Math.hypot(position.x - LANDING.x, position.z - LANDING.z) < .06,
-                    "Shift descent must converge toward the landing instead of just stopping at its current position");
+                    "braking must converge toward the landing instead of just stopping at its current position");
         }
     }
 
@@ -137,7 +143,8 @@ public final class JetpackFastDescentTest {
         var descent = started();
         check(descent.advance(at(1, 11.9, -0.18, false, false, false, Command.OFF, Status.CONFIRMED_APPLIED), false) == Command.ON,
                 "changed support continued free descent");
-        descent.advance(at(2, 11.7, -0.1, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
+        for (int tick = 2; tick <= 4; tick++)
+            descent.advance(at(tick, 11.7, -0.1, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false);
         check(descent.finished(), "restored geometry incorrectly resumed the abandoned free drop");
         var shifted = started();
         var original = at(1, 11.9, -0.18, false, false, true, Command.OFF, Status.CONFIRMED_APPLIED);
@@ -181,8 +188,8 @@ public final class JetpackFastDescentTest {
 
     private static void eligibility() {
         var shortDrop = new JetpackFastDescent();
-        check(shortDrop.advance(at(0, 2, -0.1, true, true, true, Command.NONE, null), true) == Command.NONE,
-                "a short platform landing needlessly toggled the pack");
+        check(shortDrop.advance(at(0, 2, -0.1, true, true, true, Command.NONE, null), true) == Command.ON,
+                "a short approach without a harmless fall budget must confirm native braking");
         check(!JetpackFastDescent.aligned(LANDING.add(0.2, 10, 0), Vec3.ZERO, LANDING), "off-center column admitted");
         check(!JetpackFastDescent.aligned(LANDING.add(0, 10, 0), new Vec3(0.07, 0, 0), LANDING), "sideways drift admitted");
         var unavailable = new JetpackFastDescent();
@@ -219,17 +226,18 @@ public final class JetpackFastDescentTest {
         descent.advance(at(2, 6.7, -0.25, false, false, true, Command.OFF, Status.CONFIRMED_APPLIED), false, false);
         check(descent.advance(at(10, 2, -0.5, false, false, true, Command.OFF, Status.CONFIRMED_APPLIED), false, false) == Command.ON,
                 "intermediate-height restart was missed");
-        descent.advance(at(12, 1.9, -0.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false, false);
-        check(descent.phase().equals("braking"), "room above the intermediate height did not permit shift descent");
-        descent.advance(at(15, 1.0, -0.392, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false, false);
-        check(descent.finished(), "intermediate descent waited for onGround instead of releasing shift above its target");
-        check(JetpackFastDescent.shiftReleaseHeight(POWER, 200) > JetpackFastDescent.shiftReleaseHeight(POWER, 0),
-                "mid-flight shift release ignored connection delay");
+        for (int tick = 12; tick <= 14; tick++)
+            descent.advance(at(tick, 1.9, -0.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false, false);
+        check(descent.phase().equals("braking"), "intermediate descent did not observe native braking");
+        descent.advance(at(15, .1, -.1078, true, true, true, Command.ON, Status.CONFIRMED_APPLIED), false, false);
+        check(descent.finished(), "intermediate descent waited for onGround instead of handing back height control");
+        check(JetpackFastDescent.hoverReleaseHeight(POWER, 200) > JetpackFastDescent.hoverReleaseHeight(POWER, 0),
+                "mid-flight height handoff ignored connection delay");
         for (int ping : new int[]{0, 50, 200}) {
             double height = 5;
-            while (height > JetpackFastDescent.shiftReleaseHeight(POWER, ping)) height -= POWER.vertical();
-            height -= POWER.vertical() * (1 + (int)Math.ceil(ping / 50D));
-            check(height > 0, "shift-release latency crossed below the next cruise segment");
+            while (height > JetpackFastDescent.hoverReleaseHeight(POWER, ping)) height += POWER.hoverDescent();
+            height += POWER.hoverDescent() * (1 + (int)Math.ceil(ping / 50D));
+            check(height > 0, "braking handoff latency crossed below the next cruise segment");
         }
         JetpackRoute.Space shaft = new JetpackRoute.Space() {
             public boolean clear(Vec3 from, Vec3 to) { return true; }
