@@ -10,6 +10,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -79,7 +80,8 @@ final class BuildSupportSupply {
             uncertain |= Boolean.TRUE.equals(data.get("outcome_uncertain")) || Boolean.TRUE.equals(data.get("world_change_uncertain"));
             attempts.add(Map.of("source", record instanceof MineBlockTaskRecord ? "local_harvest" : "wireless_stock",
                     "terminal_state", terminal.name(), "data", data));
-            boolean harvestFailed = record instanceof MineBlockTaskRecord && terminal != TaskState.SUCCESS;
+            boolean harvestFailed = record instanceof MineBlockTaskRecord
+                    && (terminal != TaskState.SUCCESS || result == null || !result.success());
             child = null; record = null;
             if (uncertain || harvestFailed || terminal == TaskState.CANCELLED || terminal == TaskState.TIMEOUT) {
                 failure = "temporary support operation did not settle successfully"; return TaskState.FAILED;
@@ -117,6 +119,11 @@ final class BuildSupportSupply {
     // 不挖脚下、保护格、未知块或会造成塌落的地方；邻近地表材料还须下方有完整承托，避免为垫块开深坑。
     private boolean localSourceAllowed(LocalPlayer player, BlockPos cell) {
         var level = player.level();
+        // 简单取土不能挖开水坝或熔岩边界；邻格尚未加载也无法证明拆除后仍安全。
+        for (Direction side : Direction.values()) {
+            BlockPos neighbor = cell.relative(side);
+            if (!level.isLoaded(neighbor) || !level.getFluidState(neighbor).isEmpty()) return false;
+        }
         return nearOrigin(cell) && !attempted.contains(cell) && !cell.equals(player.blockPosition().below())
                 && level.isLoaded(cell) && level.isLoaded(cell.below()) && !NavigationSafetyContext.protectsMutation(cell)
                 && !BlockHelper.shouldAvoidBreaking(level, cell) && !BlockHelper.breakReleasesFallingBlock(level, cell)

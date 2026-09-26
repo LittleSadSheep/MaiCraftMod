@@ -13,6 +13,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
@@ -74,6 +75,10 @@ public final class BuildSupportSupplyTest {
             check(BuildSupportSupply.localOutputs(Blocks.IRON_ORE.defaultBlockState()).isEmpty(), "ore cannot trigger a support expedition");
             check(NavigationSafetyContext.withProtectedArea(List.of(dirt), List.of(),
                     () -> local.tick(h.player, task -> task.tick(h.player))) == TaskState.FAILED, "protected dirt cannot be harvested");
+            h.set(dirt.east(), Blocks.WATER.defaultBlockState());
+            check(new BuildSupportSupply(h.player, owner(List.of(Source.MINE)), List.of(new SupplyNeed(Items.DIRT, 2)))
+                    .tick(h.player, task -> task.tick(h.player)) == TaskState.FAILED, "temporary support collection cannot open a fluid boundary");
+            h.set(dirt.east(), Blocks.AIR.defaultBlockState());
             var available = new BuildSupportSupply(h.player, owner(List.of(Source.MINE)), List.of(new SupplyNeed(Items.DIRT, 2)));
             check(available.tick(h.player, task -> task.tick(h.player)) == TaskState.RUNNING, "visible local dirt should create one native harvest");
             Field record = BuildSupportSupply.class.getDeclaredField("record"); record.setAccessible(true);
@@ -81,8 +86,30 @@ public final class BuildSupportSupplyTest {
             check(harvest.exactHarvest() && harvest.searchCenter().equals(dirt) && harvest.count == 1
                     && !harvest.inSearchScope(dirt.below()), "fallback cannot expand to a quarry or underground source");
             available.cancel(h.player);
+            parentResumesWithTheActualAlternative(h);
         } finally { if (before == null) runners.remove(SemanticAcquireTaskRecord.class); else runners.put(SemanticAcquireTaskRecord.class, before); }
         System.out.println("BuildSupportSupplyTest: passed");
+    }
+
+    // 使用实际施工父任务核对回执接线：补到圆石后跳过清包，原建筑材料账仍然保留。
+    private static void parentResumesWithTheActualAlternative(InteractionWorldTestHarness h) throws Exception {
+        h.inventory.clearContent();
+        var parent = new SemanticBuildSupplyCompanionTask(h.player, owner(List.of()), (r, plan) -> Decision.DISABLED);
+        var request = SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("requestSupportSupply", TaskResult.class);
+        request.setAccessible(true);
+        check(Boolean.TRUE.equals(request.invoke(parent, TaskResult.fail("supports missing", Map.of("temporary_support_demand",
+                Map.of("item_id", "minecraft:dirt", "required_final_count", 2, "support_blocks", 2))))),
+                "the parent must accept the shortage without fixing supply to the suggested dirt");
+        check(parent.progress().get("phase").equals("temporary_support_supply"), "support preparation must precede normal cargo and supply");
+        h.inventory.setItem(0, new ItemStack(Items.COBBLESTONE, 2)); h.inventory.setItem(1, new ItemStack(Items.STONE));
+        var tick = SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("tickSupportSupply"); tick.setAccessible(true);
+        check(tick.invoke(parent) == TaskState.RUNNING, "confirmed support stock resumes the still-incomplete building");
+        Field selected = SemanticBuildSupplyCompanionTask.class.getDeclaredField("supportItem"); selected.setAccessible(true);
+        Field cargo = SemanticBuildSupplyCompanionTask.class.getDeclaredField("cargoCheckPending"); cargo.setAccessible(true);
+        check(selected.get(parent) == Items.COBBLESTONE && !cargo.getBoolean(parent), "do not deposit the newly fetched supports before construction");
+        var next = SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("nextNeed"); next.setAccessible(true);
+        check(next.invoke(parent) == null && h.inventory.getItem(1).getCount() == 1,
+                "carried permanent stone remains available while the support obligation clears");
     }
     private static SemanticBuildSupplyTaskRecord owner(List<Source> sources) {
         var plan = new BuildTaskRecord("support-plan", 2000, List.of(new BuildTaskRecord.Target(Blocks.STONE.defaultBlockState(),
