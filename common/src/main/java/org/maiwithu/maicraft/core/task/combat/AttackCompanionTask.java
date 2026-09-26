@@ -202,8 +202,11 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         settleFinishedTargets();
         if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
+        // 先判断这一刻是否仍需撤退或躲爆炸，再决定能否收拾战利品；敌人离开近圈不等于已脱离追击。
+        AttackPlan.Move move = AttackPlan.decide(field, lastMove);
         if (phase == Phase.LOOT) {
-            boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging);
+            boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging)
+                    || move.action() == AttackPlan.Action.DISENGAGE || move.action() == AttackPlan.Action.EVADE_BLAST;
             if (threatened != defendingDuringLoot) {
                 stopNav();
                 abortShot();
@@ -218,7 +221,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             loot.discover();
             loot.prune();
         }
-        AttackPlan.Move move = AttackPlan.decide(field, lastMove);
         boolean blastEvading = move.action() == AttackPlan.Action.EVADE_BLAST;
         boolean blastChanged = blastEvading != (lastMove != null && lastMove.action() == AttackPlan.Action.EVADE_BLAST);
         lastMove = move;

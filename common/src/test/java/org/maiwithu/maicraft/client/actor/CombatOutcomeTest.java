@@ -1,6 +1,8 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.util.List;
+import java.util.Arrays;
+import org.maiwithu.maicraft.core.combat.AttackPlan;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -23,6 +25,7 @@ public final class CombatOutcomeTest {
         partialIsNotSuccess();
         selectableLoadout();
         retreatRequiresMovement();
+        retreatPrecedesLootSettlement();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
     }
 
@@ -106,5 +109,19 @@ public final class CombatOutcomeTest {
         check(progress.failures() == 3, "position jitter is not a successful retreat");
         progress.observe(new Vec3(2, 0, 0));
         check(progress.failures() == 0, "physical progress renews retreat attempts");
+    }
+    private static void retreatPrecedesLootSettlement() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            // 正在低血量撤离时，近圈临时没有敌人也要完成逃生判据，不能先让拾取流程接走导航。
+            f.h.player.setHealth(6);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("retreat-loot", 1000, List.of(), true));
+            task.start(f.h.player);
+            var phase = ActorControlTestHarness.field(AttackCompanionTask.class, "phase");
+            phase.set(task, Arrays.stream(phase.getType().getEnumConstants()).filter(v -> v.toString().equals("LOOT")).findFirst().orElseThrow());
+            ActorControlTestHarness.field(AttackCompanionTask.class, "lastMove").set(task, new AttackPlan.Move(AttackPlan.Action.DISENGAGE, AttackPlan.NO_FOE));
+            TaskState state = task.tick(f.h.player);
+            check(state == TaskState.FAILED && task.result(state).message().contains("too hurt"),
+                    "retreat settles through the wide-area safety check before any loot-only completion or failure");
+        }
     }
 }
