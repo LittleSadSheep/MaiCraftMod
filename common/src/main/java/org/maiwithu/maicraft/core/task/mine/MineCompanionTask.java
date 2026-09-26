@@ -161,6 +161,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final int MAX_BREAKS_WITHOUT_EXPECTED_OUTPUT = 32;
     private int breaksAtLastOutput;
     private boolean expectedOutputMissing;
+    // 收尾可能发生在身体已交还之后；记住上次进度的计数口径，格式化回执时不再读取玩家能力。
+    private boolean countedExpectedItems;
 
     private boolean navIsBranch;
     private boolean navIsDrop;
@@ -258,7 +260,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 有掉落画像看任务开始后的最终库存增量；路径执行器和直接挖掘
         // 走的是同一把尺。无掉落画像（创造）才数目标方块破坏数。
         // 生存模式按背包新增物品计数；不产生掉落物的模式按确认挖掉的目标块数计数。
-        int gathered = WorkProfile.of(player).dropsLoot()
+        boolean dropsLoot = WorkProfile.of(player).dropsLoot();
+        countedExpectedItems = !r.progressItems.isEmpty() && (dropsLoot || r.exactHarvest());
+        int gathered = dropsLoot
                 ? (r.progressItems.isEmpty()
                         ? rawItemProgress()
                         : Math.max(0, progressItemCount() - progressItemBaseline))
@@ -1360,19 +1364,27 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return data;
     }
 
+    // 数量按目标掉落物计时，消息也必须使用掉落物名称；石头掉圆石不能被描述为拿到石头。
+    private String gatheredLabel() {
+        return countedExpectedItems
+                ? r.progressItems.stream().map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).sorted().toList()
+                        + " from " + r.label
+                : r.label;
+    }
+
     @Override
     protected String successMessage() {
-        return "gathered " + r.getMined() + "/" + r.count + " " + r.label + " (" + progressNote + ")";
+        return "gathered " + r.getMined() + "/" + r.count + " " + gatheredLabel() + " (" + progressNote + ")";
     }
 
     @Override
     protected String timeoutMessage() {
         return "stopped making verified movement or mining progress after gathering "
-                + r.getMined() + "/" + r.count + " " + r.label;
+                + r.getMined() + "/" + r.count + " " + gatheredLabel();
     }
 
     @Override
     protected String cancelledMessage() {
-        return "interrupted after gathering " + r.getMined() + "/" + r.count + " " + r.label;
+        return "interrupted after gathering " + r.getMined() + "/" + r.count + " " + gatheredLabel();
     }
 }

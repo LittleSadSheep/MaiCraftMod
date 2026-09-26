@@ -31,9 +31,9 @@ public final class ExactHarvestTest {
         Map<TagKey<Block>, List<Holder<Block>>> tags = new HashMap<>();
         BuiltInRegistries.BLOCK.getTags().forEach(pair -> tags.put(pair.getFirst(), pair.getSecond().stream().toList()));
         var previous = Map.copyOf(tags);
-        tags.put(BlockTags.MINEABLE_WITH_PICKAXE, List.of(Blocks.COBBLESTONE.builtInRegistryHolder()));
+        tags.put(BlockTags.MINEABLE_WITH_PICKAXE, List.of(Blocks.COBBLESTONE.builtInRegistryHolder(), Blocks.STONE.builtInRegistryHolder()));
         BuiltInRegistries.BLOCK.bindTags(tags);
-        try { run(); } finally { BuiltInRegistries.BLOCK.bindTags(previous); }
+        try { run(); reportsActualExpectedDrop(); } finally { BuiltInRegistries.BLOCK.bindTags(previous); }
         System.out.println("ExactHarvestTest: passed");
     }
     private static void run() throws Exception {
@@ -71,6 +71,28 @@ public final class ExactHarvestTest {
                     && h.level.blockReads == reads, "unloaded exact source cannot read or substitute a nearby cell");
         }
     }
+    // 中央生成的是石头、普通镐实际掉圆石时，成功摘要必须报告背包产物，不能沿用来源方块名。
+    private static void reportsActualExpectedDrop() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE)); h.set(SOURCE, Blocks.STONE.defaultBlockState());
+            var sourceGoal = goal(SOURCE);
+            var parameters = new JsonObject(); parameters.addProperty("block_id", "minecraft:stone");
+            parameters.addProperty("expected_output_item_id", "minecraft:cobblestone"); parameters.addProperty("may_alter_terrain", true);
+            var request = new Goal(GeneralAbilityAdapter.HARVEST_BLOCK, "harvest generated stone", sourceGoal.target(),
+                    parameters.toString(), "{}", List.of(), List.of());
+            var task = new MineCompanionTask(h.player, compile(h, request)); task.start(h.player);
+            var accept = MineCompanionTask.class.getDeclaredMethod("acceptDigResult", BlockPos.class, BlockDigger.DigResult.class);
+            accept.setAccessible(true); accept.invoke(task, SOURCE, BlockDigger.DigResult.BROKE_TARGET);
+            // 先等破坏后的原生掉落同步窗口结束，消息测试不能跳过执行器要求的收尾等待。
+            for (int tick = 0; tick < 13; tick++) h.nextTick();
+            h.inventory.setItem(1, new ItemStack(Items.COBBLESTONE));
+            check(task.tick(h.player) == TaskState.SUCCESS, "the verified source break and expected inventory gain settle harvest");
+            var receipt = task.result(TaskState.SUCCESS);
+            check(receipt.message().contains("gathered 1/1 [minecraft:cobblestone] from minecraft:stone"),
+                    "human-readable receipt distinguishes collected cobblestone from its stone source");
+        }
+    }
+
     private static MineBlockTaskRecord compile(InteractionWorldTestHarness h, Goal goal) {
         SemanticGoalContract.validate(goal, GeneralAbilityAdapter.abilities());
         return (MineBlockTaskRecord) ((IntentAction.Native) AbilityAdapter.adapt(goal, h.player, null)).record();
