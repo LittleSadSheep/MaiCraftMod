@@ -30,7 +30,8 @@ final class LoadedTravelLeg {
         else if (goal instanceof NavGoal.NearGround near) radius = near.radius;
         else return requested; // 不改写战斗避让和工作面等复杂目标。
         double distance = Math.hypot(goal.center().getX() - from.getX(), goal.center().getZ() - from.getZ());
-        if (loaded.test(goal.center()) || distance <= Math.max(24, radius + 12)) return requested;
+        // 渲染距离内的远区块也可能超出飞行器的本地搜索半径；已加载不等于可一次直飞，仍由 Mod 延伸方向通道。
+        if (distance <= Math.max(24, radius + 12) || loaded.test(goal.center()) && distance <= ForwardTravelGoal.RANGE) return requested;
         intermediate = new GoalCompiler.Compiled(new ForwardTravelGoal(from, goal, surface.getAsBoolean(), 4), requested.sacred());
         return intermediate;
     }

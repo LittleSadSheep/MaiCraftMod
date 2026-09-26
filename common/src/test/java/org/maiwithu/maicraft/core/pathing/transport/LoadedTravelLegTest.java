@@ -46,9 +46,16 @@ public final class LoadedTravelLegTest {
         check(leg.resolve(requested, from.offset(300, 0, 0), p -> true, () -> true, true) == local,
                 "ongoing continuous flight retains intent beyond the initial observation horizon");
         leg.complete();
-        check(leg.resolve(requested, from.offset(24, 0, 0), p -> true, () -> true) == requested
+        check(leg.resolve(requested, from.offset(24, 0, 0), p -> true, () -> true).goal() instanceof ForwardTravelGoal,
+                "a loaded far target still needs continuous local corridors rather than an out-of-range flight");
+        leg.complete();
+        check(leg.resolve(requested, new BlockPos(476, 78, 100), p -> true, () -> true) == requested
                 && !requested.goal().isAt(new BlockPos(500, 77, 100)), "final precision and altitude are restored intact");
-        check(leg.completed() == 1 && leg.resolve(null, from, p -> false, () -> true) == null, "lost intent cannot keep an old segment");
+        check(leg.completed() == 2 && leg.resolve(null, from, p -> false, () -> true) == null, "lost intent cannot keep an old segment");
+        // 复现实机约八十四格的已加载工地：完整视野不应把原终点直接送入六十四格飞行预检。
+        var nearSite = new GoalCompiler.Compiled(NavGoal.exact(new BlockPos(84, 70, 0)), LongSets.emptySet());
+        check(new LoadedTravelLeg().resolve(nearSite, from, p -> true, () -> true).goal() instanceof ForwardTravelGoal,
+                "loaded eighty-four-block trip automatically acquires a forward corridor");
     }
     private static void safeSurfaceChoices() {
         var goal = new ForwardTravelGoal(BlockPos.ZERO, NavGoal.exact(new BlockPos(200, 0, 0)), true, 4);
