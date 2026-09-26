@@ -1,6 +1,9 @@
 package org.maiwithu.maicraft.core.task;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
+import java.util.Objects;
+import java.util.stream.Stream;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
@@ -55,7 +58,7 @@ public final class FirstPersonActionGate {
             staging = context.menus().poll(context, staging);
             if (!staging.terminal()) return Status.RUNNING;
             if (staging.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                failure = "inventory staging was not confirmed: " + staging.detail();
+                failure = "inventory staging was not confirmed: " + staging.detail() + swapEvidence(player);
                 return Status.FAILED;
             }
             staging = null;
@@ -123,6 +126,31 @@ public final class FirstPersonActionGate {
         }
         selecting = context.actions().selectHotbar(context, selectedHotbarSlot, CONFIRM_TICKS);
         return Status.RUNNING;
+    }
+
+    /** 交换未确认时保留两端实际物品与组件差异，后续诊断无需猜测是扣数、移槽还是动态组件变化。 */
+    private String swapEvidence(LocalPlayer player) {
+        if (pendingSwap == null) return "";
+        var swap = pendingSwap;
+        ItemStack sourceNow = player.getInventory().getItem(swap.source());
+        ItemStack hotbarNow = player.getInventory().getItem(swap.hotbar());
+        return "; source_slot=" + swap.source() + " before=" + identity(swap.sourceBefore()) + " now=" + identity(sourceNow)
+                + "; hotbar_slot=" + swap.hotbar() + " before=" + identity(swap.hotbarBefore()) + " now=" + identity(hotbarNow)
+                + "; source_components_vs_expected=" + changedComponents(sourceNow, swap.hotbarBefore())
+                + "; hotbar_components_vs_expected=" + changedComponents(hotbarNow, swap.sourceBefore());
+    }
+
+    private static String identity(ItemStack stack) {
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + "x" + stack.getCount();
+    }
+
+    // 只公开发生变化的组件名，不倾倒容器内容或任意自定义文本；这些差异不改变严格交换确认规则。
+    private static String changedComponents(ItemStack actual, ItemStack expected) {
+        return Stream.concat(actual.getComponents().stream(), expected.getComponents().stream())
+                .map(component -> component.type()).distinct()
+                .filter(type -> !Objects.equals(actual.get(type), expected.get(type)))
+                .map(type -> String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type)))
+                .sorted().limit(16).toList().toString();
     }
 
     public String failure() {

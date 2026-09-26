@@ -18,6 +18,7 @@ public final class FirstPersonGateExtendedHotbarTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         swapTargetFoldsIntoVanillaRange();
         extendedSelectionStillStagesThroughAVanillaSlot();
+        failedSwapReportsObservedSlotDifferences();
         System.out.println("FirstPersonGateExtendedHotbarTest: extended hotbar selection staging passed");
     }
 
@@ -57,6 +58,29 @@ public final class FirstPersonGateExtendedHotbarTest {
                     "the hotbar selection receipt is polled to completion");
             check(h.step(gate) == FirstPersonActionGate.Status.READY && world.inventory.selected == h.swapHotbar,
                     "the staged sword reaches the hand and the gate reports ready");
+            gate.reset();
+        }
+    }
+
+    // 保留一次失败交换的原始事实：不补发点击，也不把只换对物品而组件不同冒充成功。
+    private static void failedSwapReportsObservedSlotDifferences() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            Harness h = new Harness(world);
+            world.inventory.selected = 0;
+            world.inventory.setItem(20, new ItemStack(Items.IRON_SWORD));
+            world.inventory.setItem(0, new ItemStack(Items.DIRT, 3));
+            var gate = new FirstPersonActionGate();
+            h.step(gate); h.rendered = true; h.step(gate);
+            world.inventory.setItem(20, new ItemStack(Items.DIRT, 3));
+            var changed = new ItemStack(Items.IRON_SWORD); changed.setDamageValue(2);
+            world.inventory.setItem(0, changed);
+            h.swap.finish(MenuReceipt.Status.DIVERGED, "fixture component divergence");
+            check(h.step(gate) == FirstPersonActionGate.Status.FAILED && h.swaps == 1,
+                    "a divergent swap remains failed without another click");
+            check(gate.failure().contains("source_slot=20 before=minecraft:iron_swordx1 now=minecraft:dirtx3")
+                    && gate.failure().contains("hotbar_slot=0 before=minecraft:dirtx3 now=minecraft:iron_swordx1")
+                    && gate.failure().contains("hotbar_components_vs_expected=[minecraft:damage]"),
+                    "failure reports exact slot counts and names the mismatching component");
             gate.reset();
         }
     }
