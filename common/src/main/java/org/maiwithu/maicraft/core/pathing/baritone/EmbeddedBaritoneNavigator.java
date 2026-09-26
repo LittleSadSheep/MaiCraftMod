@@ -63,6 +63,7 @@ public final class EmbeddedBaritoneNavigator {
     private boolean pendingPause;
     private boolean rescueDetached;
     private boolean trackingGoal;
+    private boolean runtimeSuspended;
     private FailureType pendingFailureType;
     private String pendingFailureReason;
     private EmbeddedBaritoneTerrainProbe.ProbeFuture terrainProbe;
@@ -189,6 +190,8 @@ public final class EmbeddedBaritoneNavigator {
         }
 
         if (reached.getAsBoolean()) return arriveWhenSafe();
+        // 原任务重新得到调度后才恢复驱动；暂停期间若运行器已被防卫使用，会通过started=false重新取得路线。
+        runtimeSuspended = false;
         if (player.isPassenger()) player.stopRiding();
 
         // 每次重新取目标要求；位置、半径或保护条件变化时，需要更新路线，不能只比较对象是不是同一个。
@@ -438,8 +441,16 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     void preemptWhenSafe(String reason) {
+        // 防卫或换气接管的是已经暂停的工作，不能把待恢复的工地路线判成永久中断。
+        if (runtimeSuspended && !stopped && !terminalFailure && pendingFailureType == null && isSafeToCancel()) {
+            started = false; driveRequested = false; runtimeSuspended = false;
+            EmbeddedBaritoneRuntime.release(this); return;
+        }
         failWhenSafe(FailureType.INTERRUPTED, reason);
     }
+
+    // 调度器暂停整个父任务时，实际导航可能属于深层子任务，仍要标记当前运行器所有者可恢复。
+    void noteSuspended() { runtimeSuspended = true; }
 
     void preempted(String reason) {
         abort(FailureType.INTERRUPTED, reason);
@@ -555,6 +566,7 @@ public final class EmbeddedBaritoneNavigator {
         cancelTerrainProbe();
         pendingPause = false;
         driveRequested = false;
+        noteSuspended();
         EmbeddedBaritoneRuntime.suspend(this);
         InputDriver.halt(player);
     }

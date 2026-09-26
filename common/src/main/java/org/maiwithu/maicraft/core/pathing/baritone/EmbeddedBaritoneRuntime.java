@@ -354,6 +354,8 @@ public final class EmbeddedBaritoneRuntime {
         requireClientThread();
         lastSwimDriveTick = Long.MIN_VALUE;
         if (backend == null || owner == null) return;
+        // 父施工任务让位时也覆盖正在运行的子导航；随后防卫换路只交接运行器，不取消原施工目标。
+        owner.noteSuspended();
         backend.getInputOverrideHandler().clearAllKeys();
         ((LookBehavior) backend.getLookBehavior()).clearTarget();
         ACTIONS.suspend(currentContext(), owner,

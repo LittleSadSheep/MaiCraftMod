@@ -55,6 +55,7 @@ public final class NavigationHandoffTest {
         precisionWalkingDoesNotPlanGapJumps();
         replacedBodyDiscardsOrphanRoutes(false);
         replacedBodyDiscardsOrphanRoutes(true);
+        suspendedWorkCanResumeAfterAnotherNavigator();
         System.out.println("NavigationHandoffTest: passed");
     }
 
@@ -90,6 +91,25 @@ public final class NavigationHandoffTest {
                         "only a pending request belonging to the new body survives cleanup");
                 check(world.itemUses() == 0 && world.blockUses() == 0, "body replacement cleanup performs no world interaction");
             }
+        }
+    }
+    private static void suspendedWorkCanResumeAfterAnotherNavigator() throws Exception {
+        for (int pauseMode = 0; pauseMode < 3; pauseMode++) try (var fixture = new Fixture()) {
+            var goal = GoalCompiler.standOn(new BlockPos(500, 78, 104));
+            var work = new EmbeddedBaritoneNavigator(null, () -> goal, () -> false, PlayerNav.ContextProvider.DEFAULT, true);
+            field(EmbeddedBaritoneRuntime.class, "owner").set(null, work);
+            set(work, "started", true); set(work, "compiled", goal); set(fixture.pathing, "safeToCancel", true);
+            // 同时覆盖任务自身pause和父任务整体让位：后者的实际导航藏在子任务里，也必须能够恢复。
+            if (pauseMode == 0) work.pause();
+            if (pauseMode == 1) EmbeddedBaritoneRuntime.suspendActivePhysicalOutputs();
+            work.preemptWhenSafe("a defense navigator needs the body");
+            if (pauseMode < 2) {
+                check(work.canAcquireRuntimeOwnership() && !(Boolean) field(work.getClass(), "started").get(work),
+                        "paused work remains resumable and will reacquire the route after defense");
+                check(field(work.getClass(), "compiled").get(work) == goal, "the original construction goal survives physical handoff");
+            } else check(!work.canAcquireRuntimeOwnership(), "unpaused competing navigation still receives a real interruption");
+            check(field(EmbeddedBaritoneRuntime.class, "owner").get(null) == null && !fixture.inputs.isInputForcedDown(Input.MOVE_FORWARD),
+                    "physical ownership and keys are released before the defense route takes over");
         }
     }
 
