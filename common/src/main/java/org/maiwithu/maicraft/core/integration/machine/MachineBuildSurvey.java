@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
@@ -34,6 +35,7 @@ final class MachineBuildSurvey {
     private final List<BlockPos> dependentTargets;
     private final Set<BlockPos> completedInstallations = new HashSet<>();
     private final Set<BlockPos> declaredPositions = new HashSet<>();
+    private Map<String, Object> failureEvidence = Map.of();
 
     MachineBuildSurvey(MachineConstructionPlan plan) {
         this.plan = plan; positions = plan.positions();
@@ -61,14 +63,14 @@ final class MachineBuildSurvey {
                 else if (installation.reusesPreparation(world)) {
                     // 原有带只需补中间带轮时保留整段，开工前只检查新增轴点的修改权限。
                     for (BlockPos at : installation.mutationPositions(world)) if (NavigationSafetyContext.protectsMutation(at))
-                        return new Progress(false, null, "Native pulley addition intersects a protected area.");
+                        return blocked(world, at, "native_pulley_protected", "Native pulley addition intersects a protected area.");
                     completedInstallations.addAll(installation.targets().keySet());
                 } else for (BlockPos at : installation.targets().keySet()) {
-                    if (NavigationSafetyContext.protectsMutation(at)) return new Progress(false, null, "Native installation intersects a protected area.");
+                    if (NavigationSafetyContext.protectsMutation(at)) return blocked(world, at, "native_installation_protected", "Native installation intersects a protected area.");
                     if (BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString().equals("create:belt"))
-                        return new Progress(false, null, "An existing belt has a different native chain; inspect it before replacing any segment.");
+                        return blocked(world, at, "native_belt_chain_mismatch", "An existing belt has a different native chain; inspect it before replacing any segment.");
                     if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir())
-                        return new Progress(false, null, "Native installation needs an empty path; undeclared obstacles will not be removed.");
+                        return blocked(world, at, "native_installation_path_occupied", "Native installation needs an empty path; undeclared obstacles will not be removed.");
                 }
             } catch (RuntimeException unavailable) { return new Progress(false, null, "Native installation observation unavailable: " + unavailable.getMessage()); }
             installationIndex++;
@@ -91,7 +93,7 @@ final class MachineBuildSurvey {
                 if (!world.isLoaded(gap)) return new Progress(false, gap, null);
                 if (!declaredPositions.contains(gap)
                         && !CreateProcessingCapabilities.openProcessingSpace(world.getBlockState(gap), world, gap))
-                    return new Progress(false, null, "A required processing space is occupied outside the declared blueprint targets.");
+                    return blocked(world, gap, "processing_clearance_occupied", "A required processing space is occupied outside the declared blueprint targets.");
             }
             processingIndex++;
         }
@@ -102,7 +104,7 @@ final class MachineBuildSurvey {
             if (!world.isLoaded(at)) return new Progress(false, at, null);
             String issue = FluidPlacementRules.preparationProblem(
                     world, at, target.desiredState(), plan.replaceExisting(), plan.replaceBlockEntities());
-            if (issue != null) return new Progress(false, null, issue);
+            if (issue != null) return blocked(world, at, "source_fluid_site_blocked", issue);
             var actual = world.getBlockState(at);
             if (!actual.isAir() && actual.getFluidState().isEmpty()) {
                 MachinePlacementRules.requireModeledEffects(actual.getBlock()); clears.add(at);
@@ -116,7 +118,7 @@ final class MachineBuildSurvey {
             var state = world.getBlockState(at);
             boolean matches = MachineInstallation.matches(world, at, part.spec());
             if (!matches && NavigationSafetyContext.protectsMutation(at))
-                return new Progress(false, null, "A protected area occupies a planned native part site.");
+                return blocked(world, at, "native_part_protected", "A protected area occupies a planned native part site.");
             // 面部件所在格现在为空，但计划先装中心部件时，可以等待那个宿主生成。
             boolean futureHost = state.isAir() && part.spec().side() != null && centers.contains(at);
             if (!futureHost && !MachineInstallation.canInstall(world, at, part.spec())) {
@@ -125,7 +127,7 @@ final class MachineBuildSurvey {
                         && !state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
                         && !state.hasProperty(BlockStateProperties.BED_PART) && state.getDestroySpeed(world, at) >= 0) {
                     MachinePlacementRules.requireModeledEffects(state.getBlock()); clears.add(at);
-                } else return new Progress(false, null, "An AE2 part site is occupied or its native slot is incompatible.");
+                } else return blocked(world, at, "native_part_site_incompatible", "An AE2 part site is occupied or its native slot is incompatible.");
             }
             partIndex++;
         }
@@ -136,12 +138,25 @@ final class MachineBuildSurvey {
             if (!world.isLoaded(at)) return new Progress(false, at, null);
             var state = world.getBlockState(at);
             if (state.isAir() && !NavigationSafetyContext.protectsMutation(at)) openings.add(at);
-            else if (!target.matches(state)) return new Progress(false, null, "A temporary machine entrance is occupied or protected.");
+            else if (!target.matches(state)) return blocked(world, at, "machine_entrance_blocked", "A temporary machine entrance is occupied or protected.");
             sealIndex++;
         }
         return new Progress(sealIndex == sealTargets.size(), null, null);
     }
     Set<BlockPos> completedInstallations() { return Set.copyOf(completedInstallations); }
+
+    /** 只报告已经加载并检查过的第一处阻塞；保留实际方块与蓝图偏移，修订前不会暗中清障或扩大权限。 */
+    private Progress blocked(Level world, BlockPos at, String code, String detail) {
+        var state = world.getBlockState(at); var offset = at.subtract(plan.anchor());
+        failureEvidence = Map.of("failure_code", code, "failure_position", Map.of("x", at.getX(), "y", at.getY(), "z", at.getZ()),
+                "blueprint_offset", List.of(offset.getX(), offset.getY(), offset.getZ()),
+                "observed_block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
+                "observed_state", state.toString(), "declared_target", declaredPositions.contains(at),
+                "protected", NavigationSafetyContext.protectsMutation(at), "world_modified", false);
+        return new Progress(false, null, detail + " Observed " + BuiltInRegistries.BLOCK.getKey(state.getBlock())
+                + " at " + at.toShortString() + " (blueprint offset " + offset.toShortString() + ").");
+    }
+    Map<String, Object> failureEvidence() { return failureEvidence; }
 
     List<BlockPos> partClears() { return new ArrayList<>(clears); }
     Set<BlockPos> openings() { return Set.copyOf(openings); }

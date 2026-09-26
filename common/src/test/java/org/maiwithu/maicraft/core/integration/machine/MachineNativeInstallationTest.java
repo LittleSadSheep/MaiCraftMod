@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,8 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.intent.IntentRuntime;
+import org.maiwithu.maicraft.intent.SemanticResultView;
 
 /** 用明确的模拟原生动作检查父级装配顺序和最终状态；不把夹具世界变化当成实际 Create 验收。 */
 public final class MachineNativeInstallationTest {
@@ -76,9 +79,20 @@ public final class MachineNativeInstallationTest {
                 public boolean matches(Level world) { return false; }
                 public TaskRecord task(String id, long deadline, List<BlockPos> footprint, List<String> labels) { throw new AssertionError("blocked installation must not start"); }
             };
-            var blockedPlan = constructor.newInstance(BlockPos.ZERO, targets, List.of(), List.of(), new JsonObject(), true, false, List.of(blocked), List.of(), new JsonObject());
+            var blockedPlan = constructor.newInstance(new BlockPos(2, 1, 2), targets, List.of(), List.of(), new JsonObject(), true, false, List.of(blocked), List.of(), new JsonObject());
             check(new MachineBuildSurvey(blockedPlan).tick(h.level).failure().contains("undeclared obstacles"), "even replacement permission does not invent extra demolition targets");
             check(blockedPlan.blockTask("blocked", 1000, false).targets.stream().noneMatch(target -> target.pos().equals(obstacle)), "implicit native path remains absent from ordinary demolition tasks");
+            // 实际父任务的终态、对外净化和注意摘要都必须能定位阻塞，不能只留下笼统的空路径提示。
+            var surveyTask = new MachineBuildTask(h.player, new MachineBuildTaskRecord("survey-receipt", 1000, blockedPlan, "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of()));
+            check(invoke(surveyTask, "surveyParts") == TaskState.FAILED, "occupied native path stops before construction");
+            var receipt = SemanticResultView.result(surveyTask.result(TaskState.FAILED));
+            var clearance = (Map<?, ?>) receipt.data().get("clearance_report");
+            check(clearance.get("observed_block_id").equals("minecraft:stone") && clearance.get("blueprint_offset").equals(List.of(1, 0, 2)), "block identity and local offset remain actionable");
+            check(clearance.get("failure_position").equals(Map.of("x", 3, "y", 1, "z", 4)) && receipt.data().get("failure_type").equals("terrain_blocked"), "public receipt retains observed position and a concrete failure type");
+            var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult", JsonObject.class); compact.setAccessible(true);
+            var notice = ((JsonObject) compact.invoke(null, JsonParser.parseString(receipt.toJson()).getAsJsonObject())).getAsJsonObject("data").getAsJsonObject("clearance_report");
+            check(notice.getAsJsonObject("failure_position").get("z").getAsInt() == 4 && notice.getAsJsonArray("blueprint_offset").size() == 3, "attention preserves exact observed clearance facts");
+            check(h.level.getBlockState(obstacle).is(Blocks.STONE) && !((Boolean) clearance.get("world_modified")), "survey diagnostics do not clear undeclared obstacles");
             var belt = new CreateBeltInstallTaskRecord("unsupported-real-belt", 1000,
                     CreateBeltGeometry.between(AT, AT.east(2), Direction.Axis.Z, 20), Set.of(AT, AT.east(2)), List.of(AT), List.of());
             Task actual = TaskFactory.create(h.player, belt); actual.start(h.player);

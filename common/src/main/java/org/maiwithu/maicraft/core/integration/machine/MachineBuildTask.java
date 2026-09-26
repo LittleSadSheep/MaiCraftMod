@@ -145,7 +145,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
 
     private TaskState surveyParts() {
         var progress = survey.tick(world);
-        if (progress.failure() != null) return failure("machine_site_blocked", progress.failure() + " Construction has not started.");
+        if (progress.failure() != null) {
+            // 已观测的占用与保护阻塞有确定类别；原生接口不可用等没有现场证据的异常仍按原失败路径报告。
+            if (survey.failureEvidence().isEmpty()) return failure("machine_site_blocked", progress.failure() + " Construction has not started.");
+            failureCode = "machine_site_blocked";
+            fail(progress.failure() + " Construction has not started.", FailureType.TERRAIN_BLOCKED); return TaskState.FAILED;
+        }
         if (progress.needsLoad() != null) return load(progress.needsLoad());
         if (progress.complete()) phase = Phase.BLOCKS;
         return TaskState.RUNNING;
@@ -477,6 +482,8 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
+        // 原生安装和加工净空也有独立勘测；开工前的阻塞证据不能只在普通方块子任务中才保留。
+        if (!survey.failureEvidence().isEmpty()) data.put("clearance_report", survey.failureEvidence());
         if (!failedNavigation.isEmpty()) data.put("navigation_failure", failedNavigation);
         data.put("machine_layout", r.plan.report());
         if (recordedMachine != null) data.put("recorded_machine", recordedMachine.deepCopy());

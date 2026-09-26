@@ -911,6 +911,12 @@ public final class IntentRuntime {
         if (value.isJsonObject()) {
             JsonObject clean = new JsonObject();
             for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
+                // 实际阻塞点是修订蓝图所需的观察事实；只保留三个整数坐标，其他内部路线字段继续按既有规则处理。
+                if (entry.getKey().equals("failure_position")) {
+                    JsonObject position = observedFailurePosition(entry.getValue());
+                    if (position != null) clean.add(entry.getKey(), position);
+                    continue;
+                }
                 if (internalAttentionKey(entry.getKey())) continue;
                 JsonElement nested = sanitizeAttentionValue(entry.getValue());
                 if (nested != null) clean.add(entry.getKey(), nested);
@@ -927,6 +933,18 @@ public final class IntentRuntime {
             return new JsonPrimitive(sanitized);
         }
         return value.deepCopy();
+    }
+
+    private static JsonObject observedFailurePosition(JsonElement value) {
+        if (!value.isJsonObject()) return null;
+        JsonObject point = new JsonObject(), source = value.getAsJsonObject();
+        for (String axis : List.of("x", "y", "z")) {
+            JsonElement coordinate = source.get(axis);
+            if (coordinate == null || !coordinate.isJsonPrimitive() || !coordinate.getAsJsonPrimitive().isNumber()) return null;
+            try { point.addProperty(axis, coordinate.getAsBigDecimal().intValueExact()); }
+            catch (ArithmeticException | NumberFormatException invalid) { return null; }
+        }
+        return point;
     }
 
     private static boolean internalAttentionKey(String raw) {
