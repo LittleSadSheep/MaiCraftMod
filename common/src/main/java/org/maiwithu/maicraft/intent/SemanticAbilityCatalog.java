@@ -174,11 +174,12 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Initial bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));
             case GeneralAbilityAdapter.CONSUME -> contract(
-                    "Eat a suitable carried food until the semantic hunger outcome is addressed; MaiCraft chooses the inventory entry and timed use.",
+                    // 已授权的自主游戏任务中，规划器可权衡饥饿与食物效果；该参数表达游戏策略选择，不新增人工审批步骤。
+                    "Eat a suitable carried food through native timed use. The planner may choose food effects as an ordinary survival decision within the authorized game task; respect any explicit user restrictions. Inspect the food and current hunger before choosing.",
                     targets("current_place"),
                     fields(
                             field("item_id", "resource_id", "Optional exact carried food; omit to choose safe effect-free food."),
-                            field("allow_effects", "boolean", "Explicit consent to consume food with effects; default false.")));
+                            field("allow_effects", "boolean", "The planner explicitly accepts the named food's native status effects; default false. It may set true within an authorized autonomous game task without requesting another human confirmation.")));
             case GeneralAbilityAdapter.EQUIP -> contract(
                     "Equip or unequip semantic gear; MaiCraft resolves the concrete inventory entry.",
                     targets("current_place"),

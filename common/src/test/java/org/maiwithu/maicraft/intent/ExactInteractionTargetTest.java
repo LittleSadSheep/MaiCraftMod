@@ -64,7 +64,22 @@ public final class ExactInteractionTargetTest {
         changedAfterCompilation(false);
         changedAfterCompilation(true);
         heldItemUseHasItsOwnSemanticEntry();
+        foodEffectsAreAnExplicitPlannerChoice();
         System.out.println("ExactInteractionTargetTest: passed");
+    }
+
+    /** 默认补食仍避开效果食物；自主任务点名并接受效果后可直接执行，不插入额外人工批准。 */
+    private static void foodEffectsAreAnExplicitPlannerChoice() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.getFoodData().setFoodLevel(6); h.inventory.setItem(0, new ItemStack(Items.ROTTEN_FLESH, 3));
+            var p = new JsonObject(); p.addProperty("item_id", "minecraft:rotten_flesh");
+            var goal = new Goal(GeneralAbilityAdapter.CONSUME, "restore hunger", new Goal.SemanticTarget("current_place", null, null, null), p.toString(), "{}", List.of(), List.of());
+            check(AbilityAdapter.adapt(goal, h.player, null) instanceof IntentAction.Decision, "default food selection does not silently accept effects");
+            p.addProperty("allow_effects", true); SemanticGoalContract.validate(goal.withParameters(p), GeneralAbilityAdapter.abilities());
+            check(AbilityAdapter.adapt(goal.withParameters(p), h.player, null) instanceof IntentAction.Tool && h.itemUses() == 0,
+                    "explicit planner choice compiles one native eating action without requesting human approval or eating during planning");
+            check(SemanticAbilityCatalog.describe(GeneralAbilityAdapter.CONSUME).toString().contains("planner explicitly accepts"), "the public contract identifies the actual decision maker");
+        }
     }
 
     private static void heldItemUseHasItsOwnSemanticEntry() throws Exception {
