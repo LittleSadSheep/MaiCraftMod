@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
 
 /**
- * 收到生物造成的伤害，或观察到近处明确的攻击目标时，暂时接管当前工作自卫。
+ * 收到生物造成的伤害，或观察到近处苦力怕及明确的攻击目标时，暂时接管当前工作自卫。
  * 危险短暂消失后保留一小段观察时间，避免刚拉开一点距离就把工作还回去，再马上被同一只怪打断。
  * 它没有另一套攻击动作，实际打斗、撤退和拾取都交给 AttackCompanionTask。
  */
@@ -33,15 +33,7 @@ public final class MobDefenseChain implements Task, Reflex {
     public static final String ID = "mob_defense";
 
     /** 看多远。超出这个半径的不算"身边"。 */
-    private static final double SCAN_RADIUS = 12.0;
-
-    /**
-     * 寻常近战怪逼到这么近就算危险。
-     *
-     * <p>爬行者与末影水晶那两条线是从原版推出来的(引信倒退距离、爆炸威力两倍),这一条不是
-     * ——它是"它下一步就能打到我"的经验值。要更硬该去读每种怪自己的攻击距离。
-     */
-    private static final double MELEE_DANGER = 4.0;
+    private static final double SCAN_RADIUS = 14.0; // 充能苦力怕的十二格伤害范围也必须完整进入警戒。
 
     /**
      * 危险离开后还盯这么久才算真的没事。
@@ -216,8 +208,7 @@ public final class MobDefenseChain implements Task, Reflex {
     /**
      * 身边<b>已经近到没有提前量</b>的威胁。
      *
-     * <p>只算正在针对她的——防守不是挑衅,一只路过的僵尸猪灵不该被"防御"链招惹。还没逼近的
-     * 那些也不进来:模型看得见它们,该由它决定要不要动手。
+     * <p>苦力怕在近处主动警戒；其他生物依赖真实伤害或明确攻击目标，避免招惹中立生物。
      *
      * <p>模型自己派的 {@code attack} 已经认领的目标同样不算:那场仗有人管了。但她扛不住时
      * 一律接管——那一档只有本能看得见。
@@ -227,13 +218,10 @@ public final class MobDefenseChain implements Task, Reflex {
     private List<Mob> dangersNear(LocalPlayer companion) {
         List<Mob> near = new ArrayList<>(CombatThreats.attackers(companion));
         for (Mob m : Menace.hostilesAround(companion, SCAN_RADIUS)) {
-            if (near.contains(m) || m.getTarget() != companion) {
-                continue;
-            }
-
-            // "够危险了没有"与站位、退避问的是<b>同一个函数</b>:它自己的危险半径。
-            // 用一条固定的线时每种怪都判错——爬行者要七格,僵尸两格就够。
-            if (Menace.tooClose(m, companion)) {
+            if (near.contains(m)) continue;
+            // 苦力怕必须在爆炸前主动警戒；其他敌人的预判仍要求明确攻击目标，实际伤害另由上方记录。
+            if (Menace.creeperThreat(m, companion)
+                    || m.getTarget() == companion && Menace.tooClose(m, companion)) {
                 near.add(m);
             }
         }

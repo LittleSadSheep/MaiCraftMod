@@ -37,6 +37,7 @@ public final class CombatThreatsTest {
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();
         MobDefenseDamageTest.main(args);
+        CreeperDefenseTest.main(args);
         CombatOutcomeTest.main(args);
         RangedShotTest.main(args);
         DamageAttentionTest.main(args);

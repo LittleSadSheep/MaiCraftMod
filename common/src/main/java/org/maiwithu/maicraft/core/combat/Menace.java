@@ -26,6 +26,9 @@ public final class Menace {
 
     /** 原版 {@code Creeper.explosionRadius} 默认值;充能的翻倍。NBT 改过的少见,不追。 */
     private static final double CREEPER_BLAST_RADIUS = 3.0;
+    // 原版 SwellGoal 只在距离大于七格时因距离停止膨胀；提前在八格内警戒，留出转身和撤离空间。
+    private static final double CREEPER_DEFUSE_DISTANCE = 7.0;
+    private static final double CREEPER_ALERT_DISTANCE = 8.0;
 
     /** 末影水晶被打碎时的爆炸威力,原版写死 {@code 6.0F}。它没有引信,打碎即炸。 */
     private static final double CRYSTAL_BLAST_RADIUS = 6.0;
@@ -103,10 +106,23 @@ public final class Menace {
                 && CombatThreats.recentlyAttackedBy(player, mob));
     }
 
-    /** 引信正在涨——它已经在倒计时,不是"可能会炸"。 */
+    /** 膨胀尚未完全退回时继续保持避险，不能刚开始缩回就再次贴近并续上旧引信。 */
     public static boolean fusing(Entity entity) {
         return entity instanceof Creeper creeper
-                && (creeper.getSwellDir() > 0 || creeper.isIgnited());
+                && (creeper.getSwellDir() > 0 || creeper.isIgnited() || creeper.getSwelling(1.0F) > 0.0F);
+    }
+
+    /** 近处可见苦力怕提前触发自卫；已膨胀的危险不依赖客户端通常拿不到的 AI 目标或视线。 */
+    public static boolean creeperThreat(Entity foe, LivingEntity self) {
+        return foe instanceof Creeper && foe.isAlive() && (blastDanger(foe, self)
+                || self.distanceToSqr(foe) <= CREEPER_ALERT_DISTANCE * CREEPER_ALERT_DISTANCE
+                && self.hasLineOfSight(foe));
+    }
+
+    /** 只把正在膨胀且尚未拉开距离的苦力怕作为紧急撤离对象；末影水晶不会自行倒计时。 */
+    public static boolean blastDanger(Entity foe, LivingEntity self) {
+        double radius = dangerRadius(foe, self);
+        return fusing(foe) && self.distanceToSqr(foe) <= radius * radius;
     }
 
     /**
@@ -124,13 +140,17 @@ public final class Menace {
      *
      *
      * <p><b>引信没点着的爬行者按普通怪算</b>。按点火线(3.0)算的话,加上格量化补偿就是 3.71,
-     * 已经超过她够得着的 3.30 —— 窗口是负的,她永远不能挥这一刀,只能绕着走。而点着之后
-     * 引信有整整 30 刻,那时再退完全来得及。
+     * 已经超过她够得着的 3.30，无法靠近挥刀。开始膨胀后改用撤离半径；剩余引信时间
+     * 取决于实际膨胀进度，不能假设每次观察都还有完整三十刻。
      */
     // 准备爆炸时用爆炸范围；其他威胁用按体型估出的近战范围。非威胁返回零。
     public static double rawDangerRadius(Entity foe, Entity self) {
         if (!threatens(foe, self)) {
             return 0.0;   // 它不会打她 —— 走上去揍就是了
+        }
+        if (fusing(foe)) {
+            // 普通苦力怕要退过熄引信距离；充能苦力怕还要退过更大的伤害范围。
+            return Math.max(CREEPER_DEFUSE_DISTANCE, blastSpanOf(foe));
         }
         if (armed(foe)) {
             return blastSpanOf(foe);   // 引信在走 / 一打就炸的水晶:怕的是爆炸波及多远
@@ -230,7 +250,9 @@ public final class Menace {
         for (Entity mob : mobs) {
             if (mob != null && mob.isAlive()) {
                 threats.add(new GoalAvoidEntities.Threat(mob.getX(), mob.getY(), mob.getZ(),
-                        dangerRadius(mob, victim), rawDangerRadius(mob, victim)));
+                        dangerRadius(mob, victim), fusing(mob)
+                                ? dangerRadius(mob, victim) : rawDangerRadius(mob, victim)));
+                // 膨胀中的撤离终点也保留格心余量，避免停在七格边界上仍继续倒计时。
             }
         }
         return threats;

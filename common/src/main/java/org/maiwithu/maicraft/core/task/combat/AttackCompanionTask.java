@@ -73,7 +73,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 射击时与目标保持的最小距离——太近了弹道压得太平,而且白白挨打。 */
     private static final double RANGED_MIN_DISTANCE = 5.0;
     /** 组装局面看多远:势场要绕开谁、无差别模式打谁,都取这个半径。 */
-    private static final double FIELD_RADIUS = 12.0;
+    private static final double FIELD_RADIUS = 14.0; // 与自动警戒一起覆盖充能苦力怕及撤离余量。
 
     /**
      * 逃跑时扫多远。必须<b>大于</b> {@link Menace#FLEE_DISTANCE},否则她一边跑一边有新的怪
@@ -219,13 +219,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             loot.prune();
         }
         AttackPlan.Move move = AttackPlan.decide(field, lastMove);
+        boolean blastEvading = move.action() == AttackPlan.Action.EVADE_BLAST;
+        boolean blastChanged = blastEvading != (lastMove != null && lastMove.action() == AttackPlan.Action.EVADE_BLAST);
         lastMove = move;
         logMove(move, field);
 
         Entity chosen = move.foeId() == AttackPlan.NO_FOE ? null : liveEntity(move.foeId());
         bowFighting = move.action() == AttackPlan.Action.BOW;
         if (!bowFighting && shot != null) abortShot();
-        if (chosen != target) {
+        if (chosen != target || blastChanged) {
             stopNav();
             abortShot();
             target = chosen;
@@ -236,6 +238,11 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             lastTargetPositions.put(target.getId(), lastTargetPosition);
             if (phase != Phase.LOOT) loot.rememberPreexisting();
         }
+        if (blastEvading) {
+            // 引信响起时先撤销尚未挥出的近战、拉弓和举盾，避免换武器或持用减速耽误撤离。
+            stopMelee(); lowerShield(); haven = null;
+            return closeIn();
+        }
         // 攻击与移动<b>正交</b>:每刻先问一次"冷却好了吗、够得着谁吗",够得着就打 ——
         // 不管这一刻在靠近、在拉开、还是站着。攻击不影响寻路,最多让她回个头。
         tickShield(field);
@@ -245,7 +252,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             stopNav();
         }
         return switch (move.action()) {
-            case SKIRMISH -> {
+            case SKIRMISH, EVADE_BLAST -> {
                 yield closeIn();
             }
             case BOW -> {
@@ -267,14 +274,16 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先找附近敌对生物，补进伤害包确认的远程攻击者和明确指定的目标。
     // “正在攻击我”与“允许作为主目标”分别记录，严格授权模式还会限制顺手反击的对象。
     private Battlefield surveyField() {
-        defensiveInterruption = !r.indiscriminate && CombatThreats.attackers(player).stream()
-                .anyMatch(mob -> !r.entityIds.contains(mob.getId()));
         hostiles = CombatThreats.around(player, FIELD_RADIUS);
+        // 新袭击和可见近处苦力怕暂停普通指定目标；严格名单仍只允许避让名单外生物。
+        defensiveInterruption = !r.indiscriminate && hostiles.stream()
+                .anyMatch(mob -> engaging(mob) && !r.entityIds.contains(mob.getId()));
         List<Battlefield.Foe> foes = new ArrayList<>();
         for (var mob : hostiles) {
-            boolean engaging = CombatThreats.recentlyAttackedBy(player, mob) || mob.getTarget() == player;
-            boolean authorized = authorizedTarget(mob.getId(), engaging);
-            if (r.terminal(mob.getId())) {
+            boolean engaging = engaging(mob);
+            boolean authorized = !r.terminal(mob.getId()) && authorizedTarget(mob.getId(), engaging);
+            // 已判不可达的苦力怕仍可能走近并膨胀，终态记录不能遮掉新的爆炸危险。
+            if (r.terminal(mob.getId()) && !Menace.blastDanger(mob, player)) {
                 // 打完了、丢了、或者走不到又射不到的:<b>整只移出局面</b>。留着当"还有东西在
                 // 追我"的话,判据会永远喊走位 —— 一只在悬崖对面射她的骷髅就能把任务钉死。
                 // 躲它归寻路的势场管,那一层看的是场上的怪,不是这份名单。
@@ -287,7 +296,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                     Menace.armed(mob),
                     engaging,
                     reachable(mob.getId()),
-                    authorized));
+                    authorized, Menace.creeperThreat(mob, player), Menace.blastDanger(mob, player)));
         }
         // 点名模式还可能被要求打不敌对的东西(一只鸡、一个末影水晶),它们不在敌对扫描里。
         if (!r.indiscriminate) {
@@ -299,7 +308,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 if (e != null) {
                     foes.add(new Battlefield.Foe(id, player.distanceTo(e),
                             Menace.explodes(e), Menace.armed(e),
-                            false, reachable(id), !defensiveInterruption));
+                            false, reachable(id), !defensiveInterruption,
+                            Menace.creeperThreat(e, player), Menace.blastDanger(e, player)));
                 }
             }
         }
@@ -310,6 +320,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 reachToTarget(),
                 loadout.hasMelee(), loadout.hasRanged(),
                 retreat.failures() >= MAX_RETREAT_FAILURES, foes);
+    }
+
+    // 可见苦力怕的警戒事实与伤害事实都能维持自卫，不等待服务端 AI 目标同步。
+    private boolean engaging(Mob mob) {
+        return CombatThreats.recentlyAttackedBy(player, mob) || mob.getTarget() == player
+                || Menace.creeperThreat(mob, player);
     }
 
     private static boolean containsId(List<Battlefield.Foe> foes, int id) {
@@ -518,17 +534,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 自卫只打实际攻击者；显式战斗的严格授权模式也排除未获准对象。
     private void tickWeapon(Battlefield field) {
         if (bowFighting) {
-            if (meleeAction != null) meleeAction.stop();
-            meleeAction = null;
-            meleeVictimId = -1;
-            meleeSelection.reset();
+            stopMelee();
             return;
         }
         if (!ClientRuntime.requireContext(player).mutationAvailable()) return;
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
             Battlefield.Foe plannedFoe = field.byId(meleeVictimId);
-            if (plannedFoe == null || !plannedFoe.authorized() || r.strictAuthorized && (planned == null
+            // 选中后才开始膨胀也必须取消待发刀，不能沿用上一刻的安全判断继续贴脸挥击。
+            if (plannedFoe == null || plannedFoe.armed() || !plannedFoe.authorized() || r.strictAuthorized && (planned == null
                     || !r.entityIds.contains(planned.getId())
                     || !strictMeleeClear(planned))) {
                 meleeAction.stop();
@@ -590,6 +604,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         // 疾跑会让原版取消暴击判定(Player.attack 里 flag1 带 !isSprinting)。
         meleeVictimId = victim.getId();
         meleeAction = Interaction.attackEntity(player, victim);
+    }
+
+    /** 转入引信避险或弓战斗前交还手部控制，待安全后重新选择武器与目标。 */
+    private void stopMelee() {
+        if (meleeAction != null) meleeAction.stop();
+        meleeAction = null; meleeVictimId = -1; meleeSelection.reset();
     }
 
     /** 原版横扫剑击不能波及未列入目标的生物。 */

@@ -31,6 +31,8 @@ public final class AttackPlan {
         BOW,
         /** 脱离接触:打不过,跑。 */
         DISENGAGE,
+        /** 苦力怕正在近处膨胀：暂停手部攻击，先拉开距离。 */
+        EVADE_BLAST,
         /** 没什么可打的了。 */
         DONE
     }
@@ -66,14 +68,12 @@ public final class AttackPlan {
      */
     // 依次判断是否要逃、选谁打、用近战还是弓。低血量或没武器会先考虑撤退，除非已被判定无路可退。
     public static Move decide(Battlefield b, Move last) {
+        // 已开始的引信优先于旧目标、武器准备和普通撤退选点；严格攻击名单也不能阻止避险。
+        if (b.foes().stream().anyMatch(Foe::blastDanger)) return new Move(Action.EVADE_BLAST, NO_FOE);
         // ① 扛不住 —— 一切"怎么打"的讨论都以她还站得住为前提。
         if (outmatched(b.effectiveHealth()) && !b.cornered()) {
             return new Move(Action.DISENGAGE, NO_FOE);
         }
-        // 「会炸的贴太近了」也不在这儿判。点着的爬行者<b>危险半径就是它的爆炸波及范围</b>
-        // (6.71 格),走位环的内沿自然把她顶到那之外 —— 曾经它是一个独立动作(AVOID),
-        // 于是"躲爆炸"和"走位"成了互斥的两个状态,躲的那一支还不还手。
-        //
         // ③ 手上没有能打的东西:赤手对上会还手的东西不是一条出路,退开。
         //
         //    空手就该一路走脱离这一支,不该跟着距离线在两个动作之间换。
@@ -108,12 +108,12 @@ public final class AttackPlan {
     // 上次目标仍允许打就继续盯住它；否则在能打的候选里选最近者，同距时用编号稳定顺序。
     private static Foe pick(Battlefield b, Move last) {
         Foe kept = last == null ? null : b.byId(last.foeId());
-        if (kept != null && fightable(b, kept)) {
-            return kept;
-        }
+        // 可见近处苦力怕优先于普通旧目标，同一优先级内仍保持目标，避免不断转向。
+        boolean priority = b.foes().stream().anyMatch(f -> f.priorityThreat() && fightable(b, f));
+        if (kept != null && fightable(b, kept) && (!priority || kept.priorityThreat())) return kept;
         Foe best = null;
         for (Foe f : b.foes()) {
-            if (!fightable(b, f)) {
+            if (!fightable(b, f) || priority && !f.priorityThreat()) {
                 continue;
             }
             if (best == null || f.distance() < best.distance()
