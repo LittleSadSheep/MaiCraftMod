@@ -181,47 +181,46 @@ final class IntentTask implements Task {
 
     private TaskState begin(IntentAction action) {
         // 目标转换后可能是“还在准备”“直接给出结果”“做一项动作”“等待条件”或“需要询问”。
-        if (action == IntentAction.Pending.INSTANCE) return TaskState.RUNNING;
-        if (action instanceof IntentAction.Report report) {
-            if (!report.result().success()) return failStep(TaskState.FAILED, report.result());
-            if (report.verifiedPosition() != null) {
-                record.retainInternalStepPosition(record.stepIndex(), report.verifiedPosition());
+        // IntentAction 是 sealed 接口，漏写任何一个变体编译器都会报错；null 分支沿用旧 if 链的防御行为。
+        return switch (action) {
+            case null -> failStep(
+                    TaskState.FAILED,
+                    TaskResult.fail("intent adapter produced no executable action"));
+            case IntentAction.Pending pending -> TaskState.RUNNING;
+            case IntentAction.Report report -> {
+                if (!report.result().success()) yield failStep(TaskState.FAILED, report.result());
+                if (report.verifiedPosition() != null) {
+                    record.retainInternalStepPosition(record.stepIndex(), report.verifiedPosition());
+                }
+                completeStep(report.result());
+                yield afterImmediate();
             }
-            completeStep(report.result());
-            return afterImmediate();
-        }
-        if (action instanceof IntentAction.Native nativeAction) {
-            // 某些动作只是为了看清情况，例如靠近电梯读楼层；做完还得回来重新判断原目标。
-            reobserveAfterChild=nativeAction.reobserveAfterSuccess();
-            return beginNative(nativeAction.record());
-        }
-        if (action instanceof IntentAction.Chain nextChain) {
-            // 一组内部动作按顺序做，记住做到第几个，每次只启动当前那个。
-            chain = nextChain.actions();
-            chainIndex = 0;
-            return beginTool(chain.getFirst());
-        }
-        if (action instanceof IntentAction.Decision decision) {
-            return requestDecision(decision.snapshot());
-        }
-        if (action instanceof IntentAction.Remember remember) {
-            runtime.remember(remember.label(), remember.position(), remember.areaRole());
-            record.retainInternalStepPosition(record.stepIndex(), remember.position());
-            completeStep(TaskResult.ok("remembered " + remember.label(),
-                    Map.of("label", remember.label(),
-                            "area_role", remember.areaRole().id())));
-            return afterImmediate();
-        }
-        if (action instanceof IntentAction.Wait nextWait) {
-            wait = nextWait;
-            return tickWait();
-        }
-        if (action instanceof IntentAction.Tool toolAction) {
-            return beginTool(toolAction);
-        }
-        return failStep(
-                TaskState.FAILED,
-                TaskResult.fail("intent adapter produced no executable action"));
+            case IntentAction.Native nativeAction -> {
+                // 某些动作只是为了看清情况，例如靠近电梯读楼层；做完还得回来重新判断原目标。
+                reobserveAfterChild = nativeAction.reobserveAfterSuccess();
+                yield beginNative(nativeAction.record());
+            }
+            case IntentAction.Chain nextChain -> {
+                // 一组内部动作按顺序做，记住做到第几个，每次只启动当前那个。
+                chain = nextChain.actions();
+                chainIndex = 0;
+                yield beginTool(chain.getFirst());
+            }
+            case IntentAction.Decision decision -> requestDecision(decision.snapshot());
+            case IntentAction.Remember remember -> {
+                runtime.remember(remember.label(), remember.position(), remember.areaRole());
+                record.retainInternalStepPosition(record.stepIndex(), remember.position());
+                completeStep(TaskResult.ok("remembered " + remember.label(),
+                        Map.of("label", remember.label(),
+                                "area_role", remember.areaRole().id())));
+                yield afterImmediate();
+            }
+            case IntentAction.Wait nextWait -> {
+                wait = nextWait;
+                yield tickWait();
+            }
+            case IntentAction.Tool toolAction -> beginTool(toolAction);
+        };
     }
 
     private TaskState beginTool(IntentAction.Tool action) {
