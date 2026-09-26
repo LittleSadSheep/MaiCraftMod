@@ -51,4 +51,7 @@ public interface ICustomGoalProcess extends IBaritoneProcess {
         this.setGoal(goal);
         this.path();
     }
+
+    /** 追踪移动目标时更新终点并复核路线，允许执行器保留仍有用的部分路径。 */
+    default void updateGoalAndPath(Goal goal) { setGoalAndPath(goal); }
 }

@@ -66,12 +66,14 @@ public final class PlayerNav {
 
     public static PlayerNav trackGoal(LocalPlayer player, Supplier<NavGoal> goals,
                                       double speed, BooleanSupplier reached) {
-        return toGoal(player, goals, speed, reached);
+        return trackGoal(player, goals, speed, reached, ContextProvider.DEFAULT);
     }
 
     public static PlayerNav trackGoal(LocalPlayer player, Supplier<NavGoal> goals,
                                       double speed, BooleanSupplier reached, ContextProvider contextProvider) {
-        return toGoal(player, goals, speed, reached, contextProvider);
+        // 追击和避让会不断收到实体的新坐标，不能把每次更新都解释为必须清空整条路线的新任务。
+        var nav = toGoal(player, goals, speed, reached, contextProvider);
+        nav.navigator.trackMovingGoal(); return nav;
     }
 
     private static Supplier<GoalCompiler.Compiled> bare(Supplier<NavGoal> goals) {

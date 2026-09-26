@@ -198,11 +198,16 @@ public final class EmbeddedBaritoneRuntime {
         }
 
         configure(baritone, permit, sprintAllowed);
-        EmbeddedBaritonePolicy.install(
+        boolean policyChanged = EmbeddedBaritonePolicy.install(
                 compiled.sacred(),
                 navigator.protectedMutationCells(),
                 navigator.forbiddenBodyCells(), navigator.minimumFeetY());
         PathingBehavior pathing = (PathingBehavior) baritone.getPathingBehavior();
+        // 只有目标在移动、保护范围没有变时才保留路径；真正的安全策略变更仍走下方安全交接与强制重规划。
+        if (navigator.tracksMovingGoal() && !policyChanged && pendingPolicyOwner != navigator) {
+            baritone.getCustomGoalProcess().updateGoalAndPath(new MaiCraftGoalAdapter(compiled.goal()));
+            return;
+        }
         if (!pathing.isSafeToCancel()) {
             pendingPolicyOwner = navigator;
             pendingPolicyGoal = compiled;

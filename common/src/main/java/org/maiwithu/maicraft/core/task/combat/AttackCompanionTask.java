@@ -912,13 +912,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return TaskState.RUNNING;
         }
         long now = player.level().getGameTime();
-        if (nav != null && now - havenPlannedAt >= FLEE_REPLAN_TICKS) {
-            stopNav();   // 到点重算:落点不变,只让这一刻的怪进边成本
+        if (nav != null && now - havenPlannedAt >= FLEE_REPLAN_TICKS
+                && !nav.planningInFlight() && !nav.hasRecentPhysicalProgress(40)) {
+            // 动态威胁由追踪目标持续重检；只在确实没有身体进展时重开，不能每秒取消正在逃命的路线。
+            stopNav();
         }
         if (nav == null) {
             BlockPos landing = haven;
             havenPlannedAt = now;
-            nav = PlayerNav.toGoal(player, () -> NavGoal.approachAvoiding(
+            nav = PlayerNav.trackGoal(player, () -> NavGoal.approachAvoiding(
                             NavGoal.nearGround(landing, HAVEN_ARRIVED),
                             Menace.AVOID_PENALTY, roadHazards()),
                     CHASE_SPEED, () -> false);

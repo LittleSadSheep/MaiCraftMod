@@ -44,6 +44,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
+import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationPolicySnapshotTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldPlacementPolicyTest;
@@ -112,6 +113,7 @@ public final class NavigationRegressionSuite {
         SwimAirBudgetTest.main(args);
         SubmergedWaterTravelPolicyTest.main(args);
         NavigationHandoffTest.main(args);
+        MovingGoalRefreshTest.main(args);
         // 同一个真实半楼梯落脚面必须在建造与寻路里使用相同的起点格，避免反复得到无法起步的路径。
         BaritonePlayerFeetTest.main(args);
         // 跌落路径只查已有缓冲物时先筛选候选，保留真实水面、伤害和碰撞验证。

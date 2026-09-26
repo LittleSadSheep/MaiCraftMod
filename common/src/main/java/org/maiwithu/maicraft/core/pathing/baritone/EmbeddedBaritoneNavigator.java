@@ -62,6 +62,7 @@ public final class EmbeddedBaritoneNavigator {
     private boolean pendingArrival;
     private boolean pendingPause;
     private boolean rescueDetached;
+    private boolean trackingGoal;
     private FailureType pendingFailureType;
     private String pendingFailureReason;
     private EmbeddedBaritoneTerrainProbe.ProbeFuture terrainProbe;
@@ -101,6 +102,10 @@ public final class EmbeddedBaritoneNavigator {
     TerrainPermit permit() {
         return permit;
     }
+
+    /** 仅由明确追踪实体或动态威胁的调用方启用；普通施工目标仍使用原来的严格重规划。 */
+    public void trackMovingGoal() { trackingGoal = true; }
+    boolean tracksMovingGoal() { return trackingGoal; }
 
     /** 重生即使沿用UUID也已换身体；旧路线的落地等待与输入不能交给新角色继续执行。 */
     boolean belongsTo(LocalPlayer current) {

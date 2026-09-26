@@ -47,6 +47,7 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
      * @see State
      */
     private State state;
+    private boolean trackingGoal;
 
     public CustomGoalProcess(Baritone baritone) {
         super(baritone);
@@ -54,6 +55,8 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
 
     @Override
     public void setGoal(Goal goal) {
+        // 普通改目标恢复严格重检；移动目标入口会在下方显式选择保留有效路线前段。
+        trackingGoal = false;
         this.goal = goal;
         this.mostRecentGoal = goal;
         if (baritone.getElytraProcess().isActive()) {
@@ -77,6 +80,15 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
     }
 
     @Override
+    public void updateGoalAndPath(Goal goal) {
+        // 怪物每刻移动时保留正在执行的状态；下一刻仍能接收真实寻路失败，不反复回到首次开路阶段。
+        State previous = state;
+        setGoal(goal); trackingGoal = true;
+        if (previous == State.EXECUTING) state = State.EXECUTING;
+        else path();
+    }
+
+    @Override
     public Goal getGoal() {
         return this.goal;
     }
@@ -97,8 +109,9 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
             case GOAL_SET:
                 return new PathingCommand(this.goal, PathingCommandType.CANCEL_AND_SET_GOAL);
             case PATH_REQUESTED:
-                // return FORCE_REVALIDATE_GOAL_AND_PATH just once
-                PathingCommand ret = new PathingCommand(this.goal, PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH);
+                // 首次请求按调用方语义重检；追踪目标不能因每刻的新坐标取消尚未走完的有效路线前段。
+                PathingCommand ret = new PathingCommand(this.goal, trackingGoal
+                        ? PathingCommandType.REVALIDATE_GOAL_AND_PATH : PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH);
                 this.state = State.EXECUTING;
                 return ret;
             case EXECUTING:
@@ -116,7 +129,9 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
                     }
                     return new PathingCommand(this.goal, PathingCommandType.CANCEL_AND_SET_GOAL);
                 }
-                return new PathingCommand(this.goal, PathingCommandType.SET_GOAL_AND_PATH);
+                // 移动目标仅在旧终点失效时于动作结束后重算；未到目标的有效路径前段可以继续行走。
+                return new PathingCommand(this.goal, trackingGoal
+                        ? PathingCommandType.REVALIDATE_GOAL_AND_PATH : PathingCommandType.SET_GOAL_AND_PATH);
             default:
                 throw new IllegalStateException("Unexpected state " + this.state);
         }
@@ -126,6 +141,7 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
     public void onLostControl() {
         this.state = State.NONE;
         this.goal = null;
+        this.trackingGoal = false;
     }
 
     @Override

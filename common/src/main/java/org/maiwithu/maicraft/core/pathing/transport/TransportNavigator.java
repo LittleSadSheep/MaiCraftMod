@@ -53,6 +53,7 @@ public final class TransportNavigator {
     private FailureType failureType = FailureType.NO_PATH;
     private long progressTick = Long.MIN_VALUE;
     private Vec3 lastPosition;
+    private boolean trackingGoal;
 
     public TransportNavigator(LocalPlayer player, Supplier<GoalCompiler.Compiled> goals,
                               BooleanSupplier reached, PlayerNav.ContextProvider policy, boolean sprint) {
@@ -60,7 +61,13 @@ public final class TransportNavigator {
         this.ground = newGround();
     }
 
-    private EmbeddedBaritoneNavigator newGround() { return new EmbeddedBaritoneNavigator(player, goals, reached, policy, sprint); }
+    private EmbeddedBaritoneNavigator newGround() {
+        var next = new EmbeddedBaritoneNavigator(player, goals, reached, policy, sprint);
+        if (trackingGoal) next.trackMovingGoal(); return next;
+    }
+
+    /** 交通恢复为步行时也保留移动目标语义，不能重新变成逐刻硬取消的静态目标。 */
+    public void trackMovingGoal() { trackingGoal = true; ground.trackMovingGoal(); }
 
     public void mode(TransportMode mode) { this.mode = mode; if (mode == TransportMode.GROUND && probeRequested) ground.withTerrainProbe(); }
     public void withTerrainProbe() { probeRequested = true; if (mode == TransportMode.GROUND) ground.withTerrainProbe(); }
