@@ -62,7 +62,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     // 右键实际激活的方块（例如打开工作台界面）会被记录，供结果报告并让智能体循环写入 <known_blocks>。
     private BlockPos activatedBlock;
     private String activatedBlockId;
-    private boolean heldUseStarted, heldUseCompleted;
+    private boolean heldUseStarted, heldUseCompleted, heldUseHandResolved;
     private InteractionHand heldUseHand = InteractionHand.MAIN_HAND;
     private int expectedItemBefore = -1, outputWaitTicks;
 
@@ -224,8 +224,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             fail("another native item use is already active", FailureType.UNKNOWN); return TaskState.FAILED;
         }
         // 砂纸可以握在任意一只手；先使用当前已握住的指定物品，保留另一只手的加工原料。
-        if (!itemSelected && player.getMainHandItem().is(r.item)) itemSelected = true;
-        else if (!itemSelected && player.getOffhandItem().is(r.item)) { heldUseHand = InteractionHand.OFF_HAND; itemSelected = true; }
+        // 仅在选物前读取手别；背包交换的客户端预测可能已让砂纸出现在手里，此时仍必须等原交换确认并关好菜单。
+        if (!heldUseHandResolved) {
+            heldUseHandResolved = true;
+            if (player.getMainHandItem().is(r.item)) itemSelected = true;
+            else if (player.getOffhandItem().is(r.item)) { heldUseHand = InteractionHand.OFF_HAND; itemSelected = true; }
+        }
         if (!itemSelected) {
             var status = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
             if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;

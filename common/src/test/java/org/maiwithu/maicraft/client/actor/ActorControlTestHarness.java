@@ -62,6 +62,11 @@ final class ActorControlTestHarness {
         return screen;
     }
 
+    /** 需要菜单完整收尾的场景注入原生关闭后的界面事实，避免无窗口夹具调用真实渲染系统。 */
+    void simulateMenuClose() {
+        ((TestPlayer) player).menuClose = () -> { player.containerMenu = player.inventoryMenu; minecraft.screen = null; };
+    }
+
     Object visibility() throws Exception {
         return field(DefaultMenuPort.class, "visibility").get(actor.menus());
     }
@@ -99,10 +104,12 @@ final class ActorControlTestHarness {
     private static final class TestPlayer extends LocalPlayer {
         boolean sprinting;
         boolean sleeping;
+        Runnable menuClose;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public void setSprinting(boolean value) { sprinting = value; }
         @Override public boolean isSprinting() { return sprinting; }
         @Override public boolean isSleeping() { return sleeping; }
+        @Override public void closeContainer() { if (menuClose == null) super.closeContainer(); else menuClose.run(); }
         @Override public void swing(InteractionHand hand) { /* no network in this fixture */ }
     }
 }

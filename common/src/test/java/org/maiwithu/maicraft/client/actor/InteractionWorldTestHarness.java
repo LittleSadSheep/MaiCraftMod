@@ -20,6 +20,8 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -119,6 +121,14 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     public int itemUses() { return mode.items; }
     public int blockUses() { return mode.blocks; }
 
+    /** 批次场景使用真实菜单端口与可见性等待，槽位交换和同步包效果由夹具明确注入。 */
+    void enableInventoryTransactions(boolean synchronizedClicks) throws Exception {
+        var menu = new InventoryMenu(inventory, true, player);
+        ActorControlTestHarness.field(Player.class, "inventoryMenu").set(player, menu); player.containerMenu = menu;
+        h.minecraft.screen = h.inventoryScreen(); h.simulateMenuClose();
+        mode.inventoryClicks = true; mode.synchronizedClicks = synchronizedClicks;
+    }
+
     private void initializeVitals() throws Exception {
         // 正常施工会持续观察生命和饥饿；夹具默认健康吃饱，具体饥饿测试再显式改成低值，不能依赖未初始化字段。
         ActorControlTestHarness.field(Player.class, "foodData").set(player, new FoodData());
@@ -215,9 +225,18 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         InteractionHand usedHand;
         Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
+        boolean inventoryClicks, synchronizedClicks;
+        int menuClicks;
         private UseMode() { super(null, null); }
         // 配方请求只记次数；具体槽位分包同步由合成测试推进，不能在这里提前生成产物。
         @Override public void handlePlaceRecipe(int containerId, RecipeHolder<?> recipe, boolean shift) { recipePlacements++; }
+        @Override public void handleInventoryMouseClick(int containerId, int slot, int button, ClickType type, Player player) {
+            if (!inventoryClicks) { super.handleInventoryMouseClick(containerId, slot, button, type, player); return; }
+            if (type != ClickType.SWAP || !(button >= 0 && button <= 8 || button == 40)) throw new AssertionError("fixture expects an inventory hand swap");
+            var source = player.containerMenu.getSlot(slot); var before = source.getItem();
+            source.set(player.getInventory().getItem(button)); player.getInventory().setItem(button, before); menuClicks++;
+            if (synchronizedClicks) player.containerMenu.incrementStateId();
+        }
         @Override public InteractionResult useItem(Player player, InteractionHand hand) {
             // 记录原生物品入口实际使用哪只手，便于确认副手工具没有被偷偷移到主手。
             usedHand = hand;

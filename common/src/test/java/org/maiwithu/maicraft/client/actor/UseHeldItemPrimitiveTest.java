@@ -23,7 +23,27 @@ public final class UseHeldItemPrimitiveTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         useAndObserveOutput(true); useAndObserveOutput(false); unpickableItemStops();
         offhandToolPreservesMainHand();
+        predictedHandStillWaitsForInventoryConfirmation();
         System.out.println("UseHeldItemPrimitiveTest: passed");
+    }
+    /** 交换后客户端已显示工具，但服务器回执未到；后续持用不得越过原来的菜单事务。 */
+    private static void predictedHandStillWaitsForInventoryConfirmation() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(20, new ItemStack(Items.HONEY_BOTTLE)); h.inventory.selected = 0;
+            h.enableInventoryTransactions(false);
+            var task = new InteractAtCompanionTask(h.player, new InteractAtTaskRecord("pending-swap", 1000, MouseButton.RIGHT, null, -1, Items.HONEY_BOTTLE).useHeldItemOnly(Items.PAPER));
+            task.start(h.player);
+            for (int tick = 0; tick < 12 && h.mode.menuClicks == 0; tick++) {
+                check(task.tick(h.player) == TaskState.RUNNING, "inventory staging prepares the visible menu");
+                h.nextTick(); MenuVisibility.rendered(h.h.minecraft.screen);
+            }
+            check(h.mode.menuClicks == 1 && h.player.getMainHandItem().is(Items.HONEY_BOTTLE), "native menu prediction puts the tool in hand before confirmation");
+            for (int tick = 0; tick < 2; tick++) {
+                check(task.tick(h.player) == TaskState.RUNNING, "pending inventory swap cannot be bypassed by a predicted hand");
+                h.nextTick(); MenuVisibility.rendered(h.h.minecraft.screen);
+            }
+            check(h.itemUses() == 0 && h.actor.menus().diagnosticState().startsWith("SWAP_TO_HOTBAR:PENDING"), "the same swap receipt remains pending and no native use starts");
+        }
     }
     private static void useAndObserveOutput(boolean deliver) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
