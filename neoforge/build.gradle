@@ -39,6 +39,8 @@ neoForge {
                 programArguments.addAll '--quickPlaySingleplayer', worldName
                 // 用户要求副本内无人提示验收，这次进程不等待人工审图；不改日常客户端保存的 Dev 配置。
                 systemProperty 'maicraft.preview.enabled', 'false'
+                // 设计和观察也属于本轮自动测试，进世界就交出身体，让本能自卫不必等到首个施工指令。
+                systemProperty 'maicraft.automation.on_join', 'true'
             }
         }
         // 这是数据生成的启动配置；还需要实际的数据提供器注册，声明 runData 不会自动调用任意 Java 数据清单。

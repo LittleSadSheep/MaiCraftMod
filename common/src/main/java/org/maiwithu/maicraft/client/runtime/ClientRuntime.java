@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.StartupAutomation;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
@@ -37,6 +38,7 @@ public final class ClientRuntime {
     public static final int DEFAULT_MCP_PORT = 8766;
 
     private static final ClientActorBoundary ACTOR = new ClientActorBoundary();
+    private static final StartupAutomation STARTUP_AUTOMATION = new StartupAutomation(Boolean.getBoolean("maicraft.automation.on_join"));
     private static EmbeddedMcpService mcp;
     private static String lastMcpError;
     private static boolean bodyPresent;
@@ -96,6 +98,9 @@ public final class ClientRuntime {
         boolean pathingMayDrive = false;
         try {
             bodyPresent = true;
+            // 无人值守测试由启动参数明确接管；先登记请求，仍由正常身体边界在后续游戏刻安装输入。
+            if (STARTUP_AUTOMATION.tick(context.player(), ACTOR::requestAutomationControl))
+                Constants.LOG.info("MaiCraft explicit startup automation requested for the initial local-player body");
             // 同维度重生不会经过no_body分支；必须在清理旧任务、启动新施工前清掉旧身体的全局导航所有者。
             EmbeddedBaritoneRuntime.observeBody(context.player());
             TransportRuntime.observeControl(context);

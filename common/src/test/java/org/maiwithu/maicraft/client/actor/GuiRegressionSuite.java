@@ -157,6 +157,7 @@ public final class GuiRegressionSuite {
         MenuConfirmationLatencyTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);
+        AutomationContinuityTest.main(args);
         BlockUseConfirmationTest.main(args);
         BlockUsePostureSyncTest.main(args);
         BodyControlInputTest.main(args);

@@ -57,9 +57,10 @@ public final class ClientActorBoundary {
         boolean playerChanged = player != previousPlayer;
         boolean ownedAtStart = body.automationOwnsControls();
         if (playerChanged) {
-            // 换玩家对象时，通常撤回旧控制；只有调度器确认是本任务的传送门交接，才保留接管要求。
+            // 同一连接、同一身份的死亡重生延续已授权自动控制，使恢复思考期间也能自卫；活体替换和换服不继承。
             boolean preserveControl = body.automationControlRequested()
-                    && CompanionTickDispatcher.preservesAutomationControl(previousPlayer, player);
+                    && (samePlayerRespawn(previousPlayer, player)
+                        || CompanionTickDispatcher.preservesAutomationControl(previousPlayer, player));
             body.bodyReplaced(player, preserveControl);
             actions.revokeForBoundary("the local-player body was replaced");
             menus.revokeForBoundary("the local-player body was replaced");
@@ -187,6 +188,13 @@ public final class ClientActorBoundary {
     public void renderFrame() {
         requireClientThread();
         body.renderFrame(minecraft.player);
+    }
+
+    static boolean samePlayerRespawn(LocalPlayer previous, LocalPlayer replacement) {
+        return previous != null && replacement != null && previous != replacement
+                && previous.connection != null && previous.connection == replacement.connection
+                && previous.getUUID() != null && previous.getUUID().equals(replacement.getUUID())
+                && previous.getEntityData() != null && previous.isDeadOrDying();
     }
 
     /** 先登记下个 tick 接管，不在处理 MCP 请求的中途立即替换玩家输入。 */
