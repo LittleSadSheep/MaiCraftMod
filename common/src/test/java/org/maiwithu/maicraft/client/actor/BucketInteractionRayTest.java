@@ -32,6 +32,8 @@ public final class BucketInteractionRayTest {
         ordinaryBlockStillUsesBlock();
         requiredTypeGuardsSubmission();
         changedTargetAfterUseStillConfirms();
+        pickupTaskSettlesAfterSourceDisappears(false);
+        pickupTaskSettlesAfterSourceDisappears(true);
         System.out.println("BucketInteractionRayTest: passed");
     }
 
@@ -109,6 +111,28 @@ public final class BucketInteractionRayTest {
             f.nextTick(); use.tick(); f.nextTick();
             check(use.tick() == Interaction.Status.DONE && f.mode.items == 1,
                     "an existing pickup receipt must confirm its changed target without reapplying the input assertion");
+        }
+    }
+
+    // 走完整任务 tick，而非直接调用 act：空桶收走源格后，外层到场判断也必须允许原生回执完成。
+    private static void pickupTaskSettlesAfterSourceDisappears(boolean lava) throws Exception {
+        try (var f = world(Items.BUCKET)) {
+            var source = lava ? Blocks.LAVA : Blocks.WATER;
+            var filled = lava ? Items.LAVA_BUCKET : Items.WATER_BUCKET;
+            f.set(WATER, source.defaultBlockState());
+            var task = new InteractAtCompanionTask(f.player, new InteractAtTaskRecord(
+                    "pickup-task", 100, MouseButton.RIGHT, WATER, 0, Items.BUCKET, Blocks.AIR, source));
+            task.start(f.player);
+            check(task.tick(f.player) == TaskState.RUNNING && f.mode.items == 0, "pickup first waits for the actual camera");
+            converge(f, task);
+            check(task.tick(f.player) == TaskState.RUNNING && f.mode.items == 1, "the task submits one native bucket use");
+            f.set(WATER, Blocks.AIR.defaultBlockState()); f.inventory.setItem(0, new ItemStack(filled));
+            f.nextTick();
+            check(task.tick(f.player) == TaskState.RUNNING, "changed source does not become a false out-of-reach failure");
+            f.nextTick();
+            check(task.tick(f.player) == TaskState.SUCCESS && f.mode.items == 1 && f.mode.blocks == 0,
+                    "the existing native pickup receipt settles successfully without another click");
+            check(task.result(TaskState.SUCCESS).success(), "the completed bucket effect reaches the public task result");
         }
     }
 

@@ -92,7 +92,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected boolean reached() {
-        return r.aim == null || withinReach();
+        // 收回水或岩浆后源格已经消失，仍须继续结算刚才的原生使用；出手前的射线检查不能截断待确认回执。
+        return interaction != null || r.aim == null || withinReach();
     }
 
     @Override
