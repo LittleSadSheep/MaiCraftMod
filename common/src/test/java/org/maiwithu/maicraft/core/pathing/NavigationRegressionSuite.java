@@ -71,6 +71,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.SharedLandingExecutio
 import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingReplayTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterSurfaceExecutionTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportIntentTest;
+import org.maiwithu.maicraft.core.pathing.transport.ContinuousTravelTargetTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntimeTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportTargetsTest;
 import org.maiwithu.maicraft.core.pathing.transport.LoadedTravelLegTest;
@@ -166,6 +167,8 @@ public final class NavigationRegressionSuite {
         FallLandingTest.main(args);
         TransportTargetsTest.main(args);
         LoadedTravelLegTest.main(args);
+        // 连续飞行的参考点提前前移，备用地面仍受真实支撑与续航约束。
+        ContinuousTravelTargetTest.main(args);
         TransportRuntimeTest.main(args);
         TransportIntentTest.main(args);
         JetpackFlightTest.main(args);

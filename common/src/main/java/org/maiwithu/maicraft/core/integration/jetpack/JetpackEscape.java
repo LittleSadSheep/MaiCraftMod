@@ -14,6 +14,8 @@ final class JetpackEscape {
         List<List<Vec3>> candidates = new ArrayList<>();
         Vec3 below = space.landingBelow(position.add(0, 0.1, 0));
         if (below != null) candidates.add(List.of(position, below));
+        // 连续飞行的参考点可能在空中；备用落脚面必须单独参与退出比较，并重新核对通道与支撑。
+        for (Vec3 exit : route.emergencyLandings()) candidates.add(List.of(position, exit));
         var forward = new ArrayList<Vec3>(); forward.add(position);
         forward.addAll(route.points().subList(Math.min(next, route.points().size()-1), route.points().size()));
         candidates.add(forward);

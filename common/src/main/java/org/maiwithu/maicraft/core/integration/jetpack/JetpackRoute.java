@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
@@ -24,7 +25,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 /**
  * 按干燥程度和身体空间找最多六十四格的飞行路线，先试升高、平移、落下，再按六方向搜索。
- * 当前现场读取的加载检查使用 hasChunkAt；它在原版客户端恒为真，不能证明所查区域已有数据。
+ * 身体及邻接碰撞来源必须已在客户端加载；未知区域不能当作空气来延长飞行路线。
  */
 public final class JetpackRoute {
     public interface Space {
@@ -195,7 +196,7 @@ public final class JetpackRoute {
     }
 
     // 既检查当前身体通道，也检查向上推一下可能达到的高度；额外高度来自当前悬停模型。
-    static boolean flightClear(Space space, Vec3 from, Vec3 to, JetpackNativeAdapter.Snapshot power) {
+    public static boolean flightClear(Space space, Vec3 from, Vec3 to, JetpackNativeAdapter.Snapshot power) {
         double hoverVelocity = JetpackDynamics.rawAfterStep(power.hoverDescent(), power);
         double reserve = JetpackDynamics.riseEnvelope(hoverVelocity, true, power);
         return space.clear(from, to) && space.clear(from.add(0, reserve, 0), to.add(0, reserve, 0));
@@ -243,7 +244,7 @@ public final class JetpackRoute {
     public static Space observed(LocalPlayerContext ctx) {
         return observed(ctx, NavigationSafetyContext.forbiddenBodyCells());
     }
-    // 按实际身体尺寸加余量检查边界、禁入格和碰撞；这里的 hasChunksAt/hasChunkAt 不能在原版客户端确证区域已加载。
+    // 按实际身体尺寸加余量检查边界、禁入格和碰撞，再用真实加载状态验证相邻碰撞来源。
     public static Space observed(LocalPlayerContext ctx, LongSet forbidden) {
         var contraptions=ContraptionObstacles.capture(ctx.level(),ctx.player().position());
         return new Space() {
@@ -254,11 +255,10 @@ public final class JetpackRoute {
                 if (box.minY < ctx.level().getMinBuildHeight() || box.maxY >= ctx.level().getMaxBuildHeight()
                         || !ctx.level().getWorldBorder().isWithinBounds(box)) return false;
                 AABB origins = box.inflate(1.0000001);
-                if (!ctx.level().hasChunksAt(BlockPos.containing(origins.minX,origins.minY,origins.minZ),
-                        BlockPos.containing(origins.maxX,origins.maxY,origins.maxZ))) return false;
+                if (!loadedSurroundings(origins, ctx.level()::isLoaded)) return false;
                 for (BlockPos p : BlockPos.betweenClosed(BlockPos.containing(box.minX, box.minY, box.minZ),
                         BlockPos.containing(box.maxX, box.maxY, box.maxZ))) {
-                    if (!ctx.level().hasChunkAt(p)) return false;
+                    if (!ctx.level().isLoaded(p)) return false;
                     var state = ctx.level().getBlockState(p);
                     if (!state.getFluidState().isEmpty() || hazard(state)
                             || forbidden.contains(p.asLong())) return false;
@@ -277,7 +277,7 @@ public final class JetpackRoute {
                 BlockPos column = BlockPos.containing(point);
                 for (int y = column.getY(); y >= Math.max(ctx.level().getMinBuildHeight(), column.getY()-64); y--) {
                     BlockPos support = new BlockPos(column.getX(), y, column.getZ());
-                    if (!ctx.level().hasChunkAt(support)) return null;
+                    if (!ctx.level().isLoaded(support)) return null;
                     var state = ctx.level().getBlockState(support);
                     if (!state.getFluidState().isEmpty() || hazard(state)) return null;
                     double height = CollisionGeometry.supportHeight(ctx.level(), support);
@@ -297,5 +297,13 @@ public final class JetpackRoute {
         return state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.CACTUS) || state.is(Blocks.SWEET_BERRY_BUSH)
                 || state.is(Blocks.POINTED_DRIPSTONE) || state.getBlock() instanceof BaseFireBlock
                 || state.getBlock() instanceof CampfireBlock;
+    }
+    // 区块边缘上的身体会碰到邻块形状；完整检查这些来源列，不能只确认身体中心所在区块。
+    static boolean loadedSurroundings(AABB box, Predicate<BlockPos> loaded) {
+        BlockPos low = BlockPos.containing(box.minX, box.minY, box.minZ), high = BlockPos.containing(box.maxX, box.maxY, box.maxZ);
+        for (int x = low.getX() >> 4; x <= high.getX() >> 4; x++)
+            for (int z = low.getZ() >> 4; z <= high.getZ() >> 4; z++)
+                if (!loaded.test(new BlockPos(x * 16 + 8, low.getY(), z * 16 + 8))) return false;
+        return true;
     }
 }

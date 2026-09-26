@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.core.integration.jetpack;
 
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
+import java.util.List;
 
 /**
  * 检查气量预留、分次飞越障碍、水域上方的退出选择、刹车按键和平台对准；使用简化空间与固定设备参数。
@@ -11,6 +13,10 @@ public final class JetpackFlightTest {
             true, "fixture", "create_jetpack:netherite_jetpack", true, true, 900, 17000,
             0.016, 0.32, 0.6, -0.03, 0.08);
     public static void main(String[] args) {
+        // 靠近区块边界时，相邻碰撞来源未加载就拒绝延伸；随后加载完成才可使用该走廊。
+        var border = new AABB(14, 10, 2, 17, 13, 4);
+        check(!JetpackRoute.loadedSurroundings(border, p -> p.getX() < 16), "unknown neighboring chunk cannot masquerade as empty flight space");
+        check(JetpackRoute.loadedSurroundings(border, p -> p.getX() < 32), "loaded neighboring collision sources allow ordinary checks");
         check(JetpackNativeAdapter.usableTicks(2, 900, 900) == 0, "last charges are a landing/billing reserve");
         check(JetpackNativeAdapter.usableTicks(22, 900, 120) == 20, "float usability and integer consumption differ");
         check(JetpackNativeAdapter.usableTicks(900, 900, 0) == 0, "unknown fuel configuration cannot imply infinity");
@@ -37,6 +43,9 @@ public final class JetpackFlightTest {
         while (next < crossing.points().size()-1 && crossing.points().get(next).x <= overWater.x) next++;
         var escape = JetpackEscape.choose(water, overWater, crossing, next, POWER);
         check(escape != null && escape.points().getLast().equals(target), "cancel above water should choose nearer forward landing, not require a round trip");
+        // 连续前进的路线末点在空中，仍能从独立保存的备用地面选择安全出口。
+        var airRoute = new JetpackRoute.Plan(List.of(overWater, target.add(0, 1, 0)), List.of(target), 500);
+        check(JetpackEscape.choose(water, overWater, airRoute, 1, POWER).points().getLast().equals(target), "air steering references retain real emergency landings");
         var blocked = new TestSpace(true, false) { public boolean clear(Vec3 from, Vec3 to) { return false; } };
         check(complete(blocked, start, target) == null, "blocked takeoff must fail without input effects");
         var changed = new JetpackRoute.Search(start, target, POWER);

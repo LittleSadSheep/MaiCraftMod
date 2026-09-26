@@ -24,6 +24,8 @@ public interface MovingFlightTarget {
     default boolean seekLandingOnStop() { return false; }
     /** 仅在原生飞行效果开始前，才允许对同一目标身份尝试另一已观察着陆面。 */
     default boolean nextLanding() { return false; }
+    /** 连续前进会更新已经验证的备用地面；燃料不足或取消时仍有真实出口可供选择。 */
+    default Vec3 emergencyLanding() { return null; }
     JetpackRoute.Space space(LocalPlayerContext context, LongSet forbidden);
     Map<String, Object> diagnostics();
 }

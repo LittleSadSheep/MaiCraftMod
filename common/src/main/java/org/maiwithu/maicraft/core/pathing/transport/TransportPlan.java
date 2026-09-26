@@ -32,7 +32,10 @@ final class TransportPlan {
                 var destination = platform.anchor();
                 var flight = JetpackFlightSession.probe(context, destination.landingPoint(), forbidden);
                 if (flight.available()) offers.add(new Offer("jetpack", destination.feet(), flight.estimatedTicks(),
-                        () -> new JetpackFlightSession(destination.landingPoint(), forbidden, platform.landings())));
+                        // 远程方向目标在同一会话里提前延长走廊；终点已在本地时仍使用普通精确落地。
+                        () -> goal instanceof ForwardTravelGoal forward
+                                ? new JetpackFlightSession(new ContinuousTravelTarget(forward.destination, destination.landingPoint(), forbidden), forbidden)
+                                : new JetpackFlightSession(destination.landingPoint(), forbidden, platform.landings())));
                 else if (unavailable.size() < 8) unavailable.add("jetpack: " + flight.reason());
             }
         }

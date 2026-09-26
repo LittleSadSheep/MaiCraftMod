@@ -244,9 +244,13 @@ public final class JetpackFlightSession implements TransportSession {
         var space = space(ctx);
         Vec3 position = ctx.player().position();
         planningTarget=target;
+        // 延长空中走廊时带上新观察到的地面出口，不能只记得几十格外的最初起飞平台。
+        var exits = new ArrayList<>(route.emergencyLandings());
+        if (movingTarget.emergencyLanding() != null && !exits.contains(movingTarget.emergencyLanding())) exits.add(movingTarget.emergencyLanding());
+        if (exits.size() > 32) exits.subList(0, exits.size() - 32).clear();
         if (!landingSelected()) {
             if (!JetpackRoute.flightClear(space,position,target,power)) { obstruction(ctx,space,target); return; }
-            route=new JetpackRoute.Plan(List.of(position,target),route.emergencyLandings(),
+            route=new JetpackRoute.Plan(List.of(position,target),exits,
                     (int)Math.ceil(140+JetpackRoute.edgeTicks(position,target,power)));
             planningLanding=false; waypoint=1; waypointDistance=Double.POSITIVE_INFINITY; waypointTick=lastTick; repaired=false;
             return;
@@ -255,7 +259,7 @@ public final class JetpackFlightSession implements TransportSession {
         double reserve = Math.max(1, route.points().get(route.points().size()-2).y - route.points().getLast().y);
         Vec3 approach = target.add(0,reserve,0);
         if (JetpackRoute.flightClear(space,position,approach,power) && space.clear(approach,target)) {
-            route = new JetpackRoute.Plan(List.of(position,approach,target), route.emergencyLandings(),
+            route = new JetpackRoute.Plan(List.of(position,approach,target), exits,
                     (int)Math.ceil(140 + JetpackRoute.edgeTicks(position,target,power)));
             waypoint = 1; waypointDistance = Double.POSITIVE_INFINITY; waypointTick = lastTick;
         } else {
