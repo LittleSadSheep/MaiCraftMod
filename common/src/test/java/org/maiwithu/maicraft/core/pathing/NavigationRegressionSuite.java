@@ -78,6 +78,7 @@ import org.maiwithu.maicraft.core.pathing.transport.LoadedTravelLegTest;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeightTest;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelistTest;
 import org.maiwithu.maicraft.core.pathing.util.SwimAirBudgetTest;
+import org.maiwithu.maicraft.core.pathing.util.BreathingRouteTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionProtectionTest;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest;
 import org.maiwithu.maicraft.core.task.mine.MiningBatchTest;
@@ -114,6 +115,8 @@ public final class NavigationRegressionSuite {
         ElevatorFloorsTest.main(args);
         ElevatorTravelIntentTest.main(args);
         SwimAirBudgetTest.main(args);
+        // 低氧时先证明绕过水下遮挡的完整路线，再进入可呼吸的开口。
+        BreathingRouteTest.main(args);
         SubmergedWaterTravelPolicyTest.main(args);
         NavigationHandoffTest.main(args);
         MovingGoalRefreshTest.main(args);
