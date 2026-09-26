@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 
 /**
  * 开工前分批检查世界边界、AE2 部件宿主和临时洞口。普通方块的替换与材料检查另交给建筑子任务。
@@ -69,8 +70,14 @@ final class MachineBuildSurvey {
                     if (NavigationSafetyContext.protectsMutation(at)) return blocked(world, at, "native_installation_protected", "Native installation intersects a protected area.");
                     if (BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString().equals("create:belt"))
                         return blocked(world, at, "native_belt_chain_mismatch", "An existing belt has a different native chain; inspect it before replacing any segment.");
-                    if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir())
-                        return blocked(world, at, "native_installation_path_occupied", "Native installation needs an empty path; undeclared obstacles will not be removed.");
+                    if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir()) {
+                        // assembly 已声明整条安装路径；允许替换时先清理其中可破坏、无流体/库存的白名单方块，再执行原生连接器。
+                        var state = world.getBlockState(at);
+                        if (plan.replaceExisting() && ClearanceWhitelist.allows(state) && !state.hasBlockEntity()
+                                && state.getFluidState().isEmpty() && state.getDestroySpeed(world, at) >= 0) {
+                            MachinePlacementRules.requireModeledEffects(state.getBlock()); clears.add(at);
+                        } else return blocked(world, at, "native_installation_path_occupied", "Native installation path needs authorized clearance of ordinary whitelisted obstacles.");
+                    }
                 }
             } catch (RuntimeException unavailable) { return new Progress(false, null, "Native installation observation unavailable: " + unavailable.getMessage()); }
             installationIndex++;

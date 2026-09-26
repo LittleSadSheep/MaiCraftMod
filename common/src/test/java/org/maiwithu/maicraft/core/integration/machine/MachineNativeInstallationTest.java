@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.SemanticResultView;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 /** 用明确的模拟原生动作检查父级装配顺序和最终状态；不把夹具世界变化当成实际 Create 验收。 */
 public final class MachineNativeInstallationTest {
@@ -70,8 +71,8 @@ public final class MachineNativeInstallationTest {
             check(survey.completedInstallations().contains(AT), "completed native structure is recognized on resume");
             var remaining = plan.blockTask("resume", 1000, false, List.of(), Set.of(), survey.completedInstallations());
             check(remaining.targets.stream().noneMatch(target -> target.pos().equals(AT)), "resume cannot rebuild a finished native structure as its preparation block");
-            // 原语需要的新路径若被其他方块占用，必须停在调查阶段，不把隐含净空升级成拆除许可。
-            BlockPos obstacle = AT.south(); h.set(obstacle, Blocks.STONE.defaultBlockState());
+            // 原语路径可以清除获准的普通障碍；不在白名单的建筑材料仍须停在勘测阶段。
+            BlockPos obstacle = AT.south(); h.set(obstacle, Blocks.BRICKS.defaultBlockState());
             MachineNativeInstallation blocked = new MachineNativeInstallation() {
                 public Map<BlockPos, BlockState> preparation() { return Map.of(obstacle, Blocks.AIR.defaultBlockState()); }
                 public Map<BlockPos, BlockState> targets() { return Map.of(obstacle, Blocks.GOLD_BLOCK.defaultBlockState()); }
@@ -80,19 +81,28 @@ public final class MachineNativeInstallationTest {
                 public TaskRecord task(String id, long deadline, List<BlockPos> footprint, List<String> labels) { throw new AssertionError("blocked installation must not start"); }
             };
             var blockedPlan = constructor.newInstance(new BlockPos(2, 1, 2), targets, List.of(), List.of(), new JsonObject(), true, false, List.of(blocked), List.of(), new JsonObject());
-            check(new MachineBuildSurvey(blockedPlan).tick(h.level).failure().contains("undeclared obstacles"), "even replacement permission does not invent extra demolition targets");
+            check(new MachineBuildSurvey(blockedPlan).tick(h.level).failure().contains("authorized clearance"), "replacement permission does not override the obstacle whitelist");
             check(blockedPlan.blockTask("blocked", 1000, false).targets.stream().noneMatch(target -> target.pos().equals(obstacle)), "implicit native path remains absent from ordinary demolition tasks");
             // 实际父任务的终态、对外净化和注意摘要都必须能定位阻塞，不能只留下笼统的空路径提示。
             var surveyTask = new MachineBuildTask(h.player, new MachineBuildTaskRecord("survey-receipt", 1000, blockedPlan, "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of()));
             check(invoke(surveyTask, "surveyParts") == TaskState.FAILED, "occupied native path stops before construction");
             var receipt = SemanticResultView.result(surveyTask.result(TaskState.FAILED));
             var clearance = (Map<?, ?>) receipt.data().get("clearance_report");
-            check(clearance.get("observed_block_id").equals("minecraft:stone") && clearance.get("blueprint_offset").equals(List.of(1, 0, 2)), "block identity and local offset remain actionable");
+            check(clearance.get("observed_block_id").equals("minecraft:bricks") && clearance.get("blueprint_offset").equals(List.of(1, 0, 2)), "block identity and local offset remain actionable");
             check(clearance.get("failure_position").equals(Map.of("x", 3, "y", 1, "z", 4)) && receipt.data().get("failure_type").equals("terrain_blocked"), "public receipt retains observed position and a concrete failure type");
             var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult", JsonObject.class); compact.setAccessible(true);
             var notice = ((JsonObject) compact.invoke(null, JsonParser.parseString(receipt.toJson()).getAsJsonObject())).getAsJsonObject("data").getAsJsonObject("clearance_report");
             check(notice.getAsJsonObject("failure_position").get("z").getAsInt() == 4 && notice.getAsJsonArray("blueprint_offset").size() == 3, "attention preserves exact observed clearance facts");
-            check(h.level.getBlockState(obstacle).is(Blocks.STONE) && !((Boolean) clearance.get("world_modified")), "survey diagnostics do not clear undeclared obstacles");
+            check(h.level.getBlockState(obstacle).is(Blocks.BRICKS) && !((Boolean) clearance.get("world_modified")), "survey diagnostics do not clear rejected obstacles");
+            // 普通火把在已授权的原生路径内进入清理阶段，勘测自身不挖；缺少替换许可或遇保护格仍拒绝。
+            h.set(obstacle, Blocks.TORCH.defaultBlockState());
+            var torchSurvey = new MachineBuildSurvey(blockedPlan);
+            check(torchSurvey.tick(h.level).complete() && torchSurvey.partClears().contains(obstacle), "authorized native span schedules whitelisted torch clearance");
+            check(blockedPlan.blockTask("torch", 1000, false, torchSurvey.partClears()).targets.stream().anyMatch(target -> target.pos().equals(obstacle) && target.desiredState().isAir()), "ordinary builder receives the derived clearance target");
+            var preservePlan = constructor.newInstance(BlockPos.ZERO, targets, List.of(), List.of(), new JsonObject(), false, false, List.of(blocked), List.of(), new JsonObject());
+            check(new MachineBuildSurvey(preservePlan).tick(h.level).failure() != null, "whitelist alone does not authorize replacement");
+            check(NavigationSafetyContext.withProtectedArea(List.of(obstacle), List.of(), () -> new MachineBuildSurvey(blockedPlan).tick(h.level)).failure() != null, "protected torch stays protected inside an authored span");
+            check(h.level.getBlockState(obstacle).is(Blocks.TORCH), "survey only schedules clearance and leaves the actual world untouched");
             var belt = new CreateBeltInstallTaskRecord("unsupported-real-belt", 1000,
                     CreateBeltGeometry.between(AT, AT.east(2), Direction.Axis.Z, 20), Set.of(AT, AT.east(2)), List.of(AT), List.of());
             Task actual = TaskFactory.create(h.player, belt); actual.start(h.player);
