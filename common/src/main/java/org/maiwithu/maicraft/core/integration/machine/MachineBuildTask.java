@@ -84,6 +84,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private boolean sealingStarted;
     private Map<String, Object> lastChild = Map.of();
     private Map<String, Object> failedSupply = Map.of();
+    private Map<String, Object> failedNavigation = Map.of();
     private String failureCode;
     private JsonObject recordedMachine;
     private MachineBlueprintComparison comparison;
@@ -396,7 +397,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.column(target.getX(), target.getZ()), 1.0,
                 () -> world.isLoaded(target), PlayerNav.ContextProvider.DEFAULT);
         var state = nav.tick();
-        if (state == PlayerNav.Status.FAILED) { stopNav(); return failure("machine_chunk_unreachable", "Cannot load the next construction region."); }
+        if (state == PlayerNav.Status.FAILED) return navigationFailure("machine_chunk_unreachable", "Cannot load the next construction region.", target);
         if (state == PlayerNav.Status.ARRIVED) stopNav();
         return TaskState.RUNNING;
     }
@@ -404,7 +405,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (nav == null) nav = PlayerNav.toGoal(player, () -> NavGoal.near(target, 3), 1.0,
                 () -> player.blockPosition().distSqr(target) <= 9, PlayerNav.ContextProvider.DEFAULT);
         var state = nav.tick();
-        if (state == PlayerNav.Status.FAILED) { stopNav(); return failure("machine_commissioning_unreachable", "Cannot approach the multiblock for formation verification."); }
+        if (state == PlayerNav.Status.FAILED) return navigationFailure("machine_commissioning_unreachable", "Cannot approach the multiblock for formation verification.", target);
         if (state == PlayerNav.Status.ARRIVED) stopNav();
         return TaskState.RUNNING;
     }
@@ -412,6 +413,15 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private long deadline() { return player.level().getGameTime() + 3 * 60 * 20; }
     private String id() { return r.getToolCallId() + "-assembly-" + (++serial); }
     private TaskState failure(String code, String message) { failureCode = code; fail(message, FailureType.UNKNOWN); return TaskState.FAILED; }
+
+    // 先保存路线真正的结束原因，再停止并记账；自卫中断、地形阻挡与交通失败不能全部丢成UNKNOWN。
+    private TaskState navigationFailure(String code, String message, BlockPos target) {
+        FailureType type = nav.failType(); String reason = nav.failReason();
+        failedNavigation = Map.of("target", Map.of("x", target.getX(), "y", target.getY(), "z", target.getZ()),
+                "player_position", player.position().toString(), "failure_type", type.name().toLowerCase(Locale.ROOT),
+                "reason", reason, "path_outcome", nav.outcomeSummary(), "transport", nav.transportDiagnostics());
+        stopNav(); failureCode = code; fail(message + " Navigation: " + reason, type); return TaskState.FAILED;
+    }
 
     /** 子任务的稳定失败词表向上传递；没有类别或协议外值仍保留未知，不能推断为普通缺料。 */
     static FailureType childFailure(Map<String, Object> data) {
@@ -467,6 +477,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
+        if (!failedNavigation.isEmpty()) data.put("navigation_failure", failedNavigation);
         data.put("machine_layout", r.plan.report());
         if (recordedMachine != null) data.put("recorded_machine", recordedMachine.deepCopy());
         if (comparisonIssue != null) data.put("blueprint_diff",comparisonIssue.deepCopy());

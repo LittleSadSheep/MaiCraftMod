@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachinePlacementDependenci
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDiffTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineCompletionArchiveTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineBuildEvidenceTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineNavigationReceiptTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineWorldBlueprintTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignRejectionTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineNativeInstallationTest;
@@ -145,6 +146,9 @@ public final class MachineRegressionSuite {
         try { MachineBlueprintDiffTest.main(args); }
         catch (Exception failure) { throw new AssertionError("machine blueprint comparison", failure); }
         MachineBuildEvidenceTest.main(args);
+        // 暂停或路径失败的真实类别要传到机器任务，不能逼模型无依据地重做工地规划。
+        try { MachineNavigationReceiptTest.main(args); }
+        catch (Exception failure) { throw new AssertionError("machine navigation receipt", failure); }
         try { MachineCompletionArchiveTest.main(args); }
         catch (Exception failure) { throw new AssertionError("automatic machine archive", failure); }
         try { MachineWorldBlueprintTest.main(args); }
