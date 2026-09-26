@@ -20,6 +20,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.core.integration.machine.assembly.LavaPlacementSafety;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementAim;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTask;
@@ -37,6 +39,7 @@ public final class FluidPlacementTaskTest {
         originalBucketAndAcknowledgement(); reuseAndFailures(); openFlowChannels(); cancellationDoesNotPourAgain();
         replayOffsetStance(); arrivedStanceCannotWaitForever();
         newlyUsableFootingReplacesStaleNavigation();
+        lavaPlacementAvoidsFutureFlow();
         System.out.println("FluidPlacementTaskTest: passed");
     }
 
@@ -167,6 +170,46 @@ public final class FluidPlacementTaskTest {
                             && ((Number)running.progress().get("rejected_stances")).intValue()>0 && f.itemUses()==0,
                     "实际桶射线不可用的已抵达格须有界换站，不能假成功或继续无进展等待");
             running.result(TaskState.CANCELLED);
+        }
+    }
+
+    // 复现采收后站在干燥产物格、向邻格倒岩浆的情形：先阻止点击，再到台沿完成同一任务。
+    private static void lavaPlacementAvoidsFutureFlow() throws Exception {
+        try (var f = fixture()) {
+            f.set(AT.below(), Blocks.STONE.defaultBlockState());
+            f.set(AT.west().below(), Blocks.STONE.defaultBlockState());
+            f.set(AT.west(), Blocks.AIR.defaultBlockState()); f.position(new Vec3(2.5, 1, 3.5));
+            check(LavaPlacementSafety.mayReachBody(f.level, AT, f.player.getBoundingBox()),
+                    "a dry neighboring production cell will be reached by the newly poured lava");
+            var behind = new AABB(1.2, 1, 3.2, 1.8, 2.8, 3.8);
+            check(LavaPlacementSafety.mayReachBody(f.level, AT, behind), "the check follows more than the immediate source cell");
+            f.set(AT.west(), Blocks.GLASS.defaultBlockState());
+            check(!LavaPlacementSafety.mayReachBody(f.level, AT, behind), "an intact wall can protect a lower standing area");
+            f.set(AT.west(), Blocks.AIR.defaultBlockState());
+            check(LavaPlacementSafety.mayReachBody(f.level, AT.above(3), new AABB(3.2, 1, 3.2, 3.8, 2.8, 3.8)),
+                    "a possible downward flow cannot be ignored when the body is below the source");
+            check(!LavaPlacementSafety.mayReachBody(f.level, new BlockPos(7, 1, 7), new AABB(11.2, 1, 7.2, 11.8, 2.8, 7.8)),
+                    "ordinary horizontal decay bounds the conservative flow region");
+            f.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
+            f.mode.itemUse = player -> {
+                f.level.blockSequence++; f.set(AT, Blocks.LAVA.defaultBlockState());
+                f.inventory.setItem(0, new ItemStack(Items.BUCKET));
+            };
+            var running = new FluidPlacementTask(f.player, new FluidPlacementTaskRecord(
+                    "lava-safe-stance", 1000, AT, Blocks.LAVA.defaultBlockState(), task().installation));
+            running.start(f.player); running.tick(f.player); f.nextTick();
+            // 把已有候选设为当前脚位，单独验证到位与直接倒桶门槛；夹具不启动完整 Baritone 客户端。
+            ActorControlTestHarness.field(FluidPlacementTask.class, "stance").set(running, f.player.blockPosition());
+            check(running.tick(f.player) == TaskState.RUNNING && f.itemUses() == 0
+                    && Boolean.TRUE.equals(running.progress().get("body_in_possible_lava_flow")),
+                    "a visible bucket ray must not bypass the new lava body safety gate");
+            f.position(new Vec3(3.5, 2, 2.5)); f.nextTick();
+            check(!LavaPlacementSafety.mayReachBody(f.level, AT, f.player.getBoundingBox()),
+                    "standing on the surrounding rim stays above the predicted flow");
+            submit(f, running); f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1,
+                    "the same task pours once from a safe rim and still requires native confirmation");
+            running.result(TaskState.SUCCESS);
         }
     }
 

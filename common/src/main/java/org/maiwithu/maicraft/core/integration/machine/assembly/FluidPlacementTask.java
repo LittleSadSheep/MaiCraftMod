@@ -12,6 +12,7 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -19,6 +20,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -48,7 +50,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     private String lastStanceRejection = "";
     private long waitingSince;
     private String stage = "preflight";
-    private boolean actualRayAvailable, bodyOverTarget, actionAvailable;
+    private boolean actualRayAvailable, bodyOverTarget, actionAvailable, bodyInLavaFlow;
     private boolean selected, submitted, verified, alreadyPresent, relocate;
     private String failureCode = "";
     private Map<String,Object> stoppedProgress;
@@ -71,7 +73,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (!selection.pending() && world.isLoaded(r.target) && FluidPlacementRules.matches(world.getBlockState(r.target), r.expected)) {
             alreadyPresent = true; return TaskState.SUCCESS;
         }
-        // 角色拿桶与走近期间复查目标是否被占用，不推演周围流体以后会流到哪里。
+        // 拿桶与走近期间复查目标；岩浆的身体站位另按保守流路检查，不把邻格干燥当作倒桶后仍安全。
         String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
         if (issue != null) return failure(issue);
         if (!selected) {
@@ -91,7 +93,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         actualRayAvailable = visible != null; bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
         // 沿路已走到另一个能实际倒桶的脚位就直接使用；旧候选格不可达时，不应继续绕路去满足旧导航终点。
         boolean currentRejected = relocate && rejected.contains(PlayerNav.playerFeet(player).asLong());
-        if (currentRejected || visible == null || bodyOverTarget) return approach();
+        bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
+        if (bodyInLavaFlow) lastStanceRejection = "body_in_possible_lava_flow";
+        if (unsettledLavaBody()) lastStanceRejection = "lava_stance_not_grounded";
+        if (currentRejected || visible == null || bodyOverTarget || bodyInLavaFlow || unsettledLavaBody()) return approach();
         relocate = false;
         stopNav(); aim = visible.getLocation(); InputDriver.halt(player); InputDriver.lookAt(player, aim);
         // 只把真正等待转头的刻数记入瞄准超时；动作端口忙时不应反复丢弃已经正确的站位。
@@ -106,6 +111,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         // 出手前只确认本次落桶目标仍可用，提交后依靠原生桶回执核实实际结果。
         issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
         if (issue != null) return failure(issue);
+        // 相机等待期间围挡可能改变，提交桶之前再用实际身体复核，不能沿用旧候选的安全结论。
+        bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
+        if (bodyInLavaFlow) { rejectStand("body_in_possible_lava_flow"); return TaskState.RUNNING; }
+        if (unsettledLavaBody()) { rejectStand("lava_stance_not_grounded"); return TaskState.RUNNING; }
         actionAvailable = context.mutationAvailable();
         if (!actionAvailable) { waiting("awaiting_native_action"); return TaskState.RUNNING; }
         evidence = new FluidPlacementReceipt(player, r.target, r.expected); submitted = true;
@@ -119,13 +128,21 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     private BlockHitResult visibleFrom(Vec3 eye) {
         return FluidPlacementAim.find(world, player, eye, r.target, player.blockInteractionRange(), r.bucket);
     }
+    private boolean lavaRequiresCaution() { return r.expected.is(Blocks.LAVA) && !WorkProfile.of(player).fearless(); }
+    private boolean unsafeLavaBody(AABB body) {
+        return lavaRequiresCaution() && LavaPlacementSafety.mayReachBody(world, r.target, body);
+    }
+    // 生存角色不能把跳跃途中的高眼位当成安全台沿；先实际落稳，避免倒完后落进刚生成的岩浆。
+    private boolean unsettledLavaBody() { return lavaRequiresCaution() && !player.onGround(); }
     private TaskState approach() {
-        // 倒桶阶段不许导航拆开已建好的围挡；可站在尚未填充的干燥区域，但不能站在本次要填的格子里。
+        // 不拆围挡；倒岩浆还须排除将被流路覆盖的干燥格，优先利用真实台沿及已有隔墙。
         return NavigationSafetyContext.withProtectedArea(r.installation, List.of(r.target), () -> {
             waiting("approaching_stance");
             if (stance == null) {
                 if (stanceAttempts >= MAX_STANCE_ATTEMPTS) return failure("fluid_stance_budget_exhausted");
                 stance = AssemblyInteractionGeometry.nearestStand(player, r.target, rejected, eye -> {
+                    Vec3 feet = eye.subtract(0, player.getEyeHeight(Pose.STANDING), 0);
+                    if (unsafeLavaBody(player.getDimensions(Pose.STANDING).makeBoundingBox(feet))) return null;
                     var hit = visibleFrom(eye); return hit == null ? null : hit.getLocation();
                 }, Pose.STANDING);
                 stanceAttempts++;
@@ -153,7 +170,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     private TaskState settleStance() {
         stopNav(); actualRayAvailable = visibleFrom(player.getEyePosition()) != null;
         bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
-        if (!actualRayAvailable || bodyOverTarget) rejectStand();
+        bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
+        if (bodyInLavaFlow) rejectStand("body_in_possible_lava_flow");
+        else if (unsettledLavaBody()) rejectStand("lava_stance_not_grounded");
+        else if (!actualRayAvailable || bodyOverTarget) rejectStand();
         else { relocate = false; aimTicks = 0; aimGate.reset(); waiting("stance_ready"); }
         return TaskState.RUNNING;
     }
@@ -212,6 +232,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         data.put("waiting_ticks", Math.max(0,world.getGameTime()-waitingSince)); data.put("bucket_selected",selected);
         data.put("selection_pending",selection.pending()); data.put("bucket_submitted",submitted);
         data.put("actual_bucket_ray_available",actualRayAvailable); data.put("body_over_target",bodyOverTarget);
+        data.put("body_in_possible_lava_flow", bodyInLavaFlow);
         data.put("native_action_available",actionAvailable); data.put("aim_wait_ticks",aimTicks);
         data.put("stance_attempts",stanceAttempts); data.put("rejected_stances",rejected.size());
         data.put("navigation_active",nav!=null); data.put("in_selected_stance_cell",atStance());
