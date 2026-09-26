@@ -373,20 +373,20 @@ public final class SemanticCookCompanionTask
     }
 
     // 需要补料时先关自己开的菜单，再把需求交给语义取物任务，并传递允许来源、伤害与保护标签。
-    // 去掉 COOK 来源，避免为了本次加工原料又递归开启加工任务。
+    // 允许有界的原料再加工；祖先、燃料限制与原权限一起传递，不能把每个子任务当成全新的无约束请求。
     private TaskState acquire(Item item, int finalCount, Purpose purpose) {
         if (openedMenu) {
             phase = Phase.CLEANUP;
             return TaskState.RUNNING;
         }
+        if (!r.productionLineage.mayDescend()) return failOrClean("cooking_dependency_depth_limit",
+                "The bounded cooking prerequisite depth was reached before starting another acquisition.", FailureType.NO_MATERIAL);
         SemanticAcquireTaskRecord child = new SemanticAcquireTaskRecord(
                 childId("acquire"), childDeadline(8L * 60L * 20L),
                 List.of(BuiltInRegistries.ITEM.getKey(item)), finalCount,
-                r.allowedSources.stream()
-                        .filter(source -> source != SemanticAcquireTaskRecord.Source.COOK)
-                        .toList(),
+                r.allowedSources,
                 r.allowHarm, SemanticAcquireTaskRecord.SourceHint.empty(),
-                r.protectedLabels, 16);
+                r.protectedLabels, 16).withCookingContext(r.productionLineage.descend(r.itemId), r.allowedFuelIds);
         return start(child, purpose);
     }
 

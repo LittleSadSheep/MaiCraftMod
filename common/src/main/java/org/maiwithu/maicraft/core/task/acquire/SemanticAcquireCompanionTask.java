@@ -159,11 +159,12 @@ public final class SemanticAcquireCompanionTask
     protected void onStart() {
         // 记下起始库存，并把最终需求放到栈顶；以后缺什么先压上去，凑齐后再回到上一层继续。
         initialCounts = counts(r.itemIds);
+        var lineage = new LinkedHashSet<>(r.productionLineage.ancestors()); lineage.addAll(r.itemIds);
         rootNeed = new AcquisitionNeed(
                 r.itemIds,
                 r.count,
                 0,
-                new LinkedHashSet<>(r.itemIds),
+                lineage,
                 Set.of(),
                 Set.of(),
                 r.allowedSources);
@@ -367,6 +368,10 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCraft(AcquisitionNeed need) {
+        if (need.itemIds.stream().allMatch(r.productionLineage::blocks)) {
+            addIssue("craft", "production_dependency_cycle", "grid crafting would revisit an active production ancestor", needFacts(need));
+            advanceSource(need); return TaskState.RUNNING;
+        }
         // 对每种可接受成品查配方，优先选择材料和工作台都已经满足、成本较低的方案。
         int deficit = missing(need);
         List<CraftRecoveryCandidate> candidates = new ArrayList<>();
@@ -383,6 +388,8 @@ public final class SemanticAcquireCompanionTask
         // 一整轮比较共用一次规划预算，不能按标签成员逐项扣预算，否则可能还没看到便宜配方就停下。
         if (!takePlannerStep()) return TaskState.RUNNING;
         for (ResourceLocation output : need.itemIds) {
+            // 可以领取祖先物品的现货，但不能在加工它的原料时再递归制造同一成品。
+            if (r.productionLineage.blocks(output)) continue;
             int requestedOwnFinal = PlayerInv.buildableCount(
                     player.getInventory(), BuiltInRegistries.ITEM.get(output)) + deficit;
             ToolContext context = new ToolContext(
@@ -652,13 +659,19 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCook(AcquisitionNeed need) {
-        // 先挑一个有已知烹饪配方的成品，再交给烹饪任务找原料和燃料；对子来源去掉 COOK，防止自己递归调用自己。
+        // 多段炉子工艺继承权限与祖先；只拒绝回到此前成品或耗尽深度的生产分支，现货来源仍可尝试。
+        if (!r.productionLineage.mayDescend()) {
+            addIssue("cook", "cooking_dependency_depth_limit", "the bounded cooking prerequisite depth was reached", Map.of("depth", r.productionLineage.depth()));
+            advanceSource(need); return TaskState.RUNNING;
+        }
         ResourceLocation output = need.itemIds.stream()
+                .filter(id -> !r.productionLineage.blocks(id))
                 .filter(this::hasCookingRecipe)
                 .findFirst().orElse(null);
         if (output == null) {
-            addIssue("cook", "no_cooking_source_path",
-                    "no client-known furnace-family recipe produces this recursive need",
+            boolean cycle = need.itemIds.stream().allMatch(r.productionLineage::blocks);
+            addIssue("cook", cycle ? "production_dependency_cycle" : "no_cooking_source_path",
+                    cycle ? "cooking would revisit an active production ancestor" : "no client-known furnace-family recipe produces this recursive need",
                     Map.of("requested_item_ids", itemStrings(need.itemIds)));
             advanceSource(need);
             return TaskState.RUNNING;
@@ -676,7 +689,8 @@ public final class SemanticAcquireCompanionTask
                 childId("cook"),
                 now + 12L * 60L * 20L,
                 output, selectedFinal, SemanticCookTaskRecord.Preference.AUTO,
-                List.of(), childSources, r.allowHarm, r.protectedLabels);
+                r.cookingFuelPolicy, childSources, r.allowHarm, r.protectedLabels)
+                .withProductionLineage(r.productionLineage.include(need.lineageItems));
         return startChild(need, SemanticAcquireTaskRecord.Source.COOK, child,
                 "cook a client-known output while recursively acquiring its prerequisites");
     }

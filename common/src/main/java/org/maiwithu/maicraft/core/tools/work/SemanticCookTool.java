@@ -43,7 +43,7 @@ public final class SemanticCookTool implements MaiCraftTool {
                 "Namespaced fuel items the Mod may consume; omit for safe ordinary fuels.", null));
         properties.put("allowed_sources", arrayProperty(
                 "Source families allowed for inputs, fuel and a required workstation.",
-                List.of("inventory", "nearby", "wireless", "storage", "craft", "mine", "trade", "hunt")));
+                List.of("inventory", "nearby", "wireless", "storage", "craft", "cook", "mine", "trade", "hunt")));
         properties.put("allow_harm", property("boolean",
                 "Whether recursively acquiring cooking inputs may harm living entities; default false."));
         properties.put("protected_labels", arrayProperty(

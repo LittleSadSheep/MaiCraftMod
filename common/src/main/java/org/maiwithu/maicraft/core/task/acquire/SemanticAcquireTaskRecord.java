@@ -91,6 +91,13 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public final int searchRadius;
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */
     public final int storageSearchRadius;
+    public ProductionLineage productionLineage = ProductionLineage.ROOT;
+    public List<ResourceLocation> cookingFuelPolicy = List.of();
+
+    /** 炉子补料仍继承原来的取材权限；祖先与燃料限制另行传递，不能因创建新子任务而丢失。 */
+    public SemanticAcquireTaskRecord withCookingContext(ProductionLineage lineage, List<ResourceLocation> fuels) {
+        productionLineage = Objects.requireNonNull(lineage); cookingFuelPolicy = List.copyOf(fuels); return this;
+    }
 
     static {
         TaskFactory.register(SemanticAcquireTaskRecord.class,

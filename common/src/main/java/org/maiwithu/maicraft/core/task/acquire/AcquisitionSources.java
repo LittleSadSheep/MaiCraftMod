@@ -37,7 +37,7 @@ final class AcquisitionSources {
     }
 
     static List<Source> forCookingInputs(List<Source> parent) {
-        // 加工原料和燃料沿用当前需求的许可，去掉 COOK 避免“为了开炉又先开炉”的递归。
-        return parent.stream().filter(source -> source != Source.COOK).toList();
+        // 平滑石等需要先加工原料；保留已有COOK许可，用祖先链拒绝循环，不能直接切断所有多段工艺。
+        return List.copyOf(parent);
     }
 }

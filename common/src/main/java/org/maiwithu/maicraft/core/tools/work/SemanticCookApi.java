@@ -36,8 +36,7 @@ public final class SemanticCookApi {
             throw new IllegalArgumentException("allowed_fuels accepts at most 64 items");
         List<Source> sources = strings(args.get("allowed_sources"), "allowed_sources").stream()
                 .map(Source::parse).distinct().toList();
-        // 原料再走 cook 会形成递归开炉；明确拒绝这项要求，不能悄悄删掉后继续执行别的策略。
-        if (sources.contains(Source.COOK)) throw new IllegalArgumentException("cook inputs cannot recursively use the cook source");
+        // 原料允许继续烧炼；执行器携带祖先链限制重复成品与最大深度，保留调用者声明的来源权限。
         List<String> labels = strings(args.get("protected_labels"), "protected_labels").stream().distinct().toList();
         if (labels.size() > 64) throw new IllegalArgumentException("protected_labels accepts at most 64 labels");
         return new Arguments(item, count, preference, fuels, sources, bool(args, "allow_harm", false), labels);

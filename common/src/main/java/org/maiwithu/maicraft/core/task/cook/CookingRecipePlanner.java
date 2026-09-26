@@ -24,6 +24,7 @@ import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -35,6 +36,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticSourceKnowledge;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.core.tools.ToolParse;
+import org.maiwithu.maicraft.core.inventory.StockEvidence;
 
 /** 只读比较加工配方、燃料和准备路线；选定后由烹饪执行器操作同一台炉子并确认实际结果。 */
 final class CookingRecipePlanner {
@@ -76,9 +78,11 @@ final class CookingRecipePlanner {
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
         for (RecipeHolder<?> holder : manager.getRecipes()) {
             try {
-                if (!(holder.value() instanceof CraftingRecipe recipe)
-                        || recipe.isSpecial()
-                        || !RecipeProbe.usableIngredients(recipe)) {
+                var recipe = holder.value();
+                boolean grid = recipe instanceof CraftingRecipe && request.allowedSources.contains(SemanticAcquireTaskRecord.Source.CRAFT);
+                boolean cooking = recipe instanceof AbstractCookingRecipe && request.allowedSources.contains(SemanticAcquireTaskRecord.Source.COOK);
+                // 这里只展开获准的备料路线；真实两段烧炼仍逐段交给炉子任务，不能把烧炼伪装成格子合成。
+                if ((!grid && !cooking) || recipe.isSpecial() || !RecipeProbe.usableIngredients(recipe)) {
                     continue;
                 }
                 ItemStack output = RecipeProbe.resultOf(
@@ -89,9 +93,9 @@ final class CookingRecipePlanner {
                 int ingredientUses = recipe.getIngredients().stream()
                         .mapToInt(ingredient -> ingredient == null || ingredient.isEmpty() ? 0 : 1)
                         .sum();
-                boolean workstation = recipe instanceof ShapedRecipe shaped
+                boolean workstation = grid && (recipe instanceof ShapedRecipe shaped
                         ? shaped.getWidth() > 2 || shaped.getHeight() > 2
-                        : ingredientUses > 4;
+                        : ingredientUses > 4);
                 indexed.computeIfAbsent(output.getItem(), ignored -> new ArrayList<>())
                         .add(new CraftRoute(
                                 holder.id(), Math.max(1, output.getCount()),
@@ -109,7 +113,7 @@ final class CookingRecipePlanner {
     }
 
     // 候选物品列表完全相同的材料格合成一组，并数这种材料用了几格，避免重复遍历相同要求。
-    private static List<IngredientGroup> ingredientGroups(CraftingRecipe recipe) {
+    private static List<IngredientGroup> ingredientGroups(Recipe<?> recipe) {
         Map<List<Item>, Integer> uses = new LinkedHashMap<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
             if (ingredient == null || ingredient.isEmpty()) continue;
@@ -143,9 +147,11 @@ final class CookingRecipePlanner {
             best = Math.min(best, addCost(
                     STORAGE_FALLBACK_COST, (long) missing * DIRECT_SOURCE_UNIT_COST));
         }
-        if (depth >= MAX_ACQUISITION_DEPTH
-                || !request.allowedSources.contains(SemanticAcquireTaskRecord.Source.CRAFT)
-                || lineage.contains(item)) {
+        if (depth >= MAX_ACQUISITION_DEPTH || !request.productionLineage.mayDescend()
+                || (!request.allowedSources.contains(SemanticAcquireTaskRecord.Source.CRAFT)
+                    && !request.allowedSources.contains(SemanticAcquireTaskRecord.Source.COOK))
+                || lineage.contains(item) || request.productionLineage.blocks(BuiltInRegistries.ITEM.getKey(item))
+                || request.itemId.equals(BuiltInRegistries.ITEM.getKey(item))) {
             return best;
         }
 
@@ -196,9 +202,16 @@ final class CookingRecipePlanner {
 
     private Map<Item, Long> inventoryStock() {
         Map<Item, Long> stock = new HashMap<>();
+        // 已授权且新近观察过的AE现货参与整棵材料树的共享预算；实际缺口仍由取材任务确认入包，不凭估价发物品。
+        if (request.allowedSources.contains(SemanticAcquireTaskRecord.Source.WIRELESS)
+                || request.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE))
+            StockEvidence.latestNetwork(player).ifPresent(snapshot -> snapshot.stored().forEach((id, count) -> {
+                if (BuiltInRegistries.ITEM.containsKey(id)) stock.put(BuiltInRegistries.ITEM.get(id), count);
+            }));
         for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); slot++) {
             ItemStack stack = player.getInventory().items.get(slot);
-            if (!stack.isEmpty()) stock.merge(stack.getItem(), (long) stack.getCount(), Long::sum);
+            if (!stack.isEmpty()) stock.merge(stack.getItem(), (long) stack.getCount(),
+                    (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
         }
         return stock;
     }

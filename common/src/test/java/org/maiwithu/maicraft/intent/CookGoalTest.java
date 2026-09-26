@@ -10,6 +10,7 @@ import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
 import org.maiwithu.maicraft.core.tools.work.SemanticCookApi;
 
 /** 要烧到三百件就保留三百，原料许可与燃料清单也不能被宽松类型转换改成另一种行动。 */
@@ -19,7 +20,7 @@ public final class CookGoalTest {
         Bootstrap.bootStrap();
         for (String patch : List.of("{\"count\":1.5}", "{\"count\":\"2\"}", "{\"count\":0}",
                 "{\"count\":2305}", "{\"count\":null}", "{\"allow_harm\":\"true\"}",
-                "{\"allowed_sources\":[\"cook\"]}", "{\"allowed_fuels\":[true]}", "{\"recipe_preference\":42}",
+                "{\"allowed_sources\":[\"unknown\"]}", "{\"allowed_fuels\":[true]}", "{\"recipe_preference\":42}",
                 "{\"recipe_preference\":\"unknown\"}", "{\"item_id\":null}", "{\"source_hint\":{}}")) {
             try {
                 SemanticCookApi.parse(arguments(patch));
@@ -27,6 +28,9 @@ public final class CookGoalTest {
             } catch (IllegalArgumentException expected) { }
             rejects(goal(arguments(patch), null));
         }
+        // 显式允许前置烧炼时保留COOK，后续由跨任务祖先链控制有限递归。
+        var recursive = SemanticCookApi.newRecord(new ToolContext("finite-cook", 0), arguments("{\"allowed_sources\":[\"cook\"]}"));
+        if (!recursive.allowedSources.contains(Source.COOK)) throw new AssertionError("前置烧炼许可被删掉");
         for (int count : List.of(1, 256, 300, 2304)) {
             var record = SemanticCookApi.newRecord(new ToolContext("cook-contract", 0), arguments("{\"count\":" + count + "}"));
             if (record.count != count) throw new AssertionError("总目标在内部工具入口被改变");

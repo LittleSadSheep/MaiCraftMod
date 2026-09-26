@@ -11,6 +11,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.acquire.ProductionLineage;
+import java.util.Objects;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
@@ -52,6 +54,12 @@ public final class SemanticCookTaskRecord extends TaskRecord {
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
     public final List<String> protectedLabels;
+    public ProductionLineage productionLineage = ProductionLineage.ROOT;
+
+    /** 原料加工可以继续开炉，但每层必须保留此前的成品祖先，避免循环配方和燃料自举无限套娃。 */
+    public SemanticCookTaskRecord withProductionLineage(ProductionLineage lineage) {
+        productionLineage = Objects.requireNonNull(lineage); return this;
+    }
 
     static {
         TaskFactory.register(SemanticCookTaskRecord.class, SemanticCookCompanionTask::new);
@@ -96,16 +104,16 @@ public final class SemanticCookTaskRecord extends TaskRecord {
         }
         this.allowedFuelIds = List.copyOf(new ArrayList<>(fuels));
         LinkedHashSet<SemanticAcquireTaskRecord.Source> sources = new LinkedHashSet<>();
-        // 总允许使用已有背包物品；没有给来源时采用默认来源，但剔除 COOK，避免加工为了原料再递归加工。
+        // 总允许使用现货；多段烧炼继承显式COOK许可，循环和深度由跨任务祖先链控制。
         sources.add(SemanticAcquireTaskRecord.Source.INVENTORY);
         if (allowedSources == null || allowedSources.isEmpty()) {
             for (SemanticAcquireTaskRecord.Source source
                     : SemanticAcquireTaskRecord.DEFAULT_SOURCES) {
-                if (source != SemanticAcquireTaskRecord.Source.COOK) sources.add(source);
+                sources.add(source);
             }
         } else {
             for (SemanticAcquireTaskRecord.Source source : allowedSources) {
-                if (source != SemanticAcquireTaskRecord.Source.COOK) sources.add(source);
+                sources.add(source);
             }
         }
         this.allowedSources = List.copyOf(sources);
