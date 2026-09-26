@@ -167,10 +167,13 @@ public class PathingControlManager implements IPathingControlManager {
         if (current != null) {
             Goal intended = current.getPath().getGoal();
             BlockPos end = current.getPath().getDest();
-            if (intended.isInGoal(end) && !newGoal.isInGoal(end)) {
-                // this path used to end in the goal
-                // but the goal has changed, so there's no reason to continue...
-                return true;
+            if (!newGoal.equals(intended) && !newGoal.isInGoal(end)) {
+                // 追踪目标向前移动时，旧终点虽不再满足最终条件，已有通道仍能接近新目标，应由前瞻续路延长。
+                // 只有路线已经朝错误方向，或估价无法证明还有进展时才取消，防止逃命时每走一格便重启。
+                BlockPos feet = baritone.getPlayerContext().playerFeet();
+                double here = newGoal.heuristic(feet.getX(), feet.getY(), feet.getZ());
+                double there = newGoal.heuristic(end.getX(), end.getY(), end.getZ());
+                return !Double.isFinite(here) || !Double.isFinite(there) || there >= here - 1.0E-6;
             }
         }
         return false;

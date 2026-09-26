@@ -13,6 +13,8 @@ import baritone.process.CustomGoalProcess;
 import baritone.utils.PathingControlManager;
 import java.lang.reflect.Proxy;
 import java.lang.reflect.Field;
+import java.io.File;
+import net.minecraft.client.Minecraft;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
@@ -26,6 +28,8 @@ public final class MovingGoalRefreshTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         try (var w = new InteractionWorldTestHarness()) {
+            // 比较原生目标的剩余距离会读取Baritone设置，夹具提供独立目录，避免误用未初始化的游戏客户端字段。
+            field(Minecraft.class, "gameDirectory").set(Minecraft.getInstance(), new File("moving-goal-settings-fixture"));
             var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
             var backend = (Baritone) memory.allocateInstance(Baritone.class);
             var ctx = (IPlayerContext) Proxy.newProxyInstance(IPlayerContext.class.getClassLoader(), new Class<?>[]{IPlayerContext.class},
@@ -51,7 +55,7 @@ public final class MovingGoalRefreshTest {
             process.setGoalAndPath(original);
             check(process.onTick(false, true).commandType == PathingCommandType.FORCE_REVALIDATE_GOAL_AND_PATH,
                     "tracking mode cannot leak into a later ordinary goal");
-            // 路线只算到一半时，新的目标位置不能取消这一段；已经到达旧终点的路径才需要作废。
+            // 原终点向前移动时保留仍有效的完整或部分通道；目标换到身后，原方向失效才重算。
             var pathing = (PathingBehavior) memory.allocateInstance(PathingBehavior.class);
             var executor = (PathExecutor) memory.allocateInstance(PathExecutor.class);
             field(PathingBehavior.class, "current").set(pathing, executor); field(Baritone.class, "pathingBehavior").set(backend, pathing);
@@ -64,7 +68,8 @@ public final class MovingGoalRefreshTest {
                             default -> throw new AssertionError(method.getName());
                         });
                 field(PathExecutor.class, "path").set(executor, path);
-                check(manager.revalidateGoal(new GoalBlock(12, 1, 3)) == full, "native revalidation retains useful partial paths and rejects stale completed endpoints");
+                check(!manager.revalidateGoal(new GoalBlock(12, 1, 3)), "native revalidation keeps forward progress even when an old full path needs extending");
+                check(manager.revalidateGoal(new GoalBlock(-12, 1, 3)), "a path heading away from the changed goal must be replanned");
             }
             var following = PlayerNav.trackGoal(w.player, () -> NavGoal.exact(new BlockPos(10, 1, 3)), 1, () -> false);
             var transport = field(PlayerNav.class, "navigator").get(following);

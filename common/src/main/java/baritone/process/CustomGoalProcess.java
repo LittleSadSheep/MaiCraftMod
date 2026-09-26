@@ -129,7 +129,7 @@ public final class CustomGoalProcess extends BaritoneProcessHelper implements IC
                     }
                     return new PathingCommand(this.goal, PathingCommandType.CANCEL_AND_SET_GOAL);
                 }
-                // 移动目标仅在旧终点失效时于动作结束后重算；未到目标的有效路径前段可以继续行走。
+                // 移动目标交给方向重检；旧通道仍能接近新目标时继续行走，再由前瞻补上后续路线。
                 return new PathingCommand(this.goal, trackingGoal
                         ? PathingCommandType.REVALIDATE_GOAL_AND_PATH : PathingCommandType.SET_GOAL_AND_PATH);
             default:
