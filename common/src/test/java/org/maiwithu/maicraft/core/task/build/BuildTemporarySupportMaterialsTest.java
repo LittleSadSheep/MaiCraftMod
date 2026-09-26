@@ -56,6 +56,11 @@ public final class BuildTemporarySupportMaterialsTest {
         check(reservedNeed.requiredFinalCount() == 39, "保留三十六块永久石头后再补三块临时支撑");
         check(BuildTemporarySupportMaterials.supplyNeed(List.of(Items.SAND), Map.of(), item -> 0, 3) == null,
                 "不能给会掉落的方块发出支撑供料需求");
+        // 泥土没库存时仍保留圆石候选；硬质或机器方块即使配置允许，也不能用于待回收的临时支撑。
+        var options = BuildTemporarySupportMaterials.supplyOptions(List.of(Items.DIRT, Items.COBBLESTONE,
+                Items.OBSIDIAN, Items.CHEST, Items.BEDROCK), Map.of(), item -> 0, 2);
+        check(options.stream().map(BuildTemporarySupportMaterials.SupplyNeed::item).toList().equals(List.of(Items.DIRT, Items.COBBLESTONE)),
+                "全部易拆候选必须保留，不能因为泥土排在前面就直接外出挖土");
         System.out.println("BuildTemporarySupportMaterialsTest: passed");
     }
 

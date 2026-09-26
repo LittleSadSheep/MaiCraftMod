@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.core.task.build;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -55,24 +57,28 @@ public final class BuildTemporarySupportMaterials {
     /** 缺垫块时选择一种确实允许的材料，供料按永久预留加整条支撑链计算，不能把几种零散方块凑成一条单材质支撑。 */
     public static SupplyNeed supplyNeed(List<Item> allowed, Map<Item, Integer> reserved,
                                        ToIntFunction<Item> carried, int required) {
+        return supplyOptions(allowed, reserved, carried, required).stream().findFirst().orElse(null);
+    }
+
+    // 缺料只代表一种材料不够；保留所有易拆的替代品，让供料先逐种检查现货，再考虑附近采集。
+    public static List<SupplyNeed> supplyOptions(List<Item> allowed, Map<Item, Integer> reserved,
+                                               ToIntFunction<Item> carried, int required) {
         if (required < 1) throw new IllegalArgumentException("support quantity must be positive");
-        SupplyNeed best = null;
-        long smallestMissing = Long.MAX_VALUE;
+        var options = new ArrayList<SupplyNeed>();
         for (int tier = 0; tier < 2; tier++) {
+            var choices = new ArrayList<SupplyNeed>();
             for (Item item : allowed) {
                 int permanent = reserved.getOrDefault(item, 0);
                 if ((permanent == 0) != (tier == 0) || !eligible(item)) continue;
                 long total = (long) permanent + required;
                 if (total > Integer.MAX_VALUE) continue;
-                long missing = Math.max(0L, total - carried.applyAsInt(item));
-                if (missing < smallestMissing) {
-                    best = new SupplyNeed(item, (int) total);
-                    smallestMissing = missing;
-                }
+                choices.add(new SupplyNeed(item, (int) total));
             }
-            if (best != null) return best;
+            choices.sort(Comparator.comparingLong(need -> Math.max(0L,
+                    (long) need.requiredFinalCount() - carried.applyAsInt(need.item()))));
+            options.addAll(choices);
         }
-        return null;
+        return List.copyOf(options);
     }
 
     public static boolean canSpend(int carried, int reserved, int required) {
@@ -82,7 +88,9 @@ public final class BuildTemporarySupportMaterials {
     private static boolean eligible(Item item) {
         if (!(item instanceof BlockItem block)) return false;
         var state = block.getBlock().defaultBlockState();
-        return !state.hasBlockEntity() && !(block.getBlock() instanceof FallingBlock)
+        // 临时支撑要拆回收，只接受普通易挖硬度，不能用黑曜石、机器或掉落方块拖长施工。
+        float hardness = state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+        return hardness >= 0 && hardness <= 2 && !state.hasBlockEntity() && !(block.getBlock() instanceof FallingBlock)
                 && state.isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
     }
 }
