@@ -35,6 +35,9 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import net.minecraft.world.entity.Entity;
+import java.util.UUID;
 
 /**
  * 检查导航暂让控制和停止时的收尾：动作还没到安全位置就继续驱动，到安全位置才清按键；测试直接设置安全状态。
@@ -50,7 +53,44 @@ public final class NavigationHandoffTest {
         buildSelectionWaitsForReleasedNavigation();
         buildKeepsAnUnfinishedApproach();
         precisionWalkingDoesNotPlanGapJumps();
+        replacedBodyDiscardsOrphanRoutes(false);
+        replacedBodyDiscardsOrphanRoutes(true);
         System.out.println("NavigationHandoffTest: passed");
+    }
+
+    private static void replacedBodyDiscardsOrphanRoutes(boolean pendingBelongsToNewBody) throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
+            var old = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
+            field(LocalPlayer.class, "clientLevel").set(old, world.level);
+            UUID identity = UUID.randomUUID(); field(Entity.class, "uuid").set(old, identity); field(Entity.class, "uuid").set(world.player, identity);
+            try (Fixture fixture = new Fixture(old)) {
+                // 同一个UUID在同一世界重生，旧路线还处于不可取消的腾空阶段；新身体不能接着替它落地。
+                check(!fixture.nav.belongsTo(world.player), "same UUID cannot reuse an old LocalPlayer route");
+                var queued = new EmbeddedBaritoneNavigator(pendingBelongsToNewBody ? world.player : old,
+                        () -> null, () -> false, PlayerNav.ContextProvider.DEFAULT, false);
+                var pendingType = Class.forName(EmbeddedBaritoneRuntime.class.getName() + "$PendingStart");
+                var constructor = pendingType.getDeclaredConstructor(EmbeddedBaritoneNavigator.class, GoalCompiler.Compiled.class, TerrainPermit.class, boolean.class);
+                constructor.setAccessible(true);
+                Object request = constructor.newInstance(queued, GoalCompiler.standOn(new BlockPos(4, 1, 4)), TerrainPermit.PRESERVE, false);
+                field(EmbeddedBaritoneRuntime.class, "pendingStart").set(null, request);
+                // 暂时移除活动上下文：若清理偷偷调用任何身体InputDriver，这里就会抛错，重现原来的新任务失败。
+                var active = field(ClientRuntime.actor().getClass(), "activeContext"); Object context = active.get(ClientRuntime.actor());
+                active.set(ClientRuntime.actor(), null);
+                try {
+                    EmbeddedBaritoneRuntime.observeBody(world.player);
+                    fixture.nav.stop(); fixture.nav.pause();
+                    check(fixture.nav.tick() == PlayerNav.Status.FAILED, "old route remains retired without native body access");
+                } finally { active.set(ClientRuntime.actor(), context); }
+                check(field(EmbeddedBaritoneRuntime.class, "owner").get(null) == null && !fixture.inputs.isInputForcedDown(Input.MOVE_FORWARD),
+                        "stale owner and forced inputs are removed before a new task starts");
+                check(pendingBelongsToNewBody ? field(EmbeddedBaritoneRuntime.class, "pendingStart").get(null) == request
+                                && queued.canAcquireRuntimeOwnership()
+                        : field(EmbeddedBaritoneRuntime.class, "pendingStart").get(null) == null && !queued.canAcquireRuntimeOwnership(),
+                        "only a pending request belonging to the new body survives cleanup");
+                check(world.itemUses() == 0 && world.blockUses() == 0, "body replacement cleanup performs no world interaction");
+            }
+        }
     }
 
     private static void pollingYieldRetainsDrive() throws Exception {
@@ -180,6 +220,8 @@ public final class NavigationHandoffTest {
                 .get(ClientRuntime.actor());
         private final Object previousOwner = field(EmbeddedBaritoneRuntime.class, "owner").get(null);
         private final Object previousBackend = field(EmbeddedBaritoneRuntime.class, "backend").get(null);
+        private final Object previousWorld = field(EmbeddedBaritoneRuntime.class, "world").get(null);
+        private final Object previousPending = field(EmbeddedBaritoneRuntime.class, "pendingStart").get(null);
         private final Unsafe memory;
         private final PathingBehavior pathing;
         private final InputOverrideHandler inputs;
@@ -190,7 +232,8 @@ public final class NavigationHandoffTest {
         private Fixture(LocalPlayer suppliedPlayer) throws Exception {
             memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
             Minecraft minecraft = suppliedPlayer == null ? allocate(Minecraft.class) : Minecraft.getInstance();
-            if (suppliedPlayer == null) minecraft.player = allocate(LocalPlayer.class); // 纯导航用例不会使用此玩家。
+            // 纯导航用例没有身体；需要验证重生的用例保留InteractionWorld夹具的当前玩家。
+            if (suppliedPlayer == null) minecraft.player = null;
             set(minecraft, "gameThread", Thread.currentThread());
             field(Minecraft.class, "instance").set(null, minecraft);
             field(ClientRuntime.actor().getClass(), "minecraft").set(ClientRuntime.actor(), minecraft);
@@ -217,6 +260,7 @@ public final class NavigationHandoffTest {
                     PlayerNav.ContextProvider.DEFAULT, true);
             field(EmbeddedBaritoneRuntime.class, "owner").set(null, nav);
             field(EmbeddedBaritoneRuntime.class, "backend").set(null, baritone);
+            field(EmbeddedBaritoneRuntime.class, "world").set(null, suppliedPlayer == null ? null : suppliedPlayer.clientLevel);
             inputs.setInputForceState(Input.MOVE_FORWARD, true);
         }
 
@@ -234,6 +278,8 @@ public final class NavigationHandoffTest {
             field(ClientRuntime.actor().getClass(), "minecraft").set(ClientRuntime.actor(), previousActorClient);
             field(EmbeddedBaritoneRuntime.class, "owner").set(null, previousOwner);
             field(EmbeddedBaritoneRuntime.class, "backend").set(null, previousBackend);
+            field(EmbeddedBaritoneRuntime.class, "world").set(null, previousWorld);
+            field(EmbeddedBaritoneRuntime.class, "pendingStart").set(null, previousPending);
             field(Minecraft.class, "instance").set(null, previousMinecraft);
         }
     }

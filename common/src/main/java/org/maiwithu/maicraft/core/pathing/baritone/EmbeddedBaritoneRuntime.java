@@ -101,6 +101,25 @@ public final class EmbeddedBaritoneRuntime {
 
     private EmbeddedBaritoneRuntime() {}
 
+    /** 先退役旧身体的活动路线和排队请求，再让本刻的新任务争取控制；死亡后不能等待旧角色落地。 */
+    public static void observeBody(LocalPlayer current) {
+        requireClientThread();
+        if (owner != null && !owner.belongsTo(current)) {
+            var previous = owner;
+            previous.preempted("the local-player body or world was replaced");
+            // abandon只清导航状态和旧回执，不通过InputDriver停止已经不存在的身体，也不操作新角色。
+            abandon(previous);
+        }
+        if (pendingStart != null && !pendingStart.navigator().belongsTo(current)) {
+            pendingStart.navigator().preempted("the queued navigation's body or world was replaced");
+            pendingStart = null;
+        }
+        if (pendingPolicyOwner != null && !pendingPolicyOwner.belongsTo(current)) {
+            pendingPolicyOwner = null; pendingPolicyGoal = null;
+        }
+        if (backend != null && current != null && current.clientLevel != null) syncWorld(backend, current.clientLevel);
+    }
+
     /** 可选的实时诊断查询，不会为此启动原本空闲的 Baritone 实例。 */
     public static Map<String, Object> diagnosticState() {
         requireClientThread();
@@ -156,7 +175,12 @@ public final class EmbeddedBaritoneRuntime {
             TerrainPermit permit,
             boolean sprintAllowed) {
         requireClientThread();
+        observeBody(Minecraft.getInstance().player);
+        if (!navigator.belongsTo(Minecraft.getInstance().player)) {
+            navigator.preempted("navigation cannot acquire a replaced local-player body"); return;
+        }
         IBaritone baritone = backend();
+        syncWorld(baritone, Minecraft.getInstance().level);
         // 已有别的导航占用身体时，把新请求排为待接手，并让旧导航先到达安全停止位置。
         if (owner != null && owner != navigator) {
             EmbeddedBaritoneNavigator previous = owner;
@@ -230,6 +254,7 @@ public final class EmbeddedBaritoneRuntime {
     /** 在一次有效的 MaiCraft 角色 tick 结束时恰好调用一次。 */
     public static void tick(LocalPlayerContext context, boolean schedulerAllowsBodyWork) {
         requireClientThread();
+        observeBody(context.player());
         lastDrivenOwner = null;
         IBaritone baritone = backend;
         if (baritone == null) return;
@@ -342,6 +367,7 @@ public final class EmbeddedBaritoneRuntime {
     /** 路线停止后仍可能持有着陆动作和物品选择交易。 */
     public static boolean yieldActiveForExternalAction(LocalPlayer player) {
         requireClientThread();
+        observeBody(player);
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         if (owner != null) owner.settlePendingFailureAtSafeBoundary();
         if (owner != null && owner.requiresOrphanContinuation()) return false;

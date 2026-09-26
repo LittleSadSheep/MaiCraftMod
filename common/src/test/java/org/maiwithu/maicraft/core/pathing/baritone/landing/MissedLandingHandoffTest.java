@@ -45,6 +45,9 @@ public final class MissedLandingHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var f = new WaterLandingReplayTest.Fixture(false);
+        // 落地后恢复的仍是同一身体；夹具要让全局客户端也指向它，不能把未绑定的假玩家误当成真实重生。
+        f.minecraft.player = f.player;
+        f.minecraft.level = f.world;
         field(Minecraft.class, "gameThread").set(f.minecraft, Thread.currentThread());
         field(Minecraft.class, "gameDirectory").set(f.minecraft, new File("missed-landing-settings-fixture"));
         field(LocalPlayer.class, "clientLevel").set(f.player, f.world);

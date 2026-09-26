@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.HitResult;
@@ -34,6 +36,7 @@ import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry
  */
 public final class EmbeddedBaritoneNavigator {
     private final LocalPlayer player;
+    private final ClientLevel playerWorld;
     private final Supplier<GoalCompiler.Compiled> compiledSupplier;
     private final BooleanSupplier reached;
     private final PlayerNav.ContextProvider contextProvider;
@@ -74,6 +77,7 @@ public final class EmbeddedBaritoneNavigator {
             PlayerNav.ContextProvider contextProvider,
             boolean sprintAllowed) {
         this.player = player;
+        this.playerWorld = player == null ? null : player.clientLevel;
         this.compiledSupplier = compiledSupplier;
         this.reached = reached;
         this.contextProvider = contextProvider;
@@ -96,6 +100,18 @@ public final class EmbeddedBaritoneNavigator {
 
     TerrainPermit permit() {
         return permit;
+    }
+
+    /** 重生即使沿用UUID也已换身体；旧路线的落地等待与输入不能交给新角色继续执行。 */
+    boolean belongsTo(LocalPlayer current) {
+        return player == current && (current == null || playerWorld == current.clientLevel);
+    }
+
+    private boolean retireReplacedBody() {
+        if (belongsTo(Minecraft.getInstance().player)) return false;
+        preempted("the navigation's local-player body or world was replaced");
+        EmbeddedBaritoneRuntime.abandon(this);
+        return true;
     }
 
     HitResult objectMouseOver() {
@@ -150,6 +166,7 @@ public final class EmbeddedBaritoneNavigator {
     public PlayerNav.Status tick() {
         rescueDetached = false;
         if (terminalFailure) return PlayerNav.Status.FAILED;
+        if (retireReplacedBody()) return PlayerNav.Status.FAILED;
         if (pendingFailureType != null) return finishPendingFailureWhenSafe();
         if (stopped) {
             return failWhenSafe(FailureType.TARGET_LOST, "navigation was stopped");
@@ -503,6 +520,7 @@ public final class EmbeddedBaritoneNavigator {
         if (stopped) return;
         stopped = true;
         if (terminalFailure) return;
+        if (retireReplacedBody()) return;
         failWhenSafe(FailureType.TARGET_LOST, "navigation was stopped");
     }
 
@@ -516,6 +534,7 @@ public final class EmbeddedBaritoneNavigator {
 
     // 暂停并不总是立即松开全部控制；空中需要保持动作才能安全落地时，先记下暂停请求。
     public void pause() {
+        if (terminalFailure || retireReplacedBody()) return;
         driveRequested = false;
         if (!isSafeToCancel()) {
             pendingPause = true;
@@ -536,6 +555,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public boolean yieldForExternalAction() {
+        if (retireReplacedBody()) return false;
         // 调用方会持续轮询，直到可以挖掘或使用物品。先登记待处理暂停，使不安全的移动继续获得 tick，直到能够安全让出控制。
         pause();
         if (!isSafeToCancel()) return false;

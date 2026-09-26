@@ -96,6 +96,8 @@ public final class ClientRuntime {
         boolean pathingMayDrive = false;
         try {
             bodyPresent = true;
+            // 同维度重生不会经过no_body分支；必须在清理旧任务、启动新施工前清掉旧身体的全局导航所有者。
+            EmbeddedBaritoneRuntime.observeBody(context.player());
             TransportRuntime.observeControl(context);
             BlockSearch.tick(context.level());
             TargetIndex.clientTick(context.level());
