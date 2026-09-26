@@ -19,6 +19,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -210,10 +211,12 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     }
 
     static final class UseMode extends MultiPlayerGameMode {
-        int items, blocks, attacks, releases;
+        int items, blocks, attacks, releases, recipePlacements;
         Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
         private UseMode() { super(null, null); }
+        // 配方请求只记次数；具体槽位分包同步由合成测试推进，不能在这里提前生成产物。
+        @Override public void handlePlaceRecipe(int containerId, RecipeHolder<?> recipe, boolean shift) { recipePlacements++; }
         @Override public InteractionResult useItem(Player player, InteractionHand hand) {
             items++; if (itemUse != null) itemUse.accept(player); return InteractionResult.PASS;
         }

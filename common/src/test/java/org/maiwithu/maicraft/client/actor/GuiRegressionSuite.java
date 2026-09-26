@@ -144,6 +144,7 @@ public final class GuiRegressionSuite {
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
         // 区分实体点击与物品自身使用，避免砂纸等工序停在不可选中的掉落物上。
         UseHeldItemPrimitiveTest.main(args);
+        CraftingResultSynchronizationTest.main(args);
         // 聊天在真实发送前必须取得持久许可，重启后的旧编号不能变成第二条消息。
         ChatSubmissionHistoryTest.main(args);
         ChatTypingTest.main(args);

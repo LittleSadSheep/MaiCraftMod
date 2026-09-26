@@ -649,8 +649,19 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             gridCleanupVerified = false;
             committedGrid = activeGrid;
             committedContainerId = player.containerMenu.containerId;
+            // 配方摆放会先同步原料槽、后同步结果槽；菜单版本变化本身不能证明这一批成品已就绪。
+            // 同一请求内等待准确物品、组件和数量，不提前判缺料，也不重复点击配方簿。
+            resultSlot = findResultSlot();
+            if (resultSlot < 0) return beginGridReturnFailure("the crafting menu has no result slot", FailureType.NO_SUPPORT);
+            ItemStack expected = plannedOutput.copyWithCount(outputPerBatch);
+            int expectedSlot = resultSlot;
             menuReceipt = context.menus().placeRecipe(
-                    context, recipe, false, MenuConfirmation.stateChanged(), 30);
+                    context, recipe, false, (live, pending) -> {
+                        var menu = live.player().containerMenu;
+                        if (expectedSlot >= menu.slots.size()) return MenuConfirmation.Verdict.PENDING;
+                        return sameStack(menu.getSlot(expectedSlot).getItem(), expected)
+                                ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING;
+                    }, 30);
             return TaskState.RUNNING;
         }
         menuReceipt = context.menus().poll(context, menuReceipt);
