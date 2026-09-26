@@ -123,6 +123,7 @@ import org.maiwithu.maicraft.core.task.container.ContainerSplitTransferTest;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest;
 import org.maiwithu.maicraft.core.task.container.ObservedContainerStockTest;
 import org.maiwithu.maicraft.core.task.supply.BuildSupplyAccessDispatchTest;
+import org.maiwithu.maicraft.core.task.supply.BuildSupportSupplyTest;
 import org.maiwithu.maicraft.core.task.supply.BuildSupplyCargoDeferralTest;
 import org.maiwithu.maicraft.core.task.supply.BuildSupplyCargoDispatchTest;
 import org.maiwithu.maicraft.core.task.supply.BuildSupplyHandoffTest;
@@ -254,6 +255,8 @@ public final class GuiRegressionSuite {
         BuildFoodPreparationTest.main(args);
         BuildFoodBoundaryTest.main(args);
         BuildSupplyAccessDispatchTest.main(args);
+        // 临时垫块逐种查现货后才在工位旁采收，不能为了两块泥土开启通用采矿链。
+        BuildSupportSupplyTest.main(args);
         // 建筑拿齐材料后在仓库交还控制，不要求普通导航重新爬回墙顶；通用机器任务仍保持返程规则。
         MaterialSupplyReturnPolicyTest.main(args);
         BuildSupplyHandoffTest.main(args);

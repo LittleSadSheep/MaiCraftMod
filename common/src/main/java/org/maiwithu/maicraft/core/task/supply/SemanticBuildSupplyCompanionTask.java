@@ -21,6 +21,8 @@ import org.maiwithu.maicraft.core.task.build.BuildExcavationCargo;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
+import org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials;
+import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.tools.work.BuildTool;
 import org.maiwithu.maicraft.task.Task;
@@ -68,6 +70,7 @@ final class SemanticBuildSupplyCompanionTask
     private String failureCode;
     private Item supportItem;
     private int supportFinalCount;
+    private BuildSupportSupply supportSupply;
     private Map<String, Object> finalBuildData = Map.of();
     private Map<String, Object> failedSupply = Map.of();
     private BuildClearanceSurvey clearanceSurvey;
@@ -159,6 +162,7 @@ final class SemanticBuildSupplyCompanionTask
             }
         }
         // 正在取料或施工就先推进那件事；不能看见目标方块恰好都存在，就跳过尚未结束的点击和支撑清理。
+        if (supportSupply != null) return tickSupportSupply();
         if (supply.active()) return tickSupply();
         if (spoilSupply.active()) return tickSpoilSupply();
         if (activeChild != null) return tickChild();
@@ -559,18 +563,39 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private boolean requestSupportSupply(TaskResult result) {
-        // 只接受当前子施工确认的单一支撑物品；若背包早已满足数量，再次失败不能变成循环取料。
+        // 支撑缺的是可拆的普通材料，不把回执首选的泥土当成必须新开采的唯一物品。
         if (result == null || result.data() == null
                 || !(result.data().get("temporary_support_demand") instanceof Map<?, ?> demand)
-                || !(demand.get("item_id") instanceof String itemName)
-                || !(demand.get("required_final_count") instanceof Number count)) return false;
-        ResourceLocation id = ResourceLocation.tryParse(itemName);
-        Item item = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
-        long required = count.longValue();
-        if (item == null || required < 1 || required > SemanticAcquireTaskRecord.MAX_FINAL_COUNT
-                || inventoryCount(item) >= required) return false;
-        supportItem = item; supportFinalCount = (int) required;
+                || !(demand.get("support_blocks") instanceof Number count)) return false;
+        int required = count.intValue();
+        if (required < 1 || required > 32) return false;
+        var reserved = BuildTemporarySupportMaterials.remaining(activePlan.targets, this::constructionMatches);
+        var options = BuildTemporarySupportMaterials.supplyOptions(ScaffoldMaterials.of(player), reserved, this::inventoryCount, required);
+        if (options.isEmpty() || options.stream().anyMatch(need -> inventoryCount(need.item()) >= need.requiredFinalCount())) return false;
+        supportSupply = new BuildSupportSupply(player, r, options);
+        r.extendDeadlineTo(supportSupply.deadline());
         return true;
+    }
+
+    private TaskState tickSupportSupply() {
+        // 原地查所有现货 -> 附近定点采收 -> 原施工；整个过程保留图纸保护，不为临时垫块派出坑或仓库远行。
+        TaskState state = NavigationSafetyContext.withProtectedArea(plannedMutationCells, List.of(),
+                () -> supportSupply.tick(player, this::runChild));
+        if (state == TaskState.RUNNING) return state;
+        var evidence = supportSupply.receipt();
+        rounds.add(Map.of("kind", "temporary_support_supply", "terminal_state", state.name(), "supply", evidence));
+        supplyOutcomeUncertain |= outcomeUnknown(evidence);
+        if (state != TaskState.SUCCESS || supplyOutcomeUncertain) {
+            failedSupply = evidence;
+            stopWith("local_support_unavailable", String.valueOf(evidence.get("message")), FailureType.NO_MATERIAL);
+            return TaskState.FAILED;
+        }
+        var fulfilled = supportSupply.fulfilled();
+        supportItem = fulfilled.item(); supportFinalCount = fulfilled.requiredFinalCount();
+        supportSupply = null;
+        // 已核实这份支撑在主背包里；先交回原施工，不能把刚取来的两块又当废料存回网络。
+        cargoCheckPending = false;
+        return TaskState.RUNNING;
     }
 
     private Map<Item, Integer> ledger(boolean onlyOutstanding) {
@@ -838,11 +863,12 @@ final class SemanticBuildSupplyCompanionTask
     @Override public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());
-        data.put("phase", spoilSupply.active() ? "storing_excavation_spoil" : supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
+        data.put("phase", supportSupply != null ? "temporary_support_supply" : spoilSupply.active() ? "storing_excavation_spoil" : supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
                 : traversabilityScan != null ? "verifying" : !prepared ? "preparing_materials"
                 : "awaiting_preview_or_batch");
         data.put("construction_batches_started", buildRounds);
-        if (spoilSupply.active()) data.put("child", spoilSupply.receipt());
+        if (supportSupply != null) data.put("child", supportSupply.receipt());
+        else if (spoilSupply.active()) data.put("child", spoilSupply.receipt());
         else if (supply.active()) data.put("child", supply.progress());
         else if (activeChild != null) data.put("child", activeChild.progress());
         return Map.copyOf(data);
@@ -851,6 +877,10 @@ final class SemanticBuildSupplyCompanionTask
     @Override protected void cleanup() {
         // 总任务结束时，取料与施工小任务也要停止，并释放整份方案的预览记录。
         BuildPreviewGate.release(r);
+        if (supportSupply != null) {
+            supportSupply.cancel(player);
+            supplyOutcomeUncertain |= outcomeUnknown(supportSupply.receipt());
+        }
         if (supply.active()) {
             // 取料协调器取消时没有公开最终回执；若还在获取阶段，不能用旧的成功存入回执推断它已收尾。
             supplyOutcomeUncertain |= "acquiring_material".equals(supply.progress().get("phase"));
@@ -870,6 +900,7 @@ final class SemanticBuildSupplyCompanionTask
     @Override public boolean mustSettleBeforeSatisfiedCancellation() {
         // 即使施工格已全部匹配，正在存土石的鼠标和容器回执仍须先收尾，不能半次搬运时宣告完成。
         return spoilSupply.mustSettleBeforeSatisfiedCancellation()
+                || supportSupply != null && supportSupply.mustSettle()
                 || activeChild != null && activeChild.mustSettleBeforeSatisfiedCancellation();
     }
 }
