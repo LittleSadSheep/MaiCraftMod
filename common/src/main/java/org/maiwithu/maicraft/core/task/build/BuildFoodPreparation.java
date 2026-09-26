@@ -43,12 +43,17 @@ final class BuildFoodPreparation {
 
     static boolean needs(boolean creative, int food, float health, float maxHealth) {
         // 受伤但饱食度十七时也不能自然回血，不能等到快饿或只剩六点生命才吃；健康身体仍沿用普通补食阈值。
-        return !creative && (food <= 14 || health < 6 || food < 18 && health < maxHealth);
+        return !creative && (food <= 14 || health < Math.min(8, maxHealth) || food < 18 && health < maxHealth);
     }
+    /** 饥饿已影响疾跑或生命低于恢复底线时必须停工；普通补食需求不等同于无法继续施工。 */
+    private static boolean urgent(int food, float health, float maxHealth) { return food <= 6 || health < Math.min(8, maxHealth); }
     boolean active() { return maintaining || child != null; }
     boolean shouldPrepare(LocalPlayer player) {
-        return failure != null || active() || !player.getAbilities().instabuild
-                && needs(false, player.getFoodData().getFoodLevel(), player.getHealth(), player.getMaxHealth());
+        if (failure != null || active()) return true;
+        if (player.getAbilities().instabuild) return false;
+        int food = player.getFoodData().getFoodLevel(); float health = player.getHealth(), max = player.getMaxHealth();
+        // 缺少普通食物但仍能安全工作时，不反复停导航，也不拦住用于恢复供给的工作台准备。
+        return needs(false, food, health, max) && (urgent(food, health, max) || choose(player.getInventory().items, food) != null);
     }
     String failure() { return failure; }
     String message() { return message; }
@@ -64,11 +69,12 @@ final class BuildFoodPreparation {
         if (health <= 0) return fail("build_body_not_alive", "Construction stopped because the body is no longer alive", FailureType.UNKNOWN);
         if (!maintaining) {
             if (!needs(false, food, health, player.getMaxHealth())) return Status.READY;
+            if (!urgent(food, health, player.getMaxHealth()) && choose(player.getInventory().items, food) == null) return Status.READY;
             // 长任务先松开施工动作，再吃到接近饱；危急低血量多补到二十，给真实自然恢复留出条件。
-            maintaining = true; recovery = health < 6; episodeMeals = 0;
+            maintaining = true; recovery = health < Math.min(8, player.getMaxHealth()); episodeMeals = 0;
             deadline = now + EPISODE_TIMEOUT; restStarted = -1; lastHealth = health; healthProgress = now;
         }
-        recovery |= health < 6;
+        recovery |= health < Math.min(8, player.getMaxHealth());
         if (now >= deadline) { interruptMeal(player, TaskState.TIMEOUT); return fail("build_food_timeout", "Food preparation exceeded its bounded time", FailureType.UNKNOWN); }
         if (child != null) {
             TaskState terminal;
@@ -83,7 +89,11 @@ final class BuildFoodPreparation {
         int targetFood = recovery || health < player.getMaxHealth() ? 20 : 18;
         if (food < targetFood) {
             Item chosen = choose(player.getInventory().items, food);
-            if (chosen == null) return fail("build_food_unavailable", "Construction paused: no ordinary carried food is available", FailureType.NO_MATERIAL);
+            if (chosen == null) {
+                // 补食中途耗尽也按当前身体判断；已经越过低生命/低饥饿底线，就将角色交回原工作。
+                if (!urgent(food, health, player.getMaxHealth())) { maintaining = false; recovery = false; restStarted = -1; return Status.READY; }
+                return fail("build_food_unavailable", "Construction paused: critical hunger or health requires food, but no ordinary carried food is available", FailureType.NO_MATERIAL);
+            }
             if (++episodeMeals > 32) return fail("build_food_action_limit", "Food preparation exhausted its bounded meal count", FailureType.UNKNOWN);
             countBefore = PlayerInv.count(player.getInventory(), chosen); foodBefore = food; healthBefore = health;
             String id = BuiltInRegistries.ITEM.getKey(chosen).toString();
@@ -161,6 +171,11 @@ final class BuildFoodPreparation {
         data.put("phase", failure != null ? "failed" : child != null ? "eating" : maintaining ? "recovering_or_refilling" : "ready");
         data.put("confirmed_food_items", confirmedItems); data.put("confirmed_food_actions", confirmedMeals);
         data.put("food", player.getFoodData().getFoodLevel()); data.put("health", player.getHealth()); data.put("outcome_uncertain", uncertain);
+        // 回执区分缺少补食与紧急停工，不将继续施工误报为已吃饱或已恢复生命。
+        data.put("refill_deferred", !player.getAbilities().instabuild && !active()
+                && needs(false, player.getFoodData().getFoodLevel(), player.getHealth(), player.getMaxHealth())
+                && !urgent(player.getFoodData().getFoodLevel(), player.getHealth(), player.getMaxHealth())
+                && choose(player.getInventory().items, player.getFoodData().getFoodLevel()) == null);
         if (meal != null) data.put("item_id", BuiltInRegistries.ITEM.getKey(meal.item).toString());
         if (failure != null) data.put("failure_code", failure);
         return Map.copyOf(data);

@@ -23,6 +23,7 @@ public final class BuildFoodPreparationTest {
         thresholdsAndOrdinaryFood();
         refillAndObserveRecovery();
         injuredBodyRestoresRegenerationFood();
+        moderateShortageDoesNotInterruptWork();
         neverAcceptAClaimWithoutFoodEvidence();
         missingFoodAndUnchangingHealthAreBounded();
         directNativeChildAndCancellation();
@@ -112,9 +113,38 @@ public final class BuildFoodPreparationTest {
             h.player.getAttribute(Attributes.MAX_HEALTH).setBaseValue(40);
             h.player.setHealth(30); h.player.getFoodData().setFoodLevel(17);
             var prep = new BuildFoodPreparation((p, r) -> { throw new AssertionError("no food may be invented"); });
-            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED
-                    && prep.failure().equals("build_food_unavailable") && h.inventory.isEmpty() && h.player.getHealth() == 30,
-                    "higher maximum health still detects injury, and missing food pauses without items or healing");
+            check(!prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.READY
+                    && prep.failure() == null && h.inventory.isEmpty() && h.player.getHealth() == 30,
+                    "moderate injury with a higher maximum health can work without fabricating food or healing");
+        }
+    }
+
+    /** 重放实机十七饥饿、十一生命：有面包就补食，没有普通食物时可工作；紧急底线仍停止。 */
+    private static void moderateShortageDoesNotInterruptWork() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.setHealth(11.2F); h.player.getFoodData().setFoodLevel(17); h.inventory.setItem(0, new ItemStack(Items.ROTTEN_FLESH, 3));
+            var prep = new BuildFoodPreparation((p, r) -> { throw new AssertionError("effectful food needs an explicit separate choice"); });
+            for (int tick = 0; tick < 6; tick++) {
+                check(!prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.READY, "noncritical shortage cannot repeatedly stop work or navigation");
+                h.nextTick();
+            }
+            check(Boolean.TRUE.equals(prep.progress(h.player).get("refill_deferred")) && h.inventory.getItem(0).getCount() == 3 && h.player.getHealth() == 11.2F,
+                    "deferred refill neither consumes special food nor manufactures health");
+            h.player.getFoodData().setFoodLevel(6);
+            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED, "loss of sprint food still stops unsafe work");
+        }
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.setHealth(7); h.player.getFoodData().setFoodLevel(17);
+            var prep = new BuildFoodPreparation();
+            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED, "low actual health still requires food or recovery");
+        }
+        try (var h = new InteractionWorldTestHarness()) {
+            // 最后一份普通食物吃完后已有足够身体余量，不能因为没补到二十又把已完成的准备判失败。
+            h.player.setHealth(11); h.player.getFoodData().setFoodLevel(12); h.inventory.setItem(0, new ItemStack(Items.BREAD));
+            var prep = new BuildFoodPreparation((p, r) -> new ObservedMeal()); prep.tick(h.player, owner(), child -> null);
+            prep.tick(h.player, owner(), child -> { h.inventory.getItem(0).shrink(1); h.player.getFoodData().setFoodLevel(17); return TaskState.SUCCESS; });
+            check(prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.READY && !prep.active() && !prep.shouldPrepare(h.player), "a confirmed partial refill yields to work when supplies run out above the urgent floor");
+            check(prep.receipts().size() == 1 && prep.failure() == null, "partial refill retains its actual meal receipt without inventing a food failure");
         }
     }
 
