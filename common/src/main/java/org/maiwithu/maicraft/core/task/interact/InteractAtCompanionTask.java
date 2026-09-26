@@ -63,6 +63,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private BlockPos activatedBlock;
     private String activatedBlockId;
     private boolean heldUseStarted, heldUseCompleted;
+    private InteractionHand heldUseHand = InteractionHand.MAIN_HAND;
     private int expectedItemBefore = -1, outputWaitTicks;
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
@@ -222,6 +223,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (interaction == null && player.isUsingItem()) {
             fail("another native item use is already active", FailureType.UNKNOWN); return TaskState.FAILED;
         }
+        // 砂纸可以握在任意一只手；先使用当前已握住的指定物品，保留另一只手的加工原料。
+        if (!itemSelected && player.getMainHandItem().is(r.item)) itemSelected = true;
+        else if (!itemSelected && player.getOffhandItem().is(r.item)) { heldUseHand = InteractionHand.OFF_HAND; itemSelected = true; }
         if (!itemSelected) {
             var status = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
             if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
@@ -234,7 +238,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             // 砂纸等物品要由原生use入口读取副手或自身目标；不制造一个不可选中的掉落物实体点击。
             receipt = PressReceipt.before(player, null);
             if (r.expectedOutputItem != null) expectedItemBefore = PlayerInv.count(player.getInventory(), r.expectedOutputItem);
-            interaction = Interaction.useInAir(player, InteractionHand.MAIN_HAND, Interaction.Timing.hold());
+            interaction = Interaction.useInAir(player, heldUseHand, Interaction.Timing.hold());
             heldUseStarted = true;
         }
         var state = interaction.tick();
@@ -320,6 +324,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         if (r.heldItemUseOnly) {
             data.put("held_item_use_started", heldUseStarted); data.put("native_use_completed", heldUseCompleted);
+            data.put("used_hand", heldUseHand.name().toLowerCase());
             data.put("outcome_uncertain", heldUseStarted && !heldUseCompleted);
             if (expectedItemBefore >= 0) {
                 int after = PlayerInv.count(player.getInventory(), r.expectedOutputItem);

@@ -56,10 +56,7 @@ public final class ItemUseInputLease {
         return lease.player.isUsingItem() && lease.player.getUsedItemHand() == lease.hand
                 && lease.player.getUseItemRemainingTicks() <= lease.remaining
                 && (lease.hand != InteractionHand.MAIN_HAND || lease.player.getInventory().selected == lease.selected)
-                && same(lease.item, lease.player.getItemInHand(lease.hand)) && same(lease.item, lease.player.getUseItem());
-    }
-    private static boolean same(ItemStack left, ItemStack right) {
-        // 食物扣数与结束标志可能分批同步；同一倒计时内允许扣数，重新开始的倒计时不能继承旧持用。
-        return ItemStack.isSameItemSameComponents(left, right);
+                && HeldUseItems.same(lease.item, lease.player.getItemInHand(lease.hand), lease.player::registryAccess)
+                && HeldUseItems.same(lease.item, lease.player.getUseItem(), lease.player::registryAccess);
     }
 }

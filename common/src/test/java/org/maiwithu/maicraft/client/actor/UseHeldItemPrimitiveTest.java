@@ -9,6 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.InteractionHand;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
@@ -21,6 +22,7 @@ public final class UseHeldItemPrimitiveTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         useAndObserveOutput(true); useAndObserveOutput(false); unpickableItemStops();
+        offhandToolPreservesMainHand();
         System.out.println("UseHeldItemPrimitiveTest: passed");
     }
     private static void useAndObserveOutput(boolean deliver) throws Exception {
@@ -51,6 +53,21 @@ public final class UseHeldItemPrimitiveTest {
             task.start(h.player); check(task.tick(h.player) == TaskState.FAILED, "an unpickable entity never enters an endless aim loop");
             check("entity_not_pickable".equals(task.result(TaskState.FAILED).data().get("failure_code"))
                     && h.itemUses() == 0 && h.blockUses() == 0, "unsupported entity use is explicit and effect free");
+        }
+    }
+    private static void offhandToolPreservesMainHand() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 副手使用工具时，主手原料保持原槽；夹具用瓶子返还表示一次原生效果，不代替真实砂纸配方验收。
+            h.inventory.setItem(0, new ItemStack(Items.QUARTZ, 15)); h.inventory.selected = 0;
+            h.inventory.offhand.set(0, new ItemStack(Items.HONEY_BOTTLE));
+            h.mode.itemUse = p -> h.inventory.offhand.set(0, new ItemStack(Items.GLASS_BOTTLE));
+            var record = new InteractAtTaskRecord("offhand-use", 1000, MouseButton.RIGHT, null, -1, Items.HONEY_BOTTLE).useHeldItemOnly(Items.GLASS_BOTTLE);
+            var task = new InteractAtCompanionTask(h.player, record); task.start(h.player); TaskState state = TaskState.RUNNING;
+            for (int tick = 0; state == TaskState.RUNNING && tick < 20; tick++) { state = task.tick(h.player); h.nextTick(); }
+            check(state == TaskState.SUCCESS && h.mode.usedHand == InteractionHand.OFF_HAND && h.itemUses() == 1,
+                    "native item use must target the existing offhand tool exactly once");
+            check(h.player.getMainHandItem().is(Items.QUARTZ) && h.player.getMainHandItem().getCount() == 15,
+                    "using the other hand cannot replace the material in the main hand");
         }
     }
     private static final class DroppedItem extends ItemEntity {

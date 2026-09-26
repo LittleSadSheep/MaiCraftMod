@@ -129,7 +129,7 @@ public final class GeneralAbilityAdapter {
                 throw new IllegalArgumentException("expected_output_item_id must name an installed item");
             output = BuiltInRegistries.ITEM.get(id);
         }
-        // 这里只准备一项有界原生持用；主手选择由任务完成，副手可由已有equip语义预先准备，绝不直接修改物品数量。
+        // 这里只准备一项有界原生持用；工具与原料可由equip分别放在两只手里，任务按现有手别使用且等待原生结果。
         return new IntentAction.Native(new InteractAtTaskRecord("semantic-item-use-" + UUID.randomUUID(),
                 player.level().getGameTime() + 1200, MouseButton.RIGHT, null, -1, item).useHeldItemOnly(output));
     }

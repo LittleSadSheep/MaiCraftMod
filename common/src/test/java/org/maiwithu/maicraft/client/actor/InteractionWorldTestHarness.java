@@ -212,12 +212,15 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
 
     static final class UseMode extends MultiPlayerGameMode {
         int items, blocks, attacks, releases, recipePlacements;
+        InteractionHand usedHand;
         Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
         private UseMode() { super(null, null); }
         // 配方请求只记次数；具体槽位分包同步由合成测试推进，不能在这里提前生成产物。
         @Override public void handlePlaceRecipe(int containerId, RecipeHolder<?> recipe, boolean shift) { recipePlacements++; }
         @Override public InteractionResult useItem(Player player, InteractionHand hand) {
+            // 记录原生物品入口实际使用哪只手，便于确认副手工具没有被偷偷移到主手。
+            usedHand = hand;
             items++; if (itemUse != null) itemUse.accept(player); return InteractionResult.PASS;
         }
         @Override public void releaseUsingItem(Player player) {

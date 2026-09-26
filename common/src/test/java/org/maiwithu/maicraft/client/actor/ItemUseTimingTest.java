@@ -15,6 +15,8 @@ import org.maiwithu.maicraft.core.act.Interaction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
+import com.mojang.serialization.Codec;
+import net.minecraft.core.component.DataComponentType;
 
 /** 真正推进原版面包持用倒计时；屏蔽渲染副作用，不用手动扣食物或计数假动作代替 32 刻过程。 */
 public final class ItemUseTimingTest {
@@ -22,6 +24,7 @@ public final class ItemUseTimingTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         breadSurvivesVanillaReleaseCheck(); foreignUseAndRevocationStayUntouched(); staleFoodSlotIsNotRebound();
         nativeStartComponentBelongsToThisUse();
+        synchronizedPolishingComponentKeepsUse();
         System.out.println("ItemUseTimingTest: native bread countdown, scoped held input, single completion and ownership guards passed");
     }
 
@@ -95,6 +98,35 @@ public final class ItemUseTimingTest {
             check(!ItemUseInputLease.project(f.h.h.minecraft, false), "later unrelated component changes still revoke the old projection");
             use.stop();
         }
+    }
+
+    private static void synchronizedPolishingComponentKeepsUse() throws Exception {
+        try (var f = new Fixture()) {
+            // 当前 Create 砂纸组件 equals 将参数误判为 ItemStack；服务端同步成新组件对象后，即使内容相同也会比较失败。
+            var type = DataComponentType.<BrokenPolishing>builder().persistent(Codec.STRING.xmap(BrokenPolishing::new, BrokenPolishing::item)).build();
+            f.h.mode.itemUse = p -> {
+                p.getMainHandItem().use(f.h.level, p, InteractionHand.MAIN_HAND);
+                p.getMainHandItem().set(type, new BrokenPolishing("rose_quartz"));
+            };
+            var use = Interaction.useInAir(f.player, InteractionHand.MAIN_HAND, Interaction.Timing.hold()); use.tick();
+            var original = f.player.getMainHandItem().copy();
+            var synced = original.copy(); synced.set(type, new BrokenPolishing("rose_quartz")); f.h.inventory.setItem(0, synced);
+            check(!ItemStack.isSameItemSameComponents(original, synced), "native equality reproduces the copied polishing component mismatch");
+            check(ItemUseInputLease.project(f.h.h.minecraft, false), "semantically identical synchronized work must keep the original use held");
+            // 同步后仍走完与砂纸相同的32刻原生持用倒计时；每刻都会经过续按判断，而非只测一次对象比较。
+            for (int tick = 0; tick < 32; tick++) {
+                check(ItemUseInputLease.project(f.h.h.minecraft, false), "synchronized processing remains held through every native use tick");
+                f.player.nativeUsingTick(); f.h.nextTick();
+                check(use.tick() == Interaction.Status.RUNNING && f.h.mode.items == 1, "polishing synchronization neither releases nor repeats native use");
+            }
+            synced.set(type, new BrokenPolishing("different_input"));
+            check(!ItemUseInputLease.project(f.h.h.minecraft, false), "a changed processing input remains a different held use");
+            use.stop();
+        }
+    }
+    private record BrokenPolishing(String item) {
+        @Override public boolean equals(Object other) { return other instanceof ItemStack; }
+        @Override public int hashCode() { return item.hashCode(); }
     }
 
     private static final class Fixture implements AutoCloseable {
