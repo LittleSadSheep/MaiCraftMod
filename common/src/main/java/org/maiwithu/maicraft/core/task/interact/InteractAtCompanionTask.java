@@ -393,6 +393,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        // 普通机械交互超时也可能已经交换物品；完成通知不能把缺少确认改写为可直接重试。
+        if (interaction != null) data.putAll(interaction.useEvidence());
         // 缺料失败和成功选点都保留链条账，等待任务通知的模型也能自主决定下一步取材或连接。
         if (interaction!=null && interaction.chainUse()!=null) data.put("chain_conveyor_use",interaction.chainUse().evidence());
         if (manualCrank) {

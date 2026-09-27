@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.act;
 
+import java.util.Map;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
@@ -95,13 +96,14 @@ public final class Interaction {
     private BlockPos requiredBlockPos;
     private Block requiredBlock;
     /**
-     * 是否允许点方块／实体没有确认成功后，再使用手里的物品，例如扔出雪球。
-     * 目前连“不确定是否已经生效”也会进入这一步，不能把它解释成已确认对方没有处理点击。
+     * 是否允许点方块／实体已确认没有生效后，再使用手里的物品，例如扔出雪球。
+     * 确认超时或结果不一致时停下来检查现场，不能再追加一次物品使用。
      * 精确 useBlock 默认关闭；forHit 的调用方自行决定是否开启。
      */
     private boolean itemFallthrough;
     private MenuReceipt closeReceipt;
     private NativeActionReceipt receipt;
+    private NativeActionReceipt lastUseReceipt;
     private ChainConveyorUse chainUse;
     private boolean fallingThrough;
     private boolean releasing;
@@ -193,7 +195,7 @@ public final class Interaction {
      * 实体／方块的最长按住时间由外层任务控制，这里只设置一个很大的重复次数。
      * 创建时记住目标，真正出手前仍会检查准星；左键空气直接返回 null，表示没有可做的动作。
      *
-     * @param itemFallthrough 点击没有确认成功时，是否允许再尝试使用手里的物品。
+     * @param itemFallthrough 点击已确认未生效时，是否允许再尝试使用手里的物品。
      */
     public static Interaction forHit(LocalPlayer p, HitResult hit, Button button, int holdTicks,
                                      boolean itemFallthrough) {
@@ -543,8 +545,7 @@ public final class Interaction {
         return false;
     }
 
-    // 确认成功才算完成一次。若允许物品兜底，任何其他终态都先转去使用手中物品，
-    // 目前没有区分“确认没生效”和“结果不确定”；这是审计记录 A29 的问题。
+    // 确认成功才计次；只有明确未生效才允许物品兜底，超时后必须保留原回执并交回现场检查。
     private boolean settleUseReceipt(LocalPlayerContext context, String action) {
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) {
@@ -552,6 +553,7 @@ public final class Interaction {
         }
         NativeActionReceipt.Status status = receipt.status();
         String detail = receipt.detail();
+        lastUseReceipt = receipt;
         receipt = null;
         if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             lastUseOutcome = "confirmed (" + action + ")";
@@ -559,7 +561,8 @@ public final class Interaction {
             fallingThrough = false;
             return true;
         }
-        if (chainUse==null && itemFallthrough && !fallingThrough) {
+        if (status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED
+                && chainUse==null && itemFallthrough && !fallingThrough) {
             fallingThrough = true;
             return false;
         }
@@ -614,6 +617,18 @@ public final class Interaction {
         return lastUseOutcome;
     }
     public ChainConveyorUse chainUse() { return chainUse; }
+
+    /** 没观察到变化不等于没发生；让任务和完成通知保留原生点击的确认边界，避免再次互换已装好的材料。 */
+    public Map<String, Object> useEvidence() {
+        if (button != Button.USE) return Map.of();
+        var last = receipt == null ? lastUseReceipt : receipt;
+        if (last == null) return Map.of();
+        boolean uncertain = last.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED
+                && last.status() != NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED;
+        return Map.of("submission_attempted", true, "native_action_status", last.status().name(),
+                "native_action_kind", last.kind().name(), "outcome_uncertain", uncertain,
+                "mechanical_retry_allowed", last.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED);
+    }
 
     // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
     private boolean fireUseEntity() {

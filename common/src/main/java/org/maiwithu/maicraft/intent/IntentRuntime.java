@@ -61,6 +61,8 @@ public final class IntentRuntime {
     private static final Set<String> ATTENTION_RESULT_DATA_KEYS = Set.of(
             "chat_state", "typed_characters", "total_characters", "submission_attempted",
             "delivery_status", "effects_started", "mechanical_retry_allowed",
+            // 保留原生点击终态，模型才能区分未生效与效果尚未确认，避免对交换型机器盲目重复点击。
+            "native_action_status", "native_action_kind",
             "task_id", "failure_code", "failure_type", "requires_decision",
             "build_diagnostics", "support_access", "construction_region", "construction_access", "construction_navigation",
             // 机器包装后的拆除数量、失败格和原生朝向冲突也属于恢复事实，完成通知不能再次把这一层丢掉。
