@@ -13,7 +13,8 @@ import java.util.List;
 final class KineticNativeView {
     private static final String KINETIC = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
-    record Observation(KineticRouteGeometry.Endpoint endpoint, String blockId, double rpm, boolean powered,String networkId) {}
+    record Observation(KineticRouteGeometry.Endpoint endpoint, String blockId, double rpm, boolean powered,
+                       String networkId, boolean hasNetwork, boolean overstressed) {}
     private KineticNativeView() {}
     static Observation read(Level level, BlockPos at, Direction exactFace, boolean chainInterface) {
         var values = variants(level,at,exactFace,chainInterface);
@@ -34,16 +35,17 @@ final class KineticNativeView {
                     && NativeApi.truth(NativeApi.call(state.getBlock(),ROTATE,"hasShaftTowards",level,at,state,side))) faces.add(side);
             if (faces.isEmpty() && !(family.equals("chain_conveyor") && chainInterface && exactFace == null)) return List.of();
             double speed = ((Number) NativeApi.call(entity,KINETIC,"getSpeed")).doubleValue();
-            boolean powered = Double.isFinite(speed) && Math.abs(speed) > .0001
-                    && NativeApi.truth(NativeApi.call(entity,KINETIC,"hasNetwork"))
-                    && !NativeApi.truth(NativeApi.call(entity,KINETIC,"isOverStressed"));
+            // 停转、断网与过载是不同事实；原生字段分别保留，不能从“没有供能”反推出过载。
+            boolean hasNetwork = NativeApi.truth(NativeApi.call(entity,KINETIC,"hasNetwork"));
+            boolean overstressed = NativeApi.truth(NativeApi.call(entity,KINETIC,"isOverStressed"));
+            boolean powered = Double.isFinite(speed) && Math.abs(speed) > .0001 && hasNetwork && !overstressed;
             var result = new ArrayList<Observation>();
             Object network=NativeApi.field(entity,KINETIC,"network");String networkId=network==null?"":network.toString();
             if (family.equals("chain_conveyor") && chainInterface && exactFace == null)
-                result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,List.of(),family),id,speed,powered,networkId));
+                result.add(new Observation(new KineticRouteGeometry.Endpoint(at,axis,List.of(),family),id,speed,powered,networkId,hasNetwork,overstressed));
             for (Direction.Axis portAxis : Direction.Axis.values()) {
                 var onAxis = faces.stream().filter(face -> face.getAxis() == portAxis).toList();
-                if (!onAxis.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,portAxis,onAxis,family),id,speed,powered,networkId));
+                if (!onAxis.isEmpty()) result.add(new Observation(new KineticRouteGeometry.Endpoint(at,portAxis,onAxis,family),id,speed,powered,networkId,hasNetwork,overstressed));
             }
             return List.copyOf(result);
         } catch (RuntimeException unavailable) { return List.of(); }

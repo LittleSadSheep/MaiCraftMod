@@ -73,6 +73,9 @@ public final class IntentRuntime {
             "chain_conveyor_use",
             // 实际接入方块随完成通知保留，调用者可将动力回执与请求的压机、链轮等设备直接对照。
             "selected_destination_block", "selected_source_block",
+            // 失败时仍保留两端的独立转速与观察阶段，整体接线未验收不等于两边都没有动力。
+            "source_power_evidence", "destination_power_evidence",
+            "source_native_observation_stage", "target_native_observation_stage",
             // 清障失败的具体坐标和最近选址建议是观察证据，必须送达外部 LLM 才能改变场地。
             "clearance_report",
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
