@@ -237,6 +237,7 @@ public final class GuiRegressionSuite {
         // 现场在开工前或开挖途中出现人工方块时，实际施工任务也要停手并回报原坐标。
         BuildClearanceExecutionTest.main(args);
         MachineModificationClearanceTest.main(args);
+        BuildWrenchRemovalTest.main(args);
         BuildExcavationFrontierTest.main(args);
         ContainerBatchReplanTest.main(args);
         ContainerSplitPlannerTest.main(args);

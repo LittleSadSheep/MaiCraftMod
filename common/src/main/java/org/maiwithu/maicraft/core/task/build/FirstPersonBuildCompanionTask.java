@@ -161,6 +161,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BuildPlacementAccessDrive placementAccess;
     private BlockPos placementAccessTarget;
     private int placementAccessReplans;
+    private BuildWrenchRemoval wrenchRemoval;
+    private final List<Map<String, Object>> wrenchReceipts = new ArrayList<>();
     private String edgeReturnFailure, edgeReturnFailureCode;
     private Map<String, Object> temporarySupportDemand = Map.of();
     private boolean layerKnown;
@@ -703,6 +705,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (excavating && !excavationTools.active() && player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir()
+                && !BuildWrenchRemoval.available(player, clearing)
                 && r.toolSupply().policy() != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 && WorkToolPreparation.excavationTool(
                         player, player.level().getBlockState(clearing), excavation.remaining()) != null) {
@@ -760,6 +763,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearTick() {
+        // 扳手点击已经发出时优先结算它；原生预测先显示空气不能跳到下一格并遗失回收回执。
+        if (wrenchRemoval != null) return wrenchRemovalTick();
         if (ultimineArmed && digger.hasPendingBreak()) {
             var decision = ultimine.tickInFlight(ClientRuntime.requireContext(player));
             // 连锁九格中的任一格变成人工障碍都先松键停挖，再报告实际遇到的位置。
@@ -802,6 +807,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failAt(clearing, "observed target changed before breaking", FailureType.TARGET_LOST,
                     "build_target_changed", false); return TaskState.FAILED;
         }
+        if (digger.current() == null && !digger.hasPendingBreak()) wrenchRemoval = BuildWrenchRemoval.carried(player, clearing,
+                () -> clearingPermitted(player.level().getBlockState(clearing)) && r.mutationGuardMatches(player, clearing));
+        if (wrenchRemoval != null) return wrenchRemovalTick();
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> ultimineFailure == null ? TaskState.RUNNING : TaskState.FAILED;
             case BROKE_TARGET -> {
@@ -819,6 +827,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         "clear_occluded", false); yield TaskState.FAILED;
             }
         };
+    }
+
+    private TaskState wrenchRemovalTick() {
+        var status = wrenchRemoval.tick();
+        if (status == BuildWrenchRemoval.Status.RUNNING) return TaskState.RUNNING;
+        if (status == BuildWrenchRemoval.Status.FAILED) {
+            if (phase == Phase.CLEARANCE_REPORT) return TaskState.RUNNING;
+            failAt(clearing, wrenchRemoval.reason(), FailureType.UNKNOWN, "native_wrench_removal_failed", wrenchRemoval.uncertain());
+            return TaskState.FAILED;
+        }
+        wrenchReceipts.add(wrenchRemoval.evidence()); wrenchRemoval.stop(); wrenchRemoval = null;
+        confirmedBlockChange(clearing); r.brokeOne(); renewBuildProgress(); return nextClear();
     }
 
     private TaskState nextClear() {
@@ -2534,6 +2554,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        if (wrenchRemoval != null) { if (why == StopReason.PREEMPTED) wrenchRemoval.pause(); else wrenchRemoval.stop(); }
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
         if (scaffoldDescent != null) scaffoldDescent.stop();
         if (placementAccess != null) {
@@ -2553,6 +2574,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 暂停／取消后不再续发旧任务的 Shift；恢复时由新控制租约重新核验身体与锚点。
     }
     @Override protected void cleanup() {
+        if (wrenchRemoval != null) wrenchRemoval.stop();
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
         if (scaffoldDescent != null) scaffoldDescent.stop();
         if (placementAccess != null) placementAccess.stop();
@@ -2579,6 +2601,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 永久建材缺口和临时支撑缺口分别保留，后者必须带可执行的选料结论才能自动补给。
         if (!temporarySupportDemand.isEmpty()) data.put("temporary_support_demand", temporarySupportDemand);
         data.put("cleared", r.broken());
+        if (!wrenchReceipts.isEmpty()) data.put("native_wrench_removals", List.copyOf(wrenchReceipts));
+        if (wrenchRemoval != null) data.put("pending_wrench_removal", wrenchRemoval.evidence());
         data.put("food_preparation", foodPreparation.progress(player));
         if (!foodPreparation.receipts().isEmpty()) data.put("completed_food_receipts", foodPreparation.receipts());
         if ("build_terrain_conflict".equals(failureCode)) data.put("mechanical_retry_allowed", false);

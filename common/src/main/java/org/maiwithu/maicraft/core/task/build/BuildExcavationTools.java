@@ -39,6 +39,8 @@ final class BuildExcavationTools {
             if (result.status() == SemanticMaterialSupplyCoordinator.Status.FAILED) failure = result.message();
             return false;
         }
+        // 支持默认扳手拆卸且身上已有 Create 扳手时，拆旧轴不必先绕去制作一把镐子。
+        if (BuildWrenchRemoval.available(player, target)) return true;
         var item = WorkToolPreparation.excavationTool(player, player.level().getBlockState(target), work);
         if (item == null) return true;
         var options = record.toolSupply();
