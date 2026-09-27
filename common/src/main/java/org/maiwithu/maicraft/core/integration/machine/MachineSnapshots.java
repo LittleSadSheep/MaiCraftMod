@@ -153,15 +153,20 @@ public final class MachineSnapshots {
 
     /** 要用于操作时，再检查编号、时效、结构是否看完整，以及当前方块是否与观察时一致。 */
     public static Snapshot requireFresh(LocalPlayer player, String id) {
-        return require(player, id, false);
+        return require(player, id, false, false);
     }
 
     /** 仅施工可复用设计期间的场地锚点；开菜单、取物和控制设备继续使用普通短期回执。 */
     public static Snapshot requireForConstruction(LocalPlayer player, String id) {
-        return require(player, id, true);
+        return require(player, id, true, false);
     }
 
-    private static Snapshot require(LocalPlayer player, String id, boolean construction) {
+    /** 生产计划只借用原观察的机器范围；执行器会重新读原料和运行条件，结构未变时不因思考耗时要求模型重拍。 */
+    public static Snapshot requireForProduction(LocalPlayer player, String id) {
+        return require(player, id, false, true);
+    }
+
+    private static Snapshot require(LocalPlayer player, String id, boolean construction, boolean production) {
         bind(player);
         Snapshot snapshot = SNAPSHOTS.get(id);
         // 施工观察失效时引回同一工地的感知入口；已有机器的操作仍单独刷新设备证据。
@@ -170,7 +175,9 @@ public final class MachineSnapshots {
         if (snapshot == null) throw new IllegalArgumentException("machine_snapshot_missing: " + refresh + " in this session");
         // 蓝图施工按冻结锚点直接执行；场地变动由逐格施工处理，不用旧区域指纹把续作挡回重新勘测。
         if (construction) return snapshot;
-        if (expired(snapshot, player.level().getGameTime(), construction)) {
+        // 生产可在同一会话重新核对旧结构，但时间倒退、编号被消费或换世界仍然拒绝；菜单与控制回执不延寿。
+        long now = player.level().getGameTime();
+        if (expired(snapshot, now, construction) && (!production || now < snapshot.gameTime())) {
             throw new IllegalArgumentException("machine_snapshot_expired: " + refresh);
         }
         if (!snapshot.report().get("structure_complete").getAsBoolean()) {

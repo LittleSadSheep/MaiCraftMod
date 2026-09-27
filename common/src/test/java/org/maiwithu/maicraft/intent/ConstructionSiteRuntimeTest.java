@@ -31,6 +31,15 @@ public final class ConstructionSiteRuntimeTest {
             check(ConstructionSiteGeometry.describe(site).getAsJsonArray("surface_and_obstacles").size() == 15, "the model only needs fifteen exact floor runs");
             var clock = world.level.getClass().getDeclaredField("time"); clock.setAccessible(true); clock.setLong(world.level, 5000);
             check(MachineSnapshots.requireForConstruction(world.player, site.id()).id().equals(site.id()), "unchanged geometry survives long design work");
+            // 生产耗时较长时在原位重验结构，既不延长菜单回执，也不把原库存观察伪装成新数据。
+            check(MachineSnapshots.requireForProduction(world.player,site.id()).gameTime()==site.gameTime(),
+                    "production revalidates geometry without rewriting original observation time");
+            try { MachineSnapshots.requireForProduction(world.player,regular.id()); throw new AssertionError("partial structure was accepted"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("incomplete"),"production still needs complete structural evidence"); }
+            clock.setLong(world.level,site.gameTime()-1);
+            try { MachineSnapshots.requireForProduction(world.player,site.id()); throw new AssertionError("reversed clock was accepted"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("expired"),"reversed game time cannot renew the observation"); }
+            clock.setLong(world.level,5000);
             // 在线 plan 使用同一锚点完成原生蓝图检查，不领材料、不消费编号，execute 还能继续使用。
             IntentRuntime runtime = IntentRuntime.get();
             runtime.remember("site", new Goal.WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), site.dimension()));
@@ -109,6 +118,8 @@ public final class ConstructionSiteRuntimeTest {
             try { MachineSnapshots.requireFresh(world.player, site.id()); throw new AssertionError("native action reused an old site receipt"); }
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("expired"), "native actions retain their freshness rule"); }
             world.set(anchor.below(), Blocks.GOLD_BLOCK.defaultBlockState());
+            try { MachineSnapshots.requireForProduction(world.player,site.id()); throw new AssertionError("changed production geometry was accepted"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("changed"),"production checks current blocks before starting"); }
             var changed = MachinePlanPreflight.review(goal, world.player, runtime);
             // 施工或其他实际变化发生后继续用原锚点执行，具体格子交给原生施工，不再生成一次无谓的勘测决策。
             check(changed.get("valid").getAsBoolean()
@@ -116,6 +127,8 @@ public final class ConstructionSiteRuntimeTest {
                             && MachineAbilityAdapter.adapt(goal, world.player, runtime, null) instanceof IntentAction.Native,
                     "changed construction geometry still starts native work at the original anchor");
             MachineSnapshots.consume(site);
+            try { MachineSnapshots.requireForProduction(world.player,site.id()); throw new AssertionError("consumed production reference was reused"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("missing"),"production cannot revive a consumed receipt"); }
             try { MachineSnapshots.requireForConstruction(world.player, site.id()); throw new AssertionError("consumed site was accepted"); }
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("missing"), "consumed anchors cannot start another build"); }
             check(world.blockUses() == 0 && world.itemUses() == 0 && world.player.getInventory().isEmpty(), "survey never uses blocks or supplies materials");

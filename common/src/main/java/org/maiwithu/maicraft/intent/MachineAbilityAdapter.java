@@ -566,8 +566,11 @@ final class MachineAbilityAdapter {
         }
         // 同时核对观察编号、机器名字和位置，不能用甲机器的观察去授权修改乙机器。
         String id = requiredString(goal.parameters(), "snapshot_id", 36);
+        // 生产先在执行端重验结构，再由原生执行器读取当前原料；不用让模型为超过一分钟的推理反复勘察。
+        boolean production = OPERATE.equals(goal.ability())
+                && "run_production".equals(optionalString(goal.parameters(),"operation",64));
         MachineSnapshots.Snapshot snapshot = construction ? MachineSnapshots.requireForConstruction(player, id)
-                : MachineSnapshots.requireFresh(player, id);
+                : production ? MachineSnapshots.requireForProduction(player,id) : MachineSnapshots.requireFresh(player, id);
         Goal.WorldPosition target = resolve(goal.target(), player, runtime);
         if (!snapshot.center().equals(block(target)) || !snapshot.label().equalsIgnoreCase(goal.target().label())) {
             throw bad("machine_snapshot_target_mismatch: copy target and snapshot_id from the same observation; "
