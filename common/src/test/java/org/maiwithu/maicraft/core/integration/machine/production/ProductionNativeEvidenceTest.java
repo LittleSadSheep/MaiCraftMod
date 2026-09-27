@@ -92,6 +92,7 @@ public final class ProductionNativeEvidenceTest {
         semanticPatternConfiguration();
         configurationReadbackAfterLongSupply();
         connectionSurveyFailureIsNotMistakenForExpiry();
+        recipeDecodeFailureRemainsVisibleBeforeResourceBinding();
         ProductionEvidenceFreshnessTest.main(args);
         System.out.println("ProductionNativeEvidenceTest: passed");
     }
@@ -167,6 +168,36 @@ public final class ProductionNativeEvidenceTest {
     }
 
     private static JsonObject current(JsonObject value) { value.addProperty("tick",1401); return value; }
+    private static void recipeDecodeFailureRemainsVisibleBeforeResourceBinding() {
+        // 首次试产还没有可观察成品，服务器又未解码该配方时，应先报告解析缺口并保持禁止供料。
+        JsonObject authored = ProductionNativeFixture.manifest();
+        var evidence = new ProductionNativeEvidence(ProductionManifest.parse(authored));
+        evidence.bind(ProductionNativeFixture.DIMENSION, ProductionNativeFixture.ANCHOR);
+        JsonObject unsupported = ProductionNativeFixture.recipe();
+        unsupported.add("inputs", new JsonArray()); unsupported.add("outputs", new JsonArray());
+        unsupported.addProperty("complete", false); unsupported.addProperty("type", "create:sequenced_assembly");
+        unsupported.getAsJsonArray("unknown").add("recipe_type_not_decoded");
+        evidence.observeRecipe("press", unsupported);
+        var result = ProductionDesignCompiler.compile(authored, evidence);
+        check(result.valid() && !result.canEnter("supply"), "an undecoded recipe cannot admit supply");
+        String summary = ProductionStageReadiness.failureSummary(result.report(), "supply");
+        check(summary.contains("recipe_type_not_decoded") && summary.contains("No observed full identity"),
+                "recipe decoding and absent item identities must both remain visible: " + summary);
+        check(summary.indexOf("recipe_type_not_decoded") < summary.indexOf("No observed full identity"),
+                "native recipe limitation precedes missing identity diagnostics");
+        check(!result.report().get("machine_production_verified").getAsBoolean(), "diagnostics cannot certify output");
+        unsupported.getAsJsonArray("unknown").add("x".repeat(2048)); evidence.observeRecipe("press", unsupported);
+        check(evidence.recipeDefinition("create:pressing/iron_ingot").detail().length() < 500,
+                "native diagnostic text remains bounded");
+        // 新读取的完整配方可以重新绑定输入与产物；旧的解析失败不能永久锁住同一台机器。
+        evidence.observeRecipe("press", ProductionNativeFixture.recipe());
+        check(evidence.recipeDefinition("create:pressing/iron_ingot").status() == Status.VERIFIED
+                && evidence.resolve(new Resource("items", "create:iron_sheet")).check().status() == Status.VERIFIED,
+                "complete reread replaces the limitation and supplies the output identity");
+        evidence.advance(1401);
+        check(!evidence.recipeDefinition("create:pressing/iron_ingot").detail().contains("recipe_type_not_decoded"),
+                "expired recipe evidence only requests a current read");
+    }
     private static Port port(ProductionManifest manifest, String id) { return manifest.ports().stream().filter(p -> p.id().equals(id)).findFirst().orElseThrow(); }
     private static void rejects(Runnable action, String message) { try { action.run(); throw new AssertionError(message); } catch (IllegalArgumentException expected) { } }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

@@ -194,10 +194,33 @@ public final class ProductionNativeEvidence implements ProductionEvidence {
     }
 
     @Override public Recipe recipe(String recipeId) {
+        JsonObject latest = latestRecipe(recipeId);
+        return latest == null ? null : ProductionNativeRecipes.decode(latest);
+    }
+    @Override public Check recipeDefinition(String recipeId) {
+        JsonObject latest = latestRecipe(recipeId);
+        if (latest == null) return unknown("Read the installed recipe definition at the anchored process");
+        // 原生已说明配方类型或条件尚未解码时，先暴露这些事实；空的资源列表不能被误读为玩家缺料。
+        var reasons = new ArrayList<String>();
+        for (var value : array(latest, "unknown")) {
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) continue;
+            String reason = value.getAsString();
+            reasons.add(reason.substring(0, Math.min(160, reason.length())));
+            if (reasons.size() == 4) break;
+        }
+        if (!Boolean.TRUE.equals(bool(latest, "complete")) || Boolean.TRUE.equals(bool(latest, "truncated")) || !reasons.isEmpty()) {
+            if (Boolean.TRUE.equals(bool(latest, "truncated"))) reasons.add("native_recipe_truncated");
+            String type = text(latest, "type");
+            return unknown("Native recipe definition incomplete: " + String.join("; ", reasons)
+                    + (type == null ? "" : "; type=" + type.substring(0, Math.min(160, type.length()))));
+        }
+        return ProductionEvidence.super.recipeDefinition(recipeId);
+    }
+    private JsonObject latestRecipe(String recipeId) {
         JsonObject latest = null;
         for (JsonObject result : recipes.values()) if (fresh(result) && (recipeId.equals(text(result,"recipe_id")) || recipeId.equals(text(result,"requested_recipe_id")))
                 && (latest == null || number(result,"tick") > number(latest,"tick"))) latest = result;
-        return latest == null ? null : ProductionNativeRecipes.decode(latest);
+        return latest;
     }
     @Override public Check geometry(Node node) {
         JsonObject observation = nodes.get(node.id());

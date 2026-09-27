@@ -26,8 +26,10 @@ public final class ProductionDesignCompiler {
         try {
             ProductionManifest manifest = ProductionManifest.parse(input);
             new ProductionGraph(manifest); // 即使尚未发现身份信息，形状和拓扑错误仍必须报错。
-            JsonObject resolved = bindResources(input,manifest,evidence,report);
+            // 先记录原生配方是否可读，再绑定物料；首次试产尚无成品时也能看到真实解析缺口。
+            JsonObject resolved = input.deepCopy();
             bindRecipes(resolved,manifest,evidence,report);
+            resolved = bindResources(resolved,manifest,evidence,report);
             report.json.add("resolved_manifest",resolved);
             if (report.unboundResources) return report.finish();
             manifest = ProductionManifest.parse(resolved);
@@ -112,6 +114,8 @@ public final class ProductionDesignCompiler {
             String canonical = binding.check().status() == Status.VERIFIED && node.recipeId().equals(binding.requestedRecipeId()) ? binding.recipeId() : node.recipeId();
             if (canonical == null || canonical.isBlank()) { report.error("invalid_recipe_binding",node.id()); canonical = node.recipeId(); }
             resolved.getAsJsonArray("nodes").get(i).getAsJsonObject().addProperty("recipe_id",canonical);
+            String recipeId = canonical;
+            report.require("recipe", node.id() + "/definition", () -> evidence.recipeDefinition(recipeId));
             JsonObject row = new JsonObject(); row.addProperty("node",node.id()); row.addProperty("requested_recipe_id",node.recipeId()); row.addProperty("recipe_id",canonical); bindings.add(row);
         }
         report.json.add("recipe_bindings",bindings);
