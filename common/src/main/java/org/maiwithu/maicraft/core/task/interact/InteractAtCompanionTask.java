@@ -52,6 +52,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private final FirstPersonActionGate selection =
             new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
+    private int surfaceAimCorrections;
+    private boolean surfaceStillVisible;
+    private boolean surfaceCheckAttempted;
     private boolean itemSelected;
     /**
      * 在目标可见轮廓上挑出的瞄准点，避免只瞄方块中心而被部分遮挡。
@@ -175,7 +178,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             if (useSurface != null && useSurface.constrained()
                     && (!(hit instanceof BlockHitResult surface) || !surface.getBlockPos().equals(r.aim)
                     || !useSurface.accepts(surface))) {
-                fail("the required machine interaction surface is no longer visible", FailureType.OCCLUDED);
+                // 一度以内只说明镜头接近目标，机械手前端或置物台边缘仍可能尚未命中；未出手时先继续精确瞄准。
+                if (refineSurfaceAim(useSurface)) return TaskState.RUNNING;
+                fail(surfaceStillVisible
+                        ? "the machine surface remains visible, but the actual view did not reach it after bounded aiming"
+                        : "the required machine interaction surface is no longer visible", FailureType.OCCLUDED);
                 return TaskState.FAILED;
             }
             // 与语义预检共用同一套遮挡口径:普通目标命中更近的别块就是被挡住;
@@ -378,6 +385,18 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         return " — " + String.join("; ", changes);
     }
 
+    private boolean refineSurfaceAim(CreateInteractionSurface.Rule surface) {
+        surfaceCheckAttempted = true;
+        var visible = surface.visibleHit(player.level(), player, player.getEyePosition(), r.aim, REACH);
+        surfaceStillVisible = visible != null;
+        // 只重做尚未提交的瞄准，至多十次；真正被挡立即返回，也不会重复发送可能已经换物的点击。
+        if (visible == null || surfaceAimCorrections >= 10) return false;
+        surfaceAimCorrections++;
+        aimPoint = visible.getLocation();
+        aimConvergence.reset();
+        return true;
+    }
+
     /** 释放交互，再释放导航和目标覆盖层（父类默认清理）。 */
     @Override
     protected void cleanup() {
@@ -397,6 +416,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        if (surfaceCheckAttempted) {
+            // 只读回执分别说明几何可见性与已尝试的镜头修正，便于区分机壳遮挡和真实射线仍未对准。
+            data.put("surface_aim_corrections", surfaceAimCorrections);
+            data.put("interaction_surface_visible_at_last_check", surfaceStillVisible);
+        }
         // 普通机械交互超时也可能已经交换物品；完成通知不能把缺少确认改写为可直接重试。
         if (interaction != null) data.putAll(interaction.useEvidence());
         if (!deployerHandBefore.isEmpty()) {

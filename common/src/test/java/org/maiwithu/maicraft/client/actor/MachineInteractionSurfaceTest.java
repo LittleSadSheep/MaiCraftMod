@@ -11,6 +11,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
+import org.maiwithu.maicraft.core.task.MouseButton;
+import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
+import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 
 /** 操作面约束使用原生区块射线，不能用可见侧面或被上方方块挡住的顶面替代工件台入口。 */
 public final class MachineInteractionSurfaceTest {
@@ -20,6 +23,7 @@ public final class MachineInteractionSurfaceTest {
                 && CreateInteractionSurface.requiredFace(Blocks.CRAFTING_TABLE.defaultBlockState()) == null,
                 "only the native depot contract requires a top click; ordinary menus keep all visible faces");
         deployerRegions();
+        visibleSurfaceGetsBoundedAimCorrection();
         try (var h = new InteractionWorldTestHarness()) {
             var at = new BlockPos(8, 1, 5); h.set(at, Blocks.STONE.defaultBlockState());
             var lowEye = new Vec3(8.5, 1.5, 8.5);
@@ -69,6 +73,26 @@ public final class MachineInteractionSurfaceTest {
                 "empty hand also swaps with deployer hand");
         check(!CreateInteractionSurface.forUse(Blocks.CRAFTING_TABLE.defaultBlockState(), null).constrained(),
                 "ordinary empty-hand menus stay unconstrained");
+    }
+    private static void visibleSurfaceGetsBoundedAimCorrection() throws Exception {
+        // 已有原生可见顶面时先重取瞄准点，遮挡出现后立即停止；整个纠偏阶段不得发出点击。
+        try (var h = new InteractionWorldTestHarness()) {
+            var at = new BlockPos(8, 1, 5); h.set(at, Blocks.STONE.defaultBlockState());
+            h.position(new Vec3(8.5, 1, 6.5));
+            var task = new InteractAtCompanionTask(h.player,
+                    new InteractAtTaskRecord("surface-aim", 200, MouseButton.RIGHT, at, 0, null));
+            var top = new CreateInteractionSurface.Rule(Direction.UP, null);
+            var refine = InteractAtCompanionTask.class.getDeclaredMethod("refineSurfaceAim", CreateInteractionSurface.Rule.class);
+            refine.setAccessible(true);
+            for (int attempt = 0; attempt < 10; attempt++)
+                check((boolean) refine.invoke(task, top), "visible surface permits bounded pre-click aiming");
+            check(!(boolean) refine.invoke(task, top), "a persistent native-ray mismatch cannot cause endless aiming");
+            var blocked = new InteractAtCompanionTask(h.player,
+                    new InteractAtTaskRecord("blocked-surface", 200, MouseButton.RIGHT, at, 0, null));
+            h.set(at.above(), Blocks.STONE.defaultBlockState());
+            check(!(boolean) refine.invoke(blocked, top), "an actual covering block is not mistaken for a camera delay");
+            check(h.blockUses() == 0 && h.itemUses() == 0, "aim correction never replays a native use");
+        }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }
