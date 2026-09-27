@@ -119,6 +119,12 @@ public final class AcquisitionSourceInheritanceTest {
 
     private static void sourceOrderUsesCurrentFacts() {
         var item = ResourceLocation.withDefaultNamespace("dirt");
+        // 请求顺序即使把采矿和地面来源放前面，随身终端的可用现货仍优先，避免为已有材料离开工位。
+        var portable = new AcquisitionNeed(List.of(item),1,0,Set.of(item),Set.of(),Set.of(),
+                List.of(Source.MINE,Source.NEARBY,Source.WIRELESS,Source.INVENTORY));
+        portable.wirelessInventory=true;
+        check(AcquisitionSources.order(portable,new AcquisitionSources.Readiness(false,false,true,false))
+                .equals(List.of(Source.INVENTORY,Source.WIRELESS,Source.NEARBY,Source.MINE)),"随身与无线库存先于世界取材");
         var need = new AcquisitionNeed(List.of(item), 1, 0, Set.of(item), Set.of(), Set.of(),
                 List.of(Source.COOK, Source.MINE, Source.CRAFT, Source.STORAGE, Source.INVENTORY));
         var ready = new AcquisitionSources.Readiness(true, false, true, false);
