@@ -93,6 +93,6 @@ Copy-Item -LiteralPath '.\neoforge\run\saves\TEST-Template' -Destination $trialW
 
 日常修改在 `dev`。每个可独立理解、已经验证的修改单独提交；完成一个完整功能后整合到 `main`，随后回到 `dev`。
 
-使用已配置的 Git 身份签名提交，每次增删行数合计少于 325。提交主题使用 Conventional Commits，冒号后的说明写中文，并说明具体行为或整理理由。
+使用已配置的 Git 身份签名提交。提交主题使用 Conventional Commits，冒号后的说明写中文，并说明具体行为或整理理由。
 
 正式开发文档放在 `docs/dev/`，和代码一起维护。临时统计、实验、逐项审阅笔记和构建日志放在 `docs/tmp/` 或构建目录，不放进 Git 历史。第三方源码和版权说明按原项目保留。
