@@ -16,7 +16,8 @@ final class MachineObservationPages {
     boolean append(JsonObject page, String requestId, int blockIndex) {
         if (!page.has("schema") || !page.get("schema").getAsString().equals("maicraft.machine_snapshot.v1"))
             throw new IllegalArgumentException("unexpected server machine snapshot schema");
-        JsonObject frozen = page.deepCopy();
+        // 先去掉重复展示再计算报告预算；非空物品、组件、原生时刻和未读标记仍按原生事实保留。
+        JsonObject frozen = MachineObservationPresentation.compact(page);
         frozen.addProperty("request_id", requestId);
         // 原生位置已由调用方逐项核对；公开回执隐藏坐标后仍可按结构索引分清不同置物台和机械手。
         if (blockIndex >= 0) frozen.addProperty("block_index", blockIndex);
