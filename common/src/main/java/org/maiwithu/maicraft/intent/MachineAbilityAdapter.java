@@ -201,11 +201,11 @@ final class MachineAbilityAdapter {
                     only(p, "operation", "snapshot_id", "blueprint", "blueprint_uri", "allow_modify",
                             "material_policy", "replace_existing", "replace_block_entities", "protected_labels");
                     validateLayoutSource(p, false);
-                    validateConstructionOptions(p);
+                    validateConstructionOptions(p, true);
                 } else {
                     throw bad("unsupported_machine_modification: choose apply_blueprint, connect_mechanical_power or connect_external_input; click scripts are not accepted");
                 }
-                requiredString(p, "snapshot_id", 36);
+                optionalString(p, "snapshot_id", 36);
                 bool(p, "allow_modify", false);
                 requireMachineTarget(goal);
             }
@@ -222,7 +222,7 @@ final class MachineAbilityAdapter {
                 if (p.has("production")) { MachineProductionIntent.validate(p); bool(p, "allow_use", false); }
                 else if (p.has("allow_use")) throw bad("allow_use on build_machine requires an explicit production goal");
                 bool(p, "allow_modify", false);
-                validateConstructionOptions(p);
+                validateConstructionOptions(p, false);
                 requireMachineTarget(goal);
             }
             default -> { }
@@ -447,16 +447,18 @@ final class MachineAbilityAdapter {
             throw bad("external_utility_connection_is_separate: build without production, connect_external_input, then run_production");
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime, true);
         if (layout.buildable()) {
-            boolean replace = bool(p, "replace_existing", false);
+            boolean modification = MODIFY.equals(goal.ability());
+            boolean replace = bool(p, "replace_existing", modification);
             JsonObject design = p.getAsJsonObject("design");
             if (replace && design != null && design.has("constraints") && design.getAsJsonObject("constraints").has("preserve_existing")
                     && design.getAsJsonObject("constraints").get("preserve_existing").getAsBoolean())
                 throw bad("replace_existing conflicts with the design's preserve_existing constraint");
             BlockPos anchor = design == null ? snapshot.center() : MachineConstructionPlan.floorAnchor(snapshot.center(), layout);
             // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
-            var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", false));
-            // apply_blueprint 是修改现有机器：冻结这些明确目标的旧方块，不能把拆掉旧轴当成另找空地建新机器。
-            if (MODIFY.equals(goal.ability())) plan.bindObservedModification(player.level(), snapshot.center(), snapshot.radius());
+            // 已明确授权的修改直接执行所声明的拆换；额外选项只用于主动收紧范围，不再要求模型重复打开两个许可。
+            var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", modification && replace));
+            // apply_blueprint 沿用已授权的明确目标，当前状态与可达性由内部施工读取，拆旧轴不再转成重新选址。
+            if (modification) plan.bindAutomaticModification(player.level());
             if (!ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
                 return IntentAction.Pending.INSTANCE;
             List<String> protectedLabels = p.has("protected_labels")
@@ -513,10 +515,10 @@ final class MachineAbilityAdapter {
         }
     }
 
-    private static void validateConstructionOptions(JsonObject p) {
+    private static void validateConstructionOptions(JsonObject p, boolean modification) {
         // 允许拆带数据的机器／箱子，必须先允许普通替换，不能把两个许可写成互相矛盾的组合。
-        boolean replace = bool(p, "replace_existing", false);
-        if (bool(p, "replace_block_entities", false) && !replace)
+        boolean replace = bool(p, "replace_existing", modification);
+        if (bool(p, "replace_block_entities", modification && replace) && !replace)
             throw bad("replace_block_entities requires replace_existing=true");
         SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p, "material_policy", 64));
     }
@@ -554,6 +556,11 @@ final class MachineAbilityAdapter {
     }
 
     static MachineSnapshots.Snapshot boundSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime, boolean construction) {
+        if (MODIFY.equals(goal.ability())) {
+            // 修改的目标与授权已经给定，由 Mod 自己读取锚点；旧观察只是参考，不再要求模型为每次拆换重发 inspect。
+            Goal.WorldPosition target = resolve(goal.target(), player, runtime);
+            return MachineSnapshots.constructionSite(player, goal.target().label(), block(target), 0);
+        }
         // 同时核对观察编号、机器名字和位置，不能用甲机器的观察去授权修改乙机器。
         String id = requiredString(goal.parameters(), "snapshot_id", 36);
         MachineSnapshots.Snapshot snapshot = construction ? MachineSnapshots.requireForConstruction(player, id)

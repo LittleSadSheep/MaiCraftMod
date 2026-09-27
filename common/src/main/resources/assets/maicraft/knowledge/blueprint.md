@@ -242,7 +242,7 @@ v2 的 `panel` 可添加 `pattern`，将小段二进制图案重复到整个平�
 
 建造失败结果的 `build_diagnostics` 会给出冻结目标数组中的零起始 `target_index`、预期和实际方块状态；临时支撑失败还会带 `support_for` 指向其服务的目标。`placed` 是本次执行的放置计数，`completed` 才是本次核验已满足的目标数；不能把续建单次放置计数当作整座建筑完成度。
 
-清障额外受客户端 `config/maicraft-clearance.json` 白名单限制，默认是明确列举的自然地形、矿石、原木和植被类型。`replace_existing:true` 不能突破名单。遇到名单外的现存障碍时返回 `build_clearance_not_whitelisted`，`clearance_report.obstacles` 给出方块 ID、`at:[x,y,z]` 与目标编号，并附维度、总数和截断标记；该报告也会进入 Attention。不要原地机械重试或擅自扩大白名单，应结合报告考虑其他选址。
+普通新建的清障受客户端 `config/maicraft-clearance.json` 白名单限制，默认是明确列举的自然地形、矿石、原木和植被类型。普通新建的 `replace_existing:true` 不能突破名单。遇到名单外的现存障碍时返回 `build_clearance_not_whitelisted`，`clearance_report.obstacles` 给出方块 ID、`at:[x,y,z]` 与目标编号，并附维度、总数和截断标记。已授权的 `modify_machine` 按明确声明的改动格子执行拆换，使用独立修改范围；拆除目标不会被建议平移到另一片空地。
 
 `clearance_report.suggested_offsets` 是整份蓝图保持高度后的水平偏移 `[dx,0,dz]`，按移动距离从小到大核对半径 16 格内的已加载地形；每个建议都核对全部实体与空气目标，最多返回三个同等最近候选。未知区块、搜索预算和是否证明范围内最小距离见 `search`。这只证明清障条件，地基、通路和材料仍须重新观察。选址后创建新场地工程，不能把偏移直接套给旧冻结项目或仅移动剩余未建部分。寻路清障则将名单外方块视为不可挖障碍并绕行，走不通时如实失败。
 
@@ -268,7 +268,7 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 - `offset` 是相对于选定施工锚点的整数 `[x,y,z]`，允许负数；显式蓝图不会自动上移或重排。不同机器、平台与装饰可出现在同一蓝图中。
 - `block_id` 使用当前安装版本的完整注册 ID。`properties` 中列出的状态属性会逐项验收；省略的属性使用施工默认值，不作为额外精确状态要求。
-- 省略的位置保持原状。`minecraft:air` 表示该位置应为空，清除已有方块需要 `replace_existing: true`。替换已有方块实体还需 `replace_block_entities: true`；此选项适用于普通方块目标，AE2 部件仍保护不兼容的现存宿主。
+- 省略的位置保持原状。`minecraft:air` 表示该位置应为空。新建任务清除已有方块需要 `replace_existing: true`，替换方块实体还需 `replace_block_entities: true`。已授权的机器修改默认允许声明目标中的这两种替换，额外选项只用于主动收紧范围；AE2 部件仍保护不兼容的现存宿主。
 - 门、床等会产生其他格子的方块，必须声明所有相关格子。
 - AE2 部件可写作 `{"offset":[0,0,0],"item_id":"ae2:fluix_glass_cable","part":"center"}`；`part` 支持 `center/up/down/north/south/east/west`，实际物品须通过安装版本的原生部件检查。部件与普通方块不得占用同一位置。
 - 可选 `metadata` 与 `evidence` 为资料对象。Ponder 的原始 NBT、实体和动画变换放在 `evidence`，不自动作为施工配置，也不能改变执行权限或验收规则。
@@ -321,7 +321,7 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 `inspect_machine` 用于已有机器的深入观察，`design_machine` 是可选的独立审阅，两者都不是新建机器的前置步骤。纯结构审阅同时省略 `target` 和 `snapshot_id`；可选现场审阅则成对提供同一份当前观察的编号和目标。建造所需的材料与运行时条件由 Mod 在执行中检查，无需先调查全部库存。Dev 模式会显示完整预览；蓝图范围使用可配置的机器规划预算，场地的已观察范围不代表整个蓝图的尺寸上限。
 
-`modify_machine` 使用 `operation: "apply_blueprint"`，提供 `blueprint` 或 `blueprint_uri`，以及同样的现场与替换参数。修改是稀疏目标补丁：只声明要改变或确保存在的格子，删除必须写空气；不会清空整个包围盒。
+`modify_machine` 使用 `operation: "apply_blueprint"`，提供已知目标、`blueprint` 或 `blueprint_uri` 和已有授权对应的 `allow_modify:true`。`snapshot_id` 可省略，Mod 内部读取当前锚点与明确改动格子，不要求每次修改前另行 `inspect_machine`。修改默认允许拆换声明的旧部件，包括方块实体；不需要重复打开替换开关。修改仍是稀疏补丁：只声明要改变或确保存在的格子，删除写空气，省略的位置保留。原生确认的放置与支撑归属随世界和玩家保存，未完工支路也会记录。
 
 ## 分阶段验收
 

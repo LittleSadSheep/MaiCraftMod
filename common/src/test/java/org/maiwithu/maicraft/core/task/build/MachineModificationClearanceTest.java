@@ -19,7 +19,7 @@ public final class MachineModificationClearanceTest {
     private static final BlockPos AT = new BlockPos(5, 1, 5);
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        declaredModificationSurvivesBatching(); blockEntitiesAndObservationScopeRemainExplicit();
+        declaredModificationSurvivesBatching(); blockEntitiesAndObservationScopeRemainExplicit(); automaticModificationOwnsItsDeclaredScope();
         System.out.println("MachineModificationClearanceTest: passed");
     }
     private static void declaredModificationSurvivesBatching() throws Exception {
@@ -77,6 +77,20 @@ public final class MachineModificationClearanceTest {
     private static MachineConstructionPlan plan(boolean entities) {
         var document = JsonParser.parseString("{\"schema_version\":1,\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:air\"}]}").getAsJsonObject();
         return MachineConstructionPlan.compile(AT, MachineBlueprintDocument.compile(document, MachineConstructionPlan.registry()), true, entities);
+    }
+    private static void automaticModificationOwnsItsDeclaredScope() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var plan = plan(true); plan.bindAutomaticModification(h.level);
+            // 目标块在进入施工区后才可读，也由 Mod 自己绑定；不要求模型再拿一个只用于重复授权的观察编号。
+            h.set(AT, Blocks.BARREL.defaultBlockState());
+            var task = plan.blockTask("automatic-edit", 1000, true);
+            check(!survey(h, task).blocked() && task.observedMachineEdit(AT, h.level.getBlockState(AT)),
+                    "authorized declared cells are re-read internally even when no old snapshot contained the current block");
+            check(!task.observedMachineEdit(AT.east(), Blocks.BARREL.defaultBlockState()), "omitted neighbor cells remain outside the edit scope");
+            var batch = new BuildTaskRecord("automatic-edit-batch", 1000, task.targets, ReplaceMode.REPLACE_EMPTY, true, true, true,
+                    Map.of(), List.of(), true); task.copyExecutionContextTo(batch);
+            check(!survey(h, batch).blocked(), "material batches preserve the internally refreshed edit scope");
+        }
     }
     private static BuildClearanceSurvey survey(InteractionWorldTestHarness h, BuildTaskRecord record) {
         var survey = BuildClearanceSurvey.forPlan(h.player, record);

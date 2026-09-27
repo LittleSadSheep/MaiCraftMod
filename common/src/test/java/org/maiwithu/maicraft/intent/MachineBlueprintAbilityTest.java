@@ -40,6 +40,11 @@ public final class MachineBlueprintAbilityTest {
         check(MachineAbilityAdapter.MODIFY, modification, true);
         modification.addProperty("replace_block_entities", true);
         check(MachineAbilityAdapter.MODIFY, modification, true);
+        modification.remove("replace_existing");
+        check(MachineAbilityAdapter.MODIFY, modification, true);
+        modification.remove("snapshot_id");
+        check(MachineAbilityAdapter.MODIFY, modification, true);
+        modification.addProperty("snapshot_id", "receipt");
         modification.addProperty("replace_existing", false);
         check(MachineAbilityAdapter.MODIFY, modification, false);
         modification.addProperty("replace_existing", true);

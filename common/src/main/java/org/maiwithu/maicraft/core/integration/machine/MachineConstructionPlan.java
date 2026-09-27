@@ -10,6 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -60,6 +61,7 @@ public final class MachineConstructionPlan {
     private final List<List<BuildTaskRecord.Target>> attachmentLayers;
     private Map<BlockPos, BlockState> observedEdits = Map.of();
     private boolean fixedModification;
+    private boolean automaticModification;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
@@ -318,6 +320,7 @@ public final class MachineConstructionPlan {
                 consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
         if (fixedModification) task.machineModification(observedEdits);
+        if (automaticModification) task.automaticMachineModification(authoredModificationCells());
         task.futureWorkItems(foodProtectedWorkItems());
         var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
         fluidTargets().forEach(target -> protectedSources.add(target.pos())); task.materialSupplyProtection(protectedSources);
@@ -350,6 +353,7 @@ public final class MachineConstructionPlan {
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true); task.materialSupplyProtection(positions());
         if (fixedModification) task.machineModification(observedEdits);
+        if (automaticModification) task.automaticMachineModification(authoredModificationCells());
         task.futureWorkItems(foodProtectedWorkItems());
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
@@ -366,6 +370,13 @@ public final class MachineConstructionPlan {
             if (!state.isAir()) observed.put(at.immutable(), state);
         }
         observedEdits = Map.copyOf(observed); fixedModification = true;
+    }
+    /** 修改已指定的坐标时内部读取这些格子，不扫描无关整片场地，也不让 LLM 为加载后的格子再次申请观察。 */
+    public void bindAutomaticModification(Level world) {
+        automaticModification = true; bindObservedModification(world, anchor, Integer.MAX_VALUE);
+    }
+    private Set<BlockPos> authoredModificationCells() {
+        return MachineAssemblyDocument.blocks(blueprint()).keySet().stream().map(anchor::offset).collect(Collectors.toUnmodifiableSet());
     }
     /** 放块阶段也保留后续皮带连接器、附件和显式工序原料，防止提前吃掉例如皮带配方中的熟海带。 */
     private Set<Item> foodProtectedWorkItems() {
