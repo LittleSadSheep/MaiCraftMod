@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.build;
 
 import com.google.gson.JsonParser;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
@@ -53,8 +54,18 @@ public final class MachineModificationClearanceTest {
         try (var h = new InteractionWorldTestHarness()) {
             h.set(AT, Blocks.BARREL.defaultBlockState());
             var protectedEntity = plan(false); protectedEntity.bindObservedModification(h.level, AT, 4);
-            check(survey(h, protectedEntity.blockTask("no-entity-permission", 1000, true)).blocked(),
+            var denied = survey(h, protectedEntity.blockTask("no-entity-permission", 1000, true));
+            check(denied.blocked(),
                     "replace_existing alone cannot authorize demolition of a block entity");
+            // 实机轴替换案例缺的是方块实体选项，回执必须返回精确参数名，不能笼统叫模型换场地。
+            var obstacle = (Map<?, ?>) ((List<?>) denied.report().get("obstacles")).getFirst();
+            check(obstacle.get("required_permissions").equals(List.of("replace_block_entities"))
+                    && obstacle.get("has_block_entity").equals(true), "the exact missing entity-replacement option is visible");
+            var noReplace = new BuildTaskRecord("no-replacement-options", 1000, protectedEntity.blocks(), false);
+            noReplace.machineModification(Map.of(AT, h.level.getBlockState(AT)));
+            var both = (Map<?, ?>) ((List<?>) survey(h, noReplace).report().get("obstacles")).getFirst();
+            check(both.get("required_permissions").equals(List.of("replace_existing", "replace_block_entities")),
+                    "all missing options are reported together rather than producing two rounds of failed modification");
             var allowedEntity = plan(true); allowedEntity.bindObservedModification(h.level, AT, 4);
             check(!survey(h, allowedEntity.blockTask("entity-permission", 1000, true)).blocked(),
                     "the separate explicit block-entity option is honored at declared targets");

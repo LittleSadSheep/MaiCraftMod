@@ -149,7 +149,7 @@ final class SemanticBuildSupplyCompanionTask
             if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
             if (clearanceSurvey.blocked()) {
                 clearanceReport = clearanceSurvey.report();
-                stopWith(BuildClearanceSurvey.FAILURE, "Clearance whitelist excludes site obstacles; consider clearance_report site offsets.",
+                stopWith(BuildClearanceSurvey.FAILURE, clearanceSurvey.failureMessage(),
                         FailureType.NO_SUPPORT);
                 return TaskState.FAILED;
             }

@@ -946,7 +946,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState clearanceReportTick() {
         if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
-        failAt(clearanceDeniedAt, "Clearance whitelist excludes this obstacle; consider the site offsets in clearance_report.",
+        failAt(clearanceDeniedAt, clearanceSurvey.failureMessage(),
                 FailureType.NO_SUPPORT, BuildClearanceSurvey.FAILURE, uncertain);
         return TaskState.FAILED;
     }

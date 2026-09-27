@@ -87,7 +87,11 @@ public final class BuildClearanceSurvey {
                     conflicts++;
                     if (obstacles.size() < 16) obstacles.add(Map.of("at", coordinates(target.pos()),
                             "block_id", id(seen.state()), "target_index", index,
-                            "expected_block_id", id(target.desiredState())));
+                            "expected_block_id", id(target.desiredState()), "has_block_entity", seen.state().hasBlockEntity(),
+                            "required_permissions", missingPermissions(target, seen.state()),
+                            "reason", !replace.allows(seen.state(), target.desiredState()) ? "replacement_not_authorized"
+                                    : seen.state().hasBlockEntity() && !replaceEntities ? "block_entity_replacement_not_authorized"
+                                    : fixedModification ? "target_not_in_bound_observation_or_state_changed" : "ordinary_site_clearance_not_whitelisted"));
                 }
                 continue;
             }
@@ -131,6 +135,18 @@ public final class BuildClearanceSurvey {
     }
     private void nextCandidate() { candidate++; candidateCell = 0; }
     public boolean blocked() { return conflicts > 0; }
+    /** 轴也可能带原生方块实体；把缺少的替换许可说清，不能让模型误以为它只需要再找一块空地。 */
+    public String failureMessage() {
+        return fixedModification ? "Declared machine targets lack replacement permission or changed since observation; see clearance_report."
+                : "Clearance whitelist excludes site obstacles; consider clearance_report site offsets.";
+    }
+    private List<String> missingPermissions(BuildTaskRecord.Target target, BlockState state) {
+        // 一次列出所有缺少的显式选项，避免只补普通替换后又为同一根轴往返一次。
+        var missing = new ArrayList<String>();
+        if (!replace.allows(state, target.desiredState())) missing.add("replace_existing");
+        if (state.hasBlockEntity() && !replaceEntities) missing.add("replace_block_entities");
+        return List.copyOf(missing);
+    }
 
     /** 位置和偏移使用有明确含义的数组，供 LLM 选择新址；不把局部核对结果宣称为完整施工可行性。 */
     public Map<String, Object> report() {
