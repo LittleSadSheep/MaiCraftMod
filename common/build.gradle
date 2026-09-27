@@ -139,6 +139,11 @@ def regressionSuites = [
         heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
         purpose: '验证已加载方块发现的证据、缺席语义与坐标不外泄'
     ],
+    stonecuttingProcessRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.stonecutter.StonecuttingProcessTest',
+        heap: '512m', directory: 'stonecutting-process-regression', timeoutSeconds: 45,
+        purpose: '验证石切机原生工序的参数校验、站点匹配与诚实失败路径'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。

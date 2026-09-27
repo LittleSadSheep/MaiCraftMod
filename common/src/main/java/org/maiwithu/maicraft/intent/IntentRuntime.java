@@ -112,6 +112,7 @@ public final class IntentRuntime {
             "maicraft:craft",
             "maicraft:cook",
             "maicraft:enchant",
+        "maicraft:stonecut",
             "maicraft:trade",
             "maicraft:build",
             BuildDesignAdapter.ABILITY,

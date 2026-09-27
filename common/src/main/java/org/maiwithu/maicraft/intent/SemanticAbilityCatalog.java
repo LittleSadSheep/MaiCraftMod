@@ -351,6 +351,14 @@ public final class SemanticAbilityCatalog {
                             field("max_levels_spent","integer","Required maximum actual player levels consumed, 0..3. This is not the offer's required level, which must also be met."),
                             field("max_lapis","integer","Required maximum lapis lazuli items consumed, 0..3. Insufficient material or budget stops before submission."),
                             field("search_radius","integer","Nearest-table search radius in loaded terrain, 1..64 blocks, default 32; exact targets retain their given position.")));
+            case StonecutAbilityAdapter.ABILITY -> contract(
+                    "Cut a carried input into the requested output at an existing loaded vanilla stonecutter. "
+                            + "Uses a visible native GUI: loads the exact input count, resolves the real recipe list for that input, selects the requested output once, then quick-moves and verifies every crafted piece before returning leftovers and closing. "
+                            + "No station construction, material acquisition or output substitution. A durable reservation blocks automatic repeats once crafting has begun; inspect before requesting a new operation.",
+                    targets("coordinates","landmark","nearest"), fields(
+                            field("item_id","resource_id","Required carried input type, one item per craft, for example minecraft:stone."),
+                            field("output_item_id","resource_id","Required requested product; the input must have a real stonecutter recipe producing it, for example minecraft:stone_bricks."),
+                            field("count","integer","Crafts to perform, 1..64, default 1; each craft consumes one input and is verified separately.")));
             case "maicraft:trade" -> contract(
                     "Obtain an item from a real loaded merchant. MaiCraft selects the merchant and offer, approaches in first person, performs synchronized payment/result transfers and verifies the final inventory.",
                     targets("nearest", "area", "landmark", "prior_result"),

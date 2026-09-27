@@ -4,7 +4,7 @@
 
 ## 如何看这张表
 
-下表列出 [IntentRuntime.KNOWN_ABILITIES](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentRuntime.java) 的 38 项能力。
+下表列出 [IntentRuntime.KNOWN_ABILITIES](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentRuntime.java) 的 39 项能力。
 
 - **入口核对**：已确认能力注册和适配入口；尚未完成该能力全部执行分支的审阅。
 - **完整审阅**：参数、动作、结果、暂停取消、换世界和恢复路径均已逐项检查，并列明相关验证。
@@ -44,6 +44,7 @@
 | `cook` | 烹饪或烧炼所需物品 | `CookAbilityAdapter` | 主执行器已通读，数量、估价和菜单收尾已重构；[已验证与待审范围](cooking.md) |
 | `trade` | 与村民完成指定交易 | `AbilityAdapter.trade` | 入口核对 |
 | `enchant` | 使用附魔台完成一次有预算的附魔 | `EnchantAbilityAdapter` | 入口核对；兼容入口 |
+| `stonecut` | 在切石机把输入切成指定产物 | `StonecutAbilityAdapter` | 入口核对 |
 | `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | 入口核对 |
 | `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | 入口核对 |
 | `light_area` | 给实际识别出的区域补光 | `AbilityAdapter.lightArea` | 入口核对 |

@@ -65,6 +65,7 @@ final class AbilityAdapter {
             case "maicraft:craft" -> craft(goal);
             case CookAbilityAdapter.ABILITY -> CookAbilityAdapter.adapt(goal, player);
             case EnchantAbilityAdapter.ABILITY -> EnchantAbilityAdapter.adapt(goal, player, runtime);
+        case StonecutAbilityAdapter.ABILITY -> StonecutAbilityAdapter.adapt(goal, player, runtime);
             case "maicraft:trade" -> trade(goal);
             case "maicraft:build" -> build(goal, player, runtime);
             case BuildDesignAdapter.ABILITY -> BuildDesignAdapter.design(goal, player, runtime);

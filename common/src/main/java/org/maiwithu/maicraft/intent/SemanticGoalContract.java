@@ -70,6 +70,11 @@ final class SemanticGoalContract {
             try { EnchantAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) { throw violation("invalid_enchant_contract", path + ".parameters", ability, invalid.getMessage()); }
         }
+        // 切石的输入产物与次数必须在计划阶段明确；配方与菜单仍由执行器根据真实观察解析。
+        if (StonecutAbilityAdapter.ABILITY.equals(ability)) {
+            try { StonecutAbilityAdapter.validate(goal); }
+            catch (IllegalArgumentException invalid) { throw violation("invalid_stonecut_contract", path + ".parameters", ability, invalid.getMessage()); }
+        }
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
             // 普通续建只引用已冻结的蓝图，不能夹带新尺寸、材质或其他设计参数重新生成建筑。

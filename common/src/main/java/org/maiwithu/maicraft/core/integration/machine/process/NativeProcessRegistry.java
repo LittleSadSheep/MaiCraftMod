@@ -22,6 +22,7 @@ public final class NativeProcessRegistry {
         var out = new LinkedHashMap<String, Entry>();
         register(out, new MinecraftEnchantProcessAdapter(), "enchant");
         register(out, new WorldTransformProcessAdapter(), "world-process");
+        register(out, new MinecraftStonecuttingProcessAdapter(), "stonecutting");
         return Collections.unmodifiableMap(out);
     }
     private static void register(Map<String, Entry> entries, NativeProcessAdapter adapter, String namespace) {

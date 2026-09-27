@@ -21,6 +21,8 @@
 
 AE2 世界流体加工使用 `ae2:transform`，例如 `{"recipe_id":"<现场返回的配方 ID>","batches":1}`。从实际安装的原生配方及机制契约选择，不根据产物名称猜测配方、投入数量或环境条件。过程逐批投料并回收，不能把附近既有成品当成本次产物。`native_recipe_verified=true` 才表示原生配方事件已验证；客户端仅确认产物与拾取时返回 `evidence_scope="client_observed_output_and_inventory"`，不把这种观察当成原生配方事件或持续产线证明。
 
+切石使用 `minecraft:stonecutting`，参数为 `item_id`（输入）、必需的 `output_item_id`（目标产物）和可选 `count`（1..64，默认 1）。例如 `{"item_id":"minecraft:stone","output_item_id":"minecraft:stone_bricks","count":4}`。位置来自机器锚点，不再传 `search_radius`；输入装入后菜单列出该输入的真实可用产物，按产物匹配配方，输入无配方或产物不匹配时明确失败。过程保留可见 GUI、整叠切制与取回关闭；每件产物对应一次真实输入消耗，整批产出以背包全量对账核验。消费预约开始后不自动重发；未知结果保留人工核验。
+
 `build_machine` 可以同时提供 v2 `production` 与 `allow_use=true`：先执行同一建造任务，再核验建成位置并运行同一原生过程。蓝图中的源流体通过原生桶装配，核验源格与桶变化。消费屏障先确认父任务身份落盘，再预留一次原生消费；中断后不会通过换观察编号自动重发材料或经验消耗。沿用原 `request_key` 处理网络重试；暂停、取消或手动接管后出现 `outcome_uncertain` 时先核对现场，不能用普通重试重复消费。
 
 ## v1：机器网络与持续验收
