@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPowerTool;
 import org.maiwithu.maicraft.core.task.chain.BreathChain;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
+import org.maiwithu.maicraft.core.task.chain.NightRestChain;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerCompanionTask;
@@ -154,6 +155,8 @@ public final class MaiCraftCore {
                 BreathChain::new);
         BrainChains.register(30,
                 MobDefenseChain::new);
+        // 日常休息放在紧急自救之后，只在原生操作结清且附近确有安全床时暂停普通工作。
+        BrainChains.register(40, NightRestChain::new);
     }
 
     /**

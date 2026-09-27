@@ -114,7 +114,7 @@ public final class SleepSafetyTest {
         f.player.setXRot((float) -Math.toDegrees(Math.atan2(direction.y, direction.horizontalDistance())));
     }
 
-    private static void bedWorks(InteractionWorldTestHarness f, boolean works) throws Exception {
+    static void bedWorks(InteractionWorldTestHarness f, boolean works) throws Exception {
         var dimension = new DimensionType(OptionalLong.empty(), true, false, false, true,
                 1.0, works, false, 0, 16, 16, BlockTags.INFINIBURN_OVERWORLD,
                 ResourceLocation.withDefaultNamespace("overworld"), 0,
