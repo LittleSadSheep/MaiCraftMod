@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import org.maiwithu.maicraft.core.act.Interaction;
+import org.maiwithu.maicraft.entity.InputDriver;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 import static org.maiwithu.maicraft.client.actor.MobDefenseDamageTest.invoke;
 
@@ -32,6 +34,7 @@ public final class CombatOutcomeTest {
         asynchronousStockIsNotCombatLoot();
         retreatPrecedesLootSettlement();
         retreatAcceptsAnyReachableSafeDirection();
+        retreatCameraCannotStarveMeleeAim();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
     }
 
@@ -173,6 +176,33 @@ public final class CombatOutcomeTest {
             var goal = (NavGoal) invoke(task, "retreatGoal");
             check(goal instanceof NavGoal.Avoid && goal.isAt(new BlockPos(-40, 1, 3)) && goal.isAt(new BlockPos(40, 1, 3))
                     && !goal.isAt(new BlockPos(3, 1, 3)), "retreat goal describes safety rather than one randomly sampled endpoint");
+        }
+    }
+
+    private static void retreatCameraCannotStarveMeleeAim() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var mob = f.mob(11,2);
+            var action = Interaction.attackEntity(f.h.player,mob);
+            var task = new AttackCompanionTask(f.h.player,new AttackTaskRecord("moving-retaliation",1000,List.of(11),false));
+            ActorControlTestHarness.field(AttackCompanionTask.class,"meleeAction").set(task,action);
+            var finishMovement = AttackCompanionTask.class.getDeclaredMethod("afterCombatMovement",TaskState.class);
+            finishMovement.setAccessible(true);
+            // 回放“先瞄准，再由逃跑导航朝反方向看”的实际顺序；动作必须最终通过真实射线提交，且续瞄不清掉移动。
+            for(int tick=0;tick<80 && f.h.mode.attacks==0;tick++) {
+                action.tick();
+                InputDriver.applyMovement(f.h.player,1,0,false,false,true);
+                InputDriver.look(f.h.player,90,8);
+                var before = ActorControlTestHarness.field(DefaultBodyControlPort.class,"movement").get(f.h.h.body);
+                check(finishMovement.invoke(task,TaskState.RUNNING)==TaskState.RUNNING,"aim renewal cannot finish combat");
+                check(before.equals(ActorControlTestHarness.field(DefaultBodyControlPort.class,"movement").get(f.h.h.body)),
+                        "renewing attack aim preserves navigation's movement input");
+                ActorControlTestHarness.field(DefaultBodyControlPort.class,"lastLookUpdateNanos")
+                        .setLong(f.h.h.body,System.nanoTime()-50_000_000L);
+                f.h.h.body.endTick(f.h.h.context); f.h.nextTick();
+            }
+            check(f.h.mode.attacks==1,"moving-camera requests cannot indefinitely starve a reachable native melee attack");
+            check(f.h.blockUses()==0 && f.h.itemUses()==0,"retaliation sends no block or item use");
+            task.result(TaskState.CANCELLED);
         }
     }
 }

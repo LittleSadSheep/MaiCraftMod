@@ -235,7 +235,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             retreating = false; // 恢复战斗站位后，结束之前的撤离导航。
             stopNav();
         }
-        return switch (move.action()) {
+        return afterCombatMovement(switch (move.action()) {
             case SKIRMISH, EVADE_BLAST -> {
                 yield closeIn();
             }
@@ -244,7 +244,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
             case DISENGAGE -> tickFlee();
             case DONE -> finish();
-        };
+        });
+    }
+
+    private TaskState afterCombatMovement(TaskState state) {
+        // 导航先续移动，再保留已选近战目标的瞄准；否则撤离镜头每刻覆盖回头瞄准，角色会被追着打却始终出不了手。
+        if (state == TaskState.RUNNING && meleeAction != null
+                && ClientRuntime.requireContext(player).mutationAvailable()) meleeAction.renewEntityAttackAim();
+        return state;
     }
 
     // ==================== 局面 ====================
