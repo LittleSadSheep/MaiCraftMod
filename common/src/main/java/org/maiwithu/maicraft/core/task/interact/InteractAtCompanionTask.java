@@ -72,6 +72,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private InteractionHand heldUseHand = InteractionHand.MAIN_HAND;
     private int expectedItemBefore = -1, outputWaitTicks;
     private boolean manualCrank;
+    private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
     private NativeActionReceipt manualHandSelection;
 
@@ -110,6 +111,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected TaskState act() {
         if (r.heldItemUseOnly) return useHeldItem();
         manualCrank = r.item == null && button() == Interaction.Button.USE && CreateManualInput.supported(player.level(), r.aim);
+        // 从第一笔已确认原生使用开始记录实际转速和应力，持续操作结束后仍能说明驱动期间是否卡在超载。
+        if (manualCrank && interaction != null) manualUsage.observe(player.level(), r.aim, interaction.confirmedUses());
         // 未指定道具的语义交互先收好遗留工具；反击或补食中断后每次新点击都恢复空手，已经发出的点击先结算。
         if ((r.emptyHand || manualCrank) && (interaction == null || !interaction.awaitingReceipt())) {
             TaskState hand = prepareEmptyHand(); if (hand != null) return hand;
@@ -356,6 +359,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
      */
     private String settle() {
         changes = receipt == null ? List.of() : receipt.diff(player);
+        if (manualCrank && manualUsage.overstressed())
+            return " — native manual-generator activity was observed; the connected network was overstressed during use; machine production remains unverified.";
         if (changes.isEmpty()) {
             if (manualCrank && interaction != null && interaction.confirmedUses() > 0)
                 return " — native manual-generator activity was observed; machine production remains unverified.";
@@ -384,8 +389,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
-        if (manualCrank) data.put("manual_generator", CreateManualInput.evidence(player.level(), r.aim,
-                interaction == null ? 0 : interaction.confirmedUses()));
+        if (manualCrank) {
+            var generator = new HashMap<>(CreateManualInput.evidence(player.level(), r.aim,
+                    interaction == null ? 0 : interaction.confirmedUses()));
+            generator.put("during_use", manualUsage.data()); data.put("manual_generator", generator);
+        }
         if (r.heldItemUseOnly) {
             data.put("held_item_use_started", heldUseStarted); data.put("native_use_completed", heldUseCompleted);
             data.put("used_hand", heldUseHand.name().toLowerCase());

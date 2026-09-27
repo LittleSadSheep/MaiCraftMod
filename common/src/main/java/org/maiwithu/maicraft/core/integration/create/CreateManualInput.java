@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.create.CreateStressView;
+import org.maiwithu.maicraft.server.machine.create.CreateStressObservation;
 
 /** 手摇曲柄改变原生方块实体的转动，不能只盯方块外观、手持数量和菜单来确认操作。 */
 public final class CreateManualInput {
@@ -57,5 +58,43 @@ public final class CreateManualInput {
     public static Map<String, Object> evidence(Level world, BlockPos at, int uses) {
         return Map.of("generator_activity_observed", uses > 0, "confirmed_native_uses", uses,
                 "currently_generating", supported(world, at) && active(world.getBlockEntity(at)), "machine_production_verified", false);
+    }
+
+    /** 保留这次已确认手摇期间的原生网络账，避免模型等工具返回后再查时只看到曲柄已经停转。 */
+    public static final class UsageEvidence {
+        private JsonObject last;
+        private int samples;
+        private boolean overstressed, rotated;
+        public void observe(Level world, BlockPos at, int confirmedUses) {
+            if (confirmedUses < 1 || !supported(world, at)) return;
+            var entity = world.getBlockEntity(at);
+            if (!active(entity)) return;
+            try {
+                double rpm = ((Number) NativeApi.call(entity, KINETIC, "getSpeed")).doubleValue();
+                if (!Double.isFinite(rpm)) return;
+                boolean overload = NativeApi.truth(NativeApi.call(entity, KINETIC, "isOverStressed"));
+                var sample = new JsonObject(); sample.addProperty("actual_rpm", rpm); sample.addProperty("overstressed", overload);
+                CreateStressObservation.inspect(entity, sample, true, rpm, overload);
+                accept(sample, world.getGameTime());
+            } catch (RuntimeException | LinkageError unavailable) { /* 可选原生字段不可读时保留已有证据，不把缺失记成应力通过。 */ }
+        }
+        void accept(JsonObject sample, long tick) {
+            samples++; var budget = sample.getAsJsonObject("stress_budget");
+            boolean observed = budget != null && "observed".equals(budget.get("status").getAsString());
+            // 过载标志可能比应力总账晚同步；两者任一显示超载都保留，后面停机或恢复不能抹掉这次现象。
+            overstressed |= sample.get("overstressed").getAsBoolean()
+                    || observed && !budget.get("load_within_capacity").getAsBoolean();
+            rotated |= sample.get("actual_rpm").getAsDouble() != 0 && !sample.get("overstressed").getAsBoolean();
+            if (last == null || observed) { last = sample.deepCopy(); last.addProperty("observed_game_time", tick); }
+        }
+        public boolean overstressed() { return overstressed; }
+        public JsonObject data() {
+            var result = new JsonObject(); result.addProperty("native_network_samples", samples);
+            result.addProperty("overstress_observed", overstressed); result.addProperty("rotation_observed", rotated);
+            result.addProperty("machine_production_verified", false);
+            if (last != null) result.add("last_network_snapshot", last.deepCopy());
+            else result.addProperty("stress_status", "not_observed_during_confirmed_use");
+            return result;
+        }
     }
 }
