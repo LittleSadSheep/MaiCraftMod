@@ -63,6 +63,13 @@ public final class NativeProcessIntentTest {
     }
 
     private static void unifiedAndLegacyFactory() throws Exception {
+        // 未注册机制不能靠反复查看或登记机器变成可用；错误应指向真实契约列表。
+        try {
+            NativeProcessRegistry.adapter("test:unregistered_process");
+            throw new AssertionError("unknown v2 process accepted");
+        } catch (IllegalArgumentException unsupported) {
+            check(unsupported.getMessage().contains(NativeProcessRegistry.KNOWLEDGE_URI),"unsupported process points to registered contracts");
+        }
         try (var h = new InteractionWorldTestHarness()) {
             BlockPos table = new BlockPos(2, 1, 2); h.set(table, Blocks.ENCHANTING_TABLE.defaultBlockState());
             var task = NativeProcessRegistry.createTask("native-process-test", 1000, h.player, table, NativeProcessRequest.parse(production()));

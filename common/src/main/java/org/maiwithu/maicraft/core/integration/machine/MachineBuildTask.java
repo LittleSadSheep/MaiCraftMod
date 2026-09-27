@@ -522,7 +522,8 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         }
         supply.cancel(player); BuildPreviewGate.release(r); super.cleanup();
     }
-    @Override protected String successMessage() { return "Declared machine structure constructed and checked; use operate_machine separately to configure and verify operation."; }
+    // 结构完工不替组件选择操作入口；无容器菜单的工作面也可正常加工，供料和实物产出仍须另外验证。
+    @Override protected String successMessage() { return "Declared machine structure constructed and checked; configuration, material feeding and actual output remain separately unverified."; }
     @Override public Map<String,Object> progress() {
         // 让上层建造/加工任务透出真正等待的原生阶段，避免站位或瞄准停滞只剩一个笼统的建造中状态。
         var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(Locale.ROOT));

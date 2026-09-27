@@ -110,6 +110,8 @@ public final class MachineSnapshots {
         report.add("ae2_access_evidence", aeEvidence);
         // 只为实际匹配的标记位置附机制契约与原生配方观察，不在观察时开菜单、投料或生成设备。
         report.add("native_processes", NativeProcessRegistry.inspect(player, center));
+        report.addProperty("native_processes_scope", NativeProcessRegistry.OBSERVATION_SCOPE);
+        report.addProperty("native_processes_knowledge_uri", NativeProcessRegistry.KNOWLEDGE_URI);
         String id = UUID.randomUUID().toString();
         // 每次查看都给新编号，最多缓存十六份，正常游戏速度下一份有效约一分钟。
         report.remove("center");
