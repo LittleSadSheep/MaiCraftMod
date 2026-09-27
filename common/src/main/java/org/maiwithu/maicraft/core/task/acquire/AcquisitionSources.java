@@ -20,6 +20,7 @@ final class AcquisitionSources {
                     case NEARBY -> 10;
                     case WIRELESS -> 19;
                     case STORAGE -> 20;
+                    case HARVEST -> 24; // 有明确成熟作物时先收田，避免缺钱还先走贸易链。
                     case CRAFT -> facts.craftReady() ? 25 : 50;
                     case COOK -> facts.cookReady() ? 26 : 55;
                     case MINE -> facts.naturalMine() ? 30 : 60;

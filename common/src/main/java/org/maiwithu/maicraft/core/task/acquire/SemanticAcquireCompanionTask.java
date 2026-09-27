@@ -256,6 +256,7 @@ public final class SemanticAcquireCompanionTask
             case INVENTORY -> observeInventorySource(need);
             case NEARBY -> attemptNearby(need);
             case STORAGE, WIRELESS -> attemptStorage(need, source);
+            case HARVEST -> attemptHarvest(need);
             case CRAFT -> attemptCraft(need);
             case COOK -> attemptCook(need);
             case MINE -> attemptMine(need);
@@ -309,6 +310,17 @@ public final class SemanticAcquireCompanionTask
                 shortLabel(need.itemIds));
         return startChild(need, SemanticAcquireTaskRecord.Source.NEARBY,
                 record, "collect loaded unowned drops");
+    }
+
+    private TaskState attemptHarvest(AcquisitionNeed need) {
+        // 作物来源与掉落物拾取分别授权；固定搜索中心，实际采收器只接受成熟状态并在满足目标前补种。
+        if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.HARVEST) || !takePlannerStep()) return TaskState.RUNNING;
+        need.attempted(SemanticAcquireTaskRecord.Source.HARVEST);
+        var items = need.itemIds.stream().map(BuiltInRegistries.ITEM::get).filter(HarvestCropCompanionTask::supports).toList();
+        if (items.isEmpty()) { advanceSource(need); return TaskState.RUNNING; }
+        var record = new HarvestCropTaskRecord(childId("harvest"), player.level().getGameTime() + 2400,
+                items, need.requiredFinalCount, player.blockPosition(), r.searchRadius);
+        return startChild(need, SemanticAcquireTaskRecord.Source.HARVEST, record, "harvest and replant loaded mature crops");
     }
 
     private TaskState attemptStorage(AcquisitionNeed need, SemanticAcquireTaskRecord.Source source) {
@@ -954,6 +966,14 @@ public final class SemanticAcquireCompanionTask
         UUID completedHuntTarget = activeHuntTarget;
         clearActive();
 
+        // 目标食物虽然到账，补种仍是同一次采收的责任；失败必须保留为失败，不能被下一刻的库存达标覆盖。
+        if (completedRecord instanceof HarvestCropTaskRecord && result != null && result.data() != null
+                && Boolean.TRUE.equals(result.data().get("replant_pending"))) {
+            addIssue("harvest", "crop_replant_incomplete", "crop produce was observed but replanting did not complete", result.data());
+            failureNeed = completedNeed;
+            return failAcquisition("crop_replant_incomplete", "Crop harvest stopped before replanting was confirmed", FailureType.UNKNOWN);
+        }
+
         // 击杀之后还要结算本次可归属、可到达的掉落；拿到羊毛却没收完羊肉，不能掩盖收尾失败。
         if (completedSource == SemanticAcquireTaskRecord.Source.HUNT
                 && completedHuntStage == HuntChildStage.ATTACK
@@ -1055,7 +1075,7 @@ public final class SemanticAcquireCompanionTask
         }
         boolean structuredFailure = structuredFailure(terminal, result);
         switch (completedSource) {
-            case NEARBY -> {
+            case NEARBY, HARVEST -> {
                 if (progress == 0 || structuredFailure) advanceSource(completedNeed);
             }
             case CRAFT -> {
@@ -1120,6 +1140,12 @@ public final class SemanticAcquireCompanionTask
             default -> advanceSource(completedNeed);
         }
         return TaskState.RUNNING;
+    }
+
+    /** 让出身体时把暂停传到实际取物/采收执行器；保留其原生回执和补种责任，恢复后继续同一实例。 */
+    @Override public void stop(LocalPlayer companion, Task.StopReason reason) {
+        if (reason == Task.StopReason.PREEMPTED && activeChild != null) activeChild.stop(companion, reason);
+        super.stop(companion, reason);
     }
 
     private TaskState revalidateActiveHuntAuthorization() {
@@ -2111,6 +2137,7 @@ public final class SemanticAcquireCompanionTask
         for (SemanticAcquireTaskRecord.Source source : List.of(
                 SemanticAcquireTaskRecord.Source.WIRELESS,
                 SemanticAcquireTaskRecord.Source.STORAGE,
+                SemanticAcquireTaskRecord.Source.HARVEST,
                 SemanticAcquireTaskRecord.Source.COOK,
                 SemanticAcquireTaskRecord.Source.MINE,
                 SemanticAcquireTaskRecord.Source.TRADE,

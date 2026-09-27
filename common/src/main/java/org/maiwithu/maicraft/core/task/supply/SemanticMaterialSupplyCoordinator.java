@@ -263,6 +263,12 @@ public final class SemanticMaterialSupplyCoordinator {
         clear();
     }
 
+    /** 临时自救让出身体时保留同一趟取料与返程；已经收获的田块仍须由原子任务完成补种。 */
+    public void pause(LocalPlayer player) {
+        if (child != null) child.stop(player, Task.StopReason.PREEMPTED);
+        if (returnNavigation != null) returnNavigation.pause();
+    }
+
     public static List<SemanticAcquireTaskRecord.Source> parseSources(List<String> values) {
         if (values == null || values.isEmpty()) return List.of();
         LinkedHashSet<SemanticAcquireTaskRecord.Source> result = new LinkedHashSet<>();
@@ -293,9 +299,11 @@ public final class SemanticMaterialSupplyCoordinator {
         }
         List<SemanticAcquireTaskRecord.Source> defaults = storage
                 ? List.of(SemanticAcquireTaskRecord.Source.NEARBY,
+                        SemanticAcquireTaskRecord.Source.HARVEST,
                         SemanticAcquireTaskRecord.Source.COOK,
                         SemanticAcquireTaskRecord.Source.MINE)
                 : List.of(SemanticAcquireTaskRecord.Source.NEARBY,
+                        SemanticAcquireTaskRecord.Source.HARVEST,
                         // 默认施工保留随身网络现货；调用者显式指定来源时不加入该项。
                         SemanticAcquireTaskRecord.Source.WIRELESS,
                         SemanticAcquireTaskRecord.Source.CRAFT,

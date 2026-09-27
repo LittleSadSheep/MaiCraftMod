@@ -66,6 +66,7 @@ import org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest;
 import org.maiwithu.maicraft.core.task.build.BuildFailureEvidenceTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodPreparationTest;
+import org.maiwithu.maicraft.core.task.acquire.HarvestCropTest;
 import org.maiwithu.maicraft.core.task.build.BuildFootingTest;
 import org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest;
 import org.maiwithu.maicraft.core.task.build.BuildNavigationRetryTest;
@@ -255,6 +256,7 @@ public final class GuiRegressionSuite {
         BuildSupplyUncertaintyTest.main(args);
         BuildSupplyAccessTest.main(args);
         BuildFoodPreparationTest.main(args);
+        HarvestCropTest.main(args);
         BuildFoodBoundaryTest.main(args);
         BuildSupplyAccessDispatchTest.main(args);
         // 临时垫块逐种查现货后才在工位旁采收，不能为了两块泥土开启通用采矿链。
