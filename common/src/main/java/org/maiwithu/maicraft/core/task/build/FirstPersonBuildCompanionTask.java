@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.build.BuildValidity;
@@ -166,6 +167,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final List<Map<String, Object>> wrenchReceipts = new ArrayList<>();
     private String edgeReturnFailure, edgeReturnFailureCode;
     private Map<String, Object> temporarySupportDemand = Map.of();
+    private Map<String, Object> placementStateConflict = Map.of();
     private boolean layerKnown;
     private int constructionLayer = Integer.MAX_VALUE;
     private BuildRegions regions;
@@ -1252,6 +1254,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         // 共享路线预算有界，但不能因此跳过独立核验的支撑方案回退。
         if (cell != null) {
+            // 相邻轴强制出的齿轮箱状态不会因换脚位或垫普通支撑而改变，直接给出可用于修图的原生状态事实。
+            placementStateConflict = MachinePlacementItems.placementConflict(cell.target().item(),player.level(),
+                    cell.target().pos(),cell.target().desiredState(),cell.target()::acceptsPlacedState);
+            if (!placementStateConflict.isEmpty()) {
+                failAt(cell.target().pos(),placementStateConflict.get("detail").toString(),
+                        FailureType.UNSUPPORTED,"native_placement_state_conflict",false);
+                return TaskState.FAILED;
+            }
             TaskState support = prepareTemporarySupports();
             if (support != null) return support;
         }
@@ -2650,6 +2660,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (failurePos != null) {
             var failure = new LinkedHashMap<>(BuildFailureEvidence.describe(failureCode, failurePos,
                     r.targets, player.level()::isLoaded, player.level()::getBlockState));
+            if (!placementStateConflict.isEmpty()) {
+                failure.put("native_placement_conflict",placementStateConflict);
+                data.put("mechanical_retry_allowed",false);
+            }
             if (temporaryTargets.containsKey(failurePos.asLong())) {
                 failure.put("temporary_support", true);
                 for (int i = queueAt + 1; i < queue.size(); i++) if (!isTemporary(queue.get(i))) {

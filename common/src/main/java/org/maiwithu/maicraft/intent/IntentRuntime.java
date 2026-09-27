@@ -63,6 +63,8 @@ public final class IntentRuntime {
             "delivery_status", "effects_started", "mechanical_retry_allowed",
             "task_id", "failure_code", "failure_type", "requires_decision",
             "build_diagnostics", "support_access", "construction_region", "construction_access", "construction_navigation",
+            // 机器包装后的拆除数量、失败格和原生朝向冲突也属于恢复事实，完成通知不能再次把这一层丢掉。
+            "construction_progress",
             // 清障失败的具体坐标和最近选址建议是观察证据，必须送达外部 LLM 才能改变场地。
             "clearance_report",
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",

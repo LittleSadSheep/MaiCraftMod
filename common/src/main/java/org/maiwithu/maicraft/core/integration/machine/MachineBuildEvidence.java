@@ -44,6 +44,11 @@ public final class MachineBuildEvidence {
         if (evidence.get("build_diagnostics") instanceof List<?> diagnostics && !diagnostics.isEmpty()
                 && diagnostics.getFirst() instanceof Map<?, ?> first) {
             for (String key : List.of("expected", "observed", "target_index")) copy(first, result, key, key);
+            // 原生物品强制状态是具体失败原因，机器供料包装也要带到首层，避免仍只显示先前的站位搜索结果。
+            if (first.get("native_placement_conflict") instanceof Map<?,?> conflict) {
+                result.put("native_placement_conflict",conflict);
+                copy(conflict,result,"detail","reason");
+            }
         }
         return Map.copyOf(result);
     }
