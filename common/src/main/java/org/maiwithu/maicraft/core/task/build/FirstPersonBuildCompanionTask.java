@@ -60,6 +60,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
+import org.maiwithu.maicraft.core.blueprint.ConstructionOwnership;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
@@ -1583,7 +1584,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         useCount++;
         confirmedBlockChange(cell.target().pos());
-        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) confirmedBlockChange(effect.pos());
+        ConstructionOwnership.placed(player, cell.target().pos(), r.getToolCallId());
+        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) {
+            confirmedBlockChange(effect.pos()); ConstructionOwnership.placed(player, effect.pos(), r.getToolCallId());
+        }
         // 支撑收到原生确认即进入既有账本；即使随后退回锚点受阻，也不能把这块已消耗材料遗忘为无主方块。
         if (isTemporary(cell)) confirmedScaffold(cell.target().pos(), player.level().getBlockState(cell.target().pos()));
         if (currentPlacementComplete()) {
@@ -1673,6 +1677,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     // 动作确认后通知外部观察守卫更新事实，再使附近的失败点击和搜索结果失效。
     private void confirmedBlockChange(BlockPos pos) {
         r.confirmedMutation(player, pos);
+        if (player.level().getBlockState(pos).isAir()) ConstructionOwnership.removed(player, pos);
         placementEnvironmentChanged(pos);
     }
 
@@ -2406,11 +2411,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (scaffoldAccess != null && !r.scaffoldLedger().owns(placeAt, state)) cleanupNewSupports++;
             if (!r.scaffoldLedger().owns(placeAt, state)) placementEnvironmentChanged(placeAt);
             r.scaffoldLedger().confirmed(placeAt, state); scaffolds.add(placeAt.immutable());
+            ConstructionOwnership.placed(player, placeAt, r.getToolCallId());
             renewBuildProgress();
         }
     }
 
     @Override public void confirmedScaffoldRemoval(BlockPos pos) {
+        ConstructionOwnership.removed(player, pos);
         if (worksite != null) worksiteMovement.changed(pos);
         if (r.scaffoldLedger().contains(pos)) placementEnvironmentChanged(pos);
         r.scaffoldLedger().cleared(pos);

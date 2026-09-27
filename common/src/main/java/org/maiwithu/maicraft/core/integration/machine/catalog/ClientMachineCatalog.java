@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.integration.machine.runtime.ProductionRunPlan;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import org.maiwithu.maicraft.core.blueprint.ConstructionOwnership;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -55,6 +56,7 @@ public final class ClientMachineCatalog {
     private ClientMachineCatalog() {}
 
     public static void tick(Minecraft minecraft) {
+        ConstructionOwnership.tick(minecraft);
         if (minecraft.player == null || minecraft.level == null) {
             if (level != null) { discovery.clear(sink); if (catalog != null) catalog.unbind(); level = null; playerId = null; }
             return;
