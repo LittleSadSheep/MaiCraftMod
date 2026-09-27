@@ -10,10 +10,18 @@ import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.tools.BlockActionOps;
 import com.google.gson.JsonObject;
 import java.util.Set;
+import com.google.gson.JsonParser;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 public final class SemanticInteractionToolTest {
     public static void main(String[] args) {
         equipmentLocationContract();
+        try { manualDurationAndExactApproach(); }
+        catch (Exception failure) { throw new AssertionError("finite manual use and exact approach contract failed", failure); }
         var use = new IntentAction.Tool("interact_at", "{}");
         var walk = new IntentAction.Tool("goto", "{}");
         UseTool stone = new UseTool(ResourceLocation.withDefaultNamespace("stone_hoe"), false, false);
@@ -65,6 +73,29 @@ public final class SemanticInteractionToolTest {
             check(command.toolName().equals("equip_item") && command.arguments().get("action").getAsString().equals("unequip")
                     && command.arguments().get("slot").getAsString().equals(location),
                     "semantic location must reach the internal native equipment action unchanged");
+        }
+    }
+
+    private static void manualDurationAndExactApproach() throws Exception {
+        var json = JsonParser.parseString("{ability:'maicraft:interact',outcome:'operate the selected generator',target:{kind:'coordinates',position:{x:10,y:1,z:10}},parameters:{purpose:'use',duration_seconds:5}}").getAsJsonObject();
+        SemanticGoalContract.validate(Goal.fromJson(json), Set.of(GeneralAbilityAdapter.INTERACT));
+        json.getAsJsonObject("parameters").addProperty("duration_seconds", -1);
+        try { SemanticGoalContract.validate(Goal.fromJson(json), Set.of(GeneralAbilityAdapter.INTERACT)); throw new AssertionError("negative duration accepted"); }
+        catch (IllegalArgumentException expected) { }
+        json.getAsJsonObject("parameters").remove("duration_seconds");
+        var held = (InteractAtTaskRecord) new BlockActionOps().interactAt("right", 0, 64, 0, 600, null, null, new ToolContext("finite-use", 0));
+        check(held.getDeadlineGameTime() >= 1200, "the full requested duration still leaves time for hand preparation and the last acknowledgement");
+        try (var h = new InteractionWorldTestHarness()) {
+            var dimensions = Entity.class.getDeclaredField("dimensions"); dimensions.setAccessible(true);
+            dimensions.set(h.player, EntityDimensions.scalable(.6F, 1.8F));
+            BlockPos at = new BlockPos(10, 1, 10); h.set(at, Blocks.CRAFTING_TABLE.defaultBlockState());
+            var compile = GeneralAbilityAdapter.class.getDeclaredMethod("compileBlockInteraction", Goal.class, LocalPlayer.class, BlockPos.class,
+                    ResourceLocation.class, String.class, boolean.class); compile.setAccessible(true);
+            var plan = (IntentAction.Chain) compile.invoke(null, Goal.fromJson(json), h.player, at,
+                    ResourceLocation.withDefaultNamespace("crafting_table"), null, false);
+            // 自己已经选出的工作站位必须精确抵达，不能让普通旅行容差把角色留在几格外。
+            check(plan.actions().getFirst().toolName().equals("goto") && plan.actions().getFirst().arguments().get("exact").getAsBoolean(),
+                    "semantic interaction uses the exact approach it proved rather than ordinary travel tolerances");
         }
     }
 

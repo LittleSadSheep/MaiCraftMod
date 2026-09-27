@@ -145,6 +145,7 @@ public final class SemanticAbilityCatalog {
                             field("player_name", "string", "Optional exact player name."),
                             field("item_id", "resource_id", "Optional carried item whose ordinary use is intended."),
                             field("purpose", "string", "Open, talk, trade, use or till. Till prepares a suitable hoe when item_id is omitted."),
+                            field("duration_seconds", "number", "Optional finite duration from 0 to 30 for empty-hand Create hand-crank use. Zero or omitted means one activation; the Mod repeats native uses and settles the final receipt."),
                             field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));

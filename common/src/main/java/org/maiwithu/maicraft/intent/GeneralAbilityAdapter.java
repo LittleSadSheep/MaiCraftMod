@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
@@ -478,6 +479,9 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel container use.")), null);
         }
         String purpose = lower(string(p, "purpose"));
+        int duration = CreateManualInput.durationTicks(p);
+        if (duration > 0 && (containerOnly || !"use".equals(purpose) || !selector(goal, p).empty()))
+            throw new IllegalArgumentException("duration_seconds requires use of a supported manual-generator block");
         if ("attack".equals(purpose) || "break".equals(purpose)) {
             return decision(goal, "Destructive interaction must use the combat or mining ability.",
                     List.of(option("replace_goal", "Replace this with combat or mining so its safety policy applies."),
@@ -687,6 +691,12 @@ public final class GeneralAbilityAdapter {
         use.addProperty("y", target.getY());
         use.addProperty("z", target.getZ());
         use.addProperty("required_block_id", id.toString());
+        int duration = CreateManualInput.durationTicks(goal.parameters());
+        if (duration > 0) {
+            if (itemId != null || !CreateManualInput.supported(level, target))
+                throw new IllegalArgumentException("duration_seconds is currently supported for empty-hand Create hand-crank use");
+            use.addProperty("hold_ticks", duration);
+        }
         if ("till".equals(lower(string(goal.parameters(), "purpose"))))
             use.addProperty("expected_block_id", "minecraft:farmland");
         if (itemId != null) use.addProperty("item_id", itemId);
@@ -696,7 +706,7 @@ public final class GeneralAbilityAdapter {
             return new IntentAction.Tool("interact_at", use.toString());
         }
         BlockPos stand = interactionStand(level, player, target, player.blockPosition(), useItem);
-        // 否则找一个能站稳、能看见目标的位置。这里生成的 goto 尚未指定精确站位，会采用移动工具默认误差。
+        // 交互已经证明了具体站位，接近时必须真的到这格，不能套用普通旅行的三格误差后又报够不到。
         if (stand == null) {
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
@@ -710,6 +720,7 @@ public final class GeneralAbilityAdapter {
         travel.addProperty("x", stand.getX() + 0.5D);
         travel.addProperty("y", stand.getY());
         travel.addProperty("z", stand.getZ() + 0.5D);
+        travel.addProperty("exact", true);
         travel.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
         return new IntentAction.Chain(List.of(
                 new IntentAction.Tool("goto", travel.toString()),

@@ -98,7 +98,9 @@ String expected_block_id,
                 throw new IllegalArgumentException("required_block_id needs a valid block and an explicit aim");
             required = BuiltInRegistries.BLOCK.get(id);
         }
-        return new InteractAtTaskRecord(ctx.toolCallId(), ctx.deadline(INTERACT_AT_TIMEOUT_TICKS),
+        // 持续使用之外还要留出选物、转头和末次回执的时间，三十秒手摇不能在刚到时限时被任务总超时截断。
+        long timeout = INTERACT_AT_TIMEOUT_TICKS + Math.clamp((long) holdTicks, 0, INTERACT_AT_TIMEOUT_TICKS);
+        return new InteractAtTaskRecord(ctx.toolCallId(), ctx.deadline(timeout),
                 buttonVal, aim, holdTicks, item, expected, required);
     }
 

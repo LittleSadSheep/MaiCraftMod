@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 检查目标使用了已声明的能力、参数名和目标类型；大多数参数的具体值仍交给各能力自己检查。 */
 final class SemanticGoalContract {
@@ -99,6 +100,13 @@ final class SemanticGoalContract {
                 MachineAbilityAdapter.validate(goal);
             } catch (IllegalArgumentException invalid) {
                 throw violation("invalid_machine_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
+        if (GeneralAbilityAdapter.INTERACT.equals(ability)) {
+            // 编译前就拒绝无穷、负数和非数值持续时间，不等到已经走到曲柄旁才发现请求无法执行。
+            try { CreateManualInput.durationTicks(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_interaction_duration", path + ".parameters", ability, invalid.getMessage());
             }
         }
 

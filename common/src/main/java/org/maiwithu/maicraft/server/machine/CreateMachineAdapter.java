@@ -41,6 +41,8 @@ final class CreateMachineAdapter {
                     // 手摇曲柄和阀柄需要玩家反复使用；结构装好或当前未超载都不等于有持续供给。
                     var manual = new JsonObject(); manual.addProperty("requires_player_use", true);
                     manual.addProperty("self_running", false);
+                    manual.addProperty("ability", "maicraft:interact"); manual.addProperty("purpose", "use");
+                    manual.addProperty("duration_parameter", "duration_seconds"); manual.addProperty("maximum_duration_seconds", 30);
                     scalar(manual, "remaining_turn_ticks", NativeApi.field(entity, null, "inUse"));
                     scalar(manual, "nominal_rpm", NativeApi.call(entity.getBlockState().getBlock(), null, "getRotationSpeed"));
                     manual.addProperty("within_player_interaction_range", player.canInteractWithBlock(entity.getBlockPos(), 0));

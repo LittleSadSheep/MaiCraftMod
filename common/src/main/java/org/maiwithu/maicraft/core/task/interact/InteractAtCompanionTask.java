@@ -27,6 +27,10 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
+import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /**
  * 在当前位置对准方块、液体或前方按键。先选物品、等镜头真正对准，再按实际射线命中的目标执行。
@@ -65,6 +69,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean heldUseStarted, heldUseCompleted, heldUseHandResolved;
     private InteractionHand heldUseHand = InteractionHand.MAIN_HAND;
     private int expectedItemBefore = -1, outputWaitTicks;
+    private boolean manualCrank;
+    private final MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
+    private NativeActionReceipt manualHandSelection;
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -107,6 +114,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 fail("the required interaction target changed or unloaded before aiming", FailureType.TARGET_LOST);
                 return TaskState.FAILED;
             }
+            // 没有点名手持工具的手摇操作先腾空主手，避免无线终端或桶抢走目标方块的右键。
+            if (r.item == null && CreateManualInput.supported(player.level(), r.aim)) {
+                manualCrank = true;
+                TaskState hand = prepareManualHand(); if (hand != null) return hand;
+            }
             if (r.item != null && !itemSelected) {
                 var selected = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
                 if (selected == FirstPersonActionGate.Status.RUNNING) {
@@ -119,7 +131,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 itemSelected = true;
             }
             var useItem = player.getMainHandItem().getItem();
-            boolean bucket = button() == Interaction.Button.USE
+            boolean bucket = !manualCrank && button() == Interaction.Button.USE
                     && FirstPersonInteractionTargeting.usesBucketRay(useItem);
             if (r.aim != null) {
                 if (aimPoint == null) {
@@ -186,7 +198,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             interaction = bucket ? Interaction.useInAir(player, InteractionHand.MAIN_HAND,
                     r.holdTicks == 0 ? Interaction.Timing.once()
                             : r.holdTicks > 0 ? Interaction.Timing.hold(r.holdTicks) : Interaction.Timing.hold())
-                    : Interaction.forHit(player, hit, button(), r.holdTicks, true);
+                    : Interaction.forHit(player, hit, button(), r.holdTicks, !manualCrank);
             if (interaction != null) interaction.requireBlock(r.aim, r.requiredBlock);
             if (interaction == null) {       // 左键点击空气只会挥击，没有后续动作。
                 successMsg = "nothing under the aim (left-click in the air)";
@@ -197,13 +209,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
         }
 
-        // 固定时长的按住操作到期后松开按键。
-        // 当前实现到按住时限就直接停止并结算，不再等 interaction 内尚未确认的点击。
-        // 只有另外设置了 expectedBlock 才会核对目标方块，未设置时可能把仍在等待的动作报成成功（A30）。
+        // 到期只禁止下一次点击；已经发出的原生操作必须先结算，不能把持续时间走完冒充操作成功。
         if (holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
-            interaction.stop();
-            successMsg = describeDone() + settle();
-            return verifiedOutcome();
+            interaction.finishRepeating();
         }
         return switch (interaction.tick()) {
             case DONE -> {
@@ -216,6 +224,35 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
             case RUNNING -> TaskState.RUNNING;
         };
+    }
+
+    private TaskState prepareManualHand() {
+        var context = ClientRuntime.requireContext(player);
+        if (manualHandParking.started()) {
+            var state = manualHandParking.tick(context);
+            if (state == MachineMenuHandParking.Status.FAILED) {
+                fail("manual generator empty-hand preparation failed: " + manualHandParking.failure(), FailureType.NO_SPACE); return TaskState.FAILED;
+            }
+            if (state != MachineMenuHandParking.Status.READY) return TaskState.RUNNING;
+        }
+        if (manualHandSelection != null) {
+            manualHandSelection = context.actions().poll(context, manualHandSelection);
+            if (!manualHandSelection.terminal()) return TaskState.RUNNING;
+            if (manualHandSelection.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+                fail("manual generator hand selection unconfirmed", FailureType.UNKNOWN); return TaskState.FAILED;
+            }
+            manualHandSelection = null; return TaskState.RUNNING;
+        }
+        if (player.getMainHandItem().isEmpty()) return null;
+        for (int slot = 0; slot < 9; slot++) if (player.getInventory().getItem(slot).isEmpty()) {
+            if (context.mutationAvailable()) manualHandSelection = context.actions().selectHotbar(context, slot, 20);
+            return TaskState.RUNNING;
+        }
+        var state = manualHandParking.tick(context);
+        if (state == MachineMenuHandParking.Status.FAILED) {
+            fail("manual generator empty-hand preparation failed: " + manualHandParking.failure(), FailureType.NO_SPACE); return TaskState.FAILED;
+        }
+        return TaskState.RUNNING;
     }
 
     private TaskState useHeldItem() {
@@ -306,6 +343,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private String settle() {
         changes = receipt == null ? List.of() : receipt.diff(player);
         if (changes.isEmpty()) {
+            if (manualCrank && interaction != null && interaction.confirmedUses() > 0)
+                return " — native manual-generator activity was observed; machine production remains unverified.";
             return " — but nothing visibly changed (hands, aimed block, nearby entities all "
                     + "as before). If you expected an effect, reposition or rethink.";
         }
@@ -316,6 +355,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     @Override
     protected void cleanup() {
         if (interaction != null) interaction.stop();
+        manualHandParking.cleanup(player);
+        if (manualHandSelection != null && !manualHandSelection.terminal()) {
+            var context = ClientRuntime.actor().activeContext().filter(value -> value.player() == player && value.isCurrent());
+            if (context.isPresent()) context.get().actions().retireOneShotForTaskBoundary(context.get(), manualHandSelection, "manual hand selection ended");
+        }
         selection.reset();
         aimConvergence.reset();
         aimPoint = null;
@@ -326,6 +370,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        if (manualCrank) data.put("manual_generator", CreateManualInput.evidence(player.level(), r.aim,
+                interaction == null ? 0 : interaction.confirmedUses()));
         if (r.heldItemUseOnly) {
             data.put("held_item_use_started", heldUseStarted); data.put("native_use_completed", heldUseCompleted);
             data.put("used_hand", heldUseHand.name().toLowerCase());
