@@ -306,6 +306,7 @@ public final class GuiRegressionSuite {
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);
         NightRestBehaviorTest.main(args);
+        NightRestRouteTest.main(args);
         FishingBiteTest.main(args);
         StockEvidenceTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。

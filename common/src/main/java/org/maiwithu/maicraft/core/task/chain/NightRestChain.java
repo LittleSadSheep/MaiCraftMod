@@ -22,6 +22,9 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
 import org.maiwithu.maicraft.core.task.sleep.NightRestTask;
+import org.maiwithu.maicraft.core.task.sleep.NightRestRouteProbe;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.task.build.BuildEdgeMotion;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
@@ -35,6 +38,9 @@ public final class NightRestChain implements Task, Reflex {
     public static final String ID = "night_rest";
     private final Set<Block> beds = BuiltInRegistries.BLOCK.stream().filter(block -> block instanceof BedBlock).collect(Collectors.toUnmodifiableSet());
     private final Set<BlockPos> attempted = new HashSet<>();
+    private final Set<BlockPos> unreachable = new HashSet<>();
+    private NightRestRouteProbe routeProbe;
+    private BlockPos probeOrigin;
     private NightRestTask rest;
     private NightRestTask.Record record;
     private BlockPos candidate;
@@ -51,15 +57,28 @@ public final class NightRestChain implements Task, Reflex {
         var context = ClientRuntime.requireContext(player);
         if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu
                 || !WorldTimeSemantics.canAttemptSleep(player.level()) || !BedBlock.canSetSpawn(player.level())) return false;
+        // 临边保持和低顶挪位属于未完成的身体操作；等角色回到完整且可站立的落脚面后再考虑普通休息。
+        if (!BuildEdgeMotion.canStandAt(player, NavigationSafetyContext.forbiddenBodyCells(),
+                pos -> !NavigationSafetyContext.forbidsBody(pos))) return false;
         long day = WorldTimeSemantics.dayIndex(player.level());
-        if (night != day) { attempted.clear(); night = day; }
+        if (night != day) { attempted.clear(); unreachable.clear(); routeProbe = null; night = day; }
+        if (!player.blockPosition().equals(probeOrigin)) { unreachable.clear(); routeProbe = null; probeOrigin = player.blockPosition().immutable(); }
         var protection = protection(player);
         if (!protection.problems().isEmpty()) return false;
         if (!registered) { TargetIndex.register(player.clientLevel, beds); registered = true; }
         return protection.run(() -> {
-            var found = TargetIndex.query(player.clientLevel, player.blockPosition(), beds, 64, 2, 256, attempted);
-            for (BlockPos at : found.hits()) if (usable(player, at)) { candidate = at.immutable(); return true; }
-            if (found.complete()) retryAt = now + 200;
+            var excluded = new HashSet<>(attempted); excluded.addAll(unreachable);
+            var found = TargetIndex.query(player.clientLevel, player.blockPosition(), beds, 64, 2, 256, excluded);
+            for (BlockPos at : found.hits()) if (usable(player, at)) {
+                if (routeProbe == null || !routeProbe.matches(player, at)) {
+                    try { routeProbe = new NightRestRouteProbe(player, at, EmbeddedBaritoneRuntime.physicalObstacles()); }
+                    catch (RuntimeException | LinkageError unavailable) { unreachable.add(at.immutable()); routeProbe = null; return false; }
+                }
+                if (!routeProbe.advance()) return false;
+                if (routeProbe.connected()) { candidate = at.immutable(); return true; }
+                unreachable.add(at.immutable()); routeProbe = null; return false;
+            }
+            if (found.complete()) { retryAt = now + 200; unreachable.clear(); routeProbe = null; }
             return false;
         });
     }

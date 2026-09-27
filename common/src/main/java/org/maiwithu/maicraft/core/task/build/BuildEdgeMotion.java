@@ -57,7 +57,7 @@ public final class BuildEdgeMotion {
         result.alignment = true; return result;
     }
 
-    static boolean canStandAt(LocalPlayer player, LongSet forbidden, Predicate<BlockPos> permittedBody) {
+    public static boolean canStandAt(LocalPlayer player, LongSet forbidden, Predicate<BlockPos> permittedBody) {
         // 复用移动原语的完整保护格、原生实体与动态结构检查；只验证，不申请输入或启动一次新的运动。
         Vec3 at = player.position();
         return BuildFootprintSupport.complete(player.level(), player.level()::isLoaded, player.getBbWidth(), at, at, at)
