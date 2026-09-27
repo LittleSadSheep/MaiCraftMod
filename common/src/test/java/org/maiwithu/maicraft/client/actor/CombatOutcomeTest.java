@@ -35,7 +35,34 @@ public final class CombatOutcomeTest {
         retreatPrecedesLootSettlement();
         retreatAcceptsAnyReachableSafeDirection();
         retreatCameraCannotStarveMeleeAim();
+        meleeApproachUsesThreeDimensionalRange();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
+    }
+
+    private static void meleeApproachUsesThreeDimensionalRange() throws Exception {
+        // 水平三格但低两格时仍超出近战距离；旧水平环会误报到达，角色只能站在楼下挨箭。
+        var focus = new Vec3(.5, 3, .5);
+        NavGoal range = NavGoal.distanceBand(focus, 2.02, 3.3);
+        var below = new BlockPos(3, 1, 0); var aligned = new BlockPos(3, 3, 0);
+        check(NavGoal.ring(BlockPos.containing(focus), 2.02, 3.3).isAt(below) && !range.isAt(below),
+                "horizontal proximity cannot admit an out-of-range lower floor");
+        check(range.isAt(aligned) && range.heuristic(below) > range.heuristic(aligned),
+                "the search keeps approaching until a reachable three-dimensional band is entered");
+        NavGoal fractional = NavGoal.distanceBand(new Vec3(.01, 1, .5), 2.02, 3.3);
+        check(!fractional.isAt(new BlockPos(3, 1, 0)), "target block rounding cannot add hidden melee range");
+        check(!fractional.semanticFingerprint().equals(NavGoal.distanceBand(new Vec3(.9, 1, .5), 2.02, 3.3).semanticFingerprint()),
+                "moving inside one block still updates the precise combat goal");
+        check(NavGoal.distanceBand(focus, 4, 3.3).isAt(new BlockPos(0, 3, 0)),
+                "an impossible no-damage inner band still permits approaching a larger enemy");
+        // 直接核对战斗任务选择的目标，避免只测试几何辅助类而执行入口仍沿用旧水平环。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var mob = f.mob(11, 3.5);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("vertical-melee", 1000, List.of(11), false));
+            ActorControlTestHarness.field(AttackCompanionTask.class, "target").set(task, mob);
+            NavGoal actual = (NavGoal) invoke(task, "standoffGoal");
+            check(actual.isAt(new BlockPos(0, 1, 3)) && !actual.isAt(new BlockPos(0, -1, 3)),
+                    "the live melee approach uses both the target height and precise position");
+        }
     }
 
     private static void lostIsNotDead() throws Exception {

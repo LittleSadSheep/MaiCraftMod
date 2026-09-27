@@ -777,8 +777,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         //
         // 内沿用<b>裸</b>攻击距离(2.02),不加格量化补偿。带宽因此是 1.28 格,比格量化误差
         // 0.71 宽出一截 —— 当初算出"带只有 0.57 格、做不出来",是因为把补偿也叠进了内沿。
+        // 近战按实际三维够到距离接敌，敌人在台阶或平台上时继续寻找可出刀的高度；弓仍使用水平拉扯范围。
+        NavGoal approach = bowFighting
+                ? NavGoal.ring(target.blockPosition(), skirmishInner(), skirmishOuter())
+                : NavGoal.distanceBand(target.position(), skirmishInner(), skirmishOuter());
         return NavGoal.approachAvoiding(
-                NavGoal.ring(target.blockPosition(), skirmishInner(), skirmishOuter()),
+                approach,
                 Menace.AVOID_PENALTY,
                 bowFighting
                         ? Menace.field(player, field).stream()

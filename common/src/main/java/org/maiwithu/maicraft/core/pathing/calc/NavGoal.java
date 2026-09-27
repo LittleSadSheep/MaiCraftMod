@@ -4,6 +4,7 @@ import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities;
 import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
 import org.maiwithu.maicraft.core.pathing.moves.ActionCosts;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.List;
@@ -73,6 +74,9 @@ public interface NavGoal {
             }
             if (goal instanceof Ring g) {
                 return key("ring", g.goal.asLong(), g.inner, g.outer);
+            }
+            if (goal instanceof DistanceBand g) {
+                return key("distance_band", g.focus.x, g.focus.y, g.focus.z, g.inner, g.outer);
             }
             if (goal instanceof NearGround g) {
                 return key("near_ground", g.goal.asLong(), g.radius, g.verticalTolerance);
@@ -184,6 +188,11 @@ public interface NavGoal {
      */
     static NavGoal ring(BlockPos pos, double inner, double outer) {
         return new Ring(pos, inner, outer);
+    }
+
+    /** 近战接敌同时考虑高度与敌人格内位置，不能把楼下的水平近点当成已经够得到敌人。 */
+    static NavGoal distanceBand(Vec3 focus, double inner, double outer) {
+        return new DistanceBand(focus, inner, outer);
     }
 
     /** 要求脚位落在 {@code pos} 的 {@code radius} 欧几里得距离内，半径单位为方块。 */
@@ -452,6 +461,39 @@ public interface NavGoal {
         @Override public BlockPos center() {
             return goal;
         }
+    }
+
+    /** 候选脚位中心到精确目标脚位的三维距离带；是否真能出刀仍由原生攻击射线检查。 */
+    final class DistanceBand implements NavGoal {
+        public final Vec3 focus;
+        public final double inner;
+        public final double outer;
+
+        DistanceBand(Vec3 focus, double inner, double outer) {
+            this.focus = Objects.requireNonNull(focus);
+            if (!Double.isFinite(focus.x) || !Double.isFinite(focus.y) || !Double.isFinite(focus.z)
+                    || !Double.isFinite(inner) || !Double.isFinite(outer) || inner < 0 || outer <= 0)
+                throw new IllegalArgumentException("distance band requires finite coordinates and positive outer range");
+            this.inner = inner >= outer ? 0 : inner;
+            this.outer = outer;
+        }
+
+        private double distance(BlockPos feet) {
+            return Vec3.atBottomCenterOf(feet).distanceTo(focus);
+        }
+
+        @Override public boolean isAt(BlockPos feet) {
+            double distance = distance(feet);
+            return distance >= inner && distance <= outer;
+        }
+
+        @Override public double heuristic(BlockPos from) {
+            // 高差过大时，估价继续引导角色接近有效距离带，不能因水平已经到位就在楼下停住。
+            double distance = distance(from);
+            return (distance < inner ? inner - distance : Math.max(0, distance - outer)) * NavSettings.get().costHeuristic;
+        }
+
+        @Override public BlockPos center() { return BlockPos.containing(focus); }
     }
 
     /**
