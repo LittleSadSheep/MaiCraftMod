@@ -359,6 +359,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
      */
     private String settle() {
         changes = receipt == null ? List.of() : receipt.diff(player);
+        // 选择起点本来不会改变方块外观；用专门的原生证据告诉规划者当前处于接线的哪一步。
+        if (interaction!=null && interaction.chainUse()!=null) return " — "+interaction.chainUse().summary();
         if (manualCrank && manualUsage.overstressed())
             return " — native manual-generator activity was observed; the connected network was overstressed during use; machine production remains unverified.";
         if (changes.isEmpty()) {
@@ -389,6 +391,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        // 缺料失败和成功选点都保留链条账，等待任务通知的模型也能自主决定下一步取材或连接。
+        if (interaction!=null && interaction.chainUse()!=null) data.put("chain_conveyor_use",interaction.chainUse().evidence());
         if (manualCrank) {
             var generator = new HashMap<>(CreateManualInput.evidence(player.level(), r.aim,
                     interaction == null ? 0 : interaction.confirmedUses()));

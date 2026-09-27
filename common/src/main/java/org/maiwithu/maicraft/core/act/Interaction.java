@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorUse;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -100,6 +101,7 @@ public final class Interaction {
     private boolean itemFallthrough;
     private MenuReceipt closeReceipt;
     private NativeActionReceipt receipt;
+    private ChainConveyorUse chainUse;
     private boolean fallingThrough;
     private boolean releasing;
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
@@ -519,9 +521,15 @@ public final class Interaction {
                     context, hand, itemUseConfirmation(hand, before),
                     CONFIRM_TIMEOUT_TICKS);
         } else {
+            var confirmation=blockUseConfirmation(hit,hand);
+            // 持链缺料时先保留原生起点，直接把数量缺口交回规划者，避免盲目点击清掉选择后只收到超时。
+            if (chainUse!=null && chainUse.failure()!=null) {
+                failReason=chainUse.failure(); failType=chainUse.missingChains()>0 ? FailureType.NO_MATERIAL : FailureType.UNSUPPORTED;
+                hardFail=true; return false;
+            }
             receipt = context.actions().useBlock(
-                    context, hand, hit, blockUseConfirmation(hit, hand),
-                    CONFIRM_TIMEOUT_TICKS);
+                    context, hand, hit, confirmation,
+                    chainUse==null ? CONFIRM_TIMEOUT_TICKS : 100);
         }
         return false;
     }
@@ -538,10 +546,11 @@ public final class Interaction {
         receipt = null;
         if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             lastUseOutcome = "confirmed (" + action + ")";
+            if (chainUse!=null) chainUse.confirmed();
             fallingThrough = false;
             return true;
         }
-        if (itemFallthrough && !fallingThrough) {
+        if (chainUse==null && itemFallthrough && !fallingThrough) {
             fallingThrough = true;
             return false;
         }
@@ -558,6 +567,9 @@ public final class Interaction {
         BlockPos adjacent = clicked.relative(hit.getDirection()).immutable();
         var clickedBefore = player.level().getBlockState(clicked);
         ItemStack heldBefore = player.getItemInHand(usedHand).copy();
+        // Create 首次持链右键只改变客户端选择标记；后续接线则必须观察双向端点和材料扣账。
+        chainUse=ChainConveyorUse.prepare(player,clicked,usedHand);
+        if (chainUse!=null) return chainUse;
         // 明确用空手操作曲柄时验证其原生发电反馈；菜单弹出或无关库存变化不能冒充已经摇动曲柄。
         if (heldBefore.isEmpty()) {
             var manual = CreateManualInput.confirmation(player.level(), clicked);
@@ -592,6 +604,7 @@ public final class Interaction {
     public String lastUseOutcome() {
         return lastUseOutcome;
     }
+    public ChainConveyorUse chainUse() { return chainUse; }
 
     // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
     private boolean fireUseEntity() {
