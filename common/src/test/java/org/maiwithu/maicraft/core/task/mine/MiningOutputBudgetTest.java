@@ -40,6 +40,10 @@ public final class MiningOutputBudgetTest {
             TaskState state = task.tick(h.player);
             check(state == (expectedArrives ? TaskState.SUCCESS : TaskState.FAILED), "only expected carried output can satisfy the mining goal");
             Map<String, Object> result = task.result(state).data();
+            // 结束回执同时保留最后一次采矿观察；走动和确认破坏的计数不能被当成目标物品已经到账。
+            var observed = (Map<?, ?>) result.get("mining_observation");
+            check(observed != null && observed.get("gathered").equals(expectedArrives ? 1 : 0)
+                    && observed.get("confirmed_source_breaks").equals(32), "mining diagnostics retain actual output and separate break evidence");
             if (!expectedArrives) {
                 check("expected_mining_output_not_observed".equals(result.get("failure_code"))
                         && result.get("confirmed_source_breaks_without_output").equals(32), "unproductive source breaks have a bounded failure");

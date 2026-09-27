@@ -111,6 +111,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final int DROP_CLOSE_WAIT_TICKS = 20;
 
     private final List<BlockPos> knownOres = new ArrayList<>();
+    private long nextProgressObservation;
+    private Map<String, Object> lastMiningObservation = Map.of();
     /**
      * 当前地形下挖不动的格子 —— <b>只有 {@code NO_SHOT} 进得来</b>:够到测试过了,却连续
      * 二十刻拉不出射线(瞄准量化、站位上方有个檐口)。这是关于<b>这一格</b>的、可复现的事实。
@@ -270,6 +272,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 定点来源尚未确认破坏时，路上偶然收到同种物品也不能满足本次采收。
         if (r.exactHarvest()) gathered = brokenTargets == 0 ? 0 : Math.max(0, progressItemCount() - progressItemBaseline);
         r.setMined(gathered);
+        observeMiningProgress(gathered);
         if (gathered > lastVerifiedGathered) {
             lastVerifiedGathered = gathered;
             breaksAtLastOutput = brokenTargets;
@@ -1166,6 +1169,34 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return knownOres.stream().min(Comparator.comparingDouble(feet::distSqr)).orElse(null);
     }
 
+    // 长时间取矿时每五秒保留真实身体、矿点和寻路状态；仅有来回走动不能被日志误读为正在产出矿物。
+    // 这份观察不改变矿点选择、路线、超时或输入，供实机定位反复重规划与原生挖掘停滞的区别。
+    private void observeMiningProgress(int gathered) {
+        long now = player.level().getGameTime();
+        if (now < nextProgressObservation) return;
+        nextProgressObservation = now + 100;
+        var observation = new LinkedHashMap<String, Object>();
+        observation.put("game_time", now);
+        observation.put("phase", activeTarget != null ? "digging" : navIsDrop ? "collecting_drops" : knownOres.isEmpty() ? "querying_sources" : "approaching_sources");
+        observation.put("feet", List.of(player.getX(), player.getY(), player.getZ()));
+        observation.put("known_sources", knownOres.size()); observation.put("query_complete", lastQueryComplete);
+        observation.put("gathered", gathered); observation.put("confirmed_source_breaks", brokenTargets);
+        observation.put("food", player.getFoodData().getFoodLevel());
+        var nearest = nearestOre();
+        if (nearest != null) {
+            observation.put("nearest_source", List.of(nearest.getX(), nearest.getY(), nearest.getZ()));
+            observation.put("nearest_distance", Math.sqrt(nearest.distToCenterSqr(player.position())));
+        }
+        if (activeTarget != null) observation.put("active_target", List.of(activeTarget.getX(), activeTarget.getY(), activeTarget.getZ()));
+        if (nav != null) {
+            observation.put("planning", nav.planningInFlight()); observation.put("physical_progress", nav.hasRecentPhysicalProgress(40));
+            observation.put("stall_ticks", nav.stallTicks()); observation.put("outcome", String.valueOf(nav.outcomeSummary()));
+            observation.put("last_path_failure", String.valueOf(nav.failReason()));
+        }
+        lastMiningObservation = Map.copyOf(observation);
+        Constants.LOG.info("[maicraft-mine] task={} progress={}", r.getToolCallId(), lastMiningObservation);
+    }
+
     /** 最近矿物的日志描述使用 ASCII，避免编码问题，例如 "316,64,391 minecraft:oak_log dy=+0 dist=1.0" 或 "none"。
      *  dy 是矿物高度减脚位高度，可区分“高四格，需要垫高”和“同高”；方块 ID 用于发现误处理的藤蔓、树叶等类型。 */
     private String nearestOreInfo() {
@@ -1334,6 +1365,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        if (!lastMiningObservation.isEmpty()) data.put("mining_observation", lastMiningObservation);
         if (expectedOutputMissing) {
             data.put("failure_code", "expected_mining_output_not_observed");
             data.put("confirmed_source_breaks_without_output", brokenTargets - breaksAtLastOutput);
