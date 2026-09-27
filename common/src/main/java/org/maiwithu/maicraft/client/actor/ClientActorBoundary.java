@@ -184,6 +184,9 @@ public final class ClientActorBoundary {
         return result;
     }
 
+    /** 供非紧急自理检查是否可以暂停当前工作；这里只读操作回执，不撤销尚未结束的动作。 */
+    public boolean settledForRoutinePause() { return actions.settledForRoutinePause() && menus.settledForRoutinePause(); }
+
     /** 按渲染帧推进镜头转动；任务执行和原生游戏操作仍由游戏刻调度。 */
     public void renderFrame() {
         requireClientThread();

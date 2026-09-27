@@ -19,6 +19,8 @@ public final class DefaultMenuPort implements MenuPort {
     private MenuReceipt active;
     private final MenuVisibility visibility = new MenuVisibility();
     private AbstractContainerMenu closingMenu;
+    /** 已提交的槽位交换与关闭界面必须先结束，之后才允许离开工位去睡觉。 */
+    boolean settledForRoutinePause() { return (active == null || active.terminal()) && closingMenu == null; }
 
     @Override
     public boolean ensureVisible(LocalPlayerContext context) {

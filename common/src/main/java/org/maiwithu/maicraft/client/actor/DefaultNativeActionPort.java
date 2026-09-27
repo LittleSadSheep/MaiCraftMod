@@ -20,6 +20,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private NativeActionReceipt active;
+    /** 非紧急生活动作只在旧点击和停挖请求都结清后接手，不能打断未确认的施工或取物。 */
+    boolean settledForRoutinePause() { return (active == null || active.terminal()) && pendingBreakCancellationReason == null; }
 
     @Override public NativeActionReceipt dropSelected(LocalPlayerContext context, ItemStack expectedSelected, boolean fullStack,
                                                       NativeConfirmation confirmation, int timeoutTicks) {

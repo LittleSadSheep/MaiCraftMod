@@ -10,6 +10,9 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
+import org.maiwithu.maicraft.core.Constants;
+import java.util.Map;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.act.Interaction;
@@ -19,11 +22,34 @@ import org.maiwithu.maicraft.task.TaskState;
 /** 已经走到床边后，在这里对准床、右键，并等游戏确认玩家真的躺下。 */
 public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRecord> {
     private NativeActionReceipt receipt;
+    private boolean enteredSleep;
+    private long wakeObservedAt = -1;
+    private boolean morningObserved;
+    private static final int WAKE_SYNC_TICKS = 200;
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     public SleepCompanionTask(LocalPlayer player, SleepTaskRecord record) { super(player, record); }
     @Override protected TaskState onTick() {
-        // 已经躺下就完成；“睡觉”任务只负责躺下，不等到第二天天亮。
-        if (player.isSleeping()) return TaskState.SUCCESS;
+        // 自动休息持有身体直到自然醒；只躺下就恢复施工会让角色在床上继续发动作。
+        if (player.isSleeping()) {
+            enteredSleep = true;
+            if (receipt != null && !receipt.terminal()) {
+                var observed = ClientRuntime.requireContext(player); receipt = observed.actions().poll(observed, receipt);
+            }
+            return r.waitUntilAwake ? TaskState.RUNNING : TaskState.SUCCESS;
+        }
+        if (enteredSleep && r.waitUntilAwake) {
+            // 醒来实体包与世界时间/天气包不保证同刻到达；先留同步窗口，不能在第一帧仍显示夜晚时宣判睡眠失败。
+            long now = player.level().getGameTime();
+            if (wakeObservedAt < 0) {
+                wakeObservedAt = now;
+                Constants.LOG.info("[maicraft-rest] 观察到醒来，等待时间同步 game_time={} day_time={} thunder={}",
+                        now, player.level().getDayTime(), player.level().isThundering());
+            }
+            if (!WorldTimeSemantics.canAttemptSleep(player.level())) { morningObserved = true; return TaskState.SUCCESS; }
+            if (now - wakeObservedAt < WAKE_SYNC_TICKS) return TaskState.RUNNING;
+            fail("woke from sleep, but morning or cleared weather was not confirmed within the synchronization window", FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
             // 每次准备点击都按原版床的维度规则检查；规划通过后仍可能换维度，爆炸不能靠事后确认补救。
@@ -63,13 +89,24 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
         // 点击已发出后只等待确认，不每刻重复右键；未确认可能是白天、有怪、床被占用等。
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) return TaskState.RUNNING;
-        if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) return TaskState.SUCCESS;
+        if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            enteredSleep = true;
+            return r.waitUntilAwake ? TaskState.RUNNING : TaskState.SUCCESS;
+        }
         fail("sleep interaction was rejected or not confirmed (daytime, danger, or occupied bed): "
                 + receipt.detail(), FailureType.UNKNOWN);
         return TaskState.FAILED;
     }
-    /** 丢掉任务自己的点击和瞄准记录；当前没有退役动作端口里的待确认点击，也不会主动叫醒已睡着的玩家。 */
-    @Override protected void cleanup() { receipt = null; aimConvergence.reset(); }
-    @Override protected String successMessage() { return "sleeping in bed"; }
+    /** 睡眠结束或取消时结清自己的床点击；不会用新的点击或移动强行叫醒玩家。 */
+    @Override protected void cleanup() {
+        if (receipt != null && !receipt.terminal()) ClientRuntime.actor().activeContext().filter(context -> context.player() == player)
+                .ifPresent(context -> context.actions().retireOneShotForTaskBoundary(context, receipt, "sleep task ended"));
+        receipt = null; aimConvergence.reset(); super.cleanup();
+    }
+    @Override protected String successMessage() { return r.waitUntilAwake ? "slept and observed a natural morning wake-up" : "sleeping in bed"; }
+    @Override protected Map<String, Object> resultData() {
+        return Map.of("entered_sleep", enteredSleep, "wait_until_awake", r.waitUntilAwake,
+                "wake_observed", wakeObservedAt >= 0, "morning_observed", morningObserved);
+    }
     @Override protected String cancelledMessage() { return "sleep interrupted"; }
 }
