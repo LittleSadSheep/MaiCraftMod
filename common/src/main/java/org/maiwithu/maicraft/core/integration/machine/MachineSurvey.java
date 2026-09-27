@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.core.integration.machine;
 
 import org.maiwithu.maicraft.core.integration.create.CreateKineticCapabilities;
+import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidence;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.lang.reflect.Method;
@@ -260,6 +262,12 @@ public final class MachineSurvey {
                         if (kinetic != null) {
                             if (evidence == null) evidence = new JsonObject();
                             evidence.add("create_kinetic_client_fields", kinetic);
+                        }
+                        // 持料已由原生客户端同步时直接附在部件上，服务器大范围分页未到该部件也不必猜它是否为空。
+                        var hand = CreateDeployerHandEvidence.capture(level,absolute);
+                        if (!hand.isEmpty()) {
+                            if (evidence == null) evidence = new JsonObject();
+                            evidence.add("create_deployer_hand_client",new Gson().toJsonTree(hand));
                         }
                     }
                     result.blocks.add(new ObservedBlock(relative, id, properties, id + properties,

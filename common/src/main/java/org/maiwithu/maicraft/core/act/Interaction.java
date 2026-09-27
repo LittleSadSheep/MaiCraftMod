@@ -93,6 +93,7 @@ public final class Interaction {
 
     private final BlockDigger digger; // 仅左键破坏方块时使用。
     private BlockHitResult presetHit; // 右键方块时可携带调用方已解析的精确命中，供放置使用。
+    private BlockHitResult submittedBlockHit;
     private BlockPos requiredBlockPos;
     private Block requiredBlock;
     /**
@@ -548,6 +549,8 @@ public final class Interaction {
             receipt = context.actions().useBlock(
                     context, hand, hit, confirmation,
                     chainUse==null ? CONFIRM_TIMEOUT_TICKS : 100);
+            // 仅记录真正交给原生右键入口的面，选站位时的预想朝向不能当作已点击方向。
+            submittedBlockHit = hit;
         }
         return false;
     }
@@ -624,6 +627,7 @@ public final class Interaction {
         return lastUseOutcome;
     }
     public ChainConveyorUse chainUse() { return chainUse; }
+    public BlockHitResult submittedBlockHit() { return submittedBlockHit; }
 
     /** 没观察到变化不等于没发生；让任务和完成通知保留原生点击的确认边界，避免再次互换已装好的材料。 */
     public Map<String, Object> useEvidence() {

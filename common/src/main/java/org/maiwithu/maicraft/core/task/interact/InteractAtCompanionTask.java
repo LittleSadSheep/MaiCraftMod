@@ -30,6 +30,7 @@ import net.minecraft.world.phys.EntityHitResult;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
+import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -75,6 +76,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
     private NativeActionReceipt manualHandSelection;
+    private Map<String,Object> deployerHandBefore = Map.of();
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -210,6 +212,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
             }
             receipt = PressReceipt.before(player, r.aim);
+            // 捕获这次交换前已有的持料，避免同种同数互换未产生数量差时只剩一条超时信息。
+            deployerHandBefore = CreateDeployerHandEvidence.capture(player.level(),r.aim);
             // 点名道具时保留原生物品使用；空手操作目标时禁止回退，避免中断遗留的无线终端或工具抢走点击。
             interaction = bucket ? Interaction.useInAir(player, InteractionHand.MAIN_HAND,
                     r.holdTicks == 0 ? Interaction.Timing.once()
@@ -395,6 +399,14 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         // 普通机械交互超时也可能已经交换物品；完成通知不能把缺少确认改写为可直接重试。
         if (interaction != null) data.putAll(interaction.useEvidence());
+        if (!deployerHandBefore.isEmpty()) {
+            var hand = new HashMap<String,Object>(); hand.put("before",deployerHandBefore);
+            var after = CreateDeployerHandEvidence.capture(player.level(),r.aim);
+            hand.put("after",after.isEmpty()?Map.of("observation_status","target_unavailable"):after);
+            if (interaction != null && interaction.submittedBlockHit() != null)
+                hand.put("submitted_face",interaction.submittedBlockHit().getDirection().getName());
+            data.put("deployer_hand_observation",hand);
+        }
         // 缺料失败和成功选点都保留链条账，等待任务通知的模型也能自主决定下一步取材或连接。
         if (interaction!=null && interaction.chainUse()!=null) data.put("chain_conveyor_use",interaction.chainUse().evidence());
         if (manualCrank) {

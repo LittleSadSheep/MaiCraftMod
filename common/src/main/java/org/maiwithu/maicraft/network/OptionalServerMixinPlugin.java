@@ -24,6 +24,8 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
     @Override public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         String name = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
         if (name.equals("CreateStressObservationMixin")) return hasStressFields(targetClassName);
+        // 机械手只旁听原生同步；可选模组不存在时不加载适配器，版本未命中 read 时保持观察未知。
+        if (name.equals("CreateDeployerHandObservationMixin")) return present(targetClassName);
         if (name.equals("Ae2CraftingLifecycleMixin")) return present("appeng.core.AppEng") && present(targetClassName);
         // 本次转化钩子按 AE2 19.2 的 NeoForge 原生调用形状接入；缺少模组或加载器时不加载适配类。
         if (name.equals("Ae2TransformProductionMixin")) return present("net.neoforged.neoforge.common.NeoForge")

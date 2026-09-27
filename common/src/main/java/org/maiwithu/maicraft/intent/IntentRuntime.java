@@ -71,6 +71,8 @@ public final class IntentRuntime {
             "requested_transmission", "transmission_description", "available_transmission_choices",
             // 游戏 HUD 的锁链不足提示没有普通方块变化，持链交互的选择状态和数量缺口必须随通知到达模型。
             "chain_conveyor_use",
+            // 未确认换物时仍给出机械手本来的持料与当前持料，保持现场状态和动作确认彼此独立。
+            "deployer_hand_observation",
             // 实际接入方块随完成通知保留，调用者可将动力回执与请求的压机、链轮等设备直接对照。
             "selected_destination_block", "selected_source_block",
             // 失败时仍保留两端的独立转速与观察阶段，整体接线未验收不等于两边都没有动力。

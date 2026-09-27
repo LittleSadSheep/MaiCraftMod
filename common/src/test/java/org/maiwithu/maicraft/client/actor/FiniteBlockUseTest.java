@@ -27,8 +27,11 @@ public final class FiniteBlockUseTest {
             h.set(AT, Blocks.REDSTONE_LAMP.defaultBlockState());
             var hit = new BlockHitResult(new Vec3(8.5, 1.5, 6), Direction.SOUTH, AT, false);
             var use = Interaction.forHit(h.player, hit, Interaction.Button.USE, 100, fallback);
+            check(use.submittedBlockHit()==null,"an aimed face is not yet a submitted native click");
             for (int tick = 0; tick < 80 && h.blockUses() == 0; tick++) { use.tick(); next(h); }
             check(h.blockUses() == 1, "the native right click was submitted once");
+            check(use.submittedBlockHit()!=null && use.submittedBlockHit().getDirection()==Direction.SOUTH,
+                    "receipt records the actual face submitted to native use");
             use.finishRepeating();
             check(use.tick() == Interaction.Status.RUNNING, "elapsed duration cannot complete a pending native use");
             if (applied) h.set(AT, Blocks.REDSTONE_LAMP.defaultBlockState().setValue(RedstoneLampBlock.LIT, true));
