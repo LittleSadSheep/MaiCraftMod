@@ -102,6 +102,7 @@ import org.maiwithu.maicraft.core.task.build.BuildSharedWorksiteTest;
 import org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceSurveyTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceExecutionTest;
+import org.maiwithu.maicraft.core.task.build.MachineModificationClearanceTest;
 import org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupportAccessTest;
@@ -235,6 +236,7 @@ public final class GuiRegressionSuite {
         BuildClearanceSurveyTest.main(args);
         // 现场在开工前或开挖途中出现人工方块时，实际施工任务也要停手并回报原坐标。
         BuildClearanceExecutionTest.main(args);
+        MachineModificationClearanceTest.main(args);
         BuildExcavationFrontierTest.main(args);
         ContainerBatchReplanTest.main(args);
         ContainerSplitPlannerTest.main(args);

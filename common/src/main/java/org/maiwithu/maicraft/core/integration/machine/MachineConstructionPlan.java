@@ -58,6 +58,8 @@ public final class MachineConstructionPlan {
     private final Map<BlockPos, BuildTaskRecord.Target> targetsByPosition;
     private final Map<BlockPos, List<BlockPos>> placementDependencies;
     private final List<List<BuildTaskRecord.Target>> attachmentLayers;
+    private Map<BlockPos, BlockState> observedEdits = Map.of();
+    private boolean fixedModification;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
@@ -315,6 +317,7 @@ public final class MachineConstructionPlan {
                 replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE, replace, consume,
                 consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
+        if (fixedModification) task.machineModification(observedEdits);
         task.futureWorkItems(foodProtectedWorkItems());
         var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
         fluidTargets().forEach(target -> protectedSources.add(target.pos())); task.materialSupplyProtection(protectedSources);
@@ -346,10 +349,24 @@ public final class MachineConstructionPlan {
         var task = new BuildTaskRecord(callId, deadline, attachmentLayers.get(index), replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true); task.materialSupplyProtection(positions());
+        if (fixedModification) task.machineModification(observedEdits);
         task.futureWorkItems(foodProtectedWorkItems());
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
     public BlockPos anchor() { return anchor; }
+    /** 机器修改只豁免作者明确点名且本次勘察范围内已加载的旧方块，不给通路清障或蓝图隐含净空扩权。 */
+    public void bindObservedModification(Level world, BlockPos surveyedCenter, int radius) {
+        var observed = new LinkedHashMap<BlockPos, BlockState>();
+        for (BlockPos offset : MachineAssemblyDocument.blocks(blueprint()).keySet()) {
+            BlockPos at = anchor.offset(offset);
+            if (Math.abs((long) at.getX() - surveyedCenter.getX()) > radius
+                    || Math.abs((long) at.getY() - surveyedCenter.getY()) > radius
+                    || Math.abs((long) at.getZ() - surveyedCenter.getZ()) > radius || !world.isLoaded(at)) continue;
+            var state = world.getBlockState(at);
+            if (!state.isAir()) observed.put(at.immutable(), state);
+        }
+        observedEdits = Map.copyOf(observed); fixedModification = true;
+    }
     /** 放块阶段也保留后续皮带连接器、附件和显式工序原料，防止提前吃掉例如皮带配方中的熟海带。 */
     private Set<Item> foodProtectedWorkItems() {
         var items = new LinkedHashSet<Item>();

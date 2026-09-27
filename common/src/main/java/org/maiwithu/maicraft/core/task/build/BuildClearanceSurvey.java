@@ -29,6 +29,8 @@ public final class BuildClearanceSurvey {
     private final String dimension;
     private final Function<BlockPos, Observation> observe;
     private final BiPredicate<BlockPos, BlockState> ownedSupport;
+    private final BiPredicate<BlockPos, BlockState> machineEdit;
+    private final boolean fixedModification;
     private final List<Map<String, Object>> obstacles = new ArrayList<>(), suggestions = new ArrayList<>();
     private int scanned, conflicts, unloaded, candidate, candidateCell, searchReads, unknownCandidates;
     private int bestDistance = Integer.MAX_VALUE;
@@ -54,14 +56,21 @@ public final class BuildClearanceSurvey {
                     var state = level.getBlockState(at);
                     return new Observation(state, !protectedArea.contains(at.asLong()) && !forbidden.contains(at.asLong()),
                             state.getDestroySpeed(level, at) >= 0 && state.getFluidState().isEmpty());
-                }, plan.scaffoldLedger()::owns);
+                }, plan.scaffoldLedger()::owns, plan::observedMachineEdit, plan.fixedMachineModification());
     }
 
     BuildClearanceSurvey(List<BuildTaskRecord.Target> targets, ReplaceMode replace, boolean replaceEntities,
                          String dimension, Function<BlockPos, Observation> observe,
                          BiPredicate<BlockPos, BlockState> ownedSupport) {
+        this(targets, replace, replaceEntities, dimension, observe, ownedSupport, (at, state) -> false, false);
+    }
+    private BuildClearanceSurvey(List<BuildTaskRecord.Target> targets, ReplaceMode replace, boolean replaceEntities,
+                         String dimension, Function<BlockPos, Observation> observe,
+                         BiPredicate<BlockPos, BlockState> ownedSupport,
+                         BiPredicate<BlockPos, BlockState> machineEdit, boolean fixedModification) {
         this.targets = List.copyOf(targets); this.replace = replace; this.replaceEntities = replaceEntities;
         this.dimension = dimension; this.observe = observe; this.ownedSupport = ownedSupport;
+        this.machineEdit = machineEdit; this.fixedModification = fixedModification;
     }
 
     /** 每刻只读取有限格子；先收集原地冲突，再从最近偏移开始逐格检查，未知区块绝不当作空地。 */
@@ -73,7 +82,8 @@ public final class BuildClearanceSurvey {
                 var seen = observe.apply(target.pos());
                 if (seen == null) { unloaded++; continue; }
                 if (seen.state() != null && needsClearance(target, seen.state())
-                        && !ownedSupport.test(target.pos(), seen.state()) && !ClearanceWhitelist.allows(seen.state())) {
+                        && !ownedSupport.test(target.pos(), seen.state()) && !machineEdit.test(target.pos(), seen.state())
+                        && !ClearanceWhitelist.allows(seen.state())) {
                     conflicts++;
                     if (obstacles.size() < 16) obstacles.add(Map.of("at", coordinates(target.pos()),
                             "block_id", id(seen.state()), "target_index", index,
@@ -81,7 +91,8 @@ public final class BuildClearanceSurvey {
                 }
                 continue;
             }
-            if (conflicts == 0 || candidate == SHIFTS.size() || suggestions.size() == 3
+            // 指定坐标的拆机不能平移到旁边空气中“完成”；旧状态变化时只报告原位差异，让调用者重新勘察。
+            if (fixedModification || conflicts == 0 || candidate == SHIFTS.size() || suggestions.size() == 3
                     || distance(SHIFTS.get(candidate)) > bestDistance) { done = true; continue; }
             if (searchReads >= MAX_SEARCH_READS) { limited = true; done = true; continue; }
             BlockPos shift = SHIFTS.get(candidate);
@@ -128,11 +139,11 @@ public final class BuildClearanceSurvey {
         result.put("conflict_count", conflicts); result.put("obstacles", List.copyOf(obstacles));
         result.put("obstacles_truncated", conflicts > obstacles.size()); result.put("unloaded_targets", unloaded);
         result.put("suggested_offsets", List.copyOf(suggestions));
-        result.put("relocation_scope", "entire_blueprint_new_project_same_elevation");
+        result.put("relocation_scope", fixedModification ? "none_fixed_machine_modification" : "entire_blueprint_new_project_same_elevation");
         result.put("search", Map.of("horizontal_radius", RADIUS, "checked_observations", searchReads,
                 "unknown_candidates", unknownCandidates, "budget_exhausted", limited,
                 "minimum_proven_in_radius", done && !limited && unknownCandidates == 0 && !suggestions.isEmpty()));
-        result.put("advice", suggestions.isEmpty()
+        result.put("advice", fixedModification ? "这是原位机器修改。保留指定坐标，重新检查已变化或尚未获得替换许可的具体方块；平移拆除目标不能修复原机器。" : suggestions.isEmpty()
                 ? "附近已加载范围内尚未证明可用的平移位置；扩大场地观察后考虑其他选址，保留名单外障碍。"
                 : "优先考虑建议中的最小水平偏移，保持蓝图形状和高度；重新观察地基与通路后在新址创建工程。旧工程及已建部分不会自动搬迁。"
         );

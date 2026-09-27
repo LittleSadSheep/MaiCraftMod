@@ -696,7 +696,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!excavationTools.active() && player.level().isLoaded(clearing)) {
             var live = player.level().getBlockState(clearing);
             var declared = targets.get(clearing.asLong());
-            if (!ClearanceWhitelist.allows(live) && (declared == null || !declared.constructionMatches(live))) {
+            if (!ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)
+                    && (declared == null || !declared.constructionMatches(live))) {
                 beginClearanceReport(clearing); return TaskState.RUNNING;
             }
         }
@@ -860,8 +861,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private boolean clearingPermitted(BlockState live) {
         var declared = targets.get(clearing.asLong());
-        // 每次实际下手仍重读类型，预检后新出现的建筑也必须留在现场交回 LLM 重新选址。
-        if (!ClearanceWhitelist.allows(live) && (declared == null || !declared.constructionMatches(live))) {
+        // 机器明确修改的旧状态可按原生挖掘执行；每次下手仍重读，后来出现的别块不能继承旧轴的拆除范围。
+        if (!ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)
+                && (declared == null || !declared.constructionMatches(live))) {
             beginClearanceReport(clearing); return false;
         }
         BlockState desired = declared == null ? Blocks.AIR.defaultBlockState() : declared.desiredState();
@@ -884,6 +886,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             var target = targets.get(at.asLong());
             // 原生连锁可能一次选中多格；把名单外格记为触发证据，绝不能让副目标绕过单格清障检查。
             if (target != null && !ClearanceWhitelist.allows(player.level().getBlockState(at))
+                    && !r.observedMachineEdit(at, player.level().getBlockState(at))
                     && !r.scaffoldLedger().owns(at, player.level().getBlockState(at))
                     && !target.constructionMatches(player.level().getBlockState(at))) {
                 clearanceDeniedAt = at.immutable(); return true;

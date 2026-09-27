@@ -455,6 +455,8 @@ final class MachineAbilityAdapter {
             BlockPos anchor = design == null ? snapshot.center() : MachineConstructionPlan.floorAnchor(snapshot.center(), layout);
             // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
             var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", false));
+            // apply_blueprint 是修改现有机器：冻结这些明确目标的旧方块，不能把拆掉旧轴当成另找空地建新机器。
+            if (MODIFY.equals(goal.ability())) plan.bindObservedModification(player.level(), snapshot.center(), snapshot.radius());
             if (!ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
                 return IntentAction.Pending.INSTANCE;
             List<String> protectedLabels = p.has("protected_labels")

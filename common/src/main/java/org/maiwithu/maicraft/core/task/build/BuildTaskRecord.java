@@ -84,6 +84,17 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private boolean supplyAccessOnly;
     /** 机器尚未装配的连接件、附件与后续工序需求也随施工批次传递，避免补食只看到眼前的放块材料。 */
     private Set<Item> futureWorkItems = Set.of();
+    private Map<BlockPos, BlockState> observedMachineEdits = Map.of();
+    private boolean fixedMachineModification;
+    /** 已获准的机器修改绑定具体旧状态与位置；普通建造不会因为允许替换而获得这份拆机范围。 */
+    public void machineModification(Map<BlockPos, BlockState> observed) {
+        observedMachineEdits = Map.copyOf(observed); fixedMachineModification = true;
+    }
+    public boolean fixedMachineModification() { return fixedMachineModification; }
+    public boolean observedMachineEdit(BlockPos at, BlockState actual) {
+        return replaceExisting && !actual.isAir() && actual.equals(observedMachineEdits.get(at))
+                && (replaceBlockEntities || !actual.hasBlockEntity());
+    }
     public Set<Item> futureWorkItems() { return futureWorkItems; }
     public void futureWorkItems(Set<Item> items) { futureWorkItems = Set.copyOf(items); }
     private BuildScaffoldLedger scaffoldLedger = new BuildScaffoldLedger();
@@ -141,6 +152,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.materialSupplyProtection = materialSupplyProtection;
         destination.toolSupply = toolSupply;
         destination.futureWorkItems = futureWorkItems;
+        destination.observedMachineEdits = observedMachineEdits;
+        destination.fixedMachineModification = fixedMachineModification;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
                 preflightGuard, mutationGuard, confirmedMutation);
     }
