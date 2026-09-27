@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.integration.create;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -1115,6 +1116,14 @@ final class CreateMechanicalPowerTask
             var result = new LinkedHashMap<>(economicResult.data()); result.put("semantic_endpoints_resolved", true); return result;
         }
         Map<String, Object> safe = new LinkedHashMap<>();
+        // 路由失败也明确本次实际选择的传动家族，旧chain_drive别名不能只给出笼统链路失败而掩盖选型差异。
+        safe.put("requested_transmission",r.request.transmission().name().toLowerCase(Locale.ROOT));
+        safe.put("transmission_description",switch (r.request.transmission()) {
+            case AUTO -> "Automatic comparison of supported native transmission families";
+            case CHAIN_CONVEYOR -> "create:chain_conveyor — 锁链传动轮";
+            case ENCASED_CHAIN_DRIVE -> "create:encased_chain_drive — 链式传动箱 (legacy alias: chain_drive)";
+        });
+        safe.put("available_transmission_choices",List.of("auto","chain_conveyor","encased_chain_drive"));
         copyResultField(data, safe,
                 "progressive_survey", "progressive_travel_segments",
                 "progressive_rejected_route_candidates", "source_loaded_cells",
