@@ -166,7 +166,8 @@ final class BuildPlacementGeometry {
             if (stage.support(clicked, face))
                 gesturesAt(player, target, stage, clicked, face, player.position(), false, true, false, allowed, candidates);
         }
-        return candidates.stream().min(Comparator.comparingDouble(g ->
+        // 站着已经能完成目标时优先保留站姿，再比较转头幅度；不能为了镜头少转一点无故改为潜行。
+        return candidates.stream().min(Comparator.comparing(Gesture::sneak).thenComparingDouble(g ->
                 Math.abs(Mth.wrapDegrees(g.yaw() - player.getYRot()))
                         + Math.abs(g.pitch() - player.getXRot()))).orElse(null);
     }
@@ -251,7 +252,7 @@ final class BuildPlacementGeometry {
                     if (candidate != null) return candidate;
                 }
             } else gesturesAt(player, target, stage, clicked, toward.getOpposite(), feet,
-                    false, true, true, allowed, out);
+                    false, true, true, allowed, out, false);
             if (!out.isEmpty()) return out.getFirst();
         }
         return null;
@@ -306,7 +307,7 @@ final class BuildPlacementGeometry {
                     Vec3 point = facePoint(support.clicked(), boxes.get(sample / perBox), support.face(),
                             first[(sample % perBox) / second.length], second[sample % second.length]);
                     probeCount++;
-                    var gesture = gestureAtPoint(player, target, stage, support, feet, point, false, ignored -> true);
+                    var gesture = gestureWithPostures(player, target, stage, support, feet, point, false, ignored -> true);
                     if (gesture != null) { found.add(gesture); if (firstOnly) complete = true; }
                 // 批量预检使用格子底部中心作脚下位置；半格高度的当前站位另由 currentGesture 处理。
                 } else if (stanceAt < STANCE_OFFSETS.size()) {
@@ -412,9 +413,17 @@ final class BuildPlacementGeometry {
                                     BuildPlacementStage stage, BlockPos clicked, Direction face,
                                     Vec3 feet, boolean direct, boolean live, boolean firstOnly,
                                     Predicate<Gesture> allowed, List<Gesture> out) {
+        gesturesAt(player, target, stage, clicked, face, feet, direct, live, firstOnly, allowed, out, true);
+    }
+
+    // 贴边搜索自己分开证明站姿和降低视线，保留其独立姿态回执；其他放置入口在普通支撑上补齐潜行候选。
+    private static void gesturesAt(LocalPlayer player, BuildTaskRecord.Target target,
+            BuildPlacementStage stage, BlockPos clicked, Direction face, Vec3 feet, boolean direct, boolean live,
+            boolean firstOnly, Predicate<Gesture> allowed, List<Gesture> out, boolean optionalSneak) {
         FaceProbe probe = faceProbe(stage, clicked, face, direct);
         for (Vec3 point : facePoints(clicked, probe.shape(), face)) {
-            Gesture gesture = gestureAtPoint(player, target, stage, probe, feet, point, live, allowed);
+            Gesture gesture = optionalSneak ? gestureWithPostures(player, target, stage, probe, feet, point, live, allowed)
+                    : gestureAtPoint(player, target, stage, probe, feet, point, live, allowed);
             if (gesture != null) {
                 out.add(gesture);
                 if (firstOnly) return;
@@ -429,6 +438,16 @@ final class BuildPlacementGeometry {
         return new FaceProbe(clicked, face, direct, BuildPlacementInteraction.requiresSneak(state), state.getShape(stage, clicked));
     }
 
+    // 先试正常站姿；方向性机器可能在潜行时反转放置朝向，普通垫块也必须允许这个原生候选。
+    // 点击交互方块时仍强制潜行以绕过菜单；每个候选各自核对眼高、射线和原生最终状态，不直接改方块朝向。
+    private static Gesture gestureWithPostures(LocalPlayer player, BuildTaskRecord.Target target,
+            BuildPlacementStage stage, FaceProbe probe, Vec3 feet, Vec3 point, boolean live, Predicate<Gesture> allowed) {
+        Gesture ordinary = gestureAtPoint(player, target, stage, probe, feet, point, live, allowed);
+        if (ordinary != null || probe.sneak()) return ordinary;
+        var crouched = new FaceProbe(probe.clicked(), probe.face(), probe.direct(), true, probe.shape());
+        return gestureAtPoint(player, target, stage, crouched, feet, point, live, allowed);
+    }
+
     // 先按站立或蹲下眼高算角度，要求点击点在 4.45 格内、未被失败记录排除、视线通畅且真的命中所选面。
     private static Gesture gestureAtPoint(LocalPlayer player, BuildTaskRecord.Target target,
                                          BuildPlacementStage stage, FaceProbe probe, Vec3 feet, Vec3 point,
@@ -436,13 +455,14 @@ final class BuildPlacementGeometry {
         Vec3 eye = feet.add(0, player.getEyeHeight(probe.sneak() ? Pose.CROUCHING : Pose.STANDING), 0);
         if (eye.distanceToSqr(point) > REACH * REACH) return null;
         float yaw = AimGeometry.yawTo(eye, point), pitch = AimGeometry.pitchTo(eye, point);
-        if (!stage.rayClear(eye, point, probe.clicked())) return null;
         BlockHitResult hit = probe.shape().clip(eye, point, probe.clicked());
         if (hit == null || hit.isInside() || hit.getDirection() != probe.face()) return null;
         // 檐边向下斜点时，面内取样与实际交点的距离会被斜率放大；采用原生首个交点预测放置，不虚构点击位置。
         Gesture gesture = new Gesture(BlockPos.containing(feet), probe.clicked(), probe.face(), hit.getLocation(), yaw, pitch,
                 probe.sneak(), probe.direct() ? "replaceable target face" : "adjacent support face");
         if (!allowed.test(gesture)) return null;
+        // 局部形状已经足够生成失败记录的键；被排除的站姿或潜行手法直接跳过，不再沿射线重复读场地。
+        if (!stage.rayClear(eye, point, probe.clicked())) return null;
         if (stage.projectedSupport()) {
             if (!stage.state(target.pos()).isAir() || !probe.clicked().relative(probe.face()).equals(target.pos())) return null;
             NativePlacement predicted = predictPlacement(player, new ItemStack(target.item()), gesture.syntheticHit(),
