@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import com.google.gson.JsonParser;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
@@ -30,6 +32,8 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.intent.IntentTaskRecord;
 
 /** 只注入原生供料的观察结果；验证自动选食和预留账，不将夹具库存变化声称为实机取物成功。 */
 public final class BuildFoodStockSupplyTest {
@@ -96,6 +100,13 @@ public final class BuildFoodStockSupplyTest {
             var budget = BuildFoodMaterials.inspect(h.player, batch);
             check(batch.futureWorkItems().contains(Items.STICK) && budget.complete() && budget.spare(Items.DRIED_KELP, 64) == 0,
                     "the actual recipe manager and copied batch retain a later food ingredient");
+            // 当前任务正在合成，而施工单仅负责摆工作台时，也必须沿当前目标配方保留干海带。
+            var goal = Goal.fromJson(JsonParser.parseString("{ability:'maicraft:craft',outcome:'make current output',parameters:{item_id:'minecraft:stick',count:1}}").getAsJsonObject());
+            var active = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            var currentBudget = BuildFoodMaterials.inspect(h.player, owner(), active);
+            check(currentBudget.complete() && currentBudget.spare(Items.DRIED_KELP, 6) == 0
+                    && OrdinaryFood.choose(List.of(new ItemStack(Items.DRIED_KELP, 6)), 17, currentBudget) == null,
+                    "temporary crafting-surface preparation cannot eat the six ingredients of the current recipe");
             h.player.getFoodData().setFoodLevel(6); h.inventory.setItem(0, new ItemStack(Items.DRIED_KELP, 64));
             h.inventory.setItem(1, new ItemStack(Items.CARROT, 2));
             var meals = new ArrayList<Item>(); var prep = new BuildFoodPreparation((p, r) -> { meals.add(r.item); return new ResultTask(false); });

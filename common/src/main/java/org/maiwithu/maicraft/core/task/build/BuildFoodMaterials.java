@@ -16,18 +16,23 @@ import org.maiwithu.maicraft.core.inventory.FoodMaterialBudget;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import org.maiwithu.maicraft.task.TaskRecord;
 
 /** 补食前读取整份施工及尚未执行的语义步骤；未选定路线的食物原料先整类保留，不能擅自消耗工序库存。 */
 final class BuildFoodMaterials {
     private BuildFoodMaterials() {}
     static FoodMaterialBudget inspect(LocalPlayer player, BuildTaskRecord owner) {
+        return inspect(player, owner, CompanionTickDispatcher.current());
+    }
+    // 子施工可能只是为当前配方摆工作台；预留必须同时包含外层当前目标，不能把马上要合成的海带当口粮。
+    static FoodMaterialBudget inspect(LocalPlayer player, BuildTaskRecord owner, TaskRecord active) {
         var exact = new HashMap<Item, Long>(); var future = new HashSet<>(owner.futureWorkItems());
         for (var target : owner.targets) if (target.materialCount() > 0
                 && (!player.level().isLoaded(target.pos()) || !target.matches(player.level().getBlockState(target.pos()))))
             exact.merge(target.item(), (long) target.materialCount(), Long::sum);
-        if (CompanionTickDispatcher.current() instanceof IntentTaskRecord intent) {
-            // 当前步骤的具体用料由施工单提供；后续步骤只读已声明的目标，不推测模型尚未规划的想法。
-            for (int i = intent.stepIndex() + 1; i < intent.steps().size(); i++) referenced(intent.steps().get(i), future);
+        if (active instanceof IntentTaskRecord intent) {
+            // 当前和后续步骤都只读取已声明目标；消费食物的步骤仍由 referenced 排除，不保留模型尚未规划的需求。
+            for (int i = intent.stepIndex(); i < intent.steps().size(); i++) referenced(intent.steps().get(i), future);
         }
         if (exact.isEmpty() && future.isEmpty()) return FoodMaterialBudget.EMPTY;
         try {
