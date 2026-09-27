@@ -64,10 +64,11 @@ public final class GeneralAbilityAdapter {
     public static final String CONTAINER = "maicraft:use_container";
     public static final String MANAGE_CONTAINER = "maicraft:manage_container";
     public static final String FIND_ENTITY = "maicraft:find_entity";
+    public static final String FIND_BLOCK = "maicraft:find_block";
 
     private static final Set<String> ABILITIES = Set.of(
             COMBAT, INTERACT, FOLLOW, CONSUME, EQUIP, FISH, DROP, CONTAINER, MANAGE_CONTAINER,
-            FIND_ENTITY, USE_ITEM, HARVEST_BLOCK);
+            FIND_ENTITY, FIND_BLOCK, USE_ITEM, HARVEST_BLOCK);
     private static final Set<String> EXECUTION_FIELDS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "x", "y", "z", "button",
             "hold_ticks", "slot_index", "source_slot", "destination_slot", "from_slot",
@@ -112,6 +113,7 @@ public final class GeneralAbilityAdapter {
             case CONTAINER -> interact(goal, player, runtime, true);
             case MANAGE_CONTAINER -> manageContainer(goal);
             case FIND_ENTITY -> findEntity(goal);
+            case FIND_BLOCK -> findBlock(goal);
             default -> throw new IllegalArgumentException("unsupported general ability: " + goal.ability());
         };
     }
@@ -374,6 +376,55 @@ public final class GeneralAbilityAdapter {
             args.add("protected_labels", p.get("protected_labels").deepCopy());
         }
         return new IntentAction.Tool("find_entity", args.toString());
+    }
+
+    private static IntentAction findBlock(Goal goal) {
+        // 先把可接受的方块种类整理成去重名单；没注册的名字集中记录，稍后一次告诉调用者。
+        JsonObject p = goal.parameters();
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
+        List<String> invalid = new ArrayList<>();
+        if (p.has("block_ids") && p.get("block_ids").isJsonArray()) {
+            for (var element : p.getAsJsonArray("block_ids")) {
+                if (element == null || !element.isJsonPrimitive()) {
+                    invalid.add("non-string entry");
+                    continue;
+                }
+                addBlockId(element.getAsString(), requested, invalid);
+            }
+        }
+        String one = string(p, "block_id");
+        if (one != null) addBlockId(one, requested, invalid);
+        if (!invalid.isEmpty()) {
+            return decision(goal,
+                    "find_block received unknown or invalid namespaced block ids: " + invalid,
+                    List.of(option("retry", "Retry with registered block_ids only."),
+                            option("cancel", "Cancel block search.")), null);
+        }
+        if (requested.isEmpty()) {
+            return decision(goal,
+                    "find_block needs one or more semantic block_ids; runtime coordinates are not accepted.",
+                    List.of(option("retry", "Provide namespaced block_ids and an optional count."),
+                            option("cancel", "Cancel block search.")), null);
+        }
+
+        JsonArray ids = new JsonArray();
+        requested.forEach(ids::add);
+        JsonObject args = new JsonObject();
+        args.add("block_ids", ids);
+        args.addProperty("count", integer(p, "count", 1, 1, 32));
+        args.addProperty("max_distance", integer(p, "max_distance", 64, 4, 128));
+        return new IntentAction.Tool("find_block", args.toString());
+    }
+
+    private static void addBlockId(
+            String raw, Set<String> requested, List<String> invalid) {
+        // 已注册的方块加入候选名单，不认识的名字集中记录，稍后一次告诉调用者。
+        ResourceLocation id = ResourceLocation.tryParse(raw);
+        if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
+            invalid.add(String.valueOf(raw));
+        } else {
+            requested.add(id.toString());
+        }
     }
 
     private static void addEntityType(

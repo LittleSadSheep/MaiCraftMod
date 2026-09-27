@@ -122,6 +122,14 @@ public final class SemanticAbilityCatalog {
                             field("max_distance", "integer", "Bounded physical search distance from start; default 512, maximum 2048."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that matching evidence must not use.")));
+            case GeneralAbilityAdapter.FIND_BLOCK -> contract(
+                    "Find named blocks through loaded client evidence; MaiCraft owns the scan and keeps concrete positions internal. Only verified counts, matching block ids and a nearest-distance statistic are reported.",
+                    targets("current_place", "nearest"),
+                    fields(
+                            field("block_id", "resource_id", "One acceptable registered block type."),
+                            field("block_ids", "array<resource_id>", "Acceptable registered block types."),
+                            field("count", "integer", "Required distinct observed positions; a partial count is not success."),
+                            field("max_distance", "integer", "Bounded loaded-world scan radius from the standing place; default 64, maximum 128.")));
             case GeneralAbilityAdapter.COMBAT -> contract(
                     "Defend against or engage semantic living targets visible in loaded terrain; MaiCraft resolves concrete entities and combat movement.",
                     targets("entity", "player", "nearest"),

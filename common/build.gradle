@@ -134,6 +134,11 @@ def regressionSuites = [
         heap: '512m', directory: 'portal-regression', timeoutSeconds: 45,
         purpose: '验证传送门准备、权限与原生激活'
     ],
+    semanticBlockSearchRegression: [
+        entry: 'org.maiwithu.maicraft.intent.SemanticBlockSearchTest',
+        heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
+        purpose: '验证已加载方块发现的证据、缺席语义与坐标不外泄'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。

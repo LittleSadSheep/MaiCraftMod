@@ -12,7 +12,8 @@ final class SemanticAbilityAvailability {
     static void describe(JsonObject ability, String id, boolean createInstalled, boolean alive) {
         boolean readOnly = switch (id) {
             case "maicraft:remember_place", "maicraft:inspect_machine", "maicraft:design_machine",
-                    "maicraft:design_build", "maicraft:wait_for_condition" -> true;
+                    "maicraft:design_build", "maicraft:wait_for_condition",
+                    "maicraft:find_block" -> true;
             default -> false;
         };
         boolean supported = !id.equals("maicraft:connect_mechanical_power") || createInstalled;

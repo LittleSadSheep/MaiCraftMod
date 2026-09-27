@@ -96,6 +96,7 @@ import org.maiwithu.maicraft.core.tools.work.FishTool;
 import org.maiwithu.maicraft.core.tools.work.FollowTool;
 import org.maiwithu.maicraft.core.tools.work.MoveToTool;
 import org.maiwithu.maicraft.core.tools.work.RegionalTravelTool;
+import org.maiwithu.maicraft.core.tools.work.SemanticBlockSearchApi;
 import org.maiwithu.maicraft.core.tools.work.SemanticAcquireApi;
 import org.maiwithu.maicraft.core.tools.work.SemanticCookTool;
 import org.maiwithu.maicraft.core.tools.work.SemanticDimensionTravelTool;
@@ -215,6 +216,7 @@ public final class MaiCraftCore {
         ToolRegistry.register(new InspectBlockStorageTool());
         ToolRegistry.register(new GetWorldInfoTool());
         // 部分功能把“工具 + 记录执行器”的注册封装在自己的 API 中，增加功能时先确认是否已成对注册。
+        SemanticBlockSearchApi.register();
         SemanticEntitySearchApi.register();
         SemanticExploreApi.register();
         ToolRegistry.register(new BoardStructureTool());
