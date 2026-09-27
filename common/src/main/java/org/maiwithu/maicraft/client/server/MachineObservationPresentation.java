@@ -22,6 +22,39 @@ final class MachineObservationPresentation {
         return result;
     }
 
+    /** 直接列出各页实际看见的非空资源与组件，模型可先定位工件，再按页码补读完整接口资料。 */
+    static JsonArray occupiedResources(JsonArray pages) {
+        JsonArray result = new JsonArray();
+        for (int index = 0; index < pages.size(); index++) {
+            JsonObject page = pages.get(index).getAsJsonObject();
+            if (!page.has("observations")) continue;
+            Map<String, JsonObject> groups = new LinkedHashMap<>();
+            for (var observation : page.getAsJsonArray("observations")) {
+                if (!observation.isJsonObject() || !observation.getAsJsonObject().has("resources")) continue;
+                for (var raw : observation.getAsJsonObject().getAsJsonArray("resources")) {
+                    if (!raw.isJsonObject()) continue;
+                    JsonObject row = raw.getAsJsonObject();
+                    if (!row.has("amount") || !row.get("amount").isJsonPrimitive()
+                            || !row.getAsJsonPrimitive("amount").isNumber() || row.get("amount").getAsBigDecimal().signum() <= 0) continue;
+                    JsonObject item = new JsonObject();
+                    for (String key : new String[]{"resource_id", "identity", "unit"})
+                        if (row.has(key)) item.add(key, row.get(key).deepCopy());
+                    item.add("amount_per_view", row.get("amount").deepCopy());
+                    String key = item.toString(); JsonObject existing = groups.get(key);
+                    // 同页同身份同数量的侧面视图只压缩重复展示，数量原样保留；不同原生时刻绝不合并。
+                    if (existing != null) existing.addProperty("observed_views", existing.get("observed_views").getAsInt() + 1);
+                    else {
+                        item.addProperty("observed_views", 1); item.addProperty("source_page", index);
+                        for (String field : new String[]{"block_index", "tick"}) if (page.has(field)) item.add(field, page.get(field).deepCopy());
+                        groups.put(key, item);
+                    }
+                }
+            }
+            groups.values().forEach(result::add);
+        }
+        return result;
+    }
+
     private static void emptyItems(JsonObject observation) {
         if (!observation.has("resources")) return;
         JsonArray occupied = new JsonArray(); Map<String, JsonObject> groups = new LinkedHashMap<>();

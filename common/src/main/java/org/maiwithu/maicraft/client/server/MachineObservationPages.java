@@ -52,6 +52,9 @@ final class MachineObservationPages {
         incomplete.forEach(gaps::add);
         result.add("incomplete_reasons", gaps);
         result.add("pages", pages.deepCopy());
+        // 把工件及装配进度放到可直接读取的证据索引，避免查看一件物品先遍历几十条空接口。
+        result.add("occupied_resource_views", MachineObservationPresentation.occupiedResources(pages));
+        result.addProperty("occupied_resource_views_meaning", "Known positive resource views only, with exact identity/components. amount_per_view is not a total; observed_views counts repeated views, not items. source_page indexes pages in this report. Incomplete or omitted pages remain unknown.");
         return result;
     }
 }

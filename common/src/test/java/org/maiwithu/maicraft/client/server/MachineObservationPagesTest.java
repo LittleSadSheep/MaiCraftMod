@@ -91,6 +91,23 @@ public final class MachineObservationPagesTest {
                 "compaction cannot promote partial pages or change their native time and continuation");
         check(compressed.toString().length() < page.toString().length() / 2, "repeated empty views use less than half the report budget");
         check(resources.size() == 55 && !row.has("empty_item_views"), "original native receipt remains untouched");
+        // 工件索引只按当前页压缩重复视图；两个时刻的同一未完成件必须各自保留原生进度与页码。
+        var summaries = new MachineObservationPages();
+        resources.add(workpiece.deepCopy());
+        check(summaries.append(page, "first-moment", 13), "first native moment retained");
+        page.addProperty("tick", 43);
+        check(summaries.append(page, "second-moment", 13), "second native moment retained");
+        JsonArray known = summaries.report(1, 1, -1, 40).getAsJsonArray("occupied_resource_views");
+        check(known.size() == 2 && known.get(0).getAsJsonObject().get("amount_per_view").getAsInt() == 1
+                && known.get(0).getAsJsonObject().get("observed_views").getAsInt() == 2,
+                "duplicate side views do not double the reported item amount");
+        for (int index = 0; index < 2; index++) {
+            JsonObject item = known.get(index).getAsJsonObject();
+            check(item.get("block_index").getAsInt() == 13 && item.get("source_page").getAsInt() == index
+                    && item.get("tick").getAsInt() == 42 + index && item.getAsJsonObject("identity").equals(workpiece.getAsJsonObject("identity")),
+                    "resource overview preserves exact workpiece components and original observation references");
+        }
+        resources.remove(resources.size() - 1);
         // 身份未知、带异常组件的空气或带物品身份的零计数都不能被折成已确认空槽。
         var uncertain = template.deepCopy(); uncertain.getAsJsonObject("identity").getAsJsonObject("components").addProperty("mod:custom", true);
         resources.add(uncertain); workpiece.addProperty("amount", 0);
