@@ -26,6 +26,8 @@ public final class AttentionRegressionSuite {
         McpProtocolBudgetTest.main(args);
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // 各宿主先发现内联对象再提交目标，非法嵌套参数必须在进入游戏动作前被拒绝。
+        McpSchemaCompatibilityTest.main(args);
         // 已存的大蓝图和失败历史可分页找回，常规状态须保留当前待答问题与消费不确定性。
         TaskViewTest.main(args);
         PlanViewTest.main(args);

@@ -37,8 +37,11 @@ public final class PublicTargetContractTest {
         PublicToolCatalog.validateAndNormalize("task", recovery);
         // 三个携带目标的公开入口都要发布条件，而非只在服务器拒绝时才透露规则。
         for (var raw : PublicToolCatalog.definitions()) {
-            var schema = raw.getAsJsonObject().getAsJsonObject("inputSchema");
-            if (schema.has("$defs") && schema.getAsJsonObject("$defs").getAsJsonObject("semanticTarget").getAsJsonArray("oneOf").size() != 4)
+            var tool = raw.getAsJsonObject();
+            if (tool.get("name").getAsString().equals("perceive")) continue;
+            var goal = McpSchemaCompatibilityTest.goalSchema(tool);
+            var target = goal.getAsJsonObject("properties").getAsJsonObject("target").getAsJsonArray("anyOf").get(0).getAsJsonObject();
+            if (target.getAsJsonArray("oneOf").size() != 4)
                 throw new AssertionError("public target variants missing");
         }
     }

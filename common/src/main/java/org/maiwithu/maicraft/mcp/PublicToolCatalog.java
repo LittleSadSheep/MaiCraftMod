@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -481,8 +482,40 @@ final class PublicToolCatalog {
     }
 
     private static JsonObject goalSchema(String json) {
-        JsonObject result = schema(json);
-        result.add("$defs", GOAL_DEFINITIONS.deepCopy());
+        // 宿主发现规划、执行和恢复入口时直接看到对象字段，不必先解析引用才能提交游戏目标。
+        return inlineGoalSchema(schema(json), Set.of()).getAsJsonObject();
+    }
+
+    private static JsonElement inlineGoalSchema(JsonElement value, Set<String> ancestors) {
+        if (value.isJsonArray()) {
+            JsonArray result = new JsonArray();
+            value.getAsJsonArray().forEach(item -> result.add(inlineGoalSchema(item, ancestors)));
+            return result;
+        }
+        if (!value.isJsonObject()) return value.deepCopy();
+        JsonObject source = value.getAsJsonObject();
+        if (source.has("$ref")) {
+            String reference = source.get("$ref").getAsString();
+            JsonObject definition = GOAL_DEFINITIONS.getAsJsonObject(reference.substring("#/$defs/".length()));
+            if (ancestors.contains(reference)) {
+                // 顺序任务仍可递归提交；发现阶段只提示子目标形状，避免无限展开，逐层规则由 validateGoal 执行。
+                JsonObject child = new JsonObject();
+                child.add("type", definition.get("type").deepCopy());
+                child.add("required", definition.get("required").deepCopy());
+                // 必填字段同时列入 properties，宿主可直接填写能力和结果，其余字段沿用父目标的规则。
+                JsonObject fields = new JsonObject();
+                definition.getAsJsonArray("required").forEach(key -> fields.add(key.getAsString(),
+                        definition.getAsJsonObject("properties").get(key.getAsString()).deepCopy()));
+                child.add("properties", fields);
+                child.addProperty("additionalProperties", true);
+                child.addProperty("description", "Child goal object with the same fields: ability, outcome, target, parameters, preferences, constraints, children. Only maicraft:sequence may contain children; the server validates every level (maximum nesting depth 32).");
+                return child;
+            }
+            Set<String> path = new HashSet<>(ancestors); path.add(reference);
+            return inlineGoalSchema(definition, path);
+        }
+        JsonObject result = new JsonObject();
+        source.entrySet().forEach(entry -> result.add(entry.getKey(), inlineGoalSchema(entry.getValue(), ancestors)));
         return result;
     }
 
