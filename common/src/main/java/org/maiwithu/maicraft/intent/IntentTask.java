@@ -700,11 +700,14 @@ final class IntentTask implements Task {
             steps.add(item);
         }
         int skipped = record.skippedStepCount();
-        // 剩余清单执行结束不等于原始目标全部达成，不能把被略过的建造、采集或地点记忆写成成功。
-        String message = skipped == 0 ? record.goal().outcome()
-                : "Finished the remaining work; " + skipped + " step(s) were skipped by explicit decision.";
+        // 改成检查机器后只能报告观察结果；请求中的期望产物、被替换的施工和被略过的目标都不是完成证据。
+        String message = skipped > 0
+                ? "Finished the remaining work; " + skipped + " step(s) were skipped by explicit decision."
+                : record.stepResults().size() == 1 ? record.stepResults().getFirst().message()
+                : "Completed " + steps.size() + " current step(s); inspect their individual effect receipts.";
         return TaskResult.ok(message, Map.of("task_id", record.externalId().toString(), "steps", steps,
                 "skipped_step_count", skipped, "skipped_steps", skippedSteps(),
+                "completion_scope", "executed_steps",
                 "all_steps_succeeded", record.allStepsSucceeded()));
     }
 

@@ -75,7 +75,29 @@ public final class SequenceSkipTest {
         check(PriorResultResolver.resolve(legacy,
                 new Goal.SemanticTarget("prior_result", null, null, "camp"), "minecraft:overworld") == null,
                 "旧记录里的残留位置也不能授权后续引用一个被跳过的目标");
+        replacementCompletionUsesActualEvidence();
         System.out.println("SequenceSkipTest: passed");
+    }
+
+    private static void replacementCompletionUsesActualEvidence() throws Exception {
+        // 原目标要求产出，后来只完成检查时，成功回执必须保留检查的真实含义，而不是复制产出宣言。
+        Goal requested = new Goal("maicraft:operate_machine", "产出精密构件", null, "{}", "{}", List.of(), List.of());
+        Goal inspection = new Goal("maicraft:inspect_machine", "检查机器", null, "{}", "{}", List.of(), List.of());
+        var record = new IntentTaskRecord(UUID.randomUUID(), null, requested);
+        record.replaceCurrent(inspection);
+        record.addStepResult(new IntentTaskRecord.StepSnapshot(0, inspection.ability(), true,
+                "只观察到机器结构，生产尚未验证", TaskResult.ok("只观察到机器结构，生产尚未验证").toJson()));
+        try (var world = new InteractionWorldTestHarness()) {
+            var task = new IntentTask(world.player, record, null);
+            var completion = IntentTask.class.getDeclaredMethod("completionResult"); completion.setAccessible(true);
+            var result = (TaskResult) completion.invoke(task);
+            check(result.success() && result.message().equals(record.stepResults().getFirst().message())
+                    && !result.message().equals(requested.outcome()), "终态只报告实际执行的观察结果");
+            check(result.data().get("completion_scope").equals("executed_steps") && record.allStepsSucceeded(),
+                    "当前步骤成功与最初请求的产物验收必须区分");
+            check(record.goal().equals(requested) && world.blockUses() == 0 && world.itemUses() == 0,
+                    "报告修复不改写原请求，也不触发新的游戏动作");
+        }
     }
 
     private static IntentTaskRecord restored(JsonObject saved) {

@@ -21,13 +21,15 @@ final class TaskView {
     static JsonObject status(IntentTaskRecord record) {
         JsonObject result = MaiCraftRuntimeFacade.taskSummary(record);
         if (record.planId() != null) result.addProperty("plan_id", record.planId().toString());
-        result.addProperty("ability", record.stepIndex() < record.steps().size()
-                ? record.steps().get(record.stepIndex()).ability() : record.goal().ability());
-        JsonArray paths = new JsonArray(); paths.add("/goal");
         boolean terminal = record.getState().isTerminal() || record.terminalSnapshot() != null;
+        List<IntentTaskRecord.StepSnapshot> steps = record.stepResults();
+        // 生产任务被改成观察后，终态能力也取实际结算步骤，不能又回退到最初的生产能力名称。
+        result.addProperty("ability", !terminal && record.stepIndex() < record.steps().size()
+                ? record.steps().get(record.stepIndex()).ability()
+                : !steps.isEmpty() ? steps.getLast().ability() : record.goal().ability());
+        JsonArray paths = new JsonArray(); paths.add("/goal");
         if (!terminal && record.stepIndex() < record.steps().size()) paths.add("/current_goal");
         // 结束后默认带最近一步的结果并保留跳过标记；执行中只列历史入口，避免把上一阶段误当作当前进度。
-        List<IntentTaskRecord.StepSnapshot> steps = record.stepResults();
         if (!steps.isEmpty()) paths.add("/completed_steps");
         if (terminal && !steps.isEmpty()) {
             var step = steps.getLast(); JsonObject last = new JsonObject();

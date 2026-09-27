@@ -577,6 +577,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("step_count", record.steps().size());
         result.addProperty("skipped_step_count", record.skippedStepCount());
         result.addProperty("all_steps_succeeded", record.allStepsSucceeded());
+        result.addProperty("all_steps_scope", "current_steps_after_recovery_or_replacement");
         result.add("goal", record.goal().toJson());
         Goal current = currentGoal(record);
         if (current != null) result.add("current_goal", current.toJson());
@@ -653,12 +654,15 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("task_id", record.externalId().toString());
         result.addProperty("state", publicState(record));
         result.addProperty("outcome", record.goal().outcome());
+        // 原来的“做出精密构件”等文字只作为请求标签；完成事实必须来自实际运行步骤的回执。
+        result.addProperty("outcome_scope", "requested_intent");
         Goal current = currentGoal(record);
         if (current != null) result.addProperty("current_outcome", current.outcome());
         result.addProperty("step_index", record.stepIndex());
         result.addProperty("step_count", record.steps().size());
         result.addProperty("skipped_step_count", record.skippedStepCount());
         result.addProperty("all_steps_succeeded", record.allStepsSucceeded());
+        result.addProperty("all_steps_scope", "current_steps_after_recovery_or_replacement");
         return result;
     }
 
