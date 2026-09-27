@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Arrays;
 import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
@@ -11,6 +12,7 @@ import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.RetreatProgress;
+import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
@@ -26,6 +28,8 @@ public final class CombatOutcomeTest {
         partialIsNotSuccess();
         selectableLoadout();
         retreatRequiresMovement();
+        minorRecoveryDoesNotReverseWithdrawal();
+        asynchronousStockIsNotCombatLoot();
         retreatPrecedesLootSettlement();
         retreatAcceptsAnyReachableSafeDirection();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
@@ -111,6 +115,41 @@ public final class CombatOutcomeTest {
         check(progress.failures() == 3, "position jitter is not a successful retreat");
         progress.observe(new Vec3(2, 0, 0));
         check(progress.failures() == 0, "physical progress renews retreat attempts");
+    }
+
+    // 实机曾在生命八点撤离、回到九点就重新追击；还没走出威胁圈时，回血和爆炸避险都不能丢失撤离承诺。
+    private static void minorRecoveryDoesNotReverseWithdrawal() {
+        var foe = new Battlefield.Foe(11, 10.4, false, false, true, true, true, false, false);
+        var progress = new RetreatProgress(); progress.commit(); progress.observe(Vec3.ZERO);
+        var recovering = new Battlefield(33, 9, 3.3, true, false, false, List.of(foe));
+        var flee = new AttackPlan.Move(AttackPlan.Action.DISENGAGE, AttackPlan.NO_FOE);
+        check(AttackPlan.decide(recovering, flee, progress.committed()).action() == AttackPlan.Action.DISENGAGE,
+                "minor natural healing must not turn a withdrawing body back toward its pursuer");
+        progress.observe(new Vec3(12, 0, 0));
+        check(progress.committed(), "real forward movement resets failures but preserves withdrawal");
+        var creeper = new Battlefield.Foe(12, 3, true, true, true, true, true, true, true);
+        var blast = AttackPlan.decide(new Battlefield(33, 9, 3.3, true, false, false, List.of(creeper)), flee, progress.committed());
+        check(blast.action() == AttackPlan.Action.EVADE_BLAST
+                && AttackPlan.decide(recovering, blast, progress.committed()).action() == AttackPlan.Action.DISENGAGE,
+                "an immediate blast overrides the movement without cancelling the ongoing retreat");
+        check(AttackPlan.decide(new Battlefield(33, 9, 3.3, true, false, true, List.of(foe)), flee, true).action() == AttackPlan.Action.SKIRMISH,
+                "verified repeated path failures must still permit cornered self-defense");
+        progress.complete();
+        check(!progress.committed() && AttackPlan.decide(recovering, flee, progress.committed()).action() == AttackPlan.Action.SKIRMISH,
+                "confirmed separation releases the commitment for the next encounter");
+    }
+
+    // 回放防卫抢占取物时延迟到达的石英：库存增加是真实事实，但没有任何死亡掉落归属就不能算战利品。
+    private static void asynchronousStockIsNotCombatLoot() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("stock-during-defense", 1000, List.of(), true));
+            task.start(f.h.player);
+            f.h.inventory.setItem(8, new ItemStack(Items.QUARTZ, 3));
+            var result = task.result(TaskState.SUCCESS);
+            check(result.data().get("loot_gained").equals(Map.of()) && !result.message().contains("quartz"),
+                    "a late storage transfer cannot become loot from zero defeated hostiles");
+            check(f.h.inventory.getItem(8).getCount() == 3, "correcting attribution never removes the actual acquired stock");
+        }
     }
     private static void retreatPrecedesLootSettlement() throws Exception {
         try (var f = new CombatThreatsTest.Fixture()) {

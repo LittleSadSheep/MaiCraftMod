@@ -22,15 +22,12 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.TaskState;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
@@ -128,7 +125,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     private final Set<Integer> noPath = new HashSet<>();
 
-    private final Map<Item, Integer> inventoryBaseline = new HashMap<>();
     private final Map<Integer, Float> observedHealth = new HashMap<>();
     private final Map<Integer, Entity> observedTargets = new HashMap<>();
     private final LootSweep loot;
@@ -160,6 +156,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 撤离只保存当前是否在逃和最近开路时刻；安全终点由实际可达地形决定，不随机锁一个远处落点。
     private boolean retreating;
     private long retreatPlannedAt;
+    private Map<String, Object> lastRetreatObservation = Map.of();
+    private String lastRetreatFailure = "";
 
     public AttackCompanionTask(LocalPlayer player, AttackTaskRecord record) {
         super(player, record);
@@ -168,7 +166,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     @Override
     protected void onStart() {
-        snapshotInventory(inventoryBaseline);
     }
 
     @Override
@@ -176,6 +173,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
 
+        // 被困后靠反击走出两格也算真实进展，不能因当刻不是撤退动作而永久保留“无路可退”。
+        retreat.observe(player.position());
         Battlefield field = surveyField();
         for (var f : field.foes()) {
             if (f.authorized()) {
@@ -185,7 +184,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         settleFinishedTargets();
         if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         // 先判断这一刻是否仍需撤退或躲爆炸，再决定能否收拾战利品；敌人离开近圈不等于已脱离追击。
-        AttackPlan.Move move = AttackPlan.decide(field, lastMove);
+        AttackPlan.Move move = AttackPlan.decide(field, lastMove, retreat.committed());
+        if (move.action() == AttackPlan.Action.DISENGAGE) retreat.commit();
         if (phase == Phase.LOOT) {
             boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging)
                     || move.action() == AttackPlan.Action.DISENGAGE || move.action() == AttackPlan.Action.EVADE_BLAST;
@@ -443,6 +443,18 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                         : String.format("%.1f", distanceOf(field, move.foeId())),
                 field.hasMelee(), field.hasRanged(),
                 String.format("%.0f", field.effectiveHealth()), String.format("%.1f", field.availableHealth()), field.foes().size());
+        if (move.action() == AttackPlan.Action.DISENGAGE) {
+            // 沿用两秒采样频率，记录身体位移和导航事实；仅有“撤退中”无法区分实际移动、规划停顿与路径失败。
+            lastRetreatObservation = Map.of("feet", player.blockPosition().toShortString(),
+                    "velocity", String.valueOf(player.getDeltaMovement()), "grounded", player.onGround(),
+                    "planning", nav != null && nav.planningInFlight(),
+                    "physical_progress", nav != null && nav.hasRecentPhysicalProgress(40),
+                    "stall_ticks", nav == null ? 0 : nav.stallTicks(),
+                    "path_outcome", nav == null ? "no_active_navigation" : String.valueOf(nav.outcomeSummary()),
+                    "failures_without_displacement", retreat.failures(), "last_path_failure", lastRetreatFailure,
+                    "withdrawal_committed", retreat.committed());
+            Constants.LOG.info("[maicraft-retreat] {}", lastRetreatObservation);
+        }
     }
 
     private static double distanceOf(Battlefield field, int id) {
@@ -877,10 +889,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 躲避 ====================
 
-    /** 每刻按当前血量重新评估战斗；撤离以所有威胁的安全范围为目标，不绑定随机落点。 */
+    /** 已承诺撤离就持续寻找离开所有威胁的安全范围，不绑定随机落点，也不因少量回血改追击。 */
     // 近处危险和近期远程伤害都消失后才结束撤退；持续来袭的箭不能被近战扫描范围漏掉。
     private TaskState tickFlee() {
-        retreat.observe(player.position());
         if (!retreatThreatsPresent()) {
             clearRetreat();
             InputDriver.halt(player);
@@ -906,6 +917,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         PlayerNav.Status status = nav.tick();
         if (status == PlayerNav.Status.FAILED) {
+            // 导航释放后失败原因就不可读，先保留真实类别和说明供下一次采样及最终回执复查。
+            lastRetreatFailure = nav.failType() + ": " + nav.failReason();
             stopNav();
             retreat.failed();
         } else {
@@ -919,6 +932,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 完成撤离时释放本趟逃生导航，后续战斗重新选择动作。 */
     private void clearRetreat() {
         retreating = false;
+        // 只有广域威胁检查确认脱离后，下一场战斗才重新按当前生命选择进退。
+        retreat.complete();
         stopNav();
     }
 
@@ -1057,24 +1072,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
     }
 
-    private void snapshotInventory(Map<Item, Integer> out) {
-        out.clear();
-        Inventory inventory = player.getInventory();
-        for (ItemStack stack : inventory.items) {
-            if (!stack.isEmpty()) out.merge(stack.getItem(), stack.getCount(), Integer::sum);
-        }
-    }
-
-    // 这份摘要只是整个任务期间背包的正增加量，包含任何来源；具体战利品归属证据另在 loot.report。
+    // 自动防卫可能恰逢 AE 取物回包；后台补货带来的石英等库存增量不能冒充战斗掉落。
     private Map<String, Integer> lootGained() {
-        Map<Item, Integer> now = new HashMap<>();
-        snapshotInventory(now);
-        Map<String, Integer> gained = new LinkedHashMap<>();
-        now.forEach((item, count) -> {
-            int delta = count - inventoryBaseline.getOrDefault(item, 0);
-            if (delta > 0) gained.put(BuiltInRegistries.ITEM.getKey(item).toString(), delta);
-        });
-        return gained;
+        return loot.confirmedGains();
     }
 
     @Override
@@ -1111,6 +1111,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("unreachable_drop_count", loot.unreachableCount());
         data.put("ambiguous_merged_drop_count", loot.ambiguousMergedCount());
         data.put("loot_receipt", loot.report());
+        if (!lastRetreatObservation.isEmpty()) data.put("last_retreat_observation", lastRetreatObservation);
         return data;
     }
 
