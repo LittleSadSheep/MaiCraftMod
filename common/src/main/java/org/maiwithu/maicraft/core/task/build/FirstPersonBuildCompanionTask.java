@@ -196,6 +196,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastDeferredScaffold = Map.of();
     private BuildScaffoldCleanup scaffoldCleanup;
     private BuildScaffoldDescentDrive scaffoldDescent;
+    private Map<String, Object> lastScaffoldDescent = Map.of();
     private final Set<BlockPos> rejectedScaffoldDescents = new HashSet<>();
     private BuildScaffoldCleanupAccess scaffoldAccess;
     private final Map<BlockPos, NavGoal> scaffoldAccessGoals = new LinkedHashMap<>();
@@ -1978,9 +1979,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         forbiddenBodyCells, stanceNavigation.walkingContext(Integer.MIN_VALUE), this::recordScaffoldBreak);
                 phase = Phase.SCAFFOLD_DESCENT; return TaskState.RUNNING;
             }
-            if (onOwnedColumn(scaffold)) {
-                deferredScaffolds.add(scaffold); scaffoldAt++; continue;
-            }
+            // 逐格下拆不可用后仍可沿现有地面走离柱顶；普通清理会证明新站位不依赖待拆支撑，再允许破坏。
+            // 不能把脚下柱永久推迟，否则最后只剩这一柱时永远不会创建侧面接近路线。
             scaffoldCleanup = new BuildScaffoldCleanup(player, scaffold, forbiddenBodyCells);
             phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
         }
@@ -2214,6 +2214,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState scaffoldDescentTick() {
         var result = scaffoldDescent.tick();
         if (result == BuildScaffoldDescentDrive.Status.RUNNING) return TaskState.RUNNING;
+        // 向下拆柱被否定的具体证据要随侧面回退保留，最终回执不能只剩无关的上一次放置路径失败。
+        lastScaffoldDescent = scaffoldDescent.evidence();
         if (result == BuildScaffoldDescentDrive.Status.FAILED) {
             failAt(scaffold, scaffoldDescent.reason(), FailureType.NO_PATH, "scaffold_descent_failed", true);
             return TaskState.FAILED;
@@ -2513,6 +2515,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("creative_materials", creativeMaterials.progress());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         if (scaffoldDescent != null) data.put("scaffold_descent", scaffoldDescent.evidence());
+        else if (!lastScaffoldDescent.isEmpty()) data.put("scaffold_descent", lastScaffoldDescent);
         if (scaffoldAccess != null) data.put("scaffold_access", scaffoldAccess.evidence());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
                 "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
@@ -2639,6 +2642,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (scaffoldAccess != null) data.put("scaffold_access", scaffoldAccess.evidence());
         else if (!lastScaffoldAccess.isEmpty()) data.put("scaffold_access", lastScaffoldAccess);
         if (scaffoldDescent != null) data.put("scaffold_descent", scaffoldDescent.evidence());
+        else if (!lastScaffoldDescent.isEmpty()) data.put("scaffold_descent", lastScaffoldDescent);
         data.put("scaffold_cleanup_confirmed_removals", scaffoldConfirmedRemovals);
         data.put("scaffold_cleanup_deferred_count", deferredScaffolds.size());
         if (!lastDeferredScaffold.isEmpty()) data.put("last_deferred_scaffold", lastDeferredScaffold);

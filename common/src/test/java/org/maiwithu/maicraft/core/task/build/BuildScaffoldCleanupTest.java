@@ -5,11 +5,13 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.level.ClipContext;
@@ -25,6 +27,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import sun.misc.Unsafe;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 原生 Minecraft 射线与碰撞回归测试；候选几何不能证明导航已实际走过该处。 */
 public final class BuildScaffoldCleanupTest {
@@ -39,7 +42,36 @@ public final class BuildScaffoldCleanupTest {
         bodyCollisionAndHazardDoNotBecomeSafeShots();
         partialOutlineMustUseTheSameNativeFaceProbes();
         visibleStancesShareOneNavigationGoal();
-        System.out.println("BuildScaffoldCleanupTest: 6 native geometry groups passed; no navigation or digging actions submitted");
+        unavailableColumnDescentStillOffersSideAccess();
+        System.out.println("BuildScaffoldCleanupTest: 7 native geometry groups passed; no navigation or digging actions submitted");
+    }
+
+    private static void unavailableColumnDescentStillOffersSideAccess() throws Exception {
+        var support = TARGET.above();
+        try (var h = scene(Vec3.atBottomCenterOf(support.above()))) {
+            // 施工把上层垫块搭在别的临时桥上，桥已回收后柱底有一格空隙；逐格下降不成立，但旁边仍有平台。
+            h.set(TARGET, Blocks.AIR.defaultBlockState()); h.set(support, Blocks.COBBLESTONE.defaultBlockState());
+            h.player.setDeltaMovement(0, -.0784, 0);
+            var record = new BuildTaskRecord("cleanup-gap", 1000,
+                    List.of(new BuildTaskRecord.Target(Blocks.STONE, Items.STONE, new BlockPos(11, 1, 8), "finished work", null, null, null)), true);
+            record.scaffoldLedger().confirmed(support, h.level.getBlockState(support));
+            var descent = BuildScaffoldDescent.inspect(h.player, support, record.scaffoldLedger().snapshot(), p -> true, LongSets.emptySet());
+            check(!descent.accepted(), "a gap beneath the owned support cannot be certified as a one-block descent");
+            var task = new FirstPersonBuildCompanionTask(h.player, record);
+            field(task.getClass(), "scaffoldQueue").set(task, List.of(support));
+            @SuppressWarnings("unchecked") var rejected = (Set<BlockPos>) field(task.getClass(), "rejectedScaffoldDescents").get(task);
+            rejected.add(support);
+            var select = task.getClass().getDeclaredMethod("scaffoldSelectTick"); select.setAccessible(true);
+            check(select.invoke(task) == TaskState.RUNNING && field(task.getClass(), "phase").get(task).toString().equals("SCAFFOLD_NAV"),
+                    "after descent refusal the real cleanup scheduler offers normal side access instead of reporting no progress");
+            var cleanup = (BuildScaffoldCleanup) field(task.getClass(), "scaffoldCleanup").get(task);
+            check(!cleanup.ready(), "the scheduler still cannot break the player's current sole footing");
+            var side = candidate(cleanup); check(side != null, "the surrounding platform provides an independently supported removal stance");
+            h.position(side.feet());
+            check(cleanup.ready() && h.level.getBlockState(support).is(Blocks.COBBLESTONE)
+                    && h.blockUses() == 0 && h.itemUses() == 0,
+                    "only observed arrival at independent ground makes the removal ready, without any planning-time break");
+        }
     }
 
     private static void visibleStancesShareOneNavigationGoal() throws Exception {
