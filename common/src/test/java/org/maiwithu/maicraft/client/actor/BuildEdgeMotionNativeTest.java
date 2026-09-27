@@ -29,9 +29,11 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.entity.EntityInLevelCallback;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.task.build.BuildEdgeMotion;
+import org.maiwithu.maicraft.core.task.build.BuildEdgeRecovery;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.EndRodBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import static org.maiwithu.maicraft.client.actor.ActorControlTestHarness.check;
@@ -75,6 +77,7 @@ public final class BuildEdgeMotionNativeTest {
             f.flush(); check(!moving(f.player), "lost support cannot leave a previous forward command active");
         }
         halfStepAlignment(); standingAlignmentAndCancellation(); fullFloorLowCeiling();
+        blockedReturnFindsAnotherNativeExit();
         System.out.println("BuildEdgeMotionNativeTest: native pose waiting, friction arrival, edge hold and reverse movement passed");
     }
 
@@ -163,6 +166,36 @@ public final class BuildEdgeMotionNativeTest {
         f.h.position(start); f.player.setDeltaMovement(0, -.0784, 0);
         field(Entity.class, "mainSupportingBlockPos").set(f.player, Optional.of(new BlockPos(4, 1, 6)));
         f.h.nextTick(); return f;
+    }
+
+    private static void blockedReturnFindsAnotherNativeExit() throws Exception {
+        try (var f = new Fixture()) {
+            var outward = motion(ANCHOR, EDGE); finish(f, outward, EDGE); f.h.nextTick();
+            // 复现点击确认后横轴挡住旧锚点：世界中确实多了一根横杆，既不撤销它，也不改写身体坐标逃出。
+            BlockPos beam = new BlockPos(4, 2, 8);
+            var beamState = Blocks.END_ROD.defaultBlockState().setValue(EndRodBlock.FACING, Direction.EAST);
+            f.h.set(beam, beamState);
+            var oldReturn = motion(EDGE, ANCHOR);
+            check(oldReturn.tick(f.player) == BuildEdgeMotion.Status.FAILED, "the original return is genuinely blocked by the new beam");
+            var recovery = new BuildEdgeRecovery(f.player, new LongOpenHashSet(), pos -> true);
+            Vec3 start = f.player.position(); boolean arrived = false, moved = false;
+            for (int tick = 0; tick < 600; tick++) {
+                var state = recovery.tick();
+                check(state != BuildEdgeRecovery.Status.FAILED, "alternate exit should be found and walked: " + recovery.evidence());
+                f.flush(); moved |= moving(f.player);
+                if (state == BuildEdgeRecovery.Status.RUNNING)
+                    check(f.player.input.shiftKeyDown, "every intermediate search and turning tick retains native crouch");
+                f.player.nativePose(); f.player.nativeTravel();
+                check(f.player.onGround() && Math.abs(f.player.getY() - 1) < 1e-6, "recovery walks real supported terrain without falling or teleporting");
+                check(f.h.level.getBlockState(beam).equals(beamState) && f.h.blockUses() == 0,
+                        "the confirmed beam is preserved and no construction click is resent");
+                if (state == BuildEdgeRecovery.Status.READY) { arrived = true; break; }
+                f.h.nextTick();
+            }
+            check(arrived && moved && f.player.position().distanceTo(start) > .5
+                    && BuildEdgeMotion.canStandAt(f.player, new LongOpenHashSet(), pos -> true),
+                    "the alternate endpoint actually supports a standing body before construction resumes");
+        }
     }
 
     private static int finish(Fixture f, BuildEdgeMotion motion, Vec3 target) throws Exception {

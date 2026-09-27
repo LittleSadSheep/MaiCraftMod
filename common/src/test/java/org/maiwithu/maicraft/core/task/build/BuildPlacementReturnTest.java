@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.core.task.build;
 
 import it.unimi.dsi.fastutil.longs.LongSets;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -23,7 +25,7 @@ public final class BuildPlacementReturnTest {
     private static final Vec3 ANCHOR = new Vec3(3.5, 1, 3.5), EDGE = ANCHOR.add(0, 0, -.65);
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        placementMustLeaveReturnSpace(); earlierSupportProjectionIsPreserved();
+        placementMustLeaveReturnSpace(); earlierSupportProjectionIsPreserved(); alternateExitStaysWithinRealTerrain();
         System.out.println("BuildPlacementReturnTest: passed");
     }
     private static void placementMustLeaveReturnSpace() throws Exception {
@@ -55,6 +57,34 @@ public final class BuildPlacementReturnTest {
     private static boolean allowed(InteractionWorldTestHarness h, BuildTaskRecord.Target target, BuildSupportWorld before) {
         return BuildPlacementReturnGeometry.allowed(h.player, target, before, h.level::isLoaded, LongSets.emptySet(),
                 PhysicalObstacleSnapshot.EMPTY, EDGE, ANCHOR);
+    }
+    private static void alternateExitStaysWithinRealTerrain() throws Exception {
+        try (var h = fixture()) {
+            h.position(EDGE); h.set(new BlockPos(3, 2, 3), rod(2).desiredState());
+            var isolated = recovery(h, LongSets.emptySet()); finish(isolated);
+            check(!isolated.found(), "an isolated pillar cannot invent another supported exit under the new beam");
+            // 西侧真有现成地板时才可绕过横杆；保持薄杆与所有材料，恢复搜索没有世界写入。
+            h.set(new BlockPos(2, 0, 3), Blocks.COBBLESTONE.defaultBlockState());
+            h.set(new BlockPos(2, 2, 3), Blocks.AIR.defaultBlockState());
+            var connected = recovery(h, LongSets.emptySet()); finish(connected);
+            check(connected.found() && connected.route().size() > 1 && h.blockUses() == 0,
+                    "the side floor supplies a separate existing exit with an explicit continuous route");
+            var forbidden = new LongOpenHashSet();
+            forbidden.add(new BlockPos(2, 1, 3).asLong()); forbidden.add(new BlockPos(2, 1, 2).asLong());
+            var blocked = recovery(h, forbidden); finish(blocked);
+            check(!blocked.found(), "protected body cells cannot be crossed to fabricate an alternate exit");
+            check(BuildEdgeRecovery.recoverable("placement_return_obstructed_before_click")
+                    && !BuildEdgeRecovery.recoverable("edge_body_or_control_changed"),
+                    "local geometry may replan while loss of body ownership cannot be retried as a route issue");
+        }
+    }
+    private static BuildEdgeRecoverySearch recovery(InteractionWorldTestHarness h, LongSet forbidden) {
+        return new BuildEdgeRecoverySearch(h.player, new BuildSupportWorld(h.level, h.level::isLoaded, Map.of()),
+                forbidden, pos -> !forbidden.contains(pos.asLong()), PhysicalObstacleSnapshot.EMPTY);
+    }
+    private static void finish(BuildEdgeRecoverySearch search) {
+        for (int i = 0; i < 4096; i++) if (search.advance()) return;
+        throw new AssertionError("local recovery search did not finish its bounded geometry work");
     }
     private static BuildTaskRecord.Target rod(int y) {
         return new BuildTaskRecord.Target(Blocks.END_ROD.defaultBlockState().setValue(EndRodBlock.FACING, Direction.EAST),

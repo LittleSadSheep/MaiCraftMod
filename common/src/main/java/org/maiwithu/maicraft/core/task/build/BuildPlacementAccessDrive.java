@@ -31,6 +31,8 @@ final class BuildPlacementAccessDrive {
     private BuildPlacementGeometry.Gesture gesture;
     private PlayerNav nav;
     private BuildEdgeMotion edge, returning, anchorAlignment;
+    private BuildEdgeRecovery recovery;
+    private String originalReturnFailure;
     private Vec3 alignmentTarget;
     private boolean approached, prepared, itemPrepared, required, anchorAligned, paused, resumeFromEdge, anchorSneak;
     private int routes;
@@ -63,7 +65,7 @@ final class BuildPlacementAccessDrive {
                 if (settled != BuildSupportSettling.Status.READY) return Status.RUNNING;
                 observation = new BuildSupportWorld(player.level(), player.level()::isLoaded, Map.of());
                 search = new BuildPlacementAccessSearch(player, target, observation, player.position(), forbidden(),
-                        EmbeddedBaritoneRuntime.physicalObstacles(), 512, true); phase = "finding_real_edge";
+                        EmbeddedBaritoneRuntime.physicalObstacles(), 512, true, gestureAllowed); phase = "finding_real_edge";
             }
             if (!search.advance(16)) return Status.RUNNING;
             if (!search.accepted() || !observation.unchanged()) {
@@ -150,15 +152,30 @@ final class BuildPlacementAccessDrive {
     }
     Status returnToAnchor() {
         resumeClock();
+        if (recovery != null) return recoverToSupportedFooting();
         if (edge == null && !resumeFromEdge) return Status.READY;
-        // 点击确认后先退回原实地锚点，再交还下一段普通导航，避免把外侧部分踩空的导航格当新起点。
+        // 优先回原锚点；途中原生碰撞或支撑改变时自动查另一条实地退路，已放好的轴不需要模型重新下令。
         if (returning == null) returning = new BuildEdgeMotion(access.feet(), access.approach(), forbidden(), this::bodyAllowed);
         phase = "returning_to_real_anchor";
         var moved = returning.tick(player);
-        if (moved == BuildEdgeMotion.Status.FAILED) return fail(returning.failure());
+        if (moved == BuildEdgeMotion.Status.FAILED) {
+            if (!BuildEdgeRecovery.recoverable(returning.failure())) return fail(returning.failure());
+            originalReturnFailure = returning.failure(); returning.stop(player);
+            recovery = new BuildEdgeRecovery(player, forbidden(), this::bodyAllowed);
+            return recoverToSupportedFooting();
+        }
         if (moved != BuildEdgeMotion.Status.ARRIVED) return Status.RUNNING;
         returning.release(player); if (edge != null) edge.release(player);
         returning = null; edge = null; resumeFromEdge = false; phase = "returned"; return Status.READY;
+    }
+    private Status recoverToSupportedFooting() {
+        phase = "recovering_alternate_supported_exit";
+        var recovered = recovery.tick();
+        if (recovered == BuildEdgeRecovery.Status.RUNNING) return Status.RUNNING;
+        if (recovered == BuildEdgeRecovery.Status.FAILED) return fail("placement_local_recovery_failed:" + recovery.evidence().get("reason"));
+        if (edge != null) edge.release(player);
+        edge = returning = null; resumeFromEdge = false; phase = "recovered_alternate_exit"; status = Status.READY;
+        return Status.READY;
     }
     boolean edgeActive() { return edge != null || resumeFromEdge; }
     void rejectedGesture() {
@@ -175,10 +192,11 @@ final class BuildPlacementAccessDrive {
         }
         return status;
     }
-    void stop() { if (nav != null) { nav.stop(); nav = null; } if (returning != null) returning.stop(player); if (anchorAlignment != null) anchorAlignment.stop(player); if (edge != null) edge.stop(player); }
+    void stop() { if (recovery != null) recovery.stop(); if (nav != null) { nav.stop(); nav = null; } if (returning != null) returning.stop(player); if (anchorAlignment != null) anchorAlignment.stop(player); if (edge != null) edge.stop(player); }
     void pause() {
         // 暂停不在后台抢输入；恢复时重新取得控制租约、落稳并对齐锚点，不能复用已过期的运动控制器。
         resumeFromEdge |= edge != null || returning != null;
+        if (recovery != null) recovery.pause();
         if (nav != null) { nav.pause(); nav = null; }
         if (edge != null) edge.stop(player); if (returning != null) returning.stop(player); if (anchorAlignment != null) anchorAlignment.stop(player);
         edge = returning = anchorAlignment = null; prepared = itemPrepared = anchorAligned = false;
@@ -207,6 +225,8 @@ final class BuildPlacementAccessDrive {
         var data = new LinkedHashMap<String, Object>(); data.put("phase", phase); data.put("route_attempts", routes);
         data.put("posture_reason", postureReason); if (access != null) data.put("edge_required", access.edge());
         if (failure != null) data.put("reason", failure);
+        if (originalReturnFailure != null) data.put("original_return_failure", originalReturnFailure);
+        if (recovery != null) data.put("local_recovery", recovery.evidence());
         if (search != null) { data.put("reachable_stances", search.visited()); data.put("checked_stances", search.checked()); }
         if (search != null) data.put("rejected_post_placement_returns", search.rejectedReturns());
         // 锚点未对齐时也公开实际身体与目标的差异，不能只留下笼统的“贴边失败”而丢失半阶高度证据。

@@ -160,6 +160,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildStanceNavigation stanceNavigation = new BuildStanceNavigation(this);
     private BuildPlacementAccessDrive placementAccess;
     private BlockPos placementAccessTarget;
+    private int placementAccessReplans;
     private String edgeReturnFailure, edgeReturnFailureCode;
     private Map<String, Object> temporarySupportDemand = Map.of();
     private boolean layerKnown;
@@ -308,8 +309,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             // 已贴边后，选物、瞄准和等待确认也续潜行；移动阶段由边缘执行器供给方向，不能被这里清零。
             if (placementAccess != null && placementAccess.edgeActive() && phase != Phase.PLACE_NAV && phase != Phase.EDGE_RETURN
                     && placementAccess.hold() == BuildPlacementAccessDrive.Status.FAILED && useReceipt == null) {
-                failAt(cell == null ? player.blockPosition() : cell.target().pos(), placementAccess.failure(), FailureType.NO_PATH,
-                        "placement_edge_hold_failed", false); return TaskState.FAILED;
+                // 非点击等待阶段的贴边保持失效也进入同一局部脱离与重选流程，不在外层直接截断自动恢复。
+                return failAfterEdgeReturn(placementAccess.failure(), "placement_edge_hold_failed");
             }
             return step;
         },
@@ -938,7 +939,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
         if (!cell.target().pos().equals(placementAccessTarget)) {
             if (placementAccess != null) placementAccess.stop();
-            placementAccess = null; placementAccessTarget = cell.target().pos();
+            placementAccess = null; placementAccessTarget = cell.target().pos(); placementAccessReplans = 0;
         }
         if (placementAccess != null) {
             TaskState access = drivePlacementAccess(); if (access != null) return access;
@@ -1596,6 +1597,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         var access = placementAccess.tick(); r.extendDeadlineTo(placementAccess.deadline());
         if (access == BuildPlacementAccessDrive.Status.UNAVAILABLE) return null;
         if (access == BuildPlacementAccessDrive.Status.FAILED) {
+            if (!placementAccess.edgeActive() && retryPlacementAccess(placementAccess.failure())) return TaskState.RUNNING;
             return failAfterEdgeReturn(placementAccess.failure(), "placement_access_failed");
         }
         if (access == BuildPlacementAccessDrive.Status.READY) {
@@ -1605,19 +1607,34 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState returnFromPlacementEdge() {
-        // 本次点击已经结算，只做原生潜行退回；退不回时保留已放方块和支撑账，不再发第二次放置。
+        // 本次点击已经结算，优先回旧锚点，受阻则自动换到现有安全落脚点；全程保留已放方块和支撑账。
         var result = placementAccess.returnToAnchor();
         if (result == BuildPlacementAccessDrive.Status.RUNNING) return TaskState.RUNNING;
         if (result != BuildPlacementAccessDrive.Status.READY) {
-            failAt(cell.target().pos(), "Placement was confirmed but the safe anchor could not be regained: " + placementAccess.failure(),
+            failAt(cell.target().pos(), "Local placement access could not recover to supported footing: " + placementAccess.failure(),
                     FailureType.NO_PATH, "placement_edge_return_failed", false); return TaskState.FAILED;
         }
         if (edgeReturnFailure != null) {
             String message = edgeReturnFailure, code = edgeReturnFailureCode;
             edgeReturnFailure = edgeReturnFailureCode = null;
+            if (retryPlacementAccess(message)) return TaskState.RUNNING;
             failAt(cell.target().pos(), message, FailureType.NO_PATH, code, false); return TaskState.FAILED;
         }
         finishPlaced(); return TaskState.RUNNING;
+    }
+
+    private boolean retryPlacementAccess(String reason) {
+        if (!BuildEdgeRecovery.recoverable(reason) || useReceipt != null || placementAccessReplans >= 3
+                || !BuildEdgeMotion.canStandAt(player, forbiddenBodyCells, pos -> !forbiddenBodyCells.contains(pos.asLong()))) return false;
+        // 点击前通道变了就废弃旧姿态和射线，自动从当前实地重选；未结算的点击绝不进入这条重试路径。
+        placementAccessReplans++;
+        if (gesture != null) placementAttempts.reject(cell.target(), gesture);
+        placementAccess.stop(); placementAccess = null; stopNav(); selection.reset(); aimConvergence.reset();
+        gesture = null; gestureSearch = null; gestureProgress = null; liveGestures = List.of(); gestureAt = 0;
+        gestureFromCurrent = false; placementProofFeet = null; placementWalkTarget = null;
+        worksite = null; worksiteSearch = null; worksiteSearched = false; stanceNavigation.environmentChanged();
+        phase = Phase.PLACE_NAV; note = "local access changed; automatically proving another placement route";
+        return true;
     }
 
     private TaskState failAfterEdgeReturn(String message, String code) {
