@@ -34,7 +34,42 @@ public final class Ae2DepositTransferTest {
         independentNetworkUpdateRequired(); partialCapacityStopsAfterConfirmedQuantity(); tailUsesFastSplit(); namedAndForeignStayUntouched(); disconnectedAndFullNetworkStop();
         unconfirmedDebitKeepsBothSidesOfEvidence();
         infiniteReportedStockStopsBeforeClick();
+        constantStockNeedsNativeContractAndServerSync();
+        constantStockPartialAcceptanceStops();
         System.out.println("Ae2DepositTransferTest: native player-slot shifts, delayed network evidence, bounded partials and ownership passed");
+    }
+
+    private static void constantStockNeedsNativeContractAndServerSync() throws Exception {
+        // 原生 AE 会接收无限供给物品而不增加显示值；先等服务器槽同步，再以已核实的网络专用路径确认。
+        for (long reported : new long[]{Integer.MAX_VALUE,(long)Integer.MAX_VALUE+37,Long.MAX_VALUE}) {
+            try (var f = new Fixture(37,37)) {
+                f.network=reported; f.nativeOnly=true; f.ready();
+                check(f.shifts==1,"verified network-only menu permits exactly one native shift");
+                f.menu.getSlot(f.clicked).remove(37); f.step(); f.step();
+                check(f.transfer.deposited().isEmpty(),"slot appearance alone without a new server menu state stays unconfirmed");
+                f.menu.incrementStateId(); f.step(); f.step();
+                check(f.step()==Ae2DepositTransfer.Status.SUCCEEDED && f.transfer.deposited().get(DIRT)==37 && f.shifts==1,
+                        "server-synchronized native acceptance confirms the exact debit without another click");
+                var row=(Map<?,?>)((List<?>)f.transfer.evidence().get("deposit_receipts")).getFirst();
+                check(Boolean.FALSE.equals(row.get("network_stock_growth_verified"))
+                        && row.get("network_before_observed").equals(row.get("network_after_observed")),
+                        "receipt preserves constant stock and does not fabricate network growth");
+            }
+        }
+        try (var f = new Fixture(37,37)) {
+            f.network=Integer.MAX_VALUE; f.nativeOnly=true; f.ready();
+            f.menu.getSlot(f.clicked).remove(37); f.menu.incrementStateId(); f.nativeOnly=false;
+            for(int tick=0;tick<103;tick++)f.step();
+            check(f.transfer.deposited().isEmpty() && f.shifts==1,"lost native contract cannot authorize constant-stock confirmation");
+        }
+    }
+    private static void constantStockPartialAcceptanceStops() throws Exception {
+        try (var f = new Fixture(64,64)) {
+            f.network=Integer.MAX_VALUE; f.nativeOnly=true; f.ready();
+            f.menu.getSlot(f.clicked).remove(32); f.menu.incrementStateId(); f.step();
+            check(f.step()==Ae2DepositTransfer.Status.FAILED && f.transfer.deposited().get(DIRT)==32 && f.shifts==1,
+                    "native partial acceptance preserves the exact accepted quantity and leaves the remainder");
+        }
     }
 
     private static void infiniteReportedStockStopsBeforeClick() throws Exception {
@@ -70,6 +105,7 @@ public final class Ae2DepositTransferTest {
     }
     private static void independentNetworkUpdateRequired() throws Exception {
         try (var f = new Fixture(64, 64)) {
+            f.nativeOnly=true;
             f.ready(); check(f.shifts == 1 && f.transfer.deposited().isEmpty(), "submitting Shift is not deposit completion");
             f.menu.getSlot(f.clicked).remove(64); f.step(); f.step();
             check(f.shifts == 1 && f.transfer.deposited().isEmpty(), "player inventory sync alone cannot succeed or trigger another Shift");
@@ -135,7 +171,7 @@ public final class Ae2DepositTransferTest {
         MenuConfirmation confirmation;
         int shifts, clicked;
         long tick, network = 200;
-        boolean connected = true;
+        boolean connected = true, nativeOnly;
         Fixture(int source, int request) throws Exception {
             world.inventory.setItem(0, new ItemStack(Items.DIRT, source));
             menu = ChestMenu.threeRows(91, world.inventory, new SimpleContainer(27)); world.player.containerMenu = menu;
@@ -181,6 +217,7 @@ public final class Ae2DepositTransferTest {
                     return result;
                 }
                 public boolean safeFallback(AbstractContainerMenu value, ItemStack sample) { return true; }
+                public boolean networkOnlyShift(AbstractContainerMenu value) { return nativeOnly; }
             };
             reset(request);
         }

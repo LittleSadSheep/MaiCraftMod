@@ -8,7 +8,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
-/** 施工余料只存普通物品；已确认存入量由玩家侧和网络侧同量反向变化共同证明。 */
+/** 普通网络核对双边增减；恒定库存只在原生菜单已同步接收时记接受量，不伪造库存增长。 */
 final class Ae2DepositLedger {
     enum Verdict { WAITING, CONFIRMED, DIVERGED }
     record Observation(Verdict verdict, int deposited) {}
@@ -47,10 +47,31 @@ final class Ae2DepositLedger {
     void confirmed(ResourceLocation item, int amount, long networkBefore, long networkAfter, int sourceBefore, int sourceAfter) {
         if (amount < 1 || sourceBefore - sourceAfter != amount || networkAfter - networkBefore != amount)
             throw new IllegalArgumentException("AE deposit receipt does not conserve the exact ordinary item");
+        record(item,amount,networkBefore,networkAfter,sourceBefore,sourceAfter,true);
+    }
+    /** 创造存储会接受物品而不增加显示数量；调用者还必须证明网络专用菜单与本次服务器同步。 */
+    static Observation nativeAcceptance(int sourceBefore, int sourceAfter, int inventoryBefore, int inventoryAfter,
+                                        long networkBefore, long networkAfter, boolean cursorEmpty, boolean otherSlotsUnchanged) {
+        int removed = sourceBefore - sourceAfter;
+        if (!cursorEmpty || !otherSlotsUnchanged || removed < 0 || removed > sourceBefore
+                || inventoryBefore - inventoryAfter != removed) return new Observation(Verdict.DIVERGED,0);
+        return networkBefore >= Integer.MAX_VALUE && networkAfter == networkBefore && removed > 0
+                ? new Observation(Verdict.CONFIRMED,removed) : new Observation(Verdict.WAITING,0);
+    }
+    void confirmedNativeAcceptance(ResourceLocation item, int amount, long networkBefore, long networkAfter,
+                                   int sourceBefore, int sourceAfter) {
+        if (amount < 1 || sourceBefore-sourceAfter != amount || networkBefore < Integer.MAX_VALUE || networkBefore != networkAfter)
+            throw new IllegalArgumentException("AE native acceptance does not match the exact slot debit and constant stock");
+        record(item,amount,networkBefore,networkAfter,sourceBefore,sourceAfter,false);
+    }
+    private void record(ResourceLocation item, int amount, long networkBefore, long networkAfter, int sourceBefore,
+                        int sourceAfter, boolean growthVerified) {
         confirmed.merge(item, amount, Math::addExact);
         if (receipts.size() < 128) receipts.add(Map.of("item_id", item.toString(), "deposited", amount,
                 "source_before", sourceBefore, "source_after", sourceAfter, "network_before_observed", networkBefore,
-                "network_after_observed", networkAfter, "native_gui_shift_click", true));
+                "network_after_observed", networkAfter, "native_gui_shift_click", true,
+                "network_stock_growth_verified",growthVerified,
+                "confirmation_basis",growthVerified?"matching_player_and_network_deltas":"native_network_only_shift_with_server_slot_sync"));
     }
     int deposited(ResourceLocation item) { return confirmed.getOrDefault(item, 0); }
     Map<ResourceLocation, Integer> counts() { return Map.copyOf(confirmed); }

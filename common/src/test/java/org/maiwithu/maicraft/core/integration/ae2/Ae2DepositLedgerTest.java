@@ -10,7 +10,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
-/** AE 存入必须双边同量，命名土石不借用，公开结果不能用负的 acquired 冒充存入完成。 */
+/** 普通库存双边同量，恒定库存单独记录原生接收证明；命名土石不借用，存入回执保留真实数量。 */
 public final class Ae2DepositLedgerTest {
     private static final ResourceLocation DIRT = ResourceLocation.parse("minecraft:dirt");
     public static void main(String[] args) {
@@ -26,6 +26,15 @@ public final class Ae2DepositLedgerTest {
                 "a 49-item request cannot accept a 64-item network increase");
         check(Ae2DepositLedger.observe(49, 0, 64, 15, 200, 249, true, false).verdict() == Ae2DepositLedger.Verdict.DIVERGED,
                 "changes in other player slots invalidate the exact native click evidence");
+        // 网络专用菜单的服务器同步证明由调用方提供；账本仍拒绝混入别的槽变化或普通有限库存。
+        check(Ae2DepositLedger.nativeAcceptance(37,0,64,27,Integer.MAX_VALUE,Integer.MAX_VALUE,true,true).deposited()==37,
+                "constant reported stock can retain an exact native accepted amount");
+        check(Ae2DepositLedger.nativeAcceptance(37,37,64,64,Integer.MAX_VALUE,Integer.MAX_VALUE,true,true).verdict()==Ae2DepositLedger.Verdict.WAITING,
+                "no player debit means no accepted item");
+        check(Ae2DepositLedger.nativeAcceptance(37,0,64,26,Integer.MAX_VALUE,Integer.MAX_VALUE,true,true).verdict()==Ae2DepositLedger.Verdict.DIVERGED,
+                "unrelated inventory loss cannot be attributed to this shift");
+        check(Ae2DepositLedger.nativeAcceptance(37,0,64,27,200,200,true,true).verdict()==Ae2DepositLedger.Verdict.WAITING,
+                "finite stock continues to require matching growth");
         var named = new ItemStack(Items.DIRT, 12); named.set(DataComponents.CUSTOM_NAME, Component.literal("Do not store"));
         check(!Ae2DepositLedger.ordinary(named), "named or custom-component variants remain carried");
         check(Ae2DepositLedger.networkCount(List.of(new Ae2ReflectionBridge.Entry(DIRT, 1, 20, false, new ItemStack(Items.DIRT)),
