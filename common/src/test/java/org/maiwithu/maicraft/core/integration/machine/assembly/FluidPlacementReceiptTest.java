@@ -20,6 +20,13 @@ public final class FluidPlacementReceiptTest {
         check(FluidPlacementReceipt.compare(Blocks.LAVA.defaultBlockState(),air,water,2,3,1,4,false)==Verdict.DIVERGED,"另一流体不能顶替所需源格");
         check(FluidPlacementReceipt.compare(water.setValue(LiquidBlock.LEVEL,2),air,water,2,3,1,4,false)==Verdict.PENDING,"同种流动格仍不是最终源状态");
         check(FluidPlacementReceipt.compare(water,air,water,2,2,2,2,true)==Verdict.APPLIED,"创造真实免耗，不要求凭空产生空桶");
+        // 回收源格按相反桶账结算：空桶少一、满桶多一、原格真实为空气，缺一项都不得提前完成。
+        check(FluidPlacementReceipt.compare(air,water,air,2,3,1,4,false)==Verdict.APPLIED,"源格消失与真实回桶一起证明拆除");
+        check(FluidPlacementReceipt.compare(air,water,air,2,3,1,3,false)==Verdict.PENDING,"只看到源格消失仍等待满桶同步");
+        check(FluidPlacementReceipt.compare(water,water,air,2,3,1,4,false)==Verdict.PENDING,"桶账已变但源格仍在不能视为拆空");
+        check(FluidPlacementReceipt.compare(Blocks.STONE.defaultBlockState(),water,air,2,3,1,4,false)==Verdict.DIVERGED,"实心方块不能代替明确空气目标");
+        check(FluidPlacementReceipt.compare(air,water,air,1,0,1,1,true)==Verdict.APPLIED,"创造首次取水保留空桶并新增满桶");
+        check(FluidPlacementReceipt.compare(air,water,air,1,1,1,1,true)==Verdict.APPLIED,"创造已有同种满桶时不重复增加");
         System.out.println("FluidPlacementReceiptTest: passed");
     }
     private static void check(boolean condition,String message) { if(!condition)throw new AssertionError(message); }

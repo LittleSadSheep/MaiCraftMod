@@ -61,9 +61,9 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     @Override protected void onStart() {
         waitingSince = world.getGameTime();
         if (!world.isLoaded(r.target)) { failure("fluid_target_unloaded"); return; }
-        if (FluidPlacementRules.matches(world.getBlockState(r.target), r.expected)) { alreadyPresent = true; return; }
+        if (targetSatisfied()) { alreadyPresent = true; return; }
         // 进入倒桶阶段只核对实际落桶格；相邻通道允许流水，不要求整片机器围成封闭水池。
-        String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
+        String issue = placementProblem();
         if (issue != null) failure(issue);
     }
 
@@ -71,11 +71,11 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (player.level() != world) return failure("fluid_world_changed");
         if (alreadyPresent) { waiting("already_present"); return TaskState.SUCCESS; }
         if (submitted) return confirm();
-        if (!selection.pending() && world.isLoaded(r.target) && FluidPlacementRules.matches(world.getBlockState(r.target), r.expected)) {
+        if (!selection.pending() && world.isLoaded(r.target) && targetSatisfied()) {
             alreadyPresent = true; return TaskState.SUCCESS;
         }
         // 拿桶与走近期间复查目标；岩浆的身体站位另按保守流路检查，不把邻格干燥当作倒桶后仍安全。
-        String issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
+        String issue = placementProblem();
         if (issue != null) return failure(issue);
         if (!selected) {
             waiting("selecting_bucket");
@@ -109,9 +109,9 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         var hit = FirstPersonInteractionTargeting.bucketRay(world, player, player.getEyePosition(),
                 player.getEyePosition().add(player.getViewVector(1).scale(player.blockInteractionRange())), r.bucket);
         if (!FirstPersonInteractionTargeting.acceptsBucketHit(world, r.target, r.bucket, hit)) { rejectStand(); return TaskState.RUNNING; }
-        if (!returnFits()) return failure("fluid_empty_bucket_return_space_missing");
+        if (!returnFits()) return failure(r.removedSource == null ? "fluid_empty_bucket_return_space_missing" : "fluid_filled_bucket_return_space_missing");
         // 出手前只确认本次落桶目标仍可用，提交后依靠原生桶回执核实实际结果。
-        issue = FluidPlacementRules.placementProblem(world, r.target, r.expected);
+        issue = placementProblem();
         if (issue != null) return failure(issue);
         // 相机等待期间围挡可能改变，提交桶之前再用实际身体复核，不能沿用旧候选的安全结论。
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
@@ -127,6 +127,15 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         return TaskState.RUNNING;
     }
 
+    private boolean targetSatisfied() { return r.removedSource == null ? FluidPlacementRules.matches(world.getBlockState(r.target),r.expected)
+            : world.getBlockState(r.target).isAir(); }
+    private String placementProblem() {
+        if (r.removedSource == null) return FluidPlacementRules.placementProblem(world,r.target,r.expected);
+        // 回收只作用于本次明确声明的那个源格；流体类型或源状态变了就停，不向别处补发取水动作。
+        if (!world.isLoaded(r.target)) return "fluid_target_unloaded";
+        if (NavigationSafetyContext.protectsMutation(r.target)) return "fluid_target_protected";
+        return world.getBlockState(r.target).equals(r.removedSource) ? null : "fluid_removal_source_changed";
+    }
     private BlockHitResult visibleFrom(Vec3 eye) {
         return FluidPlacementAim.find(world, player, eye, r.target, player.blockInteractionRange(), r.bucket);
     }
@@ -199,7 +208,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     }
     private boolean returnFits() {
         if (player.hasInfiniteMaterials() || player.getMainHandItem().getCount() == 1) return true;
-        ItemStack empty = BucketItem.getEmptySuccessItem(player.getMainHandItem().copyWithCount(1), player);
+        ItemStack empty = r.removedSource == null ? BucketItem.getEmptySuccessItem(player.getMainHandItem().copyWithCount(1), player)
+                : new ItemStack(r.removedSource.getFluidState().getType().getBucket());
         return player.getInventory().items.stream().anyMatch(stack -> stack.isEmpty()
                 || ItemStack.isSameItemSameComponents(stack, empty) && stack.getCount() < stack.getMaxStackSize());
     }
@@ -208,7 +218,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         var context = ClientRuntime.requireContext(player); receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) return TaskState.RUNNING;
         if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED || evidence.observe(context) != NativeConfirmation.Verdict.APPLIED)
-            return failure("fluid_placement_not_confirmed_no_retry");
+            return failure(r.removedSource == null ? "fluid_placement_not_confirmed_no_retry" : "fluid_removal_not_confirmed_no_retry");
         verified = true; waiting("complete"); return TaskState.SUCCESS;
     }
     private TaskState failure(String code) {
@@ -235,7 +245,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         InputDriver.halt(player); super.cleanup();
     }
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return submitted && !verified; }
-    @Override protected String successMessage() { return alreadyPresent ? "Declared source fluid already present; no bucket used." : "Source fluid and native bucket return confirmed."; }
+    @Override protected String successMessage() {
+        if (r.removedSource != null) return alreadyPresent ? "Declared fluid already absent; no bucket used." : "Source removal and native filled-bucket return confirmed.";
+        return alreadyPresent ? "Declared source fluid already present; no bucket used." : "Source fluid and native bucket return confirmed.";
+    }
     @Override protected String timeoutMessage() { return "Source-fluid placement timed out while " + stage + "; bucket_submitted=" + submitted; }
     @Override public Map<String, Object> progress() {
         // 只读阶段、距离和门槛，不暴露可重放动作；失败或超时后也保留最后一次等待原因。
@@ -263,10 +276,12 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         return Map.copyOf(data);
     }
     @Override protected Map<String, Object> resultData() {
-        var data = new LinkedHashMap<String,Object>(Map.of("source_fluid_verified", verified || alreadyPresent, "already_present", alreadyPresent,
+        var data = new LinkedHashMap<String,Object>(Map.of("source_fluid_verified", r.removedSource == null && (verified || alreadyPresent), "already_present", alreadyPresent,
                 "bucket_submitted", submitted, "native_effect_verified", verified, "outcome_uncertain", submitted && !verified,
                 // 桶已提交却尚未结清时禁止机械重试；已有正确源格可只读复用，不需要重复倒桶。
                 "mechanical_retry_allowed", !submitted || verified, "failure_code", failureCode, "machine_production_verified", false));
+        data.put("source_fluid_removed",r.removedSource != null && (verified || alreadyPresent));
+        data.put("operation",r.removedSource == null ? "place_source" : "remove_source");
         data.put("placement_progress",stoppedProgress == null ? progress() : stoppedProgress); return data;
     }
 }

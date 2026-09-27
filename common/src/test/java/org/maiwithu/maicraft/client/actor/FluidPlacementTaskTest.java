@@ -40,7 +40,39 @@ public final class FluidPlacementTaskTest {
         replayOffsetStance(); arrivedStanceCannotWaitForever();
         newlyUsableFootingReplacesStaleNavigation();
         lavaPlacementAvoidsFutureFlow();
+        sourceRemovalUsesOneAcknowledgedBucket();
         System.out.println("FluidPlacementTaskTest: passed");
+    }
+
+    private static void sourceRemovalUsesOneAcknowledgedBucket() throws Exception {
+        for (boolean lava : new boolean[]{false,true}) try (var f = fixture()) {
+            // 修改机器的旧水源或岩浆源先用空桶回收，服务器确认前既不能说拆完，也不能多取一次。
+            var source = lava ? Blocks.LAVA.defaultBlockState() : Blocks.WATER.defaultBlockState();
+            f.set(AT,source); f.inventory.setItem(0,new ItemStack(Items.BUCKET));
+            f.mode.itemUse = player -> {
+                f.level.blockSequence++; f.set(AT,Blocks.AIR.defaultBlockState());
+                f.inventory.setItem(0,new ItemStack(lava ? Items.LAVA_BUCKET : Items.WATER_BUCKET));
+            };
+            var record = FluidPlacementTaskRecord.removeSource("source-removal",1000,AT,source,task().installation);
+            var running = new FluidPlacementTask(f.player,record); running.start(f.player); submit(f,running);
+            f.nextTick(); check(running.tick(f.player) == TaskState.RUNNING, "source disappearance alone cannot replace server acknowledgement");
+            f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1 && f.blockUses() == 0,
+                    "source removal settles exactly one native bucket use");
+            var result = running.result(TaskState.SUCCESS);
+            check(Boolean.TRUE.equals(result.data().get("source_fluid_removed"))
+                    && Boolean.FALSE.equals(result.data().get("source_fluid_verified")), "removal receipt cannot claim a source was placed");
+            var reuse = new FluidPlacementTask(f.player,record); reuse.start(f.player);
+            check(reuse.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1, "already absent source does not consume another empty bucket");
+            reuse.result(TaskState.SUCCESS);
+        }
+        try (var f = fixture()) {
+            var source = Blocks.WATER.defaultBlockState(); f.set(AT,source); f.inventory.setItem(0,new ItemStack(Items.BUCKET));
+            var running = new FluidPlacementTask(f.player,FluidPlacementTaskRecord.removeSource("changed-source",1000,AT,source,task().installation));
+            running.start(f.player); f.set(AT,Blocks.LAVA.defaultBlockState());
+            check(running.tick(f.player) == TaskState.FAILED && f.itemUses() == 0, "changed source cannot inherit the original pickup target");
+            running.result(TaskState.FAILED);
+        }
     }
 
     private static void newlyUsableFootingReplacesStaleNavigation() throws Exception {

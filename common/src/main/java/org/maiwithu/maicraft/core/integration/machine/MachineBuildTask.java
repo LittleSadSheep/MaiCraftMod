@@ -36,6 +36,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.preview.PreviewPart;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
@@ -53,7 +55,7 @@ import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
  * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
  */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
-    private enum Phase { SURVEY, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, BLUEPRINT_DIFF, DONE }
+    private enum Phase { SURVEY, REMOVE_FLUIDS, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, BLUEPRINT_DIFF, DONE }
     private final Level world;
     private final Map<BlockPos, BlockState> preview;
     private final JsonArray configurations;
@@ -75,6 +77,8 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int contentsIndex;
     private int filterIndex;
     private int fluidIndex;
+    private int removalIndex, drainIndex, confirmedSourceRemovals;
+    private long drainDeadline;
     private int installationIndex, verifyInstallationIndex, verifyProcessingIndex;
     private int attachmentIndex;
     private boolean assemblyVerified;
@@ -127,6 +131,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (child != null) return tickChild();
         return switch (phase) {
             case SURVEY -> surveyParts();
+            case REMOVE_FLUIDS -> removeFluids();
             case BLOCKS -> buildBlocks();
             case INSTALLATIONS -> installNative();
             case ATTACHMENTS -> installAttachments();
@@ -152,7 +157,40 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             fail(progress.failure() + " Construction has not started.", FailureType.TERRAIN_BLOCKED); return TaskState.FAILED;
         }
         if (progress.needsLoad() != null) return load(progress.needsLoad());
-        if (progress.complete()) phase = Phase.BLOCKS;
+        if (progress.complete()) phase = r.plan.modification() && r.plan.replaceExisting() ? Phase.REMOVE_FLUIDS : Phase.BLOCKS;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState removeFluids() {
+        // 明确空气目标内先收源格 -> 等已声明区域里的流水退去 -> 再普通拆换；不把桶回收交给挖掘器。
+        int budget = 128;
+        while (removalIndex < r.plan.blocks().size() && budget-- > 0) {
+            var target = r.plan.blocks().get(removalIndex);
+            if (!target.desiredState().isAir()) { removalIndex++; continue; }
+            if (!world.isLoaded(target.pos())) return load(target.pos());
+            var state = world.getBlockState(target.pos());
+            if (!(state.getBlock() instanceof LiquidBlock) || !state.getFluidState().isSource()) { removalIndex++; continue; }
+            if (NavigationSafetyContext.protectsMutation(target.pos())) return failure("machine_fluid_removal_protected", "Declared source removal intersects a protected area.");
+            if (!ensureItem(BuiltInRegistries.ITEM.getKey(Items.BUCKET))) return TaskState.RUNNING;
+            start(FluidPlacementTaskRecord.removeSource(id(),deadline(),target.pos(),state,Set.copyOf(plannedPositions)));
+            return TaskState.RUNNING;
+        }
+        if (removalIndex < r.plan.blocks().size()) return TaskState.RUNNING;
+        while (drainIndex < r.plan.blocks().size() && budget-- > 0) {
+            var target = r.plan.blocks().get(drainIndex);
+            if (!target.desiredState().isAir()) { drainIndex++; continue; }
+            if (!world.isLoaded(target.pos())) return load(target.pos());
+            var state = world.getBlockState(target.pos());
+            if (state.getBlock() instanceof LiquidBlock) {
+                // 无限水再生成或外部流入不能触发无界取水；保留已确认回桶事实，只报告这次清空还未成立。
+                if (drainDeadline == 0) drainDeadline = world.getGameTime() + 200;
+                if (world.getGameTime() >= drainDeadline) return failure("machine_declared_clearance_still_flooded",
+                        "Declared air target still contains fluid after source recovery: " + target.pos().toShortString());
+                return TaskState.RUNNING;
+            }
+            drainIndex++; drainDeadline = 0;
+        }
+        if (drainIndex >= r.plan.blocks().size()) phase = Phase.BLOCKS;
         return TaskState.RUNNING;
     }
 
@@ -394,6 +432,10 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (!acquiringItem && phase == Phase.CONTENTS) contentsIndex++;
         if (!acquiringItem && phase == Phase.FILTERS) filterIndex++;
         if (!acquiringItem && phase == Phase.FLUIDS) fluidIndex++;
+        if (!acquiringItem && phase == Phase.REMOVE_FLUIDS) {
+            removalIndex++;
+            if (Boolean.TRUE.equals(lastChild.get("native_effect_verified"))) confirmedSourceRemovals++;
+        }
         acquiringItem = false;
         return TaskState.RUNNING;
     }
@@ -515,6 +557,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         data.put("initialized_containers", contentsIndex);
         data.put("configured_output_filters", filterIndex);
         data.put("verified_source_fluid_targets", fluidIndex);
+        data.put("confirmed_source_fluid_removals",confirmedSourceRemovals);
         if (!lastChild.isEmpty()) data.put("last_native_stage", lastChild);
         // 方块供料和后置部件供料都带回同一类加工前置，模型可直接安排已知工序后再续建机器。
         if (!failedSupply.isEmpty()) MachineBuildEvidence.retainSupplyFailure(data, failedSupply);

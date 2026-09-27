@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.client.actor.BlockUseAcknowledgement;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** 一次桶操作的只读凭据：服务器已校正对应使用序号、目标成为源格、满桶减少和空桶返还必须一起成立。 */
+/** 一次桶操作的只读凭据：服务器确认使用序号后，源格出现或消失必须与空满桶的准确交换一起成立。 */
 final class FluidPlacementReceipt implements NativeConfirmation {
     private final LocalPlayer player;
     private final Level world;
@@ -26,7 +26,9 @@ final class FluidPlacementReceipt implements NativeConfirmation {
     FluidPlacementReceipt(LocalPlayer player, BlockPos target, BlockState expected) {
         this.player = player; world = player.level(); this.target = target; this.expected = expected;
         before = world.getBlockState(target); filled = player.getMainHandItem().copyWithCount(1);
-        returned = BucketItem.getEmptySuccessItem(filled.copy(), player).copy(); free = player.hasInfiniteMaterials();
+        // 倒水返空桶，取源水则返该流体的原生满桶；不把仅有客户端流体预测当作已经回收。
+        returned = expected.isAir() ? new ItemStack(before.getFluidState().getType().getBucket())
+                : BucketItem.getEmptySuccessItem(filled.copy(), player).copy(); free = player.hasInfiniteMaterials();
         beforeFilled = count(player, filled); beforeReturned = count(player, returned);
         if (!(world instanceof BlockUseAcknowledgement hook)) throw new IllegalStateException("fluid_placement_acknowledgement_unavailable");
         acknowledgements = hook; beforeSequence = hook.maicraft$currentBlockSequence();
@@ -47,11 +49,13 @@ final class FluidPlacementReceipt implements NativeConfirmation {
     static Verdict compare(BlockState actual, BlockState before, BlockState expected, int beforeFilled, int beforeReturned,
                            int afterFilled, int afterReturned, boolean free) {
         int spent = free ? 0 : 1;
+        // 创造取水不耗空桶；原版仅在背包还没有这种满桶时加入一件，普通生存始终交换一件。
+        int gained = free && expected.isAir() ? (beforeReturned == 0 ? 1 : 0) : spent;
         if (afterFilled < beforeFilled - spent || afterFilled > beforeFilled
-                || afterReturned < beforeReturned || afterReturned > beforeReturned + spent) return Verdict.DIVERGED;
-        boolean source = FluidPlacementRules.matches(actual, expected);
-        if (!source && !actual.equals(before) && !FluidPlacementRules.sameFluid(actual, expected)) return Verdict.DIVERGED;
-        return source && afterFilled == beforeFilled - spent && afterReturned == beforeReturned + spent ? Verdict.APPLIED : Verdict.PENDING;
+                || afterReturned < beforeReturned || afterReturned > beforeReturned + gained) return Verdict.DIVERGED;
+        boolean target = expected.isAir() ? actual.isAir() : FluidPlacementRules.matches(actual, expected);
+        if (!target && !actual.equals(before) && !FluidPlacementRules.sameFluid(actual, expected.isAir() ? before : expected)) return Verdict.DIVERGED;
+        return target && afterFilled == beforeFilled - spent && afterReturned == beforeReturned + gained ? Verdict.APPLIED : Verdict.PENDING;
     }
 
     private static int count(LocalPlayer player, ItemStack kind) {

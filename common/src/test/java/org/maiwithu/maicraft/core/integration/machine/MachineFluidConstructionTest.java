@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTaskRecord;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -68,7 +71,47 @@ public final class MachineFluidConstructionTest {
                     "流进来的同种水不能冒充蓝图要求的源格");
         }
         constructionKeepsNativeReceipt(plan);
+        modificationRecoversDeclaredSourcesBeforeBuilding();
         System.out.println("MachineFluidConstructionTest: passed");
+    }
+    private static void modificationRecoversDeclaredSourcesBeforeBuilding() throws Exception {
+        BlockPos at = new BlockPos(3,1,3), outside = new BlockPos(7,1,3);
+        var document = JsonParser.parseString("""
+                {"blocks":[{"offset":[3,1,3],"block_id":"minecraft:air"}]}
+                """).getAsJsonObject();
+        var survey = MachineBuildTask.class.getDeclaredMethod("surveyParts"); survey.setAccessible(true);
+        var remove = MachineBuildTask.class.getDeclaredMethod("removeFluids"); remove.setAccessible(true);
+        try (var world = new InteractionWorldTestHarness()) {
+            // 原位修改的空气目标遇到水源时先派发取桶任务，旁边未声明的水源不属于这次改造。
+            var border = Level.class.getDeclaredField("worldBorder"); border.setAccessible(true); border.set(world.level,new WorldBorder());
+            world.set(at,Blocks.WATER.defaultBlockState()); world.set(outside,Blocks.WATER.defaultBlockState());
+            world.inventory.setItem(0,new ItemStack(Items.BUCKET));
+            var plan = MachineConstructionPlan.compile(BlockPos.ZERO,MachineBlueprintDocument.compile(document,MachineConstructionPlan.registry()),true,true);
+            plan.bindAutomaticModification(world.level);
+            var running = new MachineBuildTask(world.player,new MachineBuildTaskRecord("remove-source",1000,plan,
+                    "minecraft:overworld",MaterialPolicy.INVENTORY_ONLY,List.of()));
+            survey.invoke(running); check(field("phase").get(running).toString().equals("REMOVE_FLUIDS"),"modification prepares source recovery before block excavation");
+            remove.invoke(running);
+            var child = (FluidPlacementTaskRecord) field("childRecord").get(running);
+            check(child.target.equals(at) && child.bucket == Items.BUCKET && child.expected.isAir()
+                    && child.removedSource.is(Blocks.WATER) && world.level.getBlockState(outside).is(Blocks.WATER)
+                    && world.itemUses() == 0, "planning a source pickup never edits the world or collects an undeclared neighbor");
+            running.result(TaskState.CANCELLED);
+        }
+        try (var world = new InteractionWorldTestHarness()) {
+            // 流水不能用空桶反复捞；给原生流体更新有限时间，仍流入时保留失败事实而不扩张拆除范围。
+            var border = Level.class.getDeclaredField("worldBorder"); border.setAccessible(true); border.set(world.level,new WorldBorder());
+            world.set(at,Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL,3));
+            var plan = MachineConstructionPlan.compile(BlockPos.ZERO,MachineBlueprintDocument.compile(document,MachineConstructionPlan.registry()),true,true);
+            plan.bindAutomaticModification(world.level);
+            var running = new MachineBuildTask(world.player,new MachineBuildTaskRecord("wait-drain",1000,plan,
+                    "minecraft:overworld",MaterialPolicy.INVENTORY_ONLY,List.of()));
+            survey.invoke(running); remove.invoke(running);
+            check(field("childRecord").get(running) == null && field("phase").get(running).toString().equals("REMOVE_FLUIDS"),"flowing cells wait without a bucket submission");
+            field("drainDeadline").setLong(running,world.level.getGameTime()+1); world.nextTick();
+            check(remove.invoke(running) == TaskState.FAILED && world.itemUses() == 0, "continuous inflow ends within a bounded wait");
+            check(running.result(TaskState.FAILED).data().get("failure_code").equals("machine_declared_clearance_still_flooded"),"failure identifies continuing fluid instead of misreporting an excavation permission issue");
+        }
     }
     private static void constructionKeepsNativeReceipt(MachineConstructionPlan plan) throws Exception {
         // 不确定的桶可能由子任务失败、总任务超时或用户取消收场；三种入口都必须留下同一份账，交给上层决定恢复。

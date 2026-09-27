@@ -323,6 +323,8 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 `modify_machine` 使用 `operation: "apply_blueprint"`，提供已知目标、`blueprint` 或 `blueprint_uri` 和已有授权对应的 `allow_modify:true`。`snapshot_id` 可省略，Mod 内部读取当前锚点与明确改动格子，不要求每次修改前另行 `inspect_machine`。修改默认允许拆换声明的旧部件，包括方块实体；不需要重复打开替换开关。修改仍是稀疏补丁：只声明要改变或确保存在的格子，删除写空气，省略的位置保留。原生确认的放置与支撑归属随世界和玩家保存，未完工支路也会记录。
 
+修改中的空气目标若当前为可用桶回收的源水或源岩浆，施工器先准备空桶并原生回收，核对源格消失和满桶返还，再等待声明格里的流水退去并继续普通拆换。持续流入会返回明确阻塞，排水范围限于这次声明的格子。完工补丁会合回原机器图纸，保留未改机件；同一平台锚点上的不同命名机器分别留档。
+
 ## 分阶段验收
 
 不带生产清单的构建和修改验收声明的方块、状态及原生部件。显式蓝图完成后报告 `construction_complete` 与 `machine_geometry_verified`，同时保留 `configuration_complete: false`、`configuration_status: "separate_use_phase"`、`machine_production_verified: false`。
