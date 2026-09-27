@@ -26,6 +26,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
@@ -980,7 +981,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 TaskState access = drivePlacementAccess(); if (access != null) return access;
             }
         }
-        if (supportedCell == null && useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
+        // 点击支撑已放好后，原目标仍可能需要登上一格；保留原支撑队列，同时继续证明施工站位。
+        if (useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
             stopNav(); phase = Phase.WORKSITE; return TaskState.RUNNING;
         }
         if (worksite != null) return walkToWorksite();
@@ -1188,7 +1190,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             worksiteSearch = new BuildWorksitePlanner.Search(player, pending, targets,
                     pos -> !forbiddenBodyCells.contains(pos.asLong()) && !NavigationSafetyContext.forbidsBody(pos),
                     unionForbidden(NavigationSafetyContext.forbiddenBodyCells()), rejectedWorksites,
-                    placementAttempts::allows, worksitePass, this::canPrepareWorksite);
+                    placementAttempts::allows, worksitePass, this::canPrepareWorksite, hasTemporaryPlacementSupport());
             stanceNavigation.selectPass(worksitePass);
         }
         var progress = worksiteSearch.advance(256);
@@ -1231,6 +1233,17 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return TaskState.FAILED;
     }
 
+    // 补料会新建施工子任务；从持久支撑账识别原点击垫块，不能因为 supportedCell 临时引用消失就改搭更高的柱子。
+    private boolean hasTemporaryPlacementSupport() {
+        if (supportedCell != null) return true;
+        if (cell == null) return false;
+        for (Direction face : Direction.values()) {
+            BlockPos at = cell.target().pos().relative(face);
+            if (player.level().isLoaded(at) && r.scaffoldLedger().owns(at, player.level().getBlockState(at))) return true;
+        }
+        return false;
+    }
+
     private boolean canPrepareWorksite(BlockPos feet) {
         if (!player.level().isLoaded(feet) || !player.level().isLoaded(feet.below())) return false;
         if (feet.getY() <= player.level().getMinBuildHeight() || feet.getY() > player.level().getMaxBuildHeight()) return false;
@@ -1252,6 +1265,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && nav.isSafeToCancel()) return rejectWorksite("worksite approach made no useful movement or confirmed construction progress");
         if (worksite.constructionAccess()) {
             if (nav == null) {
+                // 新落脚点下方还是空气时，先确保至少有一块未被永久建筑预留的垫块；缺料走原地支撑供料，不能空手反复求路。
+                if (player.level().getBlockState(worksite.stance().below()).isAir()
+                        && BuildTemporarySupportMaterials.choose(ScaffoldMaterials.of(player), scaffoldReservations(),
+                        inventory::mainInventoryCount, 1, player.getAbilities().instabuild && !r.consumeMaterials) == null)
+                    return missingTemporarySupportMaterials(1);
                 BlockPos destination = worksite.stance(); stanceNavigation.attempted();
                 nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), BuildStanceNavigation.PRECISE_WALK,
                         () -> placementStanceReached(destination), this).walkingOnly();
@@ -1695,7 +1713,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private boolean tryTerrainPass() {
-        if (supportedCell != null || isTemporary(cell) || liveGestures.isEmpty() || !stanceNavigation.allowTerrain()) return false;
+        // 原目标有临时点击支撑不等于身体已经够得着；仍允许有界施工导航准备实际落脚点。
+        if (isTemporary(cell) || liveGestures.isEmpty() || !stanceNavigation.allowTerrain()) return false;
         gestureAt = 0; phase = Phase.PLACE_NAV;
         note = "existing-footing alternatives exhausted; trying permitted construction access";
         return true;
@@ -1714,23 +1733,27 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 ScaffoldMaterials.of(player), scaffoldReservations(),
                 inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
         if (material == null) {
-            // 原生施工准确告诉供料父任务缺哪种垫块；补齐后继续这份目标和支撑账，不让模型猜一个不在白名单里的方块。
-            var demand = BuildTemporarySupportMaterials.supplyNeed(ScaffoldMaterials.of(player), scaffoldReservations(),
-                    inventory::mainInventoryCount, chain.size());
-            if (demand != null) temporarySupportDemand = Map.of(
-                    "item_id", BuiltInRegistries.ITEM.getKey(demand.item()).toString(),
-                    "required_final_count", demand.requiredFinalCount(), "support_blocks", chain.size(),
-                    "allowed_items", ScaffoldMaterials.effectiveIds(player));
-            failAt(cell.target().pos(), "placement needs " + chain.size()
-                            + " spare full temporary support blocks after reserving every remaining permanent build target",
-                    FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
-            return TaskState.FAILED;
+            return missingTemporarySupportMaterials(chain.size());
         }
         supportedCell = cell; supportChain = chain;
         supportMaterial = ((BlockItem) material).getBlock().defaultBlockState();
         // 垫块 -> 原目标逐块执行；每块沿用普通导航和右键，不预先证明整条支撑放完后还能走到哪里。
         stopNav();
         return enqueueSupports();
+    }
+
+    // 点击支撑和登阶落脚共用同一缺料回执；父任务会先尝试全部易拆现货，而非把首选材料送去通用采矿。
+    private TaskState missingTemporarySupportMaterials(int count) {
+        var demand = BuildTemporarySupportMaterials.supplyNeed(ScaffoldMaterials.of(player), scaffoldReservations(),
+                inventory::mainInventoryCount, count);
+        if (demand != null) temporarySupportDemand = Map.of(
+                "item_id", BuiltInRegistries.ITEM.getKey(demand.item()).toString(),
+                "required_final_count", demand.requiredFinalCount(), "support_blocks", count,
+                "allowed_items", ScaffoldMaterials.effectiveIds(player));
+        failAt(cell.target().pos(), "placement needs " + count
+                        + " spare full temporary support blocks after reserving every remaining permanent build target",
+                FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
+        return TaskState.FAILED;
     }
 
     // 从接地端开始把支撑排进普通施工队列，实际放置成功后才记账，再继续原来的目标。

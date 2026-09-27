@@ -56,6 +56,7 @@ final class BuildWorksitePlanner {
         private final Map<BlockPos, List<BuildTaskRecord.Target>> buckets = new HashMap<>();
         private final Vec3 origin;
         private final int accessPass;
+        private final boolean minimizeNewFooting;
         private final Predicate<BlockPos> accessAllowed;
         private final BuildFootingSearch footing;
         private boolean footingDone;
@@ -81,10 +82,20 @@ final class BuildWorksitePlanner {
                LongSet forbidden, Set<BlockPos> rejected,
                BiPredicate<BuildTaskRecord.Target, BuildPlacementGeometry.Gesture> gestureAllowed,
                int accessPass, Predicate<BlockPos> accessAllowed) {
+            this(player, pending, targets, allowed, forbidden, rejected, gestureAllowed, accessPass, accessAllowed, false);
+        }
+
+        // 临时点击支撑之后只需够到原目标；普通墙体仍保留登上已建层、连续施工的原有排序。
+        Search(LocalPlayer player, List<BuildTaskRecord.Target> pending,
+               Map<Long, BuildTaskRecord.Target> targets, Predicate<BlockPos> allowed,
+               LongSet forbidden, Set<BlockPos> rejected,
+               BiPredicate<BuildTaskRecord.Target, BuildPlacementGeometry.Gesture> gestureAllowed,
+               int accessPass, Predicate<BlockPos> accessAllowed, boolean minimizeNewFooting) {
             this.player = player; this.targets = targets; this.allowed = allowed;
             this.gestureAllowed = gestureAllowed;
             this.forbidden = forbidden; this.rejected = Set.copyOf(rejected); origin = player.position();
             this.accessPass = accessPass; this.accessAllowed = accessAllowed;
+            this.minimizeNewFooting = minimizeNewFooting;
             seeds = pending.stream().filter(t -> !BuildCellRules.isAirTarget(t)
                             && BuildPlacementGeometry.primaryOf(t).equals(t.pos()))
                     .sorted(Comparator.comparingDouble((BuildTaskRecord.Target t) -> t.pos().distToCenterSqr(origin))
@@ -158,7 +169,7 @@ final class BuildWorksitePlanner {
                         scoringRoute == null ? origin.distanceToSqr(scoringFeet) : scoringRoute.distance() * scoringRoute.distance(),
                         Math.max(0, origin.y - (scoringRoute == null ? scoringFeet.y : scoringRoute.lowestY())),
                         scoringRoute == null ? List.of(scoringFeet) : scoringRoute.points(), scoringRoute == null);
-                if (best == null || compare(worksite, best) < 0) best = worksite;
+                if (best == null || compare(worksite, best, minimizeNewFooting) < 0) best = worksite;
             }
             scoringCell = null; scoringFeet = null; nearby = List.of(); placements.clear();
         }
@@ -210,16 +221,21 @@ final class BuildWorksitePlanner {
     }
 
     // 不为多够到几格而丢掉已有高度；同类落脚点中再比较连续施工数量与实际路程。
-    private static int compare(Worksite a, Worksite b) {
+    private static int compare(Worksite a, Worksite b, boolean minimizeNewFooting) {
         int access = Boolean.compare(a.constructionAccess(), b.constructionAccess());
         if (access != 0) return access;
         int height = Double.compare(a.heightLoss(), b.heightLoss());
         if (height != 0) return height;
+        // 需要新搭落脚点时，先选能完成原生点击的最低高度；已经够到的机器不能只为俯视施工再多垫一层。
+        if (a.constructionAccess() && minimizeNewFooting) {
+            int rise = Double.compare(a.feet().y, b.feet().y);
+            if (rise != 0) return rise;
+        }
         int overhead = Double.compare(a.overhead(), b.overhead());
         if (overhead != 0) return overhead;
         int count = Integer.compare(b.coverage(), a.coverage());
         if (count != 0) return count;
-        if (a.constructionAccess()) {
+        if (a.constructionAccess() && !minimizeNewFooting) {
             int rise = Double.compare(a.feet().y, b.feet().y);
             if (rise != 0) return rise;
         }
