@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.actor.VanillaHotbar;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentity;
 
 /** 快捷栏全满时显示背包，把手持工具原样移到真实空格，腾出空手去开木桶或机器；不丢物品。 */
 public final class MachineMenuHandParking {
@@ -94,5 +95,6 @@ public final class MachineMenuHandParking {
         for (int slot = 1; slot <= 4; slot++) if (!menu.getSlot(slot).getItem().isEmpty()) return false;
         return true;
     }
-    private static boolean same(ItemStack left, ItemStack right) { return left.getCount() == right.getCount() && ItemStack.isSameItemSameComponents(left, right); }
+    // 为取工件腾空主手时，沿用原生交换的终端身份规则，避免刚确认的合法停车又被电量刷新否定。
+    private static boolean same(ItemStack left, ItemStack right) { return Ae2TerminalIdentity.same(left, right); }
 }

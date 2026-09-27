@@ -8,6 +8,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import java.util.Objects;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentity;
 
 /** 实际操作玩家菜单：一次点一个槽位、报价按钮或配方，等结果明确后再接受下一次；也负责任务结束时关好界面。 */
 public final class DefaultMenuPort implements MenuPort {
@@ -86,8 +87,9 @@ public final class DefaultMenuPort implements MenuPort {
         requireVisible(current);
         ItemStack sourceBefore = current.player().getInventory().getItem(sourceInventorySlot).copy();
         ItemStack hotbarBefore = current.player().getInventory().getItem(hotbarSlot).copy();
+        // 施工选料也会把刚用过的 AE 终端换回背包；电量同步不改变终端身份，数量、绑定及其余组件仍逐项核对。
         MenuConfirmation confirmation = MenuConfirmation.inventorySwap(
-                sourceInventorySlot, hotbarSlot, sourceBefore, hotbarBefore);
+                sourceInventorySlot, hotbarSlot, sourceBefore, hotbarBefore, Ae2TerminalIdentity::same);
         AbstractContainerMenu menu = current.player().inventoryMenu;
         current.claimMutation();
         MenuReceipt receipt = create(
