@@ -350,6 +350,9 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         result.put("resumed_selected_route",resumingRoute);
         result.put("worksite_reobservations_after_return",siteReturns);
         result.put("requested_transmission",r.requireChainConveyor?"chain_conveyor":"auto");
+        // 动力通过只对实际接入端点成立，回执必须露出方块类型，不能让显示标签掩盖接错设备。
+        result.put("selected_destination_block",target==null?"unobserved":target.blockId());
+        result.put("selected_source_block",sourceBlockId==null?"unobserved":sourceBlockId);
         result.put("existing_blocks_preserved",true);
         result.put("source_native_observation_stage",sourceRefreshedAfter?"after_construction":"before_construction_with_current_client_network_check");result.put("target_native_observation_stage","after_construction");
         result.put("source_label",r.sourceLabel);result.put("last_native_stage",lastChild);result.put("chain_connections",List.copyOf(linkEvidence));

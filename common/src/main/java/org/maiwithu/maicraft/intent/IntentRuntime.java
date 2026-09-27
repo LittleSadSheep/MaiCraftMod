@@ -69,6 +69,8 @@ public final class IntentRuntime {
             "requested_transmission", "transmission_description", "available_transmission_choices",
             // 游戏 HUD 的锁链不足提示没有普通方块变化，持链交互的选择状态和数量缺口必须随通知到达模型。
             "chain_conveyor_use",
+            // 实际接入方块随完成通知保留，调用者可将动力回执与请求的压机、链轮等设备直接对照。
+            "selected_destination_block", "selected_source_block",
             // 清障失败的具体坐标和最近选址建议是观察证据，必须送达外部 LLM 才能改变场地。
             "clearance_report",
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",

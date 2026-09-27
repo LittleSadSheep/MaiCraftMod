@@ -21,6 +21,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.Locale;
 import java.util.Set;
+import java.util.HashSet;
+import java.util.regex.Pattern;
+import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
 import java.util.stream.Collectors;
 import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord;
@@ -729,15 +732,21 @@ final class AbilityAdapter {
         JsonObject parameters = goal.parameters();
         String sourceLabel = string(parameters, "source_label");
         String destinationLabel = string(parameters, "target_label");
+        // 前一步的结构观察保留了组件类型关系时，把唯一的注册方块 ID 一同带入接线，不能只保留观察区域中心。
+        if(destinationLabel==null && goal.target()!=null)destinationLabel=relationBlockId(goal.target().relation());
         Goal.WorldPosition source = namedPosition(sourceLabel, player, runtime);
-        Goal.WorldPosition destination = position(goal, player, runtime);
-        if (destination == null) destination = namedPosition(destinationLabel, player, runtime);
+        // 已明确记住的设备位置优先；类型标签则在目标区域内调查匹配设备，拼错的普通名称不能悄悄被区域替代。
+        Goal.WorldPosition destination = namedPosition(destinationLabel, player, runtime);
+        if(destination==null && (destinationLabel==null || CreateMechanicalPower.registeredBlockId(destinationLabel)!=null))
+            destination=position(goal,player,runtime);
         if (source == null || destination == null) {
             String sourceIssue = source == null
                     ? namedEndpointIssue("source", sourceLabel, player, runtime)
                     : null;
             String destinationIssue = destination == null
-                    ? destinationEndpointIssue(goal.target(), destinationLabel, player, runtime)
+                    ? destinationLabel!=null && CreateMechanicalPower.registeredBlockId(destinationLabel)==null
+                        ? namedEndpointIssue("destination",destinationLabel,player,runtime)
+                        : destinationEndpointIssue(goal.target(), destinationLabel, player, runtime)
                     : null;
             String issue = sourceIssue == null ? destinationIssue
                     : destinationIssue == null ? sourceIssue
@@ -782,6 +791,20 @@ final class AbilityAdapter {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("connect_mechanical_power", args.toString());
+    }
+
+    static String relationBlockId(String relation) {
+        if(relation==null)return null;
+        var matcher=Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+").matcher(relation);
+        var types=new HashSet<String>();
+        while(matcher.find()) {
+            String token=matcher.group(), id=CreateMechanicalPower.registeredBlockId(token);
+            while(id==null && token.endsWith(".")) {
+                token=token.substring(0,token.length()-1);id=CreateMechanicalPower.registeredBlockId(token);
+            }
+            if(id!=null)types.add(id);
+        }
+        return types.size()==1 ? types.iterator().next() : null;
     }
 
     private static IntentAction.Decision decision(Goal goal, String question,

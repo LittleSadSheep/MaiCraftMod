@@ -45,6 +45,26 @@ public final class ConstructionSiteRuntimeTest {
                 check(JsonParser.parseString(action.argumentsJson()).getAsJsonObject().get("transmission").getAsString()
                         .equals(family.equals("chain_drive") ? "encased_chain_drive" : family),"semantic adapter preserves explicit transmission family");
             }
+            // 请求同时给出大区域与已记住的机器时，实际接线绑定机器；显式类型在区域内筛选，不能仅做显示名。
+            runtime.remember("receiver",new Goal.WorldPosition(4,8,4,site.dimension()));
+            var named=JsonParser.parseString("""
+                    {"ability":"maicraft:connect_mechanical_power","outcome":"连接目标机器",
+                     "target":{"kind":"area","label":"site"},"parameters":{"source_label":"site","target_label":"receiver"}}
+                    """).getAsJsonObject();
+            var resolved=(IntentAction.Tool)AbilityAdapter.adapt(Goal.fromJson(named),world.player,runtime);
+            var endpoint=JsonParser.parseString(resolved.argumentsJson()).getAsJsonObject();
+            check(endpoint.get("destination_x").getAsInt()==4 && endpoint.get("destination_z").getAsInt()==4,
+                    "named machine location takes precedence over the broad area center");
+            named.getAsJsonObject("parameters").addProperty("target_label","minecraft:hopper");
+            endpoint=JsonParser.parseString(((IntentAction.Tool)AbilityAdapter.adapt(Goal.fromJson(named),world.player,runtime)).argumentsJson()).getAsJsonObject();
+            check(endpoint.get("destination_name").getAsString().equals("minecraft:hopper") && endpoint.get("destination_x").getAsInt()==anchor.getX(),
+                    "registered type is preserved alongside the observed search area");
+            named.getAsJsonObject("parameters").addProperty("target_label","unremembered receiver");
+            check(AbilityAdapter.adapt(Goal.fromJson(named),world.player,runtime) instanceof IntentAction.Decision,
+                    "an unresolved explicit machine name cannot silently select another device in the area");
+            check("minecraft:hopper".equals(AbilityAdapter.relationBlockId("the observed minecraft:hopper."))
+                    && AbilityAdapter.relationBlockId("minecraft:hopper and minecraft:stone")==null,
+                    "one explicit registered type survives a prior-result relation without guessing among multiple types");
             JsonObject request = JsonParser.parseString("""
                     {"ability":"maicraft:build_machine","outcome":"build on the platform",
                      "target":{"kind":"landmark","label":"site"},"parameters":{"allow_modify":true,

@@ -7,6 +7,9 @@ import java.util.UUID;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
@@ -32,6 +35,17 @@ public final class CreateMechanicalPower {
             center = Objects.requireNonNull(center, "center").immutable();
             if (name.isEmpty()) throw new IllegalArgumentException("endpoint name is blank");
         }
+        // 注册方块 ID 是调用者对受电设备的明确筛选，不能只当显示名称后选中附近更近的旧轴。
+        public boolean accepts(BlockState state) {
+            String required=registeredBlockId(name);
+            return required==null || BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(required);
+        }
+    }
+
+    public static String registeredBlockId(String name) {
+        if(name==null || !name.contains(":"))return null;
+        var id=ResourceLocation.tryParse(name);
+        return id!=null && BuiltInRegistries.BLOCK.containsKey(id) ? id.toString() : null;
     }
 
     /**
