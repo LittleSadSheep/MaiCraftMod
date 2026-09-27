@@ -139,8 +139,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             boolean bucket = !manualCrank && button() == Interaction.Button.USE
                     && FirstPersonInteractionTargeting.usesBucketRay(useItem);
             // 普通取放要点中原生允许的面；桶仍按自己的取水或倒水射线走，不能混用台面规则。
-            var useFace = r.aim == null || bucket || button() != Interaction.Button.USE ? null
-                    : CreateInteractionSurface.requiredFace(player.level().getBlockState(r.aim));
+            var useSurface = r.aim == null || bucket || button() != Interaction.Button.USE ? null
+                    : CreateInteractionSurface.forUse(player.level().getBlockState(r.aim), useItem);
             if (r.aim != null) {
                 if (aimPoint == null) {
                     var state = player.level().getBlockState(r.aim);
@@ -149,8 +149,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                                     player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), useItem)
                             : state.isAir()
                             ? null
-                            : FirstPersonInteractionTargeting.visibleBlockHit(
-                                    player.level(), player, player.getEyePosition(), r.aim, REACH, useFace);
+                            : useSurface == null ? FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH)
+                            : useSurface.visibleHit(player.level(), player, player.getEyePosition(), r.aim, REACH);
                     aimPoint = visible == null ? Vec3.atCenterOf(r.aim) : visible.getLocation();
                 }
                 // 使用交互不能继承前一施工任务留下的潜行放置状态。
@@ -168,10 +169,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     ? FirstPersonInteractionTargeting.bucketRay(player.level(), player,
                             player.getEyePosition(), rayEnd, useItem)
                     : Interaction.nativeRaytrace(player, REACH);
-            // 镜头真正到位后仍核对操作面，不向已经变成侧面或被挡住的工件台发送一次无效右键。
-            if (useFace != null && (!(hit instanceof BlockHitResult surface) || !surface.getBlockPos().equals(r.aim)
-                    || surface.getDirection() != useFace)) {
-                fail("the required machine interaction face is no longer visible: " + useFace.getName(), FailureType.OCCLUDED);
+            // 镜头到位后仍核对真实命中点；台座侧面和机械手机壳都不能替代它们的原生取放入口。
+            if (useSurface != null && useSurface.constrained()
+                    && (!(hit instanceof BlockHitResult surface) || !surface.getBlockPos().equals(r.aim)
+                    || !useSurface.accepts(surface))) {
+                fail("the required machine interaction surface is no longer visible", FailureType.OCCLUDED);
                 return TaskState.FAILED;
             }
             // 与语义预检共用同一套遮挡口径:普通目标命中更近的别块就是被挡住;

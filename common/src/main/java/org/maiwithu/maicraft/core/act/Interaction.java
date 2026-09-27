@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorUse;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
@@ -513,6 +514,14 @@ public final class Interaction {
             }
         }
         if (!aimReady(hit.getLocation())) {
+            return false;
+        }
+        // 镜头在准备与出手之间仍可能变化；真正发右键前再核对台面或机械手前端，禁止向机壳发送无效点击。
+        if (!fallingThrough && !CreateInteractionSurface.forUse(player.level().getBlockState(block),
+                player.getItemInHand(hand).getItem()).accepts(hit)) {
+            failReason = "the native machine interaction region is not under the crosshair";
+            failType = FailureType.OCCLUDED;
+            hardFail = true;
             return false;
         }
         if (fallingThrough) {

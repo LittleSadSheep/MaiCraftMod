@@ -1153,9 +1153,9 @@ public final class GeneralAbilityAdapter {
             return FirstPersonInteractionTargeting.visibleBucketHit(
                     level, player, eye, target, player.blockInteractionRange(), item) != null;
         }
-        // 置物台取放只允许顶面，自动选站位时就排除只能看到侧面的格子，免得走到那里再点空。
-        var face = CreateInteractionSurface.requiredFace(level.getBlockState(target));
-        if (face != null) return FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, 4.5D, face) != null;
+        // 先找到能看见真实取放区域的站位；机械手要看到前端，不能走到只能看见机壳的位置再等待超时。
+        var surface = CreateInteractionSurface.forUse(level.getBlockState(target), item);
+        if (surface.constrained()) return surface.visibleHit(level, player, eye, target, 4.5D) != null;
         return FirstPersonInteractionTargeting.hasLoadedReachLine(
                 level, player, eye, target, 4.5D);
     }

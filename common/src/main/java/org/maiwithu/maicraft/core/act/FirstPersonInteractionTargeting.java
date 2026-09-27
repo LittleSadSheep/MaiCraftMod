@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.Set;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import java.util.ArrayList;
+import java.util.function.Predicate;
 
 /**
  * 在走过去之前先试算“站在那里能否点到”，相机转到位后再用同一套规则核对。
@@ -130,6 +131,13 @@ public final class FirstPersonInteractionTargeting {
     /** 工作台面只接受指定方向的点击时，先用真实选择形状找该面的可见点；侧面可见不代表能投料或取货。 */
     public static BlockHitResult visibleBlockHit(
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Direction requiredFace) {
+        return visibleBlockHit(level, observer, eye, target, reach, requiredFace, ignored -> true);
+    }
+
+    /** 有效交互区可能只是机械手前端；每条原生射线命中后再筛选，不能拿同一方块上的无效部位代替。 */
+    public static BlockHitResult visibleBlockHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Direction requiredFace,
+            Predicate<BlockHitResult> acceptsHit) {
         if (!Double.isFinite(reach) || reach <= 0.0D
                 || !level.isLoaded(BlockPos.containing(eye))
                 || !level.isLoaded(target)) {
@@ -173,6 +181,7 @@ public final class FirstPersonInteractionTargeting {
             if (hit.getType() == HitResult.Type.BLOCK
                     && hit.getBlockPos().equals(target)
                     && (requiredFace == null || hit.getDirection() == requiredFace)
+                    && acceptsHit.test(hit)
                     && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
                 return hit;
             }
