@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
@@ -97,8 +98,9 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (bodyInLavaFlow) lastStanceRejection = "body_in_possible_lava_flow";
         if (unsettledLavaBody()) lastStanceRejection = "lava_stance_not_grounded";
         if (currentRejected || visible == null || bodyOverTarget || bodyInLavaFlow || unsettledLavaBody()) return approach();
+        if (!settleNavigation()) return TaskState.RUNNING;
         relocate = false;
-        stopNav(); aim = visible.getLocation(); InputDriver.halt(player); InputDriver.lookAt(player, aim);
+        aim = visible.getLocation(); InputDriver.halt(player); InputDriver.lookAt(player, aim);
         // 只把真正等待转头的刻数记入瞄准超时；动作端口忙时不应反复丢弃已经正确的站位。
         if (!aimGate.ready(player, aim.subtract(player.getEyePosition()))) {
             waiting("aligning_camera"); if (++aimTicks > 80) rejectStand(); return TaskState.RUNNING;
@@ -168,7 +170,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     }
     private boolean atStance() { return stance != null && player.onGround() && PlayerNav.playerFeet(player).equals(stance); }
     private TaskState settleStance() {
-        stopNav(); actualRayAvailable = visibleFrom(player.getEyePosition()) != null;
+        if (!settleNavigation()) return TaskState.RUNNING;
+        actualRayAvailable = visibleFrom(player.getEyePosition()) != null;
         bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
         if (bodyInLavaFlow) rejectStand("body_in_possible_lava_flow");
@@ -176,6 +179,14 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         else if (!actualRayAvailable || bodyOverTarget) rejectStand();
         else { relocate = false; aimTicks = 0; aimGate.reset(); waiting("stance_ready"); }
         return TaskState.RUNNING;
+    }
+    private boolean settleNavigation() {
+        // 走近途中刚看见落桶格时，先等跳跃或下落路线安全交棒；旧导航仍握着身体时不能抢相机反复瞄准。
+        // 已被其他阶段 stop 的路线也可能还在收尾，因此同时检查运行器持有的实际控制权。
+        if (nav != null && !nav.yieldForExternalAction() || !EmbeddedBaritoneRuntime.yieldActiveForExternalAction(player)) {
+            waiting("settling_navigation"); return false;
+        }
+        stopNav(); return true;
     }
     private void rejectStand() {
         rejectStand("native_bucket_ray_unavailable");
