@@ -46,6 +46,8 @@ docs/
 !/docs/
 /docs/*
 !/docs/dev/
+!/docs/architecture/
 # 项目工作规则只在根目录保留，不进入 Git 历史。
 AGENTS.md
 experiments/
+.omo
