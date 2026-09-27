@@ -236,7 +236,7 @@ public final class ClientMachineCatalog {
                 if (focus.startsWith(prefix)) catalog.node(line.id(),focus.substring(prefix.length()),now).ifPresent(node -> nodes.add(node.json(false)));
             result.add("matching_nodes",nodes);
         }
-        result.addProperty("guidance", "Remembered descriptions are not current permission. Inspect a label before changing it; use watch_production for passive future-output monitoring.");
+        // 沿用快照层统一的修改规则，不能在目录末尾又覆盖成“每次修改前必须另发检查”。
         return result;
     }
     public static Goal.WorldPosition resolveLabel(LocalPlayer player, String label) {

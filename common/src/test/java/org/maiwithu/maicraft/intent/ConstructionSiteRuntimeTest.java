@@ -52,6 +52,16 @@ public final class ConstructionSiteRuntimeTest {
             var refreshed = MachineSnapshots.constructionSite(world.player, "site", new BlockPos(fixed.x(), fixed.y(), fixed.z()), 7);
             check(refreshed.center().equals(site.center()) && MachinePlanPreflight.review(goal, world.player, runtime)
                     .get("valid").getAsBoolean(), "刷新现场后旧计划仍绑定同一锚点");
+            // 列表只显示同名同址的最新观察；施工锚点可复用和操作证据已过期必须分别报告。
+            clock.setLong(world.level,7001);
+            var summaries = MachineSnapshots.summaries(world.player);
+            var sites = summaries.getAsJsonArray("machines").asList().stream().map(value -> value.getAsJsonObject())
+                    .filter(value -> value.get("label").getAsString().equals("site")).toList();
+            check(sites.size() == 1 && sites.getFirst().get("snapshot_id").getAsString().equals(refreshed.id())
+                    && sites.getFirst().get("cached_versions").getAsInt() == 2,"repeated observations are one machine reference with version count");
+            check(sites.getFirst().get("expired").getAsBoolean() && sites.getFirst().get("construction_anchor_reusable").getAsBoolean(),
+                    "a reusable construction anchor does not make old operating evidence fresh");
+            check(MachineSnapshots.requireForConstruction(world.player,site.id()).id().equals(site.id()),"summary deduplication cannot consume older referenced observations");
             try {
                 runtime.constructionAnchor("site", new Goal.WorldPosition(10, 8, 9, "minecraft:the_nether"));
                 throw new AssertionError("跨维度观察不应覆盖工地");

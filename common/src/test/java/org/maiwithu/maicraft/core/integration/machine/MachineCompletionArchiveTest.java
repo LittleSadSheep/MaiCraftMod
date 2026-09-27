@@ -63,6 +63,10 @@ public final class MachineCompletionArchiveTest {
             var persisted = restored.blueprint(built.id()).orElseThrow();
             check(persisted.blueprint().equals(plan.blueprint()) && persisted.captureMin().x() == 3 && persisted.captureMax().z() == 3,
                     "automatic completion records preserve blueprint and exact capture bounds across reconnect");
+            // 完整目录也必须保留“已授权修改直接执行”的约定，不能被展示层旧文案改回先检查后修改。
+            String guidance = ClientMachineCatalog.view(h.player,"简易机器").get("guidance").getAsString();
+            check(guidance.contains("snapshot_id is optional") && !guidance.contains("Inspect a label before changing"),
+                    "catalog guidance preserves the modification contract");
             // 已完成的局部新增沿用同一机器编号与原设计，比较缓存、全量读取范围也应扩展到整机。
             var patch = JsonParser.parseString("""
                     {"blocks":[{"offset":[4,1,3],"block_id":"minecraft:gold_block"}]}

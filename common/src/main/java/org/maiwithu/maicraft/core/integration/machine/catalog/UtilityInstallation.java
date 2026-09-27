@@ -40,7 +40,8 @@ public record UtilityInstallation(String id, String label, String dimension, Pos
             entries.add(entry);
         }
         result.add("external_inputs", entries); if (includeLocation) result.add("anchor", CatalogViews.position(anchor));
-        result.addProperty("next_operation", "inspect_machine then modify_machine connect_external_input; kinetic inputs may omit source_label to compare nearby loaded powered outlets");
+        // 已知机器和端口可直接委托连接，当前接口状态由修改任务内部读取，不额外制造检查回合。
+        result.addProperty("next_operation", "modify_machine connect_external_input with the known machine label and input_id; snapshot_id is optional; kinetic inputs may omit source_label to compare nearby loaded powered outlets");
         return result;
     }
     static String encode(List<MachineUtilityInputs.Input> inputs) { var entries = new JsonArray(); inputs.forEach(input -> entries.add(input.json())); return entries.toString(); }
