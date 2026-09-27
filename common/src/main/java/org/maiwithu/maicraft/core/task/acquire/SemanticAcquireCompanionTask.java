@@ -388,6 +388,7 @@ public final class SemanticAcquireCompanionTask
         int deficit = missing(need);
         List<CraftRecoveryCandidate> candidates = new ArrayList<>();
         List<ExecutableCraft> executable = new ArrayList<>();
+        List<ExecutableCraft> partial = new ArrayList<>();
         CraftingWorkstationCoordinator.PlanningSnapshot workstation =
                 CraftOps.requiresWorkstationForAny(need.itemIds, player)
                         ? CraftingWorkstationCoordinator.inspect(player) : null;
@@ -413,6 +414,12 @@ public final class SemanticAcquireCompanionTask
                 executable.add(new ExecutableCraft(output, plan));
             } else {
                 candidates.addAll(plan.recoveryCandidates());
+                // 可替代成品按合计数量交付；两根橡木加一根桦木可分别做木板，不要求九张必须全来自一种木头。
+                if(deficit>1 && need.itemIds.size()>1) {
+                    var one=craftOps.plan(output.toString(),requestedOwnFinal-deficit+1,player,context,workstation,excludedRecipes);
+                    if(one.executable() && recipePlanner.unitConversion(one.task().recipeId,need.itemIds)!=null)
+                        partial.add(new ExecutableCraft(output,one));
+                }
             }
         }
 
@@ -421,6 +428,9 @@ public final class SemanticAcquireCompanionTask
                 .min(Comparator.comparing(
                         candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
                 .orElse(null);
+        // 有一趟可做完的配方时仍优先整批；没有时才先兑现已携带的一种原料，随后继续补总数。
+        if(selected==null)selected=partial.stream().filter(candidate->candidate.plan().cost()!=null)
+                .min(Comparator.comparing(candidate->candidate.plan().cost(),CraftPlanCost.ORDER)).orElse(null);
         if (selected != null) {
             // 现在有现成可做的配方，就不再为了先前尚未凑齐的方案继续找额外材料。
             need.committedRecipeIds.clear();
@@ -1079,6 +1089,11 @@ public final class SemanticAcquireCompanionTask
                 if (progress == 0 || structuredFailure) advanceSource(completedNeed);
             }
             case CRAFT -> {
+                // 这批单料转换已完整结算且增加了目标成品，剩余数量可用另一木种，不遗留一个已完成批次的配方锁。
+                if(progress>0 && !structuredFailure && completedRecord instanceof CraftTaskRecord craft
+                        && recipePlanner.unitConversion(craft.recipeId,completedNeed.itemIds)!=null) {
+                    completedNeed.committedRecipeIds.clear(); completedNeed.committedRecipeEffectsObserved=false;
+                }
                 if (progress == 0 || structuredFailure) {
                     if (completedRecord instanceof CraftTaskRecord craft) {
                         if (recoverCraftingSurface(completedNeed, craft, result)) {
