@@ -34,6 +34,9 @@ public final class NativeRecipeDefinition {
         } catch (RuntimeException | LinkageError unavailable) {
             out.addProperty("definition_status", "unknown"); out.addProperty("definition_issue", "native_definition_not_encodable");
         }
+        // 序列装配的 chance 在原生实现中是权重；另附已安装 API 的概率事实，原始定义和整体未知边界继续保留。
+        JsonObject distribution = CreateAssemblyOutcomeFacts.read(recipe, registries);
+        if (distribution != null) out.add("native_outcome_distribution", distribution);
         return out;
     }
 

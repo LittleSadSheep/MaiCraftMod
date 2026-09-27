@@ -25,6 +25,8 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 
 /** 原生定义只经序列化读取；深度、节点、UTF-8超预算或序列化失败都明确未知，不执行配方补猜字段。 */
 public final class NativeRecipeDefinitionTest {
@@ -32,11 +34,13 @@ public final class NativeRecipeDefinitionTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         var registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
         synchronizedShapedRecipe(registries);
+        assemblyOutcomeUnitsUseNativeApi(registries);
         var invalid = new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(Items.BRICK),
                 NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK))) {
             @Override public RecipeSerializer<?> getSerializer() { throw new IllegalStateException("fixture unreadable serializer"); }
         };
         JsonObject unknown = NativeRecipeDefinition.read(invalid, registries);
+        check(!unknown.has("native_outcome_distribution"), "ordinary recipes cannot inherit Create weighted-choice semantics");
         check(unknown.get("definition_status").getAsString().equals("unknown") && !unknown.has("definition"), "无法编码时不能退回展示概率冒充原生定义");
         var huge = new ShapelessRecipe("界".repeat(20_000), CraftingBookCategory.MISC, new ItemStack(Items.BRICK),
                 NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK)));
@@ -84,4 +88,31 @@ public final class NativeRecipeDefinitionTest {
     }
 
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+    private static void assemblyOutcomeUnitsUseNativeApi(RegistryAccess registries) {
+        // 原生权重可能大于一；只在主产物概率与原生 getter 一致时解释单位，不能把展示 1.0 当作保底产出。
+        ItemStack named = new ItemStack(Items.BRICK, 2);
+        named.set(DataComponents.CUSTOM_NAME, Component.literal("原生产物"));
+        var outcomes = List.of(new CreateAssemblyOutcomeFacts.Outcome(named, 120),
+                new CreateAssemblyOutcomeFacts.Outcome(new ItemStack(Items.GOLD_NUGGET), 3),
+                new CreateAssemblyOutcomeFacts.Outcome(new ItemStack(Items.STICK), 27));
+        JsonObject facts = CreateAssemblyOutcomeFacts.describe(2, 4, outcomes, .8f, registries);
+        check(facts.get("total_steps").getAsInt() == 8 && facts.get("result_selection").getAsString().equals("one_weighted_result_after_all_loops"),
+                "loop and step counts describe one final weighted choice");
+        var rows = facts.getAsJsonArray("outcomes");
+        check(rows.get(0).getAsJsonObject().get("probability").getAsDouble() == .8
+                && rows.get(1).getAsJsonObject().get("probability").getAsDouble() == .02,
+                "native weights expose primary and byproduct probabilities without rolling any result");
+        named.setCount(8);
+        check(rows.get(0).getAsJsonObject().get("count").getAsInt() == 2
+                && rows.get(0).getAsJsonObject().getAsJsonObject("identity").getAsJsonObject("components").has("minecraft:custom_name")
+                && !facts.get("production_verified").getAsBoolean(), "knowledge preserves result components without claiming an actual product");
+        rejects(() -> CreateAssemblyOutcomeFacts.describe(2, 4, outcomes, 1, registries), "API mismatch remains unknown");
+        rejects(() -> CreateAssemblyOutcomeFacts.describe(2, 4, List.of(new CreateAssemblyOutcomeFacts.Outcome(ItemStack.EMPTY, 0)), 0, registries), "zero total weight is invalid");
+        rejects(() -> CreateAssemblyOutcomeFacts.describe(2, 4, List.of(new CreateAssemblyOutcomeFacts.Outcome(ItemStack.EMPTY, Float.NaN)), 1, registries), "nonfinite weight cannot become a probability");
+        rejects(() -> CreateAssemblyOutcomeFacts.describe(0, 4, outcomes, .8f, registries), "empty loop count cannot invent a completion boundary");
+    }
+    private static void rejects(Runnable action, String message) {
+        try { action.run(); throw new AssertionError(message); }
+        catch (IllegalArgumentException expected) { /* 原生资料未通过核对时保留未知，不输出假概率。 */ }
+    }
 }
