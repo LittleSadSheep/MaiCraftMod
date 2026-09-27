@@ -150,6 +150,8 @@ public final class GuiRegressionSuite {
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
         // 区分实体点击与物品自身使用，避免砂纸等工序停在不可选中的掉落物上。
         UseHeldItemPrimitiveTest.main(args);
+        // 打开村民交易必须先有可支付条件并准备空手，不能退回使用上一轮拿着的 AE 终端。
+        TradeMenuPreparationTest.main(args);
         // 批次核对双手准备、耗材更换和失败后的真实部分产物，禁止由重试补造成功数量。
         UseItemBatchTest.main(args);
         CraftingResultSynchronizationTest.main(args);
