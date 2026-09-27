@@ -30,6 +30,8 @@ final class BuildPlacementAccessSearch {
     private final BuildSupportWorld world;
     private final Vec3 origin;
     private final BuildSupportWalking walking;
+    private final LongSet forbidden;
+    private final PhysicalObstacleSnapshot physical;
     private final Supplier<GroundCorridor> corridors;
     private GroundCorridor corridor;
     private final boolean edgesOnly;
@@ -38,7 +40,7 @@ final class BuildPlacementAccessSearch {
     private final ArrayDeque<Node> frontier = new ArrayDeque<>();
     private final Set<BlockPos> visited = new HashSet<>();
     private Node node;
-    private int candidateAt, checked;
+    private int candidateAt, checked, rejectedReturns;
     private boolean initialized, complete;
     private String reason = "checking_reachable_placement";
     private Access access;
@@ -46,6 +48,7 @@ final class BuildPlacementAccessSearch {
     BuildPlacementAccessSearch(LocalPlayer player, BuildTaskRecord.Target target, BuildSupportWorld world, Vec3 origin,
                                LongSet forbidden, PhysicalObstacleSnapshot physical, int visitLimit, boolean edgesOnly) {
         this.player = player; this.target = target; this.world = world; this.origin = origin;
+        this.forbidden = forbidden; this.physical = physical;
         this.visitLimit = Math.min(MAX_VISITS, Math.max(0, visitLimit)); this.edgesOnly = edgesOnly;
         // 角色可能仍在另一间房：把当前脚位的小范围出口和目标附近合成有限包围框，再沿真实地板走进去。
         BlockPos start = BlockPos.containing(origin);
@@ -129,6 +132,9 @@ final class BuildPlacementAccessSearch {
             lowerEye = gesture != null;
         }
         if (gesture == null) return;
+        // 当前能点击不代表放完还能退回；先检查新方块的真实碰撞形状，再接受这条贴边方案。
+        if (edge && !BuildPlacementReturnGeometry.allowed(player, target, world, player.level()::isLoaded,
+                forbidden, physical, feet, anchor)) { rejectedReturns++; return; }
         var route = new ArrayList<Vec3>(); for (Node at = node; at != null; at = at.previous()) route.add(at.feet());
         Collections.reverse(route);
         if (!route.getLast().equals(anchor)) route.add(anchor);
@@ -157,5 +163,6 @@ final class BuildPlacementAccessSearch {
     String reason() { return reason; }
     int checked() { return checked; }
     int visited() { return visited.size(); }
+    int rejectedReturns() { return rejectedReturns; }
     private void fail(String detail) { complete = true; access = null; reason = detail; }
 }

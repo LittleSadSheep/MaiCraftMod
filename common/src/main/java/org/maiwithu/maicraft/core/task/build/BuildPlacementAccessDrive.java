@@ -140,6 +140,10 @@ final class BuildPlacementAccessDrive {
         var live = new BuildSupportWorld(player.level(), player.level()::isLoaded, Map.of());
         gesture = currentGesture(live, access.edge() || anchorSneak);
         if (gesture == null || !allowed.getAsBoolean()) return fail("placement_access_live_click_unavailable");
+        // 导航和选物期间世界可能改变；真正交出右键前重查放置后的退路，避免沿过期见证把自己封在檐边。
+        if (access.edge() && !BuildPlacementReturnGeometry.allowed(player, target, live, player.level()::isLoaded,
+                forbidden(), EmbeddedBaritoneRuntime.physicalObstacles(), player.position(), access.approach()))
+            return fail("placement_return_obstructed_before_click");
         if (gesture.sneak()) postureReason = access.edge() ? "partial_support_edge" : anchorSneak ? "low_clearance_crouch"
                 : BuildPlacementInteraction.requiresSneak(live.getBlockState(gesture.clicked())) ? "right_click_interaction" : "crouching_view_required";
         phase = "ready"; status = Status.READY; hold(); return status;
@@ -204,6 +208,7 @@ final class BuildPlacementAccessDrive {
         data.put("posture_reason", postureReason); if (access != null) data.put("edge_required", access.edge());
         if (failure != null) data.put("reason", failure);
         if (search != null) { data.put("reachable_stances", search.visited()); data.put("checked_stances", search.checked()); }
+        if (search != null) data.put("rejected_post_placement_returns", search.rejectedReturns());
         // 锚点未对齐时也公开实际身体与目标的差异，不能只留下笼统的“贴边失败”而丢失半阶高度证据。
         if (anchorAlignment != null) data.put("anchor_alignment", anchorAlignment.evidence());
         if (returning != null) data.put("edge", returning.evidence()); else if (edge != null) data.put("edge", edge.evidence());

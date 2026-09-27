@@ -66,6 +66,7 @@ import org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest;
 import org.maiwithu.maicraft.core.task.build.BuildFailureEvidenceTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodPreparationTest;
+import org.maiwithu.maicraft.core.task.build.BuildPlacementReturnTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodStockSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.HarvestCropTest;
 import org.maiwithu.maicraft.core.task.build.BuildFootingTest;
@@ -257,6 +258,7 @@ public final class GuiRegressionSuite {
         BuildSupplyUncertaintyTest.main(args);
         BuildSupplyAccessTest.main(args);
         BuildFoodPreparationTest.main(args);
+        BuildPlacementReturnTest.main(args);
         BuildFoodStockSupplyTest.main(args);
         HarvestCropTest.main(args);
         BuildFoodBoundaryTest.main(args);
