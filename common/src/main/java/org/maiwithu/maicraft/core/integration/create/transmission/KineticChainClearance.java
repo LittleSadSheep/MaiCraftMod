@@ -13,6 +13,9 @@ final class KineticChainClearance {
     private KineticChainClearance() {}
     static boolean clear(KineticGeometryWork work, List<BlockPos> wheels) {
         Set<BlockPos> wheelCenters = Set.copyOf(wheels), swept = new HashSet<>();
+        // 复用现有两只轮只检查真实轮缘和链条空间；脚下支撑、低处水面或上方屋顶的高度图不代表挂链处被占用。
+        boolean existingPair=work.blocks.isEmpty() && work.source.chainInterface() && work.target.chainInterface()
+                && wheels.size()==2 && wheelCenters.contains(work.source.position()) && wheelCenters.contains(work.target.position());
         // 传动轮会从自身方块格向外延伸到所有相邻水平格，包括对角格。
         for (BlockPos wheel : wheels) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) swept.add(wheel.offset(dx, 0, dz));
         for (int i = 1; i < wheels.size(); i++) {
@@ -35,6 +38,7 @@ final class KineticChainClearance {
             if (!work.terrain.loaded(at) || work.terrain.protectedCell(at)) return false;
             if (wheelCenters.contains(at)) continue; // 仅精确规划或观察到的轮中心可作为占用例外。
             if (work.blocks.containsKey(at) || !work.terrain.passable(at) || work.terrain.kinetic(at)) return false;
+            if(existingPair)continue;
             Integer ground = work.ground(at.getX(), at.getZ());
             if (ground == null || !endpointColumn(work, at) && at.getY() - ground - 1 < work.limits.clearance()) return false;
         }

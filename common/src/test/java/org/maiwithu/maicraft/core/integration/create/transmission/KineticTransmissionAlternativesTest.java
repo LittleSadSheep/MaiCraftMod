@@ -16,6 +16,7 @@ public final class KineticTransmissionAlternativesTest {
         encasedGeometryRejectsUnprovenTurnsAndMerges();
         wheelFootprintsAndBothStrandsNeedClearance();
         slopedSweepsAndUnknownCellsAreCheckedContinuously();
+        existingLowWheelsUseTheirActualHeight();
         System.out.println("KineticTransmissionAlternativesTest: " + checks + " checks passed");
     }
     private static void encasedBridgeCompetesWithTheOtherRealPlans() {
@@ -71,16 +72,34 @@ public final class KineticTransmissionAlternativesTest {
     private static boolean clear(Endpoint source, Endpoint target, World world) {
         return KineticChainClearance.clear(new KineticGeometryWork(source, null, target, null, world, Limits.defaults(16)), List.of(source.position(), target.position()));
     }
+    private static void existingLowWheelsUseTheirActualHeight() {
+        // 两只现有轮在地面上方两格，旁边还留着施工踏步；这些低处方块不与轮缘或链条占用体积相交。
+        Endpoint source=wheel(0,2,0), target=wheel(10,2,0); World world=new World(source,target);
+        world.solids.add(new BlockPos(9,0,1));
+        var direct=KineticRouteGeometry.generate(source,target,world,Limits.defaults(16)).stream()
+                .filter(plan->plan.family().equals("existing_chain_conveyor_link")).findFirst().orElseThrow();
+        check(direct.placements().isEmpty() && direct.bom().equals(Map.of("minecraft:chain",4)),
+                "existing low wheels need chains only, not a replacement pair and taller shaft pillars");
+        check(KineticRouteGeometry.clearanceValid(direct,world),"live revalidation preserves the same existing-wheel clearance rule");
+        // 即使高度图反映屋顶，也以挂链高度实际空间为准；有真实链条障碍时仍拒绝原位直连。
+        world.ground=8;
+        check(clear(source,target,world),"overhead heightmap does not obstruct an observed empty chain envelope");
+        world.solids.add(new BlockPos(5,2,1));
+        check(!clear(source,target,world) && !KineticRouteGeometry.clearanceValid(direct,world),
+                "a newly occupied native chain strand still invalidates the existing pair");
+        check(!KineticRouteGeometry.validLink(source.position(),new BlockPos(1,2,0),16),"native minimum distance remains required");
+    }
     private static Endpoint shaft(int x, int y, int z, Direction face) { return new Endpoint(new BlockPos(x, y, z), face.getAxis(), List.of(face), "shaft"); }
     private static Endpoint wheel(int x, int y, int z) { return new Endpoint(new BlockPos(x, y, z), Direction.Axis.Y, List.of(), "chain_conveyor"); }
     private static final class World implements Terrain {
+        int ground;
         final Set<BlockPos> solids = new HashSet<>(), protectedCells = new HashSet<>(), unloaded = new HashSet<>(), kinetics = new HashSet<>(), checked = new HashSet<>(), read = new HashSet<>();
         World(Endpoint source, Endpoint target) { solids.add(source.position()); solids.add(target.position()); kinetics.addAll(solids); }
         public boolean loaded(BlockPos at) { checked.add(at.immutable()); return !unloaded.contains(at); }
         public boolean passable(BlockPos at) { requireLoaded(at); return at.getY() > 0 && !solids.contains(at); }
         public boolean protectedCell(BlockPos at) { requireLoaded(at); return protectedCells.contains(at); }
         public boolean kinetic(BlockPos at) { requireLoaded(at); return kinetics.contains(at); }
-        public Integer groundHeight(int x, int z) { return 0; }
+        public Integer groundHeight(int x, int z) { return ground; }
         private void requireLoaded(BlockPos at) { if (!checked.contains(at) || unloaded.contains(at)) throw new AssertionError("unloaded block read"); read.add(at.immutable()); }
     }
     private static void check(boolean value, String message) { checks++; if (!value) throw new AssertionError(message); }
