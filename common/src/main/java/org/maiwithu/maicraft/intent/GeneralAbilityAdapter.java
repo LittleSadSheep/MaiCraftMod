@@ -531,6 +531,10 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel container use.")), null);
         }
         String purpose = lower(string(p, "purpose"));
+        // 精确组件身份只绑定这次方块取放；不能把实体交互或空手请求悄悄退化成按物品名随便选一叠。
+        String itemResourceId = string(p, "item_resource_id");
+        if (itemResourceId != null && (itemId(p) == null || !selector(goal, p).empty() || containerOnly))
+            throw new IllegalArgumentException("item_resource_id requires item_id and a block interaction");
         int duration = CreateManualInput.durationTicks(p);
         if (duration > 0 && (containerOnly || !"use".equals(purpose) || !selector(goal, p).empty()))
             throw new IllegalArgumentException("duration_seconds requires use of a supported manual-generator block");
@@ -755,6 +759,8 @@ public final class GeneralAbilityAdapter {
         if (itemId != null) use.addProperty("item_id", itemId);
         // 未声明道具就是操作目标本身；先按空手计算站位，执行时再原生收好战斗或施工留下的主手物品。
         else use.addProperty("empty_hand", true);
+        String itemResourceId = string(goal.parameters(), "item_resource_id");
+        if (itemResourceId != null) use.addProperty("item_resource_id", itemResourceId);
         Item useItem = itemId == null ? Items.AIR
                 : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
         if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target, useItem)) {

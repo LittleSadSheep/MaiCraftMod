@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.intent;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation.UseTool;
@@ -16,11 +17,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
 public final class SemanticInteractionToolTest {
     public static void main(String[] args) {
         equipmentLocationContract();
-        try { manualDurationAndExactApproach(); }
+        try { manualDurationAndExactApproach(); exactVariantContract(); }
         catch (Exception failure) { throw new AssertionError("finite manual use and exact approach contract failed", failure); }
         var use = new IntentAction.Tool("interact_at", "{}");
         var walk = new IntentAction.Tool("goto", "{}");
@@ -54,6 +56,21 @@ public final class SemanticInteractionToolTest {
             throw new AssertionError("a world postcondition needs a concrete target");
         } catch (IllegalArgumentException expected) { }
         System.out.println("SemanticInteractionToolTest: passed");
+    }
+
+    private static void exactVariantContract() throws Exception {
+        // 公开语义目标到内部工具保持同一个已观察身份，不能在编译或参数转换时丢掉组件选择约束。
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.BRICK)); h.set(new BlockPos(0, 1, 0), Blocks.STONE.defaultBlockState());
+            String key = ResourceIdentity.key(ResourceIdentity.base("items", "minecraft:brick"));
+            var parameters = new JsonObject(); parameters.addProperty("block_id", "minecraft:stone");
+            parameters.addProperty("item_id", "minecraft:brick"); parameters.addProperty("item_resource_id", key);
+            Goal goal = new Goal("maicraft:interact", "使用已观察身份的工件", new Goal.SemanticTarget("coordinates", null,
+                    new Goal.WorldPosition(0, 1, 0, "minecraft:overworld"), null), parameters.toString(), "{}", List.of(), List.of());
+            SemanticGoalContract.validate(goal, Set.of("maicraft:interact"));
+            var command = (IntentAction.Tool) AbilityAdapter.adapt(goal, h.player, null);
+            check(command.arguments().get("item_resource_id").getAsString().equals(key), "semantic compilation preserves the exact item binding");
+        }
     }
 
     private static void equipmentLocationContract() {

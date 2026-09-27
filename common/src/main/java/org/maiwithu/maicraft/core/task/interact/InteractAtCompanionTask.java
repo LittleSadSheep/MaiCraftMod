@@ -30,6 +30,7 @@ import net.minecraft.world.phys.EntityHitResult;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
+import org.maiwithu.maicraft.core.inventory.CarriedItemVariants;
 import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
@@ -129,8 +130,16 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 fail("the required interaction target changed or unloaded before aiming", FailureType.TARGET_LOST);
                 return TaskState.FAILED;
             }
+            // 反击等插入动作换过主手后重新选回目标；半成品按完整组件身份匹配，避免从第十四步切到第一步。
+            if (r.item != null && itemSelected && !CarriedItemVariants.matches(player.getMainHandItem(), r.item, r.itemResourceId, player.registryAccess())) {
+                selection.reset(); itemSelected = false; aimPoint = null; aimConvergence.reset();
+            }
             if (r.item != null && !itemSelected) {
-                var selected = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
+                // 选择过程中固定同一笔原生交换，先结清在途回执；准备完成后再核对组件，不能因移槽而另发选择。
+                int source = selection.started() ? selection.requestedSlot()
+                        : CarriedItemVariants.find(player.getInventory(), r.item, r.itemResourceId, player.registryAccess());
+                if (source < 0) { fail("the requested carried item variant is missing or changed; observe inventory components before choosing again", FailureType.NO_MATERIAL); return TaskState.FAILED; }
+                var selected = selection.select(player, source);
                 if (selected == FirstPersonActionGate.Status.RUNNING) {
                     return TaskState.RUNNING;
                 }
@@ -139,6 +148,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     return TaskState.FAILED;
                 }
                 itemSelected = true;
+                if (!CarriedItemVariants.matches(player.getMainHandItem(), r.item, r.itemResourceId, player.registryAccess())) {
+                    fail("the selected item variant changed before native use", FailureType.TARGET_LOST); return TaskState.FAILED;
+                }
             }
             var useItem = player.getMainHandItem().getItem();
             boolean bucket = !manualCrank && button() == Interaction.Button.USE

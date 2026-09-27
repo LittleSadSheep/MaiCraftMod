@@ -27,6 +27,15 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public boolean heldItemUseOnly;
     public boolean emptyHand;
     public Item expectedOutputItem;
+    public String itemResourceId;
+
+    /** 只给已点名物品的方块交互绑定观察身份；选择哪一进度由调用者决定，执行器不替换成同名其他工件。 */
+    public InteractAtTaskRecord withItemResourceId(String resourceId) {
+        if (item == null || aim == null || button != MouseButton.RIGHT || resourceId == null
+                || resourceId.isBlank() || resourceId.length() > 512)
+            throw new IllegalArgumentException("item_resource_id requires a named item and block use, with a bounded observed identity");
+        itemResourceId = resourceId; return this;
+    }
 
     /** 语义目标没点名物品时先收好战斗或施工留下的工具，再空手点击方块，避免把工具当材料放进机器。 */
     public InteractAtTaskRecord withEmptyHand() {
