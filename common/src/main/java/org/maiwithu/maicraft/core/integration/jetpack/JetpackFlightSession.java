@@ -17,6 +17,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.ToDoubleFunction;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.combat.Menace;
+import net.minecraft.world.entity.monster.RangedAttackMob;
 import java.util.Locale;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
@@ -62,6 +66,8 @@ public final class JetpackFlightSession implements TransportSession {
     private Result terminal;
     private Map<String, Object> nativeEvidence = Map.of();
     private final ArrayDeque<Map<String, Object>> trace = new ArrayDeque<>();
+    private boolean damageStop, emergencyExitRequested;
+    private int escapeThreatCount;
     private long traceTick = Long.MIN_VALUE;
     private Phase recordedPhase;
     private Map<String, Object> departure = Map.of(), lastObstacle = Map.of();
@@ -149,6 +155,11 @@ public final class JetpackFlightSession implements TransportSession {
             if (!applied) { uncertain = true; failure = "jetpack_mode_unconfirmed"; detail = receipt.detail(); stopping = true; }
             receipt = null;
             if (!applied && phase == Phase.RESTORE) return finish(ctx, false);
+        }
+        // 飞行收尾仍独占身体，因此受伤后主动重选避险落点；不在空中把按键直接丢给地面战斗任务。
+        if (emergencyExitRequested && route != null && !grounded && power.controllable()
+                && power.active() && power.hover() && JetpackNativeAdapter.uprightActive(nativeEvidence)) {
+            emergencyExitRequested=false; escape(ctx,space(ctx)); return running();
         }
         // 规划阶段可换候选落点，但总离地搜索预算共享，不能换一个候选就重新取得全部额度。
         if (phase == Phase.PLAN) {
@@ -343,15 +354,16 @@ public final class JetpackFlightSession implements TransportSession {
     }
 
     private void escape(LocalPlayerContext ctx, JetpackRoute.Space space) {
-        var escape = JetpackEscape.choose(space, ctx.player().position(), route, waypoint, power);
+        var risk = escapeRisk(ctx);
+        var escape = JetpackEscape.choose(space, ctx.player().position(), route, waypoint, power,risk);
         if (originalRoute != route) {
             int nearest = 0;
             for (int i = 1; i < originalRoute.points().size(); i++) {
                 if (ctx.player().position().distanceToSqr(originalRoute.points().get(i))
                         < ctx.player().position().distanceToSqr(originalRoute.points().get(nearest))) nearest = i;
             }
-            var originalExit = JetpackEscape.choose(space, ctx.player().position(), originalRoute, nearest + 1, power);
-            if (originalExit != null && (escape == null || originalExit.requiredTicks() < escape.requiredTicks())) escape = originalExit;
+            var originalExit = JetpackEscape.choose(space, ctx.player().position(), originalRoute, nearest + 1, power,risk);
+            escape = JetpackEscape.better(originalExit,escape,power,risk);
         }
         if (escape == null) { approachHeight = ctx.player().getY(); phase = Phase.LAND; uncertain = true; return; }
         route = escape; waypoint = 1; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY; exiting = true; phase = Phase.FLY;
@@ -359,6 +371,19 @@ public final class JetpackFlightSession implements TransportSession {
         if (power.fuelTicks() < route.requiredTicks()) { uncertain = true; detail = "continuing toward the cheapest observed exit after fuel loss"; }
         brake(ctx); // 下一个 tick 会先核实出口路线段，再产生移动。
     }
+
+    private ToDoubleFunction<Vec3> escapeRisk(LocalPlayerContext ctx) {
+        if (!damageStop) return point -> 0;
+        var threats = new ArrayList<>(CombatThreats.attackers(ctx.player()));
+        // 已膨胀的苦力怕与明确盯住玩家的附近敌人也影响落点，不把中立村民或被动动物当作攻击目标。
+        for (var mob : Menace.hostilesAround(ctx.player(),Menace.FLEE_DISTANCE))
+            if (!threats.contains(mob) && (Menace.creeperThreat(mob,ctx.player()) || mob.getTarget() == ctx.player())) threats.add(mob);
+        var observed = threats.stream().map(mob -> new EscapeThreat(mob.position(),mob instanceof RangedAttackMob
+                ? Menace.FLEE_DISTANCE : Math.max(8,Menace.dangerRadius(mob,ctx.player())+4))).toList();
+        escapeThreatCount=observed.size();
+        return point -> observed.stream().mapToDouble(threat -> Math.max(0,threat.radius()-point.distanceTo(threat.position()))).sum();
+    }
+    private record EscapeThreat(Vec3 position, double radius) {}
 
     // 先对准平台并消掉相对横向速度，再下降；移动平台还要确认真实接触和连续站稳。
     private void land(LocalPlayerContext ctx) {
@@ -534,6 +559,10 @@ public final class JetpackFlightSession implements TransportSession {
         discoveringExit=movingTarget!=null && movingTarget.seekLandingOnStop();
         fastDescent.requestStop();
     }
+    @Override public void requestDamageStop() {
+        // 伤害后的停止不再追着原移动平台找入口；保持原生制动，待在途模式回执结清后选择离敌人更远的出口。
+        requestStop(); damageStop=true; emergencyExitRequested=true; discoveringExit=false;
+    }
     @Override public void abandon() {
         fastDescent.abandon();
         ClientRuntime.actor().body().releaseAll(); phase = Phase.DONE;
@@ -555,6 +584,7 @@ public final class JetpackFlightSession implements TransportSession {
         result.put("target", target.toString()); result.put("landing", landing == null ? "unobserved" : landing.toString());
         result.put("effects_started", effects); result.put("uncertain", uncertain); result.put("detail", detail);
         result.put("grounded", grounded);
+        result.put("damage_stop",damageStop); result.put("escape_threats_observed",escapeThreatCount);
         result.put("landing_approach_height", approachHeight);
         result.put("native_client_evidence", nativeEvidence);
         result.put("recent_flight_trace", compactTrace(trace));

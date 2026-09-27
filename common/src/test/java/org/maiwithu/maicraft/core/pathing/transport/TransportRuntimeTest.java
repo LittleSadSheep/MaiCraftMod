@@ -68,7 +68,7 @@ public final class TransportRuntimeTest {
         var f = new Fixture(memory); var owner = new Object(); var session = new Session();
         f.acquire(owner, session); TransportRuntime.drive(owner, f.context);
         TransportRuntime.cancel(owner);
-        check(session.stops == 1 && TransportRuntime.owns(owner), "cancel requests landing and retains lease");
+        check(session.stops == 1 && session.damageStops == 0 && TransportRuntime.owns(owner), "cancel requests ordinary landing and retains lease");
         f.nextTick();
         check(TransportRuntime.tickCleanup(f.context) && session.cleanupTicks == 1 && TransportRuntime.occupied(), "orphaned cleanup continues until landing");
         check(TransportRuntime.tickCleanup(f.context) && session.cleanupTicks == 1, "cleanup obeys same tick drive limit");
@@ -151,7 +151,7 @@ public final class TransportRuntimeTest {
         f.acquire(owner, session); TransportRuntime.drive(owner, f.context);
         f.nextTick(); f.player.health = 21; f.player.absorption = 2;
         TransportRuntime.drive(owner, f.context);
-        check(session.stops == 1 && TransportRuntime.occupied(), "damage must request controlled cleanup instead of releasing an airborne body");
+        check(session.stops == 1 && session.damageStops == 1 && TransportRuntime.occupied(), "damage must request threat-aware cleanup instead of releasing an airborne body");
         f.nextTick(); TransportRuntime.tickCleanup(f.context);
         check(!TransportRuntime.occupied() && f.completed.uncertain() && f.completed.code().equals("transport_damage_observed"),
                 "healing must not mask absorption loss or permit another transport attempt after cleanup");
@@ -159,7 +159,7 @@ public final class TransportRuntimeTest {
 
     // 这个替身在收到停止请求后再更新两次才结束，用来验证运行时不会过早松开交通控制。
     private static final class Session implements TransportSession {
-        int ticks, stops, abandons, cleanupTicks;
+        int ticks, stops, abandons, cleanupTicks, damageStops;
         boolean complete, throwAbandon, throwDiagnostics;
         public Result tick(LocalPlayerContext context) {
             ticks++;
@@ -168,6 +168,8 @@ public final class TransportRuntimeTest {
             return complete ? Result.success("arrived") : Result.running("flying");
         }
         public void requestStop() { stops++; }
+        // 受伤收尾与普通取消分开交付给交通实现，保持同一份身体租约和逐刻结算规则。
+        public void requestDamageStop() { damageStops++; requestStop(); }
         public void abandon() { abandons++; if (throwAbandon) throw new IllegalStateException("fixture abandon"); }
         public boolean safeToInterrupt() { return false; }
         public boolean livenessActive() { return true; }

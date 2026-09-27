@@ -108,7 +108,12 @@ public final class TransportRuntime {
                 // 当前只按血量或额外黄心减少判受伤，没有区分伤害与增益效果消退。
                 lease.damageObserved = true;
                 lease.cancelling = true;
-                lease.session.requestStop();
+                // 受伤不能只回到最快、却仍贴着攻击者的落点；将原因交给交通控制器，在保持身体控制时避险。
+                var state = description(lease);
+                Constants.LOG.info("[maicraft-transport] damage_stop mode={} phase={} health={}->{} absorption={}->{} grounded={} target={} landing={}",
+                        lease.mode,lease.session.phase(),lease.health,health,lease.absorption,absorption,
+                        state.get("grounded"),state.get("target"),state.get("landing"));
+                lease.session.requestDamageStop();
             }
             lease.health = health; lease.absorption = absorption;
             lease.result = lease.session.tick(context);

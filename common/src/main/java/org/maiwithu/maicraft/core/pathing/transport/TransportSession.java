@@ -27,6 +27,8 @@ public interface TransportSession {
 
     /** 请求安全停止；提出请求后可能还要继续几刻落地或出梯，不能立即丢弃控制。 */
     void requestStop();
+    /** 受伤要求停止时，能控制空中移动的交通先寻找避开威胁的出口；其他交通沿用安全停止流程。 */
+    default void requestDamageStop() { requestStop(); }
 
     /** 人工接管或玩家消失时直接释放旧输入，不再为旧身体做更多游戏操作。 */
     void abandon();

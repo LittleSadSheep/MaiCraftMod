@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.ToDoubleFunction;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -11,6 +12,11 @@ import net.minecraft.world.phys.Vec3;
 final class JetpackEscape {
     static JetpackRoute.Plan choose(JetpackRoute.Space space, Vec3 position, JetpackRoute.Plan route,
                                    int next, JetpackNativeAdapter.Snapshot power) {
+        return choose(space,position,route,next,power,point -> 0);
+    }
+    // 正常取消仍比较耗时；受伤撤离由调用方提供已观察威胁的风险，所有候选都先核实落脚面和完整通道。
+    static JetpackRoute.Plan choose(JetpackRoute.Space space, Vec3 position, JetpackRoute.Plan route,
+            int next, JetpackNativeAdapter.Snapshot power, ToDoubleFunction<Vec3> risk) {
         List<List<Vec3>> candidates = new ArrayList<>();
         Vec3 below = space.landingBelow(position.add(0, 0.1, 0));
         if (below != null) candidates.add(List.of(position, below));
@@ -32,10 +38,22 @@ final class JetpackEscape {
                 if (!space.clear(points.get(i-1), points.get(i))) { clear = false; break; }
                 ticks += JetpackRoute.edgeTicks(points.get(i-1), points.get(i), power);
             }
-            if (clear && Double.isFinite(ticks) && (best == null || ticks < best.requiredTicks())) {
-                best = new JetpackRoute.Plan(points, List.of(floor), (int) Math.ceil(ticks));
-            }
+            if (clear && Double.isFinite(ticks)) best = better(
+                    new JetpackRoute.Plan(points,List.of(floor),(int)Math.ceil(ticks)),best,power,risk);
         }
         return best;
+    }
+    static JetpackRoute.Plan better(JetpackRoute.Plan candidate, JetpackRoute.Plan current,
+            JetpackNativeAdapter.Snapshot power, ToDoubleFunction<Vec3> risk) {
+        if (candidate == null) return current;
+        if (current == null) return candidate;
+        boolean fuel = candidate.requiredTicks() <= power.fuelTicks(), oldFuel = current.requiredTicks() <= power.fuelTicks();
+        if (fuel != oldFuel) return fuel ? candidate : current;
+        // 燃料允许时先避开攻击者，再比较耗时；都已缺燃料时继续保留最短的已知落地机会。
+        if (fuel) {
+            int danger = Double.compare(risk.applyAsDouble(candidate.points().getLast()),risk.applyAsDouble(current.points().getLast()));
+            if (danger != 0) return danger < 0 ? candidate : current;
+        }
+        return candidate.requiredTicks() < current.requiredTicks() ? candidate : current;
     }
 }

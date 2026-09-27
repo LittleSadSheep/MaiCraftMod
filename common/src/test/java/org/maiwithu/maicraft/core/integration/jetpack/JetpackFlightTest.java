@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.integration.jetpack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.AABB;
 import java.util.List;
+import it.unimi.dsi.fastutil.longs.LongSets;
 
 /**
  * 检查气量预留、分次飞越障碍、水域上方的退出选择、刹车按键和平台对准；使用简化空间与固定设备参数。
@@ -76,7 +77,27 @@ public final class JetpackFlightTest {
         };
         check(JetpackRoute.approachCell(lowCeiling, start, POWER).getY() == 1, "lower ceiling must choose the verified lower approach");
         check(JetpackRoute.descentSpeed(POWER) == 0.03, "fuel budgeting must use slow hover descent after removing Shift");
+        threatenedCleanupPrefersSafeExit(crossing,overWater,next);
         System.out.println("JetpackFlightTest: passed");
+    }
+    private static void threatenedCleanupPrefersSafeExit(JetpackRoute.Plan route, Vec3 position, int next) {
+        // 受伤地点下方虽能落地，但敌人仍在那里；已有安全返程出口且燃料够时，不能只因为近就落回攻击范围。
+        var floor = new TestSpace(false,false);
+        var retreat = JetpackEscape.choose(floor,position,route,next,POWER,point -> point.x >= 2 ? 10 : 0);
+        check(retreat != null && retreat.points().getLast().x < 2,"threatened cleanup chooses an observed safer exit instead of the nearest ground");
+        var lowFuel = new JetpackNativeAdapter.Snapshot(true,"fixture","create_jetpack:netherite_jetpack",true,true,
+                900,110,.016,.32,.6,-.03,.08);
+        var limited = JetpackEscape.choose(floor,position,route,next,lowFuel,point -> point.x >= 2 ? 10 : 0);
+        check(limited != null && limited.requiredTicks() <= lowFuel.fuelTicks(),"threat avoidance cannot choose a retreat beyond the observed fuel budget");
+        var blocked = new TestSpace(false,false) {
+            public boolean clear(Vec3 from,Vec3 to) { return to.x >= 2 && super.clear(from,to); }
+        };
+        var fallback = JetpackEscape.choose(blocked,position,route,next,POWER,point -> point.x >= 2 ? 10 : 0);
+        check(fallback != null && fallback.points().getLast().x >= 2,"a safer label cannot override a blocked flight corridor");
+        var session = new JetpackFlightSession(route.points().getLast(),LongSets.emptySet());
+        session.requestDamageStop();
+        check(Boolean.TRUE.equals(session.diagnostics().get("damage_stop"))
+                && Boolean.TRUE.equals(session.diagnostics().get("stopping")),"damage cancellation retains its emergency reason while awaiting native settlement");
     }
     private static JetpackRoute.Plan complete(JetpackRoute.Space space, Vec3 start, Vec3 target) {
         var search = new JetpackRoute.Search(start, target, POWER);
