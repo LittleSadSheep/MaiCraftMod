@@ -242,7 +242,7 @@ v2 的 `panel` 可添加 `pattern`，将小段二进制图案重复到整个平�
 
 建造失败结果的 `build_diagnostics` 会给出冻结目标数组中的零起始 `target_index`、预期和实际方块状态；临时支撑失败还会带 `support_for` 指向其服务的目标。`placed` 是本次执行的放置计数，`completed` 才是本次核验已满足的目标数；不能把续建单次放置计数当作整座建筑完成度。
 
-普通新建的清障受客户端 `config/maicraft-clearance.json` 白名单限制，默认是明确列举的自然地形、矿石、原木和植被类型。普通新建的 `replace_existing:true` 不能突破名单。遇到名单外的现存障碍时返回 `build_clearance_not_whitelisted`，`clearance_report.obstacles` 给出方块 ID、`at:[x,y,z]` 与目标编号，并附维度、总数和截断标记。已授权的 `modify_machine` 按明确声明的改动格子执行拆换，使用独立修改范围；拆除目标不会被建议平移到另一片空地。
+普通新建的清障受客户端 `config/maicraft-clearance.json` 白名单限制，默认是明确列举的自然地形、矿石、原木和植被类型。`replace_existing:true` 本身不能突破名单；同一玩家在同一世界经原生放置确认的自建方块，可在蓝图明确声明的替换格复用归属记录，方块实体仍服从 `replace_block_entities`，邻居和通路不继承这份范围。遇到名单外且没有这类归属的现存障碍时返回 `build_clearance_not_whitelisted`，`clearance_report.obstacles` 给出方块 ID、`at:[x,y,z]` 与目标编号，并附维度、总数和截断标记。已授权的 `modify_machine` 按明确声明的改动格子执行拆换，使用独立修改范围；拆除目标不会被建议平移到另一片空地。
 
 `clearance_report.suggested_offsets` 是整份蓝图保持高度后的水平偏移 `[dx,0,dz]`，按移动距离从小到大核对半径 16 格内的已加载地形；每个建议都核对全部实体与空气目标，最多返回三个同等最近候选。未知区块、搜索预算和是否证明范围内最小距离见 `search`。这只证明清障条件，地基、通路和材料仍须重新观察。选址后创建新场地工程，不能把偏移直接套给旧冻结项目或仅移动剩余未建部分。寻路清障则将名单外方块视为不可挖障碍并绕行，走不通时如实失败。
 

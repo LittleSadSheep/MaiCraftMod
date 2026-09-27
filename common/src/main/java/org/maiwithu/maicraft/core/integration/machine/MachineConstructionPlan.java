@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.function.BiPredicate;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -35,6 +37,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateBeltInstallation;
 import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineNativeInstallation;
+import org.maiwithu.maicraft.core.blueprint.ConstructionOwnership;
 
 /**
  * 把机器布局或逐格蓝图变成固定的装配计划：普通方块、AE2 部件、维护通道，以及最后要封闭的施工洞口。
@@ -60,6 +63,7 @@ public final class MachineConstructionPlan {
     private final Map<BlockPos, List<BlockPos>> placementDependencies;
     private final List<List<BuildTaskRecord.Target>> attachmentLayers;
     private Map<BlockPos, BlockState> observedEdits = Map.of();
+    private Map<BlockPos, BlockState> ownedReplacements = Map.of();
     private boolean fixedModification;
     private boolean automaticModification;
 
@@ -320,6 +324,7 @@ public final class MachineConstructionPlan {
                 consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
         if (fixedModification) task.machineModification(observedEdits);
+        else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
         if (automaticModification) task.automaticMachineModification(authoredModificationCells());
         task.futureWorkItems(foodProtectedWorkItems());
         var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
@@ -353,6 +358,7 @@ public final class MachineConstructionPlan {
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true); task.materialSupplyProtection(positions());
         if (fixedModification) task.machineModification(observedEdits);
+        else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
         if (automaticModification) task.automaticMachineModification(authoredModificationCells());
         task.futureWorkItems(foodProtectedWorkItems());
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
@@ -374,6 +380,23 @@ public final class MachineConstructionPlan {
     /** 修改已指定的坐标时内部读取这些格子，不扫描无关整片场地，也不让 LLM 为加载后的格子再次申请观察。 */
     public void bindAutomaticModification(Level world) {
         automaticModification = true; bindObservedModification(world, anchor, Integer.MAX_VALUE);
+    }
+
+    /** 新建入口明确允许替换时，也复用本方原生放置记录；只绑定蓝图点名的旧部件，不扩大到通路或邻居。 */
+    public void bindOwnedReplacements(LocalPlayer player) {
+        bindOwnedReplacements(player.level(), (at, state) -> ConstructionOwnership.owns(player, at, state));
+    }
+    void bindOwnedReplacements(Level world, BiPredicate<BlockPos, BlockState> owns) {
+        if (!replace) return;
+        var owned = new LinkedHashMap<BlockPos, BlockState>();
+        for (BlockPos at : authoredModificationCells()) {
+            if (!world.isLoaded(at)) continue;
+            var state = world.getBlockState(at);
+            if (!state.isAir() && owns.test(at, state)) owned.put(at.immutable(), state);
+        }
+        // 子施工保留这组原位状态，避免再建议平移已建机器；新建的完整图纸归档语义保持原样。
+        ownedReplacements = Map.copyOf(owned);
+        report.addProperty("owned_replacement_targets", owned.size());
     }
     private Set<BlockPos> authoredModificationCells() {
         return MachineAssemblyDocument.blocks(blueprint()).keySet().stream().map(anchor::offset).collect(Collectors.toUnmodifiableSet());

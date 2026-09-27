@@ -460,6 +460,8 @@ final class MachineAbilityAdapter {
             var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", modification && replace));
             // apply_blueprint 沿用已授权的明确目标，当前状态与可达性由内部施工读取，拆旧轴不再转成重新选址。
             if (modification) plan.bindAutomaticModification(player.level());
+            // 普通建造若已获准替换自己的旧部件，也把原生放置归属交给施工，免得自建轴被通用白名单挡住。
+            else plan.bindOwnedReplacements(player);
             if (!ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
                 return IntentAction.Pending.INSTANCE;
             List<String> protectedLabels = p.has("protected_labels")

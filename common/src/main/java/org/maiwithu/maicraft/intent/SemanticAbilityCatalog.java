@@ -70,7 +70,8 @@ public final class SemanticAbilityCatalog {
                             field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
                             field("allow_use", "boolean", "Required true with production: authorizes operating the declared machine after construction. Omit when production is absent."),
                             field("material_policy", "string", "ordinary, storage_available (including an existing AE2 network), or inventory_only; exact machine items are never substituted."),
-                            field("replace_existing", "boolean", "Allow removing ordinary obstructing blocks in the compiled footprint; block entities stay protected unless replace_block_entities is also true. Default false."),
+                            // 已确认自建部件在声明的替换格复用归属；其他现场清障仍使用白名单，不能凭一个选项认领整片场地。
+                            field("replace_existing", "boolean", "Allow replacement at authored blueprint targets. Confirmed self-built blocks reuse native placement ownership; other obstacles remain subject to the clearance whitelist. Block entities also require replace_block_entities=true. Default false."),
                             field("replace_block_entities", "boolean", "Also allow replacing existing block entities at declared targets; requires replace_existing=true and authorization for those changes. Default false."),
                             field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
