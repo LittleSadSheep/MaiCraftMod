@@ -156,7 +156,13 @@ public final class JetpackRoute {
                 if (goal == null) { fail("no_approach"); return; }
                 initialization++;
             } else if (initialization == 2) {
-                if (!flightClear(space, start, center(origin), power)) { fail("departure_blocked"); return; }
+                if (!flightClear(space, start, center(origin), power)) {
+                    // 头顶平台挡住整格抬升时，允许从较低的已验证高度横向飞出，再交六方向搜索寻找爬升口。
+                    // 原生推力余量仍必须畅通，不能把能站着误判成能在低天花板下开喷气背包。
+                    BlockPos low = origin.below();
+                    if (!flightClear(space,start,center(low),power)) { fail("departure_blocked"); return; }
+                    origin = low;
+                }
                 Vec3 lift = new Vec3(start.x, Math.max(origin.getY(), goal.getY()), start.z);
                 template = List.of(start, lift, new Vec3(landing.x, lift.y, landing.z), landing);
                 open.add(new Node(origin, 0, distance(origin, goal))); costs.put(origin, 0D);
