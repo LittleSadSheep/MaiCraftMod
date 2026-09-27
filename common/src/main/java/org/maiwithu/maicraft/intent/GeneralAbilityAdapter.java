@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
@@ -519,6 +520,7 @@ public final class GeneralAbilityAdapter {
             args.addProperty("button", "right");
             args.addProperty("entity_id", candidates.getFirst().getId());
             if (itemId != null) args.addProperty("item_id", itemId);
+            else args.addProperty("empty_hand", true);
             return new IntentAction.Tool("interact_entity", args.toString());
         }
         if (blockId == null && !exactBlockTarget(goal)) {
@@ -700,7 +702,9 @@ public final class GeneralAbilityAdapter {
         if ("till".equals(lower(string(goal.parameters(), "purpose"))))
             use.addProperty("expected_block_id", "minecraft:farmland");
         if (itemId != null) use.addProperty("item_id", itemId);
-        Item useItem = itemId == null ? player.getMainHandItem().getItem()
+        // 未声明道具就是操作目标本身；先按空手计算站位，执行时再原生收好战斗或施工留下的主手物品。
+        else use.addProperty("empty_hand", true);
+        Item useItem = itemId == null ? Items.AIR
                 : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
         if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target, useItem)) {
             return new IntentAction.Tool("interact_at", use.toString());
@@ -1098,6 +1102,9 @@ public final class GeneralAbilityAdapter {
             return FirstPersonInteractionTargeting.visibleBucketHit(
                     level, player, eye, target, player.blockInteractionRange(), item) != null;
         }
+        // 置物台取放只允许顶面，自动选站位时就排除只能看到侧面的格子，免得走到那里再点空。
+        var face = CreateInteractionSurface.requiredFace(level.getBlockState(target));
+        if (face != null) return FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, 4.5D, face) != null;
         return FirstPersonInteractionTargeting.hasLoadedReachLine(
                 level, player, eye, target, 4.5D);
     }

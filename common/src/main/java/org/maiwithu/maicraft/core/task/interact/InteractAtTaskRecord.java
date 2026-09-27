@@ -25,7 +25,15 @@ public final class InteractAtTaskRecord extends TaskRecord {
      */
     public final Block requiredBlock;
     public boolean heldItemUseOnly;
+    public boolean emptyHand;
     public Item expectedOutputItem;
+
+    /** 语义目标没点名物品时先收好战斗或施工留下的工具，再空手点击方块，避免把工具当材料放进机器。 */
+    public InteractAtTaskRecord withEmptyHand() {
+        if (aim == null || button != MouseButton.RIGHT || item != null || heldItemUseOnly)
+            throw new IllegalArgumentException("empty-hand interaction needs a block target and no named item");
+        emptyHand = true; return this;
+    }
 
     /** 使用物品自身逻辑时不先点击准星后的方块；副手材料由原生物品处理，产物仍须读真实背包。 */
     public InteractAtTaskRecord useHeldItemOnly(Item expectedOutput) {

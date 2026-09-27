@@ -241,6 +241,8 @@ public final class GuiRegressionSuite {
         ConstructionOwnershipTest.main(args);
         BuildWrenchRemovalTest.main(args);
         FiniteBlockUseTest.main(args);
+        EmptyHandInteractionTest.main(args);
+        MachineInteractionSurfaceTest.main(args);
         BuildExcavationFrontierTest.main(args);
         ContainerBatchReplanTest.main(args);
         ContainerSplitPlannerTest.main(args);

@@ -124,6 +124,12 @@ public final class FirstPersonInteractionTargeting {
     // 先取方块形状的边界，试中心和靠近六个面的点；命中必须属于指定格且在触及距离内。
     public static BlockHitResult visibleBlockHit(
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach) {
+        return visibleBlockHit(level, observer, eye, target, reach, null);
+    }
+
+    /** 工作台面只接受指定方向的点击时，先用真实选择形状找该面的可见点；侧面可见不代表能投料或取货。 */
+    public static BlockHitResult visibleBlockHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Direction requiredFace) {
         if (!Double.isFinite(reach) || reach <= 0.0D
                 || !level.isLoaded(BlockPos.containing(eye))
                 || !level.isLoaded(target)) {
@@ -166,6 +172,7 @@ public final class FirstPersonInteractionTargeting {
                     eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, observer));
             if (hit.getType() == HitResult.Type.BLOCK
                     && hit.getBlockPos().equals(target)
+                    && (requiredFace == null || hit.getDirection() == requiredFace)
                     && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
                 return hit;
             }

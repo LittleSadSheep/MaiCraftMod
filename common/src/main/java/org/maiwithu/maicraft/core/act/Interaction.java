@@ -232,6 +232,9 @@ public final class Interaction {
         return failReason;
     }
 
+    /** 原生点击已发出时先结算，不能为恢复空手而移动刚取回的工件，破坏库存确认依据。 */
+    public boolean awaitingReceipt() { return receipt != null; }
+
     /** 固定语义目标身份，避免把预计放置后的方块误当成新的输入目标。 */
     public Interaction requireBlock(BlockPos position, Block required) {
         if (required != null && position == null) throw new IllegalArgumentException("required block needs a position");

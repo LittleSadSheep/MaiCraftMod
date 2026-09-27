@@ -143,7 +143,7 @@ public final class SemanticAbilityCatalog {
                             field("entity_type_id", "resource_id", "Optional namespaced entity type, never a runtime entity identifier."),
                             field("entity_name", "string", "Optional visible custom/display name."),
                             field("player_name", "string", "Optional exact player name."),
-                            field("item_id", "resource_id", "Optional carried item whose ordinary use is intended."),
+                            field("item_id", "resource_id", "Optional carried item whose ordinary use is intended. Omit to prepare an empty main hand before interacting with the target."),
                             field("purpose", "string", "Open, talk, trade, use or till. Till prepares a suitable hoe when item_id is omitted."),
                             field("duration_seconds", "number", "Optional finite duration from 0 to 30 for empty-hand Create hand-crank use. Zero or omitted means one activation; the Mod repeats native uses and settles the final receipt."),
                             field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
