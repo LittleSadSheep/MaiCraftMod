@@ -48,9 +48,9 @@ public final class CreateMechanicalPower {
             source = Objects.requireNonNull(source, "source");
             destination = Objects.requireNonNull(destination, "destination");
             transmission = transmission == null ? Transmission.AUTO : transmission;
-            // 锁链传动轮必须连接已观察到的真实接口，不能退回旧版“空接收端”链式传动箱执行器。
-            if (transmission == Transmission.CHAIN_CONVEYOR && allowFreeReceiver)
-                throw new IllegalArgumentException("chain_conveyor_requires_observed_receiver");
+            // 允许新接收端只是扩大候选，不代表现场没有机器；锁链模式自动勘查已有接口，不让这项许可阻断接线。
+            // 当前锁链规划仍需真实受电机器，因此不启用旧链式传动箱的空端点兜底。
+            if (transmission == Transmission.CHAIN_CONVEYOR) allowFreeReceiver=false;
         }
 
         public static Request preserving(Endpoint source, Endpoint destination) {

@@ -78,12 +78,11 @@ public final class CreateEconomicEndpointBridgeTest {
             check(notice.getAsJsonObject("data").get("transmission_description").getAsString().contains("链式传动箱")
                     && notice.getAsJsonObject("data").getAsJsonArray("available_transmission_choices").size() == 3,
                     "attention exposes requested technology and its available alternatives");
-            try {
-                new CreateMechanicalPower.Request(request.source(),request.destination(),CreateMechanicalPower.Transmission.CHAIN_CONVEYOR,true,true);
-                throw new AssertionError("unobserved chain receiver accepted");
-            } catch (IllegalArgumentException expected) {
-                check(expected.getMessage().equals("chain_conveyor_requires_observed_receiver"),"unsupported receiver scope is explicit");
-            }
+            // 允许新端点不该在调查前误报缺少证据；锁链模式继续自动寻找实机，不回退旧版空端点执行器。
+            var permissive=new CreateMechanicalPower.Request(request.source(),request.destination(),CreateMechanicalPower.Transmission.CHAIN_CONVEYOR,true,true);
+            check(!permissive.allowFreeReceiver(),"optional new receiver permission preserves native machine discovery");
+            check(CreateMechanicalPower.task("permissive-chain",1000,permissive) instanceof CreateMechanicalPowerTaskRecord,
+                    "regional chain request starts autonomous observation without a separate inspect gate");
             var legacy = CreateEndpointContinuations.issue(request, new CreateProgressiveSurvey(request), 1, "minecraft:overworld");
             check(!legacy.economicAfterEndpoints(), "legacy opaque endpoint continuations preserve their original executor");
             CreateEndpointContinuations.discard(legacy.token());
