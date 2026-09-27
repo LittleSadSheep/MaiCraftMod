@@ -150,6 +150,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(r.materialPolicy==SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 &&!player.getAbilities().instabuild)
             chosen=ranked.stream().filter(value->value.materials().missingFinalItems().isEmpty()).findFirst().orElse(chosen);
+        // 仅背包许可仍优先遵守；若因此用了已携带的长轴材料，要明说是来源限制覆盖了锁链偏好。
+        if(chosen!=ranked.getFirst())costReport.addProperty("selection_override","inventory_only_complete_carried_materials");
         costReport.add("selected",chosen.json());selected=chosen.plan();sourceEntity=world.getBlockEntity(selected.source().position());
         var preserved=new ArrayList<BlockPos>();preserved.add(selected.source().position());preserved.add(r.target);
         selected.placements().forEach(cell->preserved.add(cell.position()));routeProtection=List.copyOf(preserved);
