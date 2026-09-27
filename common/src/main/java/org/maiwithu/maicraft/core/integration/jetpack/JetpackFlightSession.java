@@ -138,7 +138,8 @@ public final class JetpackFlightSession implements TransportSession {
         clearanceBraking = false;
         if (fastDescent.active()) {
             updateLook(ctx, fastDescentTarget, true);
-            if (stopping || movingTarget!=null && !movingTarget.supportsFastDescent()) fastDescent.requestStop();
+            // 已选定受伤后的独立出口时，允许沿该出口完成受控下降；普通取消或仍追随的移动平台继续要求恢复悬停。
+            if (stopping && !fastLandingAllowed() || movingTarget!=null && followsTarget() && !movingTarget.supportsFastDescent()) fastDescent.requestStop();
             boolean handled = fastDescent.tick(ctx, fastDescentTarget, power, false,true,space(ctx));
             if (fastDescent.hasEffects()) effects = true;
             if (fastDescent.hasModeChanges()) changedActive = true;
@@ -368,6 +369,10 @@ public final class JetpackFlightSession implements TransportSession {
         if (escape == null) { approachHeight = ctx.player().getY(); phase = Phase.LAND; uncertain = true; return; }
         route = escape; waypoint = 1; waypointTick = lastTick; waypointDistance = Double.POSITIVE_INFINITY; exiting = true; phase = Phase.FLY;
         landing = route.points().getLast();
+        // 旧下降已因受伤停止且模式回执已结清；新出口使用新的下降控制器，不能把旧的停止标记带到新落点。
+        if (damageStop && !fastDescent.active()) {
+            fastDescent = new JetpackFastDescent(forbidden); fastDescentTarget = null;
+        }
         if (power.fuelTicks() < route.requiredTicks()) { uncertain = true; detail = "continuing toward the cheapest observed exit after fuel loss"; }
         brake(ctx); // 下一个 tick 会先核实出口路线段，再产生移动。
     }
@@ -420,7 +425,7 @@ public final class JetpackFlightSession implements TransportSession {
         if (!space.clear(position, approach)) {
             obstruction(ctx, space, approach); return;
         }
-        if (!stopping && !exiting && centered && tryFastDescent(ctx, landing, true)) return;
+        if (fastLandingAllowed() && centered && tryFastDescent(ctx, landing, true)) return;
         if (!steer(ctx, approach, centered)) obstruction(ctx, space,
                 position.add(0, JetpackDynamics.riseEnvelope(ctx.player().getDeltaMovement().y, true, power), 0));
     }
@@ -431,8 +436,11 @@ public final class JetpackFlightSession implements TransportSession {
                 : new Vec3(landing.x, approachHeight, landing.z);
     }
 
+    /** 只有已经选择出口的伤害撤离可在停止中启动受控落地；普通取消不开启新的自由下降。 */
+    boolean fastLandingAllowed() { return !stopping && !exiting || damageStop && exiting; }
+
     private boolean tryFastDescent(LocalPlayerContext ctx, Vec3 target, boolean touchdown) {
-        if (movingTarget != null && !movingTarget.supportsFastDescent()) return false;
+        if (movingTarget != null && followsTarget() && !movingTarget.supportsFastDescent()) return false;
         if (fastDescent.finished() && fastDescentTarget != null && fastDescentTarget.distanceToSqr(target) > 0.01)
             fastDescent = new JetpackFastDescent(forbidden);
         if (fastDescent.finished()) return false;

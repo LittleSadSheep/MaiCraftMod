@@ -28,6 +28,8 @@ final class JetpackEscape {
         var backward = new ArrayList<Vec3>(); backward.add(position);
         for (int i = Math.min(next-1, route.points().size()-1); i >= 0; i--) backward.add(route.points().get(i));
         candidates.add(backward);
+        // 受伤处正下方和原航线都可能贴着追兵；补查有限的侧向出口，每条仍走下方同一套通道、支撑和燃料核验。
+        if (risk.applyAsDouble(position) > 0) nearbyExits(candidates, space, position);
         JetpackRoute.Plan best = null;
         for (List<Vec3> points : candidates) {
             if (points.size() < 2) continue;
@@ -42,6 +44,23 @@ final class JetpackEscape {
                     new JetpackRoute.Plan(points,List.of(floor),(int)Math.ceil(ticks)),best,power,risk);
         }
         return best;
+    }
+    private static void nearbyExits(List<List<Vec3>> candidates, JetpackRoute.Space space, Vec3 position) {
+        // 只读已加载地形：八个方向、两档距离、原高度或抬高四格，共最多三十二条；不挖路、不假定偏移点可落脚。
+        for (int radius : new int[]{8, 16}) for (int direction = 0; direction < 8; direction++) {
+            double angle = direction * Math.PI / 4;
+            for (int rise : new int[]{0, 4}) {
+                Vec3 lift = position.add(0, rise, 0);
+                Vec3 above = lift.add(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+                Vec3 landing = space.landingBelow(above);
+                if (landing == null) continue;
+                var points = new ArrayList<Vec3>(); points.add(position);
+                if (rise > 0) points.add(lift);
+                points.add(above);
+                if (above.distanceToSqr(landing) > 1e-8) points.add(landing);
+                candidates.add(points);
+            }
+        }
     }
     static JetpackRoute.Plan better(JetpackRoute.Plan candidate, JetpackRoute.Plan current,
             JetpackNativeAdapter.Snapshot power, ToDoubleFunction<Vec3> risk) {
