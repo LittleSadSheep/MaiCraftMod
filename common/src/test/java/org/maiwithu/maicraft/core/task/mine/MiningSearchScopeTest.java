@@ -36,6 +36,14 @@ public final class MiningSearchScopeTest {
             h.position(new Vec3(11.5, 1, 8.5)); h.nextTick(); finishQuery(h, task);
             check(!((List<?>) field.get(task)).contains(far) && record.searchCenter().equals(new BlockPos(8, 1, 8)),
                     "moving the player does not widen the frozen mining scope");
+            // 上个分片未完成时立即续查，不能把一秒重查冷却重复套在每个索引分片上。
+            var complete=MineCompanionTask.class.getDeclaredField("lastQueryComplete"); complete.setAccessible(true);
+            var cooldown=MineCompanionTask.class.getDeclaredField("queryCooldown"); cooldown.setAccessible(true);
+            var poll=MineCompanionTask.class.getDeclaredMethod("maybeQuery"); poll.setAccessible(true);
+            complete.setBoolean(task,false); cooldown.setInt(task,20); h.nextTick(); poll.invoke(task);
+            check(cooldown.getInt(task)==20,"unfinished indexing must call the next bounded slice without cooldown");
+            complete.setBoolean(task,true); cooldown.setInt(task,20); h.nextTick(); poll.invoke(task);
+            check(cooldown.getInt(task)==19,"completed queries retain the existing refresh cooldown");
             check(task.result(TaskState.CANCELLED).data().containsKey("search_scope") && h.blockUses() == 0,
                     "read-only scanning reports its actual scope without mining");
         }

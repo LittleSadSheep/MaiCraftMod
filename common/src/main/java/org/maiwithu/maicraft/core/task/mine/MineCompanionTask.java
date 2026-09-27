@@ -1061,7 +1061,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private void maybeQuery() {
         --queryCooldown;
         --heartbeatTimer;
-        if (queryCooldown > 0) {
+        // 冷却只限制已经完成的重复查询；未完成的分片每刻接续，索引自身的两毫秒预算负责控制开销。
+        if (queryCooldown > 0 && lastQueryComplete) {
             return;
         }
         if (knownOres.size() < QUERY_LOW_WATER
