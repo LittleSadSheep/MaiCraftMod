@@ -174,6 +174,12 @@ public final class SemanticResultView {
     }
 
     private static Object sanitizeEntry(String key, Object value) {
+        // 原生资源和库存成员标识用于判断是否同一视图，不能把其中的坐标片段洗成同一占位词而合并不同置物台。
+        if (Set.of("resource_id", "storage_id", "membership").contains(key)) {
+            if (value instanceof String text) return text;
+            if (value instanceof JsonElement json && json.isJsonPrimitive() && json.getAsJsonPrimitive().isString())
+                return json.getAsString();
+        }
         // 地图蓝图和结构差异都是只读观测，保留真实状态属性与未知格子，不能再按动作字段名删掉其中的数据。
         if (key.equals("as_built_blueprint") || key.equals("blueprint_diff")) return value;
         // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。

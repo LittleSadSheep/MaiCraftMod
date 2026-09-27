@@ -30,6 +30,8 @@ public final class AttentionRegressionSuite {
         McpSchemaCompatibilityTest.main(args);
         // 已存的大蓝图和失败历史可分页找回，常规状态须保留当前待答问题与消费不确定性。
         TaskViewTest.main(args);
+        // 背包和当前主手都携带组件身份，半成品无需先投进机器才能查看进度。
+        InventoryComponentFactsTest.main(args);
         PlanViewTest.main(args);
         // 重复请求和恢复取消必须只改变对应任务记录，不能抢占玩家或打断另一件工作。
         McpTaskLifecycleTest.main(args);
