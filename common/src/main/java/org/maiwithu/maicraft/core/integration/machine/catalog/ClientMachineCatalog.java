@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.integration.machine.catalog;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** 客户端生命周期与展示桥接；目录和发现流程绝不会接管玩家身体。 */
@@ -129,21 +131,30 @@ public final class ClientMachineCatalog {
             String label = value.label();
             if (label == null || label.isBlank()) label = catalog.blueprintAt(value.dimension(),at).map(MachineBlueprint::label)
                     .orElse("机器@"+at.x()+","+at.y()+","+at.z());
-            var positions = value.plan().positions();
-            if (positions.isEmpty()) positions = List.of(value.plan().anchor());
+            var previous = value.plan().modification() ? catalog.blueprintAt(value.dimension(),at,label).orElse(null) : null;
+            // 本次施工只确认提交的拆换；档案则保留旧机器未改的部分，不把一个曲柄补丁当成完整机器。
+            var document = previous == null ? value.plan().blueprint() : MachineBlueprintRevision.merge(previous.blueprint(),value.plan().blueprint());
+            var positions = new ArrayList<>(value.plan().positions());
+            if (previous != null && previous.captureMin() != null) {
+                var low = previous.captureMin(); var high = previous.captureMax();
+                positions.add(new BlockPos(low.x(),low.y(),low.z())); positions.add(new BlockPos(high.x(),high.y(),high.z()));
+            }
+            if (positions.isEmpty()) positions.add(value.plan().anchor());
             var xs = positions.stream().mapToInt(BlockPos::getX).summaryStatistics();
             var ys = positions.stream().mapToInt(BlockPos::getY).summaryStatistics();
             var zs = positions.stream().mapToInt(BlockPos::getZ).summaryStatistics();
             // 保存实际编译后的整机范围，包含原生带子和生成的门上半部；读取现状时无需用旧方块数据补图。
-            String id = catalog.registerBlueprint(label,value.dimension(),at,value.plan().blueprint(),now,
+            String id = catalog.registerBlueprint(label,value.dimension(),at,document,now,
                     new Position(xs.getMin(),ys.getMin(),zs.getMin()),new Position(xs.getMax(),ys.getMax(),zs.getMax()));
             var blueprint = catalog.blueprint(id).orElseThrow();
             catalog.recordBlueprintState(id,blueprint.fingerprint(),"success",now);
-            compiledBlueprints.put(id,new CachedBlueprint(blueprint.fingerprint(),value.plan()));
-            if (!value.plan().utilityInputs().isEmpty()) {
-                catalog.registerInstallation(label,value.dimension(),at,value.plan().utilityInputs(),now);
-                catalog.recordInstallationBuilt(value.dimension(),at,label,value.plan().utilityInputs(),now);
-            }
+            if (previous == null) compiledBlueprints.put(id,new CachedBlueprint(blueprint.fingerprint(),value.plan()));
+            else compiledBlueprints.remove(id); // 下次比图必须编译合并后的整机，不能给新指纹配上局部施工缓存。
+            var inputs = MachineUtilityInputs.parse(document);
+            if (!inputs.isEmpty()) {
+                catalog.registerInstallation(label,value.dimension(),at,inputs,now);
+                catalog.recordInstallationBuilt(value.dimension(),at,label,inputs,now);
+            } else catalog.forgetInstallation(value.dimension(),at,label);
             catalog.saveAsync(); var result = catalog.blueprint(id).orElseThrow().summary();
             result.addProperty("archive_status","recorded"); return result;
         } catch (RuntimeException unavailable) {

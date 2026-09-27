@@ -398,6 +398,8 @@ public final class MachineConstructionPlan {
     }
     public String blueprintJson() { return blueprintJson; }
     public JsonObject blueprint() { return JsonParser.parseString(blueprintJson).getAsJsonObject(); }
+    // 完工归档据此把局部拆换合回旧设计；普通新建仍保存完整新图，不能把两种语义混在一起。
+    public boolean modification() { return fixedModification || automaticModification; }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
     public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
     public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof LiquidBlock; }

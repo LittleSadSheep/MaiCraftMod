@@ -156,6 +156,10 @@ public final class MachineCatalog {
         return matches.size() == 1 ? Optional.of(matches.getFirst()) : Optional.empty();
     }
     public List<UtilityInstallation> installations() { requireReady(); return List.copyOf(installations.values()); }
+    // 已完成的拆换若移除了最后一个入口，就同步移除该机器的旧入口记录，避免后续连接不存在的端口。
+    public void forgetInstallation(String dimension, Position anchor, String label) {
+        installation(dimension, anchor, label).ifPresent(value -> { installations.remove(value.id()); dirty = true; });
+    }
     public void recordInstallationBuilt(String dimension, Position anchor,
             List<MachineUtilityInputs.Input> inputs, long now) {
         recordInstallationBuilt(dimension, anchor, null, inputs, now);
