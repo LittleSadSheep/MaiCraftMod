@@ -45,4 +45,8 @@ public record UtilityInstallation(String id, String label, String dimension, Pos
     }
     static String encode(List<MachineUtilityInputs.Input> inputs) { var entries = new JsonArray(); inputs.forEach(input -> entries.add(input.json())); return entries.toString(); }
     static String locationId(String identity, String dimension, Position anchor) { return "installation:" + CatalogLimits.hash(identity + "\n" + dimension + "\n" + anchor.x() + "," + anchor.y() + "," + anchor.z()); }
+    // 同一平台允许多台机器各有材料或动力入口，不能按平台坐标把端口记到另一台机器上。
+    static String namedId(String identity, String dimension, Position anchor, String label) {
+        return "installation:" + CatalogLimits.hash(locationId(identity, dimension, anchor) + "\n" + CatalogLimits.labelKey(label));
+    }
 }

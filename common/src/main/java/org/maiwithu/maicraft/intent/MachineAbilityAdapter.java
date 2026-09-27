@@ -242,7 +242,8 @@ final class MachineAbilityAdapter {
         Goal.WorldPosition position = saved == null ? resolve(goal.target(), player, runtime)
                 : new Goal.WorldPosition(saved.anchor().x(),saved.anchor().y(),saved.anchor().z(),saved.dimension());
         BlockPos center = block(position);
-        if (saved == null) saved = ClientMachineCatalog.blueprint(player,null,center).orElse(null);
+        // 同一平台可放多台命名机器，观察时沿用目标名称选择档案，避免把压机图纸交给装配机。
+        if (saved == null) saved = ClientMachineCatalog.blueprint(player,goal.target().label(),center).orElse(null);
         String label = optionalString(p, "label", 160);
         if (label == null) label = saved != null ? saved.label() : goal.target().label();
         if (label == null || label.isBlank()) throw bad("Give the machine a short label so subsequent analysis and operation refer to the same place");
@@ -389,7 +390,7 @@ final class MachineAbilityAdapter {
         if ("apply_blueprint".equals(p.get("operation").getAsString())) return build(goal, player, runtime);
         if ("connect_external_input".equals(p.get("operation").getAsString())) {
             MachineSnapshots.Snapshot snapshot = boundSnapshot(goal,player,runtime);
-            var installation = ClientMachineCatalog.requireInstallation(player,snapshot.center());
+            var installation = ClientMachineCatalog.requireInstallation(player,snapshot.center(),snapshot.label());
             String inputId = requiredString(p,"input_id",64), sourceLabel = optionalString(p,"source_label",160);
             var input = installation.inputs().stream().filter(value -> value.id().equals(inputId)).findFirst()
                     .orElseThrow(() -> bad("machine_external_input_unknown: " + inputId));

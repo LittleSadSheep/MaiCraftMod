@@ -139,20 +139,32 @@ public final class MachineCatalog {
     public String registerInstallation(String label, String dimension, Position anchor,
             List<MachineUtilityInputs.Input> inputs, long now) {
         requireReady(); dimension = CatalogLimits.registry(dimension,"dimension"); label = CatalogLimits.text(label,160,"installation label");
-        String id = UtilityInstallation.locationId(binding.identityKey(),dimension,anchor);
+        var previous = installation(dimension, anchor, label);
+        String id = previous.isPresent() ? previous.get().id() : UtilityInstallation.namedId(binding.identityKey(),dimension,anchor,label);
         if (!installations.containsKey(id) && installations.size() >= CatalogLimits.LINES) throw new IllegalStateException("catalog_installation_capacity");
         String encoded = UtilityInstallation.encode(inputs);
         installations.put(id,new UtilityInstallation(id,label,dimension,anchor,encoded,CatalogLimits.hash(encoded),now,0)); dirty = true; return id;
     }
     public Optional<UtilityInstallation> installation(String dimension, Position anchor) {
-        requireReady(); dimension = CatalogLimits.registry(dimension,"dimension");
-        return Optional.ofNullable(installations.get(UtilityInstallation.locationId(binding.identityKey(),dimension,anchor)));
+        return installation(dimension, anchor, null);
+    }
+    // 名称指定的是机器身份；未指定且同址有多台时保留歧义，不随便取其中一台的接入口。
+    public Optional<UtilityInstallation> installation(String dimension, Position anchor, String label) {
+        requireReady(); String dim = CatalogLimits.registry(dimension,"dimension");
+        var matches = installations.values().stream().filter(value -> value.dimension().equals(dim) && value.anchor().equals(anchor)
+                && (label == null || CatalogLimits.labelKey(value.label()).equals(CatalogLimits.labelKey(label)))).toList();
+        return matches.size() == 1 ? Optional.of(matches.getFirst()) : Optional.empty();
     }
     public List<UtilityInstallation> installations() { requireReady(); return List.copyOf(installations.values()); }
     public void recordInstallationBuilt(String dimension, Position anchor,
             List<MachineUtilityInputs.Input> inputs, long now) {
+        recordInstallationBuilt(dimension, anchor, null, inputs, now);
+    }
+    // 收尾只确认这次实际建造的那台机器，不能因共用锚点给相邻机器补上完工状态。
+    public void recordInstallationBuilt(String dimension, Position anchor, String label,
+            List<MachineUtilityInputs.Input> inputs, long now) {
         requireReady(); dimension = CatalogLimits.registry(dimension,"dimension");
-        var value = installation(dimension,anchor).orElseThrow(() -> new IllegalArgumentException("catalog_installation_missing"));
+        var value = installation(dimension,anchor,label).orElseThrow(() -> new IllegalArgumentException("catalog_installation_missing_or_ambiguous"));
         if (!value.inputsJson().equals(UtilityInstallation.encode(inputs))) throw new IllegalArgumentException("catalog_installation_changed");
         installations.put(value.id(),new UtilityInstallation(value.id(),value.label(),dimension,anchor,value.inputsJson(),value.inputsFingerprint(),value.registeredAtMillis(),now)); dirty = true;
     }
@@ -163,7 +175,10 @@ public final class MachineCatalog {
     }
     public String registerBlueprint(String label, String dimension, Position anchor, JsonObject blueprint, long now, Position captureMin, Position captureMax) {
         requireReady(); dimension = CatalogLimits.registry(dimension, "machine dimension");
-        String id = MachineBlueprint.locationId(binding.identityKey(), dimension, anchor);
+        label = CatalogLimits.text(label,160,"machine label");
+        var existing = blueprintAt(dimension, anchor, label);
+        // 旧版已有档案沿用原编号，新同址名称生成独立编号；局部改图仍更新同一台机器。
+        String id = existing.isPresent() ? existing.get().id() : MachineBlueprint.namedId(binding.identityKey(), dimension, anchor, label);
         if (!blueprints.containsKey(id) && blueprints.size() >= CatalogLimits.LINES) throw new IllegalStateException("catalog_blueprint_capacity");
         String encoded = blueprint.toString(), fingerprint = CatalogLimits.hash(encoded);
         var previous = blueprints.get(id); boolean same = previous != null && previous.fingerprint().equals(fingerprint);
@@ -174,7 +189,13 @@ public final class MachineCatalog {
     }
     public Optional<MachineBlueprint> blueprint(String id) { requireReady(); return Optional.ofNullable(blueprints.get(id)); }
     public Optional<MachineBlueprint> blueprintAt(String dimension, Position anchor) {
-        requireReady(); return blueprint(MachineBlueprint.locationId(binding.identityKey(),dimension,anchor));
+        return blueprintAt(dimension, anchor, null);
+    }
+    public Optional<MachineBlueprint> blueprintAt(String dimension, Position anchor, String label) {
+        requireReady(); String dim = CatalogLimits.registry(dimension,"machine dimension");
+        var matches = blueprints.values().stream().filter(value -> value.dimension().equals(dim) && value.anchor().equals(anchor)
+                && (label == null || CatalogLimits.labelKey(value.label()).equals(CatalogLimits.labelKey(label)))).toList();
+        return matches.size() == 1 ? Optional.of(matches.getFirst()) : Optional.empty();
     }
     public List<MachineBlueprint> blueprints() { requireReady(); return List.copyOf(blueprints.values()); }
     // 被替换的旧施工任务结束时不能覆盖同一地点的新蓝图记录；仅更新它实际使用过的版本。

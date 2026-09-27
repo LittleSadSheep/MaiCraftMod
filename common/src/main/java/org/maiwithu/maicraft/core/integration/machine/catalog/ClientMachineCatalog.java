@@ -119,7 +119,8 @@ public final class ClientMachineCatalog {
     public static JsonObject installationBuilt(LocalPlayer player, MachineConstructionPlan plan, String label) {
         var value = new PendingBuilt(player.level(),player.getUUID(),player.level().dimension().location().toString(),label,plan);
         if (ready(player)) return saveBuilt(value);
-        pendingBuilt.put(value.dimension()+"@"+plan.anchor(),value);
+        // 加载期间按完成顺序保留每次改造，不能让同址另一台机器或后一小段改造覆盖尚未落档的前段。
+        pendingBuilt.put(UUID.randomUUID().toString(),value);
         var result = new JsonObject(); result.addProperty("archive_status","pending_catalog_load"); return result;
     }
     private static JsonObject saveBuilt(PendingBuilt value) {
@@ -141,7 +142,7 @@ public final class ClientMachineCatalog {
             compiledBlueprints.put(id,new CachedBlueprint(blueprint.fingerprint(),value.plan()));
             if (!value.plan().utilityInputs().isEmpty()) {
                 catalog.registerInstallation(label,value.dimension(),at,value.plan().utilityInputs(),now);
-                catalog.recordInstallationBuilt(value.dimension(),at,value.plan().utilityInputs(),now);
+                catalog.recordInstallationBuilt(value.dimension(),at,label,value.plan().utilityInputs(),now);
             }
             catalog.saveAsync(); var result = catalog.blueprint(id).orElseThrow().summary();
             result.addProperty("archive_status","recorded"); return result;
@@ -158,6 +159,8 @@ public final class ClientMachineCatalog {
                     && value.dimension().equals(player.level().dimension().location().toString())).toList();
             if (named.size() == 1) return Optional.of(named.getFirst());
             if (named.size() > 1) throw new IllegalArgumentException("machine_label_ambiguous: use machine_id");
+            // 明确点名的机器未建档时只观察地图，不借同址另一台机器的蓝图代替它。
+            return Optional.empty();
         }
         return anchor == null ? Optional.empty() : catalog.blueprintAt(player.level().dimension().location().toString(),position(anchor));
     }
@@ -170,8 +173,11 @@ public final class ClientMachineCatalog {
         compiledBlueprints.put(blueprint.id(),new CachedBlueprint(blueprint.fingerprint(),plan)); return plan;
     }
     public static UtilityInstallation requireInstallation(LocalPlayer player, BlockPos anchor) {
+        return requireInstallation(player,anchor,null);
+    }
+    public static UtilityInstallation requireInstallation(LocalPlayer player, BlockPos anchor, String label) {
         if (!ready(player)) throw new IllegalArgumentException("machine_catalog_not_ready");
-        return catalog.installation(player.level().dimension().location().toString(),position(anchor))
+        return catalog.installation(player.level().dimension().location().toString(),position(anchor),label)
                 .orElseThrow(() -> new IllegalArgumentException("machine_external_inputs_unknown: build or register a blueprint with external_inputs first"));
     }
     public static void commissioned(LocalPlayer player, String label, ProductionRunPlan plan, Map<String, Object> observed) {

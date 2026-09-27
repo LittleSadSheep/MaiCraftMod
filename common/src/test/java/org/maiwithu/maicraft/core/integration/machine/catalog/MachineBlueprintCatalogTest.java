@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine.catalog;
 
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
+import java.util.List;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.Identity;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.Position;
 
@@ -32,12 +33,26 @@ public final class MachineBlueprintCatalogTest {
                 "the bounded index references a separate complete blueprint");
         var copy = built.blueprint(); copy.getAsJsonArray("blocks").get(0).getAsJsonObject().addProperty("block_id","minecraft:gold_block");
         check(built.blueprint().equals(document), "reading a blueprint cannot mutate its archived revision");
-        restored.registerBlueprint("新刷石机","minecraft:overworld",anchor,copy,400);
+        restored.registerBlueprint("刷石机","minecraft:overworld",anchor,copy,400);
         var revised = restored.blueprint(id).orElseThrow();
         restored.recordBlueprintState(id,built.fingerprint(),"success",500);
         check(revised.builtAtMillis() == 0 && restored.blueprint(id).orElseThrow().lastBuildState().equals("planned"),
                 "late completion of an old revision cannot complete the revised machine");
+        // 平台锚点相同仍是两台命名机器，不能让新设计覆盖已有机器或由无名称查询随意选中一台。
+        String secondId = restored.registerBlueprint("装配机","minecraft:overworld",anchor,document,450);
+        check(!secondId.equals(id) && restored.blueprints().size() == 2
+                && restored.blueprintAt("minecraft:overworld",anchor).isEmpty()
+                && restored.blueprintAt("minecraft:overworld",anchor,"刷石机").orElseThrow().id().equals(id),
+                "co-located named machines retain independent blueprints");
         restored.saveAsync().join();
+        var shared = new MachineCatalog(directory,Runnable::run); shared.bind(identity,"shared");
+        check(shared.ready() && shared.blueprints().size() == 2, "both co-located machines survive reload");
+        // 已保存的旧地点编号继续可读，不通过改名或伪造新图纸迁移旧机器。
+        var legacy = new MachineBlueprint(MachineBlueprint.locationId(identity.key(),built.dimension(),anchor),built.label(),
+                built.dimension(),anchor,built.blueprintJson(),built.fingerprint(),built.lastBuildState(),100,300);
+        var oldIndex = CatalogCodec.encode(new CatalogCodec.Snapshot(identity.key(),List.of(),List.of(),List.of(),List.of(legacy)));
+        check(CatalogCodec.decode(oldIndex,identity.key(),fingerprint -> legacy.blueprintJson()).blueprints().getFirst().id().equals(legacy.id()),
+                "legacy machine identity remains readable");
         restored.bind(new Identity("world-two","player"),"third");
         check(restored.ready() && restored.blueprints().isEmpty(), "machine records cannot leak into another world");
         // 蓝图文件受损时不能把另一份结构当成用户保存的目标；失败不会改写原目录。

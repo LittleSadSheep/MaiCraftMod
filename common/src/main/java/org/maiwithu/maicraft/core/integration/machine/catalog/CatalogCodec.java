@@ -70,7 +70,9 @@ final class CatalogCodec {
             var row = raw.getAsJsonObject(); keys(row,"id","label","dimension","anchor","inputs","inputs_fingerprint","registered_at_ms","built_at_ms");
             var value = new UtilityInstallation(text(row,"id"),text(row,"label"),text(row,"dimension"),position(row.getAsJsonObject("anchor")),
                     row.getAsJsonArray("inputs").toString(),text(row,"inputs_fingerprint"),number(row,"registered_at_ms"),number(row,"built_at_ms"));
-            if (!value.id().equals(UtilityInstallation.locationId(identityKey,value.dimension(),value.anchor())) || !ids.add(value.id()))
+            // 同时接受旧地点编号和新机器编号，升级目录不丢失已建机器的历史。
+            if (!(value.id().equals(UtilityInstallation.locationId(identityKey,value.dimension(),value.anchor()))
+                    || value.id().equals(UtilityInstallation.namedId(identityKey,value.dimension(),value.anchor(),value.label()))) || !ids.add(value.id()))
                 throw new IllegalArgumentException("Duplicate or foreign utility installation");
             installations.add(value);
         }
@@ -84,7 +86,8 @@ final class CatalogCodec {
                     blueprintsByFingerprint.apply(fingerprint),fingerprint,text(row,"last_build_state"),number(row,"registered_at_ms"),number(row,"last_built_at_ms"),
                     row.has("capture_min") ? vector(row.getAsJsonArray("capture_min")) : null,
                     row.has("capture_max") ? vector(row.getAsJsonArray("capture_max")) : null);
-            if (!value.id().equals(MachineBlueprint.locationId(identityKey,value.dimension(),anchor)) || !ids.add(value.id()))
+            if (!(value.id().equals(MachineBlueprint.locationId(identityKey,value.dimension(),anchor))
+                    || value.id().equals(MachineBlueprint.namedId(identityKey,value.dimension(),anchor,value.label()))) || !ids.add(value.id()))
                 throw new IllegalArgumentException("Duplicate or foreign machine blueprint");
             blueprints.add(value);
         }
