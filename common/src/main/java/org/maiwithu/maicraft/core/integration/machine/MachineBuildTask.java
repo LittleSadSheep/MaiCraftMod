@@ -462,6 +462,14 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
+    /** 机器总任务让出身体时继续向下通知实际施工/补料任务，保留同一子任务等待恢复。 */
+    @Override public void stop(LocalPlayer companion, StopReason reason) {
+        if (reason == StopReason.PREEMPTED) {
+            if (child != null) child.stop(companion, reason);
+            supply.pause(companion);
+        }
+        super.stop(companion, reason);
+    }
     @Override protected void cleanup() {
         if (child != null) {
             child.stop(player, StopReason.REPLACED);

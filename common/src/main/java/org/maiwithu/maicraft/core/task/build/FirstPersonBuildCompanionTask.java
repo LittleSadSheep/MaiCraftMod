@@ -291,8 +291,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     && !digger.hasPendingBreak() && ultimine == null && !ultimineArmed
                     && !excavationTools.active() && !spoilSupply.active() && player.onGround()
                     && (nav == null || nav.isSafeToCancel());
-            if (boundary && settled && (foodPreparation.active() || !player.isUsingItem())
-                    && foodPreparation.shouldPrepare(player)) {
+            // 已经交出的取食流程持续持有身体；采田往返途中跳跃或开菜单不能让旧施工阶段抢回来。
+            if (foodPreparation.active() || boundary && settled && !player.isUsingItem()
+                    && foodPreparation.shouldPrepare(player, r)) {
                 if (!foodPreparation.active()) { stopNav(); InputDriver.halt(player); }
                 var food = foodPreparation.tick(player, r, this::runChild);
                 r.extendDeadlineTo(foodPreparation.deadline());
@@ -2521,7 +2522,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 if (useReceipt == null && phase != Phase.EDGE_RETURN) phase = Phase.PLACE_NAV;
             } else placementAccess.stop();
         }
-        foodPreparation.stop(player);
+        if (why == StopReason.PREEMPTED) foodPreparation.pause(player); else foodPreparation.stop(player);
         spoilSupply.cancel(player);
         if (ultimine != null) { ultimine.close(); ultimine = null; ultimineArmed = false; }
         excavationTools.stop(player);

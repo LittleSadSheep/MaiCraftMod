@@ -130,8 +130,15 @@ public final class BuildFoodPreparationTest {
             }
             check(Boolean.TRUE.equals(prep.progress(h.player).get("refill_deferred")) && h.inventory.getItem(0).getCount() == 3 && h.player.getHealth() == 11.2F,
                     "deferred refill neither consumes special food nor manufactures health");
-            h.player.getFoodData().setFoodLevel(6);
-            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED, "loss of sprint food still stops unsafe work");
+            // 饥饿六点只影响疾跑，不会禁止原地放块；接近饥饿伤害之前仍可继续不依赖疾跑的施工。
+            for (int food : new int[]{6, 3, 1}) {
+                h.player.getFoodData().setFoodLevel(food);
+                check(!prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.READY,
+                        "lack of sprint food must not prohibit ordinary construction");
+            }
+            h.player.getFoodData().setFoodLevel(0);
+            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED,
+                    "actual starvation still requires food before more construction");
         }
         try (var h = new InteractionWorldTestHarness()) {
             h.player.setHealth(7); h.player.getFoodData().setFoodLevel(17);

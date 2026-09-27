@@ -24,6 +24,8 @@ public final class BuildFoodBoundaryTest {
         selectionBoundariesFeed();
         pendingExcavationKeepsItsOperation();
         accessOnlyFeedsBeforeExitNavigation();
+        exhaustedSprintDoesNotBlockConstruction();
+        activePreparationKeepsOwnershipInAir();
         System.out.println("BuildFoodBoundaryTest: passed");
     }
     private static void excavationPipelineFeedsBeforeFirstBreak() throws Exception {
@@ -74,6 +76,21 @@ public final class BuildFoodBoundaryTest {
             task.result(TaskState.CANCELLED);
         }
     }
+
+    // 复现实机生命16.53、饥饿6的置物台准备边界：无普通食物时仍能进入施工选格，不捏造进食或回血。
+    private static void exhaustedSprintDoesNotBlockConstruction() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var calls = new AtomicInteger(); var task = prepared(h, plan(), calls);
+            h.inventory.clearContent(); h.player.setHealth(16.53F); h.player.getFoodData().setFoodLevel(6);
+            phase(task, "SELECT");
+            check(task.tick(h.player) != TaskState.FAILED && calls.get() == 0
+                            && ((BuildFoodPreparation) field(task, "foodPreparation").get(task)).failure() == null,
+                    "ordinary construction is not gated by the unavailable sprint food threshold");
+            check(h.player.getFoodData().getFoodLevel() == 6 && h.player.getHealth() == 16.53F,
+                    "allowing work never changes native hunger or health");
+            task.result(TaskState.CANCELLED);
+        }
+    }
     private static FirstPersonBuildCompanionTask prepared(InteractionWorldTestHarness h, BuildTaskRecord record, AtomicInteger calls) throws Exception {
         h.player.getFoodData().setFoodLevel(14); h.inventory.setItem(0, new ItemStack(Items.BREAD, 64)); record.previewManaged(true);
         var task = new FirstPersonBuildCompanionTask(h.player, record);
@@ -86,6 +103,17 @@ public final class BuildFoodBoundaryTest {
             };
         }));
         return task;
+    }
+    private static void activePreparationKeepsOwnershipInAir() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var calls = new AtomicInteger(); var task = prepared(h, plan(), calls); phase(task, "SELECT");
+            check(task.tick(h.player) == TaskState.RUNNING && calls.get() == 1, "food preparation acquired the body at a settled boundary");
+            // 模拟取食返程跳跃或短暂击退；旧施工不能因为脚离地就恢复选块和放置。
+            field(h.player, "onGround").setBoolean(h.player, false); h.nextTick();
+            check(task.tick(h.player) == TaskState.RUNNING && field(task, "phase").get(task).toString().equals("SELECT")
+                    && calls.get() == 1, "active upkeep retains ownership while the body is airborne");
+            task.result(TaskState.CANCELLED);
+        }
     }
     private static BuildTaskRecord plan() { return new BuildTaskRecord("selection-food", 1000, List.of(new BuildTaskRecord.Target(
             Blocks.AIR, Items.AIR, new BlockPos(5, 1, 5), "air", null, null, null)), false, true); }

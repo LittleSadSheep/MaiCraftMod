@@ -5,12 +5,17 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.SharedConstants;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.MaterialPolicy;
+import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.task.Task;
+import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 工地加载失败必须保留真实导航终态，不能让模型把一次防卫中断误当成蓝图或工地坐标错误。 */
@@ -36,8 +41,24 @@ public final class MachineNavigationReceiptTest {
                     && result.message().contains("fixture navigation owner was interrupted"), "wrapper preserves concrete failure type and reason");
             check(evidence.get("target").equals(Map.of("x", 500, "y", 1, "z", 3))
                     && Boolean.FALSE.equals(result.data().get("construction_complete")), "remote target evidence cannot imply any completed construction");
+            // 真实父任务链：机器 -> 分批供料 -> 正在取食的施工子任务；暂停必须落到叶子并保留对象身份。
+            var leaf = new PausedChild();
+            var build = new BuildTaskRecord("pause-build", 1000, List.of(), false, true);
+            var supply = TaskFactory.create(world.player, new SemanticBuildSupplyTaskRecord("pause-supply", 1000, build));
+            field(supply.getClass(), "activeChild").set(supply, leaf);
+            var machine = new MachineBuildTask(world.player, record); field(MachineBuildTask.class, "child").set(machine, supply);
+            machine.stop(world.player, Task.StopReason.PREEMPTED);
+            check(leaf.pauses == 1 && field(supply.getClass(), "activeChild").get(supply) == leaf
+                    && field(MachineBuildTask.class, "child").get(machine) == supply,
+                    "defense or routine rest pauses the actual leaf without replacing the construction chain");
         }
         System.out.println("MachineNavigationReceiptTest: passed");
+    }
+    private static final class PausedChild implements Task {
+        int pauses;
+        public TaskState tick(LocalPlayer player) { return TaskState.RUNNING; }
+        public void stop(LocalPlayer player, StopReason reason) { if (reason == StopReason.PREEMPTED) pauses++; }
+        public String name() { return "owned upkeep fixture"; }
     }
     private static Field field(Class<?> type, String name) throws Exception {
         for (Class<?> owner = type; owner != null; owner = owner.getSuperclass()) {

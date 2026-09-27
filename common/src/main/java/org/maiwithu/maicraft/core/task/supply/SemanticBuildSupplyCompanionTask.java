@@ -874,6 +874,14 @@ final class SemanticBuildSupplyCompanionTask
         return Map.copyOf(data);
     }
 
+    /** 暂停传到真正持有身体的施工批次及取料器，不能只停父任务自己的空导航引用。 */
+    @Override public void stop(LocalPlayer companion, Task.StopReason reason) {
+        if (reason == Task.StopReason.PREEMPTED) {
+            if (activeChild != null) activeChild.stop(companion, reason);
+            supply.pause(companion);
+        }
+        super.stop(companion, reason);
+    }
     @Override protected void cleanup() {
         // 总任务结束时，取料与施工小任务也要停止，并释放整份方案的预览记录。
         BuildPreviewGate.release(r);
