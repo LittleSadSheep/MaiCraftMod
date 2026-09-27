@@ -34,6 +34,15 @@ public final class KineticRouteContinuationTest {
             var request=new EconomicKineticTaskRecord("test",1000,"minecraft:overworld","city",a,Direction.EAST,"input",b,
                     Direction.WEST,"minecraft:stone",0,64,false,MaterialPolicy.INVENTORY_ONLY,List.of());
             KineticRouteContinuations.retain(h.player,request,plan,new JsonObject());
+            // 同一对端点由自动选型改成锁链传动轮时，旧的轴线路由不能被静默续建为新要求的成果。
+            var chainOnly = new EconomicKineticTaskRecord("chain",1000,"minecraft:overworld","city",a,Direction.EAST,"input",b,
+                    Direction.WEST,"minecraft:stone",0,64,false,MaterialPolicy.INVENTORY_ONLY,List.of(),List.of(),false,true);
+            check(!chainOnly.accepts(plan) && request.accepts(plan),"explicit chain constraint excludes shaft-only candidates");
+            var chainPlan = new KineticRouteGeometry.Plan("chain_conveyor",source,Direction.EAST,target,Direction.WEST,
+                    List.of(),List.of(new KineticRouteGeometry.ChainLink(a,b,4)),Map.of("minecraft:chain",4));
+            check(chainOnly.accepts(chainPlan),"a declared native chain link satisfies the candidate-family filter");
+            try { KineticRouteContinuations.find(h.player,chainOnly); throw new AssertionError("different transmission reused old partial route"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("partial_route"),"changed technology keeps the original partial-route boundary"); }
             check(KineticRouteContinuations.find(h.player,request).plan()==plan,"an unfinished request must retain its exact selected plan");
             check(KineticRouteContinuations.remaining(h.player,plan).equals(Map.of("minecraft:stone",1)),"an absent cell still needs its material");
             h.set(cell,Blocks.STONE.defaultBlockState());

@@ -51,7 +51,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                 .integer("destination_x", "Internally resolved destination X.")
                 .integer("destination_y", "Internally resolved destination Y.")
                 .integer("destination_z", "Internally resolved destination Z.")
-                .optionalEnum("transmission", "Compare complete shaft, gearbox and raised chain-conveyor costs, or require encased chain drive.", "auto", "encased_chain_drive")
+                .optionalEnum("transmission", "auto compares technologies; chain_conveyor requires 锁链传动轮; encased_chain_drive requires 链式传动箱.", "auto", "chain_conveyor", "encased_chain_drive")
                 .optionalBool("allow_free_receiver", "Allow nearest authoritative destination evidence to be a verified empty receiver.")
                 .optionalEnum("material_policy", "Material source policy after route investigation.",
                         "ordinary", "storage_available", "inventory_only")
@@ -70,6 +70,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
         CreateMechanicalPower.Transmission transmission = switch (
                 parsed.transmission() == null ? "auto" : parsed.transmission()) {
             case "auto" -> CreateMechanicalPower.Transmission.AUTO;
+            case "chain_conveyor" -> CreateMechanicalPower.Transmission.CHAIN_CONVEYOR;
             case "encased_chain_drive" -> CreateMechanicalPower.Transmission.ENCASED_CHAIN_DRIVE;
             default -> throw new IllegalArgumentException("unsupported mechanical transmission");
         };

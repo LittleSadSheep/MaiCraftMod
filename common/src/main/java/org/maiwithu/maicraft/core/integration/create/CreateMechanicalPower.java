@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineti
 public final class CreateMechanicalPower {
     public static final String CHAIN_DRIVE_ID = "create:encased_chain_drive";
 
-    public enum Transmission { AUTO, ENCASED_CHAIN_DRIVE }
+    public enum Transmission { AUTO, CHAIN_CONVEYOR, ENCASED_CHAIN_DRIVE }
 
     /** 锚点通常会扩展为实时证据；exactFace 用于绑定现有动力接口。 */
     public record Endpoint(String name, BlockPos center, Direction exactFace) {
@@ -48,6 +48,9 @@ public final class CreateMechanicalPower {
             source = Objects.requireNonNull(source, "source");
             destination = Objects.requireNonNull(destination, "destination");
             transmission = transmission == null ? Transmission.AUTO : transmission;
+            // 锁链传动轮必须连接已观察到的真实接口，不能退回旧版“空接收端”链式传动箱执行器。
+            if (transmission == Transmission.CHAIN_CONVEYOR && allowFreeReceiver)
+                throw new IllegalArgumentException("chain_conveyor_requires_observed_receiver");
         }
 
         public static Request preserving(Endpoint source, Endpoint destination) {
@@ -94,14 +97,14 @@ public final class CreateMechanicalPower {
             List<String> protectedLabels) {
         install();
         Objects.requireNonNull(request, "request");
-        if (request.transmission() == Transmission.AUTO && !request.allowFreeReceiver()) {
+        if (request.transmission() != Transmission.ENCASED_CHAIN_DRIVE && !request.allowFreeReceiver()) {
             var player = Minecraft.getInstance().player;
             if (player == null) throw new IllegalArgumentException("mechanical_connection_requires_live_player");
             if (CreateEconomicEndpointBridge.direct(player.level(), request)) return new EconomicKineticTaskRecord(
                     callId,deadlineGameTime,player.level().dimension().location().toString(),request.source().name(),
                     request.source().center(),request.source().exactFace(),request.destination().name(),
                     request.destination().center(),request.destination().exactFace(),null,0,64,false,
-                    materialPolicy,protectedLabels,allowedSources,allowHarm);
+                    materialPolicy,protectedLabels,allowedSources,allowHarm,request.transmission() == Transmission.CHAIN_CONVEYOR);
         }
         return new CreateMechanicalPowerTaskRecord(callId, deadlineGameTime,
                 Objects.requireNonNull(request, "request"), null, materialPolicy,

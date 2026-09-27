@@ -61,6 +61,7 @@ final class KineticRouteContinuations {
         return Objects.equals(a.source,b.source)&&a.sourceFace==b.sourceFace&&a.targetFace==b.targetFace
                 &&Objects.equals(a.targetBlockId,b.targetBlockId)&&a.minimumRpm==b.minimumRpm
                 &&a.materialPolicy==b.materialPolicy&&a.allowedSources.equals(b.allowedSources)&&a.allowHarm==b.allowHarm
+                &&a.requireChainConveyor==b.requireChainConveyor
                 &&a.protectedLabels.equals(b.protectedLabels)&&a.dimension.equals(b.dimension)&&a.sourceRadius==b.sourceRadius;
     }
 }

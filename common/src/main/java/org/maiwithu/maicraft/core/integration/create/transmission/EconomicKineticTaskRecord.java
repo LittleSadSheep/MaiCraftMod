@@ -23,6 +23,7 @@ public final class EconomicKineticTaskRecord extends TaskRecord {
     public final List<String> protectedLabels;
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
+    public final boolean requireChainConveyor;
     public EconomicKineticTaskRecord(String callId,long deadline,String dimension,String sourceLabel,BlockPos source,Direction sourceFace,
             String targetLabel,BlockPos target,Direction targetFace,String targetBlockId,double minimumRpm,int sourceRadius,
             boolean serverProofRequired,MaterialPolicy materialPolicy,List<String> protectedLabels) {
@@ -33,6 +34,14 @@ public final class EconomicKineticTaskRecord extends TaskRecord {
             String targetLabel,BlockPos target,Direction targetFace,String targetBlockId,double minimumRpm,int sourceRadius,
             boolean serverProofRequired,MaterialPolicy materialPolicy,List<String> protectedLabels,
             List<SemanticAcquireTaskRecord.Source> allowedSources,boolean allowHarm) {
+        this(callId,deadline,dimension,sourceLabel,source,sourceFace,targetLabel,target,targetFace,targetBlockId,
+                minimumRpm,sourceRadius,serverProofRequired,materialPolicy,protectedLabels,allowedSources,allowHarm,false);
+    }
+    // 由明确的技术选择约束候选与续接，不因库存里轴更便宜就悄悄改变玩家要求的传动方式。
+    public EconomicKineticTaskRecord(String callId,long deadline,String dimension,String sourceLabel,BlockPos source,Direction sourceFace,
+            String targetLabel,BlockPos target,Direction targetFace,String targetBlockId,double minimumRpm,int sourceRadius,
+            boolean serverProofRequired,MaterialPolicy materialPolicy,List<String> protectedLabels,
+            List<SemanticAcquireTaskRecord.Source> allowedSources,boolean allowHarm,boolean requireChainConveyor) {
         super("connect_economic_kinetics",callId,deadline);
         this.dimension=Objects.requireNonNull(dimension);this.sourceLabel=sourceLabel==null?"nearest suitable source":sourceLabel;
         this.source=source==null?null:source.immutable();this.sourceFace=sourceFace;
@@ -43,6 +52,8 @@ public final class EconomicKineticTaskRecord extends TaskRecord {
         this.materialPolicy=materialPolicy==null?MaterialPolicy.ORDINARY:materialPolicy;
         this.protectedLabels=protectedLabels==null?List.of():List.copyOf(protectedLabels);
         this.allowedSources=allowedSources==null?List.of():List.copyOf(allowedSources);this.allowHarm=allowHarm;
+        this.requireChainConveyor=requireChainConveyor;
     }
+    boolean accepts(KineticRouteGeometry.Plan plan) { return !requireChainConveyor || !plan.chainLinks().isEmpty(); }
     @Override public String describe(){return "比较供能成本并连接 · "+targetLabel;}
 }

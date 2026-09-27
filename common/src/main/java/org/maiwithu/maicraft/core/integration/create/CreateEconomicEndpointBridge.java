@@ -18,6 +18,7 @@ final class CreateEconomicEndpointBridge {
                 request.request.source().name(), source.position(), request.request.source().exactFace(),
                 request.request.destination().name(), target.position(), request.request.destination().exactFace(),
                 BuiltInRegistries.BLOCK.getKey(target.state().getBlock()).toString(), 0, 64, false,
-                request.materialPolicy, request.protectedLabels, request.allowedSources, request.allowHarm);
+                request.materialPolicy, request.protectedLabels, request.allowedSources, request.allowHarm,
+                request.request.transmission() == CreateMechanicalPower.Transmission.CHAIN_CONVEYOR);
     }
 }

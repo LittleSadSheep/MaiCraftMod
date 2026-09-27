@@ -325,6 +325,8 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 修改中的空气目标若当前为可用桶回收的源水或源岩浆，施工器先准备空桶并原生回收，核对源格消失和满桶返还，再等待声明格里的流水退去并继续普通拆换。持续流入会返回明确阻塞，排水范围限于这次声明的格子。完工补丁会合回原机器图纸，保留未改机件；同一平台锚点上的不同命名机器分别留档。
 
+`connect_mechanical_power` 的 `transmission:"chain_conveyor"` 明确要求锁链传动轮及原生锁链连接；`encased_chain_drive`（旧别名 `chain_drive`）指定链式传动箱。省略或 `auto` 才比较多种传动方式。接线保留现场已有方块，旧线拆除仍由明确的机器修改目标表达。
+
 ## 分阶段验收
 
 不带生产清单的构建和修改验收声明的方块、状态及原生部件。显式蓝图完成后报告 `construction_complete` 与 `machine_geometry_verified`，同时保留 `configuration_complete: false`、`configuration_status: "separate_use_phase"`、`machine_production_verified: false`。

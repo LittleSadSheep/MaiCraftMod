@@ -125,9 +125,10 @@ final class CreateMechanicalPowerTask
         LocalPlayerContext context = ClientRuntime.requireContext(player);
         bodyEpoch = context.bodyEpoch();
         dimension = context.level().dimension().location().toString();
-        if (r.continuationToken == null && r.request.transmission() == CreateMechanicalPower.Transmission.AUTO && !r.request.allowFreeReceiver()) {
+        // 自动选型和明确指定锁链传动轮都查询六面实际接口；只有链式传动箱走旧版专用状态图。
+        if (r.continuationToken == null && r.request.transmission() != CreateMechanicalPower.Transmission.ENCASED_CHAIN_DRIVE && !r.request.allowFreeReceiver()) {
             if (!r.request.preserveExisting() || !CreateMechanicalPower.availability().available()) {
-                failNow("mechanical_auto_preflight_failed", "AUTO requires preserving existing blocks and an available native kinetic API", FailureType.UNSUPPORTED, List.of("inspect_endpoints", "cancel"));
+                failNow("mechanical_auto_preflight_failed", "Economic routing requires preserving existing blocks and an available native kinetic API", FailureType.UNSUPPORTED, List.of("inspect_endpoints", "cancel"));
                 return;
             }
             economicAfterEndpoints = true;

@@ -34,6 +34,17 @@ public final class ConstructionSiteRuntimeTest {
             // 在线 plan 使用同一锚点完成原生蓝图检查，不领材料、不消费编号，execute 还能继续使用。
             IntentRuntime runtime = IntentRuntime.get();
             runtime.remember("site", new Goal.WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), site.dimension()));
+            // 原生接线参数保留玩家点名的部件家族；兼容旧别名时也明确落到链式传动箱，而不是混成锁链传动轮。
+            for (String family : new String[]{"auto","chain_conveyor","encased_chain_drive","chain_drive"}) {
+                var connection = JsonParser.parseString("""
+                        {"ability":"maicraft:connect_mechanical_power","outcome":"连接已知动力接口",
+                         "target":{"kind":"landmark","label":"site"},"parameters":{"source_label":"site","target_label":"site"}}
+                        """).getAsJsonObject();
+                connection.getAsJsonObject("parameters").addProperty("transmission",family);
+                var action = (IntentAction.Tool) AbilityAdapter.adapt(Goal.fromJson(connection),world.player,runtime);
+                check(JsonParser.parseString(action.argumentsJson()).getAsJsonObject().get("transmission").getAsString()
+                        .equals(family.equals("chain_drive") ? "encased_chain_drive" : family),"semantic adapter preserves explicit transmission family");
+            }
             JsonObject request = JsonParser.parseString("""
                     {"ability":"maicraft:build_machine","outcome":"build on the platform",
                      "target":{"kind":"landmark","label":"site"},"parameters":{"allow_modify":true,

@@ -46,6 +46,19 @@ public final class CreateEconomicEndpointBridgeTest {
             check(economic.materialPolicy == MaterialPolicy.INVENTORY_ONLY && economic.allowedSources.equals(List.of(Source.STORAGE))
                     && !economic.allowHarm && economic.protectedLabels.equals(List.of("home")), "handoff preserves all supply and protection policy");
             check(field(CreateMechanicalPowerTask.class, "plan").get(task) == null, "AUTO must not construct an encased-chain plan after semantic resolution");
+            // 明确锁链传动轮从语义锚点转成交给经济规划的实机端点后，仍必须携带技术约束。
+            var chainRequest = new CreateMechanicalPower.Request(request.source(),request.destination(),
+                    CreateMechanicalPower.Transmission.CHAIN_CONVEYOR,true,false);
+            var chainRecord = (CreateMechanicalPowerTaskRecord) CreateMechanicalPower.task("regional-chain",1000,chainRequest);
+            var chainEconomic = CreateEconomicEndpointBridge.resolved(chainRecord,"minecraft:overworld",source,target);
+            check(chainEconomic.requireChainConveyor && !economic.requireChainConveyor,
+                    "explicit chain-conveyor admission must not become ordinary AUTO or encased chain drive");
+            try {
+                new CreateMechanicalPower.Request(request.source(),request.destination(),CreateMechanicalPower.Transmission.CHAIN_CONVEYOR,true,true);
+                throw new AssertionError("unobserved chain receiver accepted");
+            } catch (IllegalArgumentException expected) {
+                check(expected.getMessage().equals("chain_conveyor_requires_observed_receiver"),"unsupported receiver scope is explicit");
+            }
             var legacy = CreateEndpointContinuations.issue(request, new CreateProgressiveSurvey(request), 1, "minecraft:overworld");
             check(!legacy.economicAfterEndpoints(), "legacy opaque endpoint continuations preserve their original executor");
             CreateEndpointContinuations.discard(legacy.token());

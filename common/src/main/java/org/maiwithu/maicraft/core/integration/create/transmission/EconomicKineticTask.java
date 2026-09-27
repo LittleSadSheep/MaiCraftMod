@@ -52,6 +52,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     private String sourceBlockId;
     private boolean sourceRefreshedAfter,resumingRoute;
     private boolean serverProof,routeBuilt,powerReady,noChange,materialsReady;
+    private boolean targetBeforeChecked;
     EconomicKineticTask(LocalPlayer player,EconomicKineticTaskRecord record){super(player,record);world=player.level();}
     @Override protected void onStart() {
         target=KineticNativeView.read(world,r.target,r.targetFace,true);
@@ -117,7 +118,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         }
         sources=sources.stream().filter(value->!value.endpoint().position().equals(r.target)).toList();
         if(sources.isEmpty())return failure("kinetic_no_loaded_powered_source: inspect or name an accessible existing city outlet");
-        if(target.powered()) {
+        if(target.powered()&&!r.requireChainConveyor) {
             var source=sources.getFirst().endpoint();
             selected=new KineticRouteGeometry.Plan("existing_connection",source,null,target.endpoint(),r.targetFace,List.of(),List.of(),Map.of());
             routeProtection=List.of(source.position(),r.target);
@@ -131,7 +132,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             if(source.endpoint().position().equals(r.target))return TaskState.RUNNING;
             int span=ChainConveyorBridge.available()?ChainConveyorBridge.limits(world).maximumLength():32;
             try { candidates.addAll(KineticRouteGeometry.generate(source.endpoint(),target.endpoint(),new KineticPlanningTerrain(player.clientLevel),
-                    KineticRouteGeometry.Limits.defaults(span))); }
+                    KineticRouteGeometry.Limits.defaults(span)).stream().filter(r::accepts).toList()); }
             catch(IllegalArgumentException unavailable) { if(r.source!=null)throw unavailable; }
             if(candidates.size()>512) candidates.subList(512,candidates.size()).clear();
             return TaskState.RUNNING;
@@ -142,7 +143,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         int maxRpm=KineticRpmBudget.maximumRotationSpeed();
         candidates.removeIf(plan->sources.stream().filter(source->source.endpoint().position().equals(plan.source().position()))
                 .noneMatch(source->KineticRpmBudget.accepts(plan,source.rpm(),r.minimumRpm,maxRpm)));
-        if(candidates.isEmpty())return failure("kinetic_no_supported_economical_geometry");
+        if(candidates.isEmpty())return failure(r.requireChainConveyor ? "kinetic_no_supported_chain_conveyor_geometry" : "kinetic_no_supported_economical_geometry");
         var items=new LinkedHashSet<String>();candidates.forEach(value->items.addAll(value.bom().keySet()));
         var costs=KineticRecipeSnapshot.capture(player,items);
         var ranked=KineticRouteChoice.rank(candidates,costs);costReport=KineticRouteChoice.report(ranked);
@@ -182,7 +183,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             if(live==null||!live.powered())return failure("kinetic_client_source_not_powered");
             if(after)sourceAfter=KineticPowerEvidence.client(live);else sourceBefore=KineticPowerEvidence.client(live);
         }
-        phase=after?Phase.TARGET_AFTER:resumingRoute||selected.family().equals("existing_connection")?Phase.TARGET:Phase.BUILD;return TaskState.RUNNING;
+        phase=after?Phase.TARGET_AFTER:resumingRoute||selected.family().equals("existing_connection")
+                ||r.requireChainConveyor&&!targetBeforeChecked?Phase.TARGET:Phase.BUILD;return TaskState.RUNNING;
     }
     private TaskState checkTarget(boolean after) {
         if(serverProof&&!near(r.target))return TaskState.RUNNING;
@@ -192,7 +194,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             if(!after&&KineticNativeReads.powered(row,0)) {
                 if(sourceBefore==null||!KineticNativeReads.sameNetwork(sourceBefore,row)||!KineticNativeReads.powered(row,r.minimumRpm))
                     return failure("kinetic_target_powered_by_different_or_insufficient_network");
-                if(!resumingRoute){phase=Phase.EXISTING;return TaskState.RUNNING;}
+                if(!resumingRoute&&!r.requireChainConveyor){phase=Phase.EXISTING;return TaskState.RUNNING;}
             }
             if(after) {
                 targetAfter=row;powerReady=KineticNativeReads.powered(row,r.minimumRpm)&&KineticNativeReads.sameNetwork(sourceAfter,row);
@@ -203,14 +205,16 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             if(live==null)return failure("kinetic_client_target_changed");
             if(!after&&live.powered()) {
                 if(!KineticPowerEvidence.sameNetwork(live,sourceBefore))return failure("kinetic_client_target_on_different_network");
-                if(!resumingRoute){phase=Phase.EXISTING;return TaskState.RUNNING;}
+                if(!resumingRoute&&!r.requireChainConveyor){phase=Phase.EXISTING;return TaskState.RUNNING;}
             }
             if(after) {targetAfter=KineticPowerEvidence.client(live);powerReady=live.powered()&&Math.abs(live.rpm())>=r.minimumRpm
                     &&KineticPowerEvidence.sameNetwork(live,sourceAfter);if(!powerReady)return failure("kinetic_client_rotation_or_network_unverified");}
         }
         if(after&&!KineticRouteBuild.matches(player,selected))return failure("kinetic_built_geometry_changed");
         if(!after&&selected.family().equals("existing_connection"))return failure("kinetic_existing_power_disappeared");
-        phase=after?Phase.DONE:materialsReady?(resumingRoute?Phase.BUILD:Phase.SOURCE):Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
+        // 指定锁链时，即使目标已有转速，也要完成所选锁链路径，不能用原来的轴线冒充要求已满足。
+        if(!after)targetBeforeChecked=true;
+        phase=after?Phase.DONE:materialsReady?(resumingRoute||r.requireChainConveyor?Phase.BUILD:Phase.SOURCE):Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
     }
     private TaskState existing() {
         var face=r.targetFace;
@@ -238,7 +242,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
                     r.materialPolicy,r.allowedSources,r.allowHarm,r.protectedLabels);
             return TaskState.RUNNING;
         }
-        materialsReady=true;phase=resumingRoute?Phase.SOURCE:Phase.TARGET;return TaskState.RUNNING;
+        materialsReady=true;phase=resumingRoute||r.requireChainConveyor?Phase.SOURCE:Phase.TARGET;return TaskState.RUNNING;
     }
     private TaskState build() {
         if(!KineticRouteGeometry.clearanceValid(selected,new KineticPlanningTerrain(player.clientLevel)))return failure("kinetic_route_clearance_changed");
@@ -302,6 +306,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         result.put("native_connected",powerReady);result.put("machine_production_verified",false);result.put("throughput_verified",false);
         result.put("no_change",noChange);result.put("medium","kinetic");result.put("input_id",r.targetLabel);
         result.put("resumed_selected_route",resumingRoute);
+        result.put("requested_transmission",r.requireChainConveyor?"chain_conveyor":"auto");
+        result.put("existing_blocks_preserved",true);
         result.put("source_native_observation_stage",sourceRefreshedAfter?"after_construction":"before_construction_with_current_client_network_check");result.put("target_native_observation_stage","after_construction");
         result.put("source_label",r.sourceLabel);result.put("last_native_stage",lastChild);result.put("chain_connections",List.copyOf(linkEvidence));
         if(selected!=null){result.put("transmission_family",selected.family());result.put("material_bill",selected.bom());result.put("selected_source",KineticNativeReads.position(selected.source().position()));

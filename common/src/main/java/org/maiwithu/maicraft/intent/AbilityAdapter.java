@@ -753,11 +753,13 @@ final class AbilityAdapter {
         String requested = string(parameters, "transmission");
         String transmission;
         if (requested == null || "auto".equals(requested)) transmission = "auto";
+        // 明确点名锁链传动轮就保留这一技术约束，不能把英文 chain 统统映射成链式传动箱。
+        else if ("chain_conveyor".equals(requested)) transmission = "chain_conveyor";
         else if ("chain_drive".equals(requested) || "encased_chain_drive".equals(requested)) {
             transmission = "encased_chain_drive";
         } else {
             return decision(goal, "Unsupported mechanical transmission: " + requested,
-                    List.of(option("replace_goal", "Choose automatic or chain_drive transmission."),
+                    List.of(option("replace_goal", "Choose auto, chain_conveyor (锁链传动轮), or encased_chain_drive (链式传动箱)."),
                             option("cancel", "Cancel the whole task.")));
         }
 
