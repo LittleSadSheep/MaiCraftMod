@@ -16,6 +16,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -314,6 +315,7 @@ public final class MachineConstructionPlan {
                 replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE, replace, consume,
                 consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
+        task.futureWorkItems(foodProtectedWorkItems());
         var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
         fluidTargets().forEach(target -> protectedSources.add(target.pos())); task.materialSupplyProtection(protectedSources);
         task.semanticFacts(Map.of("machine_geometry_verified", parts.isEmpty() && openings.isEmpty() && fluidTargets().isEmpty(), "machine_production_verified", false));
@@ -344,9 +346,28 @@ public final class MachineConstructionPlan {
         var task = new BuildTaskRecord(callId, deadline, attachmentLayers.get(index), replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true); task.materialSupplyProtection(positions());
+        task.futureWorkItems(foodProtectedWorkItems());
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
     public BlockPos anchor() { return anchor; }
+    /** 放块阶段也保留后续皮带连接器、附件和显式工序原料，防止提前吃掉例如皮带配方中的熟海带。 */
+    private Set<Item> foodProtectedWorkItems() {
+        var items = new LinkedHashSet<Item>();
+        blocks.forEach(target -> { if (target.materialCount() > 0) items.add(target.item()); });
+        parts.forEach(part -> items.add(part.spec().item()));
+        installations.forEach(step -> step.materials().keySet().forEach(id -> items.add(BuiltInRegistries.ITEM.get(id))));
+        collectWorkItems(blueprint(), items);
+        items.remove(Items.AIR); return Set.copyOf(items);
+    }
+    private static void collectWorkItems(JsonElement value, Set<Item> items) {
+        // 这里只读取图纸中已声明的物品标识，不根据自然语言猜测未来需求。
+        if (value.isJsonObject()) value.getAsJsonObject().entrySet().forEach(entry -> collectWorkItems(entry.getValue(), items));
+        else if (value.isJsonArray()) value.getAsJsonArray().forEach(entry -> collectWorkItems(entry, items));
+        else if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+            var id = ResourceLocation.tryParse(value.getAsString());
+            if (id != null && BuiltInRegistries.ITEM.containsKey(id)) items.add(BuiltInRegistries.ITEM.get(id));
+        }
+    }
     public String blueprintJson() { return blueprintJson; }
     public JsonObject blueprint() { return JsonParser.parseString(blueprintJson).getAsJsonObject(); }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }

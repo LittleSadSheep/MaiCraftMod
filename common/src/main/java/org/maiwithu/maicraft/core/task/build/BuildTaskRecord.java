@@ -82,6 +82,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private boolean previewManaged;
     /** 仅供内部补料流程使用：先回到施工区外地面，临时支撑仍留在共享账中，后续正常施工负责清理。 */
     private boolean supplyAccessOnly;
+    /** 机器尚未装配的连接件、附件与后续工序需求也随施工批次传递，避免补食只看到眼前的放块材料。 */
+    private Set<Item> futureWorkItems = Set.of();
+    public Set<Item> futureWorkItems() { return futureWorkItems; }
+    public void futureWorkItems(Set<Item> items) { futureWorkItems = Set.copyOf(items); }
     private BuildScaffoldLedger scaffoldLedger = new BuildScaffoldLedger();
     private BuildExcavationCargo excavationCargo = new BuildExcavationCargo();
     BuildExcavationCargo excavationCargo() { return excavationCargo; }
@@ -136,6 +140,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.excavationCargo = excavationCargo;
         destination.materialSupplyProtection = materialSupplyProtection;
         destination.toolSupply = toolSupply;
+        destination.futureWorkItems = futureWorkItems;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
                 preflightGuard, mutationGuard, confirmedMutation);
     }
