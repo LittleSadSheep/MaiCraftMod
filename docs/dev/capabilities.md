@@ -4,7 +4,7 @@
 
 ## 如何看这张表
 
-下表列出 [IntentRuntime.KNOWN_ABILITIES](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentRuntime.java) 的 35 项能力。
+下表列出 [IntentRuntime.KNOWN_ABILITIES](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentRuntime.java) 的 38 项能力。
 
 - **入口核对**：已确认能力注册和适配入口；尚未完成该能力全部执行分支的审阅。
 - **完整审阅**：参数、动作、结果、暂停取消、换世界和恢复路径均已逐项检查，并列明相关验证。
@@ -26,6 +26,9 @@
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
 | `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 入口核对 |
 | `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | 入口核对 |
+| `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | 入口核对 |
+| `use_item` | 有限次持用背包中的物品 | `GeneralAbilityAdapter.useItem` | 入口核对 |
+| `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | 入口核对 |
 | `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | 入口核对 |
 | `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | 入口核对 |
 | `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | 入口核对 |
