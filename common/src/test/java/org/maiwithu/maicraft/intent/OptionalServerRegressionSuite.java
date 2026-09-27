@@ -70,6 +70,7 @@ import org.maiwithu.maicraft.server.machine.connectivity.ConnectionInspectionTes
 import org.maiwithu.maicraft.server.machine.connectivity.HopperConnectionInspectionTest;
 import org.maiwithu.maicraft.server.machine.create.CreatePressInputInspectionTest;
 import org.maiwithu.maicraft.server.machine.create.CreateStressObservationTest;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInputTest;
 import org.maiwithu.maicraft.server.machine.mekanism.MekanismResourceRegressionTest;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest;
 
@@ -90,6 +91,7 @@ public final class OptionalServerRegressionSuite {
         ServerNativeRegressionTest.main(args);
         CreatePressInputInspectionTest.main(args);
         CreateStressObservationTest.main(args);
+        CreateManualInputTest.main(args);
         NativeInventoryRegressionTest.main(args);
         ProductionRetentionTest.main(args);
         Ae2NativeCraftingCompletionTest.main(args);

@@ -238,6 +238,7 @@ public final class GuiRegressionSuite {
         BuildClearanceExecutionTest.main(args);
         MachineModificationClearanceTest.main(args);
         BuildWrenchRemovalTest.main(args);
+        FiniteBlockUseTest.main(args);
         BuildExcavationFrontierTest.main(args);
         ContainerBatchReplanTest.main(args);
         ContainerSplitPlannerTest.main(args);

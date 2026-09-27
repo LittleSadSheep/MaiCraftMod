@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -103,6 +104,7 @@ public final class Interaction {
     private boolean releasing;
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
     private int fires;
+    private boolean finishRequested;
     private int cooldown;             // 距下一次重复点击还需等待的游戏刻数。
     private int held;                 // 右键空气时，物品已持续使用的游戏刻数。
     private ItemStack heldUseBefore;
@@ -403,6 +405,11 @@ public final class Interaction {
 
     // 一次点击没确认完就不计次；确认一次后先等间隔，再开始下一次。
     private Status discrete() {
+        // 有限持续操作到期后只结算已经发出的这一次，不能在最后一个回执尚未完成时宣布整段成功。
+        if (finishRequested && receipt == null) {
+            if (fires > 0 && !hardFail) return Status.DONE;
+            failReason = "finite interaction ended without a confirmed native use"; return Status.FAILED;
+        }
         if (cooldown > 0) {
             cooldown--;
             return Status.RUNNING;
@@ -413,7 +420,7 @@ public final class Interaction {
         };
         if (hardFail) return Status.FAILED;
         if (!fired) return Status.RUNNING;             // 攻击冷却未结束时等待，不将其视为失败。
-        if (++fires >= timing.limit) return Status.DONE;
+        if (++fires >= timing.limit || finishRequested) return Status.DONE;
         cooldown = timing.interval;
         return Status.RUNNING;
     }
@@ -548,6 +555,11 @@ public final class Interaction {
         BlockPos adjacent = clicked.relative(hit.getDirection()).immutable();
         var clickedBefore = player.level().getBlockState(clicked);
         ItemStack heldBefore = player.getItemInHand(usedHand).copy();
+        // 明确用空手操作曲柄时验证其原生发电反馈；菜单弹出或无关库存变化不能冒充已经摇动曲柄。
+        if (heldBefore.isEmpty()) {
+            var manual = CreateManualInput.confirmation(player.level(), clicked);
+            if (manual != null) return manual;
+        }
         int beforeMenu = player.containerMenu.containerId;
         NativeConfirmation adjacentChanged = player.level().isLoaded(adjacent)
                 ? NativeConfirmation.blockChanged(
@@ -705,4 +717,6 @@ public final class Interaction {
         ItemUseInputLease.release(this);
         InputDriver.halt(player);
     }
+    public void finishRepeating() { finishRequested = true; }
+    public int confirmedUses() { return fires; }
 }
