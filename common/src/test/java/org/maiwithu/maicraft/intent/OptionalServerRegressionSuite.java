@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateEconomicEndpointBridg
 import org.maiwithu.maicraft.core.integration.create.CreateExactUtilityEndpointTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorContractTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorUseTest;
+import org.maiwithu.maicraft.core.integration.create.transmission.KineticWorksiteReturnTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticClearanceRevalidationTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticSourceScopeTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticClientHeightmapTest;
@@ -154,6 +155,7 @@ public final class OptionalServerRegressionSuite {
         KineticRouteContinuationTest.main(args);
         ChainConveyorContractTest.main(args);
         ChainConveyorUseTest.main(args);
+        KineticWorksiteReturnTest.main(args);
         ChainConveyorConnectionPathTest.main(args);
         MachineWatchProgressTest.main(args);
         System.out.println("OptionalServerRegressionSuite: passed");
