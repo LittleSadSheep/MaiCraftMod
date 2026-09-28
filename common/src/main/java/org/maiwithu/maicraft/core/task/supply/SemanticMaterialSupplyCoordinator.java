@@ -356,10 +356,13 @@ public final class SemanticMaterialSupplyCoordinator {
             if (options instanceof List<?> list) receipt.put("recovery_options", safeOptions(list));
             Object issues = childData.get("issues");
             if (issues instanceof List<?> list) receipt.put("issues", safeIssues(list));
+            // 缺料交接引用的尝试历史和配方链必须一起保留，让施工者能据真实失败分支继续规划。
+            SupplyAcquisitionEvidence.append(childData, receipt);
             List<Map<String, Object>> storage = new ArrayList<>();
             if (childData.get("attempts") instanceof List<?> attempts) {
                 for (Object value : attempts) {
-                    if (value instanceof Map<?, ?> attempt && "storage".equals(attempt.get("source"))
+                    if (value instanceof Map<?, ?> attempt
+                            && ("storage".equals(attempt.get("source")) || "wireless".equals(attempt.get("source")))
                             && attempt.get("child_data") instanceof Map<?, ?> evidence) {
                         Map<String, Object> entry = new LinkedHashMap<>();
                         for (String key : List.of("terminal_access",
@@ -384,7 +387,11 @@ public final class SemanticMaterialSupplyCoordinator {
                             }
                             entry.put("server_supply_transfers", List.copyOf(transfers));
                         }
-                        if (!entry.isEmpty()) storage.add(Map.copyOf(entry));
+                        if (!entry.isEmpty()) {
+                            // 随身无线终端取得的材料也属于已发生的库存转移，仍保留来源而不捏造未提供的回执。
+                            entry.put("source", attempt.get("source"));
+                            storage.add(Map.copyOf(entry));
+                        }
                     }
                 }
             }
