@@ -138,6 +138,10 @@ public final class ContainerTransferCompanionTask
         }
         ItemStack source = player.containerMenu.getSlot(move.from()).getItem();
         if (source.isEmpty()) return beginFailure("source slot " + move.from() + " is empty");
+        // 精妙菜单未同步或无限槽数量未有精确语义时，必须在第一次点击之前拒绝普通搬运。
+        boolean cappedPickup;
+        try { cappedPickup = ContainerSlotCapacity.storage(player, player.containerMenu, move.from()); }
+        catch (IllegalArgumentException unavailable) { return rejectBeforePickup(unavailable.getMessage()); }
         if (!player.containerMenu.getSlot(move.from()).mayPickup(player)) return beginFailure("source slot is not currently available for pickup");
         if (move.from() == move.to()) {
             completeMove(0);
@@ -172,13 +176,15 @@ public final class ContainerTransferCompanionTask
         }
         var destinationSlot = player.containerMenu.getSlot(move.to());
         // 不仅看物品最多能叠多少，还要服从这个真实槽的放入限制，避免尾数点进已经满了或锁住的槽。
-        int capacity = destinationSlot.mayPlace(source) ? Math.max(0,
-                Math.min(source.getMaxStackSize(), destinationSlot.getMaxStackSize(source)) - destination.getCount()) : 0;
+        int capacity;
+        try { capacity = destinationSlot.mayPlace(source) ? Math.max(0,
+                ContainerSlotCapacity.limit(player, player.containerMenu, move.to(), source) - destination.getCount()) : 0; }
+        catch (IllegalArgumentException unavailable) { return rejectBeforePickup(unavailable.getMessage()); }
         if (capacity < requested) {
             return beginFailure("destination slot " + move.to() + " has room for only " + capacity
                     + " item(s), fewer than requested " + requested);
         }
-        if (requested < source.getCount()) {
+        if (requested < source.getCount() || cappedPickup && source.getCount() > source.getMaxStackSize()) {
             // 尾数先求普通左右键的分堆路径；例如 64 取 49 分成 32、16、1，不临时向背包装入超额物品。
             try { split = new ContainerSplitTransfer(player, player.containerMenu, move, requested); }
             catch (IllegalArgumentException unsupported) { return beginFailure(unsupported.getMessage()); }

@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTe
 import org.maiwithu.maicraft.core.inventory.StockEvidenceTest;
 import org.maiwithu.maicraft.core.inventory.InventoryKeepPlanTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackMenuAccessTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackSplitPlannerTest;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItemsTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
@@ -332,6 +333,8 @@ public final class GuiRegressionSuite {
         InventoryKeepPlanTest.main(args);
         // 随身背包只按原生主存储角色统计，玩家槽、升级槽与大堆叠分别核对。
         BackpackMenuAccessTest.main(args);
+        // 精妙升级只放大存储槽，鼠标每次取物仍按一叠或半叠计算。
+        BackpackSplitPlannerTest.main(args);
         InventoryWorkItemsTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);

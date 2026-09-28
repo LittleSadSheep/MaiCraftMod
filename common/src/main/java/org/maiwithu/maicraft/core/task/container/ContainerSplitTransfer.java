@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.task.container;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntUnaryOperator;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
@@ -9,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackSplitPlanner;
 
 /** 在同一个真实菜单中逐次确认分堆；只动声明的两个槽，未知鼠标物品和外来界面原样保留。 */
 final class ContainerSplitTransfer {
@@ -19,6 +21,7 @@ final class ContainerSplitTransfer {
     private final ContainerTransferTaskRecord.Move move;
     private final ItemStack kind, destinationBefore;
     private final List<ContainerSplitPlanner.Step> steps;
+    private final IntUnaryOperator capacities;
     private int index;
     private MenuReceipt receipt;
     private String failure;
@@ -26,17 +29,32 @@ final class ContainerSplitTransfer {
     private boolean settlementRequested;
 
     ContainerSplitTransfer(LocalPlayer player, AbstractContainerMenu menu, ContainerTransferTaskRecord.Move move, int amount) {
+        this(player, menu, move, amount, ContainerSlotCapacity.storage(player, menu, move.from()),
+                capacities(player, menu, move));
+    }
+
+    // 槽位角色从已同步菜单推导；离线回放可注入安装版的容量与每次取一叠语义，不伪造模组菜单类型。
+    ContainerSplitTransfer(LocalPlayer player, AbstractContainerMenu menu, ContainerTransferTaskRecord.Move move, int amount,
+            boolean cappedPickup, IntUnaryOperator capacities) {
         this.player = player; this.menu = menu; this.move = move;
+        this.capacities = capacities;
         ItemStack source = menu.getSlot(move.from()).getItem(); kind = source.copyWithCount(1);
         destinationBefore = menu.getSlot(move.to()).getItem().copy();
         var sourceSlot = menu.getSlot(move.from());
         var destinationSlot = menu.getSlot(move.to());
         if (!menu.getCarried().isEmpty() || !sourceSlot.mayPickup(player)
                 || !destinationBefore.isEmpty() && !ItemStack.isSameItemSameComponents(source, destinationBefore)
-                || !destinationSlot.mayPlace(source) || amount > Math.min(source.getMaxStackSize(), destinationSlot.getMaxStackSize(source)) - destinationBefore.getCount())
+                || !destinationSlot.mayPlace(source) || amount > capacities.applyAsInt(move.to()) - destinationBefore.getCount())
             throw new IllegalArgumentException("split source, destination capacity or cursor is not available");
-        int capacity = sourceSlot.mayPlace(source) ? Math.min(source.getMaxStackSize(), sourceSlot.getMaxStackSize(source)) : -1;
-        steps = ContainerSplitPlanner.plan(source.getCount(), amount, capacity);
+        int capacity = sourceSlot.mayPlace(source) ? capacities.applyAsInt(move.from()) : -1;
+        steps = cappedPickup ? BackpackSplitPlanner.plan(source.getCount(), amount, capacity, source.getMaxStackSize())
+                : ContainerSplitPlanner.plan(source.getCount(), amount, capacity);
+    }
+
+    private static IntUnaryOperator capacities(LocalPlayer player, AbstractContainerMenu menu, ContainerTransferTaskRecord.Move move) {
+        // 源格暂时取空时仍按本笔物品检查容量；升级槽本身的限制则在每次新点击前重读。
+        ItemStack kind = menu.getSlot(move.from()).getItem().copyWithCount(1);
+        return index -> ContainerSlotCapacity.limit(player, menu, index, kind);
     }
 
     Status tick(LocalPlayerContext context) {
@@ -61,7 +79,12 @@ final class ContainerSplitTransfer {
         if (!matches(before.source, step.before().source()) || !matches(before.cursor, step.before().cursor())
                 || exact() && !matchesDestination(before.destination, destinationBefore.getCount() + step.before().deposited()))
             return fail("split source, destination or cursor changed before click", index > 0);
-        if (!permitted(step, before)) return fail("split slot capacity or pickup permission changed", index > 0);
+        try {
+            if (!permitted(step, before)) return fail("split slot capacity or pickup permission changed", index > 0);
+        } catch (IllegalArgumentException unavailable) {
+            // 容量读取失效时保留已拿起的物品与菜单，不能把部分完成误报成没有效果。
+            return fail(unavailable.getMessage(), index > 0);
+        }
         if (!context.mutationAvailable()) return Status.RUNNING;
         int destinationCount = before.destination.getCount() + step.after().deposited() - step.before().deposited();
         Snapshot after = new Snapshot(stack(step.after().source()), step.side() == ContainerSplitPlanner.Side.DESTINATION
@@ -91,7 +114,8 @@ final class ContainerSplitTransfer {
         ItemStack existing = source ? before.source : before.destination;
         if (!existing.isEmpty() && !ItemStack.isSameItemSameComponents(existing, kind)) return false;
         int added = source ? step.after().source() - step.before().source() : step.after().deposited() - step.before().deposited();
-        return slot.mayPlace(kind) && added <= Math.min(kind.getMaxStackSize(), slot.getMaxStackSize(kind)) - existing.getCount();
+        // 大存储槽可接回这次拿起的余量；重新读原生槽上限，升级变化后不能继续沿用旧容量。
+        return slot.mayPlace(kind) && added <= capacities.applyAsInt(source ? move.from() : move.to()) - existing.getCount();
     }
     private boolean exact() { return move.destinationMode() == ContainerTransferTaskRecord.DestinationMode.EXACT; }
     private Snapshot snapshot() { return new Snapshot(menu.getSlot(move.from()).getItem().copy(), menu.getSlot(move.to()).getItem().copy(), menu.getCarried().copy()); }
