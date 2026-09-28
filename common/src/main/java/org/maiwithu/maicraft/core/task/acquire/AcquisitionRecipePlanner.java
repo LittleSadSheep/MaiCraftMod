@@ -44,7 +44,8 @@ final class AcquisitionRecipePlanner {
     private long stockHintTick = Long.MIN_VALUE;
     private boolean stockHintWireless;
     private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
-    private final Map<String, RecipeMaterialPlan.Result> materialPlans = new HashMap<>();
+    private record MaterialPlanKey(String recipeId, Set<ResourceLocation> unavailable) {}
+    private final Map<MaterialPlanKey, RecipeMaterialPlan.Result> materialPlans = new HashMap<>();
 
     private Map<ResourceLocation, List<CraftingRecipe>> recipeIndex;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> stockRecipes = new HashMap<>();
@@ -329,7 +330,9 @@ final class AcquisitionRecipePlanner {
 
     RecipeMaterialPlan.Result materialPlan(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         refreshStock(parent);
-        return materialPlans.computeIfAbsent(candidate.recipeId(), ignored -> {
+        // 同刻失败的原料分支也改变规划条件；缓存不能把已排除的木种再次选回来。
+        var unavailable = Set.copyOf(parent.rejectedRecipeInputs.getOrDefault(candidate.recipeId(), Set.of()));
+        return materialPlans.computeIfAbsent(new MaterialPlanKey(candidate.recipeId(), unavailable), ignored -> {
             List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
             for (var ingredient : candidate.ingredients()) {
                 if (ingredient.required() > 32768)
@@ -341,7 +344,7 @@ final class AcquisitionRecipePlanner {
             recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount,
                     (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
             return RecipeMaterialPlan.estimate(ingredients, pool, item -> processRecipes(item, parent),
-                    item -> sourceCost(item, parent), parent.lineageItems);
+                    item -> sourceCost(item, parent), parent.lineageItems, unavailable);
         });
     }
 

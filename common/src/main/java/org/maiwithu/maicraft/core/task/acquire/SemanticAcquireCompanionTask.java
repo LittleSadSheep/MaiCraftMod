@@ -546,6 +546,7 @@ public final class SemanticAcquireCompanionTask
                 ingredient.itemIds(), ingredientFinal, need.depth + 1,
                 lineageItems, lineageRecipes, frontier.recipeIds(), childSources);
         childNeed.unresolvedMaterialSource = frontier.unknownSource();
+        childNeed.materialTreeFrontier = true;
         childNeed.lastObservedCount = count(childNeed.itemIds);
         recipeTrace.add(Map.of(
                 "recipe_id", chosen.recipeId(),
@@ -1670,11 +1671,16 @@ public final class SemanticAcquireCompanionTask
             parent.committedRecipeEffectsObserved = false;
         }
         parent.effectsObserved |= need.effectsObserved;
-        parent.rejectedRecipes.addAll(need.parentRecipeIds);
+        // 原料树可能把可互换木板收窄成某种原木；尚未产生效果时只排除这个入口，不能连带否决整个箱子配方。
+        if (need.materialTreeFrontier) {
+            for (String recipe : need.parentRecipeIds)
+                parent.rejectedRecipeInputs.computeIfAbsent(recipe, ignored -> new LinkedHashSet<>()).addAll(need.itemIds);
+        } else parent.rejectedRecipes.addAll(need.parentRecipeIds);
         List<String> parentRecipeIds = need.parentRecipeIds.isEmpty()
                 ? List.of("unknown") : List.copyOf(need.parentRecipeIds);
         addIssue("craft", "recursive_ingredient_unmet",
-                "one recipe frontier was abandoned after its ingredient alternatives exhausted allowed sources",
+                need.materialTreeFrontier ? "one narrowed material frontier exhausted allowed sources; other parent-recipe alternatives remain eligible"
+                        : "one recipe frontier was abandoned after its ingredient alternatives exhausted allowed sources",
                 Map.of("recipe_id", parentRecipeIds.getFirst(),
                         "recipe_ids", parentRecipeIds,
                         "ingredient_item_ids", itemStrings(need.itemIds),

@@ -22,6 +22,9 @@ final class AcquisitionNeed {
     final Set<String> parentRecipeIds;
     final List<SemanticAcquireTaskRecord.Source> allowedSources;
     final Set<String> rejectedRecipes = new LinkedHashSet<>();
+    // 整树规划选中的某条原料路线失败后只排除该补料入口，同一配方的其他替代材料仍可重算。
+    final Map<String, Set<ResourceLocation>> rejectedRecipeInputs = new LinkedHashMap<>();
+    boolean materialTreeFrontier;
     /** 已经为其补过一次工作台的配方；同一摆台失败不能无限追加新工作台。 */
     final Set<String> surfaceRecoveryRecipes = new LinkedHashSet<>();
     final Map<SemanticAcquireTaskRecord.Source, Integer> sourceAttempts =

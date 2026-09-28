@@ -58,16 +58,24 @@ public final class RecipeMaterialPlan {
     public static Result estimate(List<Need> needs, Map<ResourceLocation, Long> stock,
                                   Function<ResourceLocation, List<Recipe>> recipes,
                                   Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked) {
+        return estimate(needs, stock, recipes, sources, blocked, Set.of());
+    }
+
+    /** 已耗尽的获取入口只阻止继续补料；后来真正观察到的现货仍可直接用于原配方。 */
+    public static Result estimate(List<Need> needs, Map<ResourceLocation, Long> stock,
+                                  Function<ResourceLocation, List<Recipe>> recipes,
+                                  Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
+                                  Set<ResourceLocation> unavailable) {
         Budget budget = new Budget();
         State initial = new State(stock);
-        State planned = expand(needs, initial, recipes, sources, blocked, Set.of(), 32, budget).stream().min(ORDER).orElse(null);
+        State planned = expand(needs, initial, recipes, sources, blocked, unavailable, Set.of(), 32, budget).stream().min(ORDER).orElse(null);
         return planned == null ? new Result(false, !budget.exhausted, UNREACHABLE, List.of(), List.of(), stock)
                 : new Result(true, !budget.exhausted, planned.cost, merge(planned.supplies), planned.crafts, planned.pool.remaining());
     }
 
     private static List<State> expand(List<Need> needs, State initial, Function<ResourceLocation, List<Recipe>> recipes,
                                       Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
-                                      Set<ResourceLocation> visiting, int depth, Budget budget) {
+                                      Set<ResourceLocation> unavailable, Set<ResourceLocation> visiting, int depth, Budget budget) {
         if (!budget.spend()) return List.of();
         List<State> states = List.of(initial);
         // 窄替代组先安排；同价分支保留各自库存账，避免先吃掉另一支唯一能用的材料而误报缺料。
@@ -77,7 +85,7 @@ public final class RecipeMaterialPlan {
                 State base = allocation.state(); int deficit = allocation.missing();
                 if (deficit == 0) { candidates.add(base); continue; }
                 for (ResourceLocation item : need.alternatives()) {
-                    if (blocked.contains(item)) continue;
+                    if (blocked.contains(item) || unavailable.contains(item)) continue;
                     List<Recipe> choices = recipes.apply(item); Source source = sources.apply(item);
                     // 已知获取方式可在中间层切入；无配方边界只列为高成本未知需求，不宣称它是免费原料。
                     if (source.known() || choices.isEmpty()) {
@@ -98,7 +106,7 @@ public final class RecipeMaterialPlan {
                             inputs.add(new Need(input.alternatives(), (int) count));
                         }
                         if (!bounded) continue;
-                        for (State crafted : expand(inputs, new State(base), recipes, sources, blocked, path, depth - 1, budget)) {
+                        for (State crafted : expand(inputs, new State(base), recipes, sources, blocked, unavailable, path, depth - 1, budget)) {
                             crafted.pool.add(item, (long) batches * recipe.outputCount() - deficit);
                             crafted.crafts.add(new Need(List.of(item), deficit));
                             crafted.cost = Math.min(UNREACHABLE, crafted.cost + (long) batches * recipe.batchCost());

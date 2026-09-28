@@ -145,6 +145,12 @@ def regressionSuites = [
         heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
         purpose: '验证已加载方块发现的证据、缺席语义与坐标不外泄'
     ],
+    // 配方补料回放使用独立入口，核对替代原料回退与已观察效果后的承诺边界。
+    recipeFrontierFallbackRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.acquire.RecipeFrontierFallbackTest',
+        heap: '512m', directory: 'recipe-frontier-fallback-regression', timeoutSeconds: 60,
+        purpose: '回放配方前沿替代材料失败与承诺边界'
+    ],
     stonecuttingProcessRegression: [
         entry: 'org.maiwithu.maicraft.core.task.stonecutter.StonecuttingProcessTest',
         heap: '512m', directory: 'stonecutting-process-regression', timeoutSeconds: 45,
