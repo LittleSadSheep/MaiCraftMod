@@ -1,0 +1,50 @@
+package org.maiwithu.maicraft.client.actor;
+
+import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.combat.RetreatThreats;
+import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
+import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
+import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
+import static org.maiwithu.maicraft.client.actor.MobDefenseDamageTest.invoke;
+
+/** 无关远处敌怪和隔墙敌怪不延长撤离；实际追兵、远程伤害和新近危险继续保留。 */
+public final class RetreatThreatsTest {
+    public static void main(String[] args) throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var hidden = f.mob(11, 8); var distant = f.mob(12, 30);
+            f.h.set(new BlockPos(4, 1, 3), Blocks.STONE.defaultBlockState());
+            f.h.set(new BlockPos(4, 2, 3), Blocks.STONE.defaultBlockState());
+            var threats = new RetreatThreats();
+            check(!f.h.player.hasLineOfSight(hidden), "the near ambient hostile must really be hidden by the fixture wall");
+            check(threats.observe(f.h.player, 40, 14).isEmpty(),
+                    "hidden ambient mobs and distant unengaged mobs cannot start a new retreat leg");
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("ambient-retreat", 1000, List.of(), true));
+            check(!(boolean) invoke(task, "retreatThreatsPresent"), "the combat executor uses the narrowed retreat predicate");
+            // 已收到伤害的射手即使隔墙、远于普通近圈，也立即成为明确追击对象。
+            f.hit(distant, distant);
+            check(threats.observe(f.h.player, 40, 14).equals(List.of(distant)), "native damage keeps the actual distant attacker");
+            f.h.level.time += 201;
+            check(threats.observe(f.h.player, 40, 14).equals(List.of(distant)),
+                    "damage-memory expiry cannot forget the same still-near pursuer during a retreat");
+            f.h.position(new Vec3(-12, 1, 3.5));
+            check(threats.observe(f.h.player, 40, 14).isEmpty(), "real separation retires the old pursuer without adopting ambient mobs");
+            // 明确的新近可见敌怪仍会加入避险；编号复用不能继承旧实体的追击身份。
+            f.h.position(new Vec3(.5, 1, 3.5)); var nearby = f.mob(13, 2);
+            check(threats.observe(f.h.player, 40, 14).equals(List.of(nearby)), "new visible close danger is included");
+            f.mob(13, 30);
+            check(threats.observe(f.h.player, 40, 14).isEmpty(), "a replacement entity cannot inherit the old pursuer identity");
+        }
+        try (var f = new CombatThreatsTest.Fixture()) {
+            // 近圈外持续射来的箭不靠“附近没怪”忽略；真实伤害记忆过期且射手已经远离后才能结束。
+            var archer = f.mob(21, 60); f.hit(archer, archer);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("far-retreat", 1000, List.of(), true));
+            check((boolean) invoke(task, "retreatThreatsPresent"), "a recent remote hit keeps retreat active beyond the scan radius");
+            f.h.level.time += 201;
+            check(!(boolean) invoke(task, "retreatThreatsPresent"), "a separated attacker with expired damage evidence no longer holds retreat");
+        }
+        System.out.println("RetreatThreatsTest: active pursuit, ambient exclusion and native damage memory passed");
+    }
+}

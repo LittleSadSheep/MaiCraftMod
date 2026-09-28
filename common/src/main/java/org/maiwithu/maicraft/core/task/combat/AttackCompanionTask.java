@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.core.combat.RetreatProgress;
+import org.maiwithu.maicraft.core.combat.RetreatThreats;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.Swing;
@@ -138,6 +139,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     /** 退避的寻路连续失败次数。够了就是"退不掉",判据据此改判背水一战。 */
     private final RetreatProgress retreat = new RetreatProgress();
+    private final RetreatThreats retreatThreats = new RetreatThreats();
     private final MeleeStanceRecovery stanceRecovery = new MeleeStanceRecovery();
 
     /** 上一行站位日志。数字没变就不再打,免得每 tick 一行把别的全冲掉。 */
@@ -456,14 +458,16 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 String.format("%.0f", field.effectiveHealth()), String.format("%.1f", field.availableHealth()), field.foes().size());
         if (move.action() == AttackPlan.Action.DISENGAGE) {
             // 沿用两秒采样频率，记录身体位移和导航事实；仅有“撤退中”无法区分实际移动、规划停顿与路径失败。
-            lastRetreatObservation = Map.of("feet", player.blockPosition().toShortString(),
+            var observed = new LinkedHashMap<String, Object>(Map.of("feet", player.blockPosition().toShortString(),
                     "velocity", String.valueOf(player.getDeltaMovement()), "grounded", player.onGround(),
                     "planning", nav != null && nav.planningInFlight(),
                     "physical_progress", nav != null && nav.hasRecentPhysicalProgress(40),
                     "stall_ticks", nav == null ? 0 : nav.stallTicks(),
                     "path_outcome", nav == null ? "no_active_navigation" : String.valueOf(nav.outcomeSummary()),
                     "failures_without_displacement", retreat.failures(), "last_path_failure", lastRetreatFailure,
-                    "withdrawal_committed", retreat.committed());
+                    "withdrawal_committed", retreat.committed()));
+            retreatThreats.observe(player, FLEE_SCAN_RADIUS, FIELD_RADIUS);
+            observed.put("threats", retreatThreats.evidence()); lastRetreatObservation = Map.copyOf(observed);
             Constants.LOG.info("[maicraft-retreat] {}", lastRetreatObservation);
         }
     }
@@ -931,10 +935,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (!retreatThreatsPresent()) {
             clearRetreat();
             InputDriver.halt(player);
-            Constants.LOG.info("[maicraft-attack] 脱离成功 —— {} 格内没有敌对生物",
-                    (int) Menace.FLEE_DISTANCE);
+            Constants.LOG.info("[maicraft-attack] 脱离成功 —— 追击者已拉开距离，近期攻击与近处可见危险已解除");
             fail(Menace.outmatched(player)
-                            ? "broke off — too hurt to keep fighting; nothing is near you now"
+                            ? "broke off — too hurt to keep fighting; active pursuit and nearby visible threats are clear"
                             : "broke off — nothing here can be fought with what you carry "
                                     + "(explosive, or out of reach with no bow); you are clear now",
                     FailureType.TARGET_LOST);
@@ -970,17 +973,22 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         retreating = false;
         // 只有广域威胁检查确认脱离后，下一场战斗才重新按当前生命选择进退。
         retreat.complete();
+        retreatThreats.clear();
         stopNav();
     }
 
     private NavGoal retreatGoal() {
-        var threats = Menace.field(player, CombatThreats.around(player, FLEE_SCAN_RADIUS)).stream()
+        var threats = Menace.field(player, retreatThreats.observe(player, FLEE_SCAN_RADIUS, FIELD_RADIUS)).stream()
                 .map(t -> t.withClearance(Menace.FLEE_DISTANCE)).toList();
         // 最后一只威胁消失后由tickFlee确认脱离；目标供应器不构造没有成员的避让目标。
         return threats.isEmpty() ? NavGoal.exact(PlayerNav.playerFeet(player)) : NavGoal.avoid(Menace.AVOID_PENALTY, threats);
     }
     // 近期真实伤害来源即使在普通扫描半径外，也要等其威胁记录消失后才能结束本次撤离。
-    private boolean retreatThreatsPresent() { return !CombatThreats.around(player, Menace.FLEE_DISTANCE).isEmpty(); }
+    private boolean retreatThreatsPresent() {
+        // 同一追击者需真正拉开到安全距离；近战扫描圈外仍在射来的箭继续由原生伤害记忆维持撤离。
+        return retreatThreats.observe(player, FLEE_SCAN_RADIUS, FIELD_RADIUS).stream()
+                .anyMatch(mob -> player.distanceTo(mob) <= Menace.FLEE_DISTANCE || CombatThreats.recentlyAttackedBy(player, mob));
+    }
 
     // ==================== 拾荒 ====================
 
