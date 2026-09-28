@@ -67,13 +67,22 @@ public final class RecipeMaterialPlan {
                                   Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
                                   Set<ResourceLocation> unavailable) {
         Budget budget = new Budget();
-        State initial = new State(stock);
         // 排序与展开复用同一次只读元数据，避免比较宽标签时反复查询相同材料的来源与配方。
         Map<ResourceLocation, List<Recipe>> recipeCache = new HashMap<>();
         Map<ResourceLocation, Source> sourceCache = new HashMap<>();
         Function<ResourceLocation, List<Recipe>> recipeLookup = item -> recipeCache.computeIfAbsent(item, recipes);
         Function<ResourceLocation, Source> sourceLookup = item -> sourceCache.computeIfAbsent(item, sources);
-        State planned = expand(needs, initial, recipeLookup, sourceLookup, blocked, unavailable, Set.of(), 32, budget).stream().min(ORDER).orElse(null);
+        // 先找短而完整的备料路线，再增加合成层数；羊毛互染等循环不能先吃光预算，把普通原料路线挤掉。
+        // 各轮共用原来的总预算，保留已经找到的完整数量账；后续搜索截断时仍能使用较早的可行方案。
+        State planned = null;
+        for (int depth = 1; depth <= 32; depth *= 2) {
+            budget.exhausted = false;
+            State candidate = expand(needs, new State(stock), recipeLookup, sourceLookup, blocked, unavailable,
+                    Set.of(), depth, budget).stream().min(ORDER).orElse(null);
+            if (candidate != null && (planned == null || ORDER.compare(candidate, planned) < 0)) planned = candidate;
+            // 没有深度截断、候选裁剪或预算耗尽时才算搜索完整；否则在剩余预算内继续比较更深路线。
+            if (!budget.exhausted || budget.remaining <= 0) break;
+        }
         return planned == null ? new Result(false, !budget.exhausted, UNREACHABLE, List.of(), List.of(), stock)
                 : new Result(true, !budget.exhausted, planned.cost, merge(planned.supplies), planned.crafts, planned.pool.remaining());
     }
