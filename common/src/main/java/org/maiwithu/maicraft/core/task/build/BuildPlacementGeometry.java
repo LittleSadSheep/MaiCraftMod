@@ -464,7 +464,8 @@ final class BuildPlacementGeometry {
         // 局部形状已经足够生成失败记录的键；被排除的站姿或潜行手法直接跳过，不再沿射线重复读场地。
         if (!stage.rayClear(eye, point, probe.clicked())) return null;
         if (stage.projectedSupport()) {
-            if (!stage.state(target.pos()).isAir() || !probe.clicked().relative(probe.face()).equals(target.pos())) return null;
+            // 水流、草等可替换状态不要求预先变成空气；贴边候选同样交给原生放置上下文判断落点与状态。
+            if (!probe.clicked().relative(probe.face()).equals(target.pos())) return null;
             NativePlacement predicted = predictPlacement(player, new ItemStack(target.item()), gesture.syntheticHit(),
                     yaw, pitch, gesture.sneak(), target.pos(), stage.proposedAt(probe.clicked()));
             return predicted != null && predicted.state() != null && (target.acceptsPlacedState(predicted.state())
