@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.core.inventory.StockEvidenceTest;
 import org.maiwithu.maicraft.core.inventory.InventoryKeepPlanTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackMenuAccessTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSplitPlannerTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackTransferPlanTest;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItemsTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
@@ -337,6 +338,8 @@ public final class GuiRegressionSuite {
         BackpackOpenSessionTest.main(args);
         // 精妙升级只放大存储槽，鼠标每次取物仍按一叠或半叠计算。
         BackpackSplitPlannerTest.main(args);
+        // 逐笔存取尊重需求、真实余量和现有堆叠，满包与没有库存分开报告。
+        BackpackTransferPlanTest.main(args);
         InventoryWorkItemsTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);
