@@ -70,9 +70,9 @@ public final class SemanticAbilityCatalog {
                             field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
                             field("allow_use", "boolean", "Required true with production: authorizes operating the declared machine after construction. Omit when production is absent."),
                             field("material_policy", "string", "ordinary, storage_available (including an existing AE2 network), or inventory_only; exact machine items are never substituted."),
-                            // 已确认自建部件在声明的替换格复用归属；其他现场清障仍使用白名单，不能凭一个选项认领整片场地。
-                            field("replace_existing", "boolean", "Allow replacement at authored blueprint targets. Confirmed self-built blocks reuse native placement ownership; other obstacles remain subject to the clearance whitelist. Block entities also require replace_block_entities=true. Default false."),
-                            field("replace_block_entities", "boolean", "Also allow replacing existing block entities at declared targets; requires replace_existing=true and authorization for those changes. Default false."),
+                            // 建造授权直接覆盖声明范围；额外字段用于主动保留，不能诱导模型再次为同一块地申请许可。
+                            field("replace_existing", "boolean", "Defaults true within authored blueprint targets; set false only to deliberately preserve occupied cells. Unlisted cells are outside this replacement scope."),
+                            field("replace_block_entities", "boolean", "Defaults true when replacement is enabled, including declared old machine components; set false only to deliberately preserve block entities."),
                             field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
                     "Use surveyed machines through native evidence. run_production accepts a v1 production network or a v2 native process; inspect_machine supplies matching mechanism contracts. Existing menu transfers, controls and AE2 supply retain their own evidence requirements. Success reports verified effects.",

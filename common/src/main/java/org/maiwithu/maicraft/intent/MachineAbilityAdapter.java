@@ -449,17 +449,15 @@ final class MachineAbilityAdapter {
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime, true);
         if (layout.buildable()) {
             boolean modification = MODIFY.equals(goal.ability());
-            boolean replace = bool(p, "replace_existing", modification);
+            // 建造授权覆盖蓝图点名格的地形和旧部件；保留选项仅在调用方主动收紧时生效，不新增逐次许可门槛。
+            boolean replace = replacementEnabled(p);
             JsonObject design = p.getAsJsonObject("design");
-            if (replace && design != null && design.has("constraints") && design.getAsJsonObject("constraints").has("preserve_existing")
-                    && design.getAsJsonObject("constraints").get("preserve_existing").getAsBoolean())
-                throw bad("replace_existing conflicts with the design's preserve_existing constraint");
             BlockPos anchor = design == null ? snapshot.center() : MachineConstructionPlan.floorAnchor(snapshot.center(), layout);
             // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
             // 已明确授权的修改直接执行所声明的拆换；额外选项只用于主动收紧范围，不再要求模型重复打开两个许可。
-            var plan = MachineConstructionPlan.compile(anchor, layout, replace, bool(p, "replace_block_entities", modification && replace));
+            var plan = MachineConstructionPlan.compile(anchor, layout, replace, replace && bool(p, "replace_block_entities", true));
             // apply_blueprint 沿用已授权的明确目标，当前状态与可达性由内部施工读取，拆旧轴不再转成重新选址。
-            if (modification) plan.bindAutomaticModification(player.level());
+            if (replace) plan.bindAutomaticModification(player.level());
             // 普通建造若已获准替换自己的旧部件，也把原生放置归属交给施工，免得自建轴被通用白名单挡住。
             else plan.bindOwnedReplacements(player);
             if (!ClientMachineCatalog.registerInstallation(player,snapshot.label(),plan))
@@ -519,11 +517,18 @@ final class MachineAbilityAdapter {
     }
 
     private static void validateConstructionOptions(JsonObject p, boolean modification) {
-        // 允许拆带数据的机器／箱子，必须先允许普通替换，不能把两个许可写成互相矛盾的组合。
-        boolean replace = bool(p, "replace_existing", modification);
-        if (bool(p, "replace_block_entities", modification && replace) && !replace)
-            throw bad("replace_block_entities requires replace_existing=true");
+        // 参数只校验类型；不因重复许可字段的组合把已授权原生施工挡在入口。
+        replacementEnabled(p); bool(p, "replace_block_entities", true);
         SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p, "material_policy", 64));
+    }
+
+    private static boolean replacementEnabled(JsonObject p) {
+        // 显式替换选项优先；未指定时只遵循作者明确声明的保留约束，其余蓝图范围默认可以拆换。
+        JsonObject design = p.getAsJsonObject("design");
+        boolean preserve = design != null && design.has("constraints")
+                && design.getAsJsonObject("constraints").has("preserve_existing")
+                && design.getAsJsonObject("constraints").get("preserve_existing").getAsBoolean();
+        return bool(p, "replace_existing", !preserve);
     }
 
     private static SemanticMachineLayout.Result compileLayout(JsonObject p, LocalPlayer player) {
