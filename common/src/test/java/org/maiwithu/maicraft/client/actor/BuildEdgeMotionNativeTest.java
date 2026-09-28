@@ -29,6 +29,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.entity.EntityInLevelCallback;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.task.build.BuildEdgeMotion;
+import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.task.build.BuildEdgeRecovery;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.Direction;
@@ -77,8 +79,40 @@ public final class BuildEdgeMotionNativeTest {
             f.flush(); check(!moving(f.player), "lost support cannot leave a previous forward command active");
         }
         halfStepAlignment(); standingAlignmentAndCancellation(); fullFloorLowCeiling();
+        meleeStanceUsesNativeTravel();
         blockedReturnFindsAnotherNativeExit();
         System.out.println("BuildEdgeMotionNativeTest: native pose waiting, friction arrival, edge hold and reverse movement passed");
+    }
+
+    private static void meleeStanceUsesNativeTravel() throws Exception {
+        // 角色真实站在远侧格边时，仅原版travel推进补位，进入实际射程即交还身体，不改实体坐标凑到达。
+        try (var f = new Fixture()) {
+            // 将同一个3.4格边界放在夹具已加载区域内部，碰撞扫描的外围也必须真实可读。
+            Vec3 focus = new Vec3(7.5, 1, 5.5); f.h.position(new Vec3(4.1, 1, 5.5));
+            var goal = NavGoal.distanceBand(focus, 2.02, 3.3); var recovery = new MeleeStanceRecovery();
+            check(goal.isAt(f.player.blockPosition()) && f.player.position().distanceTo(focus) > 3.3,
+                    "fixture starts in the accepted cell but outside actual melee reach");
+            recovery.begin(f.player); boolean moved = false;
+            for (int tick = 0; tick < 100 && recovery.active(); tick++) {
+                recovery.tick(f.player, goal, f.player.position().distanceTo(focus) <= 3.3);
+                f.flush(); moved |= moving(f.player); f.player.nativePose(); f.player.nativeTravel(); f.h.nextTick();
+            }
+            check(moved && !recovery.active() && f.player.position().distanceTo(focus) <= 3.3,
+                    "native short movement enters actual reach and ends without repeated grid arrival: moved=" + moved
+                            + ", feet=" + f.player.position() + ", evidence=" + recovery.evidence());
+            f.flush(); check(!moving(f.player), "the completed correction releases its movement input");
+        }
+        try (var f = new Fixture()) {
+            // 补位前脚下支撑消失时停止输入，并将失败终点排除，其他近战候选仍可用于绕行。
+            f.h.position(new Vec3(4.1, 1, 5.5)); var cell = f.player.blockPosition();
+            var goal = NavGoal.distanceBand(new Vec3(7.5, 1, 5.5), 2.02, 3.3);
+            var recovery = new MeleeStanceRecovery(); recovery.begin(f.player);
+            f.h.set(cell.below(), Blocks.AIR.defaultBlockState());
+            check(!recovery.tick(f.player, goal, false) && !recovery.active(), "lost support stops the correction");
+            f.flush(); check(!moving(f.player), "unsafe correction leaves no movement command");
+            check(!recovery.filter(goal).isAt(cell) && recovery.filter(goal).isAt(new BlockPos(5, 1, 6)),
+                    "only the failed stance is rejected; safe alternate goal cells remain available");
+        }
     }
 
     private static void halfStepAlignment() throws Exception {

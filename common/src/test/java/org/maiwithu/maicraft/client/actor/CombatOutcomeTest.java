@@ -5,6 +5,8 @@ import java.util.Map;
 import java.util.Arrays;
 import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -16,6 +18,7 @@ import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.Task;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import org.maiwithu.maicraft.core.act.Interaction;
@@ -36,7 +39,26 @@ public final class CombatOutcomeTest {
         retreatAcceptsAnyReachableSafeDirection();
         retreatCameraCannotStarveMeleeAim();
         meleeApproachUsesThreeDimensionalRange();
+        arrivalOutsideReachStartsSafeAlignment();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
+    }
+
+    private static void arrivalOutsideReachStartsSafeAlignment() throws Exception {
+        // 模拟导航已接受本格，但真实身体距敌人3.4格：战斗入口必须启动补位，而不是继续空转到挨打撤退。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.position(new Vec3(1.1, 1, 3.5)); var foe = f.mob(11, 4.5);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("subcell-melee", 1000, List.of(11), false));
+            ActorControlTestHarness.field(AttackCompanionTask.class, "target").set(task, foe);
+            var arrived = AttackCompanionTask.class.getDeclaredMethod("correctArrivedStance", PlayerNav.Status.class);
+            arrived.setAccessible(true);
+            check(!(boolean) arrived.invoke(task, PlayerNav.Status.RUNNING), "ordinary ongoing navigation keeps its movement");
+            check((boolean) arrived.invoke(task, PlayerNav.Status.ARRIVED), "an accepted grid cell cannot finish a still-unreachable melee approach");
+            var recovery = (MeleeStanceRecovery) ActorControlTestHarness.field(AttackCompanionTask.class, "stanceRecovery").get(task);
+            check(recovery.active(), "the real combat arrival branch starts the collision-checked subcell controller");
+            task.stop(f.h.player, Task.StopReason.PREEMPTED);
+            check(!recovery.active(), "higher-priority survival actions release pending stance inputs");
+            task.result(TaskState.CANCELLED);
+        }
     }
 
     private static void meleeApproachUsesThreeDimensionalRange() throws Exception {

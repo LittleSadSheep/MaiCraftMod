@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.core.combat.RetreatProgress;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.Swing;
+import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -137,6 +138,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     /** 退避的寻路连续失败次数。够了就是"退不掉",判据据此改判背水一战。 */
     private final RetreatProgress retreat = new RetreatProgress();
+    private final MeleeStanceRecovery stanceRecovery = new MeleeStanceRecovery();
 
     /** 上一行站位日志。数字没变就不再打,免得每 tick 一行把别的全冲掉。 */
     private String lastStandoffLog;
@@ -206,6 +208,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         boolean blastEvading = move.action() == AttackPlan.Action.EVADE_BLAST;
         boolean blastChanged = blastEvading != (lastMove != null && lastMove.action() == AttackPlan.Action.EVADE_BLAST);
         lastMove = move;
+        // 撤退、弓战与爆炸避险及时释放近战格内微调，不能用旧站位输入覆盖新的逃生方向。
+        if (move.action() != AttackPlan.Action.SKIRMISH) stanceRecovery.stop(player);
         logMove(move, field);
 
         Entity chosen = move.foeId() == AttackPlan.NO_FOE ? null : liveEntity(move.foeId());
@@ -658,6 +662,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     // 围着目标保持战斗距离，同时绕开其他危险；只有真正无路可走才把目标送去远程可达性判断。
     private PlayerNav.Status driveApproach() {
+        stanceRecovery.target(player, bowFighting ? null : target);
+        if (stanceRecovery.active()) {
+            if (stanceRecovery.tick(player, standoffGoal(), target != null && player.distanceTo(target) <= reachToTarget()))
+                return PlayerNav.Status.RUNNING;
+            stopNav();
+        }
         if (nav == null) {
             // <b>没有目标也要走。</b>判据的 SKIRMISH 可以是"对全场的"(挑不出能打的,但还有
             // 东西追她),那时该退开等机会 —— 这里曾经第一行就 {@code target == null} 早退,
@@ -669,6 +679,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             nav = PlayerNav.trackGoal(player, this::standoffGoal, CHASE_SPEED, () -> false);
         }
         PlayerNav.Status status = nav.tick();
+        if (correctArrivedStance(status)) return PlayerNav.Status.RUNNING;
         // <b>只有真 NO-PATH 才算够不着</b>:搜索烧完整个预算也没找出路线。目标丢了、被围死、
         // 重规划抖动都是另外的事,拿它们当够不着会把两格外的普通僵尸也判死。
         boolean noRoute = status == PlayerNav.Status.FAILED
@@ -692,6 +703,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         return status;
+    }
+
+    private boolean correctArrivedStance(PlayerNav.Status status) {
+        // Baritone 的到达只证明脚格合格；真实身体站在远侧格边时，先安全挪向该格中心再交给原生攻击检查。
+        if (status != PlayerNav.Status.ARRIVED || bowFighting || target == null || !player.onGround()
+                || player.distanceTo(target) <= reachToTarget()) return false;
+        stopNav(); stanceRecovery.target(player, target); stanceRecovery.begin(player); return true;
     }
 
     /**
@@ -781,7 +799,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         NavGoal approach = bowFighting
                 ? NavGoal.ring(target.blockPosition(), skirmishInner(), skirmishOuter())
                 : NavGoal.distanceBand(target.position(), skirmishInner(), skirmishOuter());
-        return NavGoal.approachAvoiding(
+        NavGoal stance = NavGoal.approachAvoiding(
                 approach,
                 Menace.AVOID_PENALTY,
                 bowFighting
@@ -790,6 +808,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                                         Math.max(x.clearance(), BOW_MIN_DISTANCE)))
                                 .toList()
                         : Menace.field(player, field));
+        return bowFighting ? stance : stanceRecovery.filter(stance);
         // 弓那一套的内沿对<b>每一只</b>都成立:她要跟所有怪保持五格,不只是当前目标。
     }
 
@@ -1088,6 +1107,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         return loot.confirmedGains();
     }
 
+    @Override protected void stopNav() {
+        stanceRecovery.stop(player); super.stopNav();
+    }
+
+    @Override public void stop(LocalPlayer companion, StopReason why) {
+        // 更高优先级自救接管时释放短距离移动，恢复后按新的实际脚位重新验证。
+        stanceRecovery.stop(player); super.stop(companion, why);
+    }
+
     @Override
     // 结束时依次停射击、近战和举盾，清物品选择，松开身体输入，再停止导航。
     // 这些 stop 仍可能受共享动作记录冲突影响，不能把清掉字段等同于动作已在游戏中结束。
@@ -1123,6 +1151,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("ambiguous_merged_drop_count", loot.ambiguousMergedCount());
         data.put("loot_receipt", loot.report());
         if (!lastRetreatObservation.isEmpty()) data.put("last_retreat_observation", lastRetreatObservation);
+        if (!stanceRecovery.evidence().isEmpty()) data.put("last_melee_stance_adjustment", stanceRecovery.evidence());
         return data;
     }
 
