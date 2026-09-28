@@ -14,6 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.inventory.InventoryWorkItems;
 import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.core.integration.machine.assembly.AePartTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTaskRecord;
@@ -113,6 +114,11 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
 
     @Override protected TaskState onTick() {
+        // 机器内部取料或清包时沿用整份装配和生产投入清单；作用域只维持本刻，不泄漏到下一项工作。
+        return InventoryWorkItems.within(r.plan.workItems(), this::tickMachine);
+    }
+
+    private TaskState tickMachine() {
         if (player.level() != world) return failure("machine_world_changed", "The reviewed world changed.");
         Decision decision = BuildPreviewGate.await(r, r.describe(), preview, previewParts);
         if (decision == Decision.WAITING) return TaskState.RUNNING;

@@ -402,6 +402,9 @@ public final class MachineConstructionPlan {
         return MachineAssemblyDocument.blocks(blueprint()).keySet().stream().map(anchor::offset).collect(Collectors.toUnmodifiableSet());
     }
     /** 放块阶段也保留后续皮带连接器、附件和显式工序原料，防止提前吃掉例如皮带配方中的熟海带。 */
+    /** 同一份后续材料账用于补食和整理背包，不能把待装传送带或待投原料存成无关余料。 */
+    public Set<Item> workItems() { return foodProtectedWorkItems(); }
+
     private Set<Item> foodProtectedWorkItems() {
         var items = new LinkedHashSet<Item>();
         blocks.forEach(target -> { if (target.materialCount() > 0) items.add(target.item()); });

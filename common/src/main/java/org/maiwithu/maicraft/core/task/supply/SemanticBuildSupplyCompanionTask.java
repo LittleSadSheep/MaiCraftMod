@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.supply;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
@@ -12,6 +13,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.inventory.InventoryWorkItems;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
@@ -139,6 +141,16 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected TaskState onTick() {
+        // 建造子任务先登记后续用途，取材层整理背包时不得把本批或下一工序材料当成闲置物品。
+        var workItems = new LinkedHashSet<Item>();
+        if (activePlan != null) {
+            workItems.addAll(activePlan.futureWorkItems());
+            activePlan.targets.forEach(target -> workItems.add(target.item()));
+        }
+        return InventoryWorkItems.within(workItems, this::tickConstruction);
+    }
+
+    private TaskState tickConstruction() {
         if (!prepared) {
             advanceMaterialBinding();
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
