@@ -25,6 +25,14 @@ public final class BackpackOpenSession {
     private AbstractContainerMenu menu;
     private String failure;
     private boolean closed, uncertain;
+    private final int requestedSlot;
+
+    public BackpackOpenSession() { this(-1); }
+    /** 多只随身背包由调用方逐只观察；选定格失效后不擅自改开另一只包。 */
+    public BackpackOpenSession(int requestedSlot) {
+        if (requestedSlot < -1 || requestedSlot >= 36 && requestedSlot != 40) throw new IllegalArgumentException("unsupported carried backpack slot");
+        this.requestedSlot = requestedSlot;
+    }
 
     public static int carriedSlot(LocalPlayer player) {
         // 主背包和副手都可走原生持物使用；穿戴栏与其他模组饰品栏不冒充主背包槽号。
@@ -39,8 +47,9 @@ public final class BackpackOpenSession {
         if (owner == null) {
             if (player.containerMenu != player.inventoryMenu || context.minecraft().screen != null
                     || !player.inventoryMenu.getCarried().isEmpty()) return fail("another menu or carried cursor is already active", false);
-            slot = carriedSlot(player);
+            slot = requestedSlot < 0 ? carriedSlot(player) : requestedSlot;
             if (slot < 0) return fail("no Sophisticated Backpack is available in the main inventory or offhand", false);
+            if (!BackpackMenuAccess.isBackpack(player.getInventory().getItem(slot))) return fail("the selected carried backpack slot changed", false);
             owner = player; level = player.level(); started = player.level().getGameTime();
             hand = slot == 40 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         }
