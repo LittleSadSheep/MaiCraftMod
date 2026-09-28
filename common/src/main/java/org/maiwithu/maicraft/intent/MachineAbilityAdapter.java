@@ -252,6 +252,14 @@ final class MachineAbilityAdapter {
         // 默认导出当前地图，只有显式 diff 才拿存档设计比较；未知区块返回未知，不用旧设计填充现场。
         var blueprintView = MachineInspectionBlueprintView.read(player,saved,center,radius,p.has("radius"),mode,
                 integer(p,"offset",0,0,Integer.MAX_VALUE),integer(p,"limit",256,1,512));
+        if (mode.equals("diff")) {
+            // 已登记机器只查差异时直接交回整机目标的本页观察，不再扫描周边或排队补读组件库存。
+            // 这里只提供差异事实，不生成菜单操作所需的区域快照；后续施工仍可复用原场地锚点。
+            blueprintView.addProperty("label",label); blueprintView.addProperty("observation_only",true);
+            runtime.remember(label,position);
+            return new IntentAction.Report(TaskResult.ok("Recorded machine design compared with the current map; differences are observations only.",
+                    Map.of("machine",blueprintView)),null);
+        }
         if (!player.level().isLoaded(center) || !player.level().dimension().location().toString().equals(position.dimension())) {
             blueprintView.addProperty("label",label); blueprintView.addProperty("structure_complete",false);
             return new IntentAction.Report(TaskResult.ok("Machine location retained; unloaded map data remains unknown.",Map.of("machine",blueprintView)),null);

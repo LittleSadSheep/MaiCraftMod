@@ -69,6 +69,8 @@ public final class MachineInspectionModesTest {
     private static JsonObject inspect(InteractionWorldTestHarness h,IntentRuntime runtime,JsonObject parameters) throws Exception {
         var goal = goal(parameters); SemanticGoalContract.validate(goal,IntentRuntime.KNOWN_ABILITIES); MachineAbilityAdapter.validate(goal);
         var action = MachineAbilityAdapter.adapt(goal,h.player,runtime,null);
+        // 显式差异查询直接返回整机比较，只有完整勘测才会安排原生组件观察任务。
+        if (action instanceof IntentAction.Report report) return (JsonObject) report.result().data().get("machine");
         if (!(action instanceof IntentAction.Native nativeAction)) throw new AssertionError("inspection did not create its native observation: " + action);
         var snapshot = (MachineSnapshots.Snapshot) field(nativeAction.record().getClass(),"snapshot").get(nativeAction.record());
         // 可选服务端补读不能覆盖已经从地图得到的全量布局或差异。
