@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupply
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
 import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionWirelessInventoryTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionBackpackInventoryTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2StockObservationTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentityTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
@@ -294,6 +295,8 @@ public final class GuiRegressionSuite {
         ObservedRecipeStockCostTest.main(args);
         RecipeMaterialPlanTest.main(args);
         AcquisitionWirelessInventoryTest.main(args);
+        // 缺料先检查允许访问的随身背包，未知库存和未结效果不会把角色驱去别处采集。
+        AcquisitionBackpackInventoryTest.main(args);
         Ae2StockObservationTest.main(args);
         // 终端交换遇到原生耗电仍应确认，身份或数量改变则保留不确定结果。
         Ae2TerminalIdentityTest.main(args);

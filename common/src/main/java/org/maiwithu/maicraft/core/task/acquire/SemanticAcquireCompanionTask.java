@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2SupplyTaskRecord;
 import java.util.function.Predicate;
 
@@ -146,6 +147,7 @@ public final class SemanticAcquireCompanionTask
     private long wirelessStockQueryTick;
     private final AcquisitionWirelessEvidence wirelessEvidence = new AcquisitionWirelessEvidence();
     private final AcquisitionInventoryTidy inventoryTidy;
+    private final AcquisitionBackpackInventory backpacks;
 
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
@@ -159,10 +161,16 @@ public final class SemanticAcquireCompanionTask
 
     SemanticAcquireCompanionTask(LocalPlayer player, SemanticAcquireTaskRecord record, Predicate<LocalPlayer> wirelessAvailable,
             AcquisitionInventoryTidy inventoryTidy) {
+        this(player, record, wirelessAvailable, inventoryTidy, new AcquisitionBackpackInventory());
+    }
+    // 随身背包发现与原生事务分离，回放可核对“先近处存储、后外部来源”的真实调度顺序。
+    SemanticAcquireCompanionTask(LocalPlayer player, SemanticAcquireTaskRecord record, Predicate<LocalPlayer> wirelessAvailable,
+            AcquisitionInventoryTidy inventoryTidy, AcquisitionBackpackInventory backpacks) {
         super(player, record);
         recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm, record.storageSearchRadius, record.protectedLabels);
         this.wirelessAvailable = wirelessAvailable;
         this.inventoryTidy = inventoryTidy;
+        this.backpacks = backpacks;
     }
 
     @Override
@@ -214,6 +222,13 @@ public final class SemanticAcquireCompanionTask
 
         if (activeChild != null) {
             return tickActiveChild();
+        }
+
+        // 主背包不足时先取随身背包现货，随后才开无线终端或找外部来源；mine/wireless等单一许可不被扩权。
+        if (!needs.isEmpty()) {
+            var need = needs.peek();
+            var backpack = backpacks.next(player, need, missing(need), () -> childId("backpack"), player.level().getGameTime() + STORAGE_TICKS);
+            if (backpack != null) return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, backpack, "read and withdraw carried backpack stock");
         }
 
         // 先一次性读随身终端的网络库存，再比较材料树；查询不领取物品，也不替玩家提交网络合成。
@@ -1092,6 +1107,7 @@ public final class SemanticAcquireCompanionTask
             facts.put("detail", result.message() == null ? "requested material does not fit" : result.message());
             // 空槽是当下观察，完整物品组件仍由子任务核对；不猜测精确需要腾出几个槽位，也不自动丢弃材料。
             capacityFailure = Map.copyOf(facts); failureNeed = completedNeed;
+            if (completedRecord instanceof BackpackSupplyTaskRecord backpack) backpacks.retryAfterCapacity(completedNeed, backpack.backpackSlot);
             TaskState tidying = startInventoryTidy(completedNeed, completedRecord);
             if (tidying != null) return tidying;
             completedNeed.decisionRequired = true;
@@ -1104,6 +1120,15 @@ public final class SemanticAcquireCompanionTask
             bodyPreparationFailure = Map.copyOf(result.data()); failureNeed = completedNeed; completedNeed.decisionRequired = true;
             addIssue("craft", "crafting_body_preparation_required", result.message(), result.data());
             return failAcquisition("crafting_body_preparation_required", result.message(), childFailureType(terminal, result));
+        }
+        if (completedRecord instanceof BackpackSupplyTaskRecord) {
+            String code = result == null || result.data() == null ? "backpack_result_missing" : string(result.data().get("failure_code"));
+            // 某只包确定没货才继续看下一只；读不到或未关闭不是空包，不能因此转去采矿。
+            if ("backpack_stock_insufficient".equals(code) && Boolean.TRUE.equals(result.data().get("menu_closed"))) {
+                addIssue("inventory", code, result.message(), result.data()); return TaskState.RUNNING;
+            }
+            failureNeed = completedNeed;
+            return failAcquisition("backpack_access_unverified", result == null ? "carried backpack result missing" : result.message(), FailureType.TARGET_LOST);
         }
         if (completedSource == SemanticAcquireTaskRecord.Source.HUNT) {
             return finishHuntChild(
