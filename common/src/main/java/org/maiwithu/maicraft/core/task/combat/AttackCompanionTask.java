@@ -550,6 +550,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
             Battlefield.Foe plannedFoe = field.byId(meleeVictimId);
+            // 追兵退出实际射程后，撤销尚未挥出的回头瞄准；已经发出的攻击仍须等待其原生回执。
+            if (plannedFoe != null && planned != null && !meleeAction.entityAttackSubmitted()
+                    && plannedFoe.distance() > Swing.reachTo(
+                            player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE), planned.getBbWidth())) {
+                stopMelee(); return;
+            }
             // 选中后才开始膨胀也必须取消待发刀，不能沿用上一刻的安全判断继续贴脸挥击。
             if (plannedFoe == null || plannedFoe.armed() || !plannedFoe.authorized() || r.strictAuthorized && (planned == null
                     || !r.entityIds.contains(planned.getId())

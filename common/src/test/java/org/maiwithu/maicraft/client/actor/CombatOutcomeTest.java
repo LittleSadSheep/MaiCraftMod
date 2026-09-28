@@ -40,7 +40,25 @@ public final class CombatOutcomeTest {
         retreatCameraCannotStarveMeleeAim();
         meleeApproachUsesThreeDimensionalRange();
         arrivalOutsideReachStartsSafeAlignment();
+        escapedTargetReleasesUnsubmittedAim();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
+    }
+
+    private static void escapedTargetReleasesUnsubmittedAim() throws Exception {
+        // 撤离时已经抬手瞄准，但追兵退出射程：取消的只是未发出的刀，不能继续锁镜头回头看。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var foe = f.mob(11, 2);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("escaped-melee", 1000, List.of(11), false));
+            var field = MobDefenseDamageTest.survey(task);
+            var weapon = AttackCompanionTask.class.getDeclaredMethod("tickWeapon", Battlefield.class); weapon.setAccessible(true);
+            weapon.invoke(task, field);
+            var action = (Interaction) ActorControlTestHarness.field(AttackCompanionTask.class, "meleeAction").get(task);
+            check(action != null && !action.entityAttackSubmitted(), "a newly selected melee target has not yet been clicked");
+            f.h.position(new Vec3(7, 1, 3.5)); weapon.invoke(task, MobDefenseDamageTest.survey(task));
+            check(ActorControlTestHarness.field(AttackCompanionTask.class, "meleeAction").get(task) == null && f.h.mode.attacks == 0,
+                    "an escaped target releases unsubmitted aiming without sending an out-of-range attack");
+            task.result(TaskState.CANCELLED);
+        }
     }
 
     private static void arrivalOutsideReachStartsSafeAlignment() throws Exception {
@@ -236,13 +254,14 @@ public final class CombatOutcomeTest {
             ActorControlTestHarness.field(AttackCompanionTask.class,"meleeAction").set(task,action);
             var finishMovement = AttackCompanionTask.class.getDeclaredMethod("afterCombatMovement",TaskState.class);
             finishMovement.setAccessible(true);
-            // 回放“先瞄准，再由逃跑导航朝反方向看”的实际顺序；动作必须最终通过真实射线提交，且续瞄不清掉移动。
+            // 回放战斗调度后帧末导航再次转头的实际顺序；动作仍须通过真实射线，移动也必须保留。
             for(int tick=0;tick<80 && f.h.mode.attacks==0;tick++) {
                 action.tick();
                 InputDriver.applyMovement(f.h.player,1,0,false,false,true);
-                InputDriver.look(f.h.player,90,8);
+                InputDriver.lookForNavigation(f.h.player,90,8);
                 var before = ActorControlTestHarness.field(DefaultBodyControlPort.class,"movement").get(f.h.h.body);
                 check(finishMovement.invoke(task,TaskState.RUNNING)==TaskState.RUNNING,"aim renewal cannot finish combat");
+                InputDriver.lookForNavigation(f.h.player,90,8);
                 check(before.equals(ActorControlTestHarness.field(DefaultBodyControlPort.class,"movement").get(f.h.h.body)),
                         "renewing attack aim preserves navigation's movement input");
                 ActorControlTestHarness.field(DefaultBodyControlPort.class,"lastLookUpdateNanos")

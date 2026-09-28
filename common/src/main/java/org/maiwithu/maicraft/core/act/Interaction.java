@@ -266,10 +266,13 @@ public final class Interaction {
 
     /** 走位更新后续订同一近战目标的可见瞄准；不发攻击、不改移动，真正出手仍由下一次 tick 核对射线。 */
     public void renewEntityAttackAim() {
-        if (button != Button.ATTACK || entity == null || !entity.isAlive()
+        if (button != Button.ATTACK || receipt != null || entity == null || !entity.isAlive()
                 || player.level().getEntity(entity.getId()) != entity || hardFail) return;
         InputDriver.lookAt(player, stableEntityAimPoint(entity));
     }
+
+    /** 挥击已经提交时必须继续收回执；尚未提交的瞄准才允许因对手退出射程而撤销。 */
+    public boolean entityAttackSubmitted() { return button == Button.ATTACK && receipt != null; }
 
     // 先处理还没关好的界面，再分别推进挖方块、对空气使用物品或离散点击。
     // 已经发出的动作优先等结果，不因这次动作刚打开了箱子就立刻把箱子关上。

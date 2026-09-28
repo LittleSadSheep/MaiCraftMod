@@ -11,6 +11,11 @@ final class NavigationCameraCourse {
     private float yaw, tickStartYaw;
     private long tick = Long.MIN_VALUE;
 
+    static float pitch(float requested, boolean submerged) {
+        // 原生移动有独立的路线旋转基准；普通起跳与落地不必反复看脚下，潜泳仍保留专用俯仰。
+        return submerged ? Mth.clamp(requested, -90.0f, 90.0f) : 8.0f;
+    }
+
     float target(float requestedYaw, long revision) {
         if (tick != revision) {
             tick = revision;
