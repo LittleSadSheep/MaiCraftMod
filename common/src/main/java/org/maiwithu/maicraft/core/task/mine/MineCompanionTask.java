@@ -153,6 +153,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 完整尝试后仍不可达的掉落物不得持续阻塞后续目标；本次有限挖矿任务会按实体身份跳过它。 */
     private final Set<Integer> unreachableDropIds = new HashSet<>();
     private int unreachableDropCount;
+    /** 捡取失败时保留当时的实体位置和导航结论，避免后续材料汇总把真实通行问题覆盖掉。 */
+    private Map<String, Object> uncollectedDropEvidence = Map.of();
     private int ambiguousMergedDropCount;
     /** 角色靠近但背包尚未增加时的等待计数；每次确认物品入包后清零。 */
     private int dropCloseTicks;
@@ -334,6 +336,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.SUCCESS;
         }
         if (expectedOutputBudgetExhausted(gathered)) {
+            // 已经看见产物而只是走不过去时，报告收取路径问题；不能误导模型重查配方或更换采收工具。
+            if (unreachableDropCount > 0) return unreachableDropFailure();
+            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             expectedOutputMissing = true;
             fail("confirmed source breaks did not yield the expected inventory items within the bounded mining batch; review actual inventory changes and the processing or tool requirements", FailureType.NO_MATERIAL);
             return TaskState.FAILED;
@@ -705,6 +710,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 ItemEntity unreachable = nearestLiveDrop();
                 if (unreachable != null && unreachableDropIds.add(unreachable.getId())) {
                     unreachableDropCount++;
+                    // 导航马上会被释放，先留下掉落所在格、身体位置和失败原因，便于区分水槽收取与产物缺失。
+                    uncollectedDropEvidence = Map.of(
+                            "failure_position", List.of(unreachable.getX(), unreachable.getY(), unreachable.getZ()),
+                            "player_feet", List.of(player.getX(), player.getY(), player.getZ()),
+                            "observed_at_tick", player.level().getGameTime(),
+                            "item_id", BuiltInRegistries.ITEM.getKey(unreachable.getItem().getItem()).toString(),
+                            "count", unreachable.getItem().getCount(),
+                            "block_state", player.level().getBlockState(unreachable.blockPosition()).toString(),
+                            "navigation_failure", String.valueOf(nav.failReason()),
+                            "navigation_outcome", String.valueOf(nav.outcomeSummary()));
                     progressNote = "left " + unreachableDropCount
                             + " mined drop(s) unreachable and continued with another source";
                 }
@@ -1393,6 +1408,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("confirmed_harvests", List.copyOf(confirmedHarvests));
         data.put("confirmed_harvests_truncated", truncatedHarvests);
         data.put("unreachable_drop_count", unreachableDropCount);
+        if (!uncollectedDropEvidence.isEmpty()) data.put("uncollected_drop", uncollectedDropEvidence);
         data.put("ambiguous_merged_drop_count", ambiguousMergedDropCount);
         return data;
     }
