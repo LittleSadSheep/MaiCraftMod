@@ -75,7 +75,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (!selection.pending() && world.isLoaded(r.target) && targetSatisfied()) {
             alreadyPresent = true; return TaskState.SUCCESS;
         }
-        // 拿桶与走近期间复查目标；岩浆的身体站位另按保守流路检查，不把邻格干燥当作倒桶后仍安全。
+        // 拿桶与走近期间复查真实加载和目标权限；流动后果只观察，不据预测拒绝已经授权的倒桶。
         String issue = placementProblem();
         if (issue != null) return failure(issue);
         if (!selected) {
@@ -96,9 +96,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         // 沿路已走到另一个能实际倒桶的脚位就直接使用；旧候选格不可达时，不应继续绕路去满足旧导航终点。
         boolean currentRejected = relocate && rejected.contains(PlayerNav.playerFeet(player).asLong());
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
-        if (bodyInLavaFlow) lastStanceRejection = "body_in_possible_lava_flow";
-        if (unsettledLavaBody()) lastStanceRejection = "lava_stance_not_grounded";
-        if (currentRejected || visible == null || bodyOverTarget || bodyInLavaFlow || unsettledLavaBody()) return approach();
+        // 流体允许进入角色所在格，也允许空中使用桶；只要真实射线能对准目标，就由原生使用和身体反射接手。
+        if (currentRejected || visible == null) return approach();
         if (!settleNavigation()) return TaskState.RUNNING;
         relocate = false;
         aim = visible.getLocation(); InputDriver.halt(player); InputDriver.lookAt(player, aim);
@@ -114,10 +113,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         // 出手前只确认本次落桶目标仍可用，提交后依靠原生桶回执核实实际结果。
         issue = placementProblem();
         if (issue != null) return failure(issue);
-        // 相机等待期间围挡可能改变，提交桶之前再用实际身体复核，不能沿用旧候选的安全结论。
+        // 提交前更新流路观察，但不把预测危险或未落地当成原生动作的准入门槛。
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
-        if (bodyInLavaFlow) { rejectStand("body_in_possible_lava_flow"); return TaskState.RUNNING; }
-        if (unsettledLavaBody()) { rejectStand("lava_stance_not_grounded"); return TaskState.RUNNING; }
         actionAvailable = context.mutationAvailable();
         if (!actionAvailable) { waiting("awaiting_native_action"); return TaskState.RUNNING; }
         evidence = new FluidPlacementReceipt(player, r.target, r.expected); submitted = true;
@@ -144,17 +141,13 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     private boolean unsafeLavaBody(AABB body) {
         return lavaRequiresCaution() && LavaPlacementSafety.mayReachBody(world, r.target, body);
     }
-    // 生存角色不能把跳跃途中的高眼位当成安全台沿；先实际落稳，避免倒完后落进刚生成的岩浆。
-    private boolean unsettledLavaBody() { return lavaRequiresCaution() && !player.onGround(); }
     private TaskState approach() {
-        // 不拆围挡；倒岩浆还须排除将被流路覆盖的干燥格，优先利用真实台沿及已有隔墙。
+        // 寻找真实可站且能命中目标的位置，不用未来流路预测把所有原生可用位置提前排除。
         return NavigationSafetyContext.withProtectedArea(r.installation, List.of(r.target), () -> {
             waiting("approaching_stance");
             if (stance == null) {
                 if (stanceAttempts >= MAX_STANCE_ATTEMPTS) return failure("fluid_stance_budget_exhausted");
                 stance = AssemblyInteractionGeometry.nearestStand(player, r.target, rejected, eye -> {
-                    Vec3 feet = eye.subtract(0, player.getEyeHeight(Pose.STANDING), 0);
-                    if (unsafeLavaBody(player.getDimensions(Pose.STANDING).makeBoundingBox(feet))) return null;
                     var hit = visibleFrom(eye); return hit == null ? null : hit.getLocation();
                 }, Pose.STANDING);
                 stanceAttempts++;
@@ -184,9 +177,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         actualRayAvailable = visibleFrom(player.getEyePosition()) != null;
         bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
-        if (bodyInLavaFlow) rejectStand("body_in_possible_lava_flow");
-        else if (unsettledLavaBody()) rejectStand("lava_stance_not_grounded");
-        else if (!actualRayAvailable || bodyOverTarget) rejectStand();
+        if (!actualRayAvailable) rejectStand();
         else { relocate = false; aimTicks = 0; aimGate.reset(); waiting("stance_ready"); }
         return TaskState.RUNNING;
     }
