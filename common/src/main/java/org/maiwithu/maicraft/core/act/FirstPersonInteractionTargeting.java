@@ -60,8 +60,7 @@ public final class FirstPersonInteractionTargeting {
             return hit.getBlockPos().equals(target) && state.getBlock() instanceof BucketPickup
                     && (!(state.getBlock() instanceof LiquidBlock) || state.getFluidState().isSource());
         }
-        // 请求格本身是实体方块时，当前规则只要求点击该格；空气或流体格则继续推算水要落在哪里。
-        if (!state.isAir() && !(state.getBlock() instanceof LiquidBlock)) return hit.getBlockPos().equals(target);
+        // 满桶始终核对真实落点；火把等占用也应点相邻支撑面，不能点中目标却把桶倒到它旁边。
         // 当前只按方块是否实现含水接口判断，没检查双层台阶等实际不能含水的状态；见审计记录 A31。
         boolean waterlogs = (item == Items.WATER_BUCKET || item instanceof MobBucketItem)
                 && level.getBlockState(hit.getBlockPos()).getBlock() instanceof LiquidBlockContainer;
@@ -74,10 +73,7 @@ public final class FirstPersonInteractionTargeting {
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Item item) {
         if (!Double.isFinite(reach) || reach <= 0.0D
                 || !level.isLoaded(BlockPos.containing(eye)) || !level.isLoaded(target)) return null;
-        var state = level.getBlockState(target);
-        if (item != Items.BUCKET && !state.isAir() && !(state.getBlock() instanceof LiquidBlock)) {
-            return visibleBlockHit(level, observer, eye, target, reach);
-        }
+        // 即使目标被火把等方块占用也核对桶的实际落点，不能绕过acceptsBucketHit返回一条会倒到旁格的射线。
         Vec3 delta = Vec3.atCenterOf(target).subtract(eye);
         if (delta.lengthSqr() < EPSILON) return null;
         BlockHitResult hit = bucketRay(level, observer, eye, eye.add(delta.normalize().scale(reach)), item);

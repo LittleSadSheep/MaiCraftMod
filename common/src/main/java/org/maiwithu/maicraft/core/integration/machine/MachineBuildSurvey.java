@@ -117,7 +117,7 @@ final class MachineBuildSurvey {
                     world, at, target.desiredState(), plan.replaceExisting(), plan.replaceBlockEntities());
             if (issue != null) return blocked(world, at, "source_fluid_site_blocked", issue);
             var actual = world.getBlockState(at);
-            if (!actual.isAir() && actual.getFluidState().isEmpty()) {
+            if (FluidPlacementRules.needsSolidClearance(world, at, plan.replaceExisting(), plan.replaceBlockEntities())) {
                 MachinePlacementRules.requireModeledEffects(actual.getBlock()); clears.add(at);
             }
             fluidIndex++;

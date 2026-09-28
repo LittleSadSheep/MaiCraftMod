@@ -41,7 +41,38 @@ public final class FluidPlacementTaskTest {
         newlyUsableFootingReplacesStaleNavigation();
         lavaPlacementAvoidsFutureFlow();
         sourceRemovalUsesOneAcknowledgedBucket();
+        nativeReactionRemainsConfirmed();
         System.out.println("FluidPlacementTaskTest: passed");
+    }
+
+    private static void nativeReactionRemainsConfirmed() throws Exception {
+        try (var f = fixture()) {
+            // 火把的选择框不等于桶落点；应找到邻接面的合法射线，再让原生水流替换火把。
+            f.set(AT, Blocks.TORCH.defaultBlockState()); f.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET)); installUse(f);
+            var running = new FluidPlacementTask(f.player, task()); running.start(f.player); submit(f, running);
+            f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1,
+                    "可被原生水替换的占用不要求先提交人工清障");
+            running.result(TaskState.SUCCESS);
+        }
+        try (var f = fixture()) {
+            // 对已被岩浆占据的目标真实提交一次水桶，夹具重放服务器结算成黑曜石及返桶，不能提前门控。
+            f.set(AT, Blocks.LAVA.defaultBlockState()); f.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
+            f.mode.itemUse = player -> {
+                f.level.blockSequence++; f.set(AT, Blocks.OBSIDIAN.defaultBlockState());
+                f.inventory.setItem(0, new ItemStack(Items.BUCKET));
+            };
+            var running = new FluidPlacementTask(f.player, task()); running.start(f.player); submit(f, running);
+            f.nextTick(); check(running.tick(f.player) == TaskState.RUNNING, "凝固和返桶预测不能绕过服务器确认");
+            f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1, "已确认的原生反应不是未知操作，也不补发第二桶");
+            var result = running.result(TaskState.SUCCESS);
+            check(Boolean.TRUE.equals(result.data().get("native_effect_verified"))
+                            && Boolean.FALSE.equals(result.data().get("outcome_uncertain"))
+                            && Boolean.FALSE.equals(result.data().get("source_fluid_verified"))
+                            && "minecraft:obsidian".equals(result.data().get("observed_block_id")),
+                    "动作成功、源格未达成和实际黑曜石必须分别反馈");
+        }
     }
 
     private static void sourceRemovalUsesOneAcknowledgedBucket() throws Exception {
@@ -129,7 +160,7 @@ public final class FluidPlacementTaskTest {
         try(var f=fixture()) {
             f.inventory.setItem(0,new ItemStack(Items.WATER_BUCKET)); var changed=new FluidPlacementTask(f.player,task()); changed.start(f.player);
             f.set(AT,Blocks.STONE.defaultBlockState());
-            check(changed.tick(f.player)==TaskState.FAILED && f.itemUses()==0, "出手前目标变成存量方块时不能让桶自行破坏它"); changed.result(TaskState.FAILED);
+            check(changed.tick(f.player)==TaskState.RUNNING && f.itemUses()==0, "目标占用不再提前否决，后续仍需真实射线与原生使用"); changed.result(TaskState.CANCELLED);
         }
     }
 
@@ -148,6 +179,8 @@ public final class FluidPlacementTaskTest {
             f.set(boundary,Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL,3));
             check(FluidPlacementRules.placementProblem(f.level,new BlockPos(6,1,6),Blocks.LAVA.defaultBlockState())==null,
                     "相邻水流不能阻止在空目标格倒岩浆");
+            check(FluidPlacementRules.placementProblem(f.level,boundary,Blocks.LAVA.defaultBlockState())==null,
+                    "目标格本身已有水流也交给原生桶结算");
         }
     }
 

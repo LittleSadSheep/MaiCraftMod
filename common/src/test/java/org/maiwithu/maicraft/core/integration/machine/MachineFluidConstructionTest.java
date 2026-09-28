@@ -59,20 +59,43 @@ public final class MachineFluidConstructionTest {
             var reused = new MachineBuildSurvey(plan);
             check(reused.tick(world.level).complete() && !reused.partClears().contains(at), "已有正确源格必须直接保留");
             world.set(at, Blocks.STONE.defaultBlockState());
-            check(new MachineBuildSurvey(plan).tick(world.level).failure() != null, "未授权替换时桶不能悄悄清掉普通方块");
+            var nativeOnly = new MachineBuildSurvey(plan);
+            check(nativeOnly.tick(world.level).complete() && !nativeOnly.partClears().contains(at), "未授权拆换时保留普通方块，允许后续原生桶尝试而不隐式挖掉它");
             var replace = MachineConstructionPlan.compile(BlockPos.ZERO, layout, true);
             var prepared = new MachineBuildSurvey(replace); check(prepared.tick(world.level).complete() && prepared.partClears().contains(at), "明确授权后才将普通障碍加入准备清空");
             var protectedResult = NavigationSafetyContext.withProtectedArea(List.of(at), List.of(), () -> new MachineBuildSurvey(replace).tick(world.level));
             check(protectedResult.failure() != null, "替换授权不能绕过明确的保护格");
             world.set(at, Blocks.LAVA.defaultBlockState());
-            check(new MachineBuildSurvey(replace).tick(world.level).failure() != null, "普通替换许可不能暗中混合另一种流体");
+            check(new MachineBuildSurvey(replace).tick(world.level).complete(), "另一种流体不再提前阻止声明的原生倒桶");
             world.set(at, Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL, 3));
             check(!plan.fluidTargets().stream().filter(target -> target.pos().equals(at)).findFirst().orElseThrow().matches(world.level.getBlockState(at)),
                     "流进来的同种水不能冒充蓝图要求的源格");
         }
         constructionKeepsNativeReceipt(plan);
         modificationRecoversDeclaredSourcesBeforeBuilding();
+        reactionProducesBlueprintDiff();
         System.out.println("MachineFluidConstructionTest: passed");
+    }
+    private static void reactionProducesBlueprintDiff() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            // 原生倒桶已把设计水源变成黑曜石；动作任务正常结束，附diff供模型判断，不替它否决设计。
+            var document = JsonParser.parseString("{\"blocks\":[{\"offset\":[3,1,3],\"block_id\":\"minecraft:water\"}]}").getAsJsonObject();
+            var plan = MachineConstructionPlan.compile(BlockPos.ZERO, MachineBlueprintDocument.compile(document, MachineConstructionPlan.registry()), false);
+            world.set(new BlockPos(3,1,3), Blocks.OBSIDIAN.defaultBlockState());
+            var task = new MachineBuildTask(world.player, new MachineBuildTaskRecord("reaction-diff", 1000, plan,
+                    "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of()));
+            field("fluidIndex").setInt(task, 1);
+            var verify = MachineBuildTask.class.getDeclaredMethod("verify"); verify.setAccessible(true);
+            check(verify.invoke(task) == TaskState.RUNNING, "布局不符先进入差异扫描而非丢掉现场差异");
+            var compare = MachineBuildTask.class.getDeclaredMethod("compareCompletedMachine"); compare.setAccessible(true);
+            check(compare.invoke(task) == TaskState.SUCCESS, "静态差异不能把已执行完的动作任务改判失败");
+            var result = task.result(TaskState.SUCCESS);
+            var diff = (JsonObject) result.data().get("blueprint_diff");
+            check(diff.get("comparison_complete").getAsBoolean() && !diff.get("structure_matches_blueprint").getAsBoolean()
+                            && diff.getAsJsonArray("differences").size() == 1 && diff.toString().contains("minecraft:obsidian")
+                            && ((Number) result.data().get("verified_source_fluid_targets")).intValue() == 0,
+                    "回执给出真实黑曜石差异，已处理一桶不能冒充已有一个水源");
+        }
     }
     private static void modificationRecoversDeclaredSourcesBeforeBuilding() throws Exception {
         BlockPos at = new BlockPos(3,1,3), outside = new BlockPos(7,1,3);

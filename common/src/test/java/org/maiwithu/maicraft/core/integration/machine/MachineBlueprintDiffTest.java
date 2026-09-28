@@ -7,6 +7,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 /** 真实已加载区块中的缺块、错块、朝向与占位分别返回；分页和未加载区域不伪造完整匹配。 */
@@ -52,7 +53,30 @@ public final class MachineBlueprintDiffTest {
                     "the completed scan stays frozen and does not turn unloaded cells into missing blocks");
             check(h.blockUses() == 0 && h.itemUses() == 0 && h.inventory.isEmpty(),"diff never places, removes, supplies or uses blocks");
         }
+        naturalFlowOutsideDeclaredTargets();
         System.out.println("MachineBlueprintDiffTest: current-world categories, paging, damage and unloaded state passed");
+    }
+    private static void naturalFlowOutsideDeclaredTargets() throws Exception {
+        // 蓝图只声明两端源格；流动水和中间生成的圆石不需要逐格列入，也不能当成隐式空气目标验收。
+        var blueprint = JsonParser.parseString("""
+                {"blocks":[{"offset":[3,1,3],"block_id":"minecraft:water"},
+                           {"offset":[7,1,3],"block_id":"minecraft:lava"}]}
+                """).getAsJsonObject();
+        var plan = MachineConstructionPlan.compile(BlockPos.ZERO,
+                MachineBlueprintDocument.compile(blueprint,MachineConstructionPlan.registry()),false);
+        try (var h = new InteractionWorldTestHarness()) {
+            h.set(new BlockPos(3,1,3),Blocks.WATER.defaultBlockState());
+            h.set(new BlockPos(4,1,3),Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL,1));
+            h.set(new BlockPos(5,1,3),Blocks.COBBLESTONE.defaultBlockState());
+            h.set(new BlockPos(6,1,3),Blocks.LAVA.defaultBlockState().setValue(LiquidBlock.LEVEL,1));
+            h.set(new BlockPos(7,1,3),Blocks.LAVA.defaultBlockState());
+            var comparison = new MachineBlueprintComparison(plan,"minecraft:overworld");
+            check(comparison.advance(h.level,128),"declared sources complete one bounded comparison");
+            var result = comparison.report();
+            check(result.get("structure_matches_blueprint").getAsBoolean() && result.get("unexpected").getAsInt() == 0
+                            && result.getAsJsonArray("differences").isEmpty() && !result.get("production_verified").getAsBoolean(),
+                    "unlisted natural flow and cobblestone are allowed; static matches alone do not prove production");
+        }
     }
     private static void check(boolean value,String message) { if (!value) throw new AssertionError(message); }
 }

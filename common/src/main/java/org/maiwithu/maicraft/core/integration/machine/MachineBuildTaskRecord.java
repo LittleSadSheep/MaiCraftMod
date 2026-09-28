@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * 保存整套机器装配计划、所在维度、取材策略和保护标签；完成验收之后才记下可对外使用的位置。
+ * 保存整套机器装配计划、所在维度、取材策略和保护标签；原生施工结束后保留现场位置，供继续观察和修改。
  */
 public final class MachineBuildTaskRecord extends TaskRecord implements InternalPositionReceipt {
     static { TaskFactory.register(MachineBuildTaskRecord.class, MachineBuildTask::new); }
@@ -33,7 +33,7 @@ public final class MachineBuildTaskRecord extends TaskRecord implements Internal
         this.label = label;
     }
 
-    // 记录已验收机器的锚点，表示结构所在位置，不表示角色正站在这个坐标。
+    // 记录本次实际施工的锚点，供回看和修改；不证明蓝图匹配或生产成功，也不表示角色站在这里。
     void verified() {
         var at = plan.anchor(); verified = new Position(at.getX(), at.getY(), at.getZ(), dimension);
     }

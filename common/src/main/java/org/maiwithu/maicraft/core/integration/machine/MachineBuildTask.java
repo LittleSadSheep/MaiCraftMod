@@ -78,6 +78,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int contentsIndex;
     private int filterIndex;
     private int fluidIndex;
+    private String observationCode, observationDetail;
     private int removalIndex, drainIndex, confirmedSourceRemovals;
     private long drainDeadline;
     private int installationIndex, verifyInstallationIndex, verifyProcessingIndex;
@@ -342,34 +343,34 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             BlockPos position;
             if (verifyIndex < blocks) {
                 var target = r.plan.blocks().get(verifyIndex); position = target.pos();
-                if (!world.isLoaded(position)) return load(position);
+                if (!world.isLoaded(position)) return compareMismatch("machine_observation_incomplete", "A declared target is currently unloaded.");
                 if (!r.plan.nativePositions().contains(position) && !target.matches(world.getBlockState(position)))
-                    return failure("machine_geometry_changed", "A built target or maintenance clearance no longer matches the frozen layout.");
+                    return compareMismatch("machine_geometry_changed", "A built target or maintenance clearance no longer matches the frozen layout.");
             } else {
                 var part = r.plan.parts().get(verifyIndex - blocks); position = part.position();
-                if (!world.isLoaded(position)) return load(position);
+                if (!world.isLoaded(position)) return compareMismatch("machine_observation_incomplete", "An installed part is currently unloaded.");
                 if (!MachineInstallation.matches(world, position, part.spec()))
-                    return failure("machine_part_changed", "An installed AE2 part no longer matches the frozen layout.");
+                    return compareMismatch("machine_part_changed", "An installed AE2 part no longer matches the frozen layout.");
             }
             verifyIndex++;
         }
         if (verifyIndex < blocks + r.plan.parts().size()) return TaskState.RUNNING;
         // 原生结构按最终带而不是准备轴验收；每刻核对一个安装／加工关系，避免一次遍历整个大工厂。
         if (verifyInstallationIndex < r.plan.installations().size()) {
-            if (!r.plan.installations().get(verifyInstallationIndex++).matches(world)) return failure("native_installation_changed", "A native installation no longer matches the authored structure.");
+            if (!r.plan.installations().get(verifyInstallationIndex++).matches(world)) return compareMismatch("native_installation_changed", "A native installation no longer matches the authored structure.");
             return TaskState.RUNNING;
         }
         if (verifyProcessingIndex < r.plan.processing().size()) {
-            if (!r.plan.processing().get(verifyProcessingIndex++).matches(world)) return failure("processing_relationship_changed", "The processor, work surface or required clearance no longer matches the native contract.");
+            if (!r.plan.processing().get(verifyProcessingIndex++).matches(world)) return compareMismatch("processing_relationship_changed", "The processor, work surface or required clearance no longer matches the native contract.");
             return TaskState.RUNNING;
         }
         assemblyVerified = true;
         while (verifyConfigIndex < configurations.size() && budget-- > 0) {
             var config = configurations.get(verifyConfigIndex).getAsJsonObject();
             BlockPos at = MachineConstructionPlan.offset(r.plan.anchor(), config.get("offset"));
-            if (!world.isLoaded(at)) return load(at);
+            if (!world.isLoaded(at)) return compareMismatch("machine_observation_incomplete", "A configured interface is currently unloaded.");
             if (!MachineCompletionChecks.configurationMatches(world, r.plan.anchor(), config))
-                return failure("machine_configuration_changed", "A native interface mode changed before final acceptance.");
+                return compareMismatch("machine_configuration_changed", "A native interface mode changed before final acceptance.");
             verifyConfigIndex++;
         }
         if (verifyConfigIndex >= configurations.size()) {
@@ -386,7 +387,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         int budget = 16;
         while (evidenceIndex < r.plan.components().size() && budget-- > 0) {
             BlockPos position = r.plan.components().get(evidenceIndex);
-            if (!world.isLoaded(position)) return load(position);
+            if (!world.isLoaded(position)) return compareMismatch("machine_observation_incomplete", "A component is currently unloaded.");
             JsonObject evidence = MachineCommissioning.inspect(world, position);
             evidence.addProperty("component_index", evidenceIndex++); commissioning.add(evidence);
         }
@@ -394,13 +395,11 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (requirementIndex < requirements.size()) {
             JsonObject requirement = requirements.get(requirementIndex).getAsJsonObject();
             BlockPos missing = MachineCompletionChecks.regionToLoad(world, r.plan.anchor(), requirement);
-            if (missing != null) return approach(missing);
-            if (commissioningDeadline == 0) commissioningDeadline = world.getGameTime() + 200;
+            if (missing != null) return compareMismatch("machine_observation_incomplete", "A formation region is currently unloaded.");
             JsonObject evidence = MachineCompletionChecks.inspect(world, r.plan.anchor(), requirement);
             if (!MachineCompletionChecks.satisfied(requirement, evidence)) {
-                if (world.getGameTime() < commissioningDeadline) return TaskState.RUNNING;
                 commissioning.add(evidence);
-                return failure("machine_commissioning_incomplete", "The native multiblock has not confirmed its expected formation and bounds.");
+                return compareMismatch("machine_commissioning_incomplete", "The native multiblock has not confirmed its expected formation and bounds.");
             }
             commissioning.add(evidence); requirementIndex++; commissioningDeadline = 0; return TaskState.RUNNING;
         }
@@ -489,12 +488,25 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private void rememberInstallation() { recordedMachine = ClientMachineCatalog.installationBuilt(player,r.plan,r.label); }
     private TaskState constructionCompleted() {
         r.verified(); rememberInstallation(); stopNav();
+        return beginComparison();
+    }
+    private TaskState compareMismatch(String code, String message) {
+        // 结构、形成和配置检查只产生观察；原生施工已经执行完，不因设计差异把任务改判失败。
+        observationCode = code; observationDetail = message; stopNav();
+        r.verified(); rememberInstallation();
+        return beginComparison();
+    }
+    private TaskState comparisonFinished() {
+        phase = Phase.DONE;
+        return TaskState.SUCCESS;
+    }
+    private TaskState beginComparison() {
         // 施工动作已经完成，随后默认附上一轮当前地图差异；差异不触发重建、补料或失败决策。
         try { comparison = new MachineBlueprintComparison(r.plan,r.dimension); }
         catch (RuntimeException | LinkageError unavailable) {
             comparisonIssue = new JsonObject(); comparisonIssue.addProperty("comparison_complete",false);
             comparisonIssue.addProperty("reason","comparison_unavailable:"+unavailable.getClass().getSimpleName());
-            phase = Phase.DONE; return TaskState.SUCCESS;
+            return comparisonFinished();
         }
         phase = Phase.BLUEPRINT_DIFF;
         r.extendDeadlineTo(world.getGameTime() + 200L + (plannedPositions.size() + 127L) / 128);
@@ -506,7 +518,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             comparisonIssue = new JsonObject(); comparisonIssue.addProperty("comparison_complete",false);
             comparisonIssue.addProperty("reason","observation_unavailable:"+unavailable.getClass().getSimpleName());
         }
-        phase = Phase.DONE; return TaskState.SUCCESS;
+        return comparisonFinished();
     }
 
     // 结束时停止尚在运行的子任务、取消供料、释放预览，再清理公共导航状态。
@@ -529,16 +541,22 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         supply.cancel(player); BuildPreviewGate.release(r); super.cleanup();
     }
     // 结构完工不替组件选择操作入口；无容器菜单的工作面也可正常加工，供料和实物产出仍须另外验证。
-    @Override protected String successMessage() { return "Declared machine structure constructed and checked; configuration, material feeding and actual output remain separately unverified."; }
+    @Override protected String successMessage() { return "Native construction actions completed; observations and blueprint differences are attached. Actual machine operation and output remain unverified."; }
     @Override public Map<String,Object> progress() {
         // 让上层建造/加工任务透出真正等待的原生阶段，避免站位或瞄准停滞只剩一个笼统的建造中状态。
         var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(Locale.ROOT));
-        if (comparison != null) { data.put("construction_complete",true); data.put("blueprint_diff",comparison.report()); }
-        data.put("verified_source_fluid_targets",fluidIndex); data.put("source_fluid_targets",r.plan.fluidTargets().size());
+        if (comparison != null) { data.put("native_execution_complete",true); data.put("blueprint_diff",comparison.report()); }
+        data.put("verified_source_fluid_targets",verifiedFluidTargets()); data.put("source_fluid_targets",r.plan.fluidTargets().size());
+        data.put("processed_source_fluid_targets",fluidIndex);
         if(child!=null)data.put("native_stage",child.progress()); return Map.copyOf(data);
     }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>(completion.report());
+        // 动作结束、静态匹配和功能成功三者独立；观察差异不转换成需要重试或等待决策的失败门控。
+        data.put("native_execution_complete", phase == Phase.BLUEPRINT_DIFF || phase == Phase.DONE);
+        if (observationCode != null) {
+            data.put("observation_code",observationCode); data.put("observation_detail",observationDetail);
+        }
         // 原生安装和加工净空也有独立勘测；开工前的阻塞证据不能只在普通方块子任务中才保留。
         if (!survey.failureEvidence().isEmpty()) data.put("clearance_report", survey.failureEvidence());
         if (!failedNavigation.isEmpty()) data.put("navigation_failure", failedNavigation);
@@ -563,7 +581,8 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         data.put("configured_interfaces", configIndex); data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         data.put("initialized_containers", contentsIndex);
         data.put("configured_output_filters", filterIndex);
-        data.put("verified_source_fluid_targets", fluidIndex);
+        data.put("verified_source_fluid_targets", verifiedFluidTargets());
+        data.put("processed_source_fluid_targets",fluidIndex);
         data.put("confirmed_source_fluid_removals",confirmedSourceRemovals);
         if (!lastChild.isEmpty()) data.put("last_native_stage", lastChild);
         // 方块供料和后置部件供料都带回同一类加工前置，模型可直接安排已知工序后再续建机器。
@@ -581,5 +600,11 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         } else if (Boolean.FALSE.equals(lastChild.get("mechanical_retry_allowed"))) data.put("mechanical_retry_allowed", false);
         if (failureCode != null) data.put("failure_code", failureCode);
         return data;
+    }
+
+    private long verifiedFluidTargets() {
+        // 处理过几桶不等于留下几个源格；水岩浆反应后的验收数只读当前实际状态。
+        return r.plan.fluidTargets().stream().filter(target -> world.isLoaded(target.pos())
+                && FluidPlacementRules.matches(world.getBlockState(target.pos()), target.desiredState())).count();
     }
 }

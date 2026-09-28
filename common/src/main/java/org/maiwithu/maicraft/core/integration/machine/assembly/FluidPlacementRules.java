@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.core.integration.machine.assembly;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -23,21 +22,20 @@ public final class FluidPlacementRules {
         BlockState actual = world.getBlockState(at);
         if (matches(actual, expected)) return null;
         if (NavigationSafetyContext.protectsMutation(at)) return "fluid_target_protected";
-        if (actual.isAir() || sameFluid(actual, expected) && !actual.getFluidState().isSource()) return null;
-        if (!actual.getFluidState().isEmpty()) return "fluid_target_contains_other_fluid";
-        // 原料桶不能充当隐式拆除器；普通占用只有明确替换授权后，才交前面的正常清空施工处理。
-        if (!replace || actual.hasBlockEntity() && !replaceBlockEntities) return "fluid_target_occupied_without_replacement";
-        if (actual.getDestroySpeed(world, at) < 0 || actual.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
-                || actual.hasProperty(BlockStateProperties.BED_PART)) return "fluid_target_has_unmodeled_removal";
+        // 目标已有水流、火把或其他方块不证明桶不能使用；是否替换、反应或拒绝由真实原生右键结算。
         return null;
     }
 
+    public static boolean needsSolidClearance(Level world, BlockPos at, boolean replace, boolean replaceBlockEntities) {
+        // 只有明确授权的普通拆换才预先清空；其余占用留给桶的原生交互，不用“不能代拆”提前否决倒桶。
+        BlockState actual = world.getBlockState(at);
+        return replace && !actual.isAir() && actual.getFluidState().isEmpty() && !actual.canBeReplaced()
+                && (!actual.hasBlockEntity() || replaceBlockEntities) && actual.getDestroySpeed(world, at) >= 0
+                && !actual.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF) && !actual.hasProperty(BlockStateProperties.BED_PART);
+    }
+
     public static String placementProblem(Level world, BlockPos at, BlockState expected) {
-        String problem = preparationProblem(world, at, expected, false, false);
-        if (problem != null || matches(world.getBlockState(at), expected)) return problem;
-        // 原版超热维度会蒸发水标签流体并照常退空桶，必须在消费前识别这种无法留下源格的环境。
-        if (world.dimensionType().ultraWarm() && expected.getFluidState().is(FluidTags.WATER)) return "fluid_would_evaporate";
-        // 刷石机需要让水和岩浆流入相邻空格，不能把蓝图的源格清单当成禁止外流的边界。
-        return null;
+        // 超热维度蒸发、水岩浆相遇等设计后果也由世界结算，之后通过实际状态和蓝图diff反馈。
+        return preparationProblem(world, at, expected, false, false);
     }
 }

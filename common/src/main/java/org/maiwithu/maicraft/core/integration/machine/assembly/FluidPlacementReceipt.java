@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.client.actor.BlockUseAcknowledgement;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
-/** 一次桶操作的只读凭据：服务器确认使用序号后，源格出现或消失必须与空满桶的准确交换一起成立。 */
+/** 一次桶操作的只读凭据：服务器确认使用序号与准确桶账证明动作，设计目标是否达成另读现场和diff。 */
 final class FluidPlacementReceipt implements NativeConfirmation {
     private final LocalPlayer player;
     private final Level world;
@@ -53,6 +53,8 @@ final class FluidPlacementReceipt implements NativeConfirmation {
         int gained = free && expected.isAir() ? (beforeReturned == 0 ? 1 : 0) : spent;
         if (afterFilled < beforeFilled - spent || afterFilled > beforeFilled
                 || afterReturned < beforeReturned || afterReturned > beforeReturned + gained) return Verdict.DIVERGED;
+        // 生存中一满一空的准确交换已证明本次原生操作；蒸发、凝固或源格再生不能把确定效果改称未知。
+        if (!free && afterFilled == beforeFilled - spent && afterReturned == beforeReturned + gained) return Verdict.APPLIED;
         boolean target = expected.isAir() ? actual.isAir() : FluidPlacementRules.matches(actual, expected);
         if (!target && !actual.equals(before) && !FluidPlacementRules.sameFluid(actual, expected.isAir() ? before : expected)) return Verdict.DIVERGED;
         return target && afterFilled == beforeFilled - spent && afterReturned == beforeReturned + gained ? Verdict.APPLIED : Verdict.PENDING;

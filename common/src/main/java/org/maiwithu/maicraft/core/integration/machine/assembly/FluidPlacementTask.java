@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.BucketItem;
@@ -246,6 +247,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     }
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return submitted && !verified; }
     @Override protected String successMessage() {
+        // 桶动作已结清但现场偏离声明时如实报告，不能用“原生成功”声称水源或机器已经符合蓝图。
+        if (verified && !targetSatisfied()) return "Native bucket action confirmed; the observed block differs from the declared target.";
         if (r.removedSource != null) return alreadyPresent ? "Declared fluid already absent; no bucket used." : "Source removal and native filled-bucket return confirmed.";
         return alreadyPresent ? "Declared source fluid already present; no bucket used." : "Source fluid and native bucket return confirmed.";
     }
@@ -276,11 +279,15 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         return Map.copyOf(data);
     }
     @Override protected Map<String, Object> resultData() {
-        var data = new LinkedHashMap<String,Object>(Map.of("source_fluid_verified", r.removedSource == null && (verified || alreadyPresent), "already_present", alreadyPresent,
+        boolean targetMatches = world.isLoaded(r.target) && targetSatisfied();
+        var data = new LinkedHashMap<String,Object>(Map.of("source_fluid_verified", r.removedSource == null && (verified || alreadyPresent) && targetMatches, "already_present", alreadyPresent,
                 "bucket_submitted", submitted, "native_effect_verified", verified, "outcome_uncertain", submitted && !verified,
                 // 桶已提交却尚未结清时禁止机械重试；已有正确源格可只读复用，不需要重复倒桶。
                 "mechanical_retry_allowed", !submitted || verified, "failure_code", failureCode, "machine_production_verified", false));
-        data.put("source_fluid_removed",r.removedSource != null && (verified || alreadyPresent));
+        data.put("source_fluid_removed",r.removedSource != null && (verified || alreadyPresent) && targetMatches);
+        // 这只是原生结果事实，不告诉模型设计错在哪里或怎样改；整机阶段继续附已有蓝图diff。
+        data.put("declared_target_matches", targetMatches);
+        if (world.isLoaded(r.target)) data.put("observed_block_id", BuiltInRegistries.BLOCK.getKey(world.getBlockState(r.target).getBlock()).toString());
         data.put("operation",r.removedSource == null ? "place_source" : "remove_source");
         data.put("placement_progress",stoppedProgress == null ? progress() : stoppedProgress); return data;
     }
