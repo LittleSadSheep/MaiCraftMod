@@ -90,6 +90,8 @@ public final class IntentRuntime {
             "blocked_need", "planning_handoff",
             // 容量与原生收尾原因必须随失败通知保留，不让上层靠再查整份施工记录猜测恢复方向。
             "inventory_capacity", "cause_code", "detail",
+            // 自动存余料后保留实际去向和已确认数量，外部规划者不必重新猜背包中为什么少了物品。
+            "inventory_maintenance",
             "allowed_sources", "achieved_coverage",
             "required_coverage", "dark_cell_count", "site_verified",
             "waterfront_required", "max_distance", "farthest_body_distance",

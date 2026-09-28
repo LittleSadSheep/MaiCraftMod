@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -144,6 +145,7 @@ public final class SemanticAcquireCompanionTask
     private boolean wirelessStockChecked;
     private long wirelessStockQueryTick;
     private final AcquisitionWirelessEvidence wirelessEvidence = new AcquisitionWirelessEvidence();
+    private final AcquisitionInventoryTidy inventoryTidy;
 
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
@@ -152,9 +154,15 @@ public final class SemanticAcquireCompanionTask
 
     /** 网络入口判断单独注入；实际操作仍交给同一 AE 会话，测试无需真的连接外部游戏服务器。 */
     SemanticAcquireCompanionTask(LocalPlayer player, SemanticAcquireTaskRecord record, Predicate<LocalPlayer> wirelessAvailable) {
+        this(player, record, wirelessAvailable, new AcquisitionInventoryTidy());
+    }
+
+    SemanticAcquireCompanionTask(LocalPlayer player, SemanticAcquireTaskRecord record, Predicate<LocalPlayer> wirelessAvailable,
+            AcquisitionInventoryTidy inventoryTidy) {
         super(player, record);
         recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm, record.storageSearchRadius, record.protectedLabels);
         this.wirelessAvailable = wirelessAvailable;
+        this.inventoryTidy = inventoryTidy;
     }
 
     @Override
@@ -189,6 +197,8 @@ public final class SemanticAcquireCompanionTask
     private TaskState tickAcquisition() {
         // 先看最终数量是否已够，再推进当前子任务或原料需求；通常拿够就停，不为了内部计划继续多做。
         plannerStepsThisTick = 0;
+        // 已开始的整理先结清原生存入，不能因为途中恰好捡够目标物品而丢下菜单事务。
+        if (activeChild != null && inventoryTidy.owns(activeRecord)) return tickActiveChild();
         // 先看上一刻是否已经拿够，不能因为子任务还没报结束就多挖一下或多做一批。
         // 已提交的原生动作例外：让同一子任务结清回执、关闭菜单，再结束取物，不追加新操作。
         if (count(r.itemIds) >= r.count) {
@@ -918,7 +928,7 @@ public final class SemanticAcquireCompanionTask
         }
         activeNeed.lastObservedCount = liveCount;
         // 总目标已经在外层检查，这里还要检查正在补的原料；上一刻的拾取也可能已经把这一项补齐。
-        if (liveCount >= activeNeed.requiredFinalCount) {
+        if (!inventoryTidy.owns(activeRecord) && liveCount >= activeNeed.requiredFinalCount) {
             if (activeChild.mustSettleBeforeSatisfiedCancellation()) {
                 activeChild.requestSatisfiedSettlement();
             } else {
@@ -945,6 +955,19 @@ public final class SemanticAcquireCompanionTask
             if (terminal == null) return TaskState.RUNNING;
         }
         TaskResult result = activeChild.result(terminal);
+        if (inventoryTidy.owns(activeRecord)) {
+            recordAttempt(terminal, result, count(activeNeed.itemIds), 0, false);
+            clearActive(); var settled = inventoryTidy.outcome();
+            if (settled.uncertain()) {
+                outcomeUncertain = true;
+                return failAcquisition("inventory_tidy_uncertain", "inventory tidying did not settle; inspect confirmed deposits before another transfer", FailureType.UNKNOWN);
+            }
+            if (!settled.progressed())
+                return failAcquisition("inventory_capacity_blocked", "carried storage could not free the required inventory capacity", FailureType.NO_SPACE);
+            // 已确认腾出容量后重新读库存并继续原需求，不能沿用清包前的数量或旧容量阻塞。
+            capacityFailure = Map.of(); failureNeed = null; wirelessStockChecked = false; renewProgressLease();
+            return TaskState.RUNNING;
+        }
         if (activeRecord instanceof Ae2SupplyTaskRecord supply
                 && supply.request.operation() == Ae2ResourceSupply.Operation.OBSERVE) {
             wirelessEvidence.querySettled(terminal, result, wirelessStockQueryTick, player.level().getGameTime());
@@ -1057,7 +1080,7 @@ public final class SemanticAcquireCompanionTask
             renewProgressLease();
             return TaskState.RUNNING;
         }
-        // 已确认背包装不下时先交回容量前置；换仓库、合成或采矿都不能让同一批缺料凭空获得空位。
+        // 已确认背包装不下时先整理闲置物资；无可用整理路线才交回容量前置，不能改成继续找矿。
         if (result != null && result.data() != null && (terminal != TaskState.SUCCESS || !result.success())
                 && ("no_space".equals(result.data().get("failure_type"))
                         || "inventory_full".equals(result.data().get("failure_code"))
@@ -1068,7 +1091,10 @@ public final class SemanticAcquireCompanionTask
             copyIfPresent(result.data(), facts, "failure_code");
             facts.put("detail", result.message() == null ? "requested material does not fit" : result.message());
             // 空槽是当下观察，完整物品组件仍由子任务核对；不猜测精确需要腾出几个槽位，也不自动丢弃材料。
-            capacityFailure = Map.copyOf(facts); failureNeed = completedNeed; completedNeed.decisionRequired = true;
+            capacityFailure = Map.copyOf(facts); failureNeed = completedNeed;
+            TaskState tidying = startInventoryTidy(completedNeed, completedRecord);
+            if (tidying != null) return tidying;
+            completedNeed.decisionRequired = true;
             addIssue(completedSource.name().toLowerCase(Locale.ROOT), "inventory_capacity_blocked", result.message(), capacityFailure);
             return failAcquisition("inventory_capacity_blocked", "the requested material does not fit in carried inventory; "
                     + "prepare inventory capacity before re-evaluating the unchanged inventory goal", FailureType.NO_SPACE);
@@ -1179,6 +1205,25 @@ public final class SemanticAcquireCompanionTask
             default -> advanceSource(completedNeed);
         }
         return TaskState.RUNNING;
+    }
+
+    private TaskState startInventoryTidy(AcquisitionNeed need, TaskRecord blockedRecord) {
+        if (need == null) return null;
+        var keep = needs.stream().flatMap(value -> Stream.concat(value.itemIds.stream(), value.lineageItems.stream()))
+                .map(BuiltInRegistries.ITEM::get).collect(Collectors.toSet());
+        // 原生合成已经选定配方后才因容量停下时，连同其全部可用原料保留，不能把红石块存走再尝试拆红石。
+        if (blockedRecord instanceof CraftTaskRecord craft) {
+            var recipe = ClientRuntime.requireContext(player).connection().getRecipeManager().byKey(craft.recipeId);
+            if (recipe.isEmpty()) return null;
+            recipe.get().value().getIngredients().forEach(ingredient -> {
+                for (var accepted : ingredient.getItems()) if (!accepted.isEmpty()) keep.add(accepted.getItem());
+            });
+        }
+        TaskRecord record = inventoryTidy.prepare(player, keep, r.getToolCallId(),
+                player.level().getGameTime() + STORAGE_TICKS, wirelessAvailable.test(player));
+        if (record == null) return null;
+        renewProgressLease();
+        return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, record, "store unused carried items before acquiring more materials");
     }
 
     /** 让出身体时把暂停传到实际取物/采收执行器；保留其原生回执和补种责任，恢复后继续同一实例。 */
@@ -2091,6 +2136,7 @@ public final class SemanticAcquireCompanionTask
 
     private boolean effectsObserved() {
         return (rootNeed != null && rootNeed.effectsObserved) || (failureNeed != null && failureNeed.effectsObserved)
+                || inventoryTidy.effectsObserved()
                 || attempts.stream().anyMatch(attempt -> bool(attempt.get("effects_observed")));
     }
 
@@ -2113,6 +2159,10 @@ public final class SemanticAcquireCompanionTask
             int progress,
             boolean stoppedBecauseSatisfied) {
         // 记开始和结束库存、子任务结果及是否因数量已够提前停止；记录数量上限与实际执行次数分开。
+        if (inventoryTidy.owns(activeRecord)) {
+            inventoryTidy.settle(player, state, result);
+            outcomeUncertain |= inventoryTidy.outcome().uncertain();
+        }
         // 查询途中满足目标或被取消时也结清查询状态，终态回执不能继续声称终端还在查货。
         if (activeRecord instanceof Ae2SupplyTaskRecord supply
                 && supply.request.operation() == Ae2ResourceSupply.Operation.OBSERVE)
@@ -2173,6 +2223,10 @@ public final class SemanticAcquireCompanionTask
     }
 
     private List<Map<String, Object>> recoveryOptions() {
+        // 整理有未确认转移时先观察原生回执，不开放新的存取动作去掩盖同一笔未知效果。
+        if (inventoryTidy.outcome().uncertain()) return List.of(Map.of("id", "inspect_inventory_storage",
+                "summary", "Inspect carried inventory and confirmed storage receipts before issuing another transfer.",
+                "risk", "read_only"), Map.of("id", "stop", "risk", "none"));
         // 容量问题只交回整理背包或停止，不再建议开放采矿、狩猎等无关来源。
         if (!capacityFailure.isEmpty()) return List.of(Map.of("id", "prepare_inventory_capacity",
                 "summary", "Review carried items and prepare capacity using authorized inventory or storage operations, then reassess the unchanged inventory goal.",
@@ -2304,6 +2358,7 @@ public final class SemanticAcquireCompanionTask
         if (!wirelessFacts.isEmpty()) data.put("wireless_stock_evidence", wirelessFacts);
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
+        if (!inventoryTidy.history().isEmpty()) data.put("inventory_maintenance", inventoryTidy.history());
         if (!capacityFailure.isEmpty()) data.put("inventory_capacity", capacityFailure);
         if (!processPlanning.isEmpty()) data.put("planning_handoff", processPlanning);
         if (!bodyPreparationFailure.isEmpty()) {
@@ -2411,7 +2466,7 @@ public final class SemanticAcquireCompanionTask
     public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());
-        data.put("phase", activeChild == null ? "planning_acquisition" : "acquiring");
+        data.put("phase", inventoryTidy.owns(activeRecord) ? "organizing_inventory" : activeChild == null ? "planning_acquisition" : "acquiring");
         if (!processPlanning.isEmpty()) {
             data.put("phase", MaterialProcessPlanning.KIND); data.put("planning_handoff", processPlanning);
         }

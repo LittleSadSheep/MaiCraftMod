@@ -34,6 +34,7 @@ public final class AcquisitionWirelessInventoryTest {
         emptyAndUnknownAreDistinct();
         // 同一供料入口也覆盖背包装不下后的停止边界，确认不会继续转去采集世界材料。
         AcquisitionCapacityFailureTest.main(args);
+        AcquisitionInventoryTidyTest.main(args);
         System.out.println("AcquisitionWirelessInventoryTest: passed");
     }
 
