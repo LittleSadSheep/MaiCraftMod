@@ -9,6 +9,11 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
+import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 
 /** 按精妙注册的本人库存处理器观察背包，主背包、胸甲和饰品槽各保留自己的原生地址。 */
 public final class BackpackCarriers {
@@ -85,6 +90,23 @@ public final class BackpackCarriers {
                     .invoke(handler, player, carrier.identifier(), carrier.slot());
         } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
             throw new IllegalStateException("native worn backpack inventory cannot be verified", unavailable);
+        }
+    }
+    public static NativeActionReceipt openWorn(LocalPlayerContext context, Carrier carrier) {
+        // 穿戴包按模组B键使用的同一种原生请求打开，槽号来自已验证的本人handler，不卸下装备或改物品数据。
+        if (carrier.vanillaSlot() >= 0 || !BackpackMenuAccess.isBackpack(current(context.player(), carrier)))
+            throw new IllegalArgumentException("the requested worn backpack is no longer carried");
+        try {
+            Object packet = Class.forName("net.p3pp3rf1y.sophisticatedbackpacks.network.BackpackOpenPayload")
+                    .getConstructor(int.class, String.class, String.class).newInstance(carrier.slot(), carrier.identifier(), carrier.handler());
+            if (!(packet instanceof CustomPacketPayload payload)) throw new IllegalStateException("native backpack payload type changed");
+            int before = context.player().containerMenu.containerId;
+            return context.actions().submitControlProtocol(context, "sophisticated_backpack_open", () -> {
+                if (!BackpackMenuAccess.isBackpack(current(context.player(), carrier))) throw new IllegalStateException("worn backpack changed before submission");
+                context.connection().send(new ServerboundCustomPayloadPacket(payload));
+            }, NativeConfirmation.menuChanged(before), 60);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            throw new IllegalStateException("native worn backpack open request is unavailable", unavailable);
         }
     }
     private static List<Entry> vanillaEntries(LocalPlayer player) {

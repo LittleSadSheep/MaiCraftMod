@@ -41,11 +41,11 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
     private String code;
     private FailureType failureType = FailureType.NO_MATERIAL;
 
-    public BackpackSupplyTask(LocalPlayer player, BackpackSupplyTaskRecord record) { this(player, record, nativeAccess(record.backpackSlot)); }
+    public BackpackSupplyTask(LocalPlayer player, BackpackSupplyTaskRecord record) { this(player, record, nativeAccess(record.carrier)); }
     // 流程回放可替换开包观察口；实际物品搬运仍经同一任务工厂与确认账。
     BackpackSupplyTask(LocalPlayer player, BackpackSupplyTaskRecord record, Access access) { super(player, record); this.access = access; }
-    private static Access nativeAccess(int slot) {
-        var session = new BackpackOpenSession(slot);
+    private static Access nativeAccess(BackpackCarriers.Carrier carrier) {
+        var session = new BackpackOpenSession(carrier);
         return new Access() {
             public BackpackOpenSession.Status open(LocalPlayerContext context) { return session.open(context); }
             public BackpackOpenSession.Status close(LocalPlayerContext context) { return session.close(context); }

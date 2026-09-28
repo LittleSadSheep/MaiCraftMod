@@ -60,6 +60,19 @@ public final class BackpackOpenSessionTest {
             h.nextTick(); session.cancel(ClientRuntime.requireContext(h.player));
             check(h.mode.releases == 1 && session.uncertain(), "cancellation releases native item use and preserves unknown open effects");
         }
+        // 穿戴包走模组原生协议；取消时退役该次请求，不能误发持物松手或重新提交开包。
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.inventoryMenu.setCarried(ItemStack.EMPTY);
+            var session = new BackpackOpenSession(); var context = ClientRuntime.requireContext(h.player);
+            int[] submitted = {0};
+            var opening = context.actions().submitControlProtocol(context, "backpack-open-fixture", () -> submitted[0]++, NativeConfirmation.pending(), 40);
+            ActorControlTestHarness.field(BackpackOpenSession.class, "owner").set(session, h.player);
+            ActorControlTestHarness.field(BackpackOpenSession.class, "level").set(session, h.level);
+            ActorControlTestHarness.field(BackpackOpenSession.class, "opening").set(session, opening);
+            h.nextTick(); session.cancel(ClientRuntime.requireContext(h.player));
+            check(submitted[0] == 1 && h.mode.releases == 0 && opening.status() == NativeActionReceipt.Status.UNCERTAIN,
+                    "cancelled worn open stays one unconfirmed protocol effect");
+        }
         System.out.println("BackpackOpenSessionTest: passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

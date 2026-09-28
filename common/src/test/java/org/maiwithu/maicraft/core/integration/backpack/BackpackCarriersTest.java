@@ -6,6 +6,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import java.util.List;
+import java.util.Map;
 
 /** 穿戴与饰品位置属于模组的库存处理器，不能把其slot零号当作玩家快捷栏零号。 */
 public final class BackpackCarriersTest {
@@ -17,6 +19,8 @@ public final class BackpackCarriersTest {
         var curios = new BackpackCarriers.Carrier("curios", "back", 0);
         check(armor.vanillaSlot() == -1 && curios.vanillaSlot() == -1 && !armor.key().equals(curios.key()),
                 "worn slots preserve handler and identifier instead of aliasing the hotbar");
+        var request = new BackpackSupplyTaskRecord("worn", 1000, curios, BackpackSupplyTaskRecord.Operation.OBSERVE, List.of(), 0, Map.of());
+        check(request.carrier.equals(curios) && request.backpackSlot == -1, "worn requests retain their native address without an invented vanilla slot");
         try { BackpackCarriers.Carrier.vanilla(38); throw new AssertionError("armor cannot masquerade as a hand slot"); }
         catch (IllegalArgumentException expected) { }
         var original = new ItemStack(Items.CHEST); var entry = new BackpackCarriers.Entry(armor, original);

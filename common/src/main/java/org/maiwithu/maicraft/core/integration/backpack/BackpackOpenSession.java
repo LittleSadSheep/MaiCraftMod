@@ -25,14 +25,16 @@ public final class BackpackOpenSession {
     private AbstractContainerMenu menu;
     private String failure;
     private boolean closed, uncertain;
-    private final int requestedSlot;
+    private final BackpackCarriers.Carrier requestedCarrier;
+    private BackpackCarriers.Carrier carrier;
 
     public BackpackOpenSession() { this(-1); }
     /** 多只随身背包由调用方逐只观察；选定格失效后不擅自改开另一只包。 */
     public BackpackOpenSession(int requestedSlot) {
-        if (requestedSlot < -1 || requestedSlot >= 36 && requestedSlot != 40) throw new IllegalArgumentException("unsupported carried backpack slot");
-        this.requestedSlot = requestedSlot;
+        this(requestedSlot == -1 ? null : BackpackCarriers.Carrier.vanilla(requestedSlot));
     }
+    /** 扩展穿戴槽沿用模组给出的handler地址，不能把饰品槽编号拿去做主背包SWAP。 */
+    public BackpackOpenSession(BackpackCarriers.Carrier requestedCarrier) { this.requestedCarrier = requestedCarrier; }
 
     public static int carriedSlot(LocalPlayer player) {
         // 主背包和副手都可走原生持物使用；穿戴栏与其他模组饰品栏不冒充主背包槽号。
@@ -47,11 +49,17 @@ public final class BackpackOpenSession {
         if (owner == null) {
             if (player.containerMenu != player.inventoryMenu || context.minecraft().screen != null
                     || !player.inventoryMenu.getCarried().isEmpty()) return fail("another menu or carried cursor is already active", false);
-            slot = requestedSlot < 0 ? carriedSlot(player) : requestedSlot;
-            if (slot < 0) return fail("no Sophisticated Backpack is available in the main inventory or offhand", false);
-            if (!BackpackMenuAccess.isBackpack(player.getInventory().getItem(slot))) return fail("the selected carried backpack slot changed", false);
+            carrier = requestedCarrier;
+            if (carrier == null) {
+                var carriers = BackpackCarriers.observe(player);
+                if (!carriers.complete()) return fail(carriers.problem(), false);
+                if (carriers.entries().isEmpty()) return fail("no carried Sophisticated Backpack was observed", false);
+                carrier = carriers.entries().getFirst().carrier();
+            }
+            if (!BackpackMenuAccess.isBackpack(BackpackCarriers.current(player, carrier))) return fail("the selected carried backpack slot changed", false);
+            slot = carrier.vanillaSlot();
             owner = player; level = player.level(); started = player.level().getGameTime();
-            hand = slot == 40 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+            hand = slot < 0 ? null : slot == 40 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         }
         if (player != owner || player.level() != level) return fail("backpack owner or world changed", opening != null);
         // 已提交的原生使用先结算；同步较慢只等待，不向同一只背包反复发右键。
@@ -63,8 +71,9 @@ public final class BackpackOpenSession {
             var read = BackpackMenuAccess.read(player);
             if ("awaiting_sync".equals(read.status()) && player.level().getGameTime() - started < 120) return Status.RUNNING;
             if (read.snapshot() == null) return fail("opened backpack is not observable: " + read.status(), false);
-            if (!ItemStack.isSameItemSameComponents(read.snapshot().backpack(), player.getItemInHand(hand)))
-                return fail("opened menu does not match the backpack in the initiating hand", false);
+            ItemStack current = hand == null ? BackpackCarriers.current(player, carrier) : player.getItemInHand(hand);
+            if (!ItemStack.isSameItemSameComponents(read.snapshot().backpack(), current))
+                return fail("opened menu does not match the initiating carried backpack", false);
             menu = read.snapshot().menu(); return Status.READY;
         }
         if (player.level().getGameTime() - started >= 120) return fail("backpack preparation timed out", selection.pending());
@@ -74,6 +83,11 @@ public final class BackpackOpenSession {
             if (status != FirstPersonActionGate.Status.READY) return Status.RUNNING;
         }
         if (!context.mutationAvailable()) return Status.RUNNING;
+        if (hand == null) {
+            try { opening = BackpackCarriers.openWorn(context, carrier); }
+            catch (RuntimeException unavailable) { return fail(unavailable.getMessage(), false); }
+            return Status.RUNNING;
+        }
         if (!BackpackMenuAccess.isBackpack(player.getItemInHand(hand))) return fail("selected backpack changed before native use", false);
         opening = context.actions().useItem(context, hand, NativeConfirmation.menuChanged(player.containerMenu.containerId), 60);
         return Status.RUNNING;
@@ -108,6 +122,8 @@ public final class BackpackOpenSession {
                 uncertain = true;
                 if (context.mutationAvailable() && opening.kind() == NativeActionReceipt.Kind.USE_ITEM)
                     opening = context.actions().releaseUsingItem(context, opening);
+                else if (opening.kind() == NativeActionReceipt.Kind.MOD_PROTOCOL)
+                    opening = context.actions().retireOneShotForTaskBoundary(context, opening, "worn backpack open cancelled");
             }
             uncertain |= opening.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED;
         }
