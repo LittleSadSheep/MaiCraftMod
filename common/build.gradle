@@ -124,6 +124,12 @@ def regressionSuites = [
         heap: '512m', directory: 'combat-regression', timeoutSeconds: 45,
         purpose: '验证受伤证据与自动自卫'
     ],
+    // R21 距离循环使用独立入口，单独核对格心站位与真实玩家攻击距离的边界。
+    combatStanceReplayRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.CombatStanceReplayTest',
+        heap: '512m', directory: 'combat-stance-replay-regression', timeoutSeconds: 45,
+        purpose: '回放近战站位与原生出刀边界'
+    ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
         heap: '768m', directory: 'optional-server-regression', timeoutSeconds: 90,
