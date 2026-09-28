@@ -21,6 +21,8 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackMenuAccess;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackCarriers;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackCarriers.Carrier;
 import org.maiwithu.maicraft.core.inventory.InventoryKeepPlan;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItems;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
@@ -34,7 +36,7 @@ final class AcquisitionInventoryTidy {
     record Outcome(boolean uncertain, boolean progressed) {}
     private final List<Map<String, Object>> history = new ArrayList<>();
     private final UnaryOperator<Set<Item>> reservations;
-    private final Function<LocalPlayer, List<Integer>> backpacks;
+    private final Function<LocalPlayer, List<Carrier>> backpacks;
     private Map<ResourceLocation, Integer> approved = Map.of(), before = Map.of();
     private final Map<String, Map<ResourceLocation, Integer>> unchanged = new LinkedHashMap<>();
     private String storage, storageKey;
@@ -45,8 +47,8 @@ final class AcquisitionInventoryTidy {
 
     AcquisitionInventoryTidy() { this(InventoryWorkItems::current); }
     /** 保留清单读取独立于存取执行，离线重放可提供同一份已声明工作材料。 */
-    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations) { this(reservations, BackpackStock::carriedSlots); }
-    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations, Function<LocalPlayer, List<Integer>> backpacks) {
+    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations) { this(reservations, BackpackStock::carriers); }
+    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations, Function<LocalPlayer, List<Carrier>> backpacks) {
         this.reservations = reservations; this.backpacks = backpacks;
     }
 
@@ -63,9 +65,9 @@ final class AcquisitionInventoryTidy {
                 .forEach(entry -> ordered.put(entry.getKey(), entry.getValue()));
         String childId = callId + "-inventory-tidy-" + history.size();
         // 一只包确认无法腾出空间后换下一存储；相同无进展清单只禁止重试同一后端，不封死AE备选。
-        for (int slot : backpacks.apply(player)) {
-            String identity = BackpackMenuAccess.contentsIdentity(player.getInventory().getItem(slot));
-            String key = identity == null ? "backpack_slot:" + slot : identity;
+        for (Carrier slot : backpacks.apply(player)) {
+            String identity = BackpackMenuAccess.contentsIdentity(BackpackCarriers.current(player, slot));
+            String key = identity == null ? "backpack_carrier:" + slot.key() : identity;
             if (approved.equals(unchanged.get(key))) continue;
             storage = "sophisticated_backpack"; storageKey = key;
             pending = new BackpackSupplyTaskRecord(childId, deadline, slot, BackpackSupplyTaskRecord.Operation.DEPOSIT, List.of(), 0, ordered);

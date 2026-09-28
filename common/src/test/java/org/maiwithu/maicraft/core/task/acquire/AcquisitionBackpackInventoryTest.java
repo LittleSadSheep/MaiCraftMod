@@ -14,6 +14,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2SupplyTaskRecord;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackCarriers.Carrier;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -24,7 +25,7 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class AcquisitionBackpackInventoryTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        for (String scenario : List.of("available", "second_bag", "unreadable", "uncertain")) run(scenario);
+        for (String scenario : List.of("available", "second_bag", "unreadable", "uncertain", "worn")) run(scenario);
         check(!AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.MINE)), "mine-only does not open carried storage");
         check(!AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.WIRELESS)), "wireless-only stays at AE");
         check(AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.STORAGE)), "storage permission includes one's carried backpack");
@@ -44,6 +45,8 @@ public final class AcquisitionBackpackInventoryTest {
                 public String name() { return "随身背包原生回执调度夹具"; }
                 public TaskState tick(LocalPlayer ignored) {
                     opened.add(record.backpackSlot);
+                    if (scenario.equals("worn")) check(record.carrier.equals(new Carrier("curios", "back", 0)) && record.backpackSlot == -1,
+                            "worn acquisition preserves native handler identity and never aliases a main slot");
                     check(record.operation == BackpackSupplyTaskRecord.Operation.WITHDRAW && record.amount == 2 && record.items.equals(List.of(quartz)),
                             "only the current exact need is requested from carried stock");
                     if (scenario.equals("second_bag") && record.backpackSlot == 0)
@@ -60,14 +63,15 @@ public final class AcquisitionBackpackInventoryTest {
                     List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.WIRELESS), false,
                     SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
             var task = new SemanticAcquireCompanionTask(h.player, request, player -> true, new AcquisitionInventoryTidy(Set::copyOf),
-                    new AcquisitionBackpackInventory(player -> scenario.equals("second_bag") ? List.of(0, 1) : List.of(0)));
+                    new AcquisitionBackpackInventory(player -> scenario.equals("worn") ? List.of(new Carrier("curios", "back", 0))
+                            : scenario.equals("second_bag") ? List.of(Carrier.vanilla(0), Carrier.vanilla(1)) : List.of(Carrier.vanilla(0))));
             task.onStart(); var state = TaskState.RUNNING;
             for (int i = 0; i < 30 && !state.isTerminal(); i++) state = task.onTick();
             var result = task.result(state);
             if (scenario.equals("unreadable")) check(state == TaskState.FAILED && result.data().get("failure_code").equals("backpack_access_unverified"), "unreadable bag is not an empty source");
             else if (scenario.equals("uncertain")) check(state == TaskState.FAILED && Boolean.TRUE.equals(result.data().get("outcome_uncertain")), "unknown transfer blocks all new sources");
             else check(state == TaskState.SUCCESS && h.inventory.countItem(Items.QUARTZ) == 2, "carried stock satisfies the same acquisition without model retry");
-            check(opened.equals(scenario.equals("second_bag") ? List.of(0, 1) : List.of(0)), "each physical backpack is attempted once in order");
+            check(opened.equals(scenario.equals("worn") ? List.of(-1) : scenario.equals("second_bag") ? List.of(0, 1) : List.of(0)), "each physical backpack is attempted once in order");
         } finally { runners.put(BackpackSupplyTaskRecord.class, previousBag); runners.put(Ae2SupplyTaskRecord.class, previousAe); }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

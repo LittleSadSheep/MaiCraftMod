@@ -228,7 +228,9 @@ public final class SemanticAcquireCompanionTask
         // 主背包不足时先取随身背包现货，随后才开无线终端或找外部来源；mine/wireless等单一许可不被扩权。
         if (!needs.isEmpty()) {
             var need = needs.peek();
-            var backpack = backpacks.next(player, need, missing(need), () -> childId("backpack"), player.level().getGameTime() + STORAGE_TICKS);
+            BackpackSupplyTaskRecord backpack;
+            try { backpack = backpacks.next(player, need, missing(need), () -> childId("backpack"), player.level().getGameTime() + STORAGE_TICKS); }
+            catch (IllegalStateException unavailable) { return failAcquisition("backpack_inventory_unverified", unavailable.getMessage(), FailureType.TARGET_LOST); }
             if (backpack != null) return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, backpack, "read and withdraw carried backpack stock");
         }
 
@@ -1115,7 +1117,7 @@ public final class SemanticAcquireCompanionTask
             // 空槽是当下观察，完整物品组件仍由子任务核对；不猜测精确需要腾出几个槽位，也不自动丢弃材料。
             capacityFailure = Map.copyOf(facts); failureNeed = completedNeed;
             inventoryCapacityBlockedRecord = completedRecord;
-            if (completedRecord instanceof BackpackSupplyTaskRecord backpack) backpacks.retryAfterCapacity(completedNeed, backpack.backpackSlot);
+            if (completedRecord instanceof BackpackSupplyTaskRecord backpack) backpacks.retryAfterCapacity(completedNeed, backpack.carrier);
             TaskState tidying = startInventoryTidy(completedNeed, completedRecord);
             if (tidying != null) return tidying;
             completedNeed.decisionRequired = true;
@@ -1252,8 +1254,13 @@ public final class SemanticAcquireCompanionTask
                 for (var accepted : ingredient.getItems()) if (!accepted.isEmpty()) keep.add(accepted.getItem());
             });
         }
-        TaskRecord record = inventoryTidy.prepare(player, keep, r.getToolCallId(),
-                player.level().getGameTime() + STORAGE_TICKS, wirelessAvailable.test(player));
+        TaskRecord record;
+        try { record = inventoryTidy.prepare(player, keep, r.getToolCallId(),
+                player.level().getGameTime() + STORAGE_TICKS, wirelessAvailable.test(player)); }
+        catch (IllegalStateException unavailable) {
+            // 穿戴库存API不可读时保留明确前置，不把未知来源当成没有背包或继续采集。
+            return failAcquisition("inventory_storage_unverified", unavailable.getMessage(), FailureType.TARGET_LOST);
+        }
         if (record == null) return null;
         renewProgressLease();
         return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, record, "store unused carried items before acquiring more materials");

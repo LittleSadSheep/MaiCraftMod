@@ -18,11 +18,10 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 public final class BackpackStock {
     private static final Cache CACHE = new Cache();
     private BackpackStock() {}
-    public static List<Integer> carriedSlots(LocalPlayer player) {
-        var slots = new ArrayList<Integer>();
-        for (int i = 0; i < 36; i++) if (BackpackMenuAccess.isBackpack(player.getInventory().getItem(i))) slots.add(i);
-        if (BackpackMenuAccess.isBackpack(player.getOffhandItem())) slots.add(40);
-        return List.copyOf(slots);
+    public static List<BackpackCarriers.Carrier> carriers(LocalPlayer player) {
+        var observation = BackpackCarriers.observe(player);
+        if (!observation.complete()) throw new IllegalStateException(observation.problem());
+        return observation.entries().stream().map(BackpackCarriers.Entry::carrier).toList();
     }
     public static void observe(LocalPlayer player) {
         if (player == null || player != Minecraft.getInstance().player || player.level() != Minecraft.getInstance().level) { CACHE.clear(); return; }
@@ -33,9 +32,12 @@ public final class BackpackStock {
         CACHE.record(player, player.level(), mainCounts(player), view);
     }
     public static List<BackpackMenuAccess.Snapshot> known(LocalPlayer player) {
+        return known(player, BackpackCarriers.observe(player).entries());
+    }
+    private static List<BackpackMenuAccess.Snapshot> known(LocalPlayer player, List<BackpackCarriers.Entry> carried) {
         Set<String> identities = new LinkedHashSet<>();
-        for (int slot : carriedSlots(player)) {
-            String id = BackpackMenuAccess.contentsIdentity(player.getInventory().getItem(slot));
+        for (var entry : carried) {
+            String id = BackpackMenuAccess.contentsIdentity(entry.stack());
             if (id != null) identities.add(id);
         }
         return CACHE.latest(player, player.level(), mainCounts(player), identities, player.level().getGameTime());
@@ -43,7 +45,7 @@ public final class BackpackStock {
     public static Map<String, Object> facts(LocalPlayer player) {
         // 感知只读当前可见菜单和有时效的观察，不会为了回答库存偷偷打开背包。
         observe(player);
-        var carried = carriedSlots(player); var known = known(player);
+        var discovery = BackpackCarriers.observe(player); var carried = discovery.entries(); var known = known(player, carried);
         var counts = new LinkedHashMap<ResourceLocation, Long>(); var extractable = new LinkedHashMap<ResourceLocation, Long>();
         var sources = new ArrayList<Map<String, Object>>();
         for (var view : known) {
@@ -51,15 +53,15 @@ public final class BackpackStock {
             view.extractable().forEach((id, amount) -> extractable.merge(id, amount, Math::addExact));
             sources.add(Map.of("storage_id", view.storageId(), "observed_game_tick", view.observedTick(), "infinite_slot_count", view.infiniteSlots().size()));
         }
-        long covered = carried.stream().filter(slot -> known.stream().anyMatch(view -> view.storageId().equals(
-                BackpackMenuAccess.contentsIdentity(player.getInventory().getItem(slot))))).count();
+        long covered = carried.stream().filter(entry -> known.stream().anyMatch(view -> view.storageId().equals(
+                BackpackMenuAccess.contentsIdentity(entry.stack())))).count();
         var rows = counts.keySet().stream().sorted().limit(64).map(id -> Map.<String, Object>of("item_id", id.toString(),
                 "stored", counts.get(id), "extractable", extractable.getOrDefault(id, 0L))).toList();
-        return Map.of("source", "sophisticated_backpack", "scope", "main_inventory_and_offhand",
+        return Map.of("source", "sophisticated_backpack", "scope", "native_registered_player_inventories",
                 "carried_backpacks", carried.size(), "unobserved_backpacks", carried.size() - covered,
-                "all_carried_backpacks_observed", carried.size() == covered, "observations", sources,
+                "all_carried_backpacks_observed", discovery.complete() && carried.size() == covered, "observations", sources,
                 "items", rows, "omitted_item_types", Math.max(0, counts.size() - rows.size()),
-                "fresh_transfer_check_required", true);
+                "fresh_transfer_check_required", true, "discovery_status", discovery.complete() ? "observed" : discovery.problem());
     }
     private static Map<ResourceLocation, Long> mainCounts(LocalPlayer player) {
         var counts = new LinkedHashMap<ResourceLocation, Long>();

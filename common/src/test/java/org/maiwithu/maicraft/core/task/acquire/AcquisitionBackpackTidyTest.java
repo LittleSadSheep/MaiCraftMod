@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2SupplyTaskRecord;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackCarriers.Carrier;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -61,7 +62,7 @@ public final class AcquisitionBackpackTidyTest {
                     List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.WIRELESS), false,
                     SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
             var task = new SemanticAcquireCompanionTask(h.player, record, player -> scenario.equals("backpack_full"),
-                    new AcquisitionInventoryTidy(Set::copyOf, player -> List.of(35)), new AcquisitionBackpackInventory(player -> List.of(35)));
+                    new AcquisitionInventoryTidy(Set::copyOf, player -> List.of(Carrier.vanilla(35))), new AcquisitionBackpackInventory(player -> List.of(Carrier.vanilla(35))));
             task.onStart(); var state = TaskState.RUNNING;
             for (int i = 0; i < 60 && !state.isTerminal(); i++) state = task.onTick();
             var result = task.result(state);
