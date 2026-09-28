@@ -490,15 +490,22 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         return TaskState.SUCCESS;
     }
     private TaskState beginComparison() {
-        // 施工动作已经完成，随后默认附上一轮当前地图差异；差异不触发重建、补料或失败决策。
-        try { comparison = new MachineBlueprintComparison(r.plan,r.dimension); }
+        // 修改完成后比较合并的整机声明，隔板拆除导致旁边岩浆凝固也要直接反馈，而不只回报本次一格补丁。
+        MachineConstructionPlan compared = r.plan;
+        try {
+            if (recordedMachine != null && recordedMachine.has("machine_id")) {
+                var archived = ClientMachineCatalog.blueprint(player, recordedMachine.get("machine_id").getAsString(), r.plan.anchor());
+                if (archived.isPresent()) compared = ClientMachineCatalog.blueprintPlan(archived.get());
+            }
+            comparison = new MachineBlueprintComparison(compared,r.dimension);
+        }
         catch (RuntimeException | LinkageError unavailable) {
             comparisonIssue = new JsonObject(); comparisonIssue.addProperty("comparison_complete",false);
             comparisonIssue.addProperty("reason","comparison_unavailable:"+unavailable.getClass().getSimpleName());
             return comparisonFinished();
         }
         phase = Phase.BLUEPRINT_DIFF;
-        r.extendDeadlineTo(world.getGameTime() + 200L + (plannedPositions.size() + 127L) / 128);
+        r.extendDeadlineTo(world.getGameTime() + 200L + (compared.positions().size() + compared.parts().size() + 127L) / 128);
         return TaskState.RUNNING;
     }
     private TaskState compareCompletedMachine() {
@@ -552,7 +559,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         data.put("machine_layout", r.plan.report());
         if (recordedMachine != null) data.put("recorded_machine", recordedMachine.deepCopy());
         if (comparisonIssue != null) data.put("blueprint_diff",comparisonIssue.deepCopy());
-        else if (comparison != null) data.put("blueprint_diff",comparison.report());
+        else if (comparison != null) {
+            var observed = comparison.report(); data.put("blueprint_diff",observed);
+            // 本次补丁已做完不等于整机仍完整；这里仅更新观察事实，仍不改变已完成动作的成功终态。
+            data.put("machine_geometry_verified", observed.get("comparison_complete").getAsBoolean()
+                    && observed.get("structure_matches_blueprint").getAsBoolean());
+        }
         JsonArray plannedPorts = r.plan.report().getAsJsonArray("power_ports");
         if (plannedPorts != null) data.put("power_port_observations", MachinePowerPortObservations.observe(player.level() == world ? world : null, r.plan.anchor(), plannedPorts));
         data.put("native_installations_completed", installationIndex);
