@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
@@ -35,7 +36,26 @@ public final class RecipeMaterialPlanTest {
                 PART, List.of(new Recipe(1, List.of(need(IRON, 1)))));
         var shared = plan(List.of(need(PLANK, 1), need(PART, 1)), Map.of(IRON, 1L, LOG, 1L), coupled, Map.of());
         check(shared.feasible() && shared.supplies().isEmpty(), "alternative allocation must preserve the other branch's unique ingredient");
+        knownRoutePrecedesWideUnknownBranches();
         System.out.println("RecipeMaterialPlanTest: passed");
+    }
+
+    private static void knownRoutePrecedesWideUnknownBranches() {
+        // 保留原8192步上限；数千条未知叶子排在前面时，最后一条已知便宜路线也必须先得到比较机会。
+        var target = id("wide_target"); var known = id("known_leaf");
+        var alternatives = new ArrayList<Recipe>();
+        for (int i = 0; i < 4200; i++) alternatives.add(new Recipe(1, List.of(need(id("wide_leaf_" + i), 1))));
+        var direct = new Recipe(1, List.of(need(known, 1))); alternatives.add(direct);
+        var replay = plan(List.of(need(target, 1)), Map.of(), Map.of(target, alternatives), Map.of(known, 1));
+        var control = plan(List.of(need(target, 1)), Map.of(), Map.of(target, List.of(direct)), Map.of(known, 1));
+        check(replay.feasible() && replay.cost() == control.cost() && replay.supplies().equals(control.supplies()),
+                "a wide unknown branch list cannot hide the later known cheap route");
+        check(!replay.searchComplete(), "prioritizing useful routes does not pretend the bounded search was exhaustive");
+        // 同一替代组也比较下一层实际可用材料，普通原木路径优先于没有来源的模组木板。
+        var opaque = id("opaque_plank"); var planks = id("ordinary_planks");
+        var mixed = plan(List.of(new Need(List.of(opaque, planks), 16)), Map.of(),
+                Map.of(planks, List.of(new Recipe(4, List.of(need(LOG, 1))))), Map.of(LOG, 40));
+        check(mixed.supplies().equals(List.of(need(LOG, 4))), "ordinary known timber outranks an unknown alternate plank");
     }
 
     private static RecipeMaterialPlan.Result plan(List<Need> needs, Map<ResourceLocation, Long> stock,
