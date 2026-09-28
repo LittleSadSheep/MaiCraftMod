@@ -142,6 +142,7 @@ public final class SemanticAcquireCompanionTask
     private boolean outcomeUncertain;
     private boolean wirelessStockChecked;
     private long wirelessStockQueryTick;
+    private final AcquisitionWirelessEvidence wirelessEvidence = new AcquisitionWirelessEvidence();
 
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
@@ -209,6 +210,8 @@ public final class SemanticAcquireCompanionTask
                 || player.level().getGameTime() - wirelessStockQueryTick >= StockEvidence.MAX_AGE_TICKS)) {
             wirelessStockChecked = true;
             wirelessStockQueryTick = player.level().getGameTime();
+            wirelessEvidence.access(true);
+            wirelessEvidence.queryStarted(wirelessStockQueryTick);
             var request = new Ae2ResourceSupply.Request(List.of(), false, Ae2ResourceSupply.Operation.OBSERVE);
             return startChild(rootNeed, SemanticAcquireTaskRecord.Source.INVENTORY,
                     Ae2ResourceSupply.taskRecord(childId("wireless-stock"), wirelessStockQueryTick + STORAGE_TICKS, request),
@@ -355,6 +358,8 @@ public final class SemanticAcquireCompanionTask
         if (wireless) {
             // 自动网络现货只拿已经查到的数量，先取部分现货，再对余下缺口拆配方；不顺便搜索普通容器。
             var stock = StockEvidence.latestNetwork(player);
+            // 零现货不会启动取物子任务，也必须留下这次针对缺料的真实观察供外层区分未知与无货。
+            wirelessEvidence.checked(need, stock, player.level().getGameTime());
             if (stock.isEmpty()) {
                 addIssue("storage", "wireless_stock_unknown", "wireless inventory could not be verified; it is not known empty", Map.of());
                 advanceSource(need); return TaskState.RUNNING;
@@ -941,6 +946,7 @@ public final class SemanticAcquireCompanionTask
         TaskResult result = activeChild.result(terminal);
         if (activeRecord instanceof Ae2SupplyTaskRecord supply
                 && supply.request.operation() == Ae2ResourceSupply.Operation.OBSERVE) {
+            wirelessEvidence.querySettled(terminal, result, wirelessStockQueryTick, player.level().getGameTime());
             // 库存查询成功只更新规划事实，不要求背包增加；其界面收尾结果仍须明确，不能忽略未结清操作。
             clearActive();
             if (terminal != TaskState.SUCCESS || result == null || !result.success()) {
@@ -1885,6 +1891,7 @@ public final class SemanticAcquireCompanionTask
         // 许可只决定能用哪些来源；每次库存进展或来源耗尽后，再根据现场条件重排剩余来源。
         boolean wireless = need.allowedSources.contains(SemanticAcquireTaskRecord.Source.WIRELESS)
                 && wirelessAvailable.test(player);
+        if (need.allowedSources.contains(SemanticAcquireTaskRecord.Source.WIRELESS)) wirelessEvidence.access(wireless);
         if (need.wirelessInventory != wireless) need.plannedSourceOrder = null;
         need.wirelessInventory = wireless;
         if (need.plannedSourceOrder != null) return need.plannedSourceOrder;
@@ -2089,6 +2096,10 @@ public final class SemanticAcquireCompanionTask
             int progress,
             boolean stoppedBecauseSatisfied) {
         // 记开始和结束库存、子任务结果及是否因数量已够提前停止；记录数量上限与实际执行次数分开。
+        // 查询途中满足目标或被取消时也结清查询状态，终态回执不能继续声称终端还在查货。
+        if (activeRecord instanceof Ae2SupplyTaskRecord supply
+                && supply.request.operation() == Ae2ResourceSupply.Operation.OBSERVE)
+            wirelessEvidence.querySettled(state, result, wirelessStockQueryTick, player.level().getGameTime());
         if (attempts.size() >= MAX_REPORTED_ATTEMPTS) return;
         Map<String, Object> attempt = new LinkedHashMap<>();
         attempt.put("source", activeSource.name().toLowerCase());
@@ -2267,6 +2278,9 @@ public final class SemanticAcquireCompanionTask
         data.put("harmless_hunt_retargets", harmlessHuntRetargets);
         data.put("attempts", List.copyOf(attempts));
         data.put("recipe_trace", List.copyOf(recipeTrace));
+        // 查过、未查及无匹配材料分别报告；最终背包不足本身不能证明远端网络没有库存。
+        var wirelessFacts = wirelessEvidence.describe();
+        if (!wirelessFacts.isEmpty()) data.put("wireless_stock_evidence", wirelessFacts);
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
         if (!processPlanning.isEmpty()) data.put("planning_handoff", processPlanning);

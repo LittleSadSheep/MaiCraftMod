@@ -42,9 +42,13 @@ public final class MaterialSupplyReceiptTest {
         method.setAccessible(true);
         var handoff = Map.of("missing_materials", List.of(Map.of("item_id", "create:polished_rose_quartz", "count", 15)),
                 "knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
+        // 无线查货失败也可能结束施工供料，不能只保留普通缺料数量而丢掉连接是否读到的事实。
+        var stockEvidence = Map.of("last_query", Map.of("status", "failed"), "need_checks", List.of());
         var failed = (Map<?, ?>) method.invoke(coordinator,
                 TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff,
+                        "wireless_stock_evidence", stockEvidence,
                         "body_preparation_required", true, "food_preparation", Map.of("food", 10, "health", 7))), TaskState.FAILED, 1, false);
+        check(stockEvidence.equals(failed.get("wireless_stock_evidence")), "supply keeps query failure distinct from empty stock");
         check(handoff.equals(failed.get("planning_handoff")), "supply keeps the material process handoff");
         check(Boolean.TRUE.equals(failed.get("body_preparation_required")), "supply also preserves the body's independent prerequisite");
         constructionKeepsMaterialHandoff(failed, handoff);
