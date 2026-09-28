@@ -122,7 +122,7 @@ public final class MachineFluidConstructionTest {
             running.result(TaskState.CANCELLED);
         }
         try (var world = new InteractionWorldTestHarness()) {
-            // 流水不能用空桶反复捞；给原生流体更新有限时间，仍流入时保留失败事实而不扩张拆除范围。
+            // 流水不能用空桶反复捞；直接推进可执行的固体施工，最终流水状态交给diff观察。
             var border = Level.class.getDeclaredField("worldBorder"); border.setAccessible(true); border.set(world.level,new WorldBorder());
             world.set(at,Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL,3));
             var plan = MachineConstructionPlan.compile(BlockPos.ZERO,MachineBlueprintDocument.compile(document,MachineConstructionPlan.registry()),true,true);
@@ -130,10 +130,9 @@ public final class MachineFluidConstructionTest {
             var running = new MachineBuildTask(world.player,new MachineBuildTaskRecord("wait-drain",1000,plan,
                     "minecraft:overworld",MaterialPolicy.INVENTORY_ONLY,List.of()));
             survey.invoke(running); remove.invoke(running);
-            check(field("childRecord").get(running) == null && field("phase").get(running).toString().equals("REMOVE_FLUIDS"),"flowing cells wait without a bucket submission");
-            field("drainDeadline").setLong(running,world.level.getGameTime()+1); world.nextTick();
-            check(remove.invoke(running) == TaskState.FAILED && world.itemUses() == 0, "continuous inflow ends within a bounded wait");
-            check(running.result(TaskState.FAILED).data().get("failure_code").equals("machine_declared_clearance_still_flooded"),"failure identifies continuing fluid instead of misreporting an excavation permission issue");
+            check(field("childRecord").get(running) == null && field("phase").get(running).toString().equals("BLOCKS")
+                    && world.itemUses() == 0,"flowing cells neither trigger bucket retries nor prevent the solid construction stage");
+            running.result(TaskState.CANCELLED);
         }
     }
     private static void constructionKeepsNativeReceipt(MachineConstructionPlan plan) throws Exception {

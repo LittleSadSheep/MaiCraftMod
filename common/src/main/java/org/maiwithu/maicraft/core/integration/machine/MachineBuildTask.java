@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Locale;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -79,8 +80,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private int filterIndex;
     private int fluidIndex;
     private String observationCode, observationDetail;
-    private int removalIndex, drainIndex, confirmedSourceRemovals;
-    private long drainDeadline;
+    private int removalIndex, confirmedSourceRemovals;
     private int installationIndex, verifyInstallationIndex, verifyProcessingIndex;
     private int attachmentIndex;
     private boolean assemblyVerified;
@@ -164,12 +164,12 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             fail(progress.failure() + " Construction has not started.", FailureType.TERRAIN_BLOCKED); return TaskState.FAILED;
         }
         if (progress.needsLoad() != null) return load(progress.needsLoad());
-        if (progress.complete()) phase = r.plan.modification() && r.plan.replaceExisting() ? Phase.REMOVE_FLUIDS : Phase.BLOCKS;
+        if (progress.complete()) phase = r.plan.replaceExisting() ? Phase.REMOVE_FLUIDS : Phase.BLOCKS;
         return TaskState.RUNNING;
     }
 
     private TaskState removeFluids() {
-        // 明确空气目标内先收源格 -> 等已声明区域里的流水退去 -> 再普通拆换；不把桶回收交给挖掘器。
+        // 明确空气目标先收可取的源格 -> 做固体拆换和导流坑 -> 最后观察流体变化，不把等待退水设为开工条件。
         int budget = 128;
         while (removalIndex < r.plan.blocks().size() && budget-- > 0) {
             var target = r.plan.blocks().get(removalIndex);
@@ -183,27 +183,16 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             return TaskState.RUNNING;
         }
         if (removalIndex < r.plan.blocks().size()) return TaskState.RUNNING;
-        while (drainIndex < r.plan.blocks().size() && budget-- > 0) {
-            var target = r.plan.blocks().get(drainIndex);
-            if (!target.desiredState().isAir()) { drainIndex++; continue; }
-            if (!world.isLoaded(target.pos())) return load(target.pos());
-            var state = world.getBlockState(target.pos());
-            if (state.getBlock() instanceof LiquidBlock) {
-                // 无限水再生成或外部流入不能触发无界取水；保留已确认回桶事实，只报告这次清空还未成立。
-                if (drainDeadline == 0) drainDeadline = world.getGameTime() + 200;
-                if (world.getGameTime() >= drainDeadline) return failure("machine_declared_clearance_still_flooded",
-                        "Declared air target still contains fluid after source recovery: " + target.pos().toShortString());
-                return TaskState.RUNNING;
-            }
-            drainIndex++; drainDeadline = 0;
-        }
-        if (drainIndex >= r.plan.blocks().size()) phase = Phase.BLOCKS;
+        phase = Phase.BLOCKS;
         return TaskState.RUNNING;
     }
 
     // 普通方块只启动一轮子任务，之后继续装部件；生存模式先经过供料，创造模式直接建。
     private TaskState buildBlocks() {
-        Set<BlockPos> completedInstallations = survey.completedInstallations();
+        Set<BlockPos> completedInstallations = new HashSet<>(survey.completedInstallations());
+        // 流水不能靠挖掘变空气；它的最终状态留给后续diff，不能因此挡住同一蓝图里能执行的挖坑和放块。
+        for (var target : r.plan.blocks()) if (target.desiredState().isAir() && world.isLoaded(target.pos())
+                && world.getBlockState(target.pos()).getBlock() instanceof LiquidBlock) completedInstallations.add(target.pos());
         if (blocksStarted || r.plan.blocks().stream().allMatch(target -> MachineConstructionPlan.isFluid(target)
                 || completedInstallations.contains(target.pos())) && survey.partClears().isEmpty()) { phase = Phase.INSTALLATIONS; return TaskState.RUNNING; }
         blocksStarted = true;

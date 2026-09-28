@@ -325,7 +325,8 @@ public final class MachineConstructionPlan {
         task.previewManaged(true);
         if (fixedModification) task.machineModification(observedEdits);
         else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
-        if (automaticModification) task.automaticMachineModification(authoredModificationCells());
+        // 作者明确允许替换时，蓝图点名的格子直接继承许可；新建入口续建也不要求旧观察状态完全一致。
+        if (replace) task.automaticMachineModification(authoredModificationCells());
         task.futureWorkItems(foodProtectedWorkItems());
         var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
         fluidTargets().forEach(target -> protectedSources.add(target.pos())); task.materialSupplyProtection(protectedSources);
@@ -359,7 +360,8 @@ public final class MachineConstructionPlan {
         task.previewManaged(true); task.materialSupplyProtection(positions());
         if (fixedModification) task.machineModification(observedEdits);
         else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
-        if (automaticModification) task.automaticMachineModification(authoredModificationCells());
+        // 后置附件使用同一份声明范围，不能因进入另一个阶段又回到旧快照的逐格准入门控。
+        if (replace) task.automaticMachineModification(authoredModificationCells());
         task.futureWorkItems(foodProtectedWorkItems());
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
