@@ -298,6 +298,8 @@ public final class GuiRegressionSuite {
         ItemUseTimingTest.main(args);
         ObservedRecipeStockCostTest.main(args);
         RecipeMaterialPlanTest.main(args);
+        // 剪毛后的取料必须能辨认本次产物，同时保持原生拾取和旧物品保护边界。
+        ShearingDropReceiptTest.main(args);
         AcquisitionWirelessInventoryTest.main(args);
         // 缺料先检查允许访问的随身背包，未知库存和未结效果不会把角色驱去别处采集。
         AcquisitionBackpackInventoryTest.main(args);

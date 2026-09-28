@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.act.PressReceipt;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
+import org.maiwithu.maicraft.client.actor.ShearingDropReceipt;
 
 /**
  * 先靠近选定实体，跟随它的位置，等真实准星命中它后再执行左键或右键。
@@ -62,6 +63,8 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     private final MachineMenuHandParking handParking = new MachineMenuHandParking();
     /** 按键前的世界快照,收尾时对账出"真发生了什么"。 */
     private PressReceipt receipt;
+    private ShearingDropReceipt shearing;
+    private boolean settlingShearing;
     private List<String> changes = List.of();
     private long holdUntil = -1;
     private boolean acted = false;     // 至少有一次按键命中；之后目标死亡应算成功，而非失败。
@@ -104,13 +107,15 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     /** 目标消失时报告结果、固定按住时间到期，或已在交互距离内且视线畅通时执行本 tick 动作；否则由父类导航继续跟随实体。 */
     @Override
     protected boolean reached() {
-        return entity == null || !entity.isAlive()
+        return settlingShearing || entity == null || !entity.isAlive()
                 || (interaction != null && holdUntil >= 0 && player.level().getGameTime() >= holdUntil)
                 || inReachAndLos();
     }
 
     @Override
     protected TaskState act() {
+        // 已经完成剪刀点击后只等同步回执，羊走开也不能再次导航追上去重复剪毛。
+        if (settlingShearing) return finishInteraction();
         // 目标消失时，若此前左键已命中则视为成功；否则说明目标在角色接触前逃离。
         if (entity == null || !entity.isAlive()) {
             if (acted) {
@@ -140,8 +145,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         // 按住时限到了便停止并返回成功，即使最后一次交互还没确认；这也是审计记录 A30 的触发点。
         if (interaction != null && holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
             interaction.stop();
-            successMsg = describeDone() + settle();
-            return TaskState.SUCCESS;
+            return finishInteraction();
         }
 
         // 交易开窗先把手持物保存在背包，等真实空手确认后再瞄准；不能把村民的 PASS 变成打开 AE 或使用其他道具。
@@ -185,6 +189,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
                 itemSelected = true;
             }
             receipt = PressReceipt.before(player, null);
+            if (r.button == MouseButton.RIGHT) shearing = ShearingDropReceipt.before(player, entity);
             // 普通物品交互保留原生后续使用；明确开实体菜单时禁止这条回退，未开成就交回上层判断。
             interaction = Interaction.forHit(player, hit, button(), r.holdTicks, !r.menuOnly);
             if (r.holdTicks > 0) {
@@ -195,8 +200,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
 
         return switch (interaction.tick()) {
             case DONE -> {
-                successMsg = describeDone() + settle();
-                yield TaskState.SUCCESS;
+                yield finishInteraction();
             }
             case FAILED -> {
                 fail(interaction.failReason(), FailureType.UNKNOWN);
@@ -222,6 +226,14 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
             case RUNNING -> FirstPersonActionGate.Status.RUNNING;
             case FAILED -> FirstPersonActionGate.Status.FAILED;
         };
+    }
+
+    private TaskState finishInteraction() {
+        // 一次原生操作 -> 确认剪毛状态及新掉落 -> 交还上层；出现羊毛与真正收入背包分开结算。
+        settlingShearing = shearing != null;
+        if (shearing != null && !shearing.settle(player)) return TaskState.RUNNING;
+        successMsg = describeDone() + settle();
+        return TaskState.SUCCESS;
     }
 
     /**
@@ -308,6 +320,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         data.put("entity_id", r.entityId);
+        if (shearing != null) data.put("attributed_shearing_drop_count", shearing.attributed());
         if (r.menuOnly) data.put("menu_hand_preparation", handParking.evidence());
         if (entity != null && !entity.isPickable()) {
             data.put("failure_code", "entity_not_pickable"); data.put("mechanical_retry_allowed", false);
