@@ -257,6 +257,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 case WAIT_INITIAL_INVENTORY_CLOSE -> {
                     // 先收关闭回执，下一刻从原请求继续查货，不把屏幕交接当成取到了物品。
                     if (settleMenuReceipt(context, "initial_inventory_close_unconfirmed")) {
+                        inventoryGuiOwned = false;
                         if (worldAccessAvailable(context)) setPhase(Phase.START);
                         else finishUncertain("initial_inventory_close_unconfirmed", "the ordinary inventory did not return to world interaction");
                     }
@@ -646,13 +647,18 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private void stage(LocalPlayerContext context) {
         inventoryGuiOwned = true;
         if (!context.menus().ensureVisible(context)) return;
-        if (!stagedItemMatches(player.getInventory().getItem(inventorySwap.sourceSlot()), inventorySwap.sourceBefore())
-                || !same(player.getInventory().getItem(inventorySwap.hotbarSlot()), inventorySwap.hotbarBefore())) {
+        if (!stagedItemMatches(player.getInventory().getItem(inventorySwap.sourceSlot()), inventorySwap.sourceBefore())) {
+            // 开背包期间终端位置可能已变化；尚未发出交换时原生关包并重找入口，继续同一请求而非把任务抛回模型。
+            if (!context.mutationAvailable()) return;
             inventorySwap = null;
-            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "inventory_changed_before_stage",
-                    "the terminal staging slots changed while the inventory GUI was opening");
+            menuReceipt = context.menus().close(context, INVENTORY_CONFIRM_TICKS);
+            setPhase(Phase.WAIT_INITIAL_INVENTORY_CLOSE);
             return;
         }
+        // 挖完方块后掉落物可能刚进入暂存快捷格；原生交换尚未提交，按这刻真实内容重建账本即可继续。
+        if (!same(player.getInventory().getItem(inventorySwap.hotbarSlot()), inventorySwap.hotbarBefore()))
+            inventorySwap = new InventorySwap(inventorySwap.sourceSlot(), inventorySwap.hotbarSlot(),
+                    player.getInventory().getItem(inventorySwap.sourceSlot()), player.getInventory().getItem(inventorySwap.hotbarSlot()));
         menuReceipt = swapTerminalSlots(context, inventorySwap);
         setPhase(Phase.WAIT_STAGE);
     }
