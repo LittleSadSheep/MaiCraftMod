@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 夜间休息要等真正醒来；隔墙、占床与未确认点击都不能被“附近有床”这一事实掩盖。 */
@@ -34,6 +35,7 @@ public final class NightRestBehaviorTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         waitsForWake(); ordinaryWorkOnly(); bedEligibilityAndWall(); unsettledAction();
+        defensePreservesReturnBudget();
         System.out.println("NightRestBehaviorTest: passed");
     }
     private static void waitsForWake() throws Exception {
@@ -95,6 +97,30 @@ public final class NightRestBehaviorTest {
             check(!ClientRuntime.actor().settledForRoutinePause(), "rest cannot interrupt a pending native world action");
             context.actions().retireOneShotForTaskBoundary(context, receipt, "fixture ended");
             check(ClientRuntime.actor().settledForRoutinePause(), "settled world actions permit the next routine boundary");
+        }
+    }
+    private static void defensePreservesReturnBudget() throws Exception {
+        // 醒后返回途中自卫占用身体超过原期限；恢复仍先执行返工收尾，不能直接把角色留在撤离终点。
+        for (boolean cancel : List.of(false, true)) try (var h = new InteractionWorldTestHarness()) {
+            var chain = new NightRestChain();
+            long start = h.level.getGameTime();
+            var record = new NightRestTask.Record("preempted-rest", start + 10, h.player.blockPosition(), new BlockPos(1, 1, 1));
+            var rest = new NightRestTask(h.player, record); rest.start(h.player);
+            ActorControlTestHarness.field(NightRestTask.class, "returning").setBoolean(rest, true);
+            ActorControlTestHarness.field(NightRestChain.class, "record").set(chain, record);
+            ActorControlTestHarness.field(NightRestChain.class, "rest").set(chain, rest);
+            chain.stop(h.player, Task.StopReason.PREEMPTED);
+            for (int i = 0; i < 20; i++) h.nextTick();
+            chain.stop(h.player, Task.StopReason.PREEMPTED);
+            for (int i = 0; i < 20; i++) h.nextTick();
+            if (cancel) chain.stop(h.player, Task.StopReason.REPLACED);
+            else chain.tick(h.player);
+            check(record.getDeadlineGameTime() == start + (cancel ? 10 : 50),
+                    "only resumed rest receives its actual preemption duration, once");
+            check(ActorControlTestHarness.field(NightRestChain.class, "rest").get(chain) == null,
+                    "a resumed return at its origin can settle normally, and cancellation still terminates");
+            check(ActorControlTestHarness.field(NightRestChain.class, "preemptedAt").getLong(chain) == -1,
+                    "terminal rest cannot donate its suspension time to another night");
         }
     }
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }

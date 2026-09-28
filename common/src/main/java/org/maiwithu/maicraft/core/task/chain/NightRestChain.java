@@ -46,6 +46,7 @@ public final class NightRestChain implements Task, Reflex {
     private BlockPos candidate;
     private boolean registered;
     private long retryAt, night = Long.MIN_VALUE;
+    private long preemptedAt = -1;
     private float initialHealth;
 
     @Override public boolean canRun(LocalPlayer player) {
@@ -114,6 +115,13 @@ public final class NightRestChain implements Task, Reflex {
     }
     @Override public TaskState tick(LocalPlayer player) {
         long now = player.level().getGameTime();
+        // 自卫、换气等本能占用身体期间夜休没有执行；恢复时先补回这段时间，再检查是否还能返回原工位。
+        if (record != null && preemptedAt >= 0) {
+            long paused = Math.max(0, now - preemptedAt);
+            long deadline = record.getDeadlineGameTime();
+            record.extendDeadlineTo(deadline > Long.MAX_VALUE - paused ? Long.MAX_VALUE : deadline + paused);
+            preemptedAt = -1;
+        }
         if (rest == null) {
             if (candidate == null || !usable(player, candidate)) { retryAt = now + 200; return TaskState.RUNNING; }
             attempted.add(candidate); initialHealth = player.getHealth();
@@ -133,12 +141,16 @@ public final class NightRestChain implements Task, Reflex {
     }
     private void finish(LocalPlayer player, TaskState state) {
         var result = rest.result(state); rest = null; record = null; candidate = null; retryAt = player.level().getGameTime() + 1200;
+        // 取消、死亡或正常收尾后丢弃旧抢占时间，下一次夜休不能获得上一趟的执行预算。
+        preemptedAt = -1;
         Constants.LOG.info("[maicraft-rest] 收尾 {} {}", state, result.message());
         GameplayAttentionMonitor.reflexFinished(ID, result.message(), Boolean.TRUE.equals(result.data().get("slept_until_morning")) ? 1 : 0,
                 "no items consumed by night rest", "observed health change=" + (player.getHealth() - initialHealth));
     }
     @Override public void stop(LocalPlayer player, StopReason reason) {
         if (rest != null) {
+            // 连续多次暂停只记第一次失去身体的时刻，防止重复暂停缩短实际等待区间。
+            if (reason == StopReason.PREEMPTED && preemptedAt < 0) preemptedAt = player.level().getGameTime();
             rest.stop(player, reason);
             if (reason != StopReason.PREEMPTED) finish(player, TaskState.CANCELLED);
         }
