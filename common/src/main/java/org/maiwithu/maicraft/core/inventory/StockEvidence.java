@@ -16,6 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.integration.create.CreateStockObservation;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 
 /**
@@ -69,6 +70,7 @@ public final class StockEvidence {
 
     private static void observe(LocalPlayer player, boolean immediate) {
         if (player == null || player.clientLevel != Minecraft.getInstance().level) {
+            BackpackStock.observe(null);
             CACHE.clear();
             NETWORK_CACHE.clear();
             synchronizedMenu = null;
@@ -77,6 +79,8 @@ public final class StockEvidence {
             ContainerSupplySources.reset();
             return;
         }
+        // 精妙背包独立记录逻辑存储身份；被动观察每秒采样，不与AE网络库存混在一本账里。
+        if (immediate || player.level().getGameTime() % 20 == 0) BackpackStock.observe(player);
         CACHE.latest(player, player.clientLevel, inventory(player), player.level().getGameTime());
         AbstractContainerMenu menu = player.containerMenu;
         if (menu == player.inventoryMenu || !MenuVisibility.matches(Minecraft.getInstance(), menu)) {

@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.intent.MachinePlanPreflight;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -455,6 +456,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 ? "thunder" : player.level().isRaining() ? "rain" : "clear");
         result.addProperty("game_time", player.level().getGameTime());
         result.add("inventory", inventorySummary(player));
+        // 随身储物与主背包分开显示：没观察过的包明确未知，不把未打开当成空包。
+        result.add("carried_storage", new Gson().toJsonTree(BackpackStock.facts(player)));
         result.add("equipment", equipmentSummary(player));
         if (player.getVehicle() != null) {
             result.addProperty("vehicle_type", BuiltInRegistries.ENTITY_TYPE

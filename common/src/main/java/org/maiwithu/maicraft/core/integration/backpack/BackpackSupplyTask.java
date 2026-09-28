@@ -75,6 +75,8 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
         var read = access.read(player);
         if (read.snapshot() == null) return broken("backpack_observation_" + read.status(), transfer != null);
         observed = read.snapshot();
+        // 每次存取前后都刷新这只随身包的已观察库存，供随后备料参考；关闭后的旧缓存仍有明确时效。
+        BackpackStock.record(player, observed);
         if (transfer != null) {
             // 升级改变菜单布局时不再向旧槽号发新点击；未知鼠标余物与已有回执保留供恢复检查。
             if (observed.menu() != transferView.menu() || !observed.playerSlots().equals(transferView.playerSlots())

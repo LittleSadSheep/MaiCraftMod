@@ -27,7 +27,7 @@ final class PerceiveSections {
             "dimension", "position", "view", "health", "max_health", "food", "air",
             "in_water", "underwater", "swimming", "sprinting", "day", "is_daytime",
             "time_phase", "time_of_day", "day_index", "weather", "game_time",
-            "inventory", "equipment", "vehicle_type", "task",
+            "inventory", "carried_storage", "equipment", "vehicle_type", "task",
             "elevators", "actor", "tick_stage", "controlling_task", "navigation",
             "collision_geometry", "transport", "landing_assist", "jetpack", "physical_structures");
 

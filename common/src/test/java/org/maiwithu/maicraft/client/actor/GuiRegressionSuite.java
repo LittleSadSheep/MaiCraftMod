@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.integration.backpack.BackpackMenuAccessTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSplitPlannerTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackTransferPlanTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackStockTest;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItemsTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
@@ -343,6 +344,8 @@ public final class GuiRegressionSuite {
         BackpackTransferPlanTest.main(args);
         // 整笔事务只有关闭确认后成功，未知搬运保留菜单和鼠标，不追加取料。
         BackpackSupplyTaskTest.main(args);
+        // 库存提示随身且有时效；离身、换世界与背包增减后都不能继续拿旧数量作担保。
+        BackpackStockTest.main(args);
         InventoryWorkItemsTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);

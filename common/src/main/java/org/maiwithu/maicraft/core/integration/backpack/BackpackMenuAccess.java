@@ -71,12 +71,17 @@ public final class BackpackMenuAccess {
     }
 
     static String storedIdentity(ItemStack stack, AbstractContainerMenu menu) {
+        String persistent = contentsIdentity(stack);
+        // 新空包或旧格式未提供现成标识时，身份仅限这次菜单对象；下次打开必须重新观察。
+        return persistent == null ? transientIdentity(menu) : persistent;
+    }
+    /** 读取现成内容标识供随身库存去重，不调用模组会迁移旧数据的 getter。 */
+    public static String contentsIdentity(ItemStack stack) {
         for (var component : stack.getComponents()) {
             if ("sophisticatedcore:storage_uuid".equals(String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(component.type())))
                     && component.value() instanceof UUID uuid) return "sophisticated_backpack:" + uuid;
         }
-        // 新空包或旧格式未提供现成标识时，身份仅限这次菜单对象；下次打开必须重新观察。
-        return transientIdentity(menu);
+        return null;
     }
     private static String transientIdentity(AbstractContainerMenu menu) {
         return "backpack_menu:" + menu.containerId + ":" + Integer.toUnsignedString(System.identityHashCode(menu));
