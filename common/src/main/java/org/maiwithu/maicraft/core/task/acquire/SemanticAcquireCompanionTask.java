@@ -148,6 +148,7 @@ public final class SemanticAcquireCompanionTask
     private final AcquisitionWirelessEvidence wirelessEvidence = new AcquisitionWirelessEvidence();
     private final AcquisitionInventoryTidy inventoryTidy;
     private final AcquisitionBackpackInventory backpacks;
+    private TaskRecord inventoryCapacityBlockedRecord;
 
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
@@ -977,10 +978,16 @@ public final class SemanticAcquireCompanionTask
                 outcomeUncertain = true;
                 return failAcquisition("inventory_tidy_uncertain", "inventory tidying did not settle; inspect confirmed deposits before another transfer", FailureType.UNKNOWN);
             }
-            if (!settled.progressed())
+            // 整理已结清且期间实际拾取满足了总目标，就直接完成，不为原本的容量缺口再开另一个仓库。
+            if (count(r.itemIds) >= r.count) return TaskState.SUCCESS;
+            if (!settled.progressed()) {
+                // 这只随身包确实满了但交易已结清时，再尝试其他随身存储；保留最初配方的备料约束。
+                TaskState alternative = startInventoryTidy(failureNeed, inventoryCapacityBlockedRecord);
+                if (alternative != null) return alternative;
                 return failAcquisition("inventory_capacity_blocked", "carried storage could not free the required inventory capacity", FailureType.NO_SPACE);
+            }
             // 已确认腾出容量后重新读库存并继续原需求，不能沿用清包前的数量或旧容量阻塞。
-            capacityFailure = Map.of(); failureNeed = null; wirelessStockChecked = false; renewProgressLease();
+            capacityFailure = Map.of(); failureNeed = null; inventoryCapacityBlockedRecord = null; wirelessStockChecked = false; renewProgressLease();
             return TaskState.RUNNING;
         }
         if (activeRecord instanceof Ae2SupplyTaskRecord supply
@@ -1107,6 +1114,7 @@ public final class SemanticAcquireCompanionTask
             facts.put("detail", result.message() == null ? "requested material does not fit" : result.message());
             // 空槽是当下观察，完整物品组件仍由子任务核对；不猜测精确需要腾出几个槽位，也不自动丢弃材料。
             capacityFailure = Map.copyOf(facts); failureNeed = completedNeed;
+            inventoryCapacityBlockedRecord = completedRecord;
             if (completedRecord instanceof BackpackSupplyTaskRecord backpack) backpacks.retryAfterCapacity(completedNeed, backpack.backpackSlot);
             TaskState tidying = startInventoryTidy(completedNeed, completedRecord);
             if (tidying != null) return tidying;

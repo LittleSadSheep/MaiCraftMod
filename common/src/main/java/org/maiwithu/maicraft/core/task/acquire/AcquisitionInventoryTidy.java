@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.UnaryOperator;
+import java.util.function.Function;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -17,6 +18,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackMenuAccess;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
 import org.maiwithu.maicraft.core.inventory.InventoryKeepPlan;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItems;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
@@ -25,12 +29,15 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 背包吃紧时把闲置物资存到随身AE；原生动作仍由取料任务的同一子任务生命周期推进。 */
+/** 背包吃紧时先存随身背包，再尝试随身AE；原生动作仍由取料任务的同一子任务生命周期推进。 */
 final class AcquisitionInventoryTidy {
     record Outcome(boolean uncertain, boolean progressed) {}
     private final List<Map<String, Object>> history = new ArrayList<>();
     private final UnaryOperator<Set<Item>> reservations;
-    private Map<ResourceLocation, Integer> approved = Map.of(), before = Map.of(), lastUnchanged = Map.of();
+    private final Function<LocalPlayer, List<Integer>> backpacks;
+    private Map<ResourceLocation, Integer> approved = Map.of(), before = Map.of();
+    private final Map<String, Map<ResourceLocation, Integer>> unchanged = new LinkedHashMap<>();
+    private String storage, storageKey;
     private Map<ResourceLocation, String> retained = Map.of();
     private TaskRecord pending;
     private boolean effects;
@@ -38,21 +45,35 @@ final class AcquisitionInventoryTidy {
 
     AcquisitionInventoryTidy() { this(InventoryWorkItems::current); }
     /** 保留清单读取独立于存取执行，离线重放可提供同一份已声明工作材料。 */
-    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations) { this.reservations = reservations; }
+    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations) { this(reservations, BackpackStock::carriedSlots); }
+    AcquisitionInventoryTidy(UnaryOperator<Set<Item>> reservations, Function<LocalPlayer, List<Integer>> backpacks) {
+        this.reservations = reservations; this.backpacks = backpacks;
+    }
 
     TaskRecord prepare(LocalPlayer player, Set<Item> requested, String callId, long deadline, boolean wireless) {
         // 一个取料调用最多整理四轮；相同清单若未腾出空间，不重复打开终端制造无进展循环。
-        if (pending != null || history.size() >= 4 || !wireless || !closed(player)) return null;
+        if (pending != null || history.size() >= 4 || !closed(player)) return null;
         var plan = InventoryKeepPlan.inspect(player.getInventory().items,
                 reservations.apply(requested), ScaffoldMaterials.of(player));
-        if (plan.deposit().isEmpty() || plan.deposit().equals(lastUnchanged)) return null;
+        if (plan.deposit().isEmpty()) return null;
         approved = plan.deposit(); retained = plan.retainedReasons(); before = counts(player, approved.keySet());
         var ordered = new LinkedHashMap<ResourceLocation, Integer>();
         // 先整叠存入腾出中转槽，再处理必须保留一部分的物品，防止满包时第一步就卡在分堆。
         approved.entrySet().stream().sorted(Comparator.comparing(entry -> !hasWholeStack(player, entry.getKey(), entry.getValue())))
                 .forEach(entry -> ordered.put(entry.getKey(), entry.getValue()));
-        pending = Ae2ResourceSupply.taskRecord(callId + "-inventory-tidy-" + history.size(), deadline,
-                InventoryDepositCoordinator.aeDepositRequest(ordered, true));
+        String childId = callId + "-inventory-tidy-" + history.size();
+        // 一只包确认无法腾出空间后换下一存储；相同无进展清单只禁止重试同一后端，不封死AE备选。
+        for (int slot : backpacks.apply(player)) {
+            String identity = BackpackMenuAccess.contentsIdentity(player.getInventory().getItem(slot));
+            String key = identity == null ? "backpack_slot:" + slot : identity;
+            if (approved.equals(unchanged.get(key))) continue;
+            storage = "sophisticated_backpack"; storageKey = key;
+            pending = new BackpackSupplyTaskRecord(childId, deadline, slot, BackpackSupplyTaskRecord.Operation.DEPOSIT, List.of(), 0, ordered);
+            return pending;
+        }
+        if (!wireless || approved.equals(unchanged.get("ae2_wireless"))) return null;
+        storage = storageKey = "ae2_wireless";
+        pending = Ae2ResourceSupply.taskRecord(childId, deadline, InventoryDepositCoordinator.aeDepositRequest(ordered, true));
         return pending;
     }
 
@@ -75,12 +96,14 @@ final class AcquisitionInventoryTidy {
         effects |= total > 0 || Boolean.TRUE.equals(data.get("effects_started")) || !before.equals(after);
         outcome = new Outcome(uncertain, total > 0);
         var row = new LinkedHashMap<String, Object>();
-        row.put("storage", "ae2_wireless"); row.put("approved_deposit", strings(approved));
+        row.put("storage", storage); row.put("storage_id", storageKey); row.put("approved_deposit", strings(approved));
         row.put("confirmed_deposited", strings(moved)); row.put("retained_reasons", strings(retained));
         row.put("outcome_uncertain", uncertain); row.put("terminal_state", state.name().toLowerCase(Locale.ROOT));
         row.put("empty_main_slots_after", player.getInventory().items.stream().limit(36).filter(ItemStack::isEmpty).count());
         if (data.containsKey("failure_code")) row.put("cause_code", data.get("failure_code"));
-        history.add(Map.copyOf(row)); lastUnchanged = total == 0 ? approved : Map.of(); pending = null;
+        history.add(Map.copyOf(row));
+        if (total == 0) unchanged.put(storageKey, approved); else unchanged.remove(storageKey);
+        pending = null;
     }
 
     private static boolean closed(LocalPlayer player) {
