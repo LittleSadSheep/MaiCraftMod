@@ -322,6 +322,9 @@ public final class GuiRegressionSuite {
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);
         NightRestBehaviorTest.main(args);
+        // 暗洞补光复用原生持物和放置，检查位置保护、任务边界与分包确认后才恢复采掘。
+        RoutineTorchPlacementTest.main(args);
+        TorchLightingBehaviorTest.main(args);
         NightRestRouteTest.main(args);
         FishingBiteTest.main(args);
         StockEvidenceTest.main(args);

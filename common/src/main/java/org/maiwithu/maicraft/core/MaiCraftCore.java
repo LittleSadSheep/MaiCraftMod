@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.core.task.chain.BreathChain;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
 import org.maiwithu.maicraft.core.task.chain.NightRestChain;
+import org.maiwithu.maicraft.core.task.chain.TorchLightingChain;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerCompanionTask;
@@ -158,6 +159,8 @@ public final class MaiCraftCore {
                 MobDefenseChain::new);
         // 日常休息放在紧急自救之后，只在原生操作结清且附近确有安全床时暂停普通工作。
         BrainChains.register(40, NightRestChain::new);
+        // 采掘间隙的照明属于日常动作，所有紧急自救和安全夜休都先于插火把。
+        BrainChains.register(50, TorchLightingChain::new);
     }
 
     /**
