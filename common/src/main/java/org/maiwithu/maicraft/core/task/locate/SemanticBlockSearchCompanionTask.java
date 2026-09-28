@@ -28,6 +28,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
 
     private BlockPos origin;
     private double nearestMatchDistance = -1;
+    private double nearestHorizontalDistance;
+    private int nearestVerticalOffset;
     private String failureCode;
     /** 具体位置只在 Mod 内部保存；公开结果仅输出数量与距离统计。 */
     private final Map<BlockPos, Block> observed = new LinkedHashMap<>();
@@ -73,9 +75,12 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
                 continue;
             }
             if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
-                double distance = Math.sqrt(dx * dx + dz * dz);
+                // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
+                double distance = Math.sqrt(pos.distSqr(origin));
                 if (nearestMatchDistance < 0 || distance < nearestMatchDistance) {
                     nearestMatchDistance = distance;
+                    nearestHorizontalDistance = Math.sqrt(dx * dx + dz * dz);
+                    nearestVerticalOffset = pos.getY() - origin.getY();
                 }
             }
         }
@@ -124,9 +129,14 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("verified", observed.size() >= r.count);
         data.put("scope", "loaded_client_blocks");
         data.put("max_distance", r.maxDistance);
+        data.put("search_geometry", "horizontal_radius_across_loaded_sections");
+        data.put("distance_metric", "euclidean_3d");
+        data.put("distance_scope", "nearest verified observed match; not a reachability result");
         if (nearestMatchDistance >= 0) {
             data.put("nearest_match_distance",
                     Math.round(nearestMatchDistance * 10.0) / 10.0);
+            data.put("nearest_match_horizontal_distance", Math.round(nearestHorizontalDistance * 10.0) / 10.0);
+            data.put("nearest_match_vertical_offset", nearestVerticalOffset);
         }
         if (observed.size() < r.count) {
             String code = failureCode == null ? "find_block_timeout" : failureCode;
@@ -144,7 +154,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     protected String successMessage() {
         return "verified " + observed.size() + "/" + r.count + " matching block positions"
                 + (nearestMatchDistance >= 0
-                        ? ", nearest about " + Math.round(nearestMatchDistance) + " blocks away"
+                        ? ", nearest observed about " + Math.round(nearestMatchDistance) + " blocks away in 3D"
+                                + " (horizontal " + Math.round(nearestHorizontalDistance) + ", height offset " + nearestVerticalOffset + ")"
                         : "")
                 + " through loaded client chunks";
     }

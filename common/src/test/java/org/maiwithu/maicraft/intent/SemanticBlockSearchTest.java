@@ -10,6 +10,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchCompanionTask;
@@ -29,8 +30,34 @@ public final class SemanticBlockSearchTest {
         adapterCompilesSelectorsAndRejectsUnknown();
         apiClampsAndRecordRejectsInvalid();
         scanReportsCountsAndDistanceWithoutCoordinates();
+        deepMatchesReportThreeDimensionalDistance();
         absenceFailsWithHonestScopeNote();
         System.out.println("SemanticBlockSearchTest: passed");
+    }
+
+    private static void deepMatchesReportThreeDimensionalDistance() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 地下矿在水平方向只差一格，但实际相隔九格高度；较远的同层矿才是三维距离更近的观察点。
+            h.position(new Vec3(4.5, 10, 4.5));
+            var deep = new BlockPos(5, 1, 4); var sameLevel = new BlockPos(8, 10, 4);
+            h.set(deep, Blocks.REDSTONE_ORE.defaultBlockState()); h.set(sameLevel, Blocks.REDSTONE_ORE.defaultBlockState());
+            var task = new SemanticBlockSearchCompanionTask(h.player,
+                    new SemanticBlockSearchTaskRecord("depth-report", 1000, List.of(Blocks.REDSTONE_ORE), 1, 16));
+            task.start(h.player);
+            var absorb = SemanticBlockSearchCompanionTask.class.getDeclaredMethod("absorb", List.class); absorb.setAccessible(true);
+            var report = SemanticBlockSearchCompanionTask.class.getDeclaredMethod("resultData"); report.setAccessible(true);
+            absorb.invoke(task, List.of(deep));
+            var underground = (Map<?, ?>) report.invoke(task);
+            check(underground.get("nearest_match_distance").equals(9.1)
+                    && underground.get("nearest_match_horizontal_distance").equals(1.0)
+                    && underground.get("nearest_match_vertical_offset").equals(-9), "deep ore distance includes vertical separation");
+            absorb.invoke(task, List.of(sameLevel));
+            var result = task.result(TaskState.SUCCESS);
+            check(result.data().get("nearest_match_distance").equals(4.0)
+                    && result.data().get("nearest_match_vertical_offset").equals(0)
+                    && "euclidean_3d".equals(result.data().get("distance_metric")), "nearest observed selection follows actual 3D distance");
+            check(result.message().contains("in 3D") && result.message().contains("height offset 0"), "the short receipt preserves the distance meaning");
+        }
     }
 
     private static void adapterCompilesSelectorsAndRejectsUnknown() throws Exception {
