@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildOrder;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationCargo;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinator;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
 import org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials;
@@ -84,7 +84,7 @@ final class SemanticBuildSupplyCompanionTask
     private SemanticBuildMaterialBinding.Proposal materialProposal;
     private final SemanticMaterialSupplyCoordinator supply =
             new SemanticMaterialSupplyCoordinator();
-    private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
+    private final InventoryDepositCoordinator spoilSupply = new InventoryDepositCoordinator();
     private final Map<ResourceLocation, ResourceLocation> selectedVariants =
             new LinkedHashMap<>();
     private final List<BlockPos> plannedMutationCells = new ArrayList<>();
@@ -424,11 +424,11 @@ final class SemanticBuildSupplyCompanionTask
         cargoEffectsSeen |= Boolean.TRUE.equals(tick.receipt().get("effects_started"))
                 || tick.receipt().get("last_container_receipt") instanceof Map<?, ?> child && Boolean.TRUE.equals(child.get("effects_started"));
         spoilOutcomeUncertain = outcomeUnknown(tick.receipt()) || spoilOutcomeUncertain
-                && tick.status() != BuildExcavationSpoilSupply.Status.DEPOSITED;
+                && tick.status() != InventoryDepositCoordinator.Status.DEPOSITED;
         r.extendDeadlineTo(spoilSupply.childDeadline());
-        if (tick.status() == BuildExcavationSpoilSupply.Status.RUNNING) return TaskState.RUNNING;
+        if (tick.status() == InventoryDepositCoordinator.Status.RUNNING) return TaskState.RUNNING;
         rounds.add(Map.of("kind", "excavation_spoil", "terminal_state", tick.status().name().toLowerCase(), "data", tick.receipt()));
-        if (tick.status() == BuildExcavationSpoilSupply.Status.FAILED || spoilOutcomeUncertain) {
+        if (tick.status() == InventoryDepositCoordinator.Status.FAILED || spoilOutcomeUncertain) {
             if (!cargoEffectsSeen && storageUnavailableWithoutEffects(tick.receipt()) && cargoMenuSettled()) {
                 if (!canContinueWithCargo()) {
                     stopWith("inventory_capacity_blocked", "Storage has no available capacity and the carried inventory cannot safely accept the next construction batch.", FailureType.NO_SPACE);

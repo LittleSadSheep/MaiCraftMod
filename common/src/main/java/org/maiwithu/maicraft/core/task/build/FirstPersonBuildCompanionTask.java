@@ -104,7 +104,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BlockPos excavationExit;
     private boolean supplyAccessReady;
     private Phase afterExcavationExit;
-    private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
+    private final InventoryDepositCoordinator spoilSupply = new InventoryDepositCoordinator();
     private final List<Map<String, Object>> spoilReceipts = new ArrayList<>();
     private final BuildFoodPreparation foodPreparation = new BuildFoodPreparation();
     private final BiFunction<LocalPlayer, Double, HitResult> placementRay;
@@ -540,9 +540,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     r.targets.stream().map(BuildTaskRecord.Target::pos).toList(), List.of(),
                     () -> spoilSupply.tick(player, this::runChild));
             r.extendDeadlineTo(spoilSupply.childDeadline());
-            if (deposited.status() == BuildExcavationSpoilSupply.Status.RUNNING) return TaskState.RUNNING;
+            if (deposited.status() == InventoryDepositCoordinator.Status.RUNNING) return TaskState.RUNNING;
             spoilReceipts.add(deposited.receipt());
-            if (deposited.status() == BuildExcavationSpoilSupply.Status.FAILED) {
+            if (deposited.status() == InventoryDepositCoordinator.Status.FAILED) {
                 failAt(player.blockPosition(), "Excavation surplus could not be stored: " + deposited.receipt(),
                         FailureType.NO_SPACE, "excavation_spoil_storage_failed", false);
                 return TaskState.FAILED;

@@ -27,9 +27,9 @@ public final class BuildAeSpoilReceiptTest {
     }
 
     private static void verifiedQuantitiesCannotChangeDirectionOrExceedAuthorization() {
-        check(BuildExcavationSpoilSupply.verifiedAeCounts(receipt(197, 128), LIMITS).equals(LIMITS), "完整存入量等于本次批准余料");
+        check(InventoryDepositCoordinator.verifiedAeCounts(receipt(197, 128), LIMITS).equals(LIMITS), "完整存入量等于本次批准余料");
         var partial = receipt(64, 0);
-        check(BuildExcavationSpoilSupply.verifiedAeCounts(partial, LIMITS).get(DIRT) == 64, "只登记已确认的部分存入量");
+        check(InventoryDepositCoordinator.verifiedAeCounts(partial, LIMITS).get(DIRT) == 64, "只登记已确认的部分存入量");
         reject(Map.of("operation", "supply", "deposited", Map.of(DIRT.toString(), 197), "confirmed_deposited_total", 197));
         reject(receipt(198, 128));
         reject(Map.of("operation", "deposit", "deposited", Map.of(DIRT.toString(), 1.5), "confirmed_deposited_total", 1.5));
@@ -45,13 +45,13 @@ public final class BuildAeSpoilReceiptTest {
             h.inventory.setItem(0, new ItemStack(Items.DIRT, 64)); h.inventory.setItem(1, new ItemStack(Items.DIRT, 64));
             h.inventory.setItem(2, new ItemStack(Items.DIRT, 64)); h.inventory.setItem(3, new ItemStack(Items.DIRT, 8));
             for (int slot = 4; slot < 7; slot++) h.inventory.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
-            var supply = new BuildExcavationSpoilSupply(); supply.begin(h.player, "ae-spoil", 1000, LIMITS, List.of(), 48);
+            var supply = new InventoryDepositCoordinator(); supply.begin(h.player, "ae-spoil", 1000, LIMITS, List.of(), 48);
             field("aeLimits").set(supply, LIMITS); field("aeBefore").set(supply, Map.of(DIRT, 200, COBBLE, 192));
             // 模拟会话已经收到网络增加回执；另行写入相应客户端背包观察，以检验整理器的第二层核对。
             for (int slot = 0; slot < 7; slot++) h.inventory.setItem(slot, ItemStack.EMPTY);
             h.inventory.setItem(0, new ItemStack(Items.DIRT, diverged ? 2 : 3));
             h.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 64));
-            var account = BuildExcavationSpoilSupply.class.getDeclaredMethod("accountAe", TaskResult.class); account.setAccessible(true);
+            var account = InventoryDepositCoordinator.class.getDeclaredMethod("accountAe", TaskResult.class); account.setAccessible(true);
             boolean accepted = (boolean) account.invoke(supply, TaskResult.ok("原生 AE 会话回执夹具", receipt(197, 128)));
             check(accepted != diverged, "任一类背包减少过量时，整份新回执都不能记成成功");
             check(supply.receipt().get("outcome_uncertain").equals(diverged), "背包与网络回执不符必须向父任务报告不确定性");
@@ -66,12 +66,12 @@ public final class BuildAeSpoilReceiptTest {
                 "confirmed_deposited_total", dirt + cobble, "outcome_uncertain", false, "effects_started", dirt + cobble > 0);
     }
     private static void reject(Map<String, Object> receipt) {
-        try { BuildExcavationSpoilSupply.verifiedAeCounts(receipt, LIMITS); }
+        try { InventoryDepositCoordinator.verifiedAeCounts(receipt, LIMITS); }
         catch (IllegalArgumentException rejected) { return; }
         throw new AssertionError("无法归属于批准余料的 AE 存入必须拒绝");
     }
     private static Field field(String name) throws Exception {
-        Field field = BuildExcavationSpoilSupply.class.getDeclaredField(name); field.setAccessible(true); return field;
+        Field field = InventoryDepositCoordinator.class.getDeclaredField(name); field.setAccessible(true); return field;
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

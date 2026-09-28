@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinator;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest;
@@ -177,7 +177,7 @@ public final class BuildSupplyCargoDeferralTest {
         if (funded) h.inventory.setItem(0, new ItemStack(Items.OAK_PLANKS));
         h.inventory.setItem(1, new ItemStack(Items.DIRT, 64)); h.inventory.setItem(2, new ItemStack(Items.DIRT, 64));
     }
-    private static BuildExcavationSpoilSupply spoil(Object task) throws Exception { return (BuildExcavationSpoilSupply) field(task, "spoilSupply").get(task); }
+    private static InventoryDepositCoordinator spoil(Object task) throws Exception { return (InventoryDepositCoordinator) field(task, "spoilSupply").get(task); }
     private static class EmptyDeposit implements Task {
         private final boolean uncertain, effects; EmptyDeposit(boolean uncertain, boolean effects) { this.uncertain = uncertain; this.effects = effects; }
         public TaskState tick(LocalPlayer player) { return TaskState.SUCCESS; }

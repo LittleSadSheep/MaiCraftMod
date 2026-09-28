@@ -63,7 +63,7 @@ import org.maiwithu.maicraft.core.task.build.BuildExcavationCargoRecoveryTest;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationCargoTest;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontierTest;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilBoundaryTest;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupplyTest;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinatorTest;
 import org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest;
 import org.maiwithu.maicraft.core.task.build.BuildFailureEvidenceTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest;
@@ -261,7 +261,7 @@ public final class GuiRegressionSuite {
         // 出坑后补料应找到较远的已加载仓库，同时保持采矿范围和主人指定的查找距离。
         StorageSupplyRadiusTest.main(args);
         UltimineSelectionPolicyTest.main(args);
-        BuildExcavationSpoilSupplyTest.main(args);
+        InventoryDepositCoordinatorTest.main(args);
         BuildExcavationCargoTest.main(args);
         // 续建先保留建材与垫脚储备，再把普通土石存进有空位的仓库；没有确认回执不能继续取料。
         BuildExcavationCargoRecoveryTest.main(args);

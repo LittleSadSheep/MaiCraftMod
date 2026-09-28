@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinator;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySourcesTest;
 import org.maiwithu.maicraft.task.Task;
@@ -45,7 +45,7 @@ public final class BuildSupplyUncertaintyTest {
                     List.of(SemanticAcquireTaskRecord.Source.STORAGE), false, List.of(), false);
             var task = new SemanticBuildSupplyCompanionTask(h.player, record, (owner, frozen) -> Decision.DISABLED);
             task.start(h.player);
-            var spoil = (BuildExcavationSpoilSupply) field(task, "spoilSupply").get(task);
+            var spoil = (InventoryDepositCoordinator) field(task, "spoilSupply").get(task);
             spoil.begin(h.player, "confirmed-spoil", 1000, Map.of(ResourceLocation.parse("minecraft:dirt"), 64), List.of(), 16);
             spoil.tick(h.player, ignored -> null);
             field(spoil, "child").set(spoil, new Receipt(TaskState.SUCCESS, Map.of("operation", "deposit", "bounded_storage_deposit", true,

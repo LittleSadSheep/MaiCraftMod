@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildCompanionTask;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinator;
 import org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
@@ -65,7 +65,7 @@ public final class BuildSupplyCargoDispatchTest {
             for (int slot = 25; slot < 36; slot++) h.inventory.setItem(slot, new ItemStack(Items.BREAD, 64));
             task.start(h.player); task.tick(h.player);
             var supply = (SemanticMaterialSupplyCoordinator) field(task, "supply").get(task);
-            var spoil = (BuildExcavationSpoilSupply) field(task, "spoilSupply").get(task);
+            var spoil = (InventoryDepositCoordinator) field(task, "spoilSupply").get(task);
             check(((BuildTaskRecord) field(task, "activeRecord").get(task)).supplyAccessOnly() && !supply.active() && !spoil.active(),
                     "满包使可取数量为零时仍先出坑，不能直接报告没有空间或在坑里找箱子");
 
@@ -106,7 +106,7 @@ public final class BuildSupplyCargoDispatchTest {
             h.inventory.setItem(0, new ItemStack(Items.DIRT, 64)); h.inventory.setItem(1, new ItemStack(Items.DIRT, 64));
             task.start(h.player);
             var prepare = SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("prepareCargo"); prepare.setAccessible(true);
-            check(!(boolean) prepare.invoke(task) && !((BuildExcavationSpoilSupply) field(task, "spoilSupply").get(task)).active()
+            check(!(boolean) prepare.invoke(task) && !((InventoryDepositCoordinator) field(task, "spoilSupply").get(task)).active()
                     && count(h.player, Items.DIRT) == 128, "只用背包策略不会为了整理擅自使用仓库");
             task.result(TaskState.CANCELLED);
         }
@@ -126,7 +126,7 @@ public final class BuildSupplyCargoDispatchTest {
             h.inventory.setItem(0, new ItemStack(Items.DIRT, 33)); h.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 11));
             h.inventory.setItem(2, new ItemStack(Items.OAK_PLANKS, 9)); var origin=h.player.position();
             task.start(h.player); task.tick(h.player);
-            var spoil=(BuildExcavationSpoilSupply)field(task,"spoilSupply").get(task);
+            var spoil=(InventoryDepositCoordinator)field(task,"spoilSupply").get(task);
             check(field(task,"activeRecord").get(task) instanceof BuildTaskRecord build && !build.supplyAccessOnly()
                             && !spoil.active() && !((SemanticMaterialSupplyCoordinator)field(task,"supply").get(task)).active(),
                     "enough carried materials and spare slots start construction before a small surplus trip");
