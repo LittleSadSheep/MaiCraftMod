@@ -333,6 +333,8 @@ public final class GuiRegressionSuite {
         InventoryKeepPlanTest.main(args);
         // 随身背包只按原生主存储角色统计，玩家槽、升级槽与大堆叠分别核对。
         BackpackMenuAccessTest.main(args);
+        // 开关背包也需要等待原生回执，取消或鼠标残留时不能无条件关闭菜单。
+        BackpackOpenSessionTest.main(args);
         // 精妙升级只放大存储槽，鼠标每次取物仍按一叠或半叠计算。
         BackpackSplitPlannerTest.main(args);
         InventoryWorkItemsTest.main(args);
