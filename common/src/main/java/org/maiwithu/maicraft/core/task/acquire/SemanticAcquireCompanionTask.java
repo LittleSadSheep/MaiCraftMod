@@ -117,6 +117,7 @@ public final class SemanticAcquireCompanionTask
     private final List<AcquisitionNeed> processPlanningNeeds = new ArrayList<>();
     private Map<String, Object> processPlanning = Map.of();
     private Map<String, Object> bodyPreparationFailure = Map.of();
+    private Map<String, Object> capacityFailure = Map.of();
     private final List<DimensionBarrier> dimensionBarriers = new ArrayList<>();
     private final AcquisitionRecipePlanner recipePlanner;
     private final Predicate<LocalPlayer> wirelessAvailable;
@@ -1055,6 +1056,22 @@ public final class SemanticAcquireCompanionTask
             }
             renewProgressLease();
             return TaskState.RUNNING;
+        }
+        // 已确认背包装不下时先交回容量前置；换仓库、合成或采矿都不能让同一批缺料凭空获得空位。
+        if (result != null && result.data() != null && (terminal != TaskState.SUCCESS || !result.success())
+                && ("no_space".equals(result.data().get("failure_type"))
+                        || "inventory_full".equals(result.data().get("failure_code"))
+                        || "inventory_capacity_blocked".equals(result.data().get("failure_code")))) {
+            var facts = new LinkedHashMap<String, Object>(needFacts(completedNeed));
+            facts.put("source", completedSource.name().toLowerCase(Locale.ROOT));
+            facts.put("empty_main_slots", player.getInventory().items.stream().limit(36).filter(ItemStack::isEmpty).count());
+            copyIfPresent(result.data(), facts, "failure_code");
+            facts.put("detail", result.message() == null ? "requested material does not fit" : result.message());
+            // 空槽是当下观察，完整物品组件仍由子任务核对；不猜测精确需要腾出几个槽位，也不自动丢弃材料。
+            capacityFailure = Map.copyOf(facts); failureNeed = completedNeed; completedNeed.decisionRequired = true;
+            addIssue(completedSource.name().toLowerCase(Locale.ROOT), "inventory_capacity_blocked", result.message(), capacityFailure);
+            return failAcquisition("inventory_capacity_blocked", "the requested material does not fit in carried inventory; "
+                    + "prepare inventory capacity before re-evaluating the unchanged inventory goal", FailureType.NO_SPACE);
         }
         // 合成工作台因身体状态暂停时，其他配方或采矿来源也不能消除这个前提；保留原配方而不继续遍历来源。
         if (result != null && result.data() != null && bool(result.data().get("body_preparation_required"))) {
@@ -2156,6 +2173,10 @@ public final class SemanticAcquireCompanionTask
     }
 
     private List<Map<String, Object>> recoveryOptions() {
+        // 容量问题只交回整理背包或停止，不再建议开放采矿、狩猎等无关来源。
+        if (!capacityFailure.isEmpty()) return List.of(Map.of("id", "prepare_inventory_capacity",
+                "summary", "Review carried items and prepare capacity using authorized inventory or storage operations, then reassess the unchanged inventory goal.",
+                "risk", "existing_authorization_required"), Map.of("id", "stop", "risk", "none"));
         // 身体前置必须先解决；换矿种、换配方或放开狩猎都不能修复同一个饥饿/健康门槛。
         if (!bodyPreparationFailure.isEmpty()) return List.of(Map.of("id", "restore_body_condition",
                 "summary", "Resolve the reported hunger or health condition, then re-evaluate the unchanged inventory goal.",
@@ -2283,6 +2304,7 @@ public final class SemanticAcquireCompanionTask
         if (!wirelessFacts.isEmpty()) data.put("wireless_stock_evidence", wirelessFacts);
         data.put("issues", List.copyOf(issues));
         data.put("outcome_uncertain", outcomeUncertain);
+        if (!capacityFailure.isEmpty()) data.put("inventory_capacity", capacityFailure);
         if (!processPlanning.isEmpty()) data.put("planning_handoff", processPlanning);
         if (!bodyPreparationFailure.isEmpty()) {
             data.put("body_preparation_required", true); data.put("preparation_failure", bodyPreparationFailure);

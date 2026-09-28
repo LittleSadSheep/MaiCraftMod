@@ -16,7 +16,8 @@ public final class MachineBuildEvidence {
             target.put("material_planning_required", true);
         }
         if (failure.containsKey("recovery_options")) target.put("recovery_options", failure.get("recovery_options"));
-        for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure"))
+        // 装不下也要交到机器外层，避免补料包装把容量前置重新解释成制造配方不足。
+        for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure", "inventory_capacity"))
             if (failure.containsKey(key)) target.put(key, failure.get(key));
     }
     private MachineBuildEvidence() {}

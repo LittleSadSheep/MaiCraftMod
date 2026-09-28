@@ -44,11 +44,14 @@ public final class MaterialSupplyReceiptTest {
                 "knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
         // 无线查货失败也可能结束施工供料，不能只保留普通缺料数量而丢掉连接是否读到的事实。
         var stockEvidence = Map.of("last_query", Map.of("status", "failed"), "need_checks", List.of());
+        var capacity = Map.of("empty_main_slots", 0, "missing", 3);
         var failed = (Map<?, ?>) method.invoke(coordinator,
                 TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff,
                         "wireless_stock_evidence", stockEvidence,
+                        "inventory_capacity", capacity,
                         "body_preparation_required", true, "food_preparation", Map.of("food", 10, "health", 7))), TaskState.FAILED, 1, false);
         check(stockEvidence.equals(failed.get("wireless_stock_evidence")), "supply keeps query failure distinct from empty stock");
+        check(capacity.equals(failed.get("inventory_capacity")), "supply keeps the carried inventory capacity prerequisite");
         check(handoff.equals(failed.get("planning_handoff")), "supply keeps the material process handoff");
         check(Boolean.TRUE.equals(failed.get("body_preparation_required")), "supply also preserves the body's independent prerequisite");
         constructionKeepsMaterialHandoff(failed, handoff);
@@ -115,6 +118,8 @@ public final class MaterialSupplyReceiptTest {
             var task = new SemanticBuildSupplyCompanionTask(h.player, record, (owner, frozen) -> Decision.DISABLED);
             task.start(h.player); set(task, "failedSupply", failed); set(task, "failureCode", "material_batch_supply_failed");
             var result = task.result(TaskState.FAILED).data();
+            // 原生供料因为容量停止时，建造外层仍暴露同一缺口，不改成原料短缺或继续施工。
+            check(failed.get("inventory_capacity").equals(result.get("inventory_capacity")), "construction retains capacity evidence");
             check(handoff.equals(result.get("planning_handoff")) && Boolean.TRUE.equals(result.get("material_planning_required"))
                     && Boolean.FALSE.equals(result.get("goal_satisfied")), "construction preserves the unsatisfied process prerequisite");
             check(Boolean.TRUE.equals(result.get("body_preparation_required"))
