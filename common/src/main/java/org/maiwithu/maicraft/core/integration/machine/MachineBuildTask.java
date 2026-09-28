@@ -491,12 +491,17 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
     private TaskState beginComparison() {
         // 修改完成后比较合并的整机声明，隔板拆除导致旁边岩浆凝固也要直接反馈，而不只回报本次一格补丁。
-        MachineConstructionPlan compared = r.plan;
+        MachineConstructionPlan compared;
         try {
-            if (recordedMachine != null && recordedMachine.has("machine_id")) {
-                var archived = ClientMachineCatalog.blueprint(player, recordedMachine.get("machine_id").getAsString(), r.plan.anchor());
-                if (archived.isPresent()) compared = ClientMachineCatalog.blueprintPlan(archived.get());
+            // 档案尚未加载或留档失败时，不能拿局部补丁冒充整机；只公开观察缺失，不撤销已经完成的施工。
+            var archived = recordedMachine == null || !recordedMachine.has("machine_id") ? null
+                    : ClientMachineCatalog.blueprint(player, recordedMachine.get("machine_id").getAsString(), r.plan.anchor()).orElse(null);
+            if (archived == null) {
+                comparisonIssue = new JsonObject(); comparisonIssue.addProperty("comparison_complete",false);
+                comparisonIssue.addProperty("reason","full_machine_blueprint_unavailable");
+                return comparisonFinished();
             }
+            compared = ClientMachineCatalog.blueprintPlan(archived);
             comparison = new MachineBlueprintComparison(compared,r.dimension);
         }
         catch (RuntimeException | LinkageError unavailable) {
@@ -558,7 +563,11 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         if (!failedNavigation.isEmpty()) data.put("navigation_failure", failedNavigation);
         data.put("machine_layout", r.plan.report());
         if (recordedMachine != null) data.put("recorded_machine", recordedMachine.deepCopy());
-        if (comparisonIssue != null) data.put("blueprint_diff",comparisonIssue.deepCopy());
+        if (comparisonIssue != null) {
+            data.put("blueprint_diff",comparisonIssue.deepCopy());
+            // 无法完成整机比较时，局部施工检查即使通过，也不能对外宣称整机结构已经核实。
+            data.put("machine_geometry_verified",false);
+        }
         else if (comparison != null) {
             var observed = comparison.report(); data.put("blueprint_diff",observed);
             // 本次补丁已做完不等于整机仍完整；这里仅更新观察事实，仍不改变已完成动作的成功终态。
