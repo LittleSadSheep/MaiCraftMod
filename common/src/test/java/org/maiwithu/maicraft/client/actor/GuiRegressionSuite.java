@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2WaterBucketFillTest;
 import org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest;
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTest;
 import org.maiwithu.maicraft.core.inventory.StockEvidenceTest;
+import org.maiwithu.maicraft.core.inventory.InventoryKeepPlanTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
 import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
@@ -322,6 +323,8 @@ public final class GuiRegressionSuite {
         NightRestRouteTest.main(args);
         FishingBiteTest.main(args);
         StockEvidenceTest.main(args);
+        // 通用整理先验证保留清单，避免存余料时一并拿走马上要用的工具与施工材料。
+        InventoryKeepPlanTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
