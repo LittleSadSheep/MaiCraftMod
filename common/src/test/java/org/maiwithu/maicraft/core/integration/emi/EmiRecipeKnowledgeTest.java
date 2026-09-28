@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.emi;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +14,7 @@ public final class EmiRecipeKnowledgeTest {
     private static final ResourceLocation ITEM = ResourceLocation.parse("minecraft:book");
     public static void main(String[] args) {
         statusBoundaries(); metadataProbe(); lazyPages(); invalidatedAndBrokenRows(); descriptionLimits();
+        repeatedAlternativesKeepNativeIdentity();
         EmiRecipeReaderTest.main(args);
         System.out.println("EmiRecipeKnowledgeTest: optional presence, bounded lazy metadata and reader contracts passed");
     }
@@ -86,6 +88,37 @@ public final class EmiRecipeKnowledgeTest {
     }
     private static JsonObject recipe(String id) {
         JsonObject out = new JsonObject(); out.addProperty("display_recipe_id", "example:" + id); out.addProperty("details_complete", true); return out;
+    }
+    private static void repeatedAlternativesKeepNativeIdentity() {
+        // 八个格子共享同一批木板展示时无损去重；完整组件仍在共享组内，不拆成半份身份。
+        var wide = recipe("wide"); var inputs = new JsonArray(); var alternatives = new JsonArray();
+        for (int i = 0; i < 32; i++) {
+            var stack = new JsonObject(); stack.addProperty("id", "example:plank_" + i);
+            stack.addProperty("component_fixture", "x".repeat(300)); alternatives.add(stack);
+        }
+        for (int i = 0; i < 8; i++) {
+            var input = new JsonObject(); input.addProperty("index", i); input.addProperty("amount", 1);
+            input.addProperty("alternatives_count", 32); input.addProperty("alternatives_truncated", false);
+            input.add("alternatives", alternatives.deepCopy()); inputs.add(input);
+        }
+        wide.add("inputs", inputs);
+        var backing = new JsonObject(); backing.addProperty("id", "minecraft:chest"); backing.addProperty("definition_status", "available");
+        wide.add("backing_recipe", backing);
+        var compact = EmiRecipeCompaction.fit(wide, EmiRecipeKnowledge.MAX_RECIPE_BYTES - 1024);
+        check(compact.getAsJsonArray("alternative_groups").size() == 1 && compact.get("details_complete").getAsBoolean(),
+                "重复展示共享后仍保留原完整性，不凭压缩改变语义");
+        for (var row : compact.getAsJsonArray("inputs"))
+            check(compact.getAsJsonArray("alternative_groups").get(row.getAsJsonObject().get("alternatives_group").getAsInt()).equals(alternatives),
+                    "每格共享引用都能还原原来的完整展示数组");
+        check(wide.getAsJsonArray("inputs").get(0).getAsJsonObject().has("alternatives"), "压缩不改来源对象");
+        // 各格独有的大展示仍无法容纳时保留原生编号与定义，明确省略展示而不是让配方无名消失。
+        wide.addProperty("display_fixture", "x".repeat(80_000));
+        var partial = EmiRecipeCompaction.fit(wide, EmiRecipeKnowledge.MAX_RECIPE_BYTES - 1024);
+        check(partial.get("display_recipe_id").equals(wide.get("display_recipe_id"))
+                        && partial.get("backing_recipe").equals(backing) && !partial.get("details_complete").getAsBoolean()
+                        && !partial.has("inputs") && partial.get("omitted_field_count").getAsInt() > 0,
+                "展示超预算不会抹掉可读的原生配方身份");
+        check(EmiRecipeKnowledge.encodedBytes(partial) <= EmiRecipeKnowledge.MAX_RECIPE_BYTES, "保留诊断仍遵守原预算");
     }
     private static void rejects(Runnable action) {
         try { action.run(); } catch (IllegalArgumentException expected) { return; } throw new AssertionError("invalid page accepted");
