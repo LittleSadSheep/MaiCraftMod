@@ -38,6 +38,8 @@ final class BuildFoodPreparation {
     private EatItemTaskRecord meal;
     private boolean maintaining, recovery, uncertain;
     private long deadline, restStarted = -1, healthProgress, pausedAt = -1;
+    private long deferredUntil;
+    private String preparationObservation;
     private int serial, episodeMeals, confirmedItems, confirmedMeals, countBefore, foodBefore;
     private float healthBefore, lastHealth;
     private String failure, message;
@@ -53,11 +55,12 @@ final class BuildFoodPreparation {
         // 受伤但饱食度十七时也不能自然回血，不能等到快饿或只剩六点生命才吃；健康身体仍沿用普通补食阈值。
         return !creative && (food <= 14 || health < Math.min(8, maxHealth) || food < 18 && health < maxHealth);
     }
-    /** 施工精确步行本就不疾跑；没有普通食物时，只在开始饥饿伤害或生命低于恢复底线时强制停工。 */
+    /** 危急身体状态优先尝试补食；这个阈值决定备餐优先级，不把吃饱或回血达标作为施工准入条件。 */
     private static boolean urgent(int food, float health, float maxHealth) { return food <= 0 || health < Math.min(8, maxHealth); }
     boolean active() { return maintaining || child != null || procuring || farming; }
     boolean shouldPrepare(LocalPlayer player) {
         if (failure != null || active()) return true;
+        if (player.level().getGameTime() < deferredUntil) return false;
         if (player.getAbilities().instabuild) return false;
         int food = player.getFoodData().getFoodLevel(); float health = player.getHealth(), max = player.getMaxHealth();
         // 缺少普通食物但仍能安全工作时，不反复停导航，也不拦住用于恢复供给的工作台准备。
@@ -66,6 +69,7 @@ final class BuildFoodPreparation {
     /** 只有真实授权的现货入口能触发额外备餐；检查前先保留整份任务的食物材料。 */
     boolean shouldPrepare(LocalPlayer player, BuildTaskRecord owner) {
         prepareBudget(player, owner);
+        if (!active() && player.level().getGameTime() < deferredUntil) return false;
         return shouldPrepare(player) || needs(player.getAbilities().instabuild, player.getFoodData().getFoodLevel(),
                 player.getHealth(), player.getMaxHealth()) && (stockSupply.canAttempt(player, owner, budget)
                         || farmSupply.canAttempt(player, owner, budget));
@@ -85,6 +89,8 @@ final class BuildFoodPreparation {
         if (player.getAbilities().instabuild) { stop(player); return Status.READY; }
         prepareBudget(player, owner);
         long now = player.level().getGameTime();
+        // 补食只是施工间隙的身体维护；失败后留出恢复间隔，不把同一吃饭尝试变成每刻重试的开工门槛。
+        if (!active() && now < deferredUntil && player.getHealth() > 0) return Status.READY;
         if (pausedAt >= 0) {
             long elapsed = now - pausedAt; deadline += elapsed; healthProgress += elapsed;
             if (restStarted >= 0) restStarted += elapsed; pausedAt = -1;
@@ -100,7 +106,7 @@ final class BuildFoodPreparation {
             deadline = now + EPISODE_TIMEOUT; restStarted = -1; lastHealth = health; healthProgress = now;
         }
         recovery |= health < Math.min(8, player.getMaxHealth());
-        if (now >= deadline) { interruptMeal(player, TaskState.TIMEOUT); return fail("build_food_timeout", "Food preparation exceeded its bounded time", FailureType.UNKNOWN); }
+        if (now >= deadline) return defer(player, "build_food_timeout", "Food preparation exceeded its bounded time");
         if (procuring) {
             // 先结清查询或取物，再读取背包；不能越过菜单确认直接吃客户端预测出来的物品。
             var status = stockSupply.tick(player, owner, budget, runner);
@@ -108,7 +114,7 @@ final class BuildFoodPreparation {
             procuring = false;
             if (status == BuildFoodStockSupply.Status.UNCERTAIN) {
                 uncertain = true;
-                return fail("build_food_stock_uncertain", "Food stock transfer did not settle; inspect its receipt before retrying", FailureType.UNKNOWN);
+                return defer(player, "build_food_stock_uncertain", "Food stock transfer did not settle; its receipt remains available");
             }
             return Status.RUNNING;
         }
@@ -120,7 +126,7 @@ final class BuildFoodPreparation {
             if (Boolean.TRUE.equals(result.receipt().get("outcome_uncertain"))
                     || "crop_replant_incomplete".equals(result.receipt().get("failure_code"))) {
                 uncertain = true;
-                return fail("build_food_harvest_uncertain", "Crop food preparation did not settle; inspect the harvest receipt", FailureType.UNKNOWN);
+                return defer(player, "build_food_harvest_uncertain", "Crop food preparation did not settle; its receipt remains available");
             }
             return Status.RUNNING;
         }
@@ -130,7 +136,7 @@ final class BuildFoodPreparation {
             else terminal = runner.apply(child);
             if (terminal == null) return Status.RUNNING;
             boolean consumed = finishMeal(player, terminal);
-            if (!consumed) return fail("build_food_unconfirmed", "The native food action did not confirm one consumed item and increased hunger", FailureType.UNKNOWN);
+            if (!consumed) return defer(player, "build_food_unconfirmed", "The native food action did not confirm consumption");
             return Status.RUNNING; // 吃完和继续施工分开一刻，先让持用和必要的背包界面完整收尾。
         }
         // 受伤时本次补到二十，给真实自然恢复留余量；这里只吃已有食物，不直接写生命值，也不要求普通伤势等到满血。
@@ -142,9 +148,9 @@ final class BuildFoodPreparation {
                 if (farmSupply.canAttempt(player, owner, budget)) { farming = true; return Status.RUNNING; }
                 // 补食中途耗尽也按当前身体判断；已经越过低生命/低饥饿底线，就将角色交回原工作。
                 if (!urgent(food, health, player.getMaxHealth())) { maintaining = false; recovery = false; restStarted = -1; return Status.READY; }
-                return fail("build_food_unavailable", "Construction paused: critical hunger or health requires food, but no ordinary carried food is available", FailureType.NO_MATERIAL);
+                return defer(player, "build_food_unavailable", "No ordinary food was available for this preparation attempt");
             }
-            if (++episodeMeals > 32) return fail("build_food_action_limit", "Food preparation exhausted its bounded meal count", FailureType.UNKNOWN);
+            if (++episodeMeals > 32) return defer(player, "build_food_action_limit", "Food preparation exhausted its bounded meal count");
             countBefore = PlayerInv.count(player.getInventory(), chosen); foodBefore = food; healthBefore = health;
             String id = BuiltInRegistries.ITEM.getKey(chosen).toString();
             meal = new EatItemTaskRecord(owner.getToolCallId() + "/build-food-" + (++serial), now + MEAL_TIMEOUT, chosen, id);
@@ -152,12 +158,12 @@ final class BuildFoodPreparation {
             return Status.RUNNING;
         }
         if (recovery && health < Math.min(8, player.getMaxHealth())) {
-            // 已吃够才停下来等血量，看到真实恢复才刷新等待期限；受伤或长时间不回血就停工，不原地死等。
+            // 已吃够后有限等待真实恢复；受伤或迟迟没恢复就结束本次维护，避免吃饭流程长期占住施工任务。
             if (restStarted < 0) { restStarted = now; healthProgress = now; lastHealth = health; }
-            if (health < lastHealth) return fail("build_health_declining", "Health declined while resting after food; construction remains stopped", FailureType.UNKNOWN);
+            if (health < lastHealth) return defer(player, "build_health_declining", "Health declined while resting after food");
             if (health > lastHealth) { lastHealth = health; healthProgress = now; }
             if (now - healthProgress >= RECOVERY_IDLE_TIMEOUT || now - restStarted >= RECOVERY_TIMEOUT)
-                return fail("build_health_recovery_unconfirmed", "Natural health recovery did not reach a safe level within the bounded wait", FailureType.UNKNOWN);
+                return defer(player, "build_health_recovery_unconfirmed", "Natural recovery did not reach the preparation target within its wait");
             return Status.RUNNING;
         }
         maintaining = false; recovery = false; return Status.READY;
@@ -204,6 +210,12 @@ final class BuildFoodPreparation {
     private Status fail(String code, String detail, FailureType type) {
         failure = code; message = detail; failureType = type; maintaining = false; return Status.FAILED;
     }
+    private Status defer(LocalPlayer player, String code, String detail) {
+        // 先结束自己持有的进食、备餐和界面操作，再交回原施工；如实保留身体维护结果，不据此判建造失败。
+        stop(player); preparationObservation = code + ": " + detail;
+        deferredUntil = player.level().getGameTime() + 400;
+        return Status.READY;
+    }
     Map<String, Object> progress(LocalPlayer player) {
         var data = new LinkedHashMap<String, Object>();
         data.put("phase", failure != null ? "failed" : child != null ? "eating" : maintaining ? "recovering_or_refilling" : "ready");
@@ -211,6 +223,8 @@ final class BuildFoodPreparation {
         data.put("food", player.getFoodData().getFoodLevel()); data.put("health", player.getHealth()); data.put("outcome_uncertain", uncertain);
         data.put("stock_supply", stockSupply.progress()); data.put("material_budget_complete", budget.complete());
         data.put("farm_supply", farmSupply.progress());
+        if (preparationObservation != null) data.put("preparation_observation", preparationObservation);
+        data.put("preparation_deferred", player.level().getGameTime() < deferredUntil);
         data.put("held_food_materials", budget.held().stream().filter(item -> OrdinaryFood.ordinary(new ItemStack(item)))
                 .map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).sorted().toList());
         // 回执区分缺少补食与紧急停工，不将继续施工误报为已吃饱或已恢复生命。
