@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.util.List;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 
@@ -104,6 +105,8 @@ final class TaskView {
             if (raw.has(key)) result.add(key, JsonReadback.preview(raw.get(key), path + "/" + key, 600));
         if (!raw.has("data") || !raw.get("data").isJsonObject()) return result;
         JsonObject data = raw.getAsJsonObject("data").deepCopy();
+        // 机器修改和检查结束时，首次回执就给出差异，不能让旧蓝图与组件目录把真正变化折叠掉。
+        machineDifference(result, data, path + "/data");
         // 饥饿和健康门槛先于换配方；默认回执直接保留身体前置及当时的饱食度、生命证据。
         if (data.has("body_preparation_required")) result.add("body_preparation_required", data.get("body_preparation_required"));
         if (data.has("food_preparation")) result.add("food_preparation", JsonReadback.preview(data.get("food_preparation"), path + "/data/food_preparation", 600));
@@ -136,6 +139,27 @@ final class TaskView {
                 result.add("pending_output", JsonReadback.preview(data.get("pending_output"), path + "/data/pending_output", 600));
         }
         return result;
+    }
+
+    private static void machineDifference(JsonObject result, JsonObject data, String path) {
+        JsonObject owner = data;
+        if (!owner.has("blueprint_diff") && data.has("machine") && data.get("machine").isJsonObject()) {
+            owner = data.getAsJsonObject("machine"); path += "/machine";
+        }
+        if (!owner.has("blueprint_diff")) return;
+        String diffPath = path + "/blueprint_diff";
+        JsonElement stored = owner.get("blueprint_diff"), diff = stored;
+        // 旧存档把差异写成字符串，展示时也恢复成结构；原记录与详情路径保持可读，不改写历史回执。
+        if (stored.isJsonPrimitive() && stored.getAsJsonPrimitive().isString()) {
+            try { diff = JsonParser.parseString(stored.getAsString()); }
+            catch (RuntimeException invalid) { /* 非 JSON 的历史说明保留为原文。 */ }
+        }
+        result.add("blueprint_diff", JsonReadback.preview(diff, diffPath, 3000));
+        result.addProperty("blueprint_diff_path", diffPath);
+        // 大机器的差异明细可直接读数组，不必逐层翻过机器的整份勘测；旧文本仍从原路径连续读取。
+        if (stored.isJsonObject() && stored.getAsJsonObject().has("differences"))
+            result.addProperty("blueprint_differences_path", diffPath + "/differences");
+        owner.remove("blueprint_diff");
     }
 
     private static JsonElement materialPlanning(JsonElement full, String path) {

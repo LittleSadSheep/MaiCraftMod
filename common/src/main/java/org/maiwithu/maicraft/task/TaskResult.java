@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.task;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.util.Map;
@@ -63,6 +64,8 @@ public record TaskResult(boolean success,
                 Object v = e.getValue();
                 if (v instanceof Number n) dataObj.addProperty(e.getKey(), n);
                 else if (v instanceof Boolean b) dataObj.addProperty(e.getKey(), b);
+                // 整机差异和现场蓝图保留 JSON 结构，让模型能按字段直读实际方块，避免先翻整段转义文本。
+                else if (v instanceof JsonElement json) dataObj.add(e.getKey(), json.deepCopy());
                 // 列表和 Map 保留为 JSON 数组或对象，数字和布尔值也保留类型；其他值转成字符串。
                 else if (v instanceof Collection<?> || v instanceof Map<?, ?>) {
                     dataObj.add(e.getKey(), GSON.toJsonTree(v));
