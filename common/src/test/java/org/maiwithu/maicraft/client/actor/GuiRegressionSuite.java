@@ -292,6 +292,8 @@ public final class GuiRegressionSuite {
         MaterialSupplyReturnPolicyTest.main(args);
         BuildSupplyHandoffTest.main(args);
         MachineMenuHandParkingTest.main(args);
+        // 玩家背包阻挡终端时先完成安全界面交接，不重复关闭或把未查库存当作无货。
+        InventoryMenuHandoffTest.main(args);
         FirstPersonGateExtendedHotbarTest.main(args);
         ItemUseTimingTest.main(args);
         ObservedRecipeStockCostTest.main(args);

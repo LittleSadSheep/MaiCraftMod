@@ -19,6 +19,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -49,6 +50,7 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private enum Phase {
         START,
+        WAIT_INITIAL_INVENTORY_CLOSE,
         STAGE,
         WAIT_STAGE,
         CLOSE_STAGE,
@@ -65,6 +67,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         PROCESS_ITEM,
         DEPOSIT_ITEM,
         FILL_WATER_BUCKET,
+        STAGE_WATER_BUCKET,
         WAIT_WATER_BUCKET,
         COLLECT_EXACT,
         WAIT_EXACT_UNIT,
@@ -190,6 +193,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private PendingTerminal pendingTerminal;
     private Ae2ResourceSupply.Outcome terminal;
     private boolean waterBucketRoute;
+    private Ae2DepositTransfer waterBucketDeposit;
+    private int carriedBucketsStaged, bucketStageCount, bucketStageBefore;
     private Ae2WaterBucketFill pendingWaterFill;
     private final List<Map<String, Object>> waterFillReceipts = new ArrayList<>();
     private Ae2ServerSupply serverSupply;
@@ -249,6 +254,13 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             if (settleSatisfied(context)) return Optional.ofNullable(terminal);
             switch (phase) {
                 case START -> start(context);
+                case WAIT_INITIAL_INVENTORY_CLOSE -> {
+                    // 先收关闭回执，下一刻从原请求继续查货，不把屏幕交接当成取到了物品。
+                    if (settleMenuReceipt(context, "initial_inventory_close_unconfirmed")) {
+                        if (worldAccessAvailable(context)) setPhase(Phase.START);
+                        else finishUncertain("initial_inventory_close_unconfirmed", "the ordinary inventory did not return to world interaction");
+                    }
+                }
                 case STAGE -> stage(context);
                 case WAIT_STAGE -> waitStage(context);
                 case CLOSE_STAGE -> closeStage(context);
@@ -265,6 +277,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 case PROCESS_ITEM -> processItem(context);
                 case DEPOSIT_ITEM -> depositItem(context);
                 case FILL_WATER_BUCKET -> fillWaterBucket(context);
+                case STAGE_WATER_BUCKET -> stageWaterBucket(context);
                 case WAIT_WATER_BUCKET -> waitWaterBucket(context);
                 case COLLECT_EXACT -> collectExact(context);
                 case WAIT_EXACT_UNIT -> waitExactUnit(context);
@@ -309,6 +322,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     @Override
     public boolean mustSettleBeforeSatisfiedCancellation() {
         return terminal == null && (effectsStarted || craftingJobEffectPending
+                || waterBucketDeposit != null && waterBucketDeposit.pending()
                 || nativeReceipt != null && !nativeReceipt.terminal() || menuReceipt != null && !menuReceipt.terminal()
                 || serverSupply != null && serverSupply.effectsStarted());
     }
@@ -323,6 +337,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     private boolean settleSatisfied(LocalPlayerContext context) {
         if (!settlingSatisfied || pendingTerminal != null || phase == Phase.SERVER_SUPPLY) return false;
         if (phase == Phase.DEPOSIT_ITEM) { deposit.requestSettlement(); depositItem(context); return true; }
+        if (phase == Phase.STAGE_WATER_BUCKET) { waterBucketDeposit.requestSettlement(); stageWaterBucket(context); return true; }
         if (phase == Phase.WAIT_EXACT_PLACE) { waitExactPlace(context); return true; }
         if (phase == Phase.WAIT_WATER_BUCKET) { waitWaterBucket(context); return true; }
         if (nativeReceipt != null && !settleNativeReceipt(context, "satisfied_effect_unconfirmed")) return true;
@@ -341,6 +356,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     @Override
     public boolean livenessActive() {
         if (deposit != null && deposit.pending()) return true;
+        if (waterBucketDeposit != null && waterBucketDeposit.pending()) return true;
         if (serverSupply != null && serverSupply.runningRequest()) return true;
         if (stoppingInPlace && terminal == null) return true;
         if (craftingJobEffectPending
@@ -366,6 +382,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (deposit != null) {
             deposit.cancel(context); effectsStarted |= deposit.effectsStarted();
             preserveUnrelatedMenu |= deposit.preserveMenu();
+        }
+        if (waterBucketDeposit != null) {
+            waterBucketDeposit.cancel(context); effectsStarted |= waterBucketDeposit.effectsStarted();
+            preserveUnrelatedMenu |= waterBucketDeposit.preserveMenu();
         }
         if (serverSupply != null) {
             effectsStarted |= serverSupply.effectsStarted();
@@ -504,6 +524,12 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (!worldAccessAvailable(context)) {
+            // 已接管自动化且普通背包没有鼠标余物或合成原料时，原生关包后自动续同一次AE查询。
+            if (MenuVisibility.idlePlayerInventory(context.minecraft(), player)) {
+                if (!context.mutationAvailable()) return;
+                menuReceipt = context.menus().close(context, 40);
+                setPhase(Phase.WAIT_INITIAL_INVENTORY_CLOSE); return;
+            }
             finishNow(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open",
                     "close the current screen before opening an AE2 terminal", false);
             return;
@@ -527,6 +553,11 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             } else {
                 int hotbar = firstEmpty(0, 8);
                 if (hotbar < 0) hotbar = originalSelected;
+                // 灌水尽量借用已有非空工具格，让空桶可用且终端原槽有暂存物，防止原生水桶先落进必须复原的空槽。
+                if (!inPlace && canUseStoredWater()) for (int slot = 0; slot < 9; slot++) {
+                    var parked = player.getInventory().getItem(slot);
+                    if (!parked.isEmpty() && !parked.is(Items.BUCKET) && parked.getComponentsPatch().isEmpty()) { hotbar = slot; break; }
+                }
                 beginStage(context, wireless.inventorySlot(), hotbar, Phase.OPEN_WIRELESS);
             }
             return;
@@ -984,7 +1015,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                     : Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.WATER_BUCKET) < request.groups().getFirst().count())) {
             var water = bridge.waterEntry(menu);
             if (water != null && water.storedAmount() >= water.bucketUnits()
-                    && Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET) > 0
+                    && (Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET) > 0 || !inPlace && Ae2WaterBucketFill.carriedBuckets(player) > 0)
                     && (!reflexRequest() || player.getInventory().getFreeSlot() >= 0
                         && !reservedInventorySlots().contains(player.getInventory().getFreeSlot()))) {
                 waterBucketRoute = true;
@@ -1074,10 +1105,15 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         var water = bridge.waterEntry(menu);
         if (entries == null) return;
         long emptyBuckets = Ae2WaterBucketFill.count(entries, Ae2WaterBucketFill.EMPTY_BUCKET);
-        if (!bridge.connected(menu) || water == null || water.storedAmount() < water.bucketUnits() || emptyBuckets < 1) {
+        if (!bridge.connected(menu) || water == null || water.storedAmount() < water.bucketUnits()) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "water_container_stock_missing",
                     "AE2 needs stored water and a stored empty bucket for native filling");
             return;
+        }
+        if (emptyBuckets < 1) {
+            int amount = Ae2WaterBucketFill.stagingAmount(group.count(), waterFillReceipts.size(), emptyBuckets, Ae2WaterBucketFill.carriedBuckets(player));
+            if (amount > 0 && !inPlace) { beginWaterBucketStage(context, amount); return; }
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "water_container_stock_missing", "no ordinary empty bucket is available for native filling"); return;
         }
         int destination = player.getInventory().getFreeSlot();
         if (destination < 0 || reservedInventorySlots().contains(destination)) {
@@ -1113,6 +1149,37 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (!settleNativeReceipt(context, "water_bucket_fill_unconfirmed")) return;
         waterFillReceipts.add(pendingWaterFill.confirmedData());
         pendingWaterFill = null;
+        setPhase(Phase.FILL_WATER_BUCKET);
+    }
+
+    private void beginWaterBucketStage(LocalPlayerContext context, int amount) {
+        // 先通过原生玩家槽把批准数量的空桶存入当前网络，再走AE自身灌水；不直接改背包或网络存储。
+        depositMenu = player.containerMenu; depositScreen = context.minecraft().screen;
+        depositAccess = Ae2DepositAccess.read(depositMenu, player, bridge, fixedTarget);
+        if (!depositAccessAllowed() || request.wirelessOnly() && depositAccess.itemSlot() == null
+                || depositAccess.position() != null && NavigationSafetyContext.protectsUse(depositAccess.position())) {
+            beginFinish(Ae2ResourceSupply.Status.FAILED, "water_bucket_stage_access_denied", "the current terminal is not authorized for bucket staging"); return;
+        }
+        var reserved = new LinkedHashSet<>(reservedInventorySlots()); if (depositAccess.itemSlot() != null) reserved.add(depositAccess.itemSlot());
+        bucketStageCount = amount; bucketStageBefore = inventoryCount(Ae2WaterBucketFill.EMPTY_BUCKET);
+        var staging = new Ae2ResourceSupply.Request(List.of(new Ae2ResourceSupply.Group(Ae2WaterBucketFill.EMPTY_BUCKET, amount)), false,
+                Ae2ResourceSupply.Operation.DEPOSIT, request.wirelessOnly());
+        waterBucketDeposit = new Ae2DepositTransfer(context, staging, bridge, reserved, inventoryCounts(), depositAccess.itemSlot());
+        setPhase(Phase.STAGE_WATER_BUCKET);
+    }
+    private void stageWaterBucket(LocalPlayerContext context) {
+        if (!depositAccessAllowed()) { finishUncertain("water_bucket_stage_access_changed", "bucket staging lost its original terminal"); return; }
+        var state = waterBucketDeposit.tick(context); effectsStarted |= waterBucketDeposit.effectsStarted();
+        if (state == Ae2DepositTransfer.Status.RUNNING) return;
+        preserveUnrelatedMenu |= waterBucketDeposit.preserveMenu();
+        if (state == Ae2DepositTransfer.Status.UNCERTAIN) { finishUncertain("water_bucket_stage_uncertain", waterBucketDeposit.code()); return; }
+        if (state != Ae2DepositTransfer.Status.SUCCEEDED) { beginFinish(Ae2ResourceSupply.Status.FAILED, waterBucketDeposit.code(), "empty bucket staging did not finish"); return; }
+        int confirmed = waterBucketDeposit.deposited().getOrDefault(Ae2WaterBucketFill.EMPTY_BUCKET, 0);
+        if (confirmed < 0 || confirmed > bucketStageCount || !settlingSatisfied && confirmed != bucketStageCount
+                || inventoryCount(Ae2WaterBucketFill.EMPTY_BUCKET) != bucketStageBefore - confirmed) {
+            finishUncertain("water_bucket_stage_inventory_changed", "staged bucket count does not match carried inventory"); return;
+        }
+        carriedBucketsStaged += confirmed;
         setPhase(Phase.FILL_WATER_BUCKET);
     }
 
@@ -1874,6 +1941,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (terminal != null) return;
         if (deposit != null) deposit.captureConfirmed();
         if (deposit != null && deposit.preserveMenu()) preserveUnrelatedMenu = true;
+        if (waterBucketDeposit != null) {
+            waterBucketDeposit.captureConfirmed(); preserveUnrelatedMenu |= waterBucketDeposit.preserveMenu();
+        }
         try {
             var context = ClientRuntime.requireContext(player);
             if (!stoppingInPlace && ownsOpenMenu(context) && (menuReceipt == null || menuReceipt.terminal()
@@ -1886,7 +1956,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 status, code, message, groupDeltas(), request.operation(), request.allowCrafting(),
                 craftingRequests, craftingJobsSubmitted, effectsStarted,
                 uncertain, terminalAccess, List.copyOf(waterFillReceipts),
-                deposit != null ? deposit.evidence() : serverSupply == null ? Map.of() : serverSupply.evidence());
+                deposit != null ? deposit.evidence() : waterBucketDeposit != null
+                        ? Map.of("water_bucket_staging", waterBucketDeposit.evidence(), "carried_empty_buckets_staged", carriedBucketsStaged)
+                        : serverSupply == null ? Map.of() : serverSupply.evidence());
         phase = Phase.FINISHED;
     }
 
@@ -2164,7 +2236,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
         if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) return deposit != null && deposit.complete() && player.containerMenu.getCarried().isEmpty();
         if (waterBucketRoute) return player.containerMenu.getCarried().isEmpty()
                 && waterFillReceipts.size() == request.groups().getFirst().count()
-                && groupProgress(request.groups().getFirst()) == waterFillReceipts.size();
+                && groupProgress(request.groups().getFirst()) == waterFillReceipts.size()
+                && inventoryCount(Ae2WaterBucketFill.EMPTY_BUCKET) == baseline.getOrDefault(Ae2WaterBucketFill.EMPTY_BUCKET, 0) - carriedBucketsStaged;
         if (request.operation() == Ae2ResourceSupply.Operation.PREPARE) {
             return player.containerMenu.getCarried().isEmpty() && plan != null
                     && plan.groups().size() == request.groups().size()

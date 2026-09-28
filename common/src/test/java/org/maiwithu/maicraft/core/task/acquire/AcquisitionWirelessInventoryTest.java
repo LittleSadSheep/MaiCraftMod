@@ -32,10 +32,43 @@ public final class AcquisitionWirelessInventoryTest {
         scenario(2, true);
         explicitMiningCannotOpenWireless();
         emptyAndUnknownAreDistinct();
+        carriedBucketReachesNativeWaterFill();
         // 同一供料入口也覆盖背包装不下后的停止边界，确认不会继续转去采集世界材料。
         AcquisitionCapacityFailureTest.main(args);
         AcquisitionInventoryTidyTest.main(args);
         System.out.println("AcquisitionWirelessInventoryTest: passed");
+    }
+
+    @SuppressWarnings("unchecked") private static void carriedBucketReachesNativeWaterFill() throws Exception {
+        // 重放本轮水桶前置：网络无成品桶，角色带普通空桶，外层仍须进入原生灌水接口确认网络水。
+        Class.forName(Ae2SupplyTaskRecord.class.getName());
+        var field = TaskFactory.class.getDeclaredField("RUNNERS"); field.setAccessible(true);
+        var runners = (Map<Class<? extends TaskRecord>, TaskFactory.Runner<? extends TaskRecord>>) field.get(null);
+        var previous = runners.get(Ae2SupplyTaskRecord.class);
+        try (var world = new InteractionWorldTestHarness()) {
+            world.inventory.setItem(0, new ItemStack(Items.BUCKET)); var calls = new ArrayList<Ae2ResourceSupply.Operation>();
+            TaskFactory.register(Ae2SupplyTaskRecord.class, (player, record) -> new Task() {
+                public String name() { return "原生灌水入口回放"; }
+                public TaskState tick(LocalPlayer ignored) {
+                    calls.add(record.request.operation());
+                    if (record.request.operation() == Ae2ResourceSupply.Operation.OBSERVE) {
+                        try { remember(world); } catch (Exception failure) { throw new AssertionError(failure); }
+                    } else {
+                        check(record.request.wirelessOnly() && !record.request.allowCrafting(), "native filling retains wireless access without network crafting");
+                        world.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
+                    }
+                    return TaskState.SUCCESS;
+                }
+                public void stop(LocalPlayer ignored, StopReason reason) {}
+                public TaskResult result(TaskState state) { return TaskResult.ok("native fill fixture settled", Map.of("outcome_uncertain", false)); }
+            });
+            var request = new SemanticAcquireTaskRecord("water-fill", 1000, List.of(ResourceLocation.parse("minecraft:water_bucket")), 1,
+                    List.of(SemanticAcquireTaskRecord.Source.WIRELESS), false, SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8);
+            var task = new SemanticAcquireCompanionTask(world.player, request, player -> true); task.onStart();
+            var state = TaskState.RUNNING; for (int i = 0; i < 20 && !state.isTerminal(); i++) state = task.onTick();
+            check(state == TaskState.SUCCESS && calls.equals(List.of(Ae2ResourceSupply.Operation.OBSERVE, Ae2ResourceSupply.Operation.SUPPLY)),
+                    "zero ready-made stock no longer skips the supported native bucket-fill path");
+        } finally { runners.put(Ae2SupplyTaskRecord.class, previous); }
     }
 
     @SuppressWarnings("unchecked")
@@ -82,6 +115,9 @@ public final class AcquisitionWirelessInventoryTest {
                 var evidence = (Map<?, ?>) task.resultData().get("wireless_stock_evidence");
                 check("failed".equals(((Map<?, ?>) evidence.get("last_query")).get("status"))
                         && ((List<?>) evidence.get("need_checks")).isEmpty(), "failed query is never a zero-stock observation");
+                var options = (List<Map<String, Object>>) task.resultData().get("recovery_options");
+                check(options.stream().map(option -> option.get("id")).toList().equals(List.of("restore_wireless_access", "stop")),
+                        "an unreadable terminal suggests access recovery instead of widening mining or hunting permissions");
             } else {
                 check(requests.size() == 2 && requests.get(1).totalCount() == 2, "withdraw only the two actually observed items");
                 check((wanted == 2) == (state == TaskState.SUCCESS), "two network items cannot complete a three-item goal");

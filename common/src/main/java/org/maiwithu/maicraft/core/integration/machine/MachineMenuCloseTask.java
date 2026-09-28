@@ -6,13 +6,14 @@ import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * 只关闭当前流程登记过的机器菜单，并等待原生关闭结果。鼠标有物品或换成了别的菜单时先报告无法关闭。
+ * 关闭本流程机器菜单或已清空操作格的普通玩家背包，等待原生回执；其他界面与未结物品保留。
  */
 public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMenuCloseTaskRecord> {
     private AbstractContainerMenu menu;
@@ -36,8 +37,13 @@ public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMen
         }
         if (closeAttempted) return failure("machine_menu_close_uncertain", "A close was already entered without a complete receipt; no second close was sent.");
         if (player.containerMenu == player.inventoryMenu) {
-            if (context.minecraft().screen != null) return failure("machine_menu_not_owned", "A different screen is now open.");
-            verified = true; return TaskState.SUCCESS;
+            if (context.minecraft().screen == null) { verified = true; return TaskState.SUCCESS; }
+            // 明确的关菜单请求可以交接普通空闲背包；有合成原料、鼠标物品或其他页面时不盲目关掉。
+            if (!MenuVisibility.idlePlayerInventory(context.minecraft(), player))
+                return failure("inventory_screen_not_idle", "The player inventory has unsettled items or another screen is open.");
+            if (!context.mutationAvailable()) return TaskState.RUNNING;
+            menu = player.inventoryMenu; closeAttempted = true;
+            receipt = context.menus().close(context, 40); return TaskState.RUNNING;
         }
         if (menu == null) menu = player.containerMenu;
         if (player.containerMenu != menu || !MachineMenu.ownedMenu(player, menu)) {
@@ -64,5 +70,5 @@ public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMen
         if (failureCode != null) data.put("failure_code", failureCode);
         return data;
     }
-    @Override protected String successMessage() { return "The machine menu is closed and the ordinary player inventory is active."; }
+    @Override protected String successMessage() { return "The menu is closed and ordinary world interaction is available."; }
 }

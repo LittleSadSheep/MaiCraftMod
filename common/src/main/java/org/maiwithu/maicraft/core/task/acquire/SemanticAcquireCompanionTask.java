@@ -394,6 +394,8 @@ public final class SemanticAcquireCompanionTask
                 advanceSource(need); return TaskState.RUNNING;
             }
             long available = need.itemIds.stream().mapToLong(stock.get()::storedCount).reduce(0L, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
+            // 空桶加网络水已有原生灌装接口；没有成品桶不能在外层把这条合法存储路线提前剪掉。
+            if (available <= 0) available = Ae2ResourceSupply.nativeWaterFillProbeCapacity(player, need.itemIds, missing, stock.get());
             if (available <= 0) { advanceSource(need); return TaskState.RUNNING; }
             missing = (int) Math.min(missing, available);
         }
@@ -2263,6 +2265,10 @@ public final class SemanticAcquireCompanionTask
     }
 
     private List<Map<String, Object>> recoveryOptions() {
+        // 查货被界面或终端访问挡住时，先恢复这项前置；不能把未查到的网络库存引导成去挖矿或狩猎。
+        if ("wireless_stock_unknown".equals(failureCode)) return List.of(Map.of("id", "restore_wireless_access",
+                "summary", "Resolve the reported screen or terminal access precondition, then retry the unchanged inventory request.",
+                "risk", "existing_authorization_required"), Map.of("id", "stop", "risk", "none"));
         // 整理有未确认转移时先观察原生回执，不开放新的存取动作去掩盖同一笔未知效果。
         if (inventoryTidy.outcome().uncertain()) return List.of(Map.of("id", "inspect_inventory_storage",
                 "summary", "Inspect carried inventory and confirmed storage receipts before issuing another transfer.",
