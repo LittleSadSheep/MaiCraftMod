@@ -19,6 +19,15 @@ public final class InteractEntityTaskRecord extends TaskRecord {
     public final int entityId;
     public final int holdTicks;
     public final Item item;        // null 表示使用当前手持物；否则先装备指定物品（食物、剪刀或武器）。
+    public boolean menuOnly;
+
+    /** 打开交易等实体界面时必须空主手，且实体拒绝交互后不能继续使用无线终端等手持物。 */
+    public InteractEntityTaskRecord forMenu() {
+        if (button != MouseButton.RIGHT || holdTicks != 0 || item != null)
+            throw new IllegalStateException("entity menu opening requires one empty-hand right click");
+        menuOnly = true;
+        return this;
+    }
 
     public InteractEntityTaskRecord(String toolCallId, long deadlineGameTime,
                                     MouseButton button, int entityId, int holdTicks, Item item) {

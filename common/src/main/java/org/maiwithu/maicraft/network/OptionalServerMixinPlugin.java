@@ -12,6 +12,7 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 import org.spongepowered.asm.service.MixinService;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import org.objectweb.asm.ClassReader;
 
 /** 在安装原生钩子前检查可选类资源；绝不定义、转换或初始化目标类。 */
 public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
@@ -22,6 +23,9 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
     private static final Set<String> CREATE_NEOFORGE_HOOKS = Set.of("CreateMillstoneProductionMixin", "CreateCrushingProductionMixin");
     @Override public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         String name = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
+        if (name.equals("CreateStressObservationMixin")) return hasStressFields(targetClassName);
+        // 机械手只旁听原生同步；可选模组不存在时不加载适配器，版本未命中 read 时保持观察未知。
+        if (name.equals("CreateDeployerHandObservationMixin")) return present(targetClassName);
         if (name.equals("Ae2CraftingLifecycleMixin")) return present("appeng.core.AppEng") && present(targetClassName);
         // 本次转化钩子按 AE2 19.2 的 NeoForge 原生调用形状接入；缺少模组或加载器时不加载适配类。
         if (name.equals("Ae2TransformProductionMixin")) return present("net.neoforged.neoforge.common.NeoForge")
@@ -41,6 +45,17 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
         try (var resource = MixinService.getService().getResourceAsStream(name.replace('.', '/') + ".class")) {
             return resource != null;
         } catch (IOException unreadable) { throw new IllegalStateException("Cannot inspect optional native hook " + name, unreadable); }
+    }
+
+    private static boolean hasStressFields(String target) {
+        // 可选版本的字段形状不匹配时明确保留应力未知，不能为了检查机器而让缺少 Create 的客户端无法启动。
+        try (var input = MixinService.getService().getResourceAsStream(target.replace('.', '/') + ".class")) {
+            if (input == null) return false;
+            var node = new ClassNode(); new ClassReader(input).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            return node.fields.stream().anyMatch(field -> field.name.equals("capacity") && field.desc.equals("F"))
+                    && node.fields.stream().anyMatch(field -> field.name.equals("stress") && field.desc.equals("F"))
+                    && node.fields.stream().anyMatch(field -> field.name.equals("networkSize") && field.desc.equals("I"));
+        } catch (IOException unavailable) { return false; }
     }
 
     @Override public void onLoad(String mixinPackage) {}

@@ -73,8 +73,14 @@ public final class AttackPlan {
      */
     // 依次判断是否要逃、选谁打、用近战还是弓。低血量或没武器会先考虑撤退，除非已被判定无路可退。
     public static Move decide(Battlefield b, Move last) {
+        return decide(b, last, false);
+    }
+
+    // 已开始的撤离由执行器保持到脱离成功；少量回血不能使角色追回血线附近的敌人，真无路可退时仍可自卫。
+    public static Move decide(Battlefield b, Move last, boolean withdrawalCommitted) {
         // 已开始的引信优先于旧目标、武器准备和普通撤退选点；严格攻击名单也不能阻止避险。
         if (b.foes().stream().anyMatch(Foe::blastDanger)) return new Move(Action.EVADE_BLAST, NO_FOE);
+        if (withdrawalCommitted && !b.cornered()) return new Move(Action.DISENGAGE, NO_FOE);
         // ① 扛不住 —— 一切"怎么打"的讨论都以她还站得住为前提。
         if (outmatched(b.effectiveHealth(), b.availableHealth()) && !b.cornered()) {
             return new Move(Action.DISENGAGE, NO_FOE);

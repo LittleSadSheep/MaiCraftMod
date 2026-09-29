@@ -131,7 +131,7 @@ public final class IntentTaskRecord extends TaskRecord {
     public int skippedStepCount() {
         return (int) stepResults.stream().filter(StepSnapshot::skipped).count();
     }
-    /** 原清单每一步都留下成功证据才算全部达成，处理完清单本身不足以证明这一点。 */
+    /** 当前有效清单每一步都须留下成功证据；恢复或替换后的清单不能自动证明最初请求的游戏产物。 */
     public boolean allStepsSucceeded() {
         return stepIndex == steps.size() && stepResults.size() == steps.size()
                 && stepResults.stream().allMatch(StepSnapshot::success);

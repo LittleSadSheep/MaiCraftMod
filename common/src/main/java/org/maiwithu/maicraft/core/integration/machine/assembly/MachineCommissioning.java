@@ -8,6 +8,7 @@ import java.util.Locale;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
+import org.maiwithu.maicraft.server.machine.create.CreateStressObservation;
 
 /**
  * 读取机器已经同步到客户端的状态：Create 是否转动、Mekanism 多方块是否成形和接口模式、AE2 部件是否有电及频道。
@@ -55,6 +56,8 @@ public final class MachineCommissioning {
             result.addProperty("network_present", network);
             result.addProperty("overstressed", overloaded);
             result.addProperty("rotation_verified", rotating(speed, network, overloaded));
+            // 施工收尾也公开当前实际网络账，让结构成功回执保留停机与应力尚未验证的事实。
+            CreateStressObservation.inspect(entity, result, network, speed, overloaded);
         } catch (ReflectiveOperationException | RuntimeException failure) { unavailable(result, failure); }
         return result;
     }

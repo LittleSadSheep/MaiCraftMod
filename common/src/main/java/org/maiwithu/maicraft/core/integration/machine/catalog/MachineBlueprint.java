@@ -46,8 +46,11 @@ public record MachineBlueprint(String id, String label, String dimension, Positi
         return result;
     }
     private static JsonArray vector(Position at) { var value = new JsonArray(); value.add(at.x()); value.add(at.y()); value.add(at.z()); return value; }
-    // 同一世界、维度和锚点沿用机器编号；改图只更新蓝图版本，后续观察仍定位同一台机器。
+    // 旧目录的地点编号继续可读；新机器还区分名称，避免同一平台上的压机和装配机互相覆盖。
     static String locationId(String identity, String dimension, Position anchor) {
         return "machine:" + CatalogLimits.hash(identity + "\n" + dimension + "\n" + anchor.x() + "," + anchor.y() + "," + anchor.z());
+    }
+    static String namedId(String identity, String dimension, Position anchor, String label) {
+        return "machine:" + CatalogLimits.hash(locationId(identity, dimension, anchor) + "\n" + CatalogLimits.labelKey(label));
     }
 }

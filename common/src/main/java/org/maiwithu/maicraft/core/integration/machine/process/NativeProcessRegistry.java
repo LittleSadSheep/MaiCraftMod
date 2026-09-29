@@ -14,6 +14,8 @@ import java.util.Collections;
 /** 统一使用机器按原生机制分派；同一水中转化适配器处理安装配方表中的不同产物，不新增逐配方能力。 */
 public final class NativeProcessRegistry {
     public static final String KNOWLEDGE_URI = "maicraft://knowledge/processes";
+    // 这里只列标记格匹配的已注册 v2 执行器；空列表不能否定普通右键交互或 v1 机器网络配方。
+    public static final String OBSERVATION_SCOPE = "Registered v2 run_production adapters matching the exact queried anchor only; not an inventory of ordinary block interactions or v1 network recipes.";
     private record Entry(NativeProcessAdapter adapter, String namespace) {}
     private static final Map<String, Entry> ENTRIES = entries();
     private NativeProcessRegistry() {}
@@ -22,6 +24,7 @@ public final class NativeProcessRegistry {
         var out = new LinkedHashMap<String, Entry>();
         register(out, new MinecraftEnchantProcessAdapter(), "enchant");
         register(out, new WorldTransformProcessAdapter(), "world-process");
+        register(out, new MinecraftStonecuttingProcessAdapter(), "stonecutting");
         return Collections.unmodifiableMap(out);
     }
     private static void register(Map<String, Entry> entries, NativeProcessAdapter adapter, String namespace) {
@@ -30,7 +33,8 @@ public final class NativeProcessRegistry {
     }
     public static NativeProcessAdapter adapter(String id) {
         Entry entry = ENTRIES.get(id);
-        if (entry == null) throw new IllegalArgumentException("unsupported_native_process: " + id + "; inspect the site for available process contracts");
+        if (entry == null) throw new IllegalArgumentException("unsupported_native_process: " + id
+                + "; this v2 process is not registered. Read available contracts at " + KNOWLEDGE_URI);
         return entry.adapter();
     }
     public static String consumptionNamespace(String id) { adapter(id); return ENTRIES.get(id).namespace(); }

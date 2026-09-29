@@ -17,6 +17,13 @@ final class KineticRelayGeometry {
     private KineticRelayGeometry() {}
     static List<Plan> candidates(Endpoint source, Direction sourceFace, Endpoint target, Direction targetFace, Terrain terrain, Limits limits) {
         List<Plan> plans = new ArrayList<>();
+        // 两端都是已建好的锁链轮时，先报价原位直接挂链；已有安装高度不应被新轴柱的架空规划重新抬高。
+        if(sourceFace==null && targetFace==null && source.chainInterface() && target.chainInterface()) {
+            var direct=new KineticGeometryWork(source,null,target,null,terrain,limits);
+            if(direct.link(source.position(),target.position())
+                    && KineticChainClearance.clear(direct,List.of(source.position(),target.position())))
+                plans.add(direct.finish("existing_chain_conveyor_link"));
+        }
         for (int shift : new int[] {3, -3}) {
             Terminal a = terminal(source, sourceFace, shift), b = terminal(target, targetFace, shift);
             for (int corridor = 0; corridor < 3; corridor++) {

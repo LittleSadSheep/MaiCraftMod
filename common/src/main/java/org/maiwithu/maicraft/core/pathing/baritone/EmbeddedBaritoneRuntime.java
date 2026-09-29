@@ -21,7 +21,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.util.Mth;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -684,7 +683,7 @@ public final class EmbeddedBaritoneRuntime {
      * 此处将镜头锁定在路线航向上；在路线转弯窗口内的细微方向修正不会转动可见镜头。
      * 实际移动朝向由 Baritone 的玩家旋转桥单独提供，因此镜头不会把该修正拆成第二个转向输入。
      * 只有真正转角时才提交新的可见航向，并让镜头转动一次。
-     * 落地时俯仰保持接近水平的观景角度；空中时跟随瞄准，保证坠落和跳跃仍可操控。
+     * 普通步行、跳跃和下落都保持稳定俯仰；水下游动保留实际潜泳方向。
      * 精确方块交互瞄准会绕过以上逻辑，让挖掘和放置保留准确视角。</p>
      */
     // 实际点击所需的精确瞄准直接交给视角层；普通走路用缓慢改变的路线朝向，地面视角保持略向下。
@@ -704,17 +703,12 @@ public final class EmbeddedBaritoneRuntime {
         if (tickingContext == null) return;
         float courseYaw = CAMERA_COURSE.target(yaw, tickingContext.tickRevision());
         // 即使视角没有变化，也必须每 tick 续发，保持镜头租约有效；否则镜头会冻结在上一次精确瞄准留下的方向。
-        float walkPitch = player.onGround()
-                && !(executor != null && executor.submergedWaterTravelActive())
-                ? WALK_PITCH_DEGREES
-                : Mth.clamp(pitch, -90.0f, 90.0f);
-        InputDriver.look(player, courseYaw, walkPitch);
+        float walkPitch = NavigationCameraCourse.pitch(pitch, executor != null && executor.submergedWaterTravelActive());
+        InputDriver.lookForNavigation(player, courseYaw, walkPitch);
     }
 
     /** 路线转向状态；导航所有权变化时重置。 */
     private static final NavigationCameraCourse CAMERA_COURSE = new NavigationCameraCourse();
-    /** 落地行走时的俯仰角保持接近水平，避免整段旅程看起来都在低头。 */
-    private static final float WALK_PITCH_DEGREES = 8.0f;
 
     private static IBaritone backend() {
         if (backend != null) return backend;

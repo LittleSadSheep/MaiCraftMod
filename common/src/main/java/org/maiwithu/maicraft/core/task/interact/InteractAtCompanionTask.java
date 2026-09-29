@@ -24,9 +24,17 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
+import org.maiwithu.maicraft.core.inventory.CarriedItemVariants;
+import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidence;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
+import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /**
  * 在当前位置对准方块、液体或前方按键。先选物品、等镜头真正对准，再按实际射线命中的目标执行。
@@ -45,6 +53,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private final FirstPersonActionGate selection =
             new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
+    private int surfaceAimCorrections;
+    private boolean surfaceStillVisible;
+    private boolean surfaceCheckAttempted;
     private boolean itemSelected;
     /**
      * 在目标可见轮廓上挑出的瞄准点，避免只瞄方块中心而被部分遮挡。
@@ -65,6 +76,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean heldUseStarted, heldUseCompleted, heldUseHandResolved;
     private InteractionHand heldUseHand = InteractionHand.MAIN_HAND;
     private int expectedItemBefore = -1, outputWaitTicks;
+    private boolean manualCrank;
+    private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
+    private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
+    private NativeActionReceipt manualHandSelection;
+    private Map<String,Object> deployerHandBefore = Map.of();
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -100,6 +116,13 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     @Override
     protected TaskState act() {
         if (r.heldItemUseOnly) return useHeldItem();
+        manualCrank = r.item == null && button() == Interaction.Button.USE && CreateManualInput.supported(player.level(), r.aim);
+        // 从第一笔已确认原生使用开始记录实际转速和应力，持续操作结束后仍能说明驱动期间是否卡在超载。
+        if (manualCrank && interaction != null) manualUsage.observe(player.level(), r.aim, interaction.confirmedUses());
+        // 未指定道具的语义交互先收好遗留工具；反击或补食中断后每次新点击都恢复空手，已经发出的点击先结算。
+        if ((r.emptyHand || manualCrank) && (interaction == null || !interaction.awaitingReceipt())) {
+            TaskState hand = prepareEmptyHand(); if (hand != null) return hand;
+        }
         // 到达交互位置后再解析准星命中，并据此执行动作。
         if (interaction == null) {
             if (r.requiredBlock != null && (!player.level().isLoaded(r.aim)
@@ -107,8 +130,16 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 fail("the required interaction target changed or unloaded before aiming", FailureType.TARGET_LOST);
                 return TaskState.FAILED;
             }
+            // 反击等插入动作换过主手后重新选回目标；半成品按完整组件身份匹配，避免从第十四步切到第一步。
+            if (r.item != null && itemSelected && !CarriedItemVariants.matches(player.getMainHandItem(), r.item, r.itemResourceId, player.registryAccess())) {
+                selection.reset(); itemSelected = false; aimPoint = null; aimConvergence.reset();
+            }
             if (r.item != null && !itemSelected) {
-                var selected = selection.select(player, PlayerInv.findSlot(player.getInventory(), r.item));
+                // 选择过程中固定同一笔原生交换，先结清在途回执；准备完成后再核对组件，不能因移槽而另发选择。
+                int source = selection.started() ? selection.requestedSlot()
+                        : CarriedItemVariants.find(player.getInventory(), r.item, r.itemResourceId, player.registryAccess());
+                if (source < 0) { fail("the requested carried item variant is missing or changed; observe inventory components before choosing again", FailureType.NO_MATERIAL); return TaskState.FAILED; }
+                var selected = selection.select(player, source);
                 if (selected == FirstPersonActionGate.Status.RUNNING) {
                     return TaskState.RUNNING;
                 }
@@ -117,10 +148,16 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     return TaskState.FAILED;
                 }
                 itemSelected = true;
+                if (!CarriedItemVariants.matches(player.getMainHandItem(), r.item, r.itemResourceId, player.registryAccess())) {
+                    fail("the selected item variant changed before native use", FailureType.TARGET_LOST); return TaskState.FAILED;
+                }
             }
             var useItem = player.getMainHandItem().getItem();
-            boolean bucket = button() == Interaction.Button.USE
+            boolean bucket = !manualCrank && button() == Interaction.Button.USE
                     && FirstPersonInteractionTargeting.usesBucketRay(useItem);
+            // 普通取放要点中原生允许的面；桶仍按自己的取水或倒水射线走，不能混用台面规则。
+            var useSurface = r.aim == null || bucket || button() != Interaction.Button.USE ? null
+                    : CreateInteractionSurface.forUse(player.level().getBlockState(r.aim), useItem);
             if (r.aim != null) {
                 if (aimPoint == null) {
                     var state = player.level().getBlockState(r.aim);
@@ -129,8 +166,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                                     player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), useItem)
                             : state.isAir()
                             ? null
-                            : FirstPersonInteractionTargeting.visibleBlockHit(
-                                    player.level(), player, player.getEyePosition(), r.aim, REACH);
+                            : useSurface == null ? FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH)
+                            : useSurface.visibleHit(player.level(), player, player.getEyePosition(), r.aim, REACH);
                     aimPoint = visible == null ? Vec3.atCenterOf(r.aim) : visible.getLocation();
                 }
                 // 使用交互不能继承前一施工任务留下的潜行放置状态。
@@ -148,6 +186,17 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     ? FirstPersonInteractionTargeting.bucketRay(player.level(), player,
                             player.getEyePosition(), rayEnd, useItem)
                     : Interaction.nativeRaytrace(player, REACH);
+            // 镜头到位后仍核对真实命中点；台座侧面和机械手机壳都不能替代它们的原生取放入口。
+            if (useSurface != null && useSurface.constrained()
+                    && (!(hit instanceof BlockHitResult surface) || !surface.getBlockPos().equals(r.aim)
+                    || !useSurface.accepts(surface))) {
+                // 一度以内只说明镜头接近目标，机械手前端或置物台边缘仍可能尚未命中；未出手时先继续精确瞄准。
+                if (refineSurfaceAim(useSurface)) return TaskState.RUNNING;
+                fail(surfaceStillVisible
+                        ? "the machine surface remains visible, but the actual view did not reach it after bounded aiming"
+                        : "the required machine interaction surface is no longer visible", FailureType.OCCLUDED);
+                return TaskState.FAILED;
+            }
             // 与语义预检共用同一套遮挡口径:普通目标命中更近的别块就是被挡住;
             // 桶使用物品自己的源流体/放置面判据，不把水后方的机器当作点击目标。
             if (r.aim != null
@@ -182,11 +231,13 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
             }
             receipt = PressReceipt.before(player, r.aim);
-            // 当前操作对象是真实 LocalPlayer；保留原版处理：方块或实体未响应使用操作时，继续使用手持物品，包括食物、珍珠和模组物品。
+            // 捕获这次交换前已有的持料，避免同种同数互换未产生数量差时只剩一条超时信息。
+            deployerHandBefore = CreateDeployerHandEvidence.capture(player.level(),r.aim);
+            // 点名道具时保留原生物品使用；空手操作目标时禁止回退，避免中断遗留的无线终端或工具抢走点击。
             interaction = bucket ? Interaction.useInAir(player, InteractionHand.MAIN_HAND,
                     r.holdTicks == 0 ? Interaction.Timing.once()
                             : r.holdTicks > 0 ? Interaction.Timing.hold(r.holdTicks) : Interaction.Timing.hold())
-                    : Interaction.forHit(player, hit, button(), r.holdTicks, true);
+                    : Interaction.forHit(player, hit, button(), r.holdTicks, !manualCrank && !r.emptyHand);
             if (interaction != null) interaction.requireBlock(r.aim, r.requiredBlock);
             if (interaction == null) {       // 左键点击空气只会挥击，没有后续动作。
                 successMsg = "nothing under the aim (left-click in the air)";
@@ -197,13 +248,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
         }
 
-        // 固定时长的按住操作到期后松开按键。
-        // 当前实现到按住时限就直接停止并结算，不再等 interaction 内尚未确认的点击。
-        // 只有另外设置了 expectedBlock 才会核对目标方块，未设置时可能把仍在等待的动作报成成功（A30）。
+        // 到期只禁止下一次点击；已经发出的原生操作必须先结算，不能把持续时间走完冒充操作成功。
         if (holdUntil >= 0 && player.level().getGameTime() >= holdUntil) {
-            interaction.stop();
-            successMsg = describeDone() + settle();
-            return verifiedOutcome();
+            interaction.finishRepeating();
         }
         return switch (interaction.tick()) {
             case DONE -> {
@@ -216,6 +263,37 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
             case RUNNING -> TaskState.RUNNING;
         };
+    }
+
+    private TaskState prepareEmptyHand() {
+        var context = ClientRuntime.requireContext(player);
+        if (manualHandParking.started()) {
+            var state = manualHandParking.tick(context);
+            if (state == MachineMenuHandParking.Status.FAILED) {
+                fail("empty-hand preparation failed: " + manualHandParking.failure(), FailureType.NO_SPACE); return TaskState.FAILED;
+            }
+            if (state != MachineMenuHandParking.Status.READY) return TaskState.RUNNING;
+            // 自动反击后来又占用了主手时重新整理；已经完成的旧交换不能一直假装这次主手仍为空。
+            if (!player.getMainHandItem().isEmpty()) manualHandParking = new MachineMenuHandParking();
+        }
+        if (manualHandSelection != null) {
+            manualHandSelection = context.actions().poll(context, manualHandSelection);
+            if (!manualHandSelection.terminal()) return TaskState.RUNNING;
+            if (manualHandSelection.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+                fail("empty-hand selection unconfirmed", FailureType.UNKNOWN); return TaskState.FAILED;
+            }
+            manualHandSelection = null; return TaskState.RUNNING;
+        }
+        if (player.getMainHandItem().isEmpty()) return null;
+        for (int slot = 0; slot < 9; slot++) if (player.getInventory().getItem(slot).isEmpty()) {
+            if (context.mutationAvailable()) manualHandSelection = context.actions().selectHotbar(context, slot, 20);
+            return TaskState.RUNNING;
+        }
+        var state = manualHandParking.tick(context);
+        if (state == MachineMenuHandParking.Status.FAILED) {
+            fail("empty-hand preparation failed: " + manualHandParking.failure(), FailureType.NO_SPACE); return TaskState.FAILED;
+        }
+        return TaskState.RUNNING;
     }
 
     private TaskState useHeldItem() {
@@ -283,7 +361,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     // 先要求身体站稳、在水中或坐在载具上。水桶按实际射线和玩家触及范围检查，普通点击仍按固定距离比较方块中心。
     private boolean withinReach() {
-        var item = r.item == null ? player.getMainHandItem().getItem() : r.item;
+        // 空手任务不能沿用先前拿着的水桶射线，否则尚未整理背包就被错误的取水可达性拦住。
+        var item = r.emptyHand ? Items.AIR : r.item == null ? player.getMainHandItem().getItem() : r.item;
         if (button() == Interaction.Button.USE && FirstPersonInteractionTargeting.usesBucketRay(item)) {
             return bodySettled() && FirstPersonInteractionTargeting.visibleBucketHit(
                     player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), item) != null;
@@ -305,17 +384,40 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
      */
     private String settle() {
         changes = receipt == null ? List.of() : receipt.diff(player);
+        // 选择起点本来不会改变方块外观；用专门的原生证据告诉规划者当前处于接线的哪一步。
+        if (interaction!=null && interaction.chainUse()!=null) return " — "+interaction.chainUse().summary();
+        if (manualCrank && manualUsage.overstressed())
+            return " — native manual-generator activity was observed; the connected network was overstressed during use; machine production remains unverified.";
         if (changes.isEmpty()) {
+            if (manualCrank && interaction != null && interaction.confirmedUses() > 0)
+                return " — native manual-generator activity was observed; machine production remains unverified.";
             return " — but nothing visibly changed (hands, aimed block, nearby entities all "
                     + "as before). If you expected an effect, reposition or rethink.";
         }
         return " — " + String.join("; ", changes);
     }
 
+    private boolean refineSurfaceAim(CreateInteractionSurface.Rule surface) {
+        surfaceCheckAttempted = true;
+        var visible = surface.visibleHit(player.level(), player, player.getEyePosition(), r.aim, REACH);
+        surfaceStillVisible = visible != null;
+        // 只重做尚未提交的瞄准，至多十次；真正被挡立即返回，也不会重复发送可能已经换物的点击。
+        if (visible == null || surfaceAimCorrections >= 10) return false;
+        surfaceAimCorrections++;
+        aimPoint = visible.getLocation();
+        aimConvergence.reset();
+        return true;
+    }
+
     /** 释放交互，再释放导航和目标覆盖层（父类默认清理）。 */
     @Override
     protected void cleanup() {
         if (interaction != null) interaction.stop();
+        manualHandParking.cleanup(player);
+        if (manualHandSelection != null && !manualHandSelection.terminal()) {
+            var context = ClientRuntime.actor().activeContext().filter(value -> value.player() == player && value.isCurrent());
+            if (context.isPresent()) context.get().actions().retireOneShotForTaskBoundary(context.get(), manualHandSelection, "manual hand selection ended");
+        }
         selection.reset();
         aimConvergence.reset();
         aimPoint = null;
@@ -326,6 +428,28 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        if (surfaceCheckAttempted) {
+            // 只读回执分别说明几何可见性与已尝试的镜头修正，便于区分机壳遮挡和真实射线仍未对准。
+            data.put("surface_aim_corrections", surfaceAimCorrections);
+            data.put("interaction_surface_visible_at_last_check", surfaceStillVisible);
+        }
+        // 普通机械交互超时也可能已经交换物品；完成通知不能把缺少确认改写为可直接重试。
+        if (interaction != null) data.putAll(interaction.useEvidence());
+        if (!deployerHandBefore.isEmpty()) {
+            var hand = new HashMap<String,Object>(); hand.put("before",deployerHandBefore);
+            var after = CreateDeployerHandEvidence.capture(player.level(),r.aim);
+            hand.put("after",after.isEmpty()?Map.of("observation_status","target_unavailable"):after);
+            if (interaction != null && interaction.submittedBlockHit() != null)
+                hand.put("submitted_face",interaction.submittedBlockHit().getDirection().getName());
+            data.put("deployer_hand_observation",hand);
+        }
+        // 缺料失败和成功选点都保留链条账，等待任务通知的模型也能自主决定下一步取材或连接。
+        if (interaction!=null && interaction.chainUse()!=null) data.put("chain_conveyor_use",interaction.chainUse().evidence());
+        if (manualCrank) {
+            var generator = new HashMap<>(CreateManualInput.evidence(player.level(), r.aim,
+                    interaction == null ? 0 : interaction.confirmedUses()));
+            generator.put("during_use", manualUsage.data()); data.put("manual_generator", generator);
+        }
         if (r.heldItemUseOnly) {
             data.put("held_item_use_started", heldUseStarted); data.put("native_use_completed", heldUseCompleted);
             data.put("used_hand", heldUseHand.name().toLowerCase());

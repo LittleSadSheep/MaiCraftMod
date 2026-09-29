@@ -29,6 +29,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     // 每条移动、转头指令都带当前游戏刻的编号。下一刻没有重新发出，就不再沿用。
     private long movementLease = Long.MIN_VALUE;
     private long lookLease = Long.MIN_VALUE;
+    private long interactionLookLease = Long.MIN_VALUE;
     private Movement movement = Movement.STOPPED;
     private Steering steering;
     private Float targetYaw;
@@ -79,6 +80,18 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     // 记录想看的方向，左右转角绕回一圈之内，上下视角限制在垂直范围内。
     public void requestLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
+        interactionLookLease = leaseTickRevision;
+        setLook(yaw, pitch, leaseTickRevision);
+    }
+
+    @Override public void requestNavigationLook(float yaw, float pitch, long leaseTickRevision) {
+        requireLease(leaseTickRevision);
+        // 帧末寻路晚于战斗调度执行，也不能抢掉本刻已经请求的真实瞄准；移动输入仍由导航正常续订。
+        if (interactionLookLease == leaseTickRevision) return;
+        setLook(yaw, pitch, leaseTickRevision);
+    }
+
+    private void setLook(float yaw, float pitch, long leaseTickRevision) {
         targetYaw = Mth.wrapDegrees(yaw);
         targetPitch = Mth.clamp(pitch, -90.0f, 90.0f);
         lookLease = leaseTickRevision;
@@ -87,6 +100,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     @Override
     // 取消继续转头，同时清除转动惯性，避免下一次看向别处时继承旧速度。
     public void clearLook() {
+        interactionLookLease = Long.MIN_VALUE;
         targetYaw = null;
         targetPitch = null;
         lookLease = Long.MIN_VALUE;

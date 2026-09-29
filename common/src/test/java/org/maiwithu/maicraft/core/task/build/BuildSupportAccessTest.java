@@ -33,6 +33,7 @@ public final class BuildSupportAccessTest {
         existingStepsRemainWalkable();
         projectedPredictionKeepsNativeDestinations();
         completedTargetsReleaseSupportOrdering();
+        raisedClickSupportKeepsConstructionAccess();
         System.out.println("BuildSupportAccessTest: projected access, no-mutation rejection and existing footing passed");
     }
 
@@ -137,12 +138,76 @@ public final class BuildSupportAccessTest {
                     "external completion releases the support bundle without claiming another actor's blocks");
         }
     }
+
+    // 回放平台上方两格的处理机：下方垫块顶面高过地面眼睛，必须另有一级落脚点才能放下原目标。
+    private static void raisedClickSupportKeepsConstructionAccess() throws Exception {
+        try (var h = world()) {
+            h.position(new Vec3(3.5, 1, 6.5)); h.player.setOnGround(true);
+            var target = stone(6, 3, 6);
+            h.set(target.pos().below(2), Blocks.STONE.defaultBlockState());
+            h.set(target.pos().below(), Blocks.DIRT.defaultBlockState());
+            h.inventory.setItem(0, new ItemStack(Items.STONE));
+            check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of()) == null,
+                    "a high support top is not clickable from the platform floor");
+            var record = new BuildTaskRecord("raised-machine", 2000, List.of(target), false);
+            record.scaffoldLedger().confirmed(target.pos().below(), Blocks.DIRT.defaultBlockState());
+            var task = new FirstPersonBuildCompanionTask(h.player, record);
+            var type = Class.forName(FirstPersonBuildCompanionTask.class.getName() + "$CellPlan");
+            var ctor = type.getDeclaredConstructor(BuildTaskRecord.Target.class, List.class); ctor.setAccessible(true);
+            Object original = ctor.newInstance(target, List.of());
+            field("cell").set(task, original); field("supportedCell").set(task, original);
+            field("queue").set(task, new ArrayList<>(List.of(original)));
+            for (int tick = 0; tick < 1000 && !field("phase").get(task).toString().equals("WORKSITE"); tick++) {
+                check(invoke(task, "placeNavTick") != TaskState.FAILED,
+                        "a confirmed click support must not disable the search for a reachable raised worksite");
+                h.nextTick();
+            }
+            check(field("phase").get(task).toString().equals("WORKSITE"), "the supported original target must enter worksite preparation");
+            for (int tick = 0; tick < 1000 && field("worksite").get(task) == null; tick++) {
+                check(invoke(task, "worksiteTick") != TaskState.FAILED, "the bounded worksite search must retain construction access");
+                h.nextTick();
+            }
+            var worksite = (BuildWorksitePlanner.Worksite) field("worksite").get(task);
+            check(worksite != null && worksite.constructionAccess() && Math.abs(worksite.feet().y - 2) < 1e-5,
+                    "choose the lowest sufficient one-step worksite instead of an unnecessary high pillar");
+            check(invoke(task, "walkToWorksite") == TaskState.FAILED,
+                    "reserved permanent stone must not be silently consumed as the missing step");
+            var demand = (Map<?, ?>) field("temporarySupportDemand").get(task);
+            check(demand.get("support_blocks").equals(1) && field("nav").get(task) == null,
+                    "missing footing material must reach the local support supplier before navigation starts");
+            // 父供料拿回材料后会创建新子任务；只有支撑账保留，旧 supportedCell 引用不会跨批次继承。
+            var resumedRecord = new BuildTaskRecord("resumed-raised-machine", 2000, List.of(target), false);
+            record.copyExecutionContextTo(resumedRecord);
+            var resumed = new FirstPersonBuildCompanionTask(h.player, resumedRecord);
+            field("cell").set(resumed, original); field("queue").set(resumed, new ArrayList<>(List.of(original)));
+            check(Boolean.TRUE.equals(invoke(resumed, "hasTemporaryPlacementSupport")), "resupply must recognize the existing owned click support");
+            for (int tick = 0; tick < 1000 && field("worksite").get(resumed) == null; tick++) {
+                check(invoke(resumed, "worksiteTick") != TaskState.FAILED, "resupply must preserve the feasible low access choice");
+                h.nextTick();
+            }
+            var resumedSite = (BuildWorksitePlanner.Worksite) field("worksite").get(resumed);
+            check(resumedSite != null && resumedSite.constructionAccess() && Math.abs(resumedSite.feet().y - 2) < 1e-5,
+                    "resupply must not turn a one-step shortage into a taller pillar");
+            // 只在夹具中注入那一级实际地面，再让相同的原生几何证明最终点击；测试本身不假报放块。
+            h.set(worksite.stance().below(), Blocks.COBBLESTONE.defaultBlockState());
+            h.position(worksite.feet());
+            check(BuildPlacementGeometry.currentGesture(h.player, target, Map.of()) != null,
+                    "standing on the proved step makes the original machine position natively clickable");
+            check(h.blockUses() == 0 && h.inventory.getItem(0).getCount() == 1,
+                    "planning and a material shortage neither click blocks nor consume reserved stock");
+        }
+    }
     private static void finish(BuildSupportAccess proof) {
         for (int i = 0; i < 4096; i++) if (proof.advance(16)) return;
         throw new AssertionError("support validation did not terminate within its finite budget");
     }
     private static Field field(String name) throws Exception {
-        Field field = FirstPersonBuildCompanionTask.class.getDeclaredField(name); field.setAccessible(true); return field;
+        // 导航句柄在任务基类中；同时检查原目标与继承的导航状态，避免只验证辅助规划器。
+        for (Class<?> type = FirstPersonBuildCompanionTask.class; type != null; type = type.getSuperclass()) {
+            try { Field field = type.getDeclaredField(name); field.setAccessible(true); return field; }
+            catch (NoSuchFieldException missing) { }
+        }
+        throw new NoSuchFieldException(name);
     }
     private static Object invoke(FirstPersonBuildCompanionTask task, String name) throws Exception {
         Method method = FirstPersonBuildCompanionTask.class.getDeclaredMethod(name); method.setAccessible(true); return method.invoke(task);

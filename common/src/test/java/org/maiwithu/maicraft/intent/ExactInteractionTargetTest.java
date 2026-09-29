@@ -34,6 +34,7 @@ public final class ExactInteractionTargetTest {
                 check(nativeTask.aim.equals(NEIGHBOR), "coordinates must keep the exact button even with a nearer match");
                 check(nativeTask.requiredBlock == Blocks.SPRUCE_BUTTON && nativeTask.expectedBlock == null,
                         "the observed input block must survive internal tool parsing as a precondition, not an outcome");
+                check(nativeTask.emptyHand, "omitting an item prepares an empty hand through the complete semantic and internal tool path");
             }
             check(f.level.searches == 0, "exact targets must bypass the section index entirely");
             f.set(NEIGHBOR, Blocks.STONE.defaultBlockState());

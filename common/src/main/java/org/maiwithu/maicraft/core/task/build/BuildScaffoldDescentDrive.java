@@ -10,9 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.act.BlockDigger;
-import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
@@ -24,13 +22,11 @@ final class BuildScaffoldDescentDrive {
     private final Map<BlockPos, BlockState> owned;
     private final Predicate<BlockPos> permitted;
     private final LongSet forbidden;
-    private final PlayerNav.ContextProvider walking;
     private final Consumer<BlockPos> confirmed;
     private final BlockDigger digger;
     private BuildEdgeMotion alignment;
     private BuildScaffoldDescent proof;
-    private PlayerNav exitNav;
-    private boolean aligned, acknowledged, exiting, exitArrived, interruptedBreak;
+    private boolean aligned, acknowledged, exiting, interruptedBreak;
     private int ticks;
     private Status status = Status.RUNNING;
     private String reason = "aligning_owned_column";
@@ -38,7 +34,7 @@ final class BuildScaffoldDescentDrive {
     BuildScaffoldDescentDrive(LocalPlayer player, BlockPos first, Map<BlockPos, BlockState> owned,
             Predicate<BlockPos> permitted, LongSet forbidden, PlayerNav.ContextProvider walking, Consumer<BlockPos> confirmed) {
         this.player = player; this.first = first.immutable(); this.owned = Map.copyOf(owned);
-        this.permitted = permitted; this.forbidden = forbidden; this.walking = walking; this.confirmed = confirmed;
+        this.permitted = permitted; this.forbidden = forbidden; this.confirmed = confirmed;
         digger = new BlockDigger(player);
         alignment = BuildEdgeMotion.alignAt(Vec3.atBottomCenterOf(first.above()), forbidden,
                 at -> !walking.embeddedForbiddenBodyCells().contains(at.asLong()));
@@ -84,26 +80,11 @@ final class BuildScaffoldDescentDrive {
     }
 
     private Status exitTick() {
-        // 最后一格拆完后实际走上旁边连片地面，避免只在证明里离开柱底就宣布完成。
-        Vec3 exit = proof.exit();
+        // 支撑已全部收回时停键复核实地和身体稳定，后续施工自行选择站位，避免额外挪步把已完成清理判为失败。
+        InputDriver.halt(player);
         var observed = proof.observe(false, player.level().getGameTime());
         if (observed == BuildScaffoldDescent.Status.REJECTED) return finish(Status.FAILED, proof.reason());
         if (observed == BuildScaffoldDescent.Status.COMPLETE) return finish(Status.STEP_DONE, proof.reason());
-        if (!exitArrived) {
-            if (exitNav == null) exitNav = PlayerNav.toGoal(player,
-                    () -> NavGoal.exact(BlockHelper.playerFeet(player.level(), exit.x, exit.y, exit.z)),
-                    BuildStanceNavigation.PRECISE_WALK, () -> player.onGround() && player.position().distanceToSqr(exit) < .01, walking).walkingOnly();
-            var result = exitNav.tick();
-            if (result == PlayerNav.Status.FAILED) return finish(Status.FAILED, exitNav.failReason());
-            if (result != PlayerNav.Status.ARRIVED) return status;
-            exitNav.stop(); exitNav = null; exitArrived = true;
-            alignment = BuildEdgeMotion.alignAt(exit, forbidden, at -> !walking.embeddedForbiddenBodyCells().contains(at.asLong()));
-        }
-        if (alignment != null) {
-            var result = alignment.tick(player);
-            if (result == BuildEdgeMotion.Status.FAILED) return finish(Status.FAILED, alignment.failure());
-            if (result == BuildEdgeMotion.Status.ARRIVED) { alignment.release(player); alignment = null; }
-        }
         return status;
     }
 
@@ -121,7 +102,7 @@ final class BuildScaffoldDescentDrive {
             interruptedBreak = !acknowledged;
         }
         if (status == Status.RUNNING) { status = Status.FAILED; reason = "scaffold_descent_interrupted_reobserve_required"; }
-        if (alignment != null) alignment.stop(player); if (exitNav != null) exitNav.stop(); digger.cancel(); InputDriver.halt(player);
+        if (alignment != null) alignment.stop(player); digger.cancel(); InputDriver.halt(player);
     }
     Map<String, Object> evidence() { return Map.of("state", status.name(), "reason", reason, "confirmed_removal", acknowledged, "interrupted_break_uncertain", interruptedBreak,
             "proof", proof == null ? Map.of() : proof.evidence()); }

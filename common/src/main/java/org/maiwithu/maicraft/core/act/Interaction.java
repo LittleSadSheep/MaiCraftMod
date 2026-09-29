@@ -1,10 +1,14 @@
 package org.maiwithu.maicraft.core.act;
 
+import java.util.Map;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
+import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorUse;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -89,20 +93,24 @@ public final class Interaction {
 
     private final BlockDigger digger; // 仅左键破坏方块时使用。
     private BlockHitResult presetHit; // 右键方块时可携带调用方已解析的精确命中，供放置使用。
+    private BlockHitResult submittedBlockHit;
     private BlockPos requiredBlockPos;
     private Block requiredBlock;
     /**
-     * 是否允许点方块／实体没有确认成功后，再使用手里的物品，例如扔出雪球。
-     * 目前连“不确定是否已经生效”也会进入这一步，不能把它解释成已确认对方没有处理点击。
+     * 是否允许点方块／实体已确认没有生效后，再使用手里的物品，例如扔出雪球。
+     * 确认超时或结果不一致时停下来检查现场，不能再追加一次物品使用。
      * 精确 useBlock 默认关闭；forHit 的调用方自行决定是否开启。
      */
     private boolean itemFallthrough;
     private MenuReceipt closeReceipt;
     private NativeActionReceipt receipt;
+    private NativeActionReceipt lastUseReceipt;
+    private ChainConveyorUse chainUse;
     private boolean fallingThrough;
     private boolean releasing;
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
     private int fires;
+    private boolean finishRequested;
     private int cooldown;             // 距下一次重复点击还需等待的游戏刻数。
     private int held;                 // 右键空气时，物品已持续使用的游戏刻数。
     private ItemStack heldUseBefore;
@@ -188,7 +196,7 @@ public final class Interaction {
      * 实体／方块的最长按住时间由外层任务控制，这里只设置一个很大的重复次数。
      * 创建时记住目标，真正出手前仍会检查准星；左键空气直接返回 null，表示没有可做的动作。
      *
-     * @param itemFallthrough 点击没有确认成功时，是否允许再尝试使用手里的物品。
+     * @param itemFallthrough 点击已确认未生效时，是否允许再尝试使用手里的物品。
      */
     public static Interaction forHit(LocalPlayer p, HitResult hit, Button button, int holdTicks,
                                      boolean itemFallthrough) {
@@ -230,6 +238,9 @@ public final class Interaction {
         return failReason;
     }
 
+    /** 原生点击已发出时先结算，不能为恢复空手而移动刚取回的工件，破坏库存确认依据。 */
+    public boolean awaitingReceipt() { return receipt != null; }
+
     /** 固定语义目标身份，避免把预计放置后的方块误当成新的输入目标。 */
     public Interaction requireBlock(BlockPos position, Block required) {
         if (required != null && position == null) throw new IllegalArgumentException("required block needs a position");
@@ -252,6 +263,16 @@ public final class Interaction {
     public FailureType failType() {
         return failType;
     }
+
+    /** 走位更新后续订同一近战目标的可见瞄准；不发攻击、不改移动，真正出手仍由下一次 tick 核对射线。 */
+    public void renewEntityAttackAim() {
+        if (button != Button.ATTACK || receipt != null || entity == null || !entity.isAlive()
+                || player.level().getEntity(entity.getId()) != entity || hardFail) return;
+        InputDriver.lookAt(player, stableEntityAimPoint(entity));
+    }
+
+    /** 挥击已经提交时必须继续收回执；尚未提交的瞄准才允许因对手退出射程而撤销。 */
+    public boolean entityAttackSubmitted() { return button == Button.ATTACK && receipt != null; }
 
     // 先处理还没关好的界面，再分别推进挖方块、对空气使用物品或离散点击。
     // 已经发出的动作优先等结果，不因这次动作刚打开了箱子就立刻把箱子关上。
@@ -403,6 +424,11 @@ public final class Interaction {
 
     // 一次点击没确认完就不计次；确认一次后先等间隔，再开始下一次。
     private Status discrete() {
+        // 有限持续操作到期后只结算已经发出的这一次，不能在最后一个回执尚未完成时宣布整段成功。
+        if (finishRequested && receipt == null) {
+            if (fires > 0 && !hardFail) return Status.DONE;
+            failReason = "finite interaction ended without a confirmed native use"; return Status.FAILED;
+        }
         if (cooldown > 0) {
             cooldown--;
             return Status.RUNNING;
@@ -413,7 +439,7 @@ public final class Interaction {
         };
         if (hardFail) return Status.FAILED;
         if (!fired) return Status.RUNNING;             // 攻击冷却未结束时等待，不将其视为失败。
-        if (++fires >= timing.limit) return Status.DONE;
+        if (++fires >= timing.limit || finishRequested) return Status.DONE;
         cooldown = timing.interval;
         return Status.RUNNING;
     }
@@ -503,21 +529,36 @@ public final class Interaction {
         if (!aimReady(hit.getLocation())) {
             return false;
         }
+        // 镜头在准备与出手之间仍可能变化；真正发右键前再核对台面或机械手前端，禁止向机壳发送无效点击。
+        if (!fallingThrough && !CreateInteractionSurface.forUse(player.level().getBlockState(block),
+                player.getItemInHand(hand).getItem()).accepts(hit)) {
+            failReason = "the native machine interaction region is not under the crosshair";
+            failType = FailureType.OCCLUDED;
+            hardFail = true;
+            return false;
+        }
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
             receipt = context.actions().useItem(
                     context, hand, itemUseConfirmation(hand, before),
                     CONFIRM_TIMEOUT_TICKS);
         } else {
+            var confirmation=blockUseConfirmation(hit,hand);
+            // 持链缺料时先保留原生起点，直接把数量缺口交回规划者，避免盲目点击清掉选择后只收到超时。
+            if (chainUse!=null && chainUse.failure()!=null) {
+                failReason=chainUse.failure(); failType=chainUse.missingChains()>0 ? FailureType.NO_MATERIAL : FailureType.UNSUPPORTED;
+                hardFail=true; return false;
+            }
             receipt = context.actions().useBlock(
-                    context, hand, hit, blockUseConfirmation(hit, hand),
-                    CONFIRM_TIMEOUT_TICKS);
+                    context, hand, hit, confirmation,
+                    chainUse==null ? CONFIRM_TIMEOUT_TICKS : 100);
+            // 仅记录真正交给原生右键入口的面，选站位时的预想朝向不能当作已点击方向。
+            submittedBlockHit = hit;
         }
         return false;
     }
 
-    // 确认成功才算完成一次。若允许物品兜底，任何其他终态都先转去使用手中物品，
-    // 目前没有区分“确认没生效”和“结果不确定”；这是审计记录 A29 的问题。
+    // 确认成功才计次；只有明确未生效才允许物品兜底，超时后必须保留原回执并交回现场检查。
     private boolean settleUseReceipt(LocalPlayerContext context, String action) {
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) {
@@ -525,13 +566,16 @@ public final class Interaction {
         }
         NativeActionReceipt.Status status = receipt.status();
         String detail = receipt.detail();
+        lastUseReceipt = receipt;
         receipt = null;
         if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             lastUseOutcome = "confirmed (" + action + ")";
+            if (chainUse!=null) chainUse.confirmed();
             fallingThrough = false;
             return true;
         }
-        if (itemFallthrough && !fallingThrough) {
+        if (status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED
+                && chainUse==null && itemFallthrough && !fallingThrough) {
             fallingThrough = true;
             return false;
         }
@@ -548,6 +592,14 @@ public final class Interaction {
         BlockPos adjacent = clicked.relative(hit.getDirection()).immutable();
         var clickedBefore = player.level().getBlockState(clicked);
         ItemStack heldBefore = player.getItemInHand(usedHand).copy();
+        // Create 首次持链右键只改变客户端选择标记；后续接线则必须观察双向端点和材料扣账。
+        chainUse=ChainConveyorUse.prepare(player,clicked,usedHand);
+        if (chainUse!=null) return chainUse;
+        // 明确用空手操作曲柄时验证其原生发电反馈；菜单弹出或无关库存变化不能冒充已经摇动曲柄。
+        if (heldBefore.isEmpty()) {
+            var manual = CreateManualInput.confirmation(player.level(), clicked);
+            if (manual != null) return manual;
+        }
         int beforeMenu = player.containerMenu.containerId;
         NativeConfirmation adjacentChanged = player.level().isLoaded(adjacent)
                 ? NativeConfirmation.blockChanged(
@@ -576,6 +628,20 @@ public final class Interaction {
      */
     public String lastUseOutcome() {
         return lastUseOutcome;
+    }
+    public ChainConveyorUse chainUse() { return chainUse; }
+    public BlockHitResult submittedBlockHit() { return submittedBlockHit; }
+
+    /** 没观察到变化不等于没发生；让任务和完成通知保留原生点击的确认边界，避免再次互换已装好的材料。 */
+    public Map<String, Object> useEvidence() {
+        if (button != Button.USE) return Map.of();
+        var last = receipt == null ? lastUseReceipt : receipt;
+        if (last == null) return Map.of();
+        boolean uncertain = last.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED
+                && last.status() != NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED;
+        return Map.of("submission_attempted", true, "native_action_status", last.status().name(),
+                "native_action_kind", last.kind().name(), "outcome_uncertain", uncertain,
+                "mechanical_retry_allowed", last.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED);
     }
 
     // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
@@ -705,4 +771,6 @@ public final class Interaction {
         ItemUseInputLease.release(this);
         InputDriver.halt(player);
     }
+    public void finishRepeating() { finishRequested = true; }
+    public int confirmedUses() { return fires; }
 }

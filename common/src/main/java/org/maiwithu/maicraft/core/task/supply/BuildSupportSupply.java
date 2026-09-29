@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -45,6 +47,7 @@ final class BuildSupportSupply {
     private int stockAt, serial;
     private SupplyNeed fulfilled;
     private boolean uncertain;
+    private boolean localSearchAttempted;
     private String failure;
 
     BuildSupportSupply(LocalPlayer player, SemanticBuildSupplyTaskRecord owner, List<SupplyNeed> options) {
@@ -99,6 +102,7 @@ final class BuildSupportSupply {
         }
         // 只有全部可用现货都查过，才尝试已加载、可直接点击且有现成工具的普通材料；搜索中心始终冻结。
         if (sources.contains(Source.MINE) && player.onGround()) {
+            localSearchAttempted = true;
             var digger = new BlockDigger(player);
             for (BlockPos cell : BlockPos.betweenClosed(origin.offset(-4, -1, -4), origin.offset(4, 2, 4))) {
                 if (!localSourceAllowed(player, cell) || digger.reachableHit(cell) == null) continue;
@@ -112,7 +116,10 @@ final class BuildSupportSupply {
                 return TaskState.RUNNING;
             }
         }
-        failure = "no sufficient carried or wireless support stock, and no easy visible local source";
+        // 未开放或未检查的来源不能报成没有材料；尤其仅背包模式并没有证明 AE 里缺少圆石。
+        failure = "no sufficient spare carried support; wireless stock "
+                + (stockAt > 0 ? "was checked without fulfilling this support need" : "was not checked under the current source policy")
+                + "; nearby easy materials " + (localSearchAttempted ? "were checked without a usable source" : "were not checked under the current source policy or body condition");
         return TaskState.FAILED;
     }
 
@@ -151,9 +158,12 @@ final class BuildSupportSupply {
     SupplyNeed fulfilled() { return fulfilled; }
     long deadline() { return deadline; }
     Map<String, Object> receipt() {
-        return Map.of("purpose", "temporary_support", "attempts", List.copyOf(attempts), "outcome_uncertain", uncertain,
+        var data = new LinkedHashMap<String, Object>(Map.of("purpose", "temporary_support", "attempts", List.copyOf(attempts), "outcome_uncertain", uncertain,
                 "failure_code", failure == null ? "" : "local_support_unavailable", "message", failure == null ? "local support supply" : failure,
-                "local_horizontal_limit", 6, "goal_satisfied", fulfilled != null);
+                "local_horizontal_limit", 6, "goal_satisfied", fulfilled != null));
+        data.put("allowed_sources", sources.stream().map(source -> source.name().toLowerCase(Locale.ROOT)).toList());
+        data.put("wireless_stock_checked", stockAt > 0); data.put("local_harvest_checked", localSearchAttempted);
+        return Map.copyOf(data);
     }
     boolean mustSettle() { return child != null && child.mustSettleBeforeSatisfiedCancellation(); }
     void cancel(LocalPlayer player) {

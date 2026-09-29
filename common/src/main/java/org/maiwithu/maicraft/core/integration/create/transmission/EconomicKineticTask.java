@@ -41,7 +41,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     private KineticSourceDiscovery discovery;
     private KineticRouteGeometry.Plan selected;
     private List<BlockPos> routeProtection=List.of();
-    private JsonObject costReport=new JsonObject(),sourceBefore,sourceAfter,targetAfter;
+    private JsonObject costReport=new JsonObject(),sourceBefore,sourceAfter,targetBefore,targetAfter;
     private Phase phase=Phase.DISCOVER;
     private int sourceIndex,linkIndex;
     private BlockEntity sourceEntity,targetEntity;
@@ -52,6 +52,9 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     private String sourceBlockId;
     private boolean sourceRefreshedAfter,resumingRoute;
     private boolean serverProof,routeBuilt,powerReady,noChange,materialsReady;
+    private boolean targetBeforeChecked;
+    private boolean mayReturnToSite, returningToSite;
+    private int siteReturns, reloadWait;
     EconomicKineticTask(LocalPlayer player,EconomicKineticTaskRecord record){super(player,record);world=player.level();}
     @Override protected void onStart() {
         target=KineticNativeView.read(world,r.target,r.targetFace,true);
@@ -68,7 +71,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     }
     @Override protected TaskState onTick() {
         try {
-            if(!current())return failure("kinetic_endpoint_changed_or_unloaded");
+            // 取料和自卫可以离开工地；先核对身体与世界，等安全回来后再读取已卸载的机器，不能将卸载当成拆机。
+            if(!bodyCurrent())return failure("kinetic_world_or_authorization_changed");
             if((r.serverProofRequired||serverProof)&&!ServerAssistClient.serverSupported("machine.snapshot")) {
                 if(ServerAssistClient.renegotiating("machine.snapshot")) { stop(player,StopReason.PREEMPTED);return TaskState.RUNNING; }
                 return failure("kinetic_server_observation_required");
@@ -81,6 +85,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
                     return failure("kinetic_material_supply_failed: "+tick.message());
                 return TaskState.RUNNING;
             }
+            if(returningToSite)return returnToSite();
+            if(!current()) {
+                if(mayReturnToSite && reinspectionAllowed(phase.name(),child!=null,routeBuilt,resumingRoute,linkIndex)) {
+                    reads.cancel(); stopNav(); returningToSite=true; reloadWait=0; return TaskState.RUNNING;
+                }
+                return failure("kinetic_endpoint_changed_or_unloaded");
+            }
+            mayReturnToSite=false;
             if(child!=null)return tickChild();
             return switch(phase) {
                 case DISCOVER -> discover();
@@ -98,10 +110,36 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         } catch(IllegalArgumentException|IllegalStateException invalid){return failure(invalid.getMessage());}
     }
     private boolean current() {
-        return player.level()==world&&player.mayBuild()&&world.dimension().location().toString().equals(r.dimension)&&world.isLoaded(r.target)
+        return bodyCurrent()&&world.isLoaded(r.target)
                 &&world.getBlockEntity(r.target)==targetEntity&&!NavigationSafetyContext.protectsUse(r.target)
                 &&(selected==null||world.isLoaded(selected.source().position())&&world.getBlockEntity(selected.source().position())==sourceEntity
                     &&!NavigationSafetyContext.protectsUse(selected.source().position())&&interfacesCurrent());
+    }
+    private boolean bodyCurrent() {
+        return player.level()==world && player.isAlive() && player.mayBuild()
+                && world.dimension().location().toString().equals(r.dimension)
+                && !NavigationSafetyContext.protectsUse(r.target)
+                && (selected==null || !NavigationSafetyContext.protectsUse(selected.source().position()));
+    }
+    static boolean reinspectionAllowed(String phase,boolean childActive,boolean built,boolean resumed,int links) {
+        // 已出手的施工和第二次接链仍保留原来的严格结算；只重开尚未施工的调查、备料阶段。
+        return !childActive && !built && !resumed && links==0
+                && List.of("DISCOVER","PLAN","SOURCE","TARGET","EXISTING","MATERIALS","BUILD").contains(phase);
+    }
+    private TaskState returnToSite() {
+        if(!near(r.target))return TaskState.RUNNING;
+        if(!world.isLoaded(r.target) || r.source!=null && !world.isLoaded(r.source)) {
+            if(++reloadWait>100)return failure("kinetic_worksite_reload_unconfirmed");
+            return TaskState.RUNNING;
+        }
+        var observed=KineticNativeView.read(world,r.target,r.targetFace,true);
+        if(observed==null || !observed.blockId().equals(target.blockId()))return failure("kinetic_target_changed_after_return");
+        // 回到原工位后作废旧端点对象、路线报价与转速快照，重新调查和算料；原生库存和方块效果保留。
+        candidates.clear(); sources=List.of(); discovery=null; selected=null; sourceEntity=null; sourceIndex=0;
+        sourceBefore=null; sourceAfter=null; targetBefore=null; targetAfter=null; sourceBlockId=null; costReport=new JsonObject();
+        routeProtection=List.of(); materialsReady=false; targetBeforeChecked=false; sourceRefreshedAfter=false;
+        returningToSite=false; mayReturnToSite=false; siteReturns++; phase=Phase.DISCOVER;
+        onStart(); return TaskState.RUNNING;
     }
     private boolean interfacesCurrent() {
         var from=KineticNativeView.read(world,selected.source().position(),selected.sourceFace(),selected.source().chainInterface());
@@ -117,7 +155,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         }
         sources=sources.stream().filter(value->!value.endpoint().position().equals(r.target)).toList();
         if(sources.isEmpty())return failure("kinetic_no_loaded_powered_source: inspect or name an accessible existing city outlet");
-        if(target.powered()) {
+        if(target.powered()&&!r.requireChainConveyor) {
             var source=sources.getFirst().endpoint();
             selected=new KineticRouteGeometry.Plan("existing_connection",source,null,target.endpoint(),r.targetFace,List.of(),List.of(),Map.of());
             routeProtection=List.of(source.position(),r.target);
@@ -131,7 +169,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             if(source.endpoint().position().equals(r.target))return TaskState.RUNNING;
             int span=ChainConveyorBridge.available()?ChainConveyorBridge.limits(world).maximumLength():32;
             try { candidates.addAll(KineticRouteGeometry.generate(source.endpoint(),target.endpoint(),new KineticPlanningTerrain(player.clientLevel),
-                    KineticRouteGeometry.Limits.defaults(span))); }
+                    KineticRouteGeometry.Limits.defaults(span)).stream().filter(r::accepts).toList()); }
             catch(IllegalArgumentException unavailable) { if(r.source!=null)throw unavailable; }
             if(candidates.size()>512) candidates.subList(512,candidates.size()).clear();
             return TaskState.RUNNING;
@@ -142,7 +180,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         int maxRpm=KineticRpmBudget.maximumRotationSpeed();
         candidates.removeIf(plan->sources.stream().filter(source->source.endpoint().position().equals(plan.source().position()))
                 .noneMatch(source->KineticRpmBudget.accepts(plan,source.rpm(),r.minimumRpm,maxRpm)));
-        if(candidates.isEmpty())return failure("kinetic_no_supported_economical_geometry");
+        if(candidates.isEmpty())return failure(r.requireChainConveyor ? "kinetic_no_supported_chain_conveyor_geometry" : "kinetic_no_supported_economical_geometry");
         var items=new LinkedHashSet<String>();candidates.forEach(value->items.addAll(value.bom().keySet()));
         var costs=KineticRecipeSnapshot.capture(player,items);
         var ranked=KineticRouteChoice.rank(candidates,costs);costReport=KineticRouteChoice.report(ranked);
@@ -150,6 +188,8 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(r.materialPolicy==SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 &&!player.getAbilities().instabuild)
             chosen=ranked.stream().filter(value->value.materials().missingFinalItems().isEmpty()).findFirst().orElse(chosen);
+        // 仅背包许可仍优先遵守；若因此用了已携带的长轴材料，要明说是来源限制覆盖了锁链偏好。
+        if(chosen!=ranked.getFirst())costReport.addProperty("selection_override","inventory_only_complete_carried_materials");
         costReport.add("selected",chosen.json());selected=chosen.plan();sourceEntity=world.getBlockEntity(selected.source().position());
         var preserved=new ArrayList<BlockPos>();preserved.add(selected.source().position());preserved.add(r.target);
         selected.placements().forEach(cell->preserved.add(cell.position()));routeProtection=List.copyOf(preserved);
@@ -173,42 +213,52 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             String observedId=BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString();
             if(sourceBlockId==null)sourceBlockId=observedId;
             if(!sourceBlockId.equals(KineticNativeReads.text(row,"block_id")))return failure("kinetic_native_source_changed");
-            if(!KineticNativeReads.powered(row,0))return failure("kinetic_selected_source_not_powered");
+            // 先留存本次原生观察再判断准入，真实零转速也必须随失败回执返回。
             if(after){sourceAfter=row;sourceRefreshedAfter=true;}else sourceBefore=row;
+            if(!KineticNativeReads.powered(row,0))return failure("kinetic_selected_source_not_powered");
         } else {
             var live=KineticNativeView.read(world,at,selected.sourceFace(),selected.source().chainInterface());
-            if(live==null||!live.powered())return failure("kinetic_client_source_not_powered");
+            if(live==null)return failure("kinetic_client_source_not_powered");
+            sourceBlockId=live.blockId();
             if(after)sourceAfter=KineticPowerEvidence.client(live);else sourceBefore=KineticPowerEvidence.client(live);
+            if(after)sourceRefreshedAfter=true;
+            if(!live.powered())return failure("kinetic_client_source_not_powered");
         }
-        phase=after?Phase.TARGET_AFTER:resumingRoute||selected.family().equals("existing_connection")?Phase.TARGET:Phase.BUILD;return TaskState.RUNNING;
+        phase=after?Phase.TARGET_AFTER:resumingRoute||selected.family().equals("existing_connection")
+                ||r.requireChainConveyor&&!targetBeforeChecked?Phase.TARGET:Phase.BUILD;return TaskState.RUNNING;
     }
     private TaskState checkTarget(boolean after) {
         if(serverProof&&!near(r.target))return TaskState.RUNNING;
         if(serverProof) {
             var row=reads.snapshot(r.target,r.dimension);if(row==null)return TaskState.RUNNING;
             if(!target.blockId().equals(KineticNativeReads.text(row,"block_id")))return failure("kinetic_native_target_changed");
+            // 目标是否有电与是否属于所选网络分别报告，不能把接错网络解释为目标没有转动。
+            if(after)targetAfter=row;else targetBefore=row;
             if(!after&&KineticNativeReads.powered(row,0)) {
                 if(sourceBefore==null||!KineticNativeReads.sameNetwork(sourceBefore,row)||!KineticNativeReads.powered(row,r.minimumRpm))
                     return failure("kinetic_target_powered_by_different_or_insufficient_network");
-                if(!resumingRoute){phase=Phase.EXISTING;return TaskState.RUNNING;}
+                if(!resumingRoute&&!r.requireChainConveyor){phase=Phase.EXISTING;return TaskState.RUNNING;}
             }
             if(after) {
-                targetAfter=row;powerReady=KineticNativeReads.powered(row,r.minimumRpm)&&KineticNativeReads.sameNetwork(sourceAfter,row);
+                powerReady=KineticNativeReads.powered(row,r.minimumRpm)&&KineticNativeReads.sameNetwork(sourceAfter,row);
                 if(!powerReady)return failure("kinetic_native_power_or_membership_unverified");
             }
         } else {
             var live=KineticNativeView.read(world,r.target,selected.targetFace(),selected.target().chainInterface());
             if(live==null)return failure("kinetic_client_target_changed");
+            if(after)targetAfter=KineticPowerEvidence.client(live);else targetBefore=KineticPowerEvidence.client(live);
             if(!after&&live.powered()) {
                 if(!KineticPowerEvidence.sameNetwork(live,sourceBefore))return failure("kinetic_client_target_on_different_network");
-                if(!resumingRoute){phase=Phase.EXISTING;return TaskState.RUNNING;}
+                if(!resumingRoute&&!r.requireChainConveyor){phase=Phase.EXISTING;return TaskState.RUNNING;}
             }
-            if(after) {targetAfter=KineticPowerEvidence.client(live);powerReady=live.powered()&&Math.abs(live.rpm())>=r.minimumRpm
+            if(after) {powerReady=live.powered()&&Math.abs(live.rpm())>=r.minimumRpm
                     &&KineticPowerEvidence.sameNetwork(live,sourceAfter);if(!powerReady)return failure("kinetic_client_rotation_or_network_unverified");}
         }
         if(after&&!KineticRouteBuild.matches(player,selected))return failure("kinetic_built_geometry_changed");
         if(!after&&selected.family().equals("existing_connection"))return failure("kinetic_existing_power_disappeared");
-        phase=after?Phase.DONE:materialsReady?(resumingRoute?Phase.BUILD:Phase.SOURCE):Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
+        // 指定锁链时，即使目标已有转速，也要完成所选锁链路径，不能用原来的轴线冒充要求已满足。
+        if(!after)targetBeforeChecked=true;
+        phase=after?Phase.DONE:materialsReady?(resumingRoute||r.requireChainConveyor?Phase.BUILD:Phase.SOURCE):Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
     }
     private TaskState existing() {
         var face=r.targetFace;
@@ -234,9 +284,10 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
                     new SemanticMaterialSupplyCoordinator.Demand(
                             List.of(ResourceLocation.parse(entry.getKey())),required,"complete selected kinetic transmission"),
                     r.materialPolicy,r.allowedSources,r.allowHarm,r.protectedLabels);
+            mayReturnToSite=true;
             return TaskState.RUNNING;
         }
-        materialsReady=true;phase=resumingRoute?Phase.SOURCE:Phase.TARGET;return TaskState.RUNNING;
+        materialsReady=true;phase=resumingRoute||r.requireChainConveyor?Phase.SOURCE:Phase.TARGET;return TaskState.RUNNING;
     }
     private TaskState build() {
         if(!KineticRouteGeometry.clearanceValid(selected,new KineticPlanningTerrain(player.clientLevel)))return failure("kinetic_route_clearance_changed");
@@ -288,23 +339,39 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         return false;
     }
     private TaskState failure(String code){failureCode=code;fail(code,FailureType.UNKNOWN);return TaskState.FAILED;}
-    @Override public void stop(LocalPlayer owner,StopReason reason){supply.cancel(owner);if(child!=null)child.stop(owner,reason);super.stop(owner,reason);}
+    @Override public void stop(LocalPlayer owner,StopReason reason){
+        // 自卫暂停后允许未施工阶段回原工位重读；取消中的这次取料不占用“同库存反复配方”的已完成尝试名额。
+        if(reason==StopReason.PREEMPTED){mayReturnToSite=true;if(supply.active())materialProgress.interrupted();}
+        supply.cancel(owner);if(child!=null)child.stop(owner,reason);super.stop(owner,reason);
+    }
     @Override protected void cleanup(){supply.cancel(player);if(child!=null){child.stop(player,StopReason.REPLACED);lastChild=child.result(TaskState.CANCELLED).data();child=null;}reads.cancel();super.cleanup();}
     @Override public Map<String,Object> progress(){var out=new LinkedHashMap<String,Object>();out.put("task",name());out.put("phase",phase.name().toLowerCase());out.put("candidate_count",candidates.size());
-        out.put("chain_links_completed",linkIndex);if(child!=null)out.put("child",child.progress());if(supply.active())out.put("supply",supply.progress());return out;}
+        out.put("chain_links_completed",linkIndex);out.put("returning_to_worksite",returningToSite);if(child!=null)out.put("child",child.progress());if(supply.active())out.put("supply",supply.progress());return out;}
     @Override protected Map<String,Object> resultData() {
         var result=new LinkedHashMap<String,Object>();result.put("cost_comparison",costReport);result.put("source_selection",r.source==null?"bounded_nearest_suitable_sources":"explicit_source");
         result.put("route_built",routeBuilt);result.put("power_ready",powerReady);result.put("server_verified",serverProof&&powerReady);
-        result.put("source_power_observed",powerReady);result.put("destination_power_observed",powerReady);
+        // 两端的已观察供能分别结算；power_ready 继续只代表整条接线的网络和转速验收通过。
+        KineticPowerEvidence.append(result,"source",sourceAfter!=null?sourceAfter:sourceBefore,0);
+        KineticPowerEvidence.append(result,"destination",targetAfter!=null?targetAfter:targetBefore,r.minimumRpm);
         result.put("verification_scope",serverProof?"fresh native destination power and admitted source network identity; per-link evidence is separate":"client synchronized rotation and constructed route");
         result.put("native_connected",powerReady);result.put("machine_production_verified",false);result.put("throughput_verified",false);
         result.put("no_change",noChange);result.put("medium","kinetic");result.put("input_id",r.targetLabel);
         result.put("resumed_selected_route",resumingRoute);
-        result.put("source_native_observation_stage",sourceRefreshedAfter?"after_construction":"before_construction_with_current_client_network_check");result.put("target_native_observation_stage","after_construction");
+        result.put("worksite_reobservations_after_return",siteReturns);
+        result.put("requested_transmission",r.requireChainConveyor?"chain_conveyor":"auto");
+        // 动力通过只对实际接入端点成立，回执必须露出方块类型，不能让显示标签掩盖接错设备。
+        result.put("selected_destination_block",target==null?"unobserved":target.blockId());
+        result.put("selected_source_block",sourceBlockId==null?"unobserved":sourceBlockId);
+        result.put("existing_blocks_preserved",true);
+        result.put("source_native_observation_stage",sourceAfter!=null
+                ? sourceRefreshedAfter?"after_construction":"before_construction_with_current_client_network_check"
+                : sourceBefore!=null?"before_construction":"not_observed");
+        result.put("target_native_observation_stage",targetAfter!=null?"after_construction":targetBefore!=null?"before_construction":"not_observed");
         result.put("source_label",r.sourceLabel);result.put("last_native_stage",lastChild);result.put("chain_connections",List.copyOf(linkEvidence));
         if(selected!=null){result.put("transmission_family",selected.family());result.put("material_bill",selected.bom());result.put("selected_source",KineticNativeReads.position(selected.source().position()));
             result.put("transmission_geometry",selected.transmissionJson());}
-        if(sourceAfter!=null)result.put("source_observation",sourceAfter);if(targetAfter!=null)result.put("target_observation",targetAfter);
+        if(sourceAfter!=null||sourceBefore!=null)result.put("source_observation",sourceAfter!=null?sourceAfter:sourceBefore);
+        if(targetAfter!=null||targetBefore!=null)result.put("target_observation",targetAfter!=null?targetAfter:targetBefore);
         if(failureCode!=null)result.put("failure_code",failureCode);return result;
     }
     @Override protected String successMessage(){KineticRouteContinuations.completed(player,r.target);return "Compared complete transmission costs, built the selected route and observed native power; production remains separate.";}

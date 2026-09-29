@@ -23,7 +23,7 @@ import static org.maiwithu.maicraft.core.task.build.BuildScaffoldDescentGeometry
 
 /** 拆自有柱的只读证明与回执门：原生挖掘由外层驱动，一格确认且身体落稳后才允许下一格。 */
 final class BuildScaffoldDescent {
-    enum Status { READY, DESCENDING, LANDED, EXIT_REQUIRED, COMPLETE, REJECTED }
+    enum Status { READY, DESCENDING, LANDED, VERIFY_GROUND, COMPLETE, REJECTED }
     record Step(BlockPos block, BlockState expected, Vec3 from, Vec3 landing) {}
     private final LocalPlayer player;
     private final Object level;
@@ -101,7 +101,7 @@ final class BuildScaffoldDescent {
         if (status == Status.REJECTED || status == Status.COMPLETE || status == Status.LANDED) return status;
         try {
             if (player.level() != level || !ordinary()) { reject("descent_body_changed"); return status; }
-            if (status == Status.EXIT_REQUIRED) { observeExit(tick); return status; }
+            if (status == Status.VERIFY_GROUND) { observeGround(tick); return status; }
             if (!armed) { reject("descent_break_not_armed"); return status; }
             Step step = step(); acknowledged |= removalAcknowledged;
             if (!view.loaded.test(step.block)) { reject("descent_step_unloaded"); return status; }
@@ -123,17 +123,18 @@ final class BuildScaffoldDescent {
     boolean advance() {
         if (status != Status.LANDED) return false;
         gone.add(step().block); index++; armed = acknowledged = false; observedTicks = 0; lastTick = Long.MIN_VALUE; settling.reset();
-        status = index == steps.size() ? Status.EXIT_REQUIRED : Status.READY; return true;
+        status = index == steps.size() ? Status.VERIFY_GROUND : Status.READY; return true;
     }
-    private void observeExit(long tick) {
-        // 柱已拆完也不算离场完成；角色须正常走到已证明的连片地面，并再次真实站稳。
-        if (!current(gone, index) || !exitCurrent()) { reject("descent_exit_changed"); return; }
+    private void observeGround(long tick) {
+        // 最后一格已有拆除回执且身体落稳后，复核当前脚下是连片独立地面；无需再走到任意选出的邻格。
+        if (!current(gone, index)) { reject("descent_exit_changed"); return; }
         count(tick); Vec3 at = player.position();
-        // 走向出口的时间和站稳观察分别计时，不能在尚未到达时耗尽六十刻站稳器、导致之后永远无法完成。
-        if (at.distanceToSqr(exit()) > .01) { settling.reset(); if (observedTicks >= 200) reject("descent_exit_timeout"); return; }
+        if (frame(view.without(gone), at).exit(at, owned.keySet()).isEmpty()) {
+            reject("descent_no_connected_exit_ground"); return;
+        }
         var stable = settling.observe(at, player.getDeltaMovement(), player.onGround(), ordinary(), tick);
-        if (stable == BuildSupportSettling.Status.READY) { status = Status.COMPLETE; reason = "descent_exit_reached"; }
-        else if (observedTicks >= 200) reject("descent_exit_timeout");
+        if (stable == BuildSupportSettling.Status.READY) { status = Status.COMPLETE; reason = "descent_connected_ground_settled"; }
+        else if (stable == BuildSupportSettling.Status.FAILED) reject("descent_ground_settling_timeout");
     }
     private boolean exitCurrent() {
         var removed = new HashSet<BlockPos>(); for (var step : steps) removed.add(step.block);

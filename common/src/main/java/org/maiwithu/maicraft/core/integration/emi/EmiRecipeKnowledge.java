@@ -57,7 +57,8 @@ public final class EmiRecipeKnowledge {
             JsonObject row;
             try {
                 row = query.reader().apply(next).deepCopy();
-                if (encodedBytes(row) > MAX_RECIPE_BYTES) row = unreadable("recipe_exceeds_description_budget");
+                // 每格都接受宽木板标签时，重复展示可压缩；配方身份及可读的原生规则仍须留给后续核对。
+                row = EmiRecipeCompaction.fit(row, MAX_RECIPE_BYTES - 1024);
             } catch (RuntimeException | LinkageError failure) { row = unreadable("recipe_metadata_unreadable"); }
             row.addProperty("index", next); row.addProperty("knowledge_only", true);
             row.addProperty("execution_support", "not_inferred_from_emi");

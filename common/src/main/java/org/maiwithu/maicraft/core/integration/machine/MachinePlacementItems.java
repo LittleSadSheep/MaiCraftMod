@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import java.util.HashSet;
+import java.util.function.Predicate;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import org.maiwithu.maicraft.core.mixin.BlockItemPlacementAccess;
 import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
@@ -67,6 +68,10 @@ public final class MachinePlacementItems {
     public static BlockState projectedFinalState(ItemStack stack, Level level, BlockPos target, Direction candidateHorizontal, BlockState initial) {
         if (initial == null || !BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals("create:vertical_gearbox")) return initial;
         if (!BuiltInRegistries.BLOCK.getKey(initial.getBlock()).toString().equals("create:gearbox") || !initial.hasProperty(BlockStateProperties.AXIS)) return null;
+        Set<Direction.Axis> neighbors = neighboringShaftAxes(level,target);
+        return neighbors == null ? null : initial.setValue(BlockStateProperties.AXIS, verticalGearboxAxis(neighbors, candidateHorizontal));
+    }
+    private static Set<Direction.Axis> neighboringShaftAxes(Level level, BlockPos target) {
         Set<Direction.Axis> neighbors = new HashSet<>();
         for (Direction face : Direction.Plane.HORIZONTAL) {
             BlockPos at = target.relative(face); if (!level.isLoaded(at)) return null;
@@ -74,7 +79,33 @@ public final class MachinePlacementItems {
             if (NativeApi.is(state.getBlock(), ROTATE) && NativeApi.truth(NativeApi.call(state.getBlock(), ROTATE,
                     "hasShaftTowards", level, at, state, face.getOpposite()))) neighbors.add(face.getAxis());
         }
-        return initial.setValue(BlockStateProperties.AXIS, verticalGearboxAxis(neighbors, candidateHorizontal));
+        return neighbors;
+    }
+    // 穷尽站位仍放不出目标状态时，报告原生物品强制朝向的现场原因，不把此类设计冲突继续说成无路可走。
+    public static Map<String,Object> placementConflict(Item item, Level level, BlockPos target, BlockState requested,
+            Predicate<BlockState> acceptsPlacedState) {
+        if (!BuiltInRegistries.ITEM.getKey(item).toString().equals("create:vertical_gearbox")
+                || !BuiltInRegistries.BLOCK.getKey(requested.getBlock()).toString().equals("create:gearbox")
+                || !requested.hasProperty(BlockStateProperties.AXIS)) return Map.of();
+        try {
+            Set<Direction.Axis> neighbors = neighboringShaftAxes(level,target);
+            if (neighbors == null || neighbors.size() != 1) return Map.of();
+            // 图纸允许任意朝向时沿用原匹配规则，不能只因默认展示状态不同就伪报冲突。
+            if (acceptsPlacedState.test(requested.setValue(BlockStateProperties.AXIS,verticalGearboxAxis(neighbors,Direction.NORTH)))) return Map.of();
+            return verticalGearboxConflict(neighbors,requested.getValue(BlockStateProperties.AXIS));
+        } catch (RuntimeException | LinkageError unavailable) { return Map.of(); }
+    }
+    static Map<String,Object> verticalGearboxConflict(Set<Direction.Axis> neighbors, Direction.Axis requested) {
+        if (neighbors.size() != 1) return Map.of();
+        Direction.Axis forced = verticalGearboxAxis(neighbors,Direction.NORTH);
+        if (requested == forced) return Map.of();
+        return Map.of("rule","create_vertical_gearbox_neighbor_alignment",
+                "requested_properties",Map.of("axis",requested.getName()),
+                "native_generated_properties",Map.of("axis",forced.getName()),
+                "neighboring_shaft_axes",neighbors.stream().map(Direction.Axis::getName).sorted().toList(),
+                "detail","Native vertical gearbox placement forces axis=" + forced.getName()
+                        + " from the current horizontal shaft neighbors; requested axis=" + requested.getName()
+                        + ". Revise the declared axis or neighboring shaft layout before resubmitting this cell.");
     }
     public static Direction.Axis verticalGearboxAxis(Set<Direction.Axis> neighboringShaftAxes, Direction candidateHorizontal) {
         if (candidateHorizontal == null || candidateHorizontal.getAxis() == Direction.Axis.Y)

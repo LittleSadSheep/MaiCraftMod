@@ -263,6 +263,12 @@ public final class SemanticMaterialSupplyCoordinator {
         clear();
     }
 
+    /** 临时自救让出身体时保留同一趟取料与返程；已经收获的田块仍须由原子任务完成补种。 */
+    public void pause(LocalPlayer player) {
+        if (child != null) child.stop(player, Task.StopReason.PREEMPTED);
+        if (returnNavigation != null) returnNavigation.pause();
+    }
+
     public static List<SemanticAcquireTaskRecord.Source> parseSources(List<String> values) {
         if (values == null || values.isEmpty()) return List.of();
         LinkedHashSet<SemanticAcquireTaskRecord.Source> result = new LinkedHashSet<>();
@@ -293,9 +299,11 @@ public final class SemanticMaterialSupplyCoordinator {
         }
         List<SemanticAcquireTaskRecord.Source> defaults = storage
                 ? List.of(SemanticAcquireTaskRecord.Source.NEARBY,
+                        SemanticAcquireTaskRecord.Source.HARVEST,
                         SemanticAcquireTaskRecord.Source.COOK,
                         SemanticAcquireTaskRecord.Source.MINE)
                 : List.of(SemanticAcquireTaskRecord.Source.NEARBY,
+                        SemanticAcquireTaskRecord.Source.HARVEST,
                         // 默认施工保留随身网络现货；调用者显式指定来源时不加入该项。
                         SemanticAcquireTaskRecord.Source.WIRELESS,
                         SemanticAcquireTaskRecord.Source.CRAFT,
@@ -343,15 +351,20 @@ public final class SemanticMaterialSupplyCoordinator {
             copy(childData, receipt, "failure_type", "failure_code", "requires_decision",
                     "requires_narration", "outcome_uncertain", "world_change_uncertain", "planning_handoff",
                     "body_preparation_required", "food_preparation", "preparation_failure");
+            // 嵌套补料同时保留查货与容量前置，区分网络没匹配库存、查询失败和背包装不下。
+            copy(childData, receipt, "wireless_stock_evidence", "inventory_capacity", "inventory_maintenance");
             // 加工前置和原生配方链接是下一次规划所需证据，不能在封装材料回执时丢掉，让模型再取同一种失败材料。
             Object options = childData.get("recovery_options");
             if (options instanceof List<?> list) receipt.put("recovery_options", safeOptions(list));
             Object issues = childData.get("issues");
             if (issues instanceof List<?> list) receipt.put("issues", safeIssues(list));
+            // 缺料交接引用的尝试历史和配方链必须一起保留，让施工者能据真实失败分支继续规划。
+            SupplyAcquisitionEvidence.append(childData, receipt);
             List<Map<String, Object>> storage = new ArrayList<>();
             if (childData.get("attempts") instanceof List<?> attempts) {
                 for (Object value : attempts) {
-                    if (value instanceof Map<?, ?> attempt && "storage".equals(attempt.get("source"))
+                    if (value instanceof Map<?, ?> attempt
+                            && ("storage".equals(attempt.get("source")) || "wireless".equals(attempt.get("source")))
                             && attempt.get("child_data") instanceof Map<?, ?> evidence) {
                         Map<String, Object> entry = new LinkedHashMap<>();
                         for (String key : List.of("terminal_access",
@@ -376,7 +389,11 @@ public final class SemanticMaterialSupplyCoordinator {
                             }
                             entry.put("server_supply_transfers", List.copyOf(transfers));
                         }
-                        if (!entry.isEmpty()) storage.add(Map.copyOf(entry));
+                        if (!entry.isEmpty()) {
+                            // 随身无线终端取得的材料也属于已发生的库存转移，仍保留来源而不捏造未提供的回执。
+                            entry.put("source", attempt.get("source"));
+                            storage.add(Map.copyOf(entry));
+                        }
                     }
                 }
             }

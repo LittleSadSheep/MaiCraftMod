@@ -62,6 +62,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 终端动态电量测试注册同名惰性物品与组件，独占进程，不能让模拟注册影响其他组的模组可用性判断。
+    nativeInventoryIdentityRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.NativeInventoryIdentityTest',
+        heap: '512m', directory: 'native-inventory-identity-regression', timeoutSeconds: 45,
+        purpose: '验证无线终端电量同步期间的原生背包交换'
+    ],
     // 原生多物品放置映射需要临时注册模拟模组；独占进程避免改变其他组对未安装模组的判断。
     nativeProjectMaterialsRegression: [
         entry: 'org.maiwithu.maicraft.core.task.build.NativeBuildProjectMaterialsTest',
@@ -118,6 +124,12 @@ def regressionSuites = [
         heap: '512m', directory: 'combat-regression', timeoutSeconds: 45,
         purpose: '验证受伤证据与自动自卫'
     ],
+    // R21 距离循环使用独立入口，单独核对格心站位与真实玩家攻击距离的边界。
+    combatStanceReplayRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.CombatStanceReplayTest',
+        heap: '512m', directory: 'combat-stance-replay-regression', timeoutSeconds: 45,
+        purpose: '回放近战站位与原生出刀边界'
+    ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
         heap: '768m', directory: 'optional-server-regression', timeoutSeconds: 90,
@@ -127,6 +139,22 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.core.task.dimension.PortalRegressionSuite',
         heap: '512m', directory: 'portal-regression', timeoutSeconds: 45,
         purpose: '验证传送门准备、权限与原生激活'
+    ],
+    semanticBlockSearchRegression: [
+        entry: 'org.maiwithu.maicraft.intent.SemanticBlockSearchTest',
+        heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
+        purpose: '验证已加载方块发现的证据、缺席语义与坐标不外泄'
+    ],
+    // 配方补料回放使用独立入口，核对替代原料回退与已观察效果后的承诺边界。
+    recipeFrontierFallbackRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.acquire.RecipeFrontierFallbackTest',
+        heap: '512m', directory: 'recipe-frontier-fallback-regression', timeoutSeconds: 60,
+        purpose: '回放配方前沿替代材料失败与承诺边界'
+    ],
+    stonecuttingProcessRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.stonecutter.StonecuttingProcessTest',
+        heap: '512m', directory: 'stonecutting-process-regression', timeoutSeconds: 45,
+        purpose: '验证石切机原生工序的参数校验、站点匹配与诚实失败路径'
     ],
 ]
 

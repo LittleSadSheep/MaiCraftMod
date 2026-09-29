@@ -41,7 +41,7 @@ public final class SemanticAbilityCatalog {
                             field("typing_interval_ms", "integer", "Time between displayed characters, 50-1000 ms, default 100. A slow client may take longer; it never bursts to catch up. The completed draft remains visible for 250 ms before automatic submission.")));
             case MachineAbilityAdapter.INSPECT -> contract(
                     // 新工地走一次场地感知；这里保留查看已有设备、菜单操作前取证及移动结构观察。
-                    "Inspect an existing machine or observed physical structure. Default mode=full exports actual map blocks/states as as_built_blueprint, never copied from the saved design. mode=diff compares current map targets to the recorded design. Newly completed machines are automatically recorded and receive one completion diff; there is no continuous build-time diff. For new construction use perceive(view=construction_site). World surveys retain native component evidence and snapshot_id; structure_id retains its separate moving-structure observation.",
+                    "Inspect an existing machine or observed physical structure. Default mode=full exports actual map blocks/states as as_built_blueprint, never copied from the saved design. mode=diff directly compares current targets to the entire recorded design; it returns blueprint_diff without a new region survey, component inventory scan or snapshot_id. Reuse the existing construction anchor for subsequent blueprint edits. Newly completed machines are automatically recorded and receive one completion diff; there is no continuous build-time diff. For new construction use perceive(view=construction_site). Full world surveys retain native component evidence and snapshot_id; structure_id retains its separate moving-structure observation.",
                     targets("current_place", "coordinates", "landmark", "area", "prior_result"),
                     fields(
                             field("label", "string", "Short durable machine label; required unless the target already supplies one. Stored as a landmark; observing grants no mutation authority."),
@@ -70,14 +70,15 @@ public final class SemanticAbilityCatalog {
                             field("allow_modify", "boolean", "Set true when the player's instructions authorize construction at this site."),
                             field("allow_use", "boolean", "Required true with production: authorizes operating the declared machine after construction. Omit when production is absent."),
                             field("material_policy", "string", "ordinary, storage_available (including an existing AE2 network), or inventory_only; exact machine items are never substituted."),
-                            field("replace_existing", "boolean", "Allow removing ordinary obstructing blocks in the compiled footprint; block entities stay protected unless replace_block_entities is also true. Default false."),
-                            field("replace_block_entities", "boolean", "Also allow replacing existing block entities at declared targets; requires replace_existing=true and authorization for those changes. Default false."),
+                            // 建造授权直接覆盖声明范围；额外字段用于主动保留，不能诱导模型再次为同一块地申请许可。
+                            field("replace_existing", "boolean", "Defaults true within authored blueprint targets; set false only to deliberately preserve occupied cells. Unlisted cells are outside this replacement scope."),
+                            field("replace_block_entities", "boolean", "Defaults true when replacement is enabled, including declared old machine components; set false only to deliberately preserve block entities."),
                             field("protected_labels", "array<string>", "Remembered areas that construction and material acquisition must preserve.")));
             case MachineAbilityAdapter.OPERATE -> contract(
                     "Use surveyed machines through native evidence. run_production accepts a v1 production network or a v2 native process; inspect_machine supplies matching mechanism contracts. Existing menu transfers, controls and AE2 supply retain their own evidence requirements. Success reports verified effects.",
                     targets("landmark", "area", "nearest", "coordinates", "prior_result"),
                     fields(
-                            field("operation", "string", "run_production, watch_production, cancel_watch, drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. run_production executes v1 networks or finite v2 processes. watch_production registers a v1 server read-only monitor before a future batch; registration is not completion, and it releases the body without refills or forced chunk loads. cancel_watch stops monitoring only. close_menu/cancel_watch omit target."),
+                            field("operation", "string", "run_production, watch_production, cancel_watch, drive_vehicle, open_menu, close_menu, deposit, withdraw, set_control or ae2_supply. run_production executes v1 networks or finite v2 processes. watch_production registers a v1 server read-only monitor before a future batch; registration is not completion, and it releases the body without refills or forced chunk loads. cancel_watch stops monitoring only. close_menu closes an owned machine menu or ordinary player inventory with empty cursor and crafting grid. close_menu/cancel_watch omit target."),
                             productionField(),
                             field("job_id", "string", "cancel_watch only: exact job_id from monitor registration or perceive(machines). Monitors belong to the current player connection and dimension; reconnect requires new registration."),
                             field("minimum_process_events", "integer", "watch_production only: required native completions per process, 1-100, default 1. Use a small repeated sample for commissioning; exact requested target output still comes from production.observation.minimum_output."),
@@ -87,7 +88,8 @@ public final class SemanticAbilityCatalog {
                             field("material_policy", "string", "run_production: v1 configuration-tool acquisition policy; v2 accepts inventory_only and uses carried inputs. Acquire missing inputs separately. build_machine uses its existing construction supply policy."),
                             field("structure_id", "string", "drive_vehicle only: observed physical-structure UUID. target is the destination. Existing control bindings are preserved; no force/stability model is assumed."),
                             field("allow_use", "boolean", "Required true only when the player's instructions authorize this use of the machine/network; never infer ownership from a label."),
-                            field("snapshot_id", "string", "run_production/watch_production/set_control/open_menu: fresh inspect_machine receipt for the exact target label; consumed by operation."),
+                            // 生产复用同会话机器范围并重验现场；有时效的菜单、库存交易与控制观察仍分别绑定原回执。
+                            field("snapshot_id", "string", "Receipt for the exact target label, consumed by operation. run_production revalidates same-session observed geometry internally before fresh native input checks; age alone does not require another inspection. watch_production/set_control/open_menu still require a fresh receipt."),
                             field("component_index", "integer", "open_menu only: index of the desired block in snapshot.relative_blocks; omit to use the marked center. Must come from that exact observation."),
                             field("menu_receipt_id", "string", "deposit/withdraw only: receipt from perceive(view=machine_menu) after open_menu. Omit target; the receipt already binds the exact native menu. Inspect again after each transaction."),
                             field("entry_index", "integer", "deposit/withdraw only: exact observed native menu entry. MaiCraft chooses player inventory entries, validates slot rules and never quick-moves or swaps arbitrary contents."),
@@ -97,18 +99,18 @@ public final class SemanticAbilityCatalog {
                             field("count", "integer", "Exact item quantity, default 1: transfer 1-64, AE2 approved net increase 1-256. Use a stable execute request_key to prevent uncertain transport retries creating duplicate work."),
                             field("allow_crafting", "boolean", "ae2_supply only: may submit an existing AE2 crafting pattern, default false. Requires target={kind:nearest} without a label; selecting a specific surveyed network is unsupported.")));
             case MachineAbilityAdapter.MODIFY -> contract(
-                    "Modify an existing surveyed machine. apply_blueprint applies explicit desired blocks at anchor-relative offsets and preserves omitted positions; exactly one blueprint or blueprint_uri is required. connect_mechanical_power lets MaiCraft plan a Create rotational route. Success verifies the requested structural change; running and production are checked separately through use abilities.",
+                    "Modify an existing machine. MaiCraft refreshes its own world observations internally; a separate inspection request is optional. apply_blueprint applies explicitly declared changes, including removing old components, and preserves omitted positions; exactly one blueprint or blueprint_uri is required. Success verifies the requested structural change; running and production are checked separately.",
                     targets("landmark", "area"),
                     fields(
-                            field("operation", "string", "apply_blueprint, connect_mechanical_power or connect_external_input. External utility hookup is a separate task after construction; inspect the machine and choose a remembered city source."),
-                            field("snapshot_id", "string", "Fresh complete receipt for the exact destination machine label; consumed before execution. Resurvey before another attempt."),
+                            field("operation", "string", "apply_blueprint, connect_mechanical_power or connect_external_input. External utility hookup is a separate task after construction; MaiCraft refreshes the named target internally."),
+                            field("snapshot_id", "string", "Optional prior observation reference. Modification resolves the named target and refreshes its own observations; no repeated inspect is required."),
                             field("source_label", "string", "Remembered existing outlet in the same dimension. For a kinetic connect_external_input, omit to compare nearby loaded powered sources; an explicit source remains fixed. Required for other utility media and connect_mechanical_power."),
                             field("source_radius", "integer", "Kinetic automatic horizontal search radius, 8..128, default 64. Sources must be visible and within 4 blocks of current work height; hidden/protected outlets are excluded. Use perceive(view=kinetic_sources, query?, radius?) for compact candidate source_labels. Never infer ownership from proximity; explicitly named authorized sources retain their own checks."),
                             field("input_id", "string", "connect_external_input only: exact external input id from perceive(machines). Create compares native interfaces and full transmission costs; FE/Mek cable hookup requires server assistance. Other media reject before mutation."),
                             blueprintField(), blueprintUriField(),
                             field("material_policy", "string", "apply_blueprint/connect_external_input: ordinary, storage_available or inventory_only."),
-                            field("replace_existing", "boolean", "apply_blueprint only: allow replacing ordinary obstructing blocks, default false. Declare minecraft:air to request removal at an explicit offset."),
-                            field("replace_block_entities", "boolean", "apply_blueprint only: also allow replacing block entities at declared targets, default false; requires replace_existing=true and authorization for those changes."),
+                            field("replace_existing", "boolean", "apply_blueprint defaults true for the already authorized declared changes. Set false only to deliberately preserve occupied cells. Declare minecraft:air to remove a named cell."),
+                            field("replace_block_entities", "boolean", "apply_blueprint defaults true when replacement is enabled; declared old machine components need no separate permission flag. Set false only to deliberately preserve block entities."),
                             field("protected_labels", "array<string>", "apply_blueprint/connect_external_input: remembered areas that modification and material acquisition must preserve."),
                             field("allow_modify", "boolean", "Required true when the player's instructions authorize this change; existing authorization carries through the workflow.")));
             case GeneralAbilityAdapter.FIND_ENTITY -> contract(
@@ -122,6 +124,14 @@ public final class SemanticAbilityCatalog {
                             field("max_distance", "integer", "Bounded physical search distance from start; default 512, maximum 2048."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that matching evidence must not use.")));
+            case GeneralAbilityAdapter.FIND_BLOCK -> contract(
+                    "Find named blocks through loaded client evidence; MaiCraft owns the scan and keeps concrete positions internal. Only verified counts, matching block ids and a nearest-distance statistic are reported.",
+                    targets("current_place", "nearest"),
+                    fields(
+                            field("block_id", "resource_id", "One acceptable registered block type."),
+                            field("block_ids", "array<resource_id>", "Acceptable registered block types."),
+                            field("count", "integer", "Required distinct observed positions; a partial count is not success."),
+                            field("max_distance", "integer", "Bounded loaded-world scan radius from the standing place; default 64, maximum 128.")));
             case GeneralAbilityAdapter.COMBAT -> contract(
                     "Defend against or engage semantic living targets visible in loaded terrain; MaiCraft resolves concrete entities and combat movement.",
                     targets("entity", "player", "nearest"),
@@ -143,8 +153,10 @@ public final class SemanticAbilityCatalog {
                             field("entity_type_id", "resource_id", "Optional namespaced entity type, never a runtime entity identifier."),
                             field("entity_name", "string", "Optional visible custom/display name."),
                             field("player_name", "string", "Optional exact player name."),
-                            field("item_id", "resource_id", "Optional carried item whose ordinary use is intended."),
+                            field("item_id", "resource_id", "Optional carried item whose ordinary use is intended. Omit to prepare an empty main hand before interacting with the target."),
+                            field("item_resource_id", "string", "Block use only, requires item_id: copy an observed resource_id from situation inventory variants or equipment.main_hand to choose that exact carried component variant. Without it, a matching current held stack is preferred."),
                             field("purpose", "string", "Open, talk, trade, use or till. Till prepares a suitable hoe when item_id is omitted."),
+                            field("duration_seconds", "number", "Optional finite duration from 0 to 30 for empty-hand Create hand-crank use. Zero or omitted means one activation; the Mod repeats native uses and settles the final receipt."),
                             field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));
@@ -342,6 +354,14 @@ public final class SemanticAbilityCatalog {
                             field("max_levels_spent","integer","Required maximum actual player levels consumed, 0..3. This is not the offer's required level, which must also be met."),
                             field("max_lapis","integer","Required maximum lapis lazuli items consumed, 0..3. Insufficient material or budget stops before submission."),
                             field("search_radius","integer","Nearest-table search radius in loaded terrain, 1..64 blocks, default 32; exact targets retain their given position.")));
+            case StonecutAbilityAdapter.ABILITY -> contract(
+                    "Cut a carried input into the requested output at an existing loaded vanilla stonecutter. "
+                            + "Uses a visible native GUI: loads the exact input count, resolves the real recipe list for that input, selects the requested output once, then quick-moves and verifies every crafted piece before returning leftovers and closing. "
+                            + "No station construction, material acquisition or output substitution. A durable reservation blocks automatic repeats once crafting has begun; inspect before requesting a new operation.",
+                    targets("coordinates","landmark","nearest"), fields(
+                            field("item_id","resource_id","Required carried input type, one item per craft, for example minecraft:stone."),
+                            field("output_item_id","resource_id","Required requested product; the input must have a real stonecutter recipe producing it, for example minecraft:stone_bricks."),
+                            field("count","integer","Crafts to perform, 1..64, default 1; each craft consumes one input and is verified separately.")));
             case "maicraft:trade" -> contract(
                     "Obtain an item from a real loaded merchant. MaiCraft selects the merchant and offer, approaches in first person, performs synchronized payment/result transfers and verifies the final inventory.",
                     targets("nearest", "area", "landmark", "prior_result"),
@@ -362,7 +382,8 @@ public final class SemanticAbilityCatalog {
                             field("item_tag", "resource_id", "A semantic item tag such as minecraft:beds or minecraft:planks; the Mod resolves live members."),
                             field("item_tags", "array<resource_id>", "Several semantic item tags combined as acceptable alternatives."),
                             field("count", "integer", "Required final aggregate main-inventory count, from 1 to 2304; default 1."),
-                            field("allowed_sources", "array<string>", "Permitted inventory, nearby, wireless, storage, craft, cook, mine, trade or hunt sources. wireless only uses observed stock from a carried terminal, without ordinary containers or network crafting. Defaults include wireless; an explicit list cannot gain unlisted sources. This is not execution order; prerequisites inherit these permissions."),
+                            // 普通取材不由模型缩成采矿或合成，先使用随身与无线现货；只有玩家明确限制来源才收窄许可。
+                            field("allowed_sources", "array<string>", "Optional hard restriction: omit for ordinary acquisition; carried inventory and carried-wireless stock precede nearby world sources. Only narrow this list for an explicit user restriction. Permitted families: inventory, nearby, wireless, storage, harvest, craft, cook, mine, trade, hunt. harvest replants loaded mature crops; nearby collects safe loose drops; wireless uses observed stock without ordinary containers or network crafting. Defaults include wireless and harvest. Explicit restrictions and prerequisite inheritance remain enforced; list order is not execution order."),
                             field("allow_harm", "boolean", "Whether acquiring may harm living entities; default false."),
                             field("protected_labels", "array<string>", "Named entities, areas or possessions that must not be touched."),
                             field("radius", "integer", "Optional bounded loaded-world evidence radius."),
@@ -415,8 +436,8 @@ public final class SemanticAbilityCatalog {
                     targets("landmark", "area", "prior_result"),
                     fields(
                             field("source_label", "string", "Existing powered network or landmark."),
-                            field("target_label", "string", "Destination machine, structure or landmark."),
-                            field("transmission", "string", "Requested family such as chain_drive."),
+                            field("target_label", "string", "Remembered destination machine/structure/landmark, or a registered block ID such as create:chain_conveyor to select that exact device type inside the target region."),
+                            field("transmission", "string", "auto (default) compares routes; chain_conveyor requires 锁链传动轮; encased_chain_drive requires 链式传动箱. The legacy chain_drive alias means encased_chain_drive. This connection preserves existing blocks; explicit old-line removal uses modify_machine."),
                             field("allow_new_receiver", "boolean", "May terminate at the nearest authoritative endpoint evidence when that evidence is a verified empty receiver rather than a machine."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only; applied after route investigation."),
                             field("allowed_sources", "array<string>", "Permitted semantic material sources; storage is tried before crafting."),

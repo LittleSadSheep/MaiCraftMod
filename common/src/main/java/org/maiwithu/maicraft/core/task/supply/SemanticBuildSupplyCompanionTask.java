@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.supply;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
@@ -12,13 +13,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.inventory.InventoryWorkItems;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildOrder;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationCargo;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupply;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinator;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
 import org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials;
@@ -82,7 +84,7 @@ final class SemanticBuildSupplyCompanionTask
     private SemanticBuildMaterialBinding.Proposal materialProposal;
     private final SemanticMaterialSupplyCoordinator supply =
             new SemanticMaterialSupplyCoordinator();
-    private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
+    private final InventoryDepositCoordinator spoilSupply = new InventoryDepositCoordinator();
     private final Map<ResourceLocation, ResourceLocation> selectedVariants =
             new LinkedHashMap<>();
     private final List<BlockPos> plannedMutationCells = new ArrayList<>();
@@ -139,6 +141,16 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override
     protected TaskState onTick() {
+        // 建造子任务先登记后续用途，取材层整理背包时不得把本批或下一工序材料当成闲置物品。
+        var workItems = new LinkedHashSet<Item>();
+        if (activePlan != null) {
+            workItems.addAll(activePlan.futureWorkItems());
+            activePlan.targets.forEach(target -> workItems.add(target.item()));
+        }
+        return InventoryWorkItems.within(workItems, this::tickConstruction);
+    }
+
+    private TaskState tickConstruction() {
         if (!prepared) {
             advanceMaterialBinding();
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
@@ -149,7 +161,7 @@ final class SemanticBuildSupplyCompanionTask
             if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
             if (clearanceSurvey.blocked()) {
                 clearanceReport = clearanceSurvey.report();
-                stopWith(BuildClearanceSurvey.FAILURE, "Clearance whitelist excludes site obstacles; consider clearance_report site offsets.",
+                stopWith(BuildClearanceSurvey.FAILURE, clearanceSurvey.failureMessage(),
                         FailureType.NO_SUPPORT);
                 return TaskState.FAILED;
             }
@@ -412,11 +424,11 @@ final class SemanticBuildSupplyCompanionTask
         cargoEffectsSeen |= Boolean.TRUE.equals(tick.receipt().get("effects_started"))
                 || tick.receipt().get("last_container_receipt") instanceof Map<?, ?> child && Boolean.TRUE.equals(child.get("effects_started"));
         spoilOutcomeUncertain = outcomeUnknown(tick.receipt()) || spoilOutcomeUncertain
-                && tick.status() != BuildExcavationSpoilSupply.Status.DEPOSITED;
+                && tick.status() != InventoryDepositCoordinator.Status.DEPOSITED;
         r.extendDeadlineTo(spoilSupply.childDeadline());
-        if (tick.status() == BuildExcavationSpoilSupply.Status.RUNNING) return TaskState.RUNNING;
+        if (tick.status() == InventoryDepositCoordinator.Status.RUNNING) return TaskState.RUNNING;
         rounds.add(Map.of("kind", "excavation_spoil", "terminal_state", tick.status().name().toLowerCase(), "data", tick.receipt()));
-        if (tick.status() == BuildExcavationSpoilSupply.Status.FAILED || spoilOutcomeUncertain) {
+        if (tick.status() == InventoryDepositCoordinator.Status.FAILED || spoilOutcomeUncertain) {
             if (!cargoEffectsSeen && storageUnavailableWithoutEffects(tick.receipt()) && cargoMenuSettled()) {
                 if (!canContinueWithCargo()) {
                     stopWith("inventory_capacity_blocked", "Storage has no available capacity and the carried inventory cannot safely accept the next construction batch.", FailureType.NO_SPACE);
@@ -796,8 +808,8 @@ final class SemanticBuildSupplyCompanionTask
                 data.put("material_planning_required", true);
             }
             if (failedSupply.containsKey("recovery_options")) data.put("recovery_options", failedSupply.get("recovery_options"));
-            // 材料工序本身因身体状态停止时也要直达施工外层，不能再被误解为原料数量不够。
-            for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure"))
+            // 身体状态或背包容量阻止取料时也要直达施工外层，不能再被误解为原料数量不够。
+            for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure", "inventory_capacity"))
                 if (failedSupply.containsKey(key)) data.put(key, failedSupply.get(key));
         }
         if (!issues.isEmpty()) data.put("issues", List.copyOf(issues));
@@ -874,6 +886,14 @@ final class SemanticBuildSupplyCompanionTask
         return Map.copyOf(data);
     }
 
+    /** 暂停传到真正持有身体的施工批次及取料器，不能只停父任务自己的空导航引用。 */
+    @Override public void stop(LocalPlayer companion, Task.StopReason reason) {
+        if (reason == Task.StopReason.PREEMPTED) {
+            if (activeChild != null) activeChild.stop(companion, reason);
+            supply.pause(companion);
+        }
+        super.stop(companion, reason);
+    }
     @Override protected void cleanup() {
         // 总任务结束时，取料与施工小任务也要停止，并释放整份方案的预览记录。
         BuildPreviewGate.release(r);

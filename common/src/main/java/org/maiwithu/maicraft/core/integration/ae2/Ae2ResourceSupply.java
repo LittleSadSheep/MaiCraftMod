@@ -344,6 +344,10 @@ public final class Ae2ResourceSupply {
     public static boolean hasCarriedWirelessTerminal(LocalPlayer player) {
         return Ae2TerminalAccess.findWireless(player) != null;
     }
+    /** 只给已有水桶原生转换查询开入口，不把空桶或水虚报为仓库中的成品水桶。 */
+    public static int nativeWaterFillProbeCapacity(LocalPlayer player, List<ResourceLocation> ids, int missing, StockEvidence.Snapshot stock) {
+        return Ae2WaterBucketFill.probeCapacity(player, ids, missing, stock);
+    }
 
     public static String availabilityDetail() {
         return Ae2ReflectionBridge.availability().detail();

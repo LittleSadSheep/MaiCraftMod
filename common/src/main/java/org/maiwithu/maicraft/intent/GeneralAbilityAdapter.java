@@ -39,6 +39,8 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
+import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
@@ -62,10 +64,11 @@ public final class GeneralAbilityAdapter {
     public static final String CONTAINER = "maicraft:use_container";
     public static final String MANAGE_CONTAINER = "maicraft:manage_container";
     public static final String FIND_ENTITY = "maicraft:find_entity";
+    public static final String FIND_BLOCK = "maicraft:find_block";
 
     private static final Set<String> ABILITIES = Set.of(
             COMBAT, INTERACT, FOLLOW, CONSUME, EQUIP, FISH, DROP, CONTAINER, MANAGE_CONTAINER,
-            FIND_ENTITY, USE_ITEM, HARVEST_BLOCK);
+            FIND_ENTITY, FIND_BLOCK, USE_ITEM, HARVEST_BLOCK);
     private static final Set<String> EXECUTION_FIELDS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "x", "y", "z", "button",
             "hold_ticks", "slot_index", "source_slot", "destination_slot", "from_slot",
@@ -110,6 +113,7 @@ public final class GeneralAbilityAdapter {
             case CONTAINER -> interact(goal, player, runtime, true);
             case MANAGE_CONTAINER -> manageContainer(goal);
             case FIND_ENTITY -> findEntity(goal);
+            case FIND_BLOCK -> findBlock(goal);
             default -> throw new IllegalArgumentException("unsupported general ability: " + goal.ability());
         };
     }
@@ -374,6 +378,55 @@ public final class GeneralAbilityAdapter {
         return new IntentAction.Tool("find_entity", args.toString());
     }
 
+    private static IntentAction findBlock(Goal goal) {
+        // 先把可接受的方块种类整理成去重名单；没注册的名字集中记录，稍后一次告诉调用者。
+        JsonObject p = goal.parameters();
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
+        List<String> invalid = new ArrayList<>();
+        if (p.has("block_ids") && p.get("block_ids").isJsonArray()) {
+            for (var element : p.getAsJsonArray("block_ids")) {
+                if (element == null || !element.isJsonPrimitive()) {
+                    invalid.add("non-string entry");
+                    continue;
+                }
+                addBlockId(element.getAsString(), requested, invalid);
+            }
+        }
+        String one = string(p, "block_id");
+        if (one != null) addBlockId(one, requested, invalid);
+        if (!invalid.isEmpty()) {
+            return decision(goal,
+                    "find_block received unknown or invalid namespaced block ids: " + invalid,
+                    List.of(option("retry", "Retry with registered block_ids only."),
+                            option("cancel", "Cancel block search.")), null);
+        }
+        if (requested.isEmpty()) {
+            return decision(goal,
+                    "find_block needs one or more semantic block_ids; runtime coordinates are not accepted.",
+                    List.of(option("retry", "Provide namespaced block_ids and an optional count."),
+                            option("cancel", "Cancel block search.")), null);
+        }
+
+        JsonArray ids = new JsonArray();
+        requested.forEach(ids::add);
+        JsonObject args = new JsonObject();
+        args.add("block_ids", ids);
+        args.addProperty("count", integer(p, "count", 1, 1, 32));
+        args.addProperty("max_distance", integer(p, "max_distance", 64, 4, 128));
+        return new IntentAction.Tool("find_block", args.toString());
+    }
+
+    private static void addBlockId(
+            String raw, Set<String> requested, List<String> invalid) {
+        // 已注册的方块加入候选名单，不认识的名字集中记录，稍后一次告诉调用者。
+        ResourceLocation id = ResourceLocation.tryParse(raw);
+        if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
+            invalid.add(String.valueOf(raw));
+        } else {
+            requested.add(id.toString());
+        }
+    }
+
     private static void addEntityType(
             String raw, Set<String> requested, List<String> invalid) {
         // 已注册的类型加入候选名单，不认识的名字集中记录，稍后一次告诉调用者。
@@ -478,6 +531,13 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel container use.")), null);
         }
         String purpose = lower(string(p, "purpose"));
+        // 精确组件身份只绑定这次方块取放；不能把实体交互或空手请求悄悄退化成按物品名随便选一叠。
+        String itemResourceId = string(p, "item_resource_id");
+        if (itemResourceId != null && (itemId(p) == null || !selector(goal, p).empty() || containerOnly))
+            throw new IllegalArgumentException("item_resource_id requires item_id and a block interaction");
+        int duration = CreateManualInput.durationTicks(p);
+        if (duration > 0 && (containerOnly || !"use".equals(purpose) || !selector(goal, p).empty()))
+            throw new IllegalArgumentException("duration_seconds requires use of a supported manual-generator block");
         if ("attack".equals(purpose) || "break".equals(purpose)) {
             return decision(goal, "Destructive interaction must use the combat or mining ability.",
                     List.of(option("replace_goal", "Replace this with combat or mining so its safety policy applies."),
@@ -515,6 +575,7 @@ public final class GeneralAbilityAdapter {
             args.addProperty("button", "right");
             args.addProperty("entity_id", candidates.getFirst().getId());
             if (itemId != null) args.addProperty("item_id", itemId);
+            else args.addProperty("empty_hand", true);
             return new IntentAction.Tool("interact_entity", args.toString());
         }
         if (blockId == null && !exactBlockTarget(goal)) {
@@ -687,16 +748,26 @@ public final class GeneralAbilityAdapter {
         use.addProperty("y", target.getY());
         use.addProperty("z", target.getZ());
         use.addProperty("required_block_id", id.toString());
+        int duration = CreateManualInput.durationTicks(goal.parameters());
+        if (duration > 0) {
+            if (itemId != null || !CreateManualInput.supported(level, target))
+                throw new IllegalArgumentException("duration_seconds is currently supported for empty-hand Create hand-crank use");
+            use.addProperty("hold_ticks", duration);
+        }
         if ("till".equals(lower(string(goal.parameters(), "purpose"))))
             use.addProperty("expected_block_id", "minecraft:farmland");
         if (itemId != null) use.addProperty("item_id", itemId);
-        Item useItem = itemId == null ? player.getMainHandItem().getItem()
+        // 未声明道具就是操作目标本身；先按空手计算站位，执行时再原生收好战斗或施工留下的主手物品。
+        else use.addProperty("empty_hand", true);
+        String itemResourceId = string(goal.parameters(), "item_resource_id");
+        if (itemResourceId != null) use.addProperty("item_resource_id", itemResourceId);
+        Item useItem = itemId == null ? Items.AIR
                 : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
         if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target, useItem)) {
             return new IntentAction.Tool("interact_at", use.toString());
         }
         BlockPos stand = interactionStand(level, player, target, player.blockPosition(), useItem);
-        // 否则找一个能站稳、能看见目标的位置。这里生成的 goto 尚未指定精确站位，会采用移动工具默认误差。
+        // 交互已经证明了具体站位，接近时必须真的到这格，不能套用普通旅行的三格误差后又报够不到。
         if (stand == null) {
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
@@ -710,6 +781,7 @@ public final class GeneralAbilityAdapter {
         travel.addProperty("x", stand.getX() + 0.5D);
         travel.addProperty("y", stand.getY());
         travel.addProperty("z", stand.getZ() + 0.5D);
+        travel.addProperty("exact", true);
         travel.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
         return new IntentAction.Chain(List.of(
                 new IntentAction.Tool("goto", travel.toString()),
@@ -1087,6 +1159,9 @@ public final class GeneralAbilityAdapter {
             return FirstPersonInteractionTargeting.visibleBucketHit(
                     level, player, eye, target, player.blockInteractionRange(), item) != null;
         }
+        // 先找到能看见真实取放区域的站位；机械手要看到前端，不能走到只能看见机壳的位置再等待超时。
+        var surface = CreateInteractionSurface.forUse(level.getBlockState(target), item);
+        if (surface.constrained()) return surface.visibleHit(level, player, eye, target, 4.5D) != null;
         return FirstPersonInteractionTargeting.hasLoadedReachLine(
                 level, player, eye, target, 4.5D);
     }

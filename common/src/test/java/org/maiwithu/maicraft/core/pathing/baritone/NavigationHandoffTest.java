@@ -38,6 +38,16 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import net.minecraft.world.entity.Entity;
 import java.util.UUID;
+import java.util.Set;
+import java.util.OptionalLong;
+import net.minecraft.core.Holder;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.util.valueproviders.ConstantInt;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.dimension.DimensionType;
+import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTask;
+import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTaskRecord;
 
 /**
  * 检查导航暂让控制和停止时的收尾：动作还没到安全位置就继续驱动，到安全位置才清按键；测试直接设置安全状态。
@@ -52,11 +62,45 @@ public final class NavigationHandoffTest {
         abandonedCallerStillReachesTheSafeBoundary(true);
         buildSelectionWaitsForReleasedNavigation();
         buildKeepsAnUnfinishedApproach();
+        fluidAimWaitsForReleasedNavigation();
         precisionWalkingDoesNotPlanGapJumps();
         replacedBodyDiscardsOrphanRoutes(false);
         replacedBodyDiscardsOrphanRoutes(true);
         suspendedWorkCanResumeAfterAnotherNavigator();
         System.out.println("NavigationHandoffTest: passed");
+    }
+
+    private static void fluidAimWaitsForReleasedNavigation() throws Exception {
+        // 覆盖仍被流体任务持有和已 stop 后由运行器继续落地的两类旧路线，均不能提前抢瞄准或倒桶。
+        for (boolean orphan : new boolean[]{false, true}) try (var world = new InteractionWorldTestHarness(); Fixture fixture = new Fixture(world.player)) {
+            // 流体预检会读取维度的水蒸发规则；夹具明确使用主世界，不能靠缺失维度跳过原生检查。
+            var dimension = new DimensionType(OptionalLong.empty(),true,false,false,true,1,true,false,0,16,16,
+                    BlockTags.INFINIBURN_OVERWORLD,ResourceLocation.withDefaultNamespace("overworld"),0,
+                    new DimensionType.MonsterSettings(false,false,ConstantInt.of(0),0));
+            field(Level.class,"dimensionTypeRegistration").set(world.level,Holder.direct(dimension));
+            world.position(new Vec3(3.5,1,5.5)); world.inventory.setItem(0,new ItemStack(Items.WATER_BUCKET));
+            BlockPos target = new BlockPos(3,1,3);
+            var running = new FluidPlacementTask(world.player,new FluidPlacementTaskRecord("fluid-handoff",1000,target,
+                    Blocks.WATER.defaultBlockState(),Set.of(target)));
+            running.start(world.player); field(FluidPlacementTask.class,"selected").setBoolean(running,true);
+            var navigation = PlayerNav.toGoal(world.player, () -> NavGoal.exact(new BlockPos(3,1,4)),1, () -> false).walkingOnly();
+            var transport = field(PlayerNav.class,"navigator").get(navigation); set(transport,"ground",fixture.nav);
+            if (orphan) fixture.nav.stop(); else field(FluidPlacementTask.class,"nav").set(running,navigation);
+            for (int tick = 0; tick < 3; tick++) {
+                world.nextTick();
+                check(running.tick(world.player) == TaskState.RUNNING && running.progress().get("phase").equals("settling_navigation"),
+                        "visible bucket target must wait for navigation handoff");
+                check(world.itemUses() == 0 && fixture.inputs.isInputForcedDown(Input.MOVE_FORWARD),
+                        "fluid aiming cannot interrupt the route's unfinished physical movement");
+                check(orphan ? fixture.nav.requiresOrphanContinuation() : field(FluidPlacementTask.class,"nav").get(running) == navigation,
+                        "navigation owner stays available until the safe handoff");
+            }
+            fixture.finishMovement(); world.nextTick(); running.tick(world.player);
+            check(field(FluidPlacementTask.class,"nav").get(running) == null
+                    && !running.progress().get("phase").equals("settling_navigation")
+                    && !fixture.inputs.isInputForcedDown(Input.MOVE_FORWARD), "same fluid task can aim after actual navigation release");
+            running.result(TaskState.CANCELLED);
+        }
     }
 
     private static void replacedBodyDiscardsOrphanRoutes(boolean pendingBelongsToNewBody) throws Exception {

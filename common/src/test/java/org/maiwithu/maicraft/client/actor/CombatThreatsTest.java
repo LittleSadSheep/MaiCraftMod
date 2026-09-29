@@ -42,6 +42,8 @@ public final class CombatThreatsTest {
         MobDefenseDamageTest.main(args);
         CreeperDefenseTest.main(args);
         CombatOutcomeTest.main(args);
+        // 追击范围使用本次参与者，防止无关敌怪不断接力把角色赶离工位。
+        RetreatThreatsTest.main(args);
         RangedShotTest.main(args);
         DamageAttentionTest.main(args);
         DamageEpisodeTest.main(args);

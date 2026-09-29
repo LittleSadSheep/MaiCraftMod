@@ -36,6 +36,11 @@ public interface BodyControlPort {
 
     void requestLook(float yaw, float pitch, long leaseTickRevision);
 
+    /** 普通导航视角在同刻让位于实际交互瞄准；下一刻未续交互请求时自动恢复路线视角。 */
+    default void requestNavigationLook(float yaw, float pitch, long leaseTickRevision) {
+        requestLook(yaw, pitch, leaseTickRevision);
+    }
+
     /** 当前游戏刻就要交互时，先让真实镜头射线对准目标，避免点击落到别处。 */
     default void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
         requestLook(yaw,pitch,leaseTickRevision);

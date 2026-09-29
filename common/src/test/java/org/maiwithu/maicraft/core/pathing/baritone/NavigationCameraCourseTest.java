@@ -3,6 +3,11 @@ package org.maiwithu.maicraft.core.pathing.baritone;
 // 用连续角度请求检查镜头转速、同一刻重复请求和左右小幅抖动；不需要启动游戏画面。
 public final class NavigationCameraCourseTest {
     public static void main(String[] args) {
+        // 普通上坡跳跃、落地和下坡请求交替时视角保持水平附近，潜泳继续采用自己的原生方向。
+        for (float pitch : new float[]{80, -30, 8, 90, -90}) {
+            check(NavigationCameraCourse.pitch(pitch, false) == 8, "walking and jumping do not alternate path-point pitch");
+            check(NavigationCameraCourse.pitch(pitch, true) == pitch, "submerged navigation keeps its requested dive direction");
+        }
         var course = new NavigationCameraCourse();
         course.target(0, 0);
         check(course.target(90, 0) == 90, "only the final first-tick request establishes the initial course");

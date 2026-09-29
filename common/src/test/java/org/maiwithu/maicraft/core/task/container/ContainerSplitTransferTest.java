@@ -26,7 +26,24 @@ public final class ContainerSplitTransferTest {
         for (int count : new int[]{49, 33, 29}) exactNativeSlots(64, count, 0);
         exactNativeSlots(63, 32, 7); guardedChangesAndCancellation(); sourceReturnPermission(); parentChoosesSplit(); parentCountsConfirmedClicks();
         settlementStopsAtEmptyCursor(); unstartedParentDoesNotClick();
+        cappedBackpackPickup();
         System.out.println("ContainerSplitTransferTest: native slot halves, delayed receipts, capacity and foreign cursor guards passed");
+    }
+    private static void cappedBackpackPickup() throws Exception {
+        // 回放已核对的精妙点击语义；存储512、鼠标最多64，只取15并确认原格余量497。
+        try (var fixture = new Fixture(64, 15, 0)) {
+            fixture.stock.getItem(0).setCount(512); fixture.cappedPickup = true;
+            fixture.transfer = new ContainerSplitTransfer(fixture.world.player, fixture.menu, fixture.move, 15, true,
+                    slot -> slot == 0 ? 1024 : 64);
+            var state = ContainerSplitTransfer.Status.RUNNING;
+            for (int i = 0; i < 80 && state == ContainerSplitTransfer.Status.RUNNING; i++) {
+                state = fixture.step(); fixture.confirm();
+                check(fixture.menu.getCarried().getCount() <= 64, "native backpack pickup never lifts all 512 items");
+            }
+            check(state == ContainerSplitTransfer.Status.COMPLETE && fixture.stock.getItem(0).getCount() == 497
+                    && fixture.menu.getSlot(27).getItem().getCount() == 15 && fixture.menu.getCarried().isEmpty(),
+                    "capped transfer confirms exact opposite deltas and an empty cursor");
+        }
     }
     private static void exactNativeSlots(int source, int amount, int destination) throws Exception {
         try (var fixture = new Fixture(source, amount, destination)) {
@@ -144,6 +161,7 @@ public final class ContainerSplitTransferTest {
         MenuReceipt pending;
         MenuConfirmation confirmation;
         int slot, button, clicks;
+        boolean cappedPickup;
         long tick;
         Fixture(int source, int amount, int destination) throws Exception {
             stock.setItem(0, new ItemStack(Items.STONE_BRICKS, source));
@@ -177,8 +195,13 @@ public final class ContainerSplitTransferTest {
             if (pending == null || pending.terminal()) return;
             Slot target = menu.getSlot(slot); ItemStack carried = menu.getCarried();
             if (carried.isEmpty()) {
-                int amount = button == 0 ? target.getItem().getCount() : (target.getItem().getCount() + 1) / 2;
+                int available = cappedPickup ? Math.min(target.getItem().getCount(), target.getItem().getMaxStackSize()) : target.getItem().getCount();
+                int amount = button == 0 ? available : (available + 1) / 2;
                 menu.setCarried(target.safeTake(amount, Integer.MAX_VALUE, world.player));
+            } else if (cappedPickup && slot == 0) {
+                // 普通ChestMenu夹具没有升级槽容量；这里只模拟已安装Core已核对的合并回存行为。
+                int count = button == 0 ? carried.getCount() : 1;
+                target.getItem().grow(count); carried.shrink(count); menu.setCarried(carried);
             } else menu.setCarried(target.safeInsert(carried, button == 0 ? carried.getCount() : 1));
             check(confirmation.observe(context, pending) == MenuConfirmation.Verdict.APPLIED, "the actual native Slot result must satisfy all three count checks");
             var finish = MenuReceipt.class.getDeclaredMethod("finish", MenuReceipt.Status.class, String.class); finish.setAccessible(true);

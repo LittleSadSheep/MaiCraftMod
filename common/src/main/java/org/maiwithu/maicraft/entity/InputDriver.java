@@ -51,6 +51,12 @@ public final class InputDriver {
         context.body().requestLook(yaw, pitch, context.tickRevision());
     }
 
+    /** 路线朝向只作为本刻背景视角，不能覆盖攻击、放置或落地救援已经申请的准星方向。 */
+    public static void lookForNavigation(LocalPlayer player, float yaw, float pitch) {
+        LocalPlayerContext context = context(player);
+        if (context != null) context.body().requestNavigationLook(yaw, pitch, context.tickRevision());
+    }
+
     // 给本刻已有的移动指令加上跳跃，不清掉同刻的前进或潜行。
     public static void jump(LocalPlayer player) {
         LocalPlayerContext context = context(player);

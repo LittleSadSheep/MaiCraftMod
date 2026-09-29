@@ -31,6 +31,8 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.tools.CraftOps;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
+import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 用真实背包分配与原生配方验证：展示可以截短，内部补料必须保留完整候选。 */
 public final class AcquisitionRecipePlanningTest {
@@ -44,6 +46,7 @@ public final class AcquisitionRecipePlanningTest {
             prerequisiteSelection(world);
             stockAwareMaterialTree(world);
             includeCookingInputsWithoutConversionLoops(world);
+            batchAlternativesShareOneNearestSourceQuery(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -153,6 +156,46 @@ public final class AcquisitionRecipePlanningTest {
 
     private static RecipeHolder<?> recipe(String id, Ingredient... ingredients) {
         return recipe(id, Items.STICK, ingredients);
+    }
+
+    private static void batchAlternativesShareOneNearestSourceQuery(InteractionWorldTestHarness world) throws Exception {
+        // 九张任意木板可由三根任意匹配原木做出，不能按木种依次发起三根原木的独立搜索。
+        world.inventory.clearContent();
+        var oakRecipe=recipe("batch_oak",Items.OAK_PLANKS,Ingredient.of(Items.OAK_LOG));
+        var birchRecipe=recipe("batch_birch",Items.BIRCH_PLANKS,Ingredient.of(Items.BIRCH_LOG));
+        var mixedRecipe=recipe("mixed_inputs",Items.SPRUCE_PLANKS,Ingredient.of(Items.OAK_LOG),Ingredient.of(Items.BIRCH_LOG));
+        var conversion=recipe("convert_existing",Items.BIRCH_PLANKS,Ingredient.of(Items.OAK_PLANKS));
+        install(world,List.of(oakRecipe,birchRecipe,mixedRecipe,conversion));
+        var oak=BuiltInRegistries.ITEM.getKey(Items.OAK_PLANKS);var birch=BuiltInRegistries.ITEM.getKey(Items.BIRCH_PLANKS);
+        var outputs=List.of(oak,birch);
+        var need=new AcquisitionNeed(outputs,9,0,Set.copyOf(outputs),Set.of(),Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY,SemanticAcquireTaskRecord.Source.MINE,SemanticAcquireTaskRecord.Source.CRAFT));
+        var planner=new AcquisitionRecipePlanner(world.player,false,16,List.of());
+        var oakPlan=new CraftOps().plan(oak.toString(),9,world.player,new ToolContext("oak-batch",0));
+        var birchPlan=new CraftOps().plan(birch.toString(),9,world.player,new ToolContext("birch-batch",0));
+        var first=oakPlan.recoveryCandidates().stream().filter(value->value.recipeId().equals(oakRecipe.id().toString())).findFirst().orElseThrow();
+        var second=birchPlan.recoveryCandidates().stream().filter(value->value.recipeId().equals(birchRecipe.id().toString())).findFirst().orElseThrow();
+        var frontier=planner.chooseFrontier(first,List.of(first,second),need);
+        check(frontier.ingredient().missing()==3 && Set.copyOf(frontier.ingredient().itemIds()).equals(
+                Set.of(BuiltInRegistries.ITEM.getKey(Items.OAK_LOG),BuiltInRegistries.ITEM.getKey(Items.BIRCH_LOG))),
+                "原木种类合并为一次总数三根的最近来源查询");
+        check(frontier.recipeIds().size()==2,"备料保留两种真实配方，采集结果可以决定木种");
+        check(planner.unitConversion(mixedRecipe.id(),List.of(oak,birch,BuiltInRegistries.ITEM.getKey(Items.SPRUCE_PLANKS)))==null,
+                "双原料配方不能拼出两套各缺一半的虚假可行账");
+        check(planner.unitConversion(conversion.id(),outputs)==null,"分批转换不能消费已计入目标总数的另一种成品");
+        // 已拿到两根橡木和一根桦木时，分别兑现木板，不因没有三根同种木头又跑去采集。
+        install(world,List.of(oakRecipe,birchRecipe));
+        world.inventory.setItem(0,new ItemStack(Items.OAK_LOG,2));world.inventory.setItem(1,new ItemStack(Items.BIRCH_LOG,1));
+        var record=new SemanticAcquireTaskRecord("mixed-stock",1000,outputs,9,List.of(SemanticAcquireTaskRecord.Source.CRAFT),false,
+                SemanticAcquireTaskRecord.SourceHint.empty(),List.of(),16);
+        var task=new SemanticAcquireCompanionTask(world.player,record);task.onStart();
+        var root=SemanticAcquireCompanionTask.class.getDeclaredField("rootNeed");root.setAccessible(true);
+        var attempt=SemanticAcquireCompanionTask.class.getDeclaredMethod("attemptCraft",AcquisitionNeed.class);attempt.setAccessible(true);
+        attempt.invoke(task,root.get(task));
+        var active=SemanticAcquireCompanionTask.class.getDeclaredField("activeRecord");active.setAccessible(true);
+        check(active.get(task) instanceof CraftTaskRecord craft && craft.plannedBatches==1 && craft.outputPerBatch==4,
+                "混合原木先执行一个可完成批次，再按实际合计木板数推进");
+        task.result(TaskState.CANCELLED);
     }
 
     private static RecipeHolder<?> recipe(String id, Item output, Ingredient... ingredients) {

@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import java.util.Collections;
 import java.util.function.Supplier;
+import java.util.function.Predicate;
 
 /** 只从当前真实可达落脚点找放置见证；檐边保留连续坐标、完整支撑扫掠和潜行姿态，不把空中格心交给导航。 */
 final class BuildPlacementAccessSearch {
@@ -30,22 +31,32 @@ final class BuildPlacementAccessSearch {
     private final BuildSupportWorld world;
     private final Vec3 origin;
     private final BuildSupportWalking walking;
+    private final LongSet forbidden;
+    private final PhysicalObstacleSnapshot physical;
     private final Supplier<GroundCorridor> corridors;
     private GroundCorridor corridor;
     private final boolean edgesOnly;
+    private final Predicate<BuildPlacementGeometry.Gesture> gestureAllowed;
     private final int visitLimit;
     private final int minX, maxX, minZ, maxZ;
     private final ArrayDeque<Node> frontier = new ArrayDeque<>();
     private final Set<BlockPos> visited = new HashSet<>();
     private Node node;
-    private int candidateAt, checked;
+    private int candidateAt, checked, rejectedReturns;
     private boolean initialized, complete;
     private String reason = "checking_reachable_placement";
     private Access access;
 
     BuildPlacementAccessSearch(LocalPlayer player, BuildTaskRecord.Target target, BuildSupportWorld world, Vec3 origin,
                                LongSet forbidden, PhysicalObstacleSnapshot physical, int visitLimit, boolean edgesOnly) {
+        this(player, target, world, origin, forbidden, physical, visitLimit, edgesOnly, ignored -> true);
+    }
+    BuildPlacementAccessSearch(LocalPlayer player, BuildTaskRecord.Target target, BuildSupportWorld world, Vec3 origin,
+                               LongSet forbidden, PhysicalObstacleSnapshot physical, int visitLimit, boolean edgesOnly,
+                               Predicate<BuildPlacementGeometry.Gesture> gestureAllowed) {
         this.player = player; this.target = target; this.world = world; this.origin = origin;
+        this.gestureAllowed = gestureAllowed;
+        this.forbidden = forbidden; this.physical = physical;
         this.visitLimit = Math.min(MAX_VISITS, Math.max(0, visitLimit)); this.edgesOnly = edgesOnly;
         // 角色可能仍在另一间房：把当前脚位的小范围出口和目标附近合成有限包围框，再沿真实地板走进去。
         BlockPos start = BlockPos.containing(origin);
@@ -121,14 +132,18 @@ final class BuildPlacementAccessSearch {
         // 普通偏移也保留可寻路的真实节点，避免把半墙旁的连续位置取整后交给一个会撞墙的格心目标。
         Vec3 anchor = edge ? safeAnchor(node.feet()) : node.feet();
         if (anchor == null || edge && (anchor.distanceToSqr(feet) > .7 * .7 || !corridor.clear(anchor, feet))) return;
-        var gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, edge);
+        // 自动重选站位时同时排除本格已经失败的手法，避免每次搜索又选回同一条堵住的点击路线。
+        var gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, edge, gestureAllowed);
         boolean lowerEye = false;
         // 完整地面仍可能被横梁挡住站姿射线；先证明普通姿态确实没有原生放法，才在同一安全脚位尝试降低视线。
         if (gesture == null && !edge) {
-            gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, true);
+            gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, true, gestureAllowed);
             lowerEye = gesture != null;
         }
         if (gesture == null) return;
+        // 当前能点击不代表放完还能退回；先检查新方块的真实碰撞形状，再接受这条贴边方案。
+        if (edge && !BuildPlacementReturnGeometry.allowed(player, target, world, player.level()::isLoaded,
+                forbidden, physical, feet, anchor)) { rejectedReturns++; return; }
         var route = new ArrayList<Vec3>(); for (Node at = node; at != null; at = at.previous()) route.add(at.feet());
         Collections.reverse(route);
         if (!route.getLast().equals(anchor)) route.add(anchor);
@@ -157,5 +172,6 @@ final class BuildPlacementAccessSearch {
     String reason() { return reason; }
     int checked() { return checked; }
     int visited() { return visited.size(); }
+    int rejectedReturns() { return rejectedReturns; }
     private void fail(String detail) { complete = true; access = null; reason = detail; }
 }

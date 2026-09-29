@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.core.task.build;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
@@ -67,7 +69,47 @@ public final class BuildPlacementPlayerRotationTest {
                             && world.level.getBlockState(support.above()).isAir(),
                     "只算放法，不能发点击、花材料或改变支撑与目标方块");
         }
-        System.out.println("BuildPlacementPlayerRotationTest: candidate yaw/pitch and unchanged real player passed; fixture getter bridge only");
+        crouchingCandidateOnPlainSupport();
+        System.out.println("BuildPlacementPlayerRotationTest: candidate yaw/pitch, crouching orientation and unchanged real player passed; fixture getter bridge only");
+    }
+
+    private static void crouchingCandidateOnPlainSupport() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var block = fixtureRegistry(BuiltInRegistries.BLOCK,
+                    () -> new SneakFacingBlock(BlockBehaviour.Properties.of().dynamicShape()));
+            var item = fixtureRegistry(BuiltInRegistries.ITEM, () -> new BlockItem(block, new Item.Properties()));
+            var at = new BlockPos(8, 2, 8); var feet = new Vec3(8.5, 2, 9.5);
+            h.set(at.below(), Blocks.COBBLESTONE.defaultBlockState());
+            h.set(new BlockPos(8, 1, 9), Blocks.STONE.defaultBlockState()); h.position(feet);
+            var desired = block.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.DOWN);
+            var target = new BuildTaskRecord.Target(desired, item, at, "down-facing native machine", null, null, null,
+                    false, Set.of("facing"), true);
+            // 复现朝下机械手：人物在上层落脚点向下点普通圆石，站着会朝上，潜行才会得到作者要求的朝下状态。
+            var current = BuildPlacementGeometry.currentGesture(h.player, target, Map.of());
+            var worksite = BuildPlacementGeometry.liveGestureFrom(h.player, target, Map.of(), feet);
+            check(current != null && current.sneak() && worksite != null && worksite.sneak(),
+                    "current-foot and shared-worksite searches both include the native crouching orientation");
+            var search = new BuildPlacementGeometry.PlanSearch(h.player, target, Map.of(), false, false,
+                    pos -> pos.equals(BlockPos.containing(feet)));
+            while (!search.advance(128).complete()) { }
+            check(!search.results().isEmpty() && search.results().stream().allMatch(BuildPlacementGeometry.Gesture::sneak),
+                    "incremental placement planning retains the same posture rather than rejecting a valid machine orientation");
+            check(h.blockUses() == 0 && h.itemUses() == 0 && h.level.getBlockState(at).isAir(),
+                    "candidate enumeration never places the machine or changes the target world");
+        }
+    }
+
+    // 夹具采用 Create 方向性机器的原生上下文规则，不按目标方块名或期望朝向返回预设答案。
+    private static final class SneakFacingBlock extends Block {
+        SneakFacingBlock(BlockBehaviour.Properties properties) { super(properties); }
+        @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+            builder.add(BlockStateProperties.FACING);
+        }
+        @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
+            var facing = context.getNearestLookingDirection().getOpposite();
+            if (context.isSecondaryUseActive()) facing = facing.getOpposite();
+            return defaultBlockState().setValue(BlockStateProperties.FACING, facing);
+        }
     }
 
     private static void checkFacing(LocalPlayer player, ItemStack stack, BlockHitResult hit,

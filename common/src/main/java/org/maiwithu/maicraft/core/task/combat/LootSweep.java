@@ -598,7 +598,8 @@ final class LootSweep {
     }
 
     // 分别返回推定来源数量、背包确认增加、地上剩余、走不到、合堆与未解释的差额，不把它们统称为已收获。
-    Map<String, Object> report() {
+    // 收场摘要与详细回执共用同一份归属账，只计算观察到战斗掉落且背包确实增加的物品。
+    Map<String, Integer> confirmedGains() {
         Map<Item, Integer> confirmed = new HashMap<>(collectedFromSettledSweeps);
         if (active) {
             for (var entry : sweepAttributed.entrySet()) {
@@ -607,6 +608,10 @@ final class LootSweep {
                 account(confirmed, entry.getKey(), Math.min(entry.getValue(), gain));
             }
         }
+        return named(confirmed);
+    }
+
+    Map<String, Object> report() {
         Map<Item, Integer> remaining = new HashMap<>();
         Map<Item, Integer> blocked = new HashMap<>();
         for (int id : tracked) {
@@ -622,7 +627,7 @@ final class LootSweep {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("attributed_by_item", named(attributedTotal));
-        out.put("confirmed_inventory_gain_by_item", named(confirmed));
+        out.put("confirmed_inventory_gain_by_item", confirmedGains());
         out.put("remaining_reachable_by_item", named(remaining));
         out.put("remaining_loaded_but_unreached_by_item", named(blocked));
         out.put("unreachable_by_item", named(unreachableByItem));

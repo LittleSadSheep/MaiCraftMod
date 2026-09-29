@@ -9,6 +9,7 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineInstallation;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
@@ -73,6 +74,9 @@ final class MachineBuildSurvey {
                     if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir()) {
                         // assembly 已声明整条安装路径；允许替换时先清理其中可破坏、无流体/库存的白名单方块，再执行原生连接器。
                         var state = world.getBlockState(at);
+                        // 流体不是可挖的普通障碍；单列诊断，让修改蓝图依据真实源状态处理水路，而不是重试挖水。
+                        if (!state.getFluidState().isEmpty()) return blocked(world, at, "native_installation_path_fluid",
+                                "Native installation requires a dry path; observed fluid needs explicitly declared fluid handling.");
                         if (plan.replaceExisting() && ClearanceWhitelist.allows(state) && !state.hasBlockEntity()
                                 && state.getFluidState().isEmpty() && state.getDestroySpeed(world, at) >= 0) {
                             MachinePlacementRules.requireModeledEffects(state.getBlock()); clears.add(at);
@@ -113,7 +117,7 @@ final class MachineBuildSurvey {
                     world, at, target.desiredState(), plan.replaceExisting(), plan.replaceBlockEntities());
             if (issue != null) return blocked(world, at, "source_fluid_site_blocked", issue);
             var actual = world.getBlockState(at);
-            if (!actual.isAir() && actual.getFluidState().isEmpty()) {
+            if (FluidPlacementRules.needsSolidClearance(world, at, plan.replaceExisting(), plan.replaceBlockEntities())) {
                 MachinePlacementRules.requireModeledEffects(actual.getBlock()); clears.add(at);
             }
             fluidIndex++;
@@ -155,11 +159,17 @@ final class MachineBuildSurvey {
     /** 只报告已经加载并检查过的第一处阻塞；保留实际方块与蓝图偏移，修订前不会暗中清障或扩大权限。 */
     private Progress blocked(Level world, BlockPos at, String code, String detail) {
         var state = world.getBlockState(at); var offset = at.subtract(plan.anchor());
+        // 原生isSource与方块类别分别保留，含水方块不能被误认成可以直接收为空气的独立源水格。
+        var fluid = state.getFluidState();
+        var fluidEvidence = Map.of("present", !fluid.isEmpty(), "source", fluid.isSource(),
+                "fluid_id", BuiltInRegistries.FLUID.getKey(fluid.getType()).toString(),
+                "standalone_liquid_block", state.getBlock() instanceof LiquidBlock);
         failureEvidence = Map.of("failure_code", code, "failure_position", Map.of("x", at.getX(), "y", at.getY(), "z", at.getZ()),
                 "blueprint_offset", List.of(offset.getX(), offset.getY(), offset.getZ()),
                 "observed_block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
                 "observed_state", state.toString(), "declared_target", declaredPositions.contains(at),
-                "protected", NavigationSafetyContext.protectsMutation(at), "world_modified", false);
+                "protected", NavigationSafetyContext.protectsMutation(at), "world_modified", false,
+                "fluid_state", fluidEvidence);
         return new Progress(false, null, detail + " Observed " + BuiltInRegistries.BLOCK.getKey(state.getBlock())
                 + " at " + at.toShortString() + " (blueprint offset " + offset.toShortString() + ").");
     }

@@ -58,16 +58,38 @@ public final class RecipeMaterialPlan {
     public static Result estimate(List<Need> needs, Map<ResourceLocation, Long> stock,
                                   Function<ResourceLocation, List<Recipe>> recipes,
                                   Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked) {
+        return estimate(needs, stock, recipes, sources, blocked, Set.of());
+    }
+
+    /** 已耗尽的获取入口只阻止继续补料；后来真正观察到的现货仍可直接用于原配方。 */
+    public static Result estimate(List<Need> needs, Map<ResourceLocation, Long> stock,
+                                  Function<ResourceLocation, List<Recipe>> recipes,
+                                  Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
+                                  Set<ResourceLocation> unavailable) {
         Budget budget = new Budget();
-        State initial = new State(stock);
-        State planned = expand(needs, initial, recipes, sources, blocked, Set.of(), 32, budget).stream().min(ORDER).orElse(null);
+        // 排序与展开复用同一次只读元数据，避免比较宽标签时反复查询相同材料的来源与配方。
+        Map<ResourceLocation, List<Recipe>> recipeCache = new HashMap<>();
+        Map<ResourceLocation, Source> sourceCache = new HashMap<>();
+        Function<ResourceLocation, List<Recipe>> recipeLookup = item -> recipeCache.computeIfAbsent(item, recipes);
+        Function<ResourceLocation, Source> sourceLookup = item -> sourceCache.computeIfAbsent(item, sources);
+        // 先找短而完整的备料路线，再增加合成层数；羊毛互染等循环不能先吃光预算，把普通原料路线挤掉。
+        // 各轮共用原来的总预算，保留已经找到的完整数量账；后续搜索截断时仍能使用较早的可行方案。
+        State planned = null;
+        for (int depth = 1; depth <= 32; depth *= 2) {
+            budget.exhausted = false;
+            State candidate = expand(needs, new State(stock), recipeLookup, sourceLookup, blocked, unavailable,
+                    Set.of(), depth, budget).stream().min(ORDER).orElse(null);
+            if (candidate != null && (planned == null || ORDER.compare(candidate, planned) < 0)) planned = candidate;
+            // 没有深度截断、候选裁剪或预算耗尽时才算搜索完整；否则在剩余预算内继续比较更深路线。
+            if (!budget.exhausted || budget.remaining <= 0) break;
+        }
         return planned == null ? new Result(false, !budget.exhausted, UNREACHABLE, List.of(), List.of(), stock)
                 : new Result(true, !budget.exhausted, planned.cost, merge(planned.supplies), planned.crafts, planned.pool.remaining());
     }
 
     private static List<State> expand(List<Need> needs, State initial, Function<ResourceLocation, List<Recipe>> recipes,
                                       Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
-                                      Set<ResourceLocation> visiting, int depth, Budget budget) {
+                                      Set<ResourceLocation> unavailable, Set<ResourceLocation> visiting, int depth, Budget budget) {
         if (!budget.spend()) return List.of();
         List<State> states = List.of(initial);
         // 窄替代组先安排；同价分支保留各自库存账，避免先吃掉另一支唯一能用的材料而误报缺料。
@@ -76,8 +98,10 @@ public final class RecipeMaterialPlan {
             for (State state : states) for (Allocation allocation : allocate(need, state, blocked)) {
                 State base = allocation.state(); int deficit = allocation.missing();
                 if (deficit == 0) { candidates.add(base); continue; }
-                for (ResourceLocation item : need.alternatives()) {
-                    if (blocked.contains(item)) continue;
+                // 固定预算内先考察现货或已知获取方式更近的路线，不能让前面的未知分支把普通木材路线挤出搜索。
+                for (ResourceLocation item : need.alternatives().stream().sorted(Comparator.comparingDouble(
+                        id -> itemPriority(id, base.pool, recipes, sources, blocked, unavailable))).toList()) {
+                    if (blocked.contains(item) || unavailable.contains(item)) continue;
                     List<Recipe> choices = recipes.apply(item); Source source = sources.apply(item);
                     // 已知获取方式可在中间层切入；无配方边界只列为高成本未知需求，不宣称它是免费原料。
                     if (source.known() || choices.isEmpty()) {
@@ -88,7 +112,8 @@ public final class RecipeMaterialPlan {
                     if (visiting.contains(item)) continue;
                     if (depth <= 0) { budget.exhausted = true; continue; }
                     Set<ResourceLocation> path = new HashSet<>(visiting); path.add(item);
-                    for (Recipe recipe : choices) {
+                    for (Recipe recipe : choices.stream().sorted(Comparator.comparingDouble(
+                            row -> recipePriority(row, base.pool, sources, blocked, unavailable))).toList()) {
                         if (!budget.spend()) break;
                         int batches = (int) (((long) deficit + recipe.outputCount() - 1) / recipe.outputCount());
                         List<Need> inputs = new ArrayList<>(); boolean bounded = true;
@@ -98,7 +123,7 @@ public final class RecipeMaterialPlan {
                             inputs.add(new Need(input.alternatives(), (int) count));
                         }
                         if (!bounded) continue;
-                        for (State crafted : expand(inputs, new State(base), recipes, sources, blocked, path, depth - 1, budget)) {
+                        for (State crafted : expand(inputs, new State(base), recipes, sources, blocked, unavailable, path, depth - 1, budget)) {
                             crafted.pool.add(item, (long) batches * recipe.outputCount() - deficit);
                             crafted.crafts.add(new Need(List.of(item), deficit));
                             crafted.cost = Math.min(UNREACHABLE, crafted.cost + (long) batches * recipe.batchCost());
@@ -111,6 +136,33 @@ public final class RecipeMaterialPlan {
             if (states.isEmpty()) break;
         }
         return states;
+    }
+
+    private static double itemPriority(ResourceLocation item, Pool pool, Function<ResourceLocation, List<Recipe>> recipes,
+                                       Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
+                                       Set<ResourceLocation> unavailable) {
+        if (blocked.contains(item) || unavailable.contains(item)) return Double.POSITIVE_INFINITY;
+        var choices = recipes.apply(item); var source = sources.apply(item);
+        double score = source.known() || choices.isEmpty() ? source.unitCost() : Double.POSITIVE_INFINITY;
+        for (Recipe recipe : choices) score = Math.min(score, recipePriority(recipe, pool, sources, blocked, unavailable));
+        return score;
+    }
+
+    private static double recipePriority(Recipe recipe, Pool pool, Function<ResourceLocation, Source> sources,
+                                         Set<ResourceLocation> blocked, Set<ResourceLocation> unavailable) {
+        // 只看下一层作为排序提示；共享库存、整批数量和循环仍由正式展开逐项扣账，不能凭这个分数宣称够料。
+        double score = recipe.batchCost();
+        for (Need input : recipe.ingredients()) {
+            double cheapest = Double.POSITIVE_INFINITY;
+            for (ResourceLocation item : input.alternatives()) {
+                if (blocked.contains(item)) continue;
+                long missing = Math.max(0L, input.count() - pool.get(item));
+                if (missing == 0) cheapest = 0;
+                else if (!unavailable.contains(item)) cheapest = Math.min(cheapest, missing * (double) sources.apply(item).unitCost());
+            }
+            score += cheapest;
+        }
+        return score / recipe.outputCount();
     }
 
     private static List<Allocation> allocate(Need need, State state, Set<ResourceLocation> blocked) {

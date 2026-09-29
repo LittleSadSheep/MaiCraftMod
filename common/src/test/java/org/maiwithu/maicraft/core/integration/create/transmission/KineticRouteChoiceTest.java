@@ -21,6 +21,7 @@ public final class KineticRouteChoiceTest {
         longRunAccountsForEveryRelayPostAndChain();
         carriedExpensiveChainDrivesDoNotBecomeFree();
         unknownRecipesHaveFinitePositiveRouteCost();
+        mediumLongRunHonorsChainPreferenceWithoutInventingRoutes();
     }
     private static void shortAxialAndTurnedRunsChooseTheirActualLowCostGeometry() {
         Endpoint a = endpoint(0, 1, 0, Direction.EAST), b = endpoint(8, 1, 0, Direction.WEST);
@@ -94,6 +95,31 @@ public final class KineticRouteChoiceTest {
         var report = KineticRouteChoice.report(List.of(cost));
         check(!report.get("globally_optimal").getAsBoolean() && !report.getAsJsonObject("selected").get("production_verified").getAsBoolean(),
                 "economic ranking never becomes a native connection or production claim");
+    }
+    private static void mediumLongRunHonorsChainPreferenceWithoutInventingRoutes() {
+        Endpoint source = endpoint(0, 1, 0, Direction.UP), target = endpoint(17, 1, 0, Direction.UP);
+        var base = prices(Map.of()); var values = new HashMap<>(base.rawUnitValues());
+        values.put("minecraft:iron_ingot", 20.0); values.put("minecraft:iron_nugget", 20.0 / 9);
+        var expensiveChain = new Snapshot(base.recipes(), values, Map.of(), Set.of(), List.of(), new JsonObject());
+        var candidates = plans(source, target, new World(source, target));
+        var ranked = KineticRouteChoice.rank(candidates, expensiveChain);
+        var shaft = ranked.stream().filter(value -> value.plan().chainLinks().isEmpty()).findFirst().orElseThrow();
+        // 复现约十七格的选择：补料估价即便更偏爱逐格铺轴，也不能覆盖已经明确的长跨度锁链偏好。
+        check(!ranked.getFirst().plan().chainLinks().isEmpty() && ranked.getFirst().total() > shaft.total()
+                        && shaft.deferredForChain(), "a feasible long chain wins without falsifying its higher material estimate");
+        var report = KineticRouteChoice.report(ranked);
+        check(report.get("long_span_horizontal_blocks").getAsInt() == 12
+                        && report.getAsJsonObject("selected").get("total_score").getAsDouble() == ranked.getFirst().total(),
+                "selection policy and original economic score are reported separately");
+        var conventional = candidates.stream().filter(plan -> plan.chainLinks().isEmpty()).toList();
+        var fallback = KineticRouteChoice.rank(conventional, expensiveChain);
+        check(fallback.stream().noneMatch(KineticRouteChoice.Scored::deferredForChain),
+                "absent or rejected native chain geometry leaves ordinary feasible routes available");
+        // 偏好只作用于同一对端点；三格外真有更便宜的动力出口时，不能为了远处的锁链绕远。
+        Endpoint near = endpoint(14, 1, 0, Direction.UP); var all = new ArrayList<>(candidates);
+        all.addAll(plans(near, target, new World(near, target)));
+        check(KineticRouteChoice.rank(all, expensiveChain).getFirst().plan().source().equals(near),
+                "a nearby economical outlet is not displaced by a farther preferred chain family");
     }
     private static Snapshot prices(Map<String, Integer> carried) {
         // 已安装的 Create 6.0.10 合成倍率；商品锚点是注入的相对单位，不代表通用市场价格。

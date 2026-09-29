@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.npc.WanderingTrader;
+import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -173,6 +174,12 @@ public final class SemanticTradeCompanionTask
                     FailureType.UNKNOWN);
         }
 
+        // 默认付款政策只允许绿宝石，主背包没有可支付的绿宝石时不必逐个开窗；显式其它支付政策仍以真实报价核验。
+        if (r.allowedPaymentIds.isEmpty() && PlayerInv.buildableCount(player.getInventory(), Items.EMERALD) == 0) {
+            return failFinal("trade_payment_missing", "The default emerald payment policy has no carried emerald; no merchant was opened.",
+                    FailureType.NO_MATERIAL);
+        }
+
         List<AbstractVillager> safe = new ArrayList<>();
         AABB bounds = player.getBoundingBox().inflate(r.radius);
         for (AbstractVillager candidate : player.clientLevel.getEntitiesOfClass(
@@ -205,11 +212,17 @@ public final class SemanticTradeCompanionTask
         if (!(candidate instanceof Villager) && !(candidate instanceof WanderingTrader)) {
             return false;
         }
+        // 无业和傻子不会提供原生交易菜单；不能为探报价而反复右键这些村民。
+        if (candidate instanceof Villager villager && !tradingProfession(villager.getVillagerData().getProfession())) return false;
         return switch (r.merchantKind) {
             case AUTO -> true;
             case VILLAGER -> candidate instanceof Villager;
             case WANDERING_TRADER -> candidate instanceof WanderingTrader;
         };
+    }
+
+    static boolean tradingProfession(VillagerProfession profession) {
+        return profession != null && profession != VillagerProfession.NONE && profession != VillagerProfession.NITWIT;
     }
 
     // 当前只要商人有自定义名字就全部排除；另外排除保护地标水平十二格内的商人，不看高度差。
@@ -252,7 +265,7 @@ public final class SemanticTradeCompanionTask
             openRequested = true;
             return start(new InteractEntityTaskRecord(
                     childId("open"), childDeadline(2L * 60L * 20L),
-                    MouseButton.RIGHT, merchant.getId(), 0, null), Purpose.OPEN);
+                    MouseButton.RIGHT, merchant.getId(), 0, null).forMenu(), Purpose.OPEN);
         }
         return exhausted();
     }
@@ -929,8 +942,11 @@ public final class SemanticTradeCompanionTask
                     .map(ResourceLocation::toString).sorted().toList());
         }
         if (failureCode != null) {
+            // 缺钱、缺报价或没有合格商人是本来源失败；保留恢复建议，不能额外要求人工决定才准父取物任务尝试其它已授权来源。
+            // 未确认的付款/取物仍由 outcome_uncertain 阻止盲目重试，支付和保护限制也没有被放宽。
+            data.put("failure_code", failureCode);
             data.put("decision", Map.of(
-                    "required", true,
+                    "required", false,
                     "reason_code", failureCode,
                     "recovery_options", recoveryOptions(failureCode)));
         }

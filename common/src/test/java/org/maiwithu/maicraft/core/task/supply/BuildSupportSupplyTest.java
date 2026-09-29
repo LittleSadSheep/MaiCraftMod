@@ -59,8 +59,14 @@ public final class BuildSupportSupplyTest {
             var carriedOnly = owner(List.of(Source.STORAGE));
             carriedOnly = new SemanticBuildSupplyTaskRecord("inventory-only", 2000, carriedOnly.plan,
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY, carriedOnly.allowedSources, false, List.of(), false);
-            check(new BuildSupportSupply(h.player, carriedOnly, NEEDS).tick(h.player, task -> task.tick(h.player)) == TaskState.FAILED
+            var restricted = new BuildSupportSupply(h.player, carriedOnly, NEEDS);
+            check(restricted.tick(h.player, task -> task.tick(h.player)) == TaskState.FAILED
                     && requested.isEmpty(), "inventory-only support cannot open the network");
+            // 复现实机仅背包手摇端：确实没查外部库存，回执必须保留这个范围，不能断言 AE 没有圆石。
+            check(restricted.receipt().get("allowed_sources").equals(List.of("inventory"))
+                    && Boolean.FALSE.equals(restricted.receipt().get("wireless_stock_checked"))
+                    && Boolean.FALSE.equals(restricted.receipt().get("local_harvest_checked"))
+                    && restricted.receipt().get("message").toString().contains("was not checked"), "unqueried stock remains unknown rather than empty");
             TaskFactory.register(SemanticAcquireTaskRecord.class, (player, record) -> stub(TaskResult.fail("unconfirmed", Map.of("outcome_uncertain", true))));
             var uncertain = new BuildSupportSupply(h.player, owner(List.of()), NEEDS);
             uncertain.tick(h.player, task -> task.tick(h.player));

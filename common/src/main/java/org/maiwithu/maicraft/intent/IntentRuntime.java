@@ -61,8 +61,23 @@ public final class IntentRuntime {
     private static final Set<String> ATTENTION_RESULT_DATA_KEYS = Set.of(
             "chat_state", "typed_characters", "total_characters", "submission_attempted",
             "delivery_status", "effects_started", "mechanical_retry_allowed",
+            // 保留原生点击终态，模型才能区分未生效与效果尚未确认，避免对交换型机器盲目重复点击。
+            "native_action_status", "native_action_kind",
             "task_id", "failure_code", "failure_type", "requires_decision",
             "build_diagnostics", "support_access", "construction_region", "construction_access", "construction_navigation",
+            // 机器包装后的拆除数量、失败格和原生朝向冲突也属于恢复事实，完成通知不能再次把这一层丢掉。
+            "construction_progress",
+            // 失败通知保留接线参数的实际含义，调用者才能发现链式传动箱与锁链传动轮的选型差异。
+            "requested_transmission", "transmission_description", "available_transmission_choices",
+            // 游戏 HUD 的锁链不足提示没有普通方块变化，持链交互的选择状态和数量缺口必须随通知到达模型。
+            "chain_conveyor_use",
+            // 未确认换物时仍给出机械手本来的持料与当前持料，保持现场状态和动作确认彼此独立。
+            "deployer_hand_observation",
+            // 实际接入方块随完成通知保留，调用者可将动力回执与请求的压机、链轮等设备直接对照。
+            "selected_destination_block", "selected_source_block",
+            // 失败时仍保留两端的独立转速与观察阶段，整体接线未验收不等于两边都没有动力。
+            "source_power_evidence", "destination_power_evidence",
+            "source_native_observation_stage", "target_native_observation_stage",
             // 清障失败的具体坐标和最近选址建议是观察证据，必须送达外部 LLM 才能改变场地。
             "clearance_report",
             "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
@@ -75,6 +90,8 @@ public final class IntentRuntime {
             "blocked_need", "planning_handoff",
             // 容量与原生收尾原因必须随失败通知保留，不让上层靠再查整份施工记录猜测恢复方向。
             "inventory_capacity", "cause_code", "detail",
+            // 自动存余料后保留实际去向和已确认数量，外部规划者不必重新猜背包中为什么少了物品。
+            "inventory_maintenance",
             "allowed_sources", "achieved_coverage",
             "required_coverage", "dark_cell_count", "site_verified",
             "waterfront_required", "max_distance", "farthest_body_distance",
@@ -102,6 +119,7 @@ public final class IntentRuntime {
             "maicraft:craft",
             "maicraft:cook",
             "maicraft:enchant",
+        "maicraft:stonecut",
             "maicraft:trade",
             "maicraft:build",
             BuildDesignAdapter.ABILITY,

@@ -30,6 +30,15 @@ public final class MenuVisibility {
         return matches(minecraft, player.inventoryMenu);
     }
 
+    /** 回到世界操作前，只接管鼠标及四格合成都已清空的普通玩家背包，避免关包时退料或掉物。 */
+    public static boolean idlePlayerInventory(Minecraft minecraft, LocalPlayer player) {
+        if (!(minecraft.screen instanceof InventoryScreen) || player.containerMenu != player.inventoryMenu
+                || !inventoryVisible(minecraft, player) || !player.inventoryMenu.getCarried().isEmpty()
+                || player.inventoryMenu.slots == null || player.inventoryMenu.slots.size() < 5) return false;
+        for (int slot = 1; slot <= 4; slot++) if (!player.inventoryMenu.getSlot(slot).getItem().isEmpty()) return false;
+        return true;
+    }
+
     /** 界面实际渲染完成后才登记可见状态，游戏刻更新不能代替可见证据。 */
     public static void rendered(Screen screen) {
         renderedScreen = screen;

@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 检查目标使用了已声明的能力、参数名和目标类型；大多数参数的具体值仍交给各能力自己检查。 */
 final class SemanticGoalContract {
@@ -69,6 +70,11 @@ final class SemanticGoalContract {
             try { EnchantAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) { throw violation("invalid_enchant_contract", path + ".parameters", ability, invalid.getMessage()); }
         }
+        // 切石的输入产物与次数必须在计划阶段明确；配方与菜单仍由执行器根据真实观察解析。
+        if (StonecutAbilityAdapter.ABILITY.equals(ability)) {
+            try { StonecutAbilityAdapter.validate(goal); }
+            catch (IllegalArgumentException invalid) { throw violation("invalid_stonecut_contract", path + ".parameters", ability, invalid.getMessage()); }
+        }
         if ("maicraft:build".equals(ability) || BuildDesignAdapter.ABILITY.equals(ability)) {
             if (BuildingSceneContract.supports(goal)) BuildingSceneContract.validate(goal);
             // 普通续建只引用已冻结的蓝图，不能夹带新尺寸、材质或其他设计参数重新生成建筑。
@@ -99,6 +105,13 @@ final class SemanticGoalContract {
                 MachineAbilityAdapter.validate(goal);
             } catch (IllegalArgumentException invalid) {
                 throw violation("invalid_machine_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
+        if (GeneralAbilityAdapter.INTERACT.equals(ability)) {
+            // 编译前就拒绝无穷、负数和非数值持续时间，不等到已经走到曲柄旁才发现请求无法执行。
+            try { CreateManualInput.durationTicks(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_interaction_duration", path + ".parameters", ability, invalid.getMessage());
             }
         }
 

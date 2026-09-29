@@ -29,6 +29,8 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         /** 只取随身无线终端的已观察现货；不搜索普通箱子，也不委托网络合成。 */
         WIRELESS,
         STORAGE,
+        /** 只采已加载的成熟农作物并补种；不把附近掉落物许可扩展为破坏农田。 */
+        HARVEST,
         CRAFT,
         COOK,
         MINE,
@@ -44,7 +46,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
             } catch (IllegalArgumentException unknown) {
                 throw new IllegalArgumentException(
                         "unknown acquisition source '" + value
-                                + "'; expected inventory, nearby, wireless, storage, craft, cook, mine, trade or hunt");
+                                + "'; expected inventory, nearby, wireless, storage, harvest, craft, cook, mine, trade or hunt");
             }
         }
     }
@@ -79,7 +81,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
 
     /** 普通生存默认来源；采矿仍检查工具和保护，狩猎只有明确允许伤害后才能真正动手。 */
     public static final List<Source> DEFAULT_SOURCES =
-            List.of(Source.INVENTORY, Source.NEARBY, Source.WIRELESS, Source.CRAFT, Source.COOK,
+            List.of(Source.INVENTORY, Source.NEARBY, Source.WIRELESS, Source.HARVEST, Source.CRAFT, Source.COOK,
                     Source.MINE, Source.HUNT);
 
     public final List<ResourceLocation> itemIds;

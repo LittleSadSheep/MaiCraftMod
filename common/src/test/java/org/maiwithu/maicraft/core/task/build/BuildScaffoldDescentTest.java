@@ -30,6 +30,7 @@ public final class BuildScaffoldDescentTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         confirmedPrefixRequiresActualLandingAndExit();
+        finalGroundMustRemainIndependentAndClear();
         lateConfirmationHasAFiniteWait();
         changedWorldProtectionAndPhysicsRejectTheClick();
         unconfirmedAdvanceAndCancellationNeverBreakAnything();
@@ -61,11 +62,30 @@ public final class BuildScaffoldDescentTest {
                 for (int i = 0; i < 3; i++) descent.observe(false, tick++);
                 check(descent.status() == LANDED && descent.advance(), "每一步都需要自己的连续站稳观测");
             }
-            check(descent.status() == EXIT_REQUIRED && descent.step() == null, "拆完柱子仍不能冒充已离场");
-            check(descent.observe(false, tick++) == EXIT_REQUIRED, "留在原柱底不能完成最后走出步骤");
-            f.h.position(descent.exit());
+            check(descent.status() == VERIFY_GROUND && descent.step() == null, "拆完柱子仍需复核实际落脚地面");
+            // 柱底本就属于已证明的连片实地，最后确认应原地完成，不能强制挪到某个邻格。
             for (int i = 0; i < 3; i++) descent.observe(false, tick++);
-            check(descent.status() == COMPLETE && !descent.beforeBreak(), "到已证明实地站稳后完成，不能再挖任何格");
+            check(descent.status() == COMPLETE && !descent.beforeBreak()
+                    && f.h.player.position().equals(new Vec3(8.5, 1, 8.5)), "在柱底独立实地站稳即可完成，不能再挖任何格");
+            f.noActions();
+        }
+    }
+
+    private static void finalGroundMustRemainIndependentAndClear() throws Exception {
+        // 拆完后的收尾仍要重读地面与动态碰撞；仅取消多余挪步，不能把悬空或被结构占据当作完成。
+        for (int changed = 0; changed < 3; changed++) try (var f = new Fixture()) {
+            var descent = f.plan(); long tick = 1;
+            while (descent.status() == READY) {
+                check(descent.beforeBreak(), "收尾夹具应能逐格下降");
+                double landing = descent.step().landing().y; f.remove(descent); f.body(landing, true, GRAVITY);
+                for (int i = 0; i < 3; i++) descent.observe(true, tick++);
+                check(descent.advance(), "每格先有原生确认和稳定落地");
+            }
+            if (changed == 0) f.h.set(new BlockPos(8, 0, 8), Blocks.AIR.defaultBlockState());
+            else if (changed == 1) f.physics.set(new PhysicalObstacleSnapshot(
+                    List.of(new AABB(8.1, 1.1, 8.1, 8.9, 1.7, 8.9)), 0, 0, "ready"));
+            else f.h.set(new BlockPos(9, 1, 8), Blocks.LAVA.defaultBlockState());
+            check(descent.observe(false, tick) == REJECTED, "地面移除、动态碰撞或相邻岩浆出现时不得报告收尾完成");
             f.noActions();
         }
     }

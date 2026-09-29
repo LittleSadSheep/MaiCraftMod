@@ -29,6 +29,7 @@ public final class TaskViewTest {
         parameters.add("blocks", blocks);
         Goal goal = new Goal("maicraft:build_machine", "搭建石质围墙", null, parameters.toString(), "{}", List.of(), List.of());
         IntentTaskRecord task = new IntentTaskRecord(UUID.randomUUID(), UUID.randomUUID(), goal);
+        completedReplacementKeepsItsExecutedAbility();
         task.setState(TaskState.RUNNING);
         TaskResult failure = TaskResult.fail("物料转移未确认", Map.of("outcome_uncertain", true,
                 "mechanical_retry_allowed", false, "pending_output", Map.of("item_id", "minecraft:stone", "count", 3)));
@@ -122,4 +123,19 @@ public final class TaskViewTest {
         }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+    private static void completedReplacementKeepsItsExecutedAbility() throws Exception {
+        // 单独读取完成状态时也要看见实际观察能力；原始生产请求只保留为追溯标签。
+        Goal requested = new Goal("maicraft:operate_machine", "产出精密构件", null, "{}", "{}", List.of(), List.of());
+        Goal inspection = new Goal("maicraft:inspect_machine", "检查机器", null, "{}", "{}", List.of(), List.of());
+        var record = new IntentTaskRecord(UUID.randomUUID(), null, requested);
+        var replace = IntentTaskRecord.class.getDeclaredMethod("replaceCurrent", Goal.class); replace.setAccessible(true); replace.invoke(record, inspection);
+        var add = IntentTaskRecord.class.getDeclaredMethod("addStepResult", IntentTaskRecord.StepSnapshot.class); add.setAccessible(true);
+        add.invoke(record, new IntentTaskRecord.StepSnapshot(0, inspection.ability(), true, "observed", TaskResult.ok("observed").toJson()));
+        record.setState(TaskState.SUCCESS);
+        JsonObject status = TaskView.status(record);
+        check(status.get("ability").getAsString().equals(inspection.ability())
+                && status.get("outcome").getAsString().equals(requested.outcome())
+                && status.get("outcome_scope").getAsString().equals("requested_intent"), "terminal ability is actual work while original outcome is explicitly intent");
+        check(status.get("all_steps_scope").getAsString().contains("replacement"), "current step success does not certify an abandoned production request");
+    }
 }

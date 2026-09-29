@@ -7,6 +7,9 @@ import java.util.UUID;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
@@ -22,7 +25,7 @@ import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineti
 public final class CreateMechanicalPower {
     public static final String CHAIN_DRIVE_ID = "create:encased_chain_drive";
 
-    public enum Transmission { AUTO, ENCASED_CHAIN_DRIVE }
+    public enum Transmission { AUTO, CHAIN_CONVEYOR, ENCASED_CHAIN_DRIVE }
 
     /** 锚点通常会扩展为实时证据；exactFace 用于绑定现有动力接口。 */
     public record Endpoint(String name, BlockPos center, Direction exactFace) {
@@ -32,6 +35,17 @@ public final class CreateMechanicalPower {
             center = Objects.requireNonNull(center, "center").immutable();
             if (name.isEmpty()) throw new IllegalArgumentException("endpoint name is blank");
         }
+        // 注册方块 ID 是调用者对受电设备的明确筛选，不能只当显示名称后选中附近更近的旧轴。
+        public boolean accepts(BlockState state) {
+            String required=registeredBlockId(name);
+            return required==null || BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(required);
+        }
+    }
+
+    public static String registeredBlockId(String name) {
+        if(name==null || !name.contains(":"))return null;
+        var id=ResourceLocation.tryParse(name);
+        return id!=null && BuiltInRegistries.BLOCK.containsKey(id) ? id.toString() : null;
     }
 
     /**
@@ -48,6 +62,9 @@ public final class CreateMechanicalPower {
             source = Objects.requireNonNull(source, "source");
             destination = Objects.requireNonNull(destination, "destination");
             transmission = transmission == null ? Transmission.AUTO : transmission;
+            // 允许新接收端只是扩大候选，不代表现场没有机器；锁链模式自动勘查已有接口，不让这项许可阻断接线。
+            // 当前锁链规划仍需真实受电机器，因此不启用旧链式传动箱的空端点兜底。
+            if (transmission == Transmission.CHAIN_CONVEYOR) allowFreeReceiver=false;
         }
 
         public static Request preserving(Endpoint source, Endpoint destination) {
@@ -94,14 +111,14 @@ public final class CreateMechanicalPower {
             List<String> protectedLabels) {
         install();
         Objects.requireNonNull(request, "request");
-        if (request.transmission() == Transmission.AUTO && !request.allowFreeReceiver()) {
+        if (request.transmission() != Transmission.ENCASED_CHAIN_DRIVE && !request.allowFreeReceiver()) {
             var player = Minecraft.getInstance().player;
             if (player == null) throw new IllegalArgumentException("mechanical_connection_requires_live_player");
             if (CreateEconomicEndpointBridge.direct(player.level(), request)) return new EconomicKineticTaskRecord(
                     callId,deadlineGameTime,player.level().dimension().location().toString(),request.source().name(),
                     request.source().center(),request.source().exactFace(),request.destination().name(),
                     request.destination().center(),request.destination().exactFace(),null,0,64,false,
-                    materialPolicy,protectedLabels,allowedSources,allowHarm);
+                    materialPolicy,protectedLabels,allowedSources,allowHarm,request.transmission() == Transmission.CHAIN_CONVEYOR);
         }
         return new CreateMechanicalPowerTaskRecord(callId, deadlineGameTime,
                 Objects.requireNonNull(request, "request"), null, materialPolicy,

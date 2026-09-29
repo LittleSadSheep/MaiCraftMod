@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.core.build.BuildValidity;
@@ -26,6 +27,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
@@ -59,6 +61,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
+import org.maiwithu.maicraft.core.blueprint.ConstructionOwnership;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
@@ -101,7 +104,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private BlockPos excavationExit;
     private boolean supplyAccessReady;
     private Phase afterExcavationExit;
-    private final BuildExcavationSpoilSupply spoilSupply = new BuildExcavationSpoilSupply();
+    private final InventoryDepositCoordinator spoilSupply = new InventoryDepositCoordinator();
     private final List<Map<String, Object>> spoilReceipts = new ArrayList<>();
     private final BuildFoodPreparation foodPreparation = new BuildFoodPreparation();
     private final BiFunction<LocalPlayer, Double, HitResult> placementRay;
@@ -159,8 +162,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildStanceNavigation stanceNavigation = new BuildStanceNavigation(this);
     private BuildPlacementAccessDrive placementAccess;
     private BlockPos placementAccessTarget;
+    private int placementAccessReplans;
+    private BuildWrenchRemoval wrenchRemoval;
+    private final List<Map<String, Object>> wrenchReceipts = new ArrayList<>();
     private String edgeReturnFailure, edgeReturnFailureCode;
     private Map<String, Object> temporarySupportDemand = Map.of();
+    private Map<String, Object> placementStateConflict = Map.of();
     private boolean layerKnown;
     private int constructionLayer = Integer.MAX_VALUE;
     private BuildRegions regions;
@@ -191,6 +198,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastDeferredScaffold = Map.of();
     private BuildScaffoldCleanup scaffoldCleanup;
     private BuildScaffoldDescentDrive scaffoldDescent;
+    private Map<String, Object> lastScaffoldDescent = Map.of();
     private final Set<BlockPos> rejectedScaffoldDescents = new HashSet<>();
     private BuildScaffoldCleanupAccess scaffoldAccess;
     private final Map<BlockPos, NavGoal> scaffoldAccessGoals = new LinkedHashMap<>();
@@ -290,8 +298,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     && !digger.hasPendingBreak() && ultimine == null && !ultimineArmed
                     && !excavationTools.active() && !spoilSupply.active() && player.onGround()
                     && (nav == null || nav.isSafeToCancel());
-            if (boundary && settled && (foodPreparation.active() || !player.isUsingItem())
-                    && foodPreparation.shouldPrepare(player)) {
+            // 已经交出的取食流程持续持有身体；采田往返途中跳跃或开菜单不能让旧施工阶段抢回来。
+            if (foodPreparation.active() || boundary && settled && !player.isUsingItem()
+                    && foodPreparation.shouldPrepare(player, r)) {
                 if (!foodPreparation.active()) { stopNav(); InputDriver.halt(player); }
                 var food = foodPreparation.tick(player, r, this::runChild);
                 r.extendDeadlineTo(foodPreparation.deadline());
@@ -306,8 +315,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             // 已贴边后，选物、瞄准和等待确认也续潜行；移动阶段由边缘执行器供给方向，不能被这里清零。
             if (placementAccess != null && placementAccess.edgeActive() && phase != Phase.PLACE_NAV && phase != Phase.EDGE_RETURN
                     && placementAccess.hold() == BuildPlacementAccessDrive.Status.FAILED && useReceipt == null) {
-                failAt(cell == null ? player.blockPosition() : cell.target().pos(), placementAccess.failure(), FailureType.NO_PATH,
-                        "placement_edge_hold_failed", false); return TaskState.FAILED;
+                // 非点击等待阶段的贴边保持失效也进入同一局部脱离与重选流程，不在外层直接截断自动恢复。
+                return failAfterEdgeReturn(placementAccess.failure(), "placement_edge_hold_failed");
             }
             return step;
         },
@@ -531,9 +540,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     r.targets.stream().map(BuildTaskRecord.Target::pos).toList(), List.of(),
                     () -> spoilSupply.tick(player, this::runChild));
             r.extendDeadlineTo(spoilSupply.childDeadline());
-            if (deposited.status() == BuildExcavationSpoilSupply.Status.RUNNING) return TaskState.RUNNING;
+            if (deposited.status() == InventoryDepositCoordinator.Status.RUNNING) return TaskState.RUNNING;
             spoilReceipts.add(deposited.receipt());
-            if (deposited.status() == BuildExcavationSpoilSupply.Status.FAILED) {
+            if (deposited.status() == InventoryDepositCoordinator.Status.FAILED) {
                 failAt(player.blockPosition(), "Excavation surplus could not be stored: " + deposited.receipt(),
                         FailureType.NO_SPACE, "excavation_spoil_storage_failed", false);
                 return TaskState.FAILED;
@@ -693,12 +702,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!excavationTools.active() && player.level().isLoaded(clearing)) {
             var live = player.level().getBlockState(clearing);
             var declared = targets.get(clearing.asLong());
-            if (!ClearanceWhitelist.allows(live) && (declared == null || !declared.constructionMatches(live))) {
+            if (!ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)
+                    && (declared == null || !declared.constructionMatches(live))) {
                 beginClearanceReport(clearing); return TaskState.RUNNING;
             }
         }
         if (excavating && !excavationTools.active() && player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir()
+                && !BuildWrenchRemoval.available(player, clearing)
                 && r.toolSupply().policy() != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 && WorkToolPreparation.excavationTool(
                         player, player.level().getBlockState(clearing), excavation.remaining()) != null) {
@@ -756,6 +767,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearTick() {
+        // 扳手点击已经发出时优先结算它；原生预测先显示空气不能跳到下一格并遗失回收回执。
+        if (wrenchRemoval != null) return wrenchRemovalTick();
         if (ultimineArmed && digger.hasPendingBreak()) {
             var decision = ultimine.tickInFlight(ClientRuntime.requireContext(player));
             // 连锁九格中的任一格变成人工障碍都先松键停挖，再报告实际遇到的位置。
@@ -798,6 +811,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failAt(clearing, "observed target changed before breaking", FailureType.TARGET_LOST,
                     "build_target_changed", false); return TaskState.FAILED;
         }
+        if (digger.current() == null && !digger.hasPendingBreak()) wrenchRemoval = BuildWrenchRemoval.carried(player, clearing,
+                () -> clearingPermitted(player.level().getBlockState(clearing)) && r.mutationGuardMatches(player, clearing));
+        if (wrenchRemoval != null) return wrenchRemovalTick();
         return switch (digger.digTargetStep(clearing)) {
             case PROGRESSING -> ultimineFailure == null ? TaskState.RUNNING : TaskState.FAILED;
             case BROKE_TARGET -> {
@@ -815,6 +831,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         "clear_occluded", false); yield TaskState.FAILED;
             }
         };
+    }
+
+    private TaskState wrenchRemovalTick() {
+        var status = wrenchRemoval.tick();
+        if (status == BuildWrenchRemoval.Status.RUNNING) return TaskState.RUNNING;
+        if (status == BuildWrenchRemoval.Status.FAILED) {
+            if (phase == Phase.CLEARANCE_REPORT) return TaskState.RUNNING;
+            failAt(clearing, wrenchRemoval.reason(), FailureType.UNKNOWN, "native_wrench_removal_failed", wrenchRemoval.uncertain());
+            return TaskState.FAILED;
+        }
+        wrenchReceipts.add(wrenchRemoval.evidence()); wrenchRemoval.stop(); wrenchRemoval = null;
+        confirmedBlockChange(clearing); r.brokeOne(); renewBuildProgress(); return nextClear();
     }
 
     private TaskState nextClear() {
@@ -857,8 +885,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private boolean clearingPermitted(BlockState live) {
         var declared = targets.get(clearing.asLong());
-        // 每次实际下手仍重读类型，预检后新出现的建筑也必须留在现场交回 LLM 重新选址。
-        if (!ClearanceWhitelist.allows(live) && (declared == null || !declared.constructionMatches(live))) {
+        // 机器明确修改的旧状态可按原生挖掘执行；每次下手仍重读，后来出现的别块不能继承旧轴的拆除范围。
+        if (!ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)
+                && (declared == null || !declared.constructionMatches(live))) {
             beginClearanceReport(clearing); return false;
         }
         BlockState desired = declared == null ? Blocks.AIR.defaultBlockState() : declared.desiredState();
@@ -881,6 +910,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             var target = targets.get(at.asLong());
             // 原生连锁可能一次选中多格；把名单外格记为触发证据，绝不能让副目标绕过单格清障检查。
             if (target != null && !ClearanceWhitelist.allows(player.level().getBlockState(at))
+                    && !r.observedMachineEdit(at, player.level().getBlockState(at))
                     && !r.scaffoldLedger().owns(at, player.level().getBlockState(at))
                     && !target.constructionMatches(player.level().getBlockState(at))) {
                 clearanceDeniedAt = at.immutable(); return true;
@@ -920,7 +950,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState clearanceReportTick() {
         if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
-        failAt(clearanceDeniedAt, "Clearance whitelist excludes this obstacle; consider the site offsets in clearance_report.",
+        failAt(clearanceDeniedAt, clearanceSurvey.failureMessage(),
                 FailureType.NO_SUPPORT, BuildClearanceSurvey.FAILURE, uncertain);
         return TaskState.FAILED;
     }
@@ -936,7 +966,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         stanceNavigation.forTarget(cell.target().pos(), PlayerNav.playerFeet(player));
         if (!cell.target().pos().equals(placementAccessTarget)) {
             if (placementAccess != null) placementAccess.stop();
-            placementAccess = null; placementAccessTarget = cell.target().pos();
+            placementAccess = null; placementAccessTarget = cell.target().pos(); placementAccessReplans = 0;
         }
         if (placementAccess != null) {
             TaskState access = drivePlacementAccess(); if (access != null) return access;
@@ -980,7 +1010,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 TaskState access = drivePlacementAccess(); if (access != null) return access;
             }
         }
-        if (supportedCell == null && useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
+        // 点击支撑已放好后，原目标仍可能需要登上一格；保留原支撑队列，同时继续证明施工站位。
+        if (useCount == 0 && !worksiteSearched && !isTemporary(cell)) {
             stopNav(); phase = Phase.WORKSITE; return TaskState.RUNNING;
         }
         if (worksite != null) return walkToWorksite();
@@ -1188,7 +1219,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             worksiteSearch = new BuildWorksitePlanner.Search(player, pending, targets,
                     pos -> !forbiddenBodyCells.contains(pos.asLong()) && !NavigationSafetyContext.forbidsBody(pos),
                     unionForbidden(NavigationSafetyContext.forbiddenBodyCells()), rejectedWorksites,
-                    placementAttempts::allows, worksitePass, this::canPrepareWorksite);
+                    placementAttempts::allows, worksitePass, this::canPrepareWorksite, hasTemporaryPlacementSupport());
             stanceNavigation.selectPass(worksitePass);
         }
         var progress = worksiteSearch.advance(256);
@@ -1223,12 +1254,31 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         // 共享路线预算有界，但不能因此跳过独立核验的支撑方案回退。
         if (cell != null) {
+            // 相邻轴强制出的齿轮箱状态不会因换脚位或垫普通支撑而改变，直接给出可用于修图的原生状态事实。
+            placementStateConflict = MachinePlacementItems.placementConflict(cell.target().item(),player.level(),
+                    cell.target().pos(),cell.target().desiredState(),cell.target()::acceptsPlacedState);
+            if (!placementStateConflict.isEmpty()) {
+                failAt(cell.target().pos(),placementStateConflict.get("detail").toString(),
+                        FailureType.UNSUPPORTED,"native_placement_state_conflict",false);
+                return TaskState.FAILED;
+            }
             TaskState support = prepareTemporarySupports();
             if (support != null) return support;
         }
         failAt(cell == null ? siteMin : cell.target().pos(), reason + "; no shared construction access was proven",
                 FailureType.NO_PATH, "construction_worksite_unproven", false);
         return TaskState.FAILED;
+    }
+
+    // 补料会新建施工子任务；从持久支撑账识别原点击垫块，不能因为 supportedCell 临时引用消失就改搭更高的柱子。
+    private boolean hasTemporaryPlacementSupport() {
+        if (supportedCell != null) return true;
+        if (cell == null) return false;
+        for (Direction face : Direction.values()) {
+            BlockPos at = cell.target().pos().relative(face);
+            if (player.level().isLoaded(at) && r.scaffoldLedger().owns(at, player.level().getBlockState(at))) return true;
+        }
+        return false;
     }
 
     private boolean canPrepareWorksite(BlockPos feet) {
@@ -1252,6 +1302,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && nav.isSafeToCancel()) return rejectWorksite("worksite approach made no useful movement or confirmed construction progress");
         if (worksite.constructionAccess()) {
             if (nav == null) {
+                // 新落脚点下方还是空气时，先确保至少有一块未被永久建筑预留的垫块；缺料走原地支撑供料，不能空手反复求路。
+                if (player.level().getBlockState(worksite.stance().below()).isAir()
+                        && BuildTemporarySupportMaterials.choose(ScaffoldMaterials.of(player), scaffoldReservations(),
+                        inventory::mainInventoryCount, 1, player.getAbilities().instabuild && !r.consumeMaterials) == null)
+                    return missingTemporarySupportMaterials(1);
                 BlockPos destination = worksite.stance(); stanceNavigation.attempted();
                 nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), BuildStanceNavigation.PRECISE_WALK,
                         () -> placementStanceReached(destination), this).walkingOnly();
@@ -1540,7 +1595,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         useCount++;
         confirmedBlockChange(cell.target().pos());
-        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) confirmedBlockChange(effect.pos());
+        ConstructionOwnership.placed(player, cell.target().pos(), r.getToolCallId());
+        for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) {
+            confirmedBlockChange(effect.pos()); ConstructionOwnership.placed(player, effect.pos(), r.getToolCallId());
+        }
         // 支撑收到原生确认即进入既有账本；即使随后退回锚点受阻，也不能把这块已消耗材料遗忘为无主方块。
         if (isTemporary(cell)) confirmedScaffold(cell.target().pos(), player.level().getBlockState(cell.target().pos()));
         if (currentPlacementComplete()) {
@@ -1577,6 +1635,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         var access = placementAccess.tick(); r.extendDeadlineTo(placementAccess.deadline());
         if (access == BuildPlacementAccessDrive.Status.UNAVAILABLE) return null;
         if (access == BuildPlacementAccessDrive.Status.FAILED) {
+            if (!placementAccess.edgeActive() && retryPlacementAccess(placementAccess.failure())) return TaskState.RUNNING;
             return failAfterEdgeReturn(placementAccess.failure(), "placement_access_failed");
         }
         if (access == BuildPlacementAccessDrive.Status.READY) {
@@ -1586,19 +1645,34 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState returnFromPlacementEdge() {
-        // 本次点击已经结算，只做原生潜行退回；退不回时保留已放方块和支撑账，不再发第二次放置。
+        // 本次点击已经结算，优先回旧锚点，受阻则自动换到现有安全落脚点；全程保留已放方块和支撑账。
         var result = placementAccess.returnToAnchor();
         if (result == BuildPlacementAccessDrive.Status.RUNNING) return TaskState.RUNNING;
         if (result != BuildPlacementAccessDrive.Status.READY) {
-            failAt(cell.target().pos(), "Placement was confirmed but the safe anchor could not be regained: " + placementAccess.failure(),
+            failAt(cell.target().pos(), "Local placement access could not recover to supported footing: " + placementAccess.failure(),
                     FailureType.NO_PATH, "placement_edge_return_failed", false); return TaskState.FAILED;
         }
         if (edgeReturnFailure != null) {
             String message = edgeReturnFailure, code = edgeReturnFailureCode;
             edgeReturnFailure = edgeReturnFailureCode = null;
+            if (retryPlacementAccess(message)) return TaskState.RUNNING;
             failAt(cell.target().pos(), message, FailureType.NO_PATH, code, false); return TaskState.FAILED;
         }
         finishPlaced(); return TaskState.RUNNING;
+    }
+
+    private boolean retryPlacementAccess(String reason) {
+        if (!BuildEdgeRecovery.recoverable(reason) || useReceipt != null || placementAccessReplans >= 3
+                || !BuildEdgeMotion.canStandAt(player, forbiddenBodyCells, pos -> !forbiddenBodyCells.contains(pos.asLong()))) return false;
+        // 点击前通道变了就废弃旧姿态和射线，自动从当前实地重选；未结算的点击绝不进入这条重试路径。
+        placementAccessReplans++;
+        if (gesture != null) placementAttempts.reject(cell.target(), gesture);
+        placementAccess.stop(); placementAccess = null; stopNav(); selection.reset(); aimConvergence.reset();
+        gesture = null; gestureSearch = null; gestureProgress = null; liveGestures = List.of(); gestureAt = 0;
+        gestureFromCurrent = false; placementProofFeet = null; placementWalkTarget = null;
+        worksite = null; worksiteSearch = null; worksiteSearched = false; stanceNavigation.environmentChanged();
+        phase = Phase.PLACE_NAV; note = "local access changed; automatically proving another placement route";
+        return true;
     }
 
     private TaskState failAfterEdgeReturn(String message, String code) {
@@ -1614,6 +1688,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     // 动作确认后通知外部观察守卫更新事实，再使附近的失败点击和搜索结果失效。
     private void confirmedBlockChange(BlockPos pos) {
         r.confirmedMutation(player, pos);
+        if (player.level().getBlockState(pos).isAir()) ConstructionOwnership.removed(player, pos);
         placementEnvironmentChanged(pos);
     }
 
@@ -1695,7 +1770,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private boolean tryTerrainPass() {
-        if (supportedCell != null || isTemporary(cell) || liveGestures.isEmpty() || !stanceNavigation.allowTerrain()) return false;
+        // 原目标有临时点击支撑不等于身体已经够得着；仍允许有界施工导航准备实际落脚点。
+        if (isTemporary(cell) || liveGestures.isEmpty() || !stanceNavigation.allowTerrain()) return false;
         gestureAt = 0; phase = Phase.PLACE_NAV;
         note = "existing-footing alternatives exhausted; trying permitted construction access";
         return true;
@@ -1714,23 +1790,27 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 ScaffoldMaterials.of(player), scaffoldReservations(),
                 inventory::mainInventoryCount, chain.size(), player.getAbilities().instabuild && !r.consumeMaterials);
         if (material == null) {
-            // 原生施工准确告诉供料父任务缺哪种垫块；补齐后继续这份目标和支撑账，不让模型猜一个不在白名单里的方块。
-            var demand = BuildTemporarySupportMaterials.supplyNeed(ScaffoldMaterials.of(player), scaffoldReservations(),
-                    inventory::mainInventoryCount, chain.size());
-            if (demand != null) temporarySupportDemand = Map.of(
-                    "item_id", BuiltInRegistries.ITEM.getKey(demand.item()).toString(),
-                    "required_final_count", demand.requiredFinalCount(), "support_blocks", chain.size(),
-                    "allowed_items", ScaffoldMaterials.effectiveIds(player));
-            failAt(cell.target().pos(), "placement needs " + chain.size()
-                            + " spare full temporary support blocks after reserving every remaining permanent build target",
-                    FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
-            return TaskState.FAILED;
+            return missingTemporarySupportMaterials(chain.size());
         }
         supportedCell = cell; supportChain = chain;
         supportMaterial = ((BlockItem) material).getBlock().defaultBlockState();
         // 垫块 -> 原目标逐块执行；每块沿用普通导航和右键，不预先证明整条支撑放完后还能走到哪里。
         stopNav();
         return enqueueSupports();
+    }
+
+    // 点击支撑和登阶落脚共用同一缺料回执；父任务会先尝试全部易拆现货，而非把首选材料送去通用采矿。
+    private TaskState missingTemporarySupportMaterials(int count) {
+        var demand = BuildTemporarySupportMaterials.supplyNeed(ScaffoldMaterials.of(player), scaffoldReservations(),
+                inventory::mainInventoryCount, count);
+        if (demand != null) temporarySupportDemand = Map.of(
+                "item_id", BuiltInRegistries.ITEM.getKey(demand.item()).toString(),
+                "required_final_count", demand.requiredFinalCount(), "support_blocks", count,
+                "allowed_items", ScaffoldMaterials.effectiveIds(player));
+        failAt(cell.target().pos(), "placement needs " + count
+                        + " spare full temporary support blocks after reserving every remaining permanent build target",
+                FailureType.NO_MATERIAL, "temporary_support_materials_missing", false);
+        return TaskState.FAILED;
     }
 
     // 从接地端开始把支撑排进普通施工队列，实际放置成功后才记账，再继续原来的目标。
@@ -1909,9 +1989,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                         forbiddenBodyCells, stanceNavigation.walkingContext(Integer.MIN_VALUE), this::recordScaffoldBreak);
                 phase = Phase.SCAFFOLD_DESCENT; return TaskState.RUNNING;
             }
-            if (onOwnedColumn(scaffold)) {
-                deferredScaffolds.add(scaffold); scaffoldAt++; continue;
-            }
+            // 逐格下拆不可用后仍可沿现有地面走离柱顶；普通清理会证明新站位不依赖待拆支撑，再允许破坏。
+            // 不能把脚下柱永久推迟，否则最后只剩这一柱时永远不会创建侧面接近路线。
             scaffoldCleanup = new BuildScaffoldCleanup(player, scaffold, forbiddenBodyCells);
             phase = Phase.SCAFFOLD_NAV; return TaskState.RUNNING;
         }
@@ -2145,6 +2224,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState scaffoldDescentTick() {
         var result = scaffoldDescent.tick();
         if (result == BuildScaffoldDescentDrive.Status.RUNNING) return TaskState.RUNNING;
+        // 向下拆柱被否定的具体证据要随侧面回退保留，最终回执不能只剩无关的上一次放置路径失败。
+        lastScaffoldDescent = scaffoldDescent.evidence();
         if (result == BuildScaffoldDescentDrive.Status.FAILED) {
             failAt(scaffold, scaffoldDescent.reason(), FailureType.NO_PATH, "scaffold_descent_failed", true);
             return TaskState.FAILED;
@@ -2342,11 +2423,13 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (scaffoldAccess != null && !r.scaffoldLedger().owns(placeAt, state)) cleanupNewSupports++;
             if (!r.scaffoldLedger().owns(placeAt, state)) placementEnvironmentChanged(placeAt);
             r.scaffoldLedger().confirmed(placeAt, state); scaffolds.add(placeAt.immutable());
+            ConstructionOwnership.placed(player, placeAt, r.getToolCallId());
             renewBuildProgress();
         }
     }
 
     @Override public void confirmedScaffoldRemoval(BlockPos pos) {
+        ConstructionOwnership.removed(player, pos);
         if (worksite != null) worksiteMovement.changed(pos);
         if (r.scaffoldLedger().contains(pos)) placementEnvironmentChanged(pos);
         r.scaffoldLedger().cleared(pos);
@@ -2442,6 +2525,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         data.put("creative_materials", creativeMaterials.progress());
         if (scaffoldCleanup != null) data.put("scaffold_cleanup", scaffoldCleanup.evidence());
         if (scaffoldDescent != null) data.put("scaffold_descent", scaffoldDescent.evidence());
+        else if (!lastScaffoldDescent.isEmpty()) data.put("scaffold_descent", lastScaffoldDescent);
         if (scaffoldAccess != null) data.put("scaffold_access", scaffoldAccess.evidence());
         if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
                 "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
@@ -2490,6 +2574,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        if (wrenchRemoval != null) { if (why == StopReason.PREEMPTED) wrenchRemoval.pause(); else wrenchRemoval.stop(); }
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
         if (scaffoldDescent != null) scaffoldDescent.stop();
         if (placementAccess != null) {
@@ -2498,7 +2583,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 if (useReceipt == null && phase != Phase.EDGE_RETURN) phase = Phase.PLACE_NAV;
             } else placementAccess.stop();
         }
-        foodPreparation.stop(player);
+        if (why == StopReason.PREEMPTED) foodPreparation.pause(player); else foodPreparation.stop(player);
         spoilSupply.cancel(player);
         if (ultimine != null) { ultimine.close(); ultimine = null; ultimineArmed = false; }
         excavationTools.stop(player);
@@ -2509,6 +2594,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 暂停／取消后不再续发旧任务的 Shift；恢复时由新控制租约重新核验身体与锚点。
     }
     @Override protected void cleanup() {
+        if (wrenchRemoval != null) wrenchRemoval.stop();
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
         if (scaffoldDescent != null) scaffoldDescent.stop();
         if (placementAccess != null) placementAccess.stop();
@@ -2535,6 +2621,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 永久建材缺口和临时支撑缺口分别保留，后者必须带可执行的选料结论才能自动补给。
         if (!temporarySupportDemand.isEmpty()) data.put("temporary_support_demand", temporarySupportDemand);
         data.put("cleared", r.broken());
+        if (!wrenchReceipts.isEmpty()) data.put("native_wrench_removals", List.copyOf(wrenchReceipts));
+        if (wrenchRemoval != null) data.put("pending_wrench_removal", wrenchRemoval.evidence());
         data.put("food_preparation", foodPreparation.progress(player));
         if (!foodPreparation.receipts().isEmpty()) data.put("completed_food_receipts", foodPreparation.receipts());
         if ("build_terrain_conflict".equals(failureCode)) data.put("mechanical_retry_allowed", false);
@@ -2564,6 +2652,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (scaffoldAccess != null) data.put("scaffold_access", scaffoldAccess.evidence());
         else if (!lastScaffoldAccess.isEmpty()) data.put("scaffold_access", lastScaffoldAccess);
         if (scaffoldDescent != null) data.put("scaffold_descent", scaffoldDescent.evidence());
+        else if (!lastScaffoldDescent.isEmpty()) data.put("scaffold_descent", lastScaffoldDescent);
         data.put("scaffold_cleanup_confirmed_removals", scaffoldConfirmedRemovals);
         data.put("scaffold_cleanup_deferred_count", deferredScaffolds.size());
         if (!lastDeferredScaffold.isEmpty()) data.put("last_deferred_scaffold", lastDeferredScaffold);
@@ -2571,6 +2660,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (failurePos != null) {
             var failure = new LinkedHashMap<>(BuildFailureEvidence.describe(failureCode, failurePos,
                     r.targets, player.level()::isLoaded, player.level()::getBlockState));
+            if (!placementStateConflict.isEmpty()) {
+                failure.put("native_placement_conflict",placementStateConflict);
+                data.put("mechanical_retry_allowed",false);
+            }
             if (temporaryTargets.containsKey(failurePos.asLong())) {
                 failure.put("temporary_support", true);
                 for (int i = queueAt + 1; i < queue.size(); i++) if (!isTemporary(queue.get(i))) {

@@ -9,9 +9,11 @@ import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.core.combat.RetreatProgress;
+import org.maiwithu.maicraft.core.combat.RetreatThreats;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.Swing;
+import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -22,15 +24,12 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.TaskState;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
@@ -128,7 +127,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     private final Set<Integer> noPath = new HashSet<>();
 
-    private final Map<Item, Integer> inventoryBaseline = new HashMap<>();
     private final Map<Integer, Float> observedHealth = new HashMap<>();
     private final Map<Integer, Entity> observedTargets = new HashMap<>();
     private final LootSweep loot;
@@ -141,6 +139,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     /** 退避的寻路连续失败次数。够了就是"退不掉",判据据此改判背水一战。 */
     private final RetreatProgress retreat = new RetreatProgress();
+    private final RetreatThreats retreatThreats = new RetreatThreats();
+    private final MeleeStanceRecovery stanceRecovery = new MeleeStanceRecovery();
 
     /** 上一行站位日志。数字没变就不再打,免得每 tick 一行把别的全冲掉。 */
     private String lastStandoffLog;
@@ -160,6 +160,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 撤离只保存当前是否在逃和最近开路时刻；安全终点由实际可达地形决定，不随机锁一个远处落点。
     private boolean retreating;
     private long retreatPlannedAt;
+    private Map<String, Object> lastRetreatObservation = Map.of();
+    private String lastRetreatFailure = "";
 
     public AttackCompanionTask(LocalPlayer player, AttackTaskRecord record) {
         super(player, record);
@@ -168,7 +170,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     @Override
     protected void onStart() {
-        snapshotInventory(inventoryBaseline);
     }
 
     @Override
@@ -176,6 +177,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
 
+        // 被困后靠反击走出两格也算真实进展，不能因当刻不是撤退动作而永久保留“无路可退”。
+        retreat.observe(player.position());
         Battlefield field = surveyField();
         for (var f : field.foes()) {
             if (f.authorized()) {
@@ -185,7 +188,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         settleFinishedTargets();
         if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         // 先判断这一刻是否仍需撤退或躲爆炸，再决定能否收拾战利品；敌人离开近圈不等于已脱离追击。
-        AttackPlan.Move move = AttackPlan.decide(field, lastMove);
+        AttackPlan.Move move = AttackPlan.decide(field, lastMove, retreat.committed());
+        if (move.action() == AttackPlan.Action.DISENGAGE) retreat.commit();
         if (phase == Phase.LOOT) {
             boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging)
                     || move.action() == AttackPlan.Action.DISENGAGE || move.action() == AttackPlan.Action.EVADE_BLAST;
@@ -206,6 +210,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         boolean blastEvading = move.action() == AttackPlan.Action.EVADE_BLAST;
         boolean blastChanged = blastEvading != (lastMove != null && lastMove.action() == AttackPlan.Action.EVADE_BLAST);
         lastMove = move;
+        // 撤退、弓战与爆炸避险及时释放近战格内微调，不能用旧站位输入覆盖新的逃生方向。
+        if (move.action() != AttackPlan.Action.SKIRMISH) stanceRecovery.stop(player);
         logMove(move, field);
 
         Entity chosen = move.foeId() == AttackPlan.NO_FOE ? null : liveEntity(move.foeId());
@@ -235,7 +241,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             retreating = false; // 恢复战斗站位后，结束之前的撤离导航。
             stopNav();
         }
-        return switch (move.action()) {
+        return afterCombatMovement(switch (move.action()) {
             case SKIRMISH, EVADE_BLAST -> {
                 yield closeIn();
             }
@@ -244,7 +250,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
             case DISENGAGE -> tickFlee();
             case DONE -> finish();
-        };
+        });
+    }
+
+    private TaskState afterCombatMovement(TaskState state) {
+        // 导航先续移动，再保留已选近战目标的瞄准；否则撤离镜头每刻覆盖回头瞄准，角色会被追着打却始终出不了手。
+        if (state == TaskState.RUNNING && meleeAction != null
+                && ClientRuntime.requireContext(player).mutationAvailable()) meleeAction.renewEntityAttackAim();
+        return state;
     }
 
     // ==================== 局面 ====================
@@ -443,6 +456,20 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                         : String.format("%.1f", distanceOf(field, move.foeId())),
                 field.hasMelee(), field.hasRanged(),
                 String.format("%.0f", field.effectiveHealth()), String.format("%.1f", field.availableHealth()), field.foes().size());
+        if (move.action() == AttackPlan.Action.DISENGAGE) {
+            // 沿用两秒采样频率，记录身体位移和导航事实；仅有“撤退中”无法区分实际移动、规划停顿与路径失败。
+            var observed = new LinkedHashMap<String, Object>(Map.of("feet", player.blockPosition().toShortString(),
+                    "velocity", String.valueOf(player.getDeltaMovement()), "grounded", player.onGround(),
+                    "planning", nav != null && nav.planningInFlight(),
+                    "physical_progress", nav != null && nav.hasRecentPhysicalProgress(40),
+                    "stall_ticks", nav == null ? 0 : nav.stallTicks(),
+                    "path_outcome", nav == null ? "no_active_navigation" : String.valueOf(nav.outcomeSummary()),
+                    "failures_without_displacement", retreat.failures(), "last_path_failure", lastRetreatFailure,
+                    "withdrawal_committed", retreat.committed()));
+            retreatThreats.observe(player, FLEE_SCAN_RADIUS, FIELD_RADIUS);
+            observed.put("threats", retreatThreats.evidence()); lastRetreatObservation = Map.copyOf(observed);
+            Constants.LOG.info("[maicraft-retreat] {}", lastRetreatObservation);
+        }
     }
 
     private static double distanceOf(Battlefield field, int id) {
@@ -527,6 +554,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (meleeAction != null) {
             Entity planned = liveEntity(meleeVictimId);
             Battlefield.Foe plannedFoe = field.byId(meleeVictimId);
+            // 追兵退出实际射程后，撤销尚未挥出的回头瞄准；已经发出的攻击仍须等待其原生回执。
+            if (plannedFoe != null && planned != null && !meleeAction.entityAttackSubmitted()
+                    && plannedFoe.distance() > Swing.reachTo(
+                            player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE), planned.getBbWidth())) {
+                stopMelee(); return;
+            }
             // 选中后才开始膨胀也必须取消待发刀，不能沿用上一刻的安全判断继续贴脸挥击。
             if (plannedFoe == null || plannedFoe.armed() || !plannedFoe.authorized() || r.strictAuthorized && (planned == null
                     || !r.entityIds.contains(planned.getId())
@@ -639,6 +672,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     // 围着目标保持战斗距离，同时绕开其他危险；只有真正无路可走才把目标送去远程可达性判断。
     private PlayerNav.Status driveApproach() {
+        stanceRecovery.target(player, bowFighting ? null : target);
+        if (stanceRecovery.active()) {
+            if (stanceRecovery.tick(player, standoffGoal(), target != null && player.distanceTo(target) <= reachToTarget()))
+                return PlayerNav.Status.RUNNING;
+            stopNav();
+        }
         if (nav == null) {
             // <b>没有目标也要走。</b>判据的 SKIRMISH 可以是"对全场的"(挑不出能打的,但还有
             // 东西追她),那时该退开等机会 —— 这里曾经第一行就 {@code target == null} 早退,
@@ -650,6 +689,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             nav = PlayerNav.trackGoal(player, this::standoffGoal, CHASE_SPEED, () -> false);
         }
         PlayerNav.Status status = nav.tick();
+        if (correctArrivedStance(status)) return PlayerNav.Status.RUNNING;
         // <b>只有真 NO-PATH 才算够不着</b>:搜索烧完整个预算也没找出路线。目标丢了、被围死、
         // 重规划抖动都是另外的事,拿它们当够不着会把两格外的普通僵尸也判死。
         boolean noRoute = status == PlayerNav.Status.FAILED
@@ -673,6 +713,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             }
         }
         return status;
+    }
+
+    private boolean correctArrivedStance(PlayerNav.Status status) {
+        // Baritone 的到达只证明脚格合格；真实身体站在远侧格边时，先安全挪向该格中心再交给原生攻击检查。
+        if (status != PlayerNav.Status.ARRIVED || bowFighting || target == null || !player.onGround()
+                || player.distanceTo(target) <= reachToTarget()) return false;
+        stopNav(); stanceRecovery.target(player, target); stanceRecovery.begin(player); return true;
     }
 
     /**
@@ -758,8 +805,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         //
         // 内沿用<b>裸</b>攻击距离(2.02),不加格量化补偿。带宽因此是 1.28 格,比格量化误差
         // 0.71 宽出一截 —— 当初算出"带只有 0.57 格、做不出来",是因为把补偿也叠进了内沿。
-        return NavGoal.approachAvoiding(
-                NavGoal.ring(target.blockPosition(), skirmishInner(), skirmishOuter()),
+        // 近战按实际三维够到距离接敌，敌人在台阶或平台上时继续寻找可出刀的高度；弓仍使用水平拉扯范围。
+        NavGoal approach = bowFighting
+                ? NavGoal.ring(target.blockPosition(), skirmishInner(), skirmishOuter())
+                : NavGoal.distanceBand(target.position(), skirmishInner(), skirmishOuter());
+        NavGoal stance = NavGoal.approachAvoiding(
+                approach,
                 Menace.AVOID_PENALTY,
                 bowFighting
                         ? Menace.field(player, field).stream()
@@ -767,6 +818,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                                         Math.max(x.clearance(), BOW_MIN_DISTANCE)))
                                 .toList()
                         : Menace.field(player, field));
+        return bowFighting ? stance : stanceRecovery.filter(stance);
         // 弓那一套的内沿对<b>每一只</b>都成立:她要跟所有怪保持五格,不只是当前目标。
     }
 
@@ -877,17 +929,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 躲避 ====================
 
-    /** 每刻按当前血量重新评估战斗；撤离以所有威胁的安全范围为目标，不绑定随机落点。 */
+    /** 已承诺撤离就持续寻找离开所有威胁的安全范围，不绑定随机落点，也不因少量回血改追击。 */
     // 近处危险和近期远程伤害都消失后才结束撤退；持续来袭的箭不能被近战扫描范围漏掉。
     private TaskState tickFlee() {
-        retreat.observe(player.position());
         if (!retreatThreatsPresent()) {
             clearRetreat();
             InputDriver.halt(player);
-            Constants.LOG.info("[maicraft-attack] 脱离成功 —— {} 格内没有敌对生物",
-                    (int) Menace.FLEE_DISTANCE);
+            Constants.LOG.info("[maicraft-attack] 脱离成功 —— 追击者已拉开距离，近期攻击与近处可见危险已解除");
             fail(Menace.outmatched(player)
-                            ? "broke off — too hurt to keep fighting; nothing is near you now"
+                            ? "broke off — too hurt to keep fighting; active pursuit and nearby visible threats are clear"
                             : "broke off — nothing here can be fought with what you carry "
                                     + "(explosive, or out of reach with no bow); you are clear now",
                     FailureType.TARGET_LOST);
@@ -906,6 +956,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         PlayerNav.Status status = nav.tick();
         if (status == PlayerNav.Status.FAILED) {
+            // 导航释放后失败原因就不可读，先保留真实类别和说明供下一次采样及最终回执复查。
+            lastRetreatFailure = nav.failType() + ": " + nav.failReason();
             stopNav();
             retreat.failed();
         } else {
@@ -919,17 +971,24 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 完成撤离时释放本趟逃生导航，后续战斗重新选择动作。 */
     private void clearRetreat() {
         retreating = false;
+        // 只有广域威胁检查确认脱离后，下一场战斗才重新按当前生命选择进退。
+        retreat.complete();
+        retreatThreats.clear();
         stopNav();
     }
 
     private NavGoal retreatGoal() {
-        var threats = Menace.field(player, CombatThreats.around(player, FLEE_SCAN_RADIUS)).stream()
+        var threats = Menace.field(player, retreatThreats.observe(player, FLEE_SCAN_RADIUS, FIELD_RADIUS)).stream()
                 .map(t -> t.withClearance(Menace.FLEE_DISTANCE)).toList();
         // 最后一只威胁消失后由tickFlee确认脱离；目标供应器不构造没有成员的避让目标。
         return threats.isEmpty() ? NavGoal.exact(PlayerNav.playerFeet(player)) : NavGoal.avoid(Menace.AVOID_PENALTY, threats);
     }
     // 近期真实伤害来源即使在普通扫描半径外，也要等其威胁记录消失后才能结束本次撤离。
-    private boolean retreatThreatsPresent() { return !CombatThreats.around(player, Menace.FLEE_DISTANCE).isEmpty(); }
+    private boolean retreatThreatsPresent() {
+        // 同一追击者需真正拉开到安全距离；近战扫描圈外仍在射来的箭继续由原生伤害记忆维持撤离。
+        return retreatThreats.observe(player, FLEE_SCAN_RADIUS, FIELD_RADIUS).stream()
+                .anyMatch(mob -> player.distanceTo(mob) <= Menace.FLEE_DISTANCE || CombatThreats.recentlyAttackedBy(player, mob));
+    }
 
     // ==================== 拾荒 ====================
 
@@ -1057,24 +1116,18 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
     }
 
-    private void snapshotInventory(Map<Item, Integer> out) {
-        out.clear();
-        Inventory inventory = player.getInventory();
-        for (ItemStack stack : inventory.items) {
-            if (!stack.isEmpty()) out.merge(stack.getItem(), stack.getCount(), Integer::sum);
-        }
+    // 自动防卫可能恰逢 AE 取物回包；后台补货带来的石英等库存增量不能冒充战斗掉落。
+    private Map<String, Integer> lootGained() {
+        return loot.confirmedGains();
     }
 
-    // 这份摘要只是整个任务期间背包的正增加量，包含任何来源；具体战利品归属证据另在 loot.report。
-    private Map<String, Integer> lootGained() {
-        Map<Item, Integer> now = new HashMap<>();
-        snapshotInventory(now);
-        Map<String, Integer> gained = new LinkedHashMap<>();
-        now.forEach((item, count) -> {
-            int delta = count - inventoryBaseline.getOrDefault(item, 0);
-            if (delta > 0) gained.put(BuiltInRegistries.ITEM.getKey(item).toString(), delta);
-        });
-        return gained;
+    @Override protected void stopNav() {
+        stanceRecovery.stop(player); super.stopNav();
+    }
+
+    @Override public void stop(LocalPlayer companion, StopReason why) {
+        // 更高优先级自救接管时释放短距离移动，恢复后按新的实际脚位重新验证。
+        stanceRecovery.stop(player); super.stop(companion, why);
     }
 
     @Override
@@ -1111,6 +1164,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("unreachable_drop_count", loot.unreachableCount());
         data.put("ambiguous_merged_drop_count", loot.ambiguousMergedCount());
         data.put("loot_receipt", loot.report());
+        if (!lastRetreatObservation.isEmpty()) data.put("last_retreat_observation", lastRetreatObservation);
+        if (!stanceRecovery.evidence().isEmpty()) data.put("last_melee_stance_adjustment", stanceRecovery.evidence());
         return data;
     }
 

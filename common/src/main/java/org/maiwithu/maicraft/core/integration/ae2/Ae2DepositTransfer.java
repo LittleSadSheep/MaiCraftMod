@@ -31,6 +31,7 @@ final class Ae2DepositTransfer {
         List<Ae2ReflectionBridge.Entry> entries(AbstractContainerMenu menu);
         Map<Integer, Integer> playerSlots(AbstractContainerMenu menu, LocalPlayer player);
         boolean safeFallback(AbstractContainerMenu menu, ItemStack sample);
+        default boolean networkOnlyShift(AbstractContainerMenu menu) { return false; }
         default boolean passiveSlotChange(int slot, ItemStack before, ItemStack after) { return false; }
     }
     private final LocalPlayer player;
@@ -46,6 +47,7 @@ final class Ae2DepositTransfer {
     private Status status = Status.RUNNING;
     private String code = "ae2_deposit_running";
     private boolean effects, settleOnly, preserve;
+    private boolean verifiedByNativeAcceptance;
     private int groupIndex, shifts, splitClicks, stagedSlot = -1, stagingSource = -1, batch, shiftSource;
     private long readySince, readyWaitStarted, stableTick = -1, networkBefore, verifiedNetworkAfter;
     private int stableAmount, stableCount, verifiedAmount;
@@ -89,6 +91,7 @@ final class Ae2DepositTransfer {
             public List<Ae2ReflectionBridge.Entry> entries(AbstractContainerMenu menu) { return bridge.entries(menu); }
             public Map<Integer, Integer> playerSlots(AbstractContainerMenu menu, LocalPlayer player) { return rules.playerSlots(menu, player); }
             public boolean safeFallback(AbstractContainerMenu menu, ItemStack sample) { return rules.safeFallback(menu, sample); }
+            public boolean networkOnlyShift(AbstractContainerMenu menu) { return rules.networkOnlyShift(menu); }
             public boolean passiveSlotChange(int slot, ItemStack before, ItemStack after) {
                 return terminalSlot != null && slot == terminalSlot && Ae2DepositAccess.sameTerminalIgnoringEnergy(before, after);
             }
@@ -119,9 +122,9 @@ final class Ae2DepositTransfer {
         // 给刚显示的终端至少两个不同刻稳定画面；这是客户端观察，不冒充 AE 没有提供的全量同步完成证书。
         if (!readyStock.equals(visible)) { readyStock = Map.copyOf(visible); readySince = context.tickRevision(); return status; }
         if (context.tickRevision() - readySince < 2) return status;
-        // 无穷供给元件会接受物品却始终报告极大常数；客户端无法区分它与同量巨库存，不能点击后再等待不可能的数量增量。
-        // 在整批第一次拆叠或存入前检查所有物品，让普通仓库或保留余料的上层恢复路径仍有“没有搬动”的确定证据。
-        for (var stock : visible.entrySet()) if (stock.getValue() >= Integer.MAX_VALUE) {
+        // 极大或无穷库存不能靠显示数量增长确认；只有原生网络专用 Shift 可改用服务器同步扣槽证据。
+        // 未核实的菜单仍在整批拆叠之前拒绝，不能因另一种菜单也长得像终端就冒险转移物品。
+        for (var stock : visible.entrySet()) if (stock.getValue() >= Integer.MAX_VALUE && !view.networkOnlyShift(menu)) {
             stockObservationLimit = Map.of("item_id", stock.getKey().toString(), "reported_network_count", stock.getValue(),
                     "reason", "stock_at_or_above_infinite_reporting_sentinel", "conservative_refusal", true);
             return fail("ae2_deposit_quantity_not_finitely_observable", false);
@@ -147,6 +150,7 @@ final class Ae2DepositTransfer {
         // 客户端 AE quickMove 不假扣背包，正常窗口点击包交给服务器的原生 Shift 路径处理。
         batch = stack.getCount(); shiftSource = source; shiftBefore = inventory(); networkBefore = visible.get(item);
         stableTick = -1; stableAmount = stableCount = verifiedAmount = 0;
+        verifiedByNativeAcceptance = false;
         receipt = context.menus().click(context, slots.get(source), 0, ClickType.QUICK_MOVE, this::observeShift, 100);
         // 前置渲染／权限检查会直接抛错；真正进入原生事务后的异常则返回 UNCERTAIN 回执，二者不能混算。
         effects = true; shifts++;
@@ -166,7 +170,7 @@ final class Ae2DepositTransfer {
         readyStock = Map.of(); readySince = readyWaitStarted = context.tickRevision();
         return status;
     }
-    private MenuConfirmation.Verdict observeShift(LocalPlayerContext context, MenuReceipt ignored) {
+    private MenuConfirmation.Verdict observeShift(LocalPlayerContext context, MenuReceipt transaction) {
         if (!sameMenu(context)) {
             lastShiftObservation = Map.of("reason", "menu_or_repository_changed"); return MenuConfirmation.Verdict.DIVERGED;
         }
@@ -183,6 +187,15 @@ final class Ae2DepositTransfer {
         boolean unchanged = unchangedOutside(shiftBefore, Set.of(shiftSource));
         var observation = Ae2DepositLedger.observe(batch, source.getCount(), beforeInventory, afterInventory,
                 networkBefore, after, menu.getCarried().isEmpty(), unchanged);
+        boolean nativeAccepted = false;
+        // AEBaseMenu 客户端 Shift 不扣物品，服务器仅按入网接受量扣槽；同时排除后备槽和其他背包变化。
+        if (observation.verdict() == Ae2DepositLedger.Verdict.WAITING && networkBefore >= Integer.MAX_VALUE
+                && menu.getStateId() != transaction.beforeStateId() && view.networkOnlyShift(menu)
+                && view.safeFallback(menu,BuiltInRegistries.ITEM.get(item).getDefaultInstance())) {
+            observation = Ae2DepositLedger.nativeAcceptance(batch,source.getCount(),beforeInventory,afterInventory,
+                    networkBefore,after,menu.getCarried().isEmpty(),unchanged);
+            nativeAccepted = observation.verdict() == Ae2DepositLedger.Verdict.CONFIRMED;
+        }
         // 真实存入未确认时保留两边数量与拒绝门槛；仅背包减少不能补造入网成功，也不能再盲发一次 Shift。
         lastShiftObservation = Map.of("item_id", item.toString(), "source_before", batch, "source_after", source.getCount(),
                 "inventory_before", beforeInventory, "inventory_after", afterInventory,
@@ -194,7 +207,7 @@ final class Ae2DepositTransfer {
         if (stableAmount != observation.deposited()) { stableAmount = observation.deposited(); stableCount = 0; }
         if (stableTick != context.tickRevision()) { stableTick = context.tickRevision(); stableCount++; }
         if (stableCount < 2) return MenuConfirmation.Verdict.PENDING;
-        verifiedAmount = observation.deposited(); verifiedNetworkAfter = after;
+        verifiedAmount = observation.deposited(); verifiedNetworkAfter = after; verifiedByNativeAcceptance = nativeAccepted;
         return MenuConfirmation.Verdict.APPLIED;
     }
     private Status settleShift(LocalPlayerContext context) {
@@ -247,7 +260,8 @@ final class Ae2DepositTransfer {
     void captureConfirmed() {
         // 回执已由菜单端确认时，只收取冻结的证明，不重新点击或重新推断网络已经接受多少。
         if (receipt != null && receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED && verifiedAmount > 0) {
-            ledger.confirmed(item, verifiedAmount, networkBefore, verifiedNetworkAfter, batch, batch - verifiedAmount);
+            if (verifiedByNativeAcceptance) ledger.confirmedNativeAcceptance(item,verifiedAmount,networkBefore,verifiedNetworkAfter,batch,batch-verifiedAmount);
+            else ledger.confirmed(item, verifiedAmount, networkBefore, verifiedNetworkAfter, batch, batch - verifiedAmount);
             receipt = null; stagedSlot = -1; readyStock = Map.of();
         }
     }

@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.Set;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import java.util.ArrayList;
+import java.util.function.Predicate;
 
 /**
  * 在走过去之前先试算“站在那里能否点到”，相机转到位后再用同一套规则核对。
@@ -59,8 +60,7 @@ public final class FirstPersonInteractionTargeting {
             return hit.getBlockPos().equals(target) && state.getBlock() instanceof BucketPickup
                     && (!(state.getBlock() instanceof LiquidBlock) || state.getFluidState().isSource());
         }
-        // 请求格本身是实体方块时，当前规则只要求点击该格；空气或流体格则继续推算水要落在哪里。
-        if (!state.isAir() && !(state.getBlock() instanceof LiquidBlock)) return hit.getBlockPos().equals(target);
+        // 满桶始终核对真实落点；火把等占用也应点相邻支撑面，不能点中目标却把桶倒到它旁边。
         // 当前只按方块是否实现含水接口判断，没检查双层台阶等实际不能含水的状态；见审计记录 A31。
         boolean waterlogs = (item == Items.WATER_BUCKET || item instanceof MobBucketItem)
                 && level.getBlockState(hit.getBlockPos()).getBlock() instanceof LiquidBlockContainer;
@@ -73,10 +73,7 @@ public final class FirstPersonInteractionTargeting {
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Item item) {
         if (!Double.isFinite(reach) || reach <= 0.0D
                 || !level.isLoaded(BlockPos.containing(eye)) || !level.isLoaded(target)) return null;
-        var state = level.getBlockState(target);
-        if (item != Items.BUCKET && !state.isAir() && !(state.getBlock() instanceof LiquidBlock)) {
-            return visibleBlockHit(level, observer, eye, target, reach);
-        }
+        // 即使目标被火把等方块占用也核对桶的实际落点，不能绕过acceptsBucketHit返回一条会倒到旁格的射线。
         Vec3 delta = Vec3.atCenterOf(target).subtract(eye);
         if (delta.lengthSqr() < EPSILON) return null;
         BlockHitResult hit = bucketRay(level, observer, eye, eye.add(delta.normalize().scale(reach)), item);
@@ -124,6 +121,19 @@ public final class FirstPersonInteractionTargeting {
     // 先取方块形状的边界，试中心和靠近六个面的点；命中必须属于指定格且在触及距离内。
     public static BlockHitResult visibleBlockHit(
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach) {
+        return visibleBlockHit(level, observer, eye, target, reach, null);
+    }
+
+    /** 工作台面只接受指定方向的点击时，先用真实选择形状找该面的可见点；侧面可见不代表能投料或取货。 */
+    public static BlockHitResult visibleBlockHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Direction requiredFace) {
+        return visibleBlockHit(level, observer, eye, target, reach, requiredFace, ignored -> true);
+    }
+
+    /** 有效交互区可能只是机械手前端；每条原生射线命中后再筛选，不能拿同一方块上的无效部位代替。 */
+    public static BlockHitResult visibleBlockHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Direction requiredFace,
+            Predicate<BlockHitResult> acceptsHit) {
         if (!Double.isFinite(reach) || reach <= 0.0D
                 || !level.isLoaded(BlockPos.containing(eye))
                 || !level.isLoaded(target)) {
@@ -166,6 +176,8 @@ public final class FirstPersonInteractionTargeting {
                     eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, observer));
             if (hit.getType() == HitResult.Type.BLOCK
                     && hit.getBlockPos().equals(target)
+                    && (requiredFace == null || hit.getDirection() == requiredFace)
+                    && acceptsHit.test(hit)
                     && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
                 return hit;
             }

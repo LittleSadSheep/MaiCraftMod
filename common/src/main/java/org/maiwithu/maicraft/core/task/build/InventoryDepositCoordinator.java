@@ -25,8 +25,8 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.Comparator;
 
-/** 将施工确认可存的余料通过真实木桶界面分箱存好；保留工具、建材和返程安排，不直接清包或丢物。 */
-public final class BuildExcavationSpoilSupply {
+/** 将已核实可存的物品通过真实容器或AE界面存好；保留数量底线，实际确认后才释放背包容量。 */
+public final class InventoryDepositCoordinator {
     public enum Status { RUNNING, DEPOSITED, FAILED }
     public record Tick(Status status, Map<String, Object> receipt) {}
     private LocalPlayer owner;
@@ -45,6 +45,7 @@ public final class BuildExcavationSpoilSupply {
     private int childLimit, childBefore;
     private boolean uncertain;
     private boolean aeAttempted, aeChild;
+    private boolean carriedOnly;
     private String ordinaryStorageFailure;
     private Map<ResourceLocation, Integer> aeLimits = Map.of(), aeBefore = Map.of();
     private Status status = Status.DEPOSITED;
@@ -59,6 +60,7 @@ public final class BuildExcavationSpoilSupply {
         status = Status.FAILED;
         failure = null; uncertain = false; lastContainer = Map.of(); child = null; childRecord = null;
         aeAttempted = aeChild = false; aeLimits = aeBefore = Map.of(); ordinaryStorageFailure = null;
+        carriedOnly = false;
         owner = player; world = player.level(); this.callId = callId == null ? "excavation-spoil" : callId;
         // 固定出坑后的仓库搜索中心，并限制整次整理时长，不能走到一只箱子后再向外扩张搜索范围。
         searchOrigin = player.blockPosition().immutable();
@@ -76,6 +78,12 @@ public final class BuildExcavationSpoilSupply {
         items = proved.keySet().stream().sorted(Comparator.comparing(ResourceLocation::toString)).toList();
         status = items.isEmpty() ? Status.DEPOSITED : Status.RUNNING;
     }
+
+    /** 随身整理固定留在当前工位；没有可用随身仓库时交回失败，不为了腾背包继续走向远处箱子。 */
+    public void beginCarried(LocalPlayer player, String callId, long deadlineGameTime, Map<ResourceLocation, Integer> approved) {
+        begin(player, callId, deadlineGameTime, approved, List.of(), 1);
+        carriedOnly = true;
+    }
     public Tick tick(LocalPlayer player, Function<Task, TaskState> runChild) {
         // 存土石 -> 确认背包与箱内数量变化 -> 关箱；外来界面或游标出现时先停下，不替玩家处理它们。
         if (status != Status.RUNNING) return new Tick(status, receipt());
@@ -85,6 +93,7 @@ public final class BuildExcavationSpoilSupply {
         while (index < items.size() && remaining(items.get(index)) == 0) { index++; attempts = 0; visited.clear(); }
         if (index == items.size()) { status = Status.DEPOSITED; return new Tick(status, receipt()); }
         if (world.getGameTime() >= deadline) return fail("excavation_spoil_deadline");
+        if (carriedOnly) return tryAeStorage("carried_storage_unavailable");
         ResourceLocation item = items.get(index); int remaining = remaining(item);
         if (!BuildExcavationCargo.plain(player, BuiltInRegistries.ITEM.get(item))) return fail("excavation_spoil_item_components_changed");
         if (count(player, item) < retained.get(item) + remaining) return fail("excavation_spoil_inventory_changed_before_deposit");
@@ -130,6 +139,7 @@ public final class BuildExcavationSpoilSupply {
     private Tick tryAeStorage(String ordinaryFailure) {
         // 普通箱子无空位时只尝试一次 AE，把全部剩余土石合并成一趟可见终端操作，不能逐种重复往返。
         if (aeAttempted || !Ae2ResourceSupply.available()) return fail(ordinaryFailure);
+        if (carriedOnly && !Ae2ResourceSupply.hasCarriedWirelessTerminal(owner)) return fail("carried_wireless_terminal_unavailable");
         aeAttempted = true; ordinaryStorageFailure = ordinaryFailure;
         Map<ResourceLocation, Integer> limits = new LinkedHashMap<>(), before = new LinkedHashMap<>();
         for (ResourceLocation item : items) if (remaining(item) > 0) {
@@ -138,15 +148,20 @@ public final class BuildExcavationSpoilSupply {
             limits.put(item, remaining(item)); before.put(item, count(owner, item));
         }
         aeLimits = Map.copyOf(limits); aeBefore = Map.copyOf(before);
-        var request = new Ae2ResourceSupply.Request(limits.entrySet().stream()
-                .map(entry -> new Ae2ResourceSupply.Group(entry.getKey(), entry.getValue())).toList(), false,
-                Ae2ResourceSupply.Operation.DEPOSIT);
+        var request = aeDepositRequest(limits, carriedOnly);
         childRecord = Ae2ResourceSupply.taskRecord(callId + "-ae-deposit", Math.min(deadline, world.getGameTime() + 2L * 60 * 20), request,
                 // 固定终端仍受本次出坑位置、已加载范围与主人保护约束限制，不能借记忆中的终端走到别处。
                 at -> owner.level() == world && at.distSqr(searchOrigin) <= (long) radius * radius
                         && ContainerSupplySources.accessAllowed(owner, at, protectedLabels));
         child = TaskFactory.create(owner, childRecord); aeChild = true;
         return new Tick(Status.RUNNING, receipt());
+    }
+
+    public static Ae2ResourceSupply.Request aeDepositRequest(Map<ResourceLocation, Integer> approved, boolean carriedOnly) {
+        // 随身模式将访问限制写进原生AE请求；仅仅搜索半径很小仍可能选中固定终端，不能代替此约束。
+        return new Ae2ResourceSupply.Request(approved.entrySet().stream()
+                .map(entry -> new Ae2ResourceSupply.Group(entry.getKey(), entry.getValue())).toList(), false,
+                Ae2ResourceSupply.Operation.DEPOSIT, carriedOnly);
     }
 
     private Tick tickAeChild(Function<Task, TaskState> runChild) {
@@ -184,7 +199,7 @@ public final class BuildExcavationSpoilSupply {
         } catch (IllegalArgumentException | ArithmeticException invalid) { uncertain = true; return false; }
     }
 
-    static Map<ResourceLocation, Integer> verifiedAeCounts(Map<String, Object> data, Map<ResourceLocation, Integer> limits) {
+    public static Map<ResourceLocation, Integer> verifiedAeCounts(Map<String, Object> data, Map<ResourceLocation, Integer> limits) {
         if (!"deposit".equals(data.get("operation")) || !(data.get("deposited") instanceof Map<?, ?> rows)
                 || !(data.get("confirmed_deposited_total") instanceof Number total)) throw new IllegalArgumentException("missing AE deposit evidence");
         Map<ResourceLocation, Integer> result = new LinkedHashMap<>(); int sum = 0;
@@ -238,6 +253,7 @@ public final class BuildExcavationSpoilSupply {
         if (searchOrigin != null) result.put("storage_search_origin", List.of(searchOrigin.getX(), searchOrigin.getY(), searchOrigin.getZ()));
         result.put("storage_search_radius", radius);
         result.put("ae_storage_attempted", aeAttempted);
+        result.put("storage_access_scope", carriedOnly ? "carried_storage_only" : "bounded_loaded_storage");
         if (failure != null) result.put("failure_code", failure);
         if (!lastContainer.isEmpty()) result.put("last_container_receipt", lastContainer);
         return Map.copyOf(result);

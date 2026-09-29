@@ -18,6 +18,14 @@ public final class MachinePlacementItemsTest {
         check(MachinePlacementItems.verticalGearboxAxis(Set.of(), Direction.EAST) == Direction.Axis.Z, "candidate yaw can naturally select the other horizontal axis");
         check(MachinePlacementItems.verticalGearboxAxis(Set.of(Direction.Axis.X, Direction.Axis.Z), Direction.EAST) == Direction.Axis.Z,
                 "conflicting native neighbor axes use the original item's view fallback");
+        // 复现压机后方已有Z向链箱、蓝图仍要求齿轮箱axis=z的情形：实际物品会强制生成axis=x。
+        var conflict = MachinePlacementItems.verticalGearboxConflict(Set.of(Direction.Axis.Z),Direction.Axis.Z);
+        check(((Map<?,?>)conflict.get("native_generated_properties")).get("axis").equals("x")
+                && ((Map<?,?>)conflict.get("requested_properties")).get("axis").equals("z"),"state conflict exposes both requested and native axes");
+        check(MachinePlacementItems.verticalGearboxConflict(Set.of(Direction.Axis.Z),Direction.Axis.X).isEmpty()
+                && MachinePlacementItems.verticalGearboxConflict(Set.of(),Direction.Axis.Z).isEmpty()
+                && MachinePlacementItems.verticalGearboxConflict(Set.of(Direction.Axis.X,Direction.Axis.Z),Direction.Axis.Z).isEmpty(),
+                "a valid or freely view-selectable native state is not reported as a forced conflict");
         System.out.println("MachinePlacementItemsTest: native gearbox item identities and post-placement axis projection passed");
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.tools.interact;
 import org.maiwithu.maicraft.core.tools.BlockActionOps;
+import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 
 import static org.maiwithu.maicraft.task.TaskDispatch.*;
 
@@ -21,7 +22,7 @@ public final class InteractAtTool implements MaiCraftTool {
     private final BlockActionOps impl = new BlockActionOps();
 
     private record Args(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
-                        String item_id, String expected_block_id, String required_block_id) {}
+                        String item_id, String expected_block_id, String required_block_id, Boolean empty_hand, String item_resource_id) {}
 
     @Override
     public String name() {
@@ -50,15 +51,22 @@ public final class InteractAtTool implements MaiCraftTool {
                 .nullableInteger("z", "Aim Z. Null when aiming forward.")
                 .nullableInteger("hold_ticks", "0/null = single press; >0 = hold that many ticks; -1 = hold until done/timeout.")
                 .nullableString("item_id", "Optional namespaced item to equip-and-use, e.g. minecraft:bonemeal. Null = use what's in hand.")
+                .nullableString("item_resource_id", "Optional observed component-sensitive identity; requires item_id and block use. Missing or changed identity stops before use.")
                 .nullableString("expected_block_id", "Optional required resulting block at the aim; an ineffective click is not success.")
                 .nullableString("required_block_id", "Optional block identity that must still occupy the aim immediately before native use.")
+                .optionalBool("empty_hand", "Prepare an empty main hand before block use; incompatible with item_id. Omitted or false retains held-item use.")
                 .build();
     }
 
     @Override
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
-        runSync(companion, impl.interactAt(a.button(), a.x(), a.y(), a.z(), a.hold_ticks(), a.item_id(),
-                a.expected_block_id(), a.required_block_id(), ctx(toolCallId, companion)), reply);
+        var task = (InteractAtTaskRecord) impl.interactAt(a.button(), a.x(), a.y(), a.z(), a.hold_ticks(), a.item_id(),
+                a.expected_block_id(), a.required_block_id(), ctx(toolCallId, companion));
+        // 空手要求随内部任务传到底层，导航或自动反击更换了主手也不能丢失这份操作意图。
+        if (Boolean.TRUE.equals(a.empty_hand())) task.withEmptyHand();
+        // 把语义层选定的工件身份一路带到原生选物前，不在内部解析时丢掉装配进度约束。
+        if (a.item_resource_id() != null) task.withItemResourceId(a.item_resource_id());
+        runSync(companion, task, reply);
     }
 }

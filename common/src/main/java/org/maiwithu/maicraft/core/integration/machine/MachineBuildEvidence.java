@@ -16,7 +16,8 @@ public final class MachineBuildEvidence {
             target.put("material_planning_required", true);
         }
         if (failure.containsKey("recovery_options")) target.put("recovery_options", failure.get("recovery_options"));
-        for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure"))
+        // 装不下也要交到机器外层，避免补料包装把容量前置重新解释成制造配方不足。
+        for (String key : List.of("body_preparation_required", "food_preparation", "preparation_failure", "inventory_capacity"))
             if (failure.containsKey(key)) target.put(key, failure.get(key));
     }
     private MachineBuildEvidence() {}
@@ -44,6 +45,11 @@ public final class MachineBuildEvidence {
         if (evidence.get("build_diagnostics") instanceof List<?> diagnostics && !diagnostics.isEmpty()
                 && diagnostics.getFirst() instanceof Map<?, ?> first) {
             for (String key : List.of("expected", "observed", "target_index")) copy(first, result, key, key);
+            // 原生物品强制状态是具体失败原因，机器供料包装也要带到首层，避免仍只显示先前的站位搜索结果。
+            if (first.get("native_placement_conflict") instanceof Map<?,?> conflict) {
+                result.put("native_placement_conflict",conflict);
+                copy(conflict,result,"detail","reason");
+            }
         }
         return Map.copyOf(result);
     }

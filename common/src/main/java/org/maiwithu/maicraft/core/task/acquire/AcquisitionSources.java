@@ -17,9 +17,11 @@ final class AcquisitionSources {
         return need.allowedSources.stream().filter(need::canTry)
                 .sorted(Comparator.comparingInt(source -> switch (source) {
                     case INVENTORY -> 0;
+                    // 随身终端不需要离开工位，先取已观察的无线现货，再走向地上掉落物或其他世界来源。
+                    case WIRELESS -> 5;
                     case NEARBY -> 10;
-                    case WIRELESS -> 19;
                     case STORAGE -> 20;
+                    case HARVEST -> 24; // 有明确成熟作物时先收田，避免缺钱还先走贸易链。
                     case CRAFT -> facts.craftReady() ? 25 : 50;
                     case COOK -> facts.cookReady() ? 26 : 55;
                     case MINE -> facts.naturalMine() ? 30 : 60;

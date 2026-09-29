@@ -82,6 +82,27 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     private boolean previewManaged;
     /** 仅供内部补料流程使用：先回到施工区外地面，临时支撑仍留在共享账中，后续正常施工负责清理。 */
     private boolean supplyAccessOnly;
+    /** 机器尚未装配的连接件、附件与后续工序需求也随施工批次传递，避免补食只看到眼前的放块材料。 */
+    private Set<Item> futureWorkItems = Set.of();
+    private Map<BlockPos, BlockState> observedMachineEdits = Map.of();
+    private boolean fixedMachineModification;
+    private Set<BlockPos> declaredMachineEdits = Set.of();
+    /** 已获准的机器修改绑定具体旧状态与位置；普通建造不会因为允许替换而获得这份拆机范围。 */
+    public void machineModification(Map<BlockPos, BlockState> observed) {
+        observedMachineEdits = Map.copyOf(observed); fixedMachineModification = true;
+    }
+    public boolean fixedMachineModification() { return fixedMachineModification; }
+    /** 已授权机器修改只作用于作者点名的格子；读取当前状态由施工内部完成，不把刷新观察当作新的许可。 */
+    public void automaticMachineModification(Set<BlockPos> cells) {
+        declaredMachineEdits = cells.stream().map(BlockPos::immutable).collect(Collectors.toUnmodifiableSet());
+        fixedMachineModification = true;
+    }
+    public boolean observedMachineEdit(BlockPos at, BlockState actual) {
+        return replaceExisting && !actual.isAir() && (declaredMachineEdits.contains(at) || actual.equals(observedMachineEdits.get(at)))
+                && (replaceBlockEntities || !actual.hasBlockEntity());
+    }
+    public Set<Item> futureWorkItems() { return futureWorkItems; }
+    public void futureWorkItems(Set<Item> items) { futureWorkItems = Set.copyOf(items); }
     private BuildScaffoldLedger scaffoldLedger = new BuildScaffoldLedger();
     private BuildExcavationCargo excavationCargo = new BuildExcavationCargo();
     BuildExcavationCargo excavationCargo() { return excavationCargo; }
@@ -136,6 +157,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.excavationCargo = excavationCargo;
         destination.materialSupplyProtection = materialSupplyProtection;
         destination.toolSupply = toolSupply;
+        destination.futureWorkItems = futureWorkItems;
+        destination.observedMachineEdits = observedMachineEdits;
+        destination.fixedMachineModification = fixedMachineModification;
+        destination.declaredMachineEdits = declaredMachineEdits;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
                 preflightGuard, mutationGuard, confirmedMutation);
     }

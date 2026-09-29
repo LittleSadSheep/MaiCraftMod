@@ -329,6 +329,8 @@ final class CreateEndpointEvidenceSearch {
     }
 
     private void scanKineticPosition(ClientLevel level, BlockPos position) {
+            // 区域只限定调查起点，不能覆盖调用者点名的机器类型；锁链轮请求不会退化成给邻近的轴供电。
+            if(!endpoint.accepts(level.getBlockState(position)))return;
             CreateKineticsBridge.Facts kinetic = CreateKineticsBridge.inspect(level, position);
             if (kinetic == null || poweredOnly && !kinetic.powered()) return;
             BlockState state = level.getBlockState(position);

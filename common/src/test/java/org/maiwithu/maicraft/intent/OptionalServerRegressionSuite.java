@@ -9,6 +9,8 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ServerSupplyTest;
 import org.maiwithu.maicraft.core.integration.create.CreateEconomicEndpointBridgeTest;
 import org.maiwithu.maicraft.core.integration.create.CreateExactUtilityEndpointTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorContractTest;
+import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorUseTest;
+import org.maiwithu.maicraft.core.integration.create.transmission.KineticWorksiteReturnTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticClearanceRevalidationTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticSourceScopeTest;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticClientHeightmapTest;
@@ -23,6 +25,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItemsTest;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogTest;
 import org.maiwithu.maicraft.core.integration.machine.catalog.UtilityInstallationCatalogTest;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprintCatalogTest;
+import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprintRevisionTest;
 import org.maiwithu.maicraft.core.integration.machine.discovery.MachineDiscoveryScannerTest;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutUtilityInputsTest;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionDesignCompilerTest;
@@ -69,6 +72,9 @@ import org.maiwithu.maicraft.server.machine.connectivity.ChainConveyorConnection
 import org.maiwithu.maicraft.server.machine.connectivity.ConnectionInspectionTest;
 import org.maiwithu.maicraft.server.machine.connectivity.HopperConnectionInspectionTest;
 import org.maiwithu.maicraft.server.machine.create.CreatePressInputInspectionTest;
+import org.maiwithu.maicraft.server.machine.create.CreateStressObservationTest;
+import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidenceTest;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInputTest;
 import org.maiwithu.maicraft.server.machine.mekanism.MekanismResourceRegressionTest;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest;
 
@@ -88,6 +94,9 @@ public final class OptionalServerRegressionSuite {
         Ae2ServerCraftJobTest.main(args);
         ServerNativeRegressionTest.main(args);
         CreatePressInputInspectionTest.main(args);
+        CreateStressObservationTest.main(args);
+        CreateDeployerHandEvidenceTest.main(args);
+        CreateManualInputTest.main(args);
         NativeInventoryRegressionTest.main(args);
         ProductionRetentionTest.main(args);
         Ae2NativeCraftingCompletionTest.main(args);
@@ -129,6 +138,7 @@ public final class OptionalServerRegressionSuite {
         UtilityInstallationCatalogTest.main(args);
         // 已建机器的完整蓝图跨连接保存，后续地图比对不依赖原施工任务仍留在内存。
         MachineBlueprintCatalogTest.main(args);
+        MachineBlueprintRevisionTest.main(args);
         UtilityConnectionPlannerTest.main(args);
         UtilityExistingCableRouteTest.main(args);
         UtilityConnectionTaskGuardTest.main(args);
@@ -146,6 +156,8 @@ public final class OptionalServerRegressionSuite {
         KineticSourceScopeTest.main(args);
         KineticRouteContinuationTest.main(args);
         ChainConveyorContractTest.main(args);
+        ChainConveyorUseTest.main(args);
+        KineticWorksiteReturnTest.main(args);
         ChainConveyorConnectionPathTest.main(args);
         MachineWatchProgressTest.main(args);
         System.out.println("OptionalServerRegressionSuite: passed");

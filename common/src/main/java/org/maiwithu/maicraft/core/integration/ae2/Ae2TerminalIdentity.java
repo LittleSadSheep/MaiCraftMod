@@ -6,12 +6,12 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
-/** 无线终端工作时会耗电；恢复栏位只忽略原生电量，其余绑定、名称、数量仍必须与原终端一致。 */
-final class Ae2TerminalIdentity {
+/** 无线终端工作时会耗电；选物与恢复栏位只忽略原生电量，其余绑定、名称、数量仍必须与原终端一致。 */
+public final class Ae2TerminalIdentity {
     private static final ResourceLocation ENERGY = ResourceLocation.parse("ae2:stored_energy");
     private Ae2TerminalIdentity() {}
 
-    static boolean same(ItemStack actual, ItemStack expected) {
+    public static boolean same(ItemStack actual, ItemStack expected) {
         if (expected.isEmpty()) return actual.isEmpty();
         var id = BuiltInRegistries.ITEM.getKey(expected.getItem());
         boolean wireless = id.getNamespace().equals("ae2")

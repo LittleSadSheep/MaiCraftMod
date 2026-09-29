@@ -19,10 +19,20 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2WaterBucketFillTest;
 import org.maiwithu.maicraft.core.integration.create.CreateStockObservationTest;
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTest;
 import org.maiwithu.maicraft.core.inventory.StockEvidenceTest;
+import org.maiwithu.maicraft.core.inventory.InventoryKeepPlanTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackMenuAccessTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackSplitPlannerTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackTransferPlanTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackStockTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackCarriersTest;
+import org.maiwithu.maicraft.core.inventory.InventoryWorkItemsTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
 import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionWirelessInventoryTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionBackpackInventoryTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionBackpackTidyTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2StockObservationTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentityTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSourceInheritanceTest;
@@ -61,11 +71,14 @@ import org.maiwithu.maicraft.core.task.build.BuildExcavationCargoRecoveryTest;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationCargoTest;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontierTest;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilBoundaryTest;
-import org.maiwithu.maicraft.core.task.build.BuildExcavationSpoilSupplyTest;
+import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinatorTest;
 import org.maiwithu.maicraft.core.task.build.BuildExecutionPacingTest;
 import org.maiwithu.maicraft.core.task.build.BuildFailureEvidenceTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodBoundaryTest;
 import org.maiwithu.maicraft.core.task.build.BuildFoodPreparationTest;
+import org.maiwithu.maicraft.core.task.build.BuildPlacementReturnTest;
+import org.maiwithu.maicraft.core.task.build.BuildFoodStockSupplyTest;
+import org.maiwithu.maicraft.core.task.acquire.HarvestCropTest;
 import org.maiwithu.maicraft.core.task.build.BuildFootingTest;
 import org.maiwithu.maicraft.core.task.build.BuildLayerFrontierTest;
 import org.maiwithu.maicraft.core.task.build.BuildNavigationRetryTest;
@@ -99,6 +112,9 @@ import org.maiwithu.maicraft.core.task.build.BuildSharedWorksiteTest;
 import org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceSurveyTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceExecutionTest;
+import org.maiwithu.maicraft.core.task.build.MachineModificationClearanceTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineOwnedReplacementTest;
+import org.maiwithu.maicraft.core.blueprint.ConstructionOwnershipTest;
 import org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupportAccessTest;
@@ -150,6 +166,8 @@ public final class GuiRegressionSuite {
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
         // 区分实体点击与物品自身使用，避免砂纸等工序停在不可选中的掉落物上。
         UseHeldItemPrimitiveTest.main(args);
+        // 打开村民交易必须先有可支付条件并准备空手，不能退回使用上一轮拿着的 AE 终端。
+        TradeMenuPreparationTest.main(args);
         // 批次核对双手准备、耗材更换和失败后的真实部分产物，禁止由重试补造成功数量。
         UseItemBatchTest.main(args);
         CraftingResultSynchronizationTest.main(args);
@@ -230,6 +248,16 @@ public final class GuiRegressionSuite {
         BuildClearanceSurveyTest.main(args);
         // 现场在开工前或开挖途中出现人工方块时，实际施工任务也要停手并回报原坐标。
         BuildClearanceExecutionTest.main(args);
+        MachineModificationClearanceTest.main(args);
+        // 新建入口复用原生施工归属时仍保持逐格权限，后续供料批次不能丢失这份范围。
+        MachineOwnedReplacementTest.main(args);
+        ConstructionOwnershipTest.main(args);
+        BuildWrenchRemovalTest.main(args);
+        FiniteBlockUseTest.main(args);
+        EmptyHandInteractionTest.main(args);
+        MachineInteractionSurfaceTest.main(args);
+        // 原生取放使用已观察的工件组件，不能只因物品注册名相同就换错装配阶段。
+        CarriedItemVariantsTest.main(args);
         BuildExcavationFrontierTest.main(args);
         ContainerBatchReplanTest.main(args);
         ContainerSplitPlannerTest.main(args);
@@ -241,7 +269,7 @@ public final class GuiRegressionSuite {
         // 出坑后补料应找到较远的已加载仓库，同时保持采矿范围和主人指定的查找距离。
         StorageSupplyRadiusTest.main(args);
         UltimineSelectionPolicyTest.main(args);
-        BuildExcavationSpoilSupplyTest.main(args);
+        InventoryDepositCoordinatorTest.main(args);
         BuildExcavationCargoTest.main(args);
         // 续建先保留建材与垫脚储备，再把普通土石存进有空位的仓库；没有确认回执不能继续取料。
         BuildExcavationCargoRecoveryTest.main(args);
@@ -253,6 +281,9 @@ public final class GuiRegressionSuite {
         BuildSupplyUncertaintyTest.main(args);
         BuildSupplyAccessTest.main(args);
         BuildFoodPreparationTest.main(args);
+        BuildPlacementReturnTest.main(args);
+        BuildFoodStockSupplyTest.main(args);
+        HarvestCropTest.main(args);
         BuildFoodBoundaryTest.main(args);
         BuildSupplyAccessDispatchTest.main(args);
         // 临时垫块逐种查现货后才在工位旁采收，不能为了两块泥土开启通用采矿链。
@@ -261,11 +292,19 @@ public final class GuiRegressionSuite {
         MaterialSupplyReturnPolicyTest.main(args);
         BuildSupplyHandoffTest.main(args);
         MachineMenuHandParkingTest.main(args);
+        // 玩家背包阻挡终端时先完成安全界面交接，不重复关闭或把未查库存当作无货。
+        InventoryMenuHandoffTest.main(args);
         FirstPersonGateExtendedHotbarTest.main(args);
         ItemUseTimingTest.main(args);
         ObservedRecipeStockCostTest.main(args);
         RecipeMaterialPlanTest.main(args);
+        // 剪毛后的取料必须能辨认本次产物，同时保持原生拾取和旧物品保护边界。
+        ShearingDropReceiptTest.main(args);
         AcquisitionWirelessInventoryTest.main(args);
+        // 缺料先检查允许访问的随身背包，未知库存和未结效果不会把角色驱去别处采集。
+        AcquisitionBackpackInventoryTest.main(args);
+        // 精妙包和AE共享保留清单，已结清的容量拒绝可换存储，未知存入必须停手。
+        AcquisitionBackpackTidyTest.main(args);
         Ae2StockObservationTest.main(args);
         // 终端交换遇到原生耗电仍应确认，身份或数量改变则保留不确定结果。
         Ae2TerminalIdentityTest.main(args);
@@ -297,8 +336,30 @@ public final class GuiRegressionSuite {
         MachineSealingTest.main(args);
         CompanionCancellationTest.main(args);
         SleepSafetyTest.main(args);
+        NightRestBehaviorTest.main(args);
+        // 暗洞补光复用原生持物和放置，检查位置保护、任务边界与分包确认后才恢复采掘。
+        RoutineTorchPlacementTest.main(args);
+        TorchLightingBehaviorTest.main(args);
+        NightRestRouteTest.main(args);
         FishingBiteTest.main(args);
         StockEvidenceTest.main(args);
+        // 通用整理先验证保留清单，避免存余料时一并拿走马上要用的工具与施工材料。
+        InventoryKeepPlanTest.main(args);
+        // 随身背包只按原生主存储角色统计，玩家槽、升级槽与大堆叠分别核对。
+        BackpackMenuAccessTest.main(args);
+        // 开关背包也需要等待原生回执，取消或鼠标残留时不能无条件关闭菜单。
+        BackpackOpenSessionTest.main(args);
+        // 精妙升级只放大存储槽，鼠标每次取物仍按一叠或半叠计算。
+        BackpackSplitPlannerTest.main(args);
+        // 逐笔存取尊重需求、真实余量和现有堆叠，满包与没有库存分开报告。
+        BackpackTransferPlanTest.main(args);
+        // 整笔事务只有关闭确认后成功，未知搬运保留菜单和鼠标，不追加取料。
+        BackpackSupplyTaskTest.main(args);
+        // 库存提示随身且有时效；离身、换世界与背包增减后都不能继续拿旧数量作担保。
+        BackpackStockTest.main(args);
+        // 背在身上的包保留模组handler身份，避免把饰品槽号误用为玩家快捷栏。
+        BackpackCarriersTest.main(args);
+        InventoryWorkItemsTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);
         AcquisitionRecipePlanningTest.main(args);

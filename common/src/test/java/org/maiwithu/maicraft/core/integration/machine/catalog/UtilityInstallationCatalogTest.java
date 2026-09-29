@@ -43,6 +43,16 @@ public final class UtilityInstallationCatalogTest {
         try { loaded.recordInstallationBuilt("minecraft:overworld",anchor,inputs,4000); throw new AssertionError("stale construction accepted"); }
         catch (IllegalArgumentException expected) { check(expected.getMessage().contains("changed"),"wrong rejection"); }
         check(loaded.installation("minecraft:overworld",anchor).orElseThrow().builtAtMillis() == 0,"revised input declarations reset construction evidence");
+        // 同址机械手的输入不能覆盖压机；明确名称的完工回执也只结算自己的端口。
+        String second = loaded.registerInstallation("Assembly","minecraft:overworld",anchor,inputs,4100);
+        loaded.recordInstallationBuilt("minecraft:overworld",anchor,"Assembly",inputs,4200);
+        check(!second.equals(id) && loaded.installation("minecraft:overworld",anchor).isEmpty()
+                && loaded.installation("minecraft:overworld",anchor,"Press").orElseThrow().builtAtMillis() == 0
+                && loaded.installation("minecraft:overworld",anchor,"Assembly").orElseThrow().builtAtMillis() == 4200,
+                "co-located installations remain independently identified and completed");
+        loaded.saveAsync().join();
+        var shared = new MachineCatalog(directory,Runnable::run); shared.bind(identity,"shared");
+        check(shared.ready() && shared.installations().size() == 2,"co-located input records survive reload");
         var legacy = JsonParser.parseString(CatalogCodec.encode(new CatalogCodec.Snapshot(identity.key(),List.of(),List.of()))).getAsJsonObject();
         legacy.addProperty("version",1); legacy.remove("installations");
         check(CatalogCodec.decode(legacy.toString(),identity.key()).installations().isEmpty(),"existing catalog format remains readable");

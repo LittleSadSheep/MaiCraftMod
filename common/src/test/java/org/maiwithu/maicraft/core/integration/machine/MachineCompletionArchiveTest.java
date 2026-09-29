@@ -63,6 +63,28 @@ public final class MachineCompletionArchiveTest {
             var persisted = restored.blueprint(built.id()).orElseThrow();
             check(persisted.blueprint().equals(plan.blueprint()) && persisted.captureMin().x() == 3 && persisted.captureMax().z() == 3,
                     "automatic completion records preserve blueprint and exact capture bounds across reconnect");
+            // 完整目录也必须保留“已授权修改直接执行”的约定，不能被展示层旧文案改回先检查后修改。
+            String guidance = ClientMachineCatalog.view(h.player,"简易机器").get("guidance").getAsString();
+            check(guidance.contains("snapshot_id is optional") && !guidance.contains("Inspect a label before changing"),
+                    "catalog guidance preserves the modification contract");
+            // 已完成的局部新增沿用同一机器编号与原设计，比较缓存、全量读取范围也应扩展到整机。
+            var patch = JsonParser.parseString("""
+                    {"blocks":[{"offset":[4,1,3],"block_id":"minecraft:gold_block"}]}
+                    """).getAsJsonObject();
+            var modification = MachineConstructionPlan.compile(BlockPos.ZERO,
+                    MachineBlueprintDocument.compile(patch,MachineConstructionPlan.registry()),true,true);
+            modification.bindAutomaticModification(h.level);
+            var archive = ClientMachineCatalog.installationBuilt(h.player,modification,"简易机器");
+            var revised = catalog.blueprint(built.id()).orElseThrow();
+            check(archive.get("archive_status").getAsString().equals("recorded") && catalog.blueprints().size() == 1
+                    && revised.blueprint().getAsJsonArray("blocks").size() == 2
+                    && revised.captureMin().x() == 3 && revised.captureMax().x() == 4,
+                    "partial completion preserves machine identity, untouched blocks and whole-machine capture bounds");
+            check(ClientMachineCatalog.blueprintPlan(revised).blocks().size() == 2,
+                    "merged fingerprint must not reuse the one-block modification plan");
+            var reloaded = new MachineCatalog(directory,Runnable::run); reloaded.bind(identity,"third");
+            check(reloaded.blueprint(built.id()).orElseThrow().blueprint().equals(revised.blueprint()),
+                    "merged machine design survives reconnect");
         } finally {
             for (var entry : saved.entrySet()) entry.getKey().set(null,entry.getValue());
             cache.clear(); cache.putAll(oldCache); pending.clear(); pending.putAll(oldPending);

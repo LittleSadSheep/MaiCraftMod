@@ -10,12 +10,16 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.function.BiPredicate;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -33,6 +37,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateBeltInstallation;
 import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineNativeInstallation;
+import org.maiwithu.maicraft.core.blueprint.ConstructionOwnership;
 
 /**
  * 把机器布局或逐格蓝图变成固定的装配计划：普通方块、AE2 部件、维护通道，以及最后要封闭的施工洞口。
@@ -57,6 +62,10 @@ public final class MachineConstructionPlan {
     private final Map<BlockPos, BuildTaskRecord.Target> targetsByPosition;
     private final Map<BlockPos, List<BlockPos>> placementDependencies;
     private final List<List<BuildTaskRecord.Target>> attachmentLayers;
+    private Map<BlockPos, BlockState> observedEdits = Map.of();
+    private Map<BlockPos, BlockState> ownedReplacements = Map.of();
+    private boolean fixedModification;
+    private boolean automaticModification;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
@@ -314,6 +323,11 @@ public final class MachineConstructionPlan {
                 replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE, replace, consume,
                 consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true);
+        if (fixedModification) task.machineModification(observedEdits);
+        else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
+        // 作者明确允许替换时，蓝图点名的格子直接继承许可；新建入口续建也不要求旧观察状态完全一致。
+        if (replace) task.automaticMachineModification(authoredModificationCells());
+        task.futureWorkItems(foodProtectedWorkItems());
         var protectedSources = new ArrayList<>(parts.stream().map(Part::position).toList());
         fluidTargets().forEach(target -> protectedSources.add(target.pos())); task.materialSupplyProtection(protectedSources);
         task.semanticFacts(Map.of("machine_geometry_verified", parts.isEmpty() && openings.isEmpty() && fluidTargets().isEmpty(), "machine_production_verified", false));
@@ -344,11 +358,76 @@ public final class MachineConstructionPlan {
         var task = new BuildTaskRecord(callId, deadline, attachmentLayers.get(index), replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true); task.materialSupplyProtection(positions());
+        if (fixedModification) task.machineModification(observedEdits);
+        else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
+        // 后置附件使用同一份声明范围，不能因进入另一个阶段又回到旧快照的逐格准入门控。
+        if (replace) task.automaticMachineModification(authoredModificationCells());
+        task.futureWorkItems(foodProtectedWorkItems());
         task.semanticFacts(Map.of("machine_geometry_verified", false, "machine_production_verified", false)); return task;
     }
     public BlockPos anchor() { return anchor; }
+    /** 机器修改只豁免作者明确点名且本次勘察范围内已加载的旧方块，不给通路清障或蓝图隐含净空扩权。 */
+    public void bindObservedModification(Level world, BlockPos surveyedCenter, int radius) {
+        var observed = new LinkedHashMap<BlockPos, BlockState>();
+        for (BlockPos offset : MachineAssemblyDocument.blocks(blueprint()).keySet()) {
+            BlockPos at = anchor.offset(offset);
+            if (Math.abs((long) at.getX() - surveyedCenter.getX()) > radius
+                    || Math.abs((long) at.getY() - surveyedCenter.getY()) > radius
+                    || Math.abs((long) at.getZ() - surveyedCenter.getZ()) > radius || !world.isLoaded(at)) continue;
+            var state = world.getBlockState(at);
+            if (!state.isAir()) observed.put(at.immutable(), state);
+        }
+        observedEdits = Map.copyOf(observed); fixedModification = true;
+    }
+    /** 修改已指定的坐标时内部读取这些格子，不扫描无关整片场地，也不让 LLM 为加载后的格子再次申请观察。 */
+    public void bindAutomaticModification(Level world) {
+        automaticModification = true; bindObservedModification(world, anchor, Integer.MAX_VALUE);
+    }
+
+    /** 新建入口明确允许替换时，也复用本方原生放置记录；只绑定蓝图点名的旧部件，不扩大到通路或邻居。 */
+    public void bindOwnedReplacements(LocalPlayer player) {
+        bindOwnedReplacements(player.level(), (at, state) -> ConstructionOwnership.owns(player, at, state));
+    }
+    void bindOwnedReplacements(Level world, BiPredicate<BlockPos, BlockState> owns) {
+        if (!replace) return;
+        var owned = new LinkedHashMap<BlockPos, BlockState>();
+        for (BlockPos at : authoredModificationCells()) {
+            if (!world.isLoaded(at)) continue;
+            var state = world.getBlockState(at);
+            if (!state.isAir() && owns.test(at, state)) owned.put(at.immutable(), state);
+        }
+        // 子施工保留这组原位状态，避免再建议平移已建机器；新建的完整图纸归档语义保持原样。
+        ownedReplacements = Map.copyOf(owned);
+        report.addProperty("owned_replacement_targets", owned.size());
+    }
+    private Set<BlockPos> authoredModificationCells() {
+        return MachineAssemblyDocument.blocks(blueprint()).keySet().stream().map(anchor::offset).collect(Collectors.toUnmodifiableSet());
+    }
+    /** 放块阶段也保留后续皮带连接器、附件和显式工序原料，防止提前吃掉例如皮带配方中的熟海带。 */
+    /** 同一份后续材料账用于补食和整理背包，不能把待装传送带或待投原料存成无关余料。 */
+    public Set<Item> workItems() { return foodProtectedWorkItems(); }
+
+    private Set<Item> foodProtectedWorkItems() {
+        var items = new LinkedHashSet<Item>();
+        blocks.forEach(target -> { if (target.materialCount() > 0) items.add(target.item()); });
+        parts.forEach(part -> items.add(part.spec().item()));
+        installations.forEach(step -> step.materials().keySet().forEach(id -> items.add(BuiltInRegistries.ITEM.get(id))));
+        collectWorkItems(blueprint(), items);
+        items.remove(Items.AIR); return Set.copyOf(items);
+    }
+    private static void collectWorkItems(JsonElement value, Set<Item> items) {
+        // 这里只读取图纸中已声明的物品标识，不根据自然语言猜测未来需求。
+        if (value.isJsonObject()) value.getAsJsonObject().entrySet().forEach(entry -> collectWorkItems(entry.getValue(), items));
+        else if (value.isJsonArray()) value.getAsJsonArray().forEach(entry -> collectWorkItems(entry, items));
+        else if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+            var id = ResourceLocation.tryParse(value.getAsString());
+            if (id != null && BuiltInRegistries.ITEM.containsKey(id)) items.add(BuiltInRegistries.ITEM.get(id));
+        }
+    }
     public String blueprintJson() { return blueprintJson; }
     public JsonObject blueprint() { return JsonParser.parseString(blueprintJson).getAsJsonObject(); }
+    // 完工归档据此把局部拆换合回旧设计；普通新建仍保存完整新图，不能把两种语义混在一起。
+    public boolean modification() { return fixedModification || automaticModification; }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
     public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
     public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof LiquidBlock; }

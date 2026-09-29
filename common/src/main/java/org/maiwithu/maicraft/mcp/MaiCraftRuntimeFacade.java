@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.intent.MachinePlanPreflight;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -455,6 +456,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 ? "thunder" : player.level().isRaining() ? "rain" : "clear");
         result.addProperty("game_time", player.level().getGameTime());
         result.add("inventory", inventorySummary(player));
+        // 随身储物与主背包分开显示：没观察过的包明确未知，不把未打开当成空包。
+        result.add("carried_storage", new Gson().toJsonTree(BackpackStock.facts(player)));
         result.add("equipment", equipmentSummary(player));
         if (player.getVehicle() != null) {
             result.addProperty("vehicle_type", BuiltInRegistries.ENTITY_TYPE
@@ -577,6 +580,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("step_count", record.steps().size());
         result.addProperty("skipped_step_count", record.skippedStepCount());
         result.addProperty("all_steps_succeeded", record.allStepsSucceeded());
+        result.addProperty("all_steps_scope", "current_steps_after_recovery_or_replacement");
         result.add("goal", record.goal().toJson());
         Goal current = currentGoal(record);
         if (current != null) result.add("current_goal", current.toJson());
@@ -653,12 +657,15 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("task_id", record.externalId().toString());
         result.addProperty("state", publicState(record));
         result.addProperty("outcome", record.goal().outcome());
+        // 原来的“做出精密构件”等文字只作为请求标签；完成事实必须来自实际运行步骤的回执。
+        result.addProperty("outcome_scope", "requested_intent");
         Goal current = currentGoal(record);
         if (current != null) result.addProperty("current_outcome", current.outcome());
         result.addProperty("step_index", record.stepIndex());
         result.addProperty("step_count", record.steps().size());
         result.addProperty("skipped_step_count", record.skippedStepCount());
         result.addProperty("all_steps_succeeded", record.allStepsSucceeded());
+        result.addProperty("all_steps_scope", "current_steps_after_recovery_or_replacement");
         return result;
     }
 
@@ -686,40 +693,25 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static JsonArray inventorySummary(LocalPlayer player) {
-        // 按物品类型合并主背包数量，多的排前面；装备和副手在另一个字段单独显示。
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (ItemStack stack : player.getInventory().items) {
-            if (stack.isEmpty()) continue;
-            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-            counts.merge(id, stack.getCount(), Integer::sum);
-        }
-        JsonArray result = new JsonArray();
-        counts.entrySet().stream()
-                .sorted((left, right) -> Integer.compare(right.getValue(), left.getValue()))
-                .forEach(entry -> {
-                    JsonObject item = new JsonObject();
-                    item.addProperty("item_id", entry.getKey());
-                    item.addProperty("count", entry.getValue());
-                    result.add(item);
-                });
-        return result;
+        // 主背包保留原有总量，同时展示半成品等组件变体；装备和副手仍单列，不重复累计。
+        return InventoryComponentFacts.inventory(player.getInventory().items, player.registryAccess());
     }
 
     private static JsonObject equipmentSummary(LocalPlayer player) {
         // 分开列出主手、副手和四件护甲，保留耐久信息，避免混在普通背包总数里看不清。
         JsonObject result = new JsonObject();
-        addStack(result, "main_hand", player.getMainHandItem());
-        addStack(result, "off_hand", player.getOffhandItem());
+        addStack(result, "main_hand", player.getMainHandItem(), player);
+        addStack(result, "off_hand", player.getOffhandItem(), player);
         String[] armorSlots = {"feet", "legs", "chest", "head"};
         for (int index = 0;
              index < Math.min(armorSlots.length, player.getInventory().armor.size());
              index++) {
-            addStack(result, armorSlots[index], player.getInventory().armor.get(index));
+            addStack(result, armorSlots[index], player.getInventory().armor.get(index), player);
         }
         return result;
     }
 
-    private static void addStack(JsonObject target, String key, ItemStack stack) {
+    private static void addStack(JsonObject target, String key, ItemStack stack, LocalPlayer player) {
         if (stack == null || stack.isEmpty()) return;
         JsonObject value = new JsonObject();
         value.addProperty("item_id",
@@ -727,6 +719,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         value.addProperty("count", stack.getCount());
         value.addProperty("damage", stack.getDamageValue());
         value.addProperty("max_damage", stack.getMaxDamage());
+        // 当前手里的装配进度直接可见，省去仅为看组件而额外取放物品的原生动作。
+        InventoryComponentFacts.observe(stack, player.registryAccess()).entrySet().forEach(entry -> value.add(entry.getKey(), entry.getValue()));
         target.add(key, value);
     }
 

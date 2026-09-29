@@ -1,9 +1,12 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Arrays;
 import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -11,11 +14,15 @@ import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.RetreatProgress;
+import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.Task;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import org.maiwithu.maicraft.core.act.Interaction;
+import org.maiwithu.maicraft.entity.InputDriver;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 import static org.maiwithu.maicraft.client.actor.MobDefenseDamageTest.invoke;
 
@@ -26,9 +33,76 @@ public final class CombatOutcomeTest {
         partialIsNotSuccess();
         selectableLoadout();
         retreatRequiresMovement();
+        minorRecoveryDoesNotReverseWithdrawal();
+        asynchronousStockIsNotCombatLoot();
         retreatPrecedesLootSettlement();
         retreatAcceptsAnyReachableSafeDirection();
+        retreatCameraCannotStarveMeleeAim();
+        meleeApproachUsesThreeDimensionalRange();
+        arrivalOutsideReachStartsSafeAlignment();
+        escapedTargetReleasesUnsubmittedAim();
         System.out.println("CombatOutcomeTest: disappearance, partial completion, loadout and retreat passed");
+    }
+
+    private static void escapedTargetReleasesUnsubmittedAim() throws Exception {
+        // 撤离时已经抬手瞄准，但追兵退出射程：取消的只是未发出的刀，不能继续锁镜头回头看。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var foe = f.mob(11, 2);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("escaped-melee", 1000, List.of(11), false));
+            var field = MobDefenseDamageTest.survey(task);
+            var weapon = AttackCompanionTask.class.getDeclaredMethod("tickWeapon", Battlefield.class); weapon.setAccessible(true);
+            weapon.invoke(task, field);
+            var action = (Interaction) ActorControlTestHarness.field(AttackCompanionTask.class, "meleeAction").get(task);
+            check(action != null && !action.entityAttackSubmitted(), "a newly selected melee target has not yet been clicked");
+            f.h.position(new Vec3(7, 1, 3.5)); weapon.invoke(task, MobDefenseDamageTest.survey(task));
+            check(ActorControlTestHarness.field(AttackCompanionTask.class, "meleeAction").get(task) == null && f.h.mode.attacks == 0,
+                    "an escaped target releases unsubmitted aiming without sending an out-of-range attack");
+            task.result(TaskState.CANCELLED);
+        }
+    }
+
+    private static void arrivalOutsideReachStartsSafeAlignment() throws Exception {
+        // 模拟导航已接受本格，但真实身体距敌人3.4格：战斗入口必须启动补位，而不是继续空转到挨打撤退。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.position(new Vec3(1.1, 1, 3.5)); var foe = f.mob(11, 4.5);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("subcell-melee", 1000, List.of(11), false));
+            ActorControlTestHarness.field(AttackCompanionTask.class, "target").set(task, foe);
+            var arrived = AttackCompanionTask.class.getDeclaredMethod("correctArrivedStance", PlayerNav.Status.class);
+            arrived.setAccessible(true);
+            check(!(boolean) arrived.invoke(task, PlayerNav.Status.RUNNING), "ordinary ongoing navigation keeps its movement");
+            check((boolean) arrived.invoke(task, PlayerNav.Status.ARRIVED), "an accepted grid cell cannot finish a still-unreachable melee approach");
+            var recovery = (MeleeStanceRecovery) ActorControlTestHarness.field(AttackCompanionTask.class, "stanceRecovery").get(task);
+            check(recovery.active(), "the real combat arrival branch starts the collision-checked subcell controller");
+            task.stop(f.h.player, Task.StopReason.PREEMPTED);
+            check(!recovery.active(), "higher-priority survival actions release pending stance inputs");
+            task.result(TaskState.CANCELLED);
+        }
+    }
+
+    private static void meleeApproachUsesThreeDimensionalRange() throws Exception {
+        // 水平三格但低两格时仍超出近战距离；旧水平环会误报到达，角色只能站在楼下挨箭。
+        var focus = new Vec3(.5, 3, .5);
+        NavGoal range = NavGoal.distanceBand(focus, 2.02, 3.3);
+        var below = new BlockPos(3, 1, 0); var aligned = new BlockPos(3, 3, 0);
+        check(NavGoal.ring(BlockPos.containing(focus), 2.02, 3.3).isAt(below) && !range.isAt(below),
+                "horizontal proximity cannot admit an out-of-range lower floor");
+        check(range.isAt(aligned) && range.heuristic(below) > range.heuristic(aligned),
+                "the search keeps approaching until a reachable three-dimensional band is entered");
+        NavGoal fractional = NavGoal.distanceBand(new Vec3(.01, 1, .5), 2.02, 3.3);
+        check(!fractional.isAt(new BlockPos(3, 1, 0)), "target block rounding cannot add hidden melee range");
+        check(!fractional.semanticFingerprint().equals(NavGoal.distanceBand(new Vec3(.9, 1, .5), 2.02, 3.3).semanticFingerprint()),
+                "moving inside one block still updates the precise combat goal");
+        check(NavGoal.distanceBand(focus, 4, 3.3).isAt(new BlockPos(0, 3, 0)),
+                "an impossible no-damage inner band still permits approaching a larger enemy");
+        // 直接核对战斗任务选择的目标，避免只测试几何辅助类而执行入口仍沿用旧水平环。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var mob = f.mob(11, 3.5);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("vertical-melee", 1000, List.of(11), false));
+            ActorControlTestHarness.field(AttackCompanionTask.class, "target").set(task, mob);
+            NavGoal actual = (NavGoal) invoke(task, "standoffGoal");
+            check(actual.isAt(new BlockPos(0, 1, 3)) && !actual.isAt(new BlockPos(0, -1, 3)),
+                    "the live melee approach uses both the target height and precise position");
+        }
     }
 
     private static void lostIsNotDead() throws Exception {
@@ -112,6 +186,41 @@ public final class CombatOutcomeTest {
         progress.observe(new Vec3(2, 0, 0));
         check(progress.failures() == 0, "physical progress renews retreat attempts");
     }
+
+    // 实机曾在生命八点撤离、回到九点就重新追击；还没走出威胁圈时，回血和爆炸避险都不能丢失撤离承诺。
+    private static void minorRecoveryDoesNotReverseWithdrawal() {
+        var foe = new Battlefield.Foe(11, 10.4, false, false, true, true, true, false, false);
+        var progress = new RetreatProgress(); progress.commit(); progress.observe(Vec3.ZERO);
+        var recovering = new Battlefield(33, 9, 3.3, true, false, false, List.of(foe));
+        var flee = new AttackPlan.Move(AttackPlan.Action.DISENGAGE, AttackPlan.NO_FOE);
+        check(AttackPlan.decide(recovering, flee, progress.committed()).action() == AttackPlan.Action.DISENGAGE,
+                "minor natural healing must not turn a withdrawing body back toward its pursuer");
+        progress.observe(new Vec3(12, 0, 0));
+        check(progress.committed(), "real forward movement resets failures but preserves withdrawal");
+        var creeper = new Battlefield.Foe(12, 3, true, true, true, true, true, true, true);
+        var blast = AttackPlan.decide(new Battlefield(33, 9, 3.3, true, false, false, List.of(creeper)), flee, progress.committed());
+        check(blast.action() == AttackPlan.Action.EVADE_BLAST
+                && AttackPlan.decide(recovering, blast, progress.committed()).action() == AttackPlan.Action.DISENGAGE,
+                "an immediate blast overrides the movement without cancelling the ongoing retreat");
+        check(AttackPlan.decide(new Battlefield(33, 9, 3.3, true, false, true, List.of(foe)), flee, true).action() == AttackPlan.Action.SKIRMISH,
+                "verified repeated path failures must still permit cornered self-defense");
+        progress.complete();
+        check(!progress.committed() && AttackPlan.decide(recovering, flee, progress.committed()).action() == AttackPlan.Action.SKIRMISH,
+                "confirmed separation releases the commitment for the next encounter");
+    }
+
+    // 回放防卫抢占取物时延迟到达的石英：库存增加是真实事实，但没有任何死亡掉落归属就不能算战利品。
+    private static void asynchronousStockIsNotCombatLoot() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("stock-during-defense", 1000, List.of(), true));
+            task.start(f.h.player);
+            f.h.inventory.setItem(8, new ItemStack(Items.QUARTZ, 3));
+            var result = task.result(TaskState.SUCCESS);
+            check(result.data().get("loot_gained").equals(Map.of()) && !result.message().contains("quartz"),
+                    "a late storage transfer cannot become loot from zero defeated hostiles");
+            check(f.h.inventory.getItem(8).getCount() == 3, "correcting attribution never removes the actual acquired stock");
+        }
+    }
     private static void retreatPrecedesLootSettlement() throws Exception {
         try (var f = new CombatThreatsTest.Fixture()) {
             // 正在低血量撤离时，近圈临时没有敌人也要完成逃生判据，不能先让拾取流程接走导航。
@@ -134,6 +243,34 @@ public final class CombatOutcomeTest {
             var goal = (NavGoal) invoke(task, "retreatGoal");
             check(goal instanceof NavGoal.Avoid && goal.isAt(new BlockPos(-40, 1, 3)) && goal.isAt(new BlockPos(40, 1, 3))
                     && !goal.isAt(new BlockPos(3, 1, 3)), "retreat goal describes safety rather than one randomly sampled endpoint");
+        }
+    }
+
+    private static void retreatCameraCannotStarveMeleeAim() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var mob = f.mob(11,2);
+            var action = Interaction.attackEntity(f.h.player,mob);
+            var task = new AttackCompanionTask(f.h.player,new AttackTaskRecord("moving-retaliation",1000,List.of(11),false));
+            ActorControlTestHarness.field(AttackCompanionTask.class,"meleeAction").set(task,action);
+            var finishMovement = AttackCompanionTask.class.getDeclaredMethod("afterCombatMovement",TaskState.class);
+            finishMovement.setAccessible(true);
+            // 回放战斗调度后帧末导航再次转头的实际顺序；动作仍须通过真实射线，移动也必须保留。
+            for(int tick=0;tick<80 && f.h.mode.attacks==0;tick++) {
+                action.tick();
+                InputDriver.applyMovement(f.h.player,1,0,false,false,true);
+                InputDriver.lookForNavigation(f.h.player,90,8);
+                var before = ActorControlTestHarness.field(DefaultBodyControlPort.class,"movement").get(f.h.h.body);
+                check(finishMovement.invoke(task,TaskState.RUNNING)==TaskState.RUNNING,"aim renewal cannot finish combat");
+                InputDriver.lookForNavigation(f.h.player,90,8);
+                check(before.equals(ActorControlTestHarness.field(DefaultBodyControlPort.class,"movement").get(f.h.h.body)),
+                        "renewing attack aim preserves navigation's movement input");
+                ActorControlTestHarness.field(DefaultBodyControlPort.class,"lastLookUpdateNanos")
+                        .setLong(f.h.h.body,System.nanoTime()-50_000_000L);
+                f.h.h.body.endTick(f.h.h.context); f.h.nextTick();
+            }
+            check(f.h.mode.attacks==1,"moving-camera requests cannot indefinitely starve a reachable native melee attack");
+            check(f.h.blockUses()==0 && f.h.itemUses()==0,"retaliation sends no block or item use");
+            task.result(TaskState.CANCELLED);
         }
     }
 }

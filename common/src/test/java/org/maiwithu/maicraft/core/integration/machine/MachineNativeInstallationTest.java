@@ -16,6 +16,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometry;
@@ -94,6 +96,23 @@ public final class MachineNativeInstallationTest {
             var notice = ((JsonObject) compact.invoke(null, JsonParser.parseString(receipt.toJson()).getAsJsonObject())).getAsJsonObject("data").getAsJsonObject("clearance_report");
             check(notice.getAsJsonObject("failure_position").get("z").getAsInt() == 4 && notice.getAsJsonArray("blueprint_offset").size() == 3, "attention preserves exact observed clearance facts");
             check(h.level.getBlockState(obstacle).is(Blocks.BRICKS) && !((Boolean) clearance.get("world_modified")), "survey diagnostics do not clear rejected obstacles");
+            // 源水、流水和含水半砖都阻止干燥带安装，但回执必须区分它们，不能统称可挖的白名单障碍。
+            for (var wet : List.of(Blocks.WATER.defaultBlockState(),
+                    Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL, 2),
+                    Blocks.LAVA.defaultBlockState(),
+                    Blocks.OAK_SLAB.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true))) {
+                h.set(obstacle, wet); var wetSurvey = new MachineBuildSurvey(blockedPlan);
+                check(wetSurvey.tick(h.level).failure() != null, "an undeclared wet native span still fails before mutation");
+                var facts = wetSurvey.failureEvidence(); var fluid = (Map<?, ?>) facts.get("fluid_state");
+                check(facts.get("failure_code").equals("native_installation_path_fluid")
+                                && fluid.get("source").equals(wet.getFluidState().isSource())
+                                && fluid.get("standalone_liquid_block").equals(wet.getBlock() instanceof LiquidBlock),
+                        "source and containing-block distinctions come from native state");
+                var publicFacts = SemanticResultView.data(Map.of("clearance_report", facts));
+                check(((Map<?, ?>) publicFacts.get("clearance_report")).get("fluid_state").equals(fluid)
+                                && h.level.getBlockState(obstacle).equals(wet) && wetSurvey.partClears().isEmpty(),
+                        "public diagnostics retain fluid facts without expanding clearance or changing the world");
+            }
             // 普通火把在已授权的原生路径内进入清理阶段，勘测自身不挖；缺少替换许可或遇保护格仍拒绝。
             h.set(obstacle, Blocks.TORCH.defaultBlockState());
             var torchSurvey = new MachineBuildSurvey(blockedPlan);

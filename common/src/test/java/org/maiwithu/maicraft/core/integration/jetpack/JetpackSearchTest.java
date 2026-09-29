@@ -16,11 +16,32 @@ public final class JetpackSearchTest {
 
     public static void main(String[] args) {
         threeDimensionalPlateau();
+        lowRoofAllowsSafeLateralDeparture();
         budgetIsNotNoCorridor();
         closedRoom();
         templateNeedsNoGridBudget();
         incrementalGeometry();
         System.out.println("JetpackSearchTest: passed");
+    }
+
+    private static void lowRoofAllowsSafeLateralDeparture() {
+        // 角色脚下能站且有一次原生上冲余量，但不能先上升一整格；搜索应从低处水平穿出平台边缘。
+        double reserve = JetpackDynamics.riseEnvelope(JetpackDynamics.rawAfterStep(POWER.hoverDescent(),POWER),true,POWER);
+        var roof = new ShapeSpace(List.of(new AABB(-4,1.88+reserve+.4,-4,5,6,5)));
+        check(!JetpackRoute.flightClear(roof,START,START.add(0,1,0),POWER)
+                && JetpackRoute.flightClear(roof,START,START,POWER),"fixture blocks the old mandatory lift but permits native hovering");
+        var search = new JetpackRoute.Search(START,DECK,POWER); finish(search,roof);
+        check(search.result() != null && search.result().points().get(1).y == START.y,
+                "low departure should reach an outside climb corridor without a manually split travel goal");
+        for (int i = 1; i < search.result().points().size(); i++) {
+            var points = search.result().points();
+            check(i == points.size()-1 ? roof.clear(points.get(i-1),points.get(i))
+                    : JetpackRoute.flightClear(roof,points.get(i-1),points.get(i),POWER),"every low departure edge keeps the full body and thrust reserve");
+        }
+        // 只有站立净空而没有喷气上冲余量的矮洞仍拒绝起飞，不能以取消抬升步骤绕过这项限制。
+        var tooLow = new ShapeSpace(List.of(new AABB(-4,1.88+reserve*.5,-4,5,6,5)));
+        var blocked = new JetpackRoute.Search(START,DECK,POWER); finish(blocked,tooLow);
+        check(blocked.result() == null && "departure_blocked".equals(blocked.failureReason()),"insufficient native thrust clearance still blocks takeoff");
     }
 
     private static void threeDimensionalPlateau() {

@@ -217,8 +217,11 @@ public final class MachineMenu {
         if (visible) Ae2ResourceSupply.observeOpenWaterInventory(menu)
                 .ifPresent(water -> out.add("ae2_water_inventory", water));
         // 明确查询菜单时才附来源对应的原生机制与报价；不把另一个台子的菜单套到当前检查对象上。
-        if (visible && validOrigin) out.add("native_processes",
-                NativeProcessRegistry.inspect(self, origin.position()));
+        if (visible && validOrigin) {
+            out.add("native_processes",NativeProcessRegistry.inspect(self, origin.position()));
+            out.addProperty("native_processes_scope",NativeProcessRegistry.OBSERVATION_SCOPE);
+            out.addProperty("native_processes_knowledge_uri",NativeProcessRegistry.KNOWLEDGE_URI);
+        }
         return out;
     }
 

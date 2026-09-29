@@ -31,6 +31,13 @@ public interface ProductionEvidence {
     record RecipeBinding(Check check, String requestedRecipeId, String recipeId) {}
     default Binding resolve(Resource selector) { return new Binding(Check.unknown("Resolve the selector to a native component-sensitive resource identity"),selector,null); }
     Recipe recipe(String recipeId);
+    /** 供料前单独核实配方是否已完整解码，避免缺少输入或产物身份时掩盖适配器的读取缺口。 */
+    default Check recipeDefinition(String recipeId) {
+        Recipe recipe = recipe(recipeId);
+        return recipe != null && recipe.complete()
+                ? new Check(Status.VERIFIED, recipe.provenance(), "Complete installed recipe definition observed")
+                : Check.unknown("Complete installed recipe definition is unavailable for " + recipeId);
+    }
     default RecipeBinding bindRecipe(Node node) {
         Recipe recipe = recipe(node.recipeId());
         return new RecipeBinding(recipe != null && node.recipeId().equals(recipe.id())

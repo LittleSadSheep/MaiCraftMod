@@ -44,7 +44,8 @@ final class AcquisitionRecipePlanner {
     private long stockHintTick = Long.MIN_VALUE;
     private boolean stockHintWireless;
     private Map<ResourceLocation, Long> recipeObservedStock = Map.of(), recipeCarriedStock = Map.of();
-    private final Map<String, RecipeMaterialPlan.Result> materialPlans = new HashMap<>();
+    private record MaterialPlanKey(String recipeId, Set<ResourceLocation> unavailable) {}
+    private final Map<MaterialPlanKey, RecipeMaterialPlan.Result> materialPlans = new HashMap<>();
 
     private Map<ResourceLocation, List<CraftingRecipe>> recipeIndex;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> stockRecipes = new HashMap<>();
@@ -271,6 +272,33 @@ final class AcquisitionRecipePlanner {
         }
     }
 
+    record UnitConversion(int outputCount, List<ResourceLocation> inputs) {}
+
+    /** 一件原料换一批同类成品时可按实际拿到的木种分批做；多原料配方不能把各自的半套原料混算。 */
+    UnitConversion unitConversion(ResourceLocation recipeId, List<ResourceLocation> outputs) {
+        if(outputs.size()<2)return null;
+        var holder=ClientRuntime.requireContext(player).connection().getRecipeManager().byKey(recipeId).orElse(null);
+        if(holder==null || !(holder.value() instanceof CraftingRecipe recipe) || recipe.isSpecial()
+                || !recipe.canCraftInDimensions(2,2))return null;
+        var ingredients=recipe.getIngredients().stream().filter(value->value!=null && !value.isEmpty()).toList();
+        if(ingredients.size()!=1)return null;
+        ItemStack result=RecipeProbe.resultOf(recipe,player.level().registryAccess());
+        if(result.isEmpty() || !outputs.contains(BuiltInRegistries.ITEM.getKey(result.getItem())))return null;
+        var items=Arrays.stream(ingredients.getFirst().getItems()).filter(value->!value.isEmpty()).toList();
+        if(items.isEmpty() || items.stream().anyMatch(value->!value.getComponentsPatch().isEmpty()))return null;
+        var ids=items.stream().map(value->BuiltInRegistries.ITEM.getKey(value.getItem())).distinct().toList();
+        if(ids.stream().anyMatch(outputs::contains))return null;
+        return new UnitConversion(result.getCount(),ids);
+    }
+
+    private UnitConversion directUnitConversion(CraftRecoveryCandidate candidate, RecipeMaterialPlan.Result plan, AcquisitionNeed parent) {
+        if(candidate.ingredients().size()!=1 || plan.supplies().size()!=1 || !plan.crafts().isEmpty())return null;
+        var input=candidate.ingredients().getFirst();
+        if(input.required()!=input.missing() || input.missing()!=plan.supplies().getFirst().count())return null;
+        var conversion=unitConversion(ResourceLocation.parse(candidate.recipeId()),parent.itemIds);
+        return conversion!=null && conversion.inputs().containsAll(plan.supplies().getFirst().alternatives()) ? conversion : null;
+    }
+
     /** 每层都使用同一本现货账；普通补料也必须考虑背包里能继续合成的原料。 */
     private void refreshStock(AcquisitionNeed parent) {
         long tick = player.level().getGameTime();
@@ -302,7 +330,9 @@ final class AcquisitionRecipePlanner {
 
     RecipeMaterialPlan.Result materialPlan(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
         refreshStock(parent);
-        return materialPlans.computeIfAbsent(candidate.recipeId(), ignored -> {
+        // 同刻失败的原料分支也改变规划条件；缓存不能把已排除的木种再次选回来。
+        var unavailable = Set.copyOf(parent.rejectedRecipeInputs.getOrDefault(candidate.recipeId(), Set.of()));
+        return materialPlans.computeIfAbsent(new MaterialPlanKey(candidate.recipeId(), unavailable), ignored -> {
             List<ObservedRecipeStockCost.Need> ingredients = new ArrayList<>();
             for (var ingredient : candidate.ingredients()) {
                 if (ingredient.required() > 32768)
@@ -314,7 +344,7 @@ final class AcquisitionRecipePlanner {
             recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount,
                     (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
             return RecipeMaterialPlan.estimate(ingredients, pool, item -> processRecipes(item, parent),
-                    item -> sourceCost(item, parent), parent.lineageItems);
+                    item -> sourceCost(item, parent), parent.lineageItems, unavailable);
         });
     }
 
@@ -384,20 +414,24 @@ final class AcquisitionRecipePlanner {
                     .findFirst().orElseThrow();
             long externalStock = supply.alternatives().stream().mapToLong(id -> recipeObservedStock.getOrDefault(id, 0L)).sum();
             long deficit = supply.count() + externalStock;
-            if (deficit == 1 && preparation.supplies().size() == 1) {
+            var conversion=directUnitConversion(chosen,preparation,parent);
+            if ((deficit == 1 || conversion!=null) && preparation.supplies().size() == 1 && externalStock==0) {
                 // 任一整条树只需再补一件时可共同寻找原料；拿到的那件会选定可完成的完整配方。
-                Set<ResourceLocation> items = new LinkedHashSet<>(supply.alternatives());
+                // 原木到木板这类等产量单料转换合并所有可用木种，让采矿一次搜索最近来源，实际合成再按木种结算。
+                Set<ResourceLocation> items = new LinkedHashSet<>(conversion==null ? supply.alternatives() : conversion.inputs());
                 Set<String> alternatives = new LinkedHashSet<>(Set.of(chosen.recipeId()));
                 Set<ResourceLocation> outputs = new LinkedHashSet<>(List.of(chosen.outputItem()));
                 for (var candidate : viableCandidates) {
                     if (candidate.cost().surface() != chosen.cost().surface()) continue;
                     var plan = materialPlan(candidate, parent);
-                    if (!plan.feasible() || plan.cost() != preparation.cost() || plan.supplies().size() != 1 || plan.supplies().getFirst().count() != 1) continue;
+                    if (!plan.feasible() || plan.cost() != preparation.cost() || plan.supplies().size() != 1 || plan.supplies().getFirst().count() != deficit) continue;
                     var next = plan.supplies().getFirst();
                     if (next.alternatives().stream().anyMatch(id -> recipeObservedStock.getOrDefault(id, 0L) > 0)) continue;
-                    items.addAll(next.alternatives()); alternatives.add(candidate.recipeId()); outputs.add(candidate.outputItem());
+                    var other=directUnitConversion(candidate,plan,parent);
+                    if(deficit>1 && (other==null || other.outputCount()!=conversion.outputCount()))continue;
+                    items.addAll(deficit>1 ? other.inputs() : next.alternatives()); alternatives.add(candidate.recipeId()); outputs.add(candidate.outputItem());
                 }
-                return new Frontier(new IngredientNeed(List.copyOf(items), 1), Set.copyOf(alternatives), List.copyOf(outputs),
+                return new Frontier(new IngredientNeed(List.copyOf(items), (int)deficit), Set.copyOf(alternatives), List.copyOf(outputs),
                         items.stream().noneMatch(id -> sourceCost(id, parent).known()));
             }
             if (deficit <= 32768) return new Frontier(new IngredientNeed(supply.alternatives(), (int) deficit), Set.of(chosen.recipeId()), List.of(chosen.outputItem()),

@@ -34,6 +34,9 @@ public final class NativeRecipeDefinition {
         } catch (RuntimeException | LinkageError unavailable) {
             out.addProperty("definition_status", "unknown"); out.addProperty("definition_issue", "native_definition_not_encodable");
         }
+        // 序列装配的 chance 在原生实现中是权重；另附已安装 API 的概率事实，原始定义和整体未知边界继续保留。
+        JsonObject distribution = CreateAssemblyOutcomeFacts.read(recipe, registries);
+        if (distribution != null) out.add("native_outcome_distribution", distribution);
         return out;
     }
 
@@ -48,12 +51,15 @@ public final class NativeRecipeDefinition {
         if (width < 1 || height < 1 || width > 3 || height > 3 || shaped.getIngredients().size() != width * height)
             return encoded.getOrThrow();
         var key = new LinkedHashMap<Character, Ingredient>(); var rows = new ArrayList<String>();
+        var symbols = new LinkedHashMap<JsonElement, Character>();
         for (int y = 0; y < height; y++) {
             var row = new StringBuilder();
             for (int x = 0; x < width; x++) {
                 int index = y * width + x; var ingredient = shaped.getIngredients().get(index);
-                char symbol = ingredient.isEmpty() ? ' ' : (char) ('A' + index);
-                row.append(symbol); if (symbol != ' ') key.put(symbol, ingredient);
+                // 网络同步后同一木板标签可能重复展开八遍；只合并原生编码完全一致的原料，保留完整匹配条件。
+                char symbol = ingredient.isEmpty() ? ' ' : symbols.computeIfAbsent(
+                        Ingredient.CODEC.encodeStart(ops, ingredient).getOrThrow(), ignored -> (char) ('A' + symbols.size()));
+                row.append(symbol); if (symbol != ' ') key.putIfAbsent(symbol, ingredient);
             }
             rows.add(row.toString());
         }

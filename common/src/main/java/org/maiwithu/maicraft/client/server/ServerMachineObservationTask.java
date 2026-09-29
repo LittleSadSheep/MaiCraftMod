@@ -69,7 +69,8 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
         }
         if (targets.isEmpty() && r.componentOffset == 0 && world.isLoaded(r.snapshot.center())
                 && player.distanceToSqr(r.snapshot.center().getCenter()) <= 16 * 16)
-            targets.add(new Target(0, r.snapshot.center()));
+            // 空场地没有第零个结构方块；仍可观察标记中心，但不能借用不存在的索引给库存归属。
+            targets.add(new Target(-1, r.snapshot.center()));
         if (!report.get("structure_complete").getAsBoolean()) pages.incomplete.add("client_structure_incomplete");
         if (targets.isEmpty()) pages.incomplete.add("no_components_within_observation_range");
     }
@@ -135,7 +136,8 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
                 return finish();
             }
         }
-        if (!pages.append(page, receipt.requestId().toString())) {
+        // 坐标核对完成后才给原生页绑定结构索引，防止别处的库存被归到当前目标机器。
+        if (!pages.append(page, receipt.requestId().toString(), target.componentIndex())) {
             continuation = targets.get(targetIndex).componentIndex();
             resourceContinuation = resourceOffset;
             pending = null;

@@ -13,7 +13,7 @@ import java.util.function.Predicate;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 
 /** 只使用现有或计划中的落脚面：仅允许直线步行和一格高差，不挖掘或增加额外支撑。 */
-final class BuildSupportWalking {
+public final class BuildSupportWalking {
     private static final double EPS = 1e-5;
     private final BlockGetter world;
     private final LongSet forbidden;
@@ -21,7 +21,8 @@ final class BuildSupportWalking {
     private final double width, height;
     private final Predicate<BlockPos> loaded;
 
-    BuildSupportWalking(BlockGetter world, Predicate<BlockPos> loaded,
+    /** 休息等无地形修改流程也复用同一落脚面和一格高差证明，避免另造一套忽略返程的走路判定。 */
+    public BuildSupportWalking(BlockGetter world, Predicate<BlockPos> loaded,
                         double width, double height, LongSet forbidden, PhysicalObstacleSnapshot physical) {
         this.world = world; this.width = width; this.height = height;
         this.forbidden = forbidden; this.physical = physical;
@@ -29,9 +30,9 @@ final class BuildSupportWalking {
     }
 
     private GroundCorridor ground() { return new GroundCorridor(world, loaded, width, height, forbidden, physical); }
-    Vec3 stance(BlockPos cell) { return ground().stance(cell); }
+    public Vec3 stance(BlockPos cell) { return ground().stance(cell); }
 
-    boolean edge(Vec3 from, Vec3 to) {
+    public boolean edge(Vec3 from, Vec3 to) {
         double rise = to.y - from.y;
         if (Math.abs(rise) > 1.0 + EPS || from.distanceToSqr(to) > 3) return false;
         if (Math.abs(rise) < EPS) return ground().clear(from, to);

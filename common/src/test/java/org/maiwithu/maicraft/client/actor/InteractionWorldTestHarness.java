@@ -10,9 +10,11 @@ import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
@@ -20,6 +22,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.level.Level;
@@ -76,6 +79,7 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(LevelChunk.class, "sections").set(level.chunks.chunk,
                 new LevelChunkSection[]{level.section});
         ActorControlTestHarness.field(Level.class, "dimension").set(level, Level.OVERWORLD);
+        ActorControlTestHarness.field(Level.class, "registryAccess").set(level, RegistryAccess.EMPTY);
         ActorControlTestHarness.field(LocalPlayer.class, "clientLevel").set(player, level);
         ActorControlTestHarness.field(Entity.class, "level").set(player, level);
         ActorControlTestHarness.field(Player.class, "inventory").set(player, inventory);
@@ -83,6 +87,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(Player.class, "attributes").set(player,
                 new AttributeMap(Player.createAttributes().build()));
         initializeVitals();
+        // 默认是已知的空配方表，不能让缺少夹具字段被当成“服务器配方观察失败”；配方场景再替换真实测试配方。
+        ActorControlTestHarness.field(ClientPacketListener.class, "recipeManager").set(h.connection, new RecipeManager(RegistryAccess.EMPTY));
         ActorControlTestHarness.field(Entity.class, "eyeHeight").setFloat(player, 1.62F);
         ActorControlTestHarness.field(Entity.class, "onGround").setBoolean(player, true);
         position(new Vec3(.5, 1, 3.5));

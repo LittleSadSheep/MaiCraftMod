@@ -12,6 +12,7 @@ import java.lang.ref.WeakReference;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Locale;
 import com.google.gson.JsonParser;
 import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
 
@@ -109,6 +110,8 @@ public final class MachineSnapshots {
         report.add("ae2_access_evidence", aeEvidence);
         // 只为实际匹配的标记位置附机制契约与原生配方观察，不在观察时开菜单、投料或生成设备。
         report.add("native_processes", NativeProcessRegistry.inspect(player, center));
+        report.addProperty("native_processes_scope", NativeProcessRegistry.OBSERVATION_SCOPE);
+        report.addProperty("native_processes_knowledge_uri", NativeProcessRegistry.KNOWLEDGE_URI);
         String id = UUID.randomUUID().toString();
         // 每次查看都给新编号，最多缓存十六份，正常游戏速度下一份有效约一分钟。
         report.remove("center");
@@ -150,15 +153,20 @@ public final class MachineSnapshots {
 
     /** 要用于操作时，再检查编号、时效、结构是否看完整，以及当前方块是否与观察时一致。 */
     public static Snapshot requireFresh(LocalPlayer player, String id) {
-        return require(player, id, false);
+        return require(player, id, false, false);
     }
 
     /** 仅施工可复用设计期间的场地锚点；开菜单、取物和控制设备继续使用普通短期回执。 */
     public static Snapshot requireForConstruction(LocalPlayer player, String id) {
-        return require(player, id, true);
+        return require(player, id, true, false);
     }
 
-    private static Snapshot require(LocalPlayer player, String id, boolean construction) {
+    /** 生产计划只借用原观察的机器范围；执行器会重新读原料和运行条件，结构未变时不因思考耗时要求模型重拍。 */
+    public static Snapshot requireForProduction(LocalPlayer player, String id) {
+        return require(player, id, false, true);
+    }
+
+    private static Snapshot require(LocalPlayer player, String id, boolean construction, boolean production) {
         bind(player);
         Snapshot snapshot = SNAPSHOTS.get(id);
         // 施工观察失效时引回同一工地的感知入口；已有机器的操作仍单独刷新设备证据。
@@ -167,7 +175,9 @@ public final class MachineSnapshots {
         if (snapshot == null) throw new IllegalArgumentException("machine_snapshot_missing: " + refresh + " in this session");
         // 蓝图施工按冻结锚点直接执行；场地变动由逐格施工处理，不用旧区域指纹把续作挡回重新勘测。
         if (construction) return snapshot;
-        if (expired(snapshot, player.level().getGameTime(), construction)) {
+        // 生产可在同一会话重新核对旧结构，但时间倒退、编号被消费或换世界仍然拒绝；菜单与控制回执不延寿。
+        long now = player.level().getGameTime();
+        if (expired(snapshot, now, construction) && (!production || now < snapshot.gameTime())) {
             throw new IllegalArgumentException("machine_snapshot_expired: " + refresh);
         }
         if (!snapshot.report().get("structure_complete").getAsBoolean()) {
@@ -193,7 +203,15 @@ public final class MachineSnapshots {
         // 这里列的是缓存概况和年龄，不重新扫描结构；显示 complete 也不代表机器现在一定还没变。
         bind(player);
         JsonArray entries = new JsonArray();
+        // 同一台机器重复观察只展示最新一份，旧编号仍留在缓存供原请求引用；不能把四次观察显示成四台机器。
+        var latest = new LinkedHashMap<String, Snapshot>();
+        var versions = new LinkedHashMap<String, Integer>();
         for (Snapshot snapshot : SNAPSHOTS.values()) {
+            String key = snapshot.dimension() + ":" + snapshot.center().asLong() + ":" + snapshot.label().strip().toLowerCase(Locale.ROOT);
+            latest.put(key,snapshot); versions.merge(key,1,Integer::sum);
+        }
+        for (var observed : latest.entrySet()) {
+            Snapshot snapshot = observed.getValue();
             JsonObject report = snapshot.report();
             JsonObject entry = new JsonObject();
             entry.addProperty("snapshot_id", snapshot.id());
@@ -202,7 +220,10 @@ public final class MachineSnapshots {
             entry.addProperty("radius", snapshot.radius());
             long age = player.level().getGameTime() - snapshot.gameTime();
             entry.addProperty("age_ticks", age);
-            entry.addProperty("expired", expired(snapshot, player.level().getGameTime(), true));
+            // 工地锚点可以继续定位施工，但不能因此把很久以前的操作证据标成新鲜。
+            entry.addProperty("expired", expired(snapshot, player.level().getGameTime(), false));
+            entry.addProperty("construction_anchor_reusable", !expired(snapshot, player.level().getGameTime(), true));
+            entry.addProperty("cached_versions", versions.get(observed.getKey()));
             entry.addProperty("complete", report.get("complete").getAsBoolean());
             entry.addProperty("structure_complete", report.get("structure_complete").getAsBoolean());
             entries.add(entry);
@@ -210,9 +231,12 @@ public final class MachineSnapshots {
         JsonObject result = new JsonObject();
         result.add("machines", entries);
         result.addProperty("cached_observations", true);
+        result.addProperty("cached_snapshot_count", SNAPSHOTS.size());
+        result.addProperty("machine_reference_count", entries.size());
+        result.addProperty("machines_scope", "Latest cached observation per named location; not a census of physical machines or proof of their full extent.");
         // 列表同时含施工锚点和设备操作回执，不能一律要求每次重试都丢掉尚未变化的工地。
         // 施工快照负责定位，不再把重读整片区域当成继续搭建的前提。
-        result.addProperty("guidance", "For construction reuse the same-session construction_site anchor; the executor handles current target blocks. Refresh the anchor after a session change. Existing machine operations use fresh inspect_machine evidence and consume their receipts. Cached entries are not live network state.");
+        result.addProperty("guidance", "Authorized modify_machine uses the known target label and observes declared edits internally; snapshot_id is optional. Use inspect_machine when current geometry or operating evidence is needed. For construction reuse the same-session construction_site anchor. Cached observations are bounded historical evidence; use watch_production for future outputs.");
         return result;
     }
 }

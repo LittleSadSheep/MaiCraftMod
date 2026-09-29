@@ -4,6 +4,12 @@ package org.maiwithu.maicraft.core.integration.create;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import org.maiwithu.maicraft.intent.IntentRuntime;
+import org.maiwithu.maicraft.intent.SemanticResultView;
+import org.maiwithu.maicraft.task.TaskResult;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -46,6 +52,37 @@ public final class CreateEconomicEndpointBridgeTest {
             check(economic.materialPolicy == MaterialPolicy.INVENTORY_ONLY && economic.allowedSources.equals(List.of(Source.STORAGE))
                     && !economic.allowHarm && economic.protectedLabels.equals(List.of("home")), "handoff preserves all supply and protection policy");
             check(field(CreateMechanicalPowerTask.class, "plan").get(task) == null, "AUTO must not construct an encased-chain plan after semantic resolution");
+            // 明确锁链传动轮从语义锚点转成交给经济规划的实机端点后，仍必须携带技术约束。
+            var chainRequest = new CreateMechanicalPower.Request(request.source(),request.destination(),
+                    CreateMechanicalPower.Transmission.CHAIN_CONVEYOR,true,false);
+            var chainRecord = (CreateMechanicalPowerTaskRecord) CreateMechanicalPower.task("regional-chain",1000,chainRequest);
+            var chainEconomic = CreateEconomicEndpointBridge.resolved(chainRecord,"minecraft:overworld",source,target);
+            check(chainEconomic.requireChainConveyor && !economic.requireChainConveyor,
+                    "explicit chain-conveyor admission must not become ordinary AUTO or encased chain drive");
+            // 尚未找到路也要公开选型含义，让语义调用方能识别锁链轮和链式传动箱的不同参数。
+            var resultData = CreateMechanicalPowerTask.class.getDeclaredMethod("resultData"); resultData.setAccessible(true);
+            var chainFacts = (Map<?,?>) resultData.invoke(new CreateMechanicalPowerTask(h.player,chainRecord));
+            check(chainFacts.get("requested_transmission").equals("chain_conveyor")
+                    && chainFacts.get("transmission_description").toString().contains("锁链传动轮"),"chain selection is visible before route success");
+            var boxedRequest = new CreateMechanicalPower.Request(request.source(),request.destination(),
+                    CreateMechanicalPower.Transmission.ENCASED_CHAIN_DRIVE,true,false);
+            var boxedRecord = (CreateMechanicalPowerTaskRecord) CreateMechanicalPower.task("boxed",1000,boxedRequest);
+            var boxedFacts = (Map<?,?>) resultData.invoke(new CreateMechanicalPowerTask(h.player,boxedRecord));
+            check(boxedFacts.get("transmission_description").toString().contains("链式传动箱")
+                    && ((List<?>)boxedFacts.get("available_transmission_choices")).contains("chain_conveyor"),"legacy family receipts retain the distinct available choice");
+            // 接线失败先经过语义结果再经过注意流；技术名称不能在这两层再次被删掉。
+            var compact = IntentRuntime.class.getDeclaredMethod("compactAttentionResult",JsonObject.class); compact.setAccessible(true);
+            var report = TaskResult.fail("route unavailable",Map.of("requested_transmission",boxedFacts.get("requested_transmission"),
+                    "transmission_description",boxedFacts.get("transmission_description"),"available_transmission_choices",boxedFacts.get("available_transmission_choices")));
+            var notice = (JsonObject) compact.invoke(null,JsonParser.parseString(SemanticResultView.result(report).toJson()).getAsJsonObject());
+            check(notice.getAsJsonObject("data").get("transmission_description").getAsString().contains("链式传动箱")
+                    && notice.getAsJsonObject("data").getAsJsonArray("available_transmission_choices").size() == 3,
+                    "attention exposes requested technology and its available alternatives");
+            // 允许新端点不该在调查前误报缺少证据；锁链模式继续自动寻找实机，不回退旧版空端点执行器。
+            var permissive=new CreateMechanicalPower.Request(request.source(),request.destination(),CreateMechanicalPower.Transmission.CHAIN_CONVEYOR,true,true);
+            check(!permissive.allowFreeReceiver(),"optional new receiver permission preserves native machine discovery");
+            check(CreateMechanicalPower.task("permissive-chain",1000,permissive) instanceof CreateMechanicalPowerTaskRecord,
+                    "regional chain request starts autonomous observation without a separate inspect gate");
             var legacy = CreateEndpointContinuations.issue(request, new CreateProgressiveSurvey(request), 1, "minecraft:overworld");
             check(!legacy.economicAfterEndpoints(), "legacy opaque endpoint continuations preserve their original executor");
             CreateEndpointContinuations.discard(legacy.token());
