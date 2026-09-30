@@ -16,7 +16,6 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRules;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
-import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 
 /**
  * 开工前分批检查世界边界、AE2 部件宿主和临时洞口。普通方块的替换与材料检查另交给建筑子任务。
@@ -72,15 +71,15 @@ final class MachineBuildSurvey {
                     if (BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString().equals("create:belt"))
                         return blocked(world, at, "native_belt_chain_mismatch", "An existing belt has a different native chain; inspect it before replacing any segment.");
                     if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir()) {
-                        // assembly 已声明整条安装路径；允许替换时先清理其中可破坏、无流体/库存的白名单方块，再执行原生连接器。
+                        // assembly 已声明整条安装路径；路径内的可破坏旧垫块直接交施工清理，不再套用范围外寻路的类型白名单。
                         var state = world.getBlockState(at);
                         // 流体不是可挖的普通障碍；单列诊断，让修改蓝图依据真实源状态处理水路，而不是重试挖水。
                         if (!state.getFluidState().isEmpty()) return blocked(world, at, "native_installation_path_fluid",
                                 "Native installation requires a dry path; observed fluid needs explicitly declared fluid handling.");
-                        if (plan.replaceExisting() && ClearanceWhitelist.allows(state) && !state.hasBlockEntity()
+                        if (plan.replaceExisting() && !state.hasBlockEntity()
                                 && state.getFluidState().isEmpty() && state.getDestroySpeed(world, at) >= 0) {
                             MachinePlacementRules.requireModeledEffects(state.getBlock()); clears.add(at);
-                        } else return blocked(world, at, "native_installation_path_occupied", "Native installation path needs authorized clearance of ordinary whitelisted obstacles.");
+                        } else return blocked(world, at, "native_installation_path_occupied", "Native installation path contains an unbreakable block, a block entity or an explicitly preserved block.");
                     }
                 }
             } catch (RuntimeException unavailable) { return new Progress(false, null, "Native installation observation unavailable: " + unavailable.getMessage()); }
@@ -167,7 +166,7 @@ final class MachineBuildSurvey {
         failureEvidence = Map.of("failure_code", code, "failure_position", Map.of("x", at.getX(), "y", at.getY(), "z", at.getZ()),
                 "blueprint_offset", List.of(offset.getX(), offset.getY(), offset.getZ()),
                 "observed_block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
-                "observed_state", state.toString(), "declared_target", declaredPositions.contains(at),
+                "observed_state", state.toString(), "declared_target", declaredPositions.contains(at) || plan.nativePositions().contains(at),
                 "protected", NavigationSafetyContext.protectsMutation(at), "world_modified", false,
                 "fluid_state", fluidEvidence);
         return new Progress(false, null, detail + " Observed " + BuiltInRegistries.BLOCK.getKey(state.getBlock())

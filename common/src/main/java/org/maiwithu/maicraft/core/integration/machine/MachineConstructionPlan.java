@@ -402,7 +402,11 @@ public final class MachineConstructionPlan {
         report.addProperty("owned_replacement_targets", owned.size());
     }
     private Set<BlockPos> authoredModificationCells() {
-        return MachineAssemblyDocument.blocks(blueprint()).keySet().stream().map(anchor::offset).collect(Collectors.toUnmodifiableSet());
+        // assembly 声明的整条皮带与逐格方块同属本次施工范围；中间格的旧垫块不需要模型再写一遍空气目标。
+        Set<BlockPos> declared = MachineAssemblyDocument.blocks(blueprint()).keySet().stream()
+                .map(anchor::offset).collect(Collectors.toCollection(LinkedHashSet::new));
+        declared.addAll(nativePositions);
+        return Set.copyOf(declared);
     }
     /** 放块阶段也保留后续皮带连接器、附件和显式工序原料，防止提前吃掉例如皮带配方中的熟海带。 */
     /** 同一份后续材料账用于补食和整理背包，不能把待装传送带或待投原料存成无关余料。 */
