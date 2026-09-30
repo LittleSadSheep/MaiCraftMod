@@ -173,8 +173,8 @@ public final class ContainerSplitTransferTest {
                     check(args[3] == ClickType.PICKUP && ((int) args[1] == 0 || (int) args[1] == 27), "only ordinary clicks on the two declared slots are permitted");
                     slot = (int) args[1]; button = (int) args[2]; confirmation = (MenuConfirmation) args[4]; clicks++;
                     var constructor = MenuReceipt.class.getDeclaredConstructor(MenuReceipt.Kind.class, LocalPlayerContext.class,
-                            int.class, int.class, int.class, boolean.class, MenuConfirmation.class); constructor.setAccessible(true);
-                    pending = constructor.newInstance(MenuReceipt.Kind.CLICK, args[0], menu.containerId, 0, 20, false, confirmation); yield pending;
+                            int.class, int.class, int.class, int.class, boolean.class, MenuConfirmation.class); constructor.setAccessible(true);
+                    pending = constructor.newInstance(MenuReceipt.Kind.CLICK, args[0], menu.containerId, 0, -1, 20, false, confirmation); yield pending;
                 }
                 case "poll" -> args[1];
                 default -> throw new AssertionError("unexpected menu call " + method.getName());

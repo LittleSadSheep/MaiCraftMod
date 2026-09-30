@@ -85,9 +85,9 @@ public final class Ae2InPlaceSupplyTest {
                         if (method.getName().equals("closeForTaskBoundary")) {
                             closes[0]++;
                             var constructor = MenuReceipt.class.getDeclaredConstructor(MenuReceipt.Kind.class,
-                                    LocalPlayerContext.class, int.class, int.class, int.class, boolean.class, MenuConfirmation.class);
+                                    LocalPlayerContext.class, int.class, int.class, int.class, int.class, boolean.class, MenuConfirmation.class);
                             constructor.setAccessible(true);
-                            receipt[0] = constructor.newInstance(MenuReceipt.Kind.CLOSE, values[0], 0, 0, 20, true,
+                            receipt[0] = constructor.newInstance(MenuReceipt.Kind.CLOSE, values[0], 0, 0, -1, 20, true,
                                     MenuConfirmation.closedToInventory());
                             return receipt[0];
                         }

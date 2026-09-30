@@ -109,8 +109,8 @@ public final class QuickMoveEvidenceTest {
                         check(method.getName().equals("click") && args[3] == ClickType.QUICK_MOVE, "只允许原来这一笔快速移动");
                         confirmation = (MenuConfirmation) args[4];
                         var constructor = MenuReceipt.class.getDeclaredConstructor(MenuReceipt.Kind.class, LocalPlayerContext.class,
-                                int.class, int.class, int.class, boolean.class, MenuConfirmation.class); constructor.setAccessible(true);
-                        receipt = (MenuReceipt) constructor.newInstance(MenuReceipt.Kind.CLICK, args[0], 55, 0, 20, false, confirmation);
+                                int.class, int.class, int.class, int.class, boolean.class, MenuConfirmation.class); constructor.setAccessible(true);
+                        receipt = (MenuReceipt) constructor.newInstance(MenuReceipt.Kind.CLICK, args[0], 55, 0, -1, 20, false, confirmation);
                         return receipt;
                     });
             context = (LocalPlayerContext) Proxy.newProxyInstance(LocalPlayerContext.class.getClassLoader(), new Class<?>[]{LocalPlayerContext.class},

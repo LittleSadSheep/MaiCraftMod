@@ -53,8 +53,8 @@ public final class MenuConfirmationLatencyTest {
 
     private static MenuReceipt create(DefaultMenuPort port, ActorControlTestHarness h, MenuConfirmation confirmation) throws Exception {
         var method = DefaultMenuPort.class.getDeclaredMethod("create", MenuReceipt.Kind.class, LocalPlayerContext.class,
-                AbstractContainerMenu.class, int.class, boolean.class, MenuConfirmation.class);
+                AbstractContainerMenu.class, int.class, int.class, boolean.class, MenuConfirmation.class);
         method.setAccessible(true);
-        return (MenuReceipt) method.invoke(port, MenuReceipt.Kind.CLICK, h.context, h.player.containerMenu, 20, false, confirmation);
+        return (MenuReceipt) method.invoke(port, MenuReceipt.Kind.CLICK, h.context, h.player.containerMenu, 0, 20, false, confirmation);
     }
 }

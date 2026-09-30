@@ -141,9 +141,9 @@ public final class EnchantTransactionPauseTest {
                         case "pressButton" -> {
                             buttons++; confirmation = (MenuConfirmation) args[2];
                             var constructor = MenuReceipt.class.getDeclaredConstructor(MenuReceipt.Kind.class, LocalPlayerContext.class,
-                                    int.class, int.class, int.class, boolean.class, MenuConfirmation.class);
+                                    int.class, int.class, int.class, int.class, boolean.class, MenuConfirmation.class);
                             constructor.setAccessible(true);
-                            receipt = constructor.newInstance(MenuReceipt.Kind.BUTTON, args[0], menu.containerId, menu.getStateId(), 100, false, confirmation);
+                            receipt = constructor.newInstance(MenuReceipt.Kind.BUTTON, args[0], menu.containerId, menu.getStateId(), -1, 100, false, confirmation);
                             yield receipt;
                         }
                         case "poll" -> args[1];

@@ -173,7 +173,7 @@ public final class LandingAssistTest {
                 (proxy, method, args) -> switch (method.getName()) {
                     case "closeForTaskBoundary" -> {
                         closes[0]++;
-                        closing[0] = (MenuReceipt) menuCtor.newInstance(MenuReceipt.Kind.CLOSE, args[0], 0, 0, 20, true, null);
+                        closing[0] = (MenuReceipt) menuCtor.newInstance(MenuReceipt.Kind.CLOSE, args[0], 0, 0, -1, 20, true, null);
                         yield closing[0];
                     }
                     case "poll" -> args[1];

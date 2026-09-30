@@ -44,7 +44,7 @@ public final class ElevatorRemoteStagingTest {
                 player.getInventory().setItem(target, before); swaps[0]++;
             } else if (m.getName().equals("close")) minecraft.screen = null;
             else throw new AssertionError("unexpected menu operation " + m.getName());
-            return receipt[0] = (MenuReceipt) ctor.newInstance(MenuReceipt.Kind.CLICK, context[0], 0, 0, 30, true, null);
+            return receipt[0] = (MenuReceipt) ctor.newInstance(MenuReceipt.Kind.CLICK, context[0], 0, 0, -1, 30, true, null);
         });
         context[0] = (LocalPlayerContext) Proxy.newProxyInstance(LocalPlayerContext.class.getClassLoader(), new Class<?>[]{LocalPlayerContext.class}, (p,m,a) -> switch (m.getName()) {
             case "minecraft" -> minecraft; case "player" -> player; case "menus" -> menus;

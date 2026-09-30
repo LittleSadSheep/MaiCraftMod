@@ -182,8 +182,8 @@ public final class Ae2DepositTransferTest {
                     check(args[3] == ClickType.QUICK_MOVE && menu.getSlot((int) args[1]).container == world.inventory, "deposit only shifts a real player inventory slot");
                     shifts++; clicked = (int) args[1]; confirmation = (MenuConfirmation) args[4];
                     var ctor = MenuReceipt.class.getDeclaredConstructor(MenuReceipt.Kind.class, LocalPlayerContext.class,
-                            int.class, int.class, int.class, boolean.class, MenuConfirmation.class); ctor.setAccessible(true);
-                    pending = ctor.newInstance(MenuReceipt.Kind.CLICK, args[0], menu.containerId, 0, 100, false, confirmation); yield pending;
+                            int.class, int.class, int.class, int.class, boolean.class, MenuConfirmation.class); ctor.setAccessible(true);
+                    pending = ctor.newInstance(MenuReceipt.Kind.CLICK, args[0], menu.containerId, 0, -1, 100, false, confirmation); yield pending;
                 }
                 case "poll" -> {
                     var verdict = confirmation.observe((LocalPlayerContext) args[0], pending);
