@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.EconomicKineticTaskRecord;
 
 /** 先解析语义锚点，再将具体且新鲜观察到的机器交给经济路线规划。 */
@@ -48,6 +49,17 @@ final class CreateEconomicEndpointBridge {
         for (var candidate : candidates) if (request.destination().accepts(candidate.state())
                 && controller.equals(CreateBeltAccess.controller(world, candidate.position())))
             unique.putIfAbsent(candidate.position(), candidate);
+        // 上游最近证据筛选会删掉同一条带的较远轴口；从已确定的原生带链读取它们，避免“候选换口”实际永远只有一个。
+        for (BlockPos at : CreateBeltAccess.loadedMembers(world, first.position())) {
+            var state = world.getBlockState(at);
+            if (!request.destination().accepts(state) || unique.containsKey(at)) continue;
+            var facts = CreateKineticsBridge.inspect(world, at);
+            if (facts == null) continue;
+            for (Direction face : Direction.values()) if (CreateKineticsBridge.hasShaftTowards(world, at, state, face)) {
+                unique.put(at, new CreateMechanicalPlan.KineticEndpoint(at, state, face, facts.speed(), facts.hasNetwork()));
+                break;
+            }
+        }
         if (unique.isEmpty()) return List.of(first);
         return unique.values().stream().sorted(Comparator.comparingDouble(candidate ->
                 candidate.position().distSqr(source.position()))).toList();

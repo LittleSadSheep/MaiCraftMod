@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.core.integration.create;
 
 import java.util.Set;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.ArrayDeque;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentType;
@@ -33,6 +35,26 @@ public final class CreateBeltAccess {
             Object controller = NativeApi.call(entity, ENTITY, "getController");
             return controller instanceof BlockPos pos ? pos.immutable() : null;
         } catch (RuntimeException | LinkageError unavailable) { return null; }
+    }
+
+    static List<BlockPos> loadedMembers(Level world, BlockPos at) {
+        BlockPos controller = controller(world, at);
+        if (controller == null) return List.of();
+        var members = new LinkedHashSet<BlockPos>();
+        var visited = new LinkedHashSet<BlockPos>();
+        var frontier = new ArrayDeque<BlockPos>(); frontier.add(at.immutable());
+        // 近端调查只给最近接口；沿实际同控制器的带格补齐已加载成员，斜坡允许相邻格同时升降一格。
+        // 上限只限制本次只读工作量，不跨未知区块，也不把旁边另一条带作为替代目标。
+        while (!frontier.isEmpty() && members.size() < 512) {
+            BlockPos next = frontier.removeFirst();
+            if (!visited.add(next) || !controller.equals(controller(world, next))) continue;
+            members.add(next);
+            for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) for (int dz = -1; dz <= 1; dz++) {
+                BlockPos neighbor = next.offset(dx, dy, dz);
+                if (!visited.contains(neighbor) && world.isLoaded(neighbor)) frontier.addLast(neighbor);
+            }
+        }
+        return List.copyOf(members);
     }
 
     public static boolean available() {
