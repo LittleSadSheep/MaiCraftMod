@@ -5,13 +5,11 @@ import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
 import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
 import com.google.gson.JsonObject;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
+import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 
 /** 取物能力对应的内部工具；数量上限与真实任务一致，来源清单表达许可而非操作顺序。 */
@@ -40,56 +38,43 @@ public final class SemanticAcquireTool implements MaiCraftTool {
 
     @Override
     public Map<String, Object> parameterSchema() {
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("item_id", property("string",
-                "One acceptable namespaced item id; item_ids may be used instead."));
-        properties.put("item_ids", arrayProperty("string",
-                "Acceptable item alternatives. Their main-inventory counts are aggregated.",
-                null));
-        properties.put("item_tag", property("string",
-                "One namespaced item tag whose live members are acceptable alternatives, with or without #."));
-        properties.put("item_tags", arrayProperty("string",
-                "Namespaced item tags whose live members form one acceptable alternative set.",
-                null));
-        properties.put("count", boundedInteger(
-                "Required final aggregate main-inventory count (default 1).", 1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT));
-        properties.put("allowed_sources", arrayProperty("string",
-                "Optional hard source restriction: omit for ordinary acquisition. Carried inventory and available carried-wireless stock are used before nearby world sources. Only narrow this list for an explicit user restriction; it is not execution order.",
-                List.of("inventory", "nearby", "wireless", "storage", "harvest", "craft", "cook", "mine", "trade", "hunt")));
-        properties.put("allow_harm", property("boolean",
-                "Explicit semantic consent to harm living entities. Default false."));
-        properties.put("protected_labels", arrayProperty("string",
-                "Remembered places or possessions that must not be touched.", null));
-        properties.put("radius", boundedInteger(
-                "Loaded-world radius for nearby evidence (default 16).", 1, 48));
-
-        Map<String, Object> hintProperties = new LinkedHashMap<>();
-        hintProperties.put("block_ids", arrayProperty("string",
-                "Semantic source block variants; never coordinates.", null));
-        hintProperties.put("block_tags", arrayProperty("string",
-                "Semantic block tags, with or without leading #.", null));
-        hintProperties.put("entity_type_ids", arrayProperty("string",
-                "Semantic entity type families; never runtime entity ids.", null));
-        hintProperties.put("expected_item_ids", arrayProperty("string",
-                "Expected products asserted by the semantic hint; the Mod still verifies inventory.",
-                null));
-        hintProperties.put("trade_profession_ids", arrayProperty("string",
-                "Semantic villager profession families, not offer slots.", null));
-        hintProperties.put("description", property("string",
-                "Short semantic relationship between source and requested items."));
-        Map<String, Object> hint = property("object",
-                "Optional semantic source evidence. It never contains positions, routes, clicks or slots.");
-        hint.put("properties", hintProperties);
-        hint.put("required", List.of());
-        hint.put("additionalProperties", false);
-        properties.put("source_hint", hint);
-
-        Map<String, Object> schema = new LinkedHashMap<>();
-        schema.put("type", "object");
-        schema.put("properties", properties);
-        schema.put("required", List.of());
-        schema.put("additionalProperties", false);
-        return schema;
+        return Schema.object()
+                .optionalString("item_id",
+                        "One acceptable namespaced item id; item_ids may be used instead.")
+                .optionalStringArray("item_ids",
+                        "Acceptable item alternatives. Their main-inventory counts are aggregated.")
+                .optionalString("item_tag",
+                        "One namespaced item tag whose live members are acceptable alternatives, with or without #.")
+                .optionalStringArray("item_tags",
+                        "Namespaced item tags whose live members form one acceptable alternative set.")
+                .optionalInteger("count",
+                        "Required final aggregate main-inventory count (default 1).",
+                        1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)
+                .optionalEnumStringArray("allowed_sources",
+                        "Optional hard source restriction: omit for ordinary acquisition. Carried inventory and available carried-wireless stock are used before nearby world sources. Only narrow this list for an explicit user restriction; it is not execution order.",
+                        "inventory", "nearby", "wireless", "storage", "harvest", "craft", "cook", "mine", "trade", "hunt")
+                .optionalBool("allow_harm",
+                        "Explicit semantic consent to harm living entities. Default false.")
+                .optionalStringArray("protected_labels",
+                        "Remembered places or possessions that must not be touched.")
+                .optionalInteger("radius",
+                        "Loaded-world radius for nearby evidence (default 16).", 1, 48)
+                .optionalObject("source_hint",
+                        "Optional semantic source evidence. It never contains positions, routes, clicks or slots.",
+                        hint -> hint
+                                .optionalStringArray("block_ids",
+                                        "Semantic source block variants; never coordinates.")
+                                .optionalStringArray("block_tags",
+                                        "Semantic block tags, with or without leading #.")
+                                .optionalStringArray("entity_type_ids",
+                                        "Semantic entity type families; never runtime entity ids.")
+                                .optionalStringArray("expected_item_ids",
+                                        "Expected products asserted by the semantic hint; the Mod still verifies inventory.")
+                                .optionalStringArray("trade_profession_ids",
+                                        "Semantic villager profession families, not offer slots.")
+                                .optionalString("description",
+                                        "Short semantic relationship between source and requested items."))
+                .build();
     }
 
     @Override
@@ -97,30 +82,5 @@ public final class SemanticAcquireTool implements MaiCraftTool {
             String toolCallId, JsonObject args, LocalPlayer player, Consumer<String> reply) {
         var record = SemanticAcquireApi.newRecord(ctx(toolCallId, player), args, player);
         setTask(player, record, args, reply);
-    }
-
-    private static Map<String, Object> property(String type, String description) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("type", type);
-        result.put("description", description);
-        return result;
-    }
-
-    private static Map<String, Object> boundedInteger(
-            String description, int minimum, int maximum) {
-        Map<String, Object> result = property("integer", description);
-        result.put("minimum", minimum);
-        result.put("maximum", maximum);
-        return result;
-    }
-
-    private static Map<String, Object> arrayProperty(
-            String itemType, String description, List<String> itemEnum) {
-        Map<String, Object> items = property(itemType, "");
-        items.remove("description");
-        if (itemEnum != null) items.put("enum", new ArrayList<>(itemEnum));
-        Map<String, Object> result = property("array", description);
-        result.put("items", items);
-        return result;
     }
 }

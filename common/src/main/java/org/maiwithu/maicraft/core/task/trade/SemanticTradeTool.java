@@ -10,13 +10,13 @@ import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
+import org.maiwithu.maicraft.agent.tool.Schema;
 
 /**
  * 内部交易入口，只接收想获得什么、最终数量和商人／付款策略。
@@ -37,26 +37,19 @@ public final class SemanticTradeTool implements MaiCraftTool {
     @Override
     // 这是参数格式说明；allowed_payment_items 的文字目前说省略可用任意付款，执行器实际默认只允许绿宝石。
     public Map<String, Object> parameterSchema() {
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("item_id", property("string", "Requested namespaced trade output."));
-        properties.put("count", boundedInteger(
-                "Required final main-inventory count.", 1,
-                SemanticTradeTaskRecord.MAX_FINAL_COUNT));
-        Map<String, Object> kind = property("string", "Allowed merchant family.");
-        kind.put("enum", List.of("auto", "villager", "wandering_trader"));
-        properties.put("merchant_kind", kind);
-        properties.put("allowed_payment_items", arrayProperty(
-                "Optional namespaced payment-item policy; omit to use any affordable offer."));
-        properties.put("protected_labels", arrayProperty(
-                "Remembered places whose merchants must not be selected."));
-        properties.put("radius", boundedInteger(
-                "Loaded-entity search radius.", 1, SemanticTradeTaskRecord.MAX_RADIUS));
-        Map<String, Object> schema = new LinkedHashMap<>();
-        schema.put("type", "object");
-        schema.put("properties", properties);
-        schema.put("required", List.of("item_id"));
-        schema.put("additionalProperties", false);
-        return schema;
+        return Schema.object()
+                .string("item_id", "Requested namespaced trade output.")
+                .integer("count", "Required final main-inventory count.", 1,
+                        SemanticTradeTaskRecord.MAX_FINAL_COUNT)
+                .optionalEnum("merchant_kind", "Allowed merchant family.",
+                        "auto", "villager", "wandering_trader")
+                .optionalStringArray("allowed_payment_items",
+                        "Optional namespaced payment-item policy; omit to use any affordable offer.")
+                .optionalStringArray("protected_labels",
+                        "Remembered places whose merchants must not be selected.")
+                .integer("radius", "Loaded-entity search radius.", 1,
+                        SemanticTradeTaskRecord.MAX_RADIUS)
+                .build();
     }
 
     @Override
@@ -84,29 +77,6 @@ public final class SemanticTradeTool implements MaiCraftTool {
                 SemanticTradeTaskRecord.MerchantKind.parse(text(args, "merchant_kind")),
                 payments, labels, radius);
         setTask(player, record, args, reply);
-    }
-
-    private static Map<String, Object> property(String type, String description) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("type", type);
-        result.put("description", description);
-        return result;
-    }
-
-    private static Map<String, Object> boundedInteger(
-            String description, int minimum, int maximum) {
-        Map<String, Object> result = property("integer", description);
-        result.put("minimum", minimum);
-        result.put("maximum", maximum);
-        return result;
-    }
-
-    private static Map<String, Object> arrayProperty(String description) {
-        Map<String, Object> items = property("string", "");
-        items.remove("description");
-        Map<String, Object> result = property("array", description);
-        result.put("items", items);
-        return result;
     }
 
     private static ResourceLocation resource(JsonElement value, String key) {

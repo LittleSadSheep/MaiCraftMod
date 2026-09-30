@@ -7,12 +7,12 @@ import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
+import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.endgame.DragonFightTaskRecord;
 
 /** 内部语义末影龙战斗能力。 */
@@ -35,35 +35,24 @@ public final class SemanticDragonFightTool implements MaiCraftTool {
 
     @Override
     public Map<String, Object> parameterSchema() {
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("allow_combat", property(
-                "boolean",
-                "Must be true: permits destroying End Crystals and killing the Ender Dragon."));
-        properties.put("may_alter_terrain", property(
-                "boolean",
-                "Permits bounded safe construction and removal of freshly verified iron bars "
-                        + "around a caged crystal. Defaults to false."));
-        properties.put("allow_rare_consumables", property(
-                "boolean",
-                "Explicitly permits consuming golden apples or enchanted golden apples for "
-                        + "recovery. Defaults to false; ordinary no-effect food remains allowed."));
-        Map<String, Object> minimumHealth = property(
-                "number",
-                "Pause combat below this many health points, evade hazards and recover before "
-                        + "rebuilding the combat subtask. Defaults to 10." );
-        minimumHealth.put("minimum", 1);
-        minimumHealth.put("maximum", DragonFightTaskRecord.MAXIMUM_HEALTH_SETTING);
-        properties.put("minimum_health", minimumHealth);
-        properties.put("protected_labels", arrayProperty(
-                "Remembered places whose nearby blocks and entities must not be altered or "
-                        + "exploded by this encounter."));
-
-        Map<String, Object> schema = new LinkedHashMap<>();
-        schema.put("type", "object");
-        schema.put("properties", properties);
-        schema.put("required", List.of("allow_combat"));
-        schema.put("additionalProperties", false);
-        return schema;
+        return Schema.object()
+                .bool("allow_combat",
+                        "Must be true: permits destroying End Crystals and killing the Ender Dragon.")
+                .optionalBool("may_alter_terrain",
+                        "Permits bounded safe construction and removal of freshly verified iron bars "
+                                + "around a caged crystal. Defaults to false.")
+                .optionalBool("allow_rare_consumables",
+                        "Explicitly permits consuming golden apples or enchanted golden apples for "
+                                + "recovery. Defaults to false; ordinary no-effect food remains allowed.")
+                .optionalNumber("minimum_health",
+                        "Pause combat below this many health points, evade hazards and recover before "
+                                + "rebuilding the combat subtask. Defaults to 10.",
+                        1.0, DragonFightTaskRecord.MAXIMUM_HEALTH_SETTING)
+                .optionalStringArray("protected_labels",
+                        "Remembered places whose nearby blocks and entities must not be altered or "
+                                + "exploded by this encounter.",
+                        DragonFightTaskRecord.MAX_PROTECTED_LABELS)
+                .build();
     }
 
     @Override
@@ -96,20 +85,6 @@ public final class SemanticDragonFightTool implements MaiCraftTool {
                 minimumHealth,
                 protectedLabels);
         setTask(player, record, args, reply);
-    }
-
-    private static Map<String, Object> property(String type, String description) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("type", type);
-        result.put("description", description);
-        return result;
-    }
-
-    private static Map<String, Object> arrayProperty(String description) {
-        Map<String, Object> result = property("array", description);
-        result.put("items", Map.of("type", "string"));
-        result.put("maxItems", DragonFightTaskRecord.MAX_PROTECTED_LABELS);
-        return result;
     }
 
     private static boolean requiredBoolean(JsonObject args, String key) {

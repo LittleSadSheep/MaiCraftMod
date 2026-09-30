@@ -82,6 +82,14 @@ public final class Schema {
             return this;
         }
 
+        public Builder optionalNumber(String name, String desc, double min, double max) {
+            Map<String, Object> p = base("number", desc);
+            p.put("minimum", min);
+            p.put("maximum", max);
+            props.put(name, p);
+            return this;
+        }
+
         /** 可以不填；填了必须从列出的文字选项中选择。 */
         public Builder optionalEnum(String name, String desc, String... values) {
             Map<String, Object> p = base("string", desc);
@@ -94,6 +102,32 @@ public final class Schema {
         public Builder optionalStringArray(String name, String desc) {
             Map<String, Object> items = new LinkedHashMap<>();
             items.put("type", "string");
+            Map<String, Object> arr = new LinkedHashMap<>();
+            arr.put("type", "array");
+            arr.put("description", desc);
+            arr.put("items", items);
+            props.put(name, arr);
+            return this;
+        }
+
+        /** 与 optionalStringArray 相同，但 maxItems 大于零时还声明列表长度的上限。 */
+        public Builder optionalStringArray(String name, String desc, int maxItems) {
+            Map<String, Object> items = new LinkedHashMap<>();
+            items.put("type", "string");
+            Map<String, Object> arr = new LinkedHashMap<>();
+            arr.put("type", "array");
+            arr.put("description", desc);
+            arr.put("items", items);
+            if (maxItems > 0) arr.put("maxItems", maxItems);
+            props.put(name, arr);
+            return this;
+        }
+
+        /** 可选的文字列表，且每一项只能从给出的选项中选择。 */
+        public Builder optionalEnumStringArray(String name, String desc, String... values) {
+            Map<String, Object> items = new LinkedHashMap<>();
+            items.put("type", "string");
+            items.put("enum", List.of(values));
             Map<String, Object> arr = new LinkedHashMap<>();
             arr.put("type", "array");
             arr.put("description", desc);
@@ -181,6 +215,20 @@ public final class Schema {
             arr.put("items", items);
             props.put(name, arr);
             required.add(name);
+            return this;
+        }
+
+        /** 可选的嵌套对象；字段与必填要求按 item 定义，和必填的 objectArray 同一写法但不强制提供。 */
+        public Builder optionalObject(String name, String desc, Consumer<Builder> item) {
+            Builder ib = new Builder();
+            item.accept(ib);
+            Map<String, Object> obj = new LinkedHashMap<>();
+            obj.put("type", "object");
+            obj.put("description", desc);
+            obj.put("properties", ib.props);
+            obj.put("required", List.copyOf(ib.required));
+            obj.put("additionalProperties", false);
+            props.put(name, obj);
             return this;
         }
 
