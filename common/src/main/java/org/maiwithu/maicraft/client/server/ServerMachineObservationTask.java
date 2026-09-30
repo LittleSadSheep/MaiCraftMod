@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,12 +28,11 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
     private ClientRequestReceipt pending;
     private int targetIndex;
     private int resourceOffset;
-    private int resourcePages;
     private int continuation = -1;
     private int resourceContinuation;
     private long requestTick;
     private boolean finished;
-    private final Set<Integer> observedComponents = new HashSet<>();
+    private final Set<BlockPos> observedComponents = new HashSet<>();
 
     ServerMachineObservationTask(LocalPlayer player, ServerMachineObservationTaskRecord record) { super(player, record); }
 
@@ -51,19 +51,22 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
             if (component.has("block_index")) declared.add(component.get("block_index").getAsInt());
         }
         var rows = report.getAsJsonArray("relative_blocks");
-        if (rows != null) for (int index = r.componentOffset; index < rows.size(); index++) {
-            var row = rows.get(index).getAsJsonArray();
-            BlockPos position = r.snapshot.center().offset(row.get(0).getAsInt(), row.get(1).getAsInt(), row.get(2).getAsInt());
-            if (!world.isLoaded(position)) { pages.incomplete.add("component_chunk_unloaded"); continue; }
+        Map<BlockPos, Integer> candidates = new LinkedHashMap<>();
+        Map<BlockPos, Integer> indices = new LinkedHashMap<>();
+        if (rows != null) for (int index = 0; index < rows.size(); index++) indices.put(at(rows.get(index).getAsJsonArray()), index);
+        boolean registered = report.has("native_component_offsets");
+        // 已登记机器直接遍历整份目标足迹；周围房屋和结构展示截断都不应抢占机器部件的观察额度。
+        if (registered) for (var raw : report.getAsJsonArray("native_component_offsets")) {
+            BlockPos position = at(raw.getAsJsonArray());
+            candidates.put(position, indices.getOrDefault(position, -1));
+        } else indices.forEach((position, index) -> { if (index >= r.componentOffset) candidates.put(position, index); });
+        for (var candidate : candidates.entrySet()) {
+            BlockPos position = candidate.getKey(); int index = candidate.getValue();
+            if (!world.isLoaded(position)) { pages.unavailable(offset(position), "component_chunk_unloaded"); continue; }
             if (world.getBlockEntity(position) == null && !declared.contains(index)) continue;
             if (player.distanceToSqr(position.getCenter()) > 16 * 16) {
-                pages.incomplete.add("components_outside_observation_range");
+                pages.unavailable(offset(position), "component_outside_observation_range");
                 continue;
-            }
-            if (targets.size() >= 64) {
-                continuation = index;
-                pages.incomplete.add("component_budget_exhausted");
-                break;
             }
             targets.add(new Target(index, position.immutable()));
         }
@@ -71,7 +74,7 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
                 && player.distanceToSqr(r.snapshot.center().getCenter()) <= 16 * 16)
             // 空场地没有第零个结构方块；仍可观察标记中心，但不能借用不存在的索引给库存归属。
             targets.add(new Target(-1, r.snapshot.center()));
-        if (!report.get("structure_complete").getAsBoolean()) pages.incomplete.add("client_structure_incomplete");
+        if (!registered && !report.get("structure_complete").getAsBoolean()) pages.incomplete.add("client_structure_incomplete");
         if (targets.isEmpty()) pages.incomplete.add("no_components_within_observation_range");
     }
 
@@ -89,8 +92,7 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
         }
         Target target = targets.get(targetIndex);
         if (!world.isLoaded(target.position()) || player.distanceToSqr(target.position().getCenter()) > 16 * 16) {
-            pages.incomplete.add("component_left_observation_range");
-            targetIndex++;
+            skip("component_left_observation_range");
             return TaskState.RUNNING;
         }
         JsonObject point = new JsonObject();
@@ -102,7 +104,8 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
         JsonObject body = new JsonObject();
         body.add("positions", positions);
         body.addProperty("resource_offset", resourceOffset);
-        body.addProperty("resource_limit", 32);
+        body.addProperty("resource_limit", 128);
+        body.addProperty("occupied_items_only", true);
         pending = ServerAssistClient.submit("machine.snapshot", body, false);
         requestTick = world.getGameTime();
         return TaskState.RUNNING;
@@ -113,10 +116,10 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
         if (!receipt.settled() && world.getGameTime() - requestTick <= 120) return TaskState.RUNNING;
         if (!receipt.settled() || receipt.retired() || receipt.status() != ClientRequestReceipt.Status.SUCCEEDED
                 || receipt.backend() != ClientRequestReceipt.Backend.SERVER) {
-            pages.incomplete.add("server_observation_" + receipt.code());
             ServerAssistClient.cancel(pending.id());
             pending = null;
-            return finish();
+            skip("server_observation_" + receipt.code());
+            return TaskState.RUNNING;
         }
         JsonObject page = receipt.result();
         if (!r.snapshot.dimension().equals(ServerCapabilityState.text(page, "dimension"))) {
@@ -137,38 +140,43 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
             }
         }
         // 坐标核对完成后才给原生页绑定结构索引，防止别处的库存被归到当前目标机器。
-        if (!pages.append(page, receipt.requestId().toString(), target.componentIndex())) {
-            continuation = targets.get(targetIndex).componentIndex();
-            resourceContinuation = resourceOffset;
-            pending = null;
-            return finish();
-        }
-        if (observations != null && !observations.isEmpty()) observedComponents.add(target.componentIndex());
+        pages.append(page, receipt.requestId().toString(), target.componentIndex(), offset(target.position()));
+        if (observations != null && !observations.isEmpty()) observedComponents.add(target.position());
         pending = null;
-        resourcePages++;
+        // 每读到新页就续期，由 Mod 连续读取剩余材料和部件；模型只接收完成后的整机事实。
+        r.extendDeadlineTo(world.getGameTime() + 1200);
         int next = page.has("next_resource_offset") ? page.get("next_resource_offset").getAsInt() : 0;
-        if (page.has("truncated") && page.get("truncated").getAsBoolean() && next > resourceOffset && next <= 4096) {
-            if (resourcePages < 4) resourceOffset = next;
-            else {
-                pages.incomplete.add("component_resource_pages_exhausted");
-                continuation = target.componentIndex();
-                resourceContinuation = next;
-                return finish();
-            }
-        }
+        if (page.has("truncated") && page.get("truncated").getAsBoolean() && next > resourceOffset) resourceOffset = next;
         else {
-            if (page.has("truncated") && page.get("truncated").getAsBoolean()) pages.incomplete.add("component_resource_pages_exhausted");
+            if (page.has("truncated") && page.get("truncated").getAsBoolean())
+                pages.unavailable(offset(target.position()), "resource_pagination_did_not_advance");
             targetIndex++;
             resourceOffset = 0;
-            resourcePages = 0;
         }
         return TaskState.RUNNING;
+    }
+
+    private BlockPos at(JsonArray row) {
+        return r.snapshot.center().offset(row.get(0).getAsInt(), row.get(1).getAsInt(), row.get(2).getAsInt());
+    }
+
+    private JsonArray offset(BlockPos position) {
+        BlockPos relative = position.subtract(r.snapshot.center()); JsonArray result = new JsonArray();
+        result.add(relative.getX()); result.add(relative.getY()); result.add(relative.getZ()); return result;
+    }
+
+    private void skip(String reason) {
+        // 单个部件真的读不到时记录其位置并继续其余部件，不能把后面所有设备一并变成未知。
+        pages.unavailable(offset(targets.get(targetIndex).position()), reason); targetIndex++; resourceOffset = 0;
     }
 
     private TaskState finish() {
         if (targetIndex < targets.size()) {
             pages.incomplete.add("components_not_observed");
             if (continuation < 0) continuation = targets.get(targetIndex).componentIndex();
+            resourceContinuation = resourceOffset;
+            for (int index = targetIndex; index < targets.size(); index++)
+                pages.unavailable(offset(targets.get(index).position()), "component_not_observed");
         }
         JsonObject evidence = pages.report(targets.size(), observedComponents.size(), continuation, r.snapshot.gameTime());
         evidence.addProperty("start_component_index", r.componentOffset);
