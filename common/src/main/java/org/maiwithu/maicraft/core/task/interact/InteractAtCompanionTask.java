@@ -157,7 +157,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected TaskState act() {
-        if (r.approachTarget) stopNav();
+        // 已到点击距离也要先让交通完成落地与装备恢复；同刻打开腾手背包会反过来挡住交通收尾，造成互相等待。
+        if (r.approachTarget && nav != null) { stopNav(); return TaskState.RUNNING; }
         if (r.heldItemUseOnly) return useHeldItem();
         manualCrank = r.item == null && button() == Interaction.Button.USE && CreateManualInput.supported(player.level(), r.aim);
         // 从第一笔已确认原生使用开始记录实际转速和应力，持续操作结束后仍能说明驱动期间是否卡在超载。
