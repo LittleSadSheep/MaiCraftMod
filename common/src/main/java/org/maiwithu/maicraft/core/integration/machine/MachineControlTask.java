@@ -249,7 +249,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         }
         String live = MachineSurvey.fingerprint(player, center, radius);
         if (!r.request.structuralFingerprint().equals(live)) {
-            failure("machine_structure_changed", "The machine structure changed since inspection; obtain a fresh survey before operating.",
+            failure("machine_structure_changed", "The machine structure changed since inspection; review the latest snapshot returned with this failure before operating.",
                     FailureType.TARGET_LOST);
             return false;
         }

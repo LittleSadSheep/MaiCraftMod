@@ -68,7 +68,32 @@ public final class TaskViewTest {
         catch (IllegalArgumentException expected) { /* 读取参数不能意外变成一条控制请求。 */ }
         frozenTickStillReportsPreview(goal);
         materialHandoffStaysVisible(blocks);
+        latestSnapshotStaysVisible(goal, blocks);
         System.out.println("TaskViewTest: full=" + full.toString().length() + " chars; status=" + compact.toString().length() + " chars; passed");
+    }
+
+    // 旧设计和效果账本很大时，首份失败查询仍直接显示新场地编号、目标和可检查的实际方块。
+    private static void latestSnapshotStaysVisible(Goal goal, JsonArray blocks) throws Exception {
+        JsonObject latest = JsonParser.parseString("""
+                {"snapshot_id":"current-site","target":{"kind":"landmark","label":"platform"},
+                 "structure_complete":true,"palette":[{"block_id":"minecraft:gold_block","properties":{}}],
+                 "relative_blocks":[[0,-1,0,0]]}
+                """).getAsJsonObject();
+        latest.addProperty("large_native_evidence", "observed".repeat(1500));
+        TaskResult failure = TaskResult.fail("machine_snapshot_changed", Map.of("failure_code", "machine_snapshot_changed",
+                "previous_snapshot_id", "old-site", "latest_snapshot", latest, "machine_layout", blocks));
+        var task = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        var finish = IntentTaskRecord.class.getDeclaredMethod("terminal", TaskState.class, TaskResult.class, long.class);
+        finish.setAccessible(true); finish.invoke(task,TaskState.FAILED,failure,99L);
+        JsonObject shown = TaskView.status(task).getAsJsonObject("terminal").getAsJsonObject("result");
+        JsonObject snapshot = shown.getAsJsonObject("latest_snapshot");
+        check(shown.get("failure_code").getAsString().equals("machine_snapshot_changed")
+                        && snapshot.get("snapshot_id").getAsString().equals("current-site")
+                        && snapshot.getAsJsonObject("target").get("label").getAsString().equals("platform")
+                        && snapshot.getAsJsonArray("relative_blocks").get(0).toString().equals("[0,-1,0,0]"),
+                "default failure presentation preserves the usable new snapshot beside large diagnostics");
+        var exact = JsonReadback.resolve(MaiCraftRuntimeFacade.taskSnapshot(task), snapshot.get("detail_path").getAsString());
+        check(exact.equals(latest) && !latest.has("omitted"), "current observation details point to the unchanged retained task result");
     }
 
     private static void materialHandoffStaysVisible(JsonArray blocks) throws Exception {

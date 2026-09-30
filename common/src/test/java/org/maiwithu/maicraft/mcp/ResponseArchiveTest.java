@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /** 大观察按冻结回执找回，页间不会换成新的世界状态；失效引用明确报错，不能触发重做游戏动作。 */
 public final class ResponseArchiveTest {
     public static void main(String[] args) {
+        latestSnapshotSurvivesOuterArchive();
         AtomicLong clock = new AtomicLong(1);
         try (var archive = new ResponseArchive(2, 1 << 20, clock::get)) {
             JsonObject raw = new JsonObject(); raw.addProperty("task_id", "accepted-task"); raw.addProperty("accepted", true);
@@ -38,6 +39,31 @@ public final class ResponseArchiveTest {
             clock.set(31 * 60 * 1000L); rejected(archive, newest);
         }
         System.out.println("ResponseArchiveTest: passed");
+    }
+
+    // 网络层再次折叠超大任务时，最新现场仍直接可用；原始几何可沿同一回执读取，不重做游戏动作。
+    private static void latestSnapshotSurvivesOuterArchive() {
+        JsonObject target = new JsonObject(); target.addProperty("kind", "landmark"); target.addProperty("label", "platform");
+        JsonObject snapshot = new JsonObject(); snapshot.addProperty("snapshot_id", "new-site"); snapshot.add("target", target);
+        snapshot.addProperty("structure_complete", true);
+        JsonArray blocks = new JsonArray(); for (int i = 0; i < 900; i++) blocks.add("new-observed-block-" + i);
+        snapshot.add("relative_blocks", blocks);
+        JsonObject data = new JsonObject(); data.addProperty("failure_code", "machine_snapshot_changed"); data.add("latest_snapshot", snapshot);
+        JsonObject failure = new JsonObject(); failure.addProperty("success", false); failure.add("data", data);
+        JsonObject terminal = new JsonObject(); terminal.add("result", failure);
+        JsonObject task = new JsonObject(); task.addProperty("task_id", "changed-task"); task.add("terminal", terminal);
+        JsonObject raw = new JsonObject(); raw.add("task", task);
+        try (var archive = new ResponseArchive()) {
+            JsonObject shown = archive.present(raw).getAsJsonObject();
+            JsonObject current = shown.getAsJsonObject("latest_snapshot");
+            check(current.get("snapshot_id").getAsString().equals("new-site") && current.getAsJsonObject("target").equals(target)
+                            && shown.get("failure_code").getAsString().equals("machine_snapshot_changed")
+                            && shown.toString().length()<ResponseArchive.INLINE_CHARS,
+                    "outer archival preserves the current reference and exact target with a bounded response");
+            String uri = current.getAsJsonObject("relative_blocks").get("resource_uri").getAsString();
+            check(archive.read(uri).getAsJsonArray("items").get(0).getAsJsonObject().get("value").getAsString().equals("new-observed-block-0"),
+                    "current geometry references the same retained observation instead of another survey");
+        }
     }
     private static void rejected(ResponseArchive archive, String uri) {
         try { archive.read(uri); throw new AssertionError("invalid or expired receipt was readable: " + uri); }

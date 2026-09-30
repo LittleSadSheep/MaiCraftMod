@@ -1,15 +1,25 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.integration.machine.MachineControl;
+import org.maiwithu.maicraft.core.integration.machine.MachineControlTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.Task;
@@ -103,7 +113,43 @@ public final class IntentTerminalStateTest {
                 "a terminal task must not advertise active work");
         activeExecutionIsObservedWithoutPersisting(goal, snapshot);
         nativeFailureReturnsWithoutDecision(goal);
+        nativeSceneFailuresReturnCurrentObservation();
         System.out.println("IntentTerminalStateTest: passed");
+    }
+
+    // 角色接近机器时观察编号已被消费；失败补读仍使用任务原位置，并保留已点击与不确定性事实。
+    private static void nativeSceneFailuresReturnCurrentObservation() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            world.player.setUUID(UUID.randomUUID());
+            BlockPos anchor = new BlockPos(4, 5, 6);
+            world.set(anchor, Blocks.STONE.defaultBlockState());
+            var previous = MachineSnapshots.inspect(world.player,"machine",anchor,1);
+            Goal goal = new Goal("maicraft:operate_machine", "操作原机器", new Goal.SemanticTarget("landmark","machine",null,null),
+                    "{\"snapshot_id\":\""+previous.id()+"\"}", "{}", List.of(), List.of());
+            var task = new IntentTask(world.player,new IntentTaskRecord(UUID.randomUUID(),null,goal),null);
+            var method = IntentTask.class.getDeclaredMethod("withLatestMachineSnapshot", TaskResult.class,
+                    TaskRecord.class); method.setAccessible(true);
+            var menu = new MachineMenuOpenTaskRecord("menu",200,
+                    new MachineMenu.OpenRequest(previous.dimension(),anchor,1,previous.fingerprint(),anchor));
+            var control = new MachineControlTaskRecord("control",200,
+                    new MachineControl.Request(previous.dimension(),anchor,1,previous.fingerprint(),true,null));
+            MachineSnapshots.consume(previous);
+            world.set(anchor,Blocks.GOLD_BLOCK.defaultBlockState());
+            world.position(new Vec3(20,10,20));
+            for (var child : List.of(menu,control)) {
+                String code = child==menu ? "machine_menu_structure_changed" : "machine_structure_changed";
+                TaskResult failure = TaskResult.fail("scene changed", Map.of("failure_code",code,
+                        "effects_started",true,"outcome_uncertain",true,"mechanical_retry_allowed",false));
+                TaskResult refreshed = (TaskResult) method.invoke(task,failure,child);
+                JsonObject data = JsonParser.parseString(refreshed.toJson()).getAsJsonObject().getAsJsonObject("data");
+                JsonObject latest = data.getAsJsonObject("latest_snapshot");
+                check(!refreshed.success() && data.get("failure_code").getAsString().equals(code)
+                                && data.get("outcome_uncertain").getAsBoolean() && !data.get("mechanical_retry_allowed").getAsBoolean()
+                                && latest.getAsJsonObject("target").get("label").getAsString().equals("machine")
+                                && MachineSnapshots.requireFresh(world.player,latest.get("snapshot_id").getAsString()).center().equals(anchor),
+                        "native scene failures return original-location evidence without resetting consumption uncertainty");
+            }
+        }
     }
 
     // 支撑实际失败时结束总任务，保留已放方块与临时支撑位置，不再挂起等待不存在的微操答复。

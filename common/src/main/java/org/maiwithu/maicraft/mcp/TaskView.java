@@ -105,6 +105,14 @@ final class TaskView {
             if (raw.has(key)) result.add(key, JsonReadback.preview(raw.get(key), path + "/" + key, 600));
         if (!raw.has("data") || !raw.get("data").isJsonObject()) return result;
         JsonObject data = raw.getAsJsonObject("data").deepCopy();
+        // 现场变化的最新观察优先显示，不能被原设计、效果账本或其他大诊断折叠成只剩过期提示。
+        if (data.has("latest_snapshot") && data.get("latest_snapshot").isJsonObject()) {
+            result.add("latest_snapshot", MachineSnapshotView.present(data.getAsJsonObject("latest_snapshot"),
+                    path + "/data/latest_snapshot", 3200, null));
+            for (String key : List.of("failure_code", "previous_snapshot_id", "next_action"))
+                if (data.has(key)) result.add(key, data.get(key).deepCopy());
+            data.remove("latest_snapshot");
+        }
         // 机器修改和检查结束时，首次回执就给出差异，不能让旧蓝图与组件目录把真正变化折叠掉。
         machineDifference(result, data, path + "/data");
         // 饥饿和健康门槛先于换配方；默认回执直接保留身体前置及当时的饱食度、生命证据。

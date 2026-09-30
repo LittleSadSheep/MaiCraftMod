@@ -54,10 +54,19 @@ final class ResponseArchive implements AutoCloseable {
                                 field.getKey().equals("task") || field.getKey().equals("decision") ? 4500 : 800,
                                 path -> link(uri, path, 0, 5)));
             } else result.add("value", JsonReadback.preview(value, "", 3000, path -> link(uri, path, 0, 5)));
+            // 外层归档仍保留失败时取得的新现场；恢复编号与目标不能因任务结果较大再要求一次 perceive。
+            var observation = MachineSnapshotView.find(value, "");
+            if (observation != null) {
+                result.add("latest_snapshot", MachineSnapshotView.present(observation.snapshot(), observation.path(),
+                        2200, path -> link(uri, path, 0, 5)));
+                for (String key : List.of("failure_code", "previous_snapshot_id", "next_action"))
+                    if (observation.owner().has(key)) result.add(key, observation.owner().get(key).deepCopy());
+            }
             if (!JsonReadback.fits(result, INLINE_CHARS - 400)) {
                 JsonObject smaller = new JsonObject();
                 for (String key : List.of("task_id", "plan_id", "request_key", "state", "status", "accepted", "success",
-                        "wake_reason", "next_attention", "snapshot_id", "target", "ready_to_execute"))
+                        "wake_reason", "next_attention", "snapshot_id", "target", "ready_to_execute",
+                        "latest_snapshot", "failure_code", "previous_snapshot_id", "next_action"))
                     if (result.has(key)) smaller.add(key, result.get(key));
                 smaller.add("details", JsonReadback.preview(value, "", 2400, path -> link(uri, path, 0, 5)));
                 result = smaller;

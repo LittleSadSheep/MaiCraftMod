@@ -24,7 +24,12 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
+import org.maiwithu.maicraft.core.integration.machine.MachineControlTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshotRejection;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
@@ -345,6 +350,8 @@ final class IntentTask implements Task {
             if (child == finishingChild) clearChild();
         }
         if (result == null) result = defaultResult(state);
+        // 接近设备期间场地也可能变化；原观察已消费时仍按任务冻结的范围返回新现场，不让模型另发勘测。
+        if (!result.success()) result = withLatestMachineSnapshot(result, finishingRecord);
         // 如果只是靠近电梯读到了楼层，就重新判断该去哪层，不能把“读到楼层”当成“已到目的地”。
         if(result.success() && reobserve) return TaskState.RUNNING;
         if (finishingRecord instanceof BuildTaskRecord
@@ -440,6 +447,34 @@ final class IntentTask implements Task {
         chain = List.of();
         chainIndex = 0;
         return failureState == TaskState.TIMEOUT ? TaskState.TIMEOUT : TaskState.FAILED;
+    }
+
+    /** 只为明确的机器结构变化补回最新观察，保留原生动作的已发生效果和重试限制。 */
+    private TaskResult withLatestMachineSnapshot(TaskResult failure, TaskRecord failedRecord) {
+        Object code = failure.data().get("failure_code");
+        BlockPos center;
+        int radius;
+        if (failedRecord instanceof MachineMenuOpenTaskRecord menu && "machine_menu_structure_changed".equals(code)) {
+            center = menu.request.center(); radius = menu.request.radius();
+        } else if (failedRecord instanceof MachineControlTaskRecord control && "machine_structure_changed".equals(code)) {
+            center = control.request.center(); radius = control.request.radius();
+        } else return failure;
+        Goal goal = currentGoal();
+        if (goal.target() == null || goal.target().label() == null) return failure;
+        Map<String, Object> data = new LinkedHashMap<>(failure.data());
+        try {
+            // 观察冻结的原设备位置，玩家取料或绕路后的脚位不能平移失败结果中的机器。
+            var latest = MachineSnapshots.inspect(player, goal.target().label(), center, radius);
+            String previousId = goal.parameters().has("snapshot_id") ? goal.parameters().get("snapshot_id").getAsString() : "";
+            data.putAll(new MachineSnapshotRejection("machine_snapshot_changed", previousId, latest).details());
+            data.put("failure_code", code);
+        } catch (RuntimeException unavailable) {
+            // 补充现场失败不能覆盖原生失败和消费不确定性；留下明确原因，避免模型把缺失观察当作空场地。
+            Constants.LOG.warn("[maicraft] 无法补读结构变化后的机器现场: target={}, center={}, radius={}",
+                    goal.target().label(), center, radius, unavailable);
+            data.put("snapshot_refresh_failure", safeMessage(unavailable));
+        }
+        return new TaskResult(false, failure.message(), failure.timedOut(), failure.interrupted(), data);
     }
 
     /** 失败离开 Mod 前，统一附上已经发生和仍未完成的语义效果。 */

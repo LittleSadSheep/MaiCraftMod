@@ -201,7 +201,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
             }
         }
         if (!r.request.structuralFingerprint().equals(MachineSurvey.fingerprint(player, center, radius))) {
-            failure("machine_menu_structure_changed", "The machine structure changed; inspect it before opening.", FailureType.TARGET_LOST); return false;
+            failure("machine_menu_structure_changed", "The machine structure changed; review the latest snapshot returned with this failure before opening.", FailureType.TARGET_LOST); return false;
         }
         return true;
     }
