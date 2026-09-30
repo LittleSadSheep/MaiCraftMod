@@ -230,8 +230,9 @@ public final class DefaultMenuPort implements MenuPort {
     public MenuReceipt poll(LocalPlayerContext context, MenuReceipt receipt) {
         // 先核对玩家和菜单没被替换，再看槽位的期望变化；一次菜单版本变化本身不说明具体哪项操作产生了它。
         context.requireCurrent();
+        // 反击或补食可在旧关闭已确认后创建新交易；恢复的任务仍须读回自己的冻结结果，不能因端口已换交易而报内部错误。
+        if (receipt != null && receipt.terminal()) return receipt;
         requireActive(receipt);
-        if (receipt.terminal()) return receipt;
         if (receipt.bodyEpoch() != context.bodyEpoch() ||
                 receipt.controlRevision() != context.controlRevision() ||
                 !context.permitsNativeActions()) {
