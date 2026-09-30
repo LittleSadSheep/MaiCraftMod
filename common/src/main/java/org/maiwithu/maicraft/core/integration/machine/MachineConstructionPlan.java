@@ -335,11 +335,20 @@ public final class MachineConstructionPlan {
         return task;
     }
 
-    /** 链条朝向由相邻方块决定，因此装配时只强制校验传动轴方向。 */
-    // Create 链式传动箱的连接状态由相邻方块生成，初次放置先放宽这两项；原始计划仍保留，最后按原要求验收。
+    /** 原生邻接生成的形态留给整机差异，动作回执只核对本次实际放置属性。 */
     private static BuildTaskRecord.Target placementTarget(BuildTaskRecord.Target target) {
-        if (!BuiltInRegistries.BLOCK.getKey(target.block()).toString().equals("create:encased_chain_drive")) return target;
+        String id = BuiltInRegistries.BLOCK.getKey(target.block()).toString();
         Set<String> properties = new LinkedHashSet<>(target.exactProperties());
+        if (id.equals("create:brass_tunnel") || id.equals("create:andesite_tunnel")) {
+            // 隧道会按相邻带段自动变成直通、T 形或十字；已放下同向隧道是明确动作效果，形态不同不是未知结果。
+            properties.remove("shape");
+            Set<String> finals = new LinkedHashSet<>(target.finalProperties() == null ? properties : target.finalProperties());
+            finals.remove("shape");
+            return new BuildTaskRecord.Target(target.desiredState(), target.item(), target.pos(), target.label(),
+                    target.facing(), target.axis(), target.topHalf(), false, properties, true, finals);
+        }
+        if (!id.equals("create:encased_chain_drive")) return target;
+        // 链式传动箱的邻接状态也由游戏生成；完整图纸仍保留原声明，施工结束后照常报告差异。
         properties.remove("axis_along_first"); properties.remove("part");
         return new BuildTaskRecord.Target(target.desiredState(), target.item(), target.pos(), target.label(),
                 target.facing(), target.axis(), target.topHalf(), false, properties, true);
@@ -356,7 +365,8 @@ public final class MachineConstructionPlan {
     }
     public BuildTaskRecord attachmentTask(int index, String callId, long deadline, boolean consume) {
         // 附件仍走已有的生存放置、材料补给和真实回执；所有已建成的计划格都保护为补料禁挖区。
-        var task = new BuildTaskRecord(callId, deadline, attachmentLayers.get(index), replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
+        var placement = attachmentLayers.get(index).stream().map(MachineConstructionPlan::placementTarget).toList();
+        var task = new BuildTaskRecord(callId, deadline, placement, replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
         task.previewManaged(true); task.materialSupplyProtection(positions());
         if (fixedModification) task.machineModification(observedEdits);
