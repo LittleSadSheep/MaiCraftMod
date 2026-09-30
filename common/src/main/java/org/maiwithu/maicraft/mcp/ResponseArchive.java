@@ -54,6 +54,9 @@ final class ResponseArchive implements AutoCloseable {
                                 field.getKey().equals("task") || field.getKey().equals("decision") ? 4500 : 800,
                                 path -> link(uri, path, 0, 5)));
             } else result.add("value", JsonReadback.preview(value, "", 3000, path -> link(uri, path, 0, 5)));
+            // 原料缺口需要先比较工艺；默认交付配方身份和短原生定义，避免标题、数组、元数据、定义四次往返。
+            JsonObject recipes = RecipeKnowledgeView.present(value, path -> link(uri, path, 0, 5));
+            if (recipes != null) result.add("recipe_choices", recipes);
             // 外层归档仍保留失败时取得的新现场；恢复编号与目标不能因任务结果较大再要求一次 perceive。
             var observation = MachineSnapshotView.find(value, "");
             if (observation != null) {
@@ -66,7 +69,7 @@ final class ResponseArchive implements AutoCloseable {
                 JsonObject smaller = new JsonObject();
                 for (String key : List.of("task_id", "plan_id", "request_key", "state", "status", "accepted", "success",
                         "wake_reason", "next_attention", "snapshot_id", "target", "ready_to_execute",
-                        "latest_snapshot", "failure_code", "previous_snapshot_id", "next_action"))
+                        "latest_snapshot", "failure_code", "previous_snapshot_id", "next_action", "recipe_choices"))
                     if (result.has(key)) smaller.add(key, result.get(key));
                 smaller.add("details", JsonReadback.preview(value, "", 2400, path -> link(uri, path, 0, 5)));
                 result = smaller;
