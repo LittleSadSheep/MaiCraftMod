@@ -101,8 +101,8 @@ public final class SemanticSourceKnowledge {
         for (ResourceLocation itemId : requestedItemIds) {
             Profile profile = PROFILES.get(itemId.toString());
             if (profile == null) {
-                // 即使知识库没有对应条目，Acquire 也能直接挖掘请求的 BlockItem；这种候选必须让组合挖掘计划保持维度无关。
-                if (BuiltInRegistries.ITEM.get(itemId) instanceof BlockItem) {
+                // 只把普通取材允许直接寻找的方块作为无维度限制的候选；加工木构件不能因缺料变成拆房来源。
+                if (directMineBlock(BuiltInRegistries.ITEM.get(itemId)) != null) {
                     unrestricted.add(SemanticAcquireTaskRecord.Source.MINE);
                     dimensions.remove(SemanticAcquireTaskRecord.Source.MINE);
                 }
@@ -132,6 +132,19 @@ public final class SemanticSourceKnowledge {
             }
         });
         return new SourcePlan(hint, allowed);
+    }
+
+    /** 自动补料先取现货或加工原木；缺木板不能退化为拆附近屋顶、门窗和围栏。 */
+    static Block directMineBlock(Item item) {
+        if (!(item instanceof BlockItem blockItem)) return null;
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        // 野生树检查只负责原木；这些成品木构件必须在自动采集入口排除，明确指定的拆除任务仍走原施工路径。
+        if (state.is(BlockTags.PLANKS) || state.is(BlockTags.WOODEN_SLABS)
+                || state.is(BlockTags.WOODEN_STAIRS) || state.is(BlockTags.WOODEN_FENCES)
+                || state.is(BlockTags.FENCE_GATES) || state.is(BlockTags.WOODEN_DOORS)
+                || state.is(BlockTags.WOODEN_TRAPDOORS) || state.is(BlockTags.WOODEN_BUTTONS)
+                || state.is(BlockTags.WOODEN_PRESSURE_PLATES)) return null;
+        return blockItem.getBlock();
     }
 
     private static void mergeDimensions(

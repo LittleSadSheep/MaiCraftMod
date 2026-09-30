@@ -619,16 +619,16 @@ public final class SemanticAcquireCompanionTask
         List<String> refs = new ArrayList<>();
         for (ResourceLocation itemId : need.itemIds) {
             Item item = BuiltInRegistries.ITEM.get(itemId);
-            if (item instanceof BlockItem blockItem) {
-                refs.add(BuiltInRegistries.BLOCK.getKey(blockItem.getBlock()).toString());
-            }
+            // 自动备木料只寻找可直接采集的来源；不能因合成暂缺原木，就绕过天然树筛选去拆现成木板。
+            Block directSource = SemanticSourceKnowledge.directMineBlock(item);
+            if (directSource != null) refs.add(BuiltInRegistries.BLOCK.getKey(directSource).toString());
         }
         refs.addAll(sourceHint(need).blockRefs());
         Set<Block> blocks = ToolParse.parseBlocks(refs);
         if (blocks.isEmpty()) {
             addIssue("mine", "mine_source_evidence_missing",
-                    "no source block can be derived from a requested BlockItem and no explicit "
-                            + "semantic block source_hint was supplied",
+                    "no automatic collection source is established; finished wooden building parts "
+                            + "are not wild material sources, and no explicit block source_hint was supplied",
                     Map.of("requested_item_ids", itemStrings(need.itemIds)));
             advanceSource(need);
             return TaskState.RUNNING;
