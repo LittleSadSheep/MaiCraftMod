@@ -15,9 +15,13 @@ import java.util.Locale;
 
 /**
  * 整理 /maicraft status 的本地说明：MCP 是否监听、角色控制权、当前任务和最近问题，不改变任务状态。
+ * 状态行先聚合成 {@link StatusRow}，聊天命令与 F9 调试面板各自格式化，保证两个出口只有一份数据。
  */
 public final class MaiCraftStatus {
     private static final int TEXT_LIMIT = 160;
+
+    /** 一条状态说明：短标签、当前值和取值颜色；值必须是已经压平的短文本。 */
+    public record StatusRow(String label, String value, ChatFormatting color) {}
 
     private MaiCraftStatus() {}
 
@@ -31,22 +35,29 @@ public final class MaiCraftStatus {
     }
 
     public static List<Component> lines() {
-        Minecraft minecraft = Minecraft.getInstance();
         List<Component> lines = new ArrayList<>();
+        for (StatusRow row : rows()) lines.add(line(row));
+        return List.copyOf(lines);
+    }
+
+    /** 只读聚合当前运行状态；调用方自行决定渲染成聊天行还是调试面板行。 */
+    public static List<StatusRow> rows() {
+        Minecraft minecraft = Minecraft.getInstance();
+        List<StatusRow> rows = new ArrayList<>();
 
         boolean listening = ClientRuntime.isMcpRunning();
         String endpoint = listening
                 ? "127.0.0.1:" + ClientRuntime.mcpPort()
                 : ClientRuntime.lastMcpError() == null
                 ? "stopped" : "stopped · " + compact(ClientRuntime.lastMcpError());
-        lines.add(line("MCP", listening
+        rows.add(new StatusRow("MCP", listening
                 ? endpoint + " · sessions " + ClientRuntime.mcpSessionCount()
                 : endpoint, listening ? ChatFormatting.GREEN : ChatFormatting.RED));
 
         boolean inWorld = minecraft.player != null && minecraft.level != null
                 && minecraft.gameMode != null && minecraft.getConnection() != null;
         String control = controlState(inWorld);
-        lines.add(line("Runtime", (inWorld ? "ready" : "waiting for a world")
+        rows.add(new StatusRow("Runtime", (inWorld ? "ready" : "waiting for a world")
                 + " · control " + control,
                 inWorld ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
 
@@ -56,29 +67,29 @@ public final class MaiCraftStatus {
                 .findFirst()
                 .orElse(null);
         if (active == null) {
-            lines.add(line("Task", "idle", ChatFormatting.GRAY));
-            appendLatestTerminalIssue(lines);
-            return List.copyOf(lines);
+            rows.add(new StatusRow("Task", "idle", ChatFormatting.GRAY));
+            appendLatestTerminalIssue(rows);
+            return List.copyOf(rows);
         }
 
         String state = publicState(active);
         int total = Math.max(1, active.steps().size());
         int current = Math.min(active.stepIndex() + 1, total);
-        lines.add(line("Task", state + " · step " + current + "/" + total
+        rows.add(new StatusRow("Task", state + " · step " + current + "/" + total
                 + " · " + compact(active.goal().outcome()), ChatFormatting.AQUA));
 
         if (active.decisionSnapshot() != null) {
-            lines.add(line("Blocked", "waiting for LLM decision",
+            rows.add(new StatusRow("Blocked", "waiting for LLM decision",
                     ChatFormatting.YELLOW));
         } else if (active.pauseSnapshot() != null) {
-            lines.add(line("Paused", compact(active.pauseSnapshot().reason()),
+            rows.add(new StatusRow("Paused", compact(active.pauseSnapshot().reason()),
                     ChatFormatting.YELLOW));
         }
         if (!active.attempts().isEmpty()) {
             IntentTaskRecord.AttemptSnapshot attempt = active.attempts().getLast();
-            lines.add(line("Last issue", compact(attempt.message()), ChatFormatting.RED));
+            rows.add(new StatusRow("Last issue", compact(attempt.message()), ChatFormatting.RED));
         }
-        return List.copyOf(lines);
+        return List.copyOf(rows);
     }
 
     // 区分已经接管、申请接管但还没拿到控制权，以及仍由玩家操作；切换中读取失败就显示 transitioning。
@@ -99,7 +110,7 @@ public final class MaiCraftStatus {
         return record.getState().name().toLowerCase(Locale.ROOT);
     }
 
-    private static void appendLatestTerminalIssue(List<Component> lines) {
+    private static void appendLatestTerminalIssue(List<StatusRow> rows) {
         IntentTaskRecord failed = IntentRuntime.get().tasks(20).stream()
                 .filter(record -> record.getState() == TaskState.FAILED
                         || record.getState() == TaskState.TIMEOUT)
@@ -109,7 +120,7 @@ public final class MaiCraftStatus {
         String message = failed.terminalSnapshot() == null
                 ? failed.getState().name().toLowerCase(Locale.ROOT)
                 : jsonMessage(failed.terminalSnapshot().result(), failed.getState());
-        lines.add(line("Last issue", compact(message), ChatFormatting.RED));
+        rows.add(new StatusRow("Last issue", compact(message), ChatFormatting.RED));
     }
 
     private static String jsonMessage(JsonObject result, TaskState fallback) {
@@ -119,10 +130,10 @@ public final class MaiCraftStatus {
         return fallback.name().toLowerCase(Locale.ROOT);
     }
 
-    private static Component line(String label, String value, ChatFormatting valueColor) {
+    private static Component line(StatusRow row) {
         return Component.literal("[MaiCraft] ").withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(label + ": ").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(value).withStyle(valueColor));
+                .append(Component.literal(row.label() + ": ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(row.value()).withStyle(row.color()));
     }
 
     // 把多行和连续空白压成一行，最长显示 160 个字符，避免一条错误刷满聊天区域。

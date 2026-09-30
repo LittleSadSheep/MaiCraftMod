@@ -10,11 +10,14 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.chat.ChatMonitor;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
+import org.maiwithu.maicraft.client.debug.DebugHudController;
+import org.maiwithu.maicraft.client.debug.DebugHudRenderer;
 import org.maiwithu.maicraft.client.preview.PreviewCommands;
 import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.Constants;
@@ -35,6 +38,7 @@ public final class MaiCraftNeoForgeClient {
     public MaiCraftNeoForgeClient(IEventBus modBus) {
         modBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(this::onClientTick);
+        NeoForge.EVENT_BUS.addListener(this::onRenderHud);
         NeoForge.EVENT_BUS.addListener(this::onChatReceived);
         NeoForge.EVENT_BUS.addListener(this::onRegisterClientCommands);
         NeoForge.EVENT_BUS.addListener(this::onGameShuttingDown);
@@ -63,6 +67,12 @@ public final class MaiCraftNeoForgeClient {
         // 每次客户端 tick 结束后推进共享运行时，具体业务逻辑不放在加载器事件里。
         ClientRuntime.tick(Minecraft.getInstance());
         PreviewController.tick(Minecraft.getInstance());
+        DebugHudController.tick(Minecraft.getInstance());
+    }
+
+    // F9 调试面板画在原版 HUD 层之上；界面打开时这一层不渲染，屏幕层入口负责补画。
+    private void onRenderHud(RenderGuiEvent.Post event) {
+        DebugHudRenderer.render(event.getGuiGraphics());
     }
 
     // 模组界面可能覆盖绘制入口而不调用原版实现，因此通过加载器事件登记真实可见帧。

@@ -7,9 +7,12 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.chat.ChatMonitor;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
+import org.maiwithu.maicraft.client.debug.DebugHudController;
+import org.maiwithu.maicraft.client.debug.DebugHudRenderer;
 import org.maiwithu.maicraft.client.preview.PreviewCommands;
 import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.MaiCraftCore;
@@ -41,6 +44,9 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         // 持续任务由游戏 tick 推进；网络请求本身只负责提交和查询任务。
         ClientTickEvents.END_CLIENT_TICK.register(ClientRuntime::tick);
         ClientTickEvents.END_CLIENT_TICK.register(PreviewController::tick);
+        ClientTickEvents.END_CLIENT_TICK.register(DebugHudController::tick);
+        // F9 调试面板画在原版 HUD 层之上；界面打开时这一层不渲染，屏幕层入口负责补画。
+        HudRenderCallback.EVENT.register((graphics, tickCounter) -> DebugHudRenderer.render(graphics));
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> ClientRuntime.stop());
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
                 ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) ->

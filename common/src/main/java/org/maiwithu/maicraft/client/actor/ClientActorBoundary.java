@@ -162,6 +162,9 @@ public final class ClientActorBoundary {
     public DefaultNativeActionPort actions() { return actions; }
     public DefaultMenuPort menus() { return menus; }
 
+    /** 调试面板读取当前菜单事务状态；与 diagnosticState 的 menu_action 同源，免去整表构建。 */
+    public String menuDiagnostic() { return menus.diagnosticState(); }
+
     /** 诊断只读取当前状态，不能为了查询而新建游戏刻上下文或取得控制权。 */
     public Map<String, Object> diagnosticState() {
         requireClientThread();
