@@ -1021,15 +1021,19 @@ public final class SemanticContainerCompanionTask
         data.put("operation", r.operation.name().toLowerCase(Locale.ROOT));
         data.put("menu_reused", reusedMenu);
         if (containerKind != null) data.put("container_kind", containerKind);
-        // 给出本次实际选中箱体，累计投料不再只挂在泛指的 minecraft:chest 上。
+        // 箱体坐标作为与蓝图一致的数组交付，经过旧定位字段整理后仍保留实际选箱身份。
         if (target != null) data.put("container_observation", Map.of("block_id", target.blockId().toString(),
-                "dimension", targetDimension, "position", Map.of("x", target.position().getX(), "y", target.position().getY(), "z", target.position().getZ()),
+                "dimension", targetDimension, "coordinates", List.of(target.position().getX(), target.position().getY(), target.position().getZ()),
                 "observed_at_tick", targetObservedAt, "menu_observed", expectedContainerId >= 0));
-        data.put("initial_main_count", initialPlayerCount);
-        data.put("observed_final_main_count", lastPlayerCount);
-        data.put("initial_container_count", initialContainerCount);
-        data.put("observed_final_container_count", lastContainerCount);
-        data.put("inventory_counts_observed_at_tick", countsObservedAt);
+        // 尚未开箱就寻路失败时没有读过两侧槽位，默认零值不能冒充已观察到库存为零。
+        data.put("inventory_counts_observation_status", countsObservedAt < 0 ? "not_observed" : "observed");
+        if (countsObservedAt >= 0) {
+            data.put("initial_main_count", initialPlayerCount);
+            data.put("observed_final_main_count", lastPlayerCount);
+            data.put("initial_container_count", initialContainerCount);
+            data.put("observed_final_container_count", lastContainerCount);
+            data.put("inventory_counts_observed_at_tick", countsObservedAt);
+        }
         if (!lastNativeTransfer.isEmpty()) data.put("last_native_transfer", lastNativeTransfer);
         data.put("moved_count", movedCount);
         // 累计投料与箱内现存量分开解释；物品被后续设备抽走，不会撤销已经确认的存入，也不证明加工完成。
