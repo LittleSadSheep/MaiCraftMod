@@ -15,8 +15,9 @@ public final class MachineBlueprintComparison {
     private final String dimension;
     private final Map<String, Integer> counts = new LinkedHashMap<>();
     private final JsonArray differences = new JsonArray();
-    private int cursor, nextDifference = -1;
+    private int cursor;
     private long started = -1, observed = -1;
+    private JsonObject operatingState;
     public MachineBlueprintComparison(MachineConstructionPlan plan, String dimension) {
         diff = new MachineBlueprintDiff(plan); this.dimension = dimension;
         MachineBlueprintDiff.COUNTERS.forEach(key -> counts.put(key,0));
@@ -27,10 +28,12 @@ public final class MachineBlueprintComparison {
         var page = diff.page(world,dimension,cursor,budget);
         MachineBlueprintDiff.COUNTERS.forEach(key -> counts.merge(key,page.get(key).getAsInt(),Integer::sum));
         for (var row : page.getAsJsonArray("differences")) {
-            if (differences.size() < 128) differences.add(row.deepCopy());
-            else if (nextDifference < 0) nextDifference = row.getAsJsonObject().get("target_index").getAsInt();
+            // 只保留真实差异，但完整保留这些决策事实，不能在第128个差异后让模型另开一轮翻页。
+            differences.add(row.deepCopy());
         }
-        cursor += page.get("examined").getAsInt(); return complete();
+        cursor += page.get("examined").getAsInt();
+        if (complete()) operatingState = diff.operatingState(world, dimension);
+        return complete();
     }
     public boolean complete() { return cursor >= diff.size(); }
     public JsonObject report() {
@@ -41,8 +44,8 @@ public final class MachineBlueprintComparison {
         boolean known = complete() && counts.get("unknown") == 0;
         result.addProperty("comparison_complete",known);
         result.add("structure_matches_blueprint",known ? new JsonPrimitive(counts.get("matched") == diff.size()) : JsonNull.INSTANCE);
-        result.add("differences",differences.deepCopy()); result.addProperty("details_truncated",nextDifference >= 0);
-        if (nextDifference >= 0) result.addProperty("next_diff_offset",nextDifference);
+        result.add("differences",differences.deepCopy()); result.addProperty("details_truncated",false);
+        if (operatingState != null) result.add("operating_state", operatingState.deepCopy());
         result.addProperty("production_verified",false); return result;
     }
 }

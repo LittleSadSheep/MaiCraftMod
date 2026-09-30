@@ -138,6 +138,9 @@ public final class MachineSurvey {
         report.addProperty("unlisted_space", "Unlisted offsets within the cube are air only when structure_complete is true; otherwise they may be unobserved or omitted blocks.");
         report.addProperty("omitted_non_air_blocks", omitted);
         report.add("component_evidence", details);
+        // 运行状态单独汇总，不再要求模型翻过几何和库存页才能发现停转的皮带或空手机械手。
+        report.add("operating_state", MachineOperatingState.observe(self.level(), self.level().dimension().location().toString(), center,
+                capture.blocks.stream().map(value -> center.offset(value.relative)).toList()));
         report.addProperty("omitted_component_details", omittedDetails);
         report.addProperty("ae2_hosts_with_unknown_parts", capture.unknownAe2Hosts);
         report.addProperty("properties_truncated", capture.propertiesTruncated);
@@ -330,6 +333,8 @@ public final class MachineSurvey {
 
     /** 与现有 Create/AE2 集成共用的精确只读 API 白名单。 */
     // 可选模组不存在、接口变了或读取失败时返回未知；不会为了读取这份报告去调用写入方法。
+    static JsonObject kineticFields(Object entity) { return OptionalReads.kinetics(entity); }
+
     private static final class OptionalReads {
         private static final Class<?> KINETIC = load("com.simibubi.create.content.kinetics.base.KineticBlockEntity");
         private static final Class<?> CABLE_BUS = load("appeng.blockentity.networking.CableBusBlockEntity");

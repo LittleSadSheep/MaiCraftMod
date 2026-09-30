@@ -32,6 +32,18 @@ public final class MachineInspectionBlueprintView {
                                   boolean explicitRadius, String mode, int offset, int limit) {
         var result = new JsonObject(); result.addProperty("inspection_mode",mode);
         if (saved != null) result.add("recorded_machine",saved.summary());
+        // 已登记机器按全部声明目标读取运行状态；结构分页和周边方块展示不能缩小这份观察范围。
+        MachineBlueprintDiff completeMachine = null;
+        if (saved != null) {
+            try {
+                completeMachine = new MachineBlueprintDiff(ClientMachineCatalog.blueprintPlan(saved));
+                result.add("operating_state", completeMachine.operatingState(player.level(), saved.dimension()));
+                result.add("native_component_offsets", completeMachine.targetOffsets());
+            } catch (RuntimeException | LinkageError unavailable) {
+                // 旧档案暂时无法展开时仍交付可读的现场，并明确整机范围未知，不能中断整个只读任务。
+                result.addProperty("recorded_targets_unavailable", unavailable.getClass().getSimpleName());
+            }
+        }
         if (mode.equals("full")) {
             boolean recordedBounds = saved != null && saved.captureMin() != null && !explicitRadius;
             // 超出单次扫描上限时明确暴露范围缺口，局部 native_processes 为空不能伪装成整机没有工艺。
@@ -49,7 +61,8 @@ public final class MachineInspectionBlueprintView {
             if (saved == null) { diff.addProperty("available",false); diff.addProperty("reason","no_recorded_design_blueprint"); }
             else {
                 try {
-                    diff = new MachineBlueprintDiff(ClientMachineCatalog.blueprintPlan(saved)).page(player.level(),saved.dimension(),offset,limit);
+                    if (completeMachine == null) throw new IllegalArgumentException("recorded_targets_unavailable");
+                    diff = completeMachine.page(player.level(),saved.dimension(),0,Integer.MAX_VALUE);
                     diff.addProperty("reference_blueprint_fingerprint",saved.fingerprint());
                 } catch (RuntimeException | LinkageError unavailable) {
                     diff.addProperty("available",false); diff.addProperty("reason","recorded_design_unavailable:"+unavailable.getClass().getSimpleName());

@@ -27,7 +27,7 @@ public final class CreateBeltAccess {
     private CreateBeltAccess() {}
 
     /** 只用原生控制器身份识别同一条带，不把附近另一条产线误当作可替换的供能对象。 */
-    static BlockPos controller(Level world, BlockPos at) {
+    public static BlockPos controller(Level world, BlockPos at) {
         if (!world.isLoaded(at)) return null;
         var entity = world.getBlockEntity(at);
         if (!NativeApi.is(entity, ENTITY)) return null;

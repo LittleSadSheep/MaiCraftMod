@@ -40,6 +40,9 @@ public final class MachineBlueprintDiff {
         targets = List.copyOf(ordered);
     }
     public int size() { return targets.size(); }
+    List<BlockPos> positions() { return targets.stream().map(Target::position).distinct().toList(); }
+    JsonObject operatingState(Level world, String dimension) { return MachineOperatingState.observe(world, dimension, anchor, positions()); }
+    JsonArray targetOffsets() { var result = new JsonArray(); positions().forEach(at -> result.add(offset(at.subtract(anchor)))); return result; }
 
     // 每页只读指定的一段蓝图，调用方可在施工期间分页查看；没加载的格子保留未知，不按空气计算。
     public JsonObject page(Level world, String dimension, int offset, int limit) {
