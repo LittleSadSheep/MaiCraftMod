@@ -45,6 +45,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     private NativeActionReceipt receipt;
     private boolean openAttempted;
     private boolean verified;
+    private boolean reusedMenu;
     private int dudTicks;
     private String failureCode;
     private JsonObject menuReport;
@@ -60,6 +61,13 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         }
         if (phase == Phase.CONFIRM) return confirm();
         if (player.containerMenu != player.inventoryMenu) {
+            // 同一目标已由其他原生工具打开时，直接沿已确认来源读取当前菜单，不再重复右键或要求先关后开。
+            if (phase == Phase.START && MachineMenu.openedAt(player, position)
+                    && player.containerMenu.getCarried().isEmpty() && !NavigationSafetyContext.protectsUse(position)) {
+                if (!fresh()) return TaskState.FAILED;
+                menuReport = MachineMenu.inspect(player); verified = true; reusedMenu = true;
+                return TaskState.SUCCESS;
+            }
             return failure("machine_menu_busy", "An unrelated menu is already open.", FailureType.UNKNOWN);
         }
         if (NavigationSafetyContext.protectsUse(position)) {
@@ -249,6 +257,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("menu_open_verified", verified);
+        data.put("menu_reused", reusedMenu);
         data.put("effects_started", openAttempted);
         data.put("outcome_uncertain", openAttempted && !verified || handParking.uncertain());
         data.put("hand_preparation", handParking.evidence());
@@ -260,6 +269,8 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     }
 
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return handParking.settling() || openAttempted && !verified && receipt != null && !receipt.terminal(); }
-    @Override protected String successMessage() { return "Opened and inspected the selected machine's native menu; item entries and data values are observed, recipe roles remain to be analyzed."; }
+    @Override protected String successMessage() { return reusedMenu
+            ? "Reused and inspected the already open native menu; no new block use was submitted."
+            : "Opened and inspected the selected machine's native menu; item entries and data values are observed, recipe roles remain to be analyzed."; }
     @Override protected String cancelledMessage() { return "Machine menu opening interrupted; inspect the active menu before another use."; }
 }

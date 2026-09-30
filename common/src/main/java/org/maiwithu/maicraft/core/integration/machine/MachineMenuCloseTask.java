@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * 关闭本流程机器菜单或已清空操作格的普通玩家背包，等待原生回执；其他界面与未结物品保留。
+ * 按显式请求关闭当前容器或空闲玩家背包，等待原生回执；光标和在途原生交易仍须先结清。
  */
 public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMenuCloseTaskRecord> {
     private AbstractContainerMenu menu;
@@ -46,8 +46,9 @@ public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMen
             receipt = context.menus().close(context, 40); return TaskState.RUNNING;
         }
         if (menu == null) menu = player.containerMenu;
-        if (player.containerMenu != menu || !MachineMenu.ownedMenu(player, menu)) {
-            return failure("machine_menu_not_owned", "The active menu was not opened by this machine operation.");
+        // 关闭界面不等于获得存取权限；use_container 等已打开的容器也可按显式请求退出，存取来源校验仍由各自接口执行。
+        if (player.containerMenu != menu) {
+            return failure("machine_menu_changed", "The active menu changed before the requested close.");
         }
         if (!menu.getCarried().isEmpty()) return failure("machine_cursor_not_empty", "The menu cursor carries a stack; reconcile it before a normal close.");
         if (!context.mutationAvailable()) return TaskState.RUNNING;

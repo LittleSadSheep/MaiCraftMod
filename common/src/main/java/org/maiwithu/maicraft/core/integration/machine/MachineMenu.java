@@ -127,6 +127,9 @@ public final class MachineMenu {
         Origin origin = ORIGINS.get(player.containerMenu); var stamp = ClientRuntime.actor().observationStamp(player).orElse(null);
         return origin != null && stamp != null && origin.player().get() == player && origin.bodyEpoch() == stamp.bodyEpoch()
                 && origin.dimension().equals(player.level().dimension().location().toString()) && origin.position().equals(position)
+                // 跨工具接续前仍确认来源方块存在；旧菜单不能因尚未收到关闭包而冒充被拆掉的箱子。
+                && player.level().isLoaded(position)
+                && BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(position).getBlock()).equals(origin.blockId())
                 && MenuVisibility.matches(Minecraft.getInstance(), player.containerMenu);
     }
 

@@ -33,6 +33,9 @@ import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
 import org.maiwithu.maicraft.core.inventory.CarriedItemVariants;
 import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuHandParking;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
@@ -63,6 +66,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private Vec3 aimPoint;
     /** 按键前的世界快照,收尾时对账出"真发生了什么"(见 {@link PressReceipt})。 */
     private PressReceipt receipt;
+    private AbstractContainerMenu menuBeforeUse;
     private List<String> changes = List.of();
     // 下面保存持续按住的结束时间和结果文字；这个类当前没有重新寻路的过程。
     /**
@@ -231,6 +235,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
             }
             receipt = PressReceipt.before(player, r.aim);
+            // 保存点击前的菜单身份，后续只给这次原生点击新打开的界面登记来源。
+            menuBeforeUse = player.containerMenu;
             // 捕获这次交换前已有的持料，避免同种同数互换未产生数量差时只剩一条超时信息。
             deployerHandBefore = CreateDeployerHandEvidence.capture(player.level(),r.aim);
             // 点名道具时保留原生物品使用；空手操作目标时禁止回退，避免中断遗留的无线终端或工具抢走点击。
@@ -254,6 +260,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         }
         return switch (interaction.tick()) {
             case DONE -> {
+                // use_container 与机器菜单共享已确认来源，后续检查、存取和关闭无需再右击一次或重启客户端。
+                if (activatedBlock != null && interaction.confirmedUses() > 0
+                        && player.containerMenu != menuBeforeUse && player.containerMenu != player.inventoryMenu
+                        && MenuVisibility.matches(ClientRuntime.requireContext(player).minecraft(), player.containerMenu))
+                    MachineMenu.rememberNativeOpened(player, player.containerMenu, activatedBlock);
                 successMsg = describeDone() + settle();
                 yield verifiedOutcome();
             }
