@@ -696,17 +696,8 @@ public final class IntentStateCodec {
     }
 
     private static String safeMessage(String value) {
-        // 包含异常或内部类名的旧消息被替换成通用提示；当前做法会同时丢掉这条消息里原有的排错细节。
-        String message = bounded(value);
-        String lower = message.toLowerCase();
-        if (lower.contains("exception") || lower.contains("stack trace")
-                || lower.contains("internal error") || lower.contains("task start failed")
-                || lower.contains("task tick failed") || lower.contains("task result failed")
-                || lower.contains("internal tool") || lower.contains("java.")
-                || lower.contains("net.minecraft.") || lower.contains("org.maiwithu.")) {
-            return "A previous semantic action stopped safely; re-observe current facts before retrying.";
-        }
-        return message;
+        // 错误类别和原生原因也是恢复所需事实；栈轨迹已有独立字段过滤，不能把摘要改成无依据的安全结论与重查指令。
+        return bounded(value);
     }
 
     private static String bounded(String value) {
