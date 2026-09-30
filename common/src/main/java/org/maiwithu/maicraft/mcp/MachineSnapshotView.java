@@ -29,7 +29,10 @@ final class MachineSnapshotView {
         JsonObject result = new JsonObject();
         // 即使整份观察较大，模型也能在首份失败回执中直接取得可提交的新编号和同址目标。
         for (String key : List.of("snapshot_id", "target", "label", "dimension", "radius", "structure_fingerprint",
-                "structure_complete", "complete", "validity", "observation_only"))
+                "structure_complete", "complete", "validity", "observation_only",
+                // 专用过程列表和组件扫描各有自己的范围，摘要不能只留下空列表而丢掉其适用边界。
+                "native_processes_scope", "native_processes_knowledge_uri",
+                "native_component_scan_radius", "native_component_bounds_covered"))
             if (snapshot.has(key)) result.add(key, snapshot.get(key).deepCopy());
         result.addProperty("omitted", true);
         result.addProperty("detail_path", path);
