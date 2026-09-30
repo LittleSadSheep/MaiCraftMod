@@ -24,6 +24,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.Comparator;
 import java.util.Set;
+import java.util.List;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import java.util.ArrayList;
 import java.util.function.Predicate;
@@ -231,6 +232,21 @@ public final class FirstPersonInteractionTargeting {
                         .getCollisionShape(level, feet.above()).isEmpty()) return false;
         BlockPos support = feet.below();
         return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
+    }
+
+    /** 将同一目标周围全部可见脚位交给寻路器比较路程，不能先按直线距离锁死一个上不去的高台。 */
+    public static List<BlockPos> visibleInteractionStands(
+            LocalPlayer player, BlockPos target, Set<Long> excluded, Predicate<Vec3> visibleFrom) {
+        ArrayList<BlockPos> candidates = new ArrayList<>();
+        // 眼睛高于脚位，低于目标三到五格也可能够得到；最终以原生射线和真实触及距离筛选。
+        for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) for (int dy = -5; dy <= 3; dy++) {
+            BlockPos feet = target.offset(dx, dy, dz);
+            if (excluded.contains(feet.asLong()) || !standable(player.level(), feet)
+                    || !player.level().getWorldBorder().isWithinBounds(feet)) continue;
+            Vec3 eyes = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(Pose.STANDING), 0);
+            if (visibleFrom.test(eyes)) candidates.add(feet.immutable());
+        }
+        return List.copyOf(candidates);
     }
 
     private static Vec3 offset(BlockPos pos, double x, double y, double z) {

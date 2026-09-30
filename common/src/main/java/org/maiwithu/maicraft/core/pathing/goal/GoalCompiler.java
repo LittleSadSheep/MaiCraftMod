@@ -63,6 +63,12 @@ public final class GoalCompiler {
         return new Compiled(NavGoal.exact(c), LongSets.emptySet());
     }
 
+    /** 多个脚位都能操作同一方块时，一次搜索选择可达路径，并保护将要点击的方块不被通行拆掉。 */
+    public static Compiled interactionStances(BlockPos target, List<BlockPos> stances) {
+        if (stances.isEmpty()) return interact(target);
+        return new Compiled(NavGoal.composite(stances.stream().map(NavGoal::exact).toList()), single(target));
+    }
+
     /** 要求正交相邻站在 {@code target} 旁作为放置站位；目标格受 sacred 保护，路线不能在任务即将填入方块的位置搭设脚手架。 */
     public static Compiled standAdjacent(BlockPos target) {
         BlockPos t = target.immutable();

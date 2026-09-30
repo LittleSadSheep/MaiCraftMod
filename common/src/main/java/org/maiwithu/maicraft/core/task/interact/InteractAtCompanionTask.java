@@ -20,6 +20,8 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -38,10 +40,11 @@ import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
 /**
  * 在当前位置对准方块、液体或前方按键。先选物品、等镜头真正对准，再按实际射线命中的目标执行。
- * 它当前不会自己走过去；超出工作距离就失败，让上层先移动。若规定了目标原来的方块和操作后的方块，会在对应阶段检查。
+ * 语义请求可让本任务自行比较站位并走近；原地点击仍沿用原行为。目标身份和原生点击效果分别核对。
  */
 public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTaskRecord> {
 
@@ -85,6 +88,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
     private NativeActionReceipt manualHandSelection;
     private Map<String,Object> deployerHandBefore = Map.of();
+    private final Set<Long> rejectedStances = new HashSet<>();
+    private boolean terrainApproach;
+    private int approachAttempts, approachCandidates;
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -101,9 +107,36 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected PlayerNav buildNav() {
-        // 本任务不自带到场导航:身体须已在触及距离内(基座在 reached()==false
-        // 且无导航时直接教学失败,旅行归 goto)。
-        return null;
+        if (!r.approachTarget || r.aim == null) return null;
+        var stances = FirstPersonInteractionTargeting.visibleInteractionStands(player, r.aim,
+                rejectedStances, this::visibleFrom);
+        approachCandidates = stances.size(); approachAttempts++;
+        var goal = GoalCompiler.interactionStances(r.aim, stances);
+        // 先走现成路线；确实走不通且请求允许时再准备通路，目标方块始终受保护。
+        return PlayerNav.to(player, () -> goal, WALK_SPEED, () -> bodySettled() && visibleFrom(player.getEyePosition()),
+                terrainApproach ? PlayerNav.ContextProvider.TERRAFORM : PlayerNav.ContextProvider.DEFAULT).withTerrainProbe();
+    }
+
+    @Override protected TaskState handleNavFailure(FailureType type, String reason) {
+        if (!r.approachTarget || interaction != null) return super.handleNavFailure(type, reason);
+        stopNav();
+        if (type == FailureType.STANCE_DUD && approachAttempts < 4) {
+            // 走到后视线已变化，只排除这个实际无效脚位，重新比较其他位置，不重复点击未知效果。
+            rejectedStances.add(player.blockPosition().asLong()); nav = buildNav(); return TaskState.RUNNING;
+        }
+        if (r.mayAlterTerrain && !terrainApproach) {
+            terrainApproach = true; nav = buildNav(); return TaskState.RUNNING;
+        }
+        return super.handleNavFailure(type, reason);
+    }
+
+    private boolean visibleFrom(Vec3 eyes) {
+        var item = r.emptyHand ? Items.AIR : r.item == null ? player.getMainHandItem().getItem() : r.item;
+        if (FirstPersonInteractionTargeting.usesBucketRay(item))
+            return FirstPersonInteractionTargeting.visibleBucketHit(player.level(), player, eyes, r.aim, player.blockInteractionRange(), item) != null;
+        var surface = CreateInteractionSurface.forUse(player.level().getBlockState(r.aim), item);
+        return surface.constrained() ? surface.visibleHit(player.level(), player, eyes, r.aim, REACH) != null
+                : FirstPersonInteractionTargeting.hasLoadedReachLine(player.level(), player, eyes, r.aim, REACH);
     }
 
     @Override
@@ -114,11 +147,17 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     @Override
     protected boolean reached() {
         // 收回水或岩浆后源格已经消失，仍须继续结算刚才的原生使用；出手前的射线检查不能截断待确认回执。
-        return interaction != null || r.aim == null || withinReach();
+        if (interaction != null || r.aim == null) return true;
+        if (!r.approachTarget) return withinReach();
+        boolean ready = bodySettled() && visibleFrom(player.getEyePosition());
+        // 反击或补食可能把角色带离工位，仍在同一目标内恢复接近，不要求模型再开一次导航任务。
+        if (!ready && nav == null) nav = buildNav();
+        return ready;
     }
 
     @Override
     protected TaskState act() {
+        if (r.approachTarget) stopNav();
         if (r.heldItemUseOnly) return useHeldItem();
         manualCrank = r.item == null && button() == Interaction.Button.USE && CreateManualInput.supported(player.level(), r.aim);
         // 从第一笔已确认原生使用开始记录实际转速和应力，持续操作结束后仍能说明驱动期间是否卡在超载。
@@ -439,6 +478,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        if (r.approachTarget) data.put("interaction_approach", Map.of("route_attempts", approachAttempts,
+                "stance_candidates", approachCandidates, "rejected_stances", rejectedStances.size(),
+                "terrain_preparation_attempted", terrainApproach, "player_feet", player.blockPosition().toShortString()));
         if (surfaceCheckAttempted) {
             // 只读回执分别说明几何可见性与已尝试的镜头修正，便于区分机壳遮挡和真实射线仍未对准。
             data.put("surface_aim_corrections", surfaceAimCorrections);

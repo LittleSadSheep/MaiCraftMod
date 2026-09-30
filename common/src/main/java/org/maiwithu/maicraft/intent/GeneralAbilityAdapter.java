@@ -5,7 +5,6 @@ import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -20,7 +19,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
 import java.util.ArrayList;
@@ -40,7 +38,6 @@ import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
-import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
@@ -740,7 +737,7 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction compileBlockInteraction(
             Goal goal, LocalPlayer player, BlockPos target, ResourceLocation id, String itemId, boolean prepareTool) {
-        // 先准备右键操作需要的目标和物品；如果现在已经够得着且看得见，就直接交互。
+        // 语义层只保留目标、物品与地形许可；是否需要走近及选哪个站位由同一原生交互任务负责。
         ClientLevel level = player.clientLevel;
         JsonObject use = new JsonObject();
         use.addProperty("button", "right");
@@ -761,31 +758,9 @@ public final class GeneralAbilityAdapter {
         else use.addProperty("empty_hand", true);
         String itemResourceId = string(goal.parameters(), "item_resource_id");
         if (itemResourceId != null) use.addProperty("item_resource_id", itemResourceId);
-        Item useItem = itemId == null ? Items.AIR
-                : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
-        if (!prepareTool && hasLoadedInteractionLine(level, player, player.getEyePosition(), target, useItem)) {
-            return new IntentAction.Tool("interact_at", use.toString());
-        }
-        BlockPos stand = interactionStand(level, player, target, player.blockPosition(), useItem);
-        // 交互已经证明了具体站位，接近时必须真的到这格，不能套用普通旅行的三格误差后又报够不到。
-        if (stand == null) {
-            JsonObject facts = new JsonObject();
-            facts.addProperty("block_id", id.toString());
-            facts.addProperty("distance", roundedDistance(player, target));
-            return decision(goal, "The loaded target has no verified standable interaction position nearby.",
-                    List.of(option("recover", "Clear or approach the obstruction, then retry."),
-                            option("replace_goal", "Choose another matching target."),
-                            option("cancel", "Cancel interaction.")), facts);
-        }
-        JsonObject travel = new JsonObject();
-        travel.addProperty("x", stand.getX() + 0.5D);
-        travel.addProperty("y", stand.getY());
-        travel.addProperty("z", stand.getZ() + 0.5D);
-        travel.addProperty("exact", true);
-        travel.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
-        return new IntentAction.Chain(List.of(
-                new IntentAction.Tool("goto", travel.toString()),
-                new IntentAction.Tool("interact_at", use.toString())));
+        use.addProperty("approach", true);
+        use.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
+        return new IntentAction.Tool("interact_at", use.toString());
     }
 
     private static IntentAction consume(Goal goal, LocalPlayer player) {
@@ -1113,57 +1088,6 @@ public final class GeneralAbilityAdapter {
             }
         }
         return null;
-    }
-
-    private static BlockPos interactionStand(
-            ClientLevel level, LocalPlayer player, BlockPos target, BlockPos current, Item item) {
-        // 在目标周围一至三格、下两格到上一格找操作位置，保留能站稳且视线够到目标的位置，选离玩家最近的。
-        List<BlockPos> candidates = new ArrayList<>();
-        for (int radius = 1; radius <= 3; radius++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
-                    for (int dy = -2; dy <= 1; dy++) {
-                        BlockPos feet = target.offset(dx, dy, dz);
-                        if (isStandable(level, feet)
-                                && hasLoadedInteractionLine(
-                                        level,
-                                        player,
-                                        Vec3.atBottomCenterOf(feet)
-                                                .add(0.0D, player.getEyeHeight(), 0.0D),
-                                        target, item)) {
-                            candidates.add(feet.immutable());
-                        }
-                    }
-                }
-            }
-        }
-        return candidates.stream().min(Comparator.comparingLong(pos -> squared(pos, current))).orElse(null);
-    }
-
-    private static boolean isStandable(ClientLevel level, BlockPos feet) {
-        // 当前规则要求脚和头所在格无碰撞、无液体，脚下整面能支撑；这比“玩家身体实际能站住”更保守。
-        if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
-                || !level.isLoaded(feet.below())) return false;
-        if (!level.getFluidState(feet).isEmpty() || !level.getFluidState(feet.above()).isEmpty()) return false;
-        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()) return false;
-        if (!level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty()) return false;
-        BlockPos support = feet.below();
-        return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
-    }
-
-    /** 从眼睛到目标真的看得见、够得着才算可操作；桶与普通物品使用不同的视线规则。 */
-    private static boolean hasLoadedInteractionLine(
-            ClientLevel level, LocalPlayer player, Vec3 eye, BlockPos target, Item item) {
-        if (FirstPersonInteractionTargeting.usesBucketRay(item)) {
-            return FirstPersonInteractionTargeting.visibleBucketHit(
-                    level, player, eye, target, player.blockInteractionRange(), item) != null;
-        }
-        // 先找到能看见真实取放区域的站位；机械手要看到前端，不能走到只能看见机壳的位置再等待超时。
-        var surface = CreateInteractionSurface.forUse(level.getBlockState(target), item);
-        if (surface.constrained()) return surface.visibleHit(level, player, eye, target, 4.5D) != null;
-        return FirstPersonInteractionTargeting.hasLoadedReachLine(
-                level, player, eye, target, 4.5D);
     }
 
     private static String blockId(Goal goal, JsonObject p) {

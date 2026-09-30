@@ -26,8 +26,16 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public final Block requiredBlock;
     public boolean heldItemUseOnly;
     public boolean emptyHand;
+    public boolean approachTarget;
+    public boolean mayAlterTerrain;
     public Item expectedOutputItem;
     public String itemResourceId;
+
+    /** 语义交互由 Mod 自行走到可点击位置；只在原请求允许时才为通行拆挖或垫块。 */
+    public InteractAtTaskRecord withApproach(boolean alterTerrain) {
+        if (aim == null || heldItemUseOnly) throw new IllegalArgumentException("approach requires a block target");
+        approachTarget = true; mayAlterTerrain = alterTerrain; return this;
+    }
 
     /** 只给已点名物品的方块交互绑定观察身份；选择哪一进度由调用者决定，执行器不替换成同名其他工件。 */
     public InteractAtTaskRecord withItemResourceId(String resourceId) {

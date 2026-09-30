@@ -22,7 +22,8 @@ public final class InteractAtTool implements MaiCraftTool {
     private final BlockActionOps impl = new BlockActionOps();
 
     private record Args(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
-                        String item_id, String expected_block_id, String required_block_id, Boolean empty_hand, String item_resource_id) {}
+                        String item_id, String expected_block_id, String required_block_id, Boolean empty_hand,
+                        String item_resource_id, Boolean approach, Boolean may_alter_terrain) {}
 
     @Override
     public String name() {
@@ -37,9 +38,8 @@ public final class InteractAtTool implements MaiCraftTool {
                 + "right-click — so aiming at WATER with a bucket scoops it, with a boat places it. "
                 + "left = attack/break (prefer mine for digging). The result reports what actually "
                 + "changed (hands, aimed block, new entities); no change listed = the click did nothing. "
-                + "It does NOT travel: you must ALREADY be within working reach (~4.5 blocks) of the aim "
-                + "point — goto stops you right beside a block, which is in reach. Farther away it fails "
-                + "and tells you to goto first.";
+                + "By default it acts within current reach. approach=true lets the native executor choose "
+                + "a reachable interaction stance; terrain changes require may_alter_terrain=true.";
     }
 
     @Override
@@ -55,6 +55,8 @@ public final class InteractAtTool implements MaiCraftTool {
                 .nullableString("expected_block_id", "Optional required resulting block at the aim; an ineffective click is not success.")
                 .nullableString("required_block_id", "Optional block identity that must still occupy the aim immediately before native use.")
                 .optionalBool("empty_hand", "Prepare an empty main hand before block use; incompatible with item_id. Omitted or false retains held-item use.")
+                .optionalBool("approach", "Choose and reach a visible interaction stance before the native click.")
+                .optionalBool("may_alter_terrain", "Allow native terrain preparation only when approach is enabled.")
                 .build();
     }
 
@@ -67,6 +69,8 @@ public final class InteractAtTool implements MaiCraftTool {
         if (Boolean.TRUE.equals(a.empty_hand())) task.withEmptyHand();
         // 把语义层选定的工件身份一路带到原生选物前，不在内部解析时丢掉装配进度约束。
         if (a.item_resource_id() != null) task.withItemResourceId(a.item_resource_id());
+        // 上层只给目标与地形许可，站位和换路留给同一原生任务，避免把寻路失败退给模型手动拆步。
+        if (Boolean.TRUE.equals(a.approach())) task.withApproach(Boolean.TRUE.equals(a.may_alter_terrain()));
         runSync(companion, task, reply);
     }
 }
