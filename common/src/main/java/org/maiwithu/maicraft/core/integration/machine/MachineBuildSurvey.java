@@ -68,18 +68,20 @@ final class MachineBuildSurvey {
                     completedInstallations.addAll(installation.targets().keySet());
                 } else for (BlockPos at : installation.targets().keySet()) {
                     if (NavigationSafetyContext.protectsMutation(at)) return blocked(world, at, "native_installation_protected", "Native installation intersects a protected area.");
-                    if (BuiltInRegistries.BLOCK.getKey(world.getBlockState(at).getBlock()).toString().equals("create:belt"))
-                        return blocked(world, at, "native_belt_chain_mismatch", "An existing belt has a different native chain; inspect it before replacing any segment.");
+                    // 作者已用原生 assembly 声明重装范围，旧带链不同只是待拆换事实，不能再要求重复检查或许可。
                     if (!declaredPositions.contains(at) && !world.getBlockState(at).isAir()) {
                         // assembly 已声明整条安装路径；路径内的可破坏旧垫块直接交施工清理，不再套用范围外寻路的类型白名单。
                         var state = world.getBlockState(at);
                         // 流体不是可挖的普通障碍；单列诊断，让修改蓝图依据真实源状态处理水路，而不是重试挖水。
                         if (!state.getFluidState().isEmpty()) return blocked(world, at, "native_installation_path_fluid",
                                 "Native installation requires a dry path; observed fluid needs explicitly declared fluid handling.");
-                        if (plan.replaceExisting() && !state.hasBlockEntity()
+                        if (plan.replaceExisting() && (!state.hasBlockEntity() || plan.replaceBlockEntities())
                                 && state.getFluidState().isEmpty() && state.getDestroySpeed(world, at) >= 0) {
-                            MachinePlacementRules.requireModeledEffects(state.getBlock()); clears.add(at);
-                        } else return blocked(world, at, "native_installation_path_occupied", "Native installation path contains an unbreakable block, a block entity or an explicitly preserved block.");
+                            // 旧皮带通过原生拆除产生联动；新带仍走专用连接器，不能把禁止直接放 belt 方块的规则套到拆除上。
+                            if (!BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("create:belt"))
+                                MachinePlacementRules.requireModeledEffects(state.getBlock());
+                            clears.add(at);
+                        } else return blocked(world, at, "native_installation_path_occupied", "Native installation path contains an unbreakable block or an explicitly preserved block/entity.");
                     }
                 }
             } catch (RuntimeException unavailable) { return new Progress(false, null, "Native installation observation unavailable: " + unavailable.getMessage()); }
