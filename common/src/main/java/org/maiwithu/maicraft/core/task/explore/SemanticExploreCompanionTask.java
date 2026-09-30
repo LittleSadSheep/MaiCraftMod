@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.explore;
 
 import java.util.ArrayList;
@@ -8,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import java.util.function.Predicate;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -156,12 +158,7 @@ public final class SemanticExploreCompanionTask
     private int shoreReturnWaypoints;
     private int observedWaterCrossingWaypoints;
 
-    private int spiralX;
-    private int spiralZ;
-    private int spiralDirection;
-    private int spiralSegmentLength = 1;
-    private int spiralSegmentProgress;
-    private int spiralSegmentsAtLength;
+    private SpiralWalker spiral;
 
     private BlockPos verifiedPosition;
     private String verifiedDescription;
@@ -174,6 +171,7 @@ public final class SemanticExploreCompanionTask
 
     @Override protected void onStart() {
         origin = player.blockPosition().immutable();
+        spiral = new SpiralWalker(origin, WAYPOINT_GRID);
         ClientLevel level = ClientRuntime.requireContext(player).level();
         if (!resolveTarget(level, r.target)) {
             fail(inputFailure, FailureType.UNSUPPORTED);
@@ -700,7 +698,7 @@ public final class SemanticExploreCompanionTask
 
     private BlockPos nextTerrainNeutralWaypoint(ClientLevel level) {
         for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
-            BlockPos desired = nextSpiralPoint();
+            BlockPos desired = spiral.next(player.blockPosition().getY());
             if (!insideScope(desired.getX(), desired.getZ())) continue;
             BlockPos frontier = loadedFrontierToward(level, desired);
             if (frontier != null && attemptedWaypoints.add(
@@ -743,7 +741,7 @@ public final class SemanticExploreCompanionTask
         // 保留向外螺旋的覆盖顺序；若本轮仍有全程干燥的扩展路线，就不选择已观察到的涉水路线。
         boolean hasAllDryChoice = choices.stream()
                 .anyMatch(choice -> !choice.crossesObservedWater());
-        BlockPos desired = nextSpiralPoint();
+        BlockPos desired = spiral.next(player.blockPosition().getY());
         FrontierChoice selected = choices.stream()
                 .filter(choice -> !hasAllDryChoice || !choice.crossesObservedWater())
                 .min(Comparator
@@ -873,28 +871,6 @@ public final class SemanticExploreCompanionTask
             frontierDirectionPass = 0;
         }
         return null;
-    }
-
-    private BlockPos nextSpiralPoint() {
-        switch (spiralDirection) {
-            case 0 -> spiralX++;
-            case 1 -> spiralZ++;
-            case 2 -> spiralX--;
-            default -> spiralZ--;
-        }
-        spiralSegmentProgress++;
-        if (spiralSegmentProgress >= spiralSegmentLength) {
-            spiralSegmentProgress = 0;
-            spiralDirection = (spiralDirection + 1) & 3;
-            if (++spiralSegmentsAtLength >= 2) {
-                spiralSegmentsAtLength = 0;
-                spiralSegmentLength++;
-            }
-        }
-        return new BlockPos(
-                origin.getX() + spiralX * WAYPOINT_GRID,
-                player.blockPosition().getY(),
-                origin.getZ() + spiralZ * WAYPOINT_GRID);
     }
 
     private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {

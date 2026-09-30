@@ -162,6 +162,11 @@ def regressionSuites = [
         heap: '512m', directory: 'stonecutting-process-regression', timeoutSeconds: 45,
         purpose: '验证石切机原生工序的参数校验、站点匹配与诚实失败路径'
     ],
+    spiralWalkerRegression: [
+        entry: 'org.maiwithu.maicraft.core.scan.SpiralWalkerTest',
+        heap: '512m', directory: 'spiral-walker-regression', timeoutSeconds: 45,
+        purpose: '验证螺旋步进的转向次序、边长增长与落点合成'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。

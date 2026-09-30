@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import java.util.UUID;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -105,12 +106,7 @@ public final class GenericEntitySearchCompanionTask
     private int protectedOrAmbiguousSeen;
     private int lastLoadedMatching;
 
-    private int spiralX;
-    private int spiralZ;
-    private int spiralDirection;
-    private int spiralSegmentLength = 1;
-    private int spiralSegmentProgress;
-    private int spiralSegmentsAtLength;
+    private SpiralWalker spiral;
 
     public GenericEntitySearchCompanionTask(
             LocalPlayer player, GenericEntitySearchTaskRecord record) {
@@ -120,6 +116,7 @@ public final class GenericEntitySearchCompanionTask
     @Override
     protected void onStart() {
         origin = player.blockPosition().immutable();
+        spiral = new SpiralWalker(origin, Math.min(WAYPOINT_GRID, Math.max(1, r.maxDistance / 2)));
         preferLandFrontiers = targetsUseGroundSpawnPlacement();
         stage = Stage.OBSERVE;
     }
@@ -275,7 +272,7 @@ public final class GenericEntitySearchCompanionTask
         selectedFrontierShoreReturn = false;
         if (preferLandFrontiers) return nextGroundSpawnFrontier(level);
         for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
-            BlockPos desired = nextSpiralPoint();
+            BlockPos desired = spiral.next(player.blockPosition().getY());
             if (!insideScope(desired.getX(), desired.getZ())) continue;
             BlockPos frontier = loadedFrontierToward(level, desired);
             if (frontier == null) continue;
@@ -283,29 +280,6 @@ public final class GenericEntitySearchCompanionTask
             if (attemptedFrontiers.add(key)) return frontier;
         }
         return null;
-    }
-
-    private BlockPos nextSpiralPoint() {
-        switch (spiralDirection) {
-            case 0 -> spiralX++;
-            case 1 -> spiralZ++;
-            case 2 -> spiralX--;
-            default -> spiralZ--;
-        }
-        spiralSegmentProgress++;
-        if (spiralSegmentProgress >= spiralSegmentLength) {
-            spiralSegmentProgress = 0;
-            spiralDirection = (spiralDirection + 1) & 3;
-            if (++spiralSegmentsAtLength >= 2) {
-                spiralSegmentsAtLength = 0;
-                spiralSegmentLength++;
-            }
-        }
-        int grid = Math.min(WAYPOINT_GRID, Math.max(1, r.maxDistance / 2));
-        return new BlockPos(
-                origin.getX() + spiralX * grid,
-                player.blockPosition().getY(),
-                origin.getZ() + spiralZ * grid);
     }
 
     private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {
@@ -363,7 +337,7 @@ public final class GenericEntitySearchCompanionTask
             BlockPos current, List<FrontierChoice> choices) {
         boolean hasDryChoice = choices.stream()
                 .anyMatch(choice -> !"bounded_water_crossing".equals(choice.evidence()));
-        BlockPos desired = nextSpiralPoint();
+        BlockPos desired = spiral.next(player.blockPosition().getY());
         FrontierChoice selected = null;
         double bestScore = Double.POSITIVE_INFINITY;
         double bestProgress = Double.NEGATIVE_INFINITY;

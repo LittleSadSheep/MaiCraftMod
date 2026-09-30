@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -103,12 +104,7 @@ public final class PhysicalStructureSearchCompanionTask
     private int frontierReached;
     private int frontierFailed;
     private int evidenceApproaches;
-    private int spiralX;
-    private int spiralZ;
-    private int spiralDirection;
-    private int spiralSegmentLength = 1;
-    private int spiralSegmentProgress;
-    private int spiralSegmentsAtLength;
+    private SpiralWalker spiral;
     private EvidenceMatch activeEvidence;
     private EvidenceMatch verifiedEvidence;
     private String issueCode;
@@ -147,6 +143,7 @@ public final class PhysicalStructureSearchCompanionTask
     @Override
     protected void onStart() {
         origin = player.blockPosition().immutable();
+        spiral = new SpiralWalker(origin, FRONTIER_GRID);
         profile = StructureEvidenceProfiles.resolve(r.structureId);
         if (profile == null) {
             failIssue(
@@ -712,36 +709,14 @@ public final class PhysicalStructureSearchCompanionTask
         int finalRing = (int) Math.ceil(
                 (r.maxDistance + SCOPE_TOLERANCE) / (double) FRONTIER_GRID) + 1;
         while (true) {
-            BlockPos desired = nextSpiralPoint();
-            if (Math.max(Math.abs(spiralX), Math.abs(spiralZ)) > finalRing) return null;
+            BlockPos desired = spiral.next(player.blockPosition().getY());
+            if (Math.max(Math.abs(spiral.offsetX()), Math.abs(spiral.offsetZ())) > finalRing) return null;
             if (!insideScope(desired)) continue;
             BlockPos frontier = loadedFrontierToward(desired);
             if (frontier == null) continue;
             long key = BlockPos.asLong(frontier.getX(), 0, frontier.getZ());
             if (attemptedFrontiers.add(key)) return frontier;
         }
-    }
-
-    private BlockPos nextSpiralPoint() {
-        switch (spiralDirection) {
-            case 0 -> spiralX++;
-            case 1 -> spiralZ++;
-            case 2 -> spiralX--;
-            default -> spiralZ--;
-        }
-        spiralSegmentProgress++;
-        if (spiralSegmentProgress >= spiralSegmentLength) {
-            spiralSegmentProgress = 0;
-            spiralDirection = (spiralDirection + 1) & 3;
-            if (++spiralSegmentsAtLength >= 2) {
-                spiralSegmentsAtLength = 0;
-                spiralSegmentLength++;
-            }
-        }
-        return new BlockPos(
-                origin.getX() + spiralX * FRONTIER_GRID,
-                player.blockPosition().getY(),
-                origin.getZ() + spiralZ * FRONTIER_GRID);
     }
 
     private BlockPos loadedFrontierToward(BlockPos desired) {
