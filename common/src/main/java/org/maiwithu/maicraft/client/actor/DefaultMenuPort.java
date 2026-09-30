@@ -9,6 +9,7 @@ import java.util.Objects;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2TerminalIdentity;
+import org.maiwithu.maicraft.core.Constants;
 
 /** 实际操作玩家菜单：一次点一个槽位、报价按钮或配方，等结果明确后再接受下一次；也负责任务结束时关好界面。 */
 public final class DefaultMenuPort implements MenuPort {
@@ -60,7 +61,7 @@ public final class DefaultMenuPort implements MenuPort {
         AbstractContainerMenu menu = current.player().containerMenu;
         if (slot < 0 || slot >= menu.slots.size()) throw new IllegalArgumentException("menu slot is out of range");
         current.claimMutation();
-        MenuReceipt receipt = create(MenuReceipt.Kind.CLICK, current, menu, timeoutTicks, false, confirmation);
+        MenuReceipt receipt = create(MenuReceipt.Kind.CLICK, current, menu, slot, timeoutTicks, false, confirmation);
         try {
             current.gameMode().handleInventoryMouseClick(menu.containerId, slot, button, clickType, current.player());
             interactionSubmitted(current);
@@ -93,7 +94,7 @@ public final class DefaultMenuPort implements MenuPort {
         AbstractContainerMenu menu = current.player().inventoryMenu;
         current.claimMutation();
         MenuReceipt receipt = create(
-                MenuReceipt.Kind.SWAP_TO_HOTBAR, current, menu, timeoutTicks, false, confirmation);
+                MenuReceipt.Kind.SWAP_TO_HOTBAR, current, menu, sourceInventorySlot, timeoutTicks, false, confirmation);
         try {
             // 原版背包主物品栏沿用槽位 9..35；交换操作的按钮参数表示目标快捷栏槽位。
             current.gameMode().handleInventoryMouseClick(
@@ -116,7 +117,7 @@ public final class DefaultMenuPort implements MenuPort {
         AbstractContainerMenu menu = current.player().containerMenu;
         current.claimMutation();
         MenuReceipt receipt = create(
-                MenuReceipt.Kind.PLACE_RECIPE, current, menu, timeoutTicks, false, confirmation);
+                MenuReceipt.Kind.PLACE_RECIPE, current, menu, -1, timeoutTicks, false, confirmation);
         try {
             current.gameMode().handlePlaceRecipe(menu.containerId, recipe, shift);
             interactionSubmitted(current);
@@ -135,12 +136,12 @@ public final class DefaultMenuPort implements MenuPort {
         AbstractContainerMenu menu = current.player().containerMenu;
         if (menu == current.player().inventoryMenu && current.minecraft().screen == null
                 && menu.getCarried().isEmpty() && !inventoryGridOccupied(current)) {
-            MenuReceipt receipt = create(MenuReceipt.Kind.CLOSE, current, menu, timeoutTicks, true,
+            MenuReceipt receipt = create(MenuReceipt.Kind.CLOSE, current, menu, -1, timeoutTicks, true,
                     MenuConfirmation.closedToInventory());
             receipt.finish(MenuReceipt.Status.CONFIRMED_APPLIED, "the inventory menu was already active");
             return receipt;
         }
-        MenuReceipt receipt = create(MenuReceipt.Kind.CLOSE, current, menu, timeoutTicks, true,
+        MenuReceipt receipt = create(MenuReceipt.Kind.CLOSE, current, menu, -1, timeoutTicks, true,
                 MenuConfirmation.closedToInventory());
         closingMenu = menu;
         advanceClose(current, receipt);
@@ -159,7 +160,7 @@ public final class DefaultMenuPort implements MenuPort {
         Objects.requireNonNull(confirmation, "menu button requires an exact postcondition");
         AbstractContainerMenu menu = current.player().containerMenu;
         current.claimMutation();
-        MenuReceipt receipt = create(MenuReceipt.Kind.BUTTON, current, menu, timeoutTicks, false, confirmation);
+        MenuReceipt receipt = create(MenuReceipt.Kind.BUTTON, current, menu, button, timeoutTicks, false, confirmation);
         try {
             // 按1.21.1附魔界面的顺序，先让当前菜单校验报价；客户端拒绝时没有按钮包，不进入等待扣费阶段。
             if (!menu.clickMenuButton(current.player(), button)) {
@@ -340,14 +341,18 @@ public final class DefaultMenuPort implements MenuPort {
     }
 
     private MenuReceipt create(MenuReceipt.Kind kind, LocalPlayerContext context,
-                               AbstractContainerMenu menu, int timeoutTicks,
+                               AbstractContainerMenu menu, int slot, int timeoutTicks,
                                boolean allowContainerChange, MenuConfirmation confirmation) {
         if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
         // 普通一秒超时不能比已知往返还短；留出首次观察和稳定检查的时间，关闭本地界面则沿用调用方预算。
         int budget = kind == MenuReceipt.Kind.CLOSE ? timeoutTicks
                 : Math.max(timeoutTicks, MenuSynchronization.windowTicks(context) + 3);
-        MenuReceipt receipt = MenuReceipt.forMenu(kind, context, menu, budget, allowContainerChange, confirmation);
+        MenuReceipt receipt = MenuReceipt.forMenu(kind, context, menu, slot, budget,
+                allowContainerChange, confirmation);
         active = receipt;
+        // 提交行与回执终态行构成一次菜单事务的完整时间线；超时预算是否过短，两行对照即得。
+        Constants.LOG.debug("menu {} slot={} containerId={} stateId={} budget={}t submitted",
+                kind, slot, menu.containerId, menu.getStateId(), budget);
         return receipt;
     }
 

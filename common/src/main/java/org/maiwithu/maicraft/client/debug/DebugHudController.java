@@ -9,6 +9,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
+import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -67,6 +68,12 @@ public final class DebugHudController {
         }
         rows.add(new MaiCraftStatus.StatusRow("Menu", "none".equals(menu) ? "无" : menu,
                 "none".equals(menu) ? ChatFormatting.GRAY : ChatFormatting.AQUA));
+        // 最近一次 UNCERTAIN 的消费可能已发生；面板只提示保留现场，核验仍以真实背包与方块为准。
+        MenuReceipt.UncertainSnapshot uncertain = MenuReceipt.lastUncertain();
+        rows.add(new MaiCraftStatus.StatusRow("Uncertain", uncertain == null ? "无记录"
+                        : uncertain.kind() + (uncertain.slot() >= 0 ? " slot=" + uncertain.slot() : "")
+                        + " @t" + uncertain.submittedTick() + " · " + clamp(uncertain.detail()),
+                uncertain == null ? ChatFormatting.GRAY : ChatFormatting.RED));
         // 扫描截断计数大于零说明最近有"预算内没扫完"的查询；缺席结论要先看这里。
         TargetIndex.BudgetCounters scan = TargetIndex.budgetCounters();
         boolean truncated = scan.wallClockExhausted() > 0 || scan.buildBudgetExhausted() > 0;
@@ -74,6 +81,12 @@ public final class DebugHudController {
                         + " · 构建预算耗尽 " + scan.buildBudgetExhausted(),
                 truncated ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
         return List.copyOf(rows);
+    }
+
+    // 面板单行放不下的原因说明截断到 96 字符；完整文本在回执的审计日志里。
+    private static String clamp(String value) {
+        if (value == null || value.isBlank()) return "unknown";
+        return value.length() <= 96 ? value : value.substring(0, 95) + "…";
     }
 
     private static void message(Minecraft minecraft, String text, ChatFormatting color) {

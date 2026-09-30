@@ -26,7 +26,7 @@ public final class BackpackOpenSessionTest {
             ActorControlTestHarness.field(BackpackOpenSession.class, "owner").set(session, h.player);
             ActorControlTestHarness.field(BackpackOpenSession.class, "level").set(session, h.level);
             ActorControlTestHarness.field(BackpackOpenSession.class, "menu").set(session, menu);
-            var close = new MenuReceipt(MenuReceipt.Kind.CLOSE, ClientRuntime.requireContext(h.player), 9, 0, 40, false,
+            var close = new MenuReceipt(MenuReceipt.Kind.CLOSE, ClientRuntime.requireContext(h.player), 9, 0, -1, 40, false,
                     (context, receipt) -> MenuConfirmation.Verdict.PENDING);
             int[] clicks = {0};
             MenuPort port = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(), new Class<?>[]{MenuPort.class}, (proxy, method, argv) -> {

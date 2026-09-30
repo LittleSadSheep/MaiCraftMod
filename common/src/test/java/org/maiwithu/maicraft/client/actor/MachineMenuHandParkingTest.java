@@ -103,10 +103,10 @@ public final class MachineMenuHandParkingTest {
                     check(visible && rendered && mutationTick != tick, "swap must use a rendered GUI and a free native mutation tick");
                     mutationTick = tick; swaps++; source = (int) args[1]; hotbar = (int) args[2];
                     check(source == 12 && hotbar == 4, "swap must use the actual empty main slot and current selected hotbar entry");
-                    swap = new MenuReceipt(MenuReceipt.Kind.SWAP_TO_HOTBAR, (LocalPlayerContext) args[0], 0, 0, 20, false, null); yield swap;
+                    swap = new MenuReceipt(MenuReceipt.Kind.SWAP_TO_HOTBAR, (LocalPlayerContext) args[0], 0, 0, -1, 20, false, null); yield swap;
                 }
                 case "close" -> { check(visible && mutationTick != tick, "close cannot share the swap tick"); mutationTick = tick; closes++;
-                    close = new MenuReceipt(MenuReceipt.Kind.CLOSE, (LocalPlayerContext) args[0], 0, 0, 20, true, null); yield close; }
+                    close = new MenuReceipt(MenuReceipt.Kind.CLOSE, (LocalPlayerContext) args[0], 0, 0, -1, 20, true, null); yield close; }
                 case "poll" -> {
                     if (args[1] == swap && allowSwap && tick > swap.submittedTick() && !swap.terminal()) {
                         ItemStack parked = world.inventory.getItem(hotbar); world.inventory.setItem(hotbar, world.inventory.getItem(source)); world.inventory.setItem(source, parked);

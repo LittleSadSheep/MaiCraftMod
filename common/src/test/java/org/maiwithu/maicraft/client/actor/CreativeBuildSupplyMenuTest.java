@@ -67,7 +67,7 @@ public final class CreativeBuildSupplyMenuTest {
                         case "close" -> {
                             check(visible, "cannot close a GUI that was not opened"); closes++;
                             closeReceipt = new MenuReceipt(MenuReceipt.Kind.CLOSE,
-                                    (LocalPlayerContext) args[0], 0, 0, 20, true, null);
+                                    (LocalPlayerContext) args[0], 0, 0, -1, 20, true, null);
                             yield closeReceipt;
                         }
                         case "poll" -> {

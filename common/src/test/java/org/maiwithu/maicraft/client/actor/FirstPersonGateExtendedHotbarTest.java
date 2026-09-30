@@ -112,14 +112,14 @@ public final class FirstPersonGateExtendedHotbarTest {
                                     "swap must use a rendered GUI and a free native mutation tick");
                             mutationTick = tick; swaps++; swapSource = (int) args[1]; swapHotbar = (int) args[2];
                             swap = new MenuReceipt(MenuReceipt.Kind.SWAP_TO_HOTBAR,
-                                    (LocalPlayerContext) args[0], 0, 0, 20, false, null);
+                                    (LocalPlayerContext) args[0], 0, 0, -1, 20, false, null);
                             yield swap;
                         }
                         case "close" -> {
                             check(mutationTick != tick, "close cannot share the swap tick");
                             mutationTick = tick; closes++;
                             close = new MenuReceipt(MenuReceipt.Kind.CLOSE,
-                                    (LocalPlayerContext) args[0], 0, 0, 20, true, null);
+                                    (LocalPlayerContext) args[0], 0, 0, -1, 20, true, null);
                             yield close;
                         }
                         case "poll" -> {

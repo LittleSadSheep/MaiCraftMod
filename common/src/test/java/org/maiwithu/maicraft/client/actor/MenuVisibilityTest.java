@@ -120,7 +120,7 @@ public final class MenuVisibilityTest {
         var h = new ActorControlTestHarness();
         var port = h.actor.menus();
         for (var kind : new MenuReceipt.Kind[]{MenuReceipt.Kind.SWAP_TO_HOTBAR, MenuReceipt.Kind.CLOSE}) {
-            var receipt = new MenuReceipt(kind, h.context, 0, 0, 20, kind == MenuReceipt.Kind.CLOSE,
+            var receipt = new MenuReceipt(kind, h.context, 0, 0, -1, 20, kind == MenuReceipt.Kind.CLOSE,
                     (context, pending) -> MenuConfirmation.Verdict.PENDING);
             ActorControlTestHarness.field(DefaultMenuPort.class, "active").set(port, receipt);
             check(!port.ensureVisible(h.context), "pending " + kind + " must keep a successor from reopening inventory");
