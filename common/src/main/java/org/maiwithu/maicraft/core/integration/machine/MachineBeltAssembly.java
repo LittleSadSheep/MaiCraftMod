@@ -69,7 +69,8 @@ public final class MachineBeltAssembly {
         if (cell == null || cell.get("block_id").getAsString().equals("minecraft:air")) return null;
         if (!cell.get("block_id").getAsString().equals("create:shaft")) throw bad("belt_endpoint_conflicts_with_authored_block");
         String value = MachineAssemblyDocument.properties(cell).get("axis");
-        if (value == null) throw bad("belt_shaft_axis_must_be_explicit; omit the endpoint block to derive it");
+        // 只写了轴方块但未指定朝向时，和省略准备轴一样按作者已选带段推导，不要求模型先删再重写。
+        if (value == null) return null;
         for (Direction.Axis axis : Direction.Axis.values()) if (axis.getName().equals(value)) return axis;
         throw bad("belt_shaft_axis_must_be_explicit");
     }
@@ -77,7 +78,13 @@ public final class MachineBeltAssembly {
             BlockPos at, Direction.Axis axis) {
         if (parts.contains(at)) throw bad("native_installation_overlap");
         JsonObject existing = blocks.get(at);
-        if (existing != null && existing.get("block_id").getAsString().equals("create:shaft")) return;
+        if (existing != null && existing.get("block_id").getAsString().equals("create:shaft")) {
+            // 补齐原生连接必需的轴向，保留作者已写的轴向、含水状态及其他属性。
+            JsonObject state = existing.has("properties") ? existing.getAsJsonObject("properties") : new JsonObject();
+            if (!state.has("axis")) state.addProperty("axis", axis.getName());
+            existing.add("properties", state);
+            return;
+        }
         // 显式空气格授权清障，但最终端点必然是带轮；将该格替换为准确的准备轴并计入统一材料清单。
         JsonObject cell = existing == null ? new JsonObject() : existing;
         cell.add("offset", MachineAssemblyDocument.json(at)); cell.addProperty("block_id", "create:shaft");
