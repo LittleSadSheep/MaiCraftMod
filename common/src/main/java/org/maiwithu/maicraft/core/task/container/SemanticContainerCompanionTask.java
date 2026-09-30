@@ -1057,6 +1057,9 @@ public final class SemanticContainerCompanionTask
         data.put("inventory_counts_observed_at_tick", countsObservedAt);
         if (!lastNativeTransfer.isEmpty()) data.put("last_native_transfer", lastNativeTransfer);
         data.put("moved_count", movedCount);
+        // 累计投料与箱内现存量分开解释；物品被后续设备抽走，不会撤销已经确认的存入，也不证明加工完成。
+        data.put("moved_count_scope", "cumulative_confirmed_native_transfers");
+        data.put("container_count_scope", "remaining_matching_items_at_inventory_counts_observed_at_tick");
         data.put("moved_items", Map.copyOf(movedByItem));
         data.put("goal_satisfied", goalSatisfied);
         data.put("outcome_partial", movedCount > 0 && !goalSatisfied);
@@ -1111,6 +1114,10 @@ public final class SemanticContainerCompanionTask
     }
 
     @Override protected String successMessage() {
+        // 成功摘要也直接给出留箱量，避免模型把自动抽料后的数量变化误认为本次投料失效。
+        if (direction == Direction.DEPOSIT) return "Confirmed native deposit of " + movedCount
+                + " item(s) into " + containerKind + "; the container held " + lastContainerCount
+                + " matching item(s) at observation. Downstream processing remains unverified; the native menu is closed.";
         return "verified " + movedCount + " semantic item(s) against "
                 + (containerKind == null ? "the selected container" : containerKind)
                 + " and closed its native menu";
