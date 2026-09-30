@@ -33,9 +33,12 @@ final class ChainConveyorInventory {
         var state = selection.select(context.player(), source);
         if (state == FirstPersonActionGate.Status.FAILED) throw new IllegalStateException("chain_conveyor_inventory_selection_failed: " + selection.failure());
         if (state != FirstPersonActionGate.Status.READY) return false;
-        if (!plain(context.player().getMainHandItem())) throw new IllegalArgumentException("chain_conveyor_selected_stack_changed");
+        if (!plain(context.player().getMainHandItem())) {
+            // 走路、飞行落水或自卫可以合法切换手持物；原选择已经结清时按现有槽位重新拿链条，不重复旧交换。
+            selection.reset(); source = -1; return false;
+        }
         return true;
     }
     // 链条已经按原生动作消耗后，直接释放选择器；不为恢复背包原排序额外交换物品或切换手持格。
-    void finish() { selection.reset(); }
+    void finish() { selection.reset(); source = -1; }
 }

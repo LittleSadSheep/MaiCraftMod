@@ -77,7 +77,12 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
                 phase = player.distanceToSqr(r.first.getCenter()) < player.distanceToSqr(r.second.getCenter()) ? Phase.VERIFY_FIRST : Phase.VERIFY_SECOND;
                 return;
             }
-            if (ChainConveyorBridge.selection().first() != null) throw new IllegalArgumentException("chain_conveyor_existing_selection_preserved");
+            if (ChainConveyorBridge.selection().first() != null) {
+                // 已选中的首端恰好就是本次授权首端时可接着走向另一端；不能重发首击去连接错误对象。
+                if (!ChainConveyorBridge.selection().matches(world, r.first))
+                    throw new IllegalArgumentException("chain_conveyor_existing_selection_preserved");
+                firstSelectionConfirmed = true;
+            }
             validatePair();
         } catch (IllegalArgumentException problem) { stop(problem.getMessage()); }
     }
@@ -167,23 +172,27 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     private TaskState observeBefore(boolean first) {
         BlockPos target = first ? r.first : r.second;
         if (!near(target)) return TaskState.RUNNING;
-        if (!serverAssisted) { unchanged(); phase = first ? Phase.FIRST_CLICK : Phase.SECOND_CLICK; return TaskState.RUNNING; }
+        if (!serverAssisted) { unchanged(); phase = first ? firstSelectionConfirmed ? Phase.SECOND_READ : Phase.FIRST_CLICK : Phase.SECOND_CLICK; return TaskState.RUNNING; }
         JsonObject observed = reads.snapshot(target, r.dimension); if (observed == null) return TaskState.RUNNING;
         ChainConveyorGeometry.validate(r.first, r.second, ChainConveyorRead.limits(observed));
         if (first) firstAdmission = observed;
         unchanged();
         if (ChainConveyorRead.hasLink(observed, first ? r.second : r.first)) return stop("chain_conveyor_server_link_changed_before_submission");
-        phase = first ? Phase.FIRST_CLICK : Phase.SECOND_CLICK; return TaskState.RUNNING;
+        phase = first ? firstSelectionConfirmed ? Phase.SECOND_READ : Phase.FIRST_CLICK : Phase.SECOND_CLICK; return TaskState.RUNNING;
     }
     private TaskState click(boolean first) {
-        validatePair(); ChainConveyorInventory.requirePlainChains(player);
-        if (ChainConveyorInventory.count(player) != countBefore || !ChainConveyorInventory.plain(player.getMainHandItem()))
-            return stop("chain_conveyor_held_chain_or_inventory_changed");
+        validatePair();
+        if (!first && secondSubmitted) return stop("chain_conveyor_second_click_replay_blocked");
         var selected = ChainConveyorBridge.selection();
         if (first ? selected.first() != null : !selected.matches(world, r.first)) return stop("chain_conveyor_selection_changed_preserved");
         BlockPos target = first ? r.first : r.second;
         if (!near(target)) return TaskState.RUNNING;
         var context = ClientRuntime.requireContext(player);
+        // 先完成两端之间的移动，再重新选链和核对数量；运输过程使用水桶或腾空主手不应让未提交点击失败。
+        if (!inventory.select(context)) return TaskState.RUNNING;
+        ChainConveyorInventory.requirePlainChains(player);
+        countBefore = ChainConveyorInventory.count(player);
+        if (countBefore < (creativeExempt ? 1 : cost)) { phase = Phase.MATERIALS; return TaskState.RUNNING; }
         if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) return stop("chain_conveyor_screen_busy");
         InputDriver.halt(player); InputDriver.sneak(player, false);
         if (player.isShiftKeyDown()) return TaskState.RUNNING;
@@ -271,7 +280,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     }
     private TaskState stop(String code) {
         if (failure == null) failure = code;
-        if (phase != Phase.CANCEL_SELECTION && firstSelectionConfirmed && !secondSubmitted && action == null
+        if (phase != Phase.CANCEL_SELECTION && selectedByTask && firstSelectionConfirmed && !secondSubmitted && action == null
                 && ChainConveyorBridge.selection().matches(world, r.first)) {
             stopNav(); phase = Phase.CANCEL_SELECTION; selectionCleanupDeadline = world.getGameTime() + 40;
             r.extendDeadlineTo(selectionCleanupDeadline + 1); return TaskState.RUNNING;
@@ -283,7 +292,9 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         if (!player.isAlive() || player.level() != world || world.getGameTime() >= selectionCleanupDeadline)
             return stop(failure);
         var context = ClientRuntime.requireContext(player);
-        if (!player.getMainHandItem().is(Items.CHAIN) || context.minecraft().screen != null) return stop(failure);
+        // 只撤销本任务真正发出的首端选择；运输换手后先取回链条，再执行原生潜行取消。
+        if (!inventory.select(context)) return TaskState.RUNNING;
+        if (context.minecraft().screen != null) return TaskState.RUNNING;
         InputDriver.halt(player); InputDriver.sneak(player, true);
         if (!player.isShiftKeyDown() || !context.mutationAvailable()) return TaskState.RUNNING;
         // 原生 onRightClick 在持链潜行时仅取消客户端首端选择；调用前后核对归属，绝不重发第二次连接。
@@ -328,6 +339,9 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         result.put("chain_cost", cost); result.put("confirmed_chain_consumption", effectSettled ? countBefore - countAfter : 0);
         result.put("chain_item", "minecraft:chain"); result.put("chain_consumption_verified", effectSettled && !creativeExempt);
         result.put("placement_geometry_preflight_verified", geometryChecked); result.put("chain_selection_owned", firstSelectionConfirmed);
+        result.put("matching_first_selection_reused", firstSelectionConfirmed && !selectedByTask);
+        result.put("observed_carried_chains", ChainConveyorInventory.count(player));
+        result.put("observed_main_hand", player.getMainHandItem().getItem().toString());
         result.put("required_new_chains", noChange || creativeExempt ? 0 : cost);
         result.put("outcome_uncertain", secondSubmitted && !effectSettled); result.put("second_click_replay_allowed", false);
         result.put("inventory_cleanup_complete", inventoryClosed); result.put("owned_selection_pending", ownedSelectionPending);
