@@ -25,9 +25,15 @@ public final class RecipeMaterialPlan {
         public Result { supplies = List.copyOf(supplies); crafts = List.copyOf(crafts); remaining = Map.copyOf(remaining); }
     }
     private static final class Budget {
-        int remaining = 8192;
+        int remaining;
         boolean exhausted;
-        boolean spend() { if (--remaining < 0) { exhausted = true; return false; } return true; }
+        // 每轮只花分配到的展开次数；浅层模组配方再宽也要给下一层普通合成留出比较机会。
+        Budget(int limit) { remaining = limit; }
+        boolean spend() {
+            if (remaining == 0) { exhausted = true; return false; }
+            remaining--;
+            return true;
+        }
     }
     /** 分支只复制发生变化的物品账，不为每条配方复制整个 AE 网络。 */
     private static final class Pool {
@@ -66,25 +72,29 @@ public final class RecipeMaterialPlan {
                                   Function<ResourceLocation, List<Recipe>> recipes,
                                   Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,
                                   Set<ResourceLocation> unavailable) {
-        Budget budget = new Budget();
+        int remainingBudget = 8192;
+        boolean searchComplete = false;
         // 排序与展开复用同一次只读元数据，避免比较宽标签时反复查询相同材料的来源与配方。
         Map<ResourceLocation, List<Recipe>> recipeCache = new HashMap<>();
         Map<ResourceLocation, Source> sourceCache = new HashMap<>();
         Function<ResourceLocation, List<Recipe>> recipeLookup = item -> recipeCache.computeIfAbsent(item, recipes);
         Function<ResourceLocation, Source> sourceLookup = item -> sourceCache.computeIfAbsent(item, sources);
         // 先找短而完整的备料路线，再增加合成层数；羊毛互染等循环不能先吃光预算，把普通原料路线挤掉。
-        // 各轮共用原来的总预算，保留已经找到的完整数量账；后续搜索截断时仍能使用较早的可行方案。
+        // 总预算不变，但为后续深度保留份额；否则桶和木板的大量替代配方会在第一轮耗尽预算，只留下未知材料。
         State planned = null;
-        for (int depth = 1; depth <= 32; depth *= 2) {
-            budget.exhausted = false;
+        for (int depth = 1, round = 0; depth <= 32 && remainingBudget > 0; depth *= 2, round++) {
+            int allowance = remainingBudget / (6 - round);
+            Budget budget = new Budget(allowance);
             State candidate = expand(needs, new State(stock), recipeLookup, sourceLookup, blocked, unavailable,
                     Set.of(), depth, budget).stream().min(ORDER).orElse(null);
+            remainingBudget -= allowance - budget.remaining;
             if (candidate != null && (planned == null || ORDER.compare(candidate, planned) < 0)) planned = candidate;
             // 没有深度截断、候选裁剪或预算耗尽时才算搜索完整；否则在剩余预算内继续比较更深路线。
-            if (!budget.exhausted || budget.remaining <= 0) break;
+            searchComplete = !budget.exhausted;
+            if (searchComplete) break;
         }
-        return planned == null ? new Result(false, !budget.exhausted, UNREACHABLE, List.of(), List.of(), stock)
-                : new Result(true, !budget.exhausted, planned.cost, merge(planned.supplies), planned.crafts, planned.pool.remaining());
+        return planned == null ? new Result(false, searchComplete, UNREACHABLE, List.of(), List.of(), stock)
+                : new Result(true, searchComplete, planned.cost, merge(planned.supplies), planned.crafts, planned.pool.remaining());
     }
 
     private static List<State> expand(List<Need> needs, State initial, Function<ResourceLocation, List<Recipe>> recipes,
@@ -92,8 +102,9 @@ public final class RecipeMaterialPlan {
                                       Set<ResourceLocation> unavailable, Set<ResourceLocation> visiting, int depth, Budget budget) {
         if (!budget.spend()) return List.of();
         List<State> states = List.of(initial);
-        // 窄替代组先安排；同价分支保留各自库存账，避免先吃掉另一支唯一能用的材料而误报缺料。
-        for (Need need : needs.stream().sorted(Comparator.comparingInt(row -> row.alternatives().size())).toList()) {
+        // 木桶等配方的相同原料格先合并数量，再扣除可混用的现货；避免每个格子重复展开整套木种组合。
+        // 窄替代组仍先安排，同价分支保留各自库存账，避免先吃掉另一支唯一能用的材料。
+        for (Need need : merge(needs).stream().sorted(Comparator.comparingInt(row -> row.alternatives().size())).toList()) {
             List<State> candidates = new ArrayList<>();
             for (State state : states) for (Allocation allocation : allocate(need, state, blocked)) {
                 State base = allocation.state(); int deficit = allocation.missing();
