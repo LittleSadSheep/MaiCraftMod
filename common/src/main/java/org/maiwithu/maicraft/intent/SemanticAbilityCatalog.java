@@ -219,8 +219,8 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));
             case GeneralAbilityAdapter.MANAGE_CONTAINER -> contract(
-                    "Deposit, withdraw or balance a semantic item group against one real loaded block container. MaiCraft selects and approaches it, opens the native menu, derives safe sides, transfers and verifies both inventories.",
-                    targets("nearest", "landmark", "area"),
+                    "Deposit, withdraw or balance against one loaded container. A coordinates target binds that exact block. MaiCraft approaches and transfers natively; receipts identify the actual container and distinguish transfer totals from remaining stock.",
+                    targets("nearest", "landmark", "area", "coordinates"),
                     fields(
                             field("operation", "string", "Deposit, withdraw or balance."),
                             field("item_id", "resource_id", "One selected item; use item_ids for a loot category."),
@@ -231,7 +231,8 @@ public final class SemanticAbilityCatalog {
                             field("block_id", "resource_id", "Optional container block-type filter, never a location."),
                             field("selection", "string", "Nearest accepts the closest safe match; unique rejects ambiguity."),
                             field("protected_labels", "array<string>", "Remembered places whose containers must not be touched."),
-                            field("radius", "integer", "Bounded loaded-container search radius; default 32.")));
+                            field("radius", "integer", "Bounded loaded-container search radius; default 32."),
+                            field("may_alter_terrain", "boolean", "Explicit native route preparation permission; default false.")));
             case "maicraft:sleep" -> contract(
                     "Sleep safely. MaiCraft finds or places a usable bed, travels to it and lies down.",
                     targets("current_place"),

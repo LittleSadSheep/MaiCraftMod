@@ -66,6 +66,15 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public final int radius;
     /** 内部多箱供料绑定的确切木桶／箱子坐标；公开存取请求仍按原有地标和选择方式找容器。 */
     public final BlockPos supplyPosition;
+    public BlockPos exactTarget;
+    public String exactDimension;
+    public boolean mayAlterTerrain;
+
+    /** 点名机器中的某只箱子时绑定该格，仍须原生走近和开箱，不在其附近重新选箱。 */
+    public SemanticContainerTaskRecord at(BlockPos target, String dimension) {
+        exactTarget = Objects.requireNonNull(target).immutable();
+        exactDimension = Objects.requireNonNull(dimension); return this;
+    }
 
     // 明确物品编号组与物品标签只能二选一；具体搬多少与目标数量也不能同时给，balance 必须给目标数量。
     public SemanticContainerTaskRecord(

@@ -17,7 +17,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.Container;
-import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.AbstractFurnaceMenu;
@@ -32,12 +31,9 @@ import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.FailureType;
-import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
@@ -60,14 +56,13 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
  */
 public final class SemanticContainerCompanionTask
         extends AbstractCompanionTask<SemanticContainerTaskRecord> {
-    private static final double REACH = 4.5D;
     private static final int LANDMARK_PROTECTION_RADIUS = 12;
     private static final int OTHER_PLAYER_RADIUS = 6;
     private static final long MENU_WAIT_TICKS = 80L;
     /** 玩家和木桶两边数量确实一增一减，才给大批量搬运续时；一直等点击回执不算进展。 */
     private static final long TRANSFER_PROGRESS_LEASE_TICKS = 2L * 60L * 20L;
 
-    private enum Phase { SURVEY, APPROACH, OPEN, WAIT_MENU, PLAN, TRANSFER, CLEANUP, COMPLETE }
+    private enum Phase { SURVEY, OPEN, WAIT_MENU, PLAN, TRANSFER, CLEANUP, COMPLETE }
     private enum Purpose { OPEN, TRANSFER, CLOSE }
     private enum Direction { DEPOSIT, WITHDRAW }
 
@@ -90,13 +85,14 @@ public final class SemanticContainerCompanionTask
 
     private Phase phase = Phase.SURVEY;
     private Candidate target;
+    private String targetDimension;
+    private long targetObservedAt;
     private MenuView view;
     private TagKey<Item> itemTag;
     private Task activeChild;
     private TaskRecord activeRecord;
     private Purpose activePurpose;
     private int childSerial;
-    private int approachDudTicks;
     private long waitMenuSince;
     private int expectedContainerId = -1;
     private Class<?> expectedMenuClass;
@@ -156,7 +152,6 @@ public final class SemanticContainerCompanionTask
         }
         return switch (phase) {
             case SURVEY -> survey();
-            case APPROACH -> approach();
             case OPEN -> open();
             case WAIT_MENU -> waitMenu();
             case PLAN -> plan();
@@ -201,6 +196,8 @@ public final class SemanticContainerCompanionTask
                     + "selection=nearest or narrow the block type or landmark.", FailureType.UNKNOWN);
         }
         target = candidates.getFirst();
+        targetDimension = player.level().dimension().location().toString();
+        targetObservedAt = player.level().getGameTime();
         if (r.storageSupply()) {
             Map<BlockPos, BlockEntity> identities = new LinkedHashMap<>();
             ContainerSupplySources.footprint(player.level(), target.position()).forEach(at -> identities.put(at, player.level().getBlockEntity(at)));
@@ -212,7 +209,8 @@ public final class SemanticContainerCompanionTask
                     + "using or changing the selected container.", FailureType.ENTITY_BLOCKED);
         }
         if (player.containerMenu != player.inventoryMenu) return reuseOpenMenu();
-        phase = r.storageSupply() ? Phase.OPEN : Phase.APPROACH;
+        // 开箱子任务比较站位并等待交通收尾，父任务不再锁定另一条接近路线。
+        phase = Phase.OPEN;
         return TaskState.RUNNING;
     }
 
@@ -232,6 +230,13 @@ public final class SemanticContainerCompanionTask
 
     private BlockPos selectionCenter() {
         if (r.storageSupply()) return r.supplyPosition;
+        if (r.exactTarget != null) {
+            if (!r.exactDimension.equals(player.level().dimension().location().toString())) {
+                failFinal("container_target_not_in_dimension", "The exact container is not in the current dimension.", FailureType.TARGET_LOST);
+                return null;
+            }
+            return r.exactTarget;
+        }
         if (r.landmarkLabel == null) return player.blockPosition();
         IntentRuntime.Landmark landmark = IntentRuntime.get().landmark(r.landmarkLabel);
         if (landmark == null) {
@@ -261,6 +266,10 @@ public final class SemanticContainerCompanionTask
             ResourceLocation id = BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(center).getBlock());
             return r.blockId != null && !r.blockId.equals(id) ? List.of() : List.of(new Candidate(center, id, false));
         }
+        if (r.exactTarget != null) {
+            Candidate exact = candidateAt(r.exactTarget);
+            return exact == null ? List.of() : List.of(exact);
+        }
         List<Candidate> result = new ArrayList<>();
         ClientLevel level = player.clientLevel;
         int chunkRadius = (r.radius + 15) / 16;
@@ -277,26 +286,28 @@ public final class SemanticContainerCompanionTask
                     BlockPos pos = entry.getKey();
                     if (!visited.add(pos.asLong())
                             || squared(pos, center) > (long) r.radius * r.radius) continue;
-                    BlockEntity entity = entry.getValue();
-                    if (!(entity instanceof Container)) continue;
-                    var state = level.getBlockState(pos);
-                    ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-                    if (r.blockId != null && !r.blockId.equals(blockId)) continue;
-                    MenuProvider provider = state.getMenuProvider(level, pos);
-                    if (provider == null || specializedStorage(blockId)
-                            || insideProtectedLandmark(pos)) continue;
-                    String customName = entity instanceof BaseContainerBlockEntity named
-                            && named.getCustomName() != null
-                            ? named.getCustomName().getString() : null;
-                    if (customName != null && r.protectedLabels.stream()
-                            .anyMatch(label -> label.equalsIgnoreCase(customName))) continue;
-                    boolean nameMatches = customName != null && r.landmarkLabel != null
-                            && customName.equalsIgnoreCase(r.landmarkLabel);
-                    result.add(new Candidate(pos.immutable(), blockId, nameMatches));
+                    Candidate candidate = candidateAt(pos);
+                    if (candidate != null) result.add(candidate);
                 }
             }
         }
         return result;
+    }
+
+    private Candidate candidateAt(BlockPos pos) {
+        // 精确和就近目标沿用同一类型与保护检查；明确箱子不存在时不另选一只代替。
+        var level = player.level();
+        if (!level.isLoaded(pos)) return null;
+        BlockEntity entity = level.getBlockEntity(pos);
+        if (!(entity instanceof Container)) return null;
+        var state = level.getBlockState(pos);
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        if ((r.blockId != null && !r.blockId.equals(id)) || state.getMenuProvider(level, pos) == null
+                || specializedStorage(id) || insideProtectedLandmark(pos)) return null;
+        String name = entity instanceof BaseContainerBlockEntity named && named.getCustomName() != null
+                ? named.getCustomName().getString() : null;
+        if (name != null && r.protectedLabels.stream().anyMatch(label -> label.equalsIgnoreCase(name))) return null;
+        return new Candidate(pos.immutable(), id, name != null && r.landmarkLabel != null && name.equalsIgnoreCase(r.landmarkLabel));
     }
 
     // 以每个保护地标为中心，把十二格距离内的容器位置排除；这里没有检查关联的大箱子另一半。
@@ -310,42 +321,6 @@ public final class SemanticContainerCompanionTask
                     <= (long) LANDMARK_PROTECTION_RADIUS * LANDMARK_PROTECTION_RADIUS) return true;
         }
         return false;
-    }
-
-    // 走近前反复核对目标方块是否还在、附近是否出现其他玩家；到达几何距离后才开始开箱。
-    private TaskState approach() {
-        if (!targetStillValid()) return failFinal("container_target_changed",
-                "The selected block is no longer the same loaded container.",
-                FailureType.TARGET_LOST);
-        if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
-                "Another player approached the selected container, so MaiCraft paused before use.",
-                FailureType.ENTITY_BLOCKED);
-        if (withinReach()) {
-            stopNav();
-            approachDudTicks = 0;
-            phase = Phase.OPEN;
-            return TaskState.RUNNING;
-        }
-        if (nav == null) {
-            nav = PlayerNav.to(player, () -> GoalCompiler.interact(target.position()),
-                    1.0D, this::withinReach).withTerrainProbe();
-        }
-        return switch (nav.tick()) {
-            case RUNNING -> TaskState.RUNNING;
-            case ARRIVED -> {
-                if (++approachDudTicks < 10) yield TaskState.RUNNING;
-                stopNav();
-                yield failFinal("container_out_of_reach",
-                        "The route ended without a valid first-person interaction stance.",
-                        FailureType.STANCE_DUD);
-            }
-            case FAILED -> {
-                FailureType type = nav.failType();
-                stopNav();
-                yield failFinal("container_unreachable", "No safe first-person route reached the "
-                        + "selected container under the current terrain policy.", type);
-            }
-        };
     }
 
     // 走近期间若同箱菜单已被原生工具打开，直接接续；否则检查锁定并通过普通右键子任务开箱。
@@ -374,7 +349,8 @@ public final class SemanticContainerCompanionTask
                     childId("open-storage"), childDeadline(30L * 20L), request), Purpose.OPEN);
         }
         return start(new InteractAtTaskRecord(childId("open"), childDeadline(30L * 20L),
-                MouseButton.RIGHT, target.position(), 0, null), Purpose.OPEN);
+                MouseButton.RIGHT, target.position(), 0, null, null, player.level().getBlockState(target.position()).getBlock())
+                .withEmptyHand().withApproach(r.mayAlterTerrain).withMenuObservation(), Purpose.OPEN);
     }
 
     // 等右键带来的菜单真正出现并显示，要求鼠标上没有残留物品，再记录玩家侧、容器侧和整份菜单状态。
@@ -927,11 +903,6 @@ public final class SemanticContainerCompanionTask
         return state.getMenuProvider(player.level(), target.position()) != null;
     }
 
-    private boolean withinReach() {
-        return target != null && player.getEyePosition().distanceToSqr(
-                Vec3.atCenterOf(target.position())) <= REACH * REACH;
-    }
-
     // 只要箱子周围各方向扩六格的盒形范围内有另一位活着、非旁观的玩家，就阻止继续；不检查对方是否实际操作箱子。
     private boolean otherPlayerNearTarget() {
         if (target == null) return false;
@@ -1050,6 +1021,10 @@ public final class SemanticContainerCompanionTask
         data.put("operation", r.operation.name().toLowerCase(Locale.ROOT));
         data.put("menu_reused", reusedMenu);
         if (containerKind != null) data.put("container_kind", containerKind);
+        // 给出本次实际选中箱体，累计投料不再只挂在泛指的 minecraft:chest 上。
+        if (target != null) data.put("container_observation", Map.of("block_id", target.blockId().toString(),
+                "dimension", targetDimension, "position", Map.of("x", target.position().getX(), "y", target.position().getY(), "z", target.position().getZ()),
+                "observed_at_tick", targetObservedAt, "menu_observed", expectedContainerId >= 0));
         data.put("initial_main_count", initialPlayerCount);
         data.put("observed_final_main_count", lastPlayerCount);
         data.put("initial_container_count", initialContainerCount);

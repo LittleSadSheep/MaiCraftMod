@@ -184,6 +184,8 @@ public final class SemanticResultView {
         if (Set.of("as_built_blueprint", "blueprint_diff", "latest_snapshot").contains(key)) return value;
         // 控制图用坐标标识原生节点；保留整份只读图，避免节点、连线、控制路径被文字整理合并成同一个占位词。
         if (key.equals("control_analysis")) return value;
+        // 实际选中的箱体是动作证据，保留身份供模型对照输入箱蓝图，不额外授权操作。
+        if (key.equals("container_observation")) return value;
         // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。
         if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return value;
         // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。

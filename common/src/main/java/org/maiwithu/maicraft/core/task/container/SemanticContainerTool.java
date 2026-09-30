@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.container;
 
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.bool;
 import static org.maiwithu.maicraft.core.tools.SemanticParameters.integer;
 import static org.maiwithu.maicraft.core.tools.SemanticParameters.optionalInteger;
 import static org.maiwithu.maicraft.core.tools.SemanticParameters.strings;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
@@ -31,7 +33,7 @@ public final class SemanticContainerTool implements MaiCraftTool {
         return "Deposit, withdraw or balance semantic item groups against one loaded block "
                 + "container. MaiCraft selects the real container, approaches and opens it in "
                 + "first person, derives safe menu sides, performs receipt-confirmed transfers, "
-                + "and verifies both inventory deltas. Never provide coordinates, slots, clicks or moves.";
+                + "and verifies native transfers. An exact observed block target may be supplied; slots and clicks remain internal.";
     }
 
     @Override
@@ -60,6 +62,12 @@ public final class SemanticContainerTool implements MaiCraftTool {
                         "Remembered places whose containers must not be touched.")
                 .optionalInteger("radius", "Bounded loaded-container search radius.", 1,
                         SemanticContainerTaskRecord.MAX_RADIUS)
+                // 坐标是目标箱体身份，不是角色必须站进去的位置；仍由原生执行器负责接近和开箱。
+                .optionalInteger("x", "Exact observed container X; provide all three axes.", Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .optionalInteger("y", "Exact observed container Y; provide all three axes.", Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .optionalInteger("z", "Exact observed container Z; provide all three axes.", Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .optionalString("dimension", "Exact container dimension; defaults to the current dimension.")
+                .optionalBool("may_alter_terrain", "Permit native route preparation while approaching.")
                 .build();
     }
 
@@ -91,6 +99,16 @@ public final class SemanticContainerTool implements MaiCraftTool {
                 text(args, "landmark_label"),
                 SemanticContainerTaskRecord.Selection.parse(text(args, "selection")),
                 labels, radius);
+        // 精确目标也复用严格整数契约；null 等同缺席，部分坐标不得被默认为别的箱子。
+        Integer x = optionalInteger(args, "x", Integer.MIN_VALUE, Integer.MAX_VALUE);
+        Integer y = optionalInteger(args, "y", Integer.MIN_VALUE, Integer.MAX_VALUE);
+        Integer z = optionalInteger(args, "z", Integer.MIN_VALUE, Integer.MAX_VALUE);
+        if (x != null || y != null || z != null) {
+            if (x == null || y == null || z == null) throw new IllegalArgumentException("exact container requires x, y and z");
+            String dimension = text(args, "dimension");
+            record.at(new BlockPos(x, y, z), dimension == null ? player.level().dimension().location().toString() : dimension);
+        }
+        record.mayAlterTerrain = bool(args, "may_alter_terrain", false);
         setTask(player, record, args, reply);
     }
 

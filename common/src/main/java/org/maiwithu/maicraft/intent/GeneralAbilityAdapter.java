@@ -108,7 +108,7 @@ public final class GeneralAbilityAdapter {
             case FISH -> fish(goal, player);
             case DROP -> drop(goal, player);
             case CONTAINER -> interact(goal, player, runtime, true);
-            case MANAGE_CONTAINER -> manageContainer(goal);
+            case MANAGE_CONTAINER -> manageContainer(goal, player);
             case FIND_ENTITY -> findEntity(goal);
             case FIND_BLOCK -> findBlock(goal);
             default -> throw new IllegalArgumentException("unsupported general ability: " + goal.ability());
@@ -182,7 +182,7 @@ public final class GeneralAbilityAdapter {
                 Set.of(BuiltInRegistries.ITEM.get(outputId))).onlyAt(at, state));
     }
 
-    private static IntentAction manageContainer(Goal goal) {
+    private static IntentAction manageContainer(Goal goal, LocalPlayer player) {
         // 先分清要存入、取出还是让背包保留指定数量，再确定物品和容器，最后交给整理容器任务执行。
         JsonObject p = goal.parameters();
         String operation = lower(string(p, "operation"));
@@ -268,13 +268,15 @@ public final class GeneralAbilityAdapter {
         String landmark = target != null && ("landmark".equals(targetKind)
                 || "area".equals(targetKind)) ? target.label() : null;
         boolean nearest = nearest(goal, p);
-        if ("coordinates".equals(targetKind) || "prior_result".equals(targetKind)) {
-            // 当前这个入口只接受容器类型、记住的地点或就近选择，不接受前一步的位置结果。
-            return decision(goal, "manage_container does not accept coordinates or prior menu details.",
-                    List.of(option("retry", "Use block_id, a landmark, or nearest selection."),
+        if ("prior_result".equals(targetKind)) {
+            return decision(goal, "Container management needs an observed exact block or a container selector.",
+                    List.of(option("retry", "Use observed coordinates, a landmark, or nearest selection."),
                             option("cancel", "Cancel container management.")), null);
         }
-        if (blockId == null && landmark == null && !nearest) {
+        boolean exact = "coordinates".equals(targetKind);
+        if (exact && !sameDimension(target.position(), player))
+            return exactBlockUnavailable(goal, "The exact container needs coordinates in the current dimension.", null);
+        if (blockId == null && landmark == null && !nearest && !exact) {
             return decision(goal, "Which semantic container should be managed?",
                     List.of(option("retry", "Provide block_id, a landmark target, or selection=nearest."),
                             option("cancel", "Cancel container management.")), null);
@@ -288,6 +290,12 @@ public final class GeneralAbilityAdapter {
 
         JsonObject args = new JsonObject();
         args.addProperty("operation", operation);
+        // 明确的输入箱目标不能降成角色脚边的最近箱。
+        if (exact) {
+            args.addProperty("x", target.position().x()); args.addProperty("y", target.position().y()); args.addProperty("z", target.position().z());
+            args.addProperty("dimension", player.level().dimension().location().toString());
+        }
+        args.addProperty("may_alter_terrain", bool(p, "may_alter_terrain", false));
         if (!itemIds.isEmpty()) {
             JsonArray values = new JsonArray();
             itemIds.forEach(values::add);
