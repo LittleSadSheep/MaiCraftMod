@@ -79,6 +79,12 @@ def regressionSuites = [
         heap: '512m', directory: 'machine-regression',
         purpose: '验证机器证据、设计契约与请求边界'
     ],
+    // 场地有效性与失败补读单独回放，保证时间、编号消费和回执折叠都覆盖到真实世界观察。
+    snapshotRegression: [
+        entry: 'org.maiwithu.maicraft.intent.MachineSnapshotRegressionSuite',
+        heap: '512m', directory: 'snapshot-regression', timeoutSeconds: 45,
+        purpose: '验证场地变化与失败回执中的最新快照'
+    ],
     buildingBudgetRegression: [
         entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
         heap: '768m', directory: 'building-budget-regression', timeoutSeconds: 120,

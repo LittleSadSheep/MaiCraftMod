@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.core.BlockPos;
 
-/** 密集地层不挤掉平台和障碍；长时间设计只延续场地定位，不改变普通机器回执的时效。 */
+/** 密集地层不挤掉平台和障碍；观察时刻不改变模型收到的场地几何。 */
 public final class ConstructionSiteGeometryTest {
     public static void main(String[] args) {
         JsonObject source = JsonParser.parseString("""
@@ -27,11 +27,12 @@ public final class ConstructionSiteGeometryTest {
         check(result.getAsJsonArray("palette").size() == 2 && result.toString().contains("barrel"), "only displayed states enter the planning palette");
         check(rows.get(0).toString().equals("[-1,-8,-8,8,0]") && rows.get(17).toString().equals("[0,0,0,0,1]"), "inclusive ranges preserve exact relative positions");
         check(snapshot.report().getAsJsonArray("relative_blocks").size() == 2313, "projection leaves the complete cached geometry intact");
-        check(!MachineSnapshots.expired(snapshot, 5000, true), "design duration alone does not invalidate the construction anchor");
-        check(MachineSnapshots.expired(snapshot, 5000, false), "site receipts cannot extend permission for native machine operations");
-        check(MachineSnapshots.expired(snapshot, 99, true), "reversed game time still invalidates a site");
+        // 同一场地的几何呈现不受观察时刻影响；实际结构变化的操作校验由世界运行测试覆盖。
+        var later = new MachineSnapshots.Snapshot(snapshot.id(),snapshot.label(),snapshot.dimension(),snapshot.center(),
+                snapshot.radius(),5000,snapshot.fingerprint(),snapshot.reportJson());
+        check(ConstructionSiteGeometry.describe(later).equals(result), "observation time does not alter the reusable site geometry");
         source.remove("construction_site");
-        check(MachineSnapshots.expired(snapshot(source), 5000, true), "ordinary machine actions retain their short receipt lifetime");
+        check(ConstructionSiteGeometry.describe(snapshot(source)).equals(result), "ordinary observations expose the same measured geometry");
         source.addProperty("structure_complete", false);
         check(!ConstructionSiteGeometry.describe(snapshot(source)).get("structure_complete").getAsBoolean(), "unloaded observations are never promoted to complete");
         System.out.println("ConstructionSiteGeometryTest: passed");

@@ -2,12 +2,14 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.List;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignRejection;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshotRejection;
 import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineSurvivalMaterials;
 
@@ -24,6 +26,7 @@ public final class MachinePlanPreflight {
         // 先沿用目标契约限制字段、组合深度和蓝图大小，再做原生编译，错误请求不能绕过原有入口检查。
         SemanticGoalContract.validate(goal, IntentRuntime.KNOWN_ABILITIES);
         JsonArray checks = new JsonArray();
+        JsonObject result = new JsonObject();
         boolean valid = true;
         List<Goal> steps = goal.executableSteps();
         for (int index = 0; index < steps.size(); index++) {
@@ -61,10 +64,17 @@ public final class MachinePlanPreflight {
                 JsonArray issues = new JsonArray();
                 issues.add(MachineDesignRejection.issue(invalid.getMessage(), issuePath));
                 check.add("issues", issues);
+                if (invalid instanceof MachineSnapshotRejection rejected) {
+                    // 计划绑定缺失时也交付同址新现场，蓝图保持原稿，由模型直接核对并替换引用后重新规划。
+                    rejected.details().forEach((key, value) -> {
+                        if (value instanceof JsonElement json) result.add(key, json.deepCopy());
+                        else result.addProperty(key, value.toString());
+                    });
+                    issues.get(0).getAsJsonObject().addProperty("next_action", result.get("next_action").getAsString());
+                }
             }
             checks.add(check);
         }
-        JsonObject result = new JsonObject();
         result.addProperty("valid", valid);
         result.add("checks", checks);
         result.addProperty("scope", "Declared machine blueprints, native installation, bound site and known creative-resource eligibility; ordinary material supply and actual production remain execution checks. Other goal types retain their own checks.");

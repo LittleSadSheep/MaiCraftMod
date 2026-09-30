@@ -11,7 +11,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.machine.ConstructionSiteGeometry;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshotRejection;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 用真实方块状态和完整快照缓存验证密集地形、设计耗时、现场变化与回执消费。 */
 public final class ConstructionSiteRuntimeTest {
@@ -31,14 +33,18 @@ public final class ConstructionSiteRuntimeTest {
             check(ConstructionSiteGeometry.describe(site).getAsJsonArray("surface_and_obstacles").size() == 15, "the model only needs fifteen exact floor runs");
             var clock = world.level.getClass().getDeclaredField("time"); clock.setAccessible(true); clock.setLong(world.level, 5000);
             check(MachineSnapshots.requireForConstruction(world.player, site.id()).id().equals(site.id()), "unchanged geometry survives long design work");
-            // 生产耗时较长时在原位重验结构，既不延长菜单回执，也不把原库存观察伪装成新数据。
+            // 思考耗时不让未变化的设备失效；普通操作与生产都复用原观察，不伪造新库存或新的观察时间。
             check(MachineSnapshots.requireForProduction(world.player,site.id()).gameTime()==site.gameTime(),
                     "production revalidates geometry without rewriting original observation time");
+            check(MachineSnapshots.requireFresh(world.player,site.id()).gameTime()==site.gameTime(),
+                    "ordinary operations retain unchanged evidence after long design work");
             try { MachineSnapshots.requireForProduction(world.player,regular.id()); throw new AssertionError("partial structure was accepted"); }
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("incomplete"),"production still needs complete structural evidence"); }
             clock.setLong(world.level,site.gameTime()-1);
-            try { MachineSnapshots.requireForProduction(world.player,site.id()); throw new AssertionError("reversed clock was accepted"); }
-            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("expired"),"reversed game time cannot renew the observation"); }
+            // 游戏时间回拨并未改变机器，不能让原位置的操作因时钟管理而被迫重新勘测。
+            check(MachineSnapshots.requireForProduction(world.player,site.id()).id().equals(site.id())
+                            && MachineSnapshots.requireFresh(world.player,site.id()).id().equals(site.id()),
+                    "clock reversal alone does not invalidate observed geometry");
             clock.setLong(world.level,5000);
             // 在线 plan 使用同一锚点完成原生蓝图检查，不领材料、不消费编号，execute 还能继续使用。
             IntentRuntime runtime = IntentRuntime.get();
@@ -92,15 +98,16 @@ public final class ConstructionSiteRuntimeTest {
             var refreshed = MachineSnapshots.constructionSite(world.player, "site", new BlockPos(fixed.x(), fixed.y(), fixed.z()), 7);
             check(refreshed.center().equals(site.center()) && MachinePlanPreflight.review(goal, world.player, runtime)
                     .get("valid").getAsBoolean(), "刷新现场后旧计划仍绑定同一锚点");
-            // 列表只显示同名同址的最新观察；施工锚点可复用和操作证据已过期必须分别报告。
+            // 列表只显示同名同址的最新观察；等待时间不把仍未变化的场地误标成过期。
             clock.setLong(world.level,7001);
             var summaries = MachineSnapshots.summaries(world.player);
             var sites = summaries.getAsJsonArray("machines").asList().stream().map(value -> value.getAsJsonObject())
                     .filter(value -> value.get("label").getAsString().equals("site")).toList();
             check(sites.size() == 1 && sites.getFirst().get("snapshot_id").getAsString().equals(refreshed.id())
                     && sites.getFirst().get("cached_versions").getAsInt() == 2,"repeated observations are one machine reference with version count");
-            check(sites.getFirst().get("expired").getAsBoolean() && sites.getFirst().get("construction_anchor_reusable").getAsBoolean(),
-                    "a reusable construction anchor does not make old operating evidence fresh");
+            check(!sites.getFirst().get("expired").getAsBoolean() && !sites.getFirst().get("structure_changed").getAsBoolean()
+                            && sites.getFirst().get("construction_anchor_reusable").getAsBoolean(),
+                    "unchanged operating evidence and construction anchors survive elapsed time");
             check(MachineSnapshots.requireForConstruction(world.player,site.id()).id().equals(site.id()),"summary deduplication cannot consume older referenced observations");
             try {
                 runtime.constructionAnchor("site", new Goal.WorldPosition(10, 8, 9, "minecraft:the_nether"));
@@ -115,11 +122,25 @@ public final class ConstructionSiteRuntimeTest {
             Goal retried = Goal.fromJson(request);
             check(MachineAbilityAdapter.adapt(retried, world.player, runtime, null) instanceof IntentAction.Native,
                     "a supply-only retry can reuse unchanged construction geometry");
-            try { MachineSnapshots.requireFresh(world.player, site.id()); throw new AssertionError("native action reused an old site receipt"); }
-            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("expired"), "native actions retain their freshness rule"); }
+            check(MachineSnapshots.requireFresh(world.player,site.id()).id().equals(site.id()),
+                    "creating construction attempts does not age out unchanged operation evidence");
             world.set(anchor.below(), Blocks.GOLD_BLOCK.defaultBlockState());
+            // 最新的缓存概况也按实际方块变化判断，仍保留原工地锚点供逐格续建。
+            var changedSummary = MachineSnapshots.summaries(world.player).getAsJsonArray("machines").asList().stream()
+                    .map(value -> value.getAsJsonObject()).filter(value -> value.get("label").getAsString().equals("site")).findFirst().orElseThrow();
+            check(changedSummary.get("expired").getAsBoolean() && changedSummary.get("structure_changed").getAsBoolean()
+                            && changedSummary.get("construction_anchor_reusable").getAsBoolean(),
+                    "actual scene changes invalidate operation evidence without blocking construction anchors");
             try { MachineSnapshots.requireForProduction(world.player,site.id()); throw new AssertionError("changed production geometry was accepted"); }
-            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("changed"),"production checks current blocks before starting"); }
+            catch (MachineSnapshotRejection expected) {
+                JsonObject latest = (JsonObject) expected.details().get("latest_snapshot");
+                var current = MachineSnapshots.requireFresh(world.player,latest.get("snapshot_id").getAsString());
+                check(!current.id().equals(site.id()) && current.center().equals(anchor) && current.radius()==site.radius()
+                                && latest.getAsJsonObject("target").get("label").getAsString().equals("site")
+                                && latest.getAsJsonArray("palette").toString().contains("minecraft:gold_block"),
+                        "changed geometry returns a usable current snapshot at the original named anchor");
+            }
+            executeReturnsCurrentObservation(world, runtime, site, anchor);
             var changed = MachinePlanPreflight.review(goal, world.player, runtime);
             // 施工或其他实际变化发生后继续用原锚点执行，具体格子交给原生施工，不再生成一次无谓的勘测决策。
             check(changed.get("valid").getAsBoolean()
@@ -131,9 +152,54 @@ public final class ConstructionSiteRuntimeTest {
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("missing"),"production cannot revive a consumed receipt"); }
             try { MachineSnapshots.requireForConstruction(world.player, site.id()); throw new AssertionError("consumed site was accepted"); }
             catch (IllegalArgumentException expected) { check(expected.getMessage().contains("missing"), "consumed anchors cannot start another build"); }
+            missingReferencesReturnCurrentSite(world,runtime,goal,anchor);
             check(world.blockUses() == 0 && world.itemUses() == 0 && world.player.getInventory().isEmpty(), "survey never uses blocks or supplies materials");
         }
         System.out.println("ConstructionSiteRuntimeTest: passed");
+    }
+
+    // 缓存编号消失后仍能按已记地标定位；规划和直接执行都交付新绑定，蓝图不必重新设计或另发勘测。
+    private static void missingReferencesReturnCurrentSite(InteractionWorldTestHarness world, IntentRuntime runtime,
+            Goal original, BlockPos anchor) {
+        JsonObject planned = MachinePlanPreflight.review(original,world.player,runtime);
+        JsonObject latest = planned.getAsJsonObject("latest_snapshot");
+        check(!planned.get("valid").getAsBoolean() && planned.get("failure_code").getAsString().equals("machine_snapshot_missing")
+                        && MachineSnapshots.requireForConstruction(world.player,latest.get("snapshot_id").getAsString()).center().equals(anchor),
+                "missing-reference planning returns current evidence at the named site despite player movement");
+        JsonObject revised = original.toJson();
+        revised.getAsJsonObject("parameters").addProperty("snapshot_id",latest.get("snapshot_id").getAsString());
+        revised.add("target",latest.getAsJsonObject("target").deepCopy());
+        check(MachinePlanPreflight.review(Goal.fromJson(revised),world.player,runtime).get("valid").getAsBoolean()
+                        && revised.getAsJsonObject("parameters").get("blueprint").equals(original.parameters().get("blueprint")),
+                "the unchanged authored blueprint can be replanned using the returned reference alone");
+        var action = MachineAbilityAdapter.adapt(original,world.player,runtime,null);
+        check(action instanceof IntentAction.Report && !((IntentAction.Report)action).result().success()
+                        && ((IntentAction.Report)action).result().data().containsKey("latest_snapshot"),
+                "direct execution also returns a current site instead of another observation decision");
+    }
+
+    // 模型沿旧现场开机器时，在任何点击前结束本次尝试，并在同一执行结果中给出新编号与新方块。
+    private static void executeReturnsCurrentObservation(InteractionWorldTestHarness world, IntentRuntime runtime,
+            MachineSnapshots.Snapshot previous, BlockPos anchor) {
+        JsonObject request = JsonParser.parseString("""
+                {"ability":"maicraft:operate_machine","outcome":"启动已观察的机器",
+                 "target":{"kind":"landmark","label":"site"},
+                 "parameters":{"operation":"set_control","powered":true,"allow_use":true}}
+                """).getAsJsonObject();
+        request.getAsJsonObject("parameters").addProperty("snapshot_id", previous.id());
+        Goal goal = Goal.fromJson(request);
+        var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        var task = new IntentTask(world.player, record, runtime);
+        check(task.tick(world.player)==TaskState.FAILED && record.decisionSnapshot()==null,
+                "changed-scene execution returns its failure without another observation decision");
+        JsonObject data = record.attempts().getLast().result().getAsJsonObject("data");
+        JsonObject latest = data.getAsJsonObject("latest_snapshot");
+        check(data.get("failure_code").getAsString().equals("machine_snapshot_changed")
+                        && data.get("previous_snapshot_id").getAsString().equals(previous.id())
+                        && latest.getAsJsonObject("target").get("label").getAsString().equals("site")
+                        && latest.getAsJsonArray("palette").toString().contains("minecraft:gold_block")
+                        && MachineSnapshots.requireFresh(world.player,latest.get("snapshot_id").getAsString()).center().equals(anchor),
+                "semantic failure preserves the exact new snapshot and original target despite player movement");
     }
 
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

@@ -180,8 +180,8 @@ public final class SemanticResultView {
             if (value instanceof JsonElement json && json.isJsonPrimitive() && json.getAsJsonPrimitive().isString())
                 return json.getAsString();
         }
-        // 地图蓝图和结构差异都是只读观测，保留真实状态属性与未知格子，不能再按动作字段名删掉其中的数据。
-        if (key.equals("as_built_blueprint") || key.equals("blueprint_diff")) return value;
+        // 地图蓝图、结构差异和变化后的最新快照都是只读观测，保留相对格子与真实状态，供模型直接修订操作。
+        if (Set.of("as_built_blueprint", "blueprint_diff", "latest_snapshot").contains(key)) return value;
         // 控制图用坐标标识原生节点；保留整份只读图，避免节点、连线、控制路径被文字整理合并成同一个占位词。
         if (key.equals("control_analysis")) return value;
         // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。

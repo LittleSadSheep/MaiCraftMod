@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineControl;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReview;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 import org.maiwithu.maicraft.core.integration.machine.MachineRecipeEvidence;
+import org.maiwithu.maicraft.core.integration.machine.MachineSnapshotRejection;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.core.integration.machine.MachineInspectionBlueprintView;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprint;
@@ -71,6 +72,9 @@ final class MachineAbilityAdapter {
                 case BUILD -> build(goal, player, runtime);
                 default -> throw new IllegalArgumentException("unknown machine ability");
             };
+        } catch (MachineSnapshotRejection rejected) {
+            // 旧现场或编号无法支持原生动作时，结束本次尝试并交付新现场，避免只给过期提示再等待勘测。
+            return new IntentAction.Report(TaskResult.fail(rejected.getMessage(), rejected.details()), null);
         } catch (IllegalArgumentException unavailable) {
             JsonObject context = new JsonObject();
             context.addProperty("ability", goal.ability());
@@ -485,7 +489,7 @@ final class MachineAbilityAdapter {
             if (execution instanceof MachineProductionTaskRecord production)
                 ClientMachineCatalog.registerPlan(player,snapshot.label(),production.plan);
             // 施工继续使用原场地锚点；已经搭过的方块由执行器复用，不要求工地维持开工前的结构指纹。
-            // 普通机器操作观察保持一次性消费，不把施工锚点的复用扩大到菜单、库存或设备控制。
+            // 普通机器操作观察仍一次性消费；施工定位复用不代表可以重复提交菜单、库存或设备控制动作。
             if (!snapshot.report().has("construction_site")) MachineSnapshots.consume(snapshot);
             return new IntentAction.Native(execution);
         }
@@ -577,19 +581,28 @@ final class MachineAbilityAdapter {
             Goal.WorldPosition target = resolve(goal.target(), player, runtime);
             return MachineSnapshots.constructionSite(player, goal.target().label(), block(target), 0);
         }
-        // 同时核对观察编号、机器名字和位置，不能用甲机器的观察去授权修改乙机器。
+        // 先定位请求点名的机器，再校对观察编号；丢失缓存时只补读这个位置，不跟随角色当前脚位。
         String id = requiredString(goal.parameters(), "snapshot_id", 36);
-        // 生产先在执行端重验结构，再由原生执行器读取当前原料；不用让模型为超过一分钟的推理反复勘察。
-        boolean production = OPERATE.equals(goal.ability())
-                && "run_production".equals(optionalString(goal.parameters(),"operation",64));
-        MachineSnapshots.Snapshot snapshot = construction ? MachineSnapshots.requireForConstruction(player, id)
-                : production ? MachineSnapshots.requireForProduction(player,id) : MachineSnapshots.requireFresh(player, id);
         Goal.WorldPosition target = resolve(goal.target(), player, runtime);
+        MachineSnapshots.Snapshot snapshot;
+        try {
+            snapshot = MachineSnapshots.requireForConstruction(player, id);
+        } catch (IllegalArgumentException unavailable) {
+            if (!unavailable.getMessage().startsWith("machine_snapshot_missing:")) throw unavailable;
+            // 旧编号被淘汰或换会话后，已记住的工地仍能定位；返回当前观察让模型复核，再提交新绑定。
+            var latest = construction ? MachineSnapshots.constructionSite(player, goal.target().label(), block(target), 4)
+                    : MachineSnapshots.inspect(player, goal.target().label(), block(target), 4);
+            throw new MachineSnapshotRejection("machine_snapshot_missing", id, latest);
+        }
         if (!snapshot.center().equals(block(target)) || !snapshot.label().equalsIgnoreCase(goal.target().label())) {
             throw bad("machine_snapshot_target_mismatch: copy target and snapshot_id from the same observation; "
                     + "correct the mismatched request fields before obtaining another observation");
         }
-        return snapshot;
+        // 菜单、控制和生产都按当前结构重验；施工只借锚点，原料与运行条件由原生执行器实时读取。
+        boolean production = OPERATE.equals(goal.ability())
+                && "run_production".equals(optionalString(goal.parameters(),"operation",64));
+        return construction ? snapshot
+                : production ? MachineSnapshots.requireForProduction(player,id) : MachineSnapshots.requireFresh(player, id);
     }
 
     private static void requireMachineTarget(Goal goal) {

@@ -135,6 +135,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 rejected.addProperty("status", "needs_revision");
                 rejected.addProperty("ready_to_execute", false);
                 rejected.add("validation", validation);
+                // 场地编号缺失的规划失败已读到当前工地，外层直接交付恢复绑定，避免模型再发一次 perceive。
+                for (String field : List.of("latest_snapshot", "failure_code", "previous_snapshot_id", "next_action"))
+                    if (validation.has(field)) rejected.add(field, validation.get(field).deepCopy());
                 return rejected;
             }
             Plan plan = intents.compile(goal, minecraft.level.getGameTime());
