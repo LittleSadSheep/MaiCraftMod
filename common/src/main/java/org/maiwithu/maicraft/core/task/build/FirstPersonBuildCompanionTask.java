@@ -1788,7 +1788,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 || !cell.target().desiredState().canSurvive(player.level(), cell.target().pos())) return null;
         // 目标缺少点击面时直接寻找可搭建的支撑，不因预计拆除后的掉落物会靠近机器而提前停工。
         List<BlockPos> chain = BuildTemporarySupportPlan.find(player.level(), player.level()::isLoaded,
-                cell.target().pos(), pos -> scaffoldPermitted(pos, null));
+                cell.target().pos(), pos -> scaffoldPermitted(pos, null),
+                // 辅助垫块只改变点击条件；遵循作者的位置/轴向，选择能原生放出该状态的侧面。
+                pos -> BuildPlacementGeometry.usableTemporarySupport(player, cell.target(), pos));
         if (chain.isEmpty()) return null;
         Item material = BuildTemporarySupportMaterials.choose(
                 ScaffoldMaterials.of(player), scaffoldReservations(),

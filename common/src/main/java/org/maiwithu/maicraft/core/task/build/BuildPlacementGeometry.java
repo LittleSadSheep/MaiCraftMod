@@ -270,6 +270,32 @@ final class BuildPlacementGeometry {
 
     record PlanProgress(boolean complete, int probeCount, int gestureCount, int stanceChecks) {}
 
+    /** 为临时垫块选择末端侧面；这里只比较原生放置朝向，实际射线、站位与碰撞仍由施工时重新证明。 */
+    static boolean usableTemporarySupport(LocalPlayer player, BuildTaskRecord.Target target, BlockPos support) {
+        // 只优化明确声明的三向轴；楼梯半部、门铰链等依赖面内点击点的状态仍交给完整候选搜索。
+        if (!target.desiredState().hasProperty(BlockStateProperties.AXIS)
+                || !target.exactProperties().contains("axis")) return true;
+        BlockPos delta = target.pos().subtract(support);
+        Direction face = Direction.fromDelta(delta.getX(), delta.getY(), delta.getZ());
+        if (face == null) return false;
+        Vec3 hitPoint = Vec3.atCenterOf(support).add(Vec3.atLowerCornerOf(face.getNormal()).scale(.5));
+        BlockHitResult hit = new BlockHitResult(hitPoint, face, support, false);
+        boolean observedNativeState = false;
+        // Create 原生邻接轴优先规则可被潜行点击面覆盖；枚举站姿/潜行和各视角，不凭模组名猜测强制朝向。
+        for (float yaw : new float[]{0, 90, 180, -90}) for (float pitch : new float[]{0, 75, -75})
+            for (boolean sneak : new boolean[]{false, true}) {
+                NativePlacement placed = predictPlacement(player, new ItemStack(target.item()), hit, yaw, pitch,
+                        sneak, target.pos(), true);
+                if (placed == null || placed.state() == null) continue;
+                observedNativeState = true;
+                if (placed.state().hasProperty(BlockStateProperties.AXIS)
+                        && placed.state().getValue(BlockStateProperties.AXIS)
+                        == target.desiredState().getValue(BlockStateProperties.AXIS)) return true;
+            }
+        // 原生预测没有返回状态时不凭未知排除支撑，仍由后续实际放置检查处理。
+        return !observedNativeState;
+    }
+
     // 保存“哪个支撑面、哪个站位、面上的哪个点”三个进度。实际施工可每刻只推进少量检查，避免从头反复找。
     static final class PlanSearch {
         private static final long SLICE_NANOS = 4_000_000;

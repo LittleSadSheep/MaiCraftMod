@@ -25,12 +25,18 @@ final class BuildTemporarySupportPlan {
 
     static List<BlockPos> find(BlockGetter world, Predicate<BlockPos> loaded, BlockPos target,
                               Predicate<BlockPos> mayPlace) {
+        return find(world, loaded, target, mayPlace, ignored -> true);
+    }
+
+    static List<BlockPos> find(BlockGetter world, Predicate<BlockPos> loaded, BlockPos target,
+                              Predicate<BlockPos> mayPlace, Predicate<BlockPos> usableClickSupport) {
         // 按离目标的步数一圈圈往外找，并记录每格从哪格来；先找下方，再找四周，最后找上方。
         var parents = new HashMap<BlockPos, BlockPos>();
         var search = new ArrayDeque<BlockPos>();
         for (Direction direction : DIRECTIONS) {
             BlockPos start = target.relative(direction);
-            if (available(world, loaded, target, start, mayPlace)) {
+            // 最靠近组件的垫块还必须能提供原生所需点击面；不能先选最短链，搭完才发现该面永远放不出指定轴向。
+            if (available(world, loaded, target, start, mayPlace) && usableClickSupport.test(start)) {
                 parents.put(start, null); search.add(start);
             }
         }
