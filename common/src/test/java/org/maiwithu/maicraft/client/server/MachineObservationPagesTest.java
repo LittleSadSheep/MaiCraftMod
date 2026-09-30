@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.server;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.Gson;
 import java.util.Map;
 import org.maiwithu.maicraft.intent.SemanticResultView;
@@ -24,14 +25,14 @@ public final class MachineObservationPagesTest {
         nativeData.addProperty("amount", 3);
         observations.add(nativeData);
         page.add("observations", observations);
-        check(pages.append(page, "request-one", 7), "native page accepted within its bounded report");
+        pages.append(page, "request-one", 7, new JsonArray());
         JsonObject result = pages.report(1, 1, -1, 12);
         check(result.getAsJsonArray("pages").get(0).getAsJsonObject().get("tick").getAsInt() == 20
                 && result.get("structural_anchor_tick").getAsInt() == 12, "structural and authoritative observation ticks stay distinct");
         check(!result.get("production_verified").getAsBoolean() && !result.get("flow_verified").getAsBoolean(),
                 "stored inventory neither proves actual transfer nor sustained production");
         // 两个置物台即使持有同类工件，也必须各自绑定结构索引；对外去坐标不能抹掉这层归属。
-        check(pages.append(page, "request-next-depot", 12), "second component page retained");
+        pages.append(page, "request-next-depot", 12, new JsonArray());
         result = pages.report(2, 2, -1, 12);
         JsonObject publicReport = new Gson().toJsonTree(SemanticResultView.data(Map.of("machine", result)))
                 .getAsJsonObject().getAsJsonObject("machine");
@@ -40,14 +41,20 @@ public final class MachineObservationPagesTest {
                 "public native pages retain their distinct structural block references");
         check(!page.has("block_index"), "binding a public copy cannot rewrite the original native receipt");
         var centerOnly = new MachineObservationPages();
-        check(centerOnly.append(page, "empty-center", -1)
-                && !centerOnly.report(1, 1, -1, 12).getAsJsonArray("pages").get(0).getAsJsonObject().has("block_index"),
+        centerOnly.append(page, "empty-center", -1, new JsonArray());
+        check(!centerOnly.report(1, 1, -1, 12).getAsJsonArray("pages").get(0).getAsJsonObject().has("block_index"),
                 "an empty marked center cannot claim a nonexistent structural index");
-        page.addProperty("large", "x".repeat(MachineObservationPages.MAX_CHARS));
-        check(!pages.append(page, "request-two", 9), "oversized aggregate response is bounded");
-        result = pages.report(2, 1, 9, 12);
-        check(!result.get("complete").getAsBoolean() && result.get("next_component_index").getAsInt() == 9,
-                "truncation retains actual first-page facts with an explicit continuation component");
+        // 分页由执行器自动读完，不再按报告预算截断；页内原生未知字段单独记账为缺口，不丢弃已保留页。
+        var unread = new JsonObject(); unread.addProperty("resource_id", "component-sensitive-opaque-key");
+        unread.addProperty("amount", 1);
+        var unknown = new JsonArray(); unknown.add(new JsonPrimitive("machinery_port_unread"));
+        unread.add("unknown", unknown);
+        page.getAsJsonArray("observations").add(unread);
+        pages.append(page, "request-two", 9, new JsonArray());
+        result = pages.report(3, 1, 9, 12);
+        check(!result.get("complete").getAsBoolean() && result.get("next_component_index").getAsInt() == 9
+                        && result.getAsJsonArray("incomplete_reasons").contains(new JsonPrimitive("native_fields_unknown")),
+                "unknown native fields record a gap without discarding retained pages");
         repeatedEmptyViewsDoNotHideWorkpieces();
         System.out.println("MachineObservationPagesTest: passed");
     }
@@ -94,9 +101,9 @@ public final class MachineObservationPagesTest {
         // 工件索引只按当前页压缩重复视图；两个时刻的同一未完成件必须各自保留原生进度与页码。
         var summaries = new MachineObservationPages();
         resources.add(workpiece.deepCopy());
-        check(summaries.append(page, "first-moment", 13), "first native moment retained");
+        summaries.append(page, "first-moment", 13, new JsonArray());
         page.addProperty("tick", 43);
-        check(summaries.append(page, "second-moment", 13), "second native moment retained");
+        summaries.append(page, "second-moment", 13, new JsonArray());
         JsonArray known = summaries.report(1, 1, -1, 40).getAsJsonArray("occupied_resource_views");
         check(known.size() == 2 && known.get(0).getAsJsonObject().get("amount_per_view").getAsInt() == 1
                 && known.get(0).getAsJsonObject().get("observed_views").getAsInt() == 2,
