@@ -17,14 +17,15 @@ import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.task.base.BlockMenuFlow;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 在已由任务打开且输入格为空的切石机界面中完成装料、选配方、逐件切制取回和关闭；不接管后来换出的菜单。 */
-final class StonecutterMenuFlow {
+/** 在已由任务打开且输入格为空的切石机界面中完成装料、选配方、整批切制与取回对账，最后关闭；不接管后来换出的菜单。 */
+final class StonecutterMenuFlow implements BlockMenuFlow {
     private enum Phase { LOAD_INPUT, WAIT_RECIPES, SELECT, WAIT_BUTTON, CRAFT, WAIT_TAKE, RETURN_INPUT, VERIFY, CLOSE, COMPLETE }
     private static final int INPUT_SLOT = 0, RESULT_SLOT = 1;
     private final LocalPlayer player;
@@ -54,7 +55,7 @@ final class StonecutterMenuFlow {
         this.beforeFirstCraft = beforeFirstCraft;
     }
 
-    TaskState tick(LocalPlayerContext context) {
+    public TaskState tick(LocalPlayerContext context) {
         try { return advance(context); }
         catch (RuntimeException error) {
             abort(error.getMessage() == null ? "stonecutter_internal_error" : error.getMessage(), FailureType.UNKNOWN);
@@ -202,7 +203,7 @@ final class StonecutterMenuFlow {
         return TaskState.RUNNING;
     }
 
-    void abort(String code, FailureType type) {
+    public void abort(String code, FailureType type) {
         if (failure == null) { failure = code; failureType = type; }
         if (preserveMenu || phase == Phase.CLOSE || phase == Phase.COMPLETE || child != null || takeAttempted) {
             // 取件点击已经发出时结果以真实背包为准但不自动补做；保留现场给人工核验，普通重试已被禁止。
@@ -229,11 +230,11 @@ final class StonecutterMenuFlow {
         return TaskState.FAILED;
     }
 
-    void stop(Task.StopReason reason) {
+    public void stop(Task.StopReason reason) {
         if (child != null) child.stop(player, reason);
     }
 
-    void cleanup() {
+    public void cleanup() {
         if (child != null) {
             child.stop(player, Task.StopReason.REPLACED);
             child.result(TaskState.CANCELLED);
@@ -255,11 +256,11 @@ final class StonecutterMenuFlow {
         } catch (RuntimeException ignored) { cleanupStatus = "cleanup_not_confirmed"; }
     }
 
-    String failure() { return failure == null ? "stonecutting_failed" : failure; }
-    boolean hasFailure() { return failure != null; }
-    FailureType failureType() { return failureType; }
+    public String failure() { return failure == null ? "stonecutting_failed" : failure; }
+    public boolean hasFailure() { return failure != null; }
+    public FailureType failureType() { return failureType; }
 
-    Map<String, Object> data() {
+    public Map<String, Object> data() {
         var data = new LinkedHashMap<String, Object>();
         data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         data.put("requested_count", record.count);

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.enchant;
 
 import com.mojang.serialization.Lifecycle;
+import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.util.Map;
 import net.minecraft.SharedConstants;
@@ -113,7 +114,7 @@ public final class EnchantWorkflowGuardTest {
         for (TaskState state : new TaskState[]{TaskState.CANCELLED, TaskState.TIMEOUT}) try (var world = new InteractionWorldTestHarness()) {
             var task = new EnchantCompanionTask(world.player, record(Items.DIAMOND_SWORD));
             var child = new CleanupProbe();
-            var field = EnchantCompanionTask.class.getDeclaredField("activeChild"); field.setAccessible(true); field.set(task, child);
+            var field = field(EnchantCompanionTask.class, "activeChild"); field.set(task, child);
             task.result(state);
             // 父任务被取消或超时都必须结束子任务回执；只调用 stop 松键而跳过 result 会漏掉 GUI 清理。
             check(child.stops == 1 && child.results == 1, "every terminal parent path finalizes its child exactly once");
@@ -158,7 +159,7 @@ public final class EnchantWorkflowGuardTest {
             var flow = new EnchantMenuFlow(world.player, record, menu, inventory,
                     () -> { throw new AssertionError("progress must not reserve consumption"); });
             var task = new EnchantCompanionTask(world.player, record);
-            var field = EnchantCompanionTask.class.getDeclaredField("flow"); field.setAccessible(true); field.set(task, flow);
+            var field = field(EnchantCompanionTask.class, "flow"); field.set(task, flow);
             var progress = task.progress();
             check(progress.equals(task.progress()) && progress.get("phase").equals("load_input")
                             && Boolean.FALSE.equals(progress.get("item_return_verified")),
@@ -177,6 +178,15 @@ public final class EnchantWorkflowGuardTest {
         catch (IllegalArgumentException | IllegalStateException expected) { check(expected.getMessage().contains(reason), "the rejection explains the missing prerequisite"); }
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+
+    /** activeChild 与 flow 在模板基类 BlockMenuCompanionTask 上；getDeclaredField 不查父类，需沿层次找。 */
+    private static Field field(Class<?> type, String name) throws Exception {
+        for (Class<?> c = type; c != null; c = c.getSuperclass()) {
+            try { var target = c.getDeclaredField(name); target.setAccessible(true); return target; }
+            catch (NoSuchFieldException ignored) { }
+        }
+        throw new NoSuchFieldException(name);
+    }
 
     private static final class CleanupProbe implements Task {
         int stops, results;

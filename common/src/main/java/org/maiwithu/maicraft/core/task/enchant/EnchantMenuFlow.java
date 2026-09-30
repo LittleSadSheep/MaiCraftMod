@@ -10,6 +10,7 @@ import net.minecraft.world.inventory.EnchantmentMenu;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.task.base.BlockMenuFlow;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord.Move;
@@ -20,7 +21,7 @@ import java.util.Locale;
 import net.minecraft.world.item.ItemStack;
 
 /** 在已由任务打开且为空的附魔台界面中完成装料、一次附魔、核验取回和关闭；不接管后来换出的菜单。 */
-final class EnchantMenuFlow {
+final class EnchantMenuFlow implements BlockMenuFlow {
     private enum Phase { LOAD_INPUT, LOAD_LAPIS, QUOTE, SUBMIT, WAIT_BUTTON, RETURN_ITEM, RETURN_LAPIS, VERIFY, CLOSE, COMPLETE }
     private final LocalPlayer player;
     private final EnchantTaskRecord record;
@@ -42,7 +43,7 @@ final class EnchantMenuFlow {
         transaction = new EnchantTransaction(player, record, beforeSubmit);
     }
 
-    TaskState tick(LocalPlayerContext context) {
+    public TaskState tick(LocalPlayerContext context) {
         try { return advance(context); }
         catch (RuntimeException error) {
             abort(error.getMessage() == null ? "enchantment_internal_error" : error.getMessage(), FailureType.UNKNOWN);
@@ -158,7 +159,7 @@ final class EnchantMenuFlow {
         phase = Phase.CLOSE; return TaskState.RUNNING;
     }
 
-    void abort(String code, FailureType type) {
+    public void abort(String code, FailureType type) {
         if (failure == null) { failure = code; failureType = type; }
         if (preserveMenu || phase == Phase.CLOSE || phase == Phase.COMPLETE || child != null
                 || player.containerMenu != menu || transaction.attempted() && !transaction.confirmed()) {
@@ -177,12 +178,12 @@ final class EnchantMenuFlow {
         preserveMenu = true; phase = Phase.COMPLETE; return TaskState.FAILED;
     }
 
-    void stop(Task.StopReason reason) {
+    public void stop(Task.StopReason reason) {
         // 生存抢占只暂停当前搬运；取消最终还需 cleanup 调子任务 result，不能遗漏未完成的 GUI 回执。
         if (child != null) child.stop(player, reason);
     }
 
-    void cleanup() {
+    public void cleanup() {
         if (child != null) {
             child.stop(player, Task.StopReason.REPLACED); child.result(TaskState.CANCELLED);
             child = null; childRecord = null; preserveMenu = true;
@@ -204,15 +205,15 @@ final class EnchantMenuFlow {
         } catch (RuntimeException ignored) { cleanupStatus = "cleanup_not_confirmed"; }
     }
 
-    String failure() { return failure == null ? "enchantment_failed" : failure; }
-    boolean hasFailure() { return failure != null; }
-    FailureType failureType() { return failureType; }
+    public String failure() { return failure == null ? "enchantment_failed" : failure; }
+    public boolean hasFailure() { return failure != null; }
+    public FailureType failureType() { return failureType; }
     private int remainingLapis() { return inventory.lapisNeeded - transaction.lapisSpent(); }
     private boolean workEmpty() {
         return menu.getCarried().isEmpty() && menu.getSlot(0).getItem().isEmpty() && menu.getSlot(1).getItem().isEmpty();
     }
 
-    Map<String, Object> data() {
+    public Map<String, Object> data() {
         var data = new LinkedHashMap<String, Object>(transaction.data());
         data.put("phase", phase.name().toLowerCase(Locale.ROOT));
         data.put("outcome_uncertain", transaction.attempted() && !successful);
