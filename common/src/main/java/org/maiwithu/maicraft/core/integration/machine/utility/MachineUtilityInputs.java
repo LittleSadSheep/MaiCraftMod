@@ -83,7 +83,7 @@ public final class MachineUtilityInputs {
         return List.copyOf(result);
     }
 
-    /** 对照准确声明的方块和畅通的外部射线，验证具体设施声明。 */
+    /** 校验接收端声明的身份和格式；真实接入路径由后续原生连接操作观察并执行。 */
     public static List<Input> parse(JsonObject blueprint) {
         supplyPreference(blueprint);
         JsonArray inputRows = rows(blueprint);
@@ -103,6 +103,8 @@ public final class MachineUtilityInputs {
             if (cell == null || cell.has("part") || !cell.has("block_id")
                     || !input.blockId.equals(cell.get("block_id").getAsString())) throw bad("external input must identify one exact declared full block: " + input.id);
             if (input.medium.equals("kinetic")) {
+                // 锁链传动轮原生具有竖向轴接口；不要求为声明接入口额外包一根轴，接线时再核对实际端面。
+                if (input.blockId.equals("create:chain_conveyor")) continue;
                 if (input.blockId.equals("create:belt")) {
                     // 中间带轮允许从侧面接入弯折动力路线；实际相邻端口及网络状态由原生动力规划器复核。
                     if (!MachineAssemblyPorts.hasBeltPort(blueprint, input.offset, input.face)) throw bad("native_belt_power_port_unavailable: " + input.id);
@@ -112,18 +114,7 @@ public final class MachineUtilityInputs {
                 if (!state.has("axis") || !state.get("axis").isJsonPrimitive() || !state.get("axis").getAsString().equals(input.face.getAxis().getName()))
                     throw bad("kinetic input shaft axis must explicitly match its connection face");
             }
-            // 物品可人工递交或从局部运输器进入；只检查紧邻接口净空，不能要求机械手穿过下方工件的整条射线。
-            if (input.medium.equals("items")) {
-                JsonObject adjacent = cells.get(input.offset.relative(input.face));
-                if (adjacent != null && !air(adjacent)) throw bad("item input face needs a free handoff cell: " + input.id);
-                continue;
-            }
-            for (var entry : cells.entrySet()) {
-                BlockPos delta = entry.getKey().subtract(input.offset);
-                int distance = delta.getX() * input.face.getStepX() + delta.getY() * input.face.getStepY() + delta.getZ() * input.face.getStepZ();
-                if (distance > 0 && entry.getKey().equals(input.offset.relative(input.face, distance)) && !air(entry.getValue()))
-                    throw bad("external input face must have a free or reserved path to the exterior: " + input.id);
-            }
+            // 漏斗、转角传动和已接管线可以占据入口前方；仅凭蓝图不能据此拒绝建造，现场操作负责报告能否接入。
         }
         return declarations;
     }
@@ -169,7 +160,8 @@ public final class MachineUtilityInputs {
     private static boolean supportedReceiver(String medium, String id) {
         if (!medium.equals("items") && id.equals(connector(medium))) return true;
         return switch (medium) {
-            case "kinetic" -> id.equals("create:belt");
+            // 皮带和锁链传动轮均可直接接收原生动力，不把准备轴当作唯一外部接口。
+            case "kinetic" -> id.equals("create:belt") || id.equals("create:chain_conveyor");
             case "energy" -> id.matches("mekanism:(basic|advanced|elite|ultimate)_universal_cable");
             case "fluids" -> id.equals("create:fluid_tank") || id.matches("mekanism:(basic|advanced|elite|ultimate)_(mechanical_pipe|fluid_tank)");
             case "chemicals" -> id.matches("mekanism:(basic|advanced|elite|ultimate)_(pressurized_tube|chemical_tank)");
@@ -249,6 +241,5 @@ public final class MachineUtilityInputs {
     private static void keys(JsonObject object, Set<String> additional) {
         for (String key : object.keySet()) if (!REQUIREMENTS.contains(key) && !additional.contains(key)) throw bad("unsupported external input field: " + key);
     }
-    private static boolean air(JsonObject cell) { return cell.has("block_id") && Set.of("minecraft:air", "minecraft:cave_air", "minecraft:void_air").contains(cell.get("block_id").getAsString()); }
     private static IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }
 }
