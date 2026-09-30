@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackDepartureApproach;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationStep;
 
 /**
@@ -34,6 +35,9 @@ public final class TransportNavigator {
     private final boolean sprint;
     private final TerrainBill journey = new TerrainBill();
     private EmbeddedBaritoneNavigator ground;
+    private PlayerNav departureApproach;
+    private int departurePreparations;
+    private final Set<Long> rejectedDepartureOrigins = new HashSet<>();
     private TransportMode mode = TransportMode.AUTO;
     private TransportTargets targets;
     private LongSet forbidden = LongSets.emptySet();
@@ -128,11 +132,36 @@ public final class TransportNavigator {
                 return PlayerNav.Status.RUNNING; // 下一角色 tick 再交接原生回执和输入。
             }
             failure = result.detail();
+            // 尚未起飞就被屋顶挡住时，在同一任务内先走到附近净空处；已出手或有未知效果的交通仍按原回执收尾。
+            if (!result.effectsStarted() && "jetpack_departure_blocked".equals(result.code())
+                    && currentGoal != null && rejectedDepartureOrigins.add(PlayerNav.playerFeet(player).asLong())) {
+                departureApproach = JetpackDepartureApproach.create(context, policy, currentGoal, rejectedDepartureOrigins);
+                if (departureApproach != null) {
+                    // 旧落点搜索已经结束；准备期间只以真实步行或算路续时，不能被残留 targets 永久视为有进展。
+                    targets = null; offers = List.of(); offersPrepared = false;
+                    departurePreparations++; return PlayerNav.Status.RUNNING;
+                }
+            }
         }
         if (paused) {
             // 暂停后重新开始时，清掉旧候选和失败状态，让导航按当前身体位置再选路线。
             paused = false; failure = null; attempted = false; forceConsumed = false; triedOffers.clear();
             ground = newGround(); targets = null; offers = List.of();
+        }
+        if (departureApproach != null) {
+            if (currentGoal == null || !targetFingerprint.equals(currentGoal.semanticFingerprint()) || !forbidden.equals(currentForbidden)) {
+                journey.addAll(departureApproach.ledger()); departureApproach.stop(); departureApproach = null;
+                paused = true; return PlayerNav.Status.RUNNING;
+            }
+            var status = departureApproach.tick();
+            if (status == PlayerNav.Status.RUNNING) return status;
+            String reason = departureApproach.failReason(); FailureType type = departureApproach.failType();
+            journey.addAll(departureApproach.ledger()); departureApproach.stop(); departureApproach = null;
+            if (status == PlayerNav.Status.FAILED) {
+                failure = "jetpack departure ground approach failed: " + reason; failureType = type; return status;
+            }
+            // 只完成了起飞准备，最终目的地不变；使用新身体位置重新规划飞行，不提前宣布旅行完成。
+            return beginTransport(context);
         }
         if (reached.getAsBoolean()) {
             targets = null;
@@ -253,36 +282,43 @@ public final class TransportNavigator {
     }
 
     public boolean isSafeToCancel() {
+        if (departureApproach != null) return departureApproach.isSafeToCancel();
         return session != null && TransportRuntime.owns(this)
                 ? TransportRuntime.canSafelySuspendActive() : ground.isSafeToCancel();
     }
-    public BlockPos pathStart() { return session != null ? PlayerNav.playerFeet(player) : ground.pathStart(); }
-    public TerrainBill ledger() { var result = new TerrainBill(); result.addAll(journey); result.addAll(ground.ledger()); return result; }
+    public BlockPos pathStart() { return departureApproach != null ? departureApproach.pathStart() : session != null ? PlayerNav.playerFeet(player) : ground.pathStart(); }
+    public TerrainBill ledger() { var result = new TerrainBill(); result.addAll(journey); result.addAll(ground.ledger()); if (departureApproach != null) result.addAll(departureApproach.ledger()); return result; }
     public String failReason() { return failure == null ? ground.failReason() : failure; }
     public FailureType failType() { return failure == null ? ground.failType() : failureType; }
     public int stallTicks() { return progressTick == Long.MIN_VALUE ? 0 : (int) Math.min(Integer.MAX_VALUE, Math.max(0, player.level().getGameTime() - progressTick)); }
     public boolean hasRecentPhysicalProgress(int ticks) {
         return targets != null || session != null && session.livenessActive()
+                || departureApproach != null && departureApproach.hasRecentPhysicalProgress(ticks)
                 || player.level().getGameTime() - progressTick <= ticks || ground.hasRecentPhysicalProgress(ticks);
     }
-    public boolean planningInFlight() { return targets != null || session != null && session.phase().contains("plan") || ground.planningInFlight(); }
+    public boolean planningInFlight() { return targets != null || session != null && session.phase().contains("plan") || ground.planningInFlight()
+            || departureApproach != null && departureApproach.planningInFlight(); }
     public NavigationStep executionStep(long clientRevision) {
+        if (departureApproach != null) return departureApproach.executionStep(clientRevision);
         return session == null && targets == null ? ground.executionStep(clientRevision) : null;
     }
     public String outcomeSummary() { return ground.outcomeSummary() + "; transport=" + attempts + (targets == null ? "" : targets.diagnostic()); }
     public Map<String, Object> diagnostics() {
         return Map.of("mode", mode.name().toLowerCase(), "attempts", List.copyOf(attempts), "unavailable", unavailable,
                 "cleanup_pending", stopped && TransportRuntime.owns(this),
+                "preparing_jetpack_departure", departureApproach != null, "departure_preparations", departurePreparations,
                 "approaching_unloaded_destination", loadedTravel.active(), "intermediate_landings_completed", loadedTravel.completed());
     }
-    public void stop() { stopped = true; ground.stop(); TransportRuntime.cancel(this); }
+    public void stop() { stopped = true; if (departureApproach != null) departureApproach.stop(); ground.stop(); TransportRuntime.cancel(this); }
     public void pause() {
+        if (departureApproach != null) { departureApproach.pause(); return; }
         // 步行保留原路线暂停；正在乘坐／飞行时先结束这一段，并用 paused 记住恢复时需要重新选路。
         if (session != null) { paused = true; TransportRuntime.cancel(this); }
         else ground.pause();
     }
-    public void abandon() { stopped = true; ground.abandon(); if (TransportRuntime.owns(this)) TransportRuntime.abandon(); }
+    public void abandon() { stopped = true; if (departureApproach != null) departureApproach.abandon(); ground.abandon(); if (TransportRuntime.owns(this)) TransportRuntime.abandon(); }
     public boolean yieldForExternalAction() {
+        if (departureApproach != null) return departureApproach.yieldForExternalAction();
         if (session == null) return ground.yieldForExternalAction();
         pause(); return !TransportRuntime.owns(this) && ClientRuntime.requireContext(player).mutationAvailable();
     }
