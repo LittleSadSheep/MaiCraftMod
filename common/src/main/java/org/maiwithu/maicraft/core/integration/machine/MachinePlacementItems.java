@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.machine;
 
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -28,6 +29,16 @@ import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
 public final class MachinePlacementItems {
     private static final String ROTATE = "com.simibubi.create.content.kinetics.base.IRotate";
     private MachinePlacementItems() {}
+
+    /** 先完成承载面，再装依附其上的运输部件；只调整施工顺序，不改作者的部件位置。 */
+    public static List<BlockPos> supportDependencies(BlockState state) {
+        return beltTunnel(state) ? List.of(BlockPos.ZERO.below()) : CreateFunnelPlacement.dependencies(state);
+    }
+
+    private static boolean beltTunnel(BlockState state) {
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        return id.equals("create:andesite_tunnel") || id.equals("create:brass_tunnel");
+    }
     public static String itemId(String blockId, Map<String, String> properties) {
         return blockId.equals("create:gearbox") && Set.of("x", "z").contains(properties.getOrDefault("axis", "y"))
                 ? "create:vertical_gearbox" : blockId;
@@ -84,6 +95,25 @@ public final class MachinePlacementItems {
     // 穷尽站位仍放不出目标状态时，报告原生物品强制朝向的现场原因，不把此类设计冲突继续说成无路可走。
     public static Map<String,Object> placementConflict(Item item, Level level, BlockPos target, BlockState requested,
             Predicate<BlockState> acceptsPlacedState) {
+        if (beltTunnel(requested)) {
+            // 普通站位均已尝试后，再给出隧道原生落点判定和实际承载面；不能把承载条件不成立一直说成导航失败。
+            try {
+                BlockPos below = target.below();
+                if (!level.isLoaded(below) || NativeApi.truth(NativeApi.call(requested.getBlock(), null,
+                        "isValidPositionForPlacement", requested, level, target))) return Map.of();
+                BlockState support = level.getBlockState(below);
+                return Map.of("rule", "create_belt_tunnel_native_support",
+                        "support_position", List.of(below.getX(), below.getY(), below.getZ()),
+                        "actual_support_block", BuiltInRegistries.BLOCK.getKey(support.getBlock()).toString(),
+                        "actual_support_state", support.toString(),
+                        "native_position_valid", false,
+                        "detail", "Native BeltTunnelBlock.isValidPositionForPlacement returned false: "
+                                + "the cell below is not a horizontal Create belt; observed " + support);
+            } catch (RuntimeException | LinkageError unavailable) {
+                // 原生接口读取失败不猜放置条件，保留原执行器的实际站位与交互结果。
+                return Map.of();
+            }
+        }
         if (!BuiltInRegistries.ITEM.getKey(item).toString().equals("create:vertical_gearbox")
                 || !BuiltInRegistries.BLOCK.getKey(requested.getBlock()).toString().equals("create:gearbox")
                 || !requested.hasProperty(BlockStateProperties.AXIS)) return Map.of();

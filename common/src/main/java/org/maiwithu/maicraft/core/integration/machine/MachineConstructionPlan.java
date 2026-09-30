@@ -88,7 +88,8 @@ public final class MachineConstructionPlan {
         installations.forEach(step -> finals.putAll(step.targets())); finalStates = Map.copyOf(finals);
         Map<BlockPos, List<BlockPos>> dependencies = new LinkedHashMap<>(); JsonArray dependencyReport = new JsonArray();
         for (var target : blocks) {
-            var required = CreateFunnelPlacement.dependencies(target.desiredState()).stream().map(target.pos()::offset).toList();
+            // 传送带隧道与漏斗都排在原生皮带安装之后，不能因只登记了漏斗依赖而先对空气安装隧道。
+            var required = MachinePlacementItems.supportDependencies(target.desiredState()).stream().map(target.pos()::offset).toList();
             if (required.isEmpty()) continue;
             dependencies.put(target.pos(), required);
             JsonObject row = new JsonObject(); row.add("offset", MachineAssemblyDocument.json(target.pos().subtract(anchor)));
