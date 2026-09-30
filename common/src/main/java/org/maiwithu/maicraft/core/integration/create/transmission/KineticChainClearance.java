@@ -1,62 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.create.transmission;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.phys.Vec3;
 
-/** 扫描已安装 Create 传动轮 1.25 格半径的占地，以及两条直线切向链条，不只检查端点。 */
+/** 链条端点必须已加载；新传动轮的放置约束由方块规划核对，不把显示链条当成待清空的方块隧道。 */
 final class KineticChainClearance {
-    private static final double RADIUS = 1.25, TANGENT_ANGLE = Math.toRadians(35), STRAND_PADDING = .2;
     private KineticChainClearance() {}
+
     static boolean clear(KineticGeometryWork work, List<BlockPos> wheels) {
-        Set<BlockPos> wheelCenters = Set.copyOf(wheels), swept = new HashSet<>();
-        // 复用现有两只轮只检查真实轮缘和链条空间；脚下支撑、低处水面或上方屋顶的高度图不代表挂链处被占用。
-        boolean existingPair=work.blocks.isEmpty() && work.source.chainInterface() && work.target.chainInterface()
-                && wheels.size()==2 && wheelCenters.contains(work.source.position()) && wheelCenters.contains(work.target.position());
-        // 传动轮会从自身方块格向外延伸到所有相邻水平格，包括对角格。
-        for (BlockPos wheel : wheels) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) swept.add(wheel.offset(dx, 0, dz));
-        for (int i = 1; i < wheels.size(); i++) {
-            BlockPos a = wheels.get(i - 1), b = wheels.get(i);
-            double horizontal = Math.hypot((double) b.getX() - a.getX(), (double) b.getZ() - a.getZ());
-            if (horizontal <= 1.5) return false;
-            double ux = (b.getX() - a.getX()) / horizontal, uz = (b.getZ() - a.getZ()) / horizontal;
-            double inward = RADIUS * Math.cos(TANGENT_ANGLE), sideways = RADIUS * Math.sin(TANGENT_ANGLE);
-            for (int sign : new int[] {-1, 1}) {
-                // 复现 ChainConveyorBlockEntity.calculateConnectionStats 与 forPointsAlongChains 的规则。
-                Vec3 from = new Vec3(a.getX() + .5 + ux * inward - uz * sideways * sign, a.getY() + .375,
-                        a.getZ() + .5 + uz * inward + ux * sideways * sign);
-                Vec3 to = new Vec3(b.getX() + .5 - ux * inward - uz * sideways * sign, b.getY() + .375,
-                        b.getZ() + .5 - uz * inward + ux * sideways * sign);
-                sweep(from, to, swept);
-            }
-        }
-        for (BlockPos at : swept) {
-            KineticRouteGeometry.checkpoint();
-            if (!work.terrain.loaded(at) || work.terrain.protectedCell(at)) return false;
-            if (wheelCenters.contains(at)) continue; // 仅精确规划或观察到的轮中心可作为占用例外。
-            if (work.blocks.containsKey(at) || !work.terrain.passable(at) || work.terrain.kinetic(at)) return false;
-            if(existingPair)continue;
-            Integer ground = work.ground(at.getX(), at.getZ());
-            if (ground == null || !endpointColumn(work, at) && at.getY() - ground - 1 < work.limits.clearance()) return false;
-        }
-        return true;
-    }
-    private static void sweep(Vec3 from, Vec3 to, Set<BlockPos> cells) {
-        int count = Math.max(1, (int) Math.ceil(from.distanceTo(to) * 2));
-        for (int step = 1; step <= count; step++) {
-            Vec3 a = from.lerp(to, (step - 1.0) / count), b = from.lerp(to, (double) step / count);
-            // 合并后的线段包围盒覆盖整条连续链条，包括穿过倾斜体素边界的部分。
-            for (int x = (int) Math.floor(Math.min(a.x, b.x) - STRAND_PADDING); x <= (int) Math.floor(Math.max(a.x, b.x) + STRAND_PADDING); x++)
-                for (int y = (int) Math.floor(Math.min(a.y, b.y) - STRAND_PADDING); y <= (int) Math.floor(Math.max(a.y, b.y) + STRAND_PADDING); y++)
-                    for (int z = (int) Math.floor(Math.min(a.z, b.z) - STRAND_PADDING); z <= (int) Math.floor(Math.max(a.z, b.z) + STRAND_PADDING); z++)
-                        cells.add(new BlockPos(x, y, z));
-        }
-    }
-    private static boolean endpointColumn(KineticGeometryWork work, BlockPos at) {
-        return at.getX() == work.source.position().getX() && at.getZ() == work.source.position().getZ()
-                || at.getX() == work.target.position().getX() && at.getZ() == work.target.position().getZ();
+        // 中间的墙、水和已有机器不被挂链操作修改；原生长度、坡度和连接数继续由各自的实际接口核对。
+        return wheels.stream().allMatch(work.terrain::loaded);
     }
 }

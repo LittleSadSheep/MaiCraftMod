@@ -27,7 +27,7 @@ public final class ChainConveyorContractTest {
         loadedClearanceAndPosts();
         specialChainsAreNotConsumedByItemType();
         reciprocalReuseAndEvidenceScopes();
-        System.out.println("ChainConveyorContractTest: native distance/slope limits, loaded strand clearance and component protection passed");
+        System.out.println("ChainConveyorContractTest: native distance/slope limits and endpoint access checks passed");
     }
     private static void nativeGeometryLimits() {
         var limits = new ChainConveyorBridge.Limits(32, 4);
@@ -52,12 +52,13 @@ public final class ChainConveyorContractTest {
             ChainConveyorGeometry.clearEnvelope(h.level, first, second);
             NavigationSafetyContext.withPreservedStructures(List.of(first, second), () -> { ChainConveyorGeometry.clearEnvelope(h.level, first, second); return null; });
             BlockPos obstruction = new BlockPos(7, 3, 4); h.set(obstruction, Blocks.STONE.defaultBlockState());
-            fails(() -> ChainConveyorGeometry.clearEnvelope(h.level, first, second), "chain_conveyor_corridor_obstructed");
+            // 原生连接不修改链条经过的石块，不能把墙面当成拒绝挂链的条件。
+            ChainConveyorGeometry.clearEnvelope(h.level, first, second);
             h.set(obstruction, Blocks.AIR.defaultBlockState());
             NavigationSafetyContext.withProtectedArea(List.of(first), List.of(), () -> {
                 fails(() -> ChainConveyorGeometry.clearEnvelope(h.level, first, second), "chain_conveyor_endpoint_protected"); return null;
             });
-            fails(() -> ChainConveyorGeometry.clearEnvelope(h.level, first, new BlockPos(18, 3, 3)), "chain_conveyor_corridor_unloaded");
+            fails(() -> ChainConveyorGeometry.clearEnvelope(h.level, first, new BlockPos(18, 3, 3)), "chain_conveyor_endpoint_unloaded");
             BlockPos raised = second.above(3);
             for (int y = 4; y <= 6; y++) h.set(new BlockPos(raised.getX(), y, raised.getZ()), Blocks.STONE.defaultBlockState());
             ChainConveyorGeometry.clearEnvelope(h.level, first, raised);

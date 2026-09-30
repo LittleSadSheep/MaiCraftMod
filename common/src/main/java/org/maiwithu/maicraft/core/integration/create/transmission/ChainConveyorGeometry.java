@@ -4,11 +4,10 @@ package org.maiwithu.maicraft.core.integration.create.transmission;
 import net.minecraft.core.BlockPos;
 import java.util.List;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** 原生链条端点间距限制，以及环绕两段外露链条的保守净空范围。 */
+/** 读取原生端点约束与显示几何；挂链不占据中间方块格，不能另加沿途净空门槛。 */
 public final class ChainConveyorGeometry {
     public record Strand(Vec3 start, Vec3 end) {}
     private ChainConveyorGeometry() {}
@@ -19,12 +18,10 @@ public final class ChainConveyorGeometry {
         if (horizontal <= 1.5 || Math.abs(delta.y) > horizontal - 1.5) throw new IllegalArgumentException("chain_conveyor_too_steep");
     }
     public static void clearEnvelope(Level world, BlockPos first, BlockPos second) {
-        for (BlockPos pulley : List.of(first, second)) checkBox(world, first, second, around(Vec3.atBottomCenterOf(pulley).add(0, .375, 0), 1.4));
-        for (Strand strand : strands(first, second)) {
-            int samples = (int) Math.ceil(strand.start.distanceTo(strand.end) * 4);
-            if (samples > 1024) throw new IllegalArgumentException("chain_conveyor_corridor_budget_exceeded");
-            for (int index = 0; index <= samples; index++)
-                checkBox(world, first, second, around(strand.start.lerp(strand.end, samples == 0 ? 0 : (double) index / samples), .2));
+        // 原生挂链只使用两端传动轮；沿途墙面、水流和轮缘旁的方块既不被修改，也不应提前阻止点击。
+        for (BlockPos pulley : List.of(first, second)) {
+            if (!world.isLoaded(pulley)) throw new IllegalArgumentException("chain_conveyor_endpoint_unloaded");
+            if (NavigationSafetyContext.protectsUse(pulley)) throw new IllegalArgumentException("chain_conveyor_endpoint_protected");
         }
     }
     /** 复现原生两条 ConnectionStats 切线：半径 1.25 格，角度 ±35 度，高度 0.375 格。 */
@@ -37,24 +34,5 @@ public final class ChainConveyorGeometry {
         double offset = Math.toRadians(35) * sign;
         return new Strand(first.add(new Vec3(0, 0, 1.25).yRot((float) (theta - offset))),
                 second.add(new Vec3(0, 0, 1.25).yRot((float) (theta + Math.PI + offset))));
-    }
-    private static AABB around(Vec3 point, double width) {
-        return new AABB(point.x - width, point.y - .2, point.z - width, point.x + width, point.y + .2, point.z + width);
-    }
-    private static void checkBox(Level world, BlockPos first, BlockPos second, AABB envelope) {
-            for (BlockPos probe : BlockPos.betweenClosed(BlockPos.containing(envelope.minX, envelope.minY, envelope.minZ),
-                    BlockPos.containing(envelope.maxX, envelope.maxY, envelope.maxZ))) {
-                if (!world.isLoaded(probe)) throw new IllegalArgumentException("chain_conveyor_corridor_unloaded");
-                if (probe.equals(first) || probe.equals(second)) {
-                    if (NavigationSafetyContext.protectsUse(probe)) throw new IllegalArgumentException("chain_conveyor_endpoint_protected");
-                    continue;
-                }
-                if (!world.getWorldBorder().isWithinBounds(probe) || world.isOutsideBuildHeight(probe)
-                        || NavigationSafetyContext.protectsMutation(probe) || NavigationSafetyContext.forbidsBody(probe))
-                    throw new IllegalArgumentException("chain_conveyor_corridor_protected");
-                if (!world.getFluidState(probe).isEmpty()) throw new IllegalArgumentException("chain_conveyor_corridor_fluid");
-                for (AABB shape : world.getBlockState(probe).getCollisionShape(world, probe).toAabbs())
-                    if (shape.move(probe).intersects(envelope)) throw new IllegalArgumentException("chain_conveyor_corridor_obstructed");
-            }
     }
 }

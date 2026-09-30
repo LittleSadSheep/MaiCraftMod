@@ -9,7 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticRouteGeometry.*;
 
-/** 将真实链式输送轮架高安装在填充的轴柱上，并按原生成本连接、在端点转向。 */
+/** 按原生接口连接传动轮；仅端点接入需要轴和转向件，中继轮不需要永久落地轴柱。 */
 final class KineticRelayGeometry {
     private record Terminal(Endpoint endpoint, Direction face, BlockPos base) {
         boolean existingWheel() { return face == null; }
@@ -27,8 +27,11 @@ final class KineticRelayGeometry {
         for (int shift : new int[] {3, -3}) {
             Terminal a = terminal(source, sourceFace, shift), b = terminal(target, targetFace, shift);
             for (int corridor = 0; corridor < 3; corridor++) {
-                Plan plan = compile(source, sourceFace, target, targetFace, terrain, limits, a, b, corridor);
-                if (plan != null) plans.add(plan);
+                // 先比较贴近端口的短接法；只有实际放轮或接轴的位置被占用时，才比较更高的备选安装位置。
+                for (int rise : new int[]{0, 1, 2, 4, 8}) {
+                    Plan plan = compile(source, sourceFace, target, targetFace, terrain, limits, a, b, corridor, rise);
+                    if (plan != null) { plans.add(plan); break; }
+                }
             }
             if (sourceFace != Direction.DOWN && targetFace != Direction.DOWN) break;
         }
@@ -40,7 +43,7 @@ final class KineticRelayGeometry {
         return new Terminal(endpoint, face, endpoint.position().relative(face, 2));
     }
     private static Plan compile(Endpoint source, Direction sourceFace, Endpoint target, Direction targetFace,
-            Terrain terrain, Limits limits, Terminal a, Terminal b, int corridor) {
+            Terrain terrain, Limits limits, Terminal a, Terminal b, int corridor, int rise) {
         KineticGeometryWork work = new KineticGeometryWork(source, sourceFace, target, targetFace, terrain, limits);
         List<BlockPos> corners = new ArrayList<>(); corners.add(a.base);
         if (corridor == 1) corners.add(new BlockPos(a.base.getX(), 0, b.base.getZ()));
@@ -48,16 +51,8 @@ final class KineticRelayGeometry {
         corners.add(b.base);
         for (int i = corners.size() - 1; i > 0; i--) if (sameColumn(corners.get(i), corners.get(i - 1))) corners.remove(i);
         if (corners.size() < 2) return null;
-        int height = Math.max(a.base.getY() + (a.existingWheel() ? 0 : 2), b.base.getY() + (b.existingWheel() ? 0 : 2));
-        for (int i = 1; i < corners.size(); i++) for (BlockPos column : columns(corners.get(i - 1), corners.get(i))) {
-            KineticRouteGeometry.checkpoint();
-            for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
-                if (endpointColumn(work, column.getX() + dx, column.getZ() + dz)) continue;
-                Integer ground = work.ground(column.getX() + dx, column.getZ() + dz);
-                if (ground == null) return null;
-                height = Math.max(height, ground + limits.clearance() + 1);
-            }
-        }
+        int height = Math.max(a.base.getY() + (a.existingWheel() ? 0 : a.face == Direction.UP ? 1 : 2),
+                b.base.getY() + (b.existingWheel() ? 0 : b.face == Direction.UP ? 1 : 2)) + rise;
         List<BlockPos> wheels = new ArrayList<>();
         for (int i = 0; i < corners.size(); i++) {
             BlockPos p = corners.get(i); int y = i == 0 && a.existingWheel() ? a.endpoint.position().getY()
@@ -76,16 +71,17 @@ final class KineticRelayGeometry {
             Terminal terminal = i == 0 ? a : i == wheels.size() - 1 ? b : null;
             if (terminal != null && terminal.existingWheel()) continue;
             work.put(wheel, "create:chain_conveyor", Map.of());
-            Integer ground = work.ground(wheel.getX(), wheel.getZ()); if (ground == null) return null;
-            int bottom = terminal != null && terminal.face == Direction.UP ? terminal.endpoint.position().getY() + 1 : ground + 1;
-            if (wheel.getY() <= bottom || wheel.getY() - bottom > limits.maxSpan()) return null;
-            if (terminal != null) attach(work, terminal, wheel);
+            // 中继轮从链条获得动力，不向地面传动；普通方块的原生施工会处理临时点击支撑及回收。
+            if (terminal == null) continue;
+            int bottom = terminal.base.getY() + 1;
+            if (wheel.getY() < bottom || wheel.getY() - bottom > limits.maxSpan()) return null;
+            attach(work, terminal, wheel);
             for (int y = bottom; y < wheel.getY(); y++) {
                 BlockPos shaft = new BlockPos(wheel.getX(), y, wheel.getZ());
                 if (!work.blocks.containsKey(shaft)) work.put(shaft, "create:shaft", Map.of("axis", "y"));
                 work.join(shaft, shaft.above());
             }
-            if (terminal != null && terminal.face == Direction.UP) work.join(terminal.endpoint.position(), terminal.endpoint.position().above());
+            if (terminal.face == Direction.UP) work.join(terminal.endpoint.position(), terminal.endpoint.position().above());
         }
         if (!work.valid || !KineticChainClearance.clear(work, wheels)) return null;
         for (int i = 1; i < wheels.size(); i++) if (!work.link(wheels.get(i - 1), wheels.get(i))) return null;
@@ -115,18 +111,5 @@ final class KineticRelayGeometry {
         }
         return null;
     }
-    private static boolean endpointColumn(KineticGeometryWork work, int x, int z) {
-        return work.source.position().getX() == x && work.source.position().getZ() == z
-                || work.target.position().getX() == x && work.target.position().getZ() == z;
-    }
     private static boolean sameColumn(BlockPos a, BlockPos b) { return a.getX() == b.getX() && a.getZ() == b.getZ(); }
-    private static List<BlockPos> columns(BlockPos a, BlockPos b) {
-        int steps = Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getZ() - b.getZ())) * 2;
-        if (steps == 0) return List.of(new BlockPos(a.getX(), 0, a.getZ()));
-        var columns = new LinkedHashSet<BlockPos>();
-        for (int step = 0; step <= steps; step++) columns.add(new BlockPos(
-                (int) Math.round(a.getX() + (double) (b.getX() - a.getX()) * step / steps), 0,
-                (int) Math.round(a.getZ() + (double) (b.getZ() - a.getZ()) * step / steps)));
-        return List.copyOf(columns);
-    }
 }

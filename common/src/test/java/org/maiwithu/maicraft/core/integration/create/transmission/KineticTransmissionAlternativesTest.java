@@ -14,8 +14,8 @@ public final class KineticTransmissionAlternativesTest {
     public static void main(String[] args) {
         encasedBridgeCompetesWithTheOtherRealPlans();
         encasedGeometryRejectsUnprovenTurnsAndMerges();
-        wheelFootprintsAndBothStrandsNeedClearance();
-        slopedSweepsAndUnknownCellsAreCheckedContinuously();
+        chainSpansDoNotRequireEmptyCells();
+        slopedLinksDoNotReadIntermediateChunks();
         existingLowWheelsUseTheirActualHeight();
         System.out.println("KineticTransmissionAlternativesTest: " + checks + " checks passed");
     }
@@ -46,28 +46,30 @@ public final class KineticTransmissionAlternativesTest {
         check(KineticEncasedGeometry.candidate(source, Direction.UP, target, Direction.UP, foreign, Limits.defaults(16)) == null,
                 "the short encased candidate cannot silently join neighboring kinetic machinery");
     }
-    private static void wheelFootprintsAndBothStrandsNeedClearance() {
+    private static void chainSpansDoNotRequireEmptyCells() {
         Endpoint source = wheel(0, 4, 0), target = wheel(10, 4, 0);
         World empty = new World(source, target);
         check(clear(source, target, empty), "isolated existing wheel boundaries have a clear native chain envelope");
         World rim = new World(source, target); rim.solids.add(source.position().offset(1, 0, 1));
-        check(!clear(source, target, rim), "the 1.25-radius rotating wheel cannot clip a diagonal adjacent solid block");
-        check(rim.read.contains(source.position().offset(1, 0, 1)), "wheel footprint checks go beyond its center block");
+        // 轮缘是显示几何，邻接石块不影响原生挂链；这里不额外读取或要求清空它们。
+        check(clear(source, target, rim), "native link accepts solid blocks beside the rendered wheel rim");
+        check(!rim.read.contains(source.position().offset(1, 0, 1)), "rendered wheel rim does not require adjacent block inspection");
         for (int z : new int[] {-1, 1}) {
             World strand = new World(source, target); strand.solids.add(new BlockPos(5, 4, z));
-            check(!clear(source, target, strand), "both offset native tangent strands are checked in their interior, not only the wheel endpoints");
+            check(clear(source, target, strand), "native links do not require empty tangent strands");
         }
         World protectedStrand = new World(source, target); protectedStrand.protectedCells.add(new BlockPos(5, 4, 1));
-        check(!clear(source, target, protectedStrand), "protected mid-span cells cannot be crossed by invisible chain interactions");
+        check(clear(source, target, protectedStrand), "linking endpoints does not mutate protected mid-span cells");
     }
-    private static void slopedSweepsAndUnknownCellsAreCheckedContinuously() {
+    private static void slopedLinksDoNotReadIntermediateChunks() {
         Endpoint source = wheel(0, 4, 0), target = wheel(12, 8, 0);
         check(KineticRouteGeometry.validLink(source.position(), target.position(), 16), "test slope satisfies native chain geometry");
         World clear = new World(source, target); check(clear(source, target, clear), "clear sloped native strands remain a valid candidate");
         World blocked = new World(source, target); blocked.solids.add(new BlockPos(6, 6, 1));
-        check(!clear(source, target, blocked), "sweep boxes include the intermediate layer crossed by an ascending strand");
+        // 倾斜链条仍只操作两个端点，中间地形不是施工格，也不需要强制加载。
+        check(clear(source, target, blocked), "sloped native links do not require empty intermediate layers");
         World unknown = new World(source, target); BlockPos missing = new BlockPos(6, 6, 1); unknown.unloaded.add(missing);
-        check(!clear(source, target, unknown) && !unknown.read.contains(missing), "unloaded mid-span cells fail without reading or forcing the missing chunk");
+        check(clear(source, target, unknown) && !unknown.read.contains(missing), "unloaded mid-span cells are not read or force-loaded");
     }
     private static boolean clear(Endpoint source, Endpoint target, World world) {
         return KineticChainClearance.clear(new KineticGeometryWork(source, null, target, null, world, Limits.defaults(16)), List.of(source.position(), target.position()));
@@ -81,12 +83,12 @@ public final class KineticTransmissionAlternativesTest {
         check(direct.placements().isEmpty() && direct.bom().equals(Map.of("minecraft:chain",4)),
                 "existing low wheels need chains only, not a replacement pair and taller shaft pillars");
         check(KineticRouteGeometry.clearanceValid(direct,world),"live revalidation preserves the same existing-wheel clearance rule");
-        // 即使高度图反映屋顶，也以挂链高度实际空间为准；有真实链条障碍时仍拒绝原位直连。
+        // 屋顶高度和链条经过的石块均不改变原生端点连接，不为它们额外架高现有轮。
         world.ground=8;
         check(clear(source,target,world),"overhead heightmap does not obstruct an observed empty chain envelope");
         world.solids.add(new BlockPos(5,2,1));
-        check(!clear(source,target,world) && !KineticRouteGeometry.clearanceValid(direct,world),
-                "a newly occupied native chain strand still invalidates the existing pair");
+        check(clear(source,target,world) && KineticRouteGeometry.clearanceValid(direct,world),
+                "occupied mid-span cells do not invalidate the existing pair");
         check(!KineticRouteGeometry.validLink(source.position(),new BlockPos(1,2,0),16),"native minimum distance remains required");
     }
     private static Endpoint shaft(int x, int y, int z, Direction face) { return new Endpoint(new BlockPos(x, y, z), face.getAxis(), List.of(face), "shaft"); }
