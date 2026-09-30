@@ -118,7 +118,8 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
                 || receipt.backend() != ClientRequestReceipt.Backend.SERVER) {
             ServerAssistClient.cancel(pending.id());
             pending = null;
-            skip("server_observation_" + receipt.code());
+            pages.rejected(offset(targets.get(targetIndex).position()), receipt);
+            targetIndex++; resourceOffset = 0;
             return TaskState.RUNNING;
         }
         JsonObject page = receipt.result();

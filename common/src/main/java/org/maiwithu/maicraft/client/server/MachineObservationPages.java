@@ -34,6 +34,16 @@ final class MachineObservationPages {
         value.add("offset", offset); value.addProperty("reason", reason); unavailable.add(value);
     }
 
+    void rejected(JsonArray offset, ClientRequestReceipt.Snapshot receipt) {
+        // 距离、锁定和原生拒绝各有不同处理条件，保留服务器的原话与数据，不能只留下一个模糊错误码。
+        String reason = "server_observation_" + receipt.code(); incomplete.add(reason);
+        JsonObject value = new JsonObject(); value.add("offset", offset); value.addProperty("reason", reason);
+        value.addProperty("message", receipt.message()); value.addProperty("status", receipt.status().name());
+        value.addProperty("server_tick", receipt.serverTick());
+        if (!receipt.result().isEmpty()) value.add("native_details", receipt.result());
+        unavailable.add(value);
+    }
+
     JsonObject report(int selected, int observed, int nextComponent, long anchorTick) {
         if (pages.isEmpty()) incomplete.add("no_native_observation_returned");
         JsonObject result = new JsonObject();

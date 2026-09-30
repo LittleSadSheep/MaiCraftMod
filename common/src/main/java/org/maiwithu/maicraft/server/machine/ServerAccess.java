@@ -85,7 +85,10 @@ public final class ServerAccess {
         }
         if (NativeApi.is(entity, "com.simibubi.create.foundation.blockEntity.SmartBlockEntity")
                 && !NativeApi.truth(NativeApi.call(entity, null, "canPlayerUse", player))) {
-            throw denied("permission_denied", "Create interaction denied");
+            // Create 的 canPlayerUse 包含原生交互距离检查；距离不够不能误报成没有机器操作权限。
+            if (!player.canInteractWithBlock(pos, 8))
+                throw denied("out_of_range", "Native Create canPlayerUse requires player.canInteractWithBlock(target, 8)");
+            throw denied("permission_denied", "Native Create canPlayerUse rejected access within its distance requirement");
         }
         if (NativeApi.present("mekanism.api.security.IBlockSecurityUtils")) {
             Object security = NativeApi.constant("mekanism.api.security.IBlockSecurityUtils", "INSTANCE");
