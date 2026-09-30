@@ -28,8 +28,11 @@ final class KineticGeometryWork {
     void put(BlockPos at, String id, Map<String, String> state) {
         KineticRouteGeometry.checkpoint();
         if (!valid) return;
-        if (at.equals(source.position()) || at.equals(target.position()) || !free(at)) { valid = false; return; }
-        Placement placement = new Placement(at, id, state), previous = blocks.putIfAbsent(at.immutable(), placement);
+        Placement placement = new Placement(at, id, state);
+        // 换来源或客户端恢复后，已建好的同状态传动件仍可复用；它不是必须拆掉或绕开的陌生障碍。
+        if (at.equals(source.position()) || at.equals(target.position()) || !inEnvelope(at) || !terrain.loaded(at)
+                || terrain.protectedCell(at) || !terrain.matches(placement) && !free(at)) { valid = false; return; }
+        Placement previous = blocks.putIfAbsent(at.immutable(), placement);
         if (previous != null && !previous.equals(placement) || blocks.size() > limits.maxPlacements()) valid = false;
     }
     void join(BlockPos a, BlockPos b) {

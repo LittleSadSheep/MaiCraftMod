@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 /** 有界的会话级所有权回执可避免将部分路线误当成修建绕行路线的许可。 */
 final class KineticRouteContinuations {
     record Entry(Level world,UUID owner,EconomicKineticTaskRecord request,KineticRouteGeometry.Plan plan,
-                 JsonObject costs,BlockEntity source,BlockEntity target,long expires) {}
+                 JsonObject costs,BlockEntity source,BlockEntity target) {}
     private static final Map<BlockPos,Entry> ENTRIES=new LinkedHashMap<>();
     private KineticRouteContinuations() {}
     static Entry find(LocalPlayer player,EconomicKineticTaskRecord request) {
@@ -37,7 +37,7 @@ final class KineticRouteContinuations {
     static void retain(LocalPlayer player,EconomicKineticTaskRecord request,KineticRouteGeometry.Plan plan,JsonObject costs) {
         if(ENTRIES.size()>=16&&!ENTRIES.containsKey(request.target))throw new IllegalArgumentException("kinetic_partial_route_receipt_capacity");
         ENTRIES.put(request.target.immutable(),new Entry(player.level(),player.getUUID(),request,plan,costs.deepCopy(),
-                player.level().getBlockEntity(plan.source().position()),player.level().getBlockEntity(request.target),player.level().getGameTime()+24000));
+                player.level().getBlockEntity(plan.source().position()),player.level().getBlockEntity(request.target)));
     }
     static void completed(LocalPlayer player,BlockPos target) {
         var entry=ENTRIES.get(target);if(entry!=null&&entry.world()==player.level()&&entry.owner().equals(player.getUUID()))ENTRIES.remove(target);
