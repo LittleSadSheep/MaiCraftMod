@@ -29,6 +29,11 @@ final class BuildExcavationTools {
 
     boolean ready(LocalPlayer player, BuildTaskRecord record, BlockPos target, int work,
                   Function<Task, TaskState> childRunner) {
+        return ready(player, record, target, work, childRunner, true);
+    }
+
+    boolean ready(LocalPlayer player, BuildTaskRecord record, BlockPos target, int work,
+                  Function<Task, TaskState> childRunner, boolean allowWrench) {
         if (player.getAbilities().instabuild) return true;
         if (supply.active()) {
             // 木桶取料或合成还没收尾时继续等待，不能刚看见铲子进包就抢走操作、直接回去刨坑。
@@ -40,7 +45,8 @@ final class BuildExcavationTools {
             return false;
         }
         // 支持默认扳手拆卸且身上已有 Create 扳手时，拆旧轴不必先绕去制作一把镐子。
-        if (BuildWrenchRemoval.available(player, target)) return true;
+        // 该格的潜行扳手已经无法够到时，仍须为普通拆除核对正确工具，不能因背包里有扳手就跳过。
+        if (allowWrench && BuildWrenchRemoval.available(player, target)) return true;
         var item = WorkToolPreparation.excavationTool(player, player.level().getBlockState(target), work);
         if (item == null) return true;
         var options = record.toolSupply();

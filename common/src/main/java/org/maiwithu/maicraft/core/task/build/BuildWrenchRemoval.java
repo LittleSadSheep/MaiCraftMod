@@ -117,6 +117,12 @@ public final class BuildWrenchRemoval {
         reason = "awaiting_native_wrench_removal"; return status;
     }
     public boolean pending() { return receipt != null && !receipt.terminal() || selection.pending(); }
+    /** 潜行后失去射线且从未发出右键时，允许调用方改回普通工具拆同一块；未知点击不能走此回退。 */
+    public boolean canFallbackToMining() {
+        return status == Status.FAILED && receipt == null && !selection.pending()
+                && reason.equals("wrench_target_occluded") && player.level() == level
+                && player.level().isLoaded(target) && player.level().getBlockState(target).equals(before);
+    }
     public boolean uncertain() { return receipt != null && receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED; }
     public String reason() { return reason; }
     public void pause() { aim.reset(); started = -1; }

@@ -165,6 +165,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private int placementAccessReplans;
     private BuildWrenchRemoval wrenchRemoval;
     private final List<Map<String, Object>> wrenchReceipts = new ArrayList<>();
+    private final Set<Long> miningInsteadOfWrench = new HashSet<>();
+    private final List<Map<String, Object>> wrenchFallbacks = new ArrayList<>();
     private String edgeReturnFailure, edgeReturnFailureCode;
     private Map<String, Object> temporarySupportDemand = Map.of();
     private Map<String, Object> placementStateConflict = Map.of();
@@ -700,6 +702,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState clearNavTick() {
+        boolean forceMining = miningInsteadOfWrench.contains(clearing.asLong());
+        int remainingBreaks = excavating ? excavation.remaining() : 1;
         // 还没开始补工具时先看眼前障碍，避免为名单外建筑跑一趟仓库之后才告知需要换场地。
         if (!excavationTools.active() && player.level().isLoaded(clearing)) {
             var live = player.level().getBlockState(clearing);
@@ -709,18 +713,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 beginClearanceReport(clearing); return TaskState.RUNNING;
             }
         }
-        if (excavating && !excavationTools.active() && player.level().isLoaded(clearing)
+        if ((excavating || forceMining) && !excavationTools.active() && player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir()
-                && !BuildWrenchRemoval.available(player, clearing)
+                && (forceMining || !BuildWrenchRemoval.available(player, clearing))
                 && r.toolSupply().policy() != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY
                 && WorkToolPreparation.excavationTool(
-                        player, player.level().getBlockState(clearing), excavation.remaining()) != null) {
+                        player, player.level().getBlockState(clearing), remainingBreaks) != null) {
             TaskState access = leaveExcavationBefore(Phase.CLEAR_NAV);
             if (access != null) return access;
         }
-        if (excavating && (excavationTools.active() || player.level().isLoaded(clearing)
+        if ((excavating || forceMining) && (excavationTools.active() || player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir())
-                && !excavationTools.ready(player, r, clearing, excavation.remaining(), this::runChild)) {
+                && !excavationTools.ready(player, r, clearing, remainingBreaks, this::runChild, !forceMining)) {
             stopNav();
             if (excavationTools.failure() == null) return TaskState.RUNNING;
             failAt(clearing, excavationTools.failure(), FailureType.NO_MATERIAL, "excavation_tool_unavailable", false);
@@ -813,7 +817,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             failAt(clearing, "observed target changed before breaking", FailureType.TARGET_LOST,
                     "build_target_changed", false); return TaskState.FAILED;
         }
-        if (digger.current() == null && !digger.hasPendingBreak()) wrenchRemoval = BuildWrenchRemoval.carried(player, clearing,
+        if (!miningInsteadOfWrench.contains(clearing.asLong()) && digger.current() == null && !digger.hasPendingBreak()) wrenchRemoval = BuildWrenchRemoval.carried(player, clearing,
                 () -> clearingPermitted(player.level().getBlockState(clearing)) && r.mutationGuardMatches(player, clearing));
         if (wrenchRemoval != null) return wrenchRemovalTick();
         return switch (digger.digTargetStep(clearing)) {
@@ -840,6 +844,16 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (status == BuildWrenchRemoval.Status.RUNNING) return TaskState.RUNNING;
         if (status == BuildWrenchRemoval.Status.FAILED) {
             if (phase == Phase.CLEARANCE_REPORT) return TaskState.RUNNING;
+            if (wrenchRemoval.canFallbackToMining() && BuildEdgeMotion.canStandAt(player, forbiddenBodyCells,
+                    pos -> !forbiddenBodyCells.contains(pos.asLong()))) {
+                // 站姿原本能挖，潜行后却够不到时，不让扳手这一便捷路径终止已授权拆除；先松潜行，再重新证明挖掘站位。
+                wrenchFallbacks.add(wrenchRemoval.evidence());
+                miningInsteadOfWrench.add(clearing.asLong());
+                wrenchRemoval.stop(); wrenchRemoval = null;
+                InputDriver.sneak(player, false); stopNav(); phase = Phase.CLEAR_NAV;
+                note = "wrench crouch lost the target ray; preparing native tool removal";
+                return TaskState.RUNNING;
+            }
             failAt(clearing, wrenchRemoval.reason(), FailureType.UNKNOWN, "native_wrench_removal_failed", wrenchRemoval.uncertain());
             return TaskState.FAILED;
         }
@@ -2661,6 +2675,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!temporarySupportDemand.isEmpty()) data.put("temporary_support_demand", temporarySupportDemand);
         data.put("cleared", r.broken());
         if (!wrenchReceipts.isEmpty()) data.put("native_wrench_removals", List.copyOf(wrenchReceipts));
+        // 未发右键的回退单列为尝试，不冒充已经拆除或回收了方块。
+        if (!wrenchFallbacks.isEmpty()) data.put("native_wrench_fallbacks", List.copyOf(wrenchFallbacks));
         if (wrenchRemoval != null) data.put("pending_wrench_removal", wrenchRemoval.evidence());
         data.put("food_preparation", foodPreparation.progress(player));
         if (!foodPreparation.receipts().isEmpty()) data.put("completed_food_receipts", foodPreparation.receipts());
