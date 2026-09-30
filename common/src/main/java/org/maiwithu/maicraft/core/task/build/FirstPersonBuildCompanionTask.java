@@ -669,6 +669,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             else {
                 if (r.allowPartial && (r.consumeMaterials || !player.getAbilities().instabuild)
                         && !inventory.hasItems(cell.target().item(), cell.target().materialCount(), true)) {
+                    // 导航可能先花掉预选垫块；临时支撑改选剩余易拆材料或交回专用内部补料流程。
+                    if (isTemporary(cell)) return refreshTemporarySupportSupply();
                     // 缺砖就留在能够补料的位置，不能空手回到坑底后才宣布材料不足。
                     failAt(cell.target().pos(), "required block item is not in synchronized inventory; resupply before approaching the cell",
                             FailureType.NO_MATERIAL, "material_exhausted", false);
@@ -1392,6 +1394,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             slot = creativeMaterials.slot();
         } else slot = inventory.findSlot(cell.target().item(), true);
         if (slot < 0) {
+            // 走到点击点之前的登阶可能消耗同种垫块，不能把它伪装成永久蓝图建材缺失。
+            if (isTemporary(cell)) return refreshTemporarySupportSupply();
             missing.clear();
             missing.putAll(currentShortfall());
             failAt(cell.target().pos(), "required block item is not in synchronized inventory",
@@ -1797,6 +1801,33 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 垫块 -> 原目标逐块执行；每块沿用普通导航和右键，不预先证明整条支撑放完后还能走到哪里。
         stopNav();
         return enqueueSupports();
+    }
+
+    private TaskState refreshTemporarySupportSupply() {
+        var pending = queue.subList(queueAt, queue.size()).stream().filter(this::isTemporary)
+                .filter(candidate -> !constructionMatches(candidate.target(), candidate.generated())).toList();
+        int count = Math.max(1, pending.size());
+        Item replacement = BuildTemporarySupportMaterials.choose(ScaffoldMaterials.of(player), scaffoldReservations(),
+                inventory::mainInventoryCount, count, false);
+        if (replacement == null) return missingTemporarySupportMaterials(count);
+        // 有其他合适现货就只更换尚未放下的垫块；已落地的支撑仍按原账本回收，不返工换材质。
+        supportMaterial = ((BlockItem) replacement).getBlock().defaultBlockState();
+        queue = new ArrayList<>(queue);
+        for (int i = queueAt; i < queue.size(); i++) {
+            CellPlan candidate = queue.get(i);
+            if (!pending.contains(candidate)) continue;
+            var target = new BuildTaskRecord.Target(supportMaterial, replacement, candidate.target().pos(),
+                    "temporary click support", null, null, null).asItemPlace();
+            temporaryTargets.put(target.pos().asLong(), target);
+            queue.set(i, new CellPlan(target, List.of()));
+        }
+        cell = queue.get(queueAt);
+        // 材料已换，旧接近器绑定的原生放置状态也必须丢弃，再用新物品重证点击。
+        if (placementAccess != null) placementAccess.stop();
+        placementAccess = null; placementAccessTarget = null;
+        resetCell(); phase = Phase.SELECT;
+        note = "using remaining carried temporary support materials";
+        return TaskState.RUNNING;
     }
 
     // 点击支撑和登阶落脚共用同一缺料回执；父任务会先尝试全部易拆现货，而非把首选材料送去通用采矿。
