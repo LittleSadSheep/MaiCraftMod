@@ -41,6 +41,9 @@ public final class TargetIndex {
     private static final int COMPLETED_QUERY_TICKS = 20;
     private static long queryTick = Long.MIN_VALUE;
     private static long queryDeadline;
+    /** 调试观测：预算截断只累计次数，不影响查询行为；跨世界累计，不随 dropAll 清零。 */
+    private static long wallClockExhausted;
+    private static long buildBudgetExhausted;
 
     /** 有任何维度有注册目标时为 true——方块变更钩子的最外层免费闸门。 */
     private static volatile boolean anyActive;
@@ -291,14 +294,29 @@ public final class TargetIndex {
             long sectionKey = SectionPos.asLong(cx, sy, cz);
             SectionEntry entry = idx.sections.get(sectionKey);
             if (entry == null || entry.version != idx.version || entry.source != section) {
-                if (budget-- <= 0) break;
+                if (budget-- <= 0) {
+                    buildBudgetExhausted++;
+                    break;
+                }
                 entry = build(section, idx);
                 idx.sections.put(sectionKey, entry);
             }
             collect(entry, section, cx, sy, cz, targets, progress.nearest);
             progress.sectionIndex++;
         }
+        // 循环里还有未完成的工作而墙钟已到，就是一次超限截断；被 build 预算打断时墙钟未到，不算。
+        if (!progress.complete && System.nanoTime() >= queryDeadline) {
+            wallClockExhausted++;
+        }
         return new Result(progress.nearest.sorted(), progress.complete);
+    }
+
+    /** 一次预算截断观测快照：两个计数都是自启动以来的累计次数。 */
+    public record BudgetCounters(long wallClockExhausted, long buildBudgetExhausted) {}
+
+    /** 供调试面板区分"范围内没有"与"预算内没扫完"；只读取计数，不重置。 */
+    public static BudgetCounters budgetCounters() {
+        return new BudgetCounters(wallClockExhausted, buildBudgetExhausted);
     }
 
     /** palette 预筛:这个 section 一定不含任何目标(纯空气,或调色板里就没有)。 */

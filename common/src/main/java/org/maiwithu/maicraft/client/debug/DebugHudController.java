@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.scan.TargetIndex;
 
 /**
  * F9 切换的常驻调试面板。每刻构建一次只读快照，渲染只画快照；本类不提交任何操作，
@@ -66,6 +67,12 @@ public final class DebugHudController {
         }
         rows.add(new MaiCraftStatus.StatusRow("Menu", "none".equals(menu) ? "无" : menu,
                 "none".equals(menu) ? ChatFormatting.GRAY : ChatFormatting.AQUA));
+        // 扫描截断计数大于零说明最近有"预算内没扫完"的查询；缺席结论要先看这里。
+        TargetIndex.BudgetCounters scan = TargetIndex.budgetCounters();
+        boolean truncated = scan.wallClockExhausted() > 0 || scan.buildBudgetExhausted() > 0;
+        rows.add(new MaiCraftStatus.StatusRow("Scan", "墙钟超限 " + scan.wallClockExhausted()
+                        + " · 构建预算耗尽 " + scan.buildBudgetExhausted(),
+                truncated ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
         return List.copyOf(rows);
     }
 
