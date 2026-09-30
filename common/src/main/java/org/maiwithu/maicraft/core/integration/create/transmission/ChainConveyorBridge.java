@@ -90,6 +90,14 @@ public final class ChainConveyorBridge {
             return new Selection((BlockPos) first.get(null), (ResourceKey<Level>) dimension.get(null));
         } catch (ReflectiveOperationException | RuntimeException | LinkageError missing) { throw unavailable(missing); }
     }
+    /** 只取消调用方已确认拥有的首端选点；使用 Create 自己的潜行右键处理，不改连接集合或背包。 */
+    public static boolean cancelOwnedSelection(Level world, BlockPos expectedFirst) {
+        if (!selection().matches(world, expectedFirst)) return false;
+        try {
+            boolean handled = Boolean.TRUE.equals(Class.forName(HANDLER).getMethod("onRightClick").invoke(null));
+            return handled && selection().first() == null;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError missing) { throw unavailable(missing); }
+    }
     private static int config(Object kinetics, String name) throws ReflectiveOperationException {
         Object value = kinetics.getClass().getField(name).get(kinetics);
         return ((Number) value.getClass().getMethod("get").invoke(value)).intValue();

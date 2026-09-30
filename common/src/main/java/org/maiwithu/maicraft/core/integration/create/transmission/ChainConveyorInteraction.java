@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.core.integration.create.transmission;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -47,16 +49,23 @@ final class ChainConveyorInteraction {
         return hit.getType() == HitResult.Type.BLOCK ? hit : null;
     }
     static BlockPos stance(LocalPlayer player, BlockPos target) {
+        return stances(player, target, Set.of()).getFirst();
+    }
+    // 把所有已有落脚点交给寻路器比较，不能把距离最近但被围挡隔开的一个点当成唯一连接站位。
+    static List<BlockPos> stances(LocalPlayer player, BlockPos target, Set<BlockPos> excluded) {
         var candidates = new ArrayList<BlockPos>();
         for (int x = -4; x <= 4; x++) for (int z = -4; z <= 4; z++) for (int y = -4; y <= 1; y++) candidates.add(target.offset(x, y, z));
         candidates.sort(Comparator.comparingDouble(at -> Vec3.atBottomCenterOf(at).distanceToSqr(player.position())));
+        var visible = new ArrayList<BlockPos>();
         for (BlockPos feet : candidates) {
+            if (excluded.contains(feet)) continue;
             if (!player.level().isLoaded(feet) || !player.level().isLoaded(feet.above()) || !player.level().isLoaded(feet.below())
                     || NavigationSafetyContext.forbidsBody(feet) || NavigationSafetyContext.forbidsBody(feet.above())
                     || !BlockHelper.isDryStandable(player.level(), feet) || BlockHelper.isHazard(player.level(), feet.below())) continue;
             Vec3 eye = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(Pose.STANDING), 0);
-            if (aim(player, target, eye) != null) return feet;
+            if (aim(player, target, eye) != null) visible.add(feet);
         }
-        throw new IllegalArgumentException("chain_conveyor_no_visible_native_stance");
+        if (visible.isEmpty()) throw new IllegalArgumentException("chain_conveyor_no_visible_native_stance");
+        return List.copyOf(visible);
     }
 }

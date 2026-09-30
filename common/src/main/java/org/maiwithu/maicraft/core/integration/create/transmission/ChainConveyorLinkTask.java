@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashSet;
+import java.util.Comparator;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -23,7 +25,7 @@ import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
-import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -34,7 +36,7 @@ import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
 
 /** 通过两次真实的持链方块交互连接；第二次原生动作绝不会重放。 */
 final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLinkTaskRecord> {
-    private enum Phase { MATERIALS, EQUIP, FIRST_READ, FIRST_CLICK, FIRST_CONFIRM, SECOND_READ, SECOND_CLICK, SECOND_CONFIRM, VERIFY_SECOND, VERIFY_FIRST, RESTORE }
+    private enum Phase { MATERIALS, EQUIP, FIRST_READ, FIRST_CLICK, FIRST_CONFIRM, SECOND_READ, SECOND_CLICK, SECOND_CONFIRM, VERIFY_SECOND, VERIFY_FIRST, RESTORE, CANCEL_SELECTION }
     private final Level world;
     private final ChainConveyorInventory inventory;
     private final ChainConveyorRead reads = new ChainConveyorRead();
@@ -44,6 +46,11 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     private Set<BlockPos> firstBefore = Set.of(), secondBefore = Set.of();
     private NativeActionReceipt action;
     private BlockPos navigating;
+    private List<BlockPos> approachCandidates = List.of();
+    private final Set<BlockPos> rejectedStances = new HashSet<>();
+    private Map<String, Object> approachObservation = Map.of();
+    private long selectionCleanupDeadline;
+    private boolean selectionCleanupConfirmed;
     private JsonObject firstProof, secondProof, firstAdmission;
     private int cost, countBefore, countAfter, approachTicks;
     private boolean selectedByTask, secondSubmitted, effectSettled, verified, noChange, inventoryClosed, ownedSelectionPending, geometryChecked;
@@ -76,6 +83,8 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     }
     @Override protected TaskState onTick() {
         try {
+            // 第二次点击尚未发送的失败先结清本任务首端选点，避免把临时客户端选点留给下一轮误认成外部占用。
+            if (phase == Phase.CANCEL_SELECTION) return cancelSelection();
             if (!current()) return stop("chain_conveyor_endpoint_or_world_changed");
             if (!serverAssisted && !ServerAssistClient.nativeFallbackAllowed("machine.snapshot")) return stop("chain_conveyor_server_policy_denied");
             if (serverAssisted && !ServerAssistClient.serverSupported("machine.snapshot")) {
@@ -106,6 +115,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
                 case VERIFY_SECOND -> verify(false);
                 case VERIFY_FIRST -> verify(true);
                 case RESTORE -> restore();
+                case CANCEL_SELECTION -> cancelSelection();
             };
         } catch (IllegalArgumentException | IllegalStateException problem) { return stop(problem.getMessage()); }
     }
@@ -223,22 +233,56 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
     }
     private boolean near(BlockPos target) {
         if (ChainConveyorInteraction.aim(player, target, player.getEyePosition()) != null) { stopNav(); navigating = null; approachTicks = 0; return true; }
-        if (!target.equals(navigating)) { stopNav(); navigating = target; approachTicks = 0; }
+        if (!target.equals(navigating)) { stopNav(); navigating = target; approachTicks = 0; rejectedStances.clear(); }
         if (nav == null) {
-            BlockPos stance = ChainConveyorInteraction.stance(player, target);
-            nav = PlayerNav.to(player, () -> GoalCompiler.standOn(stance), .9,
+            approachCandidates = ChainConveyorInteraction.stances(player, target, rejectedStances);
+            var goals = approachCandidates.stream().map(NavGoal::exact).toList();
+            // 一次搜索所有可见站位，由真实移动图选择能走到的那个，不因最近候选无路就放弃整个端点。
+            nav = PlayerNav.toGoal(player, () -> NavGoal.composite(goals), .9,
                     () -> ChainConveyorInteraction.aim(player, target, player.getEyePosition()) != null, PlayerNav.ContextProvider.DEFAULT);
         }
         var state = NavigationSafetyContext.withPreservedStructures(List.of(r.first, r.second), nav::tick);
-        if (state == PlayerNav.Status.FAILED || state == PlayerNav.Status.ARRIVED && ++approachTicks > 20)
-            throw new IllegalArgumentException("chain_conveyor_endpoint_unreachable");
+        if (state == PlayerNav.Status.FAILED || state == PlayerNav.Status.ARRIVED && ++approachTicks > 20) {
+            approachObservation = Map.of("endpoint", target.equals(r.first) ? "first" : "second",
+                    "failure_position", List.of(target.getX(), target.getY(), target.getZ()),
+                    "player_feet", List.of(player.getX(), player.getY(), player.getZ()),
+                    "visible_stances", approachCandidates.size(), "rejected_stances", rejectedStances.size(),
+                    "navigation_failure", String.valueOf(nav.failReason()), "navigation_outcome", String.valueOf(nav.outcomeSummary()));
+            if (state == PlayerNav.Status.FAILED)
+                throw new IllegalArgumentException("chain_conveyor_endpoint_unreachable: " + (target.equals(r.first) ? "first" : "second")
+                        + "; visible_stances=" + approachCandidates.size() + "; " + nav.failReason());
+            // 到格仍没有真实射线时排除这个落点再择路；始终没有提交第二次连接点击，不涉及重放连接或扣料。
+            approachCandidates.stream().min(Comparator.comparingDouble(at -> Vec3.atBottomCenterOf(at).distanceToSqr(player.position())))
+                    .ifPresent(rejectedStances::add);
+            stopNav(); approachTicks = 0;
+        }
         return false;
     }
     private TaskState restore() {
         // 连接和材料消耗已结算，直接结束使用；背包保持操作后的布局，不能再被原排序还原卡住。
         inventory.finish(); inventoryClosed = true; return TaskState.SUCCESS;
     }
-    private TaskState stop(String code) { failure = code; fail(code, FailureType.UNKNOWN); return TaskState.FAILED; }
+    private TaskState stop(String code) {
+        if (failure == null) failure = code;
+        if (phase != Phase.CANCEL_SELECTION && firstSelectionConfirmed && !secondSubmitted && action == null
+                && ChainConveyorBridge.selection().matches(world, r.first)) {
+            stopNav(); phase = Phase.CANCEL_SELECTION; selectionCleanupDeadline = world.getGameTime() + 40;
+            r.extendDeadlineTo(selectionCleanupDeadline + 1); return TaskState.RUNNING;
+        }
+        InputDriver.sneak(player, false); fail(failure, FailureType.UNKNOWN); return TaskState.FAILED;
+    }
+    private TaskState cancelSelection() {
+        if (!ChainConveyorBridge.selection().matches(world, r.first)) return stop(failure);
+        if (!player.isAlive() || player.level() != world || world.getGameTime() >= selectionCleanupDeadline)
+            return stop(failure);
+        var context = ClientRuntime.requireContext(player);
+        if (!player.getMainHandItem().is(Items.CHAIN) || context.minecraft().screen != null) return stop(failure);
+        InputDriver.halt(player); InputDriver.sneak(player, true);
+        if (!player.isShiftKeyDown() || !context.mutationAvailable()) return TaskState.RUNNING;
+        // 原生 onRightClick 在持链潜行时仅取消客户端首端选择；调用前后核对归属，绝不重发第二次连接。
+        selectionCleanupConfirmed = ChainConveyorBridge.cancelOwnedSelection(world, r.first);
+        return stop(failure);
+    }
     @Override protected void cleanup() {
         if (creativeSupply != null) { creativeSupply.stop(player, StopReason.REPLACED); creativeSupply.result(TaskState.CANCELLED); creativeSupply = null; }
         try { ownedSelectionPending = selectedByTask && ChainConveyorBridge.selection().matches(world, r.first); } catch (RuntimeException ignored) { }
@@ -260,6 +304,8 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         result.put("required_new_chains", noChange || creativeExempt ? 0 : cost);
         result.put("outcome_uncertain", secondSubmitted && !effectSettled); result.put("second_click_replay_allowed", false);
         result.put("inventory_cleanup_complete", inventoryClosed); result.put("owned_selection_pending", ownedSelectionPending);
+        result.put("selection_cleanup_confirmed", selectionCleanupConfirmed);
+        if (!approachObservation.isEmpty()) result.put("approach_observation", approachObservation);
         result.put("power_verified", false); result.put("production_verified", false);
         result.put("verification_scope", bothServerVerified ? "server_native_bidirectional_link" : serverAssisted
                 ? "server_local_endpoint_plus_client_synchronized_peer" : "client_synchronized_links_and_native_inventory_effects");
