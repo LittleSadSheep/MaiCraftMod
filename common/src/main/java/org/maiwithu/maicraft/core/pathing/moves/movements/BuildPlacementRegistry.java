@@ -63,9 +63,11 @@ public final class BuildPlacementRegistry {
     public static boolean hasScaffoldMaterialPolicy() { return activeProvider != null; }
 
     public static BuildTemporarySupportMaterials.Choice scaffoldChoice(LocalPlayer player) {
-        if (activeProvider == null || player == null) return null;
+        if (player == null) return null;
+        // 普通通行也能取用主背包中的易拆余料；施工存在永久材料预留时仍按原预留扣除可花数量。
         return BuildTemporarySupportMaterials.inventoryChoice(
-                player.getInventory().items, ScaffoldMaterials.of(player), activeProvider.scaffoldReservations());
+                player.getInventory().items, ScaffoldMaterials.of(player),
+                activeProvider == null ? Map.of() : activeProvider.scaffoldReservations());
     }
 
     /** 导航即将放置前，重新核实实际背包材料和永久性要求。 */

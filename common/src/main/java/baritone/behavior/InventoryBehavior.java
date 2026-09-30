@@ -21,6 +21,7 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.utils.Helper;
 import baritone.utils.ToolSet;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
@@ -136,8 +137,9 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public boolean hasGenericThrowaway() {
-        if (org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.hasScaffoldMaterialPolicy())
-            return org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.scaffoldChoice(ctx.player()) != null;
+        // 算路时能看到主背包里的易拆余料，实际使用仍等待原生交换确认，不把“没在快捷栏”误判成完全缺料。
+        var choice = BuildPlacementRegistry.scaffoldChoice(ctx.player());
+        if (choice != null || BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return choice != null;
         for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
             if (throwaway(false, stack -> item.equals(stack.getItem()))) {
                 return true;
@@ -147,7 +149,8 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public boolean selectThrowawayForLocation(boolean select, int x, int y, int z) {
-        if (org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry.hasScaffoldMaterialPolicy())
+        // 普通搭路也走同一选择器，避免已经算出的垫块路线在跳起后才发现无法原生拿到材料。
+        if (BuildPlacementRegistry.scaffoldChoice(ctx.player()) != null || BuildPlacementRegistry.hasScaffoldMaterialPolicy())
             return EmbeddedBaritoneRuntime.selectBuildScaffold(ctx.player(), select);
         BlockState maybe = baritone.getBuilderProcess().placeAt(x, y, z, baritone.bsi.get0(x, y, z));
         if (maybe != null && throwaway(select, stack -> stack.getItem() instanceof BlockItem && maybe.equals(((BlockItem) stack.getItem()).getBlock().getStateForPlacement(new BlockPlaceContext(new UseOnContext(ctx.world(), ctx.player(), InteractionHand.MAIN_HAND, stack, new BlockHitResult(new Vec3(ctx.player().position().x, ctx.player().position().y, ctx.player().position().z), Direction.UP, ctx.playerFeet(), false)) {}))))) {

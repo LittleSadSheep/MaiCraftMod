@@ -581,7 +581,7 @@ public final class EmbeddedBaritoneRuntime {
                 && ACTIONS.ensureHotbarSelected(context, current, player, slot);
     }
 
-    /** 建造任务会保留永久材料，即使唯一多余的脚手架方块不在快捷栏中也一样。 */
+    /** 普通通行与建造都可从主背包准备垫块；建造时额外保留永久材料，交换仍等可见菜单确认。 */
     public static boolean selectBuildScaffold(LocalPlayer player, boolean select) {
         var choice = BuildPlacementRegistry.scaffoldChoice(player);
         if (choice == null) return false;
@@ -595,8 +595,7 @@ public final class EmbeddedBaritoneRuntime {
 
     private static boolean prepareBuildScaffold(LocalPlayerContext context, EmbeddedBaritoneNavigator current) {
         if (BUILD_SCAFFOLDS.pending()) return !BUILD_SCAFFOLDS.advance(context, current);
-        if (current.permit() != TerrainPermit.TERRAFORM || !context.player().onGround() || ACTIONS.pending()
-                || !BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return false;
+        if (current.permit() != TerrainPermit.TERRAFORM || !context.player().onGround() || ACTIONS.pending()) return false;
         var choice = BuildPlacementRegistry.scaffoldChoice(context.player());
         if (choice == null || choice.inventorySlot() < 9) return false;
         // 角色落地时先准备材料，避免 Baritone 在材料选择完成前启动依赖放置的跳跃。
@@ -743,7 +742,7 @@ public final class EmbeddedBaritoneRuntime {
         settings.sprintAscends.value = true;
         settings.sprintInWater.value = true;
         configureTerrain(settings, permit);
-        // 当前关闭 Baritone 自行整理普通背包的行为；这条桥只直接支持已在快捷栏中的选择，不能据携带总量推定马上可用。
+        // 背包换槽由可见原生回执流程准备，不开放 Baritone 的直接背包操作；路线可计入主背包中已选定的易拆垫块。
         settings.allowInventory.value = false;
         settings.acceptableThrowawayItems.value = ScaffoldMaterials.of(
                 baritone.getPlayerContext().player());
