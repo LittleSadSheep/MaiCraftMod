@@ -21,8 +21,9 @@ final class KineticRouteContinuations {
     static Entry find(LocalPlayer player,EconomicKineticTaskRecord request) {
         ENTRIES.entrySet().removeIf(row->row.getValue().world()!=player.level());
         Entry entry=ENTRIES.get(request.target);if(entry==null)return null;
-        if(!entry.owner().equals(player.getUUID())||!sameRequest(entry.request(),request)
-                ||player.level().getGameTime()>entry.expires())throw new IllegalArgumentException("kinetic_partial_route_requires_inspection");
+        // 维护暂停和长时间施工不会自行破坏已建路线；续作按请求归属及下面的实时端点、方块事实核对，不因时钟拒绝。
+        if(!entry.owner().equals(player.getUUID())||!sameRequest(entry.request(),request))
+            throw new IllegalArgumentException("kinetic_partial_route_requires_inspection");
         if(!player.level().isLoaded(entry.plan().source().position())||!player.level().isLoaded(request.target)
                 ||player.level().getBlockEntity(entry.plan().source().position())!=entry.source()
                 ||player.level().getBlockEntity(request.target)!=entry.target())throw new IllegalArgumentException("kinetic_partial_route_endpoint_changed");
