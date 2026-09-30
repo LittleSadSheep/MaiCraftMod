@@ -100,6 +100,8 @@ final class CreateProgressiveSurvey {
     boolean endpointsResolved() { return !sourceCandidates.isEmpty() && !destinationCandidates.isEmpty(); }
     CreateMechanicalPlan.KineticEndpoint resolvedSource() { return sourceCandidates.getFirst(); }
     CreateMechanicalPlan.KineticEndpoint resolvedDestination() { return destinationCandidates.getFirst(); }
+    // 交接已实际发现的接收端，经济接线器可以比较同一原生结构上的等价轴口。
+    List<CreateMechanicalPlan.KineticEndpoint> resolvedDestinations() { return List.copyOf(destinationCandidates); }
     Failure failure() { return failure; }
     int travelSegments() { return travelSegments; }
     int sourceLoadedCells() { return sourceLoadedCells; }

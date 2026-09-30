@@ -24,6 +24,17 @@ public final class CreateBeltAccess {
     private static final ResourceLocation SELECTION = ResourceLocation.parse("create:belt_first_shaft");
     private CreateBeltAccess() {}
 
+    /** 只用原生控制器身份识别同一条带，不把附近另一条产线误当作可替换的供能对象。 */
+    static BlockPos controller(Level world, BlockPos at) {
+        if (!world.isLoaded(at)) return null;
+        var entity = world.getBlockEntity(at);
+        if (!NativeApi.is(entity, ENTITY)) return null;
+        try {
+            Object controller = NativeApi.call(entity, ENTITY, "getController");
+            return controller instanceof BlockPos pos ? pos.immutable() : null;
+        } catch (RuntimeException | LinkageError unavailable) { return null; }
+    }
+
     public static boolean available() {
         return NativeApi.present(CONNECTOR) && NativeApi.present(ENTITY)
                 && BuiltInRegistries.ITEM.containsKey(ITEM) && BuiltInRegistries.DATA_COMPONENT_TYPE.containsKey(SELECTION);

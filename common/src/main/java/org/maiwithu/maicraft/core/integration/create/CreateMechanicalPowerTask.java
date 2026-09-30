@@ -115,6 +115,9 @@ final class CreateMechanicalPowerTask
     private Task economicTask;
     private TaskRecord economicRecord;
     private TaskResult economicResult;
+    private CreateMechanicalPlan.KineticEndpoint economicSource;
+    private List<CreateMechanicalPlan.KineticEndpoint> economicDestinations = List.of();
+    private int economicDestinationIndex;
 
     CreateMechanicalPowerTask(LocalPlayer player, CreateMechanicalPowerTaskRecord record) {
         super(player, record);
@@ -349,9 +352,13 @@ final class CreateMechanicalPowerTask
         CreateProgressiveSurvey.Status status = progressiveSurvey.tick(context);
         observeProgressiveSurveyProgress();
         if (economicAfterEndpoints && progressiveSurvey.endpointsResolved()) {
-            economicRecord = CreateEconomicEndpointBridge.resolved(r, dimension, progressiveSurvey.resolvedSource(), progressiveSurvey.resolvedDestination());
+            // 同一原生皮带可以从多个轴口受力，不因锚点最近的一个口绕不过障碍就让模型重画机器。
+            economicSource = progressiveSurvey.resolvedSource();
+            economicDestinations = CreateEconomicEndpointBridge.equivalentDestinations(context.level(), r.request,
+                    economicSource, progressiveSurvey.resolvedDestinations());
+            economicDestinationIndex = 0;
             progressiveSurvey.stop(); progressiveSurvey = null;
-            economicTask = TaskFactory.create(player, economicRecord);
+            startEconomicalEndpoint();
             return TaskState.RUNNING;
         }
         if (status == CreateProgressiveSurvey.Status.RUNNING) return TaskState.RUNNING;
@@ -401,8 +408,24 @@ final class CreateMechanicalPowerTask
         if (state == null) return TaskState.RUNNING;
         if (state == TaskState.TIMEOUT) economicTask.stop(player, Task.StopReason.REPLACED);
         economicResult = economicTask.result(state); economicTask = null;
+        String code = economicResult.data() == null ? "" : String.valueOf(economicResult.data().get("failure_code"));
+        if (state == TaskState.FAILED && List.of("kinetic_no_supported_economical_geometry",
+                "kinetic_no_supported_chain_conveyor_geometry").contains(code)
+                && economicDestinationIndex + 1 < economicDestinations.size()) {
+            // 这两个失败只发生在材料/施工/连接前；换同带轴口重算，其他失败和任何已出手效果仍按原回执结算。
+            economicDestinationIndex++;
+            economicResult = null;
+            startEconomicalEndpoint(); renewProgressLease();
+            return TaskState.RUNNING;
+        }
         if (!economicResult.success()) fail(economicResult.message(), FailureType.UNKNOWN);
         return state;
+    }
+
+    private void startEconomicalEndpoint() {
+        economicRecord = CreateEconomicEndpointBridge.resolved(r, dimension, economicSource,
+                economicDestinations.get(economicDestinationIndex), economicDestinationIndex);
+        economicTask = TaskFactory.create(player, economicRecord);
     }
 
     // 按剩余线路和背包可容纳量确定一批数量；第一批材料未齐先补料，后续批次先归位再继续。
@@ -1113,7 +1136,11 @@ final class CreateMechanicalPowerTask
     // 对外保留实际进度、材料与失败原因，不把内部路线格和状态哈希全部当成模型需要填写的参数。
     protected Map<String, Object> resultData() {
         if (economicResult != null) {
-            var result = new LinkedHashMap<>(economicResult.data()); result.put("semantic_endpoints_resolved", true); return result;
+            var result = new LinkedHashMap<>(economicResult.data()); result.put("semantic_endpoints_resolved", true);
+            // 接线回执说明实际比较了多少等价端点，不把一次失败概括成整台机器无法供能。
+            result.put("economic_endpoint_candidates", economicDestinations.size());
+            result.put("economic_endpoint_attempts", economicDestinationIndex + 1);
+            return result;
         }
         Map<String, Object> safe = new LinkedHashMap<>();
         // 路由失败也明确本次实际选择的传动家族，旧chain_drive别名不能只给出笼统链路失败而掩盖选型差异。
