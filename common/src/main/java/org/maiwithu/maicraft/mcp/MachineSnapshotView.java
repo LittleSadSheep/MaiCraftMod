@@ -41,8 +41,10 @@ final class MachineSnapshotView {
                 // 完整部件样本已携带原生事实，默认不再复印原始分页和同一库存的第二份索引。
                 for (String key : List.of("pages", "occupied_resource_views", "occupied_resource_views_meaning", "component_reference")) evidence.remove(key);
                 evidence.addProperty("raw_pages_path", path + "/server_evidence/pages");
+                MachineEvidenceView.shareStates(evidence);
             }
         }
+        MachineEvidenceView.compactControl(result, snapshot);
         if (result.has("as_built_blueprint") && result.get("as_built_blueprint").isJsonObject()) {
             result.add("as_built_blueprint", layout(result.getAsJsonObject("as_built_blueprint")));
             if (result.getAsJsonObject("as_built_blueprint").get("capture_complete").getAsBoolean()
@@ -66,11 +68,14 @@ final class MachineSnapshotView {
                 belt.getAsJsonObject().getAsJsonArray("member_offsets").forEach(at -> grouped.add(at.toString()));
             if (operating.has("other_kinetic_components")) for (var part : operating.getAsJsonArray("other_kinetic_components"))
                 grouped.add(part.getAsJsonObject().get("offset").toString());
+            if (result.has("server_evidence") && result.getAsJsonObject("server_evidence").has("components"))
+                for (var part : result.getAsJsonObject("server_evidence").getAsJsonArray("components"))
+                    grouped.add(part.getAsJsonObject().get("offset").toString());
             var iterator = result.getAsJsonArray("component_evidence").iterator();
             while (iterator.hasNext()) {
                 JsonObject component = iterator.next().getAsJsonObject();
                 if (!component.has("offset") || !grouped.contains(component.get("offset").toString())) continue;
-                // 只去掉已在整带与机械手运行表中完整表达的同步字段；AE 部件等独有证据仍留在这里。
+                // 已有运行表或原生部件样本时不再复印实体存在和类型；AE 部件等独有证据仍留在这里。
                 for (String key : List.of("create_kinetic_client_fields", "create_deployer_hand_client",
                         "block_entity_present", "block_entity_type", "source")) component.remove(key);
                 if (component.size() == 2) iterator.remove();
