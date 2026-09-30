@@ -60,6 +60,8 @@ final class SemanticBuildSupplyCompanionTask
     private int childSerial;
     private int buildRounds;
     private boolean batchVerified;
+    // 放置尚未开始就发现缺料时，先回供料队列；不能让清障优先分支反复启动同一个缺料批次。
+    private boolean resupplyBeforeBuild;
     private int remainingCellsBeforeBuild;
     private boolean prepared;
     private boolean cargoCheckPending = true;
@@ -192,7 +194,7 @@ final class SemanticBuildSupplyCompanionTask
 
         boolean excavationNeeded = activePlan.targets.stream().anyMatch(target -> player.level().isLoaded(target.pos())
                 && !player.level().getBlockState(target.pos()).isAir() && !constructionMatches(target));
-        if (excavationNeeded && !activePlan.hasTrackedScaffolds() && supportItem == null) {
+        if (excavationNeeded && !resupplyBeforeBuild && !activePlan.hasTrackedScaffolds() && supportItem == null) {
             startBuild();
             return TaskState.RUNNING;
         }
@@ -271,9 +273,14 @@ final class SemanticBuildSupplyCompanionTask
                 && result.data().get("cleared") instanceof Number count && count.intValue() > 0;
         if (terminal == TaskState.FAILED && !buildOutcomeUncertain
                 && ("material_exhausted".equals(childCode)
-                        || "missing_materials".equals(childCode)) && progress) {
-            // 确实建了一些、只是材料用完，才自动进入下一轮补料；其他失败停下来等判断，不盲目继续重建。
-            return TaskState.RUNNING;
+                        || "missing_materials".equals(childCode))) {
+            // 原生回执已确认缺料且没有未知动作，就按当前背包重新算缺口；第一个方块尚未放下也应补料续建。
+            // 只有确实能发起取材，或已有施工进展时才续作，避免无缺口却反复收到相同错误的空转。
+            BatchNeed missing = nextNeed();
+            if (progress || missing != null && missing.fetch() > 0) {
+                resupplyBeforeBuild = true;
+                return TaskState.RUNNING;
+            }
         }
         stopFromChild("construction_batch_failed",
                 progress
@@ -515,7 +522,8 @@ final class SemanticBuildSupplyCompanionTask
 
     private void startBuild(boolean accessOnly) {
         // 新建一份施工任务单，共享整份蓝图的保护、预览和脚手架记录；世界里已经正确的格子会跳过。
-        if (!accessOnly) { buildRounds++; batchVerified = false; }
+        // 已经过供料判断后才重新进入正式施工；仅为出坑取材开的通行子任务不能清掉补料标记。
+        if (!accessOnly) { buildRounds++; batchVerified = false; resupplyBeforeBuild = false; }
         long now = player.level().getGameTime();
         BuildTaskRecord source = activePlan;
         BuildTaskRecord batch = new BuildTaskRecord(
