@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 public final class SnapshotBudget {
     private final int offset;
     private final int limit;
+    private final boolean occupiedItemsOnly;
     private int seen;
     private int emitted;
     private int bytes;
@@ -16,7 +17,14 @@ public final class SnapshotBudget {
     private boolean pageFull;
     private int nextOffset;
 
-    public SnapshotBudget(int offset, int limit) { this.offset = offset; this.limit = limit; this.nextOffset = offset; }
+    public SnapshotBudget(int offset, int limit) { this(offset, limit, false); }
+
+    public SnapshotBudget(int offset, int limit, boolean occupiedItemsOnly) {
+        this.offset = offset; this.limit = limit; this.nextOffset = offset; this.occupiedItemsOnly = occupiedItemsOnly;
+    }
+
+    // 整机观察先跳过空物品槽，再计算资源分页；空箱状态由接口计数表达，不占用工件的页额度。
+    public boolean occupiedItemsOnly() { return occupiedItemsOnly; }
 
     public void add(JsonArray destination, JsonObject resource) {
         int index = seen++;

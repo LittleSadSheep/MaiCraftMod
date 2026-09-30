@@ -22,9 +22,10 @@ public final class ServerMachineSnapshot {
         if (positions == null || positions.isEmpty() || positions.size() > 4) {
             throw ServerAccess.denied("invalid_argument", "Observe between one and four positions per page");
         }
-        int offset = body.has("resource_offset") ? ServerAccess.integer(body, "resource_offset", 0, 4096) : 0;
+        int offset = body.has("resource_offset") ? ServerAccess.integer(body, "resource_offset", 0, Integer.MAX_VALUE) : 0;
         int limit = body.has("resource_limit") ? ServerAccess.integer(body, "resource_limit", 1, 128) : 64;
-        SnapshotBudget budget = new SnapshotBudget(offset, limit);
+        SnapshotBudget budget = new SnapshotBudget(offset, limit,
+                body.has("occupied_items_only") && ServerAccess.bool(body, "occupied_items_only"));
         Set<Direction> faces = new LinkedHashSet<>();
         if (body.has("faces")) {
             if (body.getAsJsonArray("faces").size() > 6) throw ServerAccess.denied("invalid_argument", "At most six faces are allowed");

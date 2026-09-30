@@ -57,9 +57,12 @@ final class NativePortSnapshot {
         if (handler == null) return;
         int slots = handler.slots();
         port.addProperty("slot_count", slots);
-        if (slots > 128) budget.truncate();
-        for (int slot = 0; slot < Math.min(128, slots); slot++) {
+        int occupied = 0;
+        // 接口扫描覆盖实际槽位，展示额度只限制非空资源；大箱后半段的材料不能被误报为不存在。
+        for (int slot = 0; slot < slots; slot++) {
             ItemStack stack = handler.stack(slot);
+            if (!stack.isEmpty()) occupied++;
+            else if (budget.occupiedItemsOnly()) continue;
             JsonObject identity;
             try { identity = ResourceIdentity.item(stack, player.registryAccess()); }
             catch (IllegalArgumentException incomplete) {
@@ -74,6 +77,7 @@ final class NativePortSnapshot {
             if (!stack.isEmpty()) value.addProperty("valid_for_current_resource", handler.valid(slot, stack));
             budget.add(observation.getAsJsonArray("resources"), value);
         }
+        port.addProperty("occupied_slot_count", occupied);
     }
 
     private static void energy(BlockPos pos, Direction side, Object handler, JsonObject port,
