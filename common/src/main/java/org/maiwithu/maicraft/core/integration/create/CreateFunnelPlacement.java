@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.create;
 
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.function.Supplier;
 import com.google.gson.JsonArray;
@@ -89,12 +90,18 @@ public final class CreateFunnelPlacement {
         }
         if (!accepts) throw bad("native_funnel_support_missing");
         Direction facing = Direction.byName(property(state, "facing")); String desired = property(state, "shape");
-        // 仅接受正常放置能得到的形态；额外扳手变形需要单独原生动作，不能伪装成一次放置已经完成。
+        // 分别读取原生两种放法的结果；轴向组合不匹配时返回实际可得形态，不能误称任意形态都能靠后续交互补出。
+        var placementShapes = new LinkedHashSet<String>();
         for (boolean extracting : List.of(false, true)) {
             Object shape = NativeApi.call(null, VARIANT, "getShapeForPosition", new SupportView(support), BlockPos.ZERO, facing, extracting);
-            if (desired.equals(NativeApi.call(shape, null, "getSerializedName"))) return;
+            String nativeShape = String.valueOf(NativeApi.call(shape, null, "getSerializedName"));
+            placementShapes.add(nativeShape);
+            if (desired.equals(nativeShape)) return;
         }
-        throw bad("native_funnel_shape_requires_separate_interaction: " + desired);
+        // 伸展形态确实由扳手交互得到；其他不匹配情况只公开原生结果，交由作者根据接口事实修订。
+        if (desired.equals("extended")) throw bad("native_funnel_shape_requires_separate_interaction: " + desired);
+        throw bad("native_funnel_placement_shape_mismatch: requested=" + desired + "; native_shapes=" + placementShapes
+                + "; facing=" + facing + "; support=" + support);
     }
     private static boolean supports(BlockState support) {
         if (NativeApi.is(support.getBlock(), BELT)) return NativeApi.truth(NativeApi.call(null, BELT, "canTransportObjects", support));
