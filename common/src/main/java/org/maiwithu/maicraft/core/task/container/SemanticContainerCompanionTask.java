@@ -101,6 +101,7 @@ public final class SemanticContainerCompanionTask
     private int expectedContainerId = -1;
     private Class<?> expectedMenuClass;
     private boolean openedMenu;
+    private boolean reusedMenu;
     private boolean openRequested;
     private boolean outcomeUncertain;
     private boolean effectsStarted;
@@ -163,12 +164,8 @@ public final class SemanticContainerCompanionTask
         };
     }
 
-    // 先确认没有别的菜单占着，再按物品、容器类型、地标和保护范围找候选；未知保护地标会直接拒绝。
+    // 先按物品、容器类型、地标和保护范围选箱子；若该箱已由原生工具打开，就接续现有菜单。
     private TaskState survey() {
-        if (player.containerMenu != player.inventoryMenu) {
-            return failFinal("menu_busy", "Another synchronized menu is already open; MaiCraft "
-                    + "will not repurpose or close a menu it did not open.", FailureType.UNKNOWN);
-        }
         if (itemTag != null && BuiltInRegistries.ITEM.getTag(itemTag).isEmpty()) {
             return failFinal("unknown_item_tag", "The selected item tag is not present in the "
                     + "active registries.", FailureType.NO_MATERIAL);
@@ -212,7 +209,22 @@ public final class SemanticContainerCompanionTask
             return failFinal("other_player_near_container", "Another player is close enough to be "
                     + "using or changing the selected container.", FailureType.ENTITY_BLOCKED);
         }
+        if (player.containerMenu != player.inventoryMenu) return reuseOpenMenu();
         phase = r.storageSupply() ? Phase.OPEN : Phase.APPROACH;
+        return TaskState.RUNNING;
+    }
+
+    private TaskState reuseOpenMenu() {
+        // 来源必须指向本次选中的箱子；空光标才能接续存取，随后照常核验槽位、数量与原生点击回执。
+        if (!MachineMenu.openedAt(player, target.position()))
+            return failFinal("menu_busy", "The visible menu does not have a confirmed native origin at the selected container.", FailureType.UNKNOWN);
+        if (!player.containerMenu.getCarried().isEmpty())
+            return failFinal("menu_cursor_not_empty", "Settle the current cursor stack before continuing container transfer.", FailureType.UNKNOWN);
+        ownedMenu = player.containerMenu;
+        openedMenu = true;
+        reusedMenu = true;
+        waitMenuSince = player.level().getGameTime();
+        phase = Phase.WAIT_MENU;
         return TaskState.RUNNING;
     }
 
@@ -334,13 +346,9 @@ public final class SemanticContainerCompanionTask
         };
     }
 
-    // 检查当前没有意外菜单、容器没有明确锁定，再通过普通右键子任务打开。
-    // 这里没指定手持物品，会沿用玩家当前手里的东西；打开失败时的物品兜底风险见 A29。
+    // 走近期间若同箱菜单已被原生工具打开，直接接续；否则检查锁定并通过普通右键子任务开箱。
     private TaskState open() {
-        if (player.containerMenu != player.inventoryMenu) {
-            return failFinal("menu_changed_before_open", "A menu appeared before MaiCraft opened "
-                    + "the selected container.", FailureType.UNKNOWN);
-        }
+        if (player.containerMenu != player.inventoryMenu) return reuseOpenMenu();
         if (!targetStillValid()) return failFinal("container_target_changed",
                 "The selected block changed before it could be opened.", FailureType.TARGET_LOST);
         // 自动补料或整理余料只复访有对应材料的已知箱子；排队期间线索失效就停止，不临时改成盲搜。
@@ -1028,6 +1036,7 @@ public final class SemanticContainerCompanionTask
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("operation", r.operation.name().toLowerCase(Locale.ROOT));
+        data.put("menu_reused", reusedMenu);
         if (containerKind != null) data.put("container_kind", containerKind);
         data.put("initial_main_count", initialPlayerCount);
         data.put("observed_final_main_count", lastPlayerCount);
