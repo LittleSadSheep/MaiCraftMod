@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.tools.work;
 
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.bool;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.integer;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.strings;
 import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
 import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -70,40 +71,5 @@ public final class SemanticElytraTool implements MaiCraftTool {
                 context.toolCallId(), context.deadline(initialLease), maxDistance,
                 mayAlterTerrain, allowCombat, allowRareConsumables, protectedLabels);
         setTask(player, record, input, reply);
-    }
-
-    private static int integer(
-            JsonObject args, String key, int fallback, int minimum, int maximum) {
-        if (!args.has(key) || args.get(key).isJsonNull()) return fallback;
-        try {
-            return Math.clamp(args.get(key).getAsInt(), minimum, maximum);
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be an integer");
-        }
-    }
-
-    private static boolean bool(JsonObject args, String key, boolean fallback) {
-        if (!args.has(key) || args.get(key).isJsonNull()) return fallback;
-        try {
-            return args.get(key).getAsBoolean();
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be a boolean");
-        }
-    }
-
-    private static List<String> strings(JsonElement value, String label) {
-        if (value == null || value.isJsonNull()) return List.of();
-        if (!value.isJsonArray()) {
-            throw new IllegalArgumentException(label + " must be an array of strings");
-        }
-        List<String> result = new ArrayList<>();
-        for (JsonElement element : value.getAsJsonArray()) {
-            if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
-                throw new IllegalArgumentException(label + " must contain only strings");
-            }
-            String text = element.getAsString().strip();
-            if (!text.isEmpty()) result.add(text);
-        }
-        return List.copyOf(result);
     }
 }

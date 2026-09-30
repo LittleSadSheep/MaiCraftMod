@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.trade;
 
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.integer;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.strings;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.text;
 import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
 import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
@@ -114,36 +117,5 @@ public final class SemanticTradeTool implements MaiCraftTool {
         if (id == null) throw new IllegalArgumentException(
                 key + " must be a namespaced item id");
         return id;
-    }
-
-    private static String text(JsonObject object, String key) {
-        return object.has(key) && !object.get(key).isJsonNull()
-                && object.get(key).isJsonPrimitive()
-                ? object.get(key).getAsString() : null;
-    }
-
-    // 现有读取会先把 JSON 转成整数再压到范围内，小数和超范围值并非都被严格拒绝。
-    private static int integer(
-            JsonObject object, String key, int fallback, int minimum, int maximum) {
-        if (!object.has(key) || object.get(key).isJsonNull()) return fallback;
-        try {
-            return Math.clamp(object.get(key).getAsInt(), minimum, maximum);
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be an integer");
-        }
-    }
-
-    private static List<String> strings(JsonElement value, String key) {
-        if (value == null || value.isJsonNull()) return List.of();
-        if (!value.isJsonArray()) throw new IllegalArgumentException(key + " must be an array");
-        List<String> result = new ArrayList<>();
-        for (JsonElement element : value.getAsJsonArray()) {
-            if (!element.isJsonPrimitive() || element.getAsString().isBlank()) {
-                throw new IllegalArgumentException(
-                        key + " must contain only non-blank strings");
-            }
-            result.add(element.getAsString().trim());
-        }
-        return List.copyOf(result);
     }
 }

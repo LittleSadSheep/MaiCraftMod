@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.tools.work;
 
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.strings;
 import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
 import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +81,10 @@ public final class SemanticDragonFightTool implements MaiCraftTool {
                 DragonFightTaskRecord.MAXIMUM_HEALTH_SETTING);
         List<String> protectedLabels = strings(
                 args.get("protected_labels"), "protected_labels");
+        if (protectedLabels.size() > DragonFightTaskRecord.MAX_PROTECTED_LABELS)
+            throw new IllegalArgumentException(
+                    "protected_labels accepts at most "
+                            + DragonFightTaskRecord.MAX_PROTECTED_LABELS + " values");
 
         var context = ctx(toolCallId, player);
         var record = new DragonFightTaskRecord(
@@ -145,25 +149,5 @@ public final class SemanticDragonFightTool implements MaiCraftTool {
         } catch (NumberFormatException | UnsupportedOperationException invalid) {
             throw new IllegalArgumentException(key + " must be a number");
         }
-    }
-
-    private static List<String> strings(JsonElement value, String key) {
-        if (value == null || value.isJsonNull()) return List.of();
-        if (!value.isJsonArray()) throw new IllegalArgumentException(key + " must be an array");
-        List<String> result = new ArrayList<>();
-        for (JsonElement element : value.getAsJsonArray()) {
-            if (!element.isJsonPrimitive()
-                    || !element.getAsJsonPrimitive().isString()
-                    || element.getAsString().isBlank()) {
-                throw new IllegalArgumentException(key + " must contain only non-blank strings");
-            }
-            result.add(element.getAsString().trim());
-            if (result.size() > DragonFightTaskRecord.MAX_PROTECTED_LABELS) {
-                throw new IllegalArgumentException(
-                        key + " accepts at most "
-                                + DragonFightTaskRecord.MAX_PROTECTED_LABELS + " values");
-            }
-        }
-        return List.copyOf(result);
     }
 }

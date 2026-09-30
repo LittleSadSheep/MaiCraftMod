@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.container;
 
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.integer;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.optionalInteger;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.strings;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.text;
 import static org.maiwithu.maicraft.task.TaskDispatch.ctx;
 import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -126,47 +129,5 @@ public final class SemanticContainerTool implements MaiCraftTool {
         ResourceLocation id = ResourceLocation.tryParse(value);
         if (id == null) throw new IllegalArgumentException(key + " must use a namespaced id");
         return id;
-    }
-
-    private static String text(JsonObject object, String key) {
-        if (object == null || !object.has(key) || object.get(key).isJsonNull()
-                || !object.get(key).isJsonPrimitive()) return null;
-        String value = object.get(key).getAsString();
-        return value == null || value.isBlank() ? null : value.trim();
-    }
-
-    // 缺省返回 null；当前 getAsInt 仍会截断小数，再做范围检查，不是严格整数校验，见 A10。
-    private static Integer optionalInteger(
-            JsonObject object, String key, int minimum, int maximum) {
-        if (!object.has(key) || object.get(key).isJsonNull()) return null;
-        final int value;
-        try {
-            value = object.get(key).getAsInt();
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be an integer");
-        }
-        if (value < minimum || value > maximum) throw new IllegalArgumentException(
-                key + " must be between " + minimum + " and " + maximum);
-        return value;
-    }
-
-    private static int integer(
-            JsonObject object, String key, int fallback, int minimum, int maximum) {
-        Integer value = optionalInteger(object, key, minimum, maximum);
-        return value == null ? fallback : value;
-    }
-
-    private static List<String> strings(JsonElement value, String key) {
-        if (value == null || value.isJsonNull()) return List.of();
-        if (!value.isJsonArray()) throw new IllegalArgumentException(key + " must be an array");
-        List<String> result = new ArrayList<>();
-        for (JsonElement element : value.getAsJsonArray()) {
-            if (!element.isJsonPrimitive() || element.getAsString().isBlank()) {
-                throw new IllegalArgumentException(
-                        key + " must contain only non-blank strings");
-            }
-            result.add(element.getAsString().trim());
-        }
-        return List.copyOf(result);
     }
 }

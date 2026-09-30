@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.tools.work;
 
-import com.google.gson.JsonElement;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.bool;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.integer;
+import static org.maiwithu.maicraft.core.tools.SemanticParameters.strings;
+
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.List;
@@ -86,25 +89,6 @@ public final class SemanticLightAreaApi {
         }
     }
 
-    private static int integer(
-            JsonObject args, String key, int fallback, int minimum, int maximum) {
-        if (!args.has(key) || args.get(key).isJsonNull()) return fallback;
-        try {
-            return Math.clamp(args.get(key).getAsInt(), minimum, maximum);
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be an integer");
-        }
-    }
-
-    private static boolean bool(JsonObject args, String key, boolean fallback) {
-        if (!args.has(key) || args.get(key).isJsonNull()) return fallback;
-        try {
-            return args.get(key).getAsBoolean();
-        } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException(key + " must be a boolean");
-        }
-    }
-
     private static String string(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) return null;
         if (!args.get(key).isJsonPrimitive()) {
@@ -112,21 +96,5 @@ public final class SemanticLightAreaApi {
         }
         String value = args.get(key).getAsString().strip();
         return value.isEmpty() ? null : value;
-    }
-
-    private static List<String> strings(JsonElement value, String label) {
-        if (value == null || value.isJsonNull()) return List.of();
-        if (!value.isJsonArray()) {
-            throw new IllegalArgumentException(label + " must be an array of strings");
-        }
-        List<String> result = new ArrayList<>();
-        for (JsonElement element : value.getAsJsonArray()) {
-            if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
-                throw new IllegalArgumentException(label + " must contain only strings");
-            }
-            String valueString = element.getAsString().strip();
-            if (!valueString.isEmpty()) result.add(valueString);
-        }
-        return List.copyOf(result);
     }
 }
