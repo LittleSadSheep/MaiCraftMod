@@ -809,21 +809,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState reviewHunt(AcquisitionNeed need) {
-        // 狩猎必须允许伤害，并且有“这种生物能提供目标物品”的来源提示；随后才寻找未被保护的实际目标。
-        if (!r.allowHarm) {
-            SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
-            addIssue("hunt", "harm_permission_required",
-                    "hunt was allowed as a source family, but allow_harm is false; no entity was attacked",
-                    Map.of("requires_narration", true,
-                            "ingredient_item_ids", itemStrings(need.itemIds),
-                            "entity_type_ids", stringIds(hint.entityTypeIds()),
-                            "expected_item_ids", stringIds(hint.expectedItemIds()),
-                            "description", hint.description() == null
-                                    ? "semantic entity source" : hint.description()));
-            need.decisionRequired = true;
-            advanceSource(need);
-            return TaskState.RUNNING;
-        }
+        // 先确认生物与目标掉落的关系，再检查伤害许可；铁板等没有狩猎来源的加工品不能被误报成权限阻塞。
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
         if (hint.entityTypeIds().isEmpty()) {
             addIssue("hunt", "entity_source_evidence_missing",
@@ -839,6 +825,19 @@ public final class SemanticAcquireCompanionTask
                     "the semantic hint does not identify any requested item as an expected product; "
                             + "no entity was attacked",
                     Map.of("entity_type_ids", stringIds(hint.entityTypeIds())));
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
+        if (!r.allowHarm) {
+            addIssue("hunt", "harm_permission_required",
+                    "hunt was allowed as a source family, but allow_harm is false; no entity was attacked",
+                    Map.of("requires_narration", true,
+                            "ingredient_item_ids", itemStrings(need.itemIds),
+                            "entity_type_ids", stringIds(hint.entityTypeIds()),
+                            "expected_item_ids", stringIds(hint.expectedItemIds()),
+                            "description", hint.description() == null
+                                    ? "semantic entity source" : hint.description()));
+            need.decisionRequired = true;
             advanceSource(need);
             return TaskState.RUNNING;
         }
