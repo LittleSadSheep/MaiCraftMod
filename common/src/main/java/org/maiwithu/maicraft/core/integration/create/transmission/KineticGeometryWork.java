@@ -74,11 +74,7 @@ final class KineticGeometryWork {
                             && !joins.contains(Set.of(block.position(), neighbor))) return null;
                     continue;
                 }
-                if (neighbor.equals(source.position()) || neighbor.equals(target.position())) {
-                    if (!joins.contains(Set.of(block.position(), neighbor))) return null;
-                    continue;
-                }
-                if (!terrain.loaded(neighbor) || terrain.kinetic(neighbor)) return null;
+                // 路线旁已有机器不等于放置非法；原生接触、转速和实际网络在施工后核对，不要求传动件周围隔离。
             }
         }
         Map<String, Integer> materials = new LinkedHashMap<>();

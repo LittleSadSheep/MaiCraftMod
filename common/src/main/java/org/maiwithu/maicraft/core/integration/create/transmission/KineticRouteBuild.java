@@ -30,23 +30,16 @@ final class KineticRouteBuild {
         blocks.executionGuards(endpoints,ignored -> current.getAsBoolean(),(actor,at) -> {
             if(!current.getAsBoolean()||!actor.level().isLoaded(at)||endpoints.contains(at))return false;
             if(route.placements().stream().anyMatch(value -> value.position().equals(at)))
-                return emptyAndIsolated(actor,route,at);
+                return emptyForPlacement(actor,at);
             return true;
         },(actor,at)->{});
         return new SemanticBuildSupplyTaskRecord(id+"-materials",deadline,blocks,request.materialPolicy,request.allowedSources,
                 request.allowHarm,request.protectedLabels,false);
     }
-    static boolean emptyAndIsolated(LocalPlayer player,KineticRouteGeometry.Plan route,BlockPos at) {
-        if(!player.level().isLoaded(at)||!player.level().getBlockState(at).isAir()
-                ||!player.level().getBlockState(at).getFluidState().isEmpty())return false;
-        for(int dx=-1;dx<=1;dx++)for(int dy=-1;dy<=1;dy++)for(int dz=-1;dz<=1;dz++) {
-            if(dx==0&&dy==0&&dz==0)continue;
-            var neighbor=at.offset(dx,dy,dz);
-            if(neighbor.equals(route.source().position())||neighbor.equals(route.target().position())
-                    ||route.placements().stream().anyMatch(cell->cell.position().equals(neighbor)))continue;
-            if(!player.level().isLoaded(neighbor)||KineticNativeView.kinetic(player.level(),neighbor))return false;
-        }
-        return true;
+    static boolean emptyForPlacement(LocalPlayer player,BlockPos at) {
+        // 只核对实际落点；不因斜邻格或相邻格存在其他动力部件拒绝已经准入的原生施工。
+        return player.level().isLoaded(at)&&player.level().getBlockState(at).isAir()
+                &&player.level().getBlockState(at).getFluidState().isEmpty();
     }
     static boolean matches(LocalPlayer player,KineticRouteGeometry.Plan route) {
         return route.placements().stream().allMatch(item->matches(player,item));

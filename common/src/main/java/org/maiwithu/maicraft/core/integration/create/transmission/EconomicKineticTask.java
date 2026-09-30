@@ -297,7 +297,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(!resumingRoute&&destination.powered())return failure("kinetic_target_power_changed_before_construction");
         KineticRpmBudget.validate(selected,source.rpm(),r.minimumRpm,KineticRpmBudget.maximumRotationSpeed());
         if(KineticRouteBuild.matches(player,selected)){phase=Phase.LINKS;return TaskState.RUNNING;}
-        for(var cell:selected.placements()) if(!KineticRouteBuild.matches(player,cell)&&(!KineticRouteBuild.emptyAndIsolated(player,selected,cell.position())
+        for(var cell:selected.placements()) if(!KineticRouteBuild.matches(player,cell)&&(!KineticRouteBuild.emptyForPlacement(player,cell.position())
                 ||NavigationSafetyContext.protectsMutation(cell.position())))return failure("kinetic_route_changed_before_construction");
         KineticRouteContinuations.retain(player,r,selected,costReport);
         start(KineticRouteBuild.task(player,r.getToolCallId()+"-route",r.getDeadlineGameTime(),selected,r,this::current));
