@@ -22,6 +22,8 @@ import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 
 /** 把总任务、计划和地标转成可保存的 JSON，再从中恢复；不保存旧玩家的按键、菜单或正在走的路线。 */
@@ -554,7 +556,7 @@ public final class IntentStateCodec {
         // 目标里的合法蓝图另按蓝图规则检查，其他内容不能含内部操作字段；若过滤会改掉目标，就拒绝保存。
         JsonObject original = goal.toJson();
         JsonObject inspection = BlueprintGoalData.instructionView(goal);
-        JsonElement safe = safeGoalElement(inspection, 0);
+            JsonElement safe = safeGoalElement(inspection);
         if (!safe.isJsonObject()) {
             throw new IllegalArgumentException("semantic goal must encode as an object");
         }
@@ -608,18 +610,37 @@ public final class IntentStateCodec {
         }
     }
 
+    /**
+     * 结果回执清洗：结果里不允许出现内部字段、坐标、槽位和异常文本。
+     * 字符串经 {@link #safeMessage} 替换，内部键按完整名单整项删除。
+     */
     private static JsonElement safeElement(JsonElement value) {
-        return safeElement(value, 0);
+        return sanitize(value, 0, IntentStateCodec::safeMessage, IntentStateCodec::isInternalKey);
     }
 
-    private static JsonElement safeElement(JsonElement value, int depth) {
-        // 递归处理普通结果：删内部字段，限制深度，每个列表或对象最多二百五十六项，长文字也会缩短。
+    /**
+     * 目标参数清洗：玩家声明里的坐标、装备部位是合法输入，必须保留。
+     * 字符串只做长度截断，内部键按较短的名单删除（路由与回执字段，不含坐标和槽位后缀）。
+     */
+    private static JsonElement safeGoalElement(JsonElement value) {
+        return sanitize(value, 0, IntentStateCodec::bounded, IntentStateCodec::isGoalInternalKey);
+    }
+
+    /**
+     * 两份清洗名单共用的同一次递归；两个调用方只差两个策略：
+     * {@code textPolicy} 决定字符串如何脱敏——结果替换含异常关键词的消息，目标只截断长度；
+     * {@code internalKey} 决定哪些键视为内部字段整项跳过——结果的名单更严格，连坐标和槽位后缀一起删。
+     * 不变量：递归深度超过 {@link #MAX_RESULT_DEPTH} 一律丢弃；每个数组或对象最多保留二百五十六项；
+     * 键名只做长度截断（键是字段名不是内容，不经过 textPolicy），值才走 textPolicy。
+     */
+    private static JsonElement sanitize(JsonElement value, int depth,
+            UnaryOperator<String> textPolicy, Predicate<String> internalKey) {
         if (value == null || value.isJsonNull() || depth > MAX_RESULT_DEPTH) {
             return JsonNull.INSTANCE;
         }
         if (value.isJsonPrimitive()) {
             JsonPrimitive primitive = value.getAsJsonPrimitive();
-            if (primitive.isString()) return new JsonPrimitive(safeMessage(primitive.getAsString()));
+            if (primitive.isString()) return new JsonPrimitive(textPolicy.apply(primitive.getAsString()));
             return primitive.deepCopy();
         }
         if (value.isJsonArray()) {
@@ -627,7 +648,7 @@ public final class IntentStateCodec {
             int count = 0;
             for (JsonElement element : value.getAsJsonArray()) {
                 if (count++ >= 256) break;
-                result.add(safeElement(element, depth + 1));
+                result.add(sanitize(element, depth + 1, textPolicy, internalKey));
             }
             return result;
         }
@@ -636,12 +657,13 @@ public final class IntentStateCodec {
         for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
             if (count++ >= 256) break;
             String key = entry.getKey();
-            if (isInternalKey(key)) continue;
-            result.add(bounded(key), safeElement(entry.getValue(), depth + 1));
+            if (internalKey.test(key)) continue;
+            result.add(bounded(key), sanitize(entry.getValue(), depth + 1, textPolicy, internalKey));
         }
         return result;
     }
 
+    /** 执行结果与回执的内部字段名单：内部标识、槽位、路径和坐标后缀全部不允许出现在结果里。 */
     private static boolean isInternalKey(String key) {
         String lower = key.toLowerCase(Locale.ROOT);
         if (INTERNAL_KEYS.contains(lower)) return true;
@@ -659,36 +681,7 @@ public final class IntentStateCodec {
                 || lower.endsWith("_z");
     }
 
-    /** 目标参数与执行结果用不同的过滤名单；合法的目标坐标、装备部位等可以保留。 */
-    private static JsonElement safeGoalElement(JsonElement value, int depth) {
-        if (value == null || value.isJsonNull() || depth > MAX_RESULT_DEPTH) {
-            return JsonNull.INSTANCE;
-        }
-        if (value.isJsonPrimitive()) {
-            JsonPrimitive primitive = value.getAsJsonPrimitive();
-            if (primitive.isString()) return new JsonPrimitive(bounded(primitive.getAsString()));
-            return primitive.deepCopy();
-        }
-        if (value.isJsonArray()) {
-            JsonArray result = new JsonArray();
-            int count = 0;
-            for (JsonElement element : value.getAsJsonArray()) {
-                if (count++ >= 256) break;
-                result.add(safeGoalElement(element, depth + 1));
-            }
-            return result;
-        }
-        JsonObject result = new JsonObject();
-        int count = 0;
-        for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
-            if (count++ >= 256) break;
-            String key = entry.getKey();
-            if (isGoalInternalKey(key)) continue;
-            result.add(bounded(key), safeGoalElement(entry.getValue(), depth + 1));
-        }
-        return result;
-    }
-
+    /** 目标参数的内部字段名单：比结果名单短——坐标和装备部位在目标里是合法输入，予以保留。 */
     private static boolean isGoalInternalKey(String key) {
         String lower = key.toLowerCase(Locale.ROOT);
         if (GOAL_INTERNAL_KEYS.contains(lower)) return true;
