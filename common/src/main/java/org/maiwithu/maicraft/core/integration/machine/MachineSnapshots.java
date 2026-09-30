@@ -149,7 +149,7 @@ public final class MachineSnapshots {
         return enriched;
     }
 
-    /** 操作前核对编号、结构完整性和当前方块；现场未变时保留原观察，不按游戏时间失效。 */
+    /** 操作前核对编号和当前方块；现场未变时保留原观察，不按游戏时间或摘要容量失效。 */
     public static Snapshot requireFresh(LocalPlayer player, String id) {
         return require(player, id, false);
     }
@@ -178,10 +178,8 @@ public final class MachineSnapshots {
             throw new MachineSnapshotRejection("machine_snapshot_changed", snapshot.id(), inspect(player, snapshot.label(), snapshot.center(),
                     snapshot.radius(), snapshot.report().has("construction_site")));
         }
-        if (!snapshot.report().get("structure_complete").getAsBoolean()) {
-            // 这里只要求方块结构完整，电力、流体等额外运行数据不完整，不会单独挡住这一步。
-            throw new IllegalArgumentException("machine_structure_incomplete: " + refresh + "; load the intended area or reduce the observation radius; optional telemetry is not required");
-        }
+        // 大机器的展示截断或目标以外格子未知不能拦住已选组件；组件索引、实际加载、距离与原生交互由执行器逐项核对。
+        // 保留 structure_complete 的观察事实，但不再要求模型缩小范围、重做检查后才准操作同一个已知目标。
         return snapshot;
     }
 
