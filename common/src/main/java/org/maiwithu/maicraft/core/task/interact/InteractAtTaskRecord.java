@@ -28,6 +28,7 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public boolean emptyHand;
     public boolean approachTarget;
     public boolean mayAlterTerrain;
+    public boolean observeMenu;
     public Item expectedOutputItem;
     public String itemResourceId;
 
@@ -35,6 +36,12 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public InteractAtTaskRecord withApproach(boolean alterTerrain) {
         if (aim == null || heldItemUseOnly) throw new IllegalArgumentException("approach requires a block target");
         approachTarget = true; mayAlterTerrain = alterTerrain; return this;
+    }
+
+    /** 打开容器的意图在点击后等待原生菜单出现；未开出菜单也只报告观察，不重放已经确认的点击。 */
+    public InteractAtTaskRecord withMenuObservation() {
+        if (aim == null || button != MouseButton.RIGHT) throw new IllegalArgumentException("menu observation requires block use");
+        observeMenu = true; return this;
     }
 
     /** 只给已点名物品的方块交互绑定观察身份；选择哪一进度由调用者决定，执行器不替换成同名其他工件。 */

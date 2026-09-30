@@ -759,6 +759,8 @@ public final class GeneralAbilityAdapter {
         String itemResourceId = string(goal.parameters(), "item_resource_id");
         if (itemResourceId != null) use.addProperty("item_resource_id", itemResourceId);
         use.addProperty("approach", true);
+        // 容器请求要报告界面是否真正出现，不能仅凭右键已提交就让模型再猜一次是否已经开箱。
+        if (CONTAINER.equals(goal.ability())) use.addProperty("observe_menu", true);
         use.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
         return new IntentAction.Tool("interact_at", use.toString());
     }

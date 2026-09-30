@@ -70,6 +70,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     /** 按键前的世界快照,收尾时对账出"真发生了什么"(见 {@link PressReceipt})。 */
     private PressReceipt receipt;
     private AbstractContainerMenu menuBeforeUse;
+    private boolean menuOpened;
+    private int menuObservationTicks;
     private List<String> changes = List.of();
     // 下面保存持续按住的结束时间和结果文字；这个类当前没有重新寻路的过程。
     /**
@@ -300,10 +302,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         }
         return switch (interaction.tick()) {
             case DONE -> {
+                // 右键回执可能早于服务端菜单包；只等这次点击的界面，不因暂未开箱而重复右键。
+                menuOpened = player.containerMenu != menuBeforeUse && player.containerMenu != player.inventoryMenu
+                        && MenuVisibility.matches(ClientRuntime.requireContext(player).minecraft(), player.containerMenu);
+                if (r.observeMenu && !menuOpened && ++menuObservationTicks < 40) yield TaskState.RUNNING;
                 // use_container 与机器菜单共享已确认来源，后续检查、存取和关闭无需再右击一次或重启客户端。
-                if (activatedBlock != null && interaction.confirmedUses() > 0
-                        && player.containerMenu != menuBeforeUse && player.containerMenu != player.inventoryMenu
-                        && MenuVisibility.matches(ClientRuntime.requireContext(player).minecraft(), player.containerMenu))
+                if (activatedBlock != null && interaction.confirmedUses() > 0 && menuOpened)
                     MachineMenu.rememberNativeOpened(player, player.containerMenu, activatedBlock);
                 successMsg = describeDone() + settle();
                 yield verifiedOutcome();
@@ -479,6 +483,14 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
+        if (r.observeMenu) {
+            // 点击执行和开箱观察分别返回；空光标与存取仍由后续原生容器流程核验，不宣称已经搬过物品。
+            data.put("menu_open_verified", menuOpened);
+            data.put("menu_observation_ticks", menuObservationTicks);
+            data.put("menu_class", player.containerMenu.getClass().getSimpleName());
+            data.put("menu_cursor_empty", player.containerMenu.getCarried().isEmpty());
+            data.put("inventory_transfer_verified", false);
+        }
         if (r.approachTarget) data.put("interaction_approach", Map.of("route_attempts", approachAttempts,
                 "stance_candidates", approachCandidates, "rejected_stances", rejectedStances.size(),
                 "terrain_preparation_attempted", terrainApproach, "player_feet", player.blockPosition().toShortString()));

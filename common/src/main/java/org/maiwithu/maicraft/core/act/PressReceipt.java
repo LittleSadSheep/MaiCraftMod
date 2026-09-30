@@ -1,6 +1,9 @@
 package org.maiwithu.maicraft.core.act;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
@@ -13,7 +16,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 记下点击前后看见的差别：双手物品、瞄准的方块、附近新看到的实体。
+ * 记下点击前后看见的差别：双手物品、瞄准的方块、附近新看到的实体及实际打开的容器菜单。
  * 例如点完后手里的雪球少了一颗，可以报告这件事；是否完成用户目标，还要由具体任务判断。
  * 这是客户端前后对比，不是服务器对这次点击的确认，也不保证所有变化都是此次点击造成的。
  */
@@ -27,6 +30,7 @@ public final class PressReceipt {
     private final BlockPos aim;
     private final BlockState aimBefore;
     private final Set<Integer> entityIdsBefore;
+    private final AbstractContainerMenu menuBefore;
 
     // 复制双手物品，记住瞄准格的方块和附近实体编号；物品必须复制，否则原对象变化会污染“之前”的记录。
     private PressReceipt(LocalPlayer player, BlockPos aim) {
@@ -35,6 +39,7 @@ public final class PressReceipt {
         this.aim = aim != null && player.level().isLoaded(aim) ? aim.immutable() : null;
         this.aimBefore = this.aim == null ? null : player.level().getBlockState(this.aim);
         this.entityIdsBefore = nearbyIds(player);
+        this.menuBefore = player.containerMenu;
     }
 
     /** 按键之前拍快照;{@code aim} 可空(朝空气挥没有目标格)。 */
@@ -48,6 +53,10 @@ public final class PressReceipt {
      */
     public List<String> diff(LocalPlayer player) {
         List<String> facts = new ArrayList<>();
+        // 开箱通常不改变手持物和箱子方块；新菜单已经可见时，应直接报告界面变化，不能说什么都没发生。
+        if (player.containerMenu != menuBefore && player.containerMenu != player.inventoryMenu
+                && MenuVisibility.matches(Minecraft.getInstance(), player.containerMenu))
+            facts.add("opened native container menu: " + player.containerMenu.getClass().getSimpleName());
         String main = stackChange("main hand", mainBefore, player.getMainHandItem());
         if (main != null) {
             facts.add(main);

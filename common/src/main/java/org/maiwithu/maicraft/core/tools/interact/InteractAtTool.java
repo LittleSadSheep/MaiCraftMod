@@ -23,7 +23,7 @@ public final class InteractAtTool implements MaiCraftTool {
 
     private record Args(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
                         String item_id, String expected_block_id, String required_block_id, Boolean empty_hand,
-                        String item_resource_id, Boolean approach, Boolean may_alter_terrain) {}
+                        String item_resource_id, Boolean approach, Boolean may_alter_terrain, Boolean observe_menu) {}
 
     @Override
     public String name() {
@@ -57,6 +57,7 @@ public final class InteractAtTool implements MaiCraftTool {
                 .optionalBool("empty_hand", "Prepare an empty main hand before block use; incompatible with item_id. Omitted or false retains held-item use.")
                 .optionalBool("approach", "Choose and reach a visible interaction stance before the native click.")
                 .optionalBool("may_alter_terrain", "Allow native terrain preparation only when approach is enabled.")
+                .optionalBool("observe_menu", "Wait briefly after one block use and report whether a new native container menu is visibly open.")
                 .build();
     }
 
@@ -71,6 +72,8 @@ public final class InteractAtTool implements MaiCraftTool {
         if (a.item_resource_id() != null) task.withItemResourceId(a.item_resource_id());
         // 上层只给目标与地形许可，站位和换路留给同一原生任务，避免把寻路失败退给模型手动拆步。
         if (Boolean.TRUE.equals(a.approach())) task.withApproach(Boolean.TRUE.equals(a.may_alter_terrain()));
+        // 开箱意图额外结算菜单观察，普通右键仍维持自身原生交互语义。
+        if (Boolean.TRUE.equals(a.observe_menu())) task.withMenuObservation();
         runSync(companion, task, reply);
     }
 }
