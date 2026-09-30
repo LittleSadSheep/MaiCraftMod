@@ -181,7 +181,7 @@ public final class SemanticResultView {
                 return json.getAsString();
         }
         // 地图蓝图、结构差异和变化后的最新快照都是只读观测，保留相对格子与真实状态，供模型直接修订操作。
-        if (Set.of("as_built_blueprint", "blueprint_diff", "latest_snapshot").contains(key)) return value;
+        if (Set.of("machine", "operating_state", "server_evidence", "as_built_blueprint", "blueprint_diff", "latest_snapshot").contains(key)) return value;
         // 控制图用坐标标识原生节点；保留整份只读图，避免节点、连线、控制路径被文字整理合并成同一个占位词。
         if (key.equals("control_analysis")) return value;
         // 实际选中的箱体是动作证据，保留身份供模型对照输入箱蓝图，不额外授权操作。

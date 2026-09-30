@@ -630,7 +630,7 @@ public final class IntentStateCodec {
      * 两份清洗名单共用的同一次递归；两个调用方只差两个策略：
      * {@code textPolicy} 决定字符串如何脱敏——结果替换含异常关键词的消息，目标只截断长度；
      * {@code internalKey} 决定哪些键视为内部字段整项跳过——结果的名单更严格，连坐标和槽位后缀一起删。
-     * 不变量：递归深度超过 {@link #MAX_RESULT_DEPTH} 一律丢弃；每个数组或对象最多保留二百五十六项；
+     * 只读游戏证据完整保存；其它内部结构仍限制深度，避免保存执行器的活动对象；
      * 键名只做长度截断（键是字段名不是内容，不经过 textPolicy），值才走 textPolicy。
      */
     private static JsonElement sanitize(JsonElement value, int depth,
@@ -645,19 +645,20 @@ public final class IntentStateCodec {
         }
         if (value.isJsonArray()) {
             JsonArray result = new JsonArray();
-            int count = 0;
             for (JsonElement element : value.getAsJsonArray()) {
-                if (count++ >= 256) break;
                 result.add(sanitize(element, depth + 1, textPolicy, internalKey));
             }
             return result;
         }
         JsonObject result = new JsonObject();
-        int count = 0;
         for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
-            if (count++ >= 256) break;
             String key = entry.getKey();
             if (internalKey.test(key)) continue;
+            // 已发生的整机观察、差异和箱体身份必须在重启后仍完整；坐标不是待重放的执行指令。
+            if (Set.of("machine", "operating_state", "server_evidence", "as_built_blueprint", "blueprint_diff",
+                    "latest_snapshot", "control_analysis", "container_observation", "confirmed_harvests").contains(key)) {
+                result.add(key, entry.getValue().deepCopy()); continue;
+            }
             result.add(bounded(key), sanitize(entry.getValue(), depth + 1, textPolicy, internalKey));
         }
         return result;

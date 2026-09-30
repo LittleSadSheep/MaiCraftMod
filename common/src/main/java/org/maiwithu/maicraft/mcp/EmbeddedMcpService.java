@@ -337,7 +337,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 "Attention is the primary monitor: reuse one host monitor or pass next_attention to perceive. " +
                 "Handle decisions, pauses, unavailability and resync_required; wait timeout does not cancel a task. " +
                 "Recover missing context with task get+path or plan plan_id+path; omitted data is unknown, not empty. " +
-                "Read returned resource_uri/next_uri via perceive or resources/read. maicraft://receipts pages are frozen, " +
+                "Selected task/plan fields and receipt paths are returned in full at offset 0. " +
+                "Read returned resource_uri/next_uri via perceive or resources/read. maicraft://receipts are frozen, " +
                 "temporary evidence; if expired, query retained tasks or repeat only the read-only observation. Never repeat execute to recover output. " +
                 "Discover reference material with knowledge query or maicraft://knowledge/index; it is not action authorization. " +
                 "Subscriptions: maicraft://attention for tasks, maicraft://chatflow for game chat.");
@@ -568,7 +569,10 @@ public final class EmbeddedMcpService implements AutoCloseable {
             JsonObject body = new JsonObject(); body.add("source_uri", document.get("uri"));
             body.add("source_mime_type", document.get("mimeType")); body.addProperty("text", text);
             if (document.get("mimeType").getAsString().contains("json")) {
-                try { body.add("json", JsonParser.parseString(text)); }
+                try {
+                    // JSON 正文已经完整结构化，不再把同一份资料同时作为转义字符串复印进模型上下文。
+                    body.add("json", JsonParser.parseString(text)); body.remove("text");
+                }
                 catch (RuntimeException invalid) { /* 非标准资料仍可逐字找回，不把解析失败当成空文档。 */ }
             }
             document.addProperty("mimeType", "application/json");

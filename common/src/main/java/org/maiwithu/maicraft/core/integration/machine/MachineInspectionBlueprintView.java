@@ -39,6 +39,9 @@ public final class MachineInspectionBlueprintView {
                 completeMachine = new MachineBlueprintDiff(ClientMachineCatalog.blueprintPlan(saved));
                 result.add("operating_state", completeMachine.operatingState(player.level(), saved.dimension()));
                 result.add("native_component_offsets", completeMachine.targetOffsets());
+                // full 也同时给整机差异；运行状态与结构变化是一次决策所需的并列事实。
+                if (mode.equals("full")) result.add("blueprint_diff",
+                        completeMachine.page(player.level(), saved.dimension(), 0, Integer.MAX_VALUE));
             } catch (RuntimeException | LinkageError unavailable) {
                 // 旧档案暂时无法展开时仍交付可读的现场，并明确整机范围未知，不能中断整个只读任务。
                 result.addProperty("recorded_targets_unavailable", unavailable.getClass().getSimpleName());
@@ -53,7 +56,8 @@ public final class MachineInspectionBlueprintView {
             BlockPos minimum = recordedBounds ? block(saved.captureMin()) : anchor.offset(-radius,-radius,-radius);
             BlockPos maximum = recordedBounds ? block(saved.captureMax()) : anchor.offset(radius,radius,radius);
             String dimension = saved == null ? player.level().dimension().location().toString() : saved.dimension();
-            var current = MachineWorldBlueprint.page(player.level(),dimension,anchor,minimum,maximum,offset,limit);
+            var current = MachineWorldBlueprint.page(player.level(),dimension,anchor,minimum,maximum,offset,
+                    offset == 0 ? Integer.MAX_VALUE : limit);
             current.addProperty("bounds_source",recordedBounds ? "recorded_machine_extent" : "survey_radius");
             result.add("as_built_blueprint",current);
         } else {

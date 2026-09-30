@@ -14,6 +14,13 @@ final class JsonReadback {
     private static final int TEXT_PAGE = 4000;
     private JsonReadback() {}
 
+    static JsonObject complete(JsonElement root, String path) {
+        // 已明确选择的字段一次读完；逐层展开或让一项配方、一次失败证据再次分页没有决策价值。
+        JsonElement value = resolve(root, path); JsonObject result = reference(value, path);
+        result.remove("detail_path"); result.addProperty("path", path); result.addProperty("offset", 0);
+        result.add("value", value.deepCopy()); return result;
+    }
+
     static JsonObject page(JsonElement root, String path, int offset, int limit) {
         return page(root, path, offset, limit, null);
     }

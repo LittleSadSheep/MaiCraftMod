@@ -29,6 +29,7 @@ final class MachineComponentFacts {
                 });
                 component.add("observed_through_tick", observation.get("tick").deepCopy());
                 JsonObject sample = new JsonObject();
+                sample.add("block_id", observation.get("block_id").deepCopy());
                 sample.add("native", prune(observation.get("native")));
                 sample.add("ports", ports(observation));
                 sample.add("resources", resources(observation));
@@ -66,7 +67,18 @@ final class MachineComponentFacts {
             });
             sides.forEach(group.getAsJsonArray("sides")::add);
         }
-        JsonArray result = new JsonArray(); groups.values().forEach(result::add); return result;
+        JsonArray result = new JsonArray(); Map<String, JsonObject> absent = new LinkedHashMap<>();
+        for (JsonObject port : groups.values()) {
+            if (!"absent".equals(port.get("status").getAsString())) { result.add(port); continue; }
+            // 普通轴没有物品、流体等接口时，用同一侧面集合列出缺失 API，不重复五份完全相同的空端口。
+            JsonArray sides = port.getAsJsonArray("sides");
+            JsonObject group = absent.computeIfAbsent(sides.toString(), ignored -> {
+                JsonObject value = new JsonObject(); value.addProperty("status", "absent");
+                value.add("sides", sides); value.add("apis", new JsonArray()); return value;
+            });
+            group.getAsJsonArray("apis").add(port.get("api"));
+        }
+        absent.values().forEach(result::add); return result;
     }
 
     private static JsonArray resources(JsonObject observation) {

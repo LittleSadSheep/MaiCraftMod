@@ -65,7 +65,7 @@ final class AttentionSnapshot {
             return TaskView.status(record);
         JsonObject result = MaiCraftRuntimeFacade.taskSummary(record);
         if (record.activeExecution() != null) result.add("active_execution",
-                JsonReadback.preview(record.activeExecution(), "/active_execution", 1800));
+                record.activeExecution().deepCopy());
         return result;
     }
 

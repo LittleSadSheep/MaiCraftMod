@@ -1,17 +1,20 @@
 package org.maiwithu.maicraft.mcp;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Function;
 
-/** 失败附带的新现场优先显示编号、目标和实际几何；大明细仍指向本次已取得的观察。 */
+/** 整机观察只消除可还原的重复表达；真实布局、运行、材料、差异和未知项不按字符预算截断。 */
 final class MachineSnapshotView {
     record Observation(JsonObject snapshot, JsonObject owner, String path) {}
-
     private MachineSnapshotView() {}
 
-    // 只沿公开任务结果与决策回执寻找新现场，不把旧目标或蓝图里的同名字段当成恢复依据。
     static Observation find(JsonElement value, String path) {
         if (value == null || !value.isJsonObject()) return null;
         JsonObject object = value.getAsJsonObject();
@@ -24,51 +27,70 @@ final class MachineSnapshotView {
         return null;
     }
 
-    static JsonObject present(JsonObject snapshot, String path, int budget, Function<String, String> uri) {
-        if (JsonReadback.fits(snapshot, budget)) return snapshot.deepCopy();
-        JsonObject result = new JsonObject();
-        // 即使整份观察较大，模型也能在首份失败回执中直接取得可提交的新编号和同址目标。
-        for (String key : List.of("snapshot_id", "target", "label", "dimension", "radius", "structure_fingerprint",
-                "structure_complete", "complete", "validity", "observation_only",
-                // 专用过程列表和组件扫描各有自己的范围，摘要不能只留下空列表而丢掉其适用边界。
-                "native_processes_scope", "native_processes_knowledge_uri",
-                "native_component_scan_radius", "native_component_bounds_covered"))
-            if (snapshot.has(key)) result.add(key, snapshot.get(key).deepCopy());
-        result.addProperty("omitted", true);
-        result.addProperty("detail_path", path);
-        if (uri != null) result.addProperty("resource_uri", uri.apply(path));
-        if (snapshot.has("site_geometry") && snapshot.get("site_geometry").isJsonObject()) {
-            // 优先保留紧凑工地几何；普通平台的连续行可在首份失败回执中读完，无须再展开整片地下体积。
-            int remaining = budget - result.toString().length() - 180;
-            result.add("site_geometry", siteGeometry(snapshot.getAsJsonObject("site_geometry"),
-                    path + "/site_geometry", Math.min(1500, remaining), uri));
+    static JsonObject present(JsonObject snapshot, String path, int ignoredBudget, Function<String, String> uri) {
+        JsonObject result = snapshot.deepCopy();
+        // 相邻格能从布局精确推导；名字猜出的角色和每次重复的通用分析教材不属于新观察。
+        for (String key : List.of("native_component_offsets", "candidate_adjacencies", "candidate_adjacencies_format",
+                "adjacency_meaning", "omitted_candidate_adjacencies", "analysis_rules")) result.remove(key);
+        if (result.has("palette")) for (var raw : result.getAsJsonArray("palette")) {
+            raw.getAsJsonObject().remove("inferred_roles"); raw.getAsJsonObject().remove("role_basis");
         }
-        // 几何和原生过程按独立字段展示或给出直达路径，不用多层通用摘要藏住新场地。
-        for (String key : List.of("palette", "relative_blocks", "native_processes", "control_analysis", "server_evidence")) {
-            if (!snapshot.has(key)) continue;
-            int remaining = budget - result.toString().length() - 100;
-            if (remaining < 200) break;
-            result.add(key, JsonReadback.preview(snapshot.get(key), path + "/" + key, Math.min(900, remaining), uri));
-            if (!JsonReadback.fits(result, budget)) { result.remove(key); break; }
+        if (result.has("server_evidence") && result.get("server_evidence").isJsonObject()) {
+            JsonObject evidence = result.getAsJsonObject("server_evidence");
+            if (evidence.has("components")) {
+                // 完整部件样本已携带原生事实，默认不再复印原始分页和同一库存的第二份索引。
+                for (String key : List.of("pages", "occupied_resource_views", "occupied_resource_views_meaning", "component_reference")) evidence.remove(key);
+                evidence.addProperty("raw_pages_path", path + "/server_evidence/pages");
+            }
+        }
+        if (result.has("as_built_blueprint") && result.get("as_built_blueprint").isJsonObject()) {
+            result.add("as_built_blueprint", layout(result.getAsJsonObject("as_built_blueprint")));
+            if (result.getAsJsonObject("as_built_blueprint").get("capture_complete").getAsBoolean()
+                    && result.has("relative_blocks") && result.has("palette")) {
+                // 完整地图已有机器布局，把旧索引证据转成自身位置和方块身份后移除重复的几何表。
+                JsonArray rows = result.getAsJsonArray("relative_blocks"), palette = result.getAsJsonArray("palette");
+                if (result.has("component_evidence")) for (var raw : result.getAsJsonArray("component_evidence")) {
+                    JsonObject component = raw.getAsJsonObject();
+                    if (!component.has("block_index")) continue;
+                    JsonArray row = rows.get(component.remove("block_index").getAsInt()).getAsJsonArray();
+                    JsonArray offset = new JsonArray(); for (int axis = 0; axis < 3; axis++) offset.add(row.get(axis));
+                    component.add("offset", offset);
+                    component.add("block_id", palette.get(row.get(3).getAsInt()).getAsJsonObject().get("block_id"));
+                }
+                for (String key : List.of("relative_blocks", "relative_blocks_format", "palette", "unlisted_space")) result.remove(key);
+            }
+        }
+        if (result.has("operating_state") && result.has("component_evidence")) {
+            JsonObject operating = result.getAsJsonObject("operating_state"); Set<String> grouped = new HashSet<>();
+            if (operating.has("belts")) for (var belt : operating.getAsJsonArray("belts"))
+                belt.getAsJsonObject().getAsJsonArray("member_offsets").forEach(at -> grouped.add(at.toString()));
+            if (operating.has("other_kinetic_components")) for (var part : operating.getAsJsonArray("other_kinetic_components"))
+                grouped.add(part.getAsJsonObject().get("offset").toString());
+            var iterator = result.getAsJsonArray("component_evidence").iterator();
+            while (iterator.hasNext()) {
+                JsonObject component = iterator.next().getAsJsonObject();
+                if (!component.has("offset") || !grouped.contains(component.get("offset").toString())) continue;
+                // 只去掉已在整带与机械手运行表中完整表达的同步字段；AE 部件等独有证据仍留在这里。
+                for (String key : List.of("create_kinetic_client_fields", "create_deployer_hand_client",
+                        "block_entity_present", "block_entity_type", "source")) component.remove(key);
+                if (component.size() == 2) iterator.remove();
+            }
         }
         return result;
     }
 
-    private static JsonObject siteGeometry(JsonObject geometry, String path, int budget, Function<String, String> uri) {
-        if (JsonReadback.fits(geometry, budget)) return geometry.deepCopy();
-        JsonObject result = new JsonObject();
-        // 未列出的格子是否可视为空气取决于结构完整性和呈现范围，不能把分页省略误当作空场地。
-        for (String key : List.of("observed_bounds", "structure_complete", "geometry_format", "geometry_scope"))
-            if (geometry.has(key)) result.add(key, geometry.get(key).deepCopy());
-        result.addProperty("omitted", true); result.addProperty("detail_path", path);
-        if (uri != null) result.addProperty("resource_uri", uri.apply(path));
-        for (String key : List.of("palette", "surface_and_obstacles", "observed_interfaces")) {
-            if (!geometry.has(key)) continue;
-            int remaining = budget - result.toString().length() - 100;
-            if (remaining < 200) break;
-            result.add(key, JsonReadback.preview(geometry.get(key), path + "/" + key, Math.min(800, remaining), uri));
-            if (!JsonReadback.fits(result, budget)) { result.remove(key); break; }
+    private static JsonObject layout(JsonObject source) {
+        JsonObject result = source.deepCopy();
+        if (!result.has("blocks")) return result;
+        JsonArray palette = new JsonArray(), cells = new JsonArray(); Map<String, Integer> indices = new LinkedHashMap<>();
+        // 石平台和围挡的方块状态只写一次；每格仍保留原坐标，空气范围和未加载格也沿用原观察语义。
+        for (var raw : result.getAsJsonArray("blocks")) {
+            JsonObject state = raw.getAsJsonObject().deepCopy(); JsonArray offset = state.remove("offset").getAsJsonArray();
+            int index = indices.computeIfAbsent(state.toString(), ignored -> { int next = palette.size(); palette.add(state); return next; });
+            JsonArray cell = offset.deepCopy(); cell.add(index); cells.add(cell);
         }
+        result.remove("blocks"); result.add("palette", palette); result.add("cells", cells);
+        result.addProperty("cells_format", "[offset_x,offset_y,offset_z,palette_index]; unlisted cells are air only when capture_complete=true");
         return result;
     }
 }

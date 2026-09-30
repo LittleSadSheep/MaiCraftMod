@@ -46,37 +46,11 @@ final class ResponseArchive implements AutoCloseable {
     synchronized JsonElement present(JsonElement value) {
         if (closed || JsonReadback.fits(value, INLINE_CHARS)) return value;
         try {
-            String uri = retain(value); JsonObject result = new JsonObject();
-            // 接单编号、当前状态、问题和下一次等待参数都优先留在外层；大几何、配方与教材改为可读取的引用。
-            if (value.isJsonObject() && value.getAsJsonObject().size() <= 40) {
-                for (var field : value.getAsJsonObject().entrySet()) result.add(field.getKey(),
-                        JsonReadback.preview(field.getValue(), JsonReadback.childPath("", field.getKey()),
-                                field.getKey().equals("task") || field.getKey().equals("decision") ? 4500 : 800,
-                                path -> link(uri, path, 0, 5)));
-            } else result.add("value", JsonReadback.preview(value, "", 3000, path -> link(uri, path, 0, 5)));
-            // 原料缺口需要先比较工艺；默认交付配方身份和短原生定义，避免标题、数组、元数据、定义四次往返。
-            JsonObject recipes = RecipeKnowledgeView.present(value, path -> link(uri, path, 0, 5));
-            if (recipes != null) result.add("recipe_choices", recipes);
-            // 外层归档仍保留失败时取得的新现场；恢复编号与目标不能因任务结果较大再要求一次 perceive。
-            var observation = MachineSnapshotView.find(value, "");
-            if (observation != null) {
-                result.add("latest_snapshot", MachineSnapshotView.present(observation.snapshot(), observation.path(),
-                        2200, path -> link(uri, path, 0, 5)));
-                for (String key : List.of("failure_code", "previous_snapshot_id", "next_action"))
-                    if (observation.owner().has(key)) result.add(key, observation.owner().get(key).deepCopy());
-            }
-            if (!JsonReadback.fits(result, INLINE_CHARS - 400)) {
-                JsonObject smaller = new JsonObject();
-                for (String key : List.of("task_id", "plan_id", "request_key", "state", "status", "accepted", "success",
-                        "wake_reason", "next_attention", "snapshot_id", "target", "ready_to_execute",
-                        "latest_snapshot", "failure_code", "previous_snapshot_id", "next_action", "recipe_choices"))
-                    if (result.has(key)) smaller.add(key, result.get(key));
-                smaller.add("details", JsonReadback.preview(value, "", 2400, path -> link(uri, path, 0, 5)));
-                result = smaller;
-            }
+            String uri = retain(value);
+            // 归档用于冻结诊断原件；已整理的游戏事实完整交付，不能再次按固定字符数吞掉材料和运行状态。
+            JsonObject result = value.isJsonObject() ? value.getAsJsonObject().deepCopy() : new JsonObject();
+            if (!value.isJsonObject()) result.add("value", value.deepCopy());
             result.addProperty("details_uri", uri); result.addProperty("details_temporary", true);
-            // 展示省略与游戏效果的部分完成是两件事，不能覆盖原报告中的 partial 等业务状态。
-            result.addProperty("response_partial", true);
             return result;
         } catch (IOException failure) {
             // 暂存失败不能把已接单或已完成的游戏动作报成失败；保留原始回执，让宿主仍能取得确定结果。
@@ -108,7 +82,9 @@ final class ResponseArchive implements AutoCloseable {
         if (stored == null) throw new IllegalArgumentException("receipt_expired: query task/get or repeat the read-only observation; do not repeat execute to recover a receipt");
         String uri = PREFIX + id;
         try (var reader = new InputStreamReader(new GZIPInputStream(Files.newInputStream(stored.file())), StandardCharsets.UTF_8)) {
-            JsonObject page = JsonReadback.page(JsonParser.parseReader(reader), path, offset, limit, child -> link(uri, child, 0, 5));
+            JsonElement storedValue = JsonParser.parseReader(reader);
+            JsonObject page = offset == 0 ? JsonReadback.complete(storedValue, path)
+                    : JsonReadback.page(storedValue, path, offset, limit, child -> link(uri, child, 0, 5));
             entries.remove(id); entries.put(id, new Entry(stored.file(), stored.bytes(), clock.getAsLong()));
             page.addProperty("snapshot_only", true); page.addProperty("details_uri", uri);
             if (page.has("next_offset")) page.addProperty("next_uri", link(uri, path, page.get("next_offset").getAsInt(), limit));
