@@ -353,6 +353,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         // 两端的已观察供能分别结算；power_ready 继续只代表整条接线的网络和转速验收通过。
         KineticPowerEvidence.append(result,"source",sourceAfter!=null?sourceAfter:sourceBefore,0);
         KineticPowerEvidence.append(result,"destination",targetAfter!=null?targetAfter:targetBefore,r.minimumRpm);
+        // 几何规划失败时尚未发起服务端核验，但客户端已经读过端点；分开回报，避免模型把未核验误读成来源从未观察。
+        if(r.source!=null&&!sources.isEmpty()) {
+            var observed=sources.getFirst();
+            result.put("source_planning_block",observed.blockId());
+            KineticPowerEvidence.append(result,"source_planning",KineticPowerEvidence.client(observed),0);
+        }
+        if(target!=null)KineticPowerEvidence.append(result,"destination_planning",KineticPowerEvidence.client(target),r.minimumRpm);
+        result.put("planning_observation_scope","client-synchronized endpoint facts read for planning; separate from later native verification and never proof of a built route");
         result.put("verification_scope",serverProof?"fresh native destination power and admitted source network identity; per-link evidence is separate":"client synchronized rotation and constructed route");
         result.put("native_connected",powerReady);result.put("machine_production_verified",false);result.put("throughput_verified",false);
         result.put("no_change",noChange);result.put("medium","kinetic");result.put("input_id",r.targetLabel);
