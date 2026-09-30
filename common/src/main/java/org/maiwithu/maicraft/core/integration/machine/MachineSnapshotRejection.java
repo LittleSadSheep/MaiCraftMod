@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonObject;
+import java.util.List;
 import java.util.Map;
 
 /** 现场变化或旧引用丢失时，一起交付同名同址的新观察，不让模型再单独发起勘测。 */
@@ -25,6 +26,13 @@ public final class MachineSnapshotRejection extends IllegalArgumentException {
         target.addProperty("kind", "landmark");
         target.addProperty("label", latest.label());
         snapshot.add("target", target);
+        if (snapshot.has("construction_site")) {
+            // 工地的完整体积可能很大；同时交付已有感知使用的连续行几何，让模型直接看到地面和障碍。
+            JsonObject geometry = ConstructionSiteGeometry.describe(latest);
+            for (String key : List.of("snapshot_id", "dimension", "anchor", "target", "next_step", "validity", "observation_only"))
+                geometry.remove(key);
+            snapshot.add("site_geometry", geometry);
+        }
         return Map.of("failure_code", code, "previous_snapshot_id", previousId,
                 "latest_snapshot", snapshot,
                 "next_action", "Review latest_snapshot and use its target and snapshot_id in the corrected goal; unchanged requests do not need another perceive or inspect_machine call.");

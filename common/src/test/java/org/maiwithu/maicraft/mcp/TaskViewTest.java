@@ -80,6 +80,11 @@ public final class TaskViewTest {
                  "relative_blocks":[[0,-1,0,0]]}
                 """).getAsJsonObject();
         latest.addProperty("large_native_evidence", "observed".repeat(1500));
+        // 完整体积很大时仍直接显示连续行；其调色板单独保留，不能与三维快照的索引混用。
+        latest.add("site_geometry", JsonParser.parseString("""
+                {"structure_complete":true,"palette":[{"block_id":"minecraft:gold_block","properties":{}}],
+                 "surface_and_obstacles":[[-1,0,0,799,0]],"geometry_format":"inclusive horizontal runs"}
+                """));
         TaskResult failure = TaskResult.fail("machine_snapshot_changed", Map.of("failure_code", "machine_snapshot_changed",
                 "previous_snapshot_id", "old-site", "latest_snapshot", latest, "machine_layout", blocks));
         var task = new IntentTaskRecord(UUID.randomUUID(), null, goal);
@@ -90,7 +95,8 @@ public final class TaskViewTest {
         check(shown.get("failure_code").getAsString().equals("machine_snapshot_changed")
                         && snapshot.get("snapshot_id").getAsString().equals("current-site")
                         && snapshot.getAsJsonObject("target").get("label").getAsString().equals("platform")
-                        && snapshot.getAsJsonArray("relative_blocks").get(0).toString().equals("[0,-1,0,0]"),
+                        && snapshot.getAsJsonArray("relative_blocks").get(0).toString().equals("[0,-1,0,0]")
+                        && snapshot.getAsJsonObject("site_geometry").getAsJsonArray("surface_and_obstacles").get(0).toString().equals("[-1,0,0,799,0]"),
                 "default failure presentation preserves the usable new snapshot beside large diagnostics");
         var exact = JsonReadback.resolve(MaiCraftRuntimeFacade.taskSnapshot(task), snapshot.get("detail_path").getAsString());
         check(exact.equals(latest) && !latest.has("omitted"), "current observation details point to the unchanged retained task result");

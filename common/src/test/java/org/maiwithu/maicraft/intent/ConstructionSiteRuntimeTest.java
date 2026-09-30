@@ -137,7 +137,8 @@ public final class ConstructionSiteRuntimeTest {
                 var current = MachineSnapshots.requireFresh(world.player,latest.get("snapshot_id").getAsString());
                 check(!current.id().equals(site.id()) && current.center().equals(anchor) && current.radius()==site.radius()
                                 && latest.getAsJsonObject("target").get("label").getAsString().equals("site")
-                                && latest.getAsJsonArray("palette").toString().contains("minecraft:gold_block"),
+                                && latest.getAsJsonArray("palette").toString().contains("minecraft:gold_block")
+                                && latest.getAsJsonObject("site_geometry").getAsJsonArray("palette").toString().contains("minecraft:gold_block"),
                         "changed geometry returns a usable current snapshot at the original named anchor");
             }
             executeReturnsCurrentObservation(world, runtime, site, anchor);
