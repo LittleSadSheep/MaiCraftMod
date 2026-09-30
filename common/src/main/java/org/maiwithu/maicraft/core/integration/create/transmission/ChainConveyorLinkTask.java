@@ -78,10 +78,8 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
                 return;
             }
             if (ChainConveyorBridge.selection().first() != null) {
-                // 已选中的首端恰好就是本次授权首端时可接着走向另一端；不能重发首击去连接错误对象。
-                if (!ChainConveyorBridge.selection().matches(world, r.first))
-                    throw new IllegalArgumentException("chain_conveyor_existing_selection_preserved");
-                firstSelectionConfirmed = true;
+                // 相同首端直接续接；旧的不同选点稍后用原生取消手势结清，不把临时选点误接到本次目标。
+                firstSelectionConfirmed = ChainConveyorBridge.selection().matches(world, r.first);
             }
             validatePair();
         } catch (IllegalArgumentException problem) { stop(problem.getMessage()); }
@@ -184,7 +182,14 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         validatePair();
         if (!first && secondSubmitted) return stop("chain_conveyor_second_click_replay_blocked");
         var selected = ChainConveyorBridge.selection();
-        if (first ? selected.first() != null : !selected.matches(world, r.first)) return stop("chain_conveyor_selection_changed_preserved");
+        if (first && selected.first() != null) {
+            phase = Phase.CANCEL_SELECTION; selectionCleanupDeadline = world.getGameTime() + 80;
+            r.extendDeadlineTo(selectionCleanupDeadline + 1); return TaskState.RUNNING;
+        }
+        if (!first && !selected.matches(world, r.first)) {
+            // 第二击尚未提交时，首端临时选择失效可以重新准备；不重放任何已经发出的连接数据包。
+            firstSelectionConfirmed = false; selectedByTask = false; phase = Phase.FIRST_READ; return TaskState.RUNNING;
+        }
         BlockPos target = first ? r.first : r.second;
         if (!near(target)) return TaskState.RUNNING;
         var context = ClientRuntime.requireContext(player);
@@ -288,18 +293,25 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         InputDriver.sneak(player, false); fail(failure, FailureType.UNKNOWN); return TaskState.FAILED;
     }
     private TaskState cancelSelection() {
-        if (!ChainConveyorBridge.selection().matches(world, r.first)) return stop(failure);
+        BlockPos pending = ChainConveyorBridge.selection().first();
+        if (pending == null) {
+            if (failure != null) return stop(failure);
+            InputDriver.sneak(player, false); phase = Phase.FIRST_READ; return TaskState.RUNNING;
+        }
         if (!player.isAlive() || player.level() != world || world.getGameTime() >= selectionCleanupDeadline)
-            return stop(failure);
+            return stop(failure == null ? "chain_conveyor_selection_cleanup_unconfirmed" : failure);
         var context = ClientRuntime.requireContext(player);
         // 只撤销本任务真正发出的首端选择；运输换手后先取回链条，再执行原生潜行取消。
         if (!inventory.select(context)) return TaskState.RUNNING;
         if (context.minecraft().screen != null) return TaskState.RUNNING;
         InputDriver.halt(player); InputDriver.sneak(player, true);
         if (!player.isShiftKeyDown() || !context.mutationAvailable()) return TaskState.RUNNING;
-        // 原生 onRightClick 在持链潜行时仅取消客户端首端选择；调用前后核对归属，绝不重发第二次连接。
-        selectionCleanupConfirmed = ChainConveyorBridge.cancelOwnedSelection(world, r.first);
-        return stop(failure);
+        // 原生持链潜行只清理临时首端选点，不拆除世界里的链接；新方案准备完成后重新读首端，再正常点击。
+        selectionCleanupConfirmed = ChainConveyorBridge.cancelOwnedSelection(world, pending);
+        if (!selectionCleanupConfirmed) return TaskState.RUNNING;
+        InputDriver.sneak(player, false);
+        if (failure != null) return stop(failure);
+        firstSelectionConfirmed = false; selectedByTask = false; phase = Phase.FIRST_READ; return TaskState.RUNNING;
     }
     @Override protected void cleanup() {
         if (creativeSupply != null) { creativeSupply.stop(player, StopReason.REPLACED); creativeSupply.result(TaskState.CANCELLED); creativeSupply = null; }

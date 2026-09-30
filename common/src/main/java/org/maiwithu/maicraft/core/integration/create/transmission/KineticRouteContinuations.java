@@ -22,8 +22,10 @@ final class KineticRouteContinuations {
         ENTRIES.entrySet().removeIf(row->row.getValue().world()!=player.level());
         Entry entry=ENTRIES.get(request.target);if(entry==null)return null;
         // 维护暂停和长时间施工不会自行破坏已建路线；续作按请求归属及下面的实时端点、方块事实核对，不因时钟拒绝。
-        if(!entry.owner().equals(player.getUUID())||!sameRequest(entry.request(),request))
-            throw new IllegalArgumentException("kinetic_partial_route_requires_inspection");
+        if(!entry.owner().equals(player.getUUID())||!sameRequest(entry.request(),request)) {
+            // 改换来源或目标配置意味着新的接线方案；旧偏好不能锁住执行入口，现存方块仍由新规划实际读取。
+            ENTRIES.remove(request.target); return null;
+        }
         if(!player.level().isLoaded(entry.plan().source().position())||!player.level().isLoaded(request.target)
                 ||player.level().getBlockEntity(entry.plan().source().position())!=entry.source()
                 ||player.level().getBlockEntity(request.target)!=entry.target())throw new IllegalArgumentException("kinetic_partial_route_endpoint_changed");
