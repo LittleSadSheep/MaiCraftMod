@@ -1770,8 +1770,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private boolean tryTerrainPass() {
-        // 原目标有临时点击支撑不等于身体已经够得着；仍允许有界施工导航准备实际落脚点。
-        if (isTemporary(cell) || liveGestures.isEmpty() || !stanceNavigation.allowTerrain()) return false;
+        // 垫块和正式组件都可能需要先登阶或搭落脚点；临时支撑不能在只试完现有地面后直接判无路。
+        if (liveGestures.isEmpty() || !stanceNavigation.allowTerrain()) return false;
         gestureAt = 0; phase = Phase.PLACE_NAV;
         note = "existing-footing alternatives exhausted; trying permitted construction access";
         return true;
@@ -2568,6 +2568,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> navigationDiagnostics() {
         var data = new LinkedHashMap<>(stanceNavigation.evidence());
         data.put("worksite_movement",worksiteMovement.evidence());
+        // 终态也保留站位搜索和身体位置，区分没有原生点击候选、候选无落脚点与真正走路失败。
+        BlockPos feet = PlayerNav.playerFeet(player);
+        data.put("player_feet", List.of(feet.getX(), feet.getY(), feet.getZ()));
+        if (gestureProgress != null) data.put("placement_search", Map.of("complete", gestureProgress.complete(),
+                "stance_checks", gestureProgress.stanceChecks(), "face_checks", gestureProgress.probeCount(),
+                "candidates", gestureProgress.gestureCount()));
         if (cell != null) for (int i = 0; i < r.targets.size(); i++)
             if (r.targets.get(i).pos().equals(cell.target().pos())) { data.put("target_index", i); break; }
         return Map.copyOf(data);
