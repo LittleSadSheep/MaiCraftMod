@@ -76,8 +76,10 @@ public final class MaiCraftNeoForgeClient {
     }
 
     // 模组界面可能覆盖绘制入口而不调用原版实现，因此通过加载器事件登记真实可见帧。
+    // 菜单流调试时原版 HUD 层不渲染，屏幕每帧绘制后补画调试面板。
     private void onScreenRendered(ScreenEvent.Render.Post event) {
         MenuVisibility.rendered(event.getScreen());
+        DebugHudRenderer.renderScreen(event.getGuiGraphics());
     }
 
     // 系统提示没有发送者；普通消息尽量从当前连接查玩家名字，查不到时保留 UUID 和文字。

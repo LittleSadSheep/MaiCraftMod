@@ -49,8 +49,11 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((graphics, tickCounter) -> DebugHudRenderer.render(graphics));
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> ClientRuntime.stop());
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
-                ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) ->
-                        MenuVisibility.rendered(rendered)));
+                ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) -> {
+                    MenuVisibility.rendered(rendered);
+                    // 菜单流调试时原版 HUD 层不渲染，屏幕每帧绘制后补画调试面板。
+                    DebugHudRenderer.renderScreen(graphics);
+                }));
         // 聊天区消息进入独立聊天流，保留发送者；动作栏提示不混入玩家对话。
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receivedAt) -> {
             // Fabric 允许资料或签名消息缺失；有签名身份时仍保留它，不能因未同步名字而丢掉整条聊天。
