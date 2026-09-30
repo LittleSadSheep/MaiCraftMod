@@ -11,12 +11,33 @@ import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogMode
 /** full 读取地图现状；diff 才使用原设计作参照。档案在 full 模式中只提供身份、位置和读取范围。 */
 public final class MachineInspectionBlueprintView {
     private MachineInspectionBlueprintView() {}
+
+    /** 默认整机检查沿用档案足迹，避免地图看到了机械手而组件扫描仍停留在锚点附近四格。 */
+    public static int componentRadius(MachineBlueprint saved, BlockPos anchor, int radius, boolean explicitRadius) {
+        if (explicitRadius || saved == null || saved.captureMin() == null || saved.captureMax() == null) return radius;
+        return (int) Math.min(MachineSurvey.MAX_RADIUS, Math.max(radius, extentRadius(saved, anchor)));
+    }
+
+    private static long extentRadius(MachineBlueprint saved, BlockPos anchor) {
+        long extent = 0;
+        // 保留机器原锚点，只扩展只读扫描半径；不能把观察中心平移成后续施工的新坐标原点。
+        for (Position corner : new Position[]{saved.captureMin(), saved.captureMax()}) {
+            extent = Math.max(extent, Math.abs((long) corner.x() - anchor.getX()));
+            extent = Math.max(extent, Math.abs((long) corner.y() - anchor.getY()));
+            extent = Math.max(extent, Math.abs((long) corner.z() - anchor.getZ()));
+        }
+        return extent;
+    }
     public static JsonObject read(LocalPlayer player, MachineBlueprint saved, BlockPos anchor, int radius,
                                   boolean explicitRadius, String mode, int offset, int limit) {
         var result = new JsonObject(); result.addProperty("inspection_mode",mode);
         if (saved != null) result.add("recorded_machine",saved.summary());
         if (mode.equals("full")) {
             boolean recordedBounds = saved != null && saved.captureMin() != null && !explicitRadius;
+            // 超出单次扫描上限时明确暴露范围缺口，局部 native_processes 为空不能伪装成整机没有工艺。
+            result.addProperty("native_component_scan_radius", radius);
+            if (saved != null && saved.captureMin() != null && saved.captureMax() != null)
+                result.addProperty("native_component_bounds_covered", extentRadius(saved, anchor) <= radius);
             BlockPos minimum = recordedBounds ? block(saved.captureMin()) : anchor.offset(-radius,-radius,-radius);
             BlockPos maximum = recordedBounds ? block(saved.captureMax()) : anchor.offset(radius,radius,radius);
             String dimension = saved == null ? player.level().dimension().location().toString() : saved.dimension();
