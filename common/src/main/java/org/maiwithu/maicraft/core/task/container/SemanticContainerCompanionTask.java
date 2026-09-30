@@ -124,6 +124,8 @@ public final class SemanticContainerCompanionTask
     private int initialContainerCount;
     private int lastPlayerCount;
     private int lastContainerCount;
+    private long countsObservedAt = -1;
+    private Map<String, Object> lastNativeTransfer = Map.of();
     private String containerKind;
     private boolean goalSatisfied;
     private String failureCode;
@@ -408,6 +410,7 @@ public final class SemanticContainerCompanionTask
             initialContainerCount = count(view.containerSlots());
             lastPlayerCount = initialPlayerCount;
             lastContainerCount = initialContainerCount;
+            countsObservedAt = player.level().getGameTime();
             ContainerSupplySources.rememberVisible(player, target.position(), menu, view.containerSlots());
             phase = Phase.PLAN;
             return TaskState.RUNNING;
@@ -472,7 +475,7 @@ public final class SemanticContainerCompanionTask
                 knownStorage, !knownStorage && !knownMachine);
     }
 
-    // 菜单没换、物品没被别人改动、鼠标为空且旁人条件通过后，才计算要搬多少。
+    // 菜单没换、鼠标为空且旁人条件通过后，按此刻真实库存重新计算要搬多少。
     // 即使最终数量已经满足，也是先开箱走到这里才发现不需要搬。
     private TaskState plan() {
         if (!menuValid()) return menuLost("The synchronized container menu changed before planning.");
@@ -484,10 +487,8 @@ public final class SemanticContainerCompanionTask
             return failFinal("menu_cursor_not_empty", "The menu cursor is not empty, so no "
                     + "semantic transfer can start safely.", FailureType.UNKNOWN);
         }
-        if (!fingerprint(player.containerMenu).equals(stableFingerprint)) {
-            return failFinal("menu_changed_externally", "The menu contents changed after inspection "
-                    + "and before the first click.", FailureType.TARGET_LOST);
-        }
+        // 还没有提交点击，箱子自动抽料只更新计划基线，不迫使模型重新开箱或重发整项请求。
+        stableFingerprint = fingerprint(player.containerMenu);
 
         int playerCount = count(view.playerSlots());
         int containerCount = count(view.containerSlots());
@@ -604,13 +605,17 @@ public final class SemanticContainerCompanionTask
                     "The destination cannot safely hold the complete remaining requested amount.", FailureType.NO_SPACE);
 
             ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(source.getItem());
-            if (view.quickMoveSafe() && take == source.getCount()) {
+            // 存入自动抽料箱时点名目标槽，复用机器投料的原生确认；快速移动的两侧守恒可能被溜槽即时抽取打断。
+            if (selectedDirection == Direction.WITHDRAW && view.quickMoveSafe() && take == source.getCount()) {
                 moves.add(new PlannedMove(
                         new ContainerTransferTaskRecord.Move(sourceIndex, -1, 0), itemId, take));
             } else {
                 for (Allocation allocation : allocations) {
                     moves.add(new PlannedMove(new ContainerTransferTaskRecord.Move(
-                            sourceIndex, allocation.destination(), allocation.count()),
+                            sourceIndex, allocation.destination(), allocation.count(),
+                            selectedDirection == Direction.DEPOSIT
+                                    ? ContainerTransferTaskRecord.DestinationMode.MAY_MUTATE_AFTER_DEPOSIT
+                                    : ContainerTransferTaskRecord.DestinationMode.EXACT),
                             itemId, allocation.count()));
                 }
             }
@@ -680,14 +685,8 @@ public final class SemanticContainerCompanionTask
             return failFinal("menu_cursor_not_empty", "The menu cursor stopped being empty between "
                     + "verified moves.", FailureType.UNKNOWN);
         }
-        if (!fingerprint(player.containerMenu).equals(stableFingerprint)) {
-            return failFinal("menu_changed_externally", "The container or main inventory changed "
-                    + "between verified moves. MaiCraft paused instead of using a stale plan.",
-                    FailureType.TARGET_LOST);
-        }
-        // 整堆快速移动由游戏决定落在哪些槽；上一笔确认守恒后，按真实空槽重新安排剩余物品。
-        // 例如 1121 块石砖搬完 17 堆后，最后 33 块不能继续使用最初预测、现在已经装满的目标槽。
-        if (movedCount > 0) {
+        // 尚未提交下一笔点击时，漏斗或机器改变槽位只需按当前库存重新分配；菜单身份、权限和真实容量仍正常核对。
+        if (movedCount > 0 || !fingerprint(player.containerMenu).equals(stableFingerprint)) {
             Planning remaining = buildPlan(direction, plannedAmount - movedCount);
             if (!remaining.success()) return failFinal(remaining.failureCode(), remaining.failureMessage(), remaining.failureType());
             plan = remaining.moves(); planIndex = 0;
@@ -701,8 +700,7 @@ public final class SemanticContainerCompanionTask
                 List.of(pendingMove.move()), false), Purpose.TRANSFER);
     }
 
-    // 低层说完成后，父任务再核对所选物品：玩家侧增加多少，容器侧就应减少多少，反向存入同理。
-    // 对不上就停并标记结果不确定，不继续按旧计划盲点。
+    // 原生点击结算后核对玩家侧的精确变化；存入箱内的物品可能已经被溜槽抽走，不能要求它继续留在箱内。
     private TaskState verifyTransfer() {
         if (!menuValid() || pendingMove == null) {
             outcomeUncertain = true;
@@ -723,12 +721,14 @@ public final class SemanticContainerCompanionTask
                 ? -pendingMove.count() : pendingMove.count();
         int playerDelta = afterPlayer - beforePlayerCount;
         int containerDelta = afterContainer - beforeContainerCount;
+        boolean flowingDeposit = direction == Direction.DEPOSIT && pendingMove.move().destinationMode()
+                == ContainerTransferTaskRecord.DestinationMode.MAY_MUTATE_AFTER_DEPOSIT;
         if (playerDelta != expectedPlayerDelta
-                || containerDelta != -expectedPlayerDelta
+                || (!flowingDeposit && containerDelta != -expectedPlayerDelta)
                 || playerItemDelta != expectedPlayerDelta) {
             outcomeUncertain = true;
-            return failFinal("transfer_delta_diverged", "The real menu did not show equal and "
-                    + "opposite container/main-inventory deltas for the confirmed semantic item. "
+            return failFinal("transfer_delta_diverged", "The real menu did not show the exact "
+                    + "player delta and the destination evidence required by this native transfer. "
                     + "Blind retry was stopped.", FailureType.UNKNOWN);
         }
         effectsStarted = true;
@@ -736,6 +736,7 @@ public final class SemanticContainerCompanionTask
         movedByItem.merge(itemId, pendingMove.count(), Integer::sum);
         lastPlayerCount = afterPlayer;
         lastContainerCount = afterContainer;
+        countsObservedAt = player.level().getGameTime();
         stableFingerprint = fingerprint(player.containerMenu);
         ContainerSupplySources.rememberVisible(player, target.position(), player.containerMenu, view.containerSlots());
         pendingMove = null;
@@ -793,6 +794,18 @@ public final class SemanticContainerCompanionTask
         if (purpose == Purpose.TRANSFER && result != null && result.data() != null
                 && result.data().get("confirmed_split_clicks") instanceof Number clicks)
             confirmedSplitClicks += Math.max(0, clicks.intValue());
+        if (purpose == Purpose.TRANSFER) {
+            // 失败也带回底层点击原因和当时实际库存，避免沿用开箱时的旧计数误导模型重复投料。
+            Map<String, Object> evidence = result == null || result.data() == null ? Map.of() : result.data();
+            lastNativeTransfer = Map.of("message", result == null ? "missing native transfer result" : String.valueOf(result.message()),
+                    "data", evidence);
+            effectsStarted |= Boolean.TRUE.equals(evidence.get("effects_started"));
+            outcomeUncertain |= result == null || result.data() == null || Boolean.TRUE.equals(evidence.get("outcome_uncertain"));
+            if (menuValid()) {
+                lastPlayerCount = count(view.playerSlots()); lastContainerCount = count(view.containerSlots());
+                countsObservedAt = player.level().getGameTime();
+            }
+        }
         activeChild = null;
         activeRecord = null;
         activePurpose = null;
@@ -813,9 +826,8 @@ public final class SemanticContainerCompanionTask
                             lastFailure());
                 }
                 case TRANSFER -> {
-                    outcomeUncertain = true;
-                    yield failFinal("container_transfer_unconfirmed", "A menu transfer did not "
-                            + "receive a complete cursor-safe confirmation. Blind retry stopped.",
+                    yield failFinal("container_transfer_unconfirmed", "Native container transfer did not settle: "
+                            + (result == null ? "missing result" : result.message()),
                             lastFailure());
                 }
                 case CLOSE -> {
@@ -1042,6 +1054,8 @@ public final class SemanticContainerCompanionTask
         data.put("observed_final_main_count", lastPlayerCount);
         data.put("initial_container_count", initialContainerCount);
         data.put("observed_final_container_count", lastContainerCount);
+        data.put("inventory_counts_observed_at_tick", countsObservedAt);
+        if (!lastNativeTransfer.isEmpty()) data.put("last_native_transfer", lastNativeTransfer);
         data.put("moved_count", movedCount);
         data.put("moved_items", Map.copyOf(movedByItem));
         data.put("goal_satisfied", goalSatisfied);

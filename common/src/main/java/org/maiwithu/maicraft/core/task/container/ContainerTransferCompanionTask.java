@@ -46,6 +46,9 @@ public final class ContainerTransferCompanionTask
     private boolean preserveUnexpectedCursor;
     private boolean outcomeUncertain;
     private boolean settlementRequested;
+    private int submittedClicks;
+    private boolean splitEffectsStarted;
+    private Map<String, Object> lastNativeClick = Map.of();
 
     public ContainerTransferCompanionTask(LocalPlayer player, ContainerTransferTaskRecord record) {
         super(player, record);
@@ -64,6 +67,7 @@ public final class ContainerTransferCompanionTask
         if (menu == null) menu = player.containerMenu;
         if (receipt != null) {
             receipt = context.menus().poll(context, receipt);
+            rememberClick(receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
                 outcomeUncertain |= receipt.status() == MenuReceipt.Status.UNCERTAIN
@@ -195,6 +199,7 @@ public final class ContainerTransferCompanionTask
 
     private TaskState splitTick(LocalPlayerContext context) {
         var status = split.tick(context);
+        splitEffectsStarted |= split.hasStarted();
         splitEvidence = split.evidence();
         if (split.confirmedThisTick()) {
             confirmedSplitClicks++;
@@ -229,7 +234,7 @@ public final class ContainerTransferCompanionTask
         }
         requested = before.getCount();
         quick = new QuickMoveEvidence(player, player.containerMenu, move.from());
-        receipt = context.menus().click(
+        receipt = submitClick(
                 context, move.from(), 0, ClickType.QUICK_MOVE,
                 (c, ignored) -> quick.observe(), 20);
         return TaskState.RUNNING;
@@ -242,7 +247,7 @@ public final class ContainerTransferCompanionTask
         if (move.destinationMode() == ContainerTransferTaskRecord.DestinationMode.EXACT
                 && !same(player.containerMenu.getSlot(move.to()).getItem(), destinationBefore))
             return rejectBeforePickup("destination changed before pickup; no pickup was submitted");
-        receipt = context.menus().click(
+        receipt = submitClick(
                 context, move.from(), 0, ClickType.PICKUP,
                 (c, ignored) -> {
                     ItemStack carried = c.player().containerMenu.getCarried();
@@ -258,7 +263,7 @@ public final class ContainerTransferCompanionTask
     // 整堆放入一般要求目标格增加指定数量、鼠标清空。
     // 调用方明确允许机器立即消耗时，可改用源格准确扣减与鼠标清空来确认，不要求机器槽长期保留原物品。
     private TaskState submitAll(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
-        receipt = context.menus().click(
+        receipt = submitClick(
                 context, move.to(), 0, ClickType.PICKUP,
                 (c, ignored) -> {
                     ItemStack source = c.player().containerMenu.getSlot(move.from()).getItem();
@@ -294,7 +299,7 @@ public final class ContainerTransferCompanionTask
 
     // 交换后应由目标格装着原源物品，鼠标拿着原目标物品，接下来再把它还到源格。
     private TaskState submitSwap(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
-        receipt = context.menus().click(
+        receipt = submitClick(
                 context, move.to(), 0, ClickType.PICKUP,
                 (c, ignored) -> {
                     ItemStack destination = c.player().containerMenu.getSlot(move.to()).getItem();
@@ -312,7 +317,7 @@ public final class ContainerTransferCompanionTask
 
     // 把鼠标上剩下的物品放回原来源格；确认鼠标已空。它不是撤销此前所有已经成功的搬运。
     private TaskState submitReturn(LocalPlayerContext context, ContainerTransferTaskRecord.Move move) {
-        receipt = context.menus().click(
+        receipt = submitClick(
                 context, move.from(), 0, ClickType.PICKUP,
                 (c, ignored) -> c.player().containerMenu.getCarried().isEmpty()
                         ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING, 20);
@@ -374,6 +379,18 @@ public final class ContainerTransferCompanionTask
     }
 
     private boolean validSlot(int slot) { return slot >= 0 && slot < player.containerMenu.slots.size(); }
+
+    private MenuReceipt submitClick(LocalPlayerContext context, int slot, int button, ClickType type,
+                                    MenuConfirmation confirmation, int timeout) {
+        // 是否出手与是否核验搬运量分开记账；超时仍保留原生点击状态，父任务不能把零确认量说成没点过。
+        MenuReceipt submitted = context.menus().click(context, slot, button, type, confirmation, timeout);
+        submittedClicks++; rememberClick(submitted); return submitted;
+    }
+
+    private void rememberClick(MenuReceipt observed) {
+        lastNativeClick = Map.of("kind", observed.kind().name(), "status", observed.status().name(),
+                "detail", String.valueOf(observed.detail()));
+    }
     private static boolean same(ItemStack a, ItemStack b) {
         return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
@@ -396,6 +413,10 @@ public final class ContainerTransferCompanionTask
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>();
         data.put("completed_moves", moveIndex); data.put("moved_counts", List.copyOf(moved));
+        data.put("effects_started", submittedClicks > 0 || splitEffectsStarted);
+        data.put("submitted_clicks", submittedClicks);
+        data.put("native_phase", phase.name().toLowerCase());
+        if (!lastNativeClick.isEmpty()) data.put("last_native_click", lastNativeClick);
         // 原生回执确认后才累计，计划七次或已经点出七次都不能直接当作七次成功。
         data.put("confirmed_split_clicks", confirmedSplitClicks);
         data.put("outcome_uncertain", outcomeUncertain || Boolean.TRUE.equals(splitEvidence.get("outcome_uncertain")));
