@@ -232,14 +232,20 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         return TaskState.RUNNING;
     }
     private boolean near(BlockPos target) {
-        if (ChainConveyorInteraction.aim(player, target, player.getEyePosition()) != null) { stopNav(); navigating = null; approachTicks = 0; return true; }
+        // 飞行刚抬高到能看见传动轮时不能取消导航，否则背包会落回原处，下一刻又起飞，永远点不到。
+        // 已启动的接近必须在稳定落脚且能安全交还控制后结束；没有在途导航时仍可直接尝试原生交互。
+        if ((nav == null || player.onGround() && nav.isSafeToCancel())
+                && ChainConveyorInteraction.aim(player, target, player.getEyePosition()) != null) {
+            stopNav(); navigating = null; approachTicks = 0; return true;
+        }
         if (!target.equals(navigating)) { stopNav(); navigating = target; approachTicks = 0; rejectedStances.clear(); }
         if (nav == null) {
             approachCandidates = ChainConveyorInteraction.stances(player, target, rejectedStances);
             var goals = approachCandidates.stream().map(NavGoal::exact).toList();
             // 一次搜索所有可见站位，由真实移动图选择能走到的那个，不因最近候选无路就放弃整个端点。
             nav = PlayerNav.toGoal(player, () -> NavGoal.composite(goals), .9,
-                    () -> ChainConveyorInteraction.aim(player, target, player.getEyePosition()) != null, PlayerNav.ContextProvider.DEFAULT);
+                    () -> player.onGround() && ChainConveyorInteraction.aim(player, target, player.getEyePosition()) != null,
+                    PlayerNav.ContextProvider.DEFAULT);
         }
         var state = NavigationSafetyContext.withPreservedStructures(List.of(r.first, r.second), nav::tick);
         if (state == PlayerNav.Status.FAILED || state == PlayerNav.Status.ARRIVED && ++approachTicks > 20) {
@@ -258,6 +264,7 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         }
         return false;
     }
+
     private TaskState restore() {
         // 连接和材料消耗已结算，直接结束使用；背包保持操作后的布局，不能再被原排序还原卡住。
         inventory.finish(); inventoryClosed = true; return TaskState.SUCCESS;
@@ -292,7 +299,27 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         }
         reads.cancel(); supply.cancel(player); inventory.finish(); super.cleanup();
     }
-    @Override public Map<String, Object> progress() { return Map.of("task", name(), "phase", phase.name().toLowerCase(), "chain_cost", cost, "link_verified", verified); }
+    @Override public Map<String, Object> progress() {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("task", name()); result.put("phase", phase.name().toLowerCase());
+        result.put("chain_cost", cost); result.put("link_verified", verified);
+        result.put("waiting_for", nav != null ? "approaching_endpoint" : action != null ? "native_click_confirmation"
+                : player.isShiftKeyDown() ? "releasing_sneak" : !ClientRuntime.requireContext(player).mutationAvailable()
+                ? "native_action_channel" : phase == Phase.FIRST_CLICK || phase == Phase.SECOND_CLICK ? "aiming_at_endpoint" : phase.name().toLowerCase());
+        // 同一 first_click 阶段可能还在走路、飞行或等待瞄准；直接交付当前执行事实，不再逼模型猜或反复感知。
+        if (navigating != null) {
+            result.put("endpoint", navigating.equals(r.first) ? "first" : "second");
+            result.put("target_coordinates", List.of(navigating.getX(), navigating.getY(), navigating.getZ()));
+            result.put("player_feet", List.of(player.getX(), player.getY(), player.getZ()));
+            result.put("visible_stances", approachCandidates.size());
+        }
+        if (nav != null) {
+            result.put("navigation", nav.transportDiagnostics()); result.put("planning", nav.planningInFlight());
+            result.put("navigation_stall_ticks", nav.stallTicks()); result.put("safe_to_settle_navigation", nav.isSafeToCancel());
+        }
+        if (action != null) result.put("native_action_status", action.status().name());
+        return result;
+    }
     @Override protected Map<String, Object> resultData() {
         var result = new LinkedHashMap<String, Object>();
         result.put("chain_conveyor_link_verified", verified); result.put("native_link_verified", verified); result.put("no_change", noChange);
