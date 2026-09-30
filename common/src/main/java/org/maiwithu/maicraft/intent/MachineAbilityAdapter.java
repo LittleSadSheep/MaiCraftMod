@@ -470,6 +470,8 @@ final class MachineAbilityAdapter {
             // 明确蓝图的偏移从观察中心算；自动生成布局则先换算地板锚点，两类输入的定位规则不同。
             // 已明确授权的修改直接执行所声明的拆换；额外选项只用于主动收紧范围，不再要求模型重复打开两个许可。
             var plan = MachineConstructionPlan.compile(anchor, layout, replace, replace && bool(p, "replace_block_entities", true));
+            // modify_machine 的补丁身份独立于 replace_existing；只加新箱子也不能把原来整台机器的档案覆盖掉。
+            if (modification) plan.markModification();
             // apply_blueprint 沿用已授权的明确目标，当前状态与可达性由内部施工读取，拆旧轴不再转成重新选址。
             if (replace) plan.bindAutomaticModification(player.level());
             // 普通建造若已获准替换自己的旧部件，也把原生放置归属交给施工，免得自建轴被通用白名单挡住。

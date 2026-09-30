@@ -66,6 +66,7 @@ public final class MachineConstructionPlan {
     private Map<BlockPos, BlockState> ownedReplacements = Map.of();
     private boolean fixedModification;
     private boolean automaticModification;
+    private boolean declaredModification;
 
     private MachineConstructionPlan(BlockPos anchor, List<BuildTaskRecord.Target> blocks,
             List<Part> parts, List<BlockPos> components, JsonObject report, boolean replace, boolean replaceBlockEntities,
@@ -395,6 +396,9 @@ public final class MachineConstructionPlan {
         automaticModification = true; bindObservedModification(world, anchor, Integer.MAX_VALUE);
     }
 
+    /** 局部改造即使要求保留旧块，也必须合回原整机档案；档案合并不授予任何拆除权限。 */
+    public void markModification() { declaredModification = true; }
+
     /** 新建入口明确允许替换时，也复用本方原生放置记录；只绑定蓝图点名的旧部件，不扩大到通路或邻居。 */
     public void bindOwnedReplacements(LocalPlayer player) {
         bindOwnedReplacements(player.level(), (at, state) -> ConstructionOwnership.owns(player, at, state));
@@ -442,7 +446,7 @@ public final class MachineConstructionPlan {
     public String blueprintJson() { return blueprintJson; }
     public JsonObject blueprint() { return JsonParser.parseString(blueprintJson).getAsJsonObject(); }
     // 完工归档据此把局部拆换合回旧设计；普通新建仍保存完整新图，不能把两种语义混在一起。
-    public boolean modification() { return fixedModification || automaticModification; }
+    public boolean modification() { return declaredModification || fixedModification || automaticModification; }
     public List<BuildTaskRecord.Target> blocks() { return blocks; }
     public List<BuildTaskRecord.Target> fluidTargets() { return fluidTargets; }
     public static boolean isFluid(BuildTaskRecord.Target target) { return target.desiredState().getBlock() instanceof LiquidBlock; }
