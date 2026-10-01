@@ -71,6 +71,9 @@ public interface Task {
     /** 父目标已满足时，只结算已提交效果并清理现场，不再开始新的工作。 */
     default void requestSatisfiedSettlement() {}
 
+    /** 打开菜单或连续搬运的中间步骤交还界面给父流程；普通任务结束后由 Mod 统一退出遗留页面。 */
+    default boolean keepsGuiOnCompletion() { return false; }
+
     /**
      * 交回给模型的结果信封。只有走到终态才有意义——常驻任务永远不会被调到。
      *
