@@ -24,7 +24,9 @@ final class RecoveryAdvisor {
         // 先把这次失败的原始结果带上，再决定能否提供“直接重试”选项。
         JsonObject context = baseContext(goal);
         context.addProperty("failure_state", state.name().toLowerCase());
-        context.add("failure", resultJson(result));
+        JsonObject failure = resultJson(result);
+        context.add("failure", failure);
+        hoistFailurePosition(context, failure);
         boolean retryAllowed = ordinaryRetryAllowed(result);
         addRetrySafety(context, retryAllowed);
         boolean planning = materialPlanning(context.getAsJsonObject("failure"));
@@ -178,6 +180,14 @@ final class RecoveryAdvisor {
                 "semantic_goal_rule",
                 "details.goal uses the selected ability's declared fields. Machine review/build may supply a semantic design, explicit blueprint or exported Ponder blueprint_uri; modify_machine can apply blueprint changes. Use receipt-bound observed entry_index values for machine menu operations. MaiCraft owns native routes and gestures; never provide click scripts.");
         return context;
+    }
+
+    // 失败位置提升到 context 顶层：Attention 投影只保留这一种坐标事实，
+    // 模型答 recover 时直接看到出事地点，不必翻嵌套回执再拼一次位置。
+    private static void hoistFailurePosition(JsonObject context, JsonObject failure) {
+        if (failure == null || !failure.has("data") || !failure.get("data").isJsonObject()) return;
+        JsonObject data = failure.getAsJsonObject("data");
+        if (data.has("failure_position")) context.add("failure_position", data.get("failure_position").deepCopy());
     }
 
     private static JsonObject resultJson(TaskResult result) {
