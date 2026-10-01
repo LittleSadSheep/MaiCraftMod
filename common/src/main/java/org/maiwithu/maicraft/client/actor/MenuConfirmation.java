@@ -45,10 +45,10 @@ public interface MenuConfirmation {
     }
 
     static MenuConfirmation closedToInventory() {
-        // 本地已回到默认物品栏菜单且屏幕关闭，才满足这个“关闭”的观察条件。
+        // 页面先消失而返料稍后同步时继续等待；回到默认菜单且鼠标、背包合成余料均结清，才完成关闭。
         return (context, receipt) -> context.player().containerMenu == context.player().inventoryMenu
-                && context.minecraft().screen == null
-                ? Verdict.APPLIED : Verdict.PENDING;
+                && context.minecraft().screen == null && context.player().inventoryMenu.getCarried().isEmpty()
+                && !GuiPreparation.inventoryGridOccupied(context) ? Verdict.APPLIED : Verdict.PENDING;
     }
 
     static MenuConfirmation pending() {

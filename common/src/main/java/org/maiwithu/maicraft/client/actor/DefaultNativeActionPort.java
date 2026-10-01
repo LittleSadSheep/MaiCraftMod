@@ -46,6 +46,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         return poll(current, receipt);
     }
     private boolean activeProtocolUsesMenu;
+    /** 菜单按钮的模组协议也须先取得原生回执，再允许世界任务退出该界面。 */
+    boolean hasPendingMenuTransaction() { return activeProtocolUsesMenu && active != null && !active.terminal(); }
     /** 旧任务留下的挖掘还未实际停止时保留此回执，由 {@link #advance} 完成停手。 */
     private String pendingBreakCancellationReason;
     /** 记录哪次待确认的物品使用已松开，以及首次观察到松开的时间。 */

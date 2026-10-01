@@ -40,6 +40,8 @@ final class ActorControlTestHarness {
         field(Minecraft.class, "gameThread").set(minecraft, Thread.currentThread());
         field(ClientActorBoundary.class, "observedPlayer").set(actor, player);
         InventoryMenu inventory = allocate(InventoryMenu.class);
+        // 未打开背包时鼠标仍应处于原版空栈基线，界面准备不能把夹具的未初始化字段当作实际物品。
+        inventory.setCarried(ItemStack.EMPTY);
         field(LocalPlayer.class, "inventoryMenu").set(player, inventory);
         player.containerMenu = inventory;
         player.input = new Input();

@@ -21,6 +21,7 @@ public final class DefaultMenuPort implements MenuPort {
     private MenuReceipt active;
     private final MenuVisibility visibility = new MenuVisibility();
     private AbstractContainerMenu closingMenu;
+    private GuiPreparation worldPreparation = new GuiPreparation();
     /** 已提交的槽位交换与关闭界面必须先结束，聊天和休息才可接手角色。 */
     @Override public boolean hasPendingTransaction() {
         return (active != null && !active.terminal()) || closingMenu != null;
@@ -29,12 +30,23 @@ public final class DefaultMenuPort implements MenuPort {
     /** 离开工位去睡觉时沿用同一事务结清条件，避免未返还的物品被后继动作打断。 */
     boolean settledForRoutinePause() { return !hasPendingTransaction(); }
 
+    @Override public boolean ensureWorldVisible(LocalPlayerContext context) {
+        // 移动、施工与换工具都续做同一动作；真实关闭失败后留给新任务一份独立退出请求。
+        requireSubmission(context);
+        try { return worldPreparation.ready(context, true); }
+        catch (RuntimeException failure) { worldPreparation = new GuiPreparation(); throw failure; }
+    }
+
     @Override
     public boolean ensureVisible(LocalPlayerContext context) {
         // 先停移动。需要背包界面时打开它，并等它真的绘制过；不会直接在隐藏的物品栏对象上点击。
         DefaultLocalPlayerContext current = requireSubmission(context);
         current.body().releaseAll();
         if (closingMenu != null || active != null && !active.terminal()) return false;
+        // 背包操作不应被暂停或模组页面永久挡住；工作站菜单仍保持原身份，不在这里换成别的容器。
+        if (current.player().containerMenu == current.player().inventoryMenu
+                && !MenuVisibility.inventoryVisible(current.minecraft(), current.player())
+                && !ensureWorldVisible(current)) return false;
         // 自动移动允许保留聊天框，但整理物品前必须先切换到真实背包界面。
         // 保留玩家打开的其他对话框；新打开的背包也须实际渲染一帧后才能点击。
         if (DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen)
