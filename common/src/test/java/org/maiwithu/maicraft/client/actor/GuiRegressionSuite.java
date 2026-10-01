@@ -171,6 +171,8 @@ public final class GuiRegressionSuite {
         // 批次核对双手准备、耗材更换和失败后的真实部分产物，禁止由重试补造成功数量。
         UseItemBatchTest.main(args);
         CraftingResultSynchronizationTest.main(args);
+        // 材料命中通用标签不代表原生配方簿已解锁，命名材料也不能被误报为真正缺料。
+        CraftingRecipeBookBoundaryTest.main(args);
         // 聊天在真实发送前必须取得持久许可，重启后的旧编号不能变成第二条消息。
         ChatSubmissionHistoryTest.main(args);
         ChatTypingTest.main(args);
