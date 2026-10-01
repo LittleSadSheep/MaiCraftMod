@@ -21,8 +21,12 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
+import org.maiwithu.maicraft.core.task.base.PickupNavigationRetry;
+import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
+import org.maiwithu.maicraft.core.task.collect.CollectItemsApproach;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.task.TaskState;
 import java.util.HashMap;
 import java.util.function.Supplier;
@@ -49,7 +53,7 @@ public final class CollectItemsIdentityTest {
         var previous = new HashMap<>(tags);
         tags.put(FluidTags.WATER,List.of(fluids.wrapAsHolder(Fluids.WATER),fluids.wrapAsHolder(Fluids.FLOWING_WATER)));
         fluids.bindTags(tags);
-        try { scopedScanAndMerge(); continuedIdentity(); delayedContactReceipt(); shallowNudgeProtection(); }
+        try { scopedScanAndMerge(); continuedIdentity(); delayedContactReceipt(); shallowNudgeProtection(); shorePickup(); }
         finally { fluids.bindTags(previous); }
         System.out.println("CollectItemsIdentityTest: UUID scan/follow/merge, pickup sync and shallow approach guards passed");
     }
@@ -102,7 +106,11 @@ public final class CollectItemsIdentityTest {
             ActorControlTestHarness.field(Entity.class, "wasTouchingWater").setBoolean(world.player, true);
             check(world.player.onGround() && world.player.isInWater() && !world.player.isSwimming(), "实机浅水站姿条件保留");
             var owned = item(world, 81, new Vec3(11.7, 1.2, 5.5), 2);
+            // 挖掉方块后通常先看到带冷却的产物；保持同一任务等待，冷却结束才进入背包同步核验。
+            owned.setDefaultPickUpDelay();
             var task = scoped(world, owned); task.tick(world.player); clearUnstartedNav(task);
+            check(task.tick(world.player) == TaskState.RUNNING, "新掉落冷却期间继续等待，不要求额外模型调用");
+            owned.setNoPickUpDelay();
             check(task.tick(world.player) == TaskState.RUNNING, "同格实际接触后的第一帧必须等待原生拾取，不能耗尽站位失败");
             world.nextTick();
             ItemEntityReceipts.taking(world.player, world.level, new ClientboundTakeItemEntityPacket(owned.getId(), world.player.getId(), 2));
@@ -132,6 +140,45 @@ public final class CollectItemsIdentityTest {
             check(!NavigationSafetyContext.withForbiddenBodyCells(List.of(water), safe), "短靠近同样继承父任务身体禁入格");
             world.set(water.below(), Blocks.WATER.defaultBlockState());
             check(!safe.get(), "看不到浅水实底时不能用直接前进绕过导航安全");
+        }
+    }
+
+    private static void shorePickup() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            normalPlayerInfo(world);
+            // 水槽中的物品格没有实底，但角色站在西岸就能触及；拾取任务不能先按物品格拒绝整条路线。
+            var water = new BlockPos(5, 1, 5); var shore = water.west();
+            world.set(water, Blocks.WATER.defaultBlockState()); world.set(water.below(), Blocks.WATER.defaultBlockState());
+            world.set(water.east(), Blocks.STONE.defaultBlockState());
+            var drop = item(world, 91, new Vec3(5.8, 1.2, 5.5), 2);
+            var task = scoped(world, drop);
+            check(task.tick(world.player) == TaskState.RUNNING, "水槽掉落仍启动同一拾取任务");
+            var goal = (GoalCompiler.Compiled) call(task, "targetGoal");
+            check(goal.goal().isAt(shore) && !goal.goal().isAt(water.east()), "允许可接触的岸边，排除身体被石头挡住的站位");
+            var guarded = NavigationSafetyContext.withForbiddenBodyCells(List.of(shore),
+                    () -> CollectItemsApproach.goal(world.player, List.of(drop)));
+            check(!guarded.goal().isAt(shore), "周边接触站位继续遵守父任务的禁入格");
+            clearUnstartedNav(task);
+            world.position(new Vec3(4.1, 1, 5.5));
+            check(!NativePickupReceipt.insideVanillaTouchEnvelope(world.player, drop), "岸边格边缘尚未实际接触");
+            var point = CollectItemsApproach.nudgePoint(world.player, drop);
+            check(point.equals(new Vec3(4.5, 1, 5.5)) && CollectItemsApproach.safeNudge(world.player, point),
+                    "最后靠近留在岸边格心，不走进水槽");
+            // 已经进入无路重试窗口时，新的接触或入包事实仍应立即处理，不能空等到下一次寻路。
+            var retry = (PickupNavigationRetry) ActorControlTestHarness.field(CollectItemsCompanionTask.class, "navigationRetry").get(task);
+            retry.afterFailure(drop.getUUID(), world.level.getGameTime(), FailureType.NO_PATH);
+            check(task.tick(world.player) == TaskState.RUNNING, "尚未接触时在原任务等待掉落稳定");
+            world.position(point);
+            check(task.tick(world.player) == TaskState.RUNNING, "真正接触之后继续等待原生拾取");
+            world.level.entities.remove(drop.getId());
+            check(task.tick(world.player) == TaskState.RUNNING, "实体消失尚不能冒充已经入包");
+            world.inventory.setItem(0, new ItemStack(Items.BRICK, 2));
+            check(task.tick(world.player) == TaskState.RUNNING && task.tick(world.player) == TaskState.SUCCESS,
+                    "同一任务靠岸拾取并结算同步库存，无需模型另发移动和补拾取");
+            // 重放实机低于地面约0.82格的掉落高度；上层岸边够不到时不能只按平面距离算可拾取。
+            var low = item(world, 92, new Vec3(5.8, .18182857055979, 5.5), 1);
+            check(!CollectItemsApproach.goal(world.player, List.of(low)).goal().isAt(shore), "拾取站位保留原版高度接触条件");
+            check(world.blockUses() == 0 && world.itemUses() == 0, "靠岸拾取不附带右键或世界修改");
         }
     }
 

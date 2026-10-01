@@ -9,6 +9,8 @@ public final class PickupRegressionSuite {
         CombatOutcomeTest.main(args);
         ShearingDropReceiptTest.main(args);
         CollectItemsIdentityTest.main(args);
+        // 掉落物还在下落、随水漂移时留在当前任务重寻；有限窗口后仍无路才交付失败。
+        PickupNavigationRetryTest.main(args);
         System.out.println("PickupRegressionSuite: passed");
     }
 }

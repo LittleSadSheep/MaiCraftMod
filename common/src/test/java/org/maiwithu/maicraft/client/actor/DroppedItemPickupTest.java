@@ -28,6 +28,9 @@ import org.maiwithu.maicraft.core.task.collect.CollectItemsCompanionTask;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 import org.maiwithu.maicraft.core.task.mine.MineCompanionTask;
+import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.border.WorldBorder;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 重放附近取物、破坏点收取与背包同步；归属不拦动作，范围保护和实际入包证据仍有效。 */
@@ -39,12 +42,13 @@ public final class DroppedItemPickupTest {
         miningCollectsExistingAndMergedStacks(2, 2);
         miningCollectsExistingAndMergedStacks(2, 5);
         foreignPickupWaitsForInventory();
+        miningApproachesFromPitRim();
         System.out.println("DroppedItemPickupTest: ownership-free pickup, protected scope and inventory receipts passed");
     }
 
     private static void nearbyAcceptsEveryOwner() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
-            // 同一范围混有来源未知、自身和其他实体的物品；只排除明确禁入格、冷却、类型和半径不符的目标。
+            // 同一范围混有各种归属和仍在冷却的物品；冷却交给拾取器等待，只排除明确禁入格、类型和半径不符的目标。
             var unknown = item(world, 501, 2.5, 1, null);
             var self = item(world, 502, 3.5, 1, world.player);
             var foreign = item(world, 503, 4.5, 1, unknown);
@@ -62,8 +66,8 @@ public final class DroppedItemPickupTest {
             NavigationSafetyContext.withForbiddenBodyCells(List.of(protectedDrop.blockPosition()), () -> {
                 try {
                     Object result = survey.invoke(task, record.itemIds);
-                    check(call(result, "safeUuids").equals(Set.of(unknown.getUUID(), self.getUUID(), foreign.getUUID())),
-                            "附近拾取接纳所有归属，仅按真实范围与明确保护筛选");
+                    check(call(result, "safeUuids").equals(Set.of(unknown.getUUID(), self.getUUID(), foreign.getUUID(), delayed.getUUID())),
+                            "附近拾取接纳所有归属和待冷却掉落，仅按真实范围与明确保护筛选");
                     check(call(result, "protectedCount").equals(1), "归属不再冒充保护区域问题");
                     return null;
                 } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
@@ -112,6 +116,29 @@ public final class DroppedItemPickupTest {
             world.inventory.setItem(0, new ItemStack(Items.BRICK, 2));
             check(task.tick(world.player) == TaskState.RUNNING && task.tick(world.player) == TaskState.SUCCESS
                     && record.getCollected() == 2, "同步背包确认两件物品后才成功");
+        }
+    }
+
+    private static void miningApproachesFromPitRim() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            // 指定格挖掉后形成两格深坑；掉落还在坑口高度时，沿坑边接触即可，无须站进没有支撑的原格。
+            ActorControlTestHarness.field(LivingEntity.class, "activeEffects").set(world.player, new HashMap<>());
+            ActorControlTestHarness.field(Level.class, "worldBorder").set(world.level, new WorldBorder());
+            var source = new BlockPos(5, 1, 3); world.set(source, Blocks.DIRT.defaultBlockState());
+            var record = new MineBlockTaskRecord("mine-pit-rim", 1000, Set.of(Blocks.DIRT), 1,
+                    "dirt", Set.of(Items.BRICK)).onlyAt(source, Blocks.DIRT.defaultBlockState());
+            var task = new MineCompanionTask(world.player, record); task.start(world.player);
+            world.set(source, Blocks.AIR.defaultBlockState()); world.set(source.below(), Blocks.AIR.defaultBlockState());
+            Method accepted = MineCompanionTask.class.getDeclaredMethod("acceptDigResult", BlockPos.class, BlockDigger.DigResult.class);
+            accepted.setAccessible(true); accepted.invoke(task, source, BlockDigger.DigResult.BROKE_TARGET);
+            var drop = item(world, 531, 5.8, 1, null);
+            call(task, "droppedItems");
+            var goal = (GoalCompiler.Compiled) call(task, "dropFieldCompiled");
+            check(goal.goal().isAt(source.west()), "采掘直接复用坑边拾取站位，保留当前任务的产物身份");
+            world.level.entities.remove(drop.getId()); world.inventory.setItem(0, new ItemStack(Items.BRICK));
+            for (int tick = 0; tick < 13; tick++) world.nextTick();
+            check(task.tick(world.player) == TaskState.SUCCESS && record.getMined() == 1,
+                    "原任务收到同步产物后完成，不要求外部再提交补拾取");
         }
     }
 

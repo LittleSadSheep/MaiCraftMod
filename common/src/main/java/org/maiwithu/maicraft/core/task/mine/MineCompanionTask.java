@@ -19,7 +19,9 @@ import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
+import org.maiwithu.maicraft.core.task.base.PickupNavigationRetry;
 import org.maiwithu.maicraft.core.task.base.Precondition;
+import org.maiwithu.maicraft.core.task.collect.CollectItemsApproach;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -158,6 +160,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private int ambiguousMergedDropCount;
     /** 角色靠近但背包尚未增加时的等待计数；每次确认物品入包后清零。 */
     private int dropCloseTicks;
+    private final PickupNavigationRetry pickupNavigationRetry = new PickupNavigationRetry();
     private int lastVerifiedGathered;
     /** 无掉落画像(创造)下的进度计数:破坏的目标方块数——背包增量在
      *  这种画像下恒为 0,数拾取物会让任务铲平半径 32 chunk 后报败。 */
@@ -523,8 +526,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 targets, List.of());
     }
 
-    /** 仅为地面掉落物生成可直接走过拾取的精确目标格。 */
+    /** 已生成的产物按原版接触范围选择站位，避免要求角色站进刚挖空的格子。 */
     private GoalCompiler.Compiled dropFieldCompiled() {
+        if (!liveOwnedDrops.isEmpty()) return CollectItemsApproach.goal(player, liveOwnedDrops);
         if (drops.isEmpty()) return GoalCompiler.standOn(feet());
         return GoalCompiler.mineField(List.of(), new ArrayList<>(drops));
     }
@@ -649,6 +653,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 已经靠近到应能拾取时，检查背包能否容纳，并给拾取延迟与位置微调一段有限等待。
         if (close != null && NativePickupReceipt.insideVanillaTouchEnvelope(player, close)) {
             if (nav != null) nav.pause();
+            else InputDriver.halt(player);
             if (!close.hasPickUpDelay() && !NativePickupReceipt.canAccept(player, close.getItem())) {
                 fail("reached the mined drop, but no main-inventory slot can accept its "
                                 + "remaining stack",
@@ -667,9 +672,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             dropCloseTicks = 0;
         }
 
+        // 挖出的物品可能正在下落或随水移动；短暂无路先在本任务等待，随后使用最新坐标重新靠近。
+        if (close != null && pickupNavigationRetry.waiting(close.getUUID(), player.level().getGameTime())) {
+            InputDriver.halt(player);
+            return TaskState.RUNNING;
+        }
         if (close != null && player.blockPosition().equals(close.blockPosition())) {
             stopNav();
-            InputDriver.stepToward(player, close.position(), false);
+            nudgeDrop(close);
             return TaskState.RUNNING;
         }
 
@@ -687,12 +697,17 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     nav.pause();
                 } else {
                     stopNav();
-                    InputDriver.stepToward(player, arrivedDrop.position(), false);
+                    nudgeDrop(arrivedDrop);
                 }
                 yield TaskState.RUNNING;
             }
             case FAILED -> {
                 ItemEntity unreachable = nearestLiveDrop();
+                if (unreachable != null && pickupNavigationRetry.afterFailure(
+                        unreachable.getUUID(), player.level().getGameTime(), nav.failType())) {
+                    stopNav();
+                    yield TaskState.RUNNING;
+                }
                 if (unreachable != null && unreachableDropIds.add(unreachable.getId())) {
                     unreachableDropCount++;
                     // 导航马上会被释放，先留下掉落所在格、身体位置和失败原因，便于区分水槽收取与产物缺失。
@@ -713,6 +728,17 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 yield TaskState.RUNNING;
             }
         };
+    }
+
+    private void nudgeDrop(ItemEntity drop) {
+        // 到岸边后向可接触的格心补齐最后距离，仍保持真实支撑；不能为捡产物直接走入矿坑。
+        var point = CollectItemsApproach.nudgePoint(player, drop);
+        if (CollectItemsApproach.safeNudge(player, point)) InputDriver.stepToward(player, point, false);
+        else {
+            InputDriver.halt(player);
+            if (!pickupNavigationRetry.afterFailure(drop.getUUID(), player.level().getGameTime(), FailureType.NO_PATH))
+                fail("the final mined-drop approach has no supported path", FailureType.NO_PATH);
+        }
     }
 
     private ItemEntity nearestLiveDrop() {

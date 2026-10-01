@@ -8,6 +8,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
+import org.maiwithu.maicraft.core.task.base.PickupNavigationRetry;
 import org.maiwithu.maicraft.core.task.base.TargetSet;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.world.entity.Entity;
@@ -41,6 +42,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private int disappearedWithoutReceipt;
     private int pickupRejected;
     private String lastUncollectedDetail;
+    private final PickupNavigationRetry navigationRetry = new PickupNavigationRetry();
     /** 记录附近每个实体 ID 首次观察到的数量，用于核实原版实体 ID 间的堆叠合并。 */
     private final Map<Integer, Integer> firstObservedEntityCounts = new HashMap<>();
 
@@ -106,10 +108,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             // 半径范围内没有剩余物品；即使数量为零，也可用回执确认“此处没有物品”。
             return TaskState.SUCCESS;
         }
-        if (!r.targetUuids.isEmpty() && !NativePickupReceipt.insideVanillaTouchEnvelope(player, best)
-                && !CollectItemsApproach.safeTarget(player, best.blockPosition())) {
-            fail("the scoped drop has no observed dry or shallow-water footing", FailureType.NO_PATH); return TaskState.FAILED;
-        }
+        // 掉落所在格不能站立不代表无法拾取；由接触站位与正常导航尝试从周围靠近。
         pickup = NativePickupReceipt.begin(player, best);
         pickupUuid = best.getUUID();
         contactTicks = 0;
@@ -141,6 +140,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         if (receiptState == NativePickupReceipt.State.AWAITING_INVENTORY_SYNC) {
             if (retargetProvenMerge()) return TaskState.RUNNING;
             if (nav != null) nav.pause();
+            else InputDriver.halt(player);
             return TaskState.RUNNING;
         }
         if (receiptState == NativePickupReceipt.State.DISAPPEARED_WITHOUT_RECEIPT) {
@@ -155,6 +155,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         if (NativePickupReceipt.insideVanillaTouchEnvelope(player, live)) {
             // 已碰到物品就停下移动，等拾取冷却结束；背包没有空间时明确失败，不继续顶着物品走。
             if (nav != null) nav.pause();
+            else InputDriver.halt(player);
             if (live.hasPickUpDelay()) {
                 contactTicks = 0;
                 return TaskState.RUNNING;
@@ -175,11 +176,13 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             }
             return TaskState.RUNNING;
         }
-        if (!r.targetUuids.isEmpty() && !CollectItemsApproach.safeTarget(player, live.blockPosition())) {
-            fail("the scoped drop left observed dry or shallow-water footing", FailureType.NO_PATH); return TaskState.FAILED;
-        }
         contactTicks = 0;
 
+        // 原路径无路后给下落、漂移留出短窗口；每刻仍先核对接触和入包，不要求模型另开补拾取。
+        if (navigationRetry.waiting(live.getUUID(), player.level().getGameTime())) {
+            InputDriver.halt(player);
+            return TaskState.RUNNING;
+        }
         // 站在同一格也可能还没碰到小小的掉落物，最后一点距离用普通前进补齐，不能只凭格子相同算成功。
         if (player.blockPosition().equals(live.blockPosition())) {
             stopNav();
@@ -197,6 +200,10 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
                 nudge(live);
             }
             case FAILED -> {
+                if (navigationRetry.afterFailure(live.getUUID(), player.level().getGameTime(), nav.failType())) {
+                    stopNav();
+                    return TaskState.RUNNING;
+                }
                 skipped.skip(live);
                 unreachable++;
                 lastUncollectedDetail = nav.failReason();
@@ -209,7 +216,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private GoalCompiler.Compiled targetGoal() {
         ItemEntity live = pickup == null ? null : pickup.liveEntity(player);
         return live == null || !r.targetUuids.isEmpty() && (!live.getUUID().equals(pickupUuid) || !r.permits(live.getUUID()))
-                ? null : GoalCompiler.standOn(live.blockPosition());
+                ? null : CollectItemsApproach.goal(player, List.of(live));
     }
 
     private boolean pickupReceived() {
@@ -224,11 +231,16 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private void nudge(ItemEntity target) {
-        // 到了同一格仍未接触时保留原生短靠近，但受限产物不能绕过保护格或跨入未知深水。
-        if (!r.targetUuids.isEmpty() && !CollectItemsApproach.safeNudge(player, target.position())) {
-            InputDriver.halt(player); fail("the final pickup approach is not safe on the observed footing", FailureType.NO_PATH); return;
+        // 到达接触站位后只在有支撑的范围内微调；采收产物和普通拾取都不能直接冲进坑或保护格。
+        var point = CollectItemsApproach.nudgePoint(player, target);
+        if (!CollectItemsApproach.safeNudge(player, point)) {
+            InputDriver.halt(player);
+            // 目标刚滚离当前支撑时也沿用短暂重寻窗口，不能绕开路径重试直接要求模型补发任务。
+            if (!navigationRetry.afterFailure(target.getUUID(), player.level().getGameTime(), FailureType.NO_PATH))
+                fail("the final pickup approach is not safe on the observed footing", FailureType.NO_PATH);
+            return;
         }
-        InputDriver.stepToward(player, target.position(), false);
+        InputDriver.stepToward(player, point, false);
     }
 
     /** 两堆物品合并时，旧实体消失不等于被捡走；若已观察到的另一堆数量增加足够，就改为追踪合并后的那堆。 */

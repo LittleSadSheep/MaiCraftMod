@@ -329,7 +329,7 @@ public final class SemanticAcquireCompanionTask
         }
         if (survey.safeCount() == 0) {
             addIssue("nearby", "no_safe_drop_evidence",
-                    "no loaded, pickup-ready matching drops outside protected cells were observed",
+                    "no loaded matching drops outside protected cells were observed",
                     Map.of("radius", r.searchRadius));
             advanceSource(need);
             return TaskState.RUNNING;
@@ -1927,7 +1927,8 @@ public final class SemanticAcquireCompanionTask
     }
 
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
-        // 附近拾取只按物品、半径、冷却和明确保护格筛选；不猜归属，实际能否收入背包由原生拾取决定。
+        // 刚挖出的物品仍有拾取冷却也先交给拾取器；它会靠近并等待原生冷却结束，不能误报附近没有掉落。
+        // 这里只按物品、半径和明确保护格筛选；不猜归属，实际入包仍等待服务器同步。
         Set<ResourceLocation> accepted = Set.copyOf(ids);
         int safe = 0;
         Set<UUID> safeUuids = new LinkedHashSet<>();
@@ -1936,7 +1937,6 @@ public final class SemanticAcquireCompanionTask
         AABB box = player.getBoundingBox().inflate(r.searchRadius);
         for (ItemEntity item : player.clientLevel.getEntitiesOfClass(
                 ItemEntity.class, box, entity -> !entity.isRemoved()
-                        && !entity.hasPickUpDelay()
                         && accepted.contains(BuiltInRegistries.ITEM.getKey(
                                 entity.getItem().getItem())))) {
             List<String> reasons = landmarkReasons(item.blockPosition());
