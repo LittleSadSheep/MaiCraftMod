@@ -19,7 +19,11 @@ public final class MachineBlueprintComparison {
     private long started = -1, observed = -1;
     private JsonObject operatingState;
     public MachineBlueprintComparison(MachineConstructionPlan plan, String dimension) {
-        diff = new MachineBlueprintDiff(plan); this.dimension = dimension;
+        this(new MachineBlueprintDiff(plan), dimension);
+    }
+    /** 已归档整机只读取冻结目标，不要求它在修改后仍能作为一次新的完整施工计划编译。 */
+    public MachineBlueprintComparison(MachineBlueprintDiff targets, String dimension) {
+        diff = targets; this.dimension = dimension;
         MachineBlueprintDiff.COUNTERS.forEach(key -> counts.put(key,0));
     }
     public boolean advance(Level world, int budget) {

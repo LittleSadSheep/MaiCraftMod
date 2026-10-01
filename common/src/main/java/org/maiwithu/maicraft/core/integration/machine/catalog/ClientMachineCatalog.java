@@ -28,6 +28,8 @@ import java.util.concurrent.TimeUnit;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
+import org.maiwithu.maicraft.core.integration.machine.MachineComparisonTargets;
+import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDiff;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
@@ -134,6 +136,8 @@ public final class ClientMachineCatalog {
             var previous = value.plan().modification() ? catalog.blueprintAt(value.dimension(),at,label).orElse(null) : null;
             // 本次施工只确认提交的拆换；档案则保留旧机器未改的部分，不把一个曲柄补丁当成完整机器。
             var document = previous == null ? value.plan().blueprint() : MachineBlueprintRevision.merge(previous.blueprint(),value.plan().blueprint());
+            // 逐格最终状态独立于可执行安装关系，改成长带后也能比较旧支路被原生联动拆掉的部分。
+            MachineComparisonTargets.record(document, previous, value.plan());
             var positions = new ArrayList<>(value.plan().positions());
             if (previous != null && previous.captureMin() != null) {
                 var low = previous.captureMin(); var high = previous.captureMax();
@@ -182,6 +186,10 @@ public final class ClientMachineCatalog {
         var at = blueprint.anchor(); var plan = MachineConstructionPlan.compile(new BlockPos(at.x(),at.y(),at.z()),
                 MachineBlueprintDocument.compile(blueprint.blueprint(),MachineConstructionPlan.registry()),false);
         compiledBlueprints.put(blueprint.id(),new CachedBlueprint(blueprint.fingerprint(),plan)); return plan;
+    }
+    public static MachineBlueprintDiff comparison(MachineBlueprint blueprint) {
+        var at = blueprint.anchor();
+        return new MachineBlueprintDiff(new BlockPos(at.x(), at.y(), at.z()), MachineComparisonTargets.read(blueprint));
     }
     /** 接线目标是机器内一个接口时，以唯一已登记的范围找回整机；范围重叠时不猜测归属。 */
     public static Optional<MachineBlueprint> containing(LocalPlayer player, BlockPos at) {

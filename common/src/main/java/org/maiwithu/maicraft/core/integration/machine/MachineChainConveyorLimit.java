@@ -72,10 +72,11 @@ public final class MachineChainConveyorLimit {
         Set<BlockPos> recorded = new LinkedHashSet<>(), wheels = new LinkedHashSet<>();
         if (scope.blueprint() != null) {
             // 旧蓝图未被补丁覆盖的轮仍属于整机目标；自动接线在蓝图范围外放下的轮由归属记录补齐。
-            ClientMachineCatalog.blueprintPlan(scope.blueprint()).preview().forEach((at, state) -> {
-                recorded.add(at);
-                if (BLOCK.equals(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString())) wheels.add(at);
-            });
+            var saved = scope.blueprint(); var anchor = new BlockPos(saved.anchor().x(), saved.anchor().y(), saved.anchor().z());
+            for (var raw : MachineComparisonTargets.read(saved)) {
+                var row = raw.getAsJsonObject(); var at = anchor.offset(MachineAssemblyDocument.position(row.get("offset"))); recorded.add(at);
+                if (row.has("block_id") && BLOCK.equals(row.get("block_id").getAsString())) wheels.add(at);
+            }
         }
         var owned = ConstructionOwnership.placements(player);
         for (var row : owned) if (scope.key().equals(row.machine()) && BLOCK.equals(row.block())) recorded.add(row.position());

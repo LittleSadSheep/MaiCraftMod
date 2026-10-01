@@ -36,7 +36,7 @@ public final class MachineInspectionBlueprintView {
         MachineBlueprintDiff completeMachine = null;
         if (saved != null) {
             try {
-                completeMachine = new MachineBlueprintDiff(ClientMachineCatalog.blueprintPlan(saved));
+                completeMachine = ClientMachineCatalog.comparison(saved);
                 result.add("operating_state", completeMachine.operatingState(player.level(), saved.dimension()));
                 result.add("native_component_offsets", completeMachine.targetOffsets());
                 // full 也同时给整机差异；运行状态与结构变化是一次决策所需的并列事实。
@@ -44,7 +44,7 @@ public final class MachineInspectionBlueprintView {
                         completeMachine.page(player.level(), saved.dimension(), 0, Integer.MAX_VALUE));
             } catch (RuntimeException | LinkageError unavailable) {
                 // 旧档案暂时无法展开时仍交付可读的现场，并明确整机范围未知，不能中断整个只读任务。
-                result.addProperty("recorded_targets_unavailable", unavailable.getClass().getSimpleName());
+                result.addProperty("recorded_targets_unavailable", unavailable.getClass().getSimpleName() + ": " + unavailable.getMessage());
             }
         }
         if (mode.equals("full")) {
@@ -69,7 +69,8 @@ public final class MachineInspectionBlueprintView {
                     diff = completeMachine.page(player.level(),saved.dimension(),0,Integer.MAX_VALUE);
                     diff.addProperty("reference_blueprint_fingerprint",saved.fingerprint());
                 } catch (RuntimeException | LinkageError unavailable) {
-                    diff.addProperty("available",false); diff.addProperty("reason","recorded_design_unavailable:"+unavailable.getClass().getSimpleName());
+                    diff.addProperty("available",false); diff.addProperty("reason",result.has("recorded_targets_unavailable")
+                            ? result.get("recorded_targets_unavailable").getAsString() : unavailable.getMessage());
                 }
             }
             result.add("blueprint_diff",diff);

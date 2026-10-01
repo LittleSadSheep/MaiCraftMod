@@ -499,7 +499,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     }
     private TaskState beginComparison() {
         // 修改完成后比较合并的整机声明，隔板拆除导致旁边岩浆凝固也要直接反馈，而不只回报本次一格补丁。
-        MachineConstructionPlan compared;
+        MachineBlueprintDiff compared;
         try {
             // 档案尚未加载或留档失败时，不能拿局部补丁冒充整机；只公开观察缺失，不撤销已经完成的施工。
             var archived = recordedMachine == null || !recordedMachine.has("machine_id") ? null
@@ -509,7 +509,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
                 comparisonIssue.addProperty("reason","full_machine_blueprint_unavailable");
                 return comparisonFinished();
             }
-            compared = ClientMachineCatalog.blueprintPlan(archived);
+            compared = ClientMachineCatalog.comparison(archived);
             comparison = new MachineBlueprintComparison(compared,r.dimension);
         }
         catch (RuntimeException | LinkageError unavailable) {
@@ -518,7 +518,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
             return comparisonFinished();
         }
         phase = Phase.BLUEPRINT_DIFF;
-        r.extendDeadlineTo(world.getGameTime() + 200L + (compared.positions().size() + compared.parts().size() + 127L) / 128);
+        r.extendDeadlineTo(world.getGameTime() + 200L + (compared.size() + 127L) / 128);
         return TaskState.RUNNING;
     }
     private TaskState compareCompletedMachine() {
