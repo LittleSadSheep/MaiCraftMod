@@ -33,6 +33,8 @@ final class KineticPowerEvidence {
         var nativeData = observed.getAsJsonObject("native");
         if (!nativeData.has("create") || !nativeData.get("create").isJsonObject()) return;
         var kinetic = nativeData.getAsJsonObject("create");
+        // 方向与供能是两项事实；优先保留已读到的方向，即使随后发现网络字段尚未同步完整。
+        if (kinetic.has("belt_motion")) evidence.add("belt_motion", kinetic.get("belt_motion").deepCopy());
         // 部分原生接口可能不可读；缺失、类型错误和非有限转速都保持不完整，不补成零或否。
         if (!kinetic.has("getSpeed") || !kinetic.get("getSpeed").isJsonPrimitive()
                 || !kinetic.getAsJsonPrimitive("getSpeed").isNumber()) return;

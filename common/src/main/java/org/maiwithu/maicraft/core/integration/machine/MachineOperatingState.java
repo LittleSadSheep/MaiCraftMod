@@ -15,6 +15,7 @@ import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltAccess;
 import org.maiwithu.maicraft.core.integration.create.CreateDeployerHandEvidence;
 import org.maiwithu.maicraft.core.integration.create.CreateKineticCapabilities;
+import org.maiwithu.maicraft.server.machine.create.CreateBeltObservation;
 
 /** 整机运行事实独立于结构匹配；直接给出各条原生皮带及其余传动部件的状态，不代替模型判断设计。 */
 public final class MachineOperatingState {
@@ -41,6 +42,8 @@ public final class MachineOperatingState {
             String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
             JsonObject row = new JsonObject(); row.add("offset", offset(at, anchor)); row.add("state", state);
             if (id.equals("create:belt")) {
+                // 每条带按真实控制器分组，同时交付物品运动方向，避免把五条有转速的带误读为五条方向正确的带。
+                CreateBeltObservation.append(world.getBlockEntity(at), state);
                 BlockPos controller = CreateBeltAccess.controller(world, at);
                 BlockPos key = controller == null ? at : controller;
                 beltIdentity.put(key, controller != null);
