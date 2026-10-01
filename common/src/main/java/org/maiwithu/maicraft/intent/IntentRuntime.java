@@ -1,19 +1,21 @@
 package org.maiwithu.maicraft.intent;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -50,61 +52,9 @@ public final class IntentRuntime {
     private static final int MAX_TASKS = IntentStateCodec.MAX_TASKS;
     private static final int MAX_REQUEST_KEYS = IntentStateCodec.MAX_REQUEST_KEYS;
     private static final int MAX_LANDMARKS = IntentStateCodec.MAX_LANDMARKS;
-    private static final int MAX_ATTENTION_ARRAY = 12;
-    private static final int MAX_ATTENTION_STRING = 1_024;
     private static final long SAVE_INTERVAL_NANOS = 5_000_000_000L;
-    private static final Set<String> ATTENTION_INTERNAL_KEYS = Set.of(
-            "entity_id", "entity_ids", "runtime_id", "runtime_ids",
-            "slot", "slots", "click", "clicks", "route", "waypoints",
-            "path_nodes", "block_ops", "placements", "cells",
-            "x", "y", "z", "position", "center", "location", "destination", "bounds");
-    private static final Set<String> ATTENTION_RESULT_DATA_KEYS = Set.of(
-            "chat_state", "typed_characters", "total_characters", "submission_attempted",
-            "delivery_status", "effects_started", "mechanical_retry_allowed",
-            // 保留原生点击终态，模型才能区分未生效与效果尚未确认，避免对交换型机器盲目重复点击。
-            "native_action_status", "native_action_kind",
-            "task_id", "failure_code", "failure_type", "requires_decision",
-            "build_diagnostics", "support_access", "construction_region", "construction_access", "construction_navigation",
-            // 机器包装后的拆除数量、失败格和原生朝向冲突也属于恢复事实，完成通知不能再次把这一层丢掉。
-            "construction_progress",
-            // 失败通知保留接线参数的实际含义，调用者才能发现链式传动箱与锁链传动轮的选型差异。
-            "requested_transmission", "transmission_description", "available_transmission_choices",
-            // 游戏 HUD 的锁链不足提示没有普通方块变化，持链交互的选择状态和数量缺口必须随通知到达模型。
-            "chain_conveyor_use",
-            // 未确认换物时仍给出机械手本来的持料与当前持料，保持现场状态和动作确认彼此独立。
-            "deployer_hand_observation",
-            // 实际接入方块随完成通知保留，调用者可将动力回执与请求的压机、链轮等设备直接对照。
-            "selected_destination_block", "selected_source_block",
-            // 失败时仍保留两端的独立转速与观察阶段，整体接线未验收不等于两边都没有动力。
-            "source_power_evidence", "destination_power_evidence",
-            "source_native_observation_stage", "target_native_observation_stage",
-            // 清障失败的具体坐标和最近选址建议是观察证据，必须送达外部 LLM 才能改变场地。
-            "clearance_report",
-            "completed", "placed", "cleared", "stopped_phase", "temporary_supports_remaining",
-            "requires_narration", "outcome_uncertain", "recoverable", "goal",
-            "item_ids", "required_final_count", "observed_final_count", "missing",
-            // 批量加工的通知直接带出部分产量，外部规划者无需先把整批重发才能知道还缺多少。
-            "item_id", "ingredient_item_id", "expected_output_item_id", "target_output_count", "completed_output_count",
-            "remaining_output_count", "completed_uses", "carried_output_now", "output_before",
-            // 材料路线耗尽时让外部规划者看见卡住的子材料和按需工艺入口，不塞入整棵配方树。
-            "blocked_need", "planning_handoff",
-            // 容量与原生收尾原因必须随失败通知保留，不让上层靠再查整份施工记录猜测恢复方向。
-            "inventory_capacity", "cause_code", "detail",
-            // 自动存余料后保留实际去向和已确认数量，外部规划者不必重新猜背包中为什么少了物品。
-            "inventory_maintenance",
-            "allowed_sources", "achieved_coverage",
-            "required_coverage", "dark_cell_count", "site_verified",
-            "waterfront_required", "max_distance", "farthest_body_distance",
-            "target", "requested", "gathered", "confirmed_target_breaks", "scope",
-            "last_probe", "suggestions", "recovery_options", "decision", "recovery", "steps",
-            "skipped_step_count", "skipped_steps", "all_steps_succeeded",
-            "completed_effects", "remaining_effects", "landing_assist", "landing_assist_observed",
-            // 完工消息默认带出机器编号和差异；检查消息保留地图布局入口，完整内容仍可分页读取。
-            "recorded_machine", "blueprint_diff", "machine");
-    private static final Set<String> ATTENTION_ISSUE_FACT_KEYS = Set.of(
-            "failure_type", "recipe_id", "missing", "item_ids", "required_final_count",
-            "observed_final_count", "target", "requested",
-            "gathered", "confirmed_target_breaks", "candidate_count");
+    /** 进度事件的最小间隔（游戏刻）；与任务单 active_execution 的观察节奏同量级。 */
+    private static final long PROGRESS_EVENT_INTERVAL_TICKS = 100;
 
     private static final Set<String> CORE_ABILITIES = Set.of(
             ChatAbilityAdapter.ABILITY,
@@ -140,12 +90,15 @@ public final class IntentRuntime {
             .collect(Collectors.toUnmodifiableSet());
 
     private static final IntentRuntime INSTANCE = new IntentRuntime();
+    private static final Gson GSON = new Gson();
     private static boolean registered;
 
     private final LinkedHashMap<UUID, Plan> plans = new LinkedHashMap<>();
     private final LinkedHashMap<UUID, IntentTaskRecord> tasks = new LinkedHashMap<>();
     private final LinkedHashMap<String, UUID> requestKeys = new LinkedHashMap<>();
     private final LinkedHashMap<String, Landmark> landmarks = new LinkedHashMap<>();
+    /** 每个任务上次发进度事件的游戏刻；节流长任务进度，不让每刻观察都变成一条事件。 */
+    private final Map<UUID, Long> progressPublishAt = new HashMap<>();
     private final AttentionFeed attention = new AttentionFeed();
     private final ChatFlow chatFlow = new ChatFlow();
     private final IntentStateStore stateStore = new IntentStateStore();
@@ -508,7 +461,7 @@ public final class IntentRuntime {
             throw new IllegalStateException("task is not an unfinished detached restoration");
         }
         // 保留已完成步骤和失败证据，只结束后续工作；终态仍走普通通知与检查点保存路径。
-        TaskResult result = TaskResult.cancelled("semantic task cancelled before resuming");
+        TaskResult result = TaskResult.cancelled("semantic task cancelled before resuming", "resume_cancelled");
         record.terminal(TaskState.CANCELLED, result, gameTime);
         terminal(record, TaskState.CANCELLED, result);
     }
@@ -791,6 +744,7 @@ public final class IntentRuntime {
 
     void terminal(IntentTaskRecord record, TaskState state, TaskResult result) {
         markDirty();
+        progressPublishAt.remove(record.externalId());
         String type = switch (state) {
             case SUCCESS -> "completed";
             case CANCELLED -> "cancelled";
@@ -801,12 +755,43 @@ public final class IntentRuntime {
         publish(type, record, message, data);
     }
 
+    /**
+     * 长任务的节流进度事件：数据与任务单 active_execution 同源，事件让等待方中途醒来，
+     * 不必等到终态才知道"砍到几个、走到哪一步"。仅节流，不改变观察内容。
+     */
+    void publishProgress(IntentTaskRecord record, Map<String, Object> observation, long gameTime) {
+        Long last = progressPublishAt.get(record.externalId());
+        if (last != null && gameTime - last < PROGRESS_EVENT_INTERVAL_TICKS) return;
+        progressPublishAt.put(record.externalId(), gameTime);
+        JsonObject data = new JsonObject();
+        observation.forEach((key, value) ->
+                data.add(key, GSON.toJsonTree(value == null ? "" : value)));
+        publish("task_progress", record, progressMessage(observation), data);
+    }
+
+    /** 进度事件的一句话摘要；只挑通用字段，各能力的专有证据仍完整留在 data 里。 */
+    private static String progressMessage(Map<String, Object> observation) {
+        StringJoiner parts = new StringJoiner(", ");
+        if (observation.get("phase") != null) parts.add(String.valueOf(observation.get("phase")));
+        if (observation.get("gathered") != null) parts.add("gathered " + observation.get("gathered"));
+        if (observation.get("known_sources") != null) parts.add("known_sources " + observation.get("known_sources"));
+        return parts.length() == 0 ? "still working" : parts.toString();
+    }
+
     public JsonObject attention(long afterCursor, int limit) {
         return attention(afterCursor, limit, null, null);
     }
 
     public JsonObject attention(long afterCursor, int limit, String streamId, UUID taskId) {
         return attention.read(afterCursor, limit, streamId, taskId);
+    }
+
+    /** 调试面板的只读事件条目：时间、类型、优先级与一句话内容。 */
+    public record AttentionItem(java.time.Instant timestamp, String type, String priority, String message) {}
+
+    /** 最近 limit 条事件按时间升序；纯读尾窗，不碰长轮询与订阅者自己的游标。 */
+    public List<AttentionItem> recentAttention(int limit) {
+        return attention.tail(limit);
     }
 
     public JsonObject attentionCheckpoint() {
@@ -865,119 +850,17 @@ public final class IntentRuntime {
     }
 
     private static JsonObject compactAttentionResult(JsonObject source) {
+        // 任务结束时完整交付材料、菜单、现场差异和取消来源，模型才能区分执行失败与玩家接管。
         JsonObject result = new JsonObject();
-        copyAttentionField(source, result, "success");
-        copyAttentionField(source, result, "message");
-        copyAttentionField(source, result, "timed_out");
-        copyAttentionField(source, result, "interrupted");
-        if (!source.has("data") || !source.get("data").isJsonObject()) return result;
-
-        JsonObject sourceData = source.getAsJsonObject("data");
-        JsonObject data = new JsonObject();
-        for (String key : ATTENTION_RESULT_DATA_KEYS) {
-            copyAttentionField(sourceData, data, key);
+        for (String key : List.of("success", "message", "timed_out", "interrupted", "cancel_source", "data")) {
+            if (source.has(key)) result.add(key, sanitizeAttentionValue(source.get(key)));
         }
-        if (sourceData.has("issues") && sourceData.get("issues").isJsonArray()) {
-            JsonArray issues = new JsonArray();
-            JsonArray all = sourceData.getAsJsonArray("issues");
-            int from = Math.max(0, all.size() - 6);
-            for (int index = from; index < all.size(); index++) {
-                JsonElement value = all.get(index);
-                if (!value.isJsonObject()) continue;
-                JsonObject sourceIssue = value.getAsJsonObject();
-                JsonObject issue = new JsonObject();
-                copyAttentionField(sourceIssue, issue, "source");
-                copyAttentionField(sourceIssue, issue, "code");
-                copyAttentionField(sourceIssue, issue, "summary");
-                if (sourceIssue.has("facts") && sourceIssue.get("facts").isJsonObject()) {
-                    JsonObject facts = new JsonObject();
-                    for (String key : ATTENTION_ISSUE_FACT_KEYS) {
-                        copyAttentionField(sourceIssue.getAsJsonObject("facts"), facts, key);
-                    }
-                    if (facts.size() > 0) issue.add("facts", facts);
-                }
-                issues.add(issue);
-            }
-            if (issues.size() > 0) data.add("issues", issues);
-        }
-        if (data.size() > 0) result.add("data", data);
         return result;
     }
 
-    private static void copyAttentionField(JsonObject source, JsonObject target, String key) {
-        if (!source.has(key)) return;
-        JsonElement sanitized = sanitizeAttentionValue(source.get(key));
-        if (sanitized != null) target.add(key, sanitized);
-    }
-
     private static JsonElement sanitizeAttentionValue(JsonElement value) {
-        if (value == null || value.isJsonNull()) return null;
-        if (value.isJsonArray()) {
-            JsonArray clean = new JsonArray();
-            JsonArray source = value.getAsJsonArray();
-            int copied = 0;
-            for (JsonElement element : source) {
-                if (copied >= MAX_ATTENTION_ARRAY) break;
-                JsonElement nested = sanitizeAttentionValue(element);
-                if (nested != null) {
-                    clean.add(nested);
-                    copied++;
-                }
-            }
-            return clean;
-        }
-        if (value.isJsonObject()) {
-            JsonObject clean = new JsonObject();
-            for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
-                // 实际阻塞点是修订蓝图所需的观察事实；只保留三个整数坐标，其他内部路线字段继续按既有规则处理。
-                if (entry.getKey().equals("failure_position")) {
-                    JsonObject position = observedFailurePosition(entry.getValue());
-                    if (position != null) clean.add(entry.getKey(), position);
-                    continue;
-                }
-                if (internalAttentionKey(entry.getKey())) continue;
-                JsonElement nested = sanitizeAttentionValue(entry.getValue());
-                if (nested != null) clean.add(entry.getKey(), nested);
-            }
-            return clean;
-        }
-        if (value.getAsJsonPrimitive().isString()) {
-            String sanitized = value.getAsString()
-                    .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
-                    .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target");
-            if (sanitized.length() > MAX_ATTENTION_STRING) {
-                sanitized = sanitized.substring(0, MAX_ATTENTION_STRING) + "...";
-            }
-            return new JsonPrimitive(sanitized);
-        }
-        return value.deepCopy();
-    }
-
-    private static JsonObject observedFailurePosition(JsonElement value) {
-        if (!value.isJsonObject()) return null;
-        JsonObject point = new JsonObject(), source = value.getAsJsonObject();
-        for (String axis : List.of("x", "y", "z")) {
-            JsonElement coordinate = source.get(axis);
-            if (coordinate == null || !coordinate.isJsonPrimitive() || !coordinate.getAsJsonPrimitive().isNumber()) return null;
-            try { point.addProperty(axis, coordinate.getAsBigDecimal().intValueExact()); }
-            catch (ArithmeticException | NumberFormatException invalid) { return null; }
-        }
-        return point;
-    }
-
-    private static boolean internalAttentionKey(String raw) {
-        String key = raw.toLowerCase(Locale.ROOT);
-        return ATTENTION_INTERNAL_KEYS.contains(key)
-                || key.endsWith("_cells") || key.endsWith("_ops")
-                || key.endsWith("_placements") || key.endsWith("_receipts")
-                || key.endsWith("_routes") || key.endsWith("_waypoints")
-                || key.endsWith("_path_nodes") || key.endsWith("_position")
-                || key.endsWith("_center") || key.endsWith("_location")
-                || key.endsWith("_destination") || key.endsWith("_bounds")
-                || key.endsWith("_x") || key.endsWith("_y") || key.endsWith("_z")
-                || key.endsWith("_entity_id")
-                || key.endsWith("_entity_ids") || key.endsWith("_runtime_id")
-                || key.endsWith("_runtime_ids");
+        // 通知与任务详情复用同一套语义证据规则；只清理内部动作脚本，不按字数、数组长度或字段白名单删事实。
+        return new Gson().toJsonTree(SemanticResultView.jsonValue(value));
     }
 
     private static String normalizeLabel(String label) {

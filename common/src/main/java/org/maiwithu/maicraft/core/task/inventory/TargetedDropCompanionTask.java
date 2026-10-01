@@ -33,17 +33,14 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
     private NativeActionReceipt receipt;
     private TargetedDropReceipt evidence;
     private String issue;
+    private boolean initialized;
 
     public TargetedDropCompanionTask(LocalPlayer player, TargetedDropTaskRecord record) { super(player, record); }
 
-    @Override protected void onStart() {
+    private void initializeAfterGui() {
+        // 旧页面先原生返料，之后才固定投料起点和材料数量，避免把仍在鼠标或合成格里的材料当作丢失。
+        initialized = true;
         kind = r.exactItem(); world = player.level(); stance = player.position();
-        if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()) {
-            reject("targeted_drop_existing_menu_or_cursor", FailureType.INTERRUPTED); return;
-        }
-        for (int slot = 1; slot <= 4; slot++) if (!player.inventoryMenu.getSlot(slot).getItem().isEmpty()) {
-            reject("targeted_drop_existing_crafting_contents", FailureType.INTERRUPTED); return;
-        }
         if (!settled()) { reject("targeted_drop_requires_stationary_support", FailureType.STANCE_DUD); return; }
         if (TargetedDropReceipt.count(player, kind) < r.count) { reject("targeted_drop_exact_material_shortage", FailureType.NO_MATERIAL); return; }
         aim = TargetedDropGeometry.aim(player, r.receiver, r.region, r.aimRegion()).orElse(null);
@@ -52,6 +49,11 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
 
     @Override protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
+        if (!initialized) {
+            if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
+            initializeAfterGui();
+            if (issue != null) return TaskState.FAILED;
+        }
         if (receipt != null) {
             receipt = context.actions().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;

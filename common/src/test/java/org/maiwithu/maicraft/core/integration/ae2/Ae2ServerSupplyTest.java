@@ -39,6 +39,8 @@ public final class Ae2ServerSupplyTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         exactStockAndDestination();
         fallbackAndCraftIdentity();
+        changedStockRetainsCompletedAllocation();
+        rejectedExtractionRefreshesInTheSameSession();
         serverFallbackRestoresAccess();
         confirmedProvenanceIsBounded();
         inventoryArrivalSettlesSubmittedReceipt();
@@ -100,6 +102,11 @@ public final class Ae2ServerSupplyTest {
     }
 
     private static void fallbackAndCraftIdentity() {
+        // 只有服务端明确未执行的库存过期可自动刷新；权限拒绝和消费未知不能借此重发。
+        check(Ae2ServerSupply.refreshableStock(receipt("resource_unavailable", ClientRequestReceipt.Effect.NOT_APPLIED))
+                && Ae2ServerSupply.refreshableStock(receipt("source_changed", ClientRequestReceipt.Effect.NOT_APPLIED)), "未提取的过期键自动刷新");
+        check(!Ae2ServerSupply.refreshableStock(receipt("source_changed", ClientRequestReceipt.Effect.UNKNOWN))
+                && !Ae2ServerSupply.refreshableStock(receipt("permission_denied", ClientRequestReceipt.Effect.NOT_APPLIED)), "未知消费和真实权限拒绝不能重放");
         check(Ae2ServerSupply.safeFallback(receipt("unsupported_operation", ClientRequestReceipt.Effect.NOT_APPLIED)),
                 "unsupported untouched server supply can use the existing native route");
         check(!Ae2ServerSupply.safeFallback(receipt("permission_denied", ClientRequestReceipt.Effect.NOT_APPLIED)),
@@ -138,10 +145,10 @@ public final class Ae2ServerSupplyTest {
         for (int index = 0; index < 65; index++) record.invoke(supply, applied(), 7);
         var evidence = supply.evidence();
         var receipts = (List<?>) evidence.get("server_supply_receipts");
-        check(receipts.size() == 64 && evidence.get("server_supply_receipt_count").equals(65)
+        check(receipts.size() == 65 && evidence.get("server_supply_receipt_count").equals(65)
                         && evidence.get("server_supply_transferred").equals(65L)
-                        && evidence.get("server_supply_receipts_truncated").equals(true),
-                "bounded provenance retains exact confirmed totals without unbounded receipt payloads");
+                        && evidence.get("server_supply_receipts_truncated").equals(false),
+                "all confirmed native transfers remain available for reconciliation");
         var first = (Map<?, ?>) receipts.getFirst();
         UUID.fromString((String) first.get("request_id"));
         check(first.get("backend").equals("server") && first.get("amount").equals(1)
@@ -166,6 +173,48 @@ public final class Ae2ServerSupplyTest {
         var request = new Ae2ResourceSupply.Request(List.of(new Ae2ResourceSupply.Group(
                 ResourceLocation.parse("minecraft:iron_ingot"), 1)), false);
         return new Ae2ServerSupply(null, request, null, Set.of(), ignored -> 0);
+    }
+
+    private static void changedStockRetainsCompletedAllocation() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            var iron = ResourceLocation.parse("minecraft:iron_ingot"); var gold = ResourceLocation.parse("minecraft:gold_ingot");
+            var group = new Ae2ResourceSupply.Group(iron, List.of(gold), 5, Ae2ResourceSupply.SelectionMode.AGGREGATE);
+            var old = new Ae2SupplyPlanner.Allocation(iron, new ItemStack(Items.IRON_INGOT), 5, false); old.confirm(2);
+            world.inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 2));
+            var plan = new Ae2SupplyPlanner.Plan(List.of(new Ae2SupplyPlanner.PlannedGroup(group, List.of(old))));
+            var refreshed = Ae2SupplyPlanner.refreshRemaining(world.player, new Ae2SupplyPlanner.RequestView(plan,
+                    List.of(new Ae2ReflectionBridge.Entry(gold, 1, 3, false, new ItemStack(Items.GOLD_INGOT))), Set.of(), false));
+            var after = refreshed.plan().groups().getFirst();
+            check(after.confirmedCount() == 2 && after.group().count() == 5
+                    && after.allocations().stream().mapToInt(Ae2SupplyPlanner.Allocation::remaining).sum() == 3,
+                    "旧批次已确认的两件不重取，新库存只补剩余三件");
+            check(after.allocations().getLast().itemId().equals(gold) && world.inventory.countItem(Items.IRON_INGOT) == 2,
+                    "只选择原混合组已授权的替代材料，重规划不改真实背包");
+        }
+    }
+
+    private static void rejectedExtractionRefreshesInTheSameSession() throws Exception {
+        var group = new Ae2ResourceSupply.Group(ResourceLocation.parse("minecraft:iron_ingot"), 5);
+        var supply = new Ae2ServerSupply(null, new Ae2ResourceSupply.Request(List.of(group), false), null, Set.of(), ignored -> 2);
+        var allocation = new Ae2SupplyPlanner.Allocation(group.itemId(), new ItemStack(Items.IRON_INGOT), 5, false); allocation.confirm(2);
+        field(Ae2ServerSupply.class, "plan").set(supply, new Ae2SupplyPlanner.Plan(List.of(new Ae2SupplyPlanner.PlannedGroup(group, List.of(allocation)))));
+        var constructor = ClientRequestReceipt.class.getDeclaredConstructor(ClientOperation.class, JsonObject.class, long.class, long.class, Runnable.class, Consumer.class);
+        constructor.setAccessible(true);
+        var context = (LocalPlayerContext) Proxy.newProxyInstance(getClassLoader(), new Class<?>[]{LocalPlayerContext.class},
+                (proxy, method, args) -> { if (method.getName().equals("tickRevision")) return 10L;
+                    throw new AssertionError("刷新待执行库存不得触发原生动作: " + method.getName()); });
+        for (int rejected = 0; rejected < 3; rejected++) {
+            var receipt = constructor.newInstance(new ClientOperation("inventory.ae2_supply", 1, true, null), new JsonObject(), 1L, 1L,
+                    (Runnable) () -> {}, (Consumer<Runnable>) Runnable::run);
+            field(ClientRequestReceipt.class, "backend").set(receipt, ClientRequestReceipt.Backend.SERVER);
+            field(ClientRequestReceipt.class, "status").set(receipt, ClientRequestReceipt.Status.REJECTED);
+            field(ClientRequestReceipt.class, "effect").set(receipt, ClientRequestReceipt.Effect.NOT_APPLIED);
+            field(ClientRequestReceipt.class, "code").set(receipt, "resource_unavailable");
+            field(Ae2ServerSupply.class, "pending").set(supply, receipt);
+            var result = supply.tick(context);
+            check(result.state() == (rejected < 2 ? Ae2ServerSupply.State.RUNNING : Ae2ServerSupply.State.FAILED)
+                    && allocation.confirmedCount() == 2, "同一次供料有界刷新，保留前两件确认量而不重取");
+        }
     }
 
     private static void inventoryArrivalSettlesSubmittedReceipt() throws Exception {

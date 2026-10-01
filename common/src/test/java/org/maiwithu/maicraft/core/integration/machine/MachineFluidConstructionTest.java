@@ -29,6 +29,12 @@ import org.maiwithu.maicraft.task.TaskState;
 import java.lang.reflect.Field;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.Entity;
+import java.nio.file.Files;
+import java.util.UUID;
+import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatalog;
+import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalog;
+import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.Identity;
 
 /** 让 L 形多源池与普通结构混排，检查蓝图、材料和准备清空都保留源格真实语义，不固定成单格池。 */
 public final class MachineFluidConstructionTest {
@@ -77,7 +83,7 @@ public final class MachineFluidConstructionTest {
         System.out.println("MachineFluidConstructionTest: passed");
     }
     private static void reactionProducesBlueprintDiff() throws Exception {
-        try (var world = new InteractionWorldTestHarness()) {
+        try (var world = new InteractionWorldTestHarness(); var archive = new ComparisonArchive(world)) {
             // 原生倒桶已把设计水源变成黑曜石；动作任务正常结束，附diff供模型判断，不替它否决设计。
             var document = JsonParser.parseString("{\"blocks\":[{\"offset\":[3,1,3],\"block_id\":\"minecraft:water\"}]}").getAsJsonObject();
             var plan = MachineConstructionPlan.compile(BlockPos.ZERO, MachineBlueprintDocument.compile(document, MachineConstructionPlan.registry()), false);
@@ -95,6 +101,37 @@ public final class MachineFluidConstructionTest {
                             && diff.getAsJsonArray("differences").size() == 1 && diff.toString().contains("minecraft:obsidian")
                             && ((Number) result.data().get("verified_source_fluid_targets")).intValue() == 0,
                     "回执给出真实黑曜石差异，已处理一桶不能冒充已有一个水源");
+        }
+    }
+
+    /** 流体反应后的整机比较需要真实目录前置；夹具补齐登记环境，不能强迫生产代码在缺档时伪造整机 diff。 */
+    private static final class ComparisonArchive implements AutoCloseable {
+        private final Map<Field, Object> saved = new LinkedHashMap<>();
+        private final Map<String, Map<Object, Object>> caches = new LinkedHashMap<>();
+
+        @SuppressWarnings("unchecked") ComparisonArchive(InteractionWorldTestHarness world) throws Exception {
+            for (String name : List.of("catalog", "level", "playerId", "issue")) {
+                Field field = catalogField(name); saved.put(field, field.get(null));
+            }
+            for (String name : List.of("compiledBlueprints", "pendingBuilt")) {
+                var cache = (Map<Object, Object>) catalogField(name).get(null);
+                caches.put(name, new LinkedHashMap<>(cache)); cache.clear();
+            }
+            var catalog = new MachineCatalog(Files.createTempDirectory("fluid-comparison-archive-"), Runnable::run);
+            catalog.bind(new Identity("fluid-comparison", "player"), "test");
+            UUID playerId = UUID.randomUUID(); Field uuid = Entity.class.getDeclaredField("uuid"); uuid.setAccessible(true); uuid.set(world.player, playerId);
+            catalogField("catalog").set(null, catalog); catalogField("level").set(null, world.level); catalogField("playerId").set(null, playerId);
+        }
+
+        @SuppressWarnings("unchecked") public void close() throws Exception {
+            for (var entry : saved.entrySet()) entry.getKey().set(null, entry.getValue());
+            for (var entry : caches.entrySet()) {
+                var cache = (Map<Object, Object>) catalogField(entry.getKey()).get(null); cache.clear(); cache.putAll(entry.getValue());
+            }
+        }
+
+        private static Field catalogField(String name) throws Exception {
+            Field field = ClientMachineCatalog.class.getDeclaredField(name); field.setAccessible(true); return field;
         }
     }
     private static void modificationRecoversDeclaredSourcesBeforeBuilding() throws Exception {

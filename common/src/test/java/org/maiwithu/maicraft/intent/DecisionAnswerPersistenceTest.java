@@ -57,8 +57,9 @@ public final class DecisionAnswerPersistenceTest {
         check(stored.getAsJsonObject("pending_answer").getAsJsonObject("details").equals(details),
                 "saving an accepted " + choice + " answer must retain every supplied field");
         var result = stored.getAsJsonArray("attempts").get(0).getAsJsonObject().getAsJsonObject("result");
-        check(!result.has("position") && !result.has("slot") && result.get("visible").getAsBoolean(),
-                "preserving a request must not disable filtering of diagnostic results");
+        // 持久化保留实际现场位置，原生操作槽号仍留在内部；恢复上下文后不需要为了找回位置重做任务。
+        check(result.getAsJsonObject("position").get("x").getAsInt() == 1 && !result.has("slot") && result.get("visible").getAsBoolean(),
+                "observed positions survive persistence while internal click slots remain filtered");
         var s = IntentStateCodec.decode(encoded).tasks().getFirst();
         var restored = IntentTaskRecord.restored(s.id(), s.planId(), s.goal(), "answer-test", s.steps(), s.stepIndex(),
                 s.completed(), s.internalPositions(), s.internalAreaProtections(), s.attempts(),

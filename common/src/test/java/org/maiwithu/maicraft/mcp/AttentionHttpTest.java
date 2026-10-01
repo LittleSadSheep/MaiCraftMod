@@ -36,14 +36,25 @@ public final class AttentionHttpTest {
             // 大回执经真实 HTTP 归档；读取详情只能访问已冻结的输出，不能再次委派一次执行。
             var start = json(client.send(post(uri, session, 90, "tools/call", json("{\"name\":\"execute\",\"arguments\":{\"goal\":{\"ability\":\"maicraft:travel\",\"outcome\":\"test accepted receipt\"}}}")),
                     HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject("result");
+            // 大回执完整交付并附冻结引用；外层不再把观察数组折叠成引用对象。
             JsonObject accepted = json(start.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
-            check(accepted.get("accepted").getAsBoolean() && start.toString().length() < 8500, "large accepted receipt stays bounded");
-            String detailUri = accepted.getAsJsonObject("observation").get("resource_uri").getAsString();
+            check(accepted.get("accepted").getAsBoolean() && accepted.getAsJsonArray("observation").size() == 800
+                    && accepted.has("details_uri") && accepted.get("details_temporary").getAsBoolean(),
+                    "large accepted receipt is delivered in full with a frozen reference");
+            String detailUri = accepted.get("details_uri").getAsString();
             JsonObject detailCall = json("{\"name\":\"perceive\",\"arguments\":{}}"); detailCall.getAsJsonObject("arguments").addProperty("resource_uri", detailUri);
             var detailResult = json(client.send(post(uri, session, 91, "tools/call", detailCall), HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject("result");
             var detailPage = json(detailResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
-            check(detailPage.get("snapshot_only").getAsBoolean() && detailPage.has("next_uri") && runtime.executions == 1,
+            check(detailPage.get("snapshot_only").getAsBoolean()
+                    && detailPage.getAsJsonObject("value").getAsJsonArray("observation").size() == 800
+                    && runtime.executions == 1,
                     "perceive receipt pages never execute or re-observe the world");
+            // 指定观察路径也一次返回冻结的全部事实，不再次执行任务或重新勘测世界。
+            detailCall.getAsJsonObject("arguments").addProperty("resource_uri", ResponseArchive.link(detailUri, "/observation", 0, 5));
+            detailResult = json(client.send(post(uri, session, 92, "tools/call", detailCall), HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject("result");
+            detailPage = json(detailResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+            check(detailPage.get("snapshot_only").getAsBoolean() && detailPage.get("value").equals(accepted.get("observation"))
+                    && runtime.executions == 1, "one receipt read restores all frozen evidence without executing or observing again");
             String instructions = json(init.body()).getAsJsonObject("result").get("instructions").getAsString();
             check(instructions.contains("Attention is the primary") && instructions.contains("next_attention")
                             && instructions.contains("maicraft://chatflow"),

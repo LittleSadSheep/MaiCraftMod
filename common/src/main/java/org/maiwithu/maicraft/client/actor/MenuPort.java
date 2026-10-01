@@ -9,6 +9,9 @@ public interface MenuPort {
     /** 聊天等后继动作先等已提交的搬运或关闭结清，不能用新界面打断物品同步。 */
     boolean hasPendingTransaction();
 
+    /** 世界动作被旧页面挡住时原生关闭并等待；当前所需菜单的点击仍使用 ensureVisible。 */
+    boolean ensureWorldVisible(LocalPlayerContext context);
+
     /** 必要时显示玩家背包，并等对应界面真正可操作。 */
     boolean ensureVisible(LocalPlayerContext context);
 

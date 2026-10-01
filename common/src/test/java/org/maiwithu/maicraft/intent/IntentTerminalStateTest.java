@@ -192,8 +192,8 @@ public final class IntentTerminalStateTest {
         JsonObject live = read(snapshot, record).getAsJsonObject("active_execution");
         check(live.get("phase").getAsString().equals("material_supply")
                         && live.getAsJsonObject("child").get("source").getAsString().equals("mine")
-                        && !live.getAsJsonObject("child").has("position"),
-                "active execution exposes the actual nested material task without leaking planned coordinates");
+                        && live.getAsJsonObject("child").getAsJsonObject("position").get("x").getAsInt() == 1,
+                "active execution exposes the nested material task and its observed position");
         live.addProperty("phase", "caller changed");
         record.pause(43, "paused_by_mcp");
         JsonObject paused = read(snapshot, record);

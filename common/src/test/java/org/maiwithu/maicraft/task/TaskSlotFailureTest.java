@@ -16,9 +16,36 @@ public final class TaskSlotFailureTest {
             creationFailureReleasesSlot(world.player);
             startFailureSettlesOnce(world.player);
             tickFailureSettlesOnce(world.player);
+            cancelSourcesNameTheirOrigin(world.player);
         }
         TaskDeadlinePauseTest.main(args);
         System.out.println("TaskSlotFailureTest: passed");
+    }
+
+    private static void cancelSourcesNameTheirOrigin(LocalPlayer player) {
+        // 同一句"任务取消了"可能来自接管、操作者取消或失去身体；回执不写来源，调用方就无法分辨是谁结束了任务。
+        List<TaskRecord> completed = new ArrayList<>();
+        var slot = new TaskSlot(completed::add);
+        TaskFactory.register(TestRecord.class, (body, record) -> new TestTask(false, false));
+        var displaced = new TestRecord();
+        slot.put(player, displaced);
+        var cancelled = new TestRecord();
+        slot.put(player, cancelled);
+        check(displaced.getState() == TaskState.CANCELLED
+                && "takeover".equals(displaced.getCancelSource()), "接管必须把来源记为 takeover");
+        check(completed.size() == 1 && completed.get(0) == displaced, "被接管的任务应交付一次结果");
+        slot.cancel(player);
+        check(cancelled.getState() == TaskState.CANCELLED
+                && "operator_cancel".equals(cancelled.getCancelSource()), "操作者取消必须把来源记为 operator_cancel");
+        var lost = new TestRecord();
+        TaskFactory.register(TestRecord.class, (body, record) -> new NullResultTask());
+        slot.put(player, lost);
+        slot.bodyGone(player);
+        check(lost.getState() == TaskState.CANCELLED
+                && "body_gone".equals(lost.getCancelSource()), "失去身体必须把来源记为 body_gone");
+        // 执行器交不出结果时走兜底结果；来源也要随兜底结果写进 JSON，不能只停在任务单字段里。
+        check(lost.getResult() != null
+                && lost.getResult().toJson().contains("cancel_source"), "兜底取消结果应携带 cancel_source 字段");
     }
 
     private static void creationFailureReleasesSlot(LocalPlayer player) {
@@ -91,6 +118,15 @@ public final class TaskSlotFailureTest {
 
     private static final class TestRecord extends TaskRecord {
         TestRecord() { super("test_slot", "", NO_DEADLINE); }
+    }
+
+    /** 取消路径专用：交不出结果，迫使槽位走兜底结果，验证 cancel_source 一路写进 JSON。 */
+    private static final class NullResultTask implements Task {
+        @Override public void start(LocalPlayer player) { }
+        @Override public TaskState tick(LocalPlayer player) { return TaskState.RUNNING; }
+        @Override public void stop(LocalPlayer player, StopReason reason) { }
+        @Override public String name() { return "test_slot"; }
+        @Override public TaskResult result(TaskState terminal) { return null; }
     }
 
     private static final class TestTask implements Task {

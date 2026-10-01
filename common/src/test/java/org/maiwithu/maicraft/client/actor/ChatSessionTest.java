@@ -59,6 +59,8 @@ public final class ChatSessionTest {
         var stale = h.context; h.nextTick(true);
         try { session.tick(stale, 0); throw new AssertionError("stale context accepted"); }
         catch (IllegalStateException expected) { check(!view.active, "no screen opened from stale context"); }
+
+        // 页面占用先按原生流程恢复；真正退出失败的对象诊断由 ChatGuiPreparationTest 回放。
         System.out.println("ChatSessionTest: passed");
     }
 

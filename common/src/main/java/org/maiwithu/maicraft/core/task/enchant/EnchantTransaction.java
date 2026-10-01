@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.enchant;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.EnchantmentMenu;
@@ -22,6 +23,8 @@ final class EnchantTransaction {
     private long quoteSince, waitingSince = -1;
     private int levelBefore, lapisBefore, levelsSpent, lapisSpent;
     private boolean attempted, confirmed;
+    private int notAppliedAttempts;
+    private String nativeStatus;
     private ConfirmationEvidence candidate, evidence;
 
     /** 回执观察到完整成品和费用同刻吻合时保存副本；之后拾经验或换物品不能改写这次消费的历史证据。 */
@@ -40,8 +43,7 @@ final class EnchantTransaction {
             quote = EnchantmentQuote.capture(player, menu); quoteSince = now; return false;
         }
         if (!quote.stillMatches(player, menu)) {
-            // 空报价可以等服务端首次同步；已经出现可用线索后报价再变化，就停止并保留原报价供用户判断。
-            if (available()) throw new IllegalStateException("enchantment_quote_changed_before_submission");
+            // 按钮尚未提交时，刷新服务端同步后的报价并重新等待稳定；档位与费用上限仍按原授权核对。
             quote = EnchantmentQuote.capture(player, menu); quoteSince = now;
         }
         if (now - quoteSince < 2) return false;
@@ -52,14 +54,14 @@ final class EnchantTransaction {
 
     boolean submit(LocalPlayerContext context, EnchantmentMenu menu) {
         if (attempted) throw new IllegalStateException("enchantment_button_already_attempted");
-        if (offer == null || !quote.stillMatches(player, menu))
-            throw new IllegalStateException("enchantment_quote_changed_before_submission");
+        if (!prepare(context, menu)) return false;
         // 不可重复边界先异步落盘，等待期间继续显示真实报价；完成后再次核对，磁盘等待不能授权使用已经变化的报价。
         if (!beforeSubmit.getAsBoolean()) return false;
-        if (!quote.stillMatches(player, menu)) throw new IllegalStateException("enchantment_quote_changed_during_submission_barrier");
+        if (!quote.stillMatches(player, menu)) return false;
         levelBefore = player.experienceLevel; lapisBefore = menu.getSlot(1).getItem().getCount();
-        attempted = true;
         receipt = context.menus().pressButton(context, offer.tier() - 1, captureConfirmation(menu), 100);
+        nativeStatus = receipt.status().name().toLowerCase(Locale.ROOT);
+        attempted = true;
         return true;
     }
 
@@ -79,6 +81,14 @@ final class EnchantTransaction {
         if (receipt == null) throw new IllegalStateException("enchantment_button_receipt_missing");
         receipt = context.menus().poll(context, receipt);
         if (!receipt.terminal()) return false;
+        nativeStatus = receipt.status().name().toLowerCase(Locale.ROOT);
+        if (receipt.status() == MenuReceipt.Status.CONFIRMED_NOT_APPLIED) {
+            // 原生已证明本次按钮未执行，沿同一持久身份重读报价；有界恢复不重放未知或已消费的附魔。
+            attempted = false; receipt = null; candidate = null; quote = null; offer = null;
+            waitingSince = context.tickRevision();
+            if (++notAppliedAttempts <= 2) return false;
+            throw new IllegalStateException("enchantment_button_not_applied_after_refresh");
+        }
         if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED)
             throw new IllegalStateException("enchantment_button_outcome_uncertain: " + receipt.detail());
         // 已成功的回执认领确认当刻的证据；恢复后的当前经验可能来自后来拾取，不能据此重新计算附魔成本。
@@ -94,6 +104,7 @@ final class EnchantTransaction {
     }
 
     boolean attempted() { return attempted; }
+    boolean readyToRefresh() { return !attempted && notAppliedAttempts > 0; }
     boolean confirmed() { return confirmed; }
     int lapisSpent() { return lapisSpent; }
 
@@ -101,6 +112,8 @@ final class EnchantTransaction {
         var data = new LinkedHashMap<String, Object>();
         data.put("button_attempted", attempted); data.put("enchantment_confirmed", confirmed);
         data.put("native_consumption_reserved", record.submissionReserved());
+        data.put("not_applied_button_attempts", notAppliedAttempts);
+        if (nativeStatus != null) data.put("native_button_status", nativeStatus);
         data.put("mechanical_retry_allowed", !attempted && !record.submissionReserved());
         if (quote != null) data.put("quote", quote.describe());
         if (offer != null) data.put("selected_offer", offer.describe());

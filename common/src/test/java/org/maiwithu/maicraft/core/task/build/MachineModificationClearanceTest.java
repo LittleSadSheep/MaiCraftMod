@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 同一份 AIR 蓝图用于修改既有机器时保留精确旧状态，不能被普通选址清障拒绝或平移到另一片空气中。 */
+/** 已授权机器蓝图在声明格内拆换当前部件，不以旧观察或重复许可门控；明确保留规则与原生限制仍生效。 */
 public final class MachineModificationClearanceTest {
     private static final BlockPos AT = new BlockPos(5, 1, 5);
     public static void main(String[] args) throws Exception {
@@ -26,12 +26,13 @@ public final class MachineModificationClearanceTest {
         try (var h = new InteractionWorldTestHarness()) {
             h.set(AT, Blocks.BRICKS.defaultBlockState());
             var plan = plan(false);
-            check(survey(h, plan.blockTask("ordinary", 1000, true)).blocked(), "ordinary construction retains the clearance whitelist");
+            check(!survey(h, plan.blockTask("ordinary", 1000, true)).blocked(), "声明机器蓝图默认可清理目标格中的旧部件");
             plan.bindObservedModification(h.level, AT, 4);
             var source = plan.blockTask("modify", 1000, true); source.previewManaged(true);
             check(!survey(h, source).blocked() && source.observedMachineEdit(AT, h.level.getBlockState(AT)),
                     "explicit surveyed machine demolition passes the unrelated site-clearance whitelist");
-            var batch = new BuildTaskRecord("modify-batch", 1000, source.targets, true);
+            var batch = new BuildTaskRecord("modify-batch", 1000, source.targets, source.replaceMode, true, true, false,
+                    Map.of(), List.of(), source.replaceBlockEntities);
             source.copyExecutionContextTo(batch);
             check(batch.fixedMachineModification() && !survey(h, batch).blocked(), "supply batches retain the exact original modification scope");
             check(!batch.observedMachineEdit(AT.east(), Blocks.BRICKS.defaultBlockState()), "an undeclared neighbor does not inherit demolition scope");
@@ -39,11 +40,11 @@ public final class MachineModificationClearanceTest {
             check(invoke(task, "preflightTick") == TaskState.RUNNING, "real build preflight accepts the requested modification");
             invoke(task, "excavationTick");
             check(permitted(task, Blocks.BRICKS.defaultBlockState()), "the actual pre-break gate accepts the observed old block");
-            // 开工后换成另一台机器时，原位重新观察；不能平移拆除请求后报告旧轴已拆掉。
-            h.set(AT, Blocks.CHEST.defaultBlockState());
-            check(!permitted(task, h.level.getBlockState(AT)), "a later unobserved block cannot use the old state's exception");
+            // 开工后同一声明格换成其他旧部件，仍读取当前状态拆换；不能要求模型只为更新快照重发蓝图。
+            h.set(AT, Blocks.GOLD_BLOCK.defaultBlockState());
+            check(permitted(task, h.level.getBlockState(AT)), "声明格的拆换权限不依赖旧方块快照");
             var changed = survey(h, batch);
-            check(changed.blocked() && changed.report().get("suggested_offsets").equals(List.of())
+            check(!changed.blocked() && changed.report().get("suggested_offsets").equals(List.of())
                     && changed.report().get("relocation_scope").equals("none_fixed_machine_modification"),
                     "fixed machine edits never propose relocating their AIR targets");
             check(batch.broken() == 0 && h.blockUses() == 0, "permission checks alone do not fabricate native demolition");
@@ -54,7 +55,9 @@ public final class MachineModificationClearanceTest {
         try (var h = new InteractionWorldTestHarness()) {
             h.set(AT, Blocks.BARREL.defaultBlockState());
             var protectedEntity = plan(false); protectedEntity.bindObservedModification(h.level, AT, 4);
-            var denied = survey(h, protectedEntity.blockTask("no-entity-permission", 1000, true));
+            // 底层调用明确保留方块实体时仍遵守该约束；机器蓝图默认拆换则不要求追加重复许可字段。
+            var explicitPreservation = new BuildTaskRecord("preserve-entities", 1000, protectedEntity.blocks(), true);
+            var denied = survey(h, explicitPreservation);
             check(denied.blocked(),
                     "replace_existing alone cannot authorize demolition of a block entity");
             // 实机轴替换案例缺的是方块实体选项，回执必须返回精确参数名，不能笼统叫模型换场地。
@@ -70,8 +73,10 @@ public final class MachineModificationClearanceTest {
             check(!survey(h, allowedEntity.blockTask("entity-permission", 1000, true)).blocked(),
                     "the separate explicit block-entity option is honored at declared targets");
             var outside = plan(true); outside.bindObservedModification(h.level, AT.east(2), 1);
-            check(survey(h, outside.blockTask("outside-observation", 1000, true)).blocked(),
-                    "a target outside the supplied observation cannot inherit a machine-edit exception");
+            check(!survey(h, outside.blockTask("outside-observation", 1000, true)).blocked(),
+                    "声明格由执行器读取当前状态，不受旧勘测范围限制");
+            h.set(AT, Blocks.BEDROCK.defaultBlockState());
+            check(survey(h, outside.blockTask("unbreakable", 1000, true)).blocked(), "已授权也不能绕过原生不可破坏条件");
         }
     }
     private static MachineConstructionPlan plan(boolean entities) {

@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.client.actor;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,6 +30,13 @@ public final class ClientActorBoundary {
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
     private boolean previewReview;
+    // 任务可在两次游戏刻之间结束；保存当时界面归属，下一刻结清旧事务后再原生关闭。
+    private LocalPlayer guiCleanupOwner;
+    private AbstractContainerMenu guiCleanupMenu;
+    private Screen guiCleanupScreen;
+    private boolean guiCleanupStarted;
+    private GuiPreparation guiCleanup = new GuiPreparation();
+    private String guiCleanupState = "none";
 
     public ClientActorBoundary() {
         this(Minecraft.getInstance());
@@ -112,7 +122,45 @@ public final class ClientActorBoundary {
         // 新任务之前先推进旧动作和菜单的收尾；若已占用本刻操作机会，后面的任务会等下一刻。
         actions.advance(context);
         menus.advance(context);
+        advanceGuiCleanup(context);
         return Optional.of(context);
+    }
+
+    /** 普通任务终局只登记收尾；显式开菜单或连续存取的步骤不会调用这里。 */
+    public boolean requestGuiCleanup(LocalPlayer player) {
+        if (minecraft == null || player == null || minecraft.player != player || !body.automationOwnsControls()) return false;
+        requireClientThread();
+        if (minecraft.screen == null && player.containerMenu == player.inventoryMenu
+                && player.inventoryMenu.getCarried().isEmpty() && !inventoryGridOccupied(player)) return false;
+        if (guiCleanupOwner == player && guiCleanupMenu == player.containerMenu && guiCleanupScreen == minecraft.screen) return true;
+        guiCleanupOwner = player; guiCleanupMenu = player.containerMenu; guiCleanupScreen = minecraft.screen;
+        guiCleanupStarted = false; guiCleanup = new GuiPreparation(); guiCleanupState = "scheduled";
+        return true;
+    }
+
+    private static boolean inventoryGridOccupied(LocalPlayer player) {
+        // 即使合成页面已消失，也把尚未返还的四格材料交给原生收尾，不能等下一次任务才发现遗留。
+        if (player.inventoryMenu.slots == null || player.inventoryMenu.slots.size() < 5) return false;
+        for (int slot = 1; slot <= 4; slot++) if (!player.inventoryMenu.getSlot(slot).getItem().isEmpty()) return true;
+        return false;
+    }
+
+    void advanceGuiCleanup(LocalPlayerContext context) {
+        if (guiCleanupOwner == null) return;
+        // 人已接管、角色已更换或后续流程另开界面时撤销旧收尾，不把旧任务的关闭落到新操作者身上。
+        if (guiCleanupOwner != context.player() || !context.permitsNativeActions()
+                || !guiCleanupStarted && (guiCleanupMenu != context.player().containerMenu || guiCleanupScreen != minecraft.screen)) {
+            guiCleanupOwner = null; guiCleanupState = "superseded"; return;
+        }
+        if (menus.hasPendingTransaction() || actions.hasPendingMenuTransaction() || !context.mutationAvailable()) return;
+        guiCleanupStarted = true; guiCleanupState = "closing";
+        try {
+            if (guiCleanup.ready(context, false)) { guiCleanupOwner = null; guiCleanupState = "completed"; }
+        } catch (RuntimeException failure) {
+            // 主动作已完成的结果不改判失败，原生收尾问题留在身体诊断中，并保留下一任务自己的准备入口。
+            guiCleanupOwner = null; guiCleanupState = "failed";
+            Constants.LOG.warn("Task GUI cleanup could not finish: {}", failure.getMessage());
+        }
     }
 
     public Optional<LocalPlayerContext> beginPositionPacketTick() {
@@ -167,6 +215,10 @@ public final class ClientActorBoundary {
         requireClientThread();
         var result = new LinkedHashMap<String, Object>();
         result.put("actor_tick", tickRevision);
+        if (!guiCleanupState.equals("none")) {
+            var cleanup = new LinkedHashMap<String, Object>(guiCleanup.evidence());
+            cleanup.put("state", guiCleanupState); result.put("gui_cleanup", Map.copyOf(cleanup));
+        }
         result.put("control_revision", controlRevision);
         result.put("control_requested", body.automationControlRequested());
         result.put("preview_review", previewReview);

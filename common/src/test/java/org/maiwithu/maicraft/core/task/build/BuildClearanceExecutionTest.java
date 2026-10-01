@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 推进真实施工阶段，确认开工前的砖墙和开挖中途新出现的机器都先停手并留下可定位报告。 */
+/** 推进真实施工阶段，只有不可破坏目标或明确保留的机器阻止开挖，声明格旧部件不再依赖清障名单。 */
 public final class BuildClearanceExecutionTest {
     private static final BlockPos AT = new BlockPos(5, 1, 5);
 
@@ -23,7 +23,7 @@ public final class BuildClearanceExecutionTest {
         for (int changeStage : List.of(0, 1, 2)) {
             boolean changedAfterPreflight = changeStage > 0;
             try (var h = new InteractionWorldTestHarness()) {
-                var initial = changedAfterPreflight ? Blocks.DIRT : Blocks.BRICKS;
+                var initial = changedAfterPreflight ? Blocks.DIRT : Blocks.BEDROCK;
                 h.set(AT, initial.defaultBlockState());
                 var target = new BuildTaskRecord.Target(Blocks.AIR, Items.AIR, AT, "room", null, null, null);
                 var record = new BuildTaskRecord("clearance-execution", 1000, List.of(target), true);
@@ -34,12 +34,10 @@ public final class BuildClearanceExecutionTest {
                 if (changedAfterPreflight) {
                     check(state == TaskState.RUNNING, "natural dirt may reach excavation");
                     invoke(task, "excavationTick");
-                    // 现场在路径/工具准备前换成箱子；真实 clearNavTick 必须先拒绝，不能开始挖掘或取工具。
+                    // 任务明确保留方块实体时，路径/工具准备前新出现的箱子必须先拒绝，不能开始挖掘或取工具。
                     h.set(AT, Blocks.CHEST.defaultBlockState());
                     // 接近站位前和真正下手前都要拦住新箱子，不能依赖前一阶段已经做过检查。
-                    check(invoke(task, changeStage == 1 ? "clearNavTick" : "clearTick") == TaskState.RUNNING,
-                            "new obstacle enters read-only reporting");
-                    state = invoke(task, "clearanceReportTick");
+                    state = invoke(task, changeStage == 1 ? "clearNavTick" : "clearTick");
                 }
                 check(state == TaskState.FAILED && record.broken() == 0 && record.placed() == 0,
                         "blocked construction performs no demolition or placement");
@@ -47,14 +45,25 @@ public final class BuildClearanceExecutionTest {
                 var digger = (BlockDigger) diggerField.get(task);
                 check(digger.current() == null && !digger.hasPendingBreak(), "no native break remains pending");
                 var data = task.result(state).data();
-                check(BuildClearanceSurvey.FAILURE.equals(data.get("failure_code"))
-                        && Boolean.FALSE.equals(data.get("mechanical_retry_allowed")), "failure goes back to site selection");
-                var report = (Map<?, ?>) data.get("clearance_report");
-                var obstacle = (Map<?, ?>) ((List<?>) report.get("obstacles")).getFirst();
-                check(obstacle.get("at").equals(List.of(5, 1, 5)), "stopped obstruction has exact coordinates");
-                check(h.level.getBlockState(AT).is(changedAfterPreflight ? Blocks.CHEST : Blocks.BRICKS),
-                        "the non-whitelisted obstacle remains intact");
+                if (changedAfterPreflight) {
+                    check(data.get("failure_code").equals("excavation_cell_changed")
+                            && data.get("failure_position").equals(Map.of("x", 5, "y", 1, "z", 5, "dimension", "minecraft:overworld")), "真实保留限制直接交回失败格");
+                } else {
+                    check(BuildClearanceSurvey.FAILURE.equals(data.get("failure_code")), "不可破坏目标在开工前报告");
+                    var report = (Map<?, ?>) data.get("clearance_report");
+                    var obstacle = (Map<?, ?>) ((List<?>) report.get("obstacles")).getFirst();
+                    check(obstacle.get("at").equals(List.of(5, 1, 5)), "stopped obstruction has exact coordinates");
+                }
+                check(h.level.getBlockState(AT).is(changedAfterPreflight ? Blocks.CHEST : Blocks.BEDROCK), "真实保留或不可破坏目标保持原样");
             }
+        }
+        // 普通砖墙位于已授权声明格时可进入开挖，不能再因为白名单缺席而要求换场地或重发任务。
+        try (var h = new InteractionWorldTestHarness()) {
+            h.set(AT, Blocks.BRICKS.defaultBlockState());
+            var record = new BuildTaskRecord("declared-bricks", 1000, List.of(new BuildTaskRecord.Target(Blocks.AIR, Items.AIR, AT, "room", null, null, null)), true);
+            record.previewManaged(true); var task = new FirstPersonBuildCompanionTask(h.player, record); task.start(h.player);
+            check(invoke(task, "preflightTick") == TaskState.RUNNING && record.broken() == 0, "声明格先完成正常预检，不提前伪造破坏效果");
+            task.result(TaskState.CANCELLED);
         }
         System.out.println("BuildClearanceExecutionTest: passed");
     }

@@ -48,6 +48,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationPolicySnapshotTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest;
+import org.maiwithu.maicraft.core.pathing.baritone.PreserveProbeRecoveryTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldPlacementPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPhysicsTest;
@@ -145,6 +146,8 @@ public final class NavigationRegressionSuite {
         CollisionGeometryTest.main(args);
         NearbyCollisionPerceptionTest.main(args);
         NavigationProgressTest.main(args);
+        // 复算证明无需改地形后，原移动任务应自行恢复，并限制原地反复计算。
+        PreserveProbeRecoveryTest.main(args);
         GroundPathSmoothingTest.main(args);
         GroundMovementReplayTest.main(args);
         TravelJumpPhysicsTest.main(args);

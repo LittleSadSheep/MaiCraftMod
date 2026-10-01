@@ -47,6 +47,8 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
  * 语义请求可让本任务自行比较站位并走近；原地点击仍沿用原行为。目标身份和原生点击效果分别核对。
  */
 public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTaskRecord> {
+    // 单次原生右键可能就是开箱步骤；菜单交给调用方接续，不把刚打开的工作站当作遗留页面关闭。
+    @Override public boolean keepsGuiOnCompletion() { return true; }
 
     private static final double REACH = 4.5;
     private static final double REACH_SQR = REACH * REACH;

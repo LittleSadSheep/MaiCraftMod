@@ -42,6 +42,9 @@ public final class EnchantTransactionPauseTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); prepareRegistry();
         for (boolean book : new boolean[]{false, true}) confirmedWhilePaused(book);
         pendingCandidateIsNotReceipt(); changedResultAfterConfirmation();
+        // 报价在按钮前同步变化时继续等待新报价稳定，同一授权只提交一次按钮。
+        quoteChangesBeforeSubmission();
+        rejectedButtonRefreshesWithoutReplayingUnknown();
         System.out.println("EnchantTransactionPauseTest: paused confirmation snapshots, pending candidates and return ownership passed");
     }
 
@@ -94,6 +97,42 @@ public final class EnchantTransactionPauseTest {
             check(Boolean.FALSE.equals(f.flow.data().get("mechanical_retry_allowed")) && f.buttons == 1,
                     "lost return ownership preserves the one-consumption boundary");
             f.flow.cleanup();
+        }
+    }
+
+    private static void quoteChangesBeforeSubmission() throws Exception {
+        try (var f = new Fixture(false)) {
+            check(!f.transaction.prepare(f.context, f.menu), "首次报价等待同步"); f.tick += 2;
+            check(f.transaction.prepare(f.context, f.menu), "首次报价已稳定");
+            f.menu.setData(2, 29);
+            check(!f.transaction.submit(f.context, f.menu) && f.buttons == 0, "变化报价自动重读且未提交按钮");
+            f.tick += 2;
+            check(f.transaction.submit(f.context, f.menu) && f.buttons == 1, "新报价在原费用上限内继续提交");
+            rejects(() -> f.transaction.submit(f.context, f.menu), "already_attempted");
+        }
+        try (var f = new Fixture(false)) {
+            f.transaction.prepare(f.context, f.menu); f.menu.setData(2, 40); f.tick += 2;
+            check(!f.transaction.prepare(f.context, f.menu) && f.buttons == 0, "不可用的新报价仍需完整同步");
+            f.tick += 70;
+            try { f.transaction.prepare(f.context, f.menu); throw new AssertionError("经验不足不能点击"); }
+            catch (IllegalStateException expected) { check(f.buttons == 0, "真实经验不足没有消费"); }
+        }
+    }
+
+    private static void rejectedButtonRefreshesWithoutReplayingUnknown() throws Exception {
+        try (var f = new Fixture(false)) {
+            // 此回放会重新经过装料核验，因此菜单里已装入的装备和青金石必须从背包扣除，不能保留夹具副本。
+            f.world.inventory.setItem(0, ItemStack.EMPTY); f.world.inventory.setItem(1, ItemStack.EMPTY);
+            f.submit();
+            var finish = MenuReceipt.class.getDeclaredMethod("finish", MenuReceipt.Status.class, String.class); finish.setAccessible(true);
+            finish.invoke(f.receipt, MenuReceipt.Status.CONFIRMED_NOT_APPLIED, "native menu rejected before packet submission");
+            check(f.flow.tick(f.context) == TaskState.RUNNING && f.flow.data().get("phase").equals("quote")
+                    && Boolean.FALSE.equals(f.flow.data().get("outcome_uncertain")), "明确未执行的按钮在原流程刷新报价");
+            for (int tick = 0; tick < 8 && f.buttons == 1; tick++) { f.tick++; f.flow.tick(f.context); }
+            check(f.buttons == 2, "原拒绝没有消费，同一授权可以重新提交稳定报价");
+            finish.invoke(f.receipt, MenuReceipt.Status.UNCERTAIN, "server outcome unavailable");
+            check(f.flow.tick(f.context) == TaskState.FAILED && f.buttons == 2
+                    && Boolean.TRUE.equals(f.flow.data().get("outcome_uncertain")), "后续未知结果仍停止，绝不当作未执行重放");
         }
     }
 

@@ -45,8 +45,9 @@ public final class MachineBlueprintAbilityTest {
         modification.remove("snapshot_id");
         check(MachineAbilityAdapter.MODIFY, modification, true);
         modification.addProperty("snapshot_id", "receipt");
+        // 已授权修改默认拆换；显式 replace_existing=false 是主动收紧范围，不再是需要拒绝的矛盾组合。
         modification.addProperty("replace_existing", false);
-        check(MachineAbilityAdapter.MODIFY, modification, false);
+        check(MachineAbilityAdapter.MODIFY, modification, true);
         modification.addProperty("replace_existing", true);
         modification.addProperty("source_label", "drive");
         check(MachineAbilityAdapter.MODIFY, modification, false);
@@ -75,7 +76,8 @@ public final class MachineBlueprintAbilityTest {
         JsonObject build = parameters(MachineAbilityAdapter.BUILD);
         build.add("blueprint", blueprint());
         build.addProperty("replace_block_entities", true);
-        check(MachineAbilityAdapter.BUILD, build, false);
+        // 契约层放行惰性组合：替换许可关闭时该标记不生效，真正的冲突留到编译蓝图时才拒绝。
+        check(MachineAbilityAdapter.BUILD, build, true);
         build.addProperty("replace_existing", true);
         check(MachineAbilityAdapter.BUILD, build, true);
         build.addProperty("replace_block_entities", "true");

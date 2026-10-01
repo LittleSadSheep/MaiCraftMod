@@ -35,6 +35,8 @@ import org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteracti
  * 从已观察机器走到可交互位置，准备空手、瞄准并只右键一次；菜单真正出现后记录它的机器来源。
  */
 public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenuOpenTaskRecord> {
+    // 显式开菜单成功后供后续观察和存取使用；失败的界面仍由普通收尾退出。
+    @Override public boolean keepsGuiOnCompletion() { return verified; }
     private static final double REACH = 4.5;
     private enum Phase { START, APPROACH, HAND, AIM, CONFIRM }
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
@@ -60,6 +62,8 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
             return failure("machine_menu_target_lost", "The inspected machine is no longer loaded in this dimension.", FailureType.TARGET_LOST);
         }
         if (phase == Phase.CONFIRM) return confirm();
+        // 腾手期间的背包属于当前开菜单准备，先完成它自己的交换和关闭，不被外层世界恢复抢先退出。
+        if (phase == Phase.HAND) return prepareHand();
         if (player.containerMenu != player.inventoryMenu) {
             // 同一目标已由其他原生工具打开时，直接沿已确认来源读取当前菜单，不再重复右键或要求先关后开。
             if (phase == Phase.START && MachineMenu.openedAt(player, position)
@@ -68,8 +72,10 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
                 menuReport = MachineMenu.inspect(player); verified = true; reusedMenu = true;
                 return TaskState.SUCCESS;
             }
-            return failure("machine_menu_busy", "An unrelated menu is already open.", FailureType.UNKNOWN);
         }
+        // 合适的目标菜单已经在上方复用；其他旧界面由 Mod 退出，再继续原机器的开菜单步骤。
+        var context = ClientRuntime.requireContext(player);
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         if (NavigationSafetyContext.protectsUse(position)) {
             return failure("machine_menu_protected", "The selected machine is explicitly protected from use.", FailureType.UNSUPPORTED);
         }
@@ -123,6 +129,8 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     // 先用现成空快捷栏；全满时把手持物经可见背包移到真正的空主背包格，并等关闭确认。
     private TaskState prepareHand() {
         var context = ClientRuntime.requireContext(player);
+        // 尚未开始腾手时处理刚出现的挡路页面；一旦开始，就保留所需背包直到停车自身结清。
+        if (!handParking.started() && !context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         // 背包腾手已经开始就先等它完成，不能同时切换别的快捷栏或提前右键机器。
         if (handParking.started()) return parkHand(context);
         if (receipt != null) {

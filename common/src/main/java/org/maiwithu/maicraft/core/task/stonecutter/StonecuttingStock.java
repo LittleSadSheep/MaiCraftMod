@@ -16,7 +16,7 @@ final class StonecuttingStock {
     private final LocalPlayer player;
     private final ResourceLocation input, output;
     private final int count;
-    private final int inputBefore, outputBefore;
+    private int inputBefore, outputBefore;
 
     private StonecuttingStock(LocalPlayer player, ResourceLocation input, ResourceLocation output, int count) {
         this.player = player;
@@ -37,6 +37,8 @@ final class StonecuttingStock {
     /** 投入数量精确等于切制次数；逐叠搬运到切石机输入格，绝不整堆快速移动超额材料。 */
     List<Move> loadMoves(AbstractContainerMenu menu) {
         if (!menu.getSlot(INPUT_SLOT).getItem().isEmpty()) throw new IllegalStateException("stonecutting_input_slot_occupied");
+        // 走到切石机之前可能拾到同类材料；首次投料前重建本批基线，实际切制只按之后的消费与产物核验。
+        inputBefore = countOf(input); outputBefore = countOf(output);
         var moves = new ArrayList<Move>();
         int remaining = count;
         for (int i = 0; i < 36 && remaining > 0; i++) {

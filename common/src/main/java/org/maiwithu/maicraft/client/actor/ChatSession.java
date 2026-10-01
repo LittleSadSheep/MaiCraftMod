@@ -2,8 +2,6 @@
 package org.maiwithu.maicraft.client.actor;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
 import org.maiwithu.maicraft.client.chat.ChatTyping;
 import java.util.Locale;
@@ -36,12 +34,8 @@ public final class ChatSession {
     private long bodyEpoch = -1;
     private boolean opened;
     private boolean submissionHistoryUnknown;
-    // 记录本次原生收尾，暂停恢复也沿用同一请求，避免重复关箱或反复调用页面退出。
-    private MenuReceipt menuClose;
-    private Screen closingScreen;
-    private int screenCloseAttempts;
-    private long screenCloseDeadline;
-    private boolean screenExitFailed;
+    // 聊天与其他角色任务共用原生界面准备，暂停恢复也沿用同一请求和草稿。
+    private final GuiPreparation preparation = new GuiPreparation();
 
     public ChatSession(ChatMessage message, BooleanSupplier beforeSubmit) {
         this(message, new ChatScreenView(), beforeSubmit);
@@ -105,48 +99,15 @@ public final class ChatSession {
 
     /** 已授权聊天被界面挡住时由执行器收尾；容器物品交给游戏返还，关闭确认前不打开聊天框。 */
     private boolean prepareScreen(DefaultLocalPlayerContext context) {
-        if (menuClose != null && menuClose.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-            menuClose = context.menus().poll(context, menuClose);
-            if (!menuClose.terminal()) return false;
-            // 真正的原生关闭失败仍须如实报告，不能强改菜单或把不确定返料当作已完成。
-            if (menuClose.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                status = Status.FAILED;
-                detail = "Native menu closure could not be confirmed before chat: " + menuClose.detail();
-                return false;
-            }
+        // 沿用公共原生退出流程；真正关闭失败时同时保留执行回执和当前挡路对象，供调用方核对。
+        try {
+            if (preparation.ready(context, false) && view.canOpen(context.minecraft())) return true;
+            detail = "Preparing the native world view before continuing this chat.";
+        } catch (RuntimeException failure) {
+            status = Status.FAILED;
+            detail = "Native GUI preparation failed before chat: " + failure.getMessage() + " " + occupiedBy(context);
         }
-        if (context.menus().hasPendingTransaction()) {
-            detail = "Waiting for the existing menu transaction before continuing chat.";
-            return false;
-        }
-        if (context.player().containerMenu != context.player().inventoryMenu
-                || context.minecraft().screen instanceof AbstractContainerScreen<?>) {
-            // 箱子、工作台和玩家背包都走原生关菜单，光标物品及合成余料按游戏规则处理，不手动清空。
-            menuClose = context.menus().close(context, 40);
-            detail = "Closing the native menu before continuing this chat.";
-            return false;
-        }
-        if (!view.canOpen(context.minecraft())) {
-            Screen blocker = context.minecraft().screen;
-            // 暂停菜单、旧聊天框及模组页面各调用自己的退出逻辑；同一页面尚未退出时只等待，不反复关闭。
-            if (blocker != null && blocker != closingScreen) {
-                context.claimMutation();
-                closingScreen = blocker;
-                screenCloseAttempts++;
-                screenCloseDeadline = context.tickRevision() + 40;
-                blocker.onClose();
-            } else if (blocker != null && context.tickRevision() >= screenCloseDeadline) {
-                // 页面拒绝原生退出时给出实际失败，不能让无总期限的聊天永远卡在同一个页面。
-                screenExitFailed = true;
-                status = Status.FAILED;
-                detail = "The screen did not exit after native closure before chat: " + blocker.getClass().getSimpleName();
-                return false;
-            }
-            detail = "Closing the blocking screen before continuing this chat.";
-            return false;
-        }
-        closingScreen = null;
-        return true;
+        return false;
     }
 
     /**
@@ -170,30 +131,30 @@ public final class ChatSession {
         return status;
     }
 
+    // 失败回执点名挡路的界面；调用方凭类名即可判断该关哪个界面，不必逐个试。
+    // 容器菜单优先于 Screen：容器开着时它才是需要关闭的对象，Screen 只是它的外观。
+    private static String occupiedBy(LocalPlayerContext context) {
+        var menu = context.player().containerMenu;
+        if (menu != null && menu != context.player().inventoryMenu)
+            return "Blocked by: " + menu.getClass().getSimpleName() + ".";
+        var screen = context.minecraft().screen;
+        if (screen != null) return "Blocked by: " + screen.getClass().getSimpleName() + ".";
+        return "The blocking screen could not be identified.";
+    }
+
     public Status status() { return status; }
     public String detail() { return detail; }
     public Map<String, Object> evidence() {
         // 容器收尾不确定也必须单独保留；没有发送消息并不能证明鼠标物品已经正确返还。
-        boolean menuUncertain = menuClose != null && (menuClose.status() == MenuReceipt.Status.PENDING
-                || menuClose.status() == MenuReceipt.Status.UNCERTAIN
-                || menuClose.status() == MenuReceipt.Status.DIVERGED);
+        boolean menuUncertain = preparation.uncertain();
         var result = new LinkedHashMap<String, Object>(Map.of("chat_state", status.name().toLowerCase(Locale.ROOT),
                 "typed_characters", typing.typedCharacters(), "total_characters", typing.totalCharacters(),
                 "delivery_status", status == Status.SUBMITTED ? "submitted_to_client"
                         : status == Status.UNCERTAIN || typing.submissionAttempted() ? "unknown" : "not_submitted",
                 "outcome_uncertain", status == Status.UNCERTAIN || menuUncertain,
-                "mechanical_retry_allowed", status == Status.FAILED && !typing.submissionAttempted() && !menuUncertain && !screenExitFailed));
+                "mechanical_retry_allowed", status == Status.FAILED && !typing.submissionAttempted() && !menuUncertain && !preparation.failed()));
         // 自动清理与消息提交分开记账；等待、失败或取消时保留真实关界面回执，不能冒称消息已发送。
-        if (screenCloseAttempts > 0 || menuClose != null) {
-            var preparation = new LinkedHashMap<String, Object>();
-            preparation.put("screen_close_attempts", screenCloseAttempts);
-            if (closingScreen != null) preparation.put("screen_class", closingScreen.getClass().getSimpleName());
-            if (menuClose != null) {
-                preparation.put("menu_close_state", menuClose.status().name().toLowerCase(Locale.ROOT));
-                preparation.put("menu_close_detail", menuClose.detail());
-            }
-            result.put("gui_preparation", Map.copyOf(preparation));
-        }
+        if (!preparation.evidence().isEmpty()) result.put("gui_preparation", preparation.evidence());
         // 重启后的旧预约无法证明上次是否发送，不能用本会话还没调用 submit 冒充整个操作从未发生。
         if (!submissionHistoryUnknown) {
             result.put("submission_attempted", typing.submissionAttempted());

@@ -192,6 +192,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 上一次索引查询是否覆盖完整(构建预算未耗尽)。false = 冷区域仍在渐进构建,
      *  终局判定("附近没有目标")必须等它为 true 才能下。 */
     private boolean lastQueryComplete;
+    /** 最近一次来源查询的实际中心；未声明范围时随玩家移动，回执据此声明真实扫描口径。 */
+    private BlockPos lastQueryCenter;
 
     // 按玩家正常速度逐刻挖掘，与寻路执行器共用 BlockDigger，确保两条破坏路径读取同一进度。
     private final BlockDigger digger;
@@ -1090,6 +1092,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         naturalTrees.beginQuery();
         // 语义取材只扫描冻结的附近范围；直接采矿调用未声明范围时继续使用原有最大区块环。
         BlockPos queryCenter = r.searchCenter() == null ? feet() : r.searchCenter();
+        lastQueryCenter = queryCenter.immutable();
         TargetIndex.Result res = TargetIndex.query(sl, queryCenter, r.targets,
                 MAX_ORES, r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS), QUERY_BUILD_BUDGET, excluded);
         lastQueryComplete = res.complete();
@@ -1372,10 +1375,18 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             data.put("source_now", player.level().isLoaded(r.searchCenter()) ? player.level().getBlockState(r.searchCenter()).toString() : "unloaded");
             if (brokenTargets > 0) data.put("mechanical_retry_allowed", false);
         }
-        // 失败回执说明实际查过的固定范围，不能把附近没有来源说成整个世界都没有。
-        if (r.searchCenter() != null) data.put("search_scope", Map.of(
-                "center", List.of(r.searchCenter().getX(), r.searchCenter().getY(), r.searchCenter().getZ()),
-                "radius_blocks", r.searchRadius(), "index_complete", lastQueryComplete));
+        // 回执声明本轮扫描口径：查询中心、区块半径与天然原木过滤开关都写明，known_sources 跨轮波动才可解释。
+        BlockPos queryCenter = r.searchCenter() != null ? r.searchCenter() : lastQueryCenter;
+        if (queryCenter != null) {
+            Map<String, Object> scope = new LinkedHashMap<>();
+            scope.put("center", List.of(queryCenter.getX(), queryCenter.getY(), queryCenter.getZ()));
+            scope.put("query_chunk_radius", r.searchCenter() != null
+                    ? r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS) : QUERY_MAX_CHUNK_RADIUS);
+            scope.put("index_complete", lastQueryComplete);
+            scope.put("natural_logs_only", r.naturalLogsOnly);
+            if (r.searchCenter() != null) scope.put("radius_blocks", r.searchRadius());
+            data.put("search_scope", scope);
+        }
         if (naturalLogSource) data.put("excluded_unverified_logs", naturalTrees.rejected.size());
         if (naturalLogSource) data.put("unloaded_tree_evidence", naturalTrees.unloadedEvidence);
         data.put("confirmed_harvests", List.copyOf(confirmedHarvests));

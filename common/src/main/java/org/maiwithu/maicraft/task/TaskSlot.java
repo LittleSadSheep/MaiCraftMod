@@ -42,7 +42,7 @@ final class TaskSlot {
             throw new IllegalArgumentException("task record is required");
         }
         if (record != null) {
-            finishByInterruption(player, Task.StopReason.REPLACED);
+            finishByInterruption(player, Task.StopReason.REPLACED, "takeover");
         }
 
         record = next;
@@ -125,17 +125,17 @@ final class TaskSlot {
         if (record == null) {
             return false;
         }
-        finishByInterruption(player, Task.StopReason.REPLACED);
+        finishByInterruption(player, Task.StopReason.REPLACED, "operator_cancel");
         return true;
     }
 
     void bodyGone(LocalPlayer player) {
         if (record != null) {
-            finishByInterruption(player, Task.StopReason.BODY_GONE);
+            finishByInterruption(player, Task.StopReason.BODY_GONE, "body_gone");
         }
     }
 
-    private void finishByInterruption(LocalPlayer player, Task.StopReason reason) {
+    private void finishByInterruption(LocalPlayer player, Task.StopReason reason, String cancelSource) {
         // 如果事情已经做完，就保留原结果；迟到的“取消”不能把已经成功的事说成没做完。
         try {
             task.stop(player, reason);
@@ -144,6 +144,8 @@ final class TaskSlot {
         }
         if (!record.getState().isTerminal()) {
             record.setState(TaskState.CANCELLED);
+            // 只有这次真正转成取消才记来源；已终态的任务保留它原本的结论和来源。
+            record.setCancelSource(cancelSource);
         }
         settle(player);
     }
@@ -171,9 +173,11 @@ final class TaskSlot {
                 }
             }
             if (finished.getResult() == null) {
-                finished.setResult(defaultResult(finished.getState()));
+                finished.setResult(defaultResult(finished));
             }
         } finally {
+            // 未继承公共任务外壳的动作同样结清界面；显式打开和父流程接续菜单的任务自行管理交接。
+            if (task != null && !task.keepsGuiOnCompletion()) ClientRuntime.actor().requestGuiCleanup(player);
             releaseBody(player);
             task = null;
             record = null;
@@ -194,11 +198,11 @@ final class TaskSlot {
         }
     }
 
-    private static TaskResult defaultResult(TaskState state) {
-        return switch (state) {
+    private static TaskResult defaultResult(TaskRecord finished) {
+        return switch (finished.getState()) {
             case SUCCESS -> TaskResult.ok("done");
             case TIMEOUT -> TaskResult.timeout("timed out");
-            case CANCELLED -> TaskResult.cancelled("cancelled");
+            case CANCELLED -> TaskResult.cancelled("cancelled", finished.getCancelSource());
             default -> TaskResult.fail("task failed without a result");
         };
     }

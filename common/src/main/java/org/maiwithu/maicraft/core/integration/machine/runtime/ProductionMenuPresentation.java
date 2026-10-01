@@ -42,8 +42,9 @@ final class ProductionMenuPresentation {
             boolean hasMenu = state.getMenuProvider(player.level(), position) != null
                     || player.level().getBlockEntity(position) instanceof Container;
             if (!required && !hasMenu) return true; // 仓库等面向世界的端口没有容器界面。
-            if (player.containerMenu != player.inventoryMenu || ClientRuntime.requireContext(player).minecraft().screen != null)
-                throw new IllegalStateException("production_menu_busy: preserve the existing screen");
+            // 下一工位开菜单前自动退出旧页面；已绑定的当前生产菜单仍走上方的复用和明确关闭流程。
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureWorldVisible(context)) return false;
             target = position.immutable(); face = requestedFace; work.stopMovement();
             var request = new MachineMenu.OpenRequest(player.level().dimension().location().toString(), target, 0,
                     MachineSurvey.fingerprint(player, target, 0), target, face);

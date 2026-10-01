@@ -57,5 +57,7 @@ public final class ChatTask implements Task {
     }
 
     @Override public String name() { return "chat"; }
+    // 聊天自己退出输入框；玩家接管后留下的草稿不能被外层任务收尾再关一次。
+    @Override public boolean keepsGuiOnCompletion() { return true; }
     @Override public Map<String, Object> progress() { return session.evidence(); }
 }

@@ -79,7 +79,7 @@ final class AttentionSnapshot {
             // 决策、目标修订和终态的完整内容在任务单中；通知保留身份与成败，游标和事件顺序照常推进。
             JsonObject brief = new JsonObject();
             for (String key : List.of("decision_id", "mode", "success", "timed_out", "interrupted",
-                    "completed_step_count", "step_count", "skipped", "reason"))
+                    "cancel_source", "completed_step_count", "step_count", "skipped", "reason"))
                 if (data.has(key)) brief.add(key, data.get(key));
             // 未指定任务的订阅者也必须看到未决消费，随后按 task_id 查当前证据再决定是否继续。
             if (data.has("data") && data.get("data").isJsonObject()) {

@@ -121,7 +121,8 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
         BlockPos target = first ? r.span.first() : r.span.second();
         if (!near(target)) return TaskState.RUNNING;
         var context = ClientRuntime.requireContext(player);
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) return stop("belt_foreign_menu_open");
+        // 安装皮带前先退出旧界面，保留两端选择进度；关页完成后仍由本次任务提交原生点击。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         if (!context.mutationAvailable() || player.getCooldowns().isOnCooldown(player.getMainHandItem().getItem())) return TaskState.RUNNING;
         InputDriver.halt(player); InputDriver.sneak(player, false);
         if (player.isShiftKeyDown()) return TaskState.RUNNING;
@@ -180,7 +181,8 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
         if (!CreateBeltAccess.plainShaft(player.getMainHandItem()) || CreateBeltAccess.shaftCount(player) != countBefore) return stop("belt_shaft_inventory_changed");
         if (!near(at)) return TaskState.RUNNING;
         var context = ClientRuntime.requireContext(player);
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) return stop("belt_foreign_menu_open");
+        // 补中间滑轮时同样自行处理挡路界面，不能把一次页面切换当成整条皮带施工失败。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         if (!context.mutationAvailable() || player.getCooldowns().isOnCooldown(player.getMainHandItem().getItem())) return TaskState.RUNNING;
         InputDriver.halt(player); InputDriver.sneak(player, false);
         if (player.isShiftKeyDown()) return TaskState.RUNNING;

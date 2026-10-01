@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.actor.GuiPreparation;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -55,6 +56,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     private FailureType failType = FailureType.UNKNOWN;
     /** 开始前检查或 {@link #fail} 已确定终态时，下一次更新直接返回它，不再执行新动作。 */
     private TaskState pendingTerminal;
+    private GuiPreparation.Failure guiFailure;
 
     // 记录当前交给子任务处理的步骤及其准备进度。
     /** 当前正在推进的子任务，例如施工前的取料；没有时为 {@code null}。 */
@@ -116,6 +118,10 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
 
     /** 执行代码抛异常时，记日志并把这件任务标为内部错误；已经放下或挖掉的方块不会自动还原。 */
     private void crashed(String phase, RuntimeException e) {
+        // 页面确实拒绝退出或返料没有确认时返回原生事实；已经完成的其他动作仍由各任务自己的回执记账。
+        if (e instanceof GuiPreparation.Failure nativeGui) {
+            guiFailure = nativeGui; fail(nativeGui.getMessage(), FailureType.UNKNOWN); return;
+        }
         Constants.LOG.error(
                 "[maicraft-task] {} 在 {} 阶段抛出异常,本任务判失败(服务端不受影响)",
                 getClass().getSimpleName(), phase, e);
@@ -132,6 +138,14 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         // 路上真动过的地形跟着每一种收场走:成功也好失败也罢,拆了什么就说什么
         String enRoute = journey.isEmpty() ? "" : " En route I had to " + journey.describe() + ".";
         Map<String, Object> data = new LinkedHashMap<>(resultData());
+        if (guiFailure != null) {
+            data.put("gui_preparation", guiFailure.evidence());
+            data.put("outcome_uncertain", Boolean.TRUE.equals(data.get("outcome_uncertain")) || guiFailure.uncertain());
+            data.put("mechanical_retry_allowed", false);
+        }
+        // 世界任务结束后排入统一原生关页；菜单链的中间步骤明确保留，后继动作等待同一收尾即可续做。
+        if (!keepsGuiOnCompletion() && ClientRuntime.actor().requestGuiCleanup(player))
+            data.put("gui_cleanup", Map.of("state", "scheduled"));
         if (finalState == TaskState.FAILED) {
             data.putIfAbsent("failure_type", failType.name().toLowerCase(Locale.ROOT));
         }

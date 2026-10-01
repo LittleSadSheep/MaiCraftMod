@@ -24,7 +24,8 @@ public final class HarvestEvidenceContractTest {
             check(row.getAsJsonObject("position").get("y").getAsInt() == 106,
                     "不同层级的结果编码都应保留实际受损方块位置");
             check(row.get("block_state").getAsString().endsWith("[axis=y]"), "保留原方块状态供核查");
-            check(!row.has("slot") && !row.has("route") && !data.has("position")
+            // 现场位置可同时随采掘明细和子结果保留；内部点击槽与导航脚本继续过滤。
+            check(!row.has("slot") && !row.has("route") && data.get("position").equals(gson.toJsonTree(position))
                     && !data.has("slot") && !data.has("route"), "观察证据不能夹带可重放的内部动作计划");
         }
         var bad = Map.of("confirmed_harvests", List.of(Map.of("position", Map.of("x", 0.5, "y", 2, "z", 3))));
@@ -35,7 +36,7 @@ public final class HarvestEvidenceContractTest {
         var raw = new TaskResult(false, "reached the exact cell -71,106,-4.", true, false, child);
         var projected = SemanticResultView.result(raw);
         check(!projected.success() && projected.timedOut() && !projected.interrupted(), "结果投影应保留原有终态");
-        check(projected.message().equals("reached the exact target cell."), "到达说明应保留完整句意");
+        check(projected.message().equals(raw.message()), "到达说明保留实际位置，不能逼模型另查现场");
         check(child.containsKey("route") && child.containsKey("position"), "投影不能修改原始任务证据");
         System.out.println("HarvestEvidenceContractTest: passed");
     }

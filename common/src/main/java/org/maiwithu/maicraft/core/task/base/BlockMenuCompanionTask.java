@@ -50,6 +50,7 @@ public abstract class BlockMenuCompanionTask<R extends NativeSubmissionTaskRecor
     private boolean openRequested;
     private long waitMenuUntil;
     private String issue;
+    private boolean inputsPrepared;
 
     protected BlockMenuCompanionTask(LocalPlayer player, R record) { super(player, record); }
 
@@ -92,21 +93,29 @@ public abstract class BlockMenuCompanionTask<R extends NativeSubmissionTaskRecor
     }
 
     @Override protected final void onStart() {
-        // 已有人正在用菜单或拿着光标物品时拒绝接管；不会为了准备加工清空对方的工作槽。
-        if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()) {
-            failIssue(names().codePrefix() + "existing_menu_or_cursor_in_use", FailureType.INTERRUPTED); return;
-        }
+        // 目标有效性先检查；旧页面和鼠标物品交给首刻的公共准备，不在接单时提前拒绝加工。
+        if (!targetPresent()) failIssue(names().codePrefix() + names().targetNoun() + "_missing_or_unloaded", FailureType.TARGET_LOST);
+    }
+
+    private void prepareAfterGui() {
+        // 关页返料后再检查子类条件并盘点输入，不能沿用退料前的库存去误报缺料或开始加工。
         String blocker = additionalStartBlocker();
         if (blocker != null) { failIssue(blocker, FailureType.INTERRUPTED); return; }
         if (!targetPresent()) {
             failIssue(names().codePrefix() + names().targetNoun() + "_missing_or_unloaded", FailureType.TARGET_LOST);
             return;
         }
-        if (!prepareInputs()) return;
+        if (prepareInputs()) inputsPrepared = true;
     }
 
     @Override protected final TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
+        if (!inputsPrepared) {
+            if (!travelMenu.worldReady(context)) return TaskState.RUNNING;
+            prepareAfterGui();
+            if (issue != null) return TaskState.FAILED;
+            if (!inputsPrepared) return TaskState.RUNNING;
+        }
         if (flow != null) {
             // 目标方块消失只通知一次；已经进入安全归还后仍需让同一搬运子任务确认，不能每刻重新打断它。
             if (!targetPresent() && !flow.hasFailure()) {

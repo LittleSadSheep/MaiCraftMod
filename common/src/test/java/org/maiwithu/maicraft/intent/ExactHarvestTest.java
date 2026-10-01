@@ -55,7 +55,12 @@ public final class ExactHarvestTest {
             check(task.tick(h.player) == TaskState.FAILED && record.getMined() == 0,
                     "changed source fails before an unrelated inventory increment can satisfy harvest");
             check(task.result(TaskState.FAILED).data().get("confirmed_source_breaks").equals(0), "no source break is invented");
-            check(AbilityAdapter.adapt(goal(SOURCE), h.player, null) instanceof IntentAction.Decision, "mismatching block entity is rejected before dispatch");
+            // 失配拒绝要附上目标坐标当下的真实观察；调用方凭 requested/observed 对照即可分辨证据过期或坐标记错。
+            var refused = AbilityAdapter.adapt(goal(SOURCE), h.player, null);
+            check(refused instanceof IntentAction.Decision mismatch
+                    && mismatch.snapshot().contextJson().contains("\"observed_block_id\":\"minecraft:chest\"")
+                    && mismatch.snapshot().contextJson().contains("\"requested_block_id\":\"minecraft:cobblestone\""),
+                    "mismatching block entity is rejected before dispatch and names what is actually there");
         }
         try (var h = new InteractionWorldTestHarness()) {
             h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE)); h.set(SOURCE, Blocks.COBBLESTONE.defaultBlockState());

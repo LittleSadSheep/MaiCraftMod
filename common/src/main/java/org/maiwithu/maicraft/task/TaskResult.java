@@ -17,14 +17,22 @@ import java.util.Collection;
  * @param timedOut 是否因为超过执行时间而结束。
  * @param interrupted 是否被叫停，例如玩家取消任务。
  * @param data 这件事的具体结果，例如挖了多少块；没有附加信息时使用空 Map。
+ * @param cancelSource 取消来源；只有 interrupted 为真时才可能有值，区分新任务接管、操作者取消等入口。
  */
 public record TaskResult(boolean success,
                          String message,
                          boolean timedOut,
                          boolean interrupted,
-                         Map<String, Object> data) {
+                         Map<String, Object> data,
+                         String cancelSource) {
 
     private static final Gson GSON = new Gson();
+
+    /** 旧的三参布尔形态继续可用；这些调用点都不掌握取消来源，置为未知。 */
+    public TaskResult(boolean success, String message, boolean timedOut,
+                      boolean interrupted, Map<String, Object> data) {
+        this(success, message, timedOut, interrupted, data, null);
+    }
 
     /** 下面几组方法分别创建成功、失败、超时和取消的答复，避免调用者自己拼布尔值。 */
     public static TaskResult ok(String message, Map<String, Object> data) {
@@ -51,6 +59,15 @@ public record TaskResult(boolean success,
         return new TaskResult(false, message, false, true, Map.of());
     }
 
+    public static TaskResult cancelled(String message, String cancelSource) {
+        return new TaskResult(false, message, false, true, Map.of(), cancelSource);
+    }
+
+    /** 只替换附加结果，保留成败与取消来源；包装回执时不许把这些事实弄丢。 */
+    public TaskResult withData(Map<String, Object> data) {
+        return new TaskResult(success, message, timedOut, interrupted, data, cancelSource);
+    }
+
     /** 转成工具回复使用的 JSON 文本；未发生超时或取消时省略对应字段，没有附加结果时省略 data。 */
     public String toJson() {
         JsonObject root = new JsonObject();
@@ -58,6 +75,7 @@ public record TaskResult(boolean success,
         root.addProperty("message", message == null ? "" : message);
         if (timedOut) root.addProperty("timed_out", true);
         if (interrupted) root.addProperty("interrupted", true);
+        if (cancelSource != null && !cancelSource.isBlank()) root.addProperty("cancel_source", cancelSource);
         if (data != null && !data.isEmpty()) {
             JsonObject dataObj = new JsonObject();
             for (Map.Entry<String, Object> e : data.entrySet()) {

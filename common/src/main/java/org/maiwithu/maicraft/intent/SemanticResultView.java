@@ -40,7 +40,7 @@ public final class SemanticResultView {
                 || key.endsWith("_cells")
                 || key.endsWith("_ops")
                 || key.endsWith("_placements")
-                || key.endsWith("_receipts")
+                // 原生回执记录已经发生的动作和未知项；它不是可执行脚本，不能因名称后缀把证据整组删除。
                 || key.endsWith("_routes")
                 || key.endsWith("_waypoints")
                 || key.endsWith("_path_nodes")
@@ -66,7 +66,7 @@ public final class SemanticResultView {
                 .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target");
     }
 
-    /** 保留成功、超时和中断事实，只转换其对外文字与证据格式。 */
+    /** 对外包装保留成功、超时、中断与取消来源，玩家接管后的说明不能在语义转换时丢失。 */
     public static TaskResult result(TaskResult raw) {
         if (raw == null) return TaskResult.fail("internal action failed");
         return new TaskResult(
@@ -74,7 +74,8 @@ public final class SemanticResultView {
                 message(raw.message()),
                 raw.timedOut(),
                 raw.interrupted(),
-                data(raw.data()));
+                data(raw.data()),
+                raw.cancelSource());
     }
 
     public static Map<String, Object> data(Map<String, ?> source) {
@@ -169,13 +170,12 @@ public final class SemanticResultView {
         if (key.equals("container_observation")) return value;
         // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。
         if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return value;
-        // 已经实际挖过的方块是供人核查的事实，因此这个字段例外保留位置，最多列出三十二块。
+        // 已经实际挖过的方块是供人核查的事实，保留全部位置与状态，不能把后续采掘效果悄悄截掉。
         if (!"confirmed_harvests".equals(key)) return sanitizeValue(value);
         var json = new Gson().toJsonTree(value);
         if (!json.isJsonArray()) return List.of();
         List<Object> result = new ArrayList<>();
         for (var entry : json.getAsJsonArray()) {
-            if (result.size() == 32) break;
             if (!entry.isJsonObject()) continue;
             var row = entry.getAsJsonObject();
             Map<String, Object> clean = new LinkedHashMap<>();

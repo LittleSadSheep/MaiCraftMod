@@ -54,12 +54,12 @@ public final class MachineMenuHandParkingTest {
             check(h.step(new MachineMenuHandParking()) == MachineMenuHandParking.Status.FAILED && h.opens == 0,
                     "a fully occupied inventory is rejected without manufacturing an empty slot");
             world.inventory.setItem(12, ItemStack.EMPTY); world.player.inventoryMenu.setCarried(new ItemStack(Items.DIAMOND));
-            check(h.step(new MachineMenuHandParking()) == MachineMenuHandParking.Status.FAILED && world.player.inventoryMenu.getCarried().is(Items.DIAMOND),
+            check(h.step(new MachineMenuHandParking()) == MachineMenuHandParking.Status.RUNNING && world.player.inventoryMenu.getCarried().is(Items.DIAMOND),
                     "an unrelated cursor is never cleared");
             world.player.inventoryMenu.setCarried(ItemStack.EMPTY); world.player.inventoryMenu.getSlot(1).set(new ItemStack(Items.DIAMOND));
-            check(h.step(new MachineMenuHandParking()) == MachineMenuHandParking.Status.FAILED && h.opens == 0, "unrelated crafting-grid contents are not returned or discarded during close");
+            check(h.step(new MachineMenuHandParking()) == MachineMenuHandParking.Status.RUNNING && h.opens == 0, "waiting for world preparation does not manually clear crafting inputs");
             world.player.inventoryMenu.getSlot(1).set(ItemStack.EMPTY); Screen foreign = h.screen(); world.h.minecraft.screen = foreign;
-            var parking = new MachineMenuHandParking(); check(h.step(parking) == MachineMenuHandParking.Status.FAILED, "preexisting inventory screen is not adopted");
+            var parking = new MachineMenuHandParking(); check(h.step(parking) == MachineMenuHandParking.Status.RUNNING, "preexisting inventory waits for world preparation instead of being adopted");
             parking.cleanup(world.player); check(world.h.minecraft.screen == foreign && h.closes == 0 && h.swaps == 0, "foreign GUI and all inventory stacks remain untouched");
         }
     }
@@ -95,6 +95,10 @@ public final class MachineMenuHandParkingTest {
             world.inventory.setItem(12, ItemStack.EMPTY); world.inventory.selected = 4;
             var tool = new ItemStack(Items.IRON_PICKAXE); tool.set(DataComponents.CUSTOM_NAME, Component.literal("Owner's tool")); tool.setDamageValue(7); world.inventory.setItem(4, tool);
             MenuPort menus = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(), new Class<?>[]{MenuPort.class}, (proxy, method, args) -> switch (method.getName()) {
+                // 此夹具只验证停车流程；公共退出由 GuiRecoveryTest 回放，这里注入尚未结清的等待结果。
+                case "ensureWorldVisible" -> world.player.inventoryMenu.getCarried().isEmpty()
+                        && world.player.inventoryMenu.getSlot(1).getItem().isEmpty()
+                        && DefaultBodyControlPort.permitsWorldMovement(world.h.minecraft.screen);
                 case "ensureVisible" -> {
                     if (!visible) { opens++; visible = true; mutationTick = tick; world.h.minecraft.screen = screen(); yield false; }
                     yield rendered && mutationTick != tick;

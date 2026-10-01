@@ -320,9 +320,10 @@ public final class CompanionTickDispatcher {
     private static void abandon(TaskRecord record, String reason) {
         if (!record.getState().isTerminal()) {
             record.setState(TaskState.CANCELLED);
+            record.setCancelSource("handoff_abandoned");
         }
         if (record.getResult() == null) {
-            record.setResult(TaskResult.cancelled(reason));
+            record.setResult(TaskResult.cancelled(reason, "handoff_abandoned"));
         }
         String callId = record.getToolCallId();
         if (callId != null && !callId.isBlank()) {

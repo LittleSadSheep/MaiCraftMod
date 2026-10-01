@@ -31,13 +31,13 @@ public final class ChatGuiPreparationTest {
     // 明确拒绝退出的模组页面不能让无总期限聊天永久等待，也不能反复关闭或偷偷发送。
     private static void refusedScreenExitIsBounded() throws Exception {
         var h = new ActorControlTestHarness();
-        int[] closes = {0};
-        h.minecraft.screen = new PauseScreen(true) { @Override public void onClose() { closes[0]++; } };
+        var screen = new RefusingPauseScreen(); h.minecraft.screen = screen;
         var view = new View();
         var session = new ChatSession(new ChatMessage("x", 50), view, () -> true);
         session.tick(h.context, 0);
         for (int i = 0; i < 40; i++) advance(h, session);
-        check(session.status() == ChatSession.Status.FAILED && closes[0] == 1 && view.sent == 0
+        check(session.status() == ChatSession.Status.FAILED && screen.closes == 1 && view.sent == 0
+                && session.detail().contains("RefusingPauseScreen")
                 && Boolean.FALSE.equals(session.evidence().get("mechanical_retry_allowed")), "真实拒绝退出有界结束且不重试或发送");
     }
 
@@ -130,17 +130,27 @@ public final class ChatGuiPreparationTest {
         var replacement = menu(); h.player.containerMenu = replacement;
         advance(h, session);
         check(session.status() == ChatSession.Status.FAILED && !view.active && view.sent == 0
-                && h.player.containerMenu == replacement && Boolean.TRUE.equals(session.evidence().get("outcome_uncertain"))
+                && h.player.containerMenu == replacement && session.detail().contains("TestMenu")
+                && Boolean.TRUE.equals(session.evidence().get("outcome_uncertain"))
                 && Boolean.FALSE.equals(session.evidence().get("mechanical_retry_allowed")),
                 "真实关闭失败应保留新菜单和未知效果，不强制成功或允许机械重试");
     }
 
     // 使用真实菜单回执和可见性等待；只把无窗口环境中的关箱与输入框展示替换为可计数的事实。
     private static AbstractContainerMenu menu() {
-        return new AbstractContainerMenu(null, 7) {
-            @Override public ItemStack quickMoveStack(Player player, int slot) { return ItemStack.EMPTY; }
-            @Override public boolean stillValid(Player player) { return true; }
-        };
+        return new TestMenu();
+    }
+    // 具名菜单让退出失败回执能指出当前容器，保留原生菜单身份变化与关闭确认的测试边界。
+    private static final class TestMenu extends AbstractContainerMenu {
+        private TestMenu() { super(null, 7); }
+        @Override public ItemStack quickMoveStack(Player player, int slot) { return ItemStack.EMPTY; }
+        @Override public boolean stillValid(Player player) { return true; }
+    }
+    // 模拟模组暂停页收到原生退出请求后仍占用画面，核对超时诊断指向真正挡路的页面。
+    private static final class RefusingPauseScreen extends PauseScreen {
+        private int closes;
+        private RefusingPauseScreen() { super(true); }
+        @Override public void onClose() { closes++; }
     }
     private static void advance(ActorControlTestHarness h, ChatSession session) throws Exception {
         h.nextTick(true); MenuVisibility.rendered(h.minecraft.screen); h.actor.menus().advance(h.context);

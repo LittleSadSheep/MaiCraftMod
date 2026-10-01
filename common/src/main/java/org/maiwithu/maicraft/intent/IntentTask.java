@@ -50,6 +50,8 @@ import org.maiwithu.maicraft.task.TaskState;
  * 调度器只看到这个总任务，里面的小任务由这里推进，不会把总任务挤走。
  */
 final class IntentTask implements Task {
+    // 每个原生子步骤已分别收尾，显式开菜单交给下一请求；总任务不能再误关这份有效菜单。
+    @Override public boolean keepsGuiOnCompletion() { return true; }
 
     private final LocalPlayer player;
     private final IntentTaskRecord record;
@@ -101,7 +103,11 @@ final class IntentTask implements Task {
         } finally {
             // 查询和 Attention 使用实际观察到的当前子任务进度。
             // 诊断失败不能打断角色动作，也不能覆盖真正的任务结果。
-            try { record.observeExecution(progress(), player.level().getGameTime()); }
+            try {
+                Map<String, Object> observation = progress();
+                record.observeExecution(observation, player.level().getGameTime());
+                runtime.publishProgress(record, observation, player.level().getGameTime());
+            }
             catch (RuntimeException ignoredDiagnosticFailure) { }
         }
     }
@@ -118,7 +124,8 @@ final class IntentTask implements Task {
         if (answer != null) {
             if ("cancel".equals(answer.choice()) || "cancel_task".equals(answer.choice())) {
                 mechanicalContinuations.clear();
-                terminalResult = TaskResult.cancelled("cancelled at decision " + answer.decisionId());
+                record.setCancelSource("answer_cancel");
+                terminalResult = TaskResult.cancelled("cancelled at decision " + answer.decisionId(), "answer_cancel");
                 return TaskState.CANCELLED;
             }
             if ("respawn".equals(answer.choice()) || "spectate".equals(answer.choice())) {
@@ -361,7 +368,7 @@ final class IntentTask implements Task {
             machineData.put("machine_geometry_verified", result.success());
             machineData.put("machine_production_verified", false);
             machineData.put("verification_scope", "Mod-compiled physical targets and confirmed native effects; inspect menus, interfaces and actual production separately");
-            result = new TaskResult(result.success(), result.message(), result.timedOut(), result.interrupted(), machineData);
+            result = result.withData(machineData);
         }
         InternalPositionReceipt.Position internalPosition = result.success()
                 && finishingRecord instanceof InternalPositionReceipt receipt
@@ -431,8 +438,8 @@ final class IntentTask implements Task {
         // 当前步骤失败或被放弃后，其位置不能再成为后续 prior_result 的依据。
         record.discardInternalStepPosition(record.stepIndex());
         captureMechanicalContinuation(currentGoal(), result);
-        TaskResult failure = withEffectLedger(SemanticResultView.result(
-                result == null ? TaskResult.fail("internal action failed") : result));
+        TaskResult failure = withEffectLedger(SemanticResultView.result(FailureObservation.attach(
+                result == null ? TaskResult.fail("internal action failed") : result, player)));
         Goal failedGoal = currentGoal();
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
                 record.stepIndex(),
@@ -684,7 +691,7 @@ final class IntentTask implements Task {
             result = switch (terminal) {
                 case SUCCESS -> completionResult();
                 case TIMEOUT -> TaskResult.timeout("semantic task timed out");
-                case CANCELLED -> TaskResult.cancelled("semantic task cancelled");
+                case CANCELLED -> TaskResult.cancelled("semantic task cancelled", record.getCancelSource());
                 default -> TaskResult.fail("semantic task failed");
             };
         }
@@ -693,7 +700,7 @@ final class IntentTask implements Task {
         }
         Map<String, Object> projectData = new LinkedHashMap<>(result.data());
         addBuildProjects(projectData);
-        result = new TaskResult(result.success(), result.message(), result.timedOut(), result.interrupted(), projectData);
+        result = result.withData(projectData);
         if (!terminalPublished) {
             terminalPublished = true;
             record.terminal(terminal, result, player.level().getGameTime());
@@ -720,7 +727,7 @@ final class IntentTask implements Task {
         for (String key : List.of("outcome_uncertain", "effects_started", "mechanical_retry_allowed")) {
             if (clean.data().containsKey(key)) data.put(key, clean.data().get(key));
         }
-        return new TaskResult(parent.success(), parent.message(), parent.timedOut(), parent.interrupted(), data);
+        return parent.withData(data);
     }
 
     private TaskResult completionResult() {

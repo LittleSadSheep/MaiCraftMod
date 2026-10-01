@@ -35,7 +35,8 @@ import net.minecraft.world.item.Item;
 public final class EnchantWorkflowGuardTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        exactPreparation(); unavailableMaterials(); sourceChanges(); foreignMenusAndHandoff(); terminalChildCleanup(); resultDisplayAndProgress();
+        exactPreparation(); unavailableMaterials(); sourceChanges(); movedSourceKeepsIdentity();
+        foreignMenusAndHandoff(); terminalChildCleanup(); resultDisplayAndProgress();
         System.out.println("EnchantWorkflowGuardTest: inventory selection, foreign-menu guards and terminal cleanup passed");
     }
 
@@ -87,6 +88,21 @@ public final class EnchantWorkflowGuardTest {
             world.inventory.getItem(0).setDamageValue(12);
             rejects(() -> inventory.loadInput(menu), "source_changed");
             check(menu.getSlot(0).getItem().isEmpty(), "a changed source must be rejected before pickup");
+        }
+    }
+
+    private static void movedSourceKeepsIdentity() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            var sword = new ItemStack(Items.DIAMOND_SWORD); sword.setDamageValue(7);
+            world.inventory.setItem(0, sword); world.inventory.setItem(1, new ItemStack(Items.LAPIS_LAZULI, 3));
+            var inventory = EnchantInventory.prepare(world.player, record(Items.DIAMOND_SWORD));
+            world.inventory.setItem(9, sword); world.inventory.setItem(0, new ItemStack(Items.DIRT));
+            var menu = new EnchantmentMenu(57, world.inventory); world.player.containerMenu = menu;
+            var move = inventory.loadInput(menu).getFirst();
+            // 仍选择原来带损耗的剑，换槽只刷新原生入口；成品预留格被占后在当前背包重新找空位。
+            check(menu.getSlot(move.from()).getContainerSlot() == 9 && move.count() == 1, "移槽后继续装入同一件装备");
+            world.inventory.setItem(9, new ItemStack(Items.DIRT)); inventory.requireOutputSpace();
+            check(inventory.input.getDamageValue() == 7 && menu.getSlot(0).getItem().isEmpty(), "重新选槽不执行消费或替换组件");
         }
     }
 

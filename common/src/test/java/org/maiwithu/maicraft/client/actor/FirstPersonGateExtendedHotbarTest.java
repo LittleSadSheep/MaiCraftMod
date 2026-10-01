@@ -100,6 +100,8 @@ public final class FirstPersonGateExtendedHotbarTest {
             world.nextTick();
             MenuPort menus = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(),
                     new Class<?>[]{MenuPort.class}, (proxy, method, args) -> switch (method.getName()) {
+                        // 本回放将已确认关闭后的世界界面作为事实注入，公共退出本身由 GuiRecoveryTest 验证。
+                        case "ensureWorldVisible" -> !visible && mutationTick != tick;
                         case "ensureVisible" -> {
                             if (!visible) {
                                 opens++; visible = true; mutationTick = tick;

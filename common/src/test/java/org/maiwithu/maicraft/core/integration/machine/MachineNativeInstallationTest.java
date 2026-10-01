@@ -83,10 +83,14 @@ public final class MachineNativeInstallationTest {
                 public TaskRecord task(String id, long deadline, List<BlockPos> footprint, List<String> labels) { throw new AssertionError("blocked installation must not start"); }
             };
             var blockedPlan = constructor.newInstance(new BlockPos(2, 1, 2), targets, List.of(), List.of(), new JsonObject(), true, false, List.of(blocked), List.of(), new JsonObject());
-            check(new MachineBuildSurvey(blockedPlan).tick(h.level).failure().contains("authorized clearance"), "replacement permission does not override the obstacle whitelist");
+            // 已声明的安装路径里，可破坏旧垫块直接进入清理清单；作者声明的范围不再套用寻路白名单。
+            var declaredSurvey = new MachineBuildSurvey(blockedPlan);
+            check(declaredSurvey.tick(h.level).failure() == null && declaredSurvey.partClears().contains(obstacle),
+                    "declared native installation paths clear breakable old pads without the clearance whitelist");
             check(blockedPlan.blockTask("blocked", 1000, false).targets.stream().noneMatch(target -> target.pos().equals(obstacle)), "implicit native path remains absent from ordinary demolition tasks");
-            // 实际父任务的终态、对外净化和注意摘要都必须能定位阻塞，不能只留下笼统的空路径提示。
-            var surveyTask = new MachineBuildTask(h.player, new MachineBuildTaskRecord("survey-receipt", 1000, blockedPlan, "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of()));
+            // 未给替换许可时障碍仍然受阻；实际父任务的终态、对外净化和注意摘要都必须能定位阻塞，不能只留下笼统的空路径提示。
+            var refusedPlan = constructor.newInstance(new BlockPos(2, 1, 2), targets, List.of(), List.of(), new JsonObject(), false, false, List.of(blocked), List.of(), new JsonObject());
+            var surveyTask = new MachineBuildTask(h.player, new MachineBuildTaskRecord("survey-receipt", 1000, refusedPlan, "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of()));
             check(invoke(surveyTask, "surveyParts") == TaskState.FAILED, "occupied native path stops before construction");
             var receipt = SemanticResultView.result(surveyTask.result(TaskState.FAILED));
             var clearance = (Map<?, ?>) receipt.data().get("clearance_report");

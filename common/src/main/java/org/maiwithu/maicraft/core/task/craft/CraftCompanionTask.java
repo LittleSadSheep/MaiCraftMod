@@ -79,6 +79,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private MenuReceipt menuReceipt;
     // 配方未解锁或合法材料无法被配方簿搬动时，按同一批次改走可确认的原生槽位点击。
     private CraftingGridPlacement gridPlacement;
+    private int placementRefreshes;
     private String placementMethod = "not_started";
     private boolean recipeBookUnlocked;
     private Map<String, Object> placementFailureEvidence = Map.of();
@@ -106,6 +107,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private String pendingFailureMessage;
     private FailureType pendingFailureType;
     private boolean terminalGridCleanupUnconfirmed;
+    private boolean foreignGridPreserved;
     private long stationAimRequestedRevision = Long.MIN_VALUE;
     private boolean requiresTable;
     private final CraftingWorkstationCoordinator workstation =
@@ -629,9 +631,20 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             InputDriver.halt(player);
             int previousMoves = gridPlacement.confirmedMoves();
             var outcome = gridPlacement.tick(context);
-            if (gridPlacement.confirmedMoves() > previousMoves) renewProgressLease();
+            if (gridPlacement.confirmedMoves() > previousMoves) { renewProgressLease(); placementRefreshes = 0; }
             if (outcome == CraftingGridPlacement.Outcome.RUNNING) return TaskState.RUNNING;
-            if (outcome == CraftingGridPlacement.Outcome.FAILED) {
+            if (outcome == CraftingGridPlacement.Outcome.REFRESH_REQUIRED && placementRefreshes++ < 2) {
+                // 同一批尚未点击时重新扫描背包并生成原配方选槽；不清理空网格，也不让模型重新提交合成。
+                gridPlacement = null; return TaskState.RUNNING;
+            }
+            if (outcome == CraftingGridPlacement.Outcome.FAILED || outcome == CraftingGridPlacement.Outcome.REFRESH_REQUIRED) {
+                if (!gridPlacement.submitted()) {
+                    // 只冻结过空网格尚未点击时，后来出现的物品不属于本任务；保留现场，不能自动快速移动或关菜单认领它。
+                    foreignGridPreserved = true; gridCommitmentStarted = false;
+                    String detail = gridPlacement.issue(); gridPlacement = null;
+                    recordPlacementFailure("crafting_preparation_changed_before_submission", detail);
+                    fail(detail, FailureType.TARGET_LOST); return TaskState.FAILED;
+                }
                 String detail = gridPlacement.issue(); gridPlacement = null;
                 recordPlacementFailure("crafting_native_placement_unconfirmed", detail);
                 return beginGridReturnFailure(detail, FailureType.UNKNOWN);
@@ -1445,8 +1458,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         if (ownsUnsettledGrid) terminalGridCleanupUnconfirmed = true;
         try {
             var context = ClientRuntime.requireContext(player);
-            if (player.containerMenu != player.inventoryMenu || ownsUnsettledGrid
-                    || MenuVisibility.inventoryVisible(context.minecraft(), player)) {
+            if (!foreignGridPreserved && (player.containerMenu != player.inventoryMenu || ownsUnsettledGrid
+                    || MenuVisibility.inventoryVisible(context.minecraft(), player))) {
                 menuReceipt = context.menus().closeForTaskBoundary(
                         context, 20,
                         "the crafting task ended before its active menu transaction settled");
@@ -1472,6 +1485,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         data.put("recipe_book_unlocked", recipeBookUnlocked);
         if (!placementFailureEvidence.isEmpty()) data.put("crafting_placement_evidence", placementFailureEvidence);
         data.put("crafting_grid_cleanup_verified", gridCleanupVerified);
+        data.put("foreign_grid_preserved", foreignGridPreserved);
         if (terminalGridCleanupUnconfirmed) {
             data.put("crafting_grid_cleanup_unconfirmed_on_terminal", true);
         }
@@ -1506,6 +1520,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
     @Override protected String successMessage() { return "crafted " + crafted + " item(s) via " + r.recipeId; }
     @Override protected String cancelledMessage() { return "craft interrupted"; }
+    // 首次点击前被外来内容占用的界面交还原持有者，公共任务收尾同样不得替它搬运或关闭。
+    @Override public boolean keepsGuiOnCompletion() { return foreignGridPreserved; }
 
     private String childId(String label) {
         return r.getToolCallId() + "-craft-surface-" + label + "-" + (++surfaceChildSerial);

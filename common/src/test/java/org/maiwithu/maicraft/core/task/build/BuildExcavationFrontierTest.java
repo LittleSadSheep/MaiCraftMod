@@ -20,8 +20,9 @@ public final class BuildExcavationFrontierTest {
                 "open the surface before asking navigation to reach a buried basement floor");
         check(BuildExcavationFrontier.select(Set.of(footing, top), Set.of(), feet).equals(top),
                 "retain the current footing while another cell can be worked");
-        check(BuildExcavationFrontier.select(Set.of(floor, top), Set.of(top), feet) == null,
-                "an inaccessible top layer must not redirect excavation into buried cells");
+        // 单层站位失败后仍选择蓝图内其他待拆层；能否真正挖到由原生站位和准星核验，不能在选目标时提前判整项失败。
+        check(BuildExcavationFrontier.select(Set.of(floor, top), Set.of(top), feet).equals(floor),
+                "an inaccessible candidate does not abandon other authorized excavation targets");
         check(BuildExcavationFrontier.select(Set.of(floor), Set.of(), feet).equals(floor),
                 "advance to the lower layer after the overburden is removed");
         var square = Set.copyOf(UltimineSelectionPolicy
@@ -64,8 +65,9 @@ public final class BuildExcavationFrontierTest {
         check(BuildExcavationFrontier.overhead(remaining, feet)
                 && BuildExcavationFrontier.select(remaining, Set.of(), feet).equals(low), "三层头顶障碍先清最近低层，不能先找最高阁楼");
         check(BuildExcavationFrontier.select(remaining, Set.of(low), feet).equals(lowPeer), "同层一个点失败时仍可尝试该层另一点");
-        check(BuildExcavationFrontier.select(remaining, Set.of(low, lowPeer), feet) == null,
-                "最低层全被拒绝就停止，不能把尚未打开的通路跳过去");
+        // 低层候选已耗尽时仍检查其他声明目标的真实可达性，不用高度顺序推测整片施工必然失败。
+        check(BuildExcavationFrontier.select(remaining, Set.of(low, lowPeer), feet).equals(middle),
+                "最低层候选被拒绝后尝试下一层，原生站位检查继续约束实际动作");
         remaining.remove(low); remaining.remove(lowPeer);
         check(BuildExcavationFrontier.select(remaining, Set.of(), feet).equals(middle), "低层确实清完才升到下一层");
         remaining.remove(middle);

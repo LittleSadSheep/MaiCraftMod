@@ -154,6 +154,8 @@ import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 /** 验证真实可见性策略和架构边界；实际界面点击仍需在游戏中测试。 */
 public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
+        // 同一菜单中的同步与移槽由 Mod 刷新后续作，失败仍带出可用现场。
+        MachineMenuRecoveryTest.main(args);
         // 水下低顶逃生先检查实际换气链的输入，避免单独路径测试掩盖持续顶墙上浮。
         BreathChainControlTest.main(args);
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
@@ -185,6 +187,8 @@ public final class GuiRegressionSuite {
         ChatGuiPreparationTest.main(args);
         ChatAbilityTest.main(args);
         MenuVisibilityTest.main(args);
+        // 普通任务终局和世界动作都原生退出挡路页面，菜单步骤仍保留自己需要的真实容器。
+        GuiRecoveryTest.main(args);
         MenuConfirmationLatencyTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);

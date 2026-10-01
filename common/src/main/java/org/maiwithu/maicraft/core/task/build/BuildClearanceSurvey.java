@@ -13,12 +13,12 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.LiquidBlock;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 
 /** 只读检查清障冲突，再按水平移动距离核对整份蓝图的新位置；建议不会移动角色或改写冻结工程。 */
 public final class BuildClearanceSurvey {
-    public static final String FAILURE = "build_clearance_not_whitelisted";
+    public static final String FAILURE = "build_clearance_blocked";
     private static final int RADIUS = 16, MAX_SEARCH_READS = 262144;
     private static final List<BlockPos> SHIFTS = shifts();
     // 未加载返回 null；世界边界和保护格用 mutable 拒绝，已有符合蓝图的方块仍可保留。
@@ -29,7 +29,6 @@ public final class BuildClearanceSurvey {
     private final String dimension;
     private final Function<BlockPos, Observation> observe;
     private final BiPredicate<BlockPos, BlockState> ownedSupport;
-    private final BiPredicate<BlockPos, BlockState> machineEdit;
     private final boolean fixedModification;
     private final List<Map<String, Object>> obstacles = new ArrayList<>(), suggestions = new ArrayList<>();
     private int scanned, conflicts, unloaded, candidate, candidateCell, searchReads, unknownCandidates;
@@ -55,22 +54,22 @@ public final class BuildClearanceSurvey {
                     if (!level.isLoaded(at)) return null;
                     var state = level.getBlockState(at);
                     return new Observation(state, !protectedArea.contains(at.asLong()) && !forbidden.contains(at.asLong()),
-                            state.getDestroySpeed(level, at) >= 0 && state.getFluidState().isEmpty());
-                }, plan.scaffoldLedger()::owns, plan::observedMachineEdit, plan.fixedMachineModification());
+                            // 清理含水固体后让原版水流自行结算；纯水和岩浆没有可挖实体，仍不当作挖掘路线。
+                            state.getDestroySpeed(level, at) >= 0 && !(state.getBlock() instanceof LiquidBlock));
+                }, plan.scaffoldLedger()::owns, plan.fixedMachineModification());
     }
 
     BuildClearanceSurvey(List<BuildTaskRecord.Target> targets, ReplaceMode replace, boolean replaceEntities,
                          String dimension, Function<BlockPos, Observation> observe,
                          BiPredicate<BlockPos, BlockState> ownedSupport) {
-        this(targets, replace, replaceEntities, dimension, observe, ownedSupport, (at, state) -> false, false);
+        this(targets, replace, replaceEntities, dimension, observe, ownedSupport, false);
     }
     private BuildClearanceSurvey(List<BuildTaskRecord.Target> targets, ReplaceMode replace, boolean replaceEntities,
                          String dimension, Function<BlockPos, Observation> observe,
-                         BiPredicate<BlockPos, BlockState> ownedSupport,
-                         BiPredicate<BlockPos, BlockState> machineEdit, boolean fixedModification) {
+                         BiPredicate<BlockPos, BlockState> ownedSupport, boolean fixedModification) {
         this.targets = List.copyOf(targets); this.replace = replace; this.replaceEntities = replaceEntities;
         this.dimension = dimension; this.observe = observe; this.ownedSupport = ownedSupport;
-        this.machineEdit = machineEdit; this.fixedModification = fixedModification;
+        this.fixedModification = fixedModification;
     }
 
     /** 每刻只读取有限格子；先收集原地冲突，再从最近偏移开始逐格检查，未知区块绝不当作空地。 */
@@ -81,17 +80,16 @@ public final class BuildClearanceSurvey {
                 var target = targets.get(index);
                 var seen = observe.apply(target.pos());
                 if (seen == null) { unloaded++; continue; }
-                if (seen.state() != null && needsClearance(target, seen.state())
-                        && !ownedSupport.test(target.pos(), seen.state()) && !machineEdit.test(target.pos(), seen.state())
-                        && !ClearanceWhitelist.allows(seen.state())) {
+                // 已声明目标就是本次施工范围；只检查原生可破坏性及明确保留规则，不再要求障碍命中清障名单或旧快照。
+                if (seen.state() != null && needsClearance(target, seen.state()) && !usable(target, seen, target.pos())) {
                     conflicts++;
-                    if (obstacles.size() < 16) obstacles.add(Map.of("at", coordinates(target.pos()),
+                    obstacles.add(Map.of("at", coordinates(target.pos()),
                             "block_id", id(seen.state()), "target_index", index,
                             "expected_block_id", id(target.desiredState()), "has_block_entity", seen.state().hasBlockEntity(),
                             "required_permissions", missingPermissions(target, seen.state()),
                             "reason", !replace.allows(seen.state(), target.desiredState()) ? "replacement_not_authorized"
                                     : seen.state().hasBlockEntity() && !replaceEntities ? "block_entity_replacement_not_authorized"
-                                    : fixedModification ? "target_not_in_bound_observation_or_state_changed" : "ordinary_site_clearance_not_whitelisted"));
+                                    : !seen.mutable() ? "explicitly_protected_or_outside_world" : "native_block_not_breakable"));
                 }
                 continue;
             }
@@ -103,7 +101,7 @@ public final class BuildClearanceSurvey {
             var target = targets.get(candidateCell);
             var seen = observe.apply(target.pos().offset(shift)); searchReads++;
             if (seen == null) { unknownCandidates++; nextCandidate(); continue; }
-            if (!usable(target, seen)) { nextCandidate(); continue; }
+            if (!usable(target, seen, target.pos().offset(shift))) { nextCandidate(); continue; }
             if (++candidateCell == targets.size()) {
                 bestDistance = distance(shift);
                 suggestions.add(Map.of("offset", coordinates(shift), "horizontal_distance_squared", bestDistance,
@@ -115,7 +113,7 @@ public final class BuildClearanceSurvey {
     }
 
     // 每个候选必须覆盖整份蓝图，包括空气目标；不会只避开第一个障碍就把其他房间移到机器或未知区块上。
-    private boolean usable(BuildTaskRecord.Target target, Observation seen) {
+    private boolean usable(BuildTaskRecord.Target target, Observation seen, BlockPos observedAt) {
         if (seen.state() == null) return false;
         if (target.constructionMatches(seen.state())) return true;
         if (!seen.mutable()) return false;
@@ -123,8 +121,8 @@ public final class BuildClearanceSurvey {
         // 隔断可直接覆盖流水或草，选址不能要求先挖掉它们；原生放置仍会验证具体物品、支撑面与目标状态。
         if (!needsClearance(target, seen.state())) return replace.allows(seen.state(), target.desiredState())
                 && (replaceEntities || !seen.state().hasBlockEntity());
-        return seen.breakable() && ClearanceWhitelist.allows(seen.state())
-                && replace.allows(seen.state(), target.desiredState())
+        // 评估平移场地时核对候选格自身的临时支撑归属，原址的旧支撑不能授权拆除旁边同材质方块。
+        return seen.breakable() && (replace.allows(seen.state(), target.desiredState()) || ownedSupport.test(observedAt, seen.state()))
                 && (replaceEntities || !seen.state().hasBlockEntity());
     }
 
@@ -137,8 +135,7 @@ public final class BuildClearanceSurvey {
     public boolean blocked() { return conflicts > 0; }
     /** 轴也可能带原生方块实体；把缺少的替换许可说清，不能让模型误以为它只需要再找一块空地。 */
     public String failureMessage() {
-        return fixedModification ? "Declared machine targets lack replacement permission or changed since observation; see clearance_report."
-                : "Clearance whitelist excludes site obstacles; consider clearance_report site offsets.";
+        return "Declared targets encounter an explicit preservation rule or a native clearing limit; see clearance_report.";
     }
     private List<String> missingPermissions(BuildTaskRecord.Target target, BlockState state) {
         // 一次列出所有缺少的显式选项，避免只补普通替换后又为同一根轴往返一次。
@@ -151,7 +148,7 @@ public final class BuildClearanceSurvey {
     /** 位置和偏移使用有明确含义的数组，供 LLM 选择新址；不把局部核对结果宣称为完整施工可行性。 */
     public Map<String, Object> report() {
         var result = new LinkedHashMap<String, Object>();
-        result.put("dimension", dimension); result.put("whitelist_config", ClearanceWhitelist.CONFIG);
+        result.put("dimension", dimension); result.put("clearance_scope", "declared_blueprint_targets");
         result.put("conflict_count", conflicts); result.put("obstacles", List.copyOf(obstacles));
         result.put("obstacles_truncated", conflicts > obstacles.size()); result.put("unloaded_targets", unloaded);
         result.put("suggested_offsets", List.copyOf(suggestions));
@@ -159,8 +156,8 @@ public final class BuildClearanceSurvey {
         result.put("search", Map.of("horizontal_radius", RADIUS, "checked_observations", searchReads,
                 "unknown_candidates", unknownCandidates, "budget_exhausted", limited,
                 "minimum_proven_in_radius", done && !limited && unknownCandidates == 0 && !suggestions.isEmpty()));
-        result.put("advice", fixedModification ? "这是原位机器修改。保留指定坐标，重新检查已变化或尚未获得替换许可的具体方块；平移拆除目标不能修复原机器。" : suggestions.isEmpty()
-                ? "附近已加载范围内尚未证明可用的平移位置；扩大场地观察后考虑其他选址，保留名单外障碍。"
+        result.put("advice", fixedModification ? "这是原位机器修改。按返回的具体保护规则或原生限制决定下一步；旧快照变化不撤销声明格的施工范围。" : suggestions.isEmpty()
+                ? "附近已加载范围内尚未证明可用的平移位置；返回的障碍已包含具体限制。"
                 : "优先考虑建议中的最小水平偏移，保持蓝图形状和高度；重新观察地基与通路后在新址创建工程。旧工程及已建部分不会自动搬迁。"
         );
         result.put("requires_site_review", true);

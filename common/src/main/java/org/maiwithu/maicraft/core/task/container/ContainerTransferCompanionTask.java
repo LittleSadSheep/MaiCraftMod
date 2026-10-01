@@ -22,6 +22,8 @@ import java.util.LinkedHashMap;
  */
 public final class ContainerTransferCompanionTask
         extends AbstractCompanionTask<ContainerTransferTaskRecord> {
+    // 连续合成或存取的中间搬运保留当前菜单，由完整父流程决定何时退出。
+    @Override public boolean keepsGuiOnCompletion() { return !r.closeAfter; }
     /** 只有游戏确认一次菜单点击生效才给长搬运续时；等待中的点击不能无限续时。 */
     private static final long CLICK_PROGRESS_LEASE_TICKS = 60L * 20L;
     private enum Phase { BEGIN, QUICK, PICKUP, PLACE_ALL, SPLIT, SWAP_DEST, RETURN_CURSOR, CLOSE, FAILING }

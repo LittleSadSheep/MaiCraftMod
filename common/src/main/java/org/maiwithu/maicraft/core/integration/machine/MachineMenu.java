@@ -68,9 +68,7 @@ public final class MachineMenu {
         final Origin origin;
         final long bodyEpoch;
         final long expires;
-        final int stateId;
         final List<WeakReference<Slot>> entries;
-        final List<ItemStack> contents;
 
         Inspection(LocalPlayer self, AbstractContainerMenu menu, Origin origin,
                    ClientActorBoundary.ObservationStamp stamp) {
@@ -79,9 +77,7 @@ public final class MachineMenu {
             this.origin = origin;
             this.bodyEpoch = stamp.bodyEpoch();
             this.expires = stamp.tickRevision() + RECEIPT_TICKS;
-            this.stateId = menu.getStateId();
             this.entries = menu.slots.stream().map(WeakReference::new).toList();
-            this.contents = menu.slots.stream().map(slot -> slot.getItem().copy()).toList();
         }
     }
 
@@ -135,7 +131,7 @@ public final class MachineMenu {
 
     /**
      * 读取当前菜单和实际携带物品。只有本流程打开、仍可见、鼠标没有拿物品且来源仍有效的菜单才给存取编号。
-     * 编号最多保留十六份，约六百次角色更新后过期；报告不解释配方或控制数据的业务含义。
+     * 编号最多保留十六份，离开原菜单的旧编号定期清理；报告不解释配方或控制数据的业务含义。
      */
     public static JsonObject inspect(LocalPlayer self) {
         Minecraft minecraft = Minecraft.getInstance();
@@ -156,9 +152,10 @@ public final class MachineMenu {
         out.addProperty("data_meanings_verified", false);
         out.addProperty("cursor_empty", menu.getCarried().isEmpty());
         out.addProperty("menu_entry_count", menu.slots.size());
-        out.addProperty("truncated", menu.slots.size() > MAX_ENTRIES);
+        out.addProperty("truncated", false);
         JsonArray entries = new JsonArray();
-        for (int index = 0; index < Math.min(MAX_ENTRIES, menu.slots.size()); index++) {
+        // 机器的全部槽位都是当前事实；可操作范围单独校验，观察不能隐去后半段库存。
+        for (int index = 0; index < menu.slots.size(); index++) {
             Slot slot = menu.slots.get(index);
             JsonObject entry = new JsonObject();
             entry.addProperty("entry_index", index);
@@ -175,7 +172,7 @@ public final class MachineMenu {
             JsonArray acceptable = new JsonArray();
             // 这些是实际携带的候选物品堆叠，不是推断出的配方或任意槽位分类。
             Set<String> acceptedIds = new LinkedHashSet<>();
-            for (int inventory = 0; inventory < 36 && acceptable.size() < 16; inventory++) {
+            for (int inventory = 0; inventory < 36; inventory++) {
                 ItemStack candidate = self.getInventory().getItem(inventory);
                 if (candidate.isEmpty()) continue;
                 String id = BuiltInRegistries.ITEM.getKey(candidate.getItem()).toString();
@@ -191,8 +188,8 @@ public final class MachineMenu {
         JsonArray values = new JsonArray();
         if ((Object) menu instanceof MenuDataSlotsAccessor accessor) {
             var data = accessor.maicraft$dataSlots();
-            for (int index = 0; index < Math.min(128, data.size()); index++) values.add(data.get(index).get());
-            out.addProperty("data_values_truncated", data.size() > 128);
+            for (int index = 0; index < data.size(); index++) values.add(data.get(index).get());
+            out.addProperty("data_values_truncated", false);
         }
         out.add("data_values", values);
         Origin origin = ORIGINS.get(menu);
@@ -207,7 +204,8 @@ public final class MachineMenu {
         out.addProperty("transfer_receipt_available", canTransfer);
         if (canTransfer) {
             INSPECTIONS.entrySet().removeIf(entry -> entry.getValue().player.get() == null
-                    || entry.getValue().menu.get() == null || entry.getValue().expires < stamp.tickRevision());
+                    || entry.getValue().menu.get() == null
+                    || entry.getValue().expires < stamp.tickRevision() && entry.getValue().menu.get() != menu);
             while (INSPECTIONS.size() >= MAX_RECEIPTS) INSPECTIONS.remove(INSPECTIONS.keySet().iterator().next());
             UUID id = UUID.randomUUID();
             INSPECTIONS.put(id, new Inspection(self, menu, origin, stamp));
@@ -228,7 +226,7 @@ public final class MachineMenu {
         return out;
     }
 
-    // 先移除一次性编号，再核对玩家、菜单、身体版本、有效期、槽位对象和所有内容；失败后也需重新观察。
+    // 先消费一次性编号，再核对原机器菜单及槽位身份；库存同步和等待时间不改变已授权的物品、数量与目标槽。
     static Inspection consume(String token, LocalPlayer player) {
         final UUID id;
         try { id = UUID.fromString(token); }
@@ -239,15 +237,9 @@ public final class MachineMenu {
         AbstractContainerMenu menu = player.containerMenu;
         if (inspection.player.get() != player || inspection.menu.get() != menu
                 || !MenuVisibility.matches(context.minecraft(), menu)
-                || inspection.bodyEpoch != context.bodyEpoch() || inspection.expires < context.tickRevision()
-                || menu.getStateId() != inspection.stateId || !menu.getCarried().isEmpty()
+                || inspection.bodyEpoch != context.bodyEpoch() || !menu.getCarried().isEmpty()
                 || !sameEntries(inspection, menu)) {
-            throw new IllegalArgumentException("the observed menu session changed; inspect it again");
-        }
-        for (int index = 0; index < menu.slots.size(); index++) {
-            if (!same(menu.getSlot(index).getItem(), inspection.contents.get(index))) {
-                throw new IllegalArgumentException("menu contents changed since inspection; inspect it again");
-            }
+            throw new IllegalArgumentException("the observed machine menu or entry identity is no longer current");
         }
         return inspection;
     }

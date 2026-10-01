@@ -497,7 +497,7 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
                 "in_place_supply_stopped", reason, stopUncertain);
     }
 
-    // 鼠标拿着物品时先拒绝。可复用已打开的终端，否则先找无线终端，再尝试已记住或附近的固定终端。
+    // 结清旧页面和鼠标物品后复用已打开的终端，否则找无线终端，再尝试已记住或附近的固定终端。
     private void start(LocalPlayerContext context) {
         // 库存查询只使用随身无线入口；找不到或已掉线时报告未知，不转去搜索别人的固定终端。
         if (request.wirelessOnly() && !Ae2ResourceSupply.hasCarriedWirelessTerminal(player)) {
@@ -510,12 +510,10 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (!player.containerMenu.getCarried().isEmpty()) {
-            if (request.operation() == Ae2ResourceSupply.Operation.DEPOSIT) preserveUnrelatedMenu = true;
-            finishNow(Ae2ResourceSupply.Status.FAILED, "inventory_cursor_busy",
-                    "clear the inventory cursor before exact AE2 extraction", false);
-            return;
+            // 原生关页负责返还鼠标余物；返回后的实际库存再用于同一请求，不把清理拆给模型。
+            if (!context.menus().ensureWorldVisible(context)) return;
         }
-        if (bridge.isStorageMenu(player.containerMenu)) {
+        if (bridge.isStorageMenu(player.containerMenu) && !context.menus().hasPendingTransaction()) {
             if (request.wirelessOnly() && Ae2DepositAccess.read(player.containerMenu, player, bridge, null).itemSlot() == null) {
                 preserveUnrelatedMenu = true;
                 finishNow(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "wireless_access_scope_mismatch", "the open terminal belongs to another access scope", false); return;
@@ -524,17 +522,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             setPhase(Phase.WAIT_REPOSITORY);
             return;
         }
-        if (!worldAccessAvailable(context)) {
-            // 已接管自动化且普通背包没有鼠标余物或合成原料时，原生关包后自动续同一次AE查询。
-            if (MenuVisibility.idlePlayerInventory(context.minecraft(), player)) {
-                if (!context.mutationAvailable()) return;
-                menuReceipt = context.menus().close(context, 40);
-                setPhase(Phase.WAIT_INITIAL_INVENTORY_CLOSE); return;
-            }
-            finishNow(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open",
-                    "close the current screen before opening an AE2 terminal", false);
-            return;
-        }
+        // 所有旧页面都走公共准备；关闭尚在确认时即使画面已消失也等待，不提前开终端。
+        if (!context.menus().ensureWorldVisible(context)) return;
 
         if (request.operation() != Ae2ResourceSupply.Operation.DEPOSIT
                 && !request.wirelessOnly()
@@ -819,10 +808,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "ae2_deposit_access_denied", "The fixed terminal is outside the approved deposit access scope");
             return;
         }
-        if (!worldAccessAvailable(context)) {
-            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open", "another GUI interrupted terminal opening");
-            return;
-        }
+        // 固定终端尚未点击时自行退出挡路页面，仍打开已经选定的这一个终端。
+        if (!context.menus().ensureWorldVisible(context)) return;
         Ae2TerminalAccess.FixedTarget target = fixedTarget;
         if (target == null || !Ae2TerminalAccess.stillPresent(
                 player, bridge, target.position(), target.side())) {
@@ -923,10 +910,8 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
     }
 
     private void openWireless(LocalPlayerContext context) {
-        if (!worldAccessAvailable(context)) {
-            beginFinish(Ae2ResourceSupply.Status.RETRYABLE_FAILURE, "screen_open", "another GUI interrupted terminal opening");
-            return;
-        }
+        // 无线终端尚未提交使用时同样自行关页，保留原来的终端槽位和请求身份。
+        if (!context.menus().ensureWorldVisible(context)) return;
         if (selectedTerminalSlot < 0 || wireless == null) {
             beginFinish(Ae2ResourceSupply.Status.FAILED, "wireless_terminal_missing",
                     "the selected wireless AE2 terminal is unavailable");
@@ -1846,7 +1831,9 @@ final class Ae2SupplySession implements Ae2ResourceSupply.Session {
             return;
         }
         if (!ownsOpenMenu(context)) {
-            finishCleanupFailure("unrelated_screen_open");
+            // 取料已结算后遇到另一页面也原生退出，真实取出量不因这一收尾页面改变而改判失败。
+            if (!context.menus().ensureWorldVisible(context)) return;
+            serverMenu = null; setPhase(Phase.CLEAN_SELECT);
             return;
         }
         if (serverSupply != null && serverMenu != null && !serverMenu.readyToClose(context)) return;

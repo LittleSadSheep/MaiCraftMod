@@ -15,12 +15,17 @@ import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.item.crafting.ShapedRecipePattern;
 import org.maiwithu.maicraft.core.task.craft.CraftingGridPlacement;
 import org.maiwithu.maicraft.core.task.craft.CraftingPlacementPlan;
+import org.maiwithu.maicraft.core.task.craft.CraftCompanionTask;
+import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
+import org.maiwithu.maicraft.task.TaskState;
+import net.minecraft.resources.ResourceLocation;
 
 /** 使用真实原生菜单点击搬运材料，回放余料返还、结果延迟和服务器拒绝，禁止重复提交或伪造产物。 */
 public final class CraftingGridPlacementTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        placement(2, true); placement(1, true); placement(2, false); rejectedPickup();
+        placement(2, true); placement(1, true); placement(2, false); rejectedPickup(); refreshBeforeFirstPickup();
+        foreignGridBeforePickupIsPreserved();
         System.out.println("CraftingGridPlacementTest: passed");
     }
 
@@ -76,6 +81,48 @@ public final class CraftingGridPlacementTest {
             h.inventory.setItem(0, new ItemStack(Items.COAL, 2)); menu.setCarried(ItemStack.EMPTY); menu.incrementStateId();
             check(placement.tick(h.h.context) == CraftingGridPlacement.Outcome.FAILED && h.mode.menuClicks == 1,
                     "a rejected pickup ends without resubmitting or placing phantom ingredients");
+        }
+    }
+
+    private static void refreshBeforeFirstPickup() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.enableCraftingTransactions(); h.inventory.setItem(0, new ItemStack(Items.COAL)); h.inventory.setItem(1, new ItemStack(Items.STICK));
+            var menu = h.player.containerMenu; var grid = (CraftingContainer) menu.getSlot(1).container;
+            var placement = new CraftingGridPlacement(menu, CraftingPlacementPlan.create(h.player, recipe(), grid), 0, new ItemStack(Items.TORCH, 4));
+            h.inventory.setItem(0, ItemStack.EMPTY); h.inventory.setItem(9, new ItemStack(Items.COAL));
+            CraftingGridPlacement.Outcome state = CraftingGridPlacement.Outcome.RUNNING;
+            for (int tick = 0; tick < 10 && state == CraftingGridPlacement.Outcome.RUNNING; tick++) {
+                MenuVisibility.rendered(h.h.minecraft.screen); state = placement.tick(h.h.context); h.nextTick();
+            }
+            check(state == CraftingGridPlacement.Outcome.REFRESH_REQUIRED && h.mode.menuClicks == 0, "第一笔点击前可重选当前原料槽");
+            placement = new CraftingGridPlacement(menu, CraftingPlacementPlan.create(h.player, recipe(), grid), 0, new ItemStack(Items.TORCH, 4));
+            state = CraftingGridPlacement.Outcome.RUNNING;
+            for (int tick = 0; tick < 100 && state == CraftingGridPlacement.Outcome.RUNNING; tick++) {
+                MenuVisibility.rendered(h.h.minecraft.screen); state = placement.tick(h.h.context);
+                if (recipe().matches(grid.asCraftInput(), h.level)) menu.getSlot(0).set(new ItemStack(Items.TORCH, 4));
+                h.nextTick();
+            }
+            check(state == CraftingGridPlacement.Outcome.READY && h.mode.menuClicks == 4, "同配方刷新后仅执行本批真实搬运");
+        }
+    }
+
+    private static void foreignGridBeforePickupIsPreserved() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.enableCraftingTransactions(); h.inventory.setItem(0, new ItemStack(Items.COAL)); h.inventory.setItem(1, new ItemStack(Items.STICK));
+            var menu = h.player.containerMenu; var grid = (CraftingContainer) menu.getSlot(1).container;
+            var placement = new CraftingGridPlacement(menu, CraftingPlacementPlan.create(h.player, recipe(), grid), 0, new ItemStack(Items.TORCH, 4));
+            var task = new CraftCompanionTask(h.player, new CraftTaskRecord("foreign", 1000, ResourceLocation.parse("minecraft:torch"), 4, null));
+            ActorControlTestHarness.field(task.getClass(), "gridPlacement").set(task, placement);
+            ActorControlTestHarness.field(task.getClass(), "gridCommitmentStarted").setBoolean(task, true);
+            menu.getSlot(1).set(new ItemStack(Items.DIAMOND));
+            var advance = task.getClass().getDeclaredMethod("placeRecipe"); advance.setAccessible(true);
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 10 && !state.isTerminal(); tick++) {
+                MenuVisibility.rendered(h.h.minecraft.screen); state = (TaskState) advance.invoke(task); h.nextTick();
+            }
+            task.result(state);
+            check(state == TaskState.FAILED && task.keepsGuiOnCompletion() && h.mode.menuClicks == 0
+                    && menu.getSlot(1).getItem().is(Items.DIAMOND), "零点击时出现的外来物品不得被失败收尾搬走");
         }
     }
 

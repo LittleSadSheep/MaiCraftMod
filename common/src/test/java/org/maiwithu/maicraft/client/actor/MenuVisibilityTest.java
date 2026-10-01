@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import sun.misc.Unsafe;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -26,15 +27,26 @@ public final class MenuVisibilityTest {
         Minecraft minecraft = (Minecraft) memory.allocateInstance(Minecraft.class);
         LocalPlayer player = (LocalPlayer) memory.allocateInstance(LocalPlayer.class);
         InventoryMenu inventory = (InventoryMenu) memory.allocateInstance(InventoryMenu.class);
+        // 可见性夹具也保持原版空游标基线，不能把未初始化字段当作正在等待原生返料。
+        inventory.setCarried(ItemStack.EMPTY);
         assign(Player.class, player, "inventoryMenu", inventory);
         player.containerMenu = inventory;
         long[] tick = {0};
         boolean[] mutationAvailable = {true};
+        // 此夹具只核对可见性：世界准备由独立原生回放验证，这里显式提供新入口的等待结果。
+        MenuPort menuPort = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(),
+                new Class<?>[]{MenuPort.class}, (proxy, method, args2) -> {
+                    if (method.getName().equals("ensureWorldVisible"))
+                        return mutationAvailable[0] && DefaultBodyControlPort.permitsWorldMovement(minecraft.screen)
+                                && player.containerMenu == inventory;
+                    throw new AssertionError("Unexpected menu access: " + method.getName());
+                });
         LocalPlayerContext context = (LocalPlayerContext) Proxy.newProxyInstance(
                 LocalPlayerContext.class.getClassLoader(), new Class<?>[]{LocalPlayerContext.class},
                 (proxy, method, values) -> switch (method.getName()) {
                     case "minecraft" -> minecraft;
                     case "player" -> player;
+                    case "menus" -> menuPort;
                     case "tickRevision" -> tick[0];
                     case "mutationAvailable" -> mutationAvailable[0];
                     default -> throw new AssertionError("Unexpected context access: " + method);
@@ -63,7 +75,7 @@ public final class MenuVisibilityTest {
         mutationAvailable[0] = true;
         minecraft.screen = (PauseScreen) memory.allocateInstance(PauseScreen.class);
         check(!DefaultBodyControlPort.permitsWorldMovement(minecraft.screen), "other user dialogs still block movement");
-        check(!worldSession.worldReady(context), "other user dialogs cannot be closed to select an item");
+        check(!worldSession.worldReady(context), "blocked views wait for the native preparation result");
         check(worldSession.close(context), "unused world session needs no menu cleanup");
         minecraft.screen = screen;
         check(MenuVisibility.inventoryVisible(minecraft, player), "inventory screen identity matches");

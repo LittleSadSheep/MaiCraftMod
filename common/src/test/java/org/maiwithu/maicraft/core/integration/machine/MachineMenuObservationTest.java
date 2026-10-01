@@ -101,8 +101,9 @@ public final class MachineMenuObservationTest {
                 inventory.setItem(i, stack);
             }
             var ids = acceptable(player);
-            check(ids.size() == 16 && ids.stream().distinct().count() == 16,
-                    "component checks must retain the existing bounded list of distinct item ids");
+            // 背包中第十七种可用材料也会影响下一次投料，不能为了摘要长度让模型误以为不被接纳。
+            check(ids.size() == 17 && ids.stream().distinct().count() == 17,
+                    "component checks retain every accepted carried item id");
         } finally {
             inventory.clearContent();
             menu.slots.set(0, original);

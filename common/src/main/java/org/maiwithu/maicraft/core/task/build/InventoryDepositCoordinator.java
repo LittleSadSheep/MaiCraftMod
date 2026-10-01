@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
@@ -85,11 +86,12 @@ public final class InventoryDepositCoordinator {
         carriedOnly = true;
     }
     public Tick tick(LocalPlayer player, Function<Task, TaskState> runChild) {
-        // 存土石 -> 确认背包与箱内数量变化 -> 关箱；外来界面或游标出现时先停下，不替玩家处理它们。
+        // 退出旧页面 -> 存土石 -> 确认背包与箱内数量变化 -> 关箱；当前搬运子任务的菜单保持可用。
         if (status != Status.RUNNING) return new Tick(status, receipt());
         if (player != owner || player.level() != world) { cancel(owner); return fail("excavation_spoil_body_or_world_changed"); }
         if (child != null) return tickChild(runChild);
-        if (!menuClosed()) return fail("excavation_spoil_foreign_menu_or_cursor");
+        var context = ClientRuntime.requireContext(player);
+        if (!context.menus().ensureWorldVisible(context)) return new Tick(Status.RUNNING, receipt());
         while (index < items.size() && remaining(items.get(index)) == 0) { index++; attempts = 0; visited.clear(); }
         if (index == items.size()) { status = Status.DEPOSITED; return new Tick(status, receipt()); }
         if (world.getGameTime() >= deadline) return fail("excavation_spoil_deadline");

@@ -23,7 +23,7 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import org.maiwithu.maicraft.core.Constants;
 
-/** 网络层的大回执暂存：默认保留决策摘要，原始观察冻结到压缩文件，随后读取不会重新采样或操作玩家。 */
+/** 网络层的大回执完整交付并冻结到压缩文件，随后读取不会重新采样或操作玩家。 */
 final class ResponseArchive implements AutoCloseable {
     static final String PREFIX = "maicraft://receipts/";
     static final int INLINE_CHARS = 8000;
@@ -78,6 +78,8 @@ final class ResponseArchive implements AutoCloseable {
                 default -> throw new IllegalArgumentException("Unknown receipt page parameter");
             }
         }
+        // 首次读取一次交付选中的完整证据，仍须拒绝非法页码，不能因跳过分页而接受错误参数。
+        if (offset < 0 || limit < 1 || limit > 50) throw new IllegalArgumentException("Invalid receipt offset or limit");
         Entry stored = entries.get(id);
         if (stored == null) throw new IllegalArgumentException("receipt_expired: query task/get or repeat the read-only observation; do not repeat execute to recover a receipt");
         String uri = PREFIX + id;

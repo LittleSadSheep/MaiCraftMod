@@ -173,10 +173,11 @@ public final class GeneralAbilityAdapter {
                 || !BuiltInRegistries.ITEM.containsKey(outputId) || BuiltInRegistries.ITEM.get(outputId) == Items.AIR)
             return exactBlockUnavailable(goal, "Harvest needs installed block_id and expected_output_item_id.", null);
         var position = goal.target().position(); BlockPos at = new BlockPos(position.x(), position.y(), position.z());
-        if (!player.level().isLoaded(at)) return exactBlockUnavailable(goal, "The exact harvest target is not loaded.", null);
+        if (!player.level().isLoaded(at)) return exactBlockUnavailable(goal, "The exact harvest target is not loaded.", targetFacts(player, at, blockId));
         var state = player.level().getBlockState(at);
         if (!state.is(BuiltInRegistries.BLOCK.get(blockId)) || state.isAir() || !state.getFluidState().isEmpty() || state.hasBlockEntity())
-            return exactBlockUnavailable(goal, "The target must match block_id and be a solid resource without a block entity.", null);
+            return exactBlockUnavailable(goal, "The target must match block_id and be a solid resource without a block entity.",
+                    targetFacts(player, at, blockId));
         return new IntentAction.Native(new MineBlockTaskRecord("semantic-harvest-" + UUID.randomUUID(),
                 player.level().getGameTime() + 1200, Set.of(state.getBlock()), 1, blockId.toString(),
                 Set.of(BuiltInRegistries.ITEM.get(outputId))).onlyAt(at, state));
@@ -741,6 +742,20 @@ public final class GeneralAbilityAdapter {
                 List.of(option("recover", "Observe or load the exact target, then retry."),
                         option("replace_goal", "Choose an explicitly different target."),
                         option("cancel", "Cancel interaction.")), facts);
+    }
+
+    // 失配回执带上目标坐标当下的真实观察（与 interactExactBlock 的 facts 同构）；
+    // 调用方对照 requested_block_id 与 observed_block_id 即可分辨证据过期还是坐标记错，不必往返重查。
+    private static JsonObject targetFacts(LocalPlayer player, BlockPos at, ResourceLocation requested) {
+        JsonObject facts = new JsonObject();
+        facts.addProperty("x", at.getX());
+        facts.addProperty("y", at.getY());
+        facts.addProperty("z", at.getZ());
+        facts.addProperty("requested_block_id", requested.toString());
+        facts.addProperty("observed_block_id", player.level().isLoaded(at)
+                ? BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock()).toString()
+                : "unloaded");
+        return facts;
     }
 
     private static IntentAction compileBlockInteraction(
