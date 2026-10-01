@@ -10,11 +10,6 @@ public final class MenuReceipt {
     public enum Kind { CLICK, SWAP_TO_HOTBAR, PLACE_RECIPE, CLOSE, BUTTON }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, DIVERGED, UNCERTAIN }
 
-    /** 最近一次到达 UNCERTAIN 的菜单回执快照，供调试面板与人工核验对账；消费可能已发生，只保留最近一次。 */
-    public record UncertainSnapshot(Kind kind, int slot, String menuClass,
-                                    long submittedTick, int timeoutTicks, String detail) {}
-    private static volatile UncertainSnapshot lastUncertain;
-
     private final UUID id = UUID.randomUUID();
     private final Kind kind;
     private final long bodyEpoch;
@@ -91,19 +86,12 @@ public final class MenuReceipt {
     void clearUnacknowledgedApplied() {
         unacknowledgedAppliedSince = Long.MIN_VALUE;
     }
-    public static UncertainSnapshot lastUncertain() { return lastUncertain; }
-
     void finish(Status status, String detail) {
         // 已结束的结果不会在这里被后来的槽位回滚改写，因此不能过早给出确定结论。
         if (terminal()) return;
         this.status = status;
         this.detail = detail;
-        // finish 是所有回执的唯一终态收口：审计日志与 UNCERTAIN 快照挂在这里才能覆盖每一条提交路径。
-        if (status == Status.UNCERTAIN) {
-            lastUncertain = new UncertainSnapshot(kind, slot,
-                    submittedMenu == null ? null : submittedMenu.getClass().getSimpleName(),
-                    submittedTick, (int) (deadlineTick - submittedTick), detail);
-        }
+        // finish 是所有回执的唯一终态收口：审计日志挂在这里才能覆盖每一条提交路径。
         if (status == Status.UNCERTAIN || status == Status.DIVERGED) {
             Constants.LOG.warn("menu {} slot={} -> {} (budget {}t, submitted @t{}, containerId={}): {}",
                     kind, slot, status, deadlineTick - submittedTick, submittedTick, containerId, detail);

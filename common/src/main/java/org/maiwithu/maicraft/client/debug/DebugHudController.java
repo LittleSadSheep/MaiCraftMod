@@ -9,11 +9,12 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
-import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
+import org.maiwithu.maicraft.mcp.McpActivityTrace;
 import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.JsonObject;
 
@@ -59,24 +60,39 @@ public final class DebugHudController {
                         : "未监听 · " + clamp(ClientRuntime.lastMcpError()),
                 listening ? ChatFormatting.GREEN : ChatFormatting.RED));
 
+        // LLM 反复感知而不提交目标就是效率问题；计数自上次 execute 起算，视图是它最近一次看的。
+        String views = McpActivityTrace.lastPerceiveViews();
+        if (views != null) {
+            rows.add(new Row("感知", (views == null || views.isBlank() ? "默认" : views)
+                    + " · 距上次行动 " + McpActivityTrace.perceivesSinceAction() + " 次",
+                    ChatFormatting.GRAY));
+        }
+
         boolean inWorld = minecraft.player != null && minecraft.level != null
                 && minecraft.gameMode != null && minecraft.getConnection() != null;
         rows.add(new Row("身体", (inWorld ? "就绪" : "等待世界") + " · " + controlState(inWorld),
                 inWorld ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
 
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
-        IntentTaskRecord active = IntentRuntime.get().tasks(50).stream()
+        List<IntentTaskRecord> open = IntentRuntime.get().tasks(50).stream()
                 .filter(record -> !record.getState().isTerminal())
-                .findFirst()
-                .orElse(null);
+                .toList();
+        IntentTaskRecord active = open.isEmpty() ? null : open.getFirst();
         if (active == null) {
             rows.add(new Row("任务", "空闲", ChatFormatting.GRAY));
             appendLatestTerminalIssue(rows);
         } else {
             int total = Math.max(1, active.steps().size());
             int current = Math.min(active.stepIndex() + 1, total);
-            rows.add(new Row("任务", taskTitle(active) + " · 步骤 " + current + "/" + total,
+            // 尝试次数与排队数并入任务行，不单列；重试循环和积压都该在这行一眼看到。
+            rows.add(new Row("任务", taskTitle(active) + " · 步骤 " + current + "/" + total
+                            + (active.attempts().isEmpty() ? "" : " · 尝试 " + active.attempts().size())
+                            + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
                     ChatFormatting.AQUA));
+            if (active.stepIndex() >= 0 && active.stepIndex() < active.steps().size()) {
+                Goal step = active.steps().get(active.stepIndex());
+                rows.add(new Row("步骤", stepTitle(step), ChatFormatting.AQUA));
+            }
             if (active.decisionSnapshot() != null) {
                 rows.add(new Row("等待决策", "等待大模型选择后才能继续", ChatFormatting.YELLOW));
             } else if (active.pauseSnapshot() != null) {
@@ -88,20 +104,24 @@ public final class DebugHudController {
                         ChatFormatting.RED));
             }
         }
-
-        // 最近一次 UNCERTAIN 的消费可能已发生；面板只提示保留现场，核验仍以真实背包与方块为准。
-        MenuReceipt.UncertainSnapshot uncertain = MenuReceipt.lastUncertain();
-        rows.add(new Row("未定回执", uncertainText(uncertain),
-                uncertain == null ? ChatFormatting.GRAY : ChatFormatting.RED));
         return List.copyOf(rows);
     }
 
     // 任务行以标题为主体：能力短名加目标陈述，状态前缀只标注它此刻在等什么。
     private static String taskTitle(IntentTaskRecord record) {
-        String ability = record.goal().ability();
+        return statePrefix(record) + " · " + abilityTitle(record.goal());
+    }
+
+    // 步骤行是当前正在执行的子任务，随执行切换；形状与任务行一致，便于上下对照。
+    private static String stepTitle(Goal step) {
+        return "执行中 · " + abilityTitle(step);
+    }
+
+    private static String abilityTitle(Goal goal) {
+        String ability = goal.ability();
         int namespace = ability.indexOf(':');
         String shortAbility = namespace >= 0 ? ability.substring(namespace + 1) : ability;
-        return statePrefix(record) + " · " + shortAbility + "：" + clamp(record.goal().outcome());
+        return shortAbility + "：" + clamp(goal.outcome());
     }
 
     private static String statePrefix(IntentTaskRecord record) {
@@ -144,21 +164,6 @@ public final class DebugHudController {
             return result.get("message").getAsString();
         }
         return fallback.name().toLowerCase(Locale.ROOT);
-    }
-
-    // 菜单回执停在"无法证明服务器是否已执行"时进入 UNCERTAIN：消费可能已发生，先对账真实世界再决定。
-    private static String uncertainText(MenuReceipt.UncertainSnapshot uncertain) {
-        if (uncertain == null) return "无";
-        String kind = switch (uncertain.kind()) {
-            case CLICK -> "点击";
-            case SWAP_TO_HOTBAR -> "换快捷栏";
-            case PLACE_RECIPE -> "摆配方";
-            case CLOSE -> "关闭界面";
-            case BUTTON -> "按钮";
-        };
-        return kind + (uncertain.slot() >= 0 ? " 槽" + uncertain.slot() : "")
-                + " · 第" + uncertain.submittedTick() + "刻提交 · 预算" + uncertain.timeoutTicks()
-                + "刻 · " + clamp(uncertain.detail());
     }
 
     private static String clamp(String value) {
