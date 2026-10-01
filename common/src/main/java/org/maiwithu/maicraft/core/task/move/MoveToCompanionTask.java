@@ -51,6 +51,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 规划器无法再接近时（例如停在水下目标上方的水面），等待此数量的无进展 tick 再放弃：
      *  时间足以让角色被水流带到可达的水下目标附近，也能及时放弃水面上方不可达的目标。 */
     private static final int MAX_SETTLE_TICKS = 60;
+    /** 连续算路宽限上限：规划一直未产出可走路线且零实际进展超过此时限，就按无路失败收场，
+     *  不能让 "planningInFlight" 无限续期把卡死伪装成 still working（012 实测 4 分钟零位移）。 */
+    private static final long PLANNING_STALL_CEILING_TICKS = 30 * 20;
 
     private final int bx;
     private final int by;
@@ -59,6 +62,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     private double bestDist = Double.MAX_VALUE;   // 到目标曾达到的最近距离。
     private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
+    private long planningSinceTick = -1;          // 零进展连续算路的起点；有实际进展或算路结束即复位。
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
     private boolean worldViewPrepared;
@@ -266,8 +270,21 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // 路线仍有实际进展或正在后台算路就延长时间；绕湖可能暂时离目标更远，不能只用距离缩短判断进展。
         // 已到目标格、只等落地时不无限续期，避免身体悬着不落也永远不超时。
         boolean awaitingStrictLanding = strictLandingInProgress();
-        if (!awaitingStrictLanding && (nav.planningInFlight()
-                || nav.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS))) {
+        boolean planning = nav.planningInFlight();
+        boolean recentProgress = nav.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS);
+        if (planning && !recentProgress) {
+            long now = player.level().getGameTime();
+            if (planningSinceTick < 0) planningSinceTick = now;
+            if (now - planningSinceTick >= PLANNING_STALL_CEILING_TICKS) {
+                fail(blockedMessage("route planning never produced a walkable path in about "
+                        + PLANNING_STALL_CEILING_TICKS / 20 + " seconds; the target may be unreachable"
+                        + " under the allowed terrain policy"), FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+        } else {
+            planningSinceTick = -1;
+        }
+        if (!awaitingStrictLanding && (planning || recentProgress)) {
             long now = player.level().getGameTime();
             r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
         }

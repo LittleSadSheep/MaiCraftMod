@@ -889,6 +889,22 @@ public final class PhysicalStructureSearchCompanionTask
         super.cleanup();
     }
 
+    /** 停滞与进度对调用方可见：still working 事件必须能区分"在走"和"卡死"，不能只靠逐字节对比坐标。 */
+    @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("stage", String.valueOf(stage));
+        data.put("frontier_legs_attempted", frontierAttempts);
+        data.put("frontier_legs_reached", frontierReached);
+        data.put("frontier_legs_failed", frontierFailed);
+        if (moveChild != null && moveRecord != null && moveRecord.x != null && moveRecord.z != null) {
+            double dx = player.getX() - moveRecord.x;
+            double dz = player.getZ() - moveRecord.z;
+            data.put("move_leg_remaining", Math.sqrt(dx * dx + dz * dz));
+        }
+        return data;
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
