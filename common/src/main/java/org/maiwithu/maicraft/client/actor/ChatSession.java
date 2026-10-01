@@ -58,7 +58,7 @@ public final class ChatSession {
         if (!opened) {
             if (!view.canOpen(context.minecraft()) || context.player().containerMenu != context.player().inventoryMenu) {
                 status = Status.FAILED;
-                detail = "Another screen or container is open; close it before starting chat.";
+                detail = "Another screen or container is open; close it before starting chat. " + occupiedBy(context);
                 return status;
             }
             current.claimMutation();
@@ -116,6 +116,17 @@ public final class ChatSession {
         view.close();
         opened = false;
         return status;
+    }
+
+    // 失败回执点名挡路的界面；调用方凭类名即可判断该关哪个界面，不必逐个试。
+    // 容器菜单优先于 Screen：容器开着时它才是需要关闭的对象，Screen 只是它的外观。
+    private static String occupiedBy(LocalPlayerContext context) {
+        var menu = context.player().containerMenu;
+        if (menu != null && menu != context.player().inventoryMenu)
+            return "Blocked by: " + menu.getClass().getSimpleName() + ".";
+        var screen = context.minecraft().screen;
+        if (screen != null) return "Blocked by: " + screen.getClass().getSimpleName() + ".";
+        return "The blocking screen could not be identified.";
     }
 
     public Status status() { return status; }

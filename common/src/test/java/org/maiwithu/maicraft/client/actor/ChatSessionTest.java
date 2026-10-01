@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.client.actor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.world.inventory.InventoryMenu;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -58,6 +59,23 @@ public final class ChatSessionTest {
         var stale = h.context; h.nextTick(true);
         try { session.tick(stale, 0); throw new AssertionError("stale context accepted"); }
         catch (IllegalStateException expected) { check(!view.active, "no screen opened from stale context"); }
+
+        // 占用失败必须点名挡路的界面；容器优先，Screen 兜底，都没有时如实说认不出。
+        h.nextTick(true);
+        h.minecraft.screen = h.allocate(ChatScreen.class);
+        View blocked = new View(); blocked.active = true;
+        ChatSession blockedSession = new ChatSession(new ChatMessage("x", 50), blocked, () -> true);
+        blockedSession.tick(h.context, 0);
+        check(blockedSession.status() == ChatSession.Status.FAILED
+                && blockedSession.detail().contains("ChatScreen"), "screen blocker is named");
+        h.nextTick(true);
+        h.minecraft.screen = null;
+        h.player.containerMenu = h.allocate(InventoryMenu.class);
+        blocked = new View();
+        blockedSession = new ChatSession(new ChatMessage("x", 50), blocked, () -> true);
+        blockedSession.tick(h.context, 0);
+        check(blockedSession.status() == ChatSession.Status.FAILED
+                && blockedSession.detail().contains("InventoryMenu"), "container blocker is named");
         System.out.println("ChatSessionTest: passed");
     }
 
