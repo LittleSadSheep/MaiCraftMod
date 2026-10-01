@@ -1026,14 +1026,14 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 return TaskState.RUNNING;
             }
             case NO_CAPACITY -> {
-                fail("reached an attributable drop, and the synchronized main inventory has "
+                fail("reached a tracked drop, and the synchronized main inventory has "
                                 + "neither a free slot nor compatible stack capacity: "
                                 + loot.contactEvidence(),
                         FailureType.NO_SPACE);
                 return TaskState.FAILED;
             }
             case REFUSED_WITH_CAPACITY -> {
-                fail("the server left an attributable drop in true pickup contact even though "
+                fail("the server left a tracked drop in true pickup contact even though "
                                 + "the synchronized main inventory has capacity: "
                                 + loot.contactEvidence(),
                         FailureType.UNKNOWN);
@@ -1050,7 +1050,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                     return TaskState.RUNNING;
                 }
                 case UNCONFIRMED -> {
-                    fail("an attributable drop disappeared without a matching inventory gain, "
+                    fail("a tracked drop disappeared without a matching inventory gain, "
                                     + "remaining live stack, or accounted merge: "
                                     + loot.vanishEvidence(),
                             FailureType.UNKNOWN);
@@ -1059,24 +1059,12 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 case CLEAR -> { }
             }
             if (loot.hasUnreachableCurrentSweep()) {
-                fail("not every attributable drop from the defeated target is reachable: "
+                fail("not every tracked drop at the defeated target's site is reachable: "
                                 + loot.unreachableEvidence(),
                         FailureType.NO_PATH);
                 return TaskState.FAILED;
             }
-            if (loot.hasAmbiguousCurrentSweep()) {
-                fail("attributable loot merged with a pre-existing stack and cannot be collected "
-                                + "without taking older items: " + loot.ambiguousEvidence(),
-                        FailureType.UNKNOWN);
-                return TaskState.FAILED;
-            }
-            if (loot.hasUnresolvedCurrentSweep()) {
-                fail("new item entities appeared during the target death event, but client facts "
-                                + "cannot conservatively prove that they came from that target: "
-                                + loot.unresolvedEvidence(),
-                        FailureType.UNKNOWN);
-                return TaskState.FAILED;
-            }
+            // 候选物品已按原生结果结清后直接结束本轮；混堆和击杀来源未知留在回执里，不改判拾取失败。
             stopNav();
             loot.finish();
             phase = Phase.COMBAT;

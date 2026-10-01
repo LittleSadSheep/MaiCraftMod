@@ -163,6 +163,8 @@ public final class GuiRegressionSuite {
         MiningOutputBudgetTest.main(args);
         // 先验证来源未知、其他实体归属及旧堆合并仍可拾取，完成数必须等待真实背包同步。
         DroppedItemPickupTest.main(args);
+        // 战斗收场同样尝试现场旧物与未知来源，合堆不重复计数，消失而未入包仍如实失败。
+        CombatPickupOwnershipTest.main(args);
         ExactHarvestTest.main(args);
         // 身体门槛属于全局前置，不能被工作台选址和上层材料来源循环吞掉。
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);

@@ -121,6 +121,12 @@ def regressionSuites = [
         heap: '512m', directory: 'crafting-regression', timeoutSeconds: 60,
         purpose: '验证标签材料、原生摆料与准确批次产物'
     ],
+    // 拾取及死亡现场收场独立验证，归属推断不再决定角色能否尝试原生收取。
+    pickupRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.PickupRegressionSuite',
+        heap: '512m', directory: 'pickup-regression', timeoutSeconds: 45,
+        purpose: '验证不限归属的拾取、混堆记账与真实入包回执'
+    ],
     knowledgeRegression: [
         entry: 'org.maiwithu.maicraft.mcp.KnowledgeRegressionSuite',
         heap: '512m', directory: 'knowledge-regression', timeoutSeconds: 45,
