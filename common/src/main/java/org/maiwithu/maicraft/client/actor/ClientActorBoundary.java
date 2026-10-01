@@ -5,6 +5,7 @@ import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
@@ -126,10 +127,12 @@ public final class ClientActorBoundary {
         return Optional.of(context);
     }
 
-    /** 普通任务终局只登记收尾；显式开菜单或连续存取的步骤不会调用这里。 */
+    /** 明确要求退出且已掌握当时界面的流程可登记收尾；公共任务终局不能自动调用此入口推断页面归属。 */
     public boolean requestGuiCleanup(LocalPlayer player) {
         if (minecraft == null || player == null || minecraft.player != player || !body.automationOwnsControls()) return false;
         requireClientThread();
+        // 正在床上或仍显示床上界面时不登记自动关闭，退出该页会被原版解释为主动起床。
+        if (player.isSleeping() || minecraft.screen instanceof InBedChatScreen) return false;
         if (minecraft.screen == null && player.containerMenu == player.inventoryMenu
                 && player.inventoryMenu.getCarried().isEmpty() && !inventoryGridOccupied(player)) return false;
         if (guiCleanupOwner == player && guiCleanupMenu == player.containerMenu && guiCleanupScreen == minecraft.screen) return true;
@@ -147,6 +150,10 @@ public final class ClientActorBoundary {
 
     void advanceGuiCleanup(LocalPlayerContext context) {
         if (guiCleanupOwner == null) return;
+        // 请求登记后才进入睡眠也要撤销旧收尾；不能让前一动作的关闭请求把角色从床上叫醒。
+        if (context.player().isSleeping() || minecraft.screen instanceof InBedChatScreen) {
+            guiCleanupOwner = null; guiCleanupState = "native_sleep_active"; return;
+        }
         // 人已接管、角色已更换或后续流程另开界面时撤销旧收尾，不把旧任务的关闭落到新操作者身上。
         if (guiCleanupOwner != context.player() || !context.permitsNativeActions()
                 || !guiCleanupStarted && (guiCleanupMenu != context.player().containerMenu || guiCleanupScreen != minecraft.screen)) {

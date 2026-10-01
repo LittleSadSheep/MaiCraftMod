@@ -143,9 +143,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
             data.put("outcome_uncertain", Boolean.TRUE.equals(data.get("outcome_uncertain")) || guiFailure.uncertain());
             data.put("mechanical_retry_allowed", false);
         }
-        // 世界任务结束后排入统一原生关页；菜单链的中间步骤明确保留，后继动作等待同一收尾即可续做。
-        if (!keepsGuiOnCompletion() && ClientRuntime.actor().requestGuiCleanup(player))
-            data.put("gui_cleanup", Map.of("state", "scheduled"));
+        // 子动作结束不代表当前页面属于它；菜单收尾由实际打开并管理界面的流程执行，不能抢关父任务界面。
         if (finalState == TaskState.FAILED) {
             data.putIfAbsent("failure_type", failType.name().toLowerCase(Locale.ROOT));
         }

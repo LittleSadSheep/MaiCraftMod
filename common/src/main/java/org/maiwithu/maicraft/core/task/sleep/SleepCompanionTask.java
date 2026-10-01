@@ -28,6 +28,8 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
     private static final int WAKE_SYNC_TICKS = 200;
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     public SleepCompanionTask(LocalPlayer player, SleepTaskRecord record) { super(player, record); }
+    // 只确认上床的任务可以结束，但原生睡眠还在继续；床上界面保留到自然醒或玩家主动离床。
+    @Override public boolean keepsGuiOnCompletion() { return player.isSleeping(); }
     @Override protected TaskState onTick() {
         // 自动休息持有身体直到自然醒；只躺下就恢复施工会让角色在床上继续发动作。
         if (player.isSleeping()) {

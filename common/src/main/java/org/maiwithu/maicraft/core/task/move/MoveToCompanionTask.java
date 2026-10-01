@@ -60,6 +60,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
+    private boolean worldViewPrepared;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
     private final JetpackGroundMode groundFlight=
@@ -232,6 +233,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         observeLanding();
         // 现有导航必须先消费其原生完成回执，之后任务清理才可停止它；仅仅碰到船舱地板或喷气背包触地，不代表退出或模式恢复已经完成。
         if (nav == null && reached()) return successAtBody();
+        // 只有本次移动开始前明确退出旧页面；后续导航换装备或交通准备自己的菜单不被每刻抢关。
+        if (!worldViewPrepared) {
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
+            worldViewPrepared = true;
+        }
         if (boatLeg != null) {
             return tickBoatLeg();
         }

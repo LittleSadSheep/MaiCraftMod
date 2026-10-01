@@ -53,7 +53,7 @@ public final class GuiRecoveryTest {
                 "菜单操作保留当前容器，公共恢复不能每刻关掉它");
     }
 
-    // 普通任务终局可排队收尾；旧搬运先结清，关闭一次后确认，再交给后继任务。
+    // 拥有当前页面的流程显式请求收尾时，旧搬运先结清，关闭一次后确认，再交给后继任务。
     private static void cleanupWaitsForTransaction() throws Exception {
         var h = new ActorControlTestHarness(); var menu = menu(); show(h, menu); int[] closes = {0};
         field(h.player.getClass(), "menuClose").set(h.player, (Runnable) () -> {

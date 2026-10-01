@@ -304,6 +304,8 @@ public final class MoveToTransportCompletionTest {
         @Override public ItemStack getItemBySlot(EquipmentSlot slot) { return ItemStack.EMPTY; }
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isAlive() { return true; }
+        // 此夹具只验证清醒时的交通完成；未初始化的实体同步数据不能被当成实际睡眠状态。
+        @Override public boolean isSleeping() { return false; }
         @Override public float getHealth() { return 20; }
         @Override public float getAbsorptionAmount() { return 0; }
         @Override public void setSprinting(boolean sprinting) { }

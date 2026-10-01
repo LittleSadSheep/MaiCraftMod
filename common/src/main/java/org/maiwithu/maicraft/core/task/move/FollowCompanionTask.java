@@ -4,6 +4,7 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.FailureType;
@@ -64,6 +65,9 @@ public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskR
             return TaskState.FAILED;
         }
         if (nav == null) {
+            // 每次跟随重新起步时先退出遗留页面；导航开始后的换装备和交通菜单交给各自流程，不能每刻抢关。
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
             // 目标每次重规划时现取,所以主人边走她也跟得上。地形许可按记录来,默认只走不改;
             // 探针开着——跟不上的时候回执里要有"会动哪些方块"的清单
             nav = PlayerNav.toGoal(player, this::goal, WALK_SPEED, this::closeEnough,

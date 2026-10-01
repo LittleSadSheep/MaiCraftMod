@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.client.actor;
 import net.minecraft.client.player.Input;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
@@ -262,8 +263,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     /** 判断当前界面是否允许角色在已有移动授权下继续行走。 */
     public static boolean permitsWorldMovement(Screen screen) {
         // BotInput 提供移动信号而非键盘事件，因此沿指定路线行走时可以保留聊天框。
-        // 容器和模态界面仍禁止世界移动，避免角色在处理菜单时离开交互位置。
-        return screen == null || screen instanceof ChatScreen;
+        // 床上的聊天界面必须保持静止等待自然醒；不能因继承普通聊天框而让旧导航继续移动。
+        return screen == null || screen instanceof ChatScreen && !(screen instanceof InBedChatScreen);
     }
 
     /** 每个渲染帧推进一次玩家真实的第一人称镜头，使转向与画面更新同步。 */

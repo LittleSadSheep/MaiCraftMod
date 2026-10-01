@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 
@@ -35,6 +36,10 @@ public final class GuiPreparation {
     /** 移动可保留聊天框，聊天发送则须先退出旧草稿；其他页面均先执行原生退出。 */
     public boolean ready(LocalPlayerContext context, boolean allowChat) {
         if (!context.mutationAvailable()) return false;
+        // 床上界面由原版睡眠生命周期管理，onClose 会发送起床包；等待自然醒，不能把它当成普通挡路页。
+        if (context.minecraft().screen instanceof InBedChatScreen || context.player().isSleeping()) {
+            context.body().releaseAll(); return false;
+        }
         if (closing != null && closing.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
             closing = context.menus().poll(context, closing);
             if (!closing.terminal()) return false;

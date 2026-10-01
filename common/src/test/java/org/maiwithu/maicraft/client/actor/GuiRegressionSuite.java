@@ -189,6 +189,8 @@ public final class GuiRegressionSuite {
         MenuVisibilityTest.main(args);
         // 普通任务终局和世界动作都原生退出挡路页面，菜单步骤仍保留自己需要的真实容器。
         GuiRecoveryTest.main(args);
+        // 子步骤不能抢关父任务页面；睡眠必须等待自然醒，不能由通用退出主动叫醒玩家。
+        NativeGuiLifecycleTest.main(args);
         MenuConfirmationLatencyTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);

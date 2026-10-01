@@ -92,10 +92,7 @@ public final class TransportNavigator {
         // 目标或禁止进入的区域变了，先让正在进行的交通安全停下，再按新要求规划，不能直接换终点。
         if (stopped) return PlayerNav.Status.FAILED;
         var context = ClientRuntime.requireContext(player);
-        // 走路、追随和施工接近共享世界入口；旧页面先原生退出，等待期间不推进路线或消耗新的交通动作。
-        if (session == null && !context.menus().ensureWorldVisible(context)) {
-            context.body().releaseAll(); return PlayerNav.Status.RUNNING;
-        }
+        // 导航内部的换装备或交通准备可能正在使用菜单，不能在每刻入口抢关；世界动作由调用流程明确准备。
         var currentGoal = effectiveGoal();
         LongSet currentForbidden = policy.embeddedForbiddenBodyCells();
         if (session != null && !compatibleGoal(currentGoal, activeDestination, targetFingerprint, forbidden, currentForbidden)) {
