@@ -14,6 +14,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.Input;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
@@ -213,6 +215,10 @@ public final class MoveToTransportCompletionTest {
         Fixture(Unsafe memory, double x) throws Exception {
             minecraft = (Minecraft) memory.allocateInstance(Minecraft.class);
             player = (TestPlayer) memory.allocateInstance(TestPlayer.class);
+            // 导航夹具保持真实世界入口的常驻菜单和空游标基线，不能把未初始化玩家当成挡路界面。
+            var inventoryMenu = (InventoryMenu) memory.allocateInstance(InventoryMenu.class);
+            inventoryMenu.setCarried(ItemStack.EMPTY);
+            field(LocalPlayer.class, "inventoryMenu").set(player, inventoryMenu); player.containerMenu = inventoryMenu;
             world = (FlatLevel) memory.allocateInstance(FlatLevel.class);
             minecraft.player = player; minecraft.level = world;
             field(Minecraft.class, "gameThread").set(minecraft, Thread.currentThread());

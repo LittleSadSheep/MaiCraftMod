@@ -157,13 +157,9 @@ public final class SemanticTradeCompanionTask
 
     // 只找已加载范围内的成年村民／流浪商人，按距离排列；先拒绝未知保护地标，避免错误理解保护范围。
     private TaskState survey() {
-        if (player.containerMenu != player.inventoryMenu) {
-            return failFinal(
-                    "menu_busy",
-                    "A different synchronized menu is already open; MaiCraft will not close "
-                            + "or repurpose it to begin trading.",
-                    FailureType.UNKNOWN);
-        }
+        // 选商人前先原生退出旧页面；交易尚未提交，仍在本次任务里选择目标并核对实际报价。
+        var context = ClientRuntime.requireContext(player);
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         List<String> unknownLabels = r.protectedLabels.stream()
                 .filter(label -> IntentRuntime.get().landmark(label) == null)
                 .toList();

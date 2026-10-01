@@ -215,11 +215,12 @@ public final class SemanticContainerCompanionTask
     }
 
     private TaskState reuseOpenMenu() {
-        // 来源必须指向本次选中的箱子；空光标才能接续存取，随后照常核验槽位、数量与原生点击回执。
-        if (!MachineMenu.openedAt(player, target.position()))
-            return failFinal("menu_busy", "The visible menu does not have a confirmed native origin at the selected container.", FailureType.UNKNOWN);
-        if (!player.containerMenu.getCarried().isEmpty())
-            return failFinal("menu_cursor_not_empty", "Settle the current cursor stack before continuing container transfer.", FailureType.UNKNOWN);
+        // 合适且空光标的原生箱子直接接续；其他旧菜单先退出，再打开本次已选定的目标，不猜旧槽位。
+        if (!MachineMenu.openedAt(player, target.position()) || !player.containerMenu.getCarried().isEmpty()) {
+            var context = ClientRuntime.requireContext(player);
+            if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
+            phase = Phase.OPEN; return TaskState.RUNNING;
+        }
         ownedMenu = player.containerMenu;
         openedMenu = true;
         reusedMenu = true;
@@ -735,26 +736,12 @@ public final class SemanticContainerCompanionTask
         return movedCount == plannedAmount;
     }
 
-    // 收尾先保留来历不明的鼠标物品；已绑定的木桶菜单若被别的界面替换，也保留新界面不关闭。
-    // 只有仍由这次开箱管理、且鼠标为空的菜单，才进入正常关闭流程。
+    // 搬运与关页分开结算；菜单余物交原生返还，旧页面替换不再要求模型另开关页任务。
     private TaskState cleanupMenu() {
-        if (!player.containerMenu.getCarried().isEmpty()) {
-            outcomeUncertain = true; openedMenu = false; openRequested = false;
-            return failFinal("container_cursor_preserved", "The cursor contains an unconfirmed stack; its menu was left open without closing or discarding it.", FailureType.UNKNOWN);
-        }
-        if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
-            openedMenu = false;
-            openRequested = false;
-            if (!player.inventoryMenu.getCarried().isEmpty()) outcomeUncertain = true;
-            phase = Phase.COMPLETE;
-            return TaskState.RUNNING;
-        }
-        if (ownedMenu != null && player.containerMenu != ownedMenu) {
-            openedMenu = false; openRequested = false;
-            return failFinal("container_menu_replaced", "A different menu appeared during container cleanup; it was left open.", FailureType.TARGET_LOST);
-        }
-        return start(new CloseMenuTaskRecord(
-                childId("close"), childDeadline(30L * 20L)), Purpose.CLOSE);
+        var context = ClientRuntime.requireContext(player);
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
+        openedMenu = false; openRequested = false; phase = Phase.COMPLETE;
+        return TaskState.RUNNING;
     }
 
     // 开箱、搬运、关箱都有自己的子任务。子任务结束先取结果并清理，再按用途继续下一阶段或记录失败。

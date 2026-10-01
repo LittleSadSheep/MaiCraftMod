@@ -106,6 +106,8 @@ public final class TargetedDropEvidenceTest {
             var record=new TargetedDropTaskRecord("fresh-input-guard",1000,
                     world.inventory.getItem(0),1,new BlockPos(5,1,5),region,()->{aimReads.incrementAndGet();return region;},()->{checks.incrementAndGet();return false;});
             var task=new TargetedDropCompanionTask(world.player,record);task.start(world.player);
+            // 原生界面准备完成后的首刻才固定瞄准和库存；盘点尚未发生时不能读取旧 start 的相机目标。
+            task.tick(world.player);world.nextTick();
             TaskState terminal=TaskState.RUNNING;
             // 夹具只把相机放到请求角度；最终原料位置复核失败后不得出现任何Q包或库存预测扣减。
             for(int tick=0;tick<10&&!terminal.isTerminal();tick++) {

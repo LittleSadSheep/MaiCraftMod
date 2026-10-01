@@ -29,9 +29,11 @@ public final class MachineMenuHandParking {
         if (failure != null) return Status.FAILED;
         if (ready) return Status.READY;
         var player = context.player();
+        // 尚未打开自己的停车背包时由公共入口结清旧页面和余物；开始交换后保留所需菜单直到自身关闭。
+        if (source < 0 && !context.menus().ensureWorldVisible(context)) return Status.RUNNING;
         if (player.containerMenu != player.inventoryMenu || !clearCursorAndGrid(player.inventoryMenu)) return failed("machine_menu_inventory_busy");
         if (source < 0) {
-            // 外来界面和鼠标残留不能借用；没有空主背包格就停下，不清空手中工具来制造空间。
+            // 公共准备已经退出外来页面；没有空主背包格仍按实际容量停止，不清空手中工具制造空间。
             if (!DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen)) return failed("machine_menu_foreign_inventory_screen");
             for (int slot = 9; slot < Math.min(36, player.getInventory().items.size()); slot++)
                 if (player.getInventory().getItem(slot).isEmpty()) { source = slot; break; }

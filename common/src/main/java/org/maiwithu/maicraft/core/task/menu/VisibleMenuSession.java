@@ -33,18 +33,9 @@ public final class VisibleMenuSession {
 
     /** 容器界面打开时，快捷栏物品仍无法在世界中使用。 */
     public boolean worldReady(LocalPlayerContext context) {
-        // 回到世界里用物品前先关自己的菜单；如果用户打开了不相关的对话框，就等，不擅自关掉它。
+        // 回到世界里用物品前结清旧关闭，再由公共入口退出挡路页面，角色无需另领关界面任务。
         if (!settleSwitch(context)) return false;
-        if (DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen)
-                && context.player().containerMenu == context.player().inventoryMenu) {
-            return context.mutationAvailable();
-        }
-        if (context.minecraft().screen != null
-                && !MenuVisibility.matches(context.minecraft(), context.player().containerMenu)) return false;
-        used = true;
-        closed = false;
-        switching = context.menus().close(context, 20);
-        return false;
+        return context.menus().ensureWorldVisible(context);
     }
 
     private boolean settleSwitch(LocalPlayerContext context) {
