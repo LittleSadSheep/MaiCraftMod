@@ -405,10 +405,17 @@ public final class EmbeddedMcpService implements AutoCloseable {
             if (knowledge && resource != null && resource.startsWith(ResponseArchive.PREFIX))
                 return toolResult(responseArchive.read(resource), false);
             stage = switch (name) {
-                case PublicToolCatalog.PERCEIVE -> knowledge ? runtime.knowledge(
-                        KnowledgeLibrary.perceptionRequest(arguments)) : runtime.perceive(arguments);
+                case PublicToolCatalog.PERCEIVE -> {
+                    McpActivityTrace.notePerceive(nullableString(arguments, "view"));
+                    yield knowledge ? runtime.knowledge(
+                            KnowledgeLibrary.perceptionRequest(arguments)) : runtime.perceive(arguments);
+                }
                 case PublicToolCatalog.PLAN -> runtime.plan(arguments);
-                case PublicToolCatalog.EXECUTE -> runtime.execute(arguments);
+                case PublicToolCatalog.EXECUTE -> {
+                    // 行动重置感知计数；反复感知而不提交目标就是 LLM 效率问题，面板据此显示。
+                    McpActivityTrace.noteAction();
+                    yield runtime.execute(arguments);
+                }
                 case PublicToolCatalog.TASK -> runtime.task(arguments);
                 default -> throw new IllegalStateException("unreachable tool dispatch");
             };
