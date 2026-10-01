@@ -144,15 +144,25 @@ final class SemanticGoalContract {
         }
     }
 
+    // goal 顶层字段被误嵌进 parameters/preferences 是高频提交错误（实测 build 的 target 曾整会话反复试错）；
+    // 拒绝时点名正确位置，省一轮改写重发。
+    private static final Set<String> GOAL_LEVEL_FIELDS =
+            Set.of("ability", "outcome", "target", "constraints", "children", "parameters", "preferences");
+
     private static void validateObjectKeys(
             JsonObject values, Set<String> allowed, String path, String ability, String code) {
         for (String key : values.keySet()) {
             if (!allowed.contains(key)) {
                 throw violation(code, path + "." + key, ability,
                         ability + " does not declare '" + key + "' at " + path
-                                + "; the Mod refused to ignore it.");
+                                + "; the Mod refused to ignore it." + goalLevelHint(key, path));
             }
         }
+    }
+
+    private static String goalLevelHint(String key, String path) {
+        if (!GOAL_LEVEL_FIELDS.contains(key)) return "";
+        return " '" + key + "' is a goal-level field: write it at goal." + key + ", not inside " + path + ".";
     }
 
     private static void validateTarget(Goal goal, String path, String ability, boolean restoredHistory) {

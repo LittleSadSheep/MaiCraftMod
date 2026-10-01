@@ -66,6 +66,15 @@ public final class BuildingModelPublicTest {
                 rejects(tool, ability, mixed.toString(), "unknown_parameter");
             }
         }
+        // 顶层字段误嵌进 parameters 是实测高频提交错误；拒绝时必须点名正确位置，不能只说未声明。
+        var misplaced = JsonParser.parseString(blueprint).getAsJsonObject();
+        misplaced.add("target", JsonParser.parseString("{\"kind\":\"current_place\"}"));
+        try { compile("execute", "maicraft:build", misplaced.toString()); }
+        catch (SemanticContractException expected) {
+            if (!"unknown_parameter".equals(expected.violationCode())) throw new AssertionError(expected);
+            if (!expected.getMessage().contains("'target' is a goal-level field: write it at goal.target"))
+                throw new AssertionError(expected);
+        }
         // 组合目标也逐个检查子建筑，不能把没有图纸的建造藏进 sequence 后等角色走到现场才发现。
         var sequence = request("maicraft:sequence", "{}");
         var children = new JsonArray();
