@@ -19,7 +19,9 @@ public final class CreateBeltObservation {
         var motion = new JsonObject(); state.add("belt_motion", motion);
         try {
             boolean supportsItems = NativeApi.truth(NativeApi.call(null, BLOCK, "canTransportObjects", entity.getBlockState()));
-            double speed = NativeApi.number(NativeApi.call(entity, ENTITY, "getBeltMovementSpeed"));
+            // 原生带速是每刻的小数位移；不能经整数读取器截成零，否则正常旋转也会被误报为停转。
+            double speed = ((Number) NativeApi.call(entity, ENTITY, "getBeltMovementSpeed")).doubleValue();
+            if (!Double.isFinite(speed)) throw new IllegalArgumentException("non_finite_belt_speed");
             motion.addProperty("supports_item_transport", supportsItems);
             // 停转时原生 facing 方法仍返回一个方位；必须先看真实速度，不能把零速带说成正向输送。
             if (speed == 0 || !supportsItems) {
