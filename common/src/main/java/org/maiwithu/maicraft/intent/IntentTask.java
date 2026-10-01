@@ -436,8 +436,8 @@ final class IntentTask implements Task {
         // 当前步骤失败或被放弃后，其位置不能再成为后续 prior_result 的依据。
         record.discardInternalStepPosition(record.stepIndex());
         captureMechanicalContinuation(currentGoal(), result);
-        TaskResult failure = withEffectLedger(SemanticResultView.result(
-                result == null ? TaskResult.fail("internal action failed") : result));
+        TaskResult failure = withEffectLedger(SemanticResultView.result(FailureObservation.attach(
+                result == null ? TaskResult.fail("internal action failed") : result, player)));
         Goal failedGoal = currentGoal();
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
                 record.stepIndex(),

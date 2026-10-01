@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.mcp;
 
+import org.maiwithu.maicraft.core.inventory.InventoryComponentFacts;
+
 import org.maiwithu.maicraft.core.integration.create.transmission.KineticSourceQueries;
 
 import org.maiwithu.maicraft.core.integration.machine.ConstructionSiteGeometry;

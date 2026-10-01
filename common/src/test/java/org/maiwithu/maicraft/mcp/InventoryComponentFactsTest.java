@@ -12,6 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
 import org.maiwithu.maicraft.intent.SemanticResultView;
+import org.maiwithu.maicraft.core.inventory.InventoryComponentFacts;
 
 /** 背包总量不变，带不同进度组件的同类物品保持可区分，未知大组件不能冒充空组件。 */
 public final class InventoryComponentFactsTest {
@@ -34,8 +35,8 @@ public final class InventoryComponentFactsTest {
         ItemStack large = workpiece(1); CompoundTag tag = new CompoundTag(); tag.putString("large", "x".repeat(5000));
         large.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
         var unknown = InventoryComponentFacts.observe(large, registries);
-        check(unknown.get("identity_status").getAsString().equals("unknown") && !unknown.has("components") && !unknown.has("resource_id"),
-                "unavailable components are not reported as a default variant");
+        check(unknown.get("identity_status").getAsString().equals("observed") && unknown.has("components") && unknown.has("resource_id"),
+                "large observed components remain available without another tool call");
         // 两个原生库存即使显示同一种工件，也必须保留各自的成员与存储标识；独立位置字段继续按既有规则处理。
         var source = Map.of("storage_id", "504, 78, 104/items/view:up/0", "membership", "504, 78, 104",
                 "resource_id", "items:minecraft:brick#native-key", "position", Map.of("x", 504, "y", 78, "z", 104));

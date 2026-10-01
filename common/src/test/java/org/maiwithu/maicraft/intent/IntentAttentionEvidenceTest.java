@@ -8,12 +8,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 施工停止后，第一份通知必须携带已有现场，不能靠额外查询找回被摘要丢掉的恢复事实。 */
 public final class IntentAttentionEvidenceTest {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        failureIncludesCurrentBodyAndInventory();
         String detail = "原生机器仍在运行，等待核对已消耗的物品。".repeat(100);
         JsonArray facts = new JsonArray();
         for (int index = 0; index < 24; index++) {
@@ -58,6 +62,23 @@ public final class IntentAttentionEvidenceTest {
         check(result.get("interrupted").getAsBoolean() && result.get("cancel_source").getAsString().equals("operator_cancel")
                 && result.getAsJsonObject("data").get("actual_inventory").equals(facts), "取消通知同时保留来源与全部已知材料");
         System.out.println("IntentAttentionEvidenceTest: passed");
+    }
+
+    private static void failureIncludesCurrentBodyAndInventory() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            world.inventory.setItem(0, new ItemStack(Items.STONE, 5)); world.player.setHealth(8);
+            world.player.getFoodData().setFoodLevel(7);
+            var source = TaskResult.cancelled("操作被叫停", "operator").withData(Map.of("outcome_uncertain", true, "mechanical_retry_allowed", false));
+            var result = FailureObservation.attach(source, world.player);
+            var data = JsonParser.parseString(result.toJson()).getAsJsonObject().getAsJsonObject("data");
+            var observation = data.getAsJsonObject("failure_observation");
+            // 结束时只读当前背包和身体，保留原未知消费及取消来源，不伪造产物或发出补观察动作。
+            check(observation.getAsJsonArray("inventory").get(0).getAsJsonObject().get("count").getAsInt() == 5
+                    && observation.getAsJsonObject("body").get("food").getAsInt() == 7
+                    && observation.getAsJsonObject("body").get("health").getAsInt() == 8, "失败默认附带当前材料和身体事实");
+            check(result.interrupted() && result.cancelSource().equals("operator") && data.get("outcome_uncertain").getAsBoolean()
+                    && !data.get("mechanical_retry_allowed").getAsBoolean(), "补事实不改原结算与重试限制");
+        }
     }
 
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

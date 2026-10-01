@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.mcp;
+package org.maiwithu.maicraft.core.inventory;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -12,26 +12,25 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
 /** 总数量仍按物品汇总，同时保留带组件的变体，使背包里的不同装配进度无需放到机器上才能辨认。 */
-final class InventoryComponentFacts {
+public final class InventoryComponentFacts {
     private InventoryComponentFacts() {}
 
-    static JsonObject observe(ItemStack stack, HolderLookup.Provider registries) {
+    public static JsonObject observe(ItemStack stack, HolderLookup.Provider registries) {
         JsonObject facts = new JsonObject();
         try {
             JsonObject identity = ResourceIdentity.item(stack, registries);
-            if (identity.toString().length() > 4096) throw new IllegalArgumentException("component_identity_exceeds_budget");
             facts.addProperty("identity_status", "observed");
             facts.addProperty("resource_id", ResourceIdentity.key(identity));
             facts.add("components", identity.get("components").deepCopy());
         } catch (RuntimeException unavailable) {
-            // 无法序列化或过大的组件只报未知；不能把未读出的进度伪装成默认空组件。
+            // 真正无法序列化的组件才报未知；已经读到的大组件完整交付，不能让模型额外放入机器才能看进度。
             facts.addProperty("identity_status", "unknown");
-            facts.addProperty("identity_issue", "components_unavailable_or_outside_budget");
+            facts.addProperty("identity_issue", "components_unavailable");
         }
         return facts;
     }
 
-    static JsonArray inventory(Iterable<ItemStack> stacks, HolderLookup.Provider registries) {
+    public static JsonArray inventory(Iterable<ItemStack> stacks, HolderLookup.Provider registries) {
         Map<String, Long> totals = new LinkedHashMap<>();
         Map<String, Map<String, JsonObject>> variants = new LinkedHashMap<>();
         var detailed = new LinkedHashSet<String>(); int unknown = 0;
