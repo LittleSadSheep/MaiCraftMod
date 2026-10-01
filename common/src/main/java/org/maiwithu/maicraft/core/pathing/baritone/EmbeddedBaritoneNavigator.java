@@ -59,6 +59,8 @@ public final class EmbeddedBaritoneNavigator {
     private boolean stopped;
     private boolean terminalFailure;
     private boolean terrainProbeRequested;
+    private int preserveReplans;
+    private BlockPos preserveReplanFeet;
     private boolean pendingArrival;
     private boolean pendingPause;
     private boolean rescueDetached;
@@ -205,7 +207,7 @@ public final class EmbeddedBaritoneNavigator {
                 && !compiledFingerprint.equals(freshFingerprint);
         if (!started || semanticsChanged
                 || (arrivedLatched && !freshGoal.isAt(feet()))) {
-            if (semanticsChanged) cancelTerrainProbe();
+            if (semanticsChanged) { cancelTerrainProbe(); preserveReplans = 0; preserveReplanFeet = null; }
             compiled = fresh;
             compiledFingerprint = freshFingerprint;
             goal = freshGoal;
@@ -305,12 +307,17 @@ public final class EmbeddedBaritoneNavigator {
                             + "bridging, pillaring and water placement" + partial
                             + "; the probe did not establish a complete route and executed nothing");
         }
-        // 第二次计算找到无需改动的路时，当前仍返回本次失败并建议重试，没有把第二次路线直接接着执行。
+        // 只读复算已找到不改地形的完整路线时，在原任务内重启保留地形导航；不让模型重发同一目的地。
         if (bill.isEmpty()) {
+            if (!feet().equals(preserveReplanFeet)) { preserveReplanFeet = feet().immutable(); preserveReplans = 0; }
+            if (preserveReplans++ < 2) {
+                // 下一刻重新从实际脚位算路，仍使用原许可；同一脚位最多恢复两次，避免无进展空转。
+                started = false; calculationFailed = false; driveRequested = false;
+                return PlayerNav.Status.RUNNING;
+            }
             return failWhenSafe(FailureType.NO_PATH,
-                    "the preserve calculation failed, but a read-only second calculation reached "
-                            + "the goal without needing terrain changes; treat the original result "
-                            + "as transient and retry the same intent; nothing was executed");
+                    "a read-only probe found a terrain-preserving route, but two internal replans "
+                            + "made no physical progress from " + feet().toShortString());
         }
         return failWhenSafe(FailureType.TERRAIN_BLOCKED,
                 "no complete route was found without altering terrain; a read-only full-route "
