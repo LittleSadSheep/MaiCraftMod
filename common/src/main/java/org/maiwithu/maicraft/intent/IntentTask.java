@@ -50,6 +50,8 @@ import org.maiwithu.maicraft.task.TaskState;
  * 调度器只看到这个总任务，里面的小任务由这里推进，不会把总任务挤走。
  */
 final class IntentTask implements Task {
+    // 每个原生子步骤已分别收尾，显式开菜单交给下一请求；总任务不能再误关这份有效菜单。
+    @Override public boolean keepsGuiOnCompletion() { return true; }
 
     private final LocalPlayer player;
     private final IntentTaskRecord record;

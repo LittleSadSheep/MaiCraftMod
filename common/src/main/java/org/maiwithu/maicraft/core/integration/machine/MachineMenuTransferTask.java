@@ -27,6 +27,8 @@ import com.google.gson.JsonObject;
  * 同组件的多叠来源和多个背包空位由执行器分批处理，整项搬运仍只消费一个语义请求。
  */
 public final class MachineMenuTransferTask extends AbstractCompanionTask<MachineMenuTransferTaskRecord> {
+    // 原生机器存取属于可连续操作的菜单会话，已有失败收尾负责返还不确定游标，普通完成保留菜单。
+    @Override public boolean keepsGuiOnCompletion() { return true; }
     private enum Phase { START, PICKUP, PLACE, RETURN, NEXT_BATCH, VERIFY }
     private Phase phase = Phase.START;
     private MachineMenu.Inspection inspection;

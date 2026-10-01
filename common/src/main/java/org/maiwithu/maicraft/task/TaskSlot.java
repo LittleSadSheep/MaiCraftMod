@@ -176,6 +176,8 @@ final class TaskSlot {
                 finished.setResult(defaultResult(finished));
             }
         } finally {
+            // 未继承公共任务外壳的动作同样结清界面；显式打开和父流程接续菜单的任务自行管理交接。
+            if (task != null && !task.keepsGuiOnCompletion()) ClientRuntime.actor().requestGuiCleanup(player);
             releaseBody(player);
             task = null;
             record = null;
