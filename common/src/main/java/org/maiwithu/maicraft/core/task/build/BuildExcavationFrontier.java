@@ -91,8 +91,10 @@ public final class BuildExcavationFrontier {
     }
 
     static BlockPos select(Set<BlockPos> pending, Set<BlockPos> rejected, BlockPos feet) {
-        int layer = workLayer(pending, feet);
-        return pending.stream().filter(pos -> pos.getY() == layer && !rejected.contains(pos))
+        // 某层站位失败后继续试蓝图内其他待拆层；拆开支撑后会清空 rejected，再回头处理原来的高处部件。
+        Set<BlockPos> available = new LinkedHashSet<>(pending); available.removeAll(rejected);
+        int layer = workLayer(available, feet);
+        return available.stream().filter(pos -> pos.getY() == layer)
                 .min(Comparator.comparing((BlockPos pos) -> pos.equals(feet.below()))
                         .thenComparingDouble(pos -> pos.distSqr(feet))
                         .thenComparingLong(BlockPos::asLong)).orElse(null);
@@ -105,7 +107,7 @@ public final class BuildExcavationFrontier {
 
     private static int workLayer(Set<BlockPos> pending, BlockPos feet) {
         var heights = pending.stream().mapToInt(BlockPos::getY).summaryStatistics();
-        // 层级由所有未完成格决定，再排除本层失败点；不能因为低层被拒绝，就越过它去追高处阁楼。
+        // 通常从上往下拆；全在头顶时先拆最低层，以打开本次蓝图已授权的通行空间。
         return !pending.isEmpty() && heights.getMin() > feet.getY() ? heights.getMin() : heights.getMax();
     }
 
@@ -113,7 +115,10 @@ public final class BuildExcavationFrontier {
     static List<NavGoal> approaches(LocalPlayer player, BlockPos target) {
         var level = player.level();
         List<NavGoal> result = new ArrayList<>();
-        for (int dy = -2; dy <= 1; dy++) for (int dx = -3; dx <= 3; dx++) for (int dz = -3; dz <= 3; dz++) {
+        double reach = player.blockInteractionRange();
+        int radius = (int) Math.ceil(reach), down = (int) Math.ceil(reach + player.getEyeHeight());
+        // 高处的锁链轮常可从平台仰头拆下；按原生手长查真实站位，不再只查目标下面两格的悬空层。
+        for (int dy = -down; dy <= radius; dy++) for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
             BlockPos feet = target.offset(dx, dy, dz);
             if (feet.below().equals(target) || !level.isLoaded(feet) || !level.isLoaded(feet.above())
                     || !level.isLoaded(feet.below())) continue;
@@ -126,7 +131,7 @@ public final class BuildExcavationFrontier {
             AABB box = player.getBoundingBox().move(body.subtract(player.position()));
             if (!level.noCollision(player, box)) continue;
             Vec3 eye = body.add(0, player.getEyeHeight(), 0);
-            if (FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, 4.5) != null)
+            if (FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, reach) != null)
                 result.add(NavGoal.exact(feet));
         }
         return result;
