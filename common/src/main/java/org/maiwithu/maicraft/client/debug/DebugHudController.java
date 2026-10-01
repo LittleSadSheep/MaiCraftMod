@@ -230,12 +230,6 @@ public final class DebugHudController {
     }
 
     private static void toggle(Minecraft minecraft) {
-        // Dev 是调试子系统的总闸：总闸关闭时 F9 只提示，不单独打开面板。
-        if (!PreviewConfig.enabled(minecraft.gameDirectory.toPath())) {
-            message(minecraft, "Dev 未开启：先用 /maicraft dev on，再按 F9 显示调试面板。",
-                    ChatFormatting.YELLOW);
-            return;
-        }
         boolean show = !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath());
         try {
             PreviewConfig.hudVisible(show);

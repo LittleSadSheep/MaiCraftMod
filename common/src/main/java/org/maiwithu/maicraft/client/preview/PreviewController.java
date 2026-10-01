@@ -109,18 +109,13 @@ public final class PreviewController {
             }
             else current.visible(false);
         }
-        // 关闭 Dev 时调试面板一并隐藏：Dev 是调试子系统的总闸，不留下无总闸的孤立面板。
-        if (!enabled) {
-            try { PreviewConfig.hudVisible(false); }
-            catch (IOException ignored) { }
-        }
         try { PreviewConfig.enabled(enabled); }
         catch (IOException exception) {
             message("Dev " + (enabled ? "已开启" : "已关闭") + "，配置未能保存："
                     + exception.getMessage(), ChatFormatting.YELLOW);
             return 0;
         }
-        message("Dev " + (enabled ? "已开启：施工前需要确认蓝图。F9 切换调试面板。" : "已关闭。"), ChatFormatting.GREEN);
+        message("Dev " + (enabled ? "已开启：施工前需要确认蓝图。" : "已关闭。"), ChatFormatting.GREEN);
         return 1;
     }
 
