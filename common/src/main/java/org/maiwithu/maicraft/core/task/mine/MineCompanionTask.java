@@ -838,7 +838,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (ore.distSqr(feet) > IN_PLACE_FILTER_SQR) {
                 break;   // 候选已按距离从近到远排序，后续位置只会更远。
             }
-            if ((ore.equals(support) && (r.exactHarvest() || !safeSupportDescent(level, support)))
+            // 定点授权已包含这一块支撑；下面能安全落一格时直接原地挖，不为同一个目标强迫寻找侧面站位。
+            if ((ore.equals(support) && !safeSupportDescent(level, support))
                     || level.getBlockState(ore).isAir()) {
                 continue;
             }

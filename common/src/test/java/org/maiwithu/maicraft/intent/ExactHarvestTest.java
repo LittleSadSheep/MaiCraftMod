@@ -15,6 +15,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -33,8 +34,24 @@ public final class ExactHarvestTest {
         var previous = Map.copyOf(tags);
         tags.put(BlockTags.MINEABLE_WITH_PICKAXE, List.of(Blocks.COBBLESTONE.builtInRegistryHolder(), Blocks.STONE.builtInRegistryHolder()));
         BuiltInRegistries.BLOCK.bindTags(tags);
-        try { run(); reportsActualExpectedDrop(); } finally { BuiltInRegistries.BLOCK.bindTags(previous); }
+        try { run(); reportsActualExpectedDrop(); harvestOwnSupportWithSafeLanding(); }
+        finally { BuiltInRegistries.BLOCK.bindTags(previous); }
         System.out.println("ExactHarvestTest: passed");
+    }
+    // 困在一格坑里时可以按定点授权向下挖一格；下面为空洞或流体时仍保留真实落脚限制。
+    private static void harvestOwnSupportWithSafeLanding() throws Exception {
+        for (var floor : List.of(Blocks.STONE, Blocks.AIR, Blocks.WATER, Blocks.LAVA)) {
+            try (var h = new InteractionWorldTestHarness()) {
+                h.position(Vec3.atBottomCenterOf(SOURCE.above()));
+                h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
+                h.set(SOURCE, Blocks.COBBLESTONE.defaultBlockState()); h.set(SOURCE.below(), floor.defaultBlockState());
+                var task = new MineCompanionTask(h.player, compile(h, goal(SOURCE))); task.start(h.player);
+                var reachable = MineCompanionTask.class.getDeclaredMethod("reachableTarget"); reachable.setAccessible(true);
+                check(SOURCE.equals(reachable.invoke(task)) == (floor == Blocks.STONE),
+                        "exact support harvest uses the real landing floor: " + floor);
+                check(h.itemUses() == 0 && h.blockUses() == 0, "stance selection itself does not alter the world");
+            }
+        }
     }
     private static void run() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
