@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 通过真实决策跳过没有地点的记忆目标，确认后续步骤可继续，但未完成的目标不会被报告为已做成。 */
+/** 通过真实决策跳过地点无法解析的记忆目标，确认后续步骤可继续，但未完成的目标不会被报告为已做成。 */
 public final class SequenceSkipTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
@@ -21,7 +21,9 @@ public final class SequenceSkipTest {
         var constructor = IntentRuntime.class.getDeclaredConstructor();
         constructor.setAccessible(true);
         var runtime = constructor.newInstance();
-        var missingPlace = new Goal("maicraft:remember_place", "记住营地", null,
+        // 漏 target 的记忆目标按新契约默认记住当前位置；这里用解析不到的地标制造待决策步骤。
+        var missingPlace = new Goal("maicraft:remember_place", "记住营地",
+                new Goal.SemanticTarget("landmark", "camp", null, null),
                 "{\"label\":\"camp\"}", "{}", List.of(), List.of());
         var wait = new Goal("maicraft:wait_for_condition", "准备结束", null,
                 "{\"after_s\":0}", "{}", List.of(), List.of());
@@ -38,7 +40,7 @@ public final class SequenceSkipTest {
         try (var world = new InteractionWorldTestHarness()) {
             var task = new IntentTask(world.player, record, runtime);
             check(task.tick(world.player) == TaskState.RUNNING && record.decisionSnapshot() != null,
-                    "没有地点时应询问，不能凭空记住营地");
+                    "地点解析不到时应询问，不能凭空记住营地");
             var decision = record.decisionSnapshot();
             runtime.validateDecisionAnswer(record, "skip", new JsonObject());
             check(record.answer(decision.id(), "skip", new JsonObject()), "应接受明确跳过这一步");
