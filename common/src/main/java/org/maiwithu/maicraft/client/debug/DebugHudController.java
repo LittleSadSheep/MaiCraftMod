@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -55,7 +56,7 @@ public final class DebugHudController {
         boolean listening = ClientRuntime.isMcpRunning();
         rows.add(new Row("MCP", listening
                 ? "127.0.0.1:" + ClientRuntime.mcpPort()
-                        + " · 连接数 " + ClientRuntime.mcpSessionCount()
+                        + " · 会话数 " + ClientRuntime.mcpSessionCount()
                 : ClientRuntime.lastMcpError() == null ? "未监听"
                         : "未监听 · " + clamp(ClientRuntime.lastMcpError()),
                 listening ? ChatFormatting.GREEN : ChatFormatting.RED));
@@ -94,7 +95,8 @@ public final class DebugHudController {
                 rows.add(new Row("步骤", stepTitle(step), ChatFormatting.AQUA));
             }
             if (active.decisionSnapshot() != null) {
-                rows.add(new Row("等待决策", "等待大模型选择后才能继续", ChatFormatting.YELLOW));
+                rows.add(new Row("等待决策", decisionText(active.decisionSnapshot()),
+                        ChatFormatting.YELLOW));
             } else if (active.pauseSnapshot() != null) {
                 rows.add(new Row("已暂停", clamp(active.pauseSnapshot().reason()),
                         ChatFormatting.YELLOW));
@@ -122,6 +124,16 @@ public final class DebugHudController {
         int namespace = ability.indexOf(':');
         String shortAbility = namespace >= 0 ? ability.substring(namespace + 1) : ability;
         return shortAbility + "：" + clamp(goal.outcome());
+    }
+
+    // 决策行要说出在等什么：问题摘要加可选项；只重复"在等决策"没有信息量。
+    private static String decisionText(IntentTaskRecord.DecisionSnapshot decision) {
+        String choices = decision.options().stream()
+                .map(IntentTaskRecord.DecisionOption::choice)
+                .collect(Collectors.joining("/"));
+        String text = clamp(decision.question(), 40)
+                + (choices.isBlank() ? "" : " · 选项 " + clamp(choices, 24));
+        return clamp(text);
     }
 
     private static String statePrefix(IntentTaskRecord record) {
@@ -168,10 +180,15 @@ public final class DebugHudController {
 
     private static String clamp(String value) {
         if (value == null || value.isBlank()) return "未知";
+        return clamp(value, TEXT_LIMIT);
+    }
+
+    private static String clamp(String value, int limit) {
+        if (value == null || value.isBlank()) return "未知";
         String singleLine = value.replace('\r', ' ').replace('\n', ' ')
                 .replaceAll("\\s+", " ").strip();
-        return singleLine.length() <= TEXT_LIMIT
-                ? singleLine : singleLine.substring(0, TEXT_LIMIT - 1) + "…";
+        return singleLine.length() <= limit
+                ? singleLine : singleLine.substring(0, limit - 1) + "…";
     }
 
     private static void toggle(Minecraft minecraft) {
