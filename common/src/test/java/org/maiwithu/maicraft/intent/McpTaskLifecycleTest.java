@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.intent;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonElement;
 import java.lang.reflect.Field;
@@ -39,7 +40,50 @@ public final class McpTaskLifecycleTest {
         restoredCancellationPreservesCurrentWork();
         fullHistoryRejectsBeforeAcceptingMoreWork();
         networkCancellationRespectsClientDispatch();
+        progressEventsThrottlePerTask();
         System.out.println("McpTaskLifecycleTest: passed");
+    }
+
+    private static void progressEventsThrottlePerTask() throws Exception {
+        try (var f = new Fixture()) {
+            // 长任务靠进度事件中途醒来；节流到每 100 刻至多一条，避免每刻观察刷屏。
+            var record = f.record();
+            f.tasks().put(record.externalId(), record);
+            f.runtime.publishProgress(record, Map.of("phase", "approaching_sources", "gathered", 17), 1_000);
+            f.runtime.publishProgress(record, Map.of("phase", "approaching_sources", "gathered", 18), 1_050);
+            var events = f.runtime.attention(0, 50).getAsJsonArray("events");
+            check(countType(events, "task_progress") == 1, "间隔内的进度观察应被节流成一条事件");
+            f.runtime.publishProgress(record, Map.of("phase", "approaching_sources", "gathered", 19), 1_101);
+            events = f.runtime.attention(0, 50).getAsJsonArray("events");
+            var latest = lastOf(events, "task_progress");
+            check(countType(events, "task_progress") == 2, "过了间隔进度事件恢复发送");
+            check(latest != null
+                    && latest.get("task_id").getAsString().equals(record.externalId().toString())
+                    && latest.getAsJsonObject("data").get("gathered").getAsInt() == 19,
+                    "进度事件应带任务编号和当前观察数据");
+            // 终态清掉节流记账；同任务再次发进度不被旧间隔吞掉。
+            f.runtime.terminal(record, TaskState.SUCCESS, TaskResult.ok("done"));
+            f.runtime.publishProgress(record, Map.of("phase", "digging"), 1_150);
+            events = f.runtime.attention(0, 50).getAsJsonArray("events");
+            check(countType(events, "task_progress") == 3, "终态清空进度记账后新进度应立即发送");
+        }
+    }
+
+    private static int countType(JsonArray events, String type) {
+        int count = 0;
+        for (var element : events) {
+            if (type.equals(element.getAsJsonObject().get("type").getAsString())) count++;
+        }
+        return count;
+    }
+
+    private static JsonObject lastOf(JsonArray events, String type) {
+        JsonObject found = null;
+        for (var element : events) {
+            JsonObject event = element.getAsJsonObject();
+            if (type.equals(event.get("type").getAsString())) found = event;
+        }
+        return found;
     }
 
     private static void repeatedExecutionLeavesHumanControlAlone() throws Exception {

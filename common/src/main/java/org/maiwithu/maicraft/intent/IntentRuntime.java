@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.intent;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -9,11 +10,13 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -53,6 +56,8 @@ public final class IntentRuntime {
     private static final int MAX_ATTENTION_ARRAY = 12;
     private static final int MAX_ATTENTION_STRING = 1_024;
     private static final long SAVE_INTERVAL_NANOS = 5_000_000_000L;
+    /** 进度事件的最小间隔（游戏刻）；与任务单 active_execution 的观察节奏同量级。 */
+    private static final long PROGRESS_EVENT_INTERVAL_TICKS = 100;
     private static final Set<String> ATTENTION_INTERNAL_KEYS = Set.of(
             "entity_id", "entity_ids", "runtime_id", "runtime_ids",
             "slot", "slots", "click", "clicks", "route", "waypoints",
@@ -140,12 +145,15 @@ public final class IntentRuntime {
             .collect(Collectors.toUnmodifiableSet());
 
     private static final IntentRuntime INSTANCE = new IntentRuntime();
+    private static final Gson GSON = new Gson();
     private static boolean registered;
 
     private final LinkedHashMap<UUID, Plan> plans = new LinkedHashMap<>();
     private final LinkedHashMap<UUID, IntentTaskRecord> tasks = new LinkedHashMap<>();
     private final LinkedHashMap<String, UUID> requestKeys = new LinkedHashMap<>();
     private final LinkedHashMap<String, Landmark> landmarks = new LinkedHashMap<>();
+    /** 每个任务上次发进度事件的游戏刻；节流长任务进度，不让每刻观察都变成一条事件。 */
+    private final Map<UUID, Long> progressPublishAt = new HashMap<>();
     private final AttentionFeed attention = new AttentionFeed();
     private final ChatFlow chatFlow = new ChatFlow();
     private final IntentStateStore stateStore = new IntentStateStore();
@@ -791,6 +799,7 @@ public final class IntentRuntime {
 
     void terminal(IntentTaskRecord record, TaskState state, TaskResult result) {
         markDirty();
+        progressPublishAt.remove(record.externalId());
         String type = switch (state) {
             case SUCCESS -> "completed";
             case CANCELLED -> "cancelled";
@@ -799,6 +808,29 @@ public final class IntentRuntime {
         JsonObject data = result == null ? new JsonObject() : compactAttentionResult(resultJson(result));
         String message = result == null ? state.name().toLowerCase() : result.message();
         publish(type, record, message, data);
+    }
+
+    /**
+     * 长任务的节流进度事件：数据与任务单 active_execution 同源，事件让等待方中途醒来，
+     * 不必等到终态才知道"砍到几个、走到哪一步"。仅节流，不改变观察内容。
+     */
+    void publishProgress(IntentTaskRecord record, Map<String, Object> observation, long gameTime) {
+        Long last = progressPublishAt.get(record.externalId());
+        if (last != null && gameTime - last < PROGRESS_EVENT_INTERVAL_TICKS) return;
+        progressPublishAt.put(record.externalId(), gameTime);
+        JsonObject data = new JsonObject();
+        observation.forEach((key, value) ->
+                data.add(key, GSON.toJsonTree(value == null ? "" : value)));
+        publish("task_progress", record, progressMessage(observation), data);
+    }
+
+    /** 进度事件的一句话摘要；只挑通用字段，各能力的专有证据仍完整留在 data 里。 */
+    private static String progressMessage(Map<String, Object> observation) {
+        StringJoiner parts = new StringJoiner(", ");
+        if (observation.get("phase") != null) parts.add(String.valueOf(observation.get("phase")));
+        if (observation.get("gathered") != null) parts.add("gathered " + observation.get("gathered"));
+        if (observation.get("known_sources") != null) parts.add("known_sources " + observation.get("known_sources"));
+        return parts.length() == 0 ? "still working" : parts.toString();
     }
 
     public JsonObject attention(long afterCursor, int limit) {

@@ -101,7 +101,11 @@ final class IntentTask implements Task {
         } finally {
             // 查询和 Attention 使用实际观察到的当前子任务进度。
             // 诊断失败不能打断角色动作，也不能覆盖真正的任务结果。
-            try { record.observeExecution(progress(), player.level().getGameTime()); }
+            try {
+                Map<String, Object> observation = progress();
+                record.observeExecution(observation, player.level().getGameTime());
+                runtime.publishProgress(record, observation, player.level().getGameTime());
+            }
             catch (RuntimeException ignoredDiagnosticFailure) { }
         }
     }
