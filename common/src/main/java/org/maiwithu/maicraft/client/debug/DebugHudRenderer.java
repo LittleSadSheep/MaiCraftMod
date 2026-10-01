@@ -6,7 +6,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
 
 /**
@@ -33,16 +32,16 @@ public final class DebugHudRenderer {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.options.hideGui
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())) return;
-        List<MaiCraftStatus.StatusRow> rows = DebugHudController.snapshot();
+        List<DebugHudController.Row> rows = DebugHudController.snapshot();
         if (rows.isEmpty()) return;
         Font font = minecraft.font;
         int width = 0;
-        for (MaiCraftStatus.StatusRow row : rows) {
+        for (DebugHudController.Row row : rows) {
             width = Math.max(width, font.width(row.label() + ": ") + font.width(row.value()));
         }
         graphics.fill(2, 2, 8 + width, 6 + rows.size() * LINE_HEIGHT, BACKGROUND);
         int y = 6;
-        for (MaiCraftStatus.StatusRow row : rows) {
+        for (DebugHudController.Row row : rows) {
             String label = row.label() + ": ";
             graphics.drawString(font, label, 4, y, LABEL);
             ChatFormatting color = row.color();
