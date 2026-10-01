@@ -20,14 +20,13 @@ final class EnchantInventory {
     private final LocalPlayer player;
     final ItemStack input, lapisKind;
     final int lapisNeeded;
-    private final ItemStack sourceStack;
-    private final int sourceInventorySlot, outputInventorySlot, inputBefore, lapisBefore;
+    private int sourceInventorySlot, outputInventorySlot, inputBefore, lapisBefore;
     private ItemStack result = ItemStack.EMPTY;
     private int resultBefore;
 
     private EnchantInventory(LocalPlayer player, int source, int output, ItemStack lapis, int needed) {
         this.player = player; sourceInventorySlot = source; outputInventorySlot = output;
-        sourceStack = player.getInventory().getItem(source).copy(); input = sourceStack.copyWithCount(1);
+        input = player.getInventory().getItem(source).copyWithCount(1);
         lapisKind = lapis.copyWithCount(lapis.isEmpty() ? 0 : 1); lapisNeeded = needed;
         inputBefore = count(input); lapisBefore = count(lapisKind);
     }
@@ -62,10 +61,16 @@ final class EnchantInventory {
     }
 
     List<Move> loadInput(EnchantmentMenu menu) {
-        // 到台子后重新核对原来源整叠，防止导航途中物品被换过却沿用旧槽号。
-        if (!ItemStack.matches(sourceStack, player.getInventory().getItem(sourceInventorySlot)))
-            throw new IllegalStateException("enchantment_source_changed");
-        requireOutputSpace();
+        // 到台子后按同一装备的完整组件重新找来源；路上整理背包不改变附魔意图，也不能换成另一件装备。
+        sourceInventorySlot = -1;
+        for (int i = 0; i < 36; i++) if (sameKind(player.getInventory().getItem(i), input)) {
+            sourceInventorySlot = i; break;
+        }
+        if (sourceInventorySlot < 0) throw new IllegalStateException("enchantment_source_changed");
+        outputInventorySlot = sourceInventorySlot;
+        if (player.getInventory().getItem(sourceInventorySlot).getCount() > 1) requireOutputSpace();
+        // 以首次真实搬运之前的库存对账，导航时拾到的书或青金石不能算成本次附魔的消费差异。
+        inputBefore = count(input); lapisBefore = count(lapisKind);
         return List.of(new Move(menuSlot(menu, sourceInventorySlot), 0, 1));
     }
 
@@ -125,9 +130,12 @@ final class EnchantInventory {
     }
 
     void requireOutputSpace() {
-        // 一本书变成不可堆叠的附魔书后需要独立格；投入前来源只有一件时，其腾出的格就是预留位置。
-        if (outputInventorySlot != sourceInventorySlot && !player.getInventory().getItem(outputInventorySlot).isEmpty())
-            throw new IllegalStateException("enchantment_reserved_output_space_changed");
+        // 成品需要空格；旧预留格被占时重新找当前空格，不能把普通移槽误报为附魔失败。
+        if (player.getInventory().getItem(outputInventorySlot).isEmpty()) return;
+        for (int i = 0; i < 36; i++) if (player.getInventory().getItem(i).isEmpty()) {
+            outputInventorySlot = i; return;
+        }
+        throw new IllegalStateException("enchantment_reserved_output_space_changed");
     }
 
     String resultItemId() { return result.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(result.getItem()).toString(); }

@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.BlockMenuFlow;
+import org.maiwithu.maicraft.core.task.base.MenuTransferEvidence;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord.Move;
@@ -29,11 +30,13 @@ final class EnchantMenuFlow implements BlockMenuFlow {
     private final EnchantInventory inventory;
     private final EnchantTransaction transaction;
     private final VisibleMenuSession session = new VisibleMenuSession();
+    private final MenuTransferEvidence transfers = new MenuTransferEvidence();
     private Phase phase = Phase.LOAD_INPUT;
     private ContainerTransferCompanionTask child;
     private ContainerTransferTaskRecord childRecord;
     private boolean childStarted, preserveMenu, returned, closeStarted, closed, successful;
     private int serial;
+    private int transferRefreshes;
     private String failure, cleanupStatus = "not_started";
     private FailureType failureType = FailureType.UNKNOWN;
 
@@ -69,7 +72,10 @@ final class EnchantMenuFlow implements BlockMenuFlow {
         }
         if (player.containerMenu != menu) return abandon("enchantment_menu_changed", FailureType.TARGET_LOST);
         if (phase == Phase.WAIT_BUTTON) {
-            if (!transaction.poll(context)) return TaskState.RUNNING;
+            if (!transaction.poll(context)) {
+                if (transaction.readyToRefresh()) phase = Phase.QUOTE;
+                return TaskState.RUNNING;
+            }
             inventory.freezeResult(transaction.confirmedResult()); phase = Phase.RETURN_ITEM; return TaskState.RUNNING;
         }
         if (!session.ready(context)) return TaskState.RUNNING;
@@ -120,13 +126,20 @@ final class EnchantMenuFlow implements BlockMenuFlow {
         record.extendDeadlineTo(childRecord.getDeadlineGameTime());
         if (!state.isTerminal()) return TaskState.RUNNING;
         if (state != TaskState.SUCCESS) child.stop(player, Task.StopReason.REPLACED);
-        child.result(state); child = null; childRecord = null; childStarted = false;
+        // 搬运结算随附魔回执一起交付，包含已装料、已返还数量和真正的未知项。
+        var result = child.result(state);
+        transfers.retain(phase.name().toLowerCase(Locale.ROOT), result);
+        child = null; childRecord = null; childStarted = false;
         if (state != TaskState.SUCCESS) {
+            // 还没点击的选槽变化由当前阶段重新装料或返料；已发生效果的搬运不走这一恢复路径。
+            if (player.containerMenu == menu && menu.getCarried().isEmpty()
+                    && MenuTransferEvidence.canRefreshBeforeSubmission(result) && transferRefreshes++ < 2)
+                return TaskState.RUNNING;
             // 子搬运已经负责自己的原生关闭或陌生光标保护；父任务不得再关闭一次覆盖该保护。
             preserveMenu = true; cleanupStatus = "transfer_boundary_cleanup_not_confirmed";
-            // 子任务日志保留底层诊断，对外只给语义原因，避免把原生菜单槽号混进状态与附魔结果。
             return abandon("enchantment_transfer_failed", FailureType.UNKNOWN);
         }
+        transferRefreshes = 0;
         phase = switch (phase) {
             case LOAD_INPUT -> Phase.LOAD_LAPIS;
             case LOAD_LAPIS -> Phase.QUOTE;
@@ -185,7 +198,8 @@ final class EnchantMenuFlow implements BlockMenuFlow {
 
     public void cleanup() {
         if (child != null) {
-            child.stop(player, Task.StopReason.REPLACED); child.result(TaskState.CANCELLED);
+            child.stop(player, Task.StopReason.REPLACED);
+            transfers.retain(phase.name().toLowerCase(Locale.ROOT), child.result(TaskState.CANCELLED));
             child = null; childRecord = null; preserveMenu = true;
             cleanupStatus = "transfer_boundary_cleanup_not_confirmed";
         }
@@ -216,6 +230,7 @@ final class EnchantMenuFlow implements BlockMenuFlow {
     public Map<String, Object> data() {
         var data = new LinkedHashMap<String, Object>(transaction.data());
         data.put("phase", phase.name().toLowerCase(Locale.ROOT));
+        data.put("transfer_refreshes_without_progress", transferRefreshes);
         data.put("outcome_uncertain", transaction.attempted() && !successful);
         data.put("item_return_verified", returned); data.put("gui_closed", closed); data.put("cleanup_status", cleanupStatus);
         // 只有真实按钮回执已确认、成品也已冻结时才展示全部附魔；报价线索不能冒充最终随机结果。
@@ -224,6 +239,7 @@ final class EnchantMenuFlow implements BlockMenuFlow {
             data.put("result_enchantments", inventory.resultEnchantments());
         }
         if (failure != null) data.put("issue_code", failure);
+        transfers.appendTo(data);
         return data;
     }
 }

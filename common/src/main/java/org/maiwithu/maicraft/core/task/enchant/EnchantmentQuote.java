@@ -90,7 +90,7 @@ public final class EnchantmentQuote {
         return offer;
     }
 
-    /** 提交前重新确认身体、菜单、三档报价和两叠物品；报价重滚或经验变化后必须重新征询，而不是照旧点击。 */
+    /** 提交前核对身体、菜单、报价与物品；变化时由执行器重读并按原档位和费用上限重新验证。 */
     public boolean stillMatches(LocalPlayer player, EnchantmentMenu menu) {
         return sameSession(player, menu) && player.experienceLevel == playerLevel
                 && menu.getEnchantmentSeed() == seed && Arrays.equals(costs, menu.costs)
