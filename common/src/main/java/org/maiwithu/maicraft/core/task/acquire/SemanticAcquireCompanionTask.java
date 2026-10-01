@@ -141,6 +141,7 @@ public final class SemanticAcquireCompanionTask
     private int childSerial;
     private int plannerStepsThisTick;
     private String failureCode;
+    private FailureType failureType;
     private AcquisitionNeed failureNeed;
     private DimensionBarrier failureDimension;
     private boolean outcomeUncertain;
@@ -2159,6 +2160,7 @@ public final class SemanticAcquireCompanionTask
             }
         }
         failureCode = code;
+        failureType = type;
         if (failureNeed == null) failureNeed = needs.peek();
         fail(message, type);
         return TaskState.FAILED;
@@ -2342,6 +2344,16 @@ public final class SemanticAcquireCompanionTask
                             + "the current named, tamed, player, managed or protected candidates "
                             + "will not be attacked.",
                     "risk", "high_after_a_new_target_is_verified"));
+        }
+        // 采矿区耗尽最常见的出路是换一片区域重扫；只列外部来源会让调用方以为脚下还有矿只是许可没开。
+        if (allowed.contains(SemanticAcquireTaskRecord.Source.MINE)
+                && failureType == FailureType.MINED_OUT) {
+            options.add(Map.of(
+                    "id", "continue_mining_from_another_semantic_area",
+                    "summary", "Travel outside the exhausted scan area and retry the same inventory"
+                            + " outcome; a fresh first-person scan from new ground can find sources"
+                            + " this area no longer contains.",
+                    "risk", "none_until_a_new_target_is_verified"));
         }
         options.add(Map.of(
                 "id", "semantic_prerequisite",
