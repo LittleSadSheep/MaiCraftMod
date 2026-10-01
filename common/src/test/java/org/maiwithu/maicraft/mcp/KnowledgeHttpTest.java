@@ -134,8 +134,8 @@ public final class KnowledgeHttpTest {
             // 模拟模型把文本字符数当成分页条数；读取归档失败必须提示修参，不要诱导重新扫描工地。
             var schemaManifest = json(schemaFallback.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
             var badPage = json("{\"name\":\"perceive\",\"arguments\":{}}");
-            badPage.getAsJsonObject("arguments").addProperty("resource_uri", schemaManifest.getAsJsonObject("text")
-                    .get("resource_uri").getAsString().replaceAll("limit=\\d+", "limit=4000"));
+            badPage.getAsJsonObject("arguments").addProperty("resource_uri",
+                    schemaManifest.get("details_uri").getAsString() + "?path=%2Fjson&offset=1&limit=4000");
             var pageError = payload(send("tools/call", badPage)).getAsJsonObject("error");
             check(pageError.get("code").getAsString().equals("invalid_arguments") && pageError.get("outcome_known").getAsBoolean()
                     && pageError.get("message").getAsString().contains("1..50"), "只读分页失败明确为可修正参数错误");
@@ -222,11 +222,13 @@ public final class KnowledgeHttpTest {
         return JsonParser.parseString(response.body()).getAsJsonObject();
     }
     private String documentText(String text, boolean viaTool) throws Exception {
-        check(text.length() <= 8500, "initial document response stays bounded");
+        // 大文档完整交付并附冻结引用：JSON 文档内联在 json 字段；文本文档仍走 text 分页。
         JsonObject manifest;
         try { manifest = json(text); } catch (RuntimeException ordinaryText) { return text; }
         if (!manifest.has("details_uri")) return text;
         check(manifest.has("source_mime_type"), "paged document identifies the source format");
+        if (manifest.has("json")) return manifest.get("json").toString();
+        if (!manifest.has("text")) return text;
         String next = manifest.getAsJsonObject("text").get("resource_uri").getAsString();
         StringBuilder full = new StringBuilder();
         while (next != null) {

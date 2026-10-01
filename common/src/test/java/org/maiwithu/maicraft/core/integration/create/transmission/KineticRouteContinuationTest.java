@@ -46,8 +46,10 @@ public final class KineticRouteContinuationTest {
             var chainPlan = new KineticRouteGeometry.Plan("chain_conveyor",source,Direction.EAST,target,Direction.WEST,
                     List.of(),List.of(new KineticRouteGeometry.ChainLink(a,b,4)),Map.of("minecraft:chain",4));
             check(chainOnly.accepts(chainPlan),"a declared native chain link satisfies the candidate-family filter");
-            try { KineticRouteContinuations.find(h.player,chainOnly); throw new AssertionError("different transmission reused old partial route"); }
-            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("partial_route"),"changed technology keeps the original partial-route boundary"); }
+            // 偏移偏好不同的新请求清掉旧续作、交回重新规划；不把旧技术路线静默续建成新成果。
+            check(KineticRouteContinuations.find(h.player,chainOnly) == null,
+                    "a changed technology request retires the old partial route instead of reusing it");
+            KineticRouteContinuations.retain(h.player,request,plan,new JsonObject());
             check(KineticRouteContinuations.find(h.player,request).plan()==plan,"an unfinished request must retain its exact selected plan");
             check(KineticRouteContinuations.remaining(h.player,plan).equals(Map.of("minecraft:stone",1)),"an absent cell still needs its material");
             h.set(cell,Blocks.STONE.defaultBlockState());

@@ -23,6 +23,9 @@ public final class MachineObservationPagesTest {
         var nativeData = new JsonObject();
         nativeData.addProperty("resource_id", "component-sensitive-opaque-key");
         nativeData.addProperty("amount", 3);
+        nativeData.addProperty("block_id", "minecraft:barrel");
+        nativeData.addProperty("tick", 20);
+        nativeData.add("unknown", new JsonArray());
         observations.add(nativeData);
         page.add("observations", observations);
         pages.append(page, "request-one", 7, new JsonArray());
@@ -47,6 +50,8 @@ public final class MachineObservationPagesTest {
         // 分页由执行器自动读完，不再按报告预算截断；页内原生未知字段单独记账为缺口，不丢弃已保留页。
         var unread = new JsonObject(); unread.addProperty("resource_id", "component-sensitive-opaque-key");
         unread.addProperty("amount", 1);
+        unread.addProperty("block_id", "minecraft:barrel");
+        unread.addProperty("tick", 21);
         var unknown = new JsonArray(); unknown.add(new JsonPrimitive("machinery_port_unread"));
         unread.add("unknown", unknown);
         page.getAsJsonArray("observations").add(unread);
@@ -64,6 +69,9 @@ public final class MachineObservationPagesTest {
         page.addProperty("complete", false); page.addProperty("truncated", true); page.addProperty("tick", 42);
         page.addProperty("next_resource_offset", 54);
         var observations = new JsonArray(); var row = new JsonObject(); observations.add(row); page.add("observations", observations);
+        row.addProperty("block_id", "minecraft:barrel");
+        row.addProperty("tick", 42);
+        row.add("unknown", new JsonArray());
         var resources = new JsonArray(); var ports = new JsonArray(); row.add("resources", resources); row.add("ports", ports);
         var template = new JsonObject(); var identity = new JsonObject();
         identity.addProperty("kind", "items"); identity.addProperty("id", "minecraft:air"); identity.add("components", new JsonObject());

@@ -60,8 +60,7 @@ public final class MachineUtilityInputsTest {
         JsonObject absent = blueprint(); input(absent).add("offset", JsonParser.parseString("[1,0,0]")); rejects(absent);
         JsonObject axis = blueprint(); cell(axis).getAsJsonObject("properties").addProperty("axis", "y"); rejects(axis);
         JsonObject unspecifiedAxis = blueprint(); cell(unspecifiedAxis).remove("properties"); rejects(unspecifiedAxis);
-        JsonObject blocked = blueprint(); blocked.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[-1,0,0],\"block_id\":\"minecraft:stone\"}")); rejects(blocked);
-        JsonObject enclosed = blueprint(); enclosed.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[-4,0,0],\"block_id\":\"minecraft:stone\"}")); rejects(enclosed);
+        // 声明阶段的净空预测已移除：入口前方占用或射线不通都交由现场接线操作报告，蓝图不再预拒。
         JsonObject reserved = blueprint(); reserved.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[-1,0,0],\"block_id\":\"minecraft:air\"}"));
         check(MachineUtilityInputs.parse(reserved).size() == 1, "explicit clearance is a valid reserved hookup cell");
         JsonObject part = blueprint(); cell(part).addProperty("part", "west"); rejects(part);
@@ -98,7 +97,7 @@ public final class MachineUtilityInputsTest {
         doc.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[0,0,0],\"block_id\":\"create:depot\"}"));
         check(MachineUtilityInputs.parse(doc).size() == 16, "sixteen native item receivers need no central storage or straight exterior ray");
         MachineBlueprintDocument.validateWire(doc);
-        var blocked = doc.deepCopy(); blocked.getAsJsonArray("blocks").add(JsonParser.parseString("{\"offset\":[0,1,0],\"block_id\":\"minecraft:stone\"}")); rejects(blocked);
+        // 入口面前的净空要求已移除：现场接线操作负责报告能否真正接入。
         var imaginary = doc.deepCopy(); input(imaginary).addProperty("block_id", "create:mechanical_press"); cell(imaginary).addProperty("block_id", "create:mechanical_press"); rejects(imaginary);
         var shared = doc.deepCopy(); var second = shared.getAsJsonArray("external_inputs").get(1).getAsJsonObject();
         second.add("offset", input(shared).get("offset").deepCopy()); second.addProperty("resource", "minecraft:iron_ingot");

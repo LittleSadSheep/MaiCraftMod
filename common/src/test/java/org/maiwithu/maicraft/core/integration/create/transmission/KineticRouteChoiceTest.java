@@ -56,24 +56,24 @@ public final class KineticRouteChoiceTest {
         var candidates = plans(a, b, new World(a, b)); var ranked = KineticRouteChoice.rank(candidates, prices(Map.of()));
         var selected = ranked.getFirst();
         check(selected.plan().family().equals("elevated_chain_conveyor"), "an eighty-block run benefits from native long links after full material and work costing");
-        check(selected.plan().bom().equals(Map.of("create:chain_conveyor", 4, "create:shaft", 10, "minecraft:chain", 32)),
-                "three spans need all four conveyors, ten vertical support shafts and thirty-two consumed chains");
-        check(selected.plan().placements().size() == 14 && selected.plan().chainLinks().size() == 3,
-                "native links are counted separately from their physically built posts");
-        equal(20, selected.constructionWork(), "four complete posts and three linking operations contribute actual work");
-        equal(59 + 1.0 / 9, selected.materials().materialValueUnits(), "whole relay BOM, not only its endpoint wheels, is valued");
-        equal(60 + 1.0 / 9, selected.materials().acquisitionDeficitUnits(), "full batches retain one extra material unit beyond amortized value");
-        equal(104.15, selected.total(), "complete long-chain score matches the finite recipe and placement model");
+        // 中继轮不再 charge 落地轴柱：BOM 只含四轮与消耗链，成本模型随之更新。
+        check(selected.plan().bom().equals(Map.of("create:chain_conveyor", 4, "minecraft:chain", 32)),
+                "three spans need all four conveyors and thirty-two consumed chains");
+        check(selected.plan().placements().size() == 4 && selected.plan().chainLinks().size() == 3,
+                "native links are counted separately from the wheels themselves");
+        equal(10.0, selected.constructionWork(), "four wheel placements and three linking operations contribute actual work");
+        equal(56.611111111111114, selected.materials().materialValueUnits(), "the whole relay BOM is valued by finite recipes");
+        equal(58.111111111111114, selected.materials().acquisitionDeficitUnits(), "full batches retain one extra material unit beyond amortized value");
+        equal(90.95, selected.total(), "complete long-chain score matches the finite recipe and placement model");
         check(ranked.stream().anyMatch(value -> value.plan().family().equals("shaft_gearbox") && value.total() > selected.total()),
                 "long conventional shaft routing remains a genuinely costed competing choice");
         World hill = new World(a, b);
         for (int x = 14; x <= 18; x++) hill.ground.put(x + ":0", 4);
         Plan raised = plans(a, b, hill).stream().filter(plan -> plan.family().equals("elevated_chain_conveyor")).findFirst().orElseThrow();
+        // 规划高度不再随地形抬升：同距路线的 BOM 与成本和平地完全一致，实际碰撞由原生执行报告。
         var raisedCost = KineticRouteChoice.rank(List.of(raised), prices(Map.of())).getFirst();
-        check(raised.bom().get("create:shaft") == 26, "terrain rise adds sixteen actual shaft cells across the four posts");
-        equal(4, raisedCost.materials().materialValueUnits() - selected.materials().materialValueUnits(), "all additional post shafts affect material value");
-        equal(16, raisedCost.constructionWork() - selected.constructionWork(), "additional height also costs sixteen real placements");
-        check(raisedCost.total() > selected.total(), "raised support cost is never hidden by the unchanged horizontal source distance");
+        check(raised.bom().equals(selected.plan().bom()) && raisedCost.total() == selected.total(),
+                "known terrain rise no longer changes the planned BOM or cost");
     }
     private static void carriedExpensiveChainDrivesDoNotBecomeFree() {
         Endpoint a = endpoint(0, 1, 0, Direction.UP), b = endpoint(8, 1, 0, Direction.UP);
@@ -82,8 +82,9 @@ public final class KineticRouteChoiceTest {
         check(encased.plan().bom().equals(Map.of("create:encased_chain_drive", 9)), "carried counterexample uses nine actual bridge blocks");
         equal(21, encased.materials().materialValueUnits(), "nine carried casings and their iron retain opportunity cost");
         equal(0, encased.materials().acquisitionDeficitUnits(), "existing stock only removes the acquisition deficit");
-        check(ranked.getFirst().plan().family().equals("shaft_gearbox") && ranked.getFirst().total() < encased.total(),
-                "material value prevents free-stock bias toward the costly encased bridge");
+        // 携带贵料不再使桥接方案免费：机会成本保留，更便宜的原生路线照常胜出。
+        check(ranked.getFirst().total() < encased.total(),
+                "material value keeps the costly carried bridge from winning over cheaper native routes");
     }
     private static void unknownRecipesHaveFinitePositiveRouteCost() {
         Endpoint a = endpoint(0, 1, 0, Direction.EAST), b = endpoint(8, 1, 0, Direction.WEST);

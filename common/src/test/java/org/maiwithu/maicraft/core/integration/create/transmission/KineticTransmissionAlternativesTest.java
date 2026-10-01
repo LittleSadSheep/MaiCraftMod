@@ -43,7 +43,10 @@ public final class KineticTransmissionAlternativesTest {
         check(KineticEncasedGeometry.candidate(source, Direction.UP, horizontal, Direction.WEST, new World(source, horizontal), Limits.defaults(16)) == null,
                 "a horizontal shaft is not connected to a chain drive's decorative chain side");
         Endpoint target = shaft(3, 1, 0, Direction.UP); World foreign = new World(source, target); foreign.kinetics.add(new BlockPos(1, 2, 1));
-        check(KineticEncasedGeometry.candidate(source, Direction.UP, target, Direction.UP, foreign, Limits.defaults(16)) == null,
+        var encased = KineticEncasedGeometry.candidate(source, Direction.UP, target, Direction.UP, foreign, Limits.defaults(16));
+        // 候选不得把外来传动装置当成路线元素；高度规则改变后仍要显式核对放置与链接两端。
+        check(encased != null && encased.placements().stream().noneMatch(b -> b.position().equals(new BlockPos(1, 2, 1)))
+                        && encased.chainLinks().stream().noneMatch(l -> l.from().equals(new BlockPos(1, 2, 1)) || l.to().equals(new BlockPos(1, 2, 1))),
                 "the short encased candidate cannot silently join neighboring kinetic machinery");
     }
     private static void chainSpansDoNotRequireEmptyCells() {
