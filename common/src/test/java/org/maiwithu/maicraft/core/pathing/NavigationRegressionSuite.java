@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.pathing;
 
+import baritone.behavior.PathCalculationOriginTest;
 import baritone.pathing.calc.HeightPolicyTest;
 import baritone.pathing.calc.GroundJourneyContinuationTest;
 import baritone.pathing.calc.PathSearchRegressionTest;
@@ -43,6 +44,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.FallLandingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundMovementReplayTest;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest;
+import org.maiwithu.maicraft.core.pathing.baritone.InstantClearanceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
@@ -140,6 +142,8 @@ public final class NavigationRegressionSuite {
         MoveToContractTest.main(args);
         MoveToTransportCompletionTest.main(args);
         PathSearchRegressionTest.main(args);
+        // 传送或改目标后，异步旧失败不得终止角色从当前起点继续寻路。
+        PathCalculationOriginTest.main(args);
         // 空背包在逐步加载的地形里自动续路，危险直线必须让位于有支撑的绕行。
         GroundJourneyContinuationTest.main(args);
         HeightPolicyTest.main(args);
@@ -157,6 +161,8 @@ public final class NavigationRegressionSuite {
         TravelRunwayTest.main(args);
         NavigationCameraCourseTest.main(args);
         NavigationActionPolicyTest.main(args);
+        // 脚边火把、草等零硬度障碍仍须提交真实挖掘，不能因无限大进度停在原地。
+        InstantClearanceTest.main(args);
         WaterBucketFallTest.main(args);
         LandingSurfaceRulesTest.main(args);
         NativeBucketLandingTest.main(args);

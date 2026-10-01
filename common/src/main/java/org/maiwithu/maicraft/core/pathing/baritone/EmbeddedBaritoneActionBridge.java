@@ -207,7 +207,9 @@ final class EmbeddedBaritoneActionBridge {
         if (!ClearanceWhitelist.allows(before)) { navigator.rejectedClearance(hit.getBlockPos()); return; }
         float destroyProgress = before.getDestroyProgress(
                 context.player(), context.level(), hit.getBlockPos());
-        if (!(destroyProgress > 0.0F) || !Float.isFinite(destroyProgress)) return;
+        // 火把、草等零硬度方块在原版返回正无穷，表示一击即可挖掉；仍提交原生挖掘并等待世界确认。
+        // 非正值和 NaN 才是不具备当前破坏进度，不能把可瞬间清除的障碍留在搭柱位置上反复重算。
+        if (!(destroyProgress > 0.0F)) return;
         try {
             receiptOwner = navigator;
             pendingKind = PendingKind.BREAK;

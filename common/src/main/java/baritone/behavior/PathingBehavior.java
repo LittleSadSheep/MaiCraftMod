@@ -43,6 +43,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 import org.maiwithu.maicraft.core.pathing.baritone.SwimTravelControl;
 
@@ -70,6 +71,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     // Only the client thread owns these handles; detached futures cannot affect a later owner.
     private CompletableFuture<PathCalculationResult> pendingCalculation;
     private BlockPos calculationStart;
+    private Goal calculationGoal;
+    private Level calculationWorld;
     private BlockPos failedPlanAheadStart;
     private LoadedFrontier calculationFrontier, failedPlanAheadFrontier;
     private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
@@ -499,6 +502,9 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (talkAboutIt) logDebug("Searching from " + start + " to " + goal);
         if (current == null) failedPlanAheadStart = null;
         calculationStart = start.immutable();
+        // 请求发出时冻结归属；角色被传送、换世界或改目标后，旧失败不能裁决新现场是否有路。
+        calculationGoal = goal;
+        calculationWorld = ctx.world();
         // 记搜索开始时的边界，避免计算期间加载的区块被失败回执吞掉而失去重试机会。
         calculationFrontier = LoadedFrontier.capture(start, ctx.world()::isLoaded);
         inProgress = pathfinder;
@@ -516,12 +522,22 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             result = new PathCalculationResult(PathCalculationResult.Type.EXCEPTION);
         }
         BlockPos start = calculationStart;
+        Goal requestedGoal = calculationGoal;
+        Level requestedWorld = calculationWorld;
         pendingCalculation = null;
         calculationStart = null;
+        calculationGoal = null;
+        calculationWorld = null;
         inProgress = null;
         if (result == null || result.getType() == PathCalculationResult.Type.CANCELLATION) return;
+        // 旧世界的方块证据不能用于当前身体，即使传送前后坐标恰巧相同也要重新搜索。
+        if (requestedWorld != ctx.world()) return;
 
         Optional<IPath> path = result.getPath();
+        // 成功路径可按下方已有成员检查接续；无路结果没有可复用路段，只能归于原目标和原起点。
+        // 丢弃过期失败后保持目标进程活动，下一刻从真实脚位搜索，不要求模型重发任务。
+        if (path.isEmpty() && (!Objects.equals(requestedGoal, goal)
+                || !Objects.equals(start, current == null ? expectedSegmentStart : current.getPath().getDest()))) return;
         if (current == null) {
             if (path.isPresent()) {
                 if (path.get().positions().contains(expectedSegmentStart)) {
@@ -559,6 +575,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         inProgress = null;
         pendingCalculation = null;
         calculationStart = null;
+        calculationGoal = null;
+        calculationWorld = null;
         failedPlanAheadStart = null;
         calculationFrontier = null; failedPlanAheadFrontier = null;
     }

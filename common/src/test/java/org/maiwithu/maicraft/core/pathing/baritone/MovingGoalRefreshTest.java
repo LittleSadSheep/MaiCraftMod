@@ -27,6 +27,12 @@ import sun.misc.Unsafe;
 public final class MovingGoalRefreshTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        // 包装对象的更新不能让静止目标永远丢弃真实失败；坐标和到达范围改变才属于新请求。
+        var first = new MaiCraftGoalAdapter(NavGoal.exact(new BlockPos(10, 1, 3)));
+        var same = new MaiCraftGoalAdapter(NavGoal.exact(new BlockPos(10, 1, 3)));
+        check(first.equals(same) && first.hashCode() == same.hashCode(), "equivalent goal wrappers share a search identity");
+        check(!first.equals(new MaiCraftGoalAdapter(NavGoal.exact(new BlockPos(11, 1, 3)))), "moved target invalidates old failure");
+        check(!first.equals(new MaiCraftGoalAdapter(NavGoal.nearGround(new BlockPos(10, 1, 3), 2))), "changed arrival scope invalidates old failure");
         try (var w = new InteractionWorldTestHarness()) {
             // 比较原生目标的剩余距离会读取Baritone设置，夹具提供独立目录，避免误用未初始化的游戏客户端字段。
             field(Minecraft.class, "gameDirectory").set(Minecraft.getInstance(), new File("moving-goal-settings-fixture"));
