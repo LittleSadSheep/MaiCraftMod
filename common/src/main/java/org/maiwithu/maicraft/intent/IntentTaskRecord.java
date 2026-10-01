@@ -332,8 +332,11 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     public boolean answer(UUID decisionId, String choice, JsonObject details) {
-        // 问题编号和选项都必须匹配，防止迟到的答复被用到另一个问题上；接受后下一次执行再处理。
-        if (getState().isTerminal() || terminal != null) return false;
+        // 终态任务通常不再匹配答复，防止迟到的答复被用到另一份决策上。
+        // 唯独死亡恢复决策例外：它的主体是死亡本身，body_gone 抢先终结任务后问题依然成立，
+        // 必须放行答复（Facade 会同步应用重生/观战/取消），否则没有任何 MCP 入口能完成重生。
+        boolean terminalBlock = (getState().isTerminal() || terminal != null) && !deathRecovery(decision);
+        if (terminalBlock) return false;
         if (decision == null || !decision.id().equals(decisionId) || !decision.accepts(choice)) return false;
         pendingAnswer = new DecisionAnswer(decisionId, choice,
                 details == null ? "{}" : details.toString());
@@ -341,6 +344,12 @@ public final class IntentTaskRecord extends TaskRecord {
         pause = null;
         changed();
         return true;
+    }
+
+    private boolean deathRecoveryPending(UUID decisionId) {
+        return decision != null && decisionId.equals(decision.id())
+                && decision.contextJson() != null
+                && decision.contextJson().contains("death_recovery");
     }
 
     DecisionAnswer takeAnswer() {
@@ -353,13 +362,20 @@ public final class IntentTaskRecord extends TaskRecord {
 
     void terminal(TaskState state, TaskResult result, long gameTime) {
         // 最后结果确定后，清掉暂停、待答问题和未处理答复；结束的任务不再等待人回答。
+        // 例外是死亡恢复决策：它的主体是死亡本身，body_gone 抢先终结任务后
+        // "重生还是取消"依然必须有人能回答，清掉它等于封死唯一的重生入口。
         if (!state.isTerminal()) throw new IllegalArgumentException("terminal receipt requires a terminal state");
         terminal = new TerminalSnapshot(state, result == null ? "{}" : result.toJson(), gameTime);
         setState(state);
         pause = null;
-        decision = null;
+        if (!deathRecovery(decision)) decision = null;
         pendingAnswer = null;
         changed();
+    }
+
+    private static boolean deathRecovery(DecisionSnapshot snapshot) {
+        return snapshot != null && snapshot.contextJson() != null
+                && snapshot.contextJson().contains("death_recovery");
     }
 
     private void changed() {

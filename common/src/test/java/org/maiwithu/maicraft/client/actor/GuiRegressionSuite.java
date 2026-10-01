@@ -164,6 +164,8 @@ public final class GuiRegressionSuite {
         // 水下低顶逃生先检查实际换气链的输入，避免单独路径测试掩盖持续顶墙上浮。
         BreathChainControlTest.main(args);
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
+        // 死亡恢复决策在 body_gone 抢先终结任务后仍必须可回答，重生入口不能死锁。
+        org.maiwithu.maicraft.intent.DeathDecisionSurvivesCancelTest.main(args);
         TaskSlotFailureTest.main(args);
         // 嵌套取材只扫描已声明的附近范围，空搜加工设备不能把整片已加载世界都扫一遍。
         MiningSearchScopeTest.main(args);
