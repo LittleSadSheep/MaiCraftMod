@@ -35,7 +35,7 @@ public final class SemanticResultView {
     private static boolean internalKey(String raw) {
         String key = raw.toLowerCase(Locale.ROOT);
         // 失败格和未拆支撑是已经观察到的诊断事实，保留它们不会开放新的方块操作入口。
-        if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return false;
+        if (ObservedGameEvidence.spatialField(key)) return false;
         return INTERNAL_RESULT_KEYS.contains(key)
                 || key.endsWith("_cells")
                 || key.endsWith("_ops")
@@ -58,31 +58,12 @@ public final class SemanticResultView {
                 || key.endsWith("_runtime_ids");
     }
 
-    /** 移动结果保留到达含义，去掉只属于本次执行的位置和实体编号。 */
+    /** 原生错误里的失败格和到达位置原样交付，模型据此关联蓝图；仅隐藏无持久意义的运行时实体号。 */
     static String message(String raw) {
         if (raw == null) return "";
         return raw
-                // 到达目标后的成功说明先保持完整句意，再去掉内部坐标。
-                // 若只替换数字，原来的“到达指定格”可能重复叠加位置说明。
-                .replaceFirst(
-                        "(?i)reached the exact cell -?\\d+\\s*,\\s*-?\\d+\\s*,\\s*-?\\d+\\.",
-                        "reached the exact target cell.")
-                .replaceFirst(
-                        "(?i)arrived at location x\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\s+z\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?,"
-                                + "\\s*standing on the ground at y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\.",
-                        "arrived at the target location, standing on solid ground.")
-                .replaceFirst(
-                        "(?i)The exact cell y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)? wasn't reachable",
-                        "The exact requested cell wasn't reachable")
                 .replaceAll("(?i)entity\\s*#?\\s*\\d+", "selected entity")
-                .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target")
-                .replaceAll(
-                        "(?i)(?:location\\s+)?x\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?\\s+z\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?(?:,?\\s*standing\\s+on\\s+the\\s+ground\\s+at\\s+y\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?)?",
-                        "the internally verified location")
-                .replaceAll("(?<!\\d)-?\\d+\\s*,\\s*-?\\d+\\s*,\\s*-?\\d+(?!\\d)",
-                        "the internally verified location")
-                .replaceAll("(?i)\\b[xyz]\\s*[:=]\\s*-?\\d+(?:\\.\\d+)?",
-                        "the internally verified coordinate");
+                .replaceAll("(?i)runtime\\s+id\\s*[:=]?\\s*\\d+", "internal target");
     }
 
     /** 保留成功、超时和中断事实，只转换其对外文字与证据格式。 */

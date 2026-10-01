@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.intent.BlueprintGoalData;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
+import org.maiwithu.maicraft.intent.ObservedGameEvidence;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import java.nio.charset.StandardCharsets;
@@ -611,8 +612,7 @@ public final class IntentStateCodec {
     }
 
     /**
-     * 结果回执清洗：结果里不允许出现内部字段、坐标、槽位和异常文本。
-     * 字符串经 {@link #safeMessage} 替换，内部键按完整名单整项删除。
+     * 已观察的坐标和错误摘要完整保存；只删除执行器的槽位脚本与运行时内部对象。
      */
     private static JsonElement safeElement(JsonElement value) {
         return sanitize(value, 0, IntentStateCodec::safeMessage, IntentStateCodec::isInternalKey);
@@ -629,7 +629,7 @@ public final class IntentStateCodec {
     /**
      * 两份清洗名单共用的同一次递归；两个调用方只差两个策略：
      * {@code textPolicy} 决定字符串如何脱敏——结果替换含异常关键词的消息，目标只截断长度；
-     * {@code internalKey} 决定哪些键视为内部字段整项跳过——结果的名单更严格，连坐标和槽位后缀一起删。
+     * {@code internalKey} 删除操作脚本；结果与展示层共用现场位置判定，不在存档时二次丢失诊断格。
      * 只读游戏证据完整保存；其它内部结构仍限制深度，避免保存执行器的活动对象；
      * 键名只做长度截断（键是字段名不是内容，不经过 textPolicy），值才走 textPolicy。
      */
@@ -664,9 +664,10 @@ public final class IntentStateCodec {
         return result;
     }
 
-    /** 执行结果与回执的内部字段名单：内部标识、槽位、路径和坐标后缀全部不允许出现在结果里。 */
+    /** 保留只读位置，执行器的内部标识、点击序列与寻路节点仍不作为下一次模型动作脚本。 */
     private static boolean isInternalKey(String key) {
         String lower = key.toLowerCase(Locale.ROOT);
+        if (ObservedGameEvidence.spatialField(lower)) return false;
         if (INTERNAL_KEYS.contains(lower)) return true;
         return lower.endsWith("_entity_id") || lower.endsWith("_entity_ids")
                 || lower.endsWith("_entity_uuid") || lower.endsWith("_entity_uuids")
@@ -697,7 +698,7 @@ public final class IntentStateCodec {
 
     private static String safeMessage(String value) {
         // 错误类别和原生原因也是恢复所需事实；栈轨迹已有独立字段过滤，不能把摘要改成无依据的安全结论与重查指令。
-        return bounded(value);
+        return value == null ? "" : value.strip();
     }
 
     private static String bounded(String value) {
