@@ -187,6 +187,8 @@ public final class GuiRegressionSuite {
         ChatGuiPreparationTest.main(args);
         ChatAbilityTest.main(args);
         MenuVisibilityTest.main(args);
+        // 普通任务终局和世界动作都原生退出挡路页面，菜单步骤仍保留自己需要的真实容器。
+        GuiRecoveryTest.main(args);
         MenuConfirmationLatencyTest.main(args);
         WindowControlTest.main(args);
         ControlProtocolTest.main(args);

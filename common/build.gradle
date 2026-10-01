@@ -122,6 +122,12 @@ def regressionSuites = [
         heap: '512m', directory: 'chat-regression', timeoutSeconds: 45,
         purpose: '验证聊天自动关界面、草稿交接与只提交一次'
     ],
+    // 公共关页、延迟返料及所需菜单保留独立验证，避免其他游戏用例遮住角色任务的交接结论。
+    guiRecoveryRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.GuiRecoveryRegressionSuite',
+        heap: '512m', directory: 'gui-recovery-regression', timeoutSeconds: 60,
+        purpose: '验证角色任务自动关界面、返料等待与菜单交接'
+    ],
     guiRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.GuiRegressionSuite',
         heap: '512m', directory: 'gui-regression', timeoutSeconds: 45,
