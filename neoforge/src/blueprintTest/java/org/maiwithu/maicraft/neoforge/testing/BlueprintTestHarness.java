@@ -48,6 +48,7 @@ public final class BlueprintTestHarness {
             nextPoll = game.level.getGameTime() + 20;
             Path directory = game.gameDirectory.toPath().resolve("blueprint-test").resolve(expected);
             Files.createDirectories(directory.resolve("requests")); Files.createDirectories(directory.resolve("receipts"));
+            BlueprintTestArchive.replay(game, directory);
             try (var files = Files.list(directory.resolve("requests"))) {
                 inbox = files.filter(path -> path.getFileName().toString().matches("[a-zA-Z0-9_-]+\\.json"))
                         .filter(path -> !Files.exists(directory.resolve("receipts").resolve(path.getFileName())))

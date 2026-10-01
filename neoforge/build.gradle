@@ -47,6 +47,9 @@ neoForge {
                     if (blueprintWorld.get() != worldName || !worldName.startsWith('TEST-Blueprint-Flat-'))
                         throw new GradleException('Blueprint testing requires its own TEST-Blueprint-Flat- world')
                     systemProperty 'maicraft.blueprintTest.world', worldName
+                    // 维护时可从已应用回执重建比较档案；执行器不会因此重放世界生成或投料。
+                    if (providers.gradleProperty('maicraftBlueprintCatalogReplay').isPresent())
+                        systemProperty 'maicraft.blueprintTest.rebuildCatalog', 'true'
                 }
             }
         }
