@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.server.machine;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.core.Direction;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -31,6 +32,27 @@ final class CreateMachineAdapter {
             CreateChainConveyorObservation.inspect(player, entity, state);
             // 接上动力后仍可能反向输送，快照直接公开原生运动方向供整机观察与接线回执复用。
             CreateBeltObservation.append(entity, state);
+            String vault = "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity";
+            if (NativeApi.is(entity, vault)) {
+                // 相邻保险库不一定共享一个库存；公开真实控制器与已成型尺寸，让模型按原生连接判断供料范围。
+                var structure = new JsonObject(); state.add("item_vault", structure);
+                Object rawController = NativeApi.call(entity, vault, "getController");
+                if (rawController instanceof BlockPos controller) {
+                    var coordinates = new JsonArray(); coordinates.add(controller.getX()); coordinates.add(controller.getY()); coordinates.add(controller.getZ());
+                    structure.add("controller_position", coordinates);
+                    var owner = player.serverLevel().isLoaded(controller) ? player.serverLevel().getBlockEntity(controller) : null;
+                    if (NativeApi.is(owner, vault)) {
+                        var axis = (Direction.Axis) NativeApi.call(owner, vault, "getMainConnectionAxis");
+                        int width = ((Number) NativeApi.call(owner, vault, "getWidth")).intValue();
+                        int length = ((Number) NativeApi.call(owner, vault, "getHeight")).intValue();
+                        structure.addProperty("axis", axis.getName()); structure.addProperty("width", width); structure.addProperty("length", length);
+                        structure.addProperty("connected_blocks", width * width * length);
+                        structure.addProperty("maximum_width", NativeApi.number(NativeApi.call(owner, vault, "getMaxWidth")));
+                        structure.addProperty("maximum_length_for_current_width", NativeApi.number(NativeApi.call(owner, vault, "getMaxLength", axis, width)));
+                        structure.addProperty("status", "observed");
+                    } else structure.addProperty("status", "controller_unavailable");
+                } else structure.addProperty("status", "controller_unknown");
+            }
             if (NativeApi.is(entity, KINETIC)) {
                 for (String method : new String[]{"getSpeed", "getTheoreticalSpeed", "getGeneratedSpeed", "isOverStressed",
                         "isSpeedRequirementFulfilled", "hasSource", "hasNetwork"}) scalar(state, method, NativeApi.call(entity, KINETIC, method));
