@@ -43,8 +43,9 @@ public final class CraftingPlacementPlan {
             demands.add(new Demand(ingredient, target));
         }
         int size = Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size());
-        int[] sources = new int[size], remaining = new int[size], assigned = new int[demands.size()];
+        int[] sources = new int[size], remaining = new int[size], stock = new int[size], assigned = new int[demands.size()];
         Arrays.fill(sources, -1); Arrays.fill(assigned, -1);
+        for (int index = 0; index < size; index++) stock[index] = player.getInventory().getItem(index).getCount();
         // 背包、工作台及模组合成菜单的槽号可能不同，只依据容器身份与实际背包索引寻找材料槽。
         for (int slot = 0; slot < menu.slots.size(); slot++) {
             Slot candidate = menu.getSlot(slot); int index = candidate.getContainerSlot();
@@ -53,15 +54,24 @@ public final class CraftingPlacementPlan {
             }
         }
         boolean[][] accepts = new boolean[demands.size()][size];
+        boolean[][] matches = new boolean[demands.size()][size];
         for (int demand = 0; demand < demands.size(); demand++) {
             for (int source = 0; source < size; source++) {
                 ItemStack stack = player.getInventory().getItem(source);
-                accepts[demand][source] = sources[source] >= 0 && !stack.isEmpty()
-                        && demands.get(demand).ingredient().test(stack)
+                matches[demand][source] = !stack.isEmpty() && demands.get(demand).ingredient().test(stack);
+                accepts[demand][source] = sources[source] >= 0 && matches[demand][source]
                         && menu.getSlot(demands.get(demand).targetSlot()).mayPlace(stack);
             }
+        }
+        for (int demand = 0; demand < demands.size(); demand++) {
             // 宽泛木板标签可能先拿走精确橡木输入；沿增广路径重新分配，避免明明齐料却被贪心选料卡住。
-            if (!assign(demand, accepts, remaining, assigned, new boolean[size])) return List.of();
+            if (!assign(demand, accepts, remaining, assigned, new boolean[size])) {
+                // 材料齐备但菜单不允许搬动时，报告真实槽位条件；不能诱导模型为同一份现有材料再次补料。
+                Arrays.fill(assigned, -1);
+                for (int material = 0; material < demands.size(); material++)
+                    if (!assign(material, matches, stock, assigned, new boolean[size])) return List.of();
+                throw new IllegalStateException("materials are present but the active menu does not permit their native placement");
+            }
         }
         var result = new ArrayList<Entry>();
         for (int index = 0; index < demands.size(); index++) {
