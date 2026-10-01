@@ -59,7 +59,12 @@ public final class BlueprintTestHarness {
             String label = request.get("label").getAsString();
             BlockPos anchor = BlueprintTestNative.position(request.getAsJsonArray("anchor"));
             var layout = MachineBlueprintDocument.compile(request.getAsJsonObject("blueprint"), MachineConstructionPlan.registry());
-            if (!layout.buildable()) throw new IllegalArgumentException(layout.report().toString());
+            if (!layout.buildable()) {
+                // 首稿可能写了不存在的状态值；直接保留字段诊断，不用整页未施工端口几何和转义 JSON 淹没错误。
+                result = new JsonObject(); result.add("validation", layout.report().get("validation").deepCopy());
+                result.addProperty("effects_started", false);
+                throw new IllegalArgumentException("blueprint_schema_or_block_state_invalid");
+            }
             plan = MachineConstructionPlan.compile(anchor, layout, true, true);
             if (ClientMachineCatalog.blueprint(game.player, label, anchor).isPresent()) plan.markModification();
             var scope = MachineChainConveyorLimit.bind(game.player, "machine-test-" + inbox.getFileName(), label, anchor, true);
