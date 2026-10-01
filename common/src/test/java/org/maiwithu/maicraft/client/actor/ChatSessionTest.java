@@ -18,11 +18,12 @@ public final class ChatSessionTest {
         Bootstrap.bootStrap();
         var h = new ActorControlTestHarness();
         var invisiblePause = h.allocate(PauseScreen.class);
+        // 后台自动暂停可直接让开，手动暂停和已有草稿则须先走退出流程，不能直接覆盖页面。
         check(ChatScreenView.mayOpen(invisiblePause, false), "background automatic pause can resume for chat");
-        check(!ChatScreenView.mayOpen(invisiblePause, true), "foreground pause is retained");
+        check(!ChatScreenView.mayOpen(invisiblePause, true), "foreground pause requires native closure");
         field(PauseScreen.class, "showPauseMenu").setBoolean(invisiblePause, true);
-        check(!ChatScreenView.mayOpen(invisiblePause, false), "manual pause menu is retained even in background");
-        check(!ChatScreenView.mayOpen(h.allocate(ChatScreen.class), false), "never overwrite a human draft");
+        check(!ChatScreenView.mayOpen(invisiblePause, false), "manual pause requires closure even in background");
+        check(!ChatScreenView.mayOpen(h.allocate(ChatScreen.class), false), "an old draft must exit before new input");
         View view = new View();
         ChatSession session = new ChatSession(new ChatMessage("你好", 100), view, () -> true);
         session.tick(h.context, 0);

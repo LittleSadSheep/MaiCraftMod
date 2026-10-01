@@ -110,6 +110,12 @@ def regressionSuites = [
         heap: '512m', directory: 'navigation-regression', timeoutSeconds: 45,
         purpose: '验证导航取消、路径推进、开门与落地'
     ],
+    // 聊天独立回放界面收尾与持久发送，不让其他游戏操作回归遮住消息提交结论。
+    chatRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.ChatRegressionSuite',
+        heap: '512m', directory: 'chat-regression', timeoutSeconds: 45,
+        purpose: '验证聊天自动关界面、草稿交接与只提交一次'
+    ],
     guiRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.GuiRegressionSuite',
         heap: '512m', directory: 'gui-regression', timeoutSeconds: 45,

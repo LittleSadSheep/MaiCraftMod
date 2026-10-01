@@ -21,8 +21,13 @@ public final class DefaultMenuPort implements MenuPort {
     private MenuReceipt active;
     private final MenuVisibility visibility = new MenuVisibility();
     private AbstractContainerMenu closingMenu;
-    /** 已提交的槽位交换与关闭界面必须先结束，之后才允许离开工位去睡觉。 */
-    boolean settledForRoutinePause() { return (active == null || active.terminal()) && closingMenu == null; }
+    /** 已提交的槽位交换与关闭界面必须先结束，聊天和休息才可接手角色。 */
+    @Override public boolean hasPendingTransaction() {
+        return (active != null && !active.terminal()) || closingMenu != null;
+    }
+
+    /** 离开工位去睡觉时沿用同一事务结清条件，避免未返还的物品被后继动作打断。 */
+    boolean settledForRoutinePause() { return !hasPendingTransaction(); }
 
     @Override
     public boolean ensureVisible(LocalPlayerContext context) {
