@@ -59,7 +59,16 @@ public final class BlueprintTestHarness {
             request = JsonParser.parseString(Files.readString(inbox)).getAsJsonObject();
             String label = request.get("label").getAsString();
             BlockPos anchor = BlueprintTestNative.position(request.getAsJsonArray("anchor"));
-            var layout = MachineBlueprintDocument.compile(request.getAsJsonObject("blueprint"), MachineConstructionPlan.registry());
+            var authored = request.getAsJsonObject("blueprint").deepCopy();
+            if (authored.has("assembly")) {
+                // 测试直接生成物理图纸，加工关系只是作者说明；稀疏改料路不必重写未变化的机械手才能落地。
+                var relations = authored.getAsJsonObject("assembly").remove("processing");
+                if (relations != null) {
+                    var metadata = authored.has("metadata") ? authored.getAsJsonObject("metadata") : new JsonObject();
+                    metadata.add("test_authored_processing", relations); authored.add("metadata", metadata);
+                }
+            }
+            var layout = MachineBlueprintDocument.compile(authored, MachineConstructionPlan.registry());
             if (!layout.buildable()) {
                 // 首稿可能写了不存在的状态值；直接保留字段诊断，不用整页未施工端口几何和转义 JSON 淹没错误。
                 result = new JsonObject(); result.add("validation", layout.report().get("validation").deepCopy());
