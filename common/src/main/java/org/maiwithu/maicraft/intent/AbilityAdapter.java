@@ -788,7 +788,7 @@ final class AbilityAdapter {
             args.addProperty("continuation_token", continuationToken.toString());
         }
         for (String key : List.of(
-                "material_policy", "allowed_sources", "allow_harm", "protected_labels")) {
+                "material_policy", "allowed_sources", "allow_harm", "protected_labels", "belt_direction")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("connect_mechanical_power", args.toString());

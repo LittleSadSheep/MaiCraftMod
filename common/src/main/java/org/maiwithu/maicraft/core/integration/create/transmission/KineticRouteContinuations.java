@@ -65,6 +65,7 @@ final class KineticRouteContinuations {
                 &&Objects.equals(a.targetBlockId,b.targetBlockId)&&a.minimumRpm==b.minimumRpm
                 &&a.materialPolicy==b.materialPolicy&&a.allowedSources.equals(b.allowedSources)&&a.allowHarm==b.allowHarm
                 &&a.requireChainConveyor==b.requireChainConveyor
+                &&a.beltDirection==b.beltDirection
                 &&a.protectedLabels.equals(b.protectedLabels)&&a.dimension.equals(b.dimension)&&a.sourceRadius==b.sourceRadius;
     }
 }

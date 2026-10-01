@@ -34,7 +34,7 @@ final class CreateEconomicEndpointBridge {
                 request.request.destination().name(), target.position(), request.request.destination().exactFace(),
                 BuiltInRegistries.BLOCK.getKey(target.state().getBlock()).toString(), 0, 64, false,
                 request.materialPolicy, request.protectedLabels, request.allowedSources, request.allowHarm,
-                request.request.transmission() == CreateMechanicalPower.Transmission.CHAIN_CONVEYOR);
+                request.request.transmission() == CreateMechanicalPower.Transmission.CHAIN_CONVEYOR).expectBeltDirection(request.request.beltDirection());
     }
 
     static List<CreateMechanicalPlan.KineticEndpoint> equivalentDestinations(Level world, CreateMechanicalPower.Request request,

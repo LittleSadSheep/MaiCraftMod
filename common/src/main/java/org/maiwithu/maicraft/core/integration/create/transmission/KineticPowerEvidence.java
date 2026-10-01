@@ -6,10 +6,15 @@ import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
+import org.maiwithu.maicraft.server.machine.create.CreateBeltObservation;
 
 /** 明确标注同步原生数据；绝不会用其替代被拒绝的服务器请求。 */
 final class KineticPowerEvidence {
     private KineticPowerEvidence() {}
+    static JsonObject client(KineticNativeView.Observation live, Level world) {
+        // 纯客户端接线也读取同一原生方向方法，沿用同步观察来源标记，绝不冒充服务端实时状态。
+        var result=client(live);CreateBeltObservation.append(world.getBlockEntity(live.endpoint().position()),KineticNativeReads.kinetics(result));return result;
+    }
     static JsonObject client(KineticNativeView.Observation live) {
         var result=new JsonObject();result.addProperty("block_id",live.blockId());
         result.addProperty("provenance","client_synchronized_native");
