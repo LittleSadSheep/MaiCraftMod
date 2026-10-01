@@ -207,8 +207,14 @@ public final class FluidPlacementTaskTest {
             }
             BlockPos target=new BlockPos(11,1,4); f.position(new Vec3(12.716992959374187,2,7.715705611363118));
             f.inventory.setItem(0,new ItemStack(Items.WATER_BUCKET));
-            check(FirstPersonInteractionTargeting.visibleBucketHit(f.level,f.player,f.player.getEyePosition(),
-                            target,4.5,Items.WATER_BUCKET)==null,"原中心射线应重现实机超出远墙触及范围的问题");
+            // 单一中心射线仍会错过有效面；共享桶瞄准现在也应找到近侧支撑，不能再把旧缺陷作为预期结果。
+            Vec3 eyes = f.player.getEyePosition();
+            var centerHit = FirstPersonInteractionTargeting.bucketRay(f.level, f.player, eyes,
+                    eyes.add(Vec3.atCenterOf(target).subtract(eyes).normalize().scale(4.5)), Items.WATER_BUCKET);
+            check(!FirstPersonInteractionTargeting.acceptsBucketHit(f.level,target,Items.WATER_BUCKET,centerHit),
+                    "原中心射线应重现实机超出远墙触及范围的问题");
+            check(FirstPersonInteractionTargeting.visibleBucketHit(f.level,f.player,eyes,target,4.5,Items.WATER_BUCKET)!=null,
+                    "共享交互与施工都应支持偏心站位上的真实近侧支撑面");
             var hit=FluidPlacementAim.find(f.level,f.player,f.player.getEyePosition(),target,4.5,Items.WATER_BUCKET);
             check(hit!=null && hit.getBlockPos().relative(hit.getDirection()).equals(target)
                             && hit.getLocation().distanceTo(f.player.getEyePosition())<4.5,
