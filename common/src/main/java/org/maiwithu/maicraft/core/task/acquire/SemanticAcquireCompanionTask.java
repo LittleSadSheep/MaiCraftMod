@@ -38,7 +38,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.client.actor.ShearingDropReceipt;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
@@ -309,7 +308,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptNearby(AcquisitionNeed need) {
-        // 先看附近掉落物的归属，再只收取核实过的UUID；不明来源不再阻塞同范围内已确认的本次产物。
+        // 先找范围内匹配且未受保护的掉落物，再走近让游戏结算拾取；来源未知或属于其他实体不阻止尝试。
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.NEARBY)) {
             return TaskState.RUNNING;
         }
@@ -317,8 +316,8 @@ public final class SemanticAcquireCompanionTask
         need.attempted(SemanticAcquireTaskRecord.Source.NEARBY);
         NearbySurvey survey = surveyNearby(need.itemIds);
         if (survey.protectedCount() > 0) {
-            addIssue("nearby", survey.safeCount() == 0 ? "drop_ownership_ambiguous" : "protected_drops_skipped",
-                    "unattributed or protected loose items are excluded from the exact pickup target set",
+            addIssue("nearby", "protected_drops_skipped",
+                    "explicitly protected loose items are excluded from the pickup target set",
                     Map.of("safe_matching_drops", survey.safeCount(),
                             "protected_matching_drops", survey.protectedCount(),
                             "protected_samples", survey.protectedSamples()));
@@ -329,7 +328,7 @@ public final class SemanticAcquireCompanionTask
         }
         if (survey.safeCount() == 0) {
             addIssue("nearby", "no_safe_drop_evidence",
-                    "no loaded, pickup-ready matching drops with confirmed permission were observed",
+                    "no loaded, pickup-ready matching drops outside protected cells were observed",
                     Map.of("radius", r.searchRadius));
             advanceSource(need);
             return TaskState.RUNNING;
@@ -338,7 +337,7 @@ public final class SemanticAcquireCompanionTask
         Set<Item> items = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        // 把核实过的掉落身份一并交给拾取器；后来出现的同类物品不能因为离得更近就替换收取目标。
+        // 把本次观察到的可收取实体交给拾取器；UUID仅固定目标与保护范围，不证明物品属于角色。
         long now = player.level().getGameTime();
         CollectItemsTaskRecord record = new CollectItemsTaskRecord(
                 childId("nearby"), now + COLLECT_TICKS, items, r.searchRadius,
@@ -1070,8 +1069,7 @@ public final class SemanticAcquireCompanionTask
 
         if (completedSource == SemanticAcquireTaskRecord.Source.MINE && terminal != TaskState.SUCCESS
                 && result != null && result.data() != null
-                && (integer(result.data().get("unreachable_drop_count"), 0) > 0
-                        || integer(result.data().get("ambiguous_merged_drop_count"), 0) > 0)) {
+                && integer(result.data().get("unreachable_drop_count"), 0) > 0) {
             addIssue("mine", "mining_loot_uncollected",
                     "requested inventory progress is retained, but some mining drops were not collected",
                     Map.of("unreachable_drop_count", integer(result.data().get("unreachable_drop_count"), 0),
@@ -1925,7 +1923,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private NearbySurvey surveyNearby(List<ResourceLocation> ids) {
-        // 投掷者信息未知时，允许复用本角色已确认剪毛动作的精确掉落证据；其他未知来源仍保持原有保护。
+        // 附近拾取只按物品、半径、冷却和明确保护格筛选；不猜归属，实际能否收入背包由原生拾取决定。
         Set<ResourceLocation> accepted = Set.copyOf(ids);
         int safe = 0;
         Set<UUID> safeUuids = new LinkedHashSet<>();
@@ -1937,12 +1935,7 @@ public final class SemanticAcquireCompanionTask
                         && !entity.hasPickUpDelay()
                         && accepted.contains(BuiltInRegistries.ITEM.getKey(
                                 entity.getItem().getItem())))) {
-            Entity owner = item.getOwner();
-            List<String> reasons = new ArrayList<>();
-            // 客户端的物品堆同步不保证带有投掷者信息；owner 为空只表示没证明归属，不能当作无主物品。
-            if (owner == null && !ShearingDropReceipt.permits(player, item)) reasons.add("owner_not_proven_by_client_facts");
-            else if (owner != null && owner != player) reasons.add("owned_by_other_entity");
-            reasons.addAll(landmarkReasons(item.blockPosition()));
+            List<String> reasons = landmarkReasons(item.blockPosition());
             if (reasons.isEmpty()) {
                 safe++;
                 safeUuids.add(item.getUUID());
@@ -2459,8 +2452,7 @@ public final class SemanticAcquireCompanionTask
                 || "protected_hunt_target_requires_decision".equals(code)
                 || "hunt_entity_search_exhausted".equals(code)
                 || "hunt_entity_search_incomplete".equals(code)
-                || "expected_hunt_drop_not_observed".equals(code)
-                || "drop_ownership_ambiguous".equals(code);
+                || "expected_hunt_drop_not_observed".equals(code);
     }
 
     private Map<String, Object> dimensionFailureData() {

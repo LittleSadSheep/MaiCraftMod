@@ -20,7 +20,7 @@ public final class CollectItemsTaskRecord extends TaskRecord {
     public final int radius;
     /** 用于消息的可读标签，例如“所有物品”或“钻石”。 */
     public final String label;
-    /** 内部任务已证明归属的实体身份；空集合沿用普通拾取的不限身份语义。 */
+    /** 内部任务指定的收取实体；仅限定目标身份与范围，不要求物品属于角色，空集合按类型扫描。 */
     public final Set<UUID> targetUuids;
 
     /** 实时进度；目标物品被收入背包时更新。 */

@@ -21,18 +21,19 @@ public final class SemanticAcquireTool implements MaiCraftTool {
 
     @Override
     public String description() {
+        // 取料入口允许尝试匹配地面物品；归属不作前置许可，明确保护和实际原生拒绝仍按事实返回。
         return "Make one final main-inventory fact true for any acceptable item alternative. "
                 + "Declare only item ids or live item tags, the final count, allowed source families and semantic "
                 + "safety constraints. The Mod observes inventory before every step, stops as soon "
                 + "as the fact is true, and owns source selection, recipe recursion, loaded-world "
                 + "evidence, progress-driven first-person source exploration, paths, menus and receipts. "
                 + "Defaults cover ordinary survival: inventory, "
-                + "nearby drops proven to belong to the current player, crafting, cooking and protection-aware mining. "
+                + "matching nearby drops regardless of ownership, crafting, cooking and protection-aware mining. "
                 + "Hunting may be identified as a possible source, but never starts without explicit "
                 + "allow_harm; if no acceptable source entity is loaded, the Mod performs a generic "
                 + "type-and-relationship entity search and re-verifies before attacking. Storage "
                 + "extraction and trading require explicit allowed_sources. "
-                + "Ambiguous ownership, protection or source evidence stops with "
+                + "Unresolved protection or acquisition-source evidence stops with "
                 + "semantic recovery_options instead of silently choosing.";
     }
 

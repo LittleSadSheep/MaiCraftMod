@@ -145,7 +145,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private final Map<BlockPos, Long> pendingPathBreaks = new LinkedHashMap<>();
     /** 破坏前已存在的掉落实体不能仅因物品 ID 相同就算作本任务产物；同时记录数量以识别新掉落并入旧堆叠的情况。 */
     private final Map<Integer, Integer> preexistingDropCounts = new HashMap<>();
-    /** 只有在回执或账本确认的破坏来源附近新生成的实体，才可归属本任务并驱动角色前往拾取。 */
+    /** 在已确认破坏来源附近观察到的匹配实体驱动拾取；此集合不证明物品归属或生产来源。 */
     private final Set<Integer> attributedDropIds = new HashSet<>();
     private final Set<Integer> ambiguousMergedDropIds = new HashSet<>();
     /** 监视已加载目标格，捕捉寻路执行器将方块变为空气的变化。 */
@@ -328,19 +328,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
             return collectDrops();
         }
-        // 达到背包数量后仍要处理本任务造成的其他实物掉落；等待来源同步，并收齐所有已加载且可归属的匹配掉落物后才报告成功。
-        // 本任务还要求处理留下的相关掉落物：数量够了，仍会因走不到或与旧物品合堆而失败。
+        // 达到背包数量后仍先收齐破坏点附近已观察到的匹配掉落物；旧堆混入只记事实，走不到仍报告真实失败。
         // 上层取物任务如何看待这种失败另有规则，不由这一段决定。
         if (gathered >= r.count) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
-            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             progressNote = "gathered all requested and settled every loaded attributable matching drop";
             return TaskState.SUCCESS;
         }
         if (expectedOutputBudgetExhausted(gathered)) {
             // 已经看见产物而只是走不过去时，报告收取路径问题；不能误导模型重查配方或更换采收工具。
             if (unreachableDropCount > 0) return unreachableDropFailure();
-            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             expectedOutputMissing = true;
             fail("confirmed source breaks did not yield the expected inventory items within the bounded mining batch; review actual inventory changes and the processing or tool requirements", FailureType.NO_MATERIAL);
             return TaskState.FAILED;
@@ -353,7 +350,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
         if (toolExhausted) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
-            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             fail("the prepared harvesting tool is exhausted; collected this batch's owned drops "
                     + "and stopped before switching to bare-hand mining", FailureType.WRONG_TOOL);
             return TaskState.FAILED;
@@ -478,7 +474,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 当前配置会在这里结束“查完却没找到”的情况；下面保留的隧道探索分支不会执行。
         if (!EXPLORE_FOR_BLOCKS) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
-            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -494,7 +489,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         if (++branchTicks > MAX_BRANCH_TICKS) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
-            if (ambiguousMergedDropCount > 0) return ambiguousDropFailure();
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -572,8 +566,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /** 返回值得角色走近并由原版拾取的匹配掉落物。方块刚挖掉时暂留目标格，等待服务器生成物品实体；
      *  普通挖矿只在这些直接破坏窗口中观察到实体或背包增加后，才学习实际掉落类型。 */
-    // 只在已加载的附近区域找物品。先前已存在的实体不直接认作本轮产物，
-    // 新出现且靠近确认挖掘点的物品才尝试归入本轮；这是一组观察规则，不是服务器给出的来源证明。
+    // 只在确认破坏点附近接纳匹配物品；即使物品原已存在、混堆或带其他实体归属，也先尝试原生拾取。
     private List<BlockPos> droppedItems() {
         Level level = player.level();
         long now = level.getGameTime();
@@ -605,25 +598,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             boolean nearPendingPathOrigin = nearPendingPathBreak(p);
             Integer oldCount = preexistingDropCounts.get(id);
             if (nearConfirmedOrigin) {
-                if (oldCount == null) {
-                    // 普通方块掉落没有投掷者；若能解析出所属者，说明这是玩家或实体扔出的物品，只是恰好进入破坏窗口，不能算作本任务产物。
-                    if (entity.getOwner() != null) {
-                        preexistingDropCounts.put(id, entity.getItem().getCount());
-                        continue;
-                    }
-                    if (r.progressItems.isEmpty()) dropItems.add(item);
-                    if (dropItems.contains(item)) {
-                        attributedDropIds.add(id);
-                        if (!unreachableDropIds.contains(id)) out.add(p);
-                        collectNearbyOrigins(p, materializedOrigins);
-                        continue;
-                    }
-                // 新掉落合进原来就在地上的那一堆时，无法只捡其中属于本轮的部分，所以记录合堆问题并留下。
-                } else if (entity.getItem().getCount() > oldCount) {
-                    // 新方块掉落并入任务开始前就存在的堆叠；走过去会连旧物品或玩家物品一并拾走，因此不能收取。
-                    if (ambiguousMergedDropIds.add(id)) ambiguousMergedDropCount++;
-                    preexistingDropCounts.put(id, entity.getItem().getCount());
+                if (r.progressItems.isEmpty()) dropItems.add(item);
+                if (dropItems.contains(item)) {
+                    // 旧堆增长保留为来源不确定的观察；角色仍靠近整堆，最终数量只读取同步背包。
+                    if (oldCount != null && entity.getItem().getCount() > oldCount
+                            && ambiguousMergedDropIds.add(id)) ambiguousMergedDropCount++;
+                    attributedDropIds.add(id);
+                    if (!unreachableDropIds.contains(id)) out.add(p);
                     collectNearbyOrigins(p, materializedOrigins);
+                    continue;
                 }
             }
 
@@ -1319,23 +1302,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.FAILED;
     }
 
-    private TaskState ambiguousDropFailure() {
-        fail("mined the requested source, but " + ambiguousMergedDropCount
-                        + " resulting drop(s) merged into stacks that existed before this task; "
-                        + "collecting them would also take unrelated items, so they were left in "
-                        + "place and not reported as gathered",
-                FailureType.UNKNOWN);
-        return TaskState.FAILED;
-    }
-
     @Override
     // 上层即使发现材料已经够，也要先让本轮已产生的掉落物和导航挖掘完成收尾。
     public boolean mustSettleBeforeSatisfiedCancellation() {
         if (brokenTargets > 0
                 || !anticipatedDrops.isEmpty()
                 || !attributedDropIds.isEmpty()
-                || unreachableDropCount > 0
-                || ambiguousMergedDropCount > 0) {
+                || unreachableDropCount > 0) {
             return true;
         }
         // 两次父任务 tick 之间，地形移动可能挖掉目标并立刻拾取；即使 observeNavigationBreakOrigins() 尚未把方块加入 anticipatedDrops，
@@ -1420,7 +1393,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("confirmed_harvests_truncated", truncatedHarvests);
         data.put("unreachable_drop_count", unreachableDropCount);
         if (!uncollectedDropEvidence.isEmpty()) data.put("uncollected_drop", uncollectedDropEvidence);
+        // 混入旧堆只作为来源观察，不代表未收取；材料数量和任务结论仍由实际背包与原生通行结果决定。
         data.put("ambiguous_merged_drop_count", ambiguousMergedDropCount);
+        data.put("pickup_scope", "matching loaded drops near confirmed breaks, regardless of ownership; inventory gains do not prove origin");
         return data;
     }
 
