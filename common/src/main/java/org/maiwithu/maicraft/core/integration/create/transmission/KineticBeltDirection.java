@@ -22,7 +22,7 @@ final class KineticBeltDirection {
             return rpm * KineticTransmissionRatios.gearbox(incoming, face);
         }
         if (NativeApi.is(entity, "com.simibubi.create.content.kinetics.transmission.SplitShaftBlockEntity"))
-            return rpm * NativeApi.number(NativeApi.call(entity, null, "getRotationSpeedModifier", face));
+            return rpm * ((Number) NativeApi.call(entity, null, "getRotationSpeedModifier", face)).doubleValue();
         return rpm;
     }
 
