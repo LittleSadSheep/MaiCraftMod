@@ -115,6 +115,12 @@ def regressionSuites = [
         heap: '512m', directory: 'gui-regression', timeoutSeconds: 45,
         purpose: '验证可见菜单、身体动作与任务收尾'
     ],
+    // 合成材料匹配与逐格点击独立验证，其他任务模块失败时也能给出准确的合成回归结论。
+    craftingRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.CraftingRegressionSuite',
+        heap: '512m', directory: 'crafting-regression', timeoutSeconds: 60,
+        purpose: '验证标签材料、原生摆料与准确批次产物'
+    ],
     knowledgeRegression: [
         entry: 'org.maiwithu.maicraft.mcp.KnowledgeRegressionSuite',
         heap: '512m', directory: 'knowledge-regression', timeoutSeconds: 45,
