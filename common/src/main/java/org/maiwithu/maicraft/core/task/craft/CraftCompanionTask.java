@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.craft;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +55,8 @@ import org.maiwithu.maicraft.task.TaskState;
 import java.util.Comparator;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.Constants;
+import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
 /** 实际合成：找或摆工作台，打开合成界面，一批批摆配方、拿成品、放回剩料并关界面，最后尝试收回自己的临时工作台。 */
 public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRecord> {
@@ -74,6 +77,11 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private RecipeHolder<?> recipe;
     private NativeActionReceipt openReceipt;
     private MenuReceipt menuReceipt;
+    // 配方未解锁或合法材料无法被配方簿搬动时，按同一批次改走可确认的原生槽位点击。
+    private CraftingGridPlacement gridPlacement;
+    private String placementMethod = "not_started";
+    private boolean recipeBookUnlocked;
+    private Map<String, Object> placementFailureEvidence = Map.of();
     private int resultSlot = -1;
     private ItemStack plannedOutput = ItemStack.EMPTY;
     private int outputPerBatch;
@@ -617,6 +625,20 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     private TaskState placeRecipe() {
         // 一次只放一批配方；光标和合成格必须先为空，避免挪走用户原先放在里面的东西。
         var context = ClientRuntime.requireContext(player);
+        if (gridPlacement != null) {
+            InputDriver.halt(player);
+            int previousMoves = gridPlacement.confirmedMoves();
+            var outcome = gridPlacement.tick(context);
+            if (gridPlacement.confirmedMoves() > previousMoves) renewProgressLease();
+            if (outcome == CraftingGridPlacement.Outcome.RUNNING) return TaskState.RUNNING;
+            if (outcome == CraftingGridPlacement.Outcome.FAILED) {
+                String detail = gridPlacement.issue(); gridPlacement = null;
+                recordPlacementFailure("crafting_native_placement_unconfirmed", detail);
+                return beginGridReturnFailure(detail, FailureType.UNKNOWN);
+            }
+            gridPlacement = null;
+            return recipePlaced();
+        }
         if (menuReceipt == null && !craftingMenuReady()) return TaskState.RUNNING;
         if (menuReceipt == null) {
             if (completedBatches >= plannedBatches) {
@@ -655,6 +677,25 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             if (resultSlot < 0) return beginGridReturnFailure("the crafting menu has no result slot", FailureType.NO_SUPPORT);
             ItemStack expected = plannedOutput.copyWithCount(outputPerBatch);
             int expectedSlot = resultSlot;
+            // 材料命中标签并不代表配方已解锁；命名或带组件的合法材料也可能被原生配方簿排除。
+            // 只在配方簿确实能搬料时沿用快捷路径，其余配方使用同一原生谓词选料并逐格真实点击。
+            recipeBookUnlocked = player.getRecipeBook() != null && player.getRecipeBook().contains(recipe);
+            try {
+                if (!CraftingPlacementPlan.recipeBookUsable(player, recipe)) {
+                    placementMethod = "native_grid_clicks";
+                    var entries = CraftingPlacementPlan.create(player, (CraftingRecipe) recipe.value(), activeGrid);
+                    if (entries.isEmpty()) {
+                        recordPlacementFailure("crafting_materials_missing", "the current inventory cannot supply one complete native recipe batch");
+                        return beginGridReturnFailure(surfaceFailureDetail, FailureType.NO_MATERIAL);
+                    }
+                    gridPlacement = new CraftingGridPlacement(player.containerMenu, entries, expectedSlot, expected);
+                    return TaskState.RUNNING;
+                }
+            } catch (RuntimeException unavailable) {
+                recordPlacementFailure("crafting_placement_preparation_failed", "native ingredient placement could not be prepared: " + unavailable);
+                return beginGridReturnFailure(surfaceFailureDetail, FailureType.UNKNOWN);
+            }
+            placementMethod = "recipe_book";
             menuReceipt = context.menus().placeRecipe(
                     context, recipe, false, (live, pending) -> {
                         var menu = live.player().containerMenu;
@@ -669,10 +710,16 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         if (menuReceipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
             String detail = menuReceipt.detail();
             menuReceipt = null;
-            return beginGridReturnFailure(
-                    "recipe placement was not confirmed: " + detail, FailureType.NO_MATERIAL);
+            // 没收到准确结果只能证明摆料尚未确认；记录现场再归还剩料，不能把同步超时伪装成缺材料。
+            recordPlacementFailure("crafting_recipe_book_unconfirmed", "recipe placement was not confirmed: " + detail);
+            return beginGridReturnFailure(surfaceFailureDetail, FailureType.UNKNOWN);
         }
         menuReceipt = null;
+        return recipePlaced();
+    }
+
+    private TaskState recipePlaced() {
+        // 配方簿与逐格点击共用成品核对和取出流程，摆料方式不会改变每批数量或实际入包的结算标准。
         renewProgressLease();
         resultSlot = findResultSlot();
         if (resultSlot < 0 || !exactStack(
@@ -681,11 +728,41 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
             return beginGridReturnFailure("the current menu cannot form the exact "
                     + outputPerBatch + "-item result for recipe " + r.recipeId
                     + "; open the required crafting surface and ensure its materials are present",
-                    FailureType.NO_MATERIAL);
+                    FailureType.UNKNOWN);
         }
         batchInventoryBefore = componentInventoryCount(player, plannedOutput);
         stage = Stage.TAKE;
         return TaskState.RUNNING;
+    }
+
+    private void recordPlacementFailure(String code, String detail) {
+        // 清理网格前保留实际原料、光标和结果，供模型区分真正缺料、原生拒绝与产物尚未同步。
+        surfaceFailureCode = code; surfaceFailureDetail = detail;
+        var menu = player.containerMenu; var grid = new ArrayList<Map<String, Object>>();
+        var inventory = new ArrayList<JsonObject>();
+        for (Slot slot : menu.slots) {
+            if (slot.container instanceof CraftingContainer)
+                grid.add(Map.of("grid_index", slot.getContainerSlot(), "actual", placementStack(slot.getItem())));
+        }
+        for (int index = 0; index < Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size()); index++) {
+            ItemStack stack = player.getInventory().getItem(index);
+            if (!stack.isEmpty()) inventory.add(placementStack(stack));
+        }
+        ItemStack actual = resultSlot >= 0 && resultSlot < menu.slots.size() ? menu.getSlot(resultSlot).getItem() : ItemStack.EMPTY;
+        placementFailureEvidence = Map.of("expected_output", placementStack(plannedOutput), "actual_output", placementStack(actual),
+                "crafting_grid", grid, "cursor", placementStack(menu.getCarried()), "main_inventory", inventory);
+    }
+
+    private JsonObject placementStack(ItemStack stack) {
+        // 组件身份与数量一起交付；序列化失败只标记组件未知，已观察到的物品编号和数量仍保留。
+        JsonObject facts;
+        try { facts = ResourceIdentity.item(stack, player.level().registryAccess()); }
+        catch (RuntimeException unreadable) {
+            facts = new JsonObject(); facts.addProperty("id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            facts.addProperty("components_status", "unknown"); facts.addProperty("components_issue", unreadable.toString());
+        }
+        facts.addProperty("count", stack.getCount());
+        return facts;
     }
 
     private TaskState takeResult() {
@@ -1379,6 +1456,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                     "Could not schedule crafting GUI cleanup at the actor boundary", closeFailure);
         }
         menuReceipt = null;
+        gridPlacement = null;
         workstation.close();
         super.cleanup();
     }
@@ -1390,6 +1468,9 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         data.put("planned_batches", plannedBatches);
         data.put("completed_batches", completedBatches);
         data.put("output_per_batch", outputPerBatch);
+        data.put("crafting_placement_method", placementMethod);
+        data.put("recipe_book_unlocked", recipeBookUnlocked);
+        if (!placementFailureEvidence.isEmpty()) data.put("crafting_placement_evidence", placementFailureEvidence);
         data.put("crafting_grid_cleanup_verified", gridCleanupVerified);
         if (terminalGridCleanupUnconfirmed) {
             data.put("crafting_grid_cleanup_unconfirmed_on_terminal", true);
