@@ -27,17 +27,17 @@ public final class AcquisitionSourceInheritanceTest {
         BuiltInRegistries.BLOCK.bindTags(Map.of(
                 BlockTags.MINEABLE_WITH_SHOVEL, List.of(Blocks.DIRT.builtInRegistryHolder())));
         // 只许挖土且没有铲子时，允许报告缺工具，不允许自行消耗材料合成一把。
-        prepareTool(List.of(Source.MINE), false, 0, "stone_shovel", Set.of(Source.INVENTORY, Source.MINE));
+        prepareTool(List.of(Source.MINE), false, 0, "stone_shovel", Set.of(Source.MINE));
         // 最近看到的铁属于未授权仓库；它不能把便宜石铲升级成开箱取铁再合成。
         prepareTool(List.of(Source.MINE, Source.CRAFT), true, 0, "stone_shovel",
-                Set.of(Source.INVENTORY, Source.MINE, Source.CRAFT));
+                Set.of(Source.MINE, Source.CRAFT));
         // 仓库取材已获准时可用富余铁升级，但该升级只取现货或用现有材料合成，不为此另挖矿。
         prepareTool(List.of(Source.MINE, Source.STORAGE, Source.CRAFT), true, 0, "iron_shovel",
-                Set.of(Source.INVENTORY, Source.STORAGE, Source.CRAFT));
+                Set.of(Source.STORAGE, Source.CRAFT));
         prepareTool(List.of(Source.MINE, Source.STORAGE), true, 0, "iron_shovel",
-                Set.of(Source.INVENTORY, Source.STORAGE));
-        // 铁已经带在身上也不等于允许合成；背包观察与制造权限是两件事。
-        prepareTool(List.of(Source.MINE), false, 64, "iron_shovel", Set.of(Source.INVENTORY));
+                Set.of(Source.STORAGE));
+        // 铁已经带在身上也不等于允许合成或开包；富余材料升级只能核对已有工具，不能增加取材许可。
+        prepareTool(List.of(Source.MINE), false, 64, "iron_shovel", Set.of());
         inventoryOnlyDoesNotPrepareCrafting();
         miningKeepsLocalSearchRadius();
         sourceOrderUsesCurrentFacts();

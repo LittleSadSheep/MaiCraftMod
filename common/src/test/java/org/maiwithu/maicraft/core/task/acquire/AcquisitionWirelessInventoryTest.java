@@ -154,14 +154,14 @@ public final class AcquisitionWirelessInventoryTest {
 
     private static void explicitMiningCannotOpenWireless() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
-            // 复现“只许mine却从无线库存领货”：终端确实可用，第一刻仍只能盘点主背包，不能派发AE子任务。
+            // 只许挖矿时，核对主背包后可直接准备采矿；即便终端可用，也不能派发未授权的库存子任务。
             var record = new SemanticAcquireTaskRecord("mine-only", 1000, List.of(ITEM), 1,
                     List.of(SemanticAcquireTaskRecord.Source.MINE), false,
                     SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8);
             var task = new SemanticAcquireCompanionTask(world.player, record, ignored -> true); task.onStart();
-            check(task.onTick() == TaskState.RUNNING, "mine-only begins with ordinary inventory observation");
+            check(task.onTick() == TaskState.RUNNING, "mine-only proceeds after checking carried items");
             var active = task.getClass().getDeclaredField("activeRecord"); active.setAccessible(true);
-            check(active.get(task) == null && world.blockUses() == 0 && world.itemUses() == 0,
+            check(!(active.get(task) instanceof Ae2SupplyTaskRecord) && world.blockUses() == 0 && world.itemUses() == 0,
                     "carrying a wireless terminal cannot start a read or withdrawal for unlisted sources");
             var rootField = task.getClass().getDeclaredField("rootNeed"); rootField.setAccessible(true);
             var root = (AcquisitionNeed) rootField.get(task);

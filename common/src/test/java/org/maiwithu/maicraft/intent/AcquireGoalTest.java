@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.SharedConstants;
@@ -45,6 +46,12 @@ public final class AcquireGoalTest {
         }
         var defaults = record(arguments("{}"));
         check(defaults.count == 1 && defaults.searchRadius == 16 && !defaults.allowHarm, "缺省仍是一件物品、不伤害生物");
+        // 显式限定来源时，只保留调用者许可；默认取物仍可查随身库存，但单独补拾取不能因此开包。
+        check(defaults.allowedSources.equals(SemanticAcquireTaskRecord.DEFAULT_SOURCES), "默认取物来源保持完整");
+        for (var source : SemanticAcquireTaskRecord.Source.values()) {
+            var restricted = record(arguments("{\"allowed_sources\":[\"" + source.name().toLowerCase(Locale.ROOT) + "\"]}"));
+            check(restricted.allowedSources.equals(List.of(source)), "来源规范化不能暗中追加库存许可: " + source);
+        }
         var properties = (Map<?, ?>) new SemanticAcquireTool().parameterSchema().get("properties");
         check(((Map<?, ?>) properties.get("count")).get("maximum").equals(SemanticAcquireTaskRecord.MAX_FINAL_COUNT),
                 "工具发现与实际执行必须使用相同数量上限");

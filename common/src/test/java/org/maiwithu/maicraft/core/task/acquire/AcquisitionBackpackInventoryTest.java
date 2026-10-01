@@ -25,11 +25,32 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class AcquisitionBackpackInventoryTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        restrictedPickupKeepsStorageClosed(false);
+        restrictedPickupKeepsStorageClosed(true);
         for (String scenario : List.of("available", "second_bag", "unreadable", "uncertain", "worn")) run(scenario);
         check(!AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.MINE)), "mine-only does not open carried storage");
         check(!AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.WIRELESS)), "wireless-only stays at AE");
         check(AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.STORAGE)), "storage permission includes one's carried backpack");
         System.out.println("AcquisitionBackpackInventoryTest: passed");
+    }
+    private static void restrictedPickupKeepsStorageClosed(boolean alreadyCarried) throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 只准捡附近掉落时，先核对主背包；不足就检查地面，不能把数量核对扩写成打开随身背包。
+            if (alreadyCarried) h.inventory.setItem(0, new ItemStack(Items.OBSIDIAN));
+            var request = new SemanticAcquireTaskRecord("nearby-with-carried-bag", 1000,
+                    List.of(ResourceLocation.withDefaultNamespace("obsidian")), 1,
+                    List.of(SemanticAcquireTaskRecord.Source.NEARBY), false,
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
+            var task = new SemanticAcquireCompanionTask(h.player, request,
+                    player -> { throw new AssertionError("仅附近拾取不能查询无线终端"); },
+                    new AcquisitionInventoryTidy(Set::copyOf),
+                    new AcquisitionBackpackInventory(player -> { throw new AssertionError("仅附近拾取不能打开随身背包"); }));
+            task.onStart(); var state = TaskState.RUNNING;
+            for (int tick = 0; tick < 10 && !state.isTerminal(); tick++) state = task.onTick();
+            check(state == (alreadyCarried ? TaskState.SUCCESS : TaskState.FAILED),
+                    "已有物品直接达标；附近没有掉落时如实结束，不绕去背包取货");
+            check(h.itemUses() == 0 && h.blockUses() == 0, "补拾取检查不能额外右键物品或方块");
+        }
     }
     @SuppressWarnings("unchecked") private static void run(String scenario) throws Exception {
         Class.forName(BackpackSupplyTaskRecord.class.getName()); Class.forName(Ae2SupplyTaskRecord.class.getName());

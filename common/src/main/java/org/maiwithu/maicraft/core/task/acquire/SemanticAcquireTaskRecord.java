@@ -174,7 +174,8 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         List<Source> requested = values == null || values.isEmpty()
                 ? DEFAULT_SOURCES : values;
         LinkedHashSet<Source> result = new LinkedHashSet<>();
-        result.add(Source.INVENTORY);
+        // 主背包数量始终由执行器直接核对；只有明确许可或默认来源中的 inventory 才能触发随身背包取货。
+        // nearby 等限定请求保持原范围，避免补拾取还没走向掉落物就先打开背包界面。
         for (Source source : requested) result.add(Objects.requireNonNull(source, "source"));
         return List.copyOf(result);
     }
