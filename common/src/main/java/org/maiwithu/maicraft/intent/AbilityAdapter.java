@@ -601,6 +601,8 @@ final class AbilityAdapter {
         sources.add("inventory");
         sources.add("craft");
         args.add("allowed_sources", sources);
+        // LLM 提供的材料倾向沿用完整取物规划器，只改变配方排序，不开放额外采集来源。
+        if (parameters.has("preferred_materials")) args.add("preferred_materials", parameters.get("preferred_materials").deepCopy());
         return new IntentAction.Tool("acquire_items", args.toString());
     }
 

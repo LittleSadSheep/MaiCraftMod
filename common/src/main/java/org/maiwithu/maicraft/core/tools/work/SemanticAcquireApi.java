@@ -30,7 +30,7 @@ public final class SemanticAcquireApi {
     private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
     private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
     private static final Set<String> PARAMETERS = Set.of("item_id", "item_ids", "item_tag", "item_tags",
-            "count", "allowed_sources", "allow_harm", "source_hint", "protected_labels", "radius");
+            "count", "allowed_sources", "allow_harm", "source_hint", "protected_labels", "radius", "preferred_materials");
     private static final Set<String> HINT_FIELDS = Set.of("block_ids", "block_tags", "entity_type_ids",
             "expected_item_ids", "trade_profession_ids", "description");
 
@@ -57,6 +57,10 @@ public final class SemanticAcquireApi {
         for (String source : strings(args.get("allowed_sources"), "allowed_sources"))
             SemanticAcquireTaskRecord.Source.parse(source);
         strings(args.get("protected_labels"), "protected_labels");
+        // 偏好必须是明确的物品编号；执行时再核对当前注册表，避免拼错材料被静默忽略。
+        for (String preferred : strings(args.get("preferred_materials"), "preferred_materials"))
+            if (ResourceLocation.tryParse(preferred) == null || !preferred.contains(":"))
+                throw new IllegalArgumentException("preferred_materials needs namespaced item IDs");
         JsonObject hint = sourceHint(args);
         rejectUnknown(hint, HINT_FIELDS, "source_hint");
         for (String key : HINT_FIELDS) {
@@ -137,7 +141,8 @@ public final class SemanticAcquireApi {
         }
         return new SemanticAcquireTaskRecord(
                 context.toolCallId(), context.deadline(ticks), itemIds, count,
-                sources, allowHarm, hint, protectedLabels, radius);
+                sources, allowHarm, hint, protectedLabels, radius)
+                .withPreferredMaterials(resourceIds(args.get("preferred_materials"), "preferred_materials", true));
     }
 
     private static List<ResourceLocation> resolveItemTag(

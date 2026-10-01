@@ -329,6 +329,8 @@ public final class SemanticAbilityCatalog {
                     targets("nearest", "prior_result"),
                     fields(
                             field("item_id", "resource_id", "Requested output."),
+                            // 材料偏好允许模型引导整条依赖链；现成库存仍优先，偏好不等于额外取材许可。
+                            field("preferred_materials", "array<resource_id>", "Optional soft item-ID hints for recipe routes and intermediates. Routes covered by available stock remain first; other usable routes remain eligible if the preferred route cannot complete. Does not expand allowed sources."),
                             field("count", "integer", "Requested final inventory count, not number of clicks.")));
             case "maicraft:cook" -> contract(
                     "Cook an item through an ordinary furnace-family workstation from the current location. "
@@ -382,6 +384,7 @@ public final class SemanticAbilityCatalog {
                             field("item_ids", "array<resource_id>", "Acceptable alternatives, not an ordered recipe."),
                             field("item_tag", "resource_id", "A semantic item tag such as minecraft:beds or minecraft:planks; the Mod resolves live members."),
                             field("item_tags", "array<resource_id>", "Several semantic item tags combined as acceptable alternatives."),
+                            field("preferred_materials", "array<resource_id>", "Optional soft item-ID hints for recipe routes and intermediates, inherited by prerequisites. Available stock remains first; unavailable preferences fall back within the same allowed sources."),
                             field("count", "integer", "Required final aggregate main-inventory count, from 1 to 2304; default 1."),
                             // 普通取材不由模型缩成采矿或合成，先使用随身与无线现货；只有玩家明确限制来源才收窄许可。
                             field("allowed_sources", "array<string>", "Optional hard restriction: omit for ordinary acquisition; carried inventory and carried-wireless stock precede nearby world sources. Only narrow this list for an explicit user restriction. Permitted families: inventory, nearby, wireless, storage, harvest, craft, cook, mine, trade, hunt. harvest replants loaded mature crops; nearby collects safe loose drops; wireless uses observed stock without ordinary containers or network crafting. Defaults include wireless and harvest. Explicit restrictions and prerequisite inheritance remain enforced; list order is not execution order."),

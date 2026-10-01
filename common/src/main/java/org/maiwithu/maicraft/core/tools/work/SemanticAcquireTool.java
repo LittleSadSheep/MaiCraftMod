@@ -48,6 +48,9 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                         "One namespaced item tag whose live members are acceptable alternatives, with or without #.")
                 .optionalStringArray("item_tags",
                         "Namespaced item tags whose live members form one acceptable alternative set.")
+                // 与公开能力共享材料倾向，内部调用也能保留模型选定的递归路线提示。
+                .optionalStringArray("preferred_materials",
+                        "Soft namespaced item-ID preferences for recipe routes and intermediates; available stock stays first and allowed sources are unchanged.")
                 .optionalInteger("count",
                         "Required final aggregate main-inventory count (default 1).",
                         1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)

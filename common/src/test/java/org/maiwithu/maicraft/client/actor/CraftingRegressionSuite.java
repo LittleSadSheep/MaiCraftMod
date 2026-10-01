@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.client.actor;
 
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
+import org.maiwithu.maicraft.core.task.acquire.NearbyRecipePreferenceTest;
 import org.maiwithu.maicraft.core.task.craft.CraftSurfaceFailureTest;
 
 /** 合成独立回归集中核对标签、选料、原生摆料与延迟产物，避免其他游戏模块失败遮住合成结论。 */
@@ -19,6 +20,8 @@ public final class CraftingRegressionSuite {
         CraftSurfaceFailureTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
         RecipeMaterialPlanTest.main(args);
+        // 空背包优先利用真实野生材料；LLM 软偏好能引导路线并在失败后继续选择可用替代品。
+        NearbyRecipePreferenceTest.main(args);
         System.out.println("CraftingRegressionSuite: passed");
     }
 }
