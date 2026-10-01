@@ -11,6 +11,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import java.util.Objects;
+import org.maiwithu.maicraft.core.Constants;
 
 /** 真正调用游戏的挖掘、使用、攻击等操作，并保存一项待确认动作；结果由后续观察判断，不直接用 API 返回值。 */
 public final class DefaultNativeActionPort implements NativeActionPort {
@@ -26,7 +27,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     @Override public NativeActionReceipt dropSelected(LocalPlayerContext context, ItemStack expectedSelected, boolean fullStack,
                                                       NativeConfirmation confirmation, int timeoutTicks) {
         // 原生 Q 使用服务端朝向，先同步已经实际转到的视角，再调用玩家原生投掷；不创建实体或设置其速度。
-        var current = requireSubmission(context); requireIdle();
+        var current = requireSubmission(context); requireIdle(context);
         var player = current.player();
         if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()
                 || !DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen) || player.isUsingItem())
@@ -66,7 +67,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     public NativeActionReceipt startBreaking(LocalPlayerContext context, BlockHitResult hit, int timeoutTicks) {
         // 先检查当前控制权和有无旧动作，再占用本刻操作机会，记录目标原状态后开始挖。
         DefaultLocalPlayerContext current = requireSubmission(context);
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         NativeActionReceipt receipt = new NativeActionReceipt(
                 NativeActionReceipt.Kind.BREAK_BLOCK,
@@ -168,7 +169,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                                          NativeConfirmation confirmation, int timeoutTicks) {
         // 发一次普通方块右键，再用调用者给的条件查结果；游戏本身可能先在客户端预测放置效果。
         DefaultLocalPlayerContext current = requireSubmission(context);
-        requireIdle();
+        requireIdle(context);
         BlockUseConfirmation acknowledged = null;
         if (confirmation.requiresBlockAcknowledgement()) {
             if (!(current.level() instanceof BlockUseAcknowledgement sequences))
@@ -202,7 +203,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     public NativeActionReceipt useItem(LocalPlayerContext context, InteractionHand hand,
                                        NativeConfirmation confirmation, int timeoutTicks) {
         DefaultLocalPlayerContext current = requireSubmission(context);
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
                 NativeActionReceipt.Kind.USE_ITEM, current, confirmation, timeoutTicks);
@@ -250,7 +251,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             throw new IllegalArgumentException(
                     "hotbar slot must be between 0 and " + (selectionLimit - 1));
         }
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
                 NativeActionReceipt.Kind.SELECT_HOTBAR,
@@ -282,7 +283,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (!current.menus().ensureVisible(current)) {
             throw new IllegalStateException("creative inventory changes require a rendered player inventory GUI");
         }
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         ItemStack frozen = expected.copy();
         NativeActionReceipt receipt = oneShot(
@@ -369,7 +370,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         } else if (!DefaultBodyControlPort.permitsWorldMovement(current.minecraft().screen)) {
             throw new IllegalStateException("mod control protocols require a world interaction screen");
         }
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
                 NativeActionReceipt.Kind.MOD_PROTOCOL, current, confirmation, timeoutTicks);
@@ -388,7 +389,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     public NativeActionReceipt attack(LocalPlayerContext context, Entity target,
                                       NativeConfirmation confirmation, int timeoutTicks) {
         DefaultLocalPlayerContext current = requireSubmission(context);
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
                 NativeActionReceipt.Kind.ATTACK_ENTITY, current, confirmation, timeoutTicks);
@@ -406,7 +407,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     public NativeActionReceipt interact(LocalPlayerContext context, Entity target, InteractionHand hand,
                                         NativeConfirmation confirmation, int timeoutTicks) {
         DefaultLocalPlayerContext current = requireSubmission(context);
-        requireIdle();
+        requireIdle(context);
         current.claimMutation();
         NativeActionReceipt receipt = oneShot(
                 NativeActionReceipt.Kind.INTERACT_ENTITY, current, confirmation, timeoutTicks);
@@ -524,17 +525,29 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         return current;
     }
 
-    private void requireIdle() {
-        // 前一项操作还没结束时拒绝新操作，防止多次点击共用一份结果后分不清谁做了什么。
-        if (active != null && !active.terminal()) {
-            throw new IllegalStateException(
-                    "a native action is already awaiting confirmation"
-                            + " (kind=" + active.kind()
-                            + ", id=" + active.id()
-                            + ", status=" + active.status()
-                            + ", submitted_tick=" + active.submittedTick()
-                            + ", deadline_tick=" + active.deadlineTick() + ")");
+    private void requireIdle(LocalPlayerContext context) {
+        if (active == null || active.terminal()) return;
+        // 接管、换身体或长期无驱动都会留下待确认动作；已过期或不再属于当前身体/控制版本的
+        // 僵尸确认由本次提交就地结算为不确定并放行，不能让一次悬挂升级成会话级瘫痪。
+        if (context.tickRevision() >= active.deadlineTick()
+                || active.bodyEpoch() != context.bodyEpoch()
+                || active.controlRevision() != context.controlRevision()) {
+            NativeActionReceipt stale = active;
+            Constants.LOG.warn("[maicraft-actor] reclaiming stale native action {} (kind={}, status={}, submitted_tick={}, deadline_tick={})",
+                    stale.id(), stale.kind(), stale.status(), stale.submittedTick(), stale.deadlineTick());
+            stale.finish(NativeActionReceipt.Status.UNCERTAIN,
+                    "the pending native action outlived its deadline or body epoch; reclaimed before a new submission");
+            return;
         }
+        // 前一项操作还没结束时拒绝新操作，防止多次点击共用一份结果后分不清谁做了什么。
+        throw new IllegalStateException(
+                "a native action is already awaiting confirmation"
+                        + " (kind=" + active.kind()
+                        + ", id=" + active.id()
+                        + ", status=" + active.status()
+                        + ", submitted_tick=" + active.submittedTick()
+                        + ", deadline_tick=" + active.deadlineTick() + ")"
+                        + "; it settles at its deadline or body/control change, then the same submission may be retried");
     }
 
     private void requireActive(NativeActionReceipt receipt, NativeActionReceipt.Kind kind) {
