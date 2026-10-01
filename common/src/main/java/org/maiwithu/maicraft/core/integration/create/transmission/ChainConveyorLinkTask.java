@@ -198,7 +198,8 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         ChainConveyorInventory.requirePlainChains(player);
         countBefore = ChainConveyorInventory.count(player);
         if (countBefore < (creativeExempt ? 1 : cost)) { phase = Phase.MATERIALS; return TaskState.RUNNING; }
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) return stop("chain_conveyor_screen_busy");
+        // 首端或末端点击尚未提交时自动退出页面，再续同一条链路，不丢掉已确认的首端选择。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         InputDriver.halt(player); InputDriver.sneak(player, false);
         if (player.isShiftKeyDown()) return TaskState.RUNNING;
         Vec3 point = ChainConveyorInteraction.aim(player, target, player.getEyePosition());
@@ -303,7 +304,8 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         var context = ClientRuntime.requireContext(player);
         // 只撤销本任务真正发出的首端选择；运输换手后先取回链条，再执行原生潜行取消。
         if (!inventory.select(context)) return TaskState.RUNNING;
-        if (context.minecraft().screen != null) return TaskState.RUNNING;
+        // 撤销本任务的首端选择也先恢复世界界面，避免旧页面使潜行取消一直等待。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         InputDriver.halt(player); InputDriver.sneak(player, true);
         if (!player.isShiftKeyDown() || !context.mutationAvailable()) return TaskState.RUNNING;
         // 原生持链潜行只清理临时首端选点，不拆除世界里的链接；新方案准备完成后重新读首端，再正常点击。

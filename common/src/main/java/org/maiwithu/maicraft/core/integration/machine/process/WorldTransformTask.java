@@ -61,15 +61,16 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     private boolean approachDispatched, triggerStepStarted;
     private boolean collectionStarted;
     private String collectionDetail;
+    private boolean initialized;
     private BuildEdgeMotion alignment;
 
     WorldTransformTask(LocalPlayer player, WorldTransformTaskRecord record) { super(player, record); }
 
-    @Override protected void onStart() {
+    private void initializeAfterGui() {
+        // 原生退料后再固定加工批次与库存计划；旧菜单不在接单时拦截已授权的投料请求。
+        initialized = true;
         try {
             world = player.level();
-            if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty())
-                throw new IllegalArgumentException("world_process_existing_menu_in_use");
             recipe = NativeTransformRecipes.find(player, r.recipeId); recipeDefinition = recipe.describe();
             WorldProcessFeedRegion.requireRule(recipe);
             site = WorldProcessSite.inspect(player, r.receiver, recipe);
@@ -89,6 +90,11 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
     private TaskState advance() {
         var context = ClientRuntime.requireContext(player);
         if (!context.permitsNativeActions()) return failed("world_process_control_handed_over", FailureType.INTERRUPTED);
+        if (!initialized) {
+            if (!menus.worldReady(context)) return TaskState.RUNNING;
+            initializeAfterGui();
+            if (failure != null) return TaskState.FAILED;
+        }
         site.requireUnchanged(player); requireProtection();
         if (child != null) return tickChild();
         if (!menus.worldReady(context)) return TaskState.RUNNING;

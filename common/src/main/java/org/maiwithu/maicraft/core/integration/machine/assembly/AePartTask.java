@@ -109,9 +109,8 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
             return stop("part_held_item_changed", "AE2 placement requires the original plain part item without copied settings.");
         }
         var context = ClientRuntime.requireContext(player);
-        if (player.containerMenu != player.inventoryMenu || context.minecraft().screen != null) {
-            return stop("part_menu_busy", "A menu is open while preparing AE2 placement.");
-        }
+        // 部件尚未放置时原生退出页面，再续本次已选侧面和站位，不能仅因界面存在就结束安装。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         Candidate candidate = candidates.get(candidateIndex);
         if (relocate || aimFrom(candidate, player.getEyePosition()) == null) return approach(candidate);
         stopNav();

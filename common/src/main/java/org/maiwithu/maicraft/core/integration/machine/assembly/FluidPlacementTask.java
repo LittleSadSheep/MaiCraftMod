@@ -90,7 +90,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         }
         if (!player.getMainHandItem().is(r.bucket)) return failure("fluid_held_bucket_changed");
         var context = ClientRuntime.requireContext(player);
-        if (player.containerMenu != player.inventoryMenu || context.minecraft().screen != null) return failure("fluid_menu_busy");
+        // 倒桶尚未提交时先原生关页；桶和已确认的流体效果仍保留在本次任务中，不因界面阻挡重做倒桶。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         BlockHitResult visible = visibleFrom(player.getEyePosition());
         actualRayAvailable = visible != null; bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
         // 沿路已走到另一个能实际倒桶的脚位就直接使用；旧候选格不可达时，不应继续绕路去满足旧导航终点。

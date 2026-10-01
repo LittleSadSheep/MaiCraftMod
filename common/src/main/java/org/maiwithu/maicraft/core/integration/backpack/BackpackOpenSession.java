@@ -47,8 +47,8 @@ public final class BackpackOpenSession {
         if (closed) return Status.CLOSED;
         LocalPlayer player = context.player();
         if (owner == null) {
-            if (player.containerMenu != player.inventoryMenu || context.minecraft().screen != null
-                    || !player.inventoryMenu.getCarried().isEmpty()) return fail("another menu or carried cursor is already active", false);
+            // 打开随身背包前先结清并退出旧页面，鼠标物品由原生返还，选定背包仍在本次会话内继续打开。
+            if (!context.menus().ensureWorldVisible(context)) return Status.RUNNING;
             carrier = requestedCarrier;
             if (carrier == null) {
                 var carriers = BackpackCarriers.observe(player);
@@ -106,8 +106,8 @@ public final class BackpackOpenSession {
             closed = true; selection.reset(); return Status.CLOSED;
         }
         if (owner.containerMenu != menu) return fail("backpack menu was replaced before closing", true);
-        // 不关有物品停在鼠标上的菜单，避免原生关闭把未结算余物扔在脚下。
-        if (!menu.getCarried().isEmpty()) return fail("backpack cursor must settle before closing", true);
+        // 等上一笔搬运结清后让原生关包处理余物；背包是否取足仍由各笔真实转移回执决定。
+        if (context.menus().hasPendingTransaction()) return Status.RUNNING;
         if (!context.mutationAvailable()) return Status.RUNNING;
         closing = context.menus().close(context, 40); return Status.RUNNING;
     }

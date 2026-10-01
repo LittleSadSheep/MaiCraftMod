@@ -30,6 +30,8 @@ public final class BackpackOpenSessionTest {
                     (context, receipt) -> MenuConfirmation.Verdict.PENDING);
             int[] clicks = {0};
             MenuPort port = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(), new Class<?>[]{MenuPort.class}, (proxy, method, argv) -> {
+                // 此回放没有在途搬运；鼠标余物仍须完整交给原生关闭，不能由执行器先清空。
+                if (method.getName().equals("hasPendingTransaction")) return false;
                 if (method.getName().equals("close")) { clicks[0]++; h.player.containerMenu = h.player.inventoryMenu; return close; }
                 if (method.getName().equals("poll")) return argv[1];
                 throw new AssertionError("unexpected menu action: " + method.getName());
@@ -46,8 +48,10 @@ public final class BackpackOpenSessionTest {
             ActorControlTestHarness.field(BackpackOpenSession.class, "owner").set(cursorSession, h.player);
             ActorControlTestHarness.field(BackpackOpenSession.class, "level").set(cursorSession, h.level);
             ActorControlTestHarness.field(BackpackOpenSession.class, "menu").set(cursorSession, menu);
-            check(cursorSession.close(context) == BackpackOpenSession.Status.FAILED && clicks[0] == 1
-                    && menu.getCarried().is(Items.QUARTZ), "unsettled cursor stays visible instead of being dropped on close");
+            check(cursorSession.close(context) == BackpackOpenSession.Status.RUNNING && clicks[0] == 2
+                    && menu.getCarried().is(Items.QUARTZ), "cursor remains intact until the native close owns its return");
+            check(cursorSession.close(context) == BackpackOpenSession.Status.CLOSED && clicks[0] == 2,
+                    "the same cursor close is settled without another request");
         }
         // 开包使用仍等待确认时取消，必须走物品停止接口，不能错误地退役为普通方块点击。
         try (var h = new InteractionWorldTestHarness()) {

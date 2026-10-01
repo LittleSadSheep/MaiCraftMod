@@ -4,8 +4,7 @@ import static org.maiwithu.maicraft.task.TaskDispatch.runSync;
 
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
-import org.maiwithu.maicraft.core.task.menu.CloseMenuTaskRecord;
-import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenuCloseTaskRecord;
 import net.minecraft.client.player.LocalPlayer;
 import com.google.gson.JsonObject;
 
@@ -35,12 +34,8 @@ public final class CloseGuiTool implements MaiCraftTool {
 
     @Override
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer self, Consumer<String> reply) {
-        if (self.containerMenu == self.inventoryMenu) {
-            reply.accept(TaskResult.ok(
-                    "no block GUI is open; the player inventory menu is already the active baseline").toJson());
-            return;
-        }
-        runSync(self, new CloseMenuTaskRecord(
+        // 默认物品栏菜单常驻不代表页面已经退出；暂停、背包和模组页面都交给同一原生关闭任务。
+        runSync(self, new MachineMenuCloseTaskRecord(
                 toolCallId, ctx(toolCallId, self).deadline(TIMEOUT_TICKS)), reply);
     }
 }

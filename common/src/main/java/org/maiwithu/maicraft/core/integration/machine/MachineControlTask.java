@@ -65,10 +65,9 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         }
         // 点过以后先收齐结果；此时拉杆本来就可能已经改变，不能再拿点击前状态把确认流程拦住。
         if (phase == Phase.CONFIRM) return confirm();
-        if (player.containerMenu != player.inventoryMenu) {
-            return failure("machine_menu_busy", "An unrelated menu is open; the machine control was not used.",
-                    FailureType.UNKNOWN);
-        }
+        // 拉杆或按钮尚未使用时先原生退出旧界面，保留选定控制器和实际目标状态，随后续本次控制。
+        var context = ClientRuntime.requireContext(player);
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         if (control != null && !targetUnchanged()) {
             return failure("machine_control_changed", "The selected lever changed before its use.",
                     FailureType.TARGET_LOST);

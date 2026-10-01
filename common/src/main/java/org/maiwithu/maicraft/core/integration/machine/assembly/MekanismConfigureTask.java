@@ -83,9 +83,8 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
             return switchToolMode();
         }
         var context = ClientRuntime.requireContext(player);
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) {
-            return stop("configuration_menu_busy", "Close the active menu before native configurator use.");
-        }
+        // 配置器点击前先原生退出旧页面，保存目标模式与已经确认的切换次数，下一刻继续配置。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         boolean inductionPort = r.medium.equals("induction_port");
         // 先试当前位置能否点准；不行再找已有站位。管道要点到指定分支，感应端口则任意一面都能切换。
         Vec3 aim = relocate ? null : aimFrom(player.getEyePosition());
@@ -157,9 +156,8 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
     private TaskState switchToolMode() {
         if (modeSwitches >= 16) return stop("configurator_mode_unavailable", "No supported configurator mode was reached after the observed mode cycle.");
         var context = ClientRuntime.requireContext(player);
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) {
-            return stop("configurator_screen_busy", "Native mode-switch requires the world view.");
-        }
+        // 工具切模式也由同一公共入口关页，不要求模型先发一项关界面任务。
+        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
         stopNav(); InputDriver.halt(player);
         if (player.isSecondaryUseActive()) return TaskState.RUNNING;
         beforeMode = MekanismNativeConfiguration.toolMode(player.getMainHandItem());
