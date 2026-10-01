@@ -438,6 +438,7 @@ public final class SemanticAbilityCatalog {
                     fields(
                             field("source_label", "string", "Existing powered network or landmark."),
                             field("target_label", "string", "Remembered destination machine/structure/landmark, or a registered block ID such as create:chain_conveyor to select that exact device type inside the target region."),
+                            field("belt_direction", "string", "Optional declared item movement direction: north, south, east or west, for a destination belt using auto or chain_conveyor. Routes target this direction; receipts compare native motion separately from power. Omit only when direction is not a design requirement."),
                             field("transmission", "string", "auto (default) compares routes; chain_conveyor requires 锁链传动轮; encased_chain_drive requires 链式传动箱. The legacy chain_drive alias means encased_chain_drive. This connection preserves existing blocks; explicit old-line removal uses modify_machine."),
                             field("allow_new_receiver", "boolean", "May terminate at the nearest authoritative endpoint evidence when that evidence is a verified empty receiver rather than a machine."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only; applied after route investigation."),

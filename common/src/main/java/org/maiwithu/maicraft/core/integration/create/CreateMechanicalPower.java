@@ -57,7 +57,11 @@ public final class CreateMechanicalPower {
             Endpoint destination,
             Transmission transmission,
             boolean preserveExisting,
-            boolean allowFreeReceiver) {
+            boolean allowFreeReceiver,
+            String beltDirection) {
+        public Request(Endpoint source, Endpoint destination, Transmission transmission, boolean preserveExisting, boolean allowFreeReceiver) {
+            this(source, destination, transmission, preserveExisting, allowFreeReceiver, null);
+        }
         public Request {
             source = Objects.requireNonNull(source, "source");
             destination = Objects.requireNonNull(destination, "destination");
@@ -65,6 +69,10 @@ public final class CreateMechanicalPower {
             // 允许新接收端只是扩大候选，不代表现场没有机器；锁链模式自动勘查已有接口，不让这项许可阻断接线。
             // 当前锁链规划仍需真实受电机器，因此不启用旧链式传动箱的空端点兜底。
             if (transmission == Transmission.CHAIN_CONVEYOR) allowFreeReceiver=false;
+            // 方向是调用方声明的输送目标；未声明时保持未知，不从方块朝向替模型猜产线意图。
+            if (beltDirection != null && (!List.of("north", "south", "east", "west").contains(beltDirection)
+                    || transmission == Transmission.ENCASED_CHAIN_DRIVE || allowFreeReceiver))
+                throw new IllegalArgumentException("belt_direction requires north/south/east/west and an existing belt with auto or chain_conveyor routing");
         }
 
         public static Request preserving(Endpoint source, Endpoint destination) {
@@ -118,7 +126,7 @@ public final class CreateMechanicalPower {
                     callId,deadlineGameTime,player.level().dimension().location().toString(),request.source().name(),
                     request.source().center(),request.source().exactFace(),request.destination().name(),
                     request.destination().center(),request.destination().exactFace(),null,0,64,false,
-                    materialPolicy,protectedLabels,allowedSources,allowHarm,request.transmission() == Transmission.CHAIN_CONVEYOR);
+                    materialPolicy,protectedLabels,allowedSources,allowHarm,request.transmission() == Transmission.CHAIN_CONVEYOR).expectBeltDirection(request.beltDirection());
         }
         return new CreateMechanicalPowerTaskRecord(callId, deadlineGameTime,
                 Objects.requireNonNull(request, "request"), null, materialPolicy,

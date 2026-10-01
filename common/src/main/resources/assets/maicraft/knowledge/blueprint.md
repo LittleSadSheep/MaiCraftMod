@@ -327,6 +327,12 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 `connect_mechanical_power` 的 `transmission:"chain_conveyor"` 明确要求锁链传动轮及原生锁链连接；`encased_chain_drive`（旧别名 `chain_drive`）指定链式传动箱。省略或 `auto` 才比较多种传动方式。接线保留现场已有方块，旧线拆除仍由明确的机器修改目标表达。
 
+每台机器最多一台 `create:chain_conveyor`，旧蓝图、失败施工中已放下的轮和后续自动接线累计计数。已有公共应力接口可复用；为当前机器新增的来源端适配轮也计入额度，不能借“外部输入”绕过上限。历史超额机器允许拆轮及不增加轮的修改。近距离优先设计紧凑的轴或齿轮连接。
+
+整机观察的 `operating_state.belts[].state.belt_motion` 和服务器原生观察给出实际 `transport_direction` 与斜坡 `travel_step`。零速为 `stopped`，不能搬运物品的竖直或侧向皮带为 `rotation_only`。RPM、方块朝向、动力网络连通均不能单独证明物品流向正确；需要对照自己设计的输入、处理、回流和输出方向，并以实际产出验证功能。
+
+给皮带自动接线时可以声明 `belt_direction:"north|south|east|west"`。规划会按指定方向比较候选，`belt_direction_check` 再对照原生观察返回 `matched`、`mismatch`、`unknown` 或 `not_requested`。已接上但方向不符仍保留真实施工和供能事实，交由机器修改纠正；Mod 不推断未声明的产线流向，也不自动拆掉旧线路。
+
 ## 分阶段验收
 
 不带生产清单的构建和修改验收声明的方块、状态及原生部件。显式蓝图完成后报告 `construction_complete` 与 `machine_geometry_verified`，同时保留 `configuration_complete: false`、`configuration_status: "separate_use_phase"`、`machine_production_verified: false`。

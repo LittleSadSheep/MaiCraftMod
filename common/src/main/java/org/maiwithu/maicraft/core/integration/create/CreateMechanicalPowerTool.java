@@ -27,7 +27,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
     private record Args(
             String source_name, int source_x, int source_y, int source_z,
             String destination_name, int destination_x, int destination_y, int destination_z,
-            String transmission, Boolean allow_free_receiver,
+            String transmission, Boolean allow_free_receiver, String belt_direction,
             String material_policy, List<String> allowed_sources, Boolean allow_harm,
             List<String> protected_labels, String continuation_token) {}
 
@@ -53,6 +53,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                 .integer("destination_z", "Internally resolved destination Z.")
                 .optionalEnum("transmission", "auto compares technologies; chain_conveyor requires 锁链传动轮; encased_chain_drive requires 链式传动箱.", "auto", "chain_conveyor", "encased_chain_drive")
                 .optionalBool("allow_free_receiver", "Allow nearest authoritative destination evidence to be a verified empty receiver.")
+                .optionalEnum("belt_direction", "Declared item transport direction of the destination belt; native result is reported separately from power.", "north", "south", "east", "west")
                 .optionalEnum("material_policy", "Material source policy after route investigation.",
                         "ordinary", "storage_available", "inventory_only")
                 .optionalStringArray("allowed_sources", "Permitted semantic acquisition sources; storage is tried before crafting.")
@@ -81,7 +82,7 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                         new BlockPos(parsed.destination_x(), parsed.destination_y(), parsed.destination_z())),
                 transmission,
                 true,
-                Boolean.TRUE.equals(parsed.allow_free_receiver()));
+                Boolean.TRUE.equals(parsed.allow_free_receiver()), parsed.belt_direction());
         var policy = SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(
                 parsed.material_policy());
         var sources = SemanticMaterialSupplyCoordinator.parseSources(

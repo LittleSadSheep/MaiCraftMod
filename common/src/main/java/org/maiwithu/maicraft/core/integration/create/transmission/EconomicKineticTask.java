@@ -25,6 +25,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
+import org.maiwithu.maicraft.core.integration.machine.MachineChainConveyorLimit;
 
 /** 先选择完整且经济的传动方案，再进行施工并核实真实原生结果。 */
 final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTaskRecord> {
@@ -55,10 +56,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
     private boolean targetBeforeChecked;
     private boolean mayReturnToSite, returningToSite;
     private int siteReturns, reloadWait;
+    private MachineChainConveyorLimit.Scope machineScope;
     EconomicKineticTask(LocalPlayer player,EconomicKineticTaskRecord record){super(player,record);world=player.level();}
     @Override protected void onStart() {
+        // 同一台机器的各路接线共用累计归属，不能因改接另一条皮带而再新造一组锁链轮。
+        machineScope=MachineChainConveyorLimit.bind(player,r.getToolCallId(),r.targetLabel,r.target);
         target=KineticNativeView.read(world,r.target,r.targetFace,true);
         if(target==null || r.targetBlockId!=null&&!r.targetBlockId.equals(target.blockId())) { failure("kinetic_target_interface_unavailable");return; }
+        if(r.beltDirection!=null&&!target.blockId().equals("create:belt")){failure("belt_direction_requires_belt_target");return;}
         targetEntity=world.getBlockEntity(r.target);
         serverProof=ServerAssistClient.serverSupported("machine.snapshot");
         var continuation=KineticRouteContinuations.find(player,r);
@@ -177,10 +182,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(!ChainConveyorBridge.clientLinkAvailable())candidates.removeIf(plan->!plan.chainLinks().isEmpty());
         else if(ChainConveyorBridge.limits(world).maximumConnections()<2)candidates.removeIf(plan->plan.chainLinks().size()>1);
         candidates.removeIf(plan->!chainCapacity(plan));
+        int beforeWheelLimit=candidates.size();
+        candidates.removeIf(plan->!wheelLimit(plan).allowed());
+        if(beforeWheelLimit>0&&candidates.isEmpty())return failure("machine_chain_conveyor_limit: no candidate respects the whole-machine maximum of 1");
         int maxRpm=KineticRpmBudget.maximumRotationSpeed();
         candidates.removeIf(plan->sources.stream().filter(source->source.endpoint().position().equals(plan.source().position()))
-                .noneMatch(source->KineticRpmBudget.accepts(plan,source.rpm(),r.minimumRpm,maxRpm)));
-        if(candidates.isEmpty())return failure(r.requireChainConveyor ? "kinetic_no_supported_chain_conveyor_geometry" : "kinetic_no_supported_economical_geometry");
+                .noneMatch(source->KineticRpmBudget.accepts(plan,KineticBeltDirection.outletRpm(world,plan,source.rpm()),r.minimumRpm,maxRpm)
+                        &&KineticBeltDirection.matchesPlan(world,plan,source.rpm(),r.beltDirection)));
+        if(candidates.isEmpty())return failure(r.beltDirection!=null?"kinetic_no_route_matches_declared_belt_direction":r.requireChainConveyor ? "kinetic_no_supported_chain_conveyor_geometry" : "kinetic_no_supported_economical_geometry");
         var items=new LinkedHashSet<String>();candidates.forEach(value->items.addAll(value.bom().keySet()));
         var costs=KineticRecipeSnapshot.capture(player,items);
         var ranked=KineticRouteChoice.rank(candidates,costs);costReport=KineticRouteChoice.report(ranked);
@@ -206,6 +215,10 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         }
         return true;
     }
+    private MachineChainConveyorLimit.Check wheelLimit(KineticRouteGeometry.Plan plan) {
+        var changes=new LinkedHashMap<BlockPos,String>();plan.placements().forEach(cell->changes.put(cell.position(),cell.blockId()));
+        return MachineChainConveyorLimit.check(player,machineScope,changes);
+    }
     private TaskState checkSource(boolean after) {
         BlockPos at=selected.source().position();if(serverProof&&!near(at))return TaskState.RUNNING;
         if(serverProof) {
@@ -220,7 +233,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
             var live=KineticNativeView.read(world,at,selected.sourceFace(),selected.source().chainInterface());
             if(live==null)return failure("kinetic_client_source_not_powered");
             sourceBlockId=live.blockId();
-            if(after)sourceAfter=KineticPowerEvidence.client(live);else sourceBefore=KineticPowerEvidence.client(live);
+            if(after)sourceAfter=KineticPowerEvidence.client(live,world);else sourceBefore=KineticPowerEvidence.client(live,world);
             if(after)sourceRefreshedAfter=true;
             if(!live.powered())return failure("kinetic_client_source_not_powered");
         }
@@ -246,7 +259,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         } else {
             var live=KineticNativeView.read(world,r.target,selected.targetFace(),selected.target().chainInterface());
             if(live==null)return failure("kinetic_client_target_changed");
-            if(after)targetAfter=KineticPowerEvidence.client(live);else targetBefore=KineticPowerEvidence.client(live);
+            if(after)targetAfter=KineticPowerEvidence.client(live,world);else targetBefore=KineticPowerEvidence.client(live,world);
             if(!after&&live.powered()) {
                 if(!KineticPowerEvidence.sameNetwork(live,sourceBefore))return failure("kinetic_client_target_on_different_network");
                 if(!resumingRoute&&!r.requireChainConveyor){phase=Phase.EXISTING;return TaskState.RUNNING;}
@@ -290,12 +303,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         materialsReady=true;phase=resumingRoute||r.requireChainConveyor?Phase.SOURCE:Phase.TARGET;return TaskState.RUNNING;
     }
     private TaskState build() {
+        // 回场续建也重新核对累计数量；已有超额轮的复用与不增轮的轴接线仍可执行。
+        wheelLimit(selected).requireAllowed();
         if(!KineticRouteGeometry.clearanceValid(selected,new KineticPlanningTerrain(player.clientLevel)))return failure("kinetic_route_clearance_changed");
         if(!chainCapacity(selected))return failure("kinetic_chain_capacity_changed_before_construction");
         var source=KineticNativeView.read(world,selected.source().position(),selected.sourceFace(),selected.source().chainInterface());
         var destination=KineticNativeView.read(world,r.target,selected.targetFace(),selected.target().chainInterface());
         if(!resumingRoute&&destination.powered())return failure("kinetic_target_power_changed_before_construction");
-        KineticRpmBudget.validate(selected,source.rpm(),r.minimumRpm,KineticRpmBudget.maximumRotationSpeed());
+        KineticRpmBudget.validate(selected,KineticBeltDirection.outletRpm(world,selected,source.rpm()),r.minimumRpm,KineticRpmBudget.maximumRotationSpeed());
         if(KineticRouteBuild.matches(player,selected)){phase=Phase.LINKS;return TaskState.RUNNING;}
         for(var cell:selected.placements()) if(!KineticRouteBuild.matches(player,cell)&&(!KineticRouteBuild.emptyForPlacement(player,cell.position())
                 ||NavigationSafetyContext.protectsMutation(cell.position())))return failure("kinetic_route_changed_before_construction");
@@ -349,10 +364,14 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         out.put("chain_links_completed",linkIndex);out.put("returning_to_worksite",returningToSite);if(child!=null)out.put("child",child.progress());if(supply.active())out.put("supply",supply.progress());return out;}
     @Override protected Map<String,Object> resultData() {
         var result=new LinkedHashMap<String,Object>();result.put("cost_comparison",costReport);result.put("source_selection",r.source==null?"bounded_nearest_suitable_sources":"explicit_source");
+        if(machineScope!=null)result.put("machine_chain_conveyor_limit",selected==null
+                ?MachineChainConveyorLimit.check(player,machineScope,Map.of()).facts():wheelLimit(selected).facts());
         result.put("route_built",routeBuilt);result.put("power_ready",powerReady);result.put("server_verified",serverProof&&powerReady);
         // 两端的已观察供能分别结算；power_ready 继续只代表整条接线的网络和转速验收通过。
         KineticPowerEvidence.append(result,"source",sourceAfter!=null?sourceAfter:sourceBefore,0);
         KineticPowerEvidence.append(result,"destination",targetAfter!=null?targetAfter:targetBefore,r.minimumRpm);
+        // 接线动作和动力验收保留真实结果；方向不符直接交付差异，让模型修改已有线路，不自动拆改产线。
+        result.put("belt_direction_check",KineticBeltDirection.compare(targetAfter!=null?targetAfter:targetBefore,r.beltDirection));
         // 几何规划失败时尚未发起服务端核验，但客户端已经读过端点；分开回报，避免模型把未核验误读成来源从未观察。
         if(r.source!=null&&!sources.isEmpty()) {
             var observed=sources.getFirst();

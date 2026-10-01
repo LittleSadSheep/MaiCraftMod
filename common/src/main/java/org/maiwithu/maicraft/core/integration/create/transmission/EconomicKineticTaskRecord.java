@@ -24,6 +24,13 @@ public final class EconomicKineticTaskRecord extends TaskRecord {
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
     public final boolean requireChainConveyor;
+    public Direction beltDirection;
+    /** 创建任务时传入调用方的输送要求，续作比较也必须保留，不能用旧方向的线路缓存覆盖新要求。 */
+    public EconomicKineticTaskRecord expectBeltDirection(String value) {
+        if (value != null && !List.of("north", "south", "east", "west").contains(value))
+            throw new IllegalArgumentException("invalid_belt_direction");
+        beltDirection = value == null ? null : Direction.byName(value); return this;
+    }
     public EconomicKineticTaskRecord(String callId,long deadline,String dimension,String sourceLabel,BlockPos source,Direction sourceFace,
             String targetLabel,BlockPos target,Direction targetFace,String targetBlockId,double minimumRpm,int sourceRadius,
             boolean serverProofRequired,MaterialPolicy materialPolicy,List<String> protectedLabels) {
