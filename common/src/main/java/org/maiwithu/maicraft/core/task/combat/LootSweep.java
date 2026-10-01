@@ -28,7 +28,7 @@ import java.util.Optional;
 /**
  * 围绕本轮死亡地点追踪可能的战利品，再结合背包变化判断哪些收到了、哪些还在地上、哪些解释不清。
  * 客户端没有掉落物所属怪物的直接字段，所以这里使用出现时间和移动距离等线索推断，不能保证来源绝对正确。
- * 与旧物品混成一堆时不直接整堆拿走，而是报告无法分开的部分；是否因此让战斗失败由外层任务决定。
+ * 旧物、混堆和来源推断不足只保留为观察信息；死亡现场的候选物品仍尝试原生拾取，入包与击杀来源分别记账。
  */
 final class LootSweep {
 
@@ -55,10 +55,14 @@ final class LootSweep {
     private final Map<Item, Integer> unmatchedVanishedPreexistingByItem = new HashMap<>();
     private final Map<Integer, Integer> trackedCounts = new HashMap<>();
     private final Set<Integer> tracked = new LinkedHashSet<>();
-    private final Set<Integer> skipped = new HashSet<>();
     private final List<DeathWitness> deaths = new ArrayList<>();
     private final Map<Item, Integer> inventoryAtSweepStart = new HashMap<>();
     private final Map<Item, Integer> sweepAttributed = new HashMap<>();
+    /** 本轮实际追踪的完整堆量，包含旧物与来源未知物品；只用于核实拾取，不冒充击杀产量。 */
+    private final Map<Item, Integer> sweepPickupExpected = new HashMap<>();
+    /** 已观察到实体减少且同步入包的数量；后续合堆只沿用此前确认值，避免把本刻实体消失重复算作拾取。 */
+    private final Map<Item, Integer> sweepReceivedUnits = new HashMap<>();
+    private final Map<Item, Integer> observedPickupTotal = new HashMap<>();
     private final Map<Item, Integer> sweepAmbiguous = new HashMap<>();
     private final Map<Item, Integer> sweepUnreachable = new HashMap<>();
     private final Map<Integer, BlockedApproach> blockedApproaches = new HashMap<>();
@@ -67,7 +71,7 @@ final class LootSweep {
     private final Map<Item, Integer> collectedFromSettledSweeps = new HashMap<>();
     private final Map<Item, Integer> unreachableByItem = new HashMap<>();
     private final Map<Item, Integer> ambiguousByItem = new HashMap<>();
-    private final Map<Item, Integer> rejectedLocalPlayerDrops = new HashMap<>();
+    private final Map<Item, Integer> observedLocalPlayerDrops = new HashMap<>();
 
     private int capableContactTicks;
     private int noCapacityContactTicks;
@@ -133,7 +137,6 @@ final class LootSweep {
         deaths.clear();
         tracked.clear();
         trackedCounts.clear();
-        skipped.clear();
         blockedApproaches.clear();
         unresolvedCandidates.clear();
         capableContactTicks = 0;
@@ -142,6 +145,8 @@ final class LootSweep {
         inventoryAtSweepStart.clear();
         snapshotInventory(inventoryAtSweepStart);
         sweepAttributed.clear();
+        sweepPickupExpected.clear();
+        sweepReceivedUnits.clear();
         sweepAmbiguous.clear();
         sweepUnreachable.clear();
         unaccountedSince = Long.MIN_VALUE;
@@ -179,9 +184,9 @@ final class LootSweep {
     /**
      * 接纳被击败实体的同步生命周期尚未结束时观察到的新物品 ID。在 1.21.1 中，ItemEntity.thrower 和拾取目标不会同步给客户端，
      * 因此 {@code getOwner()==null} 不能证明物品来自野外或其他生物，也不能据此拒绝正常战利品。客户端可用证据是击杀前 ID/数量快照、生成时间和运动轨迹；
-     * 若同类型物品同时从角色背包减少，则可明确证明该实体掉出了角色持有的物品。
+     * 同类型物品同时从角色背包减少也只作为可能由角色丢出的线索，不据此证明归属或拒绝拾取。
      */
-    // 在接收窗口内，用出现时间、位置和速度寻找本轮产物。只算可能相关但证据不够的，记为待解释而不直接拾取。
+    // 死亡现场先接纳可拾取候选，再单独记录来源线索；不因归属不明、旧堆或角色自己丢出的可能性拒绝靠近。
     void discover() {
         if (!active) return;
         boolean admissionOpen = settling();
@@ -197,31 +202,35 @@ final class LootSweep {
             if (before == null) {
                 if (!admissionOpen) continue;
                 CausalMatch match = causalMatch(item);
-                if (locallyDroppedDuringSweep(item)) {
-                    account(rejectedLocalPlayerDrops,
+                if (locallyDroppedDuringSweep(item) && (match.plausible() || nearAnyDeath(item.position()))) {
+                    account(observedLocalPlayerDrops,
                             item.getItem().getItem(), item.getItem().getCount());
                     rememberAsPreexisting(item);
+                    trackForPickup(item);
                 } else if (match.strong()) {
                     admit(item);
-                } else if (match.plausible()) {
+                } else if (match.plausible() || nearAnyDeath(item.position())) {
                     unresolvedCandidates.put(id, new UnresolvedCandidate(
                             item.getItem().getItem(), item.getItem().getCount(),
                             item.blockPosition().immutable(), match.reason()));
                     rememberAsPreexisting(item);
+                    trackForPickup(item);
                 }
-            // 旧物品堆变大时，当前直接记成与本轮产物合堆，没有检查它离死亡地点多远；会误计远处无关变化（A41）。
-            } else if (admissionOpen && item.getItem().getCount() > before) {
-                // 本次掉落可能并入旧堆叠，但无法分离各自数量。不能拾走旧堆叠，只报告归属不确定的本次掉落数量。
-                int growth = item.getItem().getCount() - before;
-                ambiguousMergedCount++;
-                account(ambiguousByItem, item.getItem().getItem(), growth);
-                account(sweepAmbiguous, item.getItem().getItem(), growth);
-                preexistingCounts.put(id, item.getItem().getCount());
+            } else if (admissionOpen && nearAnyDeath(item.position())) {
+                // 现场已有物品也可收取；数量增长只说明可能混堆，不要求角色先把旧物与新产物分开。
+                if (item.getItem().getCount() > before) {
+                    int growth = item.getItem().getCount() - before;
+                    ambiguousMergedCount++;
+                    account(ambiguousByItem, item.getItem().getItem(), growth);
+                    account(sweepAmbiguous, item.getItem().getItem(), growth);
+                }
+                trackForPickup(item);
             }
         }
+        refreshPickupReceipts();
     }
 
-    // 本轮物品堆变大时，看看有没有同种旧物品刚消失；若可能混入旧物品，就停止把整堆直接收走。
+    // 本轮堆叠增长时记录可能混入的旧物，仍继续收取；其他已追踪堆的合并不重复增加待入包数量。
     private void observeTrackedGrowth(ItemEntity item) {
         int id = item.getId();
         int trackedBefore = trackedCounts.getOrDefault(id, item.getItem().getCount());
@@ -229,16 +238,23 @@ final class LootSweep {
         int oldMergedUnits = consumeVanishedPreexisting(item.getItem().getItem(), growth);
         if (growth > 0 && oldMergedUnits > 0) {
             ambiguousMergedCount++;
-            skipped.add(id);
             int causalPortion = Math.min(trackedBefore,
                     sweepAttributed.getOrDefault(item.getItem().getItem(), 0));
             account(ambiguousByItem, item.getItem().getItem(), causalPortion);
             account(sweepAmbiguous, item.getItem().getItem(), causalPortion);
         }
+        if (growth > 0) {
+            Item type = item.getItem().getItem();
+            int expected = sweepPickupExpected.getOrDefault(type, 0);
+            int extra = Math.min(growth, Math.max(0, allTrackedLiveCounts().getOrDefault(type, 0)
+                    + sweepReceivedUnits.getOrDefault(type, 0) - expected));
+            account(sweepPickupExpected, type, extra);
+            account(observedPickupTotal, type, extra);
+        }
         trackedCounts.put(id, item.getItem().getCount());
     }
 
-    // 接受一个新产物前也尝试扣除可能合入的旧物品；无法分开时记录疑似属于本轮的部分，并留在地上。
+    // 来源推定只记疑似击杀产物，拾取则接纳完整堆叠；混入的旧物不再造成收取拒绝。
     private void admit(ItemEntity item) {
         Item type = item.getItem().getItem();
         int current = item.getItem().getCount();
@@ -250,16 +266,40 @@ final class LootSweep {
             account(sweepAttributed, type, causalUnits);
             account(ambiguousByItem, type, causalUnits);
             account(sweepAmbiguous, type, causalUnits);
-            rememberAsPreexisting(item);
+            trackForPickup(item);
             return;
         }
-        tracked.add(item.getId());
-        trackedCounts.put(item.getId(), current);
+        trackForPickup(item);
         account(attributedTotal, type, current);
         account(sweepAttributed, type, current);
         Constants.LOG.info("[maicraft-loot] causally attributed {} x{} at {} (age={}, velocity={})",
                 itemName(type), current, item.blockPosition().toShortString(), item.tickCount,
                 item.getDeltaMovement());
+    }
+
+    /** 先固定现场实体，再核实整堆入包；同类已追踪实体消失后合入新实体时，沿用原有待收数量。 */
+    private void trackForPickup(ItemEntity item) {
+        if (tracked.contains(item.getId())) return;
+        Item type = item.getItem().getItem();
+        int pending = Math.max(0, sweepPickupExpected.getOrDefault(type, 0)
+                - sweepReceivedUnits.getOrDefault(type, 0)
+                - allTrackedLiveCounts().getOrDefault(type, 0));
+        int extra = Math.max(0, item.getItem().getCount() - pending);
+        tracked.add(item.getId());
+        trackedCounts.put(item.getId(), item.getItem().getCount());
+        account(sweepPickupExpected, type, extra);
+        account(observedPickupTotal, type, extra);
+    }
+
+    /** 观察完整现场后再匹配同步背包：合堆仍在地上的数量不能被别处库存增长冒充本轮已拾取。 */
+    private void refreshPickupReceipts() {
+        Map<Item, Integer> live = allTrackedLiveCounts();
+        Map<Item, Integer> gains = currentSweepInventoryGain();
+        for (var entry : sweepPickupExpected.entrySet()) {
+            int missing = Math.max(0, entry.getValue() - live.getOrDefault(entry.getKey(), 0));
+            int received = Math.min(missing, gains.getOrDefault(entry.getKey(), 0));
+            sweepReceivedUnits.merge(entry.getKey(), received, Math::max);
+        }
     }
 
     private void rememberAsPreexisting(ItemEntity item) {
@@ -366,12 +406,12 @@ final class LootSweep {
         return false;
     }
 
-    // 返回本轮仍能看到、没有因混堆跳过、且当前允许尝试靠近的物品。
+    // 返回本轮仍可见且允许尝试靠近的候选，来源推断和混堆记录不影响继续收取。
     List<ItemEntity> live() {
         List<ItemEntity> out = new ArrayList<>();
         for (int id : tracked) {
             Entity entity = player.clientLevel.getEntity(id);
-            if (entity instanceof ItemEntity item && !item.isRemoved() && !skipped.contains(id)
+            if (entity instanceof ItemEntity item && !item.isRemoved()
                     && approachMayBeRetried(item)) {
                 out.add(item);
             }
@@ -444,7 +484,7 @@ final class LootSweep {
 
     String contactEvidence() {
         ItemEntity item = nearest().orElse(null);
-        if (item == null) return "no live attributable item";
+        if (item == null) return "no live pickup candidate";
         return itemName(item.getItem().getItem()) + " x" + item.getItem().getCount()
                 + " at " + item.blockPosition().toShortString()
                 + "; client_capacity=" + inventoryCanAccept(item.getItem())
@@ -484,7 +524,7 @@ final class LootSweep {
     String vanishEvidence() {
         return "unconfirmed=" + named(unaccountedByItem())
                 + "; inventory_gain=" + named(currentSweepInventoryGain())
-                + "; live_attributed=" + named(reachableTrackedLiveCounts())
+                + "; live_pickup_candidates=" + named(reachableTrackedLiveCounts())
                 + "; ambiguous_merge=" + named(sweepAmbiguous);
     }
 
@@ -534,13 +574,12 @@ final class LootSweep {
 
     // 结算本轮背包新增量并保留累计数，再关闭窗口、清掉追踪列表；不是把剩余实体自动收进背包。
     void finish() {
-        // 保留旧物基线：无法抵达或归属不明的堆叠，在后续击杀窗口中仍视为已有物品。
+        // 保留旧物基线用于说明来源；是否继续收取由现场范围和原生结果决定。
         settleCurrentSweepCollection();
         active = false;
         Map<String, Object> receipt = report();
         tracked.clear();
         trackedCounts.clear();
-        skipped.clear();
         deaths.clear();
         resetContactEvidence();
         Constants.LOG.info("[maicraft-loot] completed causal sweep: {}", receipt);
@@ -554,14 +593,12 @@ final class LootSweep {
         return ambiguousMergedCount;
     }
 
-    // 死亡还没结束、仍有物品或数量对不上、来源／可达性有问题，都要求外层继续处理这一轮。
+    // 死亡同步、待收物品、真实入包差额和不可达结果需要结算；来源推断不足本身不阻止完成。
     boolean mustSettle() {
         return active && (settling()
                 || !live().isEmpty()
                 || !unaccountedByItem().isEmpty()
-                || hasUnreachableCurrentSweep()
-                || hasAmbiguousCurrentSweep()
-                || hasUnresolvedCurrentSweep());
+                || hasUnreachableCurrentSweep());
     }
 
     boolean hasUnreachableCurrentSweep() {
@@ -598,14 +635,12 @@ final class LootSweep {
     }
 
     // 分别返回推定来源数量、背包确认增加、地上剩余、走不到、合堆与未解释的差额，不把它们统称为已收获。
-    // 收场摘要与详细回执共用同一份归属账，只计算观察到战斗掉落且背包确实增加的物品。
+    // 收场摘要与详细回执共用拾取账，只计算观察到待收堆叠且背包确实增加的物品，不要求证明击杀来源。
     Map<String, Integer> confirmedGains() {
         Map<Item, Integer> confirmed = new HashMap<>(collectedFromSettledSweeps);
         if (active) {
-            for (var entry : sweepAttributed.entrySet()) {
-                int gain = Math.max(0, inventoryCount(entry.getKey())
-                        - inventoryAtSweepStart.getOrDefault(entry.getKey(), 0));
-                account(confirmed, entry.getKey(), Math.min(entry.getValue(), gain));
+            for (var entry : sweepPickupExpected.entrySet()) {
+                account(confirmed, entry.getKey(), sweepReceivedUnits.getOrDefault(entry.getKey(), 0));
             }
         }
         return named(confirmed);
@@ -615,7 +650,6 @@ final class LootSweep {
         Map<Item, Integer> remaining = new HashMap<>();
         Map<Item, Integer> blocked = new HashMap<>();
         for (int id : tracked) {
-            if (skipped.contains(id)) continue;
             Entity entity = player.clientLevel.getEntity(id);
             if (entity instanceof ItemEntity item && !item.isRemoved()) {
                 if (blockedApproaches.containsKey(id)) {
@@ -627,12 +661,15 @@ final class LootSweep {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("attributed_by_item", named(attributedTotal));
+        out.put("observed_pickup_units_by_item", named(observedPickupTotal));
         out.put("confirmed_inventory_gain_by_item", confirmedGains());
+        out.put("observed_inventory_increases_by_item", named(currentSweepInventoryGain()));
         out.put("remaining_reachable_by_item", named(remaining));
         out.put("remaining_loaded_but_unreached_by_item", named(blocked));
         out.put("unreachable_by_item", named(unreachableByItem));
         out.put("ambiguous_merged_by_item", named(ambiguousByItem));
-        out.put("rejected_local_player_drops_by_item", named(rejectedLocalPlayerDrops));
+        out.put("local_player_drop_candidates_by_item", named(observedLocalPlayerDrops));
+        out.put("pickup_scope", "loaded death-site candidates regardless of ownership; pickup gains do not prove kill origin");
         out.put("preexisting_stack_disappeared_by_item", named(vanishedPreexistingByItem));
         out.put("unconfirmed_vanished_by_item", named(unaccountedByItem()));
         out.put("unresolved_candidate_evidence", unresolvedEvidence());
@@ -643,19 +680,17 @@ final class LootSweep {
         return out;
     }
 
-    // 已收集最多取“本轮推定产量”和“实际背包增加量”中的较小者，避免仅因背包多了很多就夸大产出。
+    // 实际收取最多按本轮观察到的完整堆量记账；背包中其他来源的额外增加不直接放大拾取数量。
     private void settleCurrentSweepCollection() {
-        for (var entry : sweepAttributed.entrySet()) {
-            int gain = Math.max(0, inventoryCount(entry.getKey())
-                    - inventoryAtSweepStart.getOrDefault(entry.getKey(), 0));
+        for (var entry : sweepPickupExpected.entrySet()) {
             account(collectedFromSettledSweeps,
-                    entry.getKey(), Math.min(entry.getValue(), gain));
+                    entry.getKey(), sweepReceivedUnits.getOrDefault(entry.getKey(), 0));
         }
     }
 
     private Map<Item, Integer> currentSweepInventoryGain() {
         Map<Item, Integer> out = new HashMap<>();
-        for (Item item : sweepAttributed.keySet()) {
+        for (Item item : sweepPickupExpected.keySet()) {
             int gain = Math.max(0,
                     inventoryCount(item) - inventoryAtSweepStart.getOrDefault(item, 0));
             if (gain > 0) out.put(item, gain);
@@ -666,7 +701,7 @@ final class LootSweep {
     private Map<Item, Integer> reachableTrackedLiveCounts() {
         Map<Item, Integer> out = new HashMap<>();
         for (int id : tracked) {
-            if (skipped.contains(id) || blockedApproaches.containsKey(id)) continue;
+            if (blockedApproaches.containsKey(id)) continue;
             Entity entity = player.clientLevel.getEntity(id);
             if (entity instanceof ItemEntity item && !item.isRemoved()) {
                 account(out, item.getItem().getItem(), item.getItem().getCount());
@@ -678,7 +713,6 @@ final class LootSweep {
     private Map<Item, Integer> allTrackedLiveCounts() {
         Map<Item, Integer> out = new HashMap<>();
         for (int id : tracked) {
-            if (skipped.contains(id)) continue;
             Entity entity = player.clientLevel.getEntity(id);
             if (entity instanceof ItemEntity item && !item.isRemoved()) {
                 account(out, item.getItem().getItem(), item.getItem().getCount());
@@ -687,16 +721,15 @@ final class LootSweep {
         return out;
     }
 
-    // 推定属于本轮的总数，扣掉背包增加、仍在地上、已记录混堆和不可达部分，剩下的是还解释不了的去向。
+    // 待收的整堆数量扣掉同步背包、地上剩余和不可达部分；来源不明不能替代真实拾取回执。
     private Map<Item, Integer> unaccountedByItem() {
-        Map<Item, Integer> gains = currentSweepInventoryGain();
+        Map<Item, Integer> gains = sweepReceivedUnits;
         Map<Item, Integer> liveCounts = allTrackedLiveCounts();
         Map<Item, Integer> out = new HashMap<>();
-        for (var entry : sweepAttributed.entrySet()) {
+        for (var entry : sweepPickupExpected.entrySet()) {
             int missing = entry.getValue()
                     - gains.getOrDefault(entry.getKey(), 0)
                     - liveCounts.getOrDefault(entry.getKey(), 0)
-                    - sweepAmbiguous.getOrDefault(entry.getKey(), 0)
                     - sweepUnreachable.getOrDefault(entry.getKey(), 0);
             if (missing > 0) out.put(entry.getKey(), missing);
         }
