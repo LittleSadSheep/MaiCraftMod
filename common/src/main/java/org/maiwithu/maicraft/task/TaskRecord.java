@@ -34,6 +34,8 @@ public abstract class TaskRecord {
 
     private TaskState state = TaskState.PENDING;
     private TaskResult result;
+    /** 谁结束了这张单子：接管、操作者取消、失去身体等；只有取消终态需要它，回执据此区分"为什么没做完"。 */
+    private String cancelSource;
     /** 保留旧接口的异步标记；当前语义结果由父任务读取，只有旧 ToolCall 调用才用 LocalToolDispatcher 回调。 */
     private boolean async;
     /** 首次进入 RUNNING 的游戏刻;task_status 用它报已耗时。-1 = 还没开跑。 */
@@ -108,6 +110,8 @@ public abstract class TaskRecord {
     /** 直接记下执行方给出的状态和结果；这里不校验“这个状态能否变成另一个状态”。 */
     public final void setState(TaskState state) { this.state = state; }
     public final void setResult(TaskResult result) { this.result = result; }
+    public final String getCancelSource() { return cancelSource; }
+    public final void setCancelSource(String cancelSource) { this.cancelSource = cancelSource; }
 
     /** 给状态显示和排错用的短描述；具体任务可以补上目的地等信息。 */
     public String describe() {

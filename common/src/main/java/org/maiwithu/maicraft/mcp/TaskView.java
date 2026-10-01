@@ -103,7 +103,7 @@ final class TaskView {
 
     private static JsonObject result(JsonObject raw, String path) {
         JsonObject result = new JsonObject();
-        for (String key : List.of("success", "message", "timed_out", "interrupted"))
+        for (String key : List.of("success", "message", "timed_out", "interrupted", "cancel_source"))
             if (raw.has(key)) result.add(key, raw.get(key).deepCopy());
         if (!raw.has("data") || !raw.get("data").isJsonObject()) return result;
         JsonObject data = raw.getAsJsonObject("data").deepCopy();

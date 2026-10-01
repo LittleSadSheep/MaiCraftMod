@@ -508,7 +508,7 @@ public final class IntentRuntime {
             throw new IllegalStateException("task is not an unfinished detached restoration");
         }
         // 保留已完成步骤和失败证据，只结束后续工作；终态仍走普通通知与检查点保存路径。
-        TaskResult result = TaskResult.cancelled("semantic task cancelled before resuming");
+        TaskResult result = TaskResult.cancelled("semantic task cancelled before resuming", "resume_cancelled");
         record.terminal(TaskState.CANCELLED, result, gameTime);
         terminal(record, TaskState.CANCELLED, result);
     }
@@ -878,6 +878,7 @@ public final class IntentRuntime {
         copyAttentionField(source, result, "message");
         copyAttentionField(source, result, "timed_out");
         copyAttentionField(source, result, "interrupted");
+        copyAttentionField(source, result, "cancel_source");
         if (!source.has("data") || !source.get("data").isJsonObject()) return result;
 
         JsonObject sourceData = source.getAsJsonObject("data");

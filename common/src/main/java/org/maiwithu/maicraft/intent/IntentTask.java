@@ -118,7 +118,8 @@ final class IntentTask implements Task {
         if (answer != null) {
             if ("cancel".equals(answer.choice()) || "cancel_task".equals(answer.choice())) {
                 mechanicalContinuations.clear();
-                terminalResult = TaskResult.cancelled("cancelled at decision " + answer.decisionId());
+                record.setCancelSource("answer_cancel");
+                terminalResult = TaskResult.cancelled("cancelled at decision " + answer.decisionId(), "answer_cancel");
                 return TaskState.CANCELLED;
             }
             if ("respawn".equals(answer.choice()) || "spectate".equals(answer.choice())) {
@@ -361,7 +362,7 @@ final class IntentTask implements Task {
             machineData.put("machine_geometry_verified", result.success());
             machineData.put("machine_production_verified", false);
             machineData.put("verification_scope", "Mod-compiled physical targets and confirmed native effects; inspect menus, interfaces and actual production separately");
-            result = new TaskResult(result.success(), result.message(), result.timedOut(), result.interrupted(), machineData);
+            result = result.withData(machineData);
         }
         InternalPositionReceipt.Position internalPosition = result.success()
                 && finishingRecord instanceof InternalPositionReceipt receipt
@@ -684,7 +685,7 @@ final class IntentTask implements Task {
             result = switch (terminal) {
                 case SUCCESS -> completionResult();
                 case TIMEOUT -> TaskResult.timeout("semantic task timed out");
-                case CANCELLED -> TaskResult.cancelled("semantic task cancelled");
+                case CANCELLED -> TaskResult.cancelled("semantic task cancelled", record.getCancelSource());
                 default -> TaskResult.fail("semantic task failed");
             };
         }
@@ -693,7 +694,7 @@ final class IntentTask implements Task {
         }
         Map<String, Object> projectData = new LinkedHashMap<>(result.data());
         addBuildProjects(projectData);
-        result = new TaskResult(result.success(), result.message(), result.timedOut(), result.interrupted(), projectData);
+        result = result.withData(projectData);
         if (!terminalPublished) {
             terminalPublished = true;
             record.terminal(terminal, result, player.level().getGameTime());
@@ -720,7 +721,7 @@ final class IntentTask implements Task {
         for (String key : List.of("outcome_uncertain", "effects_started", "mechanical_retry_allowed")) {
             if (clean.data().containsKey(key)) data.put(key, clean.data().get(key));
         }
-        return new TaskResult(parent.success(), parent.message(), parent.timedOut(), parent.interrupted(), data);
+        return parent.withData(data);
     }
 
     private TaskResult completionResult() {
