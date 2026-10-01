@@ -11,6 +11,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
+import org.maiwithu.maicraft.client.preview.PreviewController;
+import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -74,6 +76,12 @@ public final class DebugHudController {
         rows.add(new Row("身体", (inWorld ? "就绪" : "等待世界") + " · " + controlState(inWorld),
                 inWorld ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
 
+        // 施工任务停在半途的最常见原因是预览还在等确认；蓝图行让这个等待可见。
+        PreviewSession preview = PreviewController.current();
+        if (preview != null) {
+            rows.add(new Row("蓝图", blueprintText(preview), blueprintColor(preview)));
+        }
+
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
         List<IntentTaskRecord> open = IntentRuntime.get().tasks(50).stream()
                 .filter(record -> !record.getState().isTerminal())
@@ -134,6 +142,36 @@ public final class DebugHudController {
         String text = clamp(decision.question(), 40)
                 + (choices.isBlank() ? "" : " · 选项 " + clamp(choices, 24));
         return clamp(text);
+    }
+
+    // 蓝图行回答三件事：这是什么预览、它多大、施工卡在哪个决定上；隐藏与切片也值得看见。
+    private static String blueprintText(PreviewSession preview) {
+        String text = (preview.designOnly() ? "只读设计" : "施工")
+                + " · " + clamp(preview.title(), 32)
+                + " · " + preview.cells().size() + " 格 · " + blueprintState(preview);
+        if (!preview.visible()) text += " · 已隐藏";
+        if (preview.minY() != Integer.MIN_VALUE) {
+            text += " · 层 " + preview.minY() + ".." + preview.maxY();
+        }
+        return clamp(text);
+    }
+
+    private static String blueprintState(PreviewSession preview) {
+        return switch (preview.decision()) {
+            case WAITING -> "等待确认";
+            case CONFIRMED -> "已确认开工";
+            case CANCELLED -> "已取消";
+            case DISABLED -> "Dev 未开启";
+            case DESIGN_ONLY -> "仅查看";
+        };
+    }
+
+    private static ChatFormatting blueprintColor(PreviewSession preview) {
+        return switch (preview.decision()) {
+            case WAITING -> ChatFormatting.YELLOW;
+            case CANCELLED -> ChatFormatting.RED;
+            default -> ChatFormatting.AQUA;
+        };
     }
 
     private static String statePrefix(IntentTaskRecord record) {
