@@ -36,6 +36,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.Constants;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -204,6 +205,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastScaffoldDescent = Map.of();
     private final Set<BlockPos> rejectedScaffoldDescents = new HashSet<>();
     private BuildScaffoldCleanupAccess scaffoldAccess;
+    /** 清理阶段看门狗：台账收缩与身体位移双冻结超过阈值即放弃剩余支撑，不阻塞交付。 */
+    private static final int SCAFFOLD_STALL_TICKS = 600;
+    private static final double SCAFFOLD_STALL_MOVE_SQR = 4.0;
+    private long scaffoldWatchTick;
+    private int scaffoldWatchLedger = -1;
+    private BlockPos scaffoldWatchFeet;
     private final Map<BlockPos, NavGoal> scaffoldAccessGoals = new LinkedHashMap<>();
     private final Set<BlockPos> attemptedScaffoldAccess = new HashSet<>();
     private int scaffoldAccessAttempts, cleanupNewSupports;
@@ -333,6 +340,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState stepPhase() {
+        if (scaffoldPhaseActive() && scaffoldWatchStalled()) return abandonRemainingScaffolds();
         return switch (phase) {
             case PREFLIGHT -> preflightTick(); case EXCAVATE -> excavationTick(); case SELECT -> selectTick();
             case CLEARANCE_REPORT -> clearanceReportTick();
@@ -1994,11 +2002,48 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
                         .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
         deferredScaffolds.clear(); scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
+        armScaffoldWatch();
         scaffoldAt = 0; phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
     }
 
     private VerificationFailureSignature verificationFailureSignature() {
         return new VerificationFailureSignature(verifyFailureStates);
+    }
+
+    private boolean scaffoldPhaseActive() {
+        return phase == Phase.SCAFFOLD_SELECT || phase == Phase.SCAFFOLD_NAV || phase == Phase.SCAFFOLD_BREAK
+                || phase == Phase.SCAFFOLD_DESCENT || phase == Phase.SCAFFOLD_ACCESS;
+    }
+
+    /** 台账收缩或身体位移任一发生都算进展，看门狗基准随之刷新；只有双冻结持续到阈值才判死。 */
+    private boolean scaffoldWatchStalled() {
+        long now = player.level().getGameTime();
+        if (now - scaffoldWatchTick < SCAFFOLD_STALL_TICKS) return false;
+        if (r.scaffoldLedger().snapshot().size() != scaffoldWatchLedger
+                || player.blockPosition().distSqr(scaffoldWatchFeet) > SCAFFOLD_STALL_MOVE_SQR) {
+            armScaffoldWatch(); return false;
+        }
+        return true;
+    }
+
+    private void armScaffoldWatch() {
+        scaffoldWatchTick = player.level().getGameTime();
+        scaffoldWatchLedger = r.scaffoldLedger().snapshot().size();
+        scaffoldWatchFeet = player.blockPosition().immutable();
+    }
+
+    /** 深井柱链的寻路死循环不能阻塞已就位工作站的交付：放弃剩余支撑，保留台账随回执交出，交由调用方另行回收。 */
+    private TaskState abandonRemainingScaffolds() {
+        int remaining = r.scaffoldLedger().snapshot().size();
+        Constants.LOG.warn("[maicraft-build] scaffold cleanup stalled: {} temporary supports remain; continuing to delivery",
+                remaining);
+        note = "scaffold cleanup stalled: " + remaining + " temporary supports remain in place;"
+                + " delivering the completed structure first";
+        scaffoldQueue = List.of(); deferredScaffolds.clear();
+        scaffold = null; scaffoldCleanup = null; scaffoldDescent = null;
+        stopNav(); unregisterProvider();
+        finalStateAt = 0; phase = Phase.FINAL_STATE;
+        return TaskState.RUNNING;
     }
 
     private TaskState scaffoldSelectTick() {

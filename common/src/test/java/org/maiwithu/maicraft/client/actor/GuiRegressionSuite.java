@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 
 import org.maiwithu.maicraft.task.TaskSlotFailureTest;
 import org.maiwithu.maicraft.client.chat.ChatTypingTest;
+import org.maiwithu.maicraft.core.task.build.ScaffoldCleanupStallWatchdogTest;
 import org.maiwithu.maicraft.client.preview.PreviewRefreshTest;
 import org.maiwithu.maicraft.client.preview.PreviewSessionTest;
 import org.maiwithu.maicraft.client.preview.PreviewVisibilityTest;
@@ -156,6 +157,8 @@ public final class GuiRegressionSuite {
     public static void main(String[] args) throws Exception {
         // 同一菜单中的同步与移槽由 Mod 刷新后续作，失败仍带出可用现场。
         MachineMenuRecoveryTest.main(args);
+        // 清理阶段双冻结看门狗放弃剩余支撑后，交付必须照常完成并列出遗留数量。
+        ScaffoldCleanupStallWatchdogTest.main(args);
         // 接管或长期无驱动遗留的待确认原生动作必须在下次提交前回收，不能楔死动作队列。
         NativeActionStaleReclaimTest.main(args);
         // 水下低顶逃生先检查实际换气链的输入，避免单独路径测试掩盖持续顶墙上浮。
