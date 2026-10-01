@@ -172,6 +172,37 @@ final class Ae2SupplyPlanner {
 
     private Ae2SupplyPlanner() {}
 
+    /** 库存过期后只重新分配尚未取到的部分，已确认材料仍留在同一组账本中，不会再次提取。 */
+    static Result refreshRemaining(LocalPlayer player, RequestView view) {
+        var remaining = new ArrayList<Ae2ResourceSupply.Group>();
+        var entries = new ArrayList<>(view.entries());
+        for (var planned : view.plan().groups()) {
+            var group = planned.group(); int missing = group.count() - planned.confirmedCount();
+            if (missing > 0) remaining.add(new Ae2ResourceSupply.Group(group.itemId(), group.acceptableItemIds(), missing, group.selectionMode()));
+            // 单一品种组已经取到材料后保持同一种组件身份；混合组仍可选原请求授权的其他材料。
+            if (planned.confirmedCount() > 0 && group.selectionMode() == Ae2ResourceSupply.SelectionMode.SINGLE_VARIANT) {
+                var sample = planned.allocations().stream().filter(a -> a.confirmedCount() > 0).findFirst().orElseThrow().sample();
+                entries.removeIf(entry -> group.acceptableItemIds().contains(entry.itemId()) && !same(entry.sample(), sample));
+            }
+        }
+        if (remaining.isEmpty()) return Result.success(view.plan());
+        var fresh = build(player, new Ae2ResourceSupply.Request(remaining, view.allowCrafting()), entries, view.reserved());
+        if (fresh.failure() != null) return fresh;
+        var groups = new ArrayList<PlannedGroup>(); int pending = 0;
+        for (var planned : view.plan().groups()) {
+            var allocations = new ArrayList<Allocation>();
+            for (var old : planned.allocations()) if (old.confirmedCount() > 0) {
+                var completed = new Allocation(old.itemId(), old.sample(), old.confirmedCount(), false);
+                completed.confirm(old.confirmedCount()); allocations.add(completed);
+            }
+            if (planned.confirmedCount() < planned.group().count()) allocations.addAll(fresh.plan().groups().get(pending++).allocations());
+            groups.add(new PlannedGroup(planned.group(), allocations));
+        }
+        return Result.success(new Plan(groups));
+    }
+
+    record RequestView(Plan plan, List<Ae2ReflectionBridge.Entry> entries, Set<Integer> reserved, boolean allowCrafting) {}
+
     /**
      * 只准备网络库存时不占用背包格；先选现有库存，缺少部分在允许合成且网络提供样板时列为待制作。
      */

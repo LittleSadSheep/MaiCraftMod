@@ -42,6 +42,9 @@ final class Ae2ServerSupply {
     private Progress terminal;
     private Ae2ServerCraftJob craft;
     private boolean refreshingStock;
+    private boolean refreshingRejectedStock;
+    private int stockRefreshes;
+    private String lastStockChange;
     private int craftPlans;
     private int craftStarts;
     private String awaitingOutputKey;
@@ -111,7 +114,7 @@ final class Ae2ServerSupply {
                         complete ? "resources_supplied" : "satisfied_before_owned_supply_completed",
                         "settled existing server supply; no further extraction or crafting will start");
             }
-            if (plan == null || refreshingStock) {
+            if (plan == null || refreshingStock || refreshingRejectedStock) {
                 if (queryIndex < queryItems.size()) {
                     if (context.tickRevision() < nextStockQueryTick) return running();
                     JsonObject body = targetBody();
@@ -121,6 +124,13 @@ final class Ae2ServerSupply {
                     pending = ServerAssistClient.submit("inventory.ae2_network", body, false);
                     pendingTick = context.tickRevision();
                     return running();
+                }
+                if (refreshingRejectedStock) {
+                    // 全部分页读完后只规划剩余需求；旧批次的确认量保留，背包外部变化仍由后续对账识别。
+                    var refreshed = Ae2SupplyPlanner.refreshRemaining(player, new Ae2SupplyPlanner.RequestView(
+                            plan, stock.entries(), reserved, request.allowCrafting() && Ae2ServerCraftJob.available()));
+                    if (refreshed.failure() != null) return finish(State.FAILED, refreshed.failure().code(), refreshed.failure().message());
+                    plan = refreshed.plan(); refreshingRejectedStock = false; return running();
                 }
                 if (refreshingStock) {
                     long output = stock.entries().stream().filter(value -> stock.identity(value.serial()).equals(awaitingOutputKey))
@@ -196,6 +206,8 @@ final class Ae2ServerSupply {
         if (receipt.effect() == ClientRequestReceipt.Effect.UNKNOWN || receipt.status() == ClientRequestReceipt.Status.UNKNOWN)
             return finish(State.UNCERTAIN, "server_supply_outcome_unknown", "submitted requests require reconciliation; native fallback is forbidden");
         if (receipt.retired() || receipt.status() != ClientRequestReceipt.Status.SUCCEEDED) {
+            // 服务端明确拒绝且尚未提取时，精确键消失只需重读库存，不能让 LLM 原样重发整次供料。
+            if (refreshableStock(receipt) && refreshStock(context.tickRevision(), receipt.code())) return running();
             boolean safe = !effectsStarted && safeFallback(receipt)
                     && ServerAssistClient.nativeFallbackAllowed("inventory.ae2_supply");
             return finish(safe ? State.FALLBACK : State.FAILED, receipt.code(), receipt.message());
@@ -216,7 +228,10 @@ final class Ae2ServerSupply {
                     || !stock.identity(entry.serial()).equals(result.get("resource_id").getAsString())
                     || !stock.membership().equals(result.get("membership").getAsString()))
                 return finish(State.UNCERTAIN, "server_supply_receipt_mismatch", "transfer result differs from the approved exact-key request");
-            if (transferred == 0) return finish(State.FAILED, "server_supply_no_change", "native extraction moved no items");
+            if (transferred == 0) {
+                if (refreshStock(context.tickRevision(), "server_supply_no_change")) return running();
+                return finish(State.FAILED, "server_supply_no_change", "native extraction moved no items after bounded stock refreshes");
+            }
             effectsStarted = true;
             awaitingInventory = true;
             pendingTick = context.tickRevision();
@@ -226,6 +241,7 @@ final class Ae2ServerSupply {
         if (ItemStack.isSameItemSameComponents(after, allocation.sample()) && after.getCount() == expected) {
             recordConfirmed(receipt, slot);
             allocation.confirm(transferred);
+            stockRefreshes = 0;
             stock.debit(entry.serial(), transferred);
             awaitingInventory = false;
             pending = null;
@@ -240,6 +256,21 @@ final class Ae2ServerSupply {
         return !receipt.retired() && receipt.effect() == ClientRequestReceipt.Effect.NOT_APPLIED
                 && receipt.status() == ClientRequestReceipt.Status.REJECTED
                 && (receipt.code().equals("unsupported_operation") || receipt.code().equals("unsupported_version"));
+    }
+
+    static boolean refreshableStock(ClientRequestReceipt.Snapshot receipt) {
+        return !receipt.retired() && receipt.backend() == ClientRequestReceipt.Backend.SERVER
+                && receipt.mutating() && receipt.operationId().equals("inventory.ae2_supply")
+                && receipt.status() == ClientRequestReceipt.Status.REJECTED && receipt.effect() == ClientRequestReceipt.Effect.NOT_APPLIED
+                && Set.of("resource_unavailable", "source_changed").contains(receipt.code());
+    }
+
+    private boolean refreshStock(long tick, String code) {
+        if (settlingSatisfied || plan == null || stockRefreshes >= 2) return false;
+        stockRefreshes++; lastStockChange = code;
+        pending = null; stock.clear(); queryIndex = 0; offset = 0;
+        refreshingRejectedStock = true; nextStockQueryTick = tick + 2;
+        return true;
     }
 
     static int destination(LocalPlayer player, ItemStack sample, Set<Integer> reserved) {
@@ -278,7 +309,7 @@ final class Ae2ServerSupply {
         Map<String, Object> row = confirmedReceipt(receipt, playerSlot);
         confirmedRequests++;
         confirmedTransfers = Math.addExact(confirmedTransfers, ((Number) row.get("amount")).longValue());
-        if (confirmedReceipts.size() < 64) confirmedReceipts.add(row);
+        confirmedReceipts.add(row);
     }
     static Map<String, Object> confirmedReceipt(ClientRequestReceipt.Snapshot receipt, int playerSlot) {
         if (receipt.backend() != ClientRequestReceipt.Backend.SERVER || !receipt.mutating() || receipt.retired()
@@ -298,7 +329,11 @@ final class Ae2ServerSupply {
     Map<String, Object> evidence() {
         return Map.of("server_supply_receipts", List.copyOf(confirmedReceipts),
                 "server_supply_receipt_count", confirmedRequests, "server_supply_transferred", confirmedTransfers,
-                "server_supply_receipts_truncated", confirmedRequests > confirmedReceipts.size());
+                "server_supply_receipts_truncated", false, "stock_refreshes_without_progress", stockRefreshes,
+                "stock_refresh_pending", refreshingRejectedStock, "network_membership", stock.membership() == null ? "unobserved" : stock.membership(),
+                "last_stock_change", lastStockChange == null ? "none" : lastStockChange,
+                "observed_stock", stock.entries().stream().map(value -> Map.of("item_id", value.itemId().toString(),
+                        "resource_id", stock.identity(value.serial()), "available", stock.remaining(value.serial()), "craftable", value.craftable())).toList());
     }
     boolean runningRequest() { return terminal == null && (pending != null || craft != null); }
     private Progress running() { return new Progress(State.RUNNING, "server_supply_pending", "waiting for authoritative supply evidence"); }
