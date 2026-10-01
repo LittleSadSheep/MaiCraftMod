@@ -49,6 +49,12 @@ public final class AttentionHttpTest {
                     && detailPage.getAsJsonObject("value").getAsJsonArray("observation").size() == 800
                     && runtime.executions == 1,
                     "perceive receipt pages never execute or re-observe the world");
+            // 指定观察路径也一次返回冻结的全部事实，不再次执行任务或重新勘测世界。
+            detailCall.getAsJsonObject("arguments").addProperty("resource_uri", ResponseArchive.link(detailUri, "/observation", 0, 5));
+            detailResult = json(client.send(post(uri, session, 92, "tools/call", detailCall), HttpResponse.BodyHandlers.ofString()).body()).getAsJsonObject("result");
+            detailPage = json(detailResult.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+            check(detailPage.get("snapshot_only").getAsBoolean() && detailPage.get("value").equals(accepted.get("observation"))
+                    && runtime.executions == 1, "one receipt read restores all frozen evidence without executing or observing again");
             String instructions = json(init.body()).getAsJsonObject("result").get("instructions").getAsString();
             check(instructions.contains("Attention is the primary") && instructions.contains("next_attention")
                             && instructions.contains("maicraft://chatflow"),

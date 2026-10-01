@@ -17,14 +17,19 @@ public final class ResponseArchiveTest {
             var compact = archive.present(raw).getAsJsonObject();
             // 超大回执完整交付并附冻结引用；原始观察不被外层改写。
             check(compact.get("accepted").getAsBoolean() && compact.get("task_id").getAsString().equals("accepted-task"), "acceptance survives large receipts");
-            check(!compact.get("partial").getAsBoolean() && compact.get("details_temporary").getAsBoolean(),
-                    "presentation omission cannot change a complete game result into a partial effect");
-            check(compact.getAsJsonArray("a/b~c").size() == 900 && !raw.has("details_uri"), "bounded presentation leaves source intact");
+            check(!compact.get("partial").getAsBoolean() && !compact.has("response_partial")
+                    && compact.get("details_temporary").getAsBoolean(),
+                    "archival does not hide facts or change a complete effect into a partial one");
+            check(compact.get("a/b~c").equals(evidence) && !raw.has("details_uri"), "complete presentation leaves source intact");
             String id = compact.get("details_uri").getAsString();
             var whole = archive.read(id);
             check(whole.get("snapshot_only").getAsBoolean(), "archived evidence never claims a fresh observation");
-            check(whole.getAsJsonObject("value").getAsJsonArray("a/b~c").size() == 900,
+            check(whole.getAsJsonObject("value").get("a/b~c").equals(evidence),
                     "the first page delivers the frozen original in full");
+            // 整份回执与选中的观察数组都从冻结副本完整读取，显式偏移仍可核对同一批证据。
+            var selected = archive.read(ResponseArchive.link(id, "/a~1b~0c", 0, 5));
+            check(selected.get("snapshot_only").getAsBoolean() && selected.get("value").equals(evidence),
+                    "selected frozen evidence is returned in one read");
             var slice = archive.read(ResponseArchive.link(id, "/a~1b~0c", 5, 50));
             check(slice.get("offset").getAsInt() == 5 && slice.getAsJsonArray("items").size() == 50
                     && slice.getAsJsonArray("items").get(0).getAsJsonObject().get("value").getAsString().equals("observed-block-5")
@@ -34,10 +39,8 @@ public final class ResponseArchiveTest {
             var acceptance = archive.read(ResponseArchive.link(id, "/accepted", 0, 5));
             check(acceptance.get("value").getAsBoolean(),
                     "later source mutation cannot rewrite historical acceptance");
-            // 整读语法下 limit 属分页参数、不参与校验；分页语法的畸形参数仍要明确拒绝。
-            check(archive.read(id + "?limit=999").get("snapshot_only").getAsBoolean(),
-                    "whole reads ignore the paging-only limit instead of failing");
-            for (String suffix : new String[]{"?path=%2Fa~2b", "?offset=-1", "?path=&path=%2Faccepted", "/../../other"})
+            // 首次整读仍拒绝非法参数，不能因为无需分页而掩盖调用方的错误请求。
+            for (String suffix : new String[]{"?path=%2Fa~2b", "?offset=-1", "?limit=999", "?path=&path=%2Faccepted", "/../../other"})
                 rejected(archive, id + suffix);
             archive.present(raw); archive.present(raw); rejected(archive, id);
             String newest = archive.present(raw).getAsJsonObject().get("details_uri").getAsString();
@@ -64,7 +67,7 @@ public final class ResponseArchiveTest {
                     .getAsJsonObject("result").getAsJsonObject("data");
             JsonObject current = data_.getAsJsonObject("latest_snapshot");
             check(current.get("snapshot_id").getAsString().equals("new-site") && current.getAsJsonObject("target").equals(target)
-                    && current.getAsJsonArray("relative_blocks").size() == 900
+                    && current.get("relative_blocks").equals(blocks)
                     && data_.get("failure_code").getAsString().equals("machine_snapshot_changed"),
                     "outer archival delivers the frozen original with the latest snapshot intact");
             check(shown.get("details_uri") != null && shown.get("details_temporary").getAsBoolean(),
@@ -73,8 +76,11 @@ public final class ResponseArchiveTest {
                     "/task/terminal/result/data/latest_snapshot", 0, 5));
             check(page.get("snapshot_only").getAsBoolean()
                     && page.getAsJsonObject("value").get("snapshot_id").getAsString().equals("new-site")
-                    && page.getAsJsonObject("value").getAsJsonArray("relative_blocks").get(0).getAsString().equals("new-observed-block-0"),
+                    && page.getAsJsonObject("value").get("relative_blocks").equals(blocks),
                     "current geometry references the same retained observation instead of another survey");
+            // 场地变化后的完整几何也可直接读出，不能只交付编号而遗漏后续方块。
+            String uri = ResponseArchive.link(shown.get("details_uri").getAsString(), "/task/terminal/result/data/latest_snapshot/relative_blocks", 0, 5);
+            check(archive.read(uri).getAsJsonArray("value").equals(blocks), "selected current geometry is fully available in one read");
         }
     }
     private static void rejected(ResponseArchive archive, String uri) {

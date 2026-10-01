@@ -41,7 +41,7 @@ public final class InventoryComponentFactsTest {
                 "resource_id", "items:minecraft:brick#native-key", "position", Map.of("x", 504, "y", 78, "z", 104));
         var clean = SemanticResultView.data(source);
         check(clean.get("storage_id").equals(source.get("storage_id")) && clean.get("membership").equals(source.get("membership"))
-                && !clean.containsKey("position"), "opaque identities stay exact while ordinary position fields keep their existing boundary");
+                && clean.get("position").equals(source.get("position")), "native identities and observed positions remain available together");
         var json = (Map<?, ?>) SemanticResultView.jsonValue(new Gson().toJsonTree(source));
         check(json.get("storage_id").equals(clean.get("storage_id")) && json.get("resource_id").equals(source.get("resource_id")),
                 "JSON and map receipts preserve the same resource identities");

@@ -14,14 +14,14 @@ public final class PlanViewTest {
                 new Goal.SemanticTarget("landmark", "仓库 " + i, null, null), "{}", "{}", List.of(), List.of()));
         Goal goal = new Goal("maicraft:sequence", "依次巡视仓库", null, "{}", "{}", List.of(), children);
         Plan plan = Plan.compile(goal, 20); JsonObject summary = PlanView.summary(plan, 3);
-        // 摘要列出每一步的身份（index/ability/outcome），但不复印目标参数等编排输入。
+        // 摘要直接列出全部步骤身份，读取选定设计时完整返回原输入，随后仍能按指定偏移续读。
         check(!summary.has("goal") && summary.getAsJsonArray("steps").size() == 32
                 && summary.get("step_count").getAsInt() == 32, "plan does not echo authored inputs");
         JsonObject request = new JsonObject(); request.addProperty("plan_id", plan.id().toString());
         request.addProperty("path", "/goal/children"); request.addProperty("limit", 3);
         JsonObject read = PlanView.read(plan, PublicToolCatalog.validateAndNormalize("plan", request));
         check(!read.get("validation_rechecked").getAsBoolean() && !read.has("ready_to_execute")
-                && read.getAsJsonObject("detail").getAsJsonArray("value").size() == 32,
+                && read.getAsJsonObject("detail").get("value").equals(goal.toJson().get("children")),
                 "read only restores frozen design at offset zero");
         request.addProperty("offset", 3);
         read = PlanView.read(plan, PublicToolCatalog.validateAndNormalize("plan", request));
