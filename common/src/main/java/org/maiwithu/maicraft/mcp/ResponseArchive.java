@@ -79,7 +79,9 @@ final class ResponseArchive implements AutoCloseable {
             }
         }
         // 首次读取一次交付选中的完整证据，仍须拒绝非法页码，不能因跳过分页而接受错误参数。
-        if (offset < 0 || limit < 1 || limit > 50) throw new IllegalArgumentException("Invalid receipt offset or limit");
+        // 拒绝消息与 JsonReadback.page 同一口径：点名两种计数单位，模型才能一次改对参数。
+        if (offset < 0 || limit < 1 || limit > 50) throw new IllegalArgumentException(
+                "detail offset must be non-negative and detail limit must be 1..50 collection entries; text pages contain up to 4000 UTF-16 code units regardless of limit. Copy next_offset or next_uri.");
         Entry stored = entries.get(id);
         if (stored == null) throw new IllegalArgumentException("receipt_expired: query task/get or repeat the read-only observation; do not repeat execute to recover a receipt");
         String uri = PREFIX + id;
