@@ -113,7 +113,7 @@ import org.maiwithu.maicraft.core.task.build.BuildSiteConstraintsTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceSurveyTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceExecutionTest;
 import org.maiwithu.maicraft.core.task.build.MachineModificationClearanceTest;
-import org.maiwithu.maicraft.core.integration.machine.MachineOwnedReplacementTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineDeclaredReplacementTest;
 import org.maiwithu.maicraft.core.blueprint.ConstructionOwnershipTest;
 import org.maiwithu.maicraft.core.task.build.BuildStanceNavigationTest;
 import org.maiwithu.maicraft.core.task.build.BuildSupplyAccessTest;
@@ -262,7 +262,7 @@ public final class GuiRegressionSuite {
         BuildClearanceExecutionTest.main(args);
         MachineModificationClearanceTest.main(args);
         // 新建入口复用原生施工归属时仍保持逐格权限，后续供料批次不能丢失这份范围。
-        MachineOwnedReplacementTest.main(args);
+        MachineDeclaredReplacementTest.main(args);
         ConstructionOwnershipTest.main(args);
         BuildWrenchRemovalTest.main(args);
         FiniteBlockUseTest.main(args);

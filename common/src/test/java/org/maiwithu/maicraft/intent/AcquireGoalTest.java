@@ -19,11 +19,11 @@ public final class AcquireGoalTest {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         for (String patch : List.of("{\"count\":1.5}", "{\"count\":0}", "{\"count\":-1}",
-                "{\"count\":2305}", "{\"count\":2147483648}", "{\"count\":\"2\"}", "{\"count\":null}",
+                "{\"count\":2305}", "{\"count\":2147483648}", "{\"count\":\"2\"}",
                 "{\"radius\":1.5}", "{\"radius\":0}", "{\"radius\":49}", "{\"radius\":[]}",
-                "{\"allow_harm\":\"true\"}", "{\"allow_harm\":1}", "{\"allow_harm\":null}",
+                "{\"allow_harm\":\"true\"}", "{\"allow_harm\":1}",
                 "{\"item_ids\":[1]}", "{\"item_tag\":true}", "{\"protected_labels\":[false]}",
-                "{\"allowed_sources\":[\"magic\"]}", "{\"allowed_sources\":null}",
+                "{\"allowed_sources\":[\"magic\"]}",
                 "{\"source_hint\":false}", "{\"source_hint\":{\"position\":[1,2,3]}}",
                 "{\"source_hint\":{\"description\":42}}", "{\"source_hint\":{\"block_ids\":[true]}}")) {
             try {
@@ -31,6 +31,12 @@ public final class AcquireGoalTest {
                 throw new AssertionError("取物入口接受了有歧义的参数: " + patch);
             } catch (IllegalArgumentException expected) { }
             rejectsGoal(goal(arguments(patch), null));
+        }
+        // 显式 null 与缺席同义（共享参数契约）：落到与省略该字段相同的默认值，不算歧义输入。
+        for (String patch : List.of("{\"count\":null}", "{\"allow_harm\":null}", "{\"allowed_sources\":null}")) {
+            var defaulted = record(arguments(patch));
+            check(defaulted.count == 1 && !defaulted.allowHarm,
+                    "explicit null falls back to the same defaults as absence: " + patch);
         }
         for (int count : List.of(1, 256, 257, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)) {
             var request = record(arguments("{\"count\":" + count + ",\"radius\":48,\"allow_harm\":false}"));

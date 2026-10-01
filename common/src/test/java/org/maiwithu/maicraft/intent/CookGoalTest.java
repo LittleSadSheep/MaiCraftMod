@@ -19,7 +19,7 @@ public final class CookGoalTest {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         for (String patch : List.of("{\"count\":1.5}", "{\"count\":\"2\"}", "{\"count\":0}",
-                "{\"count\":2305}", "{\"count\":null}", "{\"allow_harm\":\"true\"}",
+                "{\"count\":2305}", "{\"allow_harm\":\"true\"}",
                 "{\"allowed_sources\":[\"unknown\"]}", "{\"allowed_fuels\":[true]}", "{\"recipe_preference\":42}",
                 "{\"recipe_preference\":\"unknown\"}", "{\"item_id\":null}", "{\"source_hint\":{}}")) {
             try {
@@ -28,6 +28,9 @@ public final class CookGoalTest {
             } catch (IllegalArgumentException expected) { }
             rejects(goal(arguments(patch), null));
         }
+        // 显式 null 与缺席同义（共享参数契约）：count 落到默认 1，不算含糊参数。
+        if (SemanticCookApi.newRecord(new ToolContext("cook-null", 0), arguments("{\"count\":null}")).count != 1)
+            throw new AssertionError("count 显式 null 未按缺席处理");
         // 显式允许前置烧炼时保留COOK，后续由跨任务祖先链控制有限递归。
         var recursive = SemanticCookApi.newRecord(new ToolContext("finite-cook", 0), arguments("{\"allowed_sources\":[\"cook\"]}"));
         if (!recursive.allowedSources.contains(Source.COOK)) throw new AssertionError("前置烧炼许可被删掉");

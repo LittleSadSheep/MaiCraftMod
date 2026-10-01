@@ -82,9 +82,11 @@ public final class BuildFoodPreparationTest {
         try (var h = new InteractionWorldTestHarness()) {
             h.player.getFoodData().setFoodLevel(10); h.inventory.setItem(0, new ItemStack(Items.BREAD, 2));
             var prep = new BuildFoodPreparation((p, r) -> new ObservedMeal()); prep.tick(h.player, owner(), child -> null);
-            check(prep.tick(h.player, owner(), child -> TaskState.SUCCESS) == BuildFoodPreparation.Status.FAILED
-                    && prep.failure().equals("build_food_unconfirmed") && h.inventory.getItem(0).getCount() == 2,
-                    "a claimed eating success without actual item and hunger changes cannot restart work");
+            // 声称吃完但无实证时交回施工并保留原物；不再判失败拦住原任务。
+            var s = prep.tick(h.player, owner(), child -> TaskState.SUCCESS);
+            check(s == BuildFoodPreparation.Status.READY && prep.failure() == null
+                    && h.inventory.getItem(0).getCount() == 2,
+                    "a claimed eating success without evidence defers instead of failing or consuming");
         }
     }
 
@@ -137,13 +139,20 @@ public final class BuildFoodPreparationTest {
                         "lack of sprint food must not prohibit ordinary construction");
             }
             h.player.getFoodData().setFoodLevel(0);
-            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED,
-                    "actual starvation still requires food before more construction");
+            // 饥饿归零但没有普通食物时延后备餐并交回施工；真实饿伤掉血到危急仍会再次拦下。
+            boolean should = prep.shouldPrepare(h.player);
+            var status = prep.tick(h.player, owner(), child -> null);
+            check(should && status == BuildFoodPreparation.Status.READY
+                    && Boolean.TRUE.equals(prep.progress(h.player).get("preparation_deferred")),
+                    "starvation without ordinary food defers preparation and hands back to construction");
         }
         try (var h = new InteractionWorldTestHarness()) {
             h.player.setHealth(7); h.player.getFoodData().setFoodLevel(17);
             var prep = new BuildFoodPreparation();
-            check(prep.shouldPrepare(h.player) && prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED, "low actual health still requires food or recovery");
+            // 危急但无粮同样延后备餐交回施工；硬停只在身体真正死亡时发生。
+            check(prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.READY
+                    && Boolean.TRUE.equals(prep.progress(h.player).get("preparation_deferred")),
+                    "urgent maintenance without food defers to construction; only actual harm stops work");
         }
         try (var h = new InteractionWorldTestHarness()) {
             // 最后一份普通食物吃完后已有足够身体余量，不能因为没补到二十又把已完成的准备判失败。
@@ -159,16 +168,20 @@ public final class BuildFoodPreparationTest {
         try (var h = new InteractionWorldTestHarness()) {
             h.player.getFoodData().setFoodLevel(0);
             var prep = new BuildFoodPreparation((p, r) -> { throw new AssertionError("no item may be created"); });
-            check(prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.FAILED
-                    && prep.failure().equals("build_food_unavailable") && h.inventory.isEmpty(), "no food pauses construction without acquiring or creating an item");
+            // 绝粮不再判失败拦施工：延后备餐交回原任务，且绝不凭空造物。
+            check(prep.tick(h.player, owner(), child -> null) == BuildFoodPreparation.Status.READY
+                    && Boolean.TRUE.equals(prep.progress(h.player).get("preparation_deferred"))
+                    && prep.progress(h.player).get("preparation_observation").toString().contains("build_food_unavailable")
+                    && h.inventory.isEmpty(), "no food defers construction without acquiring or creating an item");
         }
         try (var h = new InteractionWorldTestHarness()) {
             h.player.setHealth(1); var prep = new BuildFoodPreparation(); var owner = owner();
             check(prep.tick(h.player, owner, child -> null) == BuildFoodPreparation.Status.RUNNING, "full food permits a bounded natural-recovery observation");
             for (int step = 0; step < BuildFoodPreparation.RECOVERY_IDLE_TIMEOUT; step++) h.nextTick();
-            check(prep.tick(h.player, owner, child -> null) == BuildFoodPreparation.Status.FAILED
-                    && prep.failure().equals("build_health_recovery_unconfirmed") && h.player.getHealth() == 1,
-                    "disabled or unavailable regeneration fails within a finite unchanged-health window");
+            // 回血观察超时同样交回施工；血量未变即无伪证，也不再拦住原任务。
+            check(prep.tick(h.player, owner, child -> null) == BuildFoodPreparation.Status.READY
+                    && prep.failure() == null && h.player.getHealth() == 1,
+                    "unavailable regeneration defers within a finite unchanged-health window");
         }
     }
 
