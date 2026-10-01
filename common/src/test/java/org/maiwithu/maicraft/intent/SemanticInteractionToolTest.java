@@ -108,10 +108,12 @@ public final class SemanticInteractionToolTest {
             BlockPos at = new BlockPos(10, 1, 10); h.set(at, Blocks.CRAFTING_TABLE.defaultBlockState());
             var compile = GeneralAbilityAdapter.class.getDeclaredMethod("compileBlockInteraction", Goal.class, LocalPlayer.class, BlockPos.class,
                     ResourceLocation.class, String.class, boolean.class); compile.setAccessible(true);
-            var plan = (IntentAction.Chain) compile.invoke(null, Goal.fromJson(json), h.player, at,
+            var plan = (IntentAction.Tool) compile.invoke(null, Goal.fromJson(json), h.player, at,
                     ResourceLocation.withDefaultNamespace("crafting_table"), null, false);
-            // 自己已经选出的工作站位必须精确抵达，不能让普通旅行容差把角色留在几格外。
-            check(plan.actions().getFirst().toolName().equals("goto") && plan.actions().getFirst().arguments().get("exact").getAsBoolean(),
+            // 自己已经选出的工作站位必须精确抵达：approach 与精确坐标随原语下发，不再单独构造 goto 链。
+            var use = plan.arguments();
+            check(plan.toolName().equals("interact_at") && use.get("approach").getAsBoolean()
+                    && use.get("x").getAsInt() == 10 && use.get("y").getAsInt() == 1 && use.get("z").getAsInt() == 10,
                     "semantic interaction uses the exact approach it proved rather than ordinary travel tolerances");
         }
     }

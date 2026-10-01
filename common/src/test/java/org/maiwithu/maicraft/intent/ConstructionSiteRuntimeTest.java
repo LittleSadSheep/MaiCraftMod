@@ -38,8 +38,9 @@ public final class ConstructionSiteRuntimeTest {
                     "production revalidates geometry without rewriting original observation time");
             check(MachineSnapshots.requireFresh(world.player,site.id()).gameTime()==site.gameTime(),
                     "ordinary operations retain unchanged evidence after long design work");
-            try { MachineSnapshots.requireForProduction(world.player,regular.id()); throw new AssertionError("partial structure was accepted"); }
-            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("incomplete"),"production still needs complete structural evidence"); }
+            // 展示截断不再拦住已知组件操作；结构未变时同一编号直接可用，逐项核对交给执行器。
+            check(MachineSnapshots.requireForProduction(world.player, regular.id()).id().equals(regular.id()),
+                    "presentation truncation alone does not reject an unchanged observation");
             clock.setLong(world.level,site.gameTime()-1);
             // 游戏时间回拨并未改变机器，不能让原位置的操作因时钟管理而被迫重新勘测。
             check(MachineSnapshots.requireForProduction(world.player,site.id()).id().equals(site.id())

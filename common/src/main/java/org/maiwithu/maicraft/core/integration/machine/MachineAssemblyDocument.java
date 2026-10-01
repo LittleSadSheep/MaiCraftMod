@@ -123,6 +123,8 @@ public final class MachineAssemblyDocument {
     }
 
     public static Map<BlockPos, JsonObject> blocks(JsonObject blueprint) {
+        // 无 blocks 键的蓝图（如不带几何的原生装配声明）没有逐格输入；与 belts 的守卫对称，不能在空图上崩。
+        if (!blueprint.has("blocks")) return Map.of();
         Map<BlockPos, JsonObject> result = new LinkedHashMap<>();
         for (var raw : blueprint.getAsJsonArray("blocks")) {
             JsonObject block = raw.getAsJsonObject();

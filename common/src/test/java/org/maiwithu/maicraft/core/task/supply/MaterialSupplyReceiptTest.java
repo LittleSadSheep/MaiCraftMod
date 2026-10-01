@@ -146,8 +146,8 @@ public final class MaterialSupplyReceiptTest {
                 .getDeclaredMethod("sanitizeAttentionValue", JsonElement.class);
         attention.setAccessible(true); value = (JsonElement) attention.invoke(null, value);
         var persist = Class.forName("org.maiwithu.maicraft.intent.persistence.IntentStateCodec")
-                .getDeclaredMethod("safeElement", JsonElement.class, int.class);
-        persist.setAccessible(true); return (JsonElement) persist.invoke(null, value, 0);
+                .getDeclaredMethod("safeElement", JsonElement.class);
+        persist.setAccessible(true); return (JsonElement) persist.invoke(null, value);
     }
 
     private static void set(Object instance, String name, Object value) throws Exception {
