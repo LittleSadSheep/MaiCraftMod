@@ -34,6 +34,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -471,11 +472,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     private TaskState finishPreflight() {
-        // 全场加载核对后先检查清障名单，再给出最近选址；遇到人工障碍时不能先拆掉其余半栋再报告。
+        // 全场加载后先检查明确保护和原生破坏条件，再执行声明范围内的拆换；旧部件类型不另设清障准入。
         if (clearanceSurvey == null) clearanceSurvey = BuildClearanceSurvey.forPlan(player, r, inheritedProtectedMutationCells);
         if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
         if (clearanceSurvey.blocked()) {
-            failPreflight("Clearance whitelist excludes site obstacles; inspect clearance_report and consider a nearby site.",
+            failPreflight(clearanceSurvey.failureMessage(),
                     FailureType.NO_SUPPORT, BuildClearanceSurvey.FAILURE);
             return TaskState.FAILED;
         }
@@ -704,12 +705,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState clearNavTick() {
         boolean forceMining = miningInsteadOfWrench.contains(clearing.asLong());
         int remainingBreaks = excavating ? excavation.remaining() : 1;
-        // 还没开始补工具时先看眼前障碍，避免为名单外建筑跑一趟仓库之后才告知需要换场地。
+        // 补工具前先核对未声明格的通行边界；蓝图点名的旧部件可直接按当前状态准备原生拆换。
         if (!excavationTools.active() && player.level().isLoaded(clearing)) {
             var live = player.level().getBlockState(clearing);
             var declared = targets.get(clearing.asLong());
-            if (!ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)
-                    && (declared == null || !declared.constructionMatches(live))) {
+            if (declared == null && !ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)) {
                 beginClearanceReport(clearing); return TaskState.RUNNING;
             }
         }
@@ -902,16 +902,17 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean clearingPermitted(BlockState live) {
         var declared = targets.get(clearing.asLong());
         // 机器明确修改的旧状态可按原生挖掘执行；每次下手仍重读，后来出现的别块不能继承旧轴的拆除范围。
-        if (!ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)
-                && (declared == null || !declared.constructionMatches(live))) {
+        // 先拆声明格中的旧部件再落实新目标；名单仅约束未声明格，不能要求模型为已授权目标再补许可。
+        if (declared == null && !ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)) {
             beginClearanceReport(clearing); return false;
         }
         BlockState desired = declared == null ? Blocks.AIR.defaultBlockState() : declared.desiredState();
         if (inheritedProtectedMutationCells.contains(clearing.asLong())
                 || !r.replaceMode.allows(live, desired) || live.getDestroySpeed(player.level(), clearing) < 0
-                || !live.getFluidState().isEmpty() || live.hasBlockEntity() && !r.replaceBlockEntities
+                // 含水楼梯、半砖等仍是可原生挖掉的固体；纯流体没有镐的破坏目标，不能把两者混为一谈。
+                || live.getBlock() instanceof LiquidBlock || live.hasBlockEntity() && !r.replaceBlockEntities
                 || declared != null && declared.constructionMatches(live)) {
-            failAt(clearing, "Excavation cell changed or is protected, fluid-filled or unbreakable",
+            failAt(clearing, "Excavation cell changed or is protected, a liquid block or unbreakable",
                     FailureType.TARGET_LOST, "excavation_cell_changed", false);
             return false;
         }
@@ -924,15 +925,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (ultimine == null) ultimine = new UltimineSession();
         var decision = ultimine.prepare(ClientRuntime.requireContext(player), hit, excavationAuthority, at -> {
             var target = targets.get(at.asLong());
-            // 原生连锁可能一次选中多格；把名单外格记为触发证据，绝不能让副目标绕过单格清障检查。
-            if (target != null && !ClearanceWhitelist.allows(player.level().getBlockState(at))
-                    && !r.observedMachineEdit(at, player.level().getBlockState(at))
-                    && !r.scaffoldLedger().owns(at, player.level().getBlockState(at))
-                    && !target.constructionMatches(player.level().getBlockState(at))) {
-                clearanceDeniedAt = at.immutable(); return true;
-            }
+            // 连锁破坏只包含声明格；副目标同样遵守保留范围、原生可破坏性和方块实体限制。
             return r.hasExecutionGuards() || target == null || at.equals(player.blockPosition().below())
                     || inheritedProtectedMutationCells.contains(at.asLong()) || r.scaffoldLedger().contains(at)
+                    || player.level().getBlockState(at).getDestroySpeed(player.level(), at) < 0
+                    || player.level().getBlockState(at).getBlock() instanceof LiquidBlock
+                    || player.level().getBlockState(at).hasBlockEntity() && !r.replaceBlockEntities
                     || !r.replaceMode.allows(player.level().getBlockState(at), target.desiredState())
                     || !BuildCellRules.isAirTarget(target) && target.constructionMatches(player.level().getBlockState(at));
         });

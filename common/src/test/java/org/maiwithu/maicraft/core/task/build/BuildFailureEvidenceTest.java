@@ -45,7 +45,8 @@ public final class BuildFailureEvidenceTest {
         check(row.getAsJsonObject("observed").getAsJsonObject("attributes").get("open").getAsString().equals("true"), "actual door state is diagnosable");
         check(data.get("placed").getAsInt() == 5 && data.get("completed").getAsInt() == 410
                 && data.get("temporary_supports_remaining").getAsInt() == 3, "attention cannot hide partial effects or scaffolds");
-        check(!data.has("blocked_cells") && !row.has("position"), "raw routes and coordinates remain outside this model-level receipt");
+        // 未执行的内部路线仍不公开，实际障碍的位置由下方 clearance_report 的现场证据核对。
+        check(!data.has("blocked_cells"), "internal route plans remain outside the receipt");
         var clearance = data.getAsJsonObject("clearance_report");
         check(clearance.getAsJsonArray("obstacles").get(0).getAsJsonObject().getAsJsonArray("at").get(1).getAsInt() == -59,
                 "observed obstruction coordinates survive both filters");

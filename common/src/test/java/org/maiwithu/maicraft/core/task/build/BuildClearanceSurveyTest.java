@@ -11,12 +11,15 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import java.util.Set;
 
 /** 用完整空气房间检验选址：最近偏移仍撞墙时继续搜索，未知区块不能证明更近位置可用。 */
 public final class BuildClearanceSurveyTest {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         replaceableCellsNeedNoExcavation();
+        authorizedWaterloggedSolidCanBeCleared();
         var targets = List.of(air(0, 64, 0), air(1, 64, 0));
         Map<BlockPos, BlockState> blocks = new HashMap<>();
         // 相邻两格蓝图的五个方向都撞到砖墙，只有整体向东平移两格才最先完全避开。
@@ -24,7 +27,8 @@ public final class BuildClearanceSurveyTest {
                 new BlockPos(0, 64, -1), new BlockPos(0, 64, 1), new BlockPos(1, 64, -1), new BlockPos(1, 64, 1),
                 new BlockPos(-1, 64, -1), new BlockPos(-1, 64, 1))) blocks.put(at, Blocks.BRICKS.defaultBlockState());
         var reads = new AtomicInteger();
-        var survey = new BuildClearanceSurvey(targets, ReplaceMode.REPLACE_EMPTY, false, "minecraft:overworld",
+        // 用户明确禁止拆换时才需要寻找空地；普通已授权声明格不再受材料白名单限制。
+        var survey = new BuildClearanceSurvey(targets, ReplaceMode.DONT_REPLACE, false, "minecraft:overworld",
                 at -> { reads.incrementAndGet(); return seen(blocks.getOrDefault(at, Blocks.AIR.defaultBlockState())); },
                 (at, state) -> false);
         int ticks = 0;
@@ -62,7 +66,30 @@ public final class BuildClearanceSurveyTest {
         var scaffold = new BuildClearanceSurvey(List.of(air(0, 64, 0)), ReplaceMode.REPLACE_EMPTY, false,
                 "minecraft:overworld", at -> seen(Blocks.COBBLESTONE.defaultBlockState()), (at, state) -> true);
         check(scaffold.advance(2) && !scaffold.blocked(), "owned temporary scaffolds remain available for cleanup");
+        // 原址支撑已被别人换成砖墙时，不能把旧支撑的许可借给附近仅材质相同的方块来生成错误选址建议。
+        BlockPos oldSupport = new BlockPos(0, 64, 0);
+        var moved = new BuildClearanceSurvey(List.of(air(0, 64, 0)), ReplaceMode.DONT_REPLACE, false, "minecraft:overworld",
+                at -> seen(at.equals(oldSupport) ? Blocks.BRICKS.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState()),
+                (at, state) -> at.equals(oldSupport) && state.is(Blocks.COBBLESTONE));
+        while (!moved.advance(128)) { }
+        check(moved.blocked() && rows(moved.report(), "suggested_offsets").isEmpty(), "新址只使用自己的现场归属证据");
         System.out.println("BuildClearanceSurveyTest: passed");
+    }
+
+    private static void authorizedWaterloggedSolidCanBeCleared() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            BlockPos at = new BlockPos(2, 1, 2);
+            var plan = new BuildTaskRecord("waterlogged", 500, List.of(air(2, 1, 2)), true);
+            plan.automaticMachineModification(Set.of(at));
+            var task = new FirstPersonBuildCompanionTask(world.player, plan);
+            var clearing = FirstPersonBuildCompanionTask.class.getDeclaredField("clearing"); clearing.setAccessible(true); clearing.set(task, at);
+            var allowed = FirstPersonBuildCompanionTask.class.getDeclaredMethod("clearingPermitted", BlockState.class); allowed.setAccessible(true);
+            var slab = Blocks.OAK_SLAB.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, true); world.set(at, slab);
+            // 声明范围内含水半砖可先挖，再由原版水流更新；没有实体的水格与不可破坏方块仍不能用镐强行清空。
+            check((boolean) allowed.invoke(task, slab), "已授权含水固体不能因 fluidState 非空被拦截");
+            check(!(boolean) allowed.invoke(task, Blocks.WATER.defaultBlockState()), "纯水仍不是挖掘目标");
+            check(!(boolean) allowed.invoke(task, Blocks.BEDROCK.defaultBlockState()), "不可破坏格仍如实拒绝");
+        }
     }
 
     private static void replaceableCellsNeedNoExcavation() {
