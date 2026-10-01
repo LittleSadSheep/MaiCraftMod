@@ -45,6 +45,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.GroundMovementReplayTest;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.InstantClearanceTest;
+import org.maiwithu.maicraft.core.pathing.baritone.NavigationFailureEvidenceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
@@ -163,6 +164,8 @@ public final class NavigationRegressionSuite {
         NavigationActionPolicyTest.main(args);
         // 脚边火把、草等零硬度障碍仍须提交真实挖掘，不能因无限大进度停在原地。
         InstantClearanceTest.main(args);
+        // 无路现场在导航清理和玩家换位置后仍进入默认任务回执。
+        NavigationFailureEvidenceTest.main(args);
         WaterBucketFallTest.main(args);
         LandingSurfaceRulesTest.main(args);
         NativeBucketLandingTest.main(args);

@@ -56,6 +56,7 @@ public final class EmbeddedBaritoneNavigator {
     private boolean driveRequested;
     private boolean arrivedLatched;
     private boolean calculationFailed;
+    private BlockPos failedOrigin;
     private boolean stopped;
     private boolean terminalFailure;
     private boolean terrainProbeRequested;
@@ -73,6 +74,7 @@ public final class EmbeddedBaritoneNavigator {
     private EmbeddedBaritonePolicy.Snapshot terrainProbePolicy;
     private FailureType failureType = FailureType.NO_PATH;
     private String failureReason = "embedded pathing has not failed";
+    private Map<String, Object> failureEvidence = Map.of();
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -214,6 +216,8 @@ public final class EmbeddedBaritoneNavigator {
             plannedCenter = freshCenter.immutable();
             arrivedLatched = false;
             calculationFailed = false;
+            failedOrigin = null;
+            failureEvidence = Map.of();
             EmbeddedBaritoneRuntime.startOrUpdate(this, compiled, permit, sprintAllowed);
             started = true;
         } else {
@@ -237,6 +241,13 @@ public final class EmbeddedBaritoneNavigator {
 
     // 保持地形时找不到路，可额外只计算“假如允许改地形会怎样”；这份计算不会真的挖掘或放置。
     private PlayerNav.Status diagnoseNoPath() {
+        // 失败事件已收到、只读复算尚在等待时也可能被传送；旧起点的结论不能终止新位置上的原任务。
+        if (failedOrigin != null && !failedOrigin.equals(feet())) {
+            cancelTerrainProbe(); started = false; calculationFailed = false; driveRequested = false;
+            failureEvidence = Map.of(); return PlayerNav.Status.RUNNING;
+        }
+        // 原生搜索结束时冻结观察，随后换任务或传送也不能把新位置写成这次失败的起点。
+        failureEvidence = NavigationFailureEvidence.capture(player, plannedCenter, permit, EmbeddedBaritonePolicy.snapshot());
         String detail = "Baritone found no path to " + plannedCenter.toShortString();
         if (!rejectedScaffolds.isEmpty()) detail += "; temporary scaffold safety excluded " + rejectedScaffolds.size() + " placement cells";
         if (!terrainProbeRequested || permit != TerrainPermit.PRESERVE) {
@@ -433,6 +444,7 @@ public final class EmbeddedBaritoneNavigator {
         // 若把前瞻失败当成终态，下一段遇到未加载或变化地形时，正常行走也会半途停止。
         if (event == PathEvent.CALC_FAILED) {
             calculationFailed = true;
+            failedOrigin = feet().immutable();
         }
     }
 
@@ -506,6 +518,8 @@ public final class EmbeddedBaritoneNavigator {
     public String failReason() {
         return failureReason;
     }
+
+    public Map<String, Object> failureEvidence() { return failureEvidence; }
 
     public FailureType failType() {
         return failureType;

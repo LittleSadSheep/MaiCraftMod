@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.task.InternalPositionReceipt;
  * x/y/z 都有也不一定要求精确站位，是否精确由 exact 与到达误差共同决定。
  */
 public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskRecord> {
+    private Map<String, Object> finalNavigationEvidence = Map.of();
 
     private static final long TICKS_PER_BLOCK = 20;
     private static final long MAX_EXTRA_TICKS = 5 * 60 * 20;
@@ -502,6 +503,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("final_z", player.getZ());
         data.put("ground_y", gy);
         data.put("ground_flight_mode",groundFlight.diagnostics());
+        // 任务终局直接交付导航证据，避免模型为一次无路结果另开多轮观察。
+        if (!finalNavigationEvidence.isEmpty()) data.put("navigation", finalNavigationEvidence);
         observeLanding();
         data.put("landing_assist_observed",!landingFacts.isEmpty());
         if (!landingFacts.isEmpty()) data.put("landing_assist",landingFacts);
@@ -551,6 +554,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 结束后停导航、取消还没完成的找方块扫描，并停止当前船只控制。 */
     @Override
     protected void cleanup() {
+        // 父类会释放导航引用；先保存失败时冻结的证据，再结束路线和原生按键。
+        if (nav != null) finalNavigationEvidence = nav.transportDiagnostics();
         super.cleanup();
         if (finder != null) {
             finder.cancelScan();

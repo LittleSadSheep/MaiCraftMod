@@ -95,6 +95,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private final Set<Long> rejectedStances = new HashSet<>();
     private boolean terrainApproach;
     private int approachAttempts, approachCandidates;
+    private Map<String, Object> approachFailureEvidence = Map.of();
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -123,6 +124,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override protected TaskState handleNavFailure(FailureType type, String reason) {
         if (!r.approachTarget || interaction != null) return super.handleNavFailure(type, reason);
+        // 停止旧导航前保留本次站位失败的现场，不能只剩一个候选数量或通用 no_path。
+        if (nav != null) approachFailureEvidence = nav.transportDiagnostics();
         stopNav();
         if (type == FailureType.STANCE_DUD && approachAttempts < 4) {
             // 走到后视线已变化，只排除这个实际无效脚位，重新比较其他位置，不重复点击未知效果。
@@ -484,6 +487,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
+        if (!approachFailureEvidence.isEmpty()) data.put("navigation", approachFailureEvidence);
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         if (r.observeMenu) {
             // 点击执行和开箱观察分别返回；空光标与存取仍由后续原生容器流程核验，不宣称已经搬过物品。
