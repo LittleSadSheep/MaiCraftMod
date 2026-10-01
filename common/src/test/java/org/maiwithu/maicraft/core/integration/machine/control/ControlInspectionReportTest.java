@@ -47,7 +47,9 @@ public final class ControlInspectionReportTest {
             for (var result : List.of(direct, nested)) {
                 if (!report.equals(result.getAsJsonObject("control_analysis")))
                     throw new AssertionError("public control evidence lost native node identities, routes, or uncertainty");
-                if (result.has("position")) throw new AssertionError("unrelated action positions keep their existing boundary");
+                // 图外的已观察位置也保留为事实，不能让调用者为了定位失败节点再补一次查询。
+                if (!result.get("position").equals(gson.toJsonTree(List.of(1, 2, 3))))
+                    throw new AssertionError("observed positions remain available beside the control graph");
             }
         }
     }

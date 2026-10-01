@@ -61,7 +61,11 @@ public final class MachineCompletionArchiveTest {
                             && h.blockUses() == 0 && h.itemUses() == 0,"archiving and post-build comparison never mutate the world");
             var restored = new MachineCatalog(directory,Runnable::run); restored.bind(identity,"second");
             var persisted = restored.blueprint(built.id()).orElseThrow();
-            check(persisted.blueprint().equals(plan.blueprint()) && persisted.captureMin().x() == 3 && persisted.captureMax().z() == 3,
+            // 整机档案会附加独立的比较目标；重连必须完整保留这些事实及作者原块表，不要求档案等于尚未留档的输入正文。
+            check(persisted.blueprint().equals(built.blueprint())
+                            && persisted.blueprint().get("blocks").equals(plan.blueprint().get("blocks"))
+                            && persisted.blueprint().getAsJsonObject("metadata").getAsJsonArray("maicraft_comparison_targets").size() == 1
+                            && persisted.captureMin().x() == 3 && persisted.captureMax().z() == 3,
                     "automatic completion records preserve blueprint and exact capture bounds across reconnect");
             // 完整目录也必须保留“已授权修改直接执行”的约定，不能被展示层旧文案改回先检查后修改。
             String guidance = ClientMachineCatalog.view(h.player,"简易机器").get("guidance").getAsString();

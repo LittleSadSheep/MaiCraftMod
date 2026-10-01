@@ -62,6 +62,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 任务遇到短暂库存或菜单同步时内部续作，真正失败则一次交付可用现场与全部已确认效果。
+    failureReceiptRegression: [
+        entry: 'org.maiwithu.maicraft.intent.FailureReceiptRegressionSuite',
+        heap: '768m', directory: 'failure-receipt-regression', timeoutSeconds: 90,
+        purpose: '验证无须模型重发的恢复与完整失败回执'
+    ],
     // 终端动态电量测试注册同名惰性物品与组件，独占进程，不能让模拟注册影响其他组的模组可用性判断。
     nativeInventoryIdentityRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.NativeInventoryIdentityTest',
