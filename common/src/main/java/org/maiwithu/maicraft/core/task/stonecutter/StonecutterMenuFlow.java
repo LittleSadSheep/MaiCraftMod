@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.base.BlockMenuFlow;
+import org.maiwithu.maicraft.core.task.base.MenuTransferEvidence;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
@@ -36,6 +37,7 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
     private final VisibleMenuSession session = new VisibleMenuSession();
     private Phase phase = Phase.LOAD_INPUT;
     private ContainerTransferCompanionTask child;
+    private final MenuTransferEvidence transfers = new MenuTransferEvidence();
     private ContainerTransferTaskRecord childRecord;
     private MenuReceipt selectionReceipt, takeReceipt;
     private int recipeIndex = -1, craftsDone, craftedCount = -1;
@@ -43,6 +45,9 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
     private long waitRecipesUntil;
     private boolean childStarted, preserveMenu, returned, closeStarted, closed, successful, takeAttempted;
     private int serial;
+    private int selectionRefreshes;
+    private int transferRefreshes;
+    private String selectionStatus;
     private String failure, cleanupStatus = "not_started";
     private FailureType failureType = FailureType.UNKNOWN;
 
@@ -86,6 +91,14 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
         if (phase == Phase.WAIT_BUTTON) {
             selectionReceipt = context.menus().poll(context, selectionReceipt);
             if (!selectionReceipt.terminal()) return TaskState.RUNNING;
+            selectionStatus = selectionReceipt.status().name().toLowerCase(Locale.ROOT);
+            if (selectionReceipt.status() == MenuReceipt.Status.CONFIRMED_NOT_APPLIED) {
+                // 配方选择尚未生效时按原产物重找当前配方编号；不再让模型重发同一次切石，也不重试取成品动作。
+                if (selectionRefreshes >= 2) return abandon("stonecutting_recipe_selection_not_applied", FailureType.TARGET_LOST);
+                selectionRefreshes++;
+                selectionReceipt = null; recipeIndex = -1; waitRecipesUntil = 0; phase = Phase.WAIT_RECIPES;
+                return TaskState.RUNNING;
+            }
             if (selectionReceipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED)
                 return abandon("stonecutting_recipe_selection_uncertain: " + selectionReceipt.detail(), FailureType.UNKNOWN);
             craftsDone = 0;
@@ -128,6 +141,7 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
                 if (!record.submissionReserved() && !beforeFirstCraft.getAsBoolean()) yield TaskState.RUNNING;
                 if (!stock.inputLoaded(menu)) throw new IllegalStateException("stonecutter_input_changed_before_selection");
                 selectionReceipt = context.menus().pressButton(context, recipeIndex, MenuConfirmation.stateChanged(), 100);
+                selectionStatus = selectionReceipt.status().name().toLowerCase(Locale.ROOT);
                 phase = Phase.WAIT_BUTTON;
                 yield TaskState.RUNNING;
             }
@@ -178,13 +192,20 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
         record.extendDeadlineTo(childRecord.getDeadlineGameTime());
         if (!state.isTerminal()) return TaskState.RUNNING;
         if (state != TaskState.SUCCESS) child.stop(player, Task.StopReason.REPLACED);
-        child.result(state);
+        // 切石装料或余料归还失败时，连同已搬动数量交回父任务，不能要求模型重新打开菜单才能核对。
+        var result = child.result(state);
+        transfers.retain(phase.name().toLowerCase(Locale.ROOT), result);
         child = null; childRecord = null; childStarted = false;
         if (state != TaskState.SUCCESS) {
+            // 未提交装料或返料时重读当前原生槽位并续做，同一阶段恢复次数有限，不重复已确认搬运。
+            if (player.containerMenu == menu && menu.getCarried().isEmpty()
+                    && MenuTransferEvidence.canRefreshBeforeSubmission(result) && transferRefreshes++ < 2)
+                return TaskState.RUNNING;
             preserveMenu = true;
             cleanupStatus = "transfer_boundary_cleanup_not_confirmed";
             return abandon("stonecutter_transfer_failed", FailureType.UNKNOWN);
         }
+        transferRefreshes = 0;
         phase = switch (phase) {
             case LOAD_INPUT -> Phase.WAIT_RECIPES;
             case RETURN_INPUT -> Phase.VERIFY;
@@ -237,7 +258,7 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
     public void cleanup() {
         if (child != null) {
             child.stop(player, Task.StopReason.REPLACED);
-            child.result(TaskState.CANCELLED);
+            transfers.retain(phase.name().toLowerCase(Locale.ROOT), child.result(TaskState.CANCELLED));
             child = null; childRecord = null; preserveMenu = true;
             cleanupStatus = "transfer_boundary_cleanup_not_confirmed";
         }
@@ -263,9 +284,12 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
     public Map<String, Object> data() {
         var data = new LinkedHashMap<String, Object>();
         data.put("phase", phase.name().toLowerCase(Locale.ROOT));
+        data.put("transfer_refreshes_without_progress", transferRefreshes);
         data.put("requested_count", record.count);
         if (craftedCount >= 0) data.put("crafted_count", craftedCount);
         data.put("native_consumption_reserved", record.submissionReserved());
+        data.put("recipe_selection_refreshes", selectionRefreshes);
+        if (selectionStatus != null) data.put("recipe_selection_status", selectionStatus);
         data.put("mechanical_retry_allowed", craftsDone == 0 && !record.submissionReserved());
         data.put("outcome_uncertain", takeAttempted && !successful);
         data.put("item_return_verified", returned);
@@ -273,6 +297,7 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
         data.put("cleanup_status", cleanupStatus);
         if (selectedOutput != null) data.put("selected_recipe_output", selectedOutput);
         if (failure != null) data.put("issue_code", failure);
+        transfers.appendTo(data);
         return data;
     }
 }
