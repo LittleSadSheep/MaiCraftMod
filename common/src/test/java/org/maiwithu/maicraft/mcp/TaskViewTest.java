@@ -49,14 +49,17 @@ public final class TaskViewTest {
                 && compactContext.getAsJsonObject("failure").getAsJsonObject("data").get("outcome_uncertain").getAsBoolean(), "unsafe consumption is visible before answering");
         JsonObject request = new JsonObject(); request.addProperty("action", "get");
         request.addProperty("task_id", task.externalId().toString()); request.addProperty("path", "/goal/parameters/blocks");
-        request.addProperty("limit", 20); int offset = 0; JsonArray recovered = new JsonArray();
-        while (true) {
-            request.addProperty("offset", offset);
-            var page = TaskView.read(task, PublicToolCatalog.validateAndNormalize("task", request)).getAsJsonObject("detail");
-            page.getAsJsonArray("items").forEach(row -> recovered.add(row.getAsJsonObject().get("value")));
-            if (!page.has("next_offset")) break;
-            offset = page.get("next_offset").getAsInt();
-        }
+        request.addProperty("limit", 20); JsonArray recovered = new JsonArray();
+        // 首页整读：冻结原件一次交付整份数组；指定 offset 才进入 items 分页。
+        request.addProperty("offset", 0);
+        var whole = TaskView.read(task, PublicToolCatalog.validateAndNormalize("task", request)).getAsJsonObject("detail");
+        check(!whole.has("items") && whole.getAsJsonArray("value").size() == 800,
+                "first detail page delivers the frozen whole array");
+        recovered.addAll(whole.getAsJsonArray("value"));
+        request.addProperty("offset", 5);
+        var page = TaskView.read(task, PublicToolCatalog.validateAndNormalize("task", request)).getAsJsonObject("detail");
+        check(page.getAsJsonArray("items").get(0).getAsJsonObject().get("value").getAsJsonObject().equals(blocks.get(5))
+                && page.has("next_offset"), "paged detail reads slice the same array");
         check(recovered.equals(blocks) && full.equals(MaiCraftRuntimeFacade.taskSnapshot(task)), "detail pages recover unchanged inputs without game actions");
         List<IntentTaskRecord> retained = new ArrayList<>();
         for (int i = 0; i < 20; i++) retained.add(new IntentTaskRecord(UUID.randomUUID(), null, goal));
@@ -98,7 +101,8 @@ public final class TaskViewTest {
                         && snapshot.getAsJsonArray("relative_blocks").get(0).toString().equals("[0,-1,0,0]")
                         && snapshot.getAsJsonObject("site_geometry").getAsJsonArray("surface_and_obstacles").get(0).toString().equals("[-1,0,0,799,0]"),
                 "default failure presentation preserves the usable new snapshot beside large diagnostics");
-        var exact = JsonReadback.resolve(MaiCraftRuntimeFacade.taskSnapshot(task), snapshot.get("detail_path").getAsString());
+        // 展示层不再外链详情路径；完整原件固定保留在终态结果的同一数据路径下。
+        var exact = JsonReadback.resolve(MaiCraftRuntimeFacade.taskSnapshot(task), "/terminal/result/data/latest_snapshot");
         check(exact.equals(latest) && !latest.has("omitted"), "current observation details point to the unchanged retained task result");
     }
 
@@ -117,12 +121,12 @@ public final class TaskViewTest {
         check(displayed.get("material_planning_required").getAsBoolean()
                 && displayed.getAsJsonObject("planning_handoff").getAsJsonArray("knowledge_uris").size() == 1,
                 "material planning facts survive default task compaction");
-        // 超大交接也必须首次显示精确缺口，模型无需按历史字段顺序翻页才能知道要加工磨制玫瑰石英。
+        // 交接事实完整交付：不再折叠成摘要引用，超长轨迹也原样在场，调用方不必翻页就知道缺什么。
         var summary = displayed.getAsJsonObject("planning_handoff"); var need = summary.getAsJsonObject("blocked_need");
-        check(summary.get("summary_only").getAsBoolean() && need.get("missing").getAsInt() == 3
+        check(need.get("missing").getAsInt() == 3
                 && need.getAsJsonArray("item_ids").get(0).getAsString().equals("create:polished_rose_quartz")
-                && summary.get("detail_path").getAsString().equals("/terminal/result/data/planning_handoff"),
-                "large handoff keeps the actual shortage and exact full-evidence path");
+                && summary.get("recipe_trace").getAsString().length() == 7000,
+                "large handoff keeps the full trace and shortage inline without a summary detour");
         check(summary.get("ordinary_crafting_scope").getAsString().contains("crafting-table grids"),
                 "ordinary crafting scope stays visible even beside a large recipe trace");
         check(displayed.get("body_preparation_required").getAsBoolean()

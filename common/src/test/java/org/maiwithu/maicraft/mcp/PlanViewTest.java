@@ -14,13 +14,19 @@ public final class PlanViewTest {
                 new Goal.SemanticTarget("landmark", "仓库 " + i, null, null), "{}", "{}", List.of(), List.of()));
         Goal goal = new Goal("maicraft:sequence", "依次巡视仓库", null, "{}", "{}", List.of(), children);
         Plan plan = Plan.compile(goal, 20); JsonObject summary = PlanView.summary(plan, 3);
-        check(!summary.has("goal") && summary.getAsJsonArray("steps").size() == 3
-                && summary.get("step_count").getAsInt() == 32 && summary.toString().length() < 1000, "plan does not echo authored inputs");
+        // 摘要列出每一步的身份（index/ability/outcome），但不复印目标参数等编排输入。
+        check(!summary.has("goal") && summary.getAsJsonArray("steps").size() == 32
+                && summary.get("step_count").getAsInt() == 32, "plan does not echo authored inputs");
         JsonObject request = new JsonObject(); request.addProperty("plan_id", plan.id().toString());
         request.addProperty("path", "/goal/children"); request.addProperty("limit", 3);
         JsonObject read = PlanView.read(plan, PublicToolCatalog.validateAndNormalize("plan", request));
         check(!read.get("validation_rechecked").getAsBoolean() && !read.has("ready_to_execute")
-                && read.getAsJsonObject("detail").get("next_offset").getAsInt() == 3, "read only restores frozen design and page position");
+                && read.getAsJsonObject("detail").getAsJsonArray("value").size() == 32,
+                "read only restores frozen design at offset zero");
+        request.addProperty("offset", 3);
+        read = PlanView.read(plan, PublicToolCatalog.validateAndNormalize("plan", request));
+        check(read.getAsJsonObject("detail").get("next_offset").getAsInt() == 6,
+                "paged reads continue from the requested offset");
         check(plan.goal().toJson().equals(goal.toJson()), "reading does not change the compiled goal");
         request.add("goal", goal.toJson());
         try { PublicToolCatalog.validateAndNormalize("plan", request); throw new AssertionError("ambiguous compile/read accepted"); }
