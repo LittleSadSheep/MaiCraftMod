@@ -41,6 +41,13 @@ neoForge {
                 systemProperty 'maicraft.preview.enabled', 'false'
                 // 设计和观察也属于本轮自动测试，进世界就交出身体，让本能自卫不必等到首个施工指令。
                 systemProperty 'maicraft.automation.on_join', 'true'
+                // 直接生成蓝图只存在于显式测试源码集，且绑定本次独立超平坦世界；日常构建不会包含该执行器。
+                def blueprintWorld = providers.gradleProperty('maicraftBlueprintTestWorld')
+                if (blueprintWorld.isPresent()) {
+                    if (blueprintWorld.get() != worldName || !worldName.startsWith('TEST-Blueprint-Flat-'))
+                        throw new GradleException('Blueprint testing requires its own TEST-Blueprint-Flat- world')
+                    systemProperty 'maicraft.blueprintTest.world', worldName
+                }
             }
         }
         // 这是数据生成的启动配置；还需要实际的数据提供器注册，声明 runData 不会自动调用任意 Java 数据清单。
@@ -66,6 +73,11 @@ neoForge {
 
 // 若运行数据生成得到资源，这个目录会参与打包；当前是否真的生成了标签要检查提供器和输出文件。
 sourceSets.main.resources { srcDir 'src/generated/resources' }
+if (providers.gradleProperty('maicraftBlueprintTestWorld').isPresent()) {
+    sourceSets.main.java.srcDir 'src/blueprintTest/java'
+}
+// 即使在测试启动参数下顺手打包，也不把直接改世界的测试夹具带进发布 JAR。
+tasks.withType(Jar).configureEach { exclude 'org/maiwithu/maicraft/neoforge/testing/**' }
 
 // 开发客户端必须使用本次编译的 Mod；mods 里同名打包产物会遮蔽开发类，不能让测试误跑旧执行器。
 def checkDevelopmentMods = tasks.register('checkDevelopmentMods') {
