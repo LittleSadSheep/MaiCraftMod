@@ -15,6 +15,8 @@ public final class PortalRegressionSuite {
         PortalPreparationTaskTest.main(args);
         PortalPreparationContractTest.main(args);
         DimensionPreparationFallbackTest.main(args);
+        // 高台旁先比较整扇门的底部入口，一列受阻后仍能尝试另一列。
+        PortalEntranceTest.main(args);
         PortalPreparationSupplyTest.main(args);
         NetherPreparationWorkflowTest.main(args);
         System.out.println("PortalRegressionSuite: passed");

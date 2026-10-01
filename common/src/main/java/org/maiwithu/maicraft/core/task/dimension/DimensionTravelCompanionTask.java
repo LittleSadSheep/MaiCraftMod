@@ -48,6 +48,9 @@ public final class DimensionTravelCompanionTask
     private enum Phase { FIND, MOVE, ENTER, WAIT_FOR_REPLACEMENT }
 
     private final Set<Long> attempted = new HashSet<>();
+    private final Set<Set<Long>> observedPortals = new HashSet<>();
+    private final List<Map<String, Object>> entryFailures = new ArrayList<>();
+    private int entryAttempts;
     private ClientLevel indexedLevel;
     private Set<Block> targetBlocks = Set.of();
     private Set<Long> portalCells = Set.of();
@@ -169,6 +172,18 @@ public final class DimensionTravelCompanionTask
             return TaskState.RUNNING;
         }
 
+        // 先识别整扇门，再从每列底部挑入口；角色站在高台上时，最近的中层门格没有落脚面。
+        observedPortals.add(portalCells);
+        List<BlockPos> entrances = entranceCells(portalCells, attempted, player.position());
+        if (entrances.isEmpty()) {
+            // 只有整扇门的可进入列都试过后才排除其余门格，单次接近失败不能跳过同门的另一侧。
+            attempted.addAll(portalCells);
+            portal = null; portalCells = Set.of();
+            return TaskState.RUNNING;
+        }
+        portal = entrances.getFirst();
+        entryAttempts++;
+
         moveRecord = new MoveToTaskRecord(
                 "dimension-portal-" + r.getId() + "-" + attempted.size(),
                 r.getDeadlineGameTime(),
@@ -223,8 +238,8 @@ public final class DimensionTravelCompanionTask
         revokeHandoff();
         lastPortalFailure = result == null || result.message() == null
                 ? "the first-person approach failed" : result.message();
+        recordEntryFailure("approach", lastPortalFailure);
         attempted.add(portal.asLong());
-        attempted.addAll(portalCells);
         portal = null;
         portalCells = Set.of();
         phase = Phase.FIND;
@@ -263,13 +278,27 @@ public final class DimensionTravelCompanionTask
         InputDriver.halt(player);
         revokeHandoff();
         lastPortalFailure = reason;
+        recordEntryFailure("entry", reason);
         if (portal != null) attempted.add(portal.asLong());
-        attempted.addAll(portalCells);
         portal = null;
         portalCells = Set.of();
         phase = Phase.FIND;
         portalEntryTicks = 0;
         return TaskState.RUNNING;
+    }
+
+    // 底部入口仍由真实移动图验证；不把可见门格或欧氏距离当成可达证明，也不为入门凭空放方块。
+    static List<BlockPos> entranceCells(Set<Long> cells, Set<Long> attempted, Vec3 playerPosition) {
+        return cells.stream().map(BlockPos::of)
+                .filter(cell -> !cells.contains(cell.below().asLong()) && !attempted.contains(cell.asLong()))
+                .sorted(Comparator.comparingDouble(cell -> Vec3.atBottomCenterOf(cell).distanceToSqr(playerPosition)))
+                .toList();
+    }
+
+    // 回执保留实际失败入口及其原因，让模型区分门不可进入、单侧被挡与维度交接尚未确认。
+    private void recordEntryFailure(String stage, String reason) {
+        if (portal != null) entryFailures.add(Map.of("position", List.of(portal.getX(), portal.getY(), portal.getZ()),
+                "phase", stage, "reason", reason));
     }
 
     private boolean livePortal(BlockPos position) {
@@ -453,7 +482,10 @@ public final class DimensionTravelCompanionTask
         data.put("destination_dimension", r.destinationDimension);
         data.put("final_dimension", dimension());
         if (portalBlockId != null) data.put("portal_block", portalBlockId);
-        data.put("observed_candidates_tried", attempted.size() + (portal == null ? 0 : 1));
+        // 候选数按真正启动的入口路线计，整扇门与门方块的数量不再混为一谈。
+        data.put("observed_candidates_tried", entryAttempts);
+        data.put("observed_portals_tried", observedPortals.size());
+        data.put("portal_entry_failures", List.copyOf(entryFailures));
         data.put("verified", arrived && r.destinationDimension.equals(dimension()));
         if (issueCode != null) {
             data.put("issue_code", issueCode);
