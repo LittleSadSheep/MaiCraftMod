@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.task.mine;
 
 import java.util.List;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -44,8 +45,13 @@ public final class MiningSearchScopeTest {
             check(cooldown.getInt(task)==20,"unfinished indexing must call the next bounded slice without cooldown");
             complete.setBoolean(task,true); cooldown.setInt(task,20); h.nextTick(); poll.invoke(task);
             check(cooldown.getInt(task)==19,"completed queries retain the existing refresh cooldown");
-            check(task.result(TaskState.CANCELLED).data().containsKey("search_scope") && h.blockUses() == 0,
-                    "read-only scanning reports its actual scope without mining");
+            // 扫描口径要完整声明：中心、区块窗口、范围与过滤开关，known_sources 波动才有解释依据。
+            @SuppressWarnings("unchecked")
+            var scope = (Map<String, Object>) task.result(TaskState.CANCELLED).data().get("search_scope");
+            check(scope != null && Boolean.FALSE.equals(scope.get("natural_logs_only"))
+                    && scope.get("query_chunk_radius").equals(1) && scope.get("radius_blocks").equals(2)
+                    && scope.get("center").equals(List.of(8, 1, 8)) && h.blockUses() == 0,
+                    "read-only scanning reports its actual scope, chunk window and filter switch without mining");
         }
         System.out.println("MiningSearchScopeTest: passed");
     }
