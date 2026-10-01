@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.ClientRecipeBook;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -26,6 +27,7 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -89,6 +91,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         initializeVitals();
         // 默认是已知的空配方表，不能让缺少夹具字段被当成“服务器配方观察失败”；配方场景再替换真实测试配方。
         ActorControlTestHarness.field(ClientPacketListener.class, "recipeManager").set(h.connection, new RecipeManager(RegistryAccess.EMPTY));
+        // 默认配方簿未解锁；具体合成回归显式登记已学习配方，才能验证快捷摆料与逐格点击的真实分流。
+        ActorControlTestHarness.field(LocalPlayer.class, "recipeBook").set(player, new ClientRecipeBook());
         ActorControlTestHarness.field(Entity.class, "eyeHeight").setFloat(player, 1.62F);
         ActorControlTestHarness.field(Entity.class, "onGround").setBoolean(player, true);
         position(new Vec3(.5, 1, 3.5));
@@ -133,6 +137,14 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(Player.class, "inventoryMenu").set(player, menu); player.containerMenu = menu;
         h.minecraft.screen = h.inventoryScreen(); h.simulateMenuClose();
         mode.inventoryClicks = true; mode.synchronizedClicks = synchronizedClicks;
+    }
+
+    /** 原生合成点击需要真实客户端标志、特性集合和配方表；只在合成场景补齐，避免改动其他世界夹具。 */
+    void enableCraftingTransactions() throws Exception {
+        enableInventoryTransactions(true); mode.craftingClicks = true;
+        ActorControlTestHarness.field(Level.class, "isClientSide").setBoolean(level, true);
+        ActorControlTestHarness.field(ClientLevel.class, "connection").set(level, h.connection);
+        ActorControlTestHarness.field(ClientPacketListener.class, "enabledFeatures").set(h.connection, FeatureFlags.DEFAULT_FLAGS);
     }
 
     private void initializeVitals() throws Exception {
@@ -232,11 +244,22 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
         boolean inventoryClicks, synchronizedClicks;
+        boolean craftingClicks;
+        Runnable afterCraftingClick;
         int menuClicks;
         private UseMode() { super(null, null); }
         // 配方请求只记次数；具体槽位分包同步由合成测试推进，不能在这里提前生成产物。
         @Override public void handlePlaceRecipe(int containerId, RecipeHolder<?> recipe, boolean shift) { recipePlacements++; }
         @Override public void handleInventoryMouseClick(int containerId, int slot, int button, ClickType type, Player player) {
+            // 合成回归调用真实菜单点击搬运材料，结果槽同步由场景单独提供，不能靠夹具提前造出成功回执。
+            if (craftingClicks) {
+                try { player.containerMenu.clicked(slot, button, type, player); }
+                catch (RuntimeException unavailableFixture) { throw new AssertionError("native crafting fixture could not click its menu", unavailableFixture); }
+                menuClicks++;
+                if (afterCraftingClick != null) afterCraftingClick.run();
+                if (synchronizedClicks) player.containerMenu.incrementStateId();
+                return;
+            }
             if (!inventoryClicks) { super.handleInventoryMouseClick(containerId, slot, button, type, player); return; }
             if (type != ClickType.SWAP || !(button >= 0 && button <= 8 || button == 40)) throw new AssertionError("fixture expects an inventory hand swap");
             var source = player.containerMenu.getSlot(slot); var before = source.getItem();

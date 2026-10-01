@@ -31,6 +31,8 @@ public final class CraftingResultSynchronizationTest {
             var id = ResourceLocation.parse("minecraft:redstone");
             var recipe = new RecipeHolder<>(id, new ShapelessRecipe("", CraftingBookCategory.MISC,
                     new ItemStack(Items.REDSTONE, 9), NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.REDSTONE_BLOCK))));
+            // 这组专门回放可用配方簿的分包同步；材料齐备并已解锁时继续沿用一次原生配方请求。
+            h.player.getRecipeBook().add(recipe); h.inventory.setItem(0, new ItemStack(Items.REDSTONE_BLOCK));
             var task = new CraftCompanionTask(h.player, new CraftTaskRecord("split-redstone", 1000, id, 9, null));
             set(task, "recipe", recipe); set(task, "plannedOutput", new ItemStack(Items.REDSTONE, 9));
             set(task, "outputPerBatch", 9); set(task, "plannedBatches", 1);
