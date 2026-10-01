@@ -411,9 +411,14 @@ final class CookingRecipePlanner {
                 .thenComparing(plan -> BuiltInRegistries.ITEM.getKey(
                         plan.candidate().input()).toString())
                 .thenComparing(plan -> plan.candidate().recipeId().toString());
-        return request.preference == SemanticCookTaskRecord.Preference.FASTEST
+        Comparator<ResolvedCandidate> ordinary = request.preference == SemanticCookTaskRecord.Preference.FASTEST
                 ? speed.thenComparing(preparation).thenComparing(stable)
                 : preparation.thenComparing(speed).thenComparing(stable);
+        if (request.preferredMaterials.isEmpty()) return ordinary;
+        // 原料已在手的炉次先执行；同为待备料路线时保留 LLM 指定的烧炼输入倾向。
+        return Comparator.comparing((ResolvedCandidate plan) -> plan.preparationCost() > 0)
+                .thenComparing(plan -> !request.preferredMaterials.contains(BuiltInRegistries.ITEM.getKey(plan.candidate().input())))
+                .thenComparing(ordinary);
     }
 
     boolean preferred(CookingDevice device) {

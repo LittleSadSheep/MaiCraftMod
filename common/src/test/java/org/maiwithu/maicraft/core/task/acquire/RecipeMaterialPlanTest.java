@@ -39,7 +39,33 @@ public final class RecipeMaterialPlanTest {
         check(shared.feasible() && shared.supplies().isEmpty(), "alternative allocation must preserve the other branch's unique ingredient");
         knownRoutePrecedesWideUnknownBranches();
         woolRecoloringDoesNotHidePlainMaterialRoute();
+        materialPreferencesReachDeepInputsAndFallBack();
         System.out.println("RecipeMaterialPlanTest: passed");
+    }
+
+    private static void materialPreferencesReachDeepInputsAndFallBack() {
+        // 同一部件可用便宜金属直接制作，也可经木板使用原木；模型指定原木时应看见深层依赖。
+        var recipes = Map.of(PART, List.of(new Recipe(1, List.of(need(IRON, 1))), new Recipe(1, List.of(need(PLANK, 1)))),
+                PLANK, List.of(new Recipe(4, List.of(need(LOG, 1)))));
+        var preferred = RecipeMaterialPlan.estimate(List.of(need(PART, 1)), Map.of(),
+                item -> recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(item.equals(LOG) || item.equals(IRON), item.equals(LOG) ? 40 : 1),
+                Set.of(), Set.of(), Set.of(LOG));
+        check(preferred.supplies().equals(List.of(need(LOG, 1))) && preferred.preferredMaterialsUsed().equals(Set.of(LOG)),
+                "深层原木倾向应优先于另一条缺料路线，并保留实际匹配证据");
+        // 已携带金属足以完成目标时，不因软偏好再去野外采木。
+        var stocked = RecipeMaterialPlan.estimate(List.of(need(PART, 1)), Map.of(IRON, 1L),
+                item -> recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(item.equals(LOG) || item.equals(IRON), 40),
+                Set.of(), Set.of(), Set.of(LOG));
+        check(stocked.supplies().isEmpty() && stocked.preferredMaterialsUsed().isEmpty(), "现货覆盖的完整路线保持优先");
+        // 偏好原木的获取入口耗尽后仍可回退到金属路线，不把软偏好升级成材料白名单。
+        var fallback = RecipeMaterialPlan.estimate(List.of(need(PART, 1)), Map.of(),
+                item -> recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(item.equals(LOG) || item.equals(IRON), 40),
+                Set.of(), Set.of(LOG), Set.of(LOG));
+        check(fallback.feasible() && fallback.supplies().equals(List.of(need(IRON, 1)))
+                        && fallback.preferredMaterialsUsed().isEmpty(), "偏好路线失效后仍能选择原许可内的替代原料");
     }
 
     private static void woolRecoloringDoesNotHidePlainMaterialRoute() {

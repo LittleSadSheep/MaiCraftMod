@@ -32,7 +32,8 @@ public final class CookingPrerequisiteChainTest {
         try (var w = new CookingTestWorld()) {
             w.recipes(List.of(recipe("stone", Items.COBBLESTONE, Items.STONE), recipe("smooth_stone", Items.STONE, Items.SMOOTH_STONE)));
             w.game.inventory.setItem(0, new ItemStack(Items.COBBLESTONE, 12)); w.game.inventory.setItem(1, new ItemStack(Items.COAL, 4));
-            var root = new SemanticCookCompanionTask(w.game.player, request("smooth_stone", List.of(Source.INVENTORY, Source.COOK)));
+            var root = new SemanticCookCompanionTask(w.game.player, request("smooth_stone", List.of(Source.INVENTORY, Source.COOK))
+                    .withPreferredMaterials(List.of(id("cobblestone"))));
             root.start(w.game.player);
             // 烧平滑石 → 取石头 → 先烧石头；停在第二个炉子任务创建时，不用模拟产物掩盖未执行的炉次。
             SemanticCookTaskRecord inner = null;
@@ -46,6 +47,8 @@ public final class CookingPrerequisiteChainTest {
             check(inner.allowedFuelIds.equals(List.of(id("coal"))) && inner.allowedSources.equals(List.of(Source.INVENTORY, Source.COOK)),
                     "nested cooking neither widens sources nor loses fuel restrictions");
             check(inner.productionLineage.blocks(id("smooth_stone")) && inner.productionLineage.blocks(id("stone")), "ancestors survive both dispatch boundaries");
+            // 烧炼 → 取物 → 再烧炼的两次交接也继承圆石倾向，不能只在最外层请求中保存字段。
+            check(inner.preferredMaterials.equals(List.of(id("cobblestone"))), "材料倾向必须跨完整加工前置链继承");
             check(w.game.blockUses() == 0 && w.game.itemUses() == 0, "planning cannot manufacture or load a furnace batch");
         }
     }

@@ -60,6 +60,14 @@ public final class CraftOps {
         public boolean executable() {
             return task != null;
         }
+
+        /** 多种成品都能立即制作时，保留所选配方与材料倾向的匹配情况供父需求比较。 */
+        public int preferredMaterialCount(Collection<ResourceLocation> preferred) {
+            if (task == null || preferred.isEmpty()) return 0;
+            return (int) recoveryCandidates.stream().filter(candidate -> candidate.recipeId().equals(task.recipeId.toString()))
+                    .flatMap(candidate -> candidate.ingredients().stream()).flatMap(ingredient -> ingredient.itemIds().stream())
+                    .filter(preferred::contains).distinct().count();
+        }
     }
 
     private record IndexedIngredient(int recipeSlot, Ingredient ingredient) {}
@@ -170,6 +178,13 @@ public final class CraftOps {
             ToolContext toolContext,
             CraftingWorkstationCoordinator.PlanningSnapshot workstation,
             Set<String> excludedRecipeIds) {
+        return plan(itemId, count, self, toolContext, workstation, excludedRecipeIds, List.of());
+    }
+
+    /** 先保留当前能执行的配方，再在同类候选中考虑主人提示的材料，最后比较数量和工作面成本。 */
+    public Plan plan(String itemId, Integer count, LocalPlayer self, ToolContext toolContext,
+            CraftingWorkstationCoordinator.PlanningSnapshot workstation, Set<String> excludedRecipeIds,
+            Collection<ResourceLocation> preferredMaterials) {
         Item target = ToolArgs.parseItem(itemId);
         Set<String> excluded = excludedRecipeIds == null ? Set.of() : excludedRecipeIds;
         int wantedInventoryCount = count == null ? 1 : Math.clamp(count, 1, MAX_COUNT);
@@ -230,7 +245,12 @@ public final class CraftOps {
             }
         }
 
-        candidates.sort(Comparator.comparing(Candidate::cost, CraftPlanCost.ORDER));
+        candidates.sort(Comparator.comparing((Candidate candidate) -> !candidate.dispatchable())
+                .thenComparing(candidate -> !candidate.surfaceSupported())
+                .thenComparingInt(candidate -> -(int) candidate.allocation().ingredients().stream()
+                        .flatMap(ingredient -> ingredient.acceptableItemIds().stream())
+                        .filter(preferredMaterials::contains).distinct().count())
+                .thenComparing(Candidate::cost, CraftPlanCost.ORDER));
 
         if (candidates.isEmpty()) {
             targetFacts.put("goal_satisfied", false);

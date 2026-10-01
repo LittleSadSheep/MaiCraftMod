@@ -19,6 +19,7 @@ import net.minecraft.world.item.TieredItem;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
+import org.maiwithu.maicraft.core.tools.ToolParse;
 
 /**
  * 记录配方表没有直接表达的常见来源，例如圆石来自挖石头、羊毛可来自羊。
@@ -82,6 +83,17 @@ public final class SemanticSourceKnowledge {
     private static final Map<String, Profile> PROFILES = profiles();
 
     private SemanticSourceKnowledge() {}
+
+    /** 先一起观察当前维度的已知取材方块和各木种，避免按配方名字逐种寻找不存在的树。 */
+    static Set<Block> nearbyMiningTargets(ResourceLocation dimension) {
+        Set<Block> result = new LinkedHashSet<>(ToolParse.parseBlocks(List.of("#minecraft:logs")));
+        for (Profile profile : PROFILES.values()) {
+            var dimensions = profile.allowedDimensions().getOrDefault(SemanticAcquireTaskRecord.Source.MINE, List.of());
+            if (dimensions.isEmpty() || dimensions.contains(dimension.toString()))
+                result.addAll(ToolParse.parseBlocks(profile.blocks()));
+        }
+        return Set.copyOf(result);
+    }
 
     public static SemanticAcquireTaskRecord.SourceHint infer(
             List<ResourceLocation> requestedItemIds) {

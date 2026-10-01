@@ -29,6 +29,10 @@ import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
+import org.maiwithu.maicraft.core.tools.ToolParse;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
+import org.maiwithu.maicraft.core.task.mine.NearbyMaterialSources;
+import net.minecraft.world.level.block.Block;
 
 /** 只推演缺料配方，不开菜单、不消耗材料；角色实际取材和合成仍由取物任务调度。 */
 final class AcquisitionRecipePlanner {
@@ -49,6 +53,42 @@ final class AcquisitionRecipePlanner {
 
     private Map<ResourceLocation, List<CraftingRecipe>> recipeIndex;
     private final Map<ResourceLocation, List<ObservedRecipeStockCost.Recipe>> stockRecipes = new HashMap<>();
+    private NearbyMaterialSources nearbySources;
+    private long nearbySourcesCompletedAt;
+    private ResourceLocation nearbyDimension;
+    private int nearbyRadius;
+    private Set<ResourceLocation> preferredMaterials = Set.of();
+
+    void preferMaterials(List<ResourceLocation> materials) {
+        // 父取物任务的一份软偏好供所有递归需求复用，重新设置时同步废弃旧材料树排序。
+        preferredMaterials = Set.copyOf(materials);
+        materialPlans.clear();
+    }
+
+    /** 缺料时先扫描本次允许的附近范围；纯背包合成保持原权限，不因为偏好或观察自动开放采集。 */
+    boolean observeNearbySources(AcquisitionNeed parent, int radius) {
+        if (!parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.MINE)) return true;
+        long tick = player.level().getGameTime();
+        ResourceLocation dimension = player.level().dimension().location();
+        if (nearbySources == null || !dimension.equals(nearbyDimension) || nearbyRadius != radius || nearbySources.complete()
+                && (nearbySources.center().distSqr(player.blockPosition()) > 16
+                    || tick - nearbySourcesCompletedAt >= 100 || nearbySources.changed())) {
+            nearbySources = new NearbyMaterialSources(player.level(), player.level()::isLoaded,
+                    NavigationSafetyContext::protectsMutation, player.blockPosition(), radius,
+                    SemanticSourceKnowledge.nearbyMiningTargets(dimension));
+            nearbyDimension = dimension; nearbyRadius = radius;
+        }
+        if (nearbySources.complete()) return true;
+        if (!nearbySources.advance()) return false;
+        // 一轮现场观察完整结束后重新比较材料树，不能沿用观察前选定的模组木种。
+        nearbySourcesCompletedAt = tick;
+        materialPlans.clear();
+        return true;
+    }
+
+    Map<String, Object> nearbySourceEvidence() {
+        return nearbySources == null ? Map.of("checked", false) : nearbySources.describe();
+    }
 
     AcquisitionRecipePlanner(LocalPlayer player, boolean allowHarm, int storageSearchRadius, List<String> protectedLabels) {
         this(player, allowHarm, storageSearchRadius, protectedLabels, StockEvidence::latestNetwork);
@@ -344,7 +384,7 @@ final class AcquisitionRecipePlanner {
             recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount,
                     (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
             return RecipeMaterialPlan.estimate(ingredients, pool, item -> processRecipes(item, parent),
-                    item -> sourceCost(item, parent), parent.lineageItems, unavailable);
+                    item -> sourceCost(item, parent), parent.lineageItems, unavailable, preferredMaterials);
         });
     }
 
@@ -357,18 +397,32 @@ final class AcquisitionRecipePlanner {
 
     /** 比较直接烧炼与绕远的拆包合成；不能为了一个铁锭先追九件铁装备来熔成铁粒。 */
     long cookingCost(AcquisitionNeed parent) {
-        if (!parent.canTry(SemanticAcquireTaskRecord.Source.COOK)) return RecipeMaterialPlan.UNREACHABLE;
+        return cookingPlan(parent).cost();
+    }
+
+    boolean preferCooking(CraftRecoveryCandidate craft, AcquisitionNeed parent) {
+        var cooking = cookingPlan(parent);
+        return cooking.feasible() && (craft == null || RecipeMaterialPlan.ORDER.compare(cooking, materialPlan(craft, parent)) < 0);
+    }
+
+    private RecipeMaterialPlan.Result cookingPlan(AcquisitionNeed parent) {
+        var best = new RecipeMaterialPlan.Result(false, true, RecipeMaterialPlan.UNREACHABLE, List.of(), List.of(), Map.of());
+        if (!parent.canTry(SemanticAcquireTaskRecord.Source.COOK)) return best;
         refreshStock(parent);
         int missing = parent.requiredFinalCount - parent.itemIds.stream().mapToInt(id -> recipeCarriedStock.getOrDefault(id, 0L).intValue()).sum();
-        long best = RecipeMaterialPlan.UNREACHABLE;
         Map<ResourceLocation, Long> pool = new HashMap<>(recipeCarriedStock);
         recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
         for (var output : parent.itemIds) for (var recipe : processes.cooking(output)) {
             int batches = (int) (((long) Math.max(1, missing) + recipe.outputCount() - 1) / recipe.outputCount());
             if (recipe.ingredients().stream().anyMatch(input -> (long) input.count() * batches > 32768)) continue;
             var inputs = recipe.ingredients().stream().map(input -> new ObservedRecipeStockCost.Need(input.alternatives(), input.count() * batches)).toList();
-            var estimate = RecipeMaterialPlan.estimate(inputs, pool, item -> processRecipes(item, parent), item -> sourceCost(item, parent), parent.lineageItems);
-            if (estimate.feasible()) best = Math.min(best, estimate.cost() + (long) batches * recipe.batchCost());
+            var estimate = RecipeMaterialPlan.estimate(inputs, pool, item -> processRecipes(item, parent),
+                    item -> sourceCost(item, parent), parent.lineageItems, Set.of(), preferredMaterials);
+            // 烧炼和格子合成使用同一软偏好次序，再比较实际原料账和加工批次成本。
+            var candidate = new RecipeMaterialPlan.Result(estimate.feasible(), estimate.searchComplete(),
+                    estimate.cost() + (long) batches * recipe.batchCost(), estimate.supplies(), estimate.crafts(),
+                    estimate.remaining(), estimate.preferredMaterialsUsed());
+            if (RecipeMaterialPlan.ORDER.compare(candidate, best) < 0) best = candidate;
         }
         return best;
     }
@@ -381,8 +435,15 @@ final class AcquisitionRecipePlanner {
         boolean mine = parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.MINE)
                 && (source.allowedDimensions(SemanticAcquireTaskRecord.Source.MINE).isEmpty()
                     || source.allowedDimensions(SemanticAcquireTaskRecord.Source.MINE).contains(player.level().dimension().location()));
-        if (mine && (!hint.blockRefs().isEmpty() || item instanceof BlockItem block && block.getBlock().defaultBlockState().is(BlockTags.LOGS)))
-            return new RecipeMaterialPlan.Source(true, 40);
+        if (mine && (!hint.blockRefs().isEmpty() || item instanceof BlockItem block && block.getBlock().defaultBlockState().is(BlockTags.LOGS))) {
+            Set<Block> blocks = new LinkedHashSet<>(ToolParse.parseBlocks(hint.blockRefs()));
+            if (item instanceof BlockItem block && block.getBlock().defaultBlockState().is(BlockTags.LOGS))
+                blocks.add(block.getBlock());
+            // 已确认的附近来源按距离获得较低估价；仍只记获取成本，原木和矿物不会凭观察进入库存账。
+            int cost = nearbySources == null ? 40 : nearbySources.nearest(blocks)
+                    .map(seen -> Math.clamp((int) Math.ceil(Math.sqrt(seen.distanceSquared())), 1, 20)).orElse(40);
+            return new RecipeMaterialPlan.Source(true, cost);
+        }
         if (allowHarm && parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT) && !hint.entityTypeIds().isEmpty())
             return new RecipeMaterialPlan.Source(true, 100);
         return new RecipeMaterialPlan.Source(false, 10000);
@@ -397,6 +458,8 @@ final class AcquisitionRecipePlanner {
         var plan = materialPlan(candidate, parent);
         // 只报告本次所需的备料项与合成顺序，完整 AE 网络清单留在 Mod，避免再次灌满模型上下文。
         return Map.of("feasible", plan.feasible(), "search_complete", plan.searchComplete(), "estimated_cost", plan.cost(),
+                "preferred_materials", preferredMaterials.stream().map(ResourceLocation::toString).sorted().toList(),
+                "preferred_materials_used", plan.preferredMaterialsUsed().stream().map(ResourceLocation::toString).sorted().toList(),
                 "supply_list", plan.supplies().stream().map(need -> Map.of("item_ids", need.alternatives().stream().map(ResourceLocation::toString).toList(), "count", need.count())).toList(),
                 "craft_chain", plan.crafts().stream().map(need -> Map.of("item_ids", need.alternatives().stream().map(ResourceLocation::toString).toList(), "required_output", need.count())).toList());
     }

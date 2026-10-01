@@ -170,6 +170,7 @@ public final class SemanticAcquireCompanionTask
             AcquisitionInventoryTidy inventoryTidy, AcquisitionBackpackInventory backpacks) {
         super(player, record);
         recipePlanner = new AcquisitionRecipePlanner(player, record.allowHarm, record.storageSearchRadius, record.protectedLabels);
+        recipePlanner.preferMaterials(record.preferredMaterials);
         this.wirelessAvailable = wirelessAvailable;
         this.inventoryTidy = inventoryTidy;
         this.backpacks = backpacks;
@@ -447,14 +448,14 @@ public final class SemanticAcquireCompanionTask
                     childId("craft-plan"), player.level().getGameTime());
             CraftOps.Plan plan = craftOps.plan(
                     output.toString(), requestedOwnFinal, player, context,
-                    workstation, excludedRecipes);
+                    workstation, excludedRecipes, r.preferredMaterials);
             if (plan.executable()) {
                 executable.add(new ExecutableCraft(output, plan));
             } else {
                 candidates.addAll(plan.recoveryCandidates());
                 // 可替代成品按合计数量交付；两根橡木加一根桦木可分别做木板，不要求九张必须全来自一种木头。
                 if(deficit>1 && need.itemIds.size()>1) {
-                    var one=craftOps.plan(output.toString(),requestedOwnFinal-deficit+1,player,context,workstation,excludedRecipes);
+                    var one=craftOps.plan(output.toString(),requestedOwnFinal-deficit+1,player,context,workstation,excludedRecipes,r.preferredMaterials);
                     if(one.executable() && recipePlanner.unitConversion(one.task().recipeId,need.itemIds)!=null)
                         partial.add(new ExecutableCraft(output,one));
                 }
@@ -463,12 +464,13 @@ public final class SemanticAcquireCompanionTask
 
         ExecutableCraft selected = executable.stream()
                 .filter(candidate -> candidate.plan().cost() != null)
-                .min(Comparator.comparing(
-                        candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
+                .min(Comparator.comparingInt((ExecutableCraft candidate) -> -candidate.plan().preferredMaterialCount(r.preferredMaterials))
+                        .thenComparing(candidate -> candidate.plan().cost(), CraftPlanCost.ORDER))
                 .orElse(null);
         // 有一趟可做完的配方时仍优先整批；没有时才先兑现已携带的一种原料，随后继续补总数。
         if(selected==null)selected=partial.stream().filter(candidate->candidate.plan().cost()!=null)
-                .min(Comparator.comparing(candidate->candidate.plan().cost(),CraftPlanCost.ORDER)).orElse(null);
+                .min(Comparator.comparingInt((ExecutableCraft candidate) -> -candidate.plan().preferredMaterialCount(r.preferredMaterials))
+                        .thenComparing(candidate->candidate.plan().cost(),CraftPlanCost.ORDER)).orElse(null);
         if (selected != null) {
             // 现在有现成可做的配方，就不再为了先前尚未凑齐的方案继续找额外材料。
             need.committedRecipeIds.clear();
@@ -497,6 +499,8 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
 
+        // 现成可做的配方已在上方执行；缺料且允许采集时，先复用天然树规则看附近实际有哪些材料。
+        if (!candidates.isEmpty() && !recipePlanner.observeNearbySources(need, r.searchRadius)) return TaskState.RUNNING;
         List<CraftRecoveryCandidate> viableCandidates = candidates.stream()
                 .filter(candidate -> recipeAllowedByCommit(need, candidate.recipeId()))
                 .filter(candidate -> !need.rejectedRecipes.contains(candidate.recipeId()))
@@ -508,15 +512,14 @@ public final class SemanticAcquireCompanionTask
                 .filter(candidate -> recipePlanner.materialPlan(candidate, need).feasible())
                 .sorted(Comparator
                         // 先比较扣除各层现货后的整条补料成本，再比较工作面；无来源的短配方不能抢到前面。
-                        .comparingLong((CraftRecoveryCandidate candidate) -> recipePlanner.materialPlan(candidate, need).cost())
+                        .comparing((CraftRecoveryCandidate candidate) -> recipePlanner.materialPlan(candidate, need), RecipeMaterialPlan.ORDER)
                         .thenComparingInt(candidate -> candidate.cost().surface().ordinal())
                         .thenComparing(CraftRecoveryCandidate::cost, CraftPlanCost.ORDER))
                 .toList();
         // 还缺原料时，排除循环和已失败配方，再比较所需转换层数与成本，挑一个值得继续补材料的方案。
         CraftRecoveryCandidate chosen = viableCandidates.isEmpty()
                 ? null : viableCandidates.getFirst();
-        long craftCost = chosen == null ? RecipeMaterialPlan.UNREACHABLE : recipePlanner.materialPlan(chosen, need).cost();
-        if (recipePlanner.cookingCost(need) < craftCost) {
+        if (recipePlanner.preferCooking(chosen, need)) {
             // 直接烧炼的材料树更便宜时切到已有 COOK 执行器；配方比较本身不开始炼制或扣库存。
             var order = new ArrayList<>(executionSourceOrder(need));
             order.remove(SemanticAcquireTaskRecord.Source.COOK);
@@ -751,7 +754,8 @@ public final class SemanticAcquireCompanionTask
                 now + 12L * 60L * 20L,
                 output, selectedFinal, SemanticCookTaskRecord.Preference.AUTO,
                 r.cookingFuelPolicy, childSources, r.allowHarm, r.protectedLabels)
-                .withProductionLineage(r.productionLineage.include(need.lineageItems));
+                .withProductionLineage(r.productionLineage.include(need.lineageItems))
+                .withPreferredMaterials(r.preferredMaterials);
         return startChild(need, SemanticAcquireTaskRecord.Source.COOK, child,
                 "cook a client-known output while recursively acquiring its prerequisites");
     }
@@ -2390,6 +2394,8 @@ public final class SemanticAcquireCompanionTask
         data.put("goal_satisfied", observed >= r.count);
         data.put("inventory_before_by_item", before);
         data.put("inventory_after_by_item", after);
+        data.put("nearby_material_sources", recipePlanner.nearbySourceEvidence());
+        data.put("preferred_materials", r.preferredMaterials.stream().map(ResourceLocation::toString).toList());
         data.put("allowed_sources", r.allowedSources.stream()
                 .map(source -> source.name().toLowerCase()).toList());
         data.put("allow_harm", r.allowHarm);

@@ -24,7 +24,8 @@ public final class CookingQuantityTest {
             world.inventory(256, 44, 6);
             var request = new SemanticAcquireTaskRecord("large-cooking", 100000,
                     List.of(CookingTestWorld.id("iron_ingot")), 300, List.of(Source.COOK), false,
-                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16)
+                    .withPreferredMaterials(List.of(CookingTestWorld.id("raw_iron")));
             var parent = new SemanticAcquireCompanionTask(world.game.player, request);
             parent.start(world.game.player);
             // 盘点现货 → 选择烹饪 → 子任务挑配方 → 准备本批；尚未进入原生打开菜单阶段。
@@ -35,6 +36,8 @@ public final class CookingQuantityTest {
             var childRecord = (SemanticCookTaskRecord) CookingTestWorld.read(parent, "activeRecord");
             var child = CookingTestWorld.read(parent, "activeChild");
             check(childRecord != null && childRecord.count == 300, "取物父任务把烹饪最终目标压小，提前结束了子任务");
+            // 从取物转入炉子时，完整目标和 LLM 的粗铁偏好都必须保留下来。
+            check(childRecord.preferredMaterials.equals(request.preferredMaterials), "烧炼子任务丢失材料倾向");
             check((int) CookingTestWorld.read(child, "batchRaw") == 44, "这一炉只补仍缺的四十四份");
             check(world.game.blockUses() == 0, "准备阶段不应提前点击炉子");
         }

@@ -95,6 +95,13 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public final int storageSearchRadius;
     public ProductionLineage productionLineage = ProductionLineage.ROOT;
     public List<ResourceLocation> cookingFuelPolicy = List.of();
+    public List<ResourceLocation> preferredMaterials = List.of();
+
+    /** 材料倾向只影响可用配方的排序；不扩展取材来源，也不把其他材料变成禁止项。 */
+    public SemanticAcquireTaskRecord withPreferredMaterials(List<ResourceLocation> materials) {
+        preferredMaterials = materials == null || materials.isEmpty() ? List.of() : validateItems(materials);
+        return this;
+    }
 
     /** 炉子补料仍继承原来的取材权限；祖先与燃料限制另行传递，不能因创建新子任务而丢失。 */
     public SemanticAcquireTaskRecord withCookingContext(ProductionLineage lineage, List<ResourceLocation> fuels) {

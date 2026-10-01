@@ -55,6 +55,12 @@ public final class SemanticCookTaskRecord extends TaskRecord {
     public final boolean allowHarm;
     public final List<String> protectedLabels;
     public ProductionLineage productionLineage = ProductionLineage.ROOT;
+    public List<ResourceLocation> preferredMaterials = List.of();
+
+    /** 取物任务转入烧炼时保留同一材料倾向，随后燃料与设备的前置取物也继续继承。 */
+    public SemanticCookTaskRecord withPreferredMaterials(List<ResourceLocation> materials) {
+        preferredMaterials = List.copyOf(materials); return this;
+    }
 
     /** 原料加工可以继续开炉，但每层必须保留此前的成品祖先，避免循环配方和燃料自举无限套娃。 */
     public SemanticCookTaskRecord withProductionLineage(ProductionLineage lineage) {

@@ -386,7 +386,8 @@ public final class SemanticCookCompanionTask
                 List.of(BuiltInRegistries.ITEM.getKey(item)), finalCount,
                 r.allowedSources,
                 r.allowHarm, SemanticAcquireTaskRecord.SourceHint.empty(),
-                r.protectedLabels, 16).withCookingContext(r.productionLineage.descend(r.itemId), r.allowedFuelIds);
+                r.protectedLabels, 16).withCookingContext(r.productionLineage.descend(r.itemId), r.allowedFuelIds)
+                .withPreferredMaterials(r.preferredMaterials);
         return start(child, purpose);
     }
 
