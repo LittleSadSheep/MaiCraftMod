@@ -2,12 +2,17 @@
 package org.maiwithu.maicraft.client.debug;
 
 import java.io.IOException;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
@@ -23,16 +28,33 @@ import com.google.gson.JsonObject;
 
 /**
  * F9 切换的常驻调试面板。每刻构建一次只读快照，渲染只画快照；本类不提交任何操作。
- * 行文与 /maicraft status 各自独立：status 是既有命令保持原样，面板按屏幕阅读自行裁剪。
+ * 布局分两段：上方固定状态行（标签行文与 /maicraft status 各自独立），下方聊天框式事件区，
+ * 长消息按面板宽度自动换行，新事件把旧事件挤出预算，固定行布局不受事件多少影响。
  */
 public final class DebugHudController {
-    /** 面板单行的标签、取值和颜色；值必须是已经压平的短文本。 */
+    /** 固定区一行：短标签、当前值和取值颜色；值必须是已经压平的短文本。 */
     public record Row(String label, String value, ChatFormatting color) {}
+
+    /** 事件行的一个着色片段：时间、类型、内容各用各的颜色，渲染时按顺序拼在同行。 */
+    public record Segment(String text, ChatFormatting color) {}
+
+    /** 事件区一行，由一个或多个着色片段组成；换行产生的续行只有内容片段。 */
+    public record EventLine(List<Segment> segments) {}
+
+    /** 每刻快照：固定状态行加事件区换行结果；面板不可见时两段皆空。 */
+    public record Snapshot(List<Row> rows, List<EventLine> events) {}
 
     /** 面板单行放不下的说明截断到 64 字符并以 … 结尾，让人看得出后面还有内容。 */
     private static final int TEXT_LIMIT = 64;
+    /** 事件区换行后的总行数预算：占满后更旧的事件整体让位，形成聊天框式滚动。 */
+    private static final int EVENT_LINE_BUDGET = 12;
+    /** 单条事件换行后最多 4 行，仍然超长在行尾补 …。 */
+    private static final int EVENT_MAX_LINES = 4;
 
-    private static volatile List<Row> snapshot = List.of();
+    private static final DateTimeFormatter EVENT_TIME =
+            DateTimeFormatter.ofPattern("HH:mm:ss");
+
+    private static volatile Snapshot snapshot = new Snapshot(List.of(), List.of());
     private static boolean toggleWasDown;
     private DebugHudController() {}
 
@@ -45,14 +67,13 @@ public final class DebugHudController {
         if (toggled) toggle(minecraft);
         snapshot = minecraft.player == null
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())
-                ? List.of() : buildSnapshot();
+                ? new Snapshot(List.of(), List.of()) : buildSnapshot(minecraft);
     }
 
-    /** 渲染层每帧读取的最近一次快照；不可见时是空列表，渲染器据此不画。 */
-    public static List<Row> snapshot() { return snapshot; }
+    /** 渲染层每帧读取的最近一次快照；不可见时两段皆空，渲染器据此不画。 */
+    public static Snapshot snapshot() { return snapshot; }
 
-    private static List<Row> buildSnapshot() {
-        Minecraft minecraft = Minecraft.getInstance();
+    private static Snapshot buildSnapshot(Minecraft minecraft) {
         List<Row> rows = new ArrayList<>();
 
         boolean listening = ClientRuntime.isMcpRunning();
@@ -69,12 +90,6 @@ public final class DebugHudController {
             rows.add(new Row("感知", (views == null || views.isBlank() ? "默认" : views)
                     + " · 距上次行动 " + McpActivityTrace.perceivesSinceAction() + " 次",
                     ChatFormatting.GRAY));
-        }
-
-        // 事件尾窗是面板唯一的刺激侧窗口：AI 被通知了什么，解释它的自发行为；灰行是 world.* 降权事件。
-        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(4);
-        for (int i = 0; i < events.size(); i++) {
-            rows.add(attentionRow(events.get(i), i == 0));
         }
 
         boolean inWorld = minecraft.player != null && minecraft.level != null
@@ -105,8 +120,8 @@ public final class DebugHudController {
                             + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
                     ChatFormatting.AQUA));
             if (active.stepIndex() >= 0 && active.stepIndex() < active.steps().size()) {
-                Goal step = active.steps().get(active.stepIndex());
-                rows.add(new Row("步骤", stepTitle(step), ChatFormatting.AQUA));
+                rows.add(new Row("步骤", stepTitle(active.steps().get(active.stepIndex())),
+                        ChatFormatting.AQUA));
             }
             if (active.decisionSnapshot() != null) {
                 rows.add(new Row("等待决策", decisionText(active.decisionSnapshot()),
@@ -120,7 +135,67 @@ public final class DebugHudController {
                         ChatFormatting.RED));
             }
         }
-        return List.copyOf(rows);
+        return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows));
+    }
+
+    // 事件区换行宽度随固定行的宽度走，整块面板保持一个矩形；事件少时固定行布局纹丝不动。
+    private static List<EventLine> eventLines(Font font, List<Row> rows) {
+        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
+        if (events.isEmpty()) return List.of();
+        int contentWidth = 0;
+        for (Row row : rows) {
+            contentWidth = Math.max(contentWidth,
+                    font.width(row.label().isBlank() ? "" : row.label() + ": ")
+                            + font.width(row.value()));
+        }
+        List<EventLine> newestFirst = new ArrayList<>();
+        int used = 0;
+        for (int i = events.size() - 1; i >= 0; i--) {
+            EventLine[] lines = wrapEvent(font, events.get(i), Math.max(160, contentWidth));
+            if (used + lines.length > EVENT_LINE_BUDGET) break;
+            for (int j = lines.length - 1; j >= 0; j--) newestFirst.addFirst(lines[j]);
+            used += lines.length;
+        }
+        return List.copyOf(newestFirst);
+    }
+
+    // 时间与类型着色后占首行行首，内容从剩余宽度换行；灰类型是 world.* 降权事件。
+    private static EventLine[] wrapEvent(Font font, IntentRuntime.AttentionItem event, int contentWidth) {
+        String time = EVENT_TIME.format(event.timestamp().atZone(ZoneId.systemDefault())) + " ";
+        ChatFormatting priorityColor = switch (event.priority()) {
+            case "important" -> ChatFormatting.YELLOW;
+            case "task" -> ChatFormatting.AQUA;
+            default -> ChatFormatting.GRAY;
+        };
+        String head = event.type() + ": ";
+        Segment timeSegment = new Segment(time, ChatFormatting.GRAY);
+        Segment typeSegment = new Segment(head, priorityColor);
+        int messageWidth = Math.max(80, contentWidth - font.width(time) - font.width(head));
+        List<String> messageLines = wrap(font, event.message(), messageWidth);
+        EventLine[] lines = new EventLine[messageLines.size()];
+        for (int i = 0; i < messageLines.size(); i++) {
+            lines[i] = i == 0
+                    ? new EventLine(List.of(timeSegment, typeSegment,
+                            new Segment(messageLines.getFirst(), ChatFormatting.WHITE)))
+                    : new EventLine(List.of(new Segment(messageLines.get(i), ChatFormatting.WHITE)));
+        }
+        return lines;
+    }
+
+    /** 按字形宽度把内容折行：超过上限在最后一行行尾补 …；由字体分词器断行，中英文都不断在词中间。 */
+    private static List<String> wrap(Font font, String text, int width) {
+        String singleLine = text.replace('\r', ' ').replace('\n', ' ')
+                .replaceAll("\\s+", " ").strip();
+        List<String> lines = new ArrayList<>();
+        for (FormattedText line : font.getSplitter().splitLines(singleLine, width, Style.EMPTY)) {
+            lines.add(line.getString());
+        }
+        if (lines.size() > EVENT_MAX_LINES) {
+            lines = new ArrayList<>(lines.subList(0, EVENT_MAX_LINES));
+            lines.set(EVENT_MAX_LINES - 1, lines.getLast() + "…");
+        }
+        if (lines.isEmpty()) lines.add("");
+        return lines;
     }
 
     // 任务行以标题为主体：能力短名加目标陈述，状态前缀只标注它此刻在等什么。
@@ -138,60 +213,6 @@ public final class DebugHudController {
         int namespace = ability.indexOf(':');
         String shortAbility = namespace >= 0 ? ability.substring(namespace + 1) : ability;
         return shortAbility + "：" + clamp(goal.outcome());
-    }
-
-    // 时间戳先于类型：陈旧事件一眼可辨，不会被误当成刚才发生的刺激。首行带标签，其余行留空标签续排。
-    private static final java.time.format.DateTimeFormatter EVENT_TIME =
-            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss");
-
-    private static Row attentionRow(IntentRuntime.AttentionItem event, boolean labeled) {
-        String text = clamp(EVENT_TIME.format(event.timestamp().atZone(java.time.ZoneId.systemDefault()))
-                + " " + event.type() + ": " + event.message());
-        ChatFormatting color = switch (event.priority()) {
-            case "important" -> ChatFormatting.YELLOW;
-            case "task" -> ChatFormatting.AQUA;
-            default -> ChatFormatting.GRAY;
-        };
-        return new Row(labeled ? "事件" : "", text, color);
-    }
-
-    // 决策行要说出在等什么：问题摘要加可选项；只重复"在等决策"没有信息量。
-    private static String decisionText(IntentTaskRecord.DecisionSnapshot decision) {        String choices = decision.options().stream()
-                .map(IntentTaskRecord.DecisionOption::choice)
-                .collect(Collectors.joining("/"));
-        String text = clamp(decision.question(), 40)
-                + (choices.isBlank() ? "" : " · 选项 " + clamp(choices, 24));
-        return clamp(text);
-    }
-
-    // 蓝图行回答三件事：这是什么预览、它多大、施工卡在哪个决定上；隐藏与切片也值得看见。
-    private static String blueprintText(PreviewSession preview) {
-        String text = (preview.designOnly() ? "只读设计" : "施工")
-                + " · " + clamp(preview.title(), 32)
-                + " · " + preview.cells().size() + " 格 · " + blueprintState(preview);
-        if (!preview.visible()) text += " · 已隐藏";
-        if (preview.minY() != Integer.MIN_VALUE) {
-            text += " · 层 " + preview.minY() + ".." + preview.maxY();
-        }
-        return clamp(text);
-    }
-
-    private static String blueprintState(PreviewSession preview) {
-        return switch (preview.decision()) {
-            case WAITING -> "等待确认";
-            case CONFIRMED -> "已确认开工";
-            case CANCELLED -> "已取消";
-            case DISABLED -> "Dev 未开启";
-            case DESIGN_ONLY -> "仅查看";
-        };
-    }
-
-    private static ChatFormatting blueprintColor(PreviewSession preview) {
-        return switch (preview.decision()) {
-            case WAITING -> ChatFormatting.YELLOW;
-            case CANCELLED -> ChatFormatting.RED;
-            default -> ChatFormatting.AQUA;
-        };
     }
 
     private static String statePrefix(IntentTaskRecord record) {
@@ -234,6 +255,46 @@ public final class DebugHudController {
             return result.get("message").getAsString();
         }
         return fallback.name().toLowerCase(Locale.ROOT);
+    }
+
+    // 决策行要说出在等什么：问题摘要加可选项；只重复"在等决策"没有信息量。
+    private static String decisionText(IntentTaskRecord.DecisionSnapshot decision) {
+        String choices = decision.options().stream()
+                .map(IntentTaskRecord.DecisionOption::choice)
+                .collect(Collectors.joining("/"));
+        String text = clamp(decision.question(), 40)
+                + (choices.isBlank() ? "" : " · 选项 " + clamp(choices, 24));
+        return clamp(text);
+    }
+
+    // 蓝图行回答三件事：这是什么预览、它多大、施工卡在哪个决定上；隐藏与切片也值得看见。
+    private static String blueprintText(PreviewSession preview) {
+        String text = (preview.designOnly() ? "只读设计" : "施工")
+                + " · " + clamp(preview.title(), 32)
+                + " · " + preview.cells().size() + " 格 · " + blueprintState(preview);
+        if (!preview.visible()) text += " · 已隐藏";
+        if (preview.minY() != Integer.MIN_VALUE) {
+            text += " · 层 " + preview.minY() + ".." + preview.maxY();
+        }
+        return clamp(text);
+    }
+
+    private static String blueprintState(PreviewSession preview) {
+        return switch (preview.decision()) {
+            case WAITING -> "等待确认";
+            case CONFIRMED -> "已确认开工";
+            case CANCELLED -> "已取消";
+            case DISABLED -> "Dev 未开启";
+            case DESIGN_ONLY -> "仅查看";
+        };
+    }
+
+    private static ChatFormatting blueprintColor(PreviewSession preview) {
+        return switch (preview.decision()) {
+            case WAITING -> ChatFormatting.YELLOW;
+            case CANCELLED -> ChatFormatting.RED;
+            default -> ChatFormatting.AQUA;
+        };
     }
 
     private static String clamp(String value) {
