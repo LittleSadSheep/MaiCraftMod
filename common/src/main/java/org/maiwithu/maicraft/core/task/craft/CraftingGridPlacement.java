@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.client.actor.MenuSynchronization;
 
 /** 取起材料堆 -> 右键放一件 -> 放回余料；逐次确认原生点击后再推进一批合成。 */
 public final class CraftingGridPlacement {
-    public enum Outcome { RUNNING, READY, FAILED }
+    public enum Outcome { RUNNING, READY, REFRESH_REQUIRED, FAILED }
     private enum Step { PICK_UP, PLACE_ONE, RETURN_REMAINDER }
     private final AbstractContainerMenu menu;
     private final List<CraftingPlacementPlan.Entry> entries;
@@ -23,6 +23,7 @@ public final class CraftingGridPlacement {
     private ItemStack sourceBefore = ItemStack.EMPTY;
     private long resultDeadline = Long.MIN_VALUE, resultStableSince = Long.MIN_VALUE;
     private String issue;
+    private boolean submitted;
 
     public CraftingGridPlacement(AbstractContainerMenu menu, List<CraftingPlacementPlan.Entry> entries,
             int resultSlot, ItemStack output) {
@@ -30,6 +31,7 @@ public final class CraftingGridPlacement {
     }
 
     public int confirmedMoves() { return confirmedMoves; }
+    public boolean submitted() { return submitted; }
     public String issue() { return issue; }
 
     public Outcome tick(LocalPlayerContext context) {
@@ -68,9 +70,13 @@ public final class CraftingGridPlacement {
         switch (step) {
             case PICK_UP -> {
                 if (!cursor.isEmpty() || !target.isEmpty() || source.isEmpty()
-                        || !ItemStack.isSameItemSameComponents(source, entry.sample()) || !entry.ingredient().test(source))
-                    return fail("the selected native ingredient or empty destination changed before pickup");
+                        || !ItemStack.isSameItemSameComponents(source, entry.sample()) || !entry.ingredient().test(source)) {
+                    issue = "the selected native ingredient or empty destination changed before pickup";
+                    // 首次点击前仅来源槽变化时可重新选料；鼠标或工作格已有外来物品以及任何已提交动作都不能重放。
+                    return !submitted && cursor.isEmpty() && target.isEmpty() ? Outcome.REFRESH_REQUIRED : Outcome.FAILED;
+                }
                 sourceBefore = source.copy();
+                submitted = true;
                 receipt = context.menus().click(context, entry.sourceSlot(), 0, ClickType.PICKUP, this::observeMove, 40);
             }
             case PLACE_ONE -> {
