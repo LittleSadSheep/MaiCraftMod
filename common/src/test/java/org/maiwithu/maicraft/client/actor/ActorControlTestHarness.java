@@ -15,6 +15,8 @@ import java.util.HashMap;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.inventory.ClickAction;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * 构造只供控制测试使用的客户端、玩家和操作端口，并手动推进身体控制版本；没有正常启动游戏，未初始化的能力不能直接拿来推断实机行为。
@@ -111,5 +113,7 @@ final class ActorControlTestHarness {
         @Override public boolean isSleeping() { return sleeping; }
         @Override public void closeContainer() { if (menuClose == null) super.closeContainer(); else menuClose.run(); }
         @Override public void swing(InteractionHand hand) { /* no network in this fixture */ }
+        // 无窗口菜单回归仍走真实材料搬运，但不启动首次游玩教程的渲染提示。
+        @Override public void updateTutorialInventoryAction(ItemStack carried, ItemStack clicked, ClickAction action) { }
     }
 }
