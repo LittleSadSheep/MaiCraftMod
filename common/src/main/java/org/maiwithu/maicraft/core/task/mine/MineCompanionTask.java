@@ -1301,6 +1301,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  单纯“走不到”不在此判定，由 {@link #stalledOut} 负责结束任务。 */
     // 分别说明缺正确工具、发现目标但没法挖到、或确实没找到来源，避免所有情况都说“矿没了”。
     private TaskState noOreFailure() {
+        // 失败回执里的观察快照按 100 刻节流；秒级失败会带着第一刻的旧快照（query_complete:false），
+        // 误导调用方以为索引未完成就下了结论。失败前强制刷新到当前真实状态。
+        refreshObservationNow();
         if (!unharvestable.isEmpty()) {
             // 目标确实存在，但手持工具无法让它们掉落；应报告工具不足而不是矿床耗尽，并明确给出更换工具或强制破坏的处理方式。
             fail("found " + unharvestable.size() + " " + r.label + " but none can be harvested with"
@@ -1315,10 +1318,23 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     + " of them from any stance I could take; gathered 0",
                     FailureType.NO_PATH);
         } else {
-            fail("no reachable " + r.label + " found in the loaded area around me",
+            // “附近没有”必须携带扫描口径：覆盖范围之外、未加载区块与更深地层都不构成不存在的证据。
+            String scope = lastQueryCenter == null ? "the declared search scope"
+                    : "the scanned scope (center " + lastQueryCenter.toShortString()
+                            + ", chunk radius " + r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS) + ")";
+            fail("no reachable " + r.label + " found in " + scope
+                    + "; sources outside this scope, in unloaded chunks or deeper underground were not"
+                    + " covered — widen the radius, move closer, or use find_block to locate deeper"
+                    + " targets before another attempt",
                     FailureType.MINED_OUT);
         }
         return TaskState.FAILED;
+    }
+
+    /** 失败前强制把观察快照刷到当前真实状态，回执不能携带上一次节流窗口的旧事实。 */
+    private void refreshObservationNow() {
+        nextProgressObservation = 0;
+        observeMiningProgress(r.getMined());
     }
 
     private TaskState unreachableDropFailure() {
