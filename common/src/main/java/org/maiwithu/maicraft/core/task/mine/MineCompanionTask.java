@@ -401,7 +401,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 return stalled;
             }
             if (failedPath != null) {
-                switch (failedPath.next(player.position(), currentGoals, lastQueryComplete)) {
+                switch (failedPath.next(player.position(), currentGoals, lastQueryComplete, player.level().getGameTime())) {
                     case FAIL -> { return exhaustedPath(); }
                     case WAIT_FOR_QUERY -> { return TaskState.RUNNING; }
                     case SEARCH -> failedPath = null;
@@ -409,7 +409,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             }
             if (nav == null || navIsBranch || navIsDrop) {
                 stopNav();
-                pathAttempt = new NoPathVerdict(player.position(), currentGoals, "");
+                pathAttempt = new NoPathVerdict(player.position(), currentGoals, "", player.level().getGameTime());
                 // 将所有已知目标的可站立位置合成一个寻路目标；路线途经时也可能挖矿，下刻再识别其掉落并转入独占拾取分支。
                 // 矿区每几刻都会变化，因此每刻重编目标交给引擎；当前路线终点仍被接受时继续前进，否则软取消并重规划。
                 // 若站位对应的矿刚被挖掉，也恢复寻路，避免把过期到达状态误报为成功。
@@ -419,7 +419,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 navIsDrop = false;
             }
             if (!pathAttempt.goals().equals(currentGoals)) {
-                pathAttempt = new NoPathVerdict(player.position(), currentGoals, "");
+                pathAttempt = new NoPathVerdict(player.position(), currentGoals, "", player.level().getGameTime());
             }
             switch (nav.tick()) {
                 case RUNNING -> { return TaskState.RUNNING; }
@@ -449,8 +449,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                         fail(reason, type);
                         return TaskState.FAILED;
                     }
-                    failedPath = new NoPathVerdict(pathAttempt.source(), pathAttempt.goals(), reason);
-                    if (failedPath.next(player.position(), currentGoals, lastQueryComplete) == NoPathVerdict.Next.SEARCH) {
+                    failedPath = new NoPathVerdict(pathAttempt.source(), pathAttempt.goals(), reason, player.level().getGameTime());
+                    if (failedPath.next(player.position(), currentGoals, lastQueryComplete, player.level().getGameTime()) == NoPathVerdict.Next.SEARCH) {
                         failedPath = null;
                         return TaskState.RUNNING;
                     }
