@@ -25,7 +25,16 @@ final class BlueprintTestArchive {
                 if (!proof.has("status") || !proof.get("status").getAsString().equals("applied")) continue;
                 var request = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
                 var anchor = BlueprintTestNative.position(request.getAsJsonArray("anchor")); String label = request.get("label").getAsString();
-                var layout = MachineBlueprintDocument.compile(request.getAsJsonObject("blueprint"), MachineConstructionPlan.registry());
+                var authored = request.getAsJsonObject("blueprint").deepCopy();
+                if (authored.has("assembly")) {
+                    // 回放比较档案沿用直接生成的规则；保留作者的工序说明，不将它变成物理改图的准入门控。
+                    var relations = authored.getAsJsonObject("assembly").remove("processing");
+                    if (relations != null) {
+                        var metadata = authored.has("metadata") ? authored.getAsJsonObject("metadata") : new JsonObject();
+                        metadata.add("test_authored_processing", relations); authored.add("metadata", metadata);
+                    }
+                }
+                var layout = MachineBlueprintDocument.compile(authored, MachineConstructionPlan.registry());
                 var plan = MachineConstructionPlan.compile(anchor, layout, true, true);
                 // 每台机器从第一份真实已应用的设计开始，再按原顺序叠加补丁，保留被旧编译关系遮住的声明格。
                 if (!labels.add(label + "/" + anchor)) plan.markModification();
