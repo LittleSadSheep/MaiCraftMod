@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 import net.minecraft.nbt.CompoundTag;
 import org.maiwithu.maicraft.server.machine.create.CreateStressObservation;
+import org.maiwithu.maicraft.server.machine.create.CreateBeltObservation;
 
 /** 使用 Create 6.0.10 的公开 API 读取真实转速状态、行为和原生配置回调。 */
 final class CreateMachineAdapter {
@@ -28,6 +29,8 @@ final class CreateMachineAdapter {
         state.addProperty("production_attribution", "query_machine.production_events");
         try {
             CreateChainConveyorObservation.inspect(player, entity, state);
+            // 接上动力后仍可能反向输送，快照直接公开原生运动方向供整机观察与接线回执复用。
+            CreateBeltObservation.append(entity, state);
             if (NativeApi.is(entity, KINETIC)) {
                 for (String method : new String[]{"getSpeed", "getTheoreticalSpeed", "getGeneratedSpeed", "isOverStressed",
                         "isSpeedRequirementFulfilled", "hasSource", "hasNetwork"}) scalar(state, method, NativeApi.call(entity, KINETIC, method));
