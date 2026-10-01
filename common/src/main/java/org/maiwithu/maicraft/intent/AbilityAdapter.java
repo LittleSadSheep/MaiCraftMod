@@ -125,7 +125,9 @@ final class AbilityAdapter {
         if (position == null) {
             return decision(goal,
                     "remember_place needs current_place, coordinates, or an existing landmark target.",
-                    List.of(option("skip", "Do not create a landmark."),
+                    List.of(option("replace_goal",
+                                    "Provide details.goal with the complete target (current_place, coordinates or an existing landmark)."),
+                            option("skip", "Do not create a landmark."),
                             option("cancel", "Cancel the task.")));
         }
         return new IntentAction.Remember(label, position, areaRole);
@@ -909,7 +911,8 @@ final class AbilityAdapter {
         Goal goal, LocalPlayer player, IntentRuntime runtime) {
         // 记忆位置不要求玩家现在就在那个维度；和“马上前往／施工”的位置检查不同。
         Goal.SemanticTarget target = goal.target();
-        if (target == null) return null;
+        // "记住当前所在的地方"是该能力的自然默认：漏写 target 时直接按当前位置执行，不为省略多一轮决策。
+        if (target == null) return currentPosition(player);
         if ("current_place".equals(target.kind())) return currentPosition(player);
         if ("coordinates".equals(target.kind())) return target.position();
         if ("landmark".equals(target.kind()) || "area".equals(target.kind())) {
