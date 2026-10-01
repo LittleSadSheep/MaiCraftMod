@@ -42,20 +42,20 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
     private int pickupAmount;
     private int pickupButton;
     private int placed;
-    private int initialPlayerCount;
-    private int actualPlayerDelta;
     private int batchEnd;
     private int confirmedClicks;
+    private int initialPlayerCount;
+    private int actualPlayerDelta;
     private boolean effectsStarted;
     private boolean uncertain;
     private boolean verified;
     private boolean boundaryCloseRequested;
     private String failureCode;
     private String nativeStatus;
-
-    public MachineMenuTransferTask(LocalPlayer player, MachineMenuTransferTaskRecord record) { super(player, record); }
     private JsonObject menuReport;
     private String observationFailure;
+
+    public MachineMenuTransferTask(LocalPlayer player, MachineMenuTransferTaskRecord record) { super(player, record); }
 
     @Override protected TaskState onTick() {
         if (phase == Phase.START) return begin();
@@ -70,9 +70,9 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                 uncertain = receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED;
                 return failure("machine_transfer_unconfirmed", "The exact native inventory transaction was not confirmed; no click was replayed.", FailureType.UNKNOWN);
             }
+            confirmedClicks++; uncertain = false;
             expectedInventory = pendingInventory;
             receipt = null;
-            confirmedClicks++; uncertain = false;
             if (pendingPhase == Phase.PICKUP) phase = Phase.PLACE;
             else if (pendingPhase == Phase.PLACE) {
                 placed += pendingAmount;
@@ -80,16 +80,16 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
             } else if (pendingPhase == Phase.RETURN) phase = afterBatch();
             r.extendDeadlineTo(player.level().getGameTime() + 60L * 20L);
         }
-        if (!inventoryMatches(expectedInventory)) {
-            uncertain |= effectsStarted;
         // 第一次点击之前先按实时库存重新选来源、数量与容量；尚未拿起物品时不让普通同步打断整项搬运。
         if (!effectsStarted && prepareTransfer() == TaskState.FAILED) return TaskState.FAILED;
+        if (!inventoryMatches(expectedInventory)) {
+            uncertain |= effectsStarted;
             return failure("machine_inventory_changed", "The player's inventory changed outside the confirmed transfer.", FailureType.UNKNOWN);
         }
-        if (phase == Phase.VERIFY) return verify();
-        if (NavigationSafetyContext.protectsUse(inspection.origin.position())) {
         // 上一叠已结清后，下一次拿取仍可按原剩余数量刷新；目标已满时停在空光标边界，保留已确认前缀。
         if (effectsStarted && phase == Phase.PICKUP && prepareTransfer() == TaskState.FAILED) return TaskState.FAILED;
+        if (phase == Phase.VERIFY) return verify();
+        if (NavigationSafetyContext.protectsUse(inspection.origin.position())) {
             return failure("machine_transfer_protected", "The selected machine is explicitly protected from changes.", FailureType.UNSUPPORTED);
         }
         var context = ClientRuntime.requireContext(player);
@@ -100,9 +100,9 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
             case PLACE -> place();
             case RETURN -> returnRemainder();
             case VERIFY -> verify();
+            case NEXT_BATCH -> prepareTransfer();
             case START -> begin();
         };
-            case NEXT_BATCH -> prepareTransfer();
     }
 
     // 消费观察编号并重新核对现场；普通背包的三十六个槽必须全部且各出现一次，才开始选来源与去向。
@@ -110,13 +110,13 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         try { inspection = MachineMenu.consume(r.receiptId, player); }
         catch (IllegalArgumentException stale) { return failure("machine_menu_receipt_invalid", stale.getMessage(), FailureType.TARGET_LOST); }
         menu = player.containerMenu;
-        if (!sameSession() || MachineMenu.virtualMenu(menu)) {
-            return failure("machine_menu_session_invalid", "This menu has no valid observed machine origin.", FailureType.UNSUPPORTED);
         return prepareTransfer();
     }
 
     private TaskState prepareTransfer() {
         // 身体、机器及目标槽仍须相同；只刷新本次授权搬运的原生选槽，不重新消费编号或扩大数量。
+        if (!sameSession() || MachineMenu.virtualMenu(menu)) {
+            return failure("machine_menu_session_invalid", "This menu has no valid observed machine origin.", FailureType.UNSUPPORTED);
         }
         if (r.entryIndex >= menu.slots.size()) return failure("machine_entry_unobserved", "The requested entry was not in the menu inspection.", FailureType.TARGET_LOST);
         Slot machine = menu.getSlot(r.entryIndex);
@@ -129,9 +129,9 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         if (!BuiltInRegistries.ITEM.containsKey(r.itemId)) return failure("machine_item_unknown", "The selected item is not registered.", FailureType.NO_MATERIAL);
         List<Integer> playerEntries = playerEntries();
         if (playerEntries.size() != 36) return failure("machine_player_inventory_unproven", "The menu does not expose each ordinary player inventory entry exactly once.", FailureType.UNSUPPORTED);
+        int remaining = r.count - placed;
         if (r.deposit) {
             destinationEntry = r.entryIndex;
-        int remaining = r.count - placed;
             sourceEntry = -1;
             // 多叠同组件材料共同满足本次数量即可；逐叠原生拿取，已确认放入的部分不重做。
             for (int index : playerEntries) {
@@ -201,8 +201,6 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
     // 鼠标上正好是剩余数量就一次全放；鼠标拿得更多时逐件右键放，达到要求后再退回余量。
     private TaskState place() {
         ItemStack carried = menu.getCarried();
-        Slot destination = menu.getSlot(destinationEntry);
-        if (carried.isEmpty() || !ItemStack.isSameItemSameComponents(carried, kind)
         // 只在自有背包内续选落点；机器的授权入口保持不变，换槽不增加提取数量。
         if (!r.deposit && capacity(menu.getSlot(destinationEntry), kind) <= 0) {
             for (int index : playerEntries()) {
@@ -211,6 +209,8 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                         && capacity(candidate, kind) > 0) { destinationEntry = index; break; }
             }
         }
+        Slot destination = menu.getSlot(destinationEntry);
+        if (carried.isEmpty() || !ItemStack.isSameItemSameComponents(carried, kind)
                 || !destination.isActive() || !MachineMenu.transferable(destination)
                 || !compatible(destination.getItem(), kind) || !destination.mayPlace(kind)) {
             return failure("machine_destination_changed", "The selected destination no longer accepts the confirmed carried item.", FailureType.UNKNOWN);
@@ -249,10 +249,10 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
             afterInventory.set(inventoryIndex, kind.copyWithCount(afterCount));
         }
         ItemStack expected = expectedCursor.isEmpty() ? ItemStack.EMPTY : expectedCursor.copy();
-        ItemStack expectedMachineSource = submittedPhase == Phase.PICKUP
-                && entry.container != player.getInventory()
         ItemStack cursorBefore = menu.getCarried().copy(), entryBefore = entry.getItem().copy();
         List<ItemStack> beforeInventory = copyInventory(expectedInventory);
+        ItemStack expectedMachineSource = submittedPhase == Phase.PICKUP
+                && entry.container != player.getInventory()
                 ? kind.copyWithCount(entry.getItem().getCount() - amount) : null;
         pendingInventory = afterInventory;
         pendingPhase = submittedPhase;
@@ -268,24 +268,24 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
                             && inventoryMatches(afterInventory)) {
                         return MenuConfirmation.Verdict.APPLIED;
                     }
-                    return MenuConfirmation.Verdict.PENDING;
-                }, 40);
                     // 同步后仍精确等于点击前状态，表示这一笔未执行；之前已确认的批次不因此丢失或被重放。
                     if (MachineMenu.same(entry.getItem(), entryBefore) && MachineMenu.same(menu.getCarried(), cursorBefore)
                             && inventoryMatches(beforeInventory)) return MenuConfirmation.Verdict.NOT_APPLIED;
-        return TaskState.RUNNING;
-    }
+                    return MenuConfirmation.Verdict.PENDING;
+                }, 40);
         // 菜单端口的前置拒绝会直接抛错；只有它实际接收了本次点击，才记录已提交且等待原生回执。
         effectsStarted = true; uncertain = true;
+        return TaskState.RUNNING;
+    }
 
     // 最后要求放入数量、背包净变化和空鼠标同时正确，避免只数点击次数就声称搬运完成。
     private TaskState verify() {
         actualPlayerDelta = matchingPlayerCount() - initialPlayerCount;
         if (placed != r.count || !menu.getCarried().isEmpty() || !inventoryMatches(expectedInventory)
                 || actualPlayerDelta != (r.deposit ? -r.count : r.count)) {
+            uncertain = true;
             return failure("machine_transfer_delta_unconfirmed", "The exact final inventory delta and empty cursor were not both confirmed.", FailureType.UNKNOWN);
         }
-            uncertain = true;
         verified = true;
         uncertain = false;
         return TaskState.SUCCESS;
@@ -340,8 +340,6 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         return result;
     }
 
-    private boolean matchesId(ItemStack stack) { return !stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(r.itemId); }
-    private static boolean compatible(ItemStack stack, ItemStack item) { return stack.isEmpty() || ItemStack.isSameItemSameComponents(stack, item); }
     private int availableSources(List<Integer> entries, ItemStack sample) {
         int total = 0;
         for (int index : entries) {
@@ -353,6 +351,8 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
 
     private Phase afterBatch() { return placed < r.count ? Phase.NEXT_BATCH : Phase.VERIFY; }
 
+    private boolean matchesId(ItemStack stack) { return !stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(r.itemId); }
+    private static boolean compatible(ItemStack stack, ItemStack item) { return stack.isEmpty() || ItemStack.isSameItemSameComponents(stack, item); }
     private static int capacity(Slot slot, ItemStack item) { return Math.min(item.getMaxStackSize(), slot.getMaxStackSize(item)) - slot.getItem().getCount(); }
 
     private TaskState failure(String code, String message, FailureType type) {
@@ -391,9 +391,9 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         data.put("transfer_verified", verified);
         data.put("actual_player_delta", actualPlayerDelta);
         data.put("confirmed_destination_count", placed);
+        data.put("confirmed_clicks", confirmedClicks);
         data.put("machine_production_verified", false);
         data.put("effects_started", effectsStarted);
-        data.put("confirmed_clicks", confirmedClicks);
         data.put("outcome_uncertain", uncertain);
         data.put("mechanical_retry_allowed", !uncertain && confirmedClicks == 0);
         data.put("boundary_close_requested", boundaryCloseRequested);
