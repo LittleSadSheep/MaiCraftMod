@@ -25,6 +25,7 @@ final class BlueprintTestNative {
     }
     static JsonObject apply(ServerLevel world, MachineConstructionPlan plan) {
         var result = new JsonObject(); var errors = new JsonArray(); int changed = 0;
+        var deferredUpdates = new HashSet<BlockPos>();
         var retained = new HashSet<BlockPos>();
         // 修改只触及真实差异；整份蓝图重交也不能把运行中的旧皮带改回准备轴并清掉带上工件。
         for (var installation : plan.installations()) if (installation.matches(world)) retained.addAll(installation.targets().keySet());
@@ -36,7 +37,16 @@ final class BlueprintTestNative {
             if (retained.contains(target.pos())) continue;
             try {
                 world.getChunkAt(target.pos());
-                if (world.setBlock(target.pos(), target.desiredState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE)) changed++;
+                var before = world.getBlockState(target.pos());
+                if (!before.equals(target.desiredState()) && NativeApi.is(world.getBlockEntity(target.pos()),
+                        "com.simibubi.create.content.kinetics.base.KineticBlockEntity")) {
+                    // 改已有齿轮箱或轴的朝向时走 Create 的拆接网络回调，不能只改外观后留下旧动力关系。
+                    NativeApi.call(null, "com.simibubi.create.content.kinetics.base.KineticBlockEntity", "switchToBlockState",
+                            world, target.pos(), target.desiredState());
+                    if (!world.getBlockState(target.pos()).equals(before)) changed++;
+                } else if (world.setBlock(target.pos(), target.desiredState(), Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE)) {
+                    changed++; deferredUpdates.add(target.pos());
+                }
             } catch (RuntimeException failure) { errors.add(target.pos() + ": " + failure); }
         }
         int installationIndex = 0;
@@ -53,6 +63,8 @@ final class BlueprintTestNative {
         for (BlockPos at : plan.positions()) {
             var state = world.getBlockState(at);
             state.updateNeighbourShapes(world, at, Block.UPDATE_ALL);
+            // 批量生成时延后的间接邻接也必须补齐；Create 正是在这里清旧网络并登记下一刻的动力重算。
+            if (deferredUpdates.contains(at)) state.updateIndirectNeighbourShapes(world, at, Block.UPDATE_ALL);
             world.updateNeighborsAt(at, state.getBlock());
             if (!state.getFluidState().isEmpty()) world.scheduleTick(at, state.getFluidState().getType(), state.getFluidState().getType().getTickDelay(world));
         }
