@@ -259,7 +259,13 @@ final class SemanticBuildSupplyCompanionTask
             return TaskState.FAILED;
         }
 
-        if (result != null && result.data() != null) finalBuildData = Map.copyOf(result.data());
+        if (result != null) {
+            // 补料成功后再次施工可能因寻路超时结束；保留最后一次子任务的状态与原文，不能被早先的缺料盖住。
+            var latest = new LinkedHashMap<String, Object>(result.data());
+            latest.put("task_state", terminal.name().toLowerCase()); latest.put("task_message", result.message());
+            latest.put("timed_out", result.timedOut() || terminal == TaskState.TIMEOUT);
+            latest.put("interrupted", result.interrupted()); finalBuildData = Map.copyOf(latest);
+        }
         batchVerified = batchCompleted(terminal, result) && !buildOutcomeUncertain;
         if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return TaskState.RUNNING;
         String childCode = result == null || result.data() == null
@@ -282,11 +288,10 @@ final class SemanticBuildSupplyCompanionTask
                 return TaskState.RUNNING;
             }
         }
-        stopFromChild("construction_batch_failed",
-                progress
-                        ? "construction stopped after a non-material failure; no blind retry was attempted"
-                        : "construction made no verified progress; no blind retry was attempted",
-                result, FailureType.UNKNOWN);
+        stopFromChild(terminal == TaskState.TIMEOUT ? "construction_batch_timeout" : "construction_batch_failed",
+                "construction child ended as " + terminal.name().toLowerCase()
+                        + (result == null ? "" : ": " + result.message()),
+                result, terminal == TaskState.TIMEOUT ? FailureType.TIMED_OUT : FailureType.UNKNOWN);
         return TaskState.FAILED;
     }
 
