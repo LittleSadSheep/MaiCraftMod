@@ -41,6 +41,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     private Task child;
     private TaskRecord childRecord;
     private PortalPreparationSupplies.Need supplyNeed;
+    private Map<String, Object> blockedFacts;
     private BlockPos supplyOrigin, activationTarget, activationStance;
     private PortalActivation activation;
     private Vec3 activationAim;
@@ -117,7 +118,9 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         if (site != null) { survey.close(); return TaskState.RUNNING; }
         if (!survey.complete()) { r.extendDeadlineTo(r.getDeadlineGameTime() + 1); return TaskState.RUNNING; }
         if (!end) return blocked(r.mayAlterTerrain ? "portal_site_unavailable" : "portal_construction_permission_required",
-                "No reusable frame or suitable loaded construction site was found; construction needs may_alter_terrain=true.");
+                "No reusable frame or suitable loaded construction site was found within radius " + r.radius
+                        + " (loaded chunks only); travel toward more loaded terrain near water or lava, or widen the search, before retrying."
+                        + (r.mayAlterTerrain ? "" : " Construction also needs may_alter_terrain=true."));
         if (searchedStronghold) return blocked("end_portal_frame_incomplete", "No intact, correctly oriented End portal ring was observed after reaching the stronghold.");
         if (!r.policy.allowRareConsumables()) return blocked("rare_consumable_permission_required", "Finding a stronghold may consume Eyes of Ender.");
         var eyes = PortalPreparationSupplies.eyes(4);
@@ -202,12 +205,28 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     }
 
     private TaskState blocked(String code, String message) {
-        issue = code; fail(message == null ? code : message, FailureType.TARGET_LOST); return TaskState.FAILED;
+        issue = code;
+        // 失败回执自带"卡在哪"：阶段、站位、扫描范围与该阶段的关键缺口，
+        // 模型据此能直接判断下一步，不用再盲查世界状态（009）。
+        var facts = new LinkedHashMap<String, Object>();
+        facts.put("phase", phase.name().toLowerCase(Locale.ROOT));
+        facts.put("dimension", world.dimension().location().toString());
+        facts.put("feet", List.of(player.getX(), player.getY(), player.getZ()));
+        if (site != null) {
+            facts.put("missing_blocks", site.missingBlocks(world).size());
+            if (end) facts.put("missing_eyes",
+                    site.end().missingEyes(p -> PortalPreparationSite.read(world, p)).size());
+        }
+        if (supplyNeed != null) facts.put("supply_purpose", supplyNeed.purpose());
+        facts.put("survey_radius", r.radius);
+        blockedFacts = Map.copyOf(facts);
+        fail(message == null ? code : message, FailureType.TARGET_LOST); return TaskState.FAILED;
     }
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>(childEvidence);
         data.put("portal_prepared", complete); data.put("preparation_phase", phase.name().toLowerCase(Locale.ROOT));
         if (issue != null) { data.put("issue_code", issue); data.put("requires_decision", true); }
+        if (blockedFacts != null) data.put("blocked_facts", blockedFacts);
         return data;
     }
     @Override public Map<String, Object> progress() {
