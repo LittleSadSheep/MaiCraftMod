@@ -110,8 +110,9 @@ public final class ShearingDropReceiptTest {
             var need = ActorControlTestHarness.field(SemanticAcquireCompanionTask.class, "rootNeed").get(task);
             var nearby = SemanticAcquireCompanionTask.class.getDeclaredMethod("attemptNearby", need.getClass());
             nearby.setAccessible(true); nearby.invoke(task, need);
-            check(captured[0] != null && captured[0].targetUuids.equals(Set.of(owned.getUUID())),
-                    "附近未知羊毛被跳过，确认产物按精确身份交给同一拾取子任务");
+            // 剪毛证据只用于观察产物；来源未知的同色羊毛也交给原生拾取，不要求先获得归属许可。
+            check(captured[0] != null && captured[0].targetUuids.equals(Set.of(owned.getUUID(), other.getUUID())),
+                    "确认剪毛产物与未知来源羊毛都交给同一拾取子任务");
         } finally {
             if (previous == null) runners.remove(CollectItemsTaskRecord.class); else runners.put(CollectItemsTaskRecord.class, previous);
         }

@@ -161,6 +161,8 @@ public final class GuiRegressionSuite {
         // 嵌套取材只扫描已声明的附近范围，空搜加工设备不能把整片已加载世界都扫一遍。
         MiningSearchScopeTest.main(args);
         MiningOutputBudgetTest.main(args);
+        // 先验证来源未知、其他实体归属及旧堆合并仍可拾取，完成数必须等待真实背包同步。
+        DroppedItemPickupTest.main(args);
         ExactHarvestTest.main(args);
         // 身体门槛属于全局前置，不能被工作台选址和上层材料来源循环吞掉。
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
@@ -300,7 +302,7 @@ public final class GuiRegressionSuite {
         ItemUseTimingTest.main(args);
         ObservedRecipeStockCostTest.main(args);
         RecipeMaterialPlanTest.main(args);
-        // 剪毛后的取料必须能辨认本次产物，同时保持原生拾取和旧物品保护边界。
+        // 剪毛回执继续区分产物观察与实际入包，附近取料无需先证明掉落物归属。
         ShearingDropReceiptTest.main(args);
         AcquisitionWirelessInventoryTest.main(args);
         // 缺料先检查允许访问的随身背包，未知库存和未结效果不会把角色驱去别处采集。
