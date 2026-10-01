@@ -32,7 +32,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 public final class ContainerBatchReplanTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        fullStacksThenThirtyThree(); partialStackThenOne(); externalChangeDoesNotReplan(); nativeSlotCapacityAndCursorGuard();
+        fullStacksThenThirtyThree(); partialStackThenOne(); externalChangeReplansAfterConfirmation(); nativeSlotCapacityAndCursorGuard();
         System.out.println("ContainerBatchReplanTest: 1121-item reverse quick moves, live remainder allocation, conservation and cursor guards passed");
     }
     private static void fullStacksThenThirtyThree() throws Exception {
@@ -70,16 +70,18 @@ public final class ContainerBatchReplanTest {
                     "partial stacks preserve the original quantity and the native source remainder");
         }
     }
-    private static void externalChangeDoesNotReplan() throws Exception {
-        // 别人改过箱子后不能把新状态吞进重规划，继续执行尚未确认的旧取料请求。
+    private static void externalChangeReplansAfterConfirmation() throws Exception {
+        // 上笔搬运已确认、下笔尚未提交时，以箱内实际新槽位重分配原请求，不能机械重放旧整堆点击。
         try (var fixture = new Fixture(128, 192)) {
             var first = fixture.next(); fixture.apply(first); fixture.confirm();
-            fixture.stock.setItem(0, new ItemStack(Items.STONE_BRICKS, 1));
+            fixture.stock.setItem(1, new ItemStack(Items.STONE_BRICKS, 1));
             invoke(fixture.task, "transfer");
-            check("menu_changed_externally".equals(field(SemanticContainerCompanionTask.class, "failureCode").get(fixture.task)),
-                    "replanning cannot absorb an unconfirmed or external inventory change");
-            check(field(SemanticContainerCompanionTask.class, "activeRecord").get(fixture.task) == null,
-                    "no new native transfer may be dispatched after the stable fingerprint diverges");
+            check(field(SemanticContainerCompanionTask.class, "failureCode").get(fixture.task) == null,
+                    "settled menu changes refresh the still-authorized request internally");
+            var next = (ContainerTransferTaskRecord) field(SemanticContainerCompanionTask.class, "activeRecord").get(fixture.task);
+            check(next != null && next.moves.getFirst().count() <= fixture.menu.getSlot(next.moves.getFirst().from()).getItem().getCount()
+                            && !(next.moves.getFirst().from() == 1 && next.moves.getFirst().count() == 64),
+                    "the now-short source cannot replay the old full-stack click; remaining stock receives a fresh allocation");
         }
     }
     private static void nativeSlotCapacityAndCursorGuard() throws Exception {
@@ -130,6 +132,9 @@ public final class ContainerBatchReplanTest {
             Class<?> candidate = Class.forName(SemanticContainerCompanionTask.class.getName() + "$Candidate");
             var constructor = candidate.getDeclaredConstructors()[0]; constructor.setAccessible(true);
             field(SemanticContainerCompanionTask.class, "target").set(task, constructor.newInstance(target, ResourceLocation.parse("minecraft:barrel"), false));
+            // 此夹具跳过正常选箱，补齐当次选箱的维度和时间事实，回执才能说明原生批次来自哪个容器。
+            field(SemanticContainerCompanionTask.class, "targetDimension").set(task, world.level.dimension().location().toString());
+            field(SemanticContainerCompanionTask.class, "targetObservedAt").setLong(task, world.level.getGameTime());
             Method classify = SemanticContainerCompanionTask.class.getDeclaredMethod("classify", AbstractContainerMenu.class); classify.setAccessible(true);
             field(SemanticContainerCompanionTask.class, "view").set(task, classify.invoke(task, menu));
             field(SemanticContainerCompanionTask.class, "expectedContainerId").setInt(task, menu.containerId);

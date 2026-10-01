@@ -84,9 +84,12 @@ public final class InventoryDepositCoordinatorTest {
                     && changed.receipt().get("failure_code").equals("excavation_spoil_inventory_changed_before_deposit"), "inventory loss cannot be hidden by depositing retained items");
             h.inventory.getItem(0).setCount(10); supply.begin(h.player, "cursor", 1000, Map.of(DIRT, 6), List.of(), 16);
             h.player.inventoryMenu.setCarried(new ItemStack(Items.DIRT));
-            check(supply.tick(h.player, ignored -> { throw new AssertionError("foreign cursor must not be touched"); }).status() == InventoryDepositCoordinator.Status.FAILED
-                    && h.player.inventoryMenu.getCarried().getCount() == 1, "stranger cursor is neither cleared nor used as spoil");
-            check(h.blockUses() == 0 && h.itemUses() == 0, "rejection does not discard or move any items");
+            // 只注入原生关闭入口，先保持返料同步尚未到达；协调器不得把光标物品当成本次可存余料。
+            int[] closes = {0}; var nativeClose = h.player.getClass().getDeclaredField("menuClose"); nativeClose.setAccessible(true);
+            nativeClose.set(h.player, (Runnable) () -> closes[0]++);
+            check(supply.tick(h.player, ignored -> { throw new AssertionError("cursor cleanup must finish before storage work"); }).status() == InventoryDepositCoordinator.Status.RUNNING
+                    && h.player.inventoryMenu.getCarried().getCount() == 1 && closes[0] == 1, "stranger cursor waits for native return without becoming spoil");
+            check(h.blockUses() == 0 && h.itemUses() == 0, "native GUI cleanup does not discard or deposit the cursor stack");
         }
     }
     private static void rejectsUnrelatedOrUnbalancedReceipts() {
