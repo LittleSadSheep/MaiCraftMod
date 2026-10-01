@@ -70,9 +70,7 @@ public final class DebugHudController {
                 "none".equals(menu) ? ChatFormatting.GRAY : ChatFormatting.AQUA));
         // 最近一次 UNCERTAIN 的消费可能已发生；面板只提示保留现场，核验仍以真实背包与方块为准。
         MenuReceipt.UncertainSnapshot uncertain = MenuReceipt.lastUncertain();
-        rows.add(new MaiCraftStatus.StatusRow("Uncertain", uncertain == null ? "无记录"
-                        : uncertain.kind() + (uncertain.slot() >= 0 ? " slot=" + uncertain.slot() : "")
-                        + " @t" + uncertain.submittedTick() + " · " + clamp(uncertain.detail()),
+        rows.add(new MaiCraftStatus.StatusRow("未定回执", uncertainText(uncertain),
                 uncertain == null ? ChatFormatting.GRAY : ChatFormatting.RED));
         // 扫描截断计数大于零说明最近有"预算内没扫完"的查询；缺席结论要先看这里。
         TargetIndex.BudgetCounters scan = TargetIndex.budgetCounters();
@@ -81,6 +79,21 @@ public final class DebugHudController {
                         + " · 构建预算耗尽 " + scan.buildBudgetExhausted(),
                 truncated ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
         return List.copyOf(rows);
+    }
+
+    // 菜单回执停在"无法证明服务器是否已执行"时进入 UNCERTAIN：消费可能已发生，先对账真实世界再决定。
+    private static String uncertainText(MenuReceipt.UncertainSnapshot uncertain) {
+        if (uncertain == null) return "无";
+        String kind = switch (uncertain.kind()) {
+            case CLICK -> "点击";
+            case SWAP_TO_HOTBAR -> "换快捷栏";
+            case PLACE_RECIPE -> "摆配方";
+            case CLOSE -> "关闭界面";
+            case BUTTON -> "按钮";
+        };
+        return kind + (uncertain.slot() >= 0 ? " 槽" + uncertain.slot() : "")
+                + " · 第" + uncertain.submittedTick() + "刻提交 · 预算" + uncertain.timeoutTicks()
+                + "刻 · " + clamp(uncertain.detail());
     }
 
     // 面板单行放不下的原因说明截断到 96 字符；完整文本在回执的审计日志里。
