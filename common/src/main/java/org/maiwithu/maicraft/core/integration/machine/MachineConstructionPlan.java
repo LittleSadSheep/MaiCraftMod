@@ -34,7 +34,6 @@ import net.minecraft.world.level.block.LiquidBlock;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.core.integration.create.CreateProcessingCapabilities;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltInstallation;
-import org.maiwithu.maicraft.core.integration.create.CreateFunnelPlacement;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineNativeInstallation;
 import org.maiwithu.maicraft.core.blueprint.ConstructionOwnership;
@@ -96,7 +95,7 @@ public final class MachineConstructionPlan {
             JsonObject row = new JsonObject(); row.add("offset", MachineAssemblyDocument.json(target.pos().subtract(anchor)));
             JsonArray needs = new JsonArray();
             for (BlockPos support : required) {
-                if (finals.containsKey(support)) CreateFunnelPlacement.validate(target.desiredState(), finals.get(support));
+                // 承载依赖只决定先后顺序；漏斗最终形态由原生邻接结算，再交整机 diff，不能在这里预测拒绝设计。
                 needs.add(MachineAssemblyDocument.json(support.subtract(anchor)));
             }
             row.add("requires", needs); dependencyReport.add(row);
@@ -340,8 +339,8 @@ public final class MachineConstructionPlan {
     private static BuildTaskRecord.Target placementTarget(BuildTaskRecord.Target target) {
         String id = BuiltInRegistries.BLOCK.getKey(target.block()).toString();
         Set<String> properties = new LinkedHashSet<>(target.exactProperties());
-        if (id.equals("create:brass_tunnel") || id.equals("create:andesite_tunnel")) {
-            // 隧道会按相邻带段自动变成直通、T 形或十字；已放下同向隧道是明确动作效果，形态不同不是未知结果。
+        if (Set.of("create:brass_tunnel", "create:andesite_tunnel", "create:brass_belt_funnel", "create:andesite_belt_funnel").contains(id)) {
+            // 隧道和带漏斗会按相邻皮带改变 shape；原生放下同向部件是明确效果，保留原图供随后比较形态差异。
             properties.remove("shape");
             Set<String> finals = new LinkedHashSet<>(target.finalProperties() == null ? properties : target.finalProperties());
             finals.remove("shape");
@@ -361,8 +360,9 @@ public final class MachineConstructionPlan {
     public Map<BlockPos, List<BlockPos>> placementDependencies() { return placementDependencies; }
     public List<List<BuildTaskRecord.Target>> attachmentLayers() { return attachmentLayers; }
     public void validatePlacementDependency(Level world, BlockPos at) {
+        // 只确认承载格能被真实读取，不以预测的漏斗形态替代本次原生放置和事后状态观察。
         for (BlockPos support : placementDependencies.getOrDefault(at, List.of()))
-            CreateFunnelPlacement.validate(targetsByPosition.get(at).desiredState(), world.getBlockState(support));
+            if (!world.isLoaded(support)) throw new IllegalArgumentException("placement_support_unloaded: " + support);
     }
     public BuildTaskRecord attachmentTask(int index, String callId, long deadline, boolean consume) {
         // 附件仍走已有的生存放置、材料补给和真实回执；所有已建成的计划格都保护为补料禁挖区。
