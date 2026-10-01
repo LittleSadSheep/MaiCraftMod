@@ -15,6 +15,10 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.CraftingMenu;
+import net.minecraft.world.inventory.ContainerLevelAccess;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
@@ -70,6 +74,31 @@ public final class CraftingPlacementPlanTest {
             check(plan.getFirst().sample().is(Items.BIRCH_PLANKS) && plan.getLast().sample().is(Items.OAK_PLANKS),
                     "overlapping ingredients receive a complete allocation");
             check(h.inventory.countItem(Items.OAK_PLANKS) == 1 && menu.getSlot(1).getItem().isEmpty(), "planning never moves materials");
+            // 两格相同原料必须共用同一份堆叠容量，一件木板不能被重复预约给两个合成格。
+            var repeated = new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(Items.STICK),
+                    NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.OAK_PLANKS), Ingredient.of(Items.OAK_PLANKS)));
+            check(CraftingPlacementPlan.create(h.player, repeated, grid).isEmpty(), "one item cannot satisfy two input slots");
+            h.inventory.setItem(0, new ItemStack(Items.COAL)); h.inventory.setItem(1, new ItemStack(Items.STICK));
+            var table = new CraftingMenu(4, h.inventory, ContainerLevelAccess.NULL); h.player.containerMenu = table;
+            var tableGrid = (CraftingContainer) table.getSlot(1).container;
+            plan = CraftingPlacementPlan.create(h.player, torch.value(), tableGrid);
+            check(plan.getFirst().targetSlot() == 1 && plan.getLast().targetSlot() == 4,
+                    "the same vertical recipe uses the actual three-column table stride");
+            // 形状中的空格仍留空，不能因压缩非空材料表而把对角输入挤到同一行。
+            var holes = new ShapedRecipe("", CraftingBookCategory.MISC, ShapedRecipePattern.of(
+                    Map.of('A', Ingredient.of(Items.COAL), 'B', Ingredient.of(Items.STICK)), List.of("A ", " B")),
+                    new ItemStack(Items.TORCH));
+            plan = CraftingPlacementPlan.create(h.player, holes, tableGrid);
+            check(plan.getFirst().targetSlot() == 1 && plan.getLast().targetSlot() == 5, "shaped holes survive a larger crafting surface");
+            // 实际菜单拒绝拿取煤时，煤仍然在背包中；必须报告原生槽位条件，不能将它归类为缺煤。
+            int coalSlot = plan.getFirst().sourceSlot();
+            table.slots.set(coalSlot, new Slot(h.inventory, 0, 0, 0) {
+                @Override public boolean mayPickup(Player player) { return false; }
+            });
+            boolean rejected = false;
+            try { CraftingPlacementPlan.create(h.player, holes, tableGrid); }
+            catch (IllegalStateException nativeCondition) { rejected = nativeCondition.getMessage().contains("materials are present"); }
+            check(rejected && h.inventory.countItem(Items.COAL) == 1, "native pickup restrictions do not become material shortage");
         } finally { registry.bindTags(previous); }
         System.out.println("CraftingPlacementPlanTest: passed");
     }
