@@ -85,6 +85,7 @@ import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest;
 import org.maiwithu.maicraft.core.task.mine.MiningBatchTest;
 import org.maiwithu.maicraft.core.task.mine.MiningToolRequirementTest;
 import org.maiwithu.maicraft.core.task.mine.NaturalTreeSourceTest;
+import org.maiwithu.maicraft.core.task.mine.NearbyMaterialSourcesTest;
 import org.maiwithu.maicraft.core.task.mine.NoPathVerdictTest;
 import org.maiwithu.maicraft.core.task.move.MoveToContractTest;
 import org.maiwithu.maicraft.core.task.move.MoveToTransportCompletionTest;
@@ -129,6 +130,8 @@ public final class NavigationRegressionSuite {
         NavigationScaffoldPlacementPolicyTest.main(args);
         MiningBatchTest.main(args);
         NaturalTreeSourceTest.main(args);
+        // 配方前置观察与采矿共用天然树规则，核对保护、半径和未加载来源不会被误记为材料。
+        NearbyMaterialSourcesTest.main(args);
         NoPathVerdictTest.main(args);
         MiningToolRequirementTest.main(args);
         LocalFloorSenseTest.main(args);
