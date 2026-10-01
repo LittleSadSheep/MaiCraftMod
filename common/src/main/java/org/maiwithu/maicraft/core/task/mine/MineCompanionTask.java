@@ -191,6 +191,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private BlockPos lastProgressPos;
 
     private NoPathVerdict failedPath;
+    private int noPathRetries;
     private NoPathVerdict pathAttempt;
     /** 上一次索引查询是否覆盖完整(构建预算未耗尽)。false = 冷区域仍在渐进构建,
      *  终局判定("附近没有目标")必须等它为 true 才能下。 */
@@ -457,7 +458,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                         failedPath = null;
                         return TaskState.RUNNING;
                     }
-                    if (lastQueryComplete) return exhaustedPath();
+                    if (lastQueryComplete) {
+                        // 目标还在名单上时，单次失败先重规划一次；真实无路会在第二次同样失败。
+                        if (transientPathFailureWorthRetry()) return TaskState.RUNNING;
+                        return exhaustedPath();
+                    }
                     queryCooldown = 0;
                     return TaskState.RUNNING;
                 }
@@ -968,6 +973,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.FAILED;
     }
 
+    /** 同证据下的第一次 NO_PATH 常是瞬时的（砂砾掉落改变地形、路径缓存失效）；重规划一次再定论。 */
+    private boolean transientPathFailureWorthRetry() {
+        if (noPathRetries >= 1 || knownOres.isEmpty()) return false;
+        noPathRetries++;
+        failedPath = null;
+        queryCooldown = 0;
+        stopNav();
+        return true;
+    }
+
     // 确认挖掉目标才记收获位置并等掉落物；只拆掉遮挡物算有进展，却不计目标完成数。
     // 连续多次找不到可挖面才暂时略过该格，不把一次瞄准困难立即当成永远不可达。
     private void acceptDigResult(BlockPos target, BlockDigger.DigResult result) {
@@ -1248,6 +1263,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private void noteProgress() {
         lastProgressTick = player.level().getGameTime();
         lastProgressPos = feet();
+        noPathRetries = 0;
         r.extendDeadlineTo(lastProgressTick + PROGRESS_LEASE_TICKS);
     }
 
