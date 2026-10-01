@@ -101,7 +101,7 @@ public final class NearbyMaterialSources {
                 }).toList();
         return Map.of("scan_finished", complete, "scope", "loaded_cells_within_acquisition_radius",
                 "center", List.of(center.getX(), center.getY(), center.getZ()), "radius", radius,
-                "inspected_cells", inspectedCells, "unloaded_cells", unloadedCells,
+                "inspected_cell_count", inspectedCells, "unloaded_cell_count", unloadedCells,
                 "unloaded_tree_evidence", unloadedTreeEvidence, "sources", sources,
                 "inventory_credit", 0);
     }

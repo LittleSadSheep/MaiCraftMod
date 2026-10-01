@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import org.maiwithu.maicraft.intent.SemanticResultView;
 
 /** 先看现场再选配方：木梁不能抢过野生树，观察不加载区块也不增加材料库存。 */
 public final class NearbyMaterialSourcesTest {
@@ -61,6 +62,11 @@ public final class NearbyMaterialSourcesTest {
             finish(incomplete);
             check(incomplete.nearest(Set.of(Blocks.BIRCH_LOG)).isEmpty()
                     && Boolean.TRUE.equals(incomplete.describe().get("unloaded_tree_evidence")), "未加载树根不能被推断为天然树");
+            // 未加载范围会影响选料判断，经过默认语义回执整理后也必须保留，不能被当成内部几何删掉。
+            var publicEvidence = SemanticResultView.data(Map.of("nearby_material_sources", incomplete.describe()));
+            var publicScan = (Map<?, ?>) publicEvidence.get("nearby_material_sources");
+            check(((Number) publicScan.get("unloaded_cell_count")).intValue() > 0
+                    && publicScan.containsKey("inspected_cell_count"), "默认回执必须保留来源扫描的不确定范围");
             check(scene.blockEntityReads == 0, "来源观察不打开箱子或读取机器库存");
         } finally {
             BuiltInRegistries.BLOCK.bindTags(original);
