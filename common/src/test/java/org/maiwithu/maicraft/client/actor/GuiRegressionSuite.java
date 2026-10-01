@@ -181,6 +181,8 @@ public final class GuiRegressionSuite {
         ChatSubmissionHistoryTest.main(args);
         ChatTypingTest.main(args);
         ChatSessionTest.main(args);
+        // 聊天被界面挡住时由执行器原生关闭并续发，旧物品事务和消息提交各自只结算一次。
+        ChatGuiPreparationTest.main(args);
         ChatAbilityTest.main(args);
         MenuVisibilityTest.main(args);
         MenuConfirmationLatencyTest.main(args);

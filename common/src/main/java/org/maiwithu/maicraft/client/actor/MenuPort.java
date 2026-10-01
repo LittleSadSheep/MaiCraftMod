@@ -6,6 +6,9 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 
 /** 菜单操作接口：前一次还没结束就不能点下一次；查询结果本身不发新点击。 */
 public interface MenuPort {
+    /** 聊天等后继动作先等已提交的搬运或关闭结清，不能用新界面打断物品同步。 */
+    boolean hasPendingTransaction();
+
     /** 必要时显示玩家背包，并等对应界面真正可操作。 */
     boolean ensureVisible(LocalPlayerContext context);
 

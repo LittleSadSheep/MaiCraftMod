@@ -67,6 +67,7 @@
 | 传送门准备和激活 | `:common:portalRegression` |
 | 战斗与自卫证据 | `:common:combatRegression` |
 | 地面拾取、混堆与战斗掉落收场 | `:common:pickupRegression` |
+| 聊天界面收尾、草稿交接与持久提交 | `:common:chatRegression` |
 | 知识目录与只读 HTTP | `:common:knowledgeRegression` |
 
 新测试要接入相应入口；只创建一个带 `main` 的测试类，Gradle 不会自动知道要运行它。
