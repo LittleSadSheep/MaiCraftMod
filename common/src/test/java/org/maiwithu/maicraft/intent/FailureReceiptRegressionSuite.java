@@ -6,7 +6,7 @@ import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.MachineMenuRecoveryTest;
 import org.maiwithu.maicraft.client.actor.CraftingGridPlacementTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuObservationTest;
-import org.maiwithu.maicraft.core.integration.machine.MachineOwnedReplacementTest;
+import org.maiwithu.maicraft.core.integration.machine.MachineDeclaredReplacementTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ServerSupplyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.PreserveProbeRecoveryTest;
 import org.maiwithu.maicraft.core.task.build.BuildClearanceSurveyTest;
@@ -30,7 +30,7 @@ public final class FailureReceiptRegressionSuite {
         BuildClearanceSurveyTest.main(args); BuildFailureEvidenceTest.main(args);
         BuildClearanceExecutionTest.main(args);
         MachineModificationClearanceTest.main(args);
-        MachineOwnedReplacementTest.main(args);
+        MachineDeclaredReplacementTest.main(args);
         System.out.println("FailureReceiptRegressionSuite: passed");
     }
 }

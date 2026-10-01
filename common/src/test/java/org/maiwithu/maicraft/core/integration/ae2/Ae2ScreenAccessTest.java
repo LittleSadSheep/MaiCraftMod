@@ -48,6 +48,8 @@ public final class Ae2ScreenAccessTest {
         MenuPort menus = (MenuPort) Proxy.newProxyInstance(MenuPort.class.getClassLoader(),
                 new Class<?>[]{MenuPort.class}, (proxy, method, values) -> {
                     if (method.getName().equals("ensureVisible")) { openings[0]++; return false; }
+                    // 无关模态页挡下世界可见准备（生产端会尝试原生的关页），聊天页照常放行。
+                    if (method.getName().equals("ensureWorldVisible")) return !(minecraft.screen instanceof PauseScreen);
                     throw new AssertionError("must not close or operate an unrelated GUI: " + method.getName());
                 });
         LocalPlayerContext context = (LocalPlayerContext) Proxy.newProxyInstance(LocalPlayerContext.class.getClassLoader(),
@@ -65,7 +67,8 @@ public final class Ae2ScreenAccessTest {
         minecraft.screen = (PauseScreen) memory.allocateInstance(PauseScreen.class);
         var modal = new Ae2SupplySession(player, request, bridge);
         invoke(modal, "start", context);
-        check(modal.outcome().orElseThrow().code().equals("screen_open"), "unrelated dialogs remain protected");
+        check(modal.outcome().isEmpty() && modal.phase().equals("start"),
+                "unrelated dialogs make the session yield quietly without operations");
         minecraft.screen = (ChatScreen) memory.allocateInstance(ChatScreen.class);
         var cleanup = new Ae2SupplySession(player, request, bridge);
         invoke(cleanup, "cleanClose", context);
