@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import java.util.Objects;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -40,6 +42,26 @@ public final class MachineBlueprintDiff {
         targets = List.copyOf(ordered);
     }
     public int size() { return targets.size(); }
+    /** 比较已保存的最终目标时，不再重跑材料、依赖、带段重叠或施工准入检查。 */
+    public MachineBlueprintDiff(BlockPos at, JsonArray definitions) {
+        anchor = at.immutable(); var ordered = new ArrayList<Target>();
+        for (var raw : definitions) {
+            var row = raw.getAsJsonObject(); BlockPos position = anchor.offset(MachineAssemblyDocument.position(row.get("offset")));
+            if (row.has("part")) {
+                String side = row.get("part").getAsString(), item = row.get("item_id").getAsString();
+                var spec = MachineInstallation.aePart(item, side.equals("center") ? null : Direction.byName(side));
+                ordered.add(new Target(position, null, item, side, (world, actual) -> MachineInstallation.matches(world, position, spec)));
+            } else {
+                var properties = MachineAssemblyDocument.properties(row);
+                var desired = MachinePlacementRules.resolveState(row.get("block_id").getAsString(), properties);
+                ordered.add(new Target(position, desired, null, null, (world, actual) -> actual.getBlock() == desired.getBlock()
+                        && properties.keySet().stream().allMatch(name -> Objects.equals(actual.getValues().get(desired.getBlock().getStateDefinition().getProperty(name)),
+                                desired.getValues().get(desired.getBlock().getStateDefinition().getProperty(name))))));
+            }
+        }
+        ordered.sort(Comparator.comparing(Target::position).thenComparing(target -> target.side() == null ? "" : target.side()));
+        targets = List.copyOf(ordered);
+    }
     List<BlockPos> positions() { return targets.stream().map(Target::position).distinct().toList(); }
     JsonObject operatingState(Level world, String dimension) { return MachineOperatingState.observe(world, dimension, anchor, positions()); }
     JsonArray targetOffsets() { var result = new JsonArray(); positions().forEach(at -> result.add(offset(at.subtract(anchor)))); return result; }
