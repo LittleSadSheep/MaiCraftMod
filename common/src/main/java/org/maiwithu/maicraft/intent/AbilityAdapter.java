@@ -514,8 +514,10 @@ final class AbilityAdapter {
         String milestone = string(parameters, "milestone");
         Goal.SemanticTarget target = goal.target();
         if (milestone == null && target != null) milestone = target.label();
+        // 契约文档写的是 "Nether, stronghold..."；大小写在此规范化，不因首字母大写多烧一轮决策。
+        var normalized = milestone == null ? null : milestone.strip().toLowerCase(Locale.ROOT);
         if (!List.of("nether", "stronghold", "defeat_dragon", "elytra")
-                .contains(milestone)) {
+                .contains(normalized)) {
             return decision(goal,
                     "reach_milestone needs milestone=nether, stronghold, defeat_dragon or elytra. MaiCraft derives the private prerequisite chain.",
                     List.of(
@@ -523,7 +525,7 @@ final class AbilityAdapter {
                             option("cancel", "Cancel progression.")));
         }
         JsonObject args = new JsonObject();
-        args.addProperty("milestone", milestone);
+        args.addProperty("milestone", normalized);
         args.addProperty("max_search_distance",
                 integer(parameters, "max_search_distance", 4_096, 128, 4_096));
         args.addProperty("max_portal_search_radius",

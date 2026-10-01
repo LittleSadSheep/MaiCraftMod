@@ -29,6 +29,15 @@ public final class PortalPreparationContractTest {
                     "adaptation preserves every preparation constraint");
             check(SemanticAbilityCatalog.describe(ability).toString().contains("prepare_portal"), "the public contract explains preparation");
         }
+        // 契约文档写 "Nether, stronghold..."；大小写在语义层规范化，直提不再多烧一轮决策。
+        var capitalized = JsonParser.parseString("""
+                {"milestone":"Nether"}
+                """).getAsJsonObject();
+        var normalizedGoal = new Goal("maicraft:reach_milestone", "visit the next dimension", null,
+                capitalized.toString(), "{}", List.of(), List.of());
+        var normalizedAction = (IntentAction.Tool) AbilityAdapter.adapt(normalizedGoal, null, null);
+        check(normalizedAction.arguments().get("milestone").getAsString().equals("nether"),
+                "documented capitalization adapts directly instead of requesting a decision");
         var milestone = new ReachMilestoneTaskRecord("progress", 1200, ReachMilestoneTaskRecord.Milestone.ELYTRA,
                 512, 64, 10, true, true, true, List.of(), MaterialPolicy.INVENTORY_ONLY, List.of("home"), true);
         var travel = new ProgressionChildFactory(null, milestone).travel("minecraft:the_end");
