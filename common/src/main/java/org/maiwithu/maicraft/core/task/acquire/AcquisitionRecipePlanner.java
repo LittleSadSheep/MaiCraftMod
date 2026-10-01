@@ -109,7 +109,8 @@ final class AcquisitionRecipePlanner {
         // 仓库估价只展开普通九格内配方；未知配方不会凭空变成可用材料，也不会阻断其他候选。
         return stockRecipes.computeIfAbsent(output, ignored -> {
             List<ObservedRecipeStockCost.Recipe> result = new ArrayList<>();
-            for (CraftingRecipe recipe : recipes().getOrDefault(output, List.of()).stream().limit(64).toList()) {
+            // 完整候选先进入材料账，再由带偏好的搜索预算决定展开顺序；不能先截掉后面的现货或指定材料路线。
+            for (CraftingRecipe recipe : recipes().getOrDefault(output, List.of())) {
                 try {
                     if (recipe.isSpecial() || recipe instanceof ShapedRecipe shaped
                             && (shaped.getWidth() > 3 || shaped.getHeight() > 3)) continue;
@@ -436,9 +437,7 @@ final class AcquisitionRecipePlanner {
                 && (source.allowedDimensions(SemanticAcquireTaskRecord.Source.MINE).isEmpty()
                     || source.allowedDimensions(SemanticAcquireTaskRecord.Source.MINE).contains(player.level().dimension().location()));
         if (mine && (!hint.blockRefs().isEmpty() || item instanceof BlockItem block && block.getBlock().defaultBlockState().is(BlockTags.LOGS))) {
-            Set<Block> blocks = new LinkedHashSet<>(ToolParse.parseBlocks(hint.blockRefs()));
-            if (item instanceof BlockItem block && block.getBlock().defaultBlockState().is(BlockTags.LOGS))
-                blocks.add(block.getBlock());
+            Set<Block> blocks = miningBlocks(id);
             // 已确认的附近来源按距离获得较低估价；仍只记获取成本，原木和矿物不会凭观察进入库存账。
             int cost = nearbySources == null ? 40 : nearbySources.nearest(blocks)
                     .map(seen -> Math.clamp((int) Math.ceil(Math.sqrt(seen.distanceSquared())), 1, 20)).orElse(40);
@@ -447,6 +446,28 @@ final class AcquisitionRecipePlanner {
         if (allowHarm && parent.allowedSources.contains(SemanticAcquireTaskRecord.Source.HUNT) && !hint.entityTypeIds().isEmpty())
             return new RecipeMaterialPlan.Source(true, 100);
         return new RecipeMaterialPlan.Source(false, 10000);
+    }
+
+    private Set<Block> miningBlocks(ResourceLocation itemId) {
+        var hint = SemanticSourceKnowledge.inferPlan(List.of(itemId)).hint();
+        Set<Block> blocks = new LinkedHashSet<>(ToolParse.parseBlocks(hint.blockRefs()));
+        if (BuiltInRegistries.ITEM.get(itemId) instanceof BlockItem block
+                && block.getBlock().defaultBlockState().is(BlockTags.LOGS)) blocks.add(block.getBlock());
+        return blocks;
+    }
+
+    private List<Map<String, Object>> nearbySupplyEvidence(RecipeMaterialPlan.Result plan) {
+        if (nearbySources == null) return List.of();
+        List<Map<String, Object>> evidence = new ArrayList<>();
+        // 在采集开始前冻结本次选料依据；树被砍掉后，回执仍能解释当时为什么选择这条配方。
+        for (var supply : plan.supplies()) for (var item : supply.alternatives())
+            nearbySources.nearest(miningBlocks(item)).ifPresent(seen -> evidence.add(Map.of(
+                    "item_id", item.toString(), "source_block_id", BuiltInRegistries.BLOCK.getKey(
+                            player.level().getBlockState(seen.position()).getBlock()).toString(),
+                    "position", List.of(seen.position().getX(), seen.position().getY(), seen.position().getZ()),
+                    "distance_squared", seen.distanceSquared(), "natural_tree", seen.naturalTree(),
+                    "observed_game_time", player.level().getGameTime())));
+        return List.copyOf(evidence);
     }
 
     int stockPriority(CraftRecoveryCandidate candidate, AcquisitionNeed parent) {
@@ -460,6 +481,7 @@ final class AcquisitionRecipePlanner {
         return Map.of("feasible", plan.feasible(), "search_complete", plan.searchComplete(), "estimated_cost", plan.cost(),
                 "preferred_materials", preferredMaterials.stream().map(ResourceLocation::toString).sorted().toList(),
                 "preferred_materials_used", plan.preferredMaterialsUsed().stream().map(ResourceLocation::toString).sorted().toList(),
+                "nearby_supply_evidence", nearbySupplyEvidence(plan),
                 "supply_list", plan.supplies().stream().map(need -> Map.of("item_ids", need.alternatives().stream().map(ResourceLocation::toString).toList(), "count", need.count())).toList(),
                 "craft_chain", plan.crafts().stream().map(need -> Map.of("item_ids", need.alternatives().stream().map(ResourceLocation::toString).toList(), "required_output", need.count())).toList());
     }
@@ -481,18 +503,22 @@ final class AcquisitionRecipePlanner {
             if ((deficit == 1 || conversion!=null) && preparation.supplies().size() == 1 && externalStock==0) {
                 // 任一整条树只需再补一件时可共同寻找原料；拿到的那件会选定可完成的完整配方。
                 // 原木到木板这类等产量单料转换合并所有可用木种，让采矿一次搜索最近来源，实际合成再按木种结算。
-                Set<ResourceLocation> items = new LinkedHashSet<>(conversion==null ? supply.alternatives() : conversion.inputs());
+                // 已命中材料倾向时只保留该路线选中的输入，不能在合并木种时重新放宽到未偏好的原木。
+                Set<ResourceLocation> items = new LinkedHashSet<>(conversion == null || !preparation.preferredMaterialsUsed().isEmpty()
+                        ? supply.alternatives() : conversion.inputs());
                 Set<String> alternatives = new LinkedHashSet<>(Set.of(chosen.recipeId()));
                 Set<ResourceLocation> outputs = new LinkedHashSet<>(List.of(chosen.outputItem()));
                 for (var candidate : viableCandidates) {
                     if (candidate.cost().surface() != chosen.cost().surface()) continue;
                     var plan = materialPlan(candidate, parent);
-                    if (!plan.feasible() || plan.cost() != preparation.cost() || plan.supplies().size() != 1 || plan.supplies().getFirst().count() != deficit) continue;
+                    if (!plan.feasible() || RecipeMaterialPlan.ORDER.compare(plan, preparation) != 0
+                            || plan.supplies().size() != 1 || plan.supplies().getFirst().count() != deficit) continue;
                     var next = plan.supplies().getFirst();
                     if (next.alternatives().stream().anyMatch(id -> recipeObservedStock.getOrDefault(id, 0L) > 0)) continue;
                     var other=directUnitConversion(candidate,plan,parent);
                     if(deficit>1 && (other==null || other.outputCount()!=conversion.outputCount()))continue;
-                    items.addAll(deficit>1 ? other.inputs() : next.alternatives()); alternatives.add(candidate.recipeId()); outputs.add(candidate.outputItem());
+                    items.addAll(deficit > 1 && plan.preferredMaterialsUsed().isEmpty() ? other.inputs() : next.alternatives());
+                    alternatives.add(candidate.recipeId()); outputs.add(candidate.outputItem());
                 }
                 return new Frontier(new IngredientNeed(List.copyOf(items), (int)deficit), Set.copyOf(alternatives), List.copyOf(outputs),
                         items.stream().noneMatch(id -> sourceCost(id, parent).known()));

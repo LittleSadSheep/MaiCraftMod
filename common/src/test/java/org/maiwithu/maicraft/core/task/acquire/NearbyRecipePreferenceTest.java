@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.acquire;
 
 import com.google.gson.JsonParser;
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,6 +23,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
@@ -74,6 +76,8 @@ public final class NearbyRecipePreferenceTest {
             for (int tick = 0; tick < 200 && !(observed = planner.observeNearbySources(need, 16)); tick++) world.nextTick();
             check(observed && planner.materialPlan(candidate, need).supplies().getFirst().alternatives().equals(List.of(BIRCH)),
                     "空背包应优先选择附近已确认野生树所支持的配方");
+            check(((List<?>) planner.preparation(candidate, need).get("nearby_supply_evidence")).size() == 1,
+                    "备料回执应保留选中白桦来源的当时证据，不能等砍掉后只剩一个空现场");
             planner.preferMaterials(List.of(OAK));
             check(planner.materialPlan(candidate, need).supplies().getFirst().alternatives().equals(List.of(OAK)),
                     "LLM 可以用材料软偏好覆盖缺料路线的默认现场排序");
@@ -90,9 +94,54 @@ public final class NearbyRecipePreferenceTest {
             check(restricted.observeNearbySources(inventoryOnly, 16)
                     && Boolean.FALSE.equals(restricted.nearbySourceEvidence().get("checked")), "只合成时不追加世界采集观察");
             validatePreferenceApiAndReadyRecipes(world);
+            mergedFrontierPreservesMaterialPreference(world);
+            wideNativeIndexKeepsPreferredInput(world);
             check(world.blockUses() == 0 && world.itemUses() == 0, "只读配方比较不得提前采集或制作");
         } finally { BuiltInRegistries.BLOCK.bindTags(original); }
         System.out.println("NearbyRecipePreferenceTest: passed");
+    }
+
+    private static void mergedFrontierPreservesMaterialPreference(InteractionWorldTestHarness world) {
+        // 任意木板都能交付时，同价的白桦配方不能在合并来源阶段覆盖 LLM 的橡木倾向。
+        world.inventory.clearContent();
+        var outputs = List.of(id("oak_planks"), id("birch_planks"));
+        var need = new AcquisitionNeed(outputs, 4, 0, Set.copyOf(outputs), Set.of(), Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT,
+                        SemanticAcquireTaskRecord.Source.MINE));
+        var oak = new CraftRecoveryCandidate(outputs.get(0), "minecraft:oak_planks",
+                List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(OAK), 1, 1)),
+                new CraftPlanCost(1, CraftPlanCost.Surface.READY, 0, 1, "minecraft:oak_planks"), List.of());
+        var birch = new CraftRecoveryCandidate(outputs.get(1), "minecraft:birch_planks",
+                List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(BIRCH), 1, 1)),
+                new CraftPlanCost(1, CraftPlanCost.Surface.READY, 0, 1, "minecraft:birch_planks"), List.of());
+        var planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
+        planner.preferMaterials(List.of(OAK));
+        var frontier = planner.chooseFrontier(oak, List.of(oak, birch), need);
+        check(frontier.ingredient().itemIds().equals(List.of(OAK)), "同价候选合并不能丢失材料倾向");
+    }
+
+    private static void wideNativeIndexKeepsPreferredInput(InteractionWorldTestHarness world) throws Exception {
+        // 第六十五条才是背包木板可做的木棍路线；模型的橡木提示必须在完整候选中生效。
+        world.inventory.clearContent();
+        world.inventory.setItem(0, new ItemStack(Items.OAK_PLANKS, 2));
+        List<CraftingRecipe> choices = new ArrayList<>();
+        for (int i = 0; i < 64; i++) choices.add(new ShapelessRecipe("", CraftingBookCategory.MISC,
+                new ItemStack(Items.STICK, 4), NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.DIAMOND))));
+        choices.add(new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(Items.STICK, 4),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.OAK_PLANKS), Ingredient.of(Items.OAK_PLANKS))));
+        var planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
+        planner.preferMaterials(List.of(id("oak_planks")));
+        var index = AcquisitionRecipePlanner.class.getDeclaredField("recipeIndex"); index.setAccessible(true);
+        index.set(planner, Map.of(STICK, List.copyOf(choices)));
+        var target = id("stone_pickaxe");
+        var need = new AcquisitionNeed(List.of(target), 1, 0, Set.of(target), Set.of(), Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT));
+        var candidate = new CraftRecoveryCandidate(target, "minecraft:stone_pickaxe",
+                List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(STICK), 2, 2)),
+                new CraftPlanCost(2, CraftPlanCost.Surface.READY, 0, 2, "minecraft:stone_pickaxe"), List.of());
+        var plan = planner.materialPlan(candidate, need);
+        check(plan.feasible() && plan.supplies().isEmpty() && plan.cost() == 1
+                && plan.preferredMaterialsUsed().equals(Set.of(id("oak_planks"))), "较晚登记的现货偏好路线不能被固定条数截掉");
     }
 
     private static void validatePreferenceApiAndReadyRecipes(InteractionWorldTestHarness world) {
