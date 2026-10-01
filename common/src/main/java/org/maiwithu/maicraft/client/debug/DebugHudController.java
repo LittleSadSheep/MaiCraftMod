@@ -71,6 +71,12 @@ public final class DebugHudController {
                     ChatFormatting.GRAY));
         }
 
+        // 事件尾窗是面板唯一的刺激侧窗口：AI 被通知了什么，解释它的自发行为；灰行是 world.* 降权事件。
+        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(4);
+        for (int i = 0; i < events.size(); i++) {
+            rows.add(attentionRow(events.get(i), i == 0));
+        }
+
         boolean inWorld = minecraft.player != null && minecraft.level != null
                 && minecraft.gameMode != null && minecraft.getConnection() != null;
         rows.add(new Row("身体", (inWorld ? "就绪" : "等待世界") + " · " + controlState(inWorld),
@@ -134,9 +140,23 @@ public final class DebugHudController {
         return shortAbility + "：" + clamp(goal.outcome());
     }
 
+    // 时间戳先于类型：陈旧事件一眼可辨，不会被误当成刚才发生的刺激。首行带标签，其余行留空标签续排。
+    private static final java.time.format.DateTimeFormatter EVENT_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss");
+
+    private static Row attentionRow(IntentRuntime.AttentionItem event, boolean labeled) {
+        String text = clamp(EVENT_TIME.format(event.timestamp().atZone(java.time.ZoneId.systemDefault()))
+                + " " + event.type() + ": " + event.message());
+        ChatFormatting color = switch (event.priority()) {
+            case "important" -> ChatFormatting.YELLOW;
+            case "task" -> ChatFormatting.AQUA;
+            default -> ChatFormatting.GRAY;
+        };
+        return new Row(labeled ? "事件" : "", text, color);
+    }
+
     // 决策行要说出在等什么：问题摘要加可选项；只重复"在等决策"没有信息量。
-    private static String decisionText(IntentTaskRecord.DecisionSnapshot decision) {
-        String choices = decision.options().stream()
+    private static String decisionText(IntentTaskRecord.DecisionSnapshot decision) {        String choices = decision.options().stream()
                 .map(IntentTaskRecord.DecisionOption::choice)
                 .collect(Collectors.joining("/"));
         String text = clamp(decision.question(), 40)

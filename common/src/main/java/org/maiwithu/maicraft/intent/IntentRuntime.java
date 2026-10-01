@@ -809,6 +809,14 @@ public final class IntentRuntime {
         return attention.read(afterCursor, limit, streamId, taskId);
     }
 
+    /** 调试面板的只读事件条目：时间、类型、优先级与一句话内容。 */
+    public record AttentionItem(java.time.Instant timestamp, String type, String priority, String message) {}
+
+    /** 最近 limit 条事件按时间升序；纯读尾窗，不碰长轮询与订阅者自己的游标。 */
+    public List<AttentionItem> recentAttention(int limit) {
+        return attention.tail(limit);
+    }
+
     public JsonObject attentionCheckpoint() {
         return attention.checkpoint();
     }

@@ -37,15 +37,21 @@ public final class DebugHudRenderer {
         Font font = minecraft.font;
         int width = 0;
         for (DebugHudController.Row row : rows) {
-            width = Math.max(width, font.width(row.label() + ": ") + font.width(row.value()));
+            width = Math.max(width, font.width(row.label().isBlank() ? "" : row.label() + ": ")
+                    + font.width(row.value()));
         }
         graphics.fill(2, 2, 8 + width, 6 + rows.size() * LINE_HEIGHT, BACKGROUND);
         int y = 6;
         for (DebugHudController.Row row : rows) {
-            String label = row.label() + ": ";
-            graphics.drawString(font, label, 4, y, LABEL);
+            // 空标签是事件尾窗的续行，不画前缀，让多条事件读起来像一段滚动的时间线。
+            int valueX = 4;
+            if (!row.label().isBlank()) {
+                String label = row.label() + ": ";
+                graphics.drawString(font, label, 4, y, LABEL);
+                valueX = 4 + font.width(label);
+            }
             ChatFormatting color = row.color();
-            graphics.drawString(font, row.value(), 4 + font.width(label), y,
+            graphics.drawString(font, row.value(), valueX, y,
                     color.getColor() == null ? 0xFFFFFFFF : 0xFF000000 | color.getColor());
             y += LINE_HEIGHT;
         }
