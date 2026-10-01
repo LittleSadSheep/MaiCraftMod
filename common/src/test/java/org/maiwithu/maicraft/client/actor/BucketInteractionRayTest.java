@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
@@ -29,12 +31,52 @@ public final class BucketInteractionRayTest {
         bucketUse(Items.WATER_BUCKET);
         sourceDisappearsBeforePress();
         filledBucketMustPlaceInTargetCell();
+        pourFromShoreUsesVisibleSupport();
+        currentPoseSurvivesGridStanceFiltering();
         ordinaryBlockStillUsesBlock();
         requiredTypeGuardsSubmission();
         changedTargetAfterUseStillConfirms();
         pickupTaskSettlesAfterSourceDisappears(false);
         pickupTaskSettlesAfterSourceDisappears(true);
         System.out.println("BucketInteractionRayTest: passed");
+    }
+
+    // 两格外的岩浆中心射线会越过池底目标；原地改瞄底面即可倒水，任务不能为此启动无谓寻路。
+    private static void pourFromShoreUsesVisibleSupport() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            f.position(new Vec3(8.5, 1, 8.5));
+            f.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
+            BlockPos lava = new BlockPos(10, 1, 8);
+            f.set(lava, Blocks.LAVA.defaultBlockState());
+            var hit = FirstPersonInteractionTargeting.visibleBucketHit(f.level, f.player,
+                    f.player.getEyePosition(), lava, 4.5, Items.WATER_BUCKET);
+            check(hit != null && hit.getBlockPos().equals(lava.below())
+                    && hit.getBlockPos().relative(hit.getDirection()).equals(lava), "shore pouring selects the actual pool floor");
+            var record = new InteractAtTaskRecord("shore-bucket", 100, MouseButton.RIGHT, lava, 0,
+                    null, null, Blocks.LAVA).withApproach(false);
+            var task = new InteractAtCompanionTask(f.player, record);
+            Method reached = InteractAtCompanionTask.class.getDeclaredMethod("reached"); reached.setAccessible(true);
+            check((boolean) reached.invoke(task), "current shore pose is ready before any route is requested");
+            act(task); converge(f, task); act(task);
+            check(f.mode.items == 1 && f.mode.blocks == 0, "valid surface produces exactly one native bucket use");
+            // 岩浆反应改变目标格之后仍结清已发出的使用，不再要求源格身份保持不变。
+            f.set(lava, Blocks.WATER.defaultBlockState()); f.inventory.setItem(0, new ItemStack(Items.BUCKET));
+            f.nextTick(); act(task); f.nextTick();
+            check(act(task) == TaskState.SUCCESS && f.mode.items == 1, "world and bucket effects settle without a duplicate pour");
+        }
+    }
+
+    // 玩家贴边站立时真实眼位能看见目标，候选格心未必能；当前位置不能被虚拟眼位覆盖。
+    private static void currentPoseSurvivesGridStanceFiltering() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            f.position(new Vec3(8.25, 1, 8.25));
+            Vec3 eyes = f.player.getEyePosition();
+            var stands = FirstPersonInteractionTargeting.visibleInteractionStands(f.player,
+                    new BlockPos(10, 1, 8), Set.of(), eyes::equals);
+            check(stands.equals(List.of(f.player.blockPosition())), "actual current pose survives a grid-center miss");
+            check(FirstPersonInteractionTargeting.visibleInteractionStands(f.player, new BlockPos(10, 1, 8),
+                    Set.of(f.player.blockPosition().asLong()), eyes::equals).isEmpty(), "explicitly rejected current pose remains excluded");
+        }
     }
 
     private static void bucketUse(Item item) throws Exception {

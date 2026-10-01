@@ -74,8 +74,36 @@ public final class FirstPersonInteractionTargeting {
             Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Item item) {
         if (!Double.isFinite(reach) || reach <= 0.0D
                 || !level.isLoaded(BlockPos.containing(eye)) || !level.isLoaded(target)) return null;
-        // 即使目标被火把等方块占用也核对桶的实际落点，不能绕过acceptsBucketHit返回一条会倒到旁格的射线。
-        Vec3 delta = Vec3.atCenterOf(target).subtract(eye);
+        // 先保留直接对准源格的取水方式；中心被遮挡时再试露出的面，不能因一条射线失败就强迫角色换站位。
+        Vec3 center = Vec3.atCenterOf(target);
+        BlockHitResult direct = bucketHitToward(level, observer, eye, target, reach, item, center);
+        if (direct != null) return direct;
+        if (item == Items.BUCKET) {
+            for (Direction face : Direction.values()) {
+                Vec3 aim = center.add(face.getStepX() * (0.5 - FACE_INSET),
+                        face.getStepY() * (0.5 - FACE_INSET), face.getStepZ() * (0.5 - FACE_INSET));
+                BlockHitResult hit = bucketHitToward(level, observer, eye, target, reach, item, aim);
+                if (hit != null) return hit;
+            }
+            return null;
+        }
+        // 满桶靠真实支撑面确定落点：池底上表面与侧壁都可倒入目标格，不能只朝岩浆格中心延长射线。
+        // 含水方块可直接点击自身；流体相遇后的结算仍交给原版，不在这里预测或阻止反应。
+        Predicate<BlockHitResult> accepts = hit -> acceptsBucketHit(level, target, item, hit);
+        BlockHitResult contained = visibleBlockHit(level, observer, eye, target, reach, null, accepts);
+        if (contained != null) return contained;
+        for (Direction side : Direction.values()) {
+            BlockHitResult hit = visibleBlockHit(level, observer, eye, target.relative(side),
+                    reach, side.getOpposite(), accepts);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    // 每个备选瞄准点仍走桶自己的原生射线，命中其他流体或落到邻格时不冒充目标可操作。
+    private static BlockHitResult bucketHitToward(Level level, Entity observer, Vec3 eye,
+            BlockPos target, double reach, Item item, Vec3 aim) {
+        Vec3 delta = aim.subtract(eye);
         if (delta.lengthSqr() < EPSILON) return null;
         BlockHitResult hit = bucketRay(level, observer, eye, eye.add(delta.normalize().scale(reach)), item);
         return acceptsBucketHit(level, target, item, hit) ? hit : null;
@@ -238,13 +266,16 @@ public final class FirstPersonInteractionTargeting {
     public static List<BlockPos> visibleInteractionStands(
             LocalPlayer player, BlockPos target, Set<Long> excluded, Predicate<Vec3> visibleFrom) {
         ArrayList<BlockPos> candidates = new ArrayList<>();
+        // 角色已在真实眼位够到目标时保留原姿态，不用格心眼位或干燥整格筛选否决当前可执行的动作。
+        BlockPos current = PlayerNav.playerFeet(player);
+        if (!excluded.contains(current.asLong()) && visibleFrom.test(player.getEyePosition())) candidates.add(current);
         // 眼睛高于脚位，低于目标三到五格也可能够得到；最终以原生射线和真实触及距离筛选。
         for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) for (int dy = -5; dy <= 3; dy++) {
             BlockPos feet = target.offset(dx, dy, dz);
             if (excluded.contains(feet.asLong()) || !standable(player.level(), feet)
                     || !player.level().getWorldBorder().isWithinBounds(feet)) continue;
             Vec3 eyes = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(Pose.STANDING), 0);
-            if (visibleFrom.test(eyes)) candidates.add(feet.immutable());
+            if (visibleFrom.test(eyes) && !candidates.contains(feet)) candidates.add(feet.immutable());
         }
         return List.copyOf(candidates);
     }
