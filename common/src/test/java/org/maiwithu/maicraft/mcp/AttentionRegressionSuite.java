@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.intent.AttentionFeedTest;
+import org.maiwithu.maicraft.intent.IntentAttentionEvidenceTest;
 import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
 import org.maiwithu.maicraft.intent.WaitGoalTest;
@@ -26,6 +27,8 @@ public final class AttentionRegressionSuite {
         McpProtocolBudgetTest.main(args);
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // 机器失败已有的现场和库存随通知完整交付，避免额外观察再重发任务。
+        IntentAttentionEvidenceTest.main(args);
         // 各宿主先发现内联对象再提交目标，非法嵌套参数必须在进入游戏动作前被拒绝。
         McpSchemaCompatibilityTest.main(args);
         // 已存的大蓝图和失败历史可分页找回，常规状态须保留当前待答问题与消费不确定性。
