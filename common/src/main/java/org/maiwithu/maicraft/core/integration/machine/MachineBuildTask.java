@@ -95,6 +95,7 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
     private JsonObject recordedMachine;
     private MachineBlueprintComparison comparison;
     private JsonObject comparisonIssue;
+    private boolean machineLimitChecked;
 
     MachineBuildTask(LocalPlayer player, MachineBuildTaskRecord record) {
         super(player, record); world = player.level(); preview = record.plan.preview();
@@ -121,6 +122,13 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
 
     private TaskState tickMachine() {
         if (player.level() != world) return failure("machine_world_changed", "The reviewed world changed.");
+        // 开工前将本补丁与整机及此前失败施工累计检查；纯拆除不会因历史超额而再次被挡住。
+        if (!machineLimitChecked) {
+            var scope = MachineChainConveyorLimit.bind(player, r.getToolCallId(), r.label, r.plan.anchor(), true);
+            var limit = MachineChainConveyorLimit.check(player, scope, MachineChainConveyorLimit.changes(r.plan));
+            if (!limit.allowed()) return failure("machine_chain_conveyor_limit", limit.facts().toString());
+            machineLimitChecked = true;
+        }
         Decision decision = BuildPreviewGate.await(r, r.describe(), preview, previewParts);
         if (decision == Decision.WAITING) return TaskState.RUNNING;
         if (decision == Decision.CANCELLED) return TaskState.CANCELLED;

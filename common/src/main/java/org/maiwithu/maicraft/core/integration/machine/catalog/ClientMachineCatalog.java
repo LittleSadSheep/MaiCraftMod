@@ -183,6 +183,15 @@ public final class ClientMachineCatalog {
                 MachineBlueprintDocument.compile(blueprint.blueprint(),MachineConstructionPlan.registry()),false);
         compiledBlueprints.put(blueprint.id(),new CachedBlueprint(blueprint.fingerprint(),plan)); return plan;
     }
+    /** 接线目标是机器内一个接口时，以唯一已登记的范围找回整机；范围重叠时不猜测归属。 */
+    public static Optional<MachineBlueprint> containing(LocalPlayer player, BlockPos at) {
+        if (!ready(player)) return Optional.empty();
+        var found = catalog.blueprints().stream().filter(value -> value.dimension().equals(player.level().dimension().location().toString()))
+                .filter(value -> value.captureMin() != null && at.getX() >= value.captureMin().x() && at.getX() <= value.captureMax().x()
+                        && at.getY() >= value.captureMin().y() && at.getY() <= value.captureMax().y()
+                        && at.getZ() >= value.captureMin().z() && at.getZ() <= value.captureMax().z()).toList();
+        return found.size() == 1 ? Optional.of(found.getFirst()) : Optional.empty();
+    }
     public static UtilityInstallation requireInstallation(LocalPlayer player, BlockPos anchor) {
         return requireInstallation(player,anchor,null);
     }

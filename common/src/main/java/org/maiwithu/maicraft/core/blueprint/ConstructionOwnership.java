@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -24,6 +25,7 @@ public final class ConstructionOwnership {
     private static Ledger ledger = new Ledger();
     private static volatile boolean dirty;
     private static long nextSave;
+    private static final Map<String, String> machineTasks = new LinkedHashMap<>();
     private ConstructionOwnership() {}
 
     public static void tick(Minecraft minecraft) {
@@ -42,7 +44,7 @@ public final class ConstructionOwnership {
         var base = resolved.get(); var owner = minecraft.player.getUUID();
         var next = new StateIdentity(base.key(), base.directory().resolve("owned-construction").resolve(owner.toString()));
         if (!next.equals(identity)) {
-            flush(); identity = next; ledger = new Ledger(); dirty = false; nextSave = 0;
+            flush(); identity = next; ledger = new Ledger(); dirty = false; nextSave = 0; machineTasks.clear();
             var loaded = STORE.load(next);
             if (loaded.status() == IntentStateStore.Status.LOADED) {
                 try { ledger = Ledger.decode(loaded.root()); }
@@ -60,7 +62,26 @@ public final class ConstructionOwnership {
         var state = player.level().getBlockState(at);
         if (state.isAir()) return;
         ledger.placed(player.level().dimension().location().toString(), at, BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), taskId);
+        // 自动接线即使中途失败，已落地的轮和轴也归入同一台机器，后续任务不能重新获得一份轮数额度。
+        machineTasks.forEach((prefix, machine) -> {
+            if (taskId.equals(prefix) || taskId.startsWith(prefix + "-")) ledger.associate(player.level().dimension().location().toString(), at, machine);
+        });
         dirty = true;
+    }
+    public record Placement(BlockPos position, String block, String task, String machine) {}
+    public static List<Placement> placements(LocalPlayer player) {
+        if (!current(player)) return List.of();
+        String dimension = player.level().dimension().location().toString();
+        return ledger.cells.entrySet().stream().filter(row -> row.getKey().dimension().equals(dimension))
+                .map(row -> new Placement(BlockPos.of(row.getKey().position()), row.getValue().block(), row.getValue().task(), row.getValue().machine())).toList();
+    }
+    public static void bindMachineTask(LocalPlayer player, String prefix, String machine) {
+        if (!current(player)) return;
+        machineTasks.put(prefix, machine);
+        // 旧版本的确认记录可由原任务身份补齐机器归属；不根据材料名称或离机器较近就冒认施工效果。
+        for (var row : placements(player)) if (row.task().equals(prefix) || row.task().startsWith(prefix + "-")) {
+            ledger.associate(player.level().dimension().location().toString(), row.position(), machine); dirty = true;
+        }
     }
     public static void removed(LocalPlayer player, BlockPos at) {
         if (current(player)) dirty |= ledger.remove(player.level().dimension().location().toString(), at);
@@ -83,11 +104,15 @@ public final class ConstructionOwnership {
     /** 只保存本方的确认事件，读取地标、计划目标或看见相同方块都不会调用 placed。 */
     static final class Ledger {
         private record Cell(String dimension, long position) {}
-        private record Entry(String block, String task) {}
+        private record Entry(String block, String task, String machine) {}
         private final Map<Cell, Entry> cells = new LinkedHashMap<>();
         void placed(String dimension, BlockPos at, String block, String task) {
             if (block.equals("minecraft:air") || task == null || task.isBlank()) throw new IllegalArgumentException("confirmed placement requires a block and source task");
-            cells.put(new Cell(dimension, at.asLong()), new Entry(block, task));
+            cells.put(new Cell(dimension, at.asLong()), new Entry(block, task, null));
+        }
+        void associate(String dimension, BlockPos at, String machine) {
+            var key = new Cell(dimension, at.asLong()); var entry = cells.get(key);
+            if (entry != null) cells.put(key, new Entry(entry.block(), entry.task(), machine));
         }
         boolean remove(String dimension, BlockPos at) { return cells.remove(new Cell(dimension, at.asLong())) != null; }
         boolean owns(String dimension, BlockPos at, String block) {
@@ -99,6 +124,7 @@ public final class ConstructionOwnership {
             cells.forEach((cell, entry) -> {
                 var row = new JsonObject(); row.addProperty("dimension", cell.dimension()); row.addProperty("position", cell.position());
                 row.addProperty("block_id", entry.block()); row.addProperty("source_task", entry.task()); rows.add(row);
+                if (entry.machine() != null) row.addProperty("machine_scope", entry.machine());
             });
             return root;
         }
@@ -110,6 +136,8 @@ public final class ConstructionOwnership {
                 var row = element.getAsJsonObject();
                 result.placed(row.get("dimension").getAsString(), BlockPos.of(row.get("position").getAsLong()),
                         row.get("block_id").getAsString(), row.get("source_task").getAsString());
+                if (row.has("machine_scope")) result.associate(row.get("dimension").getAsString(),
+                        BlockPos.of(row.get("position").getAsLong()), row.get("machine_scope").getAsString());
             }
             return result;
         }
