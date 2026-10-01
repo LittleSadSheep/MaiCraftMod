@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.core.task.build.BuildClearanceSurvey;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.ReplaceMode;
 
-/** 显式替换自建部件可复用放置归属；尚未授权的方块实体、相邻旧建筑与后来换掉的方块仍单独核对。 */
+/** 声明格的拆换无需先证明旧部件归属；范围外方块与明确保留条件仍单独核对。 */
 public final class MachineOwnedReplacementTest {
     private static final BlockPos AT = new BlockPos(5,1,5);
     public static void main(String[] args) throws Exception {
@@ -28,18 +28,19 @@ public final class MachineOwnedReplacementTest {
             var batch = new BuildTaskRecord("owned-batch",1000,task.targets,ReplaceMode.REPLACE_EMPTY,true,true,true,Map.of(),List.of(),true);
             task.copyExecutionContextTo(batch);
             check(!blocked(h,batch), "supply batches preserve owned replacement scope");
-            // 同一份图纸清理另一格时仍须有那格的归属，不能由附近自建桶取得整片场地拆除许可。
+            // 相邻格已写进同一蓝图时可按授权拆换；再往外的未声明格不能继承这份许可。
             h.set(AT.east(),Blocks.BARREL.defaultBlockState());
-            check(blocked(h,task) && !task.observedMachineEdit(AT.east(),h.level.getBlockState(AT.east())), "unowned neighbor is protected");
+            check(!blocked(h,task) && task.observedMachineEdit(AT.east(),h.level.getBlockState(AT.east())), "声明格不要求旧部件属于本任务");
+            check(!task.observedMachineEdit(AT.east(2),Blocks.BARREL.defaultBlockState()), "未声明邻格不获得拆换许可");
             h.set(AT.east(),Blocks.AIR.defaultBlockState());
             h.set(AT,Blocks.CHEST.defaultBlockState());
-            check(blocked(h,task), "replacement by another block invalidates the old bound state");
+            check(!blocked(h,task), "已声明范围按当前方块执行，不以旧快照作为新门控");
             for (boolean replace : new boolean[]{true,false}) {
                 var denied = plan(replace,false); denied.bindOwnedReplacements(h.level,(at,state)->true);
                 check(blocked(h,denied.blockTask("no-entity-permission",1000,true)), "ownership cannot override explicit replacement limits");
             }
             var unowned = plan(true,true); unowned.bindOwnedReplacements(h.level,(at,state)->false);
-            check(blocked(h,unowned.blockTask("unowned",1000,true)), "viewing a block does not claim ownership");
+            check(!blocked(h,unowned.blockTask("unowned",1000,true)), "授权来自声明蓝图，不要求观测旧部件变成自有方块");
             check(h.blockUses()==0 && h.itemUses()==0,"binding and survey are read-only");
         }
         System.out.println("MachineOwnedReplacementTest: passed");

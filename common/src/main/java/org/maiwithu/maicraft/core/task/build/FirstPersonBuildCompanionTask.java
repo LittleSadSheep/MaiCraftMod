@@ -705,13 +705,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState clearNavTick() {
         boolean forceMining = miningInsteadOfWrench.contains(clearing.asLong());
         int remainingBreaks = excavating ? excavation.remaining() : 1;
-        // 补工具前先核对未声明格的通行边界；蓝图点名的旧部件可直接按当前状态准备原生拆换。
+        // 补工具前先核对明确保留和原生破坏条件；已经不能拆的目标不应再触发一次取工具流程。
         if (!excavationTools.active() && player.level().isLoaded(clearing)) {
             var live = player.level().getBlockState(clearing);
-            var declared = targets.get(clearing.asLong());
-            if (declared == null && !ClearanceWhitelist.allows(live) && !r.observedMachineEdit(clearing, live)) {
-                beginClearanceReport(clearing); return TaskState.RUNNING;
-            }
+            if (!live.isAir() && !clearingPermitted(live))
+                return phase == Phase.CLEARANCE_REPORT ? TaskState.RUNNING : TaskState.FAILED;
         }
         if ((excavating || forceMining) && !excavationTools.active() && player.level().isLoaded(clearing)
                 && !player.level().getBlockState(clearing).isAir()
