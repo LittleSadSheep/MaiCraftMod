@@ -184,6 +184,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 每刻先观察战场；自卫途中有攻击者时暂停拾取，持续记录掉落，安全后再恢复收集。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
+        settleSubmittedMelee(); // 先收已有攻击回执，再观察死亡和切换拾取，避免致命一击被阶段切换漏计。
         // 临时避险结束后继续同一场对战，已暂停或结束的任务不能借此重新获得许可。
         if (pvp != null) pvp.activate();
 
@@ -464,6 +465,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 打完了 —— 名单清空(点名),或没人再追她(无差别)。 */
     // 自卫以脱险结束；指定名单则必须全部确认击败，防御中额外处理的目标不能抵数。
     private TaskState finish() {
+        if (settleSubmittedMelee()) return TaskState.RUNNING; // 胜负已知也只等待原回执的有界确认，不再出刀。
         InputDriver.halt(player);
         stopNav();
         if (r.indiscriminate || r.allRequestedDefeated()) {
@@ -580,6 +582,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先把上一次近战点击结算，再在够得着的实体中选本次攻击者。
     // 自卫只打实际攻击者；显式战斗的严格授权模式也排除未获准对象。
     private void tickWeapon(Battlefield field) {
+        if (settleSubmittedMelee()) return; // 已发出的刀不再受目标存活、射程或当前武器模式筛选。
         if (bowFighting) {
             stopMelee();
             return;
@@ -663,8 +666,19 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     /** 转入引信避险或弓战斗前交还手部控制，待安全后重新选择武器与目标。 */
     private void stopMelee() {
+        if (settleSubmittedMelee()) return; // 只撤销尚未提交的瞄准；在途攻击由只读结算继续收尾。
         if (meleeAction != null) meleeAction.stop();
         meleeAction = null; meleeVictimId = -1; meleeSelection.reset();
+    }
+
+    private boolean settleSubmittedMelee() {
+        if (meleeAction == null || !meleeAction.entityAttackSubmitted()) return false;
+        Interaction.Status state = meleeAction.pollSubmittedEntityAttack();
+        if (state == Interaction.Status.RUNNING) return true;
+        // 每份确认回执只加一次；未知、拒绝和取消均不计数，随后清掉持有者，防止终态再次收账。
+        if (state == Interaction.Status.DONE) r.strike(meleeVictimId);
+        meleeAction = null; meleeVictimId = -1; meleeSelection.reset();
+        return false;
     }
 
     /** 原版横扫剑击不能波及未列入目标的生物。 */
@@ -1165,6 +1179,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 结束时依次停射击、近战和举盾，清物品选择，松开身体输入，再停止导航。
     // 这些 stop 仍可能受共享动作记录冲突影响，不能把清掉字段等同于动作已在游戏中结束。
     protected void cleanup() {
+        settleSubmittedMelee(); // 清理前消费真正已经确认的历史回执，尚未确认的攻击不会被胜负结果补成命中。
         if (pvp != null) pvp.close(); // 先撤销对战，避免手部清理异常遗留许可。
         abortShot();
         if (meleeAction != null) meleeAction.stop();
@@ -1192,6 +1207,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("lost_targets", r.lost().size());
         data.put("unreachable_targets", r.unreachable().size());
         data.put("strikes", r.strikes());
+        data.put("strikes_scope", "confirmed_melee_receipts_and_ranged_releases"); // 与耐久消耗、尝试次数及完整命中数分开。
         data.put("loot_gained", lootGained());
         data.put("unreachable_drop_count", loot.unreachableCount());
         data.put("ambiguous_merged_drop_count", loot.ambiguousMergedCount());

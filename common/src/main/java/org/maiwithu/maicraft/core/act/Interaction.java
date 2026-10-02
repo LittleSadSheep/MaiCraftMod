@@ -278,6 +278,14 @@ public final class Interaction {
     /** 挥击已经提交时必须继续收回执；尚未提交的瞄准才允许因对手退出射程而撤销。 */
     public boolean entityAttackSubmitted() { return button == Button.ATTACK && receipt != null; }
 
+    /** 只结算已提交的这一刀；死亡、丢失和任务收尾期间均不重新瞄准、点击或发包。 */
+    public Status pollSubmittedEntityAttack() {
+        if (button != Button.ATTACK || entity == null || receipt == null)
+            return hardFail ? Status.FAILED : fires > 0 ? Status.DONE : Status.RUNNING;
+        if (settleAttackReceipt()) { fires++; return Status.DONE; }
+        return hardFail ? Status.FAILED : Status.RUNNING;
+    }
+
     // 先处理还没关好的界面，再分别推进挖方块、对空气使用物品或离散点击。
     // 已经发出的动作优先等结果，不因这次动作刚打开了箱子就立刻把箱子关上。
     public Status tick() {
@@ -452,22 +460,7 @@ public final class Interaction {
     // 还要等攻击冷却和目标的短暂无敌时间结束，才发出攻击。
     private boolean fireAttackEntity() {
         LocalPlayerContext context = ClientRuntime.requireContext(player);
-        if (receipt != null) {
-            receipt = context.actions().poll(context, receipt);
-            if (!receipt.terminal()) {
-                return false;
-            }
-            NativeActionReceipt.Status status = receipt.status();
-            String detail = receipt.detail();
-            receipt = null;
-            if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-                return true;
-            }
-            failReason = "native attack was not confirmed: " + detail;
-            failType = FailureType.UNKNOWN;
-            hardFail = true;
-            return false;
-        }
+        if (receipt != null) return settleAttackReceipt();
         if (entity == null || !entity.isAlive()) {
             failReason = "the attack target is gone";
             failType = FailureType.TARGET_LOST;
@@ -502,6 +495,23 @@ public final class Interaction {
                 confirmation,
                 CONFIRM_TIMEOUT_TICKS);
         if (duel) PvpEngagement.attackSubmitted(player);
+        return false;
+    }
+
+    private boolean settleAttackReceipt() {
+        // 沿原回执的确认谓词等待，不使用耐久、死亡记账或实体消失自行补造命中；已终结回执可直接读历史结果。
+        if (!receipt.terminal()) {
+            LocalPlayerContext context = ClientRuntime.actor().activeContext()
+                    .filter(c -> c.player() == player && c.isCurrent()).orElse(null);
+            if (context == null) return false;
+            receipt = context.actions().poll(context, receipt);
+        }
+        if (!receipt.terminal()) return false;
+        NativeActionReceipt.Status status = receipt.status();
+        String detail = receipt.detail(); receipt = null;
+        if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) return true;
+        failReason = "native attack was not confirmed: " + detail;
+        failType = FailureType.UNKNOWN; hardFail = true;
         return false;
     }
 

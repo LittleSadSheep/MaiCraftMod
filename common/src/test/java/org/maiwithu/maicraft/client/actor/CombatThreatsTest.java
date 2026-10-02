@@ -40,6 +40,7 @@ public final class CombatThreatsTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         recordsMeleeAndProjectiles();
+        MeleeReceiptSettlementTest.main(args); // 死亡和拾取阶段也必须收已有攻击回执，不能用耐久或胜负凑命中数。
         PvpEngagementTest.main(args); // 先验证点名玩家的任务许可，再运行自动自卫，防止 PVP 状态泄漏。
         PvpThreatTest.main(args); // 验证玩家也进入撤退和伤害事实，不能只会点名挥刀。
         PvpTacticsTest.main(args); // 用真实目标位置、充能和背包测试进退、瞄准与破盾选装。
