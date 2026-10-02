@@ -119,11 +119,24 @@ public final class JetpackNativeAdapter {
             evidence.put("active_source_matches_chest", false);
             if (context != null) {
                 Object jetpack = call(context, "getJetpack"), source = call(context, "getSource");
+                // 原生来源可能是开发模式的盾牌或其它装备；交付真实来源和控制类型，不能只留下“不是胸甲”的笼统未知。
+                evidence.put("native_jetpack_type", jetpack.getClass().getName());
+                evidence.put("native_source_type", source.getClass().getName());
+                evidence.put("native_active_control", ((Enum<?>) call(jetpack, "activeType", context)).name());
+                evidence.put("native_hover_control", ((Enum<?>) call(jetpack, "hoverType", context)).name());
                 evidence.put("native_pose", ((Enum<?>) call(context, "getPose")).name());
                 evidence.put("native_usable", (Boolean) call(jetpack, "isUsable", context));
                 evidence.put("native_source_disabled", (Boolean) call(source, "isDisabled", context));
                 evidence.put("native_hover", (Boolean) call(jetpack, "isHovering", context));
                 Class<?> equipment = Class.forName(FLIGHT + "api.sources.EquipmentSource");
+                if (equipment.isInstance(source)) {
+                    evidence.put("native_source_slot", ((Enum<?>) call(source, "getSlot")).name());
+                    Object sourceStack = call(source, "getStack");
+                    if (sourceStack instanceof ItemStack stack) {
+                        evidence.put("native_source_item", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+                        evidence.put("native_source_count", stack.getCount());
+                    }
+                }
                 ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
                 String id = BuiltInRegistries.ITEM.getKey(chest.getItem()).toString();
                 boolean supported = id.equals("create_jetpack:jetpack") || id.equals("create_jetpack:netherite_jetpack");
