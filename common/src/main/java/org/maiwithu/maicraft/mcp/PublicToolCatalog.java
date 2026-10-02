@@ -37,7 +37,7 @@ final class PublicToolCatalog {
             {
               "worldPosition": {
                 "type":"object",
-                "description":"Full world coordinates. For travel with unknown height, omit target and use parameters.destination={x,z}; an optional y there is a height hint.",
+                "description":"World coordinates. Travel without known y: omit target, use parameters.destination={x,z}.",
                 "properties": {
                   "x":{"type":"integer"}, "y":{"type":"integer"}, "z":{"type":"integer"},
                   "dimension":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"}
@@ -50,7 +50,7 @@ final class PublicToolCatalog {
                   "kind":{"type":"string","enum":["current_place","coordinates","landmark","player","entity","nearest","area","prior_result"]},
                   "label":{"type":["string","null"],"minLength":1,"maxLength":160},
                   "position":{"anyOf":[{"$ref":"#/$defs/worldPosition"},{"type":"null"}]},
-                  "relation":{"type":["string","null"],"minLength":1,"maxLength":120,"description":"For prior_result, identify the earlier semantic ability or outcome, for example the house built earlier; never copy coordinates."}
+                  "relation":{"type":["string","null"],"minLength":1,"maxLength":120,"description":"prior_result: earlier ability/outcome; never copied coordinates."}
                 },
                 "required":["kind"], "additionalProperties":false
               },
@@ -68,12 +68,12 @@ final class PublicToolCatalog {
                 "type":"object",
                 "properties": {
                   "ability":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
-                  "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Requested result in plain language; required inside goal."},
+                  "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Desired outcome."},
                   "target":{"anyOf":[{"$ref":"#/$defs/semanticTarget"},{"type":"null"}]},
                   "parameters":{"type":"object","default":{},"description":"Fields from perceive(view=abilities,focus=ability)."},
-                  "preferences":{"type":"object","default":{},"description":"Must be empty unless the selected ability explicitly declares accepted_preferences."},
-                  "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Only parameter-free hard constraints explicitly declared by the selected ability are accepted."},
-                  "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered child outcomes; accepted only by maicraft:sequence."}
+                  "preferences":{"type":"object","default":{},"description":"Only fields declared in accepted_preferences; otherwise empty."},
+                  "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Only declared, parameter-free hard constraints."},
+                  "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered steps for maicraft:sequence only."}
                 },
                 "required":["ability","outcome"], "additionalProperties":false
               }
@@ -89,23 +89,23 @@ final class PublicToolCatalog {
     private static final List<JsonObject> TOOLS = List.of(
             // 建造先勘测并沿用返回的锚点，避免为找工具参数先遍历任务历史或整套教材；执行后再等注意流。
             tool(PERCEIVE,
-                    "Read current facts or wait with next_attention. abilities defaults to a paged index; focus reads one contract. query searches abilities/knowledge. resource_uri reads knowledge or frozen receipt pages. Construction starts with construction_site; reuse its target and snapshot_id in the authored build_machine goal.",
+                    "Read facts or wait with next_attention. abilities: paged index or focus contract. query searches abilities/knowledge/exploration. resource_uri reads saved pages. Build from construction_site target/snapshot_id.",
                     perceiveSchema("""
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: up to 8 visible powered interfaces near work height. machines: remembered observations."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: visible power. machines: memories."},
                                 "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
-                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Short keywords for knowledge/abilities metadata or actual kinetic_sources. Exclusive with focus/resource_uri."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: exact ability ID or maicraft:server_assistance diagnostics. situation: maicraft:travel/maicraft:elevators for floors; maicraft:physical_structures for moving structures; maicraft:navigation/maicraft:transport for motion diagnostics. surroundings: sign text. kinetic_sources: exact block ID. knowledge: legacy search words. exploration: biomes|biome_tags|structures catalogs."},
-                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Copy a discovered resource_uri, details_uri or next_uri. Implies knowledge. maicraft://receipts pages are frozen and temporary; omitted contents remain unknown until read."},
+                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Keywords for knowledge/abilities/exploration or kinetic_sources. Exploration focus selects a catalog; otherwise exclusive with focus/resource_uri."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: ability ID or maicraft:server_assistance. situation: maicraft:travel/elevators/physical_structures/navigation/transport. surroundings: signs. kinetic_sources: block ID. knowledge: search. exploration: discoveries(default), biomes, biome_tags, structures, pending, run:<id>, or details_focus."},
+                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Use returned resource_uri/details_uri/next_uri. Implies knowledge. Receipt pages are frozen, temporary and unknown until read."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"attention: this task plus important body events. tasks: current summary; use task get+path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
-                                 "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
+                                 "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: usually 30000 ms; returns early for completion, decision, pause, missing task or resync. Timeout does not cancel work."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
-                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"exploration/abilities/tasks pages: copy next_offset. Use focus/query or task_id for selected detail."},
+                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"Copy next_offset for exploration/abilities/tasks pages."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -113,7 +113,7 @@ final class PublicToolCatalog {
                             """), annotations(true, false, true)),
             tool(PLAN,
                     // 规划入口只讲提交和找回设计；具体图元和机器条件留在选定能力的契约中。
-                    "Compile goal without starting it. build_machine uses construction_site target/snapshot_id and an authored blueprint; execute plan_id when ready_to_execute. Materials and current-site checks belong to execution. Alternatively pass plan_id without goal to recover a saved plan; path reads its frozen input.",
+                    "Compile without starting. build_machine requires construction_site target/snapshot_id and an authored blueprint; execute plan_id when ready_to_execute. Or read a saved plan with plan_id; path selects frozen input.",
                     goalSchema("""
                             {
                               "type":"object",
@@ -143,7 +143,7 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, true, false)),
             tool(TASK,
-                    "Get/list current task summaries or control a task. get+path reads retained evidence; follow detail_path with the same task_id. Answer current decision_id with a listed choice; retry may refine details.parameters, recover/replace_goal require details.goal. Continue next_attention after control.",
+                    "Get/list task summaries or control work. get+path reads evidence via detail_path. Answer decision_id with a listed choice; retry refines details.parameters; recover/replace_goal needs details.goal. Continue next_attention.",
                     goalSchema("""
                             {
                               "type":"object",
