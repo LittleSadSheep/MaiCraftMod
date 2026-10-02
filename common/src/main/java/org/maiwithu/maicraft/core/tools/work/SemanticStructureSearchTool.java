@@ -6,11 +6,13 @@ import static org.maiwithu.maicraft.task.TaskDispatch.setTask;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.util.Map;
+import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchTaskRecord;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /**
  * 把 structure_search 请求交给实际探索任务，默认需要走到线索再确认。
@@ -25,7 +27,8 @@ public final class SemanticStructureSearchTool implements MaiCraftTool {
             Integer max_distance,
             Boolean may_alter_terrain,
             Boolean reach_structure,
-            Boolean allow_rare_consumables) {}
+            Boolean allow_rare_consumables, String direction, Integer angle_degrees, Integer min_distance,
+            String transport_mode) {}
 
     @Override
     public String name() {
@@ -45,6 +48,11 @@ public final class SemanticStructureSearchTool implements MaiCraftTool {
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .string("structure_id", "Namespaced structure id, for example minecraft:stronghold.")
+                // 结构候选与普通跑图使用相同扇区，较近的反方向结构不满足请求。
+                .optionalString("direction", "Horizontal cardinal/diagonal or forward/backward/left/right; fixed at start.")
+                .optionalInteger("angle_degrees", "Full sector width, default 90 with direction.", 1, 360)
+                .optionalInteger("min_distance", "Minimum target distance, default 16 with direction or 0 otherwise.", 0, 4096)
+                .optionalEnum("transport_mode", "Native route preference.", "auto", "ground")
                 .optionalInteger(
                         "max_distance",
                         "Maximum horizontal first-person search radius from start (default 4096).",
@@ -82,7 +90,8 @@ public final class SemanticStructureSearchTool implements MaiCraftTool {
                 distance,
                 alter,
                 reach,
-                Boolean.TRUE.equals(parsed.allow_rare_consumables()));
+                Boolean.TRUE.equals(parsed.allow_rare_consumables()), List.of(), 0,
+                parsed.direction(), parsed.angle_degrees(), parsed.min_distance(), TransportMode.parse(parsed.transport_mode()));
         setTask(player, record, args, reply);
     }
 }

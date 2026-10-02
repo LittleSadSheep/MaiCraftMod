@@ -10,6 +10,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.core.scan.SpiralWalker;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
+import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
+import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -105,6 +108,7 @@ public final class PhysicalStructureSearchCompanionTask
     private int frontierFailed;
     private int evidenceApproaches;
     private SpiralWalker spiral;
+    private ExplorationSector.Area sector;
     private EvidenceMatch activeEvidence;
     private EvidenceMatch verifiedEvidence;
     private String issueCode;
@@ -143,6 +147,7 @@ public final class PhysicalStructureSearchCompanionTask
     @Override
     protected void onStart() {
         origin = player.blockPosition().immutable();
+        sector = r.sector.at(origin.getX(), origin.getZ(), player.getYRot());
         spiral = new SpiralWalker(origin, FRONTIER_GRID);
         profile = StructureEvidenceProfiles.resolve(r.structureId);
         if (profile == null) {
@@ -447,6 +452,11 @@ public final class PhysicalStructureSearchCompanionTask
                         + pendingDirection.z * pendingDirectionDistance));
         BlockPos frontier = loadedFrontierToward(desired);
         if (frontier == null) {
+            // 投眼指向扇区之外时，保存真实消耗后换到扇区内的新观察点，不把最近要塞改称指定方向的要塞。
+            if (r.sector.direction() != null) {
+                clearDirectionTravel();
+                return beginFrontierTravel();
+            }
             stage = Stage.OBSERVE;
             if (++directionLoadWaitTicks <= 40) return TaskState.RUNNING;
             clearDirectionTravel();
@@ -585,7 +595,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     // 让共享方块索引分批收集各组候选，只保留范围内仍存在的目标方块，再按离玩家的距离试配。
-    // 这里读的是已加载方块，没有逐个检查玩家是否能直接看见它。
+    // 只有角色能直接看见的方块参与识别，不能凭墙后或地下未见的材料组合确认结构。
     private EvidenceScan scanEvidence() {
         int chunkRadius = Math.max(
                 1, (Math.min(EVIDENCE_SCAN_RADIUS, r.maxDistance) + 15) / 16);
@@ -601,7 +611,7 @@ public final class PhysicalStructureSearchCompanionTask
                     INDEX_BUILD_BUDGET_PER_GROUP);
             complete &= result.complete();
             for (BlockPos hit : result.hits()) {
-                if (!insideScope(hit) || !liveTargetBlock(hit)) continue;
+                if (!insideScope(hit) || !liveTargetBlock(hit) || !ObservationVisibility.block(player, hit)) continue;
                 merged.putIfAbsent(hit.asLong(), hit.immutable());
             }
         }
@@ -624,7 +634,7 @@ public final class PhysicalStructureSearchCompanionTask
         double radiusSqr = (double) profile.profile().clusterRadius()
                 * profile.profile().clusterRadius();
         for (BlockPos anchor : hits) {
-            if (evidenceRejected(anchor)) continue;
+            if (evidenceRejected(anchor) || !sector.accepts(anchor.getX(), anchor.getZ())) continue;
             Map<String, Integer> groups = new LinkedHashMap<>();
             Map<String, Integer> blocks = new LinkedHashMap<>();
             int total = 0;
@@ -700,12 +710,14 @@ public final class PhysicalStructureSearchCompanionTask
                 exact ? (double) target.getY() : null,
                 (double) target.getZ(),
                 null,
-                r.mayAlterTerrain);
+                r.mayAlterTerrain, false, r.transportMode);
         moveChild = new MoveToCompanionTask(player, moveRecord);
     }
 
     // 按向外绕圈的顺序选新方向，再截成当前地形已经加载的一小段。已经尝试过的横向落点不重复选。
     private BlockPos nextFrontier() {
+        if (r.sector.direction() != null) return ExplorationFrontiers.next(player.blockPosition(), sector,
+                r.maxDistance, attemptedFrontiers, pos -> columnLoaded(pos.getX(), pos.getZ()));
         int finalRing = (int) Math.ceil(
                 (r.maxDistance + SCOPE_TOLERANCE) / (double) FRONTIER_GRID) + 1;
         while (true) {
@@ -732,7 +744,7 @@ public final class PhysicalStructureSearchCompanionTask
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             BlockPos candidate = new BlockPos(x, current.getY(), z);
-            if (insideScope(candidate) && columnLoaded(x, z)) return candidate;
+            if (insideScope(candidate) && sector.contains(x, z) && columnLoaded(x, z)) return candidate;
         }
         return null;
     }
@@ -916,6 +928,8 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("reached", verifiedEvidence != null && r.reachStructure);
         data.put("scope", "loaded_client_facts_and_first_person_travel_only");
         data.put("max_distance", r.maxDistance);
+        if (sector != null) data.put("search_sector", sector.describe());
+        data.put("recognition", "visible_block_pattern; natural_generation_not_proven");
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);

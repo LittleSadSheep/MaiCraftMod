@@ -9,6 +9,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 
 /**
  * 保存结构搜索的范围、是否必须走到线索，以及开路和投眼的许可。
@@ -31,6 +33,8 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
     public final boolean mayAlterTerrain;
     public final boolean reachStructure;
     public final boolean allowRareConsumables;
+    public final ExplorationSector sector;
+    public final TransportMode transportMode;
     final List<BlockPos> excludedEvidenceAnchors;
     final int evidenceExclusionRadius;
 
@@ -85,6 +89,15 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
             boolean allowRareConsumables,
             List<BlockPos> excludedEvidenceAnchors,
             int evidenceExclusionRadius) {
+        this(toolCallId, deadlineGameTime, structureId, maxDistance, mayAlterTerrain, reachStructure,
+                allowRareConsumables, excludedEvidenceAnchors, evidenceExclusionRadius, null, null, null, TransportMode.AUTO);
+    }
+
+    /** 指定方向的结构搜索沿用原生线索，但只接受扇区内的地点；交通方式也随每段路线保留。 */
+    public PhysicalStructureSearchTaskRecord(String toolCallId, long deadlineGameTime, String structureId,
+            int maxDistance, boolean mayAlterTerrain, boolean reachStructure, boolean allowRareConsumables,
+            List<BlockPos> excludedEvidenceAnchors, int evidenceExclusionRadius,
+            String direction, Integer angleDegrees, Integer minDistance, TransportMode transportMode) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         ResourceLocation parsed = ResourceLocation.tryParse(structureId);
         if (parsed == null) {
@@ -93,6 +106,10 @@ public final class PhysicalStructureSearchTaskRecord extends TaskRecord {
         }
         this.structureId = parsed.toString();
         this.maxDistance = Math.clamp(maxDistance, MIN_DISTANCE, MAX_DISTANCE);
+        this.sector = ExplorationSector.of(direction, angleDegrees, minDistance, this.maxDistance);
+        this.transportMode = transportMode == null ? TransportMode.AUTO : transportMode;
+        if (this.transportMode != TransportMode.AUTO && this.transportMode != TransportMode.GROUND)
+            throw new IllegalArgumentException("structure discovery uses auto or ground transport");
         this.mayAlterTerrain = mayAlterTerrain;
         this.reachStructure = reachStructure;
         this.allowRareConsumables = allowRareConsumables;
