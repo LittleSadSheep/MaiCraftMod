@@ -248,7 +248,9 @@ v1 成功要求真实加工事件、声明的时间跨度和目标物品的原�
 
 MaiCraft 会增量记录附近已加载区块里的机器和容器，不为发现设备额外寻路或加载远处区块。`perceive(view="machines")` 同时列出现场快照、记住的设备、登记的产线及后台监测任务；`focus` 可指定设备 ID、产线标签或 `产线标签/节点ID`。用途线索与原生观察分开显示，自动发现不会把相邻方块猜成已经验证的完整工厂。
 
-机器档案保存在游戏目录 `config/maicraft/machines/`，按存档或服务器地址与玩家身份区分。已登记生产清单保留节点、接口、坐标关系和历史调试证据。重连后历史记录不会自动变成当前状态或修改权限；修改前仍需重新观察现场。
+任务进度、地标、容器记忆、施工归属和机器档案统一保存在游戏目录 `config/maicraft/memory.sqlite`。SQLite 驱动随 Fabric 和 NeoForge 发布包内置，无需安装数据库服务。任务记忆沿用存档或服务器身份；机器档案和施工归属继续区分玩家。已登记生产清单保留节点、接口、坐标关系和历史调试证据。重连后历史记录不会自动变成当前状态或修改权限；修改前仍需重新观察现场。
+
+首次读取某个世界时，会自动导入旧 `config/maicraft/state/` 和 `config/maicraft/machines/` 中对应的 JSON；导入成功后保留旧文件，之后优先使用数据库。机器索引与其引用的完整蓝图在同一事务中保存。数据库无法读取或恢复超出当前预算时保留原记录并报告原因，不以空记忆覆盖旧进度。备份时先正常退出游戏，再复制整个 `config/maicraft/` 目录；该目录还包含原生动作提交日志和其他持久化资源。
 
 直播和日常使用可采用“短时调试 → 登记后台观察 → 通过真实界面备料/启动 → 去做其他事情”的流程：
 
@@ -314,6 +316,7 @@ MaiCraft 作为整体以 [GNU General Public License v3.0 only](LICENSE) 发布�
 - 部分代码派生自 [minecraft-numen](https://github.com/Dwinovo/minecraft-numen) 的 `1.21.1` 分支，原许可证为 `LGPL-3.0-only`。本仓库依照 GNU GPLv3 第 7 条移除该副本的 LGPLv3 额外许可，将修改后的 Numen 派生代码按 `GPL-3.0-only` 分发；原项目及贡献者仍保留其版权。本仓库不包含 Numen 的美术、音频或品牌资产。
 - 内嵌寻路代码来自 [Baritone](https://github.com/cabaletta/baritone)，基于上游提交 `5f259b7f` 修改。与 Numen 派生代码相同，本仓库依照 GNU GPLv3 第 7 条移除该副本的 LGPLv3 额外许可及非许可性附加条款，并按 `GPL-3.0-only` 分发；来源和修改说明见 [`third_party/baritone/`](third_party/baritone/)。
 - 使用 [MultiLoader-Template](https://github.com/jaredlll08/MultiLoader-Template) 提供的多加载器项目结构。
+- 发布包内置 [SQLite JDBC](https://github.com/xerial/sqlite-jdbc) 驱动，嵌套 JAR 保留上游许可证、NOTICE 和平台原生库。
 
 ## 鸣谢
 

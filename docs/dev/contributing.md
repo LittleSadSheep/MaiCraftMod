@@ -55,6 +55,7 @@
 
 | 改动范围 | 对应任务 |
 | --- | --- |
+| SQLite 记忆、旧档案迁移与任务检查点 | `:common:memoryRegression` |
 | 身体、菜单、交互和任务收尾 | `:common:guiRegression` |
 | 任务通知、等待和聊天流 | `:common:attentionRegression` |
 | 导航、跳跃、落地和交通 | `:common:navigationRegression` |
