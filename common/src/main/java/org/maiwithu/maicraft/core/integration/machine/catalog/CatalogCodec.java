@@ -27,7 +27,7 @@ final class CatalogCodec {
         var devices = new JsonArray(); snapshot.devices().forEach(device -> devices.add(device(device)));
         var lines = new JsonArray(); snapshot.lines().forEach(line -> lines.add(line(line)));
         var installations = new JsonArray(); snapshot.installations().forEach(value -> installations.add(installation(value)));
-        // 索引只保存版本引用；完整蓝图另存文件，避免一台大机器挤满设备目录。
+        // 索引只保存版本引用；完整蓝图使用独立数据库记录，避免一台大机器挤满设备目录。
         var blueprints = new JsonArray(); snapshot.blueprints().forEach(value -> blueprints.add(value.summary()));
         root.add("blueprints", blueprints);
         root.add("devices", devices); root.add("lines", lines); root.add("installations",installations); return root.toString();

@@ -10,6 +10,8 @@ import java.util.concurrent.Executor;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Map;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 import java.util.concurrent.RejectedExecutionException;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
@@ -84,7 +86,7 @@ public final class MachineCatalogTest {
         Path directory = Files.createTempDirectory("maicraft-catalog-file-"); var io = new ManualExecutor(); var catalog = ready(directory, io);
         String id = catalog.observe(observation(PRESS, "Saved press", 10)); var first = catalog.saveAsync();
         catalog.observe(observation(PRESS, null, 11)); var last = catalog.saveAsync();
-        Path file = directory.resolve(IDENTITY.key() + ".json");
+        Path file = directory.resolve(MemoryDatabase.FILE_NAME);
         check(!Files.exists(file) && first.isCancelled() && !last.isDone(), "Coalescing claimed an unsaved checkpoint or performed synchronous I/O");
         io.runAll(); catalog.poll(); check(last.isDone() && !last.isCompletedExceptionally(), "Atomic catalog save failed");
         byte[] original = Files.readAllBytes(file);
@@ -92,8 +94,11 @@ public final class MachineCatalogTest {
         var reloadIo = new ManualExecutor(); var reloaded = ready(directory, reloadIo);
         check(reloaded.device(id, 11).orElseThrow().currentState() == CurrentState.HISTORICAL
                 && reloaded.device(id, 11).orElseThrow().device().lastObservedGameTick() == 11, "Restart lost history or restored current authorization");
-        var broken = JsonParser.parseString(Files.readString(file)).getAsJsonObject(); broken.addProperty("identity_key", new Identity("other-world", "test-account").key());
-        Files.writeString(file, broken.toString()); byte[] corrupt = Files.readAllBytes(file);
+        // 模拟数据库记录混入另一世界身份；恢复失败后不得用空目录覆盖原记录。
+        var database = new MemoryDatabase(file);
+        var broken = JsonParser.parseString(database.read("machines", IDENTITY.key(), CatalogLimits.FILE_BYTES)).getAsJsonObject();
+        broken.addProperty("identity_key", new Identity("other-world", "test-account").key());
+        database.write("machines", IDENTITY.key(), broken.toString(), Map.of(), false); byte[] corrupt = Files.readAllBytes(file);
         var badIo = new ManualExecutor(); var bad = new MachineCatalog(directory, badIo); bad.bind(IDENTITY, "after-corruption"); badIo.runAll(); bad.poll();
         check(bad.status().state() == MachineCatalog.State.FAILED, "Foreign/corrupt catalog was treated as an empty database");
         rejects(bad::saveAsync, "catalog_not_ready"); check(Arrays.equals(corrupt, Files.readAllBytes(file)), "Failed load overwrote the prior file");
@@ -126,7 +131,7 @@ public final class MachineCatalogTest {
         check(catalog.ready() && catalog.status().dirty() && catalog.device(id, 10).orElseThrow().currentState() == CurrentState.HISTORICAL,
                 "Identity round trip lost the failed in-process checkpoint or restored current evidence");
         var retry = catalog.saveAsync(); io.runAll(); catalog.poll();
-        check(!retry.isCompletedExceptionally() && !catalog.status().dirty() && Files.exists(directory.resolve(IDENTITY.key() + ".json")),
+        check(!retry.isCompletedExceptionally() && !catalog.status().dirty() && Files.exists(directory.resolve(MemoryDatabase.FILE_NAME)),
                 "A failed checkpoint could not later be saved atomically");
     }
 

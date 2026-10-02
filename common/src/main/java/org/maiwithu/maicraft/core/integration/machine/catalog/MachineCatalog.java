@@ -14,6 +14,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import org.maiwithu.maicraft.core.integration.machine.production.ProductionManifest;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 import static org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.*;
 
 /** 由所有者线程管理目录记忆，并在后台持久化；此服务绝不读取或修改 Minecraft 世界。 */
@@ -38,12 +39,17 @@ public final class MachineCatalog {
     private CompletableFuture<Void> lastSave = CompletableFuture.completedFuture(null);
 
     public MachineCatalog(Path directory) {
-        this(directory, Executors.newSingleThreadExecutor(command -> {
+        this(directory, directory.resolve(MemoryDatabase.FILE_NAME));
+    }
+    /** 游戏实例传入共用数据库；旧机器目录只用于首次导入历史档案。 */
+    public MachineCatalog(Path directory, Path databaseFile) {
+        this(directory, databaseFile, Executors.newSingleThreadExecutor(command -> {
             Thread thread = new Thread(command, "maicraft-machine-catalog-io"); thread.setDaemon(true); return thread;
         }));
     }
     /** 注入执行器便于确定性 I/O 测试；正式运行时应使用后台执行器。 */
-    public MachineCatalog(Path directory, Executor executor) { store = new MachineCatalogStore(directory, executor); }
+    public MachineCatalog(Path directory, Executor executor) { this(directory, directory.resolve(MemoryDatabase.FILE_NAME), executor); }
+    public MachineCatalog(Path directory, Path databaseFile, Executor executor) { store = new MachineCatalogStore(directory, databaseFile, executor); }
 
     public Binding bind(Identity identity, String sessionKey) {
         requireOwner(); poll(); sessionKey = CatalogLimits.text(sessionKey, 256, "session identity");

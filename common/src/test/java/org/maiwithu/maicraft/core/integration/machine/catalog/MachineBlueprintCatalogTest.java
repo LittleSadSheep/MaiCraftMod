@@ -4,10 +4,12 @@ package org.maiwithu.maicraft.core.integration.machine.catalog;
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
 import java.util.List;
+import java.sql.DriverManager;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.Identity;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineCatalogModels.Position;
 
-/** 普通机器的蓝图、原地编号和历史施工状态跨会话保留；目录只引用不可变蓝图文件。 */
+/** 普通机器的蓝图、原地编号和历史施工状态跨会话保留；索引与完整蓝图在同一事务里归档。 */
 public final class MachineBlueprintCatalogTest {
     public static void main(String[] args) throws Exception {
         var directory = Files.createTempDirectory("machine-blueprint-catalog-");
@@ -28,9 +30,11 @@ public final class MachineBlueprintCatalogTest {
         check(built.id().equals(id) && built.blueprint().equals(document) && built.builtAtMillis() == 300
                 && built.lastBuildState().equals("success"), "machine identity, blueprint and completion survive reconnect");
         check(!built.summary().get("current_world_verified").getAsBoolean(), "historical construction cannot claim current world agreement");
-        String index = Files.readString(directory.resolve(identity.key()+".json"));
-        check(!index.contains("minecraft:water") && Files.exists(directory.resolve(identity.key()+"-blueprints").resolve(built.fingerprint()+".json")),
-                "the bounded index references a separate complete blueprint");
+        var database = new MemoryDatabase(directory.resolve(MemoryDatabase.FILE_NAME));
+        String index = database.read("machines", identity.key(), CatalogLimits.FILE_BYTES);
+        check(!index.contains("minecraft:water") && database.read("machines", identity.key(), CatalogLimits.FILE_BYTES,
+                MachineBlueprint.MAX_BYTES, (json, documents) -> documents.apply(built.fingerprint())).equals(document.toString()),
+                "the bounded index references a separate complete blueprint record");
         var copy = built.blueprint(); copy.getAsJsonArray("blocks").get(0).getAsJsonObject().addProperty("block_id","minecraft:gold_block");
         check(built.blueprint().equals(document), "reading a blueprint cannot mutate its archived revision");
         restored.registerBlueprint("刷石机","minecraft:overworld",anchor,copy,400);
@@ -55,9 +59,11 @@ public final class MachineBlueprintCatalogTest {
                 "legacy machine identity remains readable");
         restored.bind(new Identity("world-two","player"),"third");
         check(restored.ready() && restored.blueprints().isEmpty(), "machine records cannot leak into another world");
-        // 蓝图文件受损时不能把另一份结构当成用户保存的目标；失败不会改写原目录。
-        var file = directory.resolve(identity.key()+"-blueprints").resolve(revised.fingerprint()+".json");
-        Files.writeString(file,document.toString());
+        // 蓝图记录受损时不能把另一份结构当成用户保存的目标；失败不会改写原目录。
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve(MemoryDatabase.FILE_NAME));
+             var sql = connection.prepareStatement("UPDATE memory_records SET payload=? WHERE scope='machines' AND identity_key=? AND document_key=?")) {
+            sql.setString(1, document.toString()); sql.setString(2, identity.key()); sql.setString(3, revised.fingerprint()); sql.executeUpdate();
+        }
         var corrupt = new MachineCatalog(directory,Runnable::run); corrupt.bind(identity,"fourth");
         check(!corrupt.ready() && corrupt.status().state() == MachineCatalog.State.FAILED, "a corrupted blueprint is not silently accepted");
         System.out.println("MachineBlueprintCatalogTest: complete blueprints persist separately with world and revision identity");

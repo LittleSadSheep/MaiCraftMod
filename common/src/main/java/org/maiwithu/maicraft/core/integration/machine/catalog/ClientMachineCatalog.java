@@ -68,7 +68,8 @@ public final class ClientMachineCatalog {
         if (level != minecraft.level || !minecraft.player.getUUID().equals(playerId)) {
             var identity = StateIdentity.resolve(minecraft);
             if (identity.isEmpty()) return;
-            if (catalog == null) catalog = new MachineCatalog(identity.get().directory().resolveSibling("machines"));
+            // 任务、施工归属与机器档案共用游戏实例的 SQLite，设备身份仍按世界和玩家隔离。
+            if (catalog == null) catalog = new MachineCatalog(identity.get().directory().resolveSibling("machines"), identity.get().databaseFile());
             level = minecraft.level; playerId = minecraft.player.getUUID(); issue = "";
             compiledBlueprints.clear();
             pendingBuilt.values().removeIf(value -> value.world() != level || !Objects.equals(value.player(),playerId));
