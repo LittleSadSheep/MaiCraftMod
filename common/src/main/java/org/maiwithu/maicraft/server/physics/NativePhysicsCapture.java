@@ -23,6 +23,8 @@ public final class NativePhysicsCapture {
     private static final String DIMENSION = "dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData";
     private static final class Lease {
         long until; boolean previous; PhysicsBody body; String error;
+        boolean collecting,directObserved;
+        PhysicsVector directForce=PhysicsVector.ZERO,directTorque=PhysicsVector.ZERO;
     }
     private NativePhysicsCapture() {}
     public static void watch(Object ship) {
@@ -39,6 +41,7 @@ public final class NativePhysicsCapture {
         if (lease == null) return;
         if (level(ship).getGameTime() > lease.until) { WATCHES.remove(ship); return; }
         try {
+            lease.collecting=true;lease.directObserved=false;lease.directForce=PhysicsVector.ZERO;lease.directTorque=PhysicsVector.ZERO;
             lease.previous = NativeApi.truth(NativeApi.call(ship, null, "isTrackingIndividualQueuedForces"));
             NativeApi.call(ship, null, "enableIndividualQueuedForcesTracking", true);
         } catch (RuntimeException missing) { lease.error = missing.getMessage(); }
@@ -49,10 +52,25 @@ public final class NativePhysicsCapture {
         try { lease.body = read(ship, handle, dt); lease.error = null; }
         catch (RuntimeException missing) { lease.body = null; lease.error = missing.getMessage(); }
         finally {
+            lease.collecting=false;
             // 原图解也可能正在观察同一条船，结束本次采样后恢复此前的记录状态。
             try { NativeApi.call(ship, null, "enableIndividualQueuedForcesTracking", lease.previous); }
             catch (RuntimeException missing) { lease.error = missing.getMessage(); }
         }
+    }
+
+    public static void direct(Object ship,Vector3dc force,Vector3dc torque) {
+        Lease lease=WATCHES.get(ship);if(lease==null||!lease.collecting) return;
+        lease.directObserved=true;lease.directForce=lease.directForce.add(PhysicsVector.of(force));
+        lease.directTorque=lease.directTorque.add(PhysicsVector.of(torque));
+    }
+    public static void directPoint(Object ship,Vector3dc point,Vector3dc force) {
+        Lease lease=WATCHES.get(ship);if(lease==null||!lease.collecting) return;
+        try {
+            Object mass=NativeApi.call(ship,null,"getMassTracker");
+            var arm=PhysicsVector.of(point).subtract(vector(NativeApi.call(mass,null,"getCenterOfMass")));
+            direct(ship,force,arm.cross(PhysicsVector.of(force)).mutable());
+        } catch(RuntimeException missing) { lease.error=missing.getMessage(); }
     }
 
     private static PhysicsBody read(Object ship, Object handle, double dt) {
@@ -69,12 +87,16 @@ public final class NativePhysicsCapture {
         worldCenter = new PhysicsVector(worldCenter.x()*scale.x(), worldCenter.y()*scale.y(), worldCenter.z()*scale.z());
         worldCenter = rotation.world(worldCenter).add(vector(NativeApi.call(pose, null, "position")));
         List<String> unknowns = new ArrayList<>();
-        if (!scale.equals(new PhysicsVector(1, 1, 1))) unknowns.add("非单位结构缩放的候选方块惯量需要额外校核");
+        if (!scale.equals(new PhysicsVector(1, 1, 1))) unknowns.add("unmodeled:非单位结构缩放的候选方块惯量需要额外校核");
         unknowns.add("点力记录不包含碰撞求解器的接触、摩擦和绳索约束冲量");
         List<PhysicsBody.Load> loads = new ArrayList<>();
+        Lease lease=WATCHES.get(ship);
+        PhysicsVector queuedForce=PhysicsVector.ZERO,queuedTorque=PhysicsVector.ZERO;
+        PhysicsVector recordedForce=PhysicsVector.ZERO,recordedTorque=PhysicsVector.ZERO;
         Object raw = NativeApi.call(ship, null, "getQueuedForceGroups");
         if (raw instanceof Map<?, ?> groups) for (var entry : groups.entrySet()) {
             String group = groupId(entry.getKey());
+            if(group.equals("null")) unknowns.add("unmodeled:原生受力组未注册，保留其数值但无法识别未来工况");
             if (group.endsWith(":gravity")) continue;
             Object queued = entry.getValue();
             PhysicsVector pointForce = PhysicsVector.ZERO, pointTorque = PhysicsVector.ZERO;
@@ -92,8 +114,10 @@ public final class NativePhysicsCapture {
             Object total = NativeApi.call(queued, null, "getForceTotal");
             PhysicsVector force = vector(NativeApi.call(total, null, "getLocalForce")).scale(1 / dt);
             PhysicsVector torque = vector(NativeApi.call(total, null, "getLocalTorque")).scale(1 / dt);
+            queuedForce=queuedForce.add(force);queuedTorque=queuedTorque.add(torque);
+            recordedForce=recordedForce.add(pointForce);recordedTorque=recordedTorque.add(pointTorque);
             // 气压梯度等可能额外贡献纯力偶，不能只根据画出来的箭头重新求和而丢掉它。
-            if (force.length() + torque.length() > 1e-9) {
+            if (!lease.directObserved && force.length() + torque.length() > 1e-9) {
                 force = force.subtract(pointForce); torque = torque.subtract(pointTorque);
                 if (force.length() + torque.length() > 1e-7)
                     loads.add(new PhysicsBody.Load(group + "/residual", group, center, force, torque,
@@ -101,6 +125,16 @@ public final class NativePhysicsCapture {
             }
             if (group.endsWith(":drag") || group.endsWith(":lift")) unknowns.add(group + " 使用采样时的气动载荷，速度变化后需要重新观察");
         }
+        if(lease.directObserved) {
+            // 已直接提交的冲量与仍在队列里的冲量合并一次，再扣除已列出的点力，防止重复计数。
+            PhysicsVector force=lease.directForce.scale(1/dt).add(queuedForce).subtract(recordedForce);
+            PhysicsVector torque=lease.directTorque.scale(1/dt).add(queuedTorque).subtract(recordedTorque);
+            if(force.length()+torque.length()>1e-7) {
+                loads.add(new PhysicsBody.Load("unattributed_impulse","sable:unattributed_impulse",center,force,torque,PhysicsBody.Frame.BODY,false,0));
+                unknowns.add("unmodeled:存在未归属到具体设备的直接冲量或力偶，实测总量已保留，未来工况来源仍需核验");
+            }
+        } else unknowns.add("直接刚体冲量未被本次采样钩子确认；只列出原生分组记录及重力");
+        unknowns.add("外部直接修改速度或位置的操作不属于当前受力积分记录");
         return new PhysicsBody((UUID) NativeApi.call(ship, null, "getUniqueId"), level(ship).dimension().location().toString(),
                 level(ship).getGameTime(), ((Number) NativeApi.call(mass, null, "getMass")).doubleValue(), center,
                 PhysicsBody.Inertia.of((Matrix3dc) NativeApi.call(mass, null, "getInertiaTensor")), rotation, worldCenter,
