@@ -64,11 +64,12 @@ final class PerceiveSections {
         result.addProperty("minItems", 1);
         result.addProperty("maxItems", 32);
         result.add("items", items);
-        result.addProperty("description", "Select top-level sections for one view only. "
+        // 模型先按视图选事实，再显式点名昂贵扫描；保留全部段名和缺段回执，减少围绕同一规则的重复解释。
+        result.addProperty("description", "Return only named sections from this view. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
-                + "Default surroundings omits terrain_overview and nearby_facilities; name one to run that sampling or scan. "
-                + "Focus diagnostics require focus. Unproduced requested sections appear in " + UNAVAILABLE + ".");
+                + "Request terrain_overview or nearby_facilities explicitly to scan them. Set focus for diagnostics. "
+                + "Missing requested sections are listed in " + UNAVAILABLE + ".");
         return result;
     }
 

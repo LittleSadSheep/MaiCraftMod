@@ -34,11 +34,12 @@ final class PublicToolCatalog {
     );
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
+    // 规划、执行和恢复共用目标说明；保留未知高度时的行走入口及能力限制，避免重复解释挤占工具预算。
     private static final JsonObject GOAL_DEFINITIONS = JsonParser.parseString("""
             {
               "worldPosition": {
                 "type":"object",
-                "description":"World coordinates. Travel without known y: omit target, use parameters.destination={x,z}.",
+                "description":"For travel without a known y, omit target and set parameters.destination={x,z}.",
                 "properties": {
                   "x":{"type":"integer"}, "y":{"type":"integer"}, "z":{"type":"integer"},
                   "dimension":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"}
@@ -51,7 +52,7 @@ final class PublicToolCatalog {
                   "kind":{"type":"string","enum":["current_place","coordinates","landmark","player","entity","nearest","area","prior_result"]},
                   "label":{"type":["string","null"],"minLength":1,"maxLength":160},
                   "position":{"anyOf":[{"$ref":"#/$defs/worldPosition"},{"type":"null"}]},
-                  "relation":{"type":["string","null"],"minLength":1,"maxLength":120,"description":"prior_result: earlier ability/outcome; never copied coordinates."}
+                  "relation":{"type":["string","null"],"minLength":1,"maxLength":120,"description":"Name the earlier ability or outcome for prior_result. Do not copy coordinates."}
                 },
                 "required":["kind"], "additionalProperties":false
               },
@@ -71,9 +72,9 @@ final class PublicToolCatalog {
                   "ability":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
                   "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Desired outcome."},
                   "target":{"anyOf":[{"$ref":"#/$defs/semanticTarget"},{"type":"null"}]},
-                  "parameters":{"type":"object","default":{},"description":"Fields from perceive(view=abilities,focus=ability)."},
-                  "preferences":{"type":"object","default":{},"description":"Only fields declared in accepted_preferences; otherwise empty."},
-                  "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Only declared, parameter-free hard constraints."},
+                  "parameters":{"type":"object","default":{},"description":"Use fields from perceive(view=abilities,focus=ability)."},
+                  "preferences":{"type":"object","default":{},"description":"Leave empty unless this ability declares accepted_preferences."},
+                  "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Use only this ability's parameter-free hard constraints."},
                   "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered steps for maicraft:sequence only."}
                 },
                 "required":["ability","outcome"], "additionalProperties":false
@@ -89,27 +90,28 @@ final class PublicToolCatalog {
 
     private static final List<JsonObject> TOOLS = List.of(
             // 建造先勘测并沿用返回的锚点，避免为找工具参数先遍历任务历史或整套教材；执行后再等注意流。
+            // 入口先说明能观察什么、怎样等待；检索规则放回参数，施工锚点的用法放在规划入口，便于模型顺着操作读。
             tool(PERCEIVE,
-                    "Read facts or wait with next_attention. abilities: paged index or focus contract. query searches abilities/knowledge/exploration. web_knowledge searches Minecraft Wiki or reads an adapted encyclopedia URL. resource_uri reads saved pages. Build from construction_site target/snapshot_id.",
+                    "Observe the world, find an ability, or read reference material. To wait for a task, reuse its next_attention arguments.",
                     perceiveSchema("""
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge","web_knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: visible power. machines: memories. web_knowledge: external references; exactly one of query/url, versions unverified."},
-                                "url":{"type":["string","null"],"maxLength":2048,"description":"web_knowledge only: HTTPS Minecraft Wiki /w/ or www.mcmod.cn item/class/post article. No query parameters. Implies web_knowledge; exclusive with query/source/language."},
-                                "source":{"type":["string","null"],"enum":["minecraft_wiki","mcmod",null],"description":"web_knowledge query only; default minecraft_wiki. MC百科 search is disallowed by its robots policy; use url to read an article."},
-                                "language":{"type":["string","null"],"enum":["zh","en",null],"description":"web_knowledge Wiki search only; defaults to zh. URL reads determine their own language."},
-                                "subject_id":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$","description":"web_knowledge only: optional registry ID to attach the installed mod version; this is not proof the article fits the current server."},
-                                "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
-                                "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
-                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Keywords for knowledge/abilities/exploration, web_knowledge Wiki search or kinetic_sources. Exploration focus selects a catalog; otherwise exclusive with focus/resource_uri/url."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: ability ID or maicraft:server_assistance. situation: maicraft:travel/elevators/physical_structures/navigation/transport. surroundings: signs. kinetic_sources: block ID. knowledge: search. exploration: discoveries(default), biomes, biome_tags, structures, pending, run:<id>, or details_focus."},
-                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Use returned resource_uri/details_uri/next_uri. Implies knowledge. Receipt pages are frozen, temporary and unknown until read."},
-                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"attention: this task plus important body events. tasks: current summary; use task get+path for evidence."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge","web_knowledge"],"default":"situation","description":"Read body and inventory with situation, nearby facts with surroundings, build geometry with construction_site, visible power with kinetic_sources, or saved observations with machines. abilities lists actions. web_knowledge needs exactly one of query or url; version compatibility is unverified."},
+                                "url":{"type":["string","null"],"maxLength":2048,"description":"Read a Minecraft Wiki /w/ or www.mcmod.cn item/class/post article over HTTPS, without URL query parameters. Selects web_knowledge; omit query, source and language."},
+                                "source":{"type":["string","null"],"enum":["minecraft_wiki","mcmod",null],"description":"Choose a web_knowledge search source; default minecraft_wiki. MC百科 robots forbid search; use an article url instead."},
+                                "language":{"type":["string","null"],"enum":["zh","en",null],"description":"Choose the web_knowledge Wiki search language; default zh. A url sets its own language."},
+                                "subject_id":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$","description":"For web_knowledge, give a registry ID to include its installed mod version. This does not verify article compatibility."},
+                                "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"Name the construction_site, or omit to generate a label for its anchor."},
+                                "radius":{"type":"integer","minimum":1,"maximum":64,"description":"Use 1..8 for construction_site (default 8), or 8..64 for kinetic_sources (default 32). Power scans also cap height and exclude hidden or protected outlets."},
+                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Search knowledge, abilities, exploration, web_knowledge or kinetic_sources by keyword. Only exploration allows a catalog focus with query. Omit resource_uri and url."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"Read an ability by ID, or maicraft:server_assistance; omit for its paged index. For situation, prefix travel, elevators, physical_structures, navigation or transport with maicraft:. Use sign text for surroundings, a block ID for kinetic_sources, or search words for knowledge. Exploration accepts discoveries (default), biomes, biome_tags, structures, pending, run:<id> or returned details_focus."},
+                                "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Read a returned resource_uri, details_uri or next_uri. Selects knowledge. Receipt pages are frozen and temporary; unread contents remain unknown."},
+                                 "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Follow this task plus important body events in attention. tasks gives its summary; use task with get and path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
-                                 "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
-                                 "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: usually 30000 ms; returns early for completion, decision, pause, missing task or resync. Timeout does not cancel work."},
-                                 "limit":{"type":"integer","minimum":1,"maximum":20,"description":"Normally 1..20, default 5. web_knowledge reads 1..5 search results, default 3."},
+                                 "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"For attention, copy cursor from the response, never latest_cursor. Reuse next_attention to page safely."},
+                                 "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"For attention, usually use 30000. Returns early on completion, decisions, pauses, missing tasks or resync. Timeout leaves the task running."},
+                                 "limit":{"type":"integer","minimum":1,"maximum":20,"description":"Defaults to 5. For web_knowledge, read 1..5 search results; default 3."},
                                  "offset":{"type":"integer","minimum":0,"default":0,"description":"Copy next_offset for exploration/abilities/tasks pages."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
@@ -117,15 +119,15 @@ final class PublicToolCatalog {
                             }
                             """), annotations(true, false, true)),
             tool(PLAN,
-                    // 规划入口只讲提交和找回设计；具体图元和机器条件留在选定能力的契约中。
-                    "Compile without starting. build_machine requires construction_site target/snapshot_id and an authored blueprint; execute plan_id when ready_to_execute. Or read a saved plan with plan_id; path selects frozen input.",
+                    // 先设计、再提交施工：用场地回执绑定自己的蓝图，待计划就绪后执行；读取旧计划的方式由 plan_id 说明。
+                    "Plan a goal without starting it. For build_machine, include your blueprint and the target and snapshot_id from construction_site. Call execute with plan_id when ready_to_execute.",
                     goalSchema("""
                             {
                               "type":"object",
                               "properties": {
                                 "goal":{"$ref":"#/$defs/goal"},
-                                "plan_id":{"type":"string","description":"Read a retained plan instead of compiling goal."},
-                                "path":{"type":"string","maxLength":1024,"description":"With plan_id: JSON Pointer to frozen input; empty string lists fields."},
+                                "plan_id":{"type":"string","description":"Read a saved plan instead of planning a new goal."},
+                                "path":{"type":"string","maxLength":1024,"description":"With plan_id, read saved input at this JSON Pointer. Use an empty string to list fields."},
                                 "offset":{"type":"integer","minimum":0,"default":0},
                                 "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
@@ -134,7 +136,8 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, false, false)),
             tool(EXECUTE,
-                    "Start goal OR plan_id asynchronously; accepted means registered. Reuse request_key for an identical retry. Continue with next_attention to observe completion, decisions or pauses.",
+                    // 登记任务后仍要等待原生动作的实际结果；相同请求复用幂等键，避免网络重试让角色重复施工。
+                    "Start a goal or saved plan in the background. accepted means registered. Reuse request_key for an identical retry; follow next_attention until completion, a decision or a pause.",
                     goalSchema("""
                             {
                               "type":"object",
@@ -148,16 +151,17 @@ final class PublicToolCatalog {
                             }
                             """), annotations(false, true, false)),
             tool(TASK,
-                    "Get/list task summaries or control work. get+path reads evidence via detail_path. Answer decision_id with a listed choice; retry refines details.parameters; recover/replace_goal needs details.goal. Continue next_attention.",
+                    // 查看状态、读取旧证据和处理待答问题分清用途；恢复参数留在这里说明，防止把查历史误当成重新执行。
+                    "Check or control a task. To answer a decision, copy decision_id and a listed choice. retry can change details.parameters; recover or replace_goal needs details.goal. Then follow next_attention.",
                     goalSchema("""
                             {
                               "type":"object",
                               "properties": {
                                 "action":{"type":"string","enum":["get","list","pause","resume","cancel","answer"]},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
-                                 "request_key":{"type":["string","null"],"minLength":1,"maxLength":128,"description":"With action=list, look up the task accepted for an execute request key after an uncertain transport outcome."},
-                                 "path":{"type":"string","maxLength":1024,"description":"get only: JSON Pointer into retained task evidence. Empty string lists fields. Omit for current status. Follow detail_path; history pages never repeat game actions."},
-                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"list or get+path: copy next_offset for the next page."},
+                                 "request_key":{"type":["string","null"],"minLength":1,"maxLength":128,"description":"If execute's reply was lost, use action=list with the same request_key to find the accepted task."},
+                                 "path":{"type":"string","maxLength":1024,"description":"With get, omit for current status. To read saved evidence, copy detail_path (a JSON Pointer); an empty string lists fields. Reading history never repeats actions."},
+                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"Copy next_offset to continue a task list or evidence page."},
                                  "answer":{
                                   "anyOf":[
                                     {"type":"null"},
@@ -520,7 +524,8 @@ final class PublicToolCatalog {
                         definition.getAsJsonObject("properties").get(key.getAsString()).deepCopy()));
                 child.add("properties", fields);
                 child.addProperty("additionalProperties", true);
-                child.addProperty("description", "Child goal object with the same fields: ability, outcome, target, parameters, preferences, constraints, children. Only maicraft:sequence may contain children; the server validates every level (maximum nesting depth 32).");
+                // 顺序施工的子目标沿用父目标字段，不再逐个重列；仍明示逐层校验和递归深度，避免漏掉执行限制。
+                child.addProperty("description", "Use the same fields as the parent goal. Every level is validated; nest at most 32 levels.");
                 return child;
             }
             Set<String> path = new HashSet<>(ancestors); path.add(reference);

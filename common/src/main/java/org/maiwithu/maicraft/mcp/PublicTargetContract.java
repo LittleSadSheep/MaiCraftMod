@@ -32,7 +32,8 @@ final class PublicTargetContract {
         }
         schema.getAsJsonObject("properties").getAsJsonObject("kind").add("enum", kinds);
         schema.add("oneOf", branches);
-        schema.addProperty("description", "Only coordinates carries position. Named targets including area require label; prior_result requires relation. nearest may be unqualified; follow the selected ability's label rules. Null optional fields count as absent.");
+        // 模型选择地点时仍能看到坐标、命名区域与先前结果的区别；精简表述不改变取物等能力的 nearest 规则。
+        schema.addProperty("description", "Only coordinates uses position. Named targets, including area, need label; prior_result needs relation. nearest may omit label if the ability allows it. Omit optional fields or use null.");
     }
 
     static void validate(JsonObject target, String kind) {
