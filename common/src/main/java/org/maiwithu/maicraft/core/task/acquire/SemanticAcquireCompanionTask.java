@@ -2548,8 +2548,9 @@ public final class SemanticAcquireCompanionTask
         }
         AcquisitionNeed need = activeNeed == null ? needs.peek() : activeNeed;
         if (need != null) {
-            data.put("required_final_count", need.requiredFinalCount);
-            if (need.lastObservedCount >= 0) data.put("observed_count", need.lastObservedCount);
+            // 记分牌标准键 done/total 进事件摘要；契约见 .omo/drafts/task-progress-contract.md。
+            data.put("total", need.requiredFinalCount);
+            if (need.lastObservedCount >= 0) data.put("done", need.lastObservedCount);
             data.put("acceptable_item_count", need.itemIds.size());
             if (need.itemIds.size() == 1) data.put("item_id", need.itemIds.getFirst().toString());
         }

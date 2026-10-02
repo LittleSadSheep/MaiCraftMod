@@ -63,6 +63,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private double bestDist = Double.MAX_VALUE;   // 到目标曾达到的最近距离。
     private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
     private long planningSinceTick = -1;          // 零进展连续算路的起点；有实际进展或算路结束即复位。
+    /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 .omo/drafts/task-progress-contract.md）。 */
+    private static final int DISTANCE_QUANTUM_BLOCKS = 16;
+    /** 出发时（或路线重估后）的分母；剩余变大说明在绕路或新路线更长，分母跟着刷新。 */
+    private int initialRemaining = -1;
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
     private boolean worldViewPrepared;
@@ -587,6 +591,17 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     /** 规划失败且未接近到可视为到达时使用的放弃消息。必须在失败位置、导航尚未释放时捕获，
      *  这样才能在父类 {@code cleanup()} 停止导航前读取 {@code failReason}。 */
+    /** 移动任务的记分牌：remaining/initial 距离对，不用 done/total——绕路时剩余变大要如实显示。 */
+    @Override
+    public Map<String, Object> progress() {
+        double distance = Math.sqrt(player.distanceToSqr(bx + 0.5, by, bz + 0.5));
+        int remaining = (int) Math.round(distance / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS;
+        if (initialRemaining < 0 || remaining > initialRemaining) initialRemaining = remaining;
+        boolean planning = nav.planningInFlight();
+        return Map.of("task", name(), "phase", planning ? "planning" : "moving",
+                "remaining", remaining, "initial", initialRemaining);
+    }
+
     private String blockedMessage(String failReason) {
         int gy = player.blockPosition().getY();
         double remaining = repDistance();
