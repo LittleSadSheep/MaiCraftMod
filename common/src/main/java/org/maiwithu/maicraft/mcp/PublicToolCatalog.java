@@ -13,6 +13,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.MachineDesignBindings;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
  * MCP 对外的四个入口及 JSON 格式校验。它检查数据形状，不负责理解自然语言。
@@ -29,7 +30,7 @@ final class PublicToolCatalog {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     );
     private static final Set<String> VIEWS = Set.of(
-            "situation", "surroundings", "construction_site", "kinetic_sources", "abilities", "tasks", "attention", "landmarks", "exploration", "machines", "machine_menu", "knowledge"
+            "situation", "surroundings", "construction_site", "kinetic_sources", "abilities", "tasks", "attention", "landmarks", "exploration", "machines", "machine_menu", "knowledge", "web_knowledge"
     );
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
@@ -89,22 +90,26 @@ final class PublicToolCatalog {
     private static final List<JsonObject> TOOLS = List.of(
             // 建造先勘测并沿用返回的锚点，避免为找工具参数先遍历任务历史或整套教材；执行后再等注意流。
             tool(PERCEIVE,
-                    "Read facts or wait with next_attention. abilities: paged index or focus contract. query searches abilities/knowledge/exploration. resource_uri reads saved pages. Build from construction_site target/snapshot_id.",
+                    "Read facts or wait with next_attention. abilities: paged index or focus contract. query searches abilities/knowledge/exploration. web_knowledge searches Minecraft Wiki or reads an adapted encyclopedia URL. resource_uri reads saved pages. Build from construction_site target/snapshot_id.",
                     perceiveSchema("""
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: visible power. machines: memories."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge","web_knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: visible power. machines: memories. web_knowledge: external references; exactly one of query/url, versions unverified."},
+                                "url":{"type":["string","null"],"maxLength":2048,"description":"web_knowledge only: HTTPS Minecraft Wiki /w/ or www.mcmod.cn item/class/post article. No query parameters. Implies web_knowledge; exclusive with query/source/language."},
+                                "source":{"type":["string","null"],"enum":["minecraft_wiki","mcmod",null],"description":"web_knowledge query only; default minecraft_wiki. MC百科 search is disallowed by its robots policy; use url to read an article."},
+                                "language":{"type":["string","null"],"enum":["zh","en",null],"description":"web_knowledge Wiki search only; defaults to zh. URL reads determine their own language."},
+                                "subject_id":{"type":["string","null"],"pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$","description":"web_knowledge only: optional registry ID to attach the installed mod version; this is not proof the article fits the current server."},
                                 "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
-                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Keywords for knowledge/abilities/exploration or kinetic_sources. Exploration focus selects a catalog; otherwise exclusive with focus/resource_uri."},
+                                "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Keywords for knowledge/abilities/exploration, web_knowledge Wiki search or kinetic_sources. Exploration focus selects a catalog; otherwise exclusive with focus/resource_uri/url."},
                                 "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: ability ID or maicraft:server_assistance. situation: maicraft:travel/elevators/physical_structures/navigation/transport. surroundings: signs. kinetic_sources: block ID. knowledge: search. exploration: discoveries(default), biomes, biome_tags, structures, pending, run:<id>, or details_focus."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Use returned resource_uri/details_uri/next_uri. Implies knowledge. Receipt pages are frozen, temporary and unknown until read."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"attention: this task plus important body events. tasks: current summary; use task get+path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: usually 30000 ms; returns early for completion, decision, pause, missing task or resync. Timeout does not cancel work."},
-                                 "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
+                                 "limit":{"type":"integer","minimum":1,"maximum":20,"description":"Normally 1..20, default 5. web_knowledge reads 1..5 search results, default 3."},
                                  "offset":{"type":"integer","minimum":0,"default":0,"description":"Copy next_offset for exploration/abilities/tasks pages."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
@@ -218,12 +223,19 @@ final class PublicToolCatalog {
     private static void validatePerceive(JsonObject value) {
         // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
         only(value, "view", "focus", "query", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "label", "radius",
-                "sections", "offset", "server_id");
+                "sections", "offset", "server_id", "url", "source", "language", "subject_id");
         // 已选中文档 URI 就直接读知识；调用者明确指定的其他视图仍会校验，避免先做一次无关身体观察。
-        defaults(value, "view", present(value, "resource_uri") ? "knowledge" : "situation", "after_cursor", 0, "wait_ms", 0,
-                "limit", 5, "offset", 0, "server_id", "minecraft-server");
+        defaults(value, "view", present(value, "url") ? WebKnowledgeService.VIEW : present(value, "resource_uri") ? "knowledge" : "situation");
         String view = string(value, "view", 1, 32, false);
+        defaults(value, "after_cursor", 0, "wait_ms", 0, "limit", WebKnowledgeService.VIEW.equals(view) ? 3 : 5,
+                "offset", 0, "server_id", "minecraft-server");
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
+        // 查外部机制沿资料线程读取，专用参数不能混入身体观察或原生配方查询。
+        if (WebKnowledgeService.VIEW.equals(view)) {
+            if (present(value, "focus")) throw bad("web_knowledge uses query or url, not focus");
+            WebKnowledgeService.validate(value);
+        } else if (present(value, "url") || present(value, "source") || present(value, "language") || present(value, "subject_id"))
+            throw bad("url/source/language/subject_id are only supported by web_knowledge");
         // 场地参数只服务这一次有界观察，不悄悄改变其他视图的范围或过滤语义。
         if ("construction_site".equals(view)) {
             defaults(value, "radius", 8);
@@ -239,7 +251,7 @@ final class PublicToolCatalog {
         // 模糊发现与精确读取明确分开，不能把产品名传给只接受能力标识的 focus。
         nullableString(value, "query", 1, 256);
         if (present(value, "query")) {
-            if (!Set.of("knowledge", "abilities", "kinetic_sources", "exploration").contains(view)) throw bad("query is only supported by knowledge, abilities, exploration and kinetic_sources");
+            if (!Set.of("knowledge", "web_knowledge", "abilities", "kinetic_sources", "exploration").contains(view)) throw bad("query is only supported by knowledge, web_knowledge, abilities, exploration and kinetic_sources");
             if (value.get("query").getAsString().isBlank()) throw bad("query must contain search keywords");
             if (present(value, "focus") && !"exploration".equals(view) || present(value, "resource_uri")) throw bad("Use query to discover candidates, then focus or resource_uri to read one; do not combine them");
         }

@@ -50,6 +50,7 @@ import java.util.concurrent.ExecutionException;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeException;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
  * 游戏进程里的 MCP 网络服务：接收请求、检查连接和格式，再把实际工作交给 RuntimeFacade。
@@ -895,6 +896,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private Duration requestTimeout(String toolName, JsonObject arguments) {
         // Attention 本身可能要等三十秒，网络超时要加上这段主动等待时间，不能十五秒就先掐断它。
         Duration base = config.requestTimeout();
+        // 专站查询内部已有总期限；传输层额外留出序列化时间，站点慢不能卡住角色动作或提前吞掉部分结果。
+        if (PublicToolCatalog.PERCEIVE.equals(toolName) && WebKnowledgeService.VIEW.equals(nullableString(arguments, "view")))
+            return base.plus(WebKnowledgeService.BUDGET);
         if (PublicToolCatalog.PERCEIVE.equals(toolName)
                 && "attention".equals(nullableString(arguments, "view"))
                 && arguments.has("wait_ms")) {

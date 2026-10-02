@@ -41,13 +41,22 @@ MCP 的 `tools/list` 里**只有四个工具**。它们是**通道**，不是功
 **到语义部分**：`attention` / `tasks` / `landmarks` 读 `IntentRuntime` 的记录；
 其余 view 是现场观察。
 
-**三条旁路**（不走游戏线程的常规路径）：
+**四条旁路**（不走游戏线程的常规路径）：
 
 | 请求 | 去哪 |
 | --- | --- |
 | `view=knowledge` | 离线知识库，不要求进世界 |
 | `view=knowledge` + 回执 URI | 直接读冻结回执，连知识库都不查 |
+| `view=web_knowledge` | 专用工作线程检索百科与读取条目，不要求进世界、不申请身体控制 |
 | `view=attention` + `wait_ms>0` | 挂起等待，而不是立即求值 |
+
+联网资料通过 `perceive(view="web_knowledge", query="Stone", language="en", limit=1)` 查询 Minecraft Wiki；中文站使用 `language="zh"`（默认）。也可指定 `url` 读取 `minecraft.wiki`、`zh.minecraft.wiki` 的 `/w/` 条目，以及 `www.mcmod.cn` 的 `/item/`、`/class/`、`/post/` 条目。只传 `url` 会自动选择此视图。`query` 和 `url` 二选一，URL 不接受查询参数；URL 已确定来源，不能同时填 `source` 或 `language`。
+
+`source` 默认为 `minecraft_wiki`。Wiki 的 API、站内搜索页受 robots 限制，因此读取站点主动公布的 sitemap，连续读取主命名空间分片，在本地匹配条目标题，再获取选中的普通百科页面。`search_scope="sitemap_article_titles"` 表示标题检索，`indexed_articles` 和 `index_fetched_at` 说明覆盖量及索引时间；不会将标题未命中冒充全文不存在。MC 百科站内 `/s` 检索被其 robots 规则禁止，`source="mcmod"` 的检索返回 `site_search_disallowed`；条目链接读取仍可用。整个查询不需要搜索服务 API Key。
+
+`subject_id` 可附带相关模组的客户端安装版本，版本信息在客户端启动时冻结。外部文档始终返回 `version_match="unverified"`，不会把客户端版本或网页更新时间当成服务器配方的证明。正文保留段落、表格、图片替代文字和引用；图片格子布局不转换成可执行配方。大结果沿现有冻结回执机制完整交付，不能静默裁掉条件或版本备注。
+
+每次检索读取 1～5 个候选（默认 3），`total_matches` 和 `more_search_results` 报告检索范围；各页失败单列，允许部分成功。单次请求共用 20 秒期限、每次下载最多 4 秒、每个来源至少间隔 1 秒，并遵守更长的 Crawl-delay。HTTP 只接受白名单 HTTPS 路由，所有重定向重新校验；网页缓存最多 32 页、4 Mi 字符、15 分钟，缓存命中保留原抓取时间；每个语言站另外保留一份同样有效期的标题索引。正文超过 2 MiB 明确失败，不使用残页；站点地图下载上限 8 MiB，解压上限 16 MiB。两个资料工作线程最多受理四个请求，取消查询中断下载但不取消游戏任务。
 
 ---
 

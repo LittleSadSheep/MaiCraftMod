@@ -59,6 +59,7 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.tools.perception.LocalFloorSense;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /** 把 MCP 请求接到当前游戏玩家：读世界、登记目标、控制任务、整理对外回复；不另外运行一套游戏逻辑。 */
 public final class MaiCraftRuntimeFacade implements RuntimeFacade {
@@ -81,6 +82,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     @Override
     public CompletionStage<JsonElement> perceive(JsonObject arguments) {
+        // 遇到陌生物品时在资料线程联网；只读启动时冻结的版本信息，不等待游戏刻、不申请身体。
+        if (WebKnowledgeService.VIEW.equals(arguments.get("view").getAsString()))
+            return WebKnowledgeService.instance().request(arguments);
         // 文档可以离线读，周边地形要分几刻采样，等任务消息则挂起回复；其他查询交给游戏线程当次处理。
         if ("knowledge".equals(arguments.get("view").getAsString())) return knowledge(
                 KnowledgeLibrary.perceptionRequest(arguments));

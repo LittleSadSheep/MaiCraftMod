@@ -27,6 +27,10 @@ import net.neoforged.neoforge.client.event.ScreenEvent;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
+import org.maiwithu.maicraft.mcp.knowledge.web.KnowledgeEnvironment;
+import net.neoforged.fml.ModList;
+import net.minecraft.SharedConstants;
+import java.util.stream.Collectors;
 
 /**
  * NeoForge 的客户端入口，作用与 Fabric 入口相同，只是事件类型和注册方式不同。
@@ -54,6 +58,10 @@ public final class MaiCraftNeoForgeClient {
             // 与 Fabric 一样在接单前载入清障名单，缺少有效配置时不允许自动挖路。
             ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
             NeoForgeOptionalServerClient.install();
+            // 与 Fabric 一样只冻结已安装版本；外部教程是否适配当前整合包仍需结合原生配方确认。
+            KnowledgeEnvironment.install("neoforge", SharedConstants.getCurrentVersion().getName(),
+                    ModList.get().getMods().stream().collect(Collectors.toMap(
+                            mod -> mod.getModId(), mod -> mod.getVersion().toString(), (first, second) -> first)));
             MaiCraftCore.init();
             // 启动验收前可直接核对实际加载的类位置和人工审图开关，避免旧打包 Mod 冒充刚编译的修复。
             var source = PreviewController.class.getProtectionDomain().getCodeSource();
