@@ -16,6 +16,8 @@ public final class ServerNativeRegressionTest {
         historyGapsAreExplicit();
         pagesNeverSkipUnreportedResources();
         nativeFailureCannotBecomeMissingApi();
+        // 服务器读取可选模组设备时先验证重载选择，避免真实操作到入口就失败。
+        NativeApiDispatchTest.main(args);
         configurationBooleansAreStrict();
         System.out.println("Server native identity, event, paging and reflection regressions passed");
     }

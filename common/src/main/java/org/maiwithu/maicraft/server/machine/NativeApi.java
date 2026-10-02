@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.server.machine;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Arrays;
 import java.util.List;
@@ -40,6 +41,8 @@ public final class NativeApi {
         List<Method> methods;
         try { methods = METHODS.get(owner).getOrDefault(method, List.of()); }
         catch (LinkageError unavailable) { throw new Unavailable(owner.getName(), unavailable); }
+        // 先收集可接收当前世界或设备的全部入口，再选择最具体的重载，避免 Sable 的父类世界入口遮住服务端入口。
+        List<Method> applicable = new ArrayList<>();
         for (Method candidate : methods) {
             if (!candidate.getName().equals(method) || candidate.getParameterCount() != arguments.length) continue;
             Class<?>[] parameters = candidate.getParameterTypes();
@@ -51,13 +54,16 @@ public final class NativeApi {
                     break;
                 }
             }
-            if (matches) {
-                if (found != null && !found.isBridge() && !candidate.isBridge()
-                        && !Arrays.equals(found.getParameterTypes(), candidate.getParameterTypes())) {
-                    throw new Unavailable("Ambiguous API: " + owner.getName() + "." + method, null);
-                }
-                if (found == null || found.isBridge()) found = candidate;
+            if (matches) applicable.add(candidate);
+        }
+        for (Method candidate : applicable) {
+            if (applicable.stream().anyMatch(other -> moreSpecific(other, candidate))) continue;
+            // 不相关的设备接口仍可能同时匹配；没有唯一入口时保留歧义，不试调用任意一个来猜测结果。
+            if (found != null && !found.isBridge() && !candidate.isBridge()
+                    && !Arrays.equals(found.getParameterTypes(), candidate.getParameterTypes())) {
+                throw new Unavailable("Ambiguous API: " + owner.getName() + "." + method, null);
             }
+            if (found == null || found.isBridge()) found = candidate;
         }
         if (found == null) throw new Unavailable(owner.getName() + "." + method, null);
         try { return found.invoke(target, arguments); }
@@ -67,6 +73,17 @@ public final class NativeApi {
         } catch (ReflectiveOperationException | LinkageError missing) {
             throw new Unavailable(owner.getName() + "." + method, missing);
         }
+    }
+
+    private static boolean moreSpecific(Method candidate, Method other) {
+        // 只有每个参数都能收窄到同一实际对象，才让更具体的游戏世界或设备入口取代父类入口。
+        Class<?>[] narrower = candidate.getParameterTypes(), broader = other.getParameterTypes();
+        boolean strict = false;
+        for (int i = 0; i < narrower.length; i++) {
+            if (!broader[i].isAssignableFrom(narrower[i])) return false;
+            strict |= narrower[i] != broader[i];
+        }
+        return strict;
     }
 
     public static Object field(Object target, String api, String name) {
