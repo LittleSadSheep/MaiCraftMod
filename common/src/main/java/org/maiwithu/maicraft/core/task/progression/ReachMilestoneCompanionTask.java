@@ -65,6 +65,8 @@ public final class ReachMilestoneCompanionTask
     private String issueCode;
     private List<String> recoveryOptions = List.of();
     private String completionFact;
+    /** 最近一次子任务失败的原始回执数据；聚合层原样透传，不再只留类型码（009）。 */
+    private Map<String, Object> childEvidence = Map.of();
 
     public ReachMilestoneCompanionTask(LocalPlayer player, ReachMilestoneTaskRecord record) {
         super(player, record);
@@ -297,6 +299,10 @@ public final class ReachMilestoneCompanionTask
             TaskRecord record,
             TaskResult result,
             ProgressionFacts facts) {
+        // 聚合只替换类型码与恢复建议；子任务带回的阶段/站位/扫描范围等卡点事实原样保留，
+        // 否则唯一对外入口看不到 child 层已有的诊断（009 实机验收失败的根因）。
+        childEvidence = result == null || result.data() == null
+                ? Map.of() : Map.copyOf(result.data());
         String childIssue = issue(result);
         if ((purpose == Purpose.ACQUIRE || purpose == Purpose.DIMENSION_TRAVEL
                 || purpose == Purpose.SUPPLY_DIMENSION_TRAVEL) && "requires_dimension".equals(childIssue)) {
@@ -367,6 +373,8 @@ public final class ReachMilestoneCompanionTask
         activeRequirement = requirement;
         activeStartFingerprint = facts.fingerprint();
         phase = nextPhase;
+        // 新阶段开启后旧子任务的失败证据不再属于当前回执；终态前不经过 start 的路径才保留它。
+        childEvidence = Map.of();
         return TaskState.RUNNING;
     }
 
@@ -389,6 +397,7 @@ public final class ReachMilestoneCompanionTask
     private TaskState complete(ProgressionFacts facts) {
         phase = Phase.COMPLETE;
         completionFact = facts.completionFact(r.milestone);
+        childEvidence = Map.of();
         return TaskState.SUCCESS;
     }
 
@@ -428,6 +437,20 @@ public final class ReachMilestoneCompanionTask
             data.put("issue_code", issueCode);
             data.put("requires_decision", true);
             data.put("recovery_options", recoveryOptions);
+        }
+        if (!childEvidence.isEmpty()) {
+            // blocked_facts 顶层透传保持 child 层既有键名；其余证据聚合在 child_evidence 下，
+            // 聚合层自己产出并已表达的键（类型码/恢复建议/决策）不再重复。
+            Object blockedFacts = childEvidence.get("blocked_facts");
+            if (blockedFacts != null) data.put("blocked_facts", blockedFacts);
+            Map<String, Object> rest = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : childEvidence.entrySet()) {
+                if (List.of("blocked_facts", "issue_code", "failure_type",
+                        "recovery_options", "requires_decision", "decision")
+                        .contains(entry.getKey())) continue;
+                rest.put(entry.getKey(), entry.getValue());
+            }
+            if (!rest.isEmpty()) data.put("child_evidence", rest);
         }
         return data;
     }

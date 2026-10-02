@@ -19,6 +19,8 @@ public final class PortalRegressionSuite {
         PortalEntranceTest.main(args);
         PortalPreparationSupplyTest.main(args);
         NetherPreparationWorkflowTest.main(args);
+        // 里程碑聚合层是 reach_milestone 的唯一对外入口；child 卡点事实被聚合丢弃即 009 复发。
+        org.maiwithu.maicraft.core.task.progression.ReachMilestoneEvidencePassThroughTest.main(args);
         System.out.println("PortalRegressionSuite: passed");
     }
 }
