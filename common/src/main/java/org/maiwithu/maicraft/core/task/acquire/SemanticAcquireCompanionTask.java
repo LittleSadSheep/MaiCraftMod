@@ -179,7 +179,8 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected void onStart() {
-        storageScope = r.storageScope == null ? ContainerSearchScope.capture(player, r.storageSearchRadius) : r.storageScope;
+        // 老检查点缺失范围时，不用恢复地点补造原点；背包数量仍照常核对，已经够用就直接完成。
+        storageScope = r.storageScopeUnknown ? null : r.storageScope == null ? ContainerSearchScope.capture(player, r.storageSearchRadius) : r.storageScope;
         r.storageScope = storageScope;
         // 记下起始库存，并把最终需求放到栈顶；以后缺什么先压上去，凑齐后再回到上一层继续。
         initialCounts = counts(r.itemIds);
@@ -206,7 +207,7 @@ public final class SemanticAcquireCompanionTask
                     String.join("; ", protection.problems()), FailureType.TARGET_LOST);
         }
         // 递归补工具、燃料和原料时继承原始翻箱起点，不从子任务的新站位继续扩大调查范围。
-        return protection.run(() -> storageScope.inherit(this::tickAcquisition));
+        return protection.run(() -> storageScope == null ? tickAcquisition() : storageScope.inherit(this::tickAcquisition));
     }
 
     private TaskState tickAcquisition() {
@@ -422,6 +423,14 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptContainers(AcquisitionNeed need) {
+        if (storageScope == null) return failAcquisition("container_search_scope_unknown",
+                "The restored acquisition has no recorded container search scope; the current position was not adopted as a new origin.", FailureType.TARGET_LOST);
+        // 等原始范围随父任务落盘再调查第一只箱子；合并写入由既有检查点屏障跟随，写入失败不扩大许可。
+        try {
+            if (!r.prepareStorageScope()) { renewProgressLease(); return TaskState.RUNNING; }
+        } catch (IllegalStateException failed) {
+            return failAcquisition("container_search_scope_checkpoint_failed", "The original container search scope could not be saved before investigation: " + failed.getMessage(), FailureType.UNKNOWN);
+        }
         if (!storageScope.contains(player)) { need.containerSearchComplete = true; return null; }
         var ordinary = ContainerSupplySources.investigate(player, storageScope.origin(), storageScope.radius(),
                 need.itemIds, need.visitedContainers, r.protectedLabels);
@@ -2283,6 +2292,8 @@ public final class SemanticAcquireCompanionTask
     }
 
     private List<Map<String, Object>> recoveryOptions() {
+        if ("container_search_scope_unknown".equals(failureCode)) return List.of(Map.of("id", "report_unknown_search_scope",
+                "summary", "The original range is unknown. Report this fact; new storage access requires a separately authorized acquisition task.", "risk", "new_request_required"));
         // 查货被界面或终端访问挡住时，先恢复这项前置；不能把未查到的网络库存引导成去挖矿或狩猎。
         if ("wireless_stock_unknown".equals(failureCode)) return List.of(Map.of("id", "restore_wireless_access",
                 "summary", "Resolve the reported screen or terminal access precondition, then retry the unchanged inventory request.",
@@ -2415,6 +2426,7 @@ public final class SemanticAcquireCompanionTask
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("goal", "final_main_inventory_count");
         if (storageScope != null) data.put("container_search_scope", storageScope.receipt());
+        else if (r.storageScopeUnknown) data.put("container_search_scope", Map.of("status", "unknown", "reason", "missing_checkpoint_scope"));
         data.put("item_ids", itemStrings(r.itemIds));
         data.put("required_final_count", r.count);
         data.put("observed_final_count", observed);

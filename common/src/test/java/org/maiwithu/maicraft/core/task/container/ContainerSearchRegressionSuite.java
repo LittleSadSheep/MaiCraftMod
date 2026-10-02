@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.container;
 
 import org.maiwithu.maicraft.intent.ContainerMemoryCheckpointTest;
+import org.maiwithu.maicraft.intent.ContainerSearchScopePersistenceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationBodyRangeTest;
 import org.maiwithu.maicraft.core.task.acquire.OrdinaryStorageAcquireTest;
 import org.maiwithu.maicraft.core.task.acquire.StorageSupplyRadiusTest;
@@ -11,6 +12,7 @@ import org.maiwithu.maicraft.core.task.supply.MaterialSupplyReceiptTest;
 public final class ContainerSearchRegressionSuite {
     public static void main(String[] args) throws Exception {
         ContainerMemoryCheckpointTest.main(args);
+        ContainerSearchScopePersistenceTest.main(args);
         NavigationBodyRangeTest.main(args);
         ContainerInvestigationTest.main(args);
         ContainerSupplySourcesTest.main(args);

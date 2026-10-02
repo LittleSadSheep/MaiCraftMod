@@ -11,12 +11,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
+import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 
 /** MCP 总任务的任务单：记住总目标、做到了哪一步、为什么暂停，以及正在等调用者回答什么。 */
 public final class IntentTaskRecord extends TaskRecord {
@@ -37,6 +39,8 @@ public final class IntentTaskRecord extends TaskRecord {
     /** 实测保护范围留给后续步骤和检查点使用，公开任务快照不输出具体方块格。 */
     private final LinkedHashMap<Integer, List<InternalAreaProtectionReceipt.Footprint>>
             internalAreaProtections = new LinkedHashMap<>();
+    /** 每个取物步骤的首次翻箱范围；空值表示旧检查点未记录，不能在恢复地点重新捕获。 */
+    private final Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes = new LinkedHashMap<>();
 
     private int stepIndex;
     private PauseSnapshot pause;
@@ -109,6 +113,9 @@ public final class IntentTaskRecord extends TaskRecord {
         record.pendingAnswer = terminal == null ? pendingAnswer : null;
         record.terminal = terminal;
         if (terminal == null) {
+            // 老记录没有运行中子任务的范围证据；随后只有检查点明确保存的范围才能覆盖这个未知标记。
+            if (stepIndex < steps.size() && AcquireAbilityAdapter.ABILITY.equals(steps.get(stepIndex).ability()))
+                record.containerSearchScopes.put(stepIndex, Optional.empty());
             record.pause = new PauseSnapshot(
                     "paused_restored", restoredGameTime,
                     decision == null ? null : decision.id());
@@ -137,6 +144,20 @@ public final class IntentTaskRecord extends TaskRecord {
                 && stepResults.stream().allMatch(StepSnapshot::success);
     }
     public List<AttemptSnapshot> attempts() { return List.copyOf(attempts); }
+    public Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes() { return Map.copyOf(containerSearchScopes); }
+
+    void restoreContainerSearchScopes(Map<Integer, Optional<ContainerSearchScope>> saved) {
+        // 只让检查点中的明确记录覆盖默认未知，不根据恢复后的站位补写任何坐标。
+        containerSearchScopes.putAll(saved);
+    }
+
+    Optional<ContainerSearchScope> retainContainerSearchScope(ContainerSearchScope initial) {
+        // 同一语义步骤的重试只复用首次范围；旧记录的未知状态也属于已保存的事实。
+        if (!containerSearchScopes.containsKey(stepIndex)) {
+            containerSearchScopes.put(stepIndex, Optional.of(Objects.requireNonNull(initial))); changed();
+        }
+        return containerSearchScopes.get(stepIndex);
+    }
     /** 供检查点保存内部位置，MCP 查询不序列化这份坐标表。 */
     public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
         return Map.copyOf(internalStepPositions);
@@ -243,6 +264,7 @@ public final class IntentTaskRecord extends TaskRecord {
         updated.addAll(steps.subList(stepIndex, steps.size()));
         steps.clear();
         steps.addAll(updated);
+        shiftContainerSearchScopes(0, expanded.size());
         changed();
     }
 
@@ -268,7 +290,18 @@ public final class IntentTaskRecord extends TaskRecord {
         updated.addAll(steps.subList(stepIndex + 1, steps.size()));
         steps.clear();
         steps.addAll(updated);
+        shiftContainerSearchScopes(1, expanded.size());
         changed();
+    }
+
+    private void shiftContainerSearchScopes(int removed, int inserted) {
+        // 插入备料步骤时原目标只是后移，仍保留旧范围；明确替换目标才丢弃被替换步骤的范围。
+        var shifted = new LinkedHashMap<Integer, Optional<ContainerSearchScope>>();
+        containerSearchScopes.forEach((index, scope) -> {
+            if (index < stepIndex) shifted.put(index, scope);
+            else if (index >= stepIndex + removed) shifted.put(index + inserted - removed, scope);
+        });
+        containerSearchScopes.clear(); containerSearchScopes.putAll(shifted);
     }
 
     /** 建筑编译成可执行工程后保留冻结设计，恢复时沿用原来的几何与材料。 */

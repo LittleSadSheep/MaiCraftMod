@@ -33,6 +33,8 @@ import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
@@ -281,6 +283,12 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
+            if (nextRecord instanceof SemanticAcquireTaskRecord acquire && AcquireAbilityAdapter.ABILITY.equals(currentGoal().ability())) {
+                // 恢复时覆盖新子任务临时捕获的位置；首次翻箱前复用现有检查点屏障，保证原范围已真正落盘。
+                var scope = record.retainContainerSearchScope(acquire.storageScope == null
+                        ? ContainerSearchScope.capture(player, acquire.storageSearchRadius) : acquire.storageScope);
+                acquire.bindStorageScope(scope.orElse(null), NativeSubmissionBinding.barrier(record, runtime, "container_search_scope", () -> true));
+            }
             // 单次提交先绑定父任务的持久身份，附魔、投料和聊天都不能因重启后新建子任务而重复执行。
             if (nextRecord instanceof NativeSubmissionTaskRecord submission)
                 NativeSubmissionBinding.bind(submission, record, runtime);
