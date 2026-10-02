@@ -1,0 +1,62 @@
+name: 缺陷报告
+description: 报告 mod 在实机使用中的错误行为
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先检索现有 issue，避免重复提报。
+  - type: textarea
+    id: phenomenon
+    attributes:
+      label: 现象
+      description: 一两句话说明错误行为及其影响。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 从启动到触发问题的完整操作序列，含必要的坐标或场景描述。
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 附关键日志片段或错误码（如 mined_out、no_path）。
+    validations:
+      required: true
+  - type: dropdown
+    id: loader
+    attributes:
+      label: 加载器
+      options:
+        - Fabric
+        - NeoForge
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: Minecraft 版本与 mod 版本。
+      placeholder: "例：1.21.1 / mod v0.3.2"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充
+      description: 截图、录像或脱敏后的日志附件。
+    validations:
+      required: false

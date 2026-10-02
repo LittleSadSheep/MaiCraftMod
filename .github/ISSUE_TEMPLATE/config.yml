@@ -1,0 +1,2 @@
+# 禁用空白 issue，所有反馈走结构化模板。
+blank_issues_enabled: false
