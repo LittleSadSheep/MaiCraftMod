@@ -15,9 +15,20 @@ public record PhysicsWrench(PhysicsVector force, PhysicsVector torque,
     public static PhysicsWrench evaluate(PhysicsBody body, PhysicsBody.Rotation attitude,
                                          PhysicsVector position, PhysicsVector angularVelocity,
                                          Map<String, Double> controls, double propulsion) {
+        return evaluate(body,attitude,position,angularVelocity,controls,propulsion,true);
+    }
+    public static PhysicsWrench evaluate(PhysicsBody body, PhysicsBody.Rotation attitude,
+                                         PhysicsVector position, PhysicsVector angularVelocity,
+                                         Map<String, Double> controls, double propulsion, boolean details) {
+        return evaluate(body,attitude,position,body.velocity(),angularVelocity,controls,propulsion,details);
+    }
+    public static PhysicsWrench evaluate(PhysicsBody body, PhysicsBody.Rotation attitude,
+                                         PhysicsVector position, PhysicsVector velocity, PhysicsVector angularVelocity,
+                                         Map<String, Double> controls, double propulsion, boolean details) {
+        PhysicsComputation.spend(body.loads().size()+1);
         PhysicsVector force = body.gravity().scale(body.mass()), torque = PhysicsVector.ZERO;
         List<Contribution> parts = new ArrayList<>();
-        parts.add(new Contribution("gravity", "gravity", position, force, torque));
+        if(details) parts.add(new Contribution("gravity", "gravity", position, force, torque));
         for (var load : body.loads()) {
             double setting = controls.getOrDefault(load.id(), load.propulsion() ? propulsion : 1.0);
             if (!Double.isFinite(setting)) throw new IllegalArgumentException("推力设置必须是有限数值");
@@ -26,9 +37,17 @@ public record PhysicsWrench(PhysicsVector force, PhysicsVector torque,
             PhysicsVector couple = (load.frame() == PhysicsBody.Frame.BODY
                     ? attitude.world(load.torque()) : load.torque()).scale(setting);
             PhysicsVector arm = attitude.world(load.point().subtract(body.center()));
+            if(load.propulsion()&&load.airflow()>1e-9&&applied.length()>1e-9) {
+                // 起飞加速后迎流会降低推力；偏置桨还要使用作用点的转动速度，而不是只看船中心速度。
+                PhysicsVector pointVelocity=velocity.add(angularVelocity.cross(arm));
+                double flow=load.airflow()*Math.abs(setting);
+                double advance=pointVelocity.dot(applied.scale(1/applied.length()));
+                double fraction=Math.clamp(1-advance/Math.max(flow,1e-9),0,1);
+                applied=applied.scale(fraction); couple=couple.scale(fraction);
+            }
             PhysicsVector moment = arm.cross(applied).add(couple);
             force = force.add(applied); torque = torque.add(moment);
-            parts.add(new Contribution(load.id(), load.group(), position.add(arm), applied, moment));
+            if(details) parts.add(new Contribution(load.id(), load.group(), position.add(arm), applied, moment));
         }
         // 船正在转动时保留陀螺项，否则倾斜启动的模拟会低估横滚与偏航之间的耦合。
         Vector3d omega = attitude.local(angularVelocity).mutable();

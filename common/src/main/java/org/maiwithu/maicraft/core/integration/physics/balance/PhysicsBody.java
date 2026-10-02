@@ -56,10 +56,14 @@ public record PhysicsBody(UUID structureId, String dimension, long tick, double 
 
     /** 作用点随船体移动；气球浮力保持世界方向，螺旋桨推力随船体转动，纯力偶单独保留。 */
     public record Load(String id, String group, PhysicsVector point, PhysicsVector force,
-                       PhysicsVector torque, Frame frame, boolean propulsion, double responseSeconds) {
+                       PhysicsVector torque, Frame frame, boolean propulsion, double responseSeconds, double airflow) {
+        public Load(String id,String group,PhysicsVector point,PhysicsVector force,PhysicsVector torque,
+                    Frame frame,boolean propulsion,double responseSeconds) {
+            this(id,group,point,force,torque,frame,propulsion,responseSeconds,0);
+        }
         public Load {
             if (id == null || id.isBlank() || group == null || point == null || force == null || torque == null
-                    || frame == null || !Double.isFinite(responseSeconds) || responseSeconds < 0)
+                    || frame == null || !Double.isFinite(responseSeconds+airflow) || responseSeconds < 0 || airflow < 0)
                 throw new IllegalArgumentException("受力来源缺少作用点、方向或响应时间");
         }
     }

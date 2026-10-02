@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import org.joml.Matrix3d;
 
 /** 比较调用者允许的真实配重位置；建议只返回候选，角色仅在另行执行选定补丁时施工。 */
@@ -16,9 +17,11 @@ public final class PhysicsTrim {
         }
     }
     public record Placement(String candidateId, String blockId, PhysicsVector point, double mass) {}
+    public record ConstructionStep(int placed, double mass, PhysicsVector center, PhysicsVector stoppedTorque,
+                                   double verticalAcceleration, boolean stoppedEquilibrium) {}
     public record Recommendation(String state, List<Placement> placements, double beforeScore, double afterScore,
                                  PhysicsBody predictedBody, PhysicsSimulation.Assessment validation,
-                                 List<String> reasons) {}
+                                 List<ConstructionStep> constructionSequence, List<String> reasons) {}
     private record Choice(PhysicsBody body, List<Placement> placements, double score) {}
 
     public static Recommendation recommend(PhysicsBody body, List<Ballast> candidates, int maxBlocks,
@@ -58,15 +61,26 @@ public final class PhysicsTrim {
         String state = validation.predictedBalanced() ? "predicted_balanced"
                 : best.score() < before ? "improved_not_balanced" : "no_balanced_candidate_found";
         reasons.add("有界候选搜索结束不证明所有设计都不可行；请结合完整受力及试算结果继续修改");
-        return new Recommendation(state, best.placements(), before, best.score(), best.body(), validation, List.copyOf(reasons));
+        var sequence=new ArrayList<ConstructionStep>(); var stage=body;
+        var stoppedSettings=new LinkedHashMap<>(settings);
+        for(var load:body.loads()) if(load.propulsion()) stoppedSettings.put(load.id(),0.0);
+        for(var placement:best.placements()) {
+            stage=stage.ballast(placement.mass(),placement.point(),new Matrix3d().scaling(placement.mass()/6));
+            var stopped=PhysicsWrench.evaluate(stage,stage.rotation(),stage.position(),PhysicsVector.ZERO,stoppedSettings,0,false);
+            sequence.add(new ConstructionStep(sequence.size()+1,stage.mass(),stage.center(),stopped.torque(),stopped.verticalAcceleration(),
+                    Math.abs(stopped.verticalAcceleration())<=limits.maxVerticalAcceleration()&&stopped.angularAcceleration().length()<=limits.maxAngularAcceleration()));
+        }
+        // 中间状态只作施工提示，不因预测会倾斜而禁止主人明确要求的原生拆放。
+        if(sequence.stream().anyMatch(step->!step.stoppedEquilibrium())) reasons.add("部分施工中间状态未在无支撑停机工况配平，宜在停稳或有支撑条件下施工");
+        return new Recommendation(state, best.placements(), before, best.score(), best.body(), validation,List.copyOf(sequence), List.copyOf(reasons));
     }
 
     private static double score(PhysicsBody body, Map<String, Double> settings, PhysicsSimulation.Limits limits) {
         double worst = 0;
         for (double power : new double[]{0, .25, .5, .75, 1}) {
-            var controls = new java.util.LinkedHashMap<String, Double>();
+            var controls = new LinkedHashMap<String, Double>();
             for (var load : body.loads()) controls.put(load.id(), settings.getOrDefault(load.id(), 1.0) * (load.propulsion() ? power : 1));
-            var forces = PhysicsWrench.evaluate(body, body.rotation(), body.position(), PhysicsVector.ZERO, controls, power);
+            var forces = PhysicsWrench.evaluate(body, body.rotation(), body.position(), PhysicsVector.ZERO, controls, power,false);
             double vertical = Math.abs(forces.verticalAcceleration()) / limits.maxVerticalAcceleration();
             double angular = forces.angularAcceleration().length() / limits.maxAngularAcceleration();
             worst = Math.max(worst, vertical * vertical + angular * angular);

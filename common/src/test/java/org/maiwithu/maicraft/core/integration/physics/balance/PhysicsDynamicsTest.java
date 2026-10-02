@@ -30,5 +30,22 @@ final class PhysicsDynamicsTest {
                 1, Map.of(), limits);
         check(trim.placements().size() == 1 && trim.validation().predictedBalanced(), "配重应同时补足质量并对齐浮力作用线");
         check(trim.afterScore() < trim.beforeScore(), "推荐应改善两个工况的最差偏差");
+        var cruisePropeller=new PhysicsBody.Load("cruise","propulsion",v(0,0,0),v(100,0,0),PhysicsVector.ZERO,
+                PhysicsBody.Frame.BODY,true,0,10);
+        var craft=vessel(List.of(cruisePropeller));
+        near(PhysicsWrench.evaluate(craft,craft.rotation(),craft.position(),v(5,0,0),PhysicsVector.ZERO,Map.of(),1,false).force().x(),
+                50,"达到一半桨流速度后推力应按原生迎流规则减半");
+        var missing=new PhysicsBody(craft.structureId(),craft.dimension(),craft.tick(),craft.mass(),craft.center(),craft.inertia(),craft.rotation(),
+                craft.position(),craft.velocity(),craft.angularVelocity(),craft.gravity(),List.of(balloon),List.of("unmodeled:未知推进器"));
+        check(!PhysicsSimulation.assess(missing,limits,Map.of()).predictedBalanced(),"漏掉推进器后不能把剩余载荷的平衡当成完整结论");
+        var brief=new PhysicsSimulation.Limits(1,8,.25,.035,2);
+        var stopped=PhysicsSimulation.assess(vessel(List.of(balloon)),brief,Map.of()).trials().stream()
+                .filter(trial->trial.mode().equals("stopping")).findFirst().orElseThrow();
+        near(stopped.trajectory().getLast().seconds(),4,"一秒观察窗口仍须包含完整的停机过渡");
+        try(var budget=PhysicsComputation.begin(()->true)) {
+            try { wrench(craft,craft.rotation(),1);throw new AssertionError("取消后试算仍在继续"); }
+            catch(PhysicsComputation.Limit expected) { }
+        }
+        wrench(craft,craft.rotation(),1);
     }
 }

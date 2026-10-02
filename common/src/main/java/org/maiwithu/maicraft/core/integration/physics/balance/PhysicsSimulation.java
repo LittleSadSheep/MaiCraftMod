@@ -27,7 +27,7 @@ public final class PhysicsSimulation {
                         boolean withinLimits, boolean numericalFailure, List<Sample> trajectory) {}
     public record Assessment(String model, boolean stoppedEquilibrium, boolean runningEquilibrium,
                              boolean restoringStopped, boolean restoringRunning, boolean predictedBalanced,
-                             boolean nativeVerified, PhysicsWrench stopped, PhysicsWrench running,
+                             boolean sourceComplete, boolean nativeVerified, PhysicsWrench stopped, PhysicsWrench running,
                              List<Trial> trials, List<String> limitations) {}
 
     public static Assessment assess(PhysicsBody body, Limits limits, Map<String, Double> settings) {
@@ -48,9 +48,10 @@ public final class PhysicsSimulation {
         List<String> limitations = new ArrayList<>(body.unknowns());
         limitations.add("隔离刚体预测：未复演地形碰撞、绳索及多刚体约束、传动网络重建、气球充气和流体变化");
         limitations.add("来源推力按已观察或明确声明的工况计算；预测通过仍须在游戏中核验停机、运行和启停");
+        boolean complete=body.unknowns().stream().noneMatch(reason->reason.startsWith("unmodeled:"));
         return new Assessment("isolated_rigid_body", idle, cruise, idleRestoring, cruiseRestoring,
-                idle && cruise && idleRestoring && cruiseRestoring && trials.stream().allMatch(Trial::withinLimits),
-                false, stopped, running, List.copyOf(trials), List.copyOf(limitations));
+                complete && idle && cruise && idleRestoring && cruiseRestoring && trials.stream().allMatch(Trial::withinLimits),
+                complete, false, stopped, running, List.copyOf(trials), List.copyOf(limitations));
     }
 
     private static boolean equilibrium(PhysicsWrench wrench, Limits limits) {
@@ -88,7 +89,9 @@ public final class PhysicsSimulation {
                 mode.equals("running") || mode.equals("stopping") ? 1 : 0));
         List<Sample> trajectory = new ArrayList<>();
         double peak = tilt(attitude, body.gravity()), peakSpeed = omega.length(), maxVerticalSpeed = 0;
-        double dt = .01; int steps = (int)Math.ceil(limits.duration() / dt);
+        // 时长指过渡结束后的观察窗口；即使只要求一秒，也要完整走过启动或停转过程。
+        double duration=limits.duration()+(mode.equals("stopping")?3:mode.equals("starting")?1:0);
+        double dt = .01; int steps = (int)Math.ceil(duration / dt);
         boolean failure = false;
         for (int i = 0; i <= steps; i++) {
             double time = i * dt;
@@ -97,7 +100,8 @@ public final class PhysicsSimulation {
             if (i == steps) break;
             double power = switch (mode) {
                 case "stopped" -> 0; case "running" -> 1;
-                case "starting" -> Math.min(1, time); default -> Math.max(0, 1 - time);
+                // 停转场景先保持两秒运行，让船积累真实的模型速度，再用一秒收回推进。
+                case "starting" -> Math.min(1, time); default -> time < 2 ? 1 : Math.max(0, 3 - time);
             };
             var desired = controls(body, settings, power);
             for (var load : body.loads()) {
@@ -106,7 +110,7 @@ public final class PhysicsSimulation {
                 commands.compute(load.id(), (id, old) -> old + (target - old) * fraction);
             }
             try {
-                var forces = PhysicsWrench.evaluate(body, attitude, position, omega, commands, power);
+                var forces = PhysicsWrench.evaluate(body, attitude, position, velocity, omega, commands, power,false);
                 velocity = velocity.add(forces.acceleration().scale(dt));
                 position = position.add(velocity.scale(dt));
                 omega = omega.add(forces.angularAcceleration().scale(dt));
@@ -123,7 +127,7 @@ public final class PhysicsSimulation {
         double height = g == 0 ? 0 : -position.subtract(body.position()).dot(body.gravity()) / g;
         double vertical = g == 0 ? 0 : -velocity.dot(body.gravity()) / g;
         boolean pass = !failure && peak <= limits.maxTiltDegrees()
-                && maxVerticalSpeed <= limits.maxVerticalAcceleration() * limits.duration()
+                && maxVerticalSpeed <= limits.maxVerticalAcceleration() * duration
                 && peakSpeed <= Math.toRadians(limits.maxTiltDegrees());
         return new Trial(mode, name, peak, tilt(attitude, body.gravity()), height, vertical,
                 peakSpeed, pass, failure, List.copyOf(trajectory));

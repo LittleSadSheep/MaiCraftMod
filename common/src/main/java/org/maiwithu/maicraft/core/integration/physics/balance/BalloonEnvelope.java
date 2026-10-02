@@ -17,7 +17,10 @@ public final class BalloonEnvelope {
         boolean contains(Cell p) { return p.x >= min.x && p.y >= min.y && p.z >= min.z
                 && p.x <= max.x && p.y <= max.y && p.z <= max.z; }
     }
-    public record Result(String state, int capacity, PhysicsVector center, int reads) {}
+    public record Result(String state, int capacity, PhysicsVector center, int reads, Set<Cell> cells) {
+        public Result { cells=Set.copyOf(cells); }
+        public Result(String state,int capacity,PhysicsVector center,int reads) { this(state,capacity,center,reads,Set.of()); }
+    }
     private static final int[][] FLOW = {{0,1,0},{1,0,0},{-1,0,0},{0,0,1},{0,0,-1}};
 
     public static Result inspect(Function<Cell, Kind> source, Bounds bounds, Cell start, int budget) {
@@ -42,7 +45,7 @@ public final class BalloonEnvelope {
             for (Cell p : volume) if (view.get(p) == Kind.AIR) {
                 capacity++; sum = sum.add(new PhysicsVector(p.x+.5, p.y+.5, p.z+.5));
             }
-            return new Result("enclosed", capacity, capacity == 0 ? PhysicsVector.ZERO : sum.scale(1.0 / capacity), view.cache.size());
+            return new Result("enclosed", capacity, capacity == 0 ? PhysicsVector.ZERO : sum.scale(1.0 / capacity), view.cache.size(),volume);
         } catch (Unknown missing) { return new Result(missing.getMessage(), 0, PhysicsVector.ZERO, view.cache.size()); }
     }
     private static Set<Cell> flood(View view, Cell start, Set<Cell> existing, Set<Cell> leaks) {
