@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.integration.machine;
 
+import org.maiwithu.maicraft.mcp.knowledge.MachineKnowledge;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
@@ -108,6 +110,8 @@ public final class MachineBlueprintDiff {
         boolean complete = start == 0 && end == targets.size() && counts.get("unknown") == 0;
         result.addProperty("comparison_complete", complete);
         result.add("structure_matches_blueprint", complete ? new JsonPrimitive(counts.get("matched") == targets.size()) : JsonNull.INSTANCE);
+        // 实际方块与目标不同时顺带提供双方资料；未知格仍保持未知，关联知识不改变结构或生产结论。
+        MachineKnowledge.attach(result);
         return result;
     }
     private static JsonArray offset(BlockPos at) { var value = new JsonArray(); value.add(at.getX()); value.add(at.getY()); value.add(at.getZ()); return value; }

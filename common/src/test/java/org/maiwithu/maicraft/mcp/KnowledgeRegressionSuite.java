@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeSearchTest;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeReferencesTest;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgePitfallsTest;
+import org.maiwithu.maicraft.mcp.knowledge.MachineKnowledgeTest;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSourceTest;
 import org.maiwithu.maicraft.mcp.knowledge.RecipeItemKnowledgeTest;
@@ -36,6 +37,8 @@ public final class KnowledgeRegressionSuite {
         KnowledgeReferencesTest.main(args);
         // 共享说明仍在本次回复中完整出现，配方索引不能串联成错误的原料或产物角色。
         KnowledgePitfallsTest.main(args);
+        // 用冻结的整机观察关联资料，目标与实际状态分开，未知格和观察身份保持原样。
+        MachineKnowledgeTest.main(args);
         BuildingModelContractResourcesTest.main(args);
         // 教材先跑实际建模与方块状态检查，避免把能解析但会堵门或填满屋顶的案例交给设计 Agent。
         BuildingTutorialResourcesTest.main(args);
