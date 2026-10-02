@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.pathing.baritone;
 
 import baritone.pathing.calc.GroundJourneyContinuationTest;
+import baritone.behavior.PathCalculationStallTest;
 import java.util.concurrent.TimeUnit;
 
 /** 每轮使用全新 JVM，交替初始化顺序，避免复用一个已预热的会话掩盖首任务故障。 */
@@ -11,6 +12,9 @@ public final class NavigationStartupRegressionSuite {
             if (args[0].equals("path_first")) GroundJourneyContinuationTest.main(new String[]{"startup_19"});
             NavigationStartupPreparationTest.main(new String[0]);
             if (!args[0].equals("path_first")) GroundJourneyContinuationTest.main(new String[]{"startup_19"});
+            // 每次冷启动也回放真实目标进程的丢请求恢复和工作线程停滞，不能只验证裸 A* 算法。
+            NavigationHandoffTest.main(new String[0]);
+            PathCalculationStallTest.main(new String[0]);
             return;
         }
         String java = ProcessHandle.current().info().command().orElseThrow();
