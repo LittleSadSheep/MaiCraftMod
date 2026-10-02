@@ -30,6 +30,7 @@ public final class PhysicsBalanceRegression {
         var turn = PhysicsBody.Rotation.of(new Quaterniond().rotationY(Math.PI / 2));
         near(wrench(powered, turn, 1).torque().x(), 200, "船体转向后应转换力矩坐标");
         check(body.center().equals(PhysicsVector.ZERO), "预测配重不应改动原始快照");
+        PhysicsDynamicsTest.run();
         System.out.println("PhysicsBalanceRegression: passed");
     }
     static PhysicsBody vessel(List<PhysicsBody.Load> loads) {
