@@ -65,12 +65,12 @@ public final class MemoryDatabase {
                 }
                 // 已归档的同一版本不可被另一份图纸替换；失败时连同本次目录更新一起回滚。
                 try (var statement = connection.prepareStatement("INSERT INTO memory_records VALUES(?,?,?,?) "
-                        + "ON CONFLICT(scope,identity_key,document_key) DO UPDATE SET payload=excluded.payload "
-                        + "WHERE payload=excluded.payload")) {
+                        + "ON CONFLICT(scope,identity_key,document_key) DO NOTHING")) {
                     for (var entry : documents.entrySet()) {
                         if (entry.getKey().isEmpty()) throw new IOException("empty_document_key");
                         bind(statement, scope, identity, entry.getKey(), entry.getValue());
-                        if (statement.executeUpdate() == 0) throw new IOException("immutable_memory_document_changed");
+                        if (statement.executeUpdate() == 0 && !sameDocument(connection, scope, identity, entry.getKey(), entry.getValue()))
+                            throw new IOException("immutable_memory_document_changed");
                     }
                 }
                 connection.commit();
@@ -84,6 +84,14 @@ public final class MemoryDatabase {
     private static void bind(PreparedStatement statement, String scope, String identity, String key, String json) throws SQLException {
         statement.setString(1, scope); statement.setString(2, identity);
         statement.setString(3, key); statement.setString(4, json);
+    }
+
+    private static boolean sameDocument(Connection connection, String scope, String identity, String key, String json) throws SQLException {
+        // 附近设备刷新时不重复改写已有的大图纸，只核对原文，减少后台目录保存产生的日志写入。
+        try (var statement = connection.prepareStatement("SELECT payload=? FROM memory_records WHERE scope=? AND identity_key=? AND document_key=?")) {
+            statement.setString(1, json); statement.setString(2, scope); statement.setString(3, identity); statement.setString(4, key);
+            try (var result = statement.executeQuery()) { return result.next() && result.getBoolean(1); }
+        }
     }
 
     private static String readRow(Connection connection, String scope, String identity, String key, int limit) throws IOException {
@@ -119,10 +127,11 @@ public final class MemoryDatabase {
 
     private static void initialize(Connection connection) throws SQLException, IOException {
         try (var statement = connection.createStatement()) {
-            int version;
-            try (var result = statement.executeQuery("PRAGMA user_version")) { result.next(); version = result.getInt(1); }
-            int application;
-            try (var result = statement.executeQuery("PRAGMA application_id")) { result.next(); application = result.getInt(1); }
+            int version, application;
+            // 同一次读取取得格式版本和归属，避免另一后台线程首次建库时读到新旧混合的头信息。
+            try (var result = statement.executeQuery("SELECT user_version, application_id FROM pragma_user_version, pragma_application_id")) {
+                result.next(); version = result.getInt(1); application = result.getInt(2);
+            }
             if (version == 1 && application == APPLICATION_ID) return;
             if (version != 0 || application != 0) throw new IOException("unsupported_memory_database");
             // 两个后台存储器可能同时首次保存；先取得写锁，再核对版本并建立同一套表。
@@ -139,7 +148,10 @@ public final class MemoryDatabase {
                             + "PRIMARY KEY(scope,identity_key,document_key)) WITHOUT ROWID");
                     statement.execute("PRAGMA application_id=" + APPLICATION_ID);
                     statement.execute("PRAGMA user_version=1");
-                } else if (version != 1) throw new IOException("unsupported_memory_database");
+                } else {
+                    try (var result = statement.executeQuery("PRAGMA application_id")) { result.next(); application = result.getInt(1); }
+                    if (version != 1 || application != APPLICATION_ID) throw new IOException("unsupported_memory_database");
+                }
                 statement.execute("COMMIT");
             } catch (SQLException | IOException failure) {
                 try { statement.execute("ROLLBACK"); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
