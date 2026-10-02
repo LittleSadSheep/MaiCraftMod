@@ -64,6 +64,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 跑图候选按扇区核实，群系与结构目录分页读取，避免用反方向近目标或固定原版名单替代请求。
+    explorationRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.explore.ExplorationRegressionSuite',
+        heap: '768m', directory: 'exploration-regression', timeoutSeconds: 90,
+        purpose: '验证方向探索、群系目录与结构搜索契约'
+    ],
     // 独立验证数据库事务，避免任务进程内缓存掩盖实际的持久化失败。
     memoryRegression: [
         entry: 'org.maiwithu.maicraft.intent.persistence.MemoryRegressionSuite',

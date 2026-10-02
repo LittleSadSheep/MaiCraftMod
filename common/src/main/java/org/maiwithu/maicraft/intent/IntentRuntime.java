@@ -64,6 +64,7 @@ public final class IntentRuntime {
             "maicraft:travel",
             "maicraft:travel_dimension",
             "maicraft:find_structure",
+            ExplorationIntent.ABILITY,
             "maicraft:reach_milestone",
             "maicraft:defeat_ender_dragon",
             "maicraft:obtain_elytra",

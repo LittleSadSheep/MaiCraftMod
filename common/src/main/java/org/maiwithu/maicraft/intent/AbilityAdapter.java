@@ -59,6 +59,7 @@ final class AbilityAdapter {
             case "maicraft:travel" -> travel(goal, player, runtime);
             case "maicraft:travel_dimension" -> travelDimension(goal);
             case "maicraft:find_structure" -> findStructure(goal);
+            case ExplorationIntent.ABILITY -> ExplorationIntent.adapt(goal);
             case "maicraft:reach_milestone" -> reachMilestone(goal);
             case "maicraft:defeat_ender_dragon" -> defeatEnderDragon(goal);
             case "maicraft:obtain_elytra" -> obtainElytra(goal);
@@ -336,7 +337,11 @@ final class AbilityAdapter {
                     || bool(goal.preferences(),"may_alter_terrain",false));
             return new IntentAction.Tool("travel_surface",parameters.toString());
         }
-        if (goal.parameters().has("direction")) throw new IllegalArgumentException("direction is for platform discovery");
+        // 只有尚未定位的群系探索接受扇区；已有坐标或地标的旅行不能悄悄忽略方向参数。
+        boolean sectorRequested = List.of("direction", "angle_degrees", "min_distance").stream().anyMatch(goal.parameters()::has);
+        if (sectorRequested && (discovery == null || destination != null || goal.target() != null
+                || goal.parameters().has("block_id") || goal.parameters().has("block")))
+            throw new IllegalArgumentException("direction/angle_degrees/min_distance require biome discovery");
         parameters.addProperty("transport_mode", mode.name().toLowerCase(Locale.ROOT));
         String block = string(goal.parameters(), "block_id");
         if (block == null) block = string(goal.parameters(), "block");
@@ -404,6 +409,7 @@ final class AbilityAdapter {
                 explore.addProperty("transport_mode", mode.name().toLowerCase(Locale.ROOT));
                 explore.addProperty("max_distance",
                         integer(goal.parameters(), "max_distance", 768, 64, 2_048));
+                ExplorationIntent.copySector(goal.parameters(), explore, explore.get("max_distance").getAsInt());
                 if (bool(goal.parameters(), "may_alter_terrain", false)
                         || bool(goal.preferences(), "may_alter_terrain", false)) {
                     explore.addProperty("may_alter_terrain", true);
@@ -492,6 +498,8 @@ final class AbilityAdapter {
         args.addProperty("reach_structure",
                 !parameters.has("reach_structure")
                         || bool(parameters, "reach_structure", true));
+        ExplorationIntent.copySector(parameters, args, args.get("max_distance").getAsInt());
+        if (parameters.has("transport_mode")) args.add("transport_mode", parameters.get("transport_mode"));
         if (bool(parameters, "may_alter_terrain", false)
                 || bool(goal.preferences(), "may_alter_terrain", false)) {
             args.addProperty("may_alter_terrain", true);

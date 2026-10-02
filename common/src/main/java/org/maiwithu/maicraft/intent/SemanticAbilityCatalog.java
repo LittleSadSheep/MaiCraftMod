@@ -266,12 +266,30 @@ public final class SemanticAbilityCatalog {
                             field("allow_water_bucket_fall", "boolean", "Allow temporary bucket water for falls to a located destination, without granting digging or scaffold placement. Default false."),
                             field("allow_landing_assists", "boolean", "Allow verified temporary landing aids from carried items, including water and boats, without granting excavation or scaffolding. Requires a located destination; default false."),
                             field("semantic_target", "string", "Discover coast, a biome id/#biome_tag, platform, or surface. Platform discovery keeps observing while moving; no coordinates are required. Use direction to choose where to search. Surface discovery climbs out to open sky (no solid or liquid cover above the standing column; tree foliage is not cover) and needs no direction."),
-                            field("direction", "down|up|forward|backward|left|right|north|south|east|west", "For platform discovery only; defaults to forward. Use down to find a platform below. Relative directions use the heading when travel begins. Regional radius max_distance is 8..128 (default 64)."),
+                            field("direction", "string", "Platform: down/up or horizontal, default forward, radius 8..128. Biome discovery: cardinal/diagonal or forward/backward/left/right. Relative directions freeze at departure; candidate places must lie in the requested sector."),
+                            field("angle_degrees", "integer", "Biome discovery: full sector width 1..360, default 90 with direction. Travel routes may detour."),
+                            field("min_distance", "integer", "Biome discovery: minimum target distance, default 16 with direction or 0 without."),
                             field("biome_id", "resource_id", "Optional exact biome to discover."),
                             field("biome_tag", "resource_id", "Optional biome tag to discover."),
                             field("max_distance", "integer", "Bounded exploration radius; omit for the Mod default."),
                             field("may_alter_terrain", "boolean", "Hard consent to dig, bridge or pillar; default false."),
                             field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint this movement must preserve.")));
+            // 跑图和找地方共用原生探索；目录中的模组群系、标签及结构证据由 LLM 按用途选择。
+            case ExplorationIntent.ABILITY -> contract(
+                    "Explore the map, discover a chosen biome/tag or structure, or survey with no target kind. Discover actual modded IDs with perceive(view=exploration,focus=biomes|biome_tags|structures,query=...). Direction restricts destination candidates to a sector, not a straight walking line. coast means minecraft:beach. Quality is chosen by the model from observed facts; no hidden seed/locate is used.",
+                    targets(), fields(
+                            field("biome_id", "resource_id", "Exact registered biome; choose at most one target selector."),
+                            field("biome_tag", "resource_id", "Registered biome tag, including mod tags."),
+                            field("structure_id", "resource_id", "Structure evidence profile discovered through the exploration catalog."),
+                            field("semantic_target", "string", "coast, biome id/#tag, or survey; no selector defaults to survey."),
+                            field("direction", "string", "Cardinal/diagonal or forward/backward/left/right; fixed at departure. Omit to search all directions."),
+                            field("angle_degrees", "integer", "Full sector width 1..360, default 90 with direction."),
+                            field("min_distance", "integer", "Minimum target distance, default 16 with direction or 0 otherwise."),
+                            field("max_distance", "integer", "Radius: biome/survey 64..2048 (default 768); structures 64..4096 (default 4096)."),
+                            field("transport_mode", "auto|ground", "Native movement preference; default auto."),
+                            field("may_alter_terrain", "boolean", "Explicit permission to dig, bridge or pillar; default false."),
+                            field("reach_structure", "boolean", "Structure only: reach and recheck evidence, default true."),
+                            field("allow_rare_consumables", "boolean", "Structure only: permit real ender-eye throws, default false.")));
             case "maicraft:travel_dimension" -> contract(
                     "Reach another dimension through a real portal. With prepare_portal, MaiCraft can prepare a Nether or End entry portal before walking through and verifying the new dimension.",
                     targets("current_place", "landmark", "area", "prior_result"),
@@ -291,6 +309,10 @@ public final class SemanticAbilityCatalog {
                     targets("current_place", "area", "landmark", "prior_result"),
                     fields(
                             field("structure_id", "resource_id", "Required structure identity, such as minecraft:stronghold or minecraft:fortress."),
+                            field("direction", "string", "Optional horizontal cardinal/diagonal or relative heading, fixed at start."),
+                            field("angle_degrees", "integer", "Full sector width 1..360, default 90 with direction."),
+                            field("min_distance", "integer", "Minimum target distance, default 16 with direction or 0 without."),
+                            field("transport_mode", "auto|ground", "Native route preference, default auto."),
                             field("max_distance", "integer", "Maximum physical search distance from the starting region; default and maximum 4096."),
                             field("reach_structure", "boolean", "Whether to physically reach and re-verify the observed structure; default true."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
