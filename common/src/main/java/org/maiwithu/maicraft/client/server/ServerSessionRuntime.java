@@ -71,6 +71,8 @@ public final class ServerSessionRuntime {
                     ServerSessionRuntime::requireThread, ServerSessionRuntime::enqueue,
                     ServerSessionRuntime::submitMutation, journal);
             router.register(new ClientOperation("machine.snapshot", 1, false, new ClientMachineSnapshot()));
+            // 同一船体的原生受力页由任务连续读取，所有试算在取得完整快照后进行。
+            router.register(new ClientOperation("physics.snapshot", 1, false, null));
             router.register(new ClientOperation("machine.configure", 1, true, null));
             router.register(new ClientOperation("inventory.transfer", 1, true, null));
             router.register(new ClientOperation("inventory.ae2_supply", 1, true, null));

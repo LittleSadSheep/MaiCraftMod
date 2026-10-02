@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.server.machine.connectivity.ServerConnectionInspect
 import org.maiwithu.maicraft.server.machine.ae2.Ae2MachineConfiguration;
 import org.maiwithu.maicraft.server.machine.ae2.TransformProductionCapture;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
+import org.maiwithu.maicraft.server.physics.PhysicsSnapshotService;
 
 /** 公共加载器引导入口；每个已公布操作都有可调用的权威实现。 */
 public final class ServerMachineOperations {
@@ -24,6 +25,9 @@ public final class ServerMachineOperations {
 
     public static synchronized void register() {
         if (registered) return;
+        // 起飞前分析通过只读物理快照读取原生质量和受力，不借观察请求启动推进器。
+        if (NativeApi.present("dev.ryanhcode.sable.sublevel.ServerSubLevel"))
+            ServerOperationRegistry.register("physics.snapshot", 1, false, PhysicsSnapshotService::inspect);
         JsonObject observation = new JsonObject();
         observation.addProperty("radius", ServerAccess.OBSERVATION_RADIUS);
         observation.addProperty("max_positions", 4);
