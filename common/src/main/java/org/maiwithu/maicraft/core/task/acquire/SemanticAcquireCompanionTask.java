@@ -2364,8 +2364,8 @@ public final class SemanticAcquireCompanionTask
                 "id", "stop",
                 "summary", "Leave the inventory fact incomplete and perform no further effects.",
                 "risk", "none");
-        List<Map<String, Object>> reported = new ArrayList<>(
-                options.stream().limit(7).toList());
+        // 与本次失败相关的换区域、前置目标等选项也要完整交付，不能被前面的来源许可说明挤掉。
+        List<Map<String, Object>> reported = new ArrayList<>(options);
         reported.add(stop);
         return List.copyOf(reported);
     }

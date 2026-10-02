@@ -129,8 +129,22 @@ final class TaskView {
             result.addProperty("material_planning_required", true);
             result.add("planning_handoff", data.remove("planning_handoff"));
         }
-        // 汇总账本不复印每个已完成步骤；尚未执行和跳过的效果影响后续动作，必须保留完整内容。
+        // 失败决策需要知道此前实际做了什么，默认交付全部完成效果；重复布局仍沿原有机器投影共享。
+        if (data.has("completed_effects") && data.get("completed_effects").isJsonArray()
+                && (!raw.has("success") || !raw.get("success").getAsBoolean())) {
+            JsonArray effects = data.getAsJsonArray("completed_effects");
+            for (int index = 0; index < effects.size(); index++) {
+                if (!effects.get(index).isJsonObject()) continue;
+                JsonObject effect = effects.get(index).getAsJsonObject();
+                if (effect.has("confirmed_effect") && effect.get("confirmed_effect").isJsonObject()
+                        && effect.getAsJsonObject("confirmed_effect").has("success"))
+                    effect.add("confirmed_effect", result(effect.getAsJsonObject("confirmed_effect"),
+                            path + "/data/completed_effects/" + index + "/confirmed_effect"));
+            }
+        }
+        // 成功结果的历史账本仍可按路径展开；失败、取消和未完成部分保持默认可见，避免重复开工。
         for (String key : List.of("steps", "completed_effects")) {
+            if (key.equals("completed_effects") && (!raw.has("success") || !raw.get("success").getAsBoolean())) continue;
             if (data.has(key) && data.get(key).isJsonArray()) {
                 JsonArray ledger = data.getAsJsonArray(key);
                 JsonObject ref = new JsonObject(); ref.addProperty("count", ledger.size());

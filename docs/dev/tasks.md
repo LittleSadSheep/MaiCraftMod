@@ -39,6 +39,8 @@
 
 [TaskView](../../common/src/main/java/org/maiwithu/maicraft/mcp/TaskView.java) 给普通查询和 Attention 提供当前状态、待答问题、消费限制及终态摘要。执行中的旧步骤结果不会每次重放；`retained_attempt_count` 是当前保留的尝试数，历史本身仍在任务单里。`task(get, path=...)` 通过 [JsonReadback](../../common/src/main/java/org/maiwithu/maicraft/mcp/JsonReadback.java) 逐项读取完整快照；投影不能修改任务单或调用执行器的 `result`。
 
+失败结算通过 `RecoveryKnowledge` 从同一份效果账本、缺料需求和现有观察生成 `recovery_options` 中的只读资料选项。`evidence_fields` 定位已报告效果、未完成部分、未知项和现场；`knowledge` 与 `ability_contracts` 提供可直接用于 `perceive` 的 `read_arguments`。原生恢复选项及风险原样保留，提示不执行动作、不扩大许可，也不把知识缺失解释为设计失败。新增提示随尝试、终态快照和 Attention 一起保存；默认失败查询保留完整 `completed_effects`，内部重复机器几何仍用现有投影整理，避免模型为确定此前消耗而再展开历史。
+
 [PlanView](../../common/src/main/java/org/maiwithu/maicraft/mcp/PlanView.java) 避免在编译回执中复印原蓝图。`plan(plan_id=..., path=...)` 恢复保存的输入，明确标记没有重新验证现场；执行仍走原来的材料、场地和原生动作检查。
 
 [ResponseArchive](../../common/src/main/java/org/maiwithu/maicraft/mcp/ResponseArchive.java) 处理其余超大载荷，把原始数据冻结在服务拥有的临时压缩文件里。页面保留对象键、数组索引和连续文本偏移，省略值附上明确引用。宿主可自行缓存完整内容，模型只展开当前需要的部分。临时引用失效时明确报错，不把缺失当成空证据；临时文件写入失败则回退交付原回执，保留已经发生的游戏事实。

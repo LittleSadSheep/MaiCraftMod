@@ -441,6 +441,8 @@ final class IntentTask implements Task {
         TaskResult failure = withEffectLedger(SemanticResultView.result(FailureObservation.attach(
                 result == null ? TaskResult.fail("internal action failed") : result, player)));
         Goal failedGoal = currentGoal();
+        // 现场和效果账本已经结清，知识提示从同一份失败事实生成并一起落盘，不再要求模型先重复观察。
+        failure = RecoveryKnowledge.attach(failedGoal, failure);
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
                 record.stepIndex(),
                 failedGoal,

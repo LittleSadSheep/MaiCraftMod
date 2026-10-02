@@ -22,6 +22,8 @@ public final class FailureReceiptRegressionSuite {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         IntentAttentionEvidenceTest.main(args);
+        // 缺口对应的资料和能力契约必须随失败到达，不能把原生未知消费变成可自动重试。
+        RecoveryKnowledgeTest.main(args);
         MachineMenuRecoveryTest.main(args); MachineMenuObservationTest.main(args);
         CraftingGridPlacementTest.main(args);
         EnchantWorkflowGuardTest.main(args); EnchantTransactionPauseTest.main(args);

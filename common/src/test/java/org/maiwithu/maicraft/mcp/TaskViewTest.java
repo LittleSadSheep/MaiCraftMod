@@ -72,7 +72,31 @@ public final class TaskViewTest {
         frozenTickStillReportsPreview(goal);
         materialHandoffStaysVisible(blocks);
         latestSnapshotStaysVisible(goal, blocks);
+        failureEffectsStayVisible();
         System.out.println("TaskViewTest: full=" + full.toString().length() + " chars; status=" + compact.toString().length() + " chars; passed");
+    }
+
+    private static void failureEffectsStayVisible() throws Exception {
+        // 前一步已消耗原料，后一步失败时不能只显示“完成了一步”；完整效果和资料入口须一起到达模型。
+        var raw = JsonParser.parseString("""
+                {"success":false,"message":"后续步骤未完成","data":{
+                  "completed_effects":[{"step_index":0,"confirmed_effect":{"success":true,
+                    "data":{"consumed":{"minecraft:iron_ingot":3},"created":{"minecraft:bucket":1}}}}],
+                  "remaining_effects":[{"step_index":1,"state":"failed_current"}],
+                  "outcome_uncertain":true,"mechanical_retry_allowed":false,
+                  "recovery_options":[{"id":"inspect_related_knowledge","knowledge":[{
+                    "read_arguments":{"view":"knowledge","resource_uri":"maicraft://knowledge/recipes/minecraft/bucket"}}]}]}}
+                """).getAsJsonObject();
+        var method = TaskView.class.getDeclaredMethod("result", JsonObject.class, String.class); method.setAccessible(true);
+        var shown = (JsonObject) method.invoke(null, raw, "/terminal/result");
+        JsonObject data = shown.getAsJsonObject("data"), source = raw.getAsJsonObject("data");
+        check(data.get("completed_effects").equals(source.get("completed_effects"))
+                && data.get("remaining_effects").equals(source.get("remaining_effects")), "default failure shows confirmed and unfinished effects");
+        var options = data.getAsJsonArray("recovery_options");
+        PublicToolCatalog.validateAndNormalize("perceive", options.get(0).getAsJsonObject().getAsJsonArray("knowledge")
+                .get(0).getAsJsonObject().getAsJsonObject("read_arguments"));
+        check(data.get("outcome_uncertain").getAsBoolean() && !data.get("mechanical_retry_allowed").getAsBoolean(),
+                "showing effects and knowledge does not permit another uncertain consumption");
     }
 
     // 旧设计和效果账本很大时，首份失败查询仍直接显示新场地编号、目标和可检查的实际方块。
