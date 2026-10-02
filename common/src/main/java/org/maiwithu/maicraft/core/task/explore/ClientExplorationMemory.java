@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,13 +46,15 @@ public final class ClientExplorationMemory {
     private final LocalPlayer player;
     private final ExplorationJournal journal;
     private final String dimension;
+    private final String runId = UUID.randomUUID().toString();
     private long nextFlush;
 
     public ClientExplorationMemory(LocalPlayer player) {
         this.player = player;
         dimension = player.level().dimension().location().toString();
         StateIdentity identity = identity();
-        journal = new ExplorationJournal(new ExplorationMemoryStore(identity)::save, WRITER, JOURNALS::remove);
+        var store = new ExplorationMemoryStore(identity);
+        journal = new ExplorationJournal(batch -> store.save(runId, batch), WRITER, JOURNALS::remove);
         JOURNALS.put(journal, identity);
     }
 
@@ -84,7 +88,13 @@ public final class ClientExplorationMemory {
                 at.getX(), at.getY(), at.getZ(), reached, System.currentTimeMillis(), GSON.toJson(evidence)));
     }
 
-    public Map<String, Object> receipt() { journal.flush(); return journal.receipt(); }
+    public Map<String, Object> receipt() {
+        journal.flush();
+        Map<String, Object> result = new LinkedHashMap<>(journal.receipt());
+        result.put("run_id", runId);
+        result.put("query", Map.of("view", "exploration", "focus", "run:" + runId));
+        return result;
+    }
     public void close() { journal.close(); }
     public static StateIdentity identity() {
         return StateIdentity.resolve(Minecraft.getInstance()).orElseThrow(() -> new IllegalStateException("exploration memory needs an active world identity"));
@@ -99,9 +109,22 @@ public final class ClientExplorationMemory {
     /** 查询返回的稳定地点标签可直接用于普通旅行；换世界后不会解析到另一存档的历史坐标。 */
     public static Goal.WorldPosition resolveLabel(String label) {
         if (label == null || !label.startsWith("exploration:")) return null;
+        return resolveLabel(identity(), label);
+    }
+
+    /** 暂时写盘失败时，当前进程已经亲自观察过的地点仍可旅行；身份过滤防止跨存档复用。 */
+    public static Goal.WorldPosition resolveLabel(StateIdentity identity, String label) {
+        if (label == null || !label.startsWith("exploration:")) return null;
+        String id = label.substring("exploration:".length());
         try {
-            var finding = new ExplorationMemoryStore(identity()).find(label.substring("exploration:".length()));
+            var finding = pendingFinding(identity, id);
+            if (finding == null) finding = new ExplorationMemoryStore(identity).find(id);
             return finding == null ? null : new Goal.WorldPosition(finding.x(), finding.y(), finding.z(), finding.dimension());
         } catch (IOException failure) { throw new IllegalStateException("exploration memory lookup failed", failure); }
+    }
+
+    public static ExplorationFinding pendingFinding(StateIdentity identity, String id) {
+        return pending(identity).stream().flatMap(journal -> journal.pendingFindings().stream())
+                .filter(finding -> finding.id().equals(id)).reduce(ExplorationFinding::merge).orElse(null);
     }
 }
