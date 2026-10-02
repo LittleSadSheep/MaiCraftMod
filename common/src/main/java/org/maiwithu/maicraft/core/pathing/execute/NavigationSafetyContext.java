@@ -5,6 +5,8 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.function.Supplier;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -16,6 +18,29 @@ public final class NavigationSafetyContext {
     private static final ThreadLocal<LongSet> PROTECTED_MUTATION_CELLS = new ThreadLocal<>();
     private static final ThreadLocal<LongSet> PROTECTED_USE_CELLS = new ThreadLocal<>();
     private static final ThreadLocal<LongSet> FORBIDDEN_BODY_CELLS = new ThreadLocal<>();
+    private static final ThreadLocal<List<BodyRange>> BODY_RANGES = new ThreadLocal<>();
+
+    /** 翻箱等局部活动的固定起点范围；绕路也必须留在范围内，不能只限制目标箱子的坐标。 */
+    public record BodyRange(BlockPos origin, int radius) {
+        public BodyRange { origin = origin.immutable(); if (radius < 1) throw new IllegalArgumentException("body radius must be positive"); }
+        public boolean contains(BlockPos at) { return contains(at.getX(), at.getY(), at.getZ()); }
+        public boolean contains(int x, int y, int z) {
+            double dx = (double) x - origin.getX(), dy = (double) y - origin.getY(), dz = (double) z - origin.getZ();
+            return dx * dx + dy * dy + dz * dz <= (long) radius * radius;
+        }
+    }
+
+    public static List<BodyRange> bodyRanges() {
+        var ranges = BODY_RANGES.get(); return ranges == null ? List.of() : ranges;
+    }
+
+    public static <T> T withBodyRange(BodyRange range, Supplier<T> operation) {
+        // 内层任务只能增加限制；退出本次开箱后恢复父任务范围，其他取材动作不沿用这次翻箱边界。
+        var previous = BODY_RANGES.get(); var ranges = new ArrayList<>(bodyRanges()); ranges.add(range);
+        BODY_RANGES.set(List.copyOf(ranges));
+        try { return operation.get(); }
+        finally { if (previous == null) BODY_RANGES.remove(); else BODY_RANGES.set(previous); }
+    }
 
     private NavigationSafetyContext() {}
 
@@ -104,7 +129,8 @@ public final class NavigationSafetyContext {
     }
 
     public static boolean forbidsBody(BlockPos pos) {
-        return pos != null && forbiddenBodyCells().contains(pos.asLong());
+        return pos != null && (forbiddenBodyCells().contains(pos.asLong())
+                || bodyRanges().stream().anyMatch(range -> !range.contains(pos)));
     }
 
     private static LongOpenHashSet packed(Iterable<BlockPos> cells) {

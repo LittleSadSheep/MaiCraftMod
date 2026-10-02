@@ -8,6 +8,8 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.List;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.BodyRange;
 import java.util.LinkedHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -45,6 +47,7 @@ public final class EmbeddedBaritoneNavigator {
     private final PlayerNav.ContextProvider contextProvider;
     private final TerrainPermit permit;
     private final boolean sprintAllowed;
+    private final List<BodyRange> bodyRanges;
     private final TerrainBill ledger = new TerrainBill();
     private final EnumMap<PathEvent, Integer> events = new EnumMap<>(PathEvent.class);
     private final LongOpenHashSet rejectedScaffolds = new LongOpenHashSet();
@@ -99,6 +102,8 @@ public final class EmbeddedBaritoneNavigator {
         this.contextProvider = contextProvider;
         this.permit = contextProvider.permit();
         this.sprintAllowed = sprintAllowed;
+        // 排队、异步算路和恢复路线时都沿用发起本次导航时的边界，不从已退出的线程上下文重新读取。
+        this.bodyRanges = List.copyOf(NavigationSafetyContext.bodyRanges());
     }
 
     LongSet protectedMutationCells() {
@@ -113,6 +118,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     int minimumFeetY() { return contextProvider.minimumFeetY(); }
+    List<BodyRange> bodyRanges() { return bodyRanges; }
 
     TerrainPermit permit() {
         return permit;

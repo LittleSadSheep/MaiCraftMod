@@ -97,7 +97,7 @@ public final class EmbeddedBaritoneRuntime {
                              TerrainPermit permit, boolean sprintAllowed) {
             this(navigator, compiled, permit, sprintAllowed,
                     EmbeddedBaritonePolicy.capture(compiled.sacred(),
-                            navigator.protectedMutationCells(), navigator.forbiddenBodyCells(), navigator.minimumFeetY()));
+                            navigator.protectedMutationCells(), navigator.forbiddenBodyCells(), navigator.minimumFeetY(), navigator.bodyRanges()));
         }
     }
 
@@ -206,7 +206,7 @@ public final class EmbeddedBaritoneRuntime {
         boolean policyChanged = EmbeddedBaritonePolicy.install(
                 compiled.sacred(),
                 navigator.protectedMutationCells(),
-                navigator.forbiddenBodyCells(), navigator.minimumFeetY());
+                navigator.forbiddenBodyCells(), navigator.minimumFeetY(), navigator.bodyRanges());
         PathingBehavior pathing = (PathingBehavior) baritone.getPathingBehavior();
         // 只有目标在移动、保护范围没有变时才保留路径；真正的安全策略变更仍走下方安全交接与强制重规划。
         if (navigator.tracksMovingGoal() && !policyChanged && pendingPolicyOwner != navigator) {
@@ -229,7 +229,7 @@ public final class EmbeddedBaritoneRuntime {
         boolean changed = EmbeddedBaritonePolicy.install(
                 compiled.sacred(),
                 navigator.protectedMutationCells(),
-                navigator.forbiddenBodyCells(), navigator.minimumFeetY());
+                navigator.forbiddenBodyCells(), navigator.minimumFeetY(), navigator.bodyRanges());
         if (!changed || backend == null) return changed;
         PathingBehavior pathing = (PathingBehavior) backend.getPathingBehavior();
         if (!pathing.isSafeToCancel()) {
