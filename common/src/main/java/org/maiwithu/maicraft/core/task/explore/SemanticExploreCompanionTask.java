@@ -46,17 +46,6 @@ import java.util.Locale;
 public final class SemanticExploreCompanionTask
         extends AbstractCompanionTask<SemanticExploreTaskRecord> {
 
-    private enum FrontierSurfacePreference { ANY_TRAVERSABLE, DRY_LAND }
-    private enum TargetKind {
-        BIOME(FrontierSurfacePreference.ANY_TRAVERSABLE),
-        COAST(FrontierSurfacePreference.DRY_LAND);
-
-        private final FrontierSurfacePreference frontierSurfacePreference;
-
-        TargetKind(FrontierSurfacePreference frontierSurfacePreference) {
-            this.frontierSurfacePreference = frontierSurfacePreference;
-        }
-    }
     private enum Stage { OBSERVE, TRAVEL_TARGET, VERIFY_TARGET, TRAVEL_WAYPOINT }
     private enum SurfaceKind { LAND, WATER, UNKNOWN }
 
@@ -113,7 +102,6 @@ public final class SemanticExploreCompanionTask
     private static final List<ColumnOffset> COAST_OBSERVATION_OFFSETS =
             buildOffsets(COAST_OBSERVATION_STEP);
 
-    private TargetKind targetKind;
     private Predicate<Holder<Biome>> biomeMatch;
     private String canonicalTarget;
     private String inputFailure;
@@ -207,7 +195,6 @@ public final class SemanticExploreCompanionTask
         if ("survey".equals(target)) {
             // 自由跑图没有预设群系；观察完一轮就继续推进，不能把脚下任意群系当作抵达目标。
             survey = true;
-            targetKind = TargetKind.BIOME;
             canonicalTarget = "survey";
             biomeMatch = holder -> true;
             return true;
@@ -224,7 +211,6 @@ public final class SemanticExploreCompanionTask
                 inputFailure = "unknown biome tag in the client registry: " + target;
                 return false;
             }
-            targetKind = TargetKind.BIOME;
             canonicalTarget = "#" + id;
             biomeMatch = holder -> holder.is(tag);
             return true;
@@ -236,7 +222,6 @@ public final class SemanticExploreCompanionTask
                     + " (use a namespaced biome id or #biome_tag)";
             return false;
         }
-        targetKind = TargetKind.BIOME;
         canonicalTarget = id.toString();
         biomeMatch = holder -> holder.is(key);
         return true;
@@ -259,10 +244,8 @@ public final class SemanticExploreCompanionTask
 
     private TaskState tickObservation() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
-        List<ColumnOffset> offsets = targetKind == TargetKind.COAST
-                ? COAST_OBSERVATION_OFFSETS : BIOME_OBSERVATION_OFFSETS;
-        int budget = targetKind == TargetKind.COAST
-                ? COAST_COLUMNS_PER_TICK : BIOME_SAMPLES_PER_TICK;
+        List<ColumnOffset> offsets = BIOME_OBSERVATION_OFFSETS;
+        int budget = BIOME_SAMPLES_PER_TICK;
         while (budget-- > 0 && observationColumn < offsets.size()) {
             ColumnOffset offset = offsets.get(observationColumn);
             int x = observationCenter.getX() + offset.dx();
@@ -287,23 +270,12 @@ public final class SemanticExploreCompanionTask
                         horizontalDistance(origin, new BlockPos(x, origin.getY(), z)));
             }
 
-            if (targetKind == TargetKind.COAST) {
-                ScoredCoast found = findScoredCoastNear(
-                        level, x, z, COAST_LOCAL_RADIUS);
+            TargetCandidate found = observeBiomeSample(level, x, z, biomeYIndex++);
+            if (biomeYIndex >= biomeSampleCount(level)) {
                 advanceObservationColumn();
-                if (found != null
-                        && !rejectedTargets.contains(found.candidate().approach().asLong())) {
-                    // 偏移量按由近到远排列。本地探测已比较附近干燥接近点和岸边地形偏好，因此立即出发，不要停在原地扫完整个视野寻找更远但看起来更好的海岸。
-                    return startTargetTravel(found.candidate());
-                }
-            } else {
-                TargetCandidate found = observeBiomeSample(level, x, z, biomeYIndex++);
-                if (biomeYIndex >= biomeSampleCount(level)) {
-                    advanceObservationColumn();
-                }
-                if (!survey && found != null && !rejectedTargets.contains(found.approach().asLong())) {
-                    return startTargetTravel(found);
-                }
+            }
+            if (!survey && found != null && !rejectedTargets.contains(found.approach().asLong())) {
+                return startTargetTravel(found);
             }
         }
         if (observationColumn < offsets.size()) {
@@ -404,11 +376,8 @@ public final class SemanticExploreCompanionTask
         long now = player.level().getGameTime();
         String parentCall = r.getToolCallId() == null ? "explore" : r.getToolCallId();
         String childCall = parentCall + "-internal-leg-" + (++legSerial);
-        // 要求干燥接近路线的目标，其观察边界和最终目标都必须满足同一精确着陆条件。对地形没有要求的生物群系目标仍允许站立或游泳，因为海洋生物群系格不可能满足 onGround。
-        moveRecord = targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND
-                ? MoveToTaskRecord.strictStance(
-                        childCall, now + INITIAL_LEG_LEASE_TICKS, target, r.mayAlterTerrain, r.transportMode)
-                : new MoveToTaskRecord(
+        // 群系目的地允许站立或游泳；到达后依据脚下真实群系复核。
+        moveRecord = new MoveToTaskRecord(
                         childCall, now + INITIAL_LEG_LEASE_TICKS,
                         (double) target.getX(), exact ? (double) target.getY() : null,
                         (double) target.getZ(), null,
@@ -464,32 +433,14 @@ public final class SemanticExploreCompanionTask
     private TaskState tickVerification() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
         TargetCandidate verified = null;
-        if (targetKind == TargetKind.BIOME) {
-            BlockPos feet = player.blockPosition();
-            if (level.isLoaded(feet) && biomeMatch.test(level.getBiome(feet))
-                    && sector.accepts(feet.getX(), feet.getZ())) {
-                verified = new TargetCandidate(feet, feet,
-                        "body position is inside " + biomeId(level, feet));
-            }
-        } else {
-            surfaceCache.clear();
-            BlockPos body = BlockHelper.playerFeet(
-                    level, player.getX(), player.getY(), player.getZ()).immutable();
-            // 精确路线被挡住时，MoveTo 可以按设计报告有限的近似成功；普通目的地可接受这种结果，但海岸回执承诺角色到达干燥陆地。
-            // 站在相邻浅水格只能证明看到了海岸，不能证明已抵达海岸。
-            if (player.onGround() && BlockHelper.isDryStandable(level, body)) {
-                TargetCandidate bodyCoast = findCoastNear(
-                        level, body.getX(), body.getZ(), 0);
-                if (bodyCoast != null && body.equals(bodyCoast.approach())) {
-                    verified = bodyCoast;
-                }
-            }
+        BlockPos feet = player.blockPosition();
+        if (level.isLoaded(feet) && biomeMatch.test(level.getBiome(feet))
+                && sector.accepts(feet.getX(), feet.getZ())) {
+            verified = new TargetCandidate(feet, feet,
+                    "body position is inside " + biomeId(level, feet));
         }
         if (verified != null) {
-            verifiedPosition = targetKind == TargetKind.COAST
-                    ? BlockHelper.playerFeet(
-                            level, player.getX(), player.getY(), player.getZ()).immutable()
-                    : player.blockPosition().immutable();
+            verifiedPosition = player.blockPosition().immutable();
             verifiedDescription = verified.description();
             r.retainVerifiedPosition(new InternalPositionReceipt.Position(
                     verifiedPosition.getX(), verifiedPosition.getY(), verifiedPosition.getZ(),
@@ -503,115 +454,6 @@ public final class SemanticExploreCompanionTask
         candidate = null;
         beginObservation();
         return TaskState.RUNNING;
-    }
-
-    private TargetCandidate findCoastNear(
-            ClientLevel level, int centerX, int centerZ, int radius) {
-        ScoredCoast best = findScoredCoastNear(level, centerX, centerZ, radius);
-        return best == null ? null : best.candidate();
-    }
-
-    private ScoredCoast findScoredCoastNear(
-            ClientLevel level, int centerX, int centerZ, int radius) {
-        ScoredCoast best = null;
-        for (int ring = 0; ring <= radius; ring++) {
-            for (int dx = -ring; dx <= ring; dx++) {
-                for (int dz = -ring; dz <= ring; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
-                    int landX = centerX + dx;
-                    int landZ = centerZ + dz;
-                    if (!insideScope(landX, landZ)) continue;
-                    SurfaceInfo land = surfaceInfo(level, landX, landZ);
-                    if (land.kind() != SurfaceKind.LAND || land.approach() == null) continue;
-                    if (rejectedTargets.contains(land.approach().asLong())) continue;
-                    for (Direction direction : Direction.Plane.HORIZONTAL) {
-                        int waterX = landX + direction.getStepX();
-                        int waterZ = landZ + direction.getStepZ();
-                        if (!insideScope(waterX, waterZ)) continue;
-                        SurfaceInfo water = surfaceInfo(level, waterX, waterZ);
-                        if (water.kind() == SurfaceKind.WATER) {
-                            WaterEvidence evidence = waterEvidence(
-                                    level, waterX, waterZ, direction);
-                            if (!evidence.qualifiesAsCoast()) continue;
-                            boolean preferredShore = preferredCoastTerrain(level, land.approach());
-                            double travelDistance = horizontalDistance(
-                                    player.blockPosition(), land.approach());
-                            String description = "verified dry coast approach beside ocean-biome water";
-                            if (preferredShore) description += " with shore terrain preferred";
-                            ScoredCoast scored = new ScoredCoast(new TargetCandidate(
-                                    land.approach(), water.evidence(), description),
-                                    preferredShore, travelDistance, evidence.score());
-                            if (betterCoast(scored, best)) {
-                                best = scored;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    private static boolean betterCoast(ScoredCoast candidate, ScoredCoast incumbent) {
-        if (incumbent == null) return true;
-        if (candidate.preferredShore() != incumbent.preferredShore()) {
-            return candidate.preferredShore();
-        }
-        int travelOrder = Double.compare(candidate.travelDistance(), incumbent.travelDistance());
-        if (travelOrder != 0) return travelOrder < 0;
-        if (candidate.evidenceScore() != incumbent.evidenceScore()) {
-            return candidate.evidenceScore() > incumbent.evidenceScore();
-        }
-        return candidate.candidate().approach().asLong()
-                < incumbent.candidate().approach().asLong();
-    }
-
-    /**
-     * 有界的海洋语义证据。必须实际观察到已加载海洋生物群系中的水格；向外连续延伸距离和横向宽度只提升可信度与排序，
-     * 不会把平原湖泊或河流误判为海岸。每次探测只检查已加载客户端柱列，固定预算不会主动发现或加载地形。
-     */
-    private WaterEvidence waterEvidence(
-            ClientLevel level, int waterX, int waterZ, Direction awayFromLand) {
-        Direction side = awayFromLand.getClockWise();
-        int forwardRun = 0;
-        int deepest = 0;
-        boolean ocean = false;
-        for (int distance = 0; distance <= LARGE_WATER_FORWARD_PROBE; distance++) {
-            int x = waterX + awayFromLand.getStepX() * distance;
-            int z = waterZ + awayFromLand.getStepZ() * distance;
-            if (!insideScope(x, z)) break;
-            SurfaceInfo sample = surfaceInfo(level, x, z);
-            if (sample.kind() != SurfaceKind.WATER) break;
-            forwardRun++;
-            deepest = Math.max(deepest, sample.waterDepth());
-            ocean |= level.getBiome(sample.evidence()).is(BiomeTags.IS_OCEAN);
-        }
-
-        int crossDistance = Math.min(4, Math.max(0, forwardRun - 1));
-        int crossX = waterX + awayFromLand.getStepX() * crossDistance;
-        int crossZ = waterZ + awayFromLand.getStepZ() * crossDistance;
-        int lateralWidth = forwardRun == 0 ? 0 : 1;
-        for (int sign : new int[]{-1, 1}) {
-            for (int distance = 1; distance <= LARGE_WATER_SIDE_PROBE; distance++) {
-                int x = crossX + side.getStepX() * distance * sign;
-                int z = crossZ + side.getStepZ() * distance * sign;
-                if (!insideScope(x, z)) break;
-                SurfaceInfo sample = surfaceInfo(level, x, z);
-                if (sample.kind() != SurfaceKind.WATER) break;
-                lateralWidth++;
-                deepest = Math.max(deepest, sample.waterDepth());
-            }
-        }
-        boolean large = forwardRun >= LARGE_WATER_MIN_FORWARD_RUN
-                && lateralWidth >= LARGE_WATER_MIN_LATERAL_WIDTH;
-        int score = (ocean ? 320 : 0) + (large ? 256 : 0)
-                + forwardRun * 4 + lateralWidth * 3 + deepest * 2;
-        return new WaterEvidence(ocean, large, forwardRun, lateralWidth, deepest, score);
-    }
-
-    private static boolean preferredCoastTerrain(ClientLevel level, BlockPos approach) {
-        Holder<Biome> biome = level.getBiome(approach);
-        return biome.is(BiomeTags.IS_BEACH) || biome.is(Biomes.STONY_SHORE);
     }
 
     private SurfaceInfo surfaceInfo(ClientLevel level, int x, int z) {
@@ -711,11 +553,6 @@ public final class SemanticExploreCompanionTask
         if (r.sector.direction() != null) {
             return ExplorationFrontiers.next(player.blockPosition(), sector, r.maxDistance,
                     attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()));
-        }
-        selectedWaypointShoreReturn = false;
-        waypointSelectionDeferred = false;
-        if (targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND) {
-            return nextDryLandWaypoint(level);
         }
         return nextTerrainNeutralWaypoint(level);
     }
@@ -1028,15 +865,6 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_failed", waypointFailed);
         data.put("target_approaches_attempted", targetAttempts);
         data.put("failed_legs", List.copyOf(legFailures));
-        data.put("frontier_surface_preference",
-                targetKind == null
-                        ? "unresolved"
-                        : targetKind.frontierSurfacePreference.name()
-                                .toLowerCase(Locale.ROOT));
-        data.put("dry_land_waypoints", dryLandWaypoints);
-        data.put("shore_return_waypoints", shoreReturnWaypoints);
-        data.put("observed_water_crossing_waypoints", observedWaterCrossingWaypoints);
-        data.put("failed_shore_return_waypoints", failedShoreReturnWaypoints.size());
 
         List<Map<String, Object>> centers = exploredCenters.stream()
                 .map(pos -> Map.<String, Object>of(
