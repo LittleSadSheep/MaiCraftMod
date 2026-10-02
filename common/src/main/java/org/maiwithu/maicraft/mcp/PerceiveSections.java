@@ -32,9 +32,11 @@ final class PerceiveSections {
             "collision_geometry", "transport", "landing_assist", "jetpack", "physical_structures");
 
     // surroundings 的可选段：位置与光照、邻近实体与告示牌、脚下可走面、地形缩略、电梯、视线与物理结构。
+    // nearby_facilities 是按需扫描的策展设施盘点，与 terrain_overview 一样默认不构建，点名才付出扫描代价。
     private static final Set<String> SURROUNDINGS = Set.of(
             "position", "dimension", "sky_light", "biome", "nearby_entities", "nearby_signs",
             "sign_observation", "local_decision_summary", "terrain_overview", "elevators",
+            "nearby_facilities",
             "view", "physical_structures");
 
     private PerceiveSections() {
@@ -65,7 +67,8 @@ final class PerceiveSections {
         result.addProperty("description", "Select top-level sections for one view only. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
-                + "Default surroundings omits terrain_overview; request it explicitly to sample terrain. "
+                + "Default surroundings omits terrain_overview and nearby_facilities; request them explicitly "
+                + "(terrain sampling and the facility scan only run when named). "
                 + "Focus diagnostics require focus. Unproduced requested sections appear in " + UNAVAILABLE + ".");
         return result;
     }

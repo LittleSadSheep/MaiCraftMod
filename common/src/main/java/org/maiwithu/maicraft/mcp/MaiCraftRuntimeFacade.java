@@ -283,11 +283,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             case "surroundings" -> {
                 JsonObject observed = surroundings(player, nullableString(arguments, "focus"), arguments.get("limit").getAsInt(),
-                        PerceiveSections.wants(sections, "terrain_overview"));
+                        PerceiveSections.wants(sections, "terrain_overview"), PerceiveSections.wants(sections, "nearby_facilities"));
                 JsonObject selected = PerceiveSections.select(observed, sections);
-                // 默认省略的段仍可发现；未看到地形不能推断外面没有可走平台。
+                // 默认省略的段仍可发现；未看到地形不能推断外面没有可走平台，未扫设施不能推断附近没有可用设备。
                 if (!arguments.has("sections") || arguments.get("sections").isJsonNull()) {
-                    JsonArray extra = new JsonArray(); extra.add("terrain_overview"); selected.add("additional_sections", extra);
+                    JsonArray extra = new JsonArray();
+                    extra.add("terrain_overview"); extra.add("nearby_facilities");
+                    selected.add("additional_sections", extra);
                 }
                 yield selected;
             }
@@ -473,8 +475,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         return result;
     }
 
-    private JsonObject surroundings(LocalPlayer player, String focus, int limit, boolean terrain) {
-        // 汇总附近实体、告示牌、可走区域和船／电梯；大范围地形来自此前分刻准备的采样。
+    private JsonObject surroundings(LocalPlayer player, String focus, int limit, boolean terrain, boolean facilities) {
+        // 汇总附近实体、告示牌、可走区域和船／电梯；大范围地形与设施盘点来自点名后才执行的采样与扫描。
         JsonObject result = new JsonObject();
         result.add("position", position(player));
         result.addProperty("dimension", player.level().dimension().location().toString());
@@ -499,6 +501,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.add("sign_observation", signs);
         result.add("local_decision_summary", localDecisionSummary(player, hostileCount));
         if (terrain) result.add("terrain_overview",navigationOverview.describe(player));
+        if (facilities) result.add("nearby_facilities", NearbyFacilityPerception.observe(player));
         result.add("elevators",new Gson().toJsonTree(
                 ElevatorFloors.overview(player)));
         result.add("view", PhysicalStructurePerception.view(player));

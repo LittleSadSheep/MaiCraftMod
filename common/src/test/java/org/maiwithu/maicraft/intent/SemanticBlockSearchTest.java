@@ -32,6 +32,8 @@ public final class SemanticBlockSearchTest {
         scanReportsCountsAndDistanceWithoutCoordinates();
         deepMatchesReportThreeDimensionalDistance();
         absenceFailsWithHonestScopeNote();
+        // 设施盘点段与 find_block 同守"证据不出坐标、缺席带范围声明"的纪律。
+        org.maiwithu.maicraft.mcp.NearbyFacilityPerceptionTest.main(args);
         System.out.println("SemanticBlockSearchTest: passed");
     }
 
