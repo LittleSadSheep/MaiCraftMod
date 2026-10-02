@@ -29,6 +29,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
@@ -118,7 +119,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      * 这一刻 {@link #FIELD_RADIUS} 内活着的敌对生物——<b>一刻只扫一次</b>,在 {@link #surveyField}
      * 里;举盾、走位的躲避场都读这一份。"场上有哪些怪"各算各的,就会出现判据说打、腿说没人的局面。
      */
-    private List<Mob> hostiles = List.of();
+    private List<LivingEntity> hostiles = List.of();
 
     /**
      * 上一次搜索<b>搜不出路</b>的目标。够不着是拓扑性质,不是距离性质 —— 悬崖对面三格的
@@ -279,7 +280,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先找附近敌对生物，补进伤害包确认的远程攻击者和明确指定的目标。
     // “正在攻击我”与“允许作为主目标”分别记录，严格授权模式还会限制顺手反击的对象。
     private Battlefield surveyField() {
-        hostiles = CombatThreats.around(player, FIELD_RADIUS);
+        // 将已授权玩家并入同一战场，使举盾、距离控制和撤退都看到正在交战的对手。
+        hostiles = new ArrayList<>(CombatThreats.around(player, FIELD_RADIUS));
+        hostiles.addAll(PvpEngagement.opponents(player));
         // 新袭击和可见近处苦力怕暂停普通指定目标；严格名单仍只允许避让名单外生物。
         defensiveInterruption = !r.indiscriminate && hostiles.stream()
                 .anyMatch(mob -> engaging(mob) && !r.entityIds.contains(mob.getId()));
@@ -329,8 +332,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     // 可见苦力怕的警戒事实与伤害事实都能维持自卫，不等待服务端 AI 目标同步。
-    private boolean engaging(Mob mob) {
-        return CombatThreats.recentlyAttackedBy(player, mob) || mob.getTarget() == player
+    private boolean engaging(LivingEntity mob) {
+        if (mob instanceof Player other) return PvpEngagement.accepts(player, other);
+        return CombatThreats.recentlyAttackedBy(player, mob) || mob instanceof Mob creature && creature.getTarget() == player
                 || Menace.creeperThreat(mob, player);
     }
 
@@ -383,14 +387,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 if (dead || crystalRemoved) {
                     r.defeated(id);
                     renewCombatProgress();
-                    beginLoot(id, lastTargetPositions.getOrDefault(id, lastTargetPosition));
+                    if (!(witnessed instanceof Player)) beginLoot(id, lastTargetPositions.getOrDefault(id, lastTargetPosition));
                 } else {
                     r.lost(id);
                 }
             } else if (e instanceof LivingEntity living && living.isDeadOrDying()) {
                 r.defeated(id);
                 renewCombatProgress();
-                beginLoot(id, lastTargetPositions.getOrDefault(id, e.position()));
+                // 玩家对战以确认死亡判胜负，不为了追逐其背包掉落延长已结束的交战。
+                if (!(e instanceof Player)) beginLoot(id, lastTargetPositions.getOrDefault(id, e.position()));
             } else if (e instanceof LivingEntity living) {
                 float current = living.getHealth();
                 Float previous = observedHealth.put(id, current);
@@ -831,7 +836,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     /** 站位日志只在数字真的变了时打一行——每 tick 一行会把别的全冲掉。 */
-    private void logStandoff(List<Mob> field) {
+    private void logStandoff(List<LivingEntity> field) {
         int tooClose = 0;
         for (var mob : field) {
             if (Menace.tooClose(mob, player)) {

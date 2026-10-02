@@ -36,6 +36,7 @@ public final class CombatThreatsTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         recordsMeleeAndProjectiles();
         PvpEngagementTest.main(args); // 先验证点名玩家的任务许可，再运行自动自卫，防止 PVP 状态泄漏。
+        PvpThreatTest.main(args); // 验证玩家也进入撤退和伤害事实，不能只会点名挥刀。
         rejectsUnrelatedDamage();
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();

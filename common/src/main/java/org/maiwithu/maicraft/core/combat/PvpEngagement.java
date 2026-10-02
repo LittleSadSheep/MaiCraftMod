@@ -6,7 +6,10 @@ import java.util.Map;
 import java.util.UUID;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
@@ -22,6 +25,8 @@ public final class PvpEngagement {
     private final AttackTaskRecord attack;
     private final TaskRecord owner;
     private final Map<Integer, Opponent> opponents = new LinkedHashMap<>();
+    private final Map<Integer, Long> incoming = new LinkedHashMap<>();
+    private final Map<Integer, Long> hits = new LinkedHashMap<>();
     private boolean closed;
 
     public PvpEngagement(LocalPlayer body, AttackTaskRecord attack) {
@@ -67,6 +72,37 @@ public final class PvpEngagement {
                 && CompanionTickDispatcher.current() == owner
                 && (owner == null || !owner.getState().isTerminal())
                 && !(owner instanceof IntentTaskRecord intent && intent.paused());
+    }
+
+    public static void observeDamage(LocalPlayer self, ClientboundDamageEventPacket packet) {
+        // 同一伤害包分清“对手打我”和“我打对手”；远端生命条不可见时仍可用本方伤害事件确认命中。
+        PvpEngagement fight = active;
+        if (fight == null || self != fight.body || !fight.eligible()) return;
+        if (packet.entityId() != self.getId() && !fight.opponents.containsKey(packet.entityId())) return;
+        var source = packet.getSource(fight.level);
+        Entity cause = source.getEntity();
+        if (cause == null && source.getDirectEntity() instanceof Projectile projectile) cause = projectile.getOwner();
+        if (packet.entityId() == self.getId() && cause instanceof Player other && fight.matches(other))
+            fight.incoming.put(other.getId(), fight.level.getGameTime());
+        Opponent victim = fight.opponents.get(packet.entityId());
+        if (cause == self && victim != null && fight.level.getEntity(packet.entityId()) == victim.entity()
+                && victim.uuid().equals(victim.entity().getUUID())) fight.hits.merge(packet.entityId(), 1L, Long::sum);
+    }
+
+    public static boolean recentlyAttackedBy(LocalPlayer self, Player other) {
+        // 远处射手刚造成伤害时继续撤离；记忆过期且已拉开距离后，不能因对战名单存在而永远逃跑。
+        if (!accepts(self, other)) return false;
+        Long tick = active.incoming.get(other.getId());
+        long now = self.level().getGameTime();
+        return tick != null && now >= tick && now - tick < 200;
+    }
+
+    public static long hitRevision(LocalPlayer self, Player other) {
+        // 已收到的致命命中证据在尸体移除后仍可结算，但不能用于给复活后的新玩家实体授权。
+        if (active == null || active.body != self || !active.eligible()) return 0;
+        Opponent bound = active.opponents.get(other.getId());
+        return bound != null && bound.entity() == other && bound.uuid().equals(other.getUUID())
+                ? active.hits.getOrDefault(other.getId(), 0L) : 0;
     }
 
     private boolean matches(Player other) {

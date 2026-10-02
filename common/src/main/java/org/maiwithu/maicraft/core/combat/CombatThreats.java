@@ -12,6 +12,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.player.Player;
 
 /** 客户端伤害包提供的自卫证据；读取不会延长记忆，也不会修改服务端 AI 字段。 */
 public final class CombatThreats {
@@ -27,6 +28,7 @@ public final class CombatThreats {
 
     /** 只接受本地玩家收到的伤害；实际伤人的普通 Mob 也可触发自卫，玩家来源只用于通知。 */
     public static void damaged(LocalPlayer player, ClientboundDamageEventPacket packet) {
+        PvpEngagement.observeDamage(player, packet); // 先记录对战双方的伤害，再处理本地身体的自卫和通知。
         if (player == null || packet.entityId() != player.getId()) return;
         observe(player);
         if (body == null) return;
@@ -92,7 +94,8 @@ public final class CombatThreats {
         return hits.values().stream().map(Hit::attacker).toList();
     }
 
-    public static boolean recentlyAttackedBy(LocalPlayer player, Mob mob) {
+    public static boolean recentlyAttackedBy(LocalPlayer player, LivingEntity mob) {
+        if (mob instanceof Player other) return PvpEngagement.recentlyAttackedBy(player, other);
         observe(player);
         Hit hit = hits.get(mob.getId());
         return hit != null && hit.attacker() == mob;
