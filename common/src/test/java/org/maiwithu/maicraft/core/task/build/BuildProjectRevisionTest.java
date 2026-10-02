@@ -6,7 +6,6 @@ import com.google.gson.JsonParser;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
-import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.readMemory;
 import java.util.List;
 import java.util.Map;
