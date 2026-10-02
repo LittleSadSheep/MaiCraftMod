@@ -5,12 +5,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import org.sqlite.JDBC;
 import org.sqlite.SQLiteConfig;
 
@@ -57,6 +59,26 @@ public final class MemoryDatabase {
             statement.setString(1, scope); statement.setString(2, identity); statement.setString(3, key);
             try (var result = statement.executeQuery()) { return result.next(); }
         } catch (SQLException failure) { throw new IOException("memory_record_lookup_failed", failure); }
+    }
+
+    /** 同一结构的两个补丁先取得写锁再合并，避免各自读到旧蓝图后覆盖另一份已登记目标。 */
+    public String updateRecord(String scope,String identity,String key,int limit,UnaryOperator<String> update) throws IOException {
+        Files.createDirectories(file.getParent());
+        try(var connection=open();var transaction=connection.createStatement()) {
+            transaction.execute("BEGIN IMMEDIATE");
+            try {
+                String next=update.apply(readRow(connection,scope,identity,key,limit));
+                if(next.getBytes(StandardCharsets.UTF_8).length>limit) throw new OverBudget();
+                try(var statement=connection.prepareStatement("INSERT INTO memory_records VALUES(?,?,?,?) "
+                        +"ON CONFLICT(scope,identity_key,document_key) DO UPDATE SET payload=excluded.payload")) {
+                    bind(statement,scope,identity,key,next);statement.executeUpdate();
+                }
+                transaction.execute("COMMIT");return next;
+            } catch(SQLException|IOException|RuntimeException failure) {
+                try { transaction.execute("ROLLBACK"); } catch(SQLException rollback) { failure.addSuppressed(rollback); }
+                throw failure;
+            }
+        } catch(SQLException failure) { throw new IOException("memory_record_update_failed",failure); }
     }
 
     /** 临时回执到期后只删除该回执，不触及任务、图纸或防止重复消费的永久预约。 */
