@@ -1,0 +1,118 @@
+package org.maiwithu.maicraft.server.physics;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.WeakHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Registry;
+import net.minecraft.server.level.ServerLevel;
+import org.joml.Matrix3dc;
+import org.joml.Quaterniondc;
+import org.joml.Vector3d;
+import org.joml.Vector3dc;
+import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBody;
+import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsVector;
+import org.maiwithu.maicraft.server.machine.NativeApi;
+
+/** 玩家请求分析后才短期旁听物理子步；复制冲量、作用点和质量，不向真实船体施加任何力。 */
+public final class NativePhysicsCapture {
+    private static final Map<Object, Lease> WATCHES = new WeakHashMap<>();
+    private static final String GROUPS = "dev.ryanhcode.sable.api.physics.force.ForceGroups";
+    private static final String DIMENSION = "dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData";
+    private static final class Lease {
+        long until; boolean previous; PhysicsBody body; String error;
+    }
+    private NativePhysicsCapture() {}
+    public static void watch(Object ship) {
+        WATCHES.computeIfAbsent(ship, ignored -> new Lease()).until = level(ship).getGameTime() + 100;
+    }
+    public static PhysicsBody latest(Object ship) {
+        Lease lease = WATCHES.get(ship); return lease == null ? null : lease.body;
+    }
+    public static String error(Object ship) {
+        Lease lease = WATCHES.get(ship); return lease == null ? null : lease.error;
+    }
+    public static void begin(Object ship) {
+        Lease lease = WATCHES.get(ship);
+        if (lease == null) return;
+        if (level(ship).getGameTime() > lease.until) { WATCHES.remove(ship); return; }
+        try {
+            lease.previous = NativeApi.truth(NativeApi.call(ship, null, "isTrackingIndividualQueuedForces"));
+            NativeApi.call(ship, null, "enableIndividualQueuedForcesTracking", true);
+        } catch (RuntimeException missing) { lease.error = missing.getMessage(); }
+    }
+    public static void capture(Object ship, Object handle, double dt) {
+        Lease lease = WATCHES.get(ship);
+        if (lease == null) return;
+        try { lease.body = read(ship, handle, dt); lease.error = null; }
+        catch (RuntimeException missing) { lease.body = null; lease.error = missing.getMessage(); }
+        finally {
+            // 原图解也可能正在观察同一条船，结束本次采样后恢复此前的记录状态。
+            try { NativeApi.call(ship, null, "enableIndividualQueuedForcesTracking", lease.previous); }
+            catch (RuntimeException missing) { lease.error = missing.getMessage(); }
+        }
+    }
+
+    private static PhysicsBody read(Object ship, Object handle, double dt) {
+        if (!Double.isFinite(dt) || dt <= 0) throw new IllegalArgumentException("物理子步时长无效");
+        Object mass = NativeApi.call(ship, null, "getMassTracker"), pose = NativeApi.call(ship, null, "logicalPose");
+        Object plot = NativeApi.call(ship, null, "getPlot");
+        BlockPos origin = (BlockPos) NativeApi.call(plot, null, "getCenterBlock");
+        PhysicsVector offset = new PhysicsVector(origin.getX(), origin.getY(), origin.getZ());
+        PhysicsVector centerStorage = vector(NativeApi.call(mass, null, "getCenterOfMass"));
+        PhysicsVector center = centerStorage.subtract(offset);
+        var rotation = PhysicsBody.Rotation.of((Quaterniondc) NativeApi.call(pose, null, "orientation"));
+        PhysicsVector scale = vector(NativeApi.call(pose, null, "scale"));
+        var worldCenter = centerStorage.subtract(vector(NativeApi.call(pose, null, "rotationPoint")));
+        worldCenter = new PhysicsVector(worldCenter.x()*scale.x(), worldCenter.y()*scale.y(), worldCenter.z()*scale.z());
+        worldCenter = rotation.world(worldCenter).add(vector(NativeApi.call(pose, null, "position")));
+        List<String> unknowns = new ArrayList<>();
+        if (!scale.equals(new PhysicsVector(1, 1, 1))) unknowns.add("非单位结构缩放的候选方块惯量需要额外校核");
+        unknowns.add("点力记录不包含碰撞求解器的接触、摩擦和绳索约束冲量");
+        List<PhysicsBody.Load> loads = new ArrayList<>();
+        Object raw = NativeApi.call(ship, null, "getQueuedForceGroups");
+        if (raw instanceof Map<?, ?> groups) for (var entry : groups.entrySet()) {
+            String group = groupId(entry.getKey());
+            if (group.endsWith(":gravity")) continue;
+            Object queued = entry.getValue();
+            PhysicsVector pointForce = PhysicsVector.ZERO, pointTorque = PhysicsVector.ZERO;
+            int index = 0;
+            for (Object point : (Iterable<?>) NativeApi.call(queued, null, "getRecordedPointForces")) {
+                PhysicsVector at = vector(NativeApi.call(point, null, "point")).subtract(offset);
+                // Sable 在子步内部记录冲量，除以实际子步时长后才是图解使用的力。
+                PhysicsVector force = vector(NativeApi.call(point, null, "force")).scale(1 / dt);
+                pointForce = pointForce.add(force); pointTorque = pointTorque.add(at.subtract(center).cross(force));
+                boolean world = group.endsWith(":balloon_lift") || group.endsWith(":levitation");
+                loads.add(new PhysicsBody.Load(group + "/" + index++, group, at,
+                        world ? rotation.world(force) : force, PhysicsVector.ZERO,
+                        world ? PhysicsBody.Frame.WORLD : PhysicsBody.Frame.BODY, group.endsWith(":propulsion"), 0));
+            }
+            Object total = NativeApi.call(queued, null, "getForceTotal");
+            PhysicsVector force = vector(NativeApi.call(total, null, "getLocalForce")).scale(1 / dt);
+            PhysicsVector torque = vector(NativeApi.call(total, null, "getLocalTorque")).scale(1 / dt);
+            // 气压梯度等可能额外贡献纯力偶，不能只根据画出来的箭头重新求和而丢掉它。
+            if (force.length() + torque.length() > 1e-9) {
+                force = force.subtract(pointForce); torque = torque.subtract(pointTorque);
+                if (force.length() + torque.length() > 1e-7)
+                    loads.add(new PhysicsBody.Load(group + "/residual", group, center, force, torque,
+                            PhysicsBody.Frame.BODY, group.endsWith(":propulsion"), 0));
+            }
+            if (group.endsWith(":drag") || group.endsWith(":lift")) unknowns.add(group + " 使用采样时的气动载荷，速度变化后需要重新观察");
+        }
+        return new PhysicsBody((UUID) NativeApi.call(ship, null, "getUniqueId"), level(ship).dimension().location().toString(),
+                level(ship).getGameTime(), ((Number) NativeApi.call(mass, null, "getMass")).doubleValue(), center,
+                PhysicsBody.Inertia.of((Matrix3dc) NativeApi.call(mass, null, "getInertiaTensor")), rotation, worldCenter,
+                vector(NativeApi.call(handle, null, "getLinearVelocity", new Vector3d())),
+                vector(NativeApi.call(handle, null, "getAngularVelocity", new Vector3d())),
+                vector(NativeApi.call(null, DIMENSION, "getGravity", level(ship))), loads, unknowns);
+    }
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String groupId(Object group) {
+        Registry registry = (Registry) NativeApi.constant(GROUPS, "REGISTRY");
+        return String.valueOf(registry.getKey(group));
+    }
+    private static PhysicsVector vector(Object value) { return PhysicsVector.of((Vector3dc) value); }
+    private static ServerLevel level(Object ship) { return (ServerLevel) NativeApi.call(ship, null, "getLevel"); }
+}

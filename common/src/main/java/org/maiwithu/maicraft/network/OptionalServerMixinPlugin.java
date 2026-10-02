@@ -23,6 +23,8 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
     private static final Set<String> CREATE_NEOFORGE_HOOKS = Set.of("CreateMillstoneProductionMixin", "CreateCrushingProductionMixin");
     @Override public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         String name = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
+        // 只有安装 Sable 时旁听船体物理子步；没有该模组的服务器照常启动。
+        if (name.equals("SableForceObservationMixin")) return present(targetClassName);
         if (name.equals("CreateStressObservationMixin")) return hasStressFields(targetClassName);
         // 机械手只旁听原生同步；可选模组不存在时不加载适配器，版本未命中 read 时保持观察未知。
         if (name.equals("CreateDeployerHandObservationMixin")) return present(targetClassName);
