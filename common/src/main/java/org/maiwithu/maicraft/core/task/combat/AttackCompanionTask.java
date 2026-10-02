@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
 import org.maiwithu.maicraft.core.combat.PvpEngagement;
+import org.maiwithu.maicraft.core.combat.PvpTactics;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -197,7 +198,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         settleFinishedTargets();
         if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         // 先判断这一刻是否仍需撤退或躲爆炸，再决定能否收拾战利品；敌人离开近圈不等于已脱离追击。
-        AttackPlan.Move move = AttackPlan.decide(field, lastMove, retreat.committed());
+        AttackPlan.Move move = plannedMove(field);
         if (move.action() == AttackPlan.Action.DISENGAGE) retreat.commit();
         if (phase == Phase.LOOT) {
             boolean threatened = field.foes().stream().anyMatch(Battlefield.Foe::engaging)
@@ -263,6 +264,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     private TaskState afterCombatMovement(TaskState state) {
+        // 近战冷却时仍面向对手，便于后退举盾；弓战保留弹道解给出的抛物线瞄准方向。
+        if (state == TaskState.RUNNING && !bowFighting && pvpTarget() && meleeAction == null)
+            InputDriver.lookAt(player, PvpTactics.aimPoint((Player) target));
         // 导航先续移动，再保留已选近战目标的瞄准；否则撤离镜头每刻覆盖回头瞄准，角色会被追着打却始终出不了手。
         if (state == TaskState.RUNNING && meleeAction != null
                 && ClientRuntime.requireContext(player).mutationAvailable()) meleeAction.renewEntityAttackAim();
@@ -336,6 +340,21 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (mob instanceof Player other) return PvpEngagement.accepts(player, other);
         return CombatThreats.recentlyAttackedBy(player, mob) || mob instanceof Mob creature && creature.getTarget() == player
                 || Menace.creeperThreat(mob, player);
+    }
+
+    private AttackPlan.Move plannedMove(Battlefield field) {
+        // 先保留低血撤退和爆炸避险的优先级，再为已点名玩家结合距离选择弓或近战。
+        AttackPlan.Move move = AttackPlan.decide(field, lastMove, retreat.committed());
+        if ((move.action() == AttackPlan.Action.SKIRMISH || move.action() == AttackPlan.Action.BOW)
+                && liveEntity(move.foeId()) instanceof Player other && PvpEngagement.accepts(player, other)) {
+            boolean ranged = PvpTactics.ranged(player.distanceTo(other), field.hasMelee(), field.hasRanged(), target == other && bowFighting);
+            return new AttackPlan.Move(ranged ? AttackPlan.Action.BOW : AttackPlan.Action.SKIRMISH, other.getId());
+        }
+        return move;
+    }
+
+    private boolean pvpTarget() {
+        return target instanceof Player other && PvpEngagement.accepts(player, other);
     }
 
     private static boolean containsId(List<Battlefield.Foe> foes, int id) {
@@ -599,7 +618,6 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         // 武器是<b>可选的</b>:拳头一点伤害,鸡四血、羊八血、牛十血,照样打得动。
         // 这里曾经"没有近战武器就直接返回" —— 那是按"打怪"写的前提(赤手对上会还手的
         // 东西不是出路),模型让她打一只鸡时那个前提不成立,她会走到跟前站着不动。
-        Loadout loadout = Loadout.forTarget(player, player);
         Entity victim = null;
         double best = Double.MAX_VALUE;
         for (var f : field.foes()) {
@@ -620,6 +638,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (victim == null) {
             return;
         }
+        // 已确定实际对手后再选武器；玩家举盾时可优先使用背包中的斧，避免按自己作为目标来评分。
+        Loadout loadout = Loadout.forTarget(player, victim);
         // 武器选择没完成就等；候选已经限定在执行器支持的背包与快捷栏内。
         if (loadout.hasMelee()) {
             FirstPersonActionGate.Status selected = meleeSelection.select(player, loadout.melee().slot());
@@ -685,7 +705,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
      */
     // 围着目标保持战斗距离，同时绕开其他危险；只有真正无路可走才把目标送去远程可达性判断。
     private PlayerNav.Status driveApproach() {
-        stanceRecovery.target(player, bowFighting ? null : target);
+        // 冷却期间主动保持外圈，不让“已到达但够不着”的格内修正把角色又推回对手刀下。
+        stanceRecovery.target(player, bowFighting || pvpTarget() && !PvpTactics.attackReady(player, (Player) target) ? null : target);
         if (stanceRecovery.active()) {
             if (stanceRecovery.tick(player, standoffGoal(), target != null && player.distanceTo(target) <= reachToTarget()))
                 return PlayerNav.Status.RUNNING;
@@ -729,6 +750,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     private boolean correctArrivedStance(PlayerNav.Status status) {
+        if (pvpTarget() && !PvpTactics.attackReady(player, (Player) target)) return false;
         // Baritone 的到达只证明脚格合格；真实身体站在远侧格边时，先安全挪向该格中心再交给原生攻击检查。
         if (status != PlayerNav.Status.ARRIVED || bowFighting || target == null || !player.onGround()
                 || player.distanceTo(target) <= reachToTarget()) return false;
@@ -746,6 +768,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     /** 走位环的外沿:剑是够到距离,弓是 {@link #BOW_MAX_DISTANCE}。 */
     private double skirmishOuter() {
+        if (pvpTarget()) return PvpTactics.band(player, (Player) target, bowFighting).outer();
         return bowFighting
                 ? strictCrystalTarget() ? STRICT_CRYSTAL_MAX_DISTANCE : BOW_MAX_DISTANCE
                 : reachToTarget();
@@ -753,6 +776,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     /** 走位环的内沿:剑是"它够得着我",弓是"拉得开弓的距离"。 */
     private double skirmishInner() {
+        if (pvpTarget()) return PvpTactics.band(player, (Player) target, bowFighting).inner();
         return bowFighting
                 ? strictCrystalTarget()
                         ? Menace.blastSpanOf(target) + STRICT_CRYSTAL_BLAST_MARGIN
@@ -793,6 +817,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 有目标时，要求走到它周围的一圈合适距离，并避开敌群；没主目标时只要求离威胁远一点。
     // 弓使用更大的间距，近战则尝试站在“我能打到它、它不容易打到我”的区域。
     private NavGoal standoffGoal() {
+        if (pvpTarget()) return PvpTactics.stance(player, (Player) target, bowFighting, hostiles);
         // 躲避场只收敌对生物:它们才有危险半径。目标本身归下面的环管——点名的猪牛鸡不是
         // 敌对生物,不在这份名单里,但照样是要走过去打的目标。"有没有目标"与"附近有没有怪"
         // 是两个问题,这里早退只看前者是否也为空:既无目标也无怪,才真的没处可站。
@@ -869,7 +894,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         // 这里曾经"近于内沿就 abortShot":僵尸一走进八格,拉到一半的弓当场取消;她退开、
         // 重新起手、僵尸又跟进来 —— 一箭都放不出去。距离是走位的判据,混进攻击层就成了
         // 一个把自己打断的开关。
-        double firingRange = strictCrystalTarget()
+        double firingRange = pvpTarget() ? PvpTactics.band(player, (Player) target, true).outer() : strictCrystalTarget()
                 ? STRICT_CRYSTAL_MAX_DISTANCE : BOW_MAX_DISTANCE;
         if (strictCrystalTarget() && player.distanceTo(target) < skirmishInner()) {
             // 寻路不是授权边界：手部操作层可能在角色仍向外移动时就得到清晰弹道解。即使只是一刻，也绝不能进入末影水晶的完整爆炸范围。
