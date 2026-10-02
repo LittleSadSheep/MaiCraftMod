@@ -50,6 +50,8 @@ final class AcquisitionNeed {
     boolean unresolvedMaterialSource;
     final Set<BlockPos> visitedContainers = new LinkedHashSet<>();
     int containerAttempts;
+    /** 本需求已用尽当前可见箱子后，才允许进入网络和其他来源的准备。 */
+    boolean containerSearchComplete;
     boolean decisionRequired;
     ResourceLocation preferredTradeOutput;
     int lastObservedCount = -1;

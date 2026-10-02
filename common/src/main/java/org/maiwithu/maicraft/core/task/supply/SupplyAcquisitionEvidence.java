@@ -13,6 +13,17 @@ final class SupplyAcquisitionEvidence {
     private SupplyAcquisitionEvidence() {}
 
     static void append(Map<String, Object> child, Map<String, Object> receipt) {
+        // 施工补料同样完整交付每只箱子的观察、记忆更新与未确认项，不让后面的调查被历史摘要遮掉。
+        if (child.containsKey("container_search_scope")) receipt.put("container_search_scope", child.get("container_search_scope"));
+        var containers = new ArrayList<Map<String, Object>>();
+        if (child.get("attempts") instanceof List<?> visits) for (Object value : visits) {
+            if (!(value instanceof Map<?, ?> row) || !(row.get("child_data") instanceof Map<?, ?> data)
+                    || !("manage_container".equals(row.get("child_tool")) || data.containsKey("container_observation"))) continue;
+            var visit = new LinkedHashMap<String, Object>();
+            copy(row, visit, "source", "terminal_state", "child_success", "child_message", "inventory_progress");
+            visit.put("container_result", data); containers.add(Map.copyOf(visit));
+        }
+        if (!containers.isEmpty()) receipt.put("container_investigations", List.copyOf(containers));
         // 子任务自己的历史可能已经有限额；这里的计数只描述收到的记录，不能宣称覆盖了全部实际尝试。
         for (String field : List.of("attempts", "recipe_trace")) {
             if (!(child.get(field) instanceof List<?> rows)) continue;

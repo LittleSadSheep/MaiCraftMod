@@ -21,18 +21,20 @@ public final class SemanticAcquireTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        // 取料入口允许尝试匹配地面物品；归属不作前置许可，明确保护和实际原生拒绝仍按事实返回。
+        // 默认取料先按记忆翻可见箱子，再继续其他来源；实际原生拒绝与明确保护按现场事实处理。
         return "Make one final main-inventory fact true for any acceptable item alternative. "
                 + "Declare only item ids or live item tags, the final count, allowed source families and semantic "
                 + "safety constraints. The Mod observes inventory before every step, stops as soon "
                 + "as the fact is true, and owns source selection, recipe recursion, loaded-world "
                 + "evidence, progress-driven first-person source exploration, paths, menus and receipts. "
-                + "Defaults cover ordinary survival: inventory, "
+                + "Defaults cover ordinary survival: inventory, visible ordinary containers, "
                 + "matching nearby drops regardless of ownership, crafting, cooking and protection-aware mining. "
                 + "Hunting may be identified as a possible source, but never starts without explicit "
                 + "allow_harm; if no acceptable source entity is loaded, the Mod performs a generic "
-                + "type-and-relationship entity search and re-verifies before attacking. Storage "
-                + "extraction and trading require explicit allowed_sources. "
+                + "type-and-relationship entity search and re-verifies before attacking. Containers are checked "
+                + "in remembered-present, unvisited, remembered-absent order; each synchronized menu refreshes durable memory. "
+                + "Container investigation and approach stay within 32 blocks of the request origin and require direct line of sight. "
+                + "Trading requires explicit allowed_sources. "
                 + "Unresolved protection or acquisition-source evidence stops with "
                 + "semantic recovery_options instead of silently choosing.";
     }
@@ -55,14 +57,14 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                         "Required final aggregate main-inventory count (default 1).",
                         1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)
                 .optionalEnumStringArray("allowed_sources",
-                        "Optional hard source restriction: omit for ordinary acquisition. Carried inventory and available carried-wireless stock are used before nearby world sources. Only narrow this list for an explicit user restriction; it is not execution order.",
+                        "Optional hard source restriction: omit for ordinary acquisition, including visible containers. Carried inventory is checked first, then containers before other external sources. Only narrow this list for an explicit user restriction; it is not execution order.",
                         "inventory", "nearby", "wireless", "storage", "harvest", "craft", "cook", "mine", "trade", "hunt")
                 .optionalBool("allow_harm",
                         "Explicit semantic consent to harm living entities. Default false.")
                 .optionalStringArray("protected_labels",
                         "Remembered places or possessions that must not be touched.")
                 .optionalInteger("radius",
-                        "Loaded-world radius for nearby evidence (default 16).", 1, 48)
+                        "Loaded-world radius for nearby evidence (default 16); containers default to 32 from the fixed request origin, and an explicit smaller radius narrows that bound.", 1, 48)
                 .optionalObject("source_hint",
                         "Optional semantic source evidence. It never contains positions, routes, clicks or slots.",
                         hint -> hint

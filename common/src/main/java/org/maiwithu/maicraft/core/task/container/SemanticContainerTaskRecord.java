@@ -69,6 +69,13 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public BlockPos exactTarget;
     public String exactDimension;
     public boolean mayAlterTerrain;
+    public ContainerSearchScope investigationScope;
+    public String priorMemoryState;
+
+    /** 取物调查继承原始调用范围与选箱依据；存余料仍沿用已知仓库流程。 */
+    public SemanticContainerTaskRecord investigateWithin(ContainerSearchScope scope, int rank) {
+        investigationScope = Objects.requireNonNull(scope); priorMemoryState = ContainerMemory.state(rank); return this;
+    }
 
     /** 点名机器中的某只箱子时绑定该格，仍须原生走近和开箱，不在其附近重新选箱。 */
     public SemanticContainerTaskRecord at(BlockPos target, String dimension) {

@@ -52,6 +52,7 @@ import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
+import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
@@ -80,8 +81,6 @@ import org.maiwithu.maicraft.task.TaskState;
  */
 public final class SemanticAcquireCompanionTask
         extends AbstractCompanionTask<SemanticAcquireTaskRecord> {
-    private static final int MAX_REPORTED_ATTEMPTS = 64;
-    private static final int MAX_REPORTED_ISSUES = 64;
     private static final int PLANNER_STEPS_PER_TICK = 1;
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
     private static final long COLLECT_TICKS = 60L * 20L;
@@ -151,6 +150,7 @@ public final class SemanticAcquireCompanionTask
     private final AcquisitionInventoryTidy inventoryTidy;
     private final AcquisitionBackpackInventory backpacks;
     private TaskRecord inventoryCapacityBlockedRecord;
+    private ContainerSearchScope storageScope;
 
     public SemanticAcquireCompanionTask(
             LocalPlayer player, SemanticAcquireTaskRecord record) {
@@ -179,6 +179,8 @@ public final class SemanticAcquireCompanionTask
 
     @Override
     protected void onStart() {
+        storageScope = r.storageScope == null ? ContainerSearchScope.capture(player, r.storageSearchRadius) : r.storageScope;
+        r.storageScope = storageScope;
         // 记下起始库存，并把最终需求放到栈顶；以后缺什么先压上去，凑齐后再回到上一层继续。
         initialCounts = counts(r.itemIds);
         var lineage = new LinkedHashSet<>(r.productionLineage.ancestors()); lineage.addAll(r.itemIds);
@@ -203,7 +205,8 @@ public final class SemanticAcquireCompanionTask
             return failAcquisition("unresolved_protected_label",
                     String.join("; ", protection.problems()), FailureType.TARGET_LOST);
         }
-        return protection.run(this::tickAcquisition);
+        // 递归补工具、燃料和原料时继承原始翻箱起点，不从子任务的新站位继续扩大调查范围。
+        return protection.run(() -> storageScope.inherit(this::tickAcquisition));
     }
 
     private TaskState tickAcquisition() {
@@ -237,7 +240,15 @@ public final class SemanticAcquireCompanionTask
             if (backpack != null) return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, backpack, "read and withdraw carried backpack stock");
         }
 
-        // 先一次性读随身终端的网络库存，再比较材料树；查询不领取物品，也不替玩家提交网络合成。
+        // 主背包和随身背包不足时先按三类记忆调查可见箱子，再考虑网络与加工路线。
+        if (!needs.isEmpty() && needs.peek().canTry(SemanticAcquireTaskRecord.Source.STORAGE)
+                && !needs.peek().containerSearchComplete && missing(needs.peek()) > 0) {
+            if (!takePlannerStep()) return TaskState.RUNNING;
+            TaskState container = attemptContainers(needs.peek());
+            if (container != null) return container;
+        }
+
+        // 箱子调查结束后读随身终端的网络库存，再比较材料树；查询不领取物品或提交网络合成。
         if (wirelessInventoryAllowed() && (!wirelessStockChecked
                 || player.level().getGameTime() - wirelessStockQueryTick >= StockEvidence.MAX_AGE_TICKS)) {
             wirelessStockChecked = true;
@@ -366,18 +377,9 @@ public final class SemanticAcquireCompanionTask
         if (!need.canTry(source)) { advanceSource(need); return TaskState.RUNNING; }
         boolean wireless = source == SemanticAcquireTaskRecord.Source.WIRELESS;
         boolean explicitStorage = source == SemanticAcquireTaskRecord.Source.STORAGE;
-        if (explicitStorage && need.containerAttempts < ContainerSupplySources.MAX_ATTEMPTS) {
-            // 仓库使用独立的有界半径；找得到主城箱子并不意味着可以在同样大的区域内挖矿。
-            var ordinary = ContainerSupplySources.candidates(player, player.blockPosition(), r.storageSearchRadius,
-                    need.itemIds, need.visitedContainers, r.protectedLabels);
-            if (!ordinary.isEmpty()) {
-                var containerSource = ordinary.getFirst(); need.visitedContainers.addAll(containerSource.footprint()); need.containerAttempts++;
-                need.attempted(SemanticAcquireTaskRecord.Source.STORAGE);
-                var record = SemanticContainerTaskRecord.withdrawAvailableAt(childId("container-stock"),
-                        player.level().getGameTime() + STORAGE_TICKS, need.itemIds, need.requiredFinalCount,
-                        containerSource.position(), containerSource.blockId(), r.protectedLabels);
-                return startChild(need, SemanticAcquireTaskRecord.Source.STORAGE, record, "withdraw available missing materials through one visible ordinary container");
-            }
+        if (explicitStorage) {
+            TaskState container = attemptContainers(need);
+            if (container != null) return container;
         }
         // 普通箱子与 AE2 共用仓库许可；切换后端不会获得挖矿许可，也不能绕过真实取物流程。
         if (!wireless && !Ae2ResourceSupply.available()) {
@@ -417,6 +419,21 @@ public final class SemanticAcquireCompanionTask
         return startChild(need, source,
                 record, "request exact missing aggregate count from storage"
                         + (allowNetworkCrafting ? " with network crafting allowed" : ""));
+    }
+
+    private TaskState attemptContainers(AcquisitionNeed need) {
+        if (!storageScope.contains(player)) { need.containerSearchComplete = true; return null; }
+        var ordinary = ContainerSupplySources.investigate(player, storageScope.origin(), storageScope.radius(),
+                need.itemIds, need.visitedContainers, r.protectedLabels);
+        if (ordinary.isEmpty()) { need.containerSearchComplete = true; return null; }
+        var source = ordinary.getFirst(); need.visitedContainers.addAll(source.footprint()); need.containerAttempts++;
+        need.attempted(SemanticAcquireTaskRecord.Source.STORAGE);
+        // 每只箱子本需求最多调查一次；原来有货却已空时先刷新记忆，再继续下一只候选。
+        var record = SemanticContainerTaskRecord.withdrawAvailableAt(childId("container-stock"),
+                player.level().getGameTime() + STORAGE_TICKS, need.itemIds, need.requiredFinalCount,
+                source.position(), source.blockId(), r.protectedLabels).investigateWithin(storageScope, source.stockRank());
+        return startChild(need, SemanticAcquireTaskRecord.Source.STORAGE, record,
+                "inspect visible container and withdraw available missing materials");
     }
 
     private TaskState attemptCraft(AcquisitionNeed need) {
@@ -2187,8 +2204,7 @@ public final class SemanticAcquireCompanionTask
 
     private void addIssue(
             String source, String code, String summary, Map<String, ?> facts) {
-        // 只保留最先出现的六十四条问题，超出的不再追加；这限制报告大小，不限制实际尝试次数。
-        if (issues.size() >= MAX_REPORTED_ISSUES) return;
+        // 每次箱子调查的原生问题都保留，后面的无货、拒绝和未确认结果不能因数量多而消失。
         Map<String, Object> issue = new LinkedHashMap<>();
         issue.put("source", source);
         issue.put("code", code);
@@ -2203,7 +2219,7 @@ public final class SemanticAcquireCompanionTask
             int after,
             int progress,
             boolean stoppedBecauseSatisfied) {
-        // 记开始和结束库存、子任务结果及是否因数量已够提前停止；记录数量上限与实际执行次数分开。
+        // 完整记录每次开始和结束库存、子任务结果及是否因数量已够停止，让较大仓库的最后一箱仍可追溯。
         if (inventoryTidy.owns(activeRecord)) {
             inventoryTidy.settle(player, state, result);
             outcomeUncertain |= inventoryTidy.outcome().uncertain();
@@ -2212,7 +2228,6 @@ public final class SemanticAcquireCompanionTask
         if (activeRecord instanceof Ae2SupplyTaskRecord supply
                 && supply.request.operation() == Ae2ResourceSupply.Operation.OBSERVE)
             wirelessEvidence.querySettled(state, result, wirelessStockQueryTick, player.level().getGameTime());
-        if (attempts.size() >= MAX_REPORTED_ATTEMPTS) return;
         Map<String, Object> attempt = new LinkedHashMap<>();
         attempt.put("source", activeSource.name().toLowerCase());
         attempt.put("detail", activeDetail);
@@ -2399,6 +2414,7 @@ public final class SemanticAcquireCompanionTask
         int observed = count(r.itemIds);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("goal", "final_main_inventory_count");
+        if (storageScope != null) data.put("container_search_scope", storageScope.receipt());
         data.put("item_ids", itemStrings(r.itemIds));
         data.put("required_final_count", r.count);
         data.put("observed_final_count", observed);

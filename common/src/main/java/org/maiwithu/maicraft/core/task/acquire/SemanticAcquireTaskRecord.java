@@ -8,6 +8,8 @@ import java.util.Locale;
 import java.util.Objects;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -79,9 +81,9 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
         }
     }
 
-    /** 普通生存默认来源；采矿仍检查工具和保护，狩猎只有明确允许伤害后才能真正动手。 */
+    /** 普通生存默认允许翻可见箱子；采矿仍检查工具和保护，狩猎只有明确允许伤害后才能动手。 */
     public static final List<Source> DEFAULT_SOURCES =
-            List.of(Source.INVENTORY, Source.NEARBY, Source.WIRELESS, Source.HARVEST, Source.CRAFT, Source.COOK,
+            List.of(Source.INVENTORY, Source.STORAGE, Source.NEARBY, Source.WIRELESS, Source.HARVEST, Source.CRAFT, Source.COOK,
                     Source.MINE, Source.HUNT);
 
     public final List<ResourceLocation> itemIds;
@@ -93,6 +95,12 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public final int searchRadius;
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */
     public final int storageSearchRadius;
+    public ContainerSearchScope storageScope;
+
+    /** 在公开工具接单时冻结原点，排队期间玩家移动不会改变本次翻箱范围。 */
+    public SemanticAcquireTaskRecord captureStorageOrigin(LocalPlayer player) {
+        if (player != null) storageScope = ContainerSearchScope.capture(player, storageSearchRadius); return this;
+    }
     public ProductionLineage productionLineage = ProductionLineage.ROOT;
     public List<ResourceLocation> cookingFuelPolicy = List.of();
     public List<ResourceLocation> preferredMaterials = List.of();
@@ -142,7 +150,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
                 protectedLabels, 64, "protected labels");
         this.searchRadius = Math.clamp(searchRadius, 1, MAX_RADIUS);
         this.storageSearchRadius = this.allowedSources.contains(Source.STORAGE)
-                ? Math.clamp(storageSearchRadius, 1, MAX_RADIUS) : this.searchRadius;
+                ? Math.clamp(storageSearchRadius, 1, ContainerSearchScope.MAX_RADIUS) : this.searchRadius;
     }
 
     /** 模组初始化时确保这类取物任务已登记，随后才能从任务单创建执行器。 */

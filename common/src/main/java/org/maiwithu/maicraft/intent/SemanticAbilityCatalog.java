@@ -406,6 +406,7 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Bounded loaded-merchant search radius; default 32.")));
             case "maicraft:acquire_items" -> contract(
                     "Make requested inventory facts true using allowed sources from the player's current location — "
+                            + "Ordinary acquisition investigates visible containers within 32 blocks of the fixed request origin: remembered-present first, then unvisited, then remembered-absent. Every synchronized visit updates durable container identity and complete inventory memory. "
                             + "mine digs exposed ore sources, harvest replants mature crops, and storage, trade, craft, cook, hunt and nearby collections are further families. "
                             + "To acquire elsewhere, use a sequence with travel first; nearest accepts no label, position or relation.",
                     targets("nearest"),
@@ -416,11 +417,11 @@ public final class SemanticAbilityCatalog {
                             field("item_tags", "array<resource_id>", "Several semantic item tags combined as acceptable alternatives."),
                             field("preferred_materials", "array<resource_id>", "Optional soft item-ID hints for recipe routes and intermediates, inherited by prerequisites. Available stock remains first; unavailable preferences fall back within the same allowed sources."),
                             field("count", "integer", "Required final aggregate main-inventory count, from 1 to 2304; default 1."),
-                            // 普通取材不由模型缩成采矿或合成，先使用随身与无线现货；只有玩家明确限制来源才收窄许可。
-                            field("allowed_sources", "array<string>", "Optional hard restriction: omit for ordinary acquisition; carried inventory and carried-wireless stock precede nearby world sources. Only narrow this list for an explicit user restriction. Permitted families: inventory, nearby, wireless, storage, harvest, craft, cook, mine, trade, hunt. mine digs exposed loaded sources only and never tunnels toward buried targets — descend first (travel + may_alter_terrain) or locate exposed sources with find_block. harvest replants loaded mature crops; nearby collects safe loose drops; wireless uses observed stock without ordinary containers or network crafting. Defaults include wireless and harvest. Explicit restrictions and prerequisite inheritance remain enforced; list order is not execution order."),
+                            // 普通取材先核对随身库存，再按三类记忆翻可见箱子；只有玩家明确限制来源才收窄许可。
+                            field("allowed_sources", "array<string>", "Optional hard restriction: omit for ordinary acquisition, including storage, wireless and harvest. Carried inventory is checked first, then visible containers before other external sources. Only narrow this list for an explicit user restriction. Permitted families: inventory, nearby, wireless, storage, harvest, craft, cook, mine, trade, hunt. mine digs exposed loaded sources only; find_block and other exploration require direct line of sight. harvest replants loaded mature crops; nearby collects loose drops; wireless uses observed stock without ordinary containers or network crafting. Explicit restrictions and prerequisite inheritance remain enforced; list order is not execution order."),
                             field("allow_harm", "boolean", "Whether acquiring may harm living entities; default false."),
                             field("protected_labels", "array<string>", "Named entities, areas or possessions that must not be touched."),
-                            field("radius", "integer", "Optional bounded loaded-world evidence radius."),
+                            field("radius", "integer", "Optional bounded loaded-world evidence radius; containers default to 32 from the fixed request origin, capped at 32, with explicit smaller radii respected."),
                             field("source_hint", "object", "Optional semantic source evidence: block/tag/entity/trade families and expected products; never coordinates, routes, entity IDs, slots or clicks.")));
             case "maicraft:build", BuildDesignAdapter.ABILITY -> contract(
                     BuildDesignAdapter.ABILITY.equals(ability)

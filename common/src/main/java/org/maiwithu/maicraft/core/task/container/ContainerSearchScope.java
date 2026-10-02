@@ -21,8 +21,9 @@ public record ContainerSearchScope(String dimension, BlockPos origin, int radius
                 : new ContainerSearchScope(parent.dimension(), parent.origin(), Math.min(radius, parent.radius()));
     }
     public boolean contains(LocalPlayer player) {
-        return dimension.equals(player.level().dimension().location().toString()) && new BodyRange(origin, radius).contains(player.blockPosition());
+        return dimension.equals(player.level().dimension().location().toString()) && contains(player.blockPosition());
     }
+    public boolean contains(BlockPos at) { return new BodyRange(origin, radius).contains(at); }
     public <T> T inherit(Supplier<T> operation) {
         ContainerSearchScope previous = CURRENT.get(); CURRENT.set(this);
         try { return operation.get(); }

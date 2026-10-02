@@ -66,6 +66,16 @@ public final class MaterialSupplyReceiptTest {
                 "the parent exposes completed transfer facts rather than internal slot receipts");
         publicEvidenceSurvives(failed);
         acquisitionHistorySurvives(coordinator, method);
+        // 七十只箱子的完整观察必须越过协调器和公开序列化，不能只留下最后八条尝试摘要。
+        var visits = IntStream.range(0, 70).mapToObj(i -> Map.of("source", "storage", "child_tool", "manage_container",
+                "child_data", Map.of("container_observation", Map.of("coordinates", List.of(i, 64, 0)),
+                        "container_memory", Map.of("container_memory_id", "box-" + i, "last_observed_items", Map.of("minecraft:iron_ingot", i)),
+                        "outcome_uncertain", false, "moved_count", i))).toList();
+        var full = (Map<?, ?>) method.invoke(coordinator, TaskResult.ok("investigated", Map.of("attempts", visits)), TaskState.SUCCESS, 4, true);
+        var visibleVisits = publicReceipt(full).getAsJsonObject().getAsJsonArray("container_investigations");
+        check(visibleVisits.size() == 70 && visibleVisits.get(69).getAsJsonObject().getAsJsonObject("container_result")
+                .getAsJsonObject("container_memory").getAsJsonObject("last_observed_items").get("minecraft:iron_ingot").getAsInt() == 69,
+                "complete container observations survive the supply wrapper and public serialization");
         var ordinary = (Map<?, ?>) method.invoke(coordinator,
                 TaskResult.ok("carried", Map.of()), TaskState.SUCCESS, 4, true);
         check(!ordinary.containsKey("storage_attempts"), "carried materials cannot fabricate an AE server receipt");

@@ -46,6 +46,22 @@ public final class ContainerSupplySourcesTest {
         fixedTargetOpenRegistersItsRunnerAndPreservesChildFailure();
         partialWithdrawalAndMenuOwnershipRemainExplicit();
         automaticOpenRequiresCurrentStockEvidence();
+        investigationOpensUnknownContainer();
+    }
+
+    private static void investigationOpensUnknownContainer() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var entities = worldEntities(h); BlockPos at = new BlockPos(3, 1, 3); addBarrel(h, entities, at);
+            // 新调查只需要真实可见目标和固定范围，既往没有库存记忆也会派发同一个原生开箱执行器。
+            var record = SemanticContainerTaskRecord.withdrawAvailableAt("unknown-visible-container", 1000, List.of(IRON), 2,
+                    at, ResourceLocation.parse("minecraft:barrel"), List.of()).investigateWithin(ContainerSearchScope.capture(h.player, 32), 1);
+            var task = new SemanticContainerCompanionTask(h.player, record); task.start(h.player);
+            check(task.tick(h.player) == TaskState.RUNNING && task.tick(h.player) == TaskState.RUNNING,
+                    "unknown visible container advances through survey and opening");
+            check(field(task.getClass(), "activeChild").get(task) instanceof MachineMenuOpenTask,
+                    "investigation dispatches the native opening task without demanding prior stock evidence");
+            check(h.blockUses() == 0 && h.itemUses() == 0, "dispatch does not fabricate an opening or inventory transfer");
+        } finally { ContainerSupplySources.reset(); }
     }
     private static void cacheNeverConfusesContainersOrWorlds() {
         var cache = new ContainerSupplySources.Cache(); Object owner = new Object(), level = new Object(), first = new Object(), second = new Object();

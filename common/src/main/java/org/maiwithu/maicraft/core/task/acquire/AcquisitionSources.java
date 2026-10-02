@@ -20,7 +20,8 @@ final class AcquisitionSources {
                     // 随身终端不需要离开工位，先取已观察的无线现货，再走向地上掉落物或其他世界来源。
                     case WIRELESS -> 5;
                     case NEARBY -> 10;
-                    case STORAGE -> 20;
+                    // 可见普通箱子先于掉落物和加工；具体开箱顺序由各箱最近的真实观察决定。
+                    case STORAGE -> 3;
                     case HARVEST -> 24; // 有明确成熟作物时先收田，避免缺钱还先走贸易链。
                     case CRAFT -> facts.craftReady() ? 25 : 50;
                     case COOK -> facts.cookReady() ? 26 : 55;

@@ -46,7 +46,7 @@ public final class StorageSupplyRadiusTest {
                 "a public explicit radius remains unchanged for every source, including storage");
         var bounded = new SemanticAcquireTaskRecord("internal-bounded", 1000, List.of(BRICKS), 4, sources, false,
                 SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16, Integer.MAX_VALUE);
-        check(bounded.searchRadius == 16 && bounded.storageSearchRadius == 48, "only storage receives the capped larger radius");
+        check(bounded.searchRadius == 16 && bounded.storageSearchRadius == 32, "storage stays within the thirty-two-block cap");
         var noStorage = new SemanticAcquireTaskRecord("no-storage", 1000, List.of(BRICKS), 4,
                 List.of(SemanticAcquireTaskRecord.Source.MINE), false, SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16, 48);
         check(noStorage.storageSearchRadius == 16 && !noStorage.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE),
@@ -55,9 +55,10 @@ public final class StorageSupplyRadiusTest {
             for (var policy : List.of(SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY, SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY)) {
                 var coordinator = begin(h, policy, List.of());
                 var record = (SemanticAcquireTaskRecord) get(coordinator, "childRecord");
-                check(record.searchRadius == 16 && record.storageSearchRadius == 16
-                        && !record.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE),
-                        "a coordinator without storage authorization retains its original local radius");
+                boolean ordinary = policy == SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY;
+                check(record.searchRadius == 16 && record.storageSearchRadius == (ordinary ? 32 : 16)
+                        && record.allowedSources.contains(SemanticAcquireTaskRecord.Source.STORAGE) == ordinary,
+                        "ordinary acquisition allows bounded containers while inventory-only does not");
                 coordinator.cancel(h.player);
             }
         }
@@ -72,14 +73,14 @@ public final class StorageSupplyRadiusTest {
             TaskFactory.register(SemanticContainerTaskRecord.class, SemanticContainerCompanionTask::new);
             var entities = ContainerSupplySourcesTest.worldEntities(h); BlockPos barrel = new BlockPos(1, 1, 1);
             ContainerSupplySourcesTest.addBarrel(h, entities, barrel);
-            // 扩大仓库半径只用于追回已知石砖，不能因此开启未知容器探索。
+            // 已知石砖优先复查；这个场景只验证有界仓库调查和采矿半径互不扩张。
             ContainerSupplySourcesTest.rememberContents(h, barrel, BRICKS, 4);
-            // 玩家位置只作为三十一格外的查询中心；仓库仍来自夹具中真实已加载区块，不启动导航或加载新区域。
-            h.position(new Vec3(1.5, 1, 32.5));
+            // 用同一已加载区块内的三十一格高度差验证球形范围，沿途视线也必须来自已加载格。
+            h.position(new Vec3(1.5, 32, 1.5));
             var sources = List.of(SemanticAcquireTaskRecord.Source.STORAGE, SemanticAcquireTaskRecord.Source.MINE, SemanticAcquireTaskRecord.Source.NEARBY);
             var coordinator = begin(h, SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY, sources);
             var record = (SemanticAcquireTaskRecord) get(coordinator, "childRecord");
-            check(record.searchRadius == 16 && record.storageSearchRadius == 48
+            check(record.searchRadius == 16 && record.storageSearchRadius == 32
                     && record.allowedSources.containsAll(sources) && !record.allowHarm,
                     "resupply only extends authorized warehouse search, leaving nearby/mining radius and harm policy intact");
             check(ContainerSupplySources.candidates(h.player, h.player.blockPosition(), record.searchRadius,

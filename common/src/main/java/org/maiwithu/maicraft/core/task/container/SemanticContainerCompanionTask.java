@@ -48,6 +48,7 @@ import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurvey;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 
 /**
  * 完成“往箱子存、从箱子取、把背包调整到指定数量”的整条流程。
@@ -122,6 +123,7 @@ public final class SemanticContainerCompanionTask
     private int lastContainerCount;
     private long countsObservedAt = -1;
     private Map<String, Object> lastNativeTransfer = Map.of();
+    private Map<String, Object> lastContainerMemory = Map.of();
     private String containerKind;
     private boolean goalSatisfied;
     private String failureCode;
@@ -138,6 +140,10 @@ public final class SemanticContainerCompanionTask
     }
 
     @Override protected TaskState onTick() {
+        return r.investigationScope == null ? tickContainer() : r.investigationScope.boundMovement(this::tickContainer);
+    }
+
+    private TaskState tickContainer() {
         if (activeChild != null) return tickChild();
         if (satisfiedSettlement && phase != Phase.CLEANUP && phase != Phase.COMPLETE) {
             stopNav(); goalSatisfied = goalSatisfied();
@@ -329,15 +335,21 @@ public final class SemanticContainerCompanionTask
         if (player.containerMenu != player.inventoryMenu) return reuseOpenMenu();
         if (!targetStillValid()) return failFinal("container_target_changed",
                 "The selected block changed before it could be opened.", FailureType.TARGET_LOST);
-        // 自动补料或整理余料只复访有对应材料的已知箱子；排队期间线索失效就停止，不临时改成盲搜。
-        if (r.storageSupply() && !ContainerSupplySources.hasObservedItems(player, target.position(), r.itemIds))
+        // 调查允许开未知或旧记忆无货的箱子；实际出发前仍须处于固定范围内且目标可见。
+        if (r.investigationScope != null && (!r.investigationScope.contains(player)
+                || !r.investigationScope.contains(target.position())
+                || !ObservationVisibility.block(player, target.position())))
+            return failFinal("container_not_visible_in_search_scope", "The container is no longer visible within the original search scope.", FailureType.TARGET_LOST);
+        // 自动存余料继续要求已有对应材料线索，避免把取物调查许可扩展为陌生箱子的存入许可。
+        if (r.storageSupply() && r.investigationScope == null && !ContainerSupplySources.hasObservedItems(player, target.position(), r.itemIds))
             return failFinal("container_stock_evidence_expired", "The automatic storage visit no longer has recent evidence of the requested material. Use a targeted container goal only when authorized or supported by a specific source hint.", FailureType.TARGET_LOST);
         BlockEntity entity = player.level().getBlockEntity(target.position());
         if (entity instanceof BaseContainerBlockEntity container && !container.canOpen(player)) {
             return failFinal("container_locked", "The selected container reports that this player "
                     + "cannot open it. No menu action was attempted.", FailureType.UNKNOWN);
         }
-        if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
+        // 调查许可按视线与原生权限落实，附近站着玩家本身不证明其占用了这只箱子。
+        if (r.investigationScope == null && otherPlayerNearTarget()) return failFinal("other_player_near_container",
                 "Another player is close enough to be using the selected container.",
                 FailureType.ENTITY_BLOCKED);
         openRequested = true;
@@ -388,7 +400,7 @@ public final class SemanticContainerCompanionTask
             lastPlayerCount = initialPlayerCount;
             lastContainerCount = initialContainerCount;
             countsObservedAt = player.level().getGameTime();
-            ContainerSupplySources.rememberVisible(player, target.position(), menu, view.containerSlots());
+            rememberContainer(menu);
             phase = Phase.PLAN;
             return TaskState.RUNNING;
         }
@@ -456,7 +468,7 @@ public final class SemanticContainerCompanionTask
     // 即使最终数量已经满足，也是先开箱走到这里才发现不需要搬。
     private TaskState plan() {
         if (!menuValid()) return menuLost("The synchronized container menu changed before planning.");
-        if (otherPlayerNearTarget()) return failFinal("other_player_near_container",
+        if (r.investigationScope == null && otherPlayerNearTarget()) return failFinal("other_player_near_container",
                 "Another player approached the open container; MaiCraft paused before moving items.",
                 FailureType.ENTITY_BLOCKED);
         if (!player.containerMenu.getCarried().isEmpty()) {
@@ -469,6 +481,9 @@ public final class SemanticContainerCompanionTask
 
         int playerCount = count(view.playerSlots());
         int containerCount = count(view.containerSlots());
+        // 等待规划期间可能被漏斗或玩家取空；尚未点击也要用当前同步槽位覆盖旧记忆和回执数量。
+        lastPlayerCount = playerCount; lastContainerCount = containerCount; countsObservedAt = player.level().getGameTime();
+        rememberContainer(player.containerMenu);
         direction = direction(playerCount);
         plannedAmount = requestedAmount(playerCount, containerCount, direction);
         if (plannedAmount < 0) return TaskState.RUNNING;
@@ -715,12 +730,21 @@ public final class SemanticContainerCompanionTask
         lastContainerCount = afterContainer;
         countsObservedAt = player.level().getGameTime();
         stableFingerprint = fingerprint(player.containerMenu);
-        ContainerSupplySources.rememberVisible(player, target.position(), player.containerMenu, view.containerSlots());
+        rememberContainer(player.containerMenu);
         pendingMove = null;
         planIndex++;
         r.extendDeadlineTo(player.level().getGameTime() + TRANSFER_PROGRESS_LEASE_TICKS);
         phase = Phase.TRANSFER;
         return TaskState.RUNNING;
+    }
+
+    private void rememberContainer(AbstractContainerMenu menu) {
+        // 菜单未获完整原生同步时不刷新世界记忆，避免把界面初始化的默认空槽记成缺货。
+        if (!StockEvidence.isContainerSynchronized(player, menu)) return;
+        ContainerSupplySources.rememberVisible(player, target.position(), menu, view.containerSlots());
+        var memory = ContainerSupplySources.memory(player, target.position());
+        // 保存本次实际观察的回执，关箱后目标卸载或被拆除也不能抹去已经确认的库存事实。
+        if (memory != null) lastContainerMemory = memory.receipt();
     }
 
     // 最后按用户目标检查：balance 要背包恰好等于目标；补足模式要求目的侧至少达到目标；普通搬运要求累计量相等。
@@ -1007,6 +1031,10 @@ public final class SemanticContainerCompanionTask
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("operation", r.operation.name().toLowerCase(Locale.ROOT));
         data.put("menu_reused", reusedMenu);
+        if (r.investigationScope != null) {
+            data.put("container_search_scope", r.investigationScope.receipt());
+            data.put("container_memory_before", r.priorMemoryState);
+        }
         if (containerKind != null) data.put("container_kind", containerKind);
         // 箱体坐标作为与蓝图一致的数组交付，经过旧定位字段整理后仍保留实际选箱身份。
         if (target != null) data.put("container_observation", Map.of("block_id", target.blockId().toString(),
@@ -1015,6 +1043,8 @@ public final class SemanticContainerCompanionTask
         // 尚未开箱就寻路失败时没有读过两侧槽位，默认零值不能冒充已观察到库存为零。
         data.put("inventory_counts_observation_status", countsObservedAt < 0 ? "not_observed" : "observed");
         if (countsObservedAt >= 0) {
+            // 开箱和取物后的整份实际库存直接随回执交付，空箱也带稳定标识及更新时间。
+            if (!lastContainerMemory.isEmpty()) data.put("container_memory", lastContainerMemory);
             data.put("initial_main_count", initialPlayerCount);
             data.put("observed_final_main_count", lastPlayerCount);
             data.put("initial_container_count", initialContainerCount);

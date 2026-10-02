@@ -289,7 +289,9 @@ public final class SemanticMaterialSupplyCoordinator {
             return List.of(SemanticAcquireTaskRecord.Source.INVENTORY);
         }
         boolean storage = effective == MaterialPolicy.STORAGE_AVAILABLE
-                || supplied.contains(SemanticAcquireTaskRecord.Source.STORAGE);
+                || supplied.contains(SemanticAcquireTaskRecord.Source.STORAGE)
+                // 普通取材默认先调查范围内的可见箱子；明确的来源限制和 inventory_only 继续按原要求收窄。
+                || effective == MaterialPolicy.ORDINARY && supplied.isEmpty();
         LinkedHashSet<SemanticAcquireTaskRecord.Source> result = new LinkedHashSet<>();
         result.add(SemanticAcquireTaskRecord.Source.INVENTORY);
         if (storage) {

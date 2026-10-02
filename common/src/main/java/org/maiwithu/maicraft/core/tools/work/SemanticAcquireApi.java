@@ -24,6 +24,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 
 /** 检查取物参数，再结合当前物品标签生成最终背包需求；这里不移动角色，也不打开容器。 */
 public final class SemanticAcquireApi {
@@ -141,7 +142,8 @@ public final class SemanticAcquireApi {
         }
         return new SemanticAcquireTaskRecord(
                 context.toolCallId(), context.deadline(ticks), itemIds, count,
-                sources, allowHarm, hint, protectedLabels, radius)
+                sources, allowHarm, hint, protectedLabels, radius, args.has("radius") ? radius : ContainerSearchScope.MAX_RADIUS)
+                .captureStorageOrigin(player)
                 .withPreferredMaterials(resourceIds(args.get("preferred_materials"), "preferred_materials", true));
     }
 
