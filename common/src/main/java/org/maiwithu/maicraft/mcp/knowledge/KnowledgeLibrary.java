@@ -26,6 +26,7 @@ public final class KnowledgeLibrary {
     public static final String BLUEPRINT = "maicraft://knowledge/blueprint";
     public static final String PROCESSES = "maicraft://knowledge/processes";
     public static final String RECIPES = "maicraft://knowledge/recipes";
+    public static final String PHYSICS = "maicraft://knowledge/physics";
     public static final String GAME_MECHANICS_PREFIX = "maicraft://knowledge/game_mechanics/";
     private static final int PAGE_SIZE = 16;
 
@@ -59,6 +60,8 @@ public final class KnowledgeLibrary {
         docs.put(PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"));
         // 材料需求先选择工艺再考虑设备；入口说明保持独立，默认能力描述不展开整套配方。
         docs.put(RECIPES, load("recipes", "从材料需求规划工艺和机器", "EMI 配方树、工作站、Ponder 教程、已有设施复用与实际产出验收。"));
+        // 配平资料解释起飞前假设和原生施工回执，避免模型把数学通过当作已经试飞成功。
+        docs.put(PHYSICS, load("physics", "起飞前受力分析与物理配平", "Sable Aeronautics 重心 惯量 螺旋桨 气球蒙皮 浮力 启停模拟 配重 physics balance"));
         // 游戏机制常识：原版规则与 mod 行为事实，失败回执指路与契约文案按需指向单条，正文按需读取。
         for (String[] entry : GAME_MECHANICS)
             docs.put(GAME_MECHANICS_PREFIX + entry[0], load("game_mechanics/" + entry[0], entry[1], entry[2]));

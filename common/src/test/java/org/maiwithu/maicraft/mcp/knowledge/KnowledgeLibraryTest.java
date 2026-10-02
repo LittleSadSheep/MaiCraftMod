@@ -36,9 +36,9 @@ public final class KnowledgeLibraryTest {
             list.add("cursor", page.get("nextCursor")); page = library.request(list);
         }
         // 材料工艺和原生过程知识都只发布元数据，不在默认发现时展开合成树、机制契约或教程正文。
-        // 7 = 5 份主文档 + attention + chatflow；游戏机制常识条目数随 GAME_MECHANICS 表推导。
-        check(uris.size() == source.entries().size() + 7 + KnowledgeLibrary.GAME_MECHANICS.length + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
-                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES,
+        // 六份主文档包含起飞前配平；发现阶段仍只返回元数据，不提前读取物理或教程正文。
+        check(uris.size() == source.entries().size() + 8 + KnowledgeLibrary.GAME_MECHANICS.length + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
+                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES, KnowledgeLibrary.PHYSICS,
                         "maicraft://attention", "maicraft://chatflow", MachineAssemblyResources.URI,
                         KnowledgeLibrary.GAME_MECHANICS_PREFIX + "gravity-blocks", KnowledgeLibrary.GAME_MECHANICS_PREFIX + "mine-source-scope")),
                 "attention, chatflow, builtins and all extension resources discovered without bodies");
@@ -50,6 +50,7 @@ public final class KnowledgeLibraryTest {
         }
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
         check(library.read(KnowledgeLibrary.RECIPES).text().contains("display_recipes"), "material planning guide available on demand");
+        check(library.read(KnowledgeLibrary.PHYSICS).text().contains("native_flight_verified"),"配平资料必须区分预测与实船证据");
         JsonObject search = request("search"); search.addProperty("query", "demo:machine"); search.addProperty("limit", 2);
         JsonObject hits = library.request(search);
         check(hits.getAsJsonArray("resources").size() == 2 && hits.get("truncated").getAsBoolean() && source.reads == 0, "bounded metadata search");

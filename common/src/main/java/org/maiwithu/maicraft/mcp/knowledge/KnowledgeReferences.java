@@ -14,6 +14,7 @@ public final class KnowledgeReferences {
         JsonArray references = new JsonArray();
         // 只为选中的能力说明相关资料用途；搜索能力名称时仍保留轻量索引，不展开整套教材。
         switch (ability) {
+            case "maicraft:physical_balance" -> references.add(resource(KnowledgeLibrary.PHYSICS,"起飞前工况、配重补丁、气球容积和预测证据边界"));
             case "maicraft:build", "maicraft:design_build" -> {
                 references.add(resource(BuildingModelContract.INDEX_URI, "建筑模型的当前格式、图元和完整 Schema"));
                 references.add(resource(KnowledgeLibrary.BLUEPRINT, "建筑蓝图、场景组合与续建说明"));
