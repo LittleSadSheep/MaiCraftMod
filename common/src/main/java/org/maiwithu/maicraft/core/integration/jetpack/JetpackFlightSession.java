@@ -638,6 +638,8 @@ public final class JetpackFlightSession implements TransportSession {
         var power = JetpackNativeAdapter.observe(player);
         var result = new LinkedHashMap<String, Object>();
         result.put("known", power.known()); result.put("reason", power.reason()); result.put("item", power.item());
+        // 背包来源未匹配时仍保留能读到的原生活动事实，避免把“未知来源”误当成飞行已开启或已关闭。
+        result.put("native_activity", JetpackNativeAdapter.activeEvidence(player));
         if (power.known()) { result.put("active", power.active()); result.put("hover", power.hover());
             result.put("priority_tank_air", power.air()); result.put("conservative_fuel_ticks", power.fuelTicks());
             result.put("controllable", power.controllable()); result.put("mode_evidence", "native client attachment; no server acknowledgement"); }

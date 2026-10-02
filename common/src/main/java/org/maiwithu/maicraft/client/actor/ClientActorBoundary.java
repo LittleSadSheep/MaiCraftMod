@@ -2,11 +2,13 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.util.Optional;
+import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import java.util.LinkedHashMap;
@@ -238,6 +240,39 @@ public final class ClientActorBoundary {
         result.put("on_ground", minecraft.player != null && minecraft.player.onGround());
         result.put("horizontal_collision", minecraft.player != null && minecraft.player.horizontalCollision);
         result.put("screen", minecraft.screen == null ? "none" : minecraft.screen.getClass().getName());
+        // 角色离地不动时同时交付原生运动标记；这里只观察，不能为了得到“已落地”而改速度、重力或飞行权限。
+        if (minecraft.player != null) {
+            var player = minecraft.player;
+            var motion = new LinkedHashMap<String, Object>();
+            motion.put("scope", "current_client_body_state_not_server_acknowledgement");
+            motion.put("entity_tick", player.tickCount);
+            var velocity = player.getDeltaMovement();
+            motion.put("velocity_observed", velocity != null);
+            if (velocity != null) motion.put("velocity", List.of(velocity.x, velocity.y, velocity.z));
+            motion.put("gravity_attribute_observed", player.getAttributes() != null);
+            if (player.getAttributes() != null) motion.put("gravity_attribute", player.getAttributeValue(Attributes.GRAVITY));
+            motion.put("no_physics", player.noPhysics);
+            motion.put("vertical_collision", player.verticalCollision);
+            motion.put("vertical_collision_below", player.verticalCollisionBelow);
+            motion.put("fall_distance", player.fallDistance);
+            var abilities = player.getAbilities();
+            motion.put("abilities_observed", abilities != null);
+            if (abilities != null) {
+                motion.put("may_fly", abilities.mayfly);
+                motion.put("flying", abilities.flying);
+            }
+            motion.put("posture_observed", player.getEntityData() != null);
+            motion.put("entity_flags_observed", player.getEntityData() != null);
+            if (player.getEntityData() != null) {
+                motion.put("no_gravity", player.isNoGravity());
+                motion.put("pose", player.getPose().name());
+                motion.put("using_item", player.isUsingItem());
+                motion.put("crouching", player.isCrouching());
+            }
+            motion.put("client_paused", minecraft.isPaused());
+            motion.put("overlay", minecraft.getOverlay() == null ? "none" : minecraft.getOverlay().getClass().getName());
+            result.put("motion", motion);
+        }
         result.put("native_action", actions.diagnosticState());
         result.put("menu_action", menus.diagnosticState());
         return result;
