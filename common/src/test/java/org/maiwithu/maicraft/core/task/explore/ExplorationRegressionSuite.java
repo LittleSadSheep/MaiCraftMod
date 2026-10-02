@@ -6,10 +6,12 @@ import org.maiwithu.maicraft.intent.ExplorationIntentTest;
 import org.maiwithu.maicraft.intent.TravelTransportContractTest;
 import org.maiwithu.maicraft.mcp.ExplorationCatalogTest;
 import org.maiwithu.maicraft.core.task.structure.StructureProfileResourcesTest;
+import org.maiwithu.maicraft.intent.persistence.ExplorationMemoryStoreTest;
+import org.maiwithu.maicraft.mcp.McpProtocolBudgetTest;
 
 /** 先核对方向和可见前沿，再回放公开契约与注册目录；实际走路仍交给游戏内原生寻路。 */
 public final class ExplorationRegressionSuite {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         ExplorationSectorTest.main(args);
         ExplorationFrontiersTest.main(args);
@@ -17,6 +19,9 @@ public final class ExplorationRegressionSuite {
         TravelTransportContractTest.main(args);
         ExplorationCatalogTest.main(args);
         StructureProfileResourcesTest.main(args);
+        ExplorationJournalTest.main(args);
+        ExplorationMemoryStoreTest.main(args);
+        McpProtocolBudgetTest.main(args);
         System.out.println("ExplorationRegressionSuite: passed");
     }
 }

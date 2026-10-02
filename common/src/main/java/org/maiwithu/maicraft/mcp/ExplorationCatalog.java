@@ -37,13 +37,10 @@ public final class ExplorationCatalog {
                 JsonObject item = new JsonObject();
                 item.addProperty("id", "#" + tag.key().location());
                 item.addProperty("biome_count", tag.size());
-                // 标签成员只在精确查询该标签时展开，默认目录用数量和 ID 供模型选择。
-                if (query != null && (query.equals(tag.key().location().toString()) || query.equals("#" + tag.key().location()))) {
-                    JsonArray members = new JsonArray();
-                    tag.stream().flatMap(holder -> holder.unwrapKey().stream()).map(key -> key.location().toString())
-                            .sorted().forEach(members::add);
-                    item.add("members", members);
-                }
+                // 模组可把大量群系放进同一标签；成员继续用群系目录分页，不能一次展开整包名单。
+                JsonObject members = new JsonObject(); members.addProperty("view", "exploration");
+                members.addProperty("focus", "biomes"); members.addProperty("query", tag.key().location().toString());
+                item.add("members_query", members);
                 rows.add(item);
             });
             case "structures" -> {

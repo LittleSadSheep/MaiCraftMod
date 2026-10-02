@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.intent.persistence;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.sql.Connection;
@@ -9,6 +10,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.TreeSet;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFinding;
 
 /** 在共用 SQLite 的 exploration 同级分区保存跑图地点，查询在数据库分页，不把全部地图塞进检查点。 */
@@ -27,6 +29,11 @@ public final class ExplorationMemoryStore {
 
     /** 一批观察在同一事务中合并，首次见到时间和实际到访状态不会被稍后的远望覆盖。 */
     public void save(List<ExplorationFinding> findings) throws IOException {
+        save(null, findings);
+    }
+
+    /** 本轮地点索引与地点本体一起提交，回执的直达查询不会看到只有编号却没有事实的半批数据。 */
+    public void save(String runId, List<ExplorationFinding> findings) throws IOException {
         if (findings.isEmpty()) return;
         Files.createDirectories(identity.databaseFile().getParent());
         try (Connection connection = database.open(); var transaction = connection.createStatement()) {
@@ -40,6 +47,12 @@ public final class ExplorationMemoryStore {
                     write.setString(1, SCOPE); write.setString(2, identity.key());
                     write.setString(3, merged.id()); write.setString(4, GSON.toJson(merged));
                     write.executeUpdate();
+                }
+                if (runId != null) {
+                    var ids = new TreeSet<>(runIds(connection, runId));
+                    findings.forEach(finding -> ids.add(finding.id()));
+                    write.setString(1, SCOPE + "/runs"); write.setString(2, identity.key());
+                    write.setString(3, runId); write.setString(4, GSON.toJson(ids)); write.executeUpdate();
                 }
                 transaction.execute("COMMIT");
             } catch (SQLException | RuntimeException failure) {
@@ -89,6 +102,37 @@ public final class ExplorationMemoryStore {
     private void bindQuery(PreparedStatement statement, String[] words) throws SQLException {
         statement.setString(1, SCOPE); statement.setString(2, identity.key());
         for (int i = 0; i < words.length; i++) statement.setString(i + 3, words[i]);
+    }
+
+    /** 本次跑图的成员列表固定保留；地点内容仍展示最近一次真实观察，旧任务也能按编号找回区域。 */
+    public Page queryRun(String runId, int offset, int limit) throws IOException {
+        if (offset < 0 || limit < 1 || limit > 20) throw new IllegalArgumentException("invalid exploration run page");
+        if (Files.notExists(identity.databaseFile())) return new Page(0, offset, null, List.of());
+        try (Connection connection = database.open()) {
+            connection.setAutoCommit(false);
+            List<String> ids = runIds(connection, runId);
+            int start = Math.min(offset, ids.size()), end = (int) Math.min((long) start + limit, ids.size());
+            List<ExplorationFinding> entries = new ArrayList<>();
+            for (String id : ids.subList(start, end)) {
+                var finding = find(connection, id);
+                if (finding == null) throw new IOException("exploration_run_references_missing_finding");
+                entries.add(finding);
+            }
+            connection.commit();
+            return new Page(ids.size(), offset, end < ids.size() ? end : null, List.copyOf(entries));
+        } catch (SQLException failure) { throw new IOException("exploration_run_query_failed", failure); }
+    }
+
+    private List<String> runIds(Connection connection, String runId) throws SQLException {
+        try (var read = connection.prepareStatement("SELECT payload FROM memory_records WHERE scope=? AND identity_key=? AND document_key=?")) {
+            read.setString(1, SCOPE + "/runs"); read.setString(2, identity.key()); read.setString(3, runId);
+            try (var row = read.executeQuery()) {
+                if (!row.next()) return List.of();
+                List<String> ids = new ArrayList<>();
+                JsonParser.parseString(row.getString(1)).getAsJsonArray().forEach(id -> ids.add(id.getAsString()));
+                return ids;
+            }
+        }
     }
 
     private static ExplorationFinding decode(String json) {
