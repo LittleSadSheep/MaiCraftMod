@@ -62,6 +62,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 翻箱记忆与供料顺序独立核对，避免一次菜单变化被误记成箱内没有物品。
+    containerSearchRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.container.ContainerSearchRegressionSuite',
+        heap: '512m', directory: 'container-search-regression', timeoutSeconds: 60,
+        purpose: '验证视线内翻箱、三类记忆顺序与固定起点范围'
+    ],
     // 任务遇到短暂库存或菜单同步时内部续作，真正失败则一次交付可用现场与全部已确认效果。
     failureReceiptRegression: [
         entry: 'org.maiwithu.maicraft.intent.FailureReceiptRegressionSuite',

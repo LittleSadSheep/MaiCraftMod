@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.task.container.ContainerMemory;
 
 /**
  * 保存客户端业务任务的计划、公开 ID、进度、决策和持久化状态，供 MCP 查询。
@@ -97,6 +98,10 @@ public final class IntentRuntime {
     private final LinkedHashMap<UUID, IntentTaskRecord> tasks = new LinkedHashMap<>();
     private final LinkedHashMap<String, UUID> requestKeys = new LinkedHashMap<>();
     private final LinkedHashMap<String, Landmark> landmarks = new LinkedHashMap<>();
+    // 自主开箱形成的标识与库存随同一世界检查点保存，断线重连后继续作为历史线索使用。
+    private final ContainerMemory containers = new ContainerMemory(this::markDirty);
+
+    public ContainerMemory containerMemory() { return containers; }
     /** 每个任务上次发进度事件的游戏刻；节流长任务进度，不让每刻观察都变成一条事件。 */
     private final Map<UUID, Long> progressPublishAt = new HashMap<>();
     private final AttentionFeed attention = new AttentionFeed();
@@ -424,8 +429,7 @@ public final class IntentRuntime {
         requireSubmissionParent(parent);
         try {
             // 绕过普通五秒保存间隔，完整保留稳定任务身份、request_key和当前步骤；返回实际磁盘写入凭据给消费屏障等待。
-            var completion = stateStore.saveAsync(stateIdentity, IntentStateCodec.encode(
-                    stateIdentity.key(), plans.values(), tasks.values(), requestKeys, landmarks.values()));
+            var completion = stateStore.saveAsync(stateIdentity, encodeCheckpoint());
             dirty = false; nextSaveNanos = System.nanoTime() + SAVE_INTERVAL_NANOS;
             return completion;
         } catch (IOException | RuntimeException failure) {
@@ -475,6 +479,7 @@ public final class IntentRuntime {
         if (loaded.status() == IntentStateStore.Status.LOADED) {
             try {
                 IntentStateCodec.Decoded decoded = IntentStateCodec.decode(loaded.root());
+                containers.restore(loaded.root().getAsJsonArray("containers"));
                 for (Plan plan : decoded.plans()) {
                     validateRestoredGoal(plan.goal());
                     if (plans.putIfAbsent(plan.id(), plan) != null) {
@@ -559,9 +564,7 @@ public final class IntentRuntime {
         if (!bodyAttached) return stateStore.hasSnapshot(stateIdentity);
         if (!force && !dirty && !stateStore.hasFailedSave(stateIdentity)) return true;
         try {
-            JsonObject root = IntentStateCodec.encode(
-                    stateIdentity.key(), plans.values(), tasks.values(),
-                    requestKeys, landmarks.values());
+            JsonObject root = encodeCheckpoint();
             stateStore.saveAsync(stateIdentity, root);
             dirty = false;
             return true;
@@ -576,12 +579,20 @@ public final class IntentRuntime {
         }
     }
 
+    private JsonObject encodeCheckpoint() {
+        // 普通保存和原生提交前的检查点共用完整记忆，避免其中一条保存路径把箱子记录覆盖掉。
+        JsonObject root = IntentStateCodec.encode(stateIdentity.key(), plans.values(), tasks.values(), requestKeys, landmarks.values());
+        root.add("containers", containers.snapshot());
+        return root;
+    }
+
     private void clearSemanticState() {
         bodyAttached = false;
         plans.clear();
         tasks.clear();
         requestKeys.clear();
         landmarks.clear();
+        containers.clear();
         attention.clear();
         // 换了世界或连接，聊天区消息也属于上一轮，随任务语义一起作废。
         chatFlow.clear();
