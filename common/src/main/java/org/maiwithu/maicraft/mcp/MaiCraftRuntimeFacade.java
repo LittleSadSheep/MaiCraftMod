@@ -318,6 +318,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 yield TaskView.list(intents.tasks(256), arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
             }
             case "landmarks" -> landmarks(player);
+            // 注册目录按需分页读取，默认身体状态不会夹带整套模组群系和历史跑图成果。
+            case "exploration" -> ExplorationCatalog.read(player.registryAccess(),
+                    nullableString(arguments, "focus") == null ? "biomes" : nullableString(arguments, "focus"),
+                    nullableString(arguments, "query"), arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
             case "machines" -> {
                 var report = ClientMachineCatalog.view(player, nullableString(arguments,"focus"));
                 report.add("production_watches",ClientMachineWatches.view(player));

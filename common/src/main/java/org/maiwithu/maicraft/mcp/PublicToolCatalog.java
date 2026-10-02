@@ -29,7 +29,7 @@ final class PublicToolCatalog {
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     );
     private static final Set<String> VIEWS = Set.of(
-            "situation", "surroundings", "construction_site", "kinetic_sources", "abilities", "tasks", "attention", "landmarks", "machines", "machine_menu", "knowledge"
+            "situation", "surroundings", "construction_site", "kinetic_sources", "abilities", "tasks", "attention", "landmarks", "exploration", "machines", "machine_menu", "knowledge"
     );
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
@@ -94,18 +94,18 @@ final class PublicToolCatalog {
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","machines","machine_menu","knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: up to 8 visible powered interfaces near work height. machines: remembered observations."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge"],"default":"situation","description":"situation: body/inventory. surroundings: nearby facts. construction_site: bounded build geometry. kinetic_sources: up to 8 visible powered interfaces near work height. machines: remembered observations."},
                                 "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"construction_site only: optional site label; omitted generates a label for the observed anchor."},
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"construction_site: 1..8, default 8. kinetic_sources: 8..64, default 32; height is independently limited and hidden/protected outlets are excluded."},
                                 "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Short keywords for knowledge/abilities metadata or actual kinetic_sources. Exclusive with focus/resource_uri."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: exact ability ID or maicraft:server_assistance diagnostics. situation: maicraft:travel/maicraft:elevators for floors; maicraft:physical_structures for moving structures; maicraft:navigation/maicraft:transport for motion diagnostics. surroundings: sign text. kinetic_sources: exact block ID. knowledge: legacy search words."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"abilities: exact ability ID or maicraft:server_assistance diagnostics. situation: maicraft:travel/maicraft:elevators for floors; maicraft:physical_structures for moving structures; maicraft:navigation/maicraft:transport for motion diagnostics. surroundings: sign text. kinetic_sources: exact block ID. knowledge: legacy search words. exploration: biomes|biome_tags|structures catalogs."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Copy a discovered resource_uri, details_uri or next_uri. Implies knowledge. maicraft://receipts pages are frozen and temporary; omitted contents remain unknown until read."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"attention: this task plus important body events. tasks: current summary; use task get+path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"Attention only: copy response cursor, never latest_cursor. Use next_attention for safe pagination."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"Attention only: event-driven wait, normally 30000 ms. Returns immediately for completed tasks, pending decisions, pauses, missing tasks or resync; timeout does not cancel the game task."},
                                  "limit":{"type":"integer","minimum":1,"maximum":20,"default":5},
-                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"abilities/tasks index only: copy next_offset. Use focus/query or task_id for selected detail."},
+                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"exploration/abilities/tasks pages: copy next_offset. Use focus/query or task_id for selected detail."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -239,11 +239,11 @@ final class PublicToolCatalog {
         // 模糊发现与精确读取明确分开，不能把产品名传给只接受能力标识的 focus。
         nullableString(value, "query", 1, 256);
         if (present(value, "query")) {
-            if (!Set.of("knowledge", "abilities", "kinetic_sources").contains(view)) throw bad("query is only supported by knowledge, abilities and kinetic_sources");
+            if (!Set.of("knowledge", "abilities", "kinetic_sources", "exploration").contains(view)) throw bad("query is only supported by knowledge, abilities, exploration and kinetic_sources");
             if (value.get("query").getAsString().isBlank()) throw bad("query must contain search keywords");
-            if (present(value, "focus") || present(value, "resource_uri")) throw bad("Use query to discover candidates, then focus or resource_uri to read one; do not combine them");
+            if (present(value, "focus") && !"exploration".equals(view) || present(value, "resource_uri")) throw bad("Use query to discover candidates, then focus or resource_uri to read one; do not combine them");
         }
-        if ("surroundings".equals(view)) nullableString(value, "focus", 1, 128);
+        if ("surroundings".equals(view) || "exploration".equals(view)) nullableString(value, "focus", 1, 128);
         else if ("knowledge".equals(view)) nullableString(value, "focus", 1, 256);
         else nullableResource(value, "focus");
         nullableString(value, "resource_uri", 1, 2048);
@@ -255,9 +255,9 @@ final class PublicToolCatalog {
         int waitMs = integer(value, "wait_ms", 0, 60_000);
         integer(value, "limit", 1, 20);
         int offset = integer(value, "offset", 0, Integer.MAX_VALUE);
-        if (offset != 0 && (!Set.of("abilities", "tasks").contains(view)
+        if (offset != 0 && !"exploration".equals(view) && (!Set.of("abilities", "tasks").contains(view)
                 || present(value, "focus") || present(value, "query") || present(value, "task_id")))
-            throw bad("offset is only supported by the abilities or tasks index");
+            throw bad("offset is only supported by exploration, abilities or tasks indexes");
         string(value, "server_id", 1, 128, false);
         boolean hasTask = present(value, "task_id");
         if (hasTask && !Set.of("tasks", "attention").contains(view)) {
