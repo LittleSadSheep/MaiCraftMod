@@ -43,6 +43,8 @@ public final class CombatThreatsTest {
         PvpEngagementTest.main(args); // 先验证点名玩家的任务许可，再运行自动自卫，防止 PVP 状态泄漏。
         PvpThreatTest.main(args); // 验证玩家也进入撤退和伤害事实，不能只会点名挥刀。
         PvpTacticsTest.main(args); // 用真实目标位置、充能和背包测试进退、瞄准与破盾选装。
+        PvpCadenceTest.main(args); // 剑、斧按实际攻速等待，不能用切目标绕过间隔。
+        PvpMeleeTest.main(args); // 贯通原生出刀、双方伤害包、准星与距离门控。
         rejectsUnrelatedDamage();
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();

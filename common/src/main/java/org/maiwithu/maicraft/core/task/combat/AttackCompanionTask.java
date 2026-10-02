@@ -552,6 +552,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         for (var foe : field.foes()) {
             if (!foe.authorized() || foe.armed()) continue;
             Entity entity = liveEntity(foe.id());
+            // 已授权玩家的出刀节拍与距离环共用，回执提前完成时也不能马上松盾再点一刀。
+            if (entity instanceof Player other && !PvpTactics.attackReady(player, other)) continue;
             if (entity != null && foe.distance() <= Swing.reachTo(
                     player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE), entity.getBbWidth())
                     && Swing.mayStrike(false, entity instanceof LivingEntity living && living.hurtTime > 0,
@@ -652,6 +654,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 player.getAttackStrengthScale(0.0f))) {
             return;
         }
+        if (victim instanceof Player other && !PvpTactics.attackReady(player, other)) return;
         if (r.strictAuthorized && !strictMeleeClear(victim)) return;
         // 疾跑会让原版取消暴击判定(Player.attack 里 flag1 带 !isSprinting)。
         meleeVictimId = victim.getId();

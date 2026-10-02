@@ -20,6 +20,7 @@ public final class PvpTacticsTest {
         try (var f = new CombatThreatsTest.Fixture()) {
             var other = PvpTestPlayers.create(f, 21, 4);
             var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("tactics", 1000, List.of(21), false)); task.start(f.h.player);
+            f.h.nextTick(); // 给开战时手持武器一个稳定刻，再比较可出手与冷却中的站位。
             // 充能好时有可进入的攻击环；冷却与受击保护期间退到对手近战范围之外。
             var ready = PvpTactics.band(f.h.player, other, false);
             ActorControlTestHarness.field(Player.class, "attackStrengthTicker").setInt(f.h.player, 0);

@@ -19,6 +19,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import org.maiwithu.maicraft.core.combat.PvpTactics;
+import org.maiwithu.maicraft.core.combat.PvpEngagement;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -491,11 +492,16 @@ public final class Interaction {
                 false, recovering, player.getAttackStrengthScale(0.0f))) {
             return false;
         }
+        // 瞄准和原生触及检查通过后，再检查本次对战的武器节拍；一次真实提交只推进一次间隔。
+        boolean duel = entity instanceof Player other && PvpEngagement.accepts(player, other);
+        if (duel && !PvpTactics.attackReady(player, (Player) entity)) return false;
+        NativeConfirmation confirmation = duel ? NativeConfirmation.pvpHit(player, (Player) entity) : NativeConfirmation.entityHurt(entity);
         receipt = context.actions().attack(
                 context,
                 entity,
-                NativeConfirmation.entityHurt(entity),
+                confirmation,
                 CONFIRM_TIMEOUT_TICKS);
+        if (duel) PvpEngagement.attackSubmitted(player);
         return false;
     }
 

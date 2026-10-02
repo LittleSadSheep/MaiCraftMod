@@ -6,6 +6,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Player;
+import org.maiwithu.maicraft.core.combat.PvpEngagement;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -98,6 +101,13 @@ public interface NativeConfirmation {
             if (!living.isAlive() || living.getHealth() < health) return Verdict.APPLIED;
             return Verdict.PENDING;
         };
+    }
+
+    public static NativeConfirmation pvpHit(LocalPlayer self, Player opponent) {
+        // 远端玩家生命值未必公开；捕获出刀前序号，只接受此后由本方造成的原生伤害事件。
+        long before = PvpEngagement.hitRevision(self, opponent);
+        return serverObservedEntity(context -> context.player() != self ? Verdict.DIVERGED
+                : PvpEngagement.hitRevision(self, opponent) > before ? Verdict.APPLIED : Verdict.PENDING);
     }
 
     public static NativeConfirmation anyOf(NativeConfirmation... confirmations) {

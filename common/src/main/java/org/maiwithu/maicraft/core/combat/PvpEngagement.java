@@ -27,6 +27,7 @@ public final class PvpEngagement {
     private final Map<Integer, Opponent> opponents = new LinkedHashMap<>();
     private final Map<Integer, Long> incoming = new LinkedHashMap<>();
     private final Map<Integer, Long> hits = new LinkedHashMap<>();
+    private final PvpCadence cadence = new PvpCadence();
     private boolean closed;
 
     public PvpEngagement(LocalPlayer body, AttackTaskRecord attack) {
@@ -37,6 +38,7 @@ public final class PvpEngagement {
             if (level.getEntity(id) instanceof Player other && other != body && other.getUUID() != null)
                 opponents.put(id, new Opponent(other, other.getUUID()));
         }
+        if (!opponents.isEmpty()) cadence.ready(body); // 开打时观察手持武器，换手稳定期不借换目标绕过。
     }
 
     public void activate() {
@@ -103,6 +105,16 @@ public final class PvpEngagement {
         Opponent bound = active.opponents.get(other.getId());
         return bound != null && bound.entity() == other && bound.uuid().equals(other.getUUID())
                 ? active.hits.getOrDefault(other.getId(), 0L) : 0;
+    }
+
+    public static boolean strikeReady(LocalPlayer self, Player other) {
+        // 同一场对战的所有对手共用角色出刀节拍，切目标不能重置角色的武器冷却。
+        return accepts(self, other) && active.cadence.ready(self);
+    }
+
+    public static void attackSubmitted(LocalPlayer self) {
+        // 只有真正进入原生攻击入口后才推进间隔，未对准或被墙挡住的尝试不算出刀。
+        if (active != null && active.body == self && active.eligible()) active.cadence.submitted(self);
     }
 
     private boolean matches(Player other) {
