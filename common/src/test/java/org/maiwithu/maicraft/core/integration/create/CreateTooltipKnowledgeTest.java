@@ -3,9 +3,10 @@ package org.maiwithu.maicraft.core.integration.create;
 
 import java.util.HashMap;
 import java.util.Map;
+import net.minecraft.network.chat.Component;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
 
-// 检查提示中的显示标记、连续编号、操作名称、搜索文字和语言缓存更新；内容过长或配对说明缺失时应明确表示。
+// 检查提示中的显示标记、连续编号、操作名称和语言缓存；长说明也必须保留末尾操作条件。
 public final class CreateTooltipKnowledgeTest {
     public static void main(String[] args) {
         String key = "block.create.shared_tooltip.tooltip";
@@ -40,9 +41,24 @@ public final class CreateTooltipKnowledgeTest {
                 "missing paired text is explicit, not a fabricated function");
         translations.put(key + ".summary", "长".repeat(40000));
         var oversized = CreateTooltipDescription.read(key, translations::get);
-        check(oversized.truncated() && oversized.summary().length() == 32768 && oversized.behaviours().isEmpty(),
-                "oversized language entries have a bounded extraction budget");
-        check(oversized.markdown().contains("部分内容未收录"), "truncation is disclosed");
+        check(!oversized.truncated() && oversized.summary().length() == 40000 && oversized.behaviours().size() == 1,
+                "long descriptions retain the following operating conditions");
+        // 物品作者提供较多连续规则时，编号超过旧上限的操作也应交给设计者。
+        for (int index = 1; index <= 105; index++) {
+            translations.put(key + ".condition" + index, "条件" + index);
+            translations.put(key + ".behaviour" + index, "行为" + index);
+        }
+        check(CreateTooltipDescription.read(key, translations::get).behaviours().size() == 105,
+                "all native consecutive conditions are read");
+        // 较长的原生物品提示也完整交付，读取异常则明确未知，不能伪装成没有用法限制。
+        var tooltip = CreateTooltipKnowledge.readTooltip(lines -> {
+            for (int index = 0; index < 40; index++) lines.add(Component.literal(index + "：" + "说明".repeat(600)));
+        });
+        check(tooltip.status().equals("available") && tooltip.lines().size() == 40
+                && tooltip.lines().getLast().length() > 1024, "native tooltip lines and tails are retained");
+        check(CreateTooltipKnowledge.readTooltip(lines -> { throw new IllegalStateException("needs a world"); })
+                .status().equals("api_unavailable"),
+                "unreadable native descriptions remain unknown");
         System.out.println("CreateTooltipKnowledgeTest: passed");
     }
 

@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibraryTest;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeSearchTest;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSourceTest;
+import org.maiwithu.maicraft.mcp.knowledge.RecipeItemKnowledgeTest;
 import org.maiwithu.maicraft.mcp.knowledge.MachineAssemblyResourcesTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestAccessTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbTaskConditionsTest;
@@ -34,6 +35,8 @@ public final class KnowledgeRegressionSuite {
         BuildingTutorialResourcesTest.main(args);
         // 材料配方页只读取所选工艺页并链接设备教程，缺失知识不能伪装成可执行配方。
         RecipeKnowledgeSourceTest.main(args);
+        // 在选配方时发现真实教程与物品用法，不为发现知识而执行教程或操作机器。
+        RecipeItemKnowledgeTest.main(args);
         MachineAssemblyResourcesTest.main(args);
         EmiRecipeKnowledgeTest.main(args);
         CreateTooltipKnowledgeTest.main(args);

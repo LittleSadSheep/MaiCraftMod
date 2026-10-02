@@ -8,12 +8,11 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * 把 Create 语言资源中的摘要、条件说明和操作提示整理成可搜索文字；去掉显示标记、限制总长度，并保留缺失说明与截断信息。
+ * 把 Create 语言资源中的摘要、条件说明和操作提示完整整理成可搜索文字，保留缺失说明。
  */
 public record CreateTooltipDescription(String translationKey, String summary, List<Detail> behaviours,
                                        List<Detail> controls, boolean truncated) {
     public record Detail(String condition, String explanation) {}
-    private static final int MAX_CHARACTERS = 32768;
 
     public CreateTooltipDescription {
         behaviours = List.copyOf(behaviours);
@@ -22,24 +21,23 @@ public record CreateTooltipDescription(String translationKey, String summary, Li
 
     /** 翻译查找在键缺失时返回 null；编号规则遵循 ItemDescription.fillBuilder。 */
     public static CreateTooltipDescription read(String key, Function<String, String> translations) {
-        Budget budget = new Budget();
         String summary = translations.apply(key + ".summary");
         if (summary == null) return new CreateTooltipDescription(key, "", List.of(), List.of(), false);
-        String text = budget.take(summary, true);
-        List<Detail> behaviours = details(key, "condition", "behaviour", translations, budget);
-        List<Detail> controls = details(key, "control", "action", translations, budget);
-        return new CreateTooltipDescription(key, text, behaviours, controls, budget.truncated);
+        // 模型选择设备时需要末尾的交互条件，说明按原生连续编号读完，不按字符预算删掉操作规则。
+        List<Detail> behaviours = details(key, "condition", "behaviour", translations);
+        List<Detail> controls = details(key, "control", "action", translations);
+        return new CreateTooltipDescription(key, plain(summary, true), behaviours, controls, false);
     }
 
     private static List<Detail> details(String key, String condition, String explanation,
-                                      Function<String, String> translations, Budget budget) {
+                                      Function<String, String> translations) {
         List<Detail> result = new ArrayList<>();
-        for (int i = 1; i < 100 && !budget.truncated; i++) {
+        for (int i = 1; ; i++) {
             String heading = translations.apply(key + "." + condition + i);
             if (heading == null) break;
             String body = translations.apply(key + "." + explanation + i);
-            result.add(new Detail(budget.take(heading, false),
-                    budget.take(body == null ? "（未提供对应说明）" : body, true)));
+            result.add(new Detail(plain(heading, false),
+                    plain(body == null ? "（未提供对应说明）" : body, true)));
         }
         return result;
     }
@@ -71,16 +69,9 @@ public record CreateTooltipDescription(String translationKey, String summary, Li
                 .append(detail.explanation()).append('\n');
     }
 
-    private static final class Budget {
-        int remaining = MAX_CHARACTERS;
-        boolean truncated;
-        String take(String value, boolean highlightMarkup) {
-            // Create 只会在摘要和正文中去掉下划线，不会处理字面条件或控制标题。
-            String plain = (highlightMarkup ? value.replace("_", "") : value).replaceAll("§[0-9A-FK-ORa-fk-or]", "").strip();
-            if (plain.length() > remaining) { plain = plain.substring(0, remaining); truncated = true; }
-            remaining -= plain.length();
-            return plain;
-        }
+    private static String plain(String value, boolean highlightMarkup) {
+        // Create 只会在摘要和正文中去掉下划线，不会处理字面条件或控制标题。
+        return (highlightMarkup ? value.replace("_", "") : value).replaceAll("§[0-9A-FK-ORa-fk-or]", "").strip();
     }
 
     /** 客户端线程缓存；语言对象变化时会同时使语言切换和资源包重载结果失效。 */
