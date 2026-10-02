@@ -36,10 +36,18 @@ public final class KnowledgeLibraryTest {
             list.add("cursor", page.get("nextCursor")); page = library.request(list);
         }
         // 材料工艺和原生过程知识都只发布元数据，不在默认发现时展开合成树、机制契约或教程正文。
-        check(uris.size() == source.entries().size() + 7 + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
+        // 7 = 5 份主文档 + attention + chatflow；游戏机制常识条目数随 GAME_MECHANICS 表推导。
+        check(uris.size() == source.entries().size() + 7 + KnowledgeLibrary.GAME_MECHANICS.length + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
                 && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES,
-                        "maicraft://attention", "maicraft://chatflow", MachineAssemblyResources.URI)),
+                        "maicraft://attention", "maicraft://chatflow", MachineAssemblyResources.URI,
+                        KnowledgeLibrary.GAME_MECHANICS_PREFIX + "gravity-blocks", KnowledgeLibrary.GAME_MECHANICS_PREFIX + "mine-source-scope")),
                 "attention, chatflow, builtins and all extension resources discovered without bodies");
+        // 每张机制常识卡必须真能读出正文，且同时带"规则"与"会怎么坑你"两节——注册了 URI 而正文缺失比没有卡片更误导。
+        for (String[] card : KnowledgeLibrary.GAME_MECHANICS) {
+            KnowledgeDocument body = library.read(KnowledgeLibrary.GAME_MECHANICS_PREFIX + card[0]);
+            check(body != null && body.text().contains("## 规则") && body.text().contains("这个规则会怎么坑你"),
+                    "mechanics card readable with rule and pitfall sections: " + card[0]);
+        }
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
         check(library.read(KnowledgeLibrary.RECIPES).text().contains("display_recipes"), "material planning guide available on demand");
         JsonObject search = request("search"); search.addProperty("query", "demo:machine"); search.addProperty("limit", 2);

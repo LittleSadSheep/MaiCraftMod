@@ -26,7 +26,18 @@ public final class KnowledgeLibrary {
     public static final String BLUEPRINT = "maicraft://knowledge/blueprint";
     public static final String PROCESSES = "maicraft://knowledge/processes";
     public static final String RECIPES = "maicraft://knowledge/recipes";
+    public static final String GAME_MECHANICS_PREFIX = "maicraft://knowledge/game_mechanics/";
     private static final int PAGE_SIZE = 16;
+
+    /** 游戏机制常识条目：slug、标题、检索描述；描述带中英关键词与注册 ID，精确与近似搜索都按 Entry 元数据匹配。 */
+    static final String[][] GAME_MECHANICS = {
+            {"gravity-blocks", "重力方块与塌落", "gravel sand 落沙 gravity 塌方 塌落 掩埋掉落物 瞬时 no_path 落方块伤害"},
+            {"fluid-flow", "流体流动与灌满", "water lava 水 岩浆 流动 灌满 倒水 自救 淹 黑曜石 生成 隧道进水"},
+            {"item-drops", "掉落物物理", "item entity 掉落物 拾取半径 漂移 消失 despawn remaining_live_drops 没进背包 对账"},
+            {"drop-rates", "关键掉率与方差", "flint 燧石 10% 掉率 方差 fortune 时运 loot 战利品表 掉落概率 苹果 树苗"},
+            {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 wrong_tool 黑曜石 obsidian diamond_pickaxe 镐 挖不动 不掉落 挖掘资格"},
+            {"mine-source-scope", "mine 源查询的范围语义", "mine 源查询 半径 深度 query_complete known_sources 保留意见 暴露源 埋藏矿 扫描范围"},
+    };
     public interface Source {
         List<KnowledgeDocument.Entry> entries();
         KnowledgeDocument read(String uri);
@@ -41,12 +52,17 @@ public final class KnowledgeLibrary {
     public KnowledgeLibrary(Source source) {
         this.source = source;
         // 按组件或具体图元名称查资料时仍发现同一份建筑说明，不新增会直接操作世界的知识入口。
-        builtins = Map.of(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程和实际执行能力。"),
-                GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"),
-                BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"),
-                PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"),
-                // 材料需求先选择工艺再考虑设备；入口说明保持独立，默认能力描述不展开整套配方。
-                RECIPES, load("recipes", "从材料需求规划工艺和机器", "EMI 配方树、工作站、Ponder 教程、已有设施复用与实际产出验收。"));
+        Map<String, KnowledgeDocument> docs = new LinkedHashMap<>();
+        docs.put(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程、游戏机制常识和实际执行能力。"));
+        docs.put(GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"));
+        docs.put(BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"));
+        docs.put(PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"));
+        // 材料需求先选择工艺再考虑设备；入口说明保持独立，默认能力描述不展开整套配方。
+        docs.put(RECIPES, load("recipes", "从材料需求规划工艺和机器", "EMI 配方树、工作站、Ponder 教程、已有设施复用与实际产出验收。"));
+        // 游戏机制常识：原版规则与 mod 行为事实，失败回执指路与契约文案按需指向单条，正文按需读取。
+        for (String[] entry : GAME_MECHANICS)
+            docs.put(GAME_MECHANICS_PREFIX + entry[0], load("game_mechanics/" + entry[0], entry[1], entry[2]));
+        builtins = Map.copyOf(docs);
     }
     public static KnowledgeLibrary offline() {
         return new KnowledgeLibrary(new Source() {
