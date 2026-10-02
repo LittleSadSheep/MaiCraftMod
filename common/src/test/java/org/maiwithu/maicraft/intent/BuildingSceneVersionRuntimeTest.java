@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.intent;
 
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.*;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
@@ -48,21 +50,21 @@ public final class BuildingSceneVersionRuntimeTest {
             examples.add("build_goal",goal(build,false).toJson());
             examples.add("build_internal_arguments",((IntentAction.Tool)action).arguments());
 
-            var directory = root.resolve("build-scenes").resolve(world); var path = directory.resolve(id+".json");
-            String intact = Files.readString(path);
+            // 从数据库核对作者版本，失败编辑和重校验都不能覆盖原模型。
+            String intact = readMemory(root, "build-scenes", world, id);
             var badEdit = guarded("update_scene",id); badEdit.add("edits",json("{\"objects\":[{\"name\":\"Wall\",\"dimensions\":[4,0,1]}]}"));
             fails(() -> run(badEdit,false,store,h),"dimensions");
-            check(Files.readString(path).equals(intact),"无效修改不能截断或覆盖旧场景");
-            try (var files = Files.list(directory)) { check(files.count() == 2,"失败时不得发布第三份场景"); }
+            check(readMemory(root, "build-scenes", world, id).equals(intact),"无效修改不能截断或覆盖旧场景");
+            check(countMemory(root, "build-scenes", world) == 2,"失败时不得发布第三份场景");
 
             // 在测试文件中模拟契约升级与旧文件；严格预览/施工/编辑均拒绝，未携带版本的旧调用仍可读取并使用。
-            var legacy = json(intact); legacy.remove("capability_revision"); legacy.remove("design_schema_revision"); Files.writeString(path,legacy.toString());
+            var legacy = json(intact); legacy.remove("capability_revision"); legacy.remove("design_schema_revision"); writeMemory(root, "build-scenes", world, id, legacy.toString());
             for (String operation : List.of("preview","build","get_scene_info")) fails(() -> run(guarded(operation,id),false,store,h),"building_scene_revalidation_required");
             fails(() -> run(guardedUpdate(id),false,store,h),"building_scene_revalidation_required");
             check(run(json("{\"operation\":\"build\",\"scene_id\":\""+id+"\"}"),false,store,h) instanceof IntentAction.Tool,"未要求版本的既有客户端仍可使用旧记录");
             var fresh = guarded("create_scene",null); fresh.add("scene",store.load(id,dimension).scene());
             var revalidated = report(run(fresh,true,store,h));
-            check(!id.equals(revalidated.data().get("scene_id")) && Files.readString(path).equals(legacy.toString()),"旧模型重校验必须另存新编号");
+            check(!id.equals(revalidated.data().get("scene_id")) && readMemory(root, "build-scenes", world, id).equals(legacy.toString()),"旧模型重校验必须另存新编号");
             check(h.blockUses() == 0 && h.itemUses() == 0,"创建、核对、预览和生成参数都没有实际世界操作");
         }
         String output = System.getProperty("maicraft.building.contract.output");

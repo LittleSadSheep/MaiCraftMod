@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.blueprint;
 
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.*;
+
 import com.google.gson.JsonObject;
 import java.nio.file.Files;
 import java.util.Properties;
@@ -78,19 +80,19 @@ public final class BuildingModelContractTest {
         var revision = store.update(first.sceneId(),dimension,json("{\"objects\":[{\"name\":\"Wall\",\"material\":\"Glass\"}]}"));
         check(revision.parentSceneId().equals(first.sceneId()) && !revision.sceneId().equals(first.sceneId()),"修改只发布直接子版本");
         check(store.load(first.sceneId(),dimension).scene().equals(source),"成功修改也不能覆盖旧模型");
-        var directory = root.resolve("build-scenes").resolve(world); var path = directory.resolve(first.sceneId()+".json");
-        String intact = Files.readString(path);
+        // 核对真实数据库中的原模型和版本数量，失败编辑不得发布半份新版本。
+        String intact = readMemory(root, "build-scenes", world, first.sceneId());
         rejects(() -> store.update(first.sceneId(),dimension,json("{\"objects\":[{\"name\":\"Wall\",\"dimensions\":[2,0,1]}]}")),"无效尺寸必须整体拒绝");
-        check(Files.readString(path).equals(intact),"失败编辑必须逐字保留旧文件");
-        try (var files = Files.list(directory)) { check(files.count() == 2,"失败编辑不能发布部分新场景"); }
+        check(readMemory(root, "build-scenes", world, first.sceneId()).equals(intact),"失败编辑必须逐字保留旧记录");
+        check(countMemory(root, "build-scenes", world) == 2,"失败编辑不能发布部分新场景");
 
         // 只在本测试新建的文件中模拟无凭据旧记录；仍允许读取，严格调用须明确要求重新校验。
-        var legacy = json(intact); legacy.remove("capability_revision"); legacy.remove("design_schema_revision"); Files.writeString(path,legacy.toString());
+        var legacy = json(intact); legacy.remove("capability_revision"); legacy.remove("design_schema_revision"); writeMemory(root, "build-scenes", world, first.sceneId(), legacy.toString());
         var old = store.load(first.sceneId(),dimension); BuildingModelContract.checkScene(old,new JsonObject());
         rejects(() -> BuildingModelContract.checkScene(old,expected),"无版本记录不能满足严格预览或施工要求");
         var revalidated = store.save(old.scene(),old.anchor()); BuildingModelContract.checkScene(revalidated,expected);
-        check(!revalidated.sceneId().equals(old.sceneId()) && Files.readString(path).equals(legacy.toString()),"重新校验另存编号，不能改写旧记录");
-        legacy.addProperty("capability_revision","old"); legacy.addProperty("design_schema_revision",current.designSchemaRevision()); Files.writeString(path,legacy.toString());
+        check(!revalidated.sceneId().equals(old.sceneId()) && readMemory(root, "build-scenes", world, first.sceneId()).equals(legacy.toString()),"重新校验另存编号，不能改写旧记录");
+        legacy.addProperty("capability_revision","old"); legacy.addProperty("design_schema_revision",current.designSchemaRevision()); writeMemory(root, "build-scenes", world, first.sceneId(), legacy.toString());
         var stale = store.load(first.sceneId(),dimension); rejects(() -> BuildingModelContract.checkScene(stale,expected),"记录与当前编译契约不同须重校验");
     }
 }

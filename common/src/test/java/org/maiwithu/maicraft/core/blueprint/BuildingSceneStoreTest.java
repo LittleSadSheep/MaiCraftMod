@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.*;
 
 /** 修改内容和进程重载后，已保存修订仍须保持对象身份和原始场地。 */
 public final class BuildingSceneStoreTest {
@@ -46,9 +47,8 @@ public final class BuildingSceneStoreTest {
         rejects(() -> store.load(first.sceneId(), "minecraft:the_nether"));
         rejects(() -> store.load("../" + first.sceneId(), dimension));
         rejects(() -> new BuildingSceneStore(root, "b".repeat(64)).load(first.sceneId(), dimension));
-        Path source = root.resolve("build-scenes").resolve(world).resolve(first.sceneId() + ".json");
         Path foreign = root.resolve("build-scenes").resolve("b".repeat(64)).resolve(first.sceneId() + ".json");
-        Files.createDirectories(foreign.getParent()); Files.copy(source, foreign);
+        Files.createDirectories(foreign.getParent()); Files.writeString(foreign, readMemory(root, "build-scenes", world, first.sceneId()));
         rejects(() -> new BuildingSceneStore(root, "b".repeat(64)).load(first.sceneId(), dimension));
         rejects(() -> store.update(first.sceneId(), dimension, json("{\"remove_objects\":[\"unknown\"]}")));
         rejects(() -> store.update(first.sceneId(), dimension, json("{\"objects\":[{\"name\":\"wall\",\"dimensions\":[2,2,2]}]}")));
@@ -76,8 +76,14 @@ public final class BuildingSceneStoreTest {
         rejects(() -> store.savePrepared(prepared, new Goal.WorldPosition(0, 0, 0, null)));
         rejects(() -> store.updatePrepared(first.sceneId(), "minecraft:the_nether", prepared));
         rejects(() -> new BuildingSceneStore(root, "b".repeat(64)).updatePrepared(first.sceneId(), dimension, prepared));
-        // 把测试文件故意加到上限之外，确认读取会拒绝；只影响这个测试创建的临时目录。
-        Files.write(source, new byte[BuildingBudgets.current().maxSceneBytes() + 1]);
+        // 旧模型版本在第一次读取时迁入 SQLite；保留旧文件，再次读取不能回退到后来损坏的副本。
+        Path migrationRoot = root.resolve("old-world"), old = migrationRoot.resolve("build-scenes").resolve(world).resolve(first.sceneId() + ".json");
+        Files.createDirectories(old.getParent()); String original = readMemory(root, "build-scenes", world, first.sceneId()); Files.writeString(old, original);
+        var migrated = new BuildingSceneStore(migrationRoot, world);
+        check(migrated.load(first.sceneId(), dimension).equals(reopened) && Files.readString(old).equals(original), "旧模型迁移丢失身份或修改了源文件");
+        Files.writeString(old, "broken legacy"); check(migrated.load(first.sceneId(), dimension).equals(reopened), "迁移后回退到了旧文件");
+        // 把测试数据库记录故意加到上限之外，确认读取会拒绝；只影响本测试的临时目录。
+        writeMemory(root, "build-scenes", world, first.sceneId(), "x".repeat(BuildingBudgets.current().maxSceneBytes() + 1));
         rejects(() -> store.load(first.sceneId(), dimension));
         System.out.println("BuildingSceneStoreTest: immutable world-bound revisions passed");
     }

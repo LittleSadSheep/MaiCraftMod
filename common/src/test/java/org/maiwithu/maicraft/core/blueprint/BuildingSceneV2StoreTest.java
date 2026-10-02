@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.blueprint;
 
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.*;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
@@ -115,7 +117,8 @@ public final class BuildingSceneV2StoreTest {
         return scene;
     }
     private static long files(Path directory) throws Exception {
-        try (var paths = Files.list(directory.resolve("build-scenes").resolve(WORLD))) { return paths.count(); }
+        // 成功编辑才增加数据库里的不可变模型版本，失败检查不能留下新记录。
+        return countMemory(directory, "build-scenes", WORLD);
     }
     private static JsonObject json(String value) { return JsonParser.parseString(value).getAsJsonObject(); }
     private static void rejects(Runnable operation) {

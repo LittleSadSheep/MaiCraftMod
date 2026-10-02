@@ -7,10 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -19,6 +16,8 @@ import java.util.function.Function;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import org.maiwithu.maicraft.intent.persistence.MemoryDocuments;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import java.util.Objects;
 import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
@@ -29,6 +28,7 @@ import static org.maiwithu.maicraft.core.blueprint.BuildingSceneGeometry.*;
 public final class BuildingSceneStore {
     private final StateIdentity identity;
     private final Path directory;
+    private final MemoryDocuments documents;
     private final Function<JsonObject, JsonObject> compiler;
 
     public record Entry(String sceneId, JsonObject scene, Goal.WorldPosition anchor, String parentSceneId,
@@ -64,6 +64,7 @@ public final class BuildingSceneStore {
         this.identity = identity;
         this.compiler = Objects.requireNonNull(compiler);
         directory = identity.directory().resolve("build-scenes").resolve(identity.key());
+        documents = new MemoryDocuments(identity, "build-scenes");
     }
 
     public BuildingSceneStore(Path stateRoot, String worldKey) {
@@ -114,13 +115,9 @@ public final class BuildingSceneStore {
         byte[] bytes = root.toString().getBytes(StandardCharsets.UTF_8);
         // 大场景按建筑配置保存作者模型；超额仍拒绝发布，不让旧的固定四兆门槛盖过用户设置。
         if (bytes.length > BuildingBudgets.current().maxSceneBytes()) throw new IllegalArgumentException("building scene exceeds the configured storage budget");
-        Files.createDirectories(directory);
-        Path temporary = Files.createTempFile(directory, ".scene-", ".tmp");
-        try {
-            Files.write(temporary, bytes);
-            try { Files.move(temporary, path(entry.sceneId()), StandardCopyOption.ATOMIC_MOVE); }
-            catch (AtomicMoveNotSupportedException unavailable) { Files.move(temporary, path(entry.sceneId())); }
-        } finally { Files.deleteIfExists(temporary); }
+        // 新编辑版本作为独立数据库记录提交；旧版本和父版本编号都保留，不能覆盖正在施工的模型。
+        if (!documents.save(entry.sceneId(), root.toString(), BuildingBudgets.current().maxSceneBytes(), true))
+            throw new IOException("building scene id already exists");
         return entry;
     }
 
@@ -129,15 +126,17 @@ public final class BuildingSceneStore {
         catch (IOException failure) { throw new IllegalStateException("building scene could not be loaded: " + failure.getMessage(), failure); }
     }
 
-    // 按当前世界和维度核对文件身份。这里只检查模型结构，不逐格展开；后续预览或施工再编译。
+    // 按当前世界和维度核对档案身份；旧 JSON 完整通过同一校验后才导入 SQLite。
     private Entry loadChecked(String sceneId, String dimension) throws IOException {
-        Path file = path(sceneId);
-        // 读取与保存使用同一场景预算，并多读一个字节确认边界，防止大小检查后文件继续增长。
-        int limit = BuildingBudgets.current().maxSceneBytes();
-        byte[] bytes;
-        try (var input = Files.newInputStream(file)) { bytes = input.readNBytes(Math.addExact(limit, 1)); }
-        if (bytes.length > limit) throw new IllegalArgumentException("building scene exceeds the configured storage budget");
-        JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
+        try {
+            Entry entry = documents.load(sceneId, path(sceneId), BuildingBudgets.current().maxSceneBytes(), json -> decode(sceneId, dimension, json));
+            if (entry == null) throw new IOException("building scene is unavailable");
+            return entry;
+        } catch (MemoryDatabase.OverBudget exceeded) { throw new IllegalArgumentException("building scene exceeds the configured storage budget", exceeded); }
+    }
+
+    private Entry decode(String sceneId, String dimension, String json) {
+        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
         if (!root.has("schema_version") || root.get("schema_version").getAsInt() != 1
                 || !identity.key().equals(fieldString(root, "world_key")) || !sceneId.equals(fieldString(root, "scene_id")))
             throw new IllegalArgumentException("building scene identity or version does not match this world");
