@@ -42,6 +42,13 @@ public final class KnowledgeHttpTest {
         var ftb = new FtbQuestsKnowledgeSource(quests.access);
         int[] selectedReads = {0};
         String selectedUri = "maicraft://knowledge/test/precision";
+        String recipeUri = "maicraft://knowledge/recipes/test/machine";
+        // 配方提示超过旧内联预算后，默认模型正文和冻结路径仍应交付最后一项操作条件。
+        JsonObject recipe = json("{\"display_recipes\":[],\"pitfalls\":[]}");
+        for (int index = 0; index < 40; index++) {
+            JsonObject hint = new JsonObject(); hint.addProperty("item_id", "test:machine_" + index);
+            hint.addProperty("condition", "真实原生操作条件".repeat(40)); recipe.getAsJsonArray("pitfalls").add(hint);
+        }
         // 在同一服务中发现教程和任务书，验证两种入口都不会误走角色操作接口。
         var knowledge = new KnowledgeLibrary(new KnowledgeLibrary.Source() {
             public List<KnowledgeDocument.Entry> entries() {
@@ -50,6 +57,8 @@ public final class KnowledgeHttpTest {
                 return entries;
             }
             public KnowledgeDocument read(String uri) {
+                if (uri.equals(recipeUri)) return new KnowledgeDocument(uri, "test.recipe", "机器配方", "配方用法",
+                        recipe.toString(), "application/json");
                 if (uri.equals(selectedUri)) {
                     selectedReads[0]++;
                     return new KnowledgeDocument(uri, "test.part", "精密构件", "材料资料", "{\"selected_body\":true}", "application/json");
@@ -94,6 +103,18 @@ public final class KnowledgeHttpTest {
                     .getAsJsonObject("result");
             check(selectedReads[0] == 1 && selected.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString().equals("{\"selected_body\":true}"),
                     "selected document is complete in the text channel");
+            var nativeRecipe = send("resources/read", uri(recipeUri)).getAsJsonObject("result")
+                    .getAsJsonArray("contents").get(0).getAsJsonObject();
+            check(json(nativeRecipe.get("text").getAsString()).equals(recipe), "resource API retains every recipe hint");
+            JsonObject recipeCall = json("{\"name\":\"perceive\",\"arguments\":{}}");
+            recipeCall.getAsJsonObject("arguments").addProperty("resource_uri", recipeUri);
+            var delivered = json(send("tools/call", recipeCall).getAsJsonObject("result")
+                    .getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+            check(delivered.getAsJsonObject("json").equals(recipe), "default tool response retains every recipe hint");
+            recipeCall.getAsJsonObject("arguments").addProperty("resource_uri", delivered.get("details_uri").getAsString()
+                    + "?path=%2Fjson%2Fpitfalls%2F39");
+            check(payload(send("tools/call", recipeCall)).get("value").equals(recipe.getAsJsonArray("pitfalls").get(39)),
+                    "frozen receipt path resolves the final hint without rereading the recipe");
             var operationSearch = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"build machien\",\"limit\":3}}")));
             check(!operationSearch.get("contract_loaded").getAsBoolean()
                     && !operationSearch.getAsJsonArray("semantic_abilities").isEmpty(), "HTTP operation metadata search");

@@ -4,9 +4,11 @@ package org.maiwithu.maicraft.mcp.knowledge;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -22,9 +24,11 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
     @FunctionalInterface interface Reader { JsonObject read(Query query); }
     record Query(ResourceLocation item, boolean uses, int offset, int limit) {}
     private final Reader reader;
+    private final RecipeItemKnowledge itemKnowledge;
 
     public RecipeKnowledgeSource() { this(RecipeKnowledgeSource::inspect); }
-    RecipeKnowledgeSource(Reader reader) { this.reader = reader; }
+    RecipeKnowledgeSource(Reader reader) { this(reader, new RecipeItemKnowledge()); }
+    RecipeKnowledgeSource(Reader reader, RecipeItemKnowledge itemKnowledge) { this.reader = reader; this.itemKnowledge = itemKnowledge; }
 
     // 目录与搜索不加载配方正文，避免一个材料目标把整张合成树塞进外部规划模型的上下文。
     @Override public List<KnowledgeDocument.Entry> entries() { return List.of(); }
@@ -49,7 +53,8 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
         report.addProperty("resource_uri", uri);
         report.addProperty("planning_guide", KnowledgeLibrary.RECIPES);
         report.addProperty("process_contracts", KnowledgeLibrary.PROCESSES);
-        linkMaterials(report);
+        // 选配方时顺手提示相关设备与材料的已知用法；只读这一页的物品，不递归查询原料配方。
+        itemKnowledge.attach(report, linkMaterials(report, query));
         // 页码只是当前索引位置；重载后应重新读第一页，不能把旧配方序号当成稳定配方身份。
         if (report.has("next_offset")) report.addProperty("next_uri", uri(query.item())
                 + "?direction=" + (query.uses() ? "input" : "output")
@@ -103,37 +108,52 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
         return report;
     }
 
-    private static void linkMaterials(JsonObject report) {
-        JsonArray links = new JsonArray(); Set<String> seen = new LinkedHashSet<>();
+    private static JsonArray linkMaterials(JsonObject report, Query query) {
+        Map<String, JsonObject> links = new LinkedHashMap<>();
         JsonArray rows = report.has("display_recipes") ? report.getAsJsonArray("display_recipes") : new JsonArray();
-        // 先给设备候选提供教程入口，再给原料提供下一层配方入口；不访问组件内部的任意ID，也不展开后继配方。
-        for (String role : List.of("workstations", "catalysts", "inputs", "outputs")) for (JsonElement element : rows) {
-            JsonObject row = element.getAsJsonObject();
+        // 设备、催化剂、原料、产物按身份合并；宽标签共享的替代组仍逐项检查，不截掉第 33 个物品的知识。
+        for (String role : List.of("workstations", "catalysts", "inputs", "outputs")) for (int index = 0; index < rows.size(); index++) {
+            JsonObject row = rows.get(index).getAsJsonObject();
+            int recipeIndex = row.has("index") ? row.get("index").getAsInt() : query.offset() + index;
             if (!row.has(role)) continue;
             for (JsonElement ingredient : row.getAsJsonArray(role)) {
                 JsonObject value = ingredient.getAsJsonObject();
-                if (value.has("alternatives")) for (JsonElement stack : value.getAsJsonArray("alternatives"))
-                    linkStack(stack.getAsJsonObject(), links, seen);
-                else linkStack(value, links, seen);
+                JsonArray alternatives = value.has("alternatives") ? value.getAsJsonArray("alternatives") : null;
+                if (alternatives == null && value.has("alternatives_group") && row.has("alternative_groups"))
+                    alternatives = row.getAsJsonArray("alternative_groups").get(value.get("alternatives_group").getAsInt()).getAsJsonArray();
+                if (alternatives != null) for (JsonElement stack : alternatives)
+                    linkStack(stack.getAsJsonObject(), links, role, recipeIndex);
+                else linkStack(value, links, role, recipeIndex);
             }
         }
-        report.add("related_resources", links);
-        report.addProperty("related_resources_truncated", seen.size() > links.size());
+        // EMI 没有匹配配方时，查询物品本身仍可能有思索或操作说明，不随空配方列表一起消失。
+        linkItem(query.item(), links, "queried_item", -1);
+        JsonArray resources = new JsonArray(); links.values().forEach(resources::add);
+        report.add("related_resources", resources);
+        report.addProperty("related_resources_truncated", false);
+        return resources;
     }
 
-    private static void linkStack(JsonObject stack, JsonArray links, Set<String> seen) {
+    private static void linkStack(JsonObject stack, Map<String, JsonObject> links, String role, int recipeIndex) {
         if (!stack.has("medium") || !"items".equals(stack.get("medium").getAsString())
                 || !stack.has("id") || stack.get("id").isJsonNull()) return;
-        String value = stack.get("id").getAsString();
-        ResourceLocation id = ResourceLocation.tryParse(value);
-        if (id == null || !seen.add(value) || links.size() >= 32) return;
-        JsonObject link = new JsonObject(); link.addProperty("item_id", value); link.addProperty("recipe_uri", uri(id));
-        // Ponder可关联工具或方块；链接只指向候选目录，不为了补链接而提前编译教程，也不保证存在场景。
-        link.addProperty("ponder_component_candidate_uri", PonderKnowledgeSource.componentUri(value));
-        if (BuiltInRegistries.ITEM.get(id) instanceof BlockItem blockItem) {
-            ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(blockItem.getBlock());
-            link.addProperty("block_uri", MinecraftKnowledgeSource.BLOCK + blockId.getNamespace() + "/" + blockId.getPath());
-        }
-        links.add(link);
+        ResourceLocation id = ResourceLocation.tryParse(stack.get("id").getAsString());
+        if (id != null) linkItem(id, links, role, recipeIndex);
+    }
+
+    private static void linkItem(ResourceLocation id, Map<String, JsonObject> links, String role, int recipeIndex) {
+        JsonObject link = links.computeIfAbsent(id.toString(), value -> {
+            JsonObject entry = new JsonObject(); entry.addProperty("item_id", value); entry.addProperty("recipe_uri", uri(id));
+            entry.add("roles", new JsonArray()); entry.add("recipe_indices", new JsonArray());
+            if (BuiltInRegistries.ITEM.containsKey(id) && BuiltInRegistries.ITEM.get(id) instanceof BlockItem blockItem) {
+                ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(blockItem.getBlock());
+                entry.addProperty("block_uri", MinecraftKnowledgeSource.BLOCK + blockId.getNamespace() + "/" + blockId.getPath());
+            }
+            return entry;
+        });
+        // 同一工作站出现在多条配方时只读一次说明，但保留它与各工艺的关系供模型选择。
+        JsonArray roles = link.getAsJsonArray("roles"), indices = link.getAsJsonArray("recipe_indices");
+        if (!roles.asList().contains(new JsonPrimitive(role))) roles.add(role);
+        if (recipeIndex >= 0 && !indices.asList().contains(new JsonPrimitive(recipeIndex))) indices.add(recipeIndex);
     }
 }
