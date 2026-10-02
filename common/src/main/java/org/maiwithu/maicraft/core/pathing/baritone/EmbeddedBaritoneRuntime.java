@@ -25,6 +25,7 @@ import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
@@ -136,6 +137,7 @@ public final class EmbeddedBaritoneRuntime {
         if (backend == null) return result;
         var pathing = (PathingBehavior) backend.getPathingBehavior();
         result.put("planning", pathing.getInProgress().isPresent());
+        result.put("planner_health", pathing.searchDiagnostics());
         result.put("safe_to_cancel", pathing.isSafeToCancel());
         var executor = pathing.getCurrent();
         if (executor == null) return result;
@@ -503,6 +505,19 @@ public final class EmbeddedBaritoneRuntime {
         return owner == navigator && backend != null
                 && backend.getPathingBehavior().getCurrent() == null
                 && backend.getPathingBehavior().getInProgress().isPresent();
+    }
+
+    // 失败分类取自真实搜索结果；排队或工作线程超时不能再向采矿、建造和行走谎报为地形无解。
+    static FailureType planningFailure(EmbeddedBaritoneNavigator navigator) {
+        if (owner != navigator || backend == null) return FailureType.NO_PATH;
+        var pathing = (PathingBehavior) backend.getPathingBehavior();
+        return pathing.calculationStalled() ? FailureType.PLANNING_STALL
+                : pathing.calculationErrored() ? FailureType.INTERNAL : FailureType.NO_PATH;
+    }
+
+    static Map<String, Object> searchDiagnostics(EmbeddedBaritoneNavigator navigator) {
+        return owner == navigator && backend != null
+                ? ((PathingBehavior) backend.getPathingBehavior()).searchDiagnostics() : Map.of();
     }
 
     private static EmbeddedBaritoneNavigator lastDrivenOwner;

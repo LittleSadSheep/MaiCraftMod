@@ -62,6 +62,8 @@ public final class PathCalculationOriginTest {
                 var receive = PathingBehavior.class.getDeclaredMethod("acceptCalculatedPath"); receive.setAccessible(true); receive.invoke(behavior);
                 var events = (LinkedBlockingQueue<?>) field(PathingBehavior.class, "toDispatch").get(behavior);
                 check(events.contains(PathEvent.CALC_FAILED) == scenario.equals("same"), "current-route failure belongs only to unchanged origin: " + scenario);
+                if (scenario.equals("same")) check(behavior.searchDiagnostics().get("classification").equals("planning_no_solution"),
+                        "a completed search with no route is distinct from an unreturned calculation");
                 check(events.contains(PathEvent.NEXT_CALC_FAILED) == scenario.equals("ahead"), "ahead failure belongs only to unchanged segment end: " + scenario);
                 check(field(PathingBehavior.class, "pendingCalculation").get(behavior) == null,
                         "discarded result releases the worker slot so the current goal can search again");

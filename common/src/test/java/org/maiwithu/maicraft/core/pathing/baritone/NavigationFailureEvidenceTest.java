@@ -49,6 +49,8 @@ public final class NavigationFailureEvidenceTest {
             ((EmbeddedBaritoneNavigator) ground).observeDispatch(true, true, true, 9, "preparing_scaffold",
                     Map.of("source_slot", 18, "pending", true));
             var dispatch = ((EmbeddedBaritoneNavigator) ground).dispatchEvidence();
+            var health = Map.of("classification", "planning_stall", "worker_stack", List.of("fixture.chunkRead"), "recovery_count", 1);
+            field(EmbeddedBaritoneNavigator.class, "healthEvidence").set(ground, health);
             var task = new MoveToCompanionTask(w.player, new MoveToTaskRecord("failure-evidence", 1000, 12D, 1D, 12D, null, true));
             field(AbstractCompanionTask.class, "nav").set(task, nav);
             // 失败后角色已被人挪走，默认终态仍必须呈现导致这次失败的冻结现场。
@@ -68,6 +70,8 @@ public final class NavigationFailureEvidenceTest {
                     "checkpoint serialization preserves the complete observed no-path context");
             check(saved.getAsJsonObject().getAsJsonObject("navigation").get("ground_dispatch").equals(gson.toJsonTree(dispatch)),
                     "checkpoint serialization preserves the dispatch stage and source inventory slot");
+            check(saved.getAsJsonObject().getAsJsonObject("navigation").get("ground_health").equals(gson.toJsonTree(health)),
+                    "search classification, recovery count and worker stack survive semantic results and checkpoints");
         }
         System.out.println("NavigationFailureEvidenceTest: passed");
     }

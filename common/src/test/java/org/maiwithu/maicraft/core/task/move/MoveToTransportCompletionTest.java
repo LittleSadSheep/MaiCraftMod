@@ -168,8 +168,8 @@ public final class MoveToTransportCompletionTest {
             }
             check(last == TaskState.FAILED, "连续算路零进展超过上限必须按无路失败，不能无限 still working");
             var result = task.result(TaskState.FAILED);
-            check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("no_path"),
-                    "规划停滞必须归为无路，而不是超时或内部错误");
+            check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("planning_stall"),
+                    "没有搜索结论的规划停滞不能伪装成地形无路");
             check(result.message().contains("route planning never produced a walkable path"),
                     "失败说明要点名规划器从未产出可走路线");
         }

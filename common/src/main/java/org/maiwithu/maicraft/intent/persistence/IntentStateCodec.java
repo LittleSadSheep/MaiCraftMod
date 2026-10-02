@@ -656,7 +656,7 @@ public final class IntentStateCodec {
             if (internalKey.test(key)) continue;
             // 已发生的整机观察、差异和箱体身份必须在重启后仍完整；坐标不是待重放的执行指令。
             if (Set.of("machine", "operating_state", "server_evidence", "as_built_blueprint", "blueprint_diff",
-                    "latest_snapshot", "control_analysis", "container_observation", "confirmed_harvests", "ground_failure", "ground_dispatch").contains(key)) {
+                    "latest_snapshot", "control_analysis", "container_observation", "confirmed_harvests", "ground_failure", "ground_dispatch", "ground_health").contains(key)) {
                 // 导航失败现场及未能开始寻路的调度事实也需跨重启保留，槽位和身体格在这里是观察证据。
                 result.add(key, entry.getValue().deepCopy()); continue;
             }

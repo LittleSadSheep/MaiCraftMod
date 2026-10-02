@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.pathing;
 
 import baritone.behavior.PathCalculationOriginTest;
+import baritone.behavior.PathCalculationStallTest;
 import baritone.pathing.calc.HeightPolicyTest;
 import baritone.pathing.calc.GroundJourneyContinuationTest;
 import baritone.pathing.calc.PathSearchRegressionTest;
@@ -147,6 +148,8 @@ public final class NavigationRegressionSuite {
         PathSearchRegressionTest.main(args);
         // 传送或改目标后，异步旧失败不得终止角色从当前起点继续寻路。
         PathCalculationOriginTest.main(args);
+        // 搜索停滞与真实无路分别结算，原目标只在有界恢复内重试。
+        PathCalculationStallTest.main(args);
         // 空背包在逐步加载的地形里自动续路，危险直线必须让位于有支撑的绕行。
         GroundJourneyContinuationTest.main(args);
         HeightPolicyTest.main(args);

@@ -40,12 +40,15 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 import org.maiwithu.maicraft.core.pathing.baritone.SwimTravelControl;
+import org.maiwithu.maicraft.core.Constants;
 
 public final class PathingBehavior extends Behavior implements IPathingBehavior, Helper {
 
@@ -73,6 +76,15 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private BlockPos calculationStart;
     private Goal calculationGoal;
     private Level calculationWorld;
+    private long calculationTimeoutMillis;
+    private PathCalculationResult.Type lastCalculationResult;
+    private boolean calculationStalled;
+    private int searchRecoveries;
+    private BlockPos recoveryOrigin;
+    private Goal recoveryGoal;
+    private Level recoveryWorld;
+    private Map<String, Object> lastRecovery = Map.of();
+    private long drivenTicks;
     private BlockPos failedPlanAheadStart;
     private LoadedFrontier calculationFrontier, failedPlanAheadFrontier;
     private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
@@ -124,6 +136,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         }
 
         expectedSegmentStart = pathStart();
+        drivenTicks++;
         acceptCalculatedPath();
         dispatchEvents();
         baritone.getPathingControlManager().preTick();
@@ -494,6 +507,13 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                 : Baritone.settings().planAheadPrimaryTimeoutMS.value;
         long failureTimeout = current == null ? Baritone.settings().failureTimeoutMS.value
                 : Baritone.settings().planAheadFailureTimeoutMS.value;
+        // 原目标与起点未变时只允许一次搜索线程恢复；真正移动或换世界后才开始新的恢复预算。
+        if (recoveryOrigin == null || recoveryOrigin.distSqr(start) > 4 || !Objects.equals(recoveryGoal, goal) || recoveryWorld != ctx.world()) {
+            searchRecoveries = 0; recoveryOrigin = start.immutable(); recoveryGoal = goal; recoveryWorld = ctx.world(); lastRecovery = Map.of();
+        }
+        calculationStalled = false; lastCalculationResult = null;
+        calculationTimeoutMillis = Math.max(10_000L, (Baritone.settings().slowPath.value
+                ? Baritone.settings().slowPathTimeoutMS.value : failureTimeout) + 5_000L);
         AbstractNodeCostSearch pathfinder = createPathfinder(start, goal,
                 current == null ? null : current.getPath(), searchContext);
         if (!Objects.equals(pathfinder.getGoal(), goal)) {
@@ -513,7 +533,12 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
 
     /** Poll without blocking; installation and executor creation happen on the client thread. */
     private void acceptCalculatedPath() {
-        if (pendingCalculation == null || !pendingCalculation.isDone()) return;
+        if (pendingCalculation == null) return;
+        if (!pendingCalculation.isDone()) {
+            // 超过 A* 自身预算仍未返回，说明阻塞发生在排队或内部读取；不能继续无限延长上层进度租约。
+            if (PathPlannerPool.ageMillis(pendingCalculation) > calculationTimeoutMillis) recoverStalledCalculation();
+            return;
+        }
         PathCalculationResult result;
         try {
             result = pendingCalculation.getNow(null);
@@ -538,6 +563,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         // 丢弃过期失败后保持目标进程活动，下一刻从真实脚位搜索，不要求模型重发任务。
         if (path.isEmpty() && (!Objects.equals(requestedGoal, goal)
                 || !Objects.equals(start, current == null ? expectedSegmentStart : current.getPath().getDest()))) return;
+        lastCalculationResult = result.getType();
         if (current == null) {
             if (path.isPresent()) {
                 if (path.get().positions().contains(expectedSegmentStart)) {
@@ -566,6 +592,40 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
                 queuePathEvent(PathEvent.NEXT_CALC_FAILED);
             }
         }
+    }
+
+    /** 只替换无实体动作的计算通道；旧图、前瞻缓存和结果句柄作废，新计算仍遵守原目标与地形许可。 */
+    private void recoverStalledCalculation() {
+        lastRecovery = PathPlannerPool.describe(pendingCalculation, true);
+        boolean recovered = searchRecoveries == 0 && PathPlannerPool.recover(pendingCalculation);
+        // 工作线程可能恰好在取证期间完成；保留已返回的真实结论，下刻正常接收，不制造竞态式停滞失败。
+        if (!recovered && pendingCalculation.isDone() && !pendingCalculation.isCancelled()) return;
+        cancelCalculation();
+        if (recovered) {
+            searchRecoveries++;
+            if (current == null) context = null; // 前瞻卡住时仍保留正在落地的执行上下文。
+            Constants.LOG.warn("[maicraft-path] planning_stall: isolated search generation and retrying the same route; {}", lastRecovery);
+        } else {
+            calculationStalled = true;
+            Constants.LOG.warn("[maicraft-path] planning_stall: bounded recovery unavailable or exhausted; {}", lastRecovery);
+            queuePathEvent(PathEvent.CALC_FAILED);
+        }
+    }
+
+    public boolean calculationStalled() { return calculationStalled; }
+    public boolean calculationErrored() { return lastCalculationResult == PathCalculationResult.Type.EXCEPTION; }
+
+    /** 默认回执分别呈现真正无解、搜索停滞与已有执行路线，不能仅以“没有位移”反推搜索结论。 */
+    public Map<String, Object> searchDiagnostics() {
+        var facts = new LinkedHashMap<String, Object>();
+        facts.put("classification", calculationStalled ? "planning_stall" : pendingCalculation != null ? "planning"
+                : current != null ? "executing" : lastCalculationResult == PathCalculationResult.Type.FAILURE
+                ? "planning_no_solution" : calculationErrored() ? "planning_error" : "idle");
+        facts.put("component", "baritone_search"); facts.put("pathing_ticks", drivenTicks);
+        facts.put("last_result", lastCalculationResult == null ? "none" : lastCalculationResult.name().toLowerCase());
+        facts.put("search", PathPlannerPool.describe(pendingCalculation, false));
+        facts.put("recovery_count", searchRecoveries); facts.put("last_recovery", lastRecovery == null ? Map.of() : lastRecovery);
+        return Map.copyOf(facts);
     }
 
     /** Detach a cancelled future immediately, so it can never install a path for a newer owner. */

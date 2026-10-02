@@ -51,7 +51,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 规划器无法再接近时（例如停在水下目标上方的水面），等待此数量的无进展 tick 再放弃：
      *  时间足以让角色被水流带到可达的水下目标附近，也能及时放弃水面上方不可达的目标。 */
     private static final int MAX_SETTLE_TICKS = 60;
-    /** 连续算路宽限上限：规划一直未产出可走路线且零实际进展超过此时限，就按无路失败收场，
+    /** 连续算路宽限上限：规划一直未产出可走路线且零实际进展超过此时限，就按规划停滞收场，
      *  不能让 "planningInFlight" 无限续期把卡死伪装成 still working（012 实测 4 分钟零位移）。 */
     private static final long PLANNING_STALL_CEILING_TICKS = 30 * 20;
 
@@ -276,9 +276,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             long now = player.level().getGameTime();
             if (planningSinceTick < 0) planningSinceTick = now;
             if (now - planningSinceTick >= PLANNING_STALL_CEILING_TICKS) {
-                fail(blockedMessage("route planning never produced a walkable path in about "
-                        + PLANNING_STALL_CEILING_TICKS / 20 + " seconds; the target may be unreachable"
-                        + " under the allowed terrain policy"), FailureType.NO_PATH);
+                fail("planning_stall: route planning never produced a walkable path in about "
+                        + PLANNING_STALL_CEILING_TICKS / 20 + " seconds; no no-path conclusion was established; "
+                        + nav.outcomeSummary(), FailureType.PLANNING_STALL);
                 return TaskState.FAILED;
             }
         } else {

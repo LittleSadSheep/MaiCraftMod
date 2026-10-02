@@ -76,6 +76,7 @@ public final class EmbeddedBaritoneNavigator {
     private String failureReason = "embedded pathing has not failed";
     private Map<String, Object> failureEvidence = Map.of();
     private Map<String, Object> dispatchEvidence = Map.of();
+    private Map<String, Object> healthEvidence = Map.of();
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -242,6 +243,9 @@ public final class EmbeddedBaritoneNavigator {
 
     // 保持地形时找不到路，可额外只计算“假如允许改地形会怎样”；这份计算不会真的挖掘或放置。
     private PlayerNav.Status diagnoseNoPath() {
+        var planningFailure = EmbeddedBaritoneRuntime.planningFailure(this);
+        if (planningFailure != FailureType.NO_PATH) return failWhenSafe(planningFailure,
+                "route computation did not establish a no-path conclusion: " + healthDiagnostics());
         // 失败事件已收到、只读复算尚在等待时也可能被传送；旧起点的结论不能终止新位置上的原任务。
         if (failedOrigin != null && !failedOrigin.equals(feet())) {
             cancelTerrainProbe(); started = false; calculationFailed = false; driveRequested = false;
@@ -421,6 +425,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private PlayerNav.Status fail(FailureType type, String reason) {
+        healthDiagnostics(); // 退役共享运行器前冻结搜索与恢复证据，后续任务不能覆盖本次失败现场。
         cancelTerrainProbe();
         failureType = type;
         failureReason = reason;
@@ -482,6 +487,7 @@ public final class EmbeddedBaritoneNavigator {
 
     private void abort(FailureType fallbackType, String fallbackReason) {
         if (terminalFailure) return;
+        healthDiagnostics();
         cancelTerrainProbe();
         // 身体、世界或运行时的硬边界无法等待结算，但仍不能覆盖已经等待空中移动着陆的具体结果。
         failureType = pendingFailureType == null ? fallbackType : pendingFailureType;
@@ -522,6 +528,11 @@ public final class EmbeddedBaritoneNavigator {
 
     public Map<String, Object> failureEvidence() { return failureEvidence; }
     public Map<String, Object> dispatchEvidence() { return dispatchEvidence; }
+    public Map<String, Object> healthDiagnostics() {
+        var current = EmbeddedBaritoneRuntime.searchDiagnostics(this);
+        if (!current.isEmpty()) healthEvidence = current;
+        return healthEvidence;
+    }
 
     // 搜索尚未提交时也保存调度事实，任务超时或缺少路径事件不能再被解释成 A* 已判定无路。
     void observeDispatch(boolean requested, boolean allowed, boolean mutationAvailable, long tick,
@@ -543,7 +554,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public String outcomeSummary() {
-        if (events.isEmpty()) return "baritone_events={}; dispatch=" + dispatchEvidence;
+        if (events.isEmpty()) return "baritone_events={}; dispatch=" + dispatchEvidence + "; health=" + healthDiagnostics();
         StringBuilder out = new StringBuilder("baritone_events={");
         boolean first = true;
         for (Map.Entry<PathEvent, Integer> entry : events.entrySet()) {
@@ -552,7 +563,7 @@ public final class EmbeddedBaritoneNavigator {
             out.append(entry.getKey().name().toLowerCase()).append(':').append(entry.getValue());
         }
         // 算出过路线也可能随后卡在取垫块，已有路径事件不能遮住当前调度阶段。
-        return out.append("}; dispatch=").append(dispatchEvidence).toString();
+        return out.append("}; dispatch=").append(dispatchEvidence).append("; health=").append(healthDiagnostics()).toString();
     }
 
     public boolean planningInFlight() {

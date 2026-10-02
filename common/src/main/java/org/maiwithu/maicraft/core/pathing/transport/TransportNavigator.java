@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
@@ -305,13 +306,15 @@ public final class TransportNavigator {
     }
     public String outcomeSummary() { return ground.outcomeSummary() + "; transport=" + attempts + (targets == null ? "" : targets.diagnostic()); }
     public Map<String, Object> diagnostics() {
-        return Map.of("mode", mode.name().toLowerCase(), "attempts", List.copyOf(attempts), "unavailable", unavailable,
+        var facts = new LinkedHashMap<String, Object>(Map.of("mode", mode.name().toLowerCase(), "attempts", List.copyOf(attempts), "unavailable", unavailable,
                 "cleanup_pending", stopped && TransportRuntime.owns(this),
                 // 即使最后选择地面路线，默认回执也能看到失败起点的障碍、材料和通行许可。
                 "ground_failure", ground.failureEvidence(),
                 "ground_dispatch", ground.dispatchEvidence(),
                 "preparing_jetpack_departure", departureApproach != null, "departure_preparations", departurePreparations,
-                "approaching_unloaded_destination", loadedTravel.active(), "intermediate_landings_completed", loadedTravel.completed());
+                "approaching_unloaded_destination", loadedTravel.active(), "intermediate_landings_completed", loadedTravel.completed()));
+        facts.put("ground_health", ground.healthDiagnostics());
+        return facts;
     }
     public void stop() { stopped = true; if (departureApproach != null) departureApproach.stop(); ground.stop(); TransportRuntime.cancel(this); }
     public void pause() {
