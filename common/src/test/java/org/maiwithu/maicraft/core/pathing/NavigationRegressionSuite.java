@@ -147,6 +147,8 @@ public final class NavigationRegressionSuite {
         IntentStateStoreTest.main(args);
         MoveToContractTest.main(args);
         MoveToTransportCompletionTest.main(args);
+        // 地表发现与坐标移动共享移动外壳；露天判定与误报防线在这里单独验证。
+        org.maiwithu.maicraft.core.task.move.TravelSurfaceTaskTest.main(args);
         PathSearchRegressionTest.main(args);
         // 传送或改目标后，异步旧失败不得终止角色从当前起点继续寻路。
         PathCalculationOriginTest.main(args);

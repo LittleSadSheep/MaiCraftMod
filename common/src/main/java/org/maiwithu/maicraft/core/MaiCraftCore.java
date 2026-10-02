@@ -97,6 +97,7 @@ import org.maiwithu.maicraft.core.tools.work.FishTool;
 import org.maiwithu.maicraft.core.tools.work.FollowTool;
 import org.maiwithu.maicraft.core.tools.work.MoveToTool;
 import org.maiwithu.maicraft.core.tools.work.RegionalTravelTool;
+import org.maiwithu.maicraft.core.tools.work.TravelSurfaceTool;
 import org.maiwithu.maicraft.core.tools.work.SemanticBlockSearchApi;
 import org.maiwithu.maicraft.core.tools.work.SemanticAcquireApi;
 import org.maiwithu.maicraft.core.tools.work.SemanticCookTool;
@@ -224,6 +225,7 @@ public final class MaiCraftCore {
         SemanticExploreApi.register();
         ToolRegistry.register(new BoardStructureTool());
         ToolRegistry.register(new RegionalTravelTool());
+        ToolRegistry.register(new TravelSurfaceTool());
         SemanticAcquireApi.register();
         SemanticLightAreaApi.register();
         CreateMechanicalPower.install();

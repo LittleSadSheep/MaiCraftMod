@@ -321,6 +321,21 @@ final class AbilityAdapter {
                     || bool(goal.preferences(),"may_alter_terrain",false));
             return new IntentAction.Tool("travel_region",parameters.toString());
         }
+        if ("surface".equals(discovery)) {
+            // “回地表”同样没有坐标：判据是脚下这一列露天，与方向无关，也不接受其他目的地。
+            if (destination!=null || goal.target()!=null && !"nearest".equals(goal.target().kind())
+                    || goal.parameters().has("block_id") || goal.parameters().has("block")
+                    || goal.parameters().has("biome_id") || goal.parameters().has("biome_tag"))
+                throw new IllegalArgumentException("surface discovery cannot be combined with another destination");
+            if (bool(goal.parameters(),"exact",false) || mode==TransportMode.ELEVATOR
+                    || goal.parameters().has("direction"))
+                throw new IllegalArgumentException("surface discovery is direction-free and uses auto, ground or jetpack transport");
+            parameters.addProperty("transport_mode",mode.name().toLowerCase(Locale.ROOT));
+            parameters.addProperty("max_distance",integer(goal.parameters(),"max_distance",64,8,128));
+            parameters.addProperty("may_alter_terrain",bool(goal.parameters(),"may_alter_terrain",false)
+                    || bool(goal.preferences(),"may_alter_terrain",false));
+            return new IntentAction.Tool("travel_surface",parameters.toString());
+        }
         if (goal.parameters().has("direction")) throw new IllegalArgumentException("direction is for platform discovery");
         parameters.addProperty("transport_mode", mode.name().toLowerCase(Locale.ROOT));
         String block = string(goal.parameters(), "block_id");

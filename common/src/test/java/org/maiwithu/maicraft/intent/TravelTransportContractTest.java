@@ -61,6 +61,7 @@ public final class TravelTransportContractTest {
                 "public and internal contracts all expose the same travel preference");
         destinationPrecision();
         regionalDiscovery();
+        surfaceDiscovery();
         System.out.println("TravelTransportContractTest: passed");
     }
 
@@ -87,6 +88,43 @@ public final class TravelTransportContractTest {
             parameters.remove("direction"); parameters.addProperty("exact",true);
             try { AbilityAdapter.adapt(goal(parameters),null,null); throw new AssertionError("unknown exact cell accepted"); }
             catch(IllegalArgumentException expected) { }
+        }
+    }
+
+    /** 地表发现与平台同形但没有方向：露天判定看脚下整列，不接受任何其他目的地。 */
+    private static void surfaceDiscovery() {
+        for(String mode:List.of("auto","ground","jetpack")) {
+            JsonObject parameters=new JsonObject();
+            parameters.addProperty("semantic_target","surface"); parameters.addProperty("transport_mode",mode);
+            var action=(IntentAction.Tool)AbilityAdapter.adapt(goal(parameters),null,null);
+            check(action.toolName().equals("travel_surface") && !action.arguments().has("x")
+                            && !action.arguments().has("direction"),
+                    "surface discovery fabricates neither a destination nor a search direction");
+            check(action.arguments().get("transport_mode").getAsString().equals(mode)
+                            && action.arguments().get("max_distance").getAsInt()==64,
+                    "surface discovery preserves the movement choice and the default radius");
+            SemanticGoalContract.validate(goal(parameters), Set.of("maicraft:travel"));
+        }
+        JsonObject bounded=new JsonObject();
+        bounded.addProperty("semantic_target","surface"); bounded.addProperty("max_distance",999);
+        var clamped=(IntentAction.Tool)AbilityAdapter.adapt(goal(bounded),null,null);
+        check(clamped.arguments().get("max_distance").getAsInt()==128,
+                "surface radius clamps to the regional bound instead of widening the search");
+        JsonObject directed=new JsonObject();
+        directed.addProperty("semantic_target","surface"); directed.addProperty("direction","up");
+        try { AbilityAdapter.adapt(goal(directed),null,null); throw new AssertionError("surface accepted a direction"); }
+        catch(IllegalArgumentException expected) {
+            check(expected.getMessage().contains("direction-free"), "open-sky search explains that direction is meaningless");
+        }
+        JsonObject exact=new JsonObject();
+        exact.addProperty("semantic_target","surface"); exact.addProperty("exact",true);
+        try { AbilityAdapter.adapt(goal(exact),null,null); throw new AssertionError("surface accepted exact=true"); }
+        catch(IllegalArgumentException expected) { }
+        Goal coordinate=new Goal("maicraft:travel","Climb out",null,
+                "{\"semantic_target\":\"surface\",\"destination\":{\"x\":1,\"z\":2}}","{}",List.of(),List.of());
+        try { AbilityAdapter.adapt(coordinate,null,null); throw new AssertionError("surface accepted a destination"); }
+        catch(IllegalArgumentException expected) {
+            check(expected.getMessage().contains("cannot be combined"), "surface discovery rejects a parallel destination");
         }
     }
 
