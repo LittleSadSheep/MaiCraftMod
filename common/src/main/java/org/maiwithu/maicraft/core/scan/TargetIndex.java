@@ -61,7 +61,7 @@ public final class TargetIndex {
     }
 
     private record QueryKey(BlockPos center, List<Block> targets, int want, int radius,
-                            Set<BlockPos> excluded) {
+                            Set<BlockPos> excluded, boolean sourcesOnly) {
         boolean affectedBy(BlockPos pos, Block before, Block after) {
             return (targets.contains(before) || targets.contains(after)) && !excluded.contains(pos)
                     && Math.abs(SectionPos.blockToSectionCoord(pos.getX())
@@ -196,6 +196,9 @@ public final class TargetIndex {
         Block nb = newState.getBlock();
         boolean oldT = idx.targetRefs.containsKey(ob);
         boolean newT = idx.targetRefs.containsKey(nb);
+        // 流动水与水源是同一种方块；水位变化也要使选源查询失效，不能继续返回已经流走的旧源格。
+        if ((oldT || newT) && oldState.getFluidState().isSource() != newState.getFluidState().isSource())
+            idx.queries.keySet().removeIf(query -> query.sourcesOnly() && query.affectedBy(pos, ob, nb));
         if ((!oldT && !newT) || ob == nb) {
             return;
         }
@@ -237,6 +240,12 @@ public final class TargetIndex {
     // 按起点、目标、数量、半径和排除位置复用扫描进度；一刻最多约两毫秒，未完成时返回当前已找到的部分。
     public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded) {
+        return query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, false);
+    }
+
+    /** 取桶时先筛源流体再比较远近，近处大量流水不能占满候选窗口而遮住稍远的真水源。 */
+    public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+                               int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded, boolean sourcesOnly) {
         LevelIndex idx = INDEXES.get(level.dimension());
         if (idx == null || targets.isEmpty() || want <= 0) {
             return new Result(List.of(), true);
@@ -249,7 +258,7 @@ public final class TargetIndex {
         idx.lastUseTick = tick;
         QueryKey key = new QueryKey(center.immutable(), List.copyOf(targets), want,
                 Math.max(0, maxChunkRadius), excluded.stream().map(BlockPos::immutable)
-                        .collect(Collectors.toUnmodifiableSet()));
+                        .collect(Collectors.toUnmodifiableSet()), sourcesOnly);
         QueryProgress progress = idx.queries.get(key);
         if (progress != null && progress.complete
                 && (tick < progress.completedTick || tick - progress.completedTick >= COMPLETED_QUERY_TICKS)) {
@@ -295,7 +304,7 @@ public final class TargetIndex {
                 entry = build(section, idx);
                 idx.sections.put(sectionKey, entry);
             }
-            collect(entry, section, cx, sy, cz, targets, progress.nearest);
+            collect(entry, section, cx, sy, cz, targets, progress.nearest, sourcesOnly);
             progress.sectionIndex++;
         }
         return new Result(progress.nearest.sorted(), progress.complete);
@@ -359,7 +368,7 @@ public final class TargetIndex {
     // 普通条目直接解码位置；饱和条目当场遍历该段，再交给最近位置容器排序。
     private static void collect(SectionEntry e, LevelChunkSection section,
                                 int cx, int sy, int cz, Collection<Block> targets,
-                                SearchGeometry.NearestPositions nearest) {
+                                SearchGeometry.NearestPositions nearest, boolean sourcesOnly) {
         if (e.hits.isEmpty()) {
             return;
         }
@@ -378,7 +387,8 @@ public final class TargetIndex {
                 for (int y = 0; y < 16; y++) {
                     for (int z = 0; z < 16; z++) {
                         for (int x = 0; x < 16; x++) {
-                            if (states.get(x, y, z).getBlock() == b) {
+                            if (states.get(x, y, z).getBlock() == b
+                                    && (!sourcesOnly || states.get(x, y, z).getFluidState().isSource())) {
                                 nearest.offer(cell.set(baseX | x, baseY + y, baseZ | z));
                             }
                         }
@@ -387,6 +397,7 @@ public final class TargetIndex {
                 continue;
             }
             for (short p : arr) {
+                if (sourcesOnly && !section.getBlockState(p & 15, p >> 8 & 15, p >> 4 & 15).getFluidState().isSource()) continue;
                 nearest.offer(new BlockPos(baseX | (p & 15), baseY + (p >> 8 & 15), baseZ | (p >> 4 & 15)));
             }
         }

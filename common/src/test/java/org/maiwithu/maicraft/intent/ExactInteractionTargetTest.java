@@ -9,6 +9,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
@@ -66,7 +67,44 @@ public final class ExactInteractionTargetTest {
         changedAfterCompilation(true);
         heldItemUseHasItsOwnSemanticEntry();
         foodEffectsAreAnExplicitPlannerChoice();
+        bucketSourceSelection(false);
+        bucketSourceSelection(true);
         System.out.println("ExactInteractionTargetTest: passed");
+    }
+
+    /** 洪水超过最近候选窗口和索引饱和阈值时，仍选真源格；同方块水位变化必须立即更新候选。 */
+    private static void bucketSourceSelection(boolean dense) throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            f.inventory.setItem(0, new ItemStack(Items.BUCKET));
+            var flow = Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL, 4);
+            for (int x = 1; x <= (dense ? 12 : 4); x++) for (int z = 1; z <= 14; z++)
+                for (int y = 1; y <= 2; y++) f.set(new BlockPos(x, y, z), flow);
+            var source = new BlockPos(14, 2, 14); f.set(source, Blocks.WATER.defaultBlockState());
+            var parameters = new JsonObject(); parameters.addProperty("block_id", "minecraft:water");
+            parameters.addProperty("item_id", "minecraft:bucket"); parameters.addProperty("selection", "nearest");
+            var goal = new Goal(GeneralAbilityAdapter.INTERACT, "fill bucket", null,
+                    parameters.toString(), "{}", List.of(), List.of());
+            check(compile(adapt(goal, f), f).aim.equals(source), "flowing water cannot crowd the real source out of the nearest window");
+            f.set(source, flow);
+            var absent = adapt(goal, f);
+            check(absent instanceof IntentAction.Report report && !report.result().success()
+                    && report.result().data().get("failure_code").equals("no_source_block")
+                    && Boolean.FALSE.equals(report.result().data().get("native_action_submitted")),
+                    "a flood with no source returns a typed, unsubmitted outcome without clicking or waiting for confirmation");
+            var renewed = new BlockPos(1, 2, 3); f.set(renewed, Blocks.WATER.defaultBlockState());
+            check(compile(adapt(goal, f), f).aim.equals(renewed), "flow-to-source changes invalidate the same-block cached query");
+            // 精确指定的流水不换成旁边水源；原生任务在创建导航或提交点击前说明无法收取。
+            var exact = goal.withTarget(new Goal.SemanticTarget("coordinates", null,
+                    new Goal.WorldPosition(source.getX(), source.getY(), source.getZ(), "minecraft:overworld"), null));
+            var task = new InteractAtCompanionTask(f.player, compile(adapt(exact, f), f));
+            task.start(f.player); check(task.tick(f.player) == TaskState.FAILED, "exact flowing target fails before travel");
+            var result = task.result(TaskState.FAILED);
+            check("not_a_source_block".equals(result.data().get("failure_type")) && f.itemUses() == 0 && f.blockUses() == 0,
+                    "native failure preserves the actual source condition and sends no use");
+            // 满桶倒入流水仍是可尝试的原生动作，不能套用空桶选源门槛。
+            f.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET)); parameters.addProperty("item_id", "minecraft:water_bucket");
+            check(adapt(goal.withParameters(parameters), f) instanceof IntentAction.Tool, "filled bucket interaction keeps flowing-water targets");
+        }
     }
 
     /** 默认补食仍避开效果食物；自主任务点名并接受效果后可直接执行，不插入额外人工批准。 */

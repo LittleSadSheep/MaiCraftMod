@@ -32,6 +32,8 @@ public enum FailureType {
     WRONG_TOOL,
     /** 原先要操作的实体或方块已无法继续定位或使用。 */
     TARGET_LOST,
+    /** 空桶点名的液态格已是流水而非源格，尚未提交取水动作。 */
+    NOT_A_SOURCE_BLOCK,
     /** 本次允许查询的范围内没有更多匹配来源。 */
     MINED_OUT,
     /** 当前做法会遇到岩浆、虚空等已识别危险。 */

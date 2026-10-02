@@ -41,6 +41,8 @@ import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
+import org.maiwithu.maicraft.task.TaskResult;
 
 /**
  * 把战斗、跟随、吃东西、装备和交互等目标，转换成已经实现的具体工具调用。
@@ -644,6 +646,9 @@ public final class GeneralAbilityAdapter {
 
         ClientLevel level = player.clientLevel;
         Block block = BuiltInRegistries.BLOCK.get(id);
+        // 源流体筛选参与索引查询，不能先挑最近几格流水再将它们当作取桶目标。
+        boolean sourcesOnly = "minecraft:bucket".equals(itemId)
+                && FirstPersonInteractionTargeting.requiresFluidSource(Items.BUCKET, block);
         BlockPos center = semanticCenter(goal, player, runtime);
         if (center == null) {
             Goal.SemanticTarget target = goal.target();
@@ -663,7 +668,7 @@ public final class GeneralAbilityAdapter {
         TargetIndex.register(level, List.of(block));
         // 查询可以分多刻完成，最多保留八个近处候选；没有查完时稍后再来，不当场说目标不存在。
         try {
-            query = TargetIndex.query(level, center, List.of(block), 8, chunkRadius, 384);
+            query = TargetIndex.query(level, center, List.of(block), 8, chunkRadius, 384, Set.of(), sourcesOnly);
         } finally {
             TargetIndex.unregister(level, List.of(block));
         }
@@ -671,9 +676,14 @@ public final class GeneralAbilityAdapter {
         List<BlockPos> hits = query.hits().stream()
                 .filter(pos -> squaredHorizontal(pos, center) <= (long) radius * radius)
                 .filter(pos -> level.getBlockState(pos).is(block))
+                .filter(pos -> !sourcesOnly || level.getBlockState(pos).getFluidState().isSource())
                 .sorted(Comparator.comparingLong(pos -> squared(pos, center)))
                 .toList();
         if (hits.isEmpty()) {
+            if (sourcesOnly) return new IntentAction.Report(TaskResult.fail(
+                    "no_source_block: no collectable fluid source was found in the loaded search area; flowing fluid cannot fill an empty bucket",
+                    Map.of("failure_type", "target_lost", "failure_code", "no_source_block", "block_id", id.toString(),
+                            "searched_loaded_radius", radius, "loaded_scan_complete", query.complete(), "native_action_submitted", false)), null);
             JsonObject facts = new JsonObject();
             facts.addProperty("block_id", id.toString());
             facts.addProperty("searched_loaded_radius", radius);

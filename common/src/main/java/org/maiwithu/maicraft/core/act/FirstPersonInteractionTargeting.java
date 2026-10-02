@@ -15,6 +15,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BucketPickup;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.LiquidBlockContainer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -43,6 +45,15 @@ public final class FirstPersonInteractionTargeting {
     /** 桶由原版 useItem 沿视线取水／倒水，不要改成点击水后面的机器。 */
     public static boolean usesBucketRay(Item item) {
         return item instanceof BucketItem;
+    }
+
+    /** 空桶收取液态方块时需要源格；倒桶、细雪和可含水部件保留各自的原生交互规则。 */
+    public static boolean requiresFluidSource(Item item, Block block) {
+        return item == Items.BUCKET && block instanceof LiquidBlock;
+    }
+
+    public static boolean uncollectibleFlow(Item item, BlockState state) {
+        return requiresFluidSource(item, state.getBlock()) && !state.getFluidState().isSource();
     }
 
     // 空桶射线会命中水源；装着东西的桶忽略流体，寻找能供倒水定位的方块表面。

@@ -107,7 +107,17 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         return List.of(() -> r.item == null || PlayerInv.count(player.getInventory(), r.item) > 0 ? null
                 : new Precondition.Failure(
                         "don't have " + BuiltInRegistries.ITEM.getKey(r.item).getPath() + " to use",
-                        FailureType.NO_MATERIAL));
+                        FailureType.NO_MATERIAL),
+                () -> uncollectibleSource() ? new Precondition.Failure(
+                        "not_a_source_block: the target is flowing fluid; an empty bucket cannot collect it and no use was submitted",
+                        FailureType.NOT_A_SOURCE_BLOCK) : null);
+    }
+
+    // 起步前、接近途中和出手前都核对同一源格；已经提交的取水仍先结清回执，不能被消失的源格截断。
+    private boolean uncollectibleSource() {
+        if (interaction != null || r.aim == null || r.button != MouseButton.RIGHT || !player.level().isLoaded(r.aim)) return false;
+        var item = r.emptyHand ? Items.AIR : r.item == null ? player.getMainHandItem().getItem() : r.item;
+        return FirstPersonInteractionTargeting.uncollectibleFlow(item, player.level().getBlockState(r.aim));
     }
 
     @Override
@@ -153,6 +163,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected boolean reached() {
+        if (uncollectibleSource()) return true; // 立即进入明确失败分支，不为已经流走的源格重新寻路。
         // 收回水或岩浆后源格已经消失，仍须继续结算刚才的原生使用；出手前的射线检查不能截断待确认回执。
         if (interaction != null || r.aim == null) return true;
         if (!r.approachTarget) return withinReach();
@@ -164,6 +175,10 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     @Override
     protected TaskState act() {
+        if (uncollectibleSource()) {
+            fail("not_a_source_block: the target became flowing fluid; no bucket use was submitted", FailureType.NOT_A_SOURCE_BLOCK);
+            return TaskState.FAILED;
+        }
         // 已到点击距离也要先让交通完成落地与装备恢复；同刻打开腾手背包会反过来挡住交通收尾，造成互相等待。
         if (r.approachTarget && nav != null) { stopNav(); return TaskState.RUNNING; }
         if (r.heldItemUseOnly) return useHeldItem();
@@ -487,6 +502,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
+        if (lastFailure() == FailureType.NOT_A_SOURCE_BLOCK) {
+            data.put("failure_code", "not_a_source_block"); data.put("native_action_submitted", false);
+        }
         if (!approachFailureEvidence.isEmpty()) data.put("navigation", approachFailureEvidence);
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         if (r.observeMenu) {
