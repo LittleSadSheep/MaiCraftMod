@@ -4,6 +4,8 @@ import baritone.Baritone;
 import baritone.api.utils.input.Input;
 import baritone.behavior.LookBehavior;
 import baritone.behavior.PathingBehavior;
+import baritone.process.CustomGoalProcess;
+import baritone.process.elytra.NullElytraProcess;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.BlockBreakHelper;
 import baritone.utils.InputOverrideHandler;
@@ -19,6 +21,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import sun.misc.Unsafe;
 import baritone.api.Settings;
@@ -67,7 +70,37 @@ public final class NavigationHandoffTest {
         replacedBodyDiscardsOrphanRoutes(false);
         replacedBodyDiscardsOrphanRoutes(true);
         suspendedWorkCanResumeAfterAnotherNavigator();
+        pureWalkingRestoresLostDispatch();
         System.out.println("NavigationHandoffTest: passed");
+    }
+
+    /** 用真实 CustomGoalProcess 回放纯行走请求丢失；恢复重新生成同一个目的地的路径命令，仍保持 PRESERVE 许可。 */
+    private static void pureWalkingRestoresLostDispatch() throws Exception {
+        for (boolean eventDelivered : new boolean[]{true, false}) try (var world = new InteractionWorldTestHarness(); var fixture = new Fixture(world.player)) {
+            var backend = (Baritone) field(PathingBehavior.class, "baritone").get(fixture.pathing);
+            var custom = new CustomGoalProcess(backend);
+            set(backend, "customGoalProcess", custom); set(backend, "elytraProcess", new NullElytraProcess(backend));
+            backend.getPathingControlManager().registerProcess(custom);
+            set(fixture.pathing, "current", null);
+            var target = GoalCompiler.standOn(new BlockPos(10, 1, 3));
+            set(fixture.nav, "compiled", target); set(fixture.nav, "goal", target.goal());
+            for (int tick = 0; tick < 40; tick++) {
+                world.nextTick(); fixture.nav.observeDrivenState(ClientRuntime.requireContext(world.player), eventDelivered);
+            }
+            check(custom.isActive() && custom.getGoal().isInGoal(10, 1, 3), "lost pure-walking goal was restored to the real Baritone process");
+            var command = custom.onTick(false, true);
+            check(command.goal.isInGoal(10, 1, 3) && fixture.nav.permit() == TerrainPermit.PRESERVE,
+                    "restored route uses the original target without escalating terrain permission");
+            // 若同一请求再次完全没有搜索，停止并指明故障组件，不以地形无解结束。
+            custom.onLostControl();
+            for (int tick = 0; tick < 40; tick++) {
+                world.nextTick(); fixture.nav.observeDrivenState(ClientRuntime.requireContext(world.player), eventDelivered);
+            }
+            check(fixture.nav.failType() == FailureType.PLANNING_STALL
+                    && fixture.nav.healthDiagnostics().get("component").equals(eventDelivered ? "pathing_control" : "pathing_event_dispatch"),
+                    "failed recovery identifies whether command control or tick dispatch stayed idle");
+            check(world.itemUses() == 0 && world.blockUses() == 0, "dispatch recovery never edits the world or inventory");
+        }
     }
 
     private static void fluidAimWaitsForReleasedNavigation() throws Exception {

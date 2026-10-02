@@ -406,6 +406,9 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     public void forceCancel() { // exposed on public api because :sob:
         cancelEverything();
         secretInternalSegmentCancel();
+        // 新导航不能继承旧进程的暂停、失败标签或执行上下文；实际旧失败已由任务在退役前冻结。
+        pauseRequestedLastTick = false; pausedThisTick = false; unpausedLastTick = false;
+        context = null; customCalculationContext = null; lastCalculationResult = null; calculationStalled = false;
     }
 
     public CalculationContext secretInternalGetCalculationContext() {
@@ -613,6 +616,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     }
 
     public boolean calculationStalled() { return calculationStalled; }
+    public long drivenTicks() { return drivenTicks; }
     public boolean calculationErrored() { return lastCalculationResult == PathCalculationResult.Type.EXCEPTION; }
 
     /** 默认回执分别呈现真正无解、搜索停滞与已有执行路线，不能仅以“没有位移”反推搜索结论。 */

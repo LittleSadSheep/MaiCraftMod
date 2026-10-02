@@ -332,10 +332,13 @@ public final class EmbeddedBaritoneRuntime {
                     context.tickRevision(), "driving_pathfinder", BUILD_SCAFFOLDS.diagnostics());
             BiFunction<EventState, TickEvent.Type, TickEvent> events =
                     TickEvent.createNextProvider();
+            var pathing = (PathingBehavior) baritone.getPathingBehavior();
+            long previousPathingTick = pathing.drivenTicks();
             baritone.getGameEventHandler().onTick(
                     events.apply(EventState.PRE, TickEvent.Type.IN));
             baritone.getGameEventHandler().onPostTick(
                     events.apply(EventState.POST, TickEvent.Type.IN));
+            if (owner == current) current.observeDrivenState(context, pathing.drivenTicks() > previousPathingTick);
             lastDrivenOwner = current;
             lastDrivenRevision = context.tickRevision();
         } catch (RuntimeException failure) {
@@ -518,6 +521,18 @@ public final class EmbeddedBaritoneRuntime {
     static Map<String, Object> searchDiagnostics(EmbeddedBaritoneNavigator navigator) {
         return owner == navigator && backend != null
                 ? ((PathingBehavior) backend.getPathingBehavior()).searchDiagnostics() : Map.of();
+    }
+
+    static boolean preparingNativeAction() { return ACTIONS.pending() || BUILD_SCAFFOLDS.pending(); }
+
+    /** 已授权驱动却始终没有搜索时重交原目标；不改材料、身体和许可，也不打断未确认的原生动作。 */
+    static boolean recoverIdleRoute(EmbeddedBaritoneNavigator navigator, GoalCompiler.Compiled compiled, LocalPlayerContext context) {
+        if (owner != navigator || compiled == null || backend == null || preparingNativeAction()
+                || !context.permitsNativeActions() || !context.mutationAvailable() || !context.player().onGround()
+                || !isSafeToCancel(navigator) || hasConcretePath(navigator) || planningInFlight(navigator)) return false;
+        physicalObservationOrigin = null;
+        replaceActiveRoute(navigator, compiled, context, "recovering a navigation request that never reached the planner");
+        return true;
     }
 
     private static EmbeddedBaritoneNavigator lastDrivenOwner;

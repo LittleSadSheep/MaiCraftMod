@@ -8,6 +8,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
@@ -18,6 +19,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
@@ -77,6 +80,9 @@ public final class EmbeddedBaritoneNavigator {
     private Map<String, Object> failureEvidence = Map.of();
     private Map<String, Object> dispatchEvidence = Map.of();
     private Map<String, Object> healthEvidence = Map.of();
+    private boolean healthLatched;
+    private final NavigationDispatchWatchdog dispatchWatchdog = new NavigationDispatchWatchdog();
+    private Map<String, Object> dispatchRecovery = Map.of();
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -530,8 +536,39 @@ public final class EmbeddedBaritoneNavigator {
     public Map<String, Object> dispatchEvidence() { return dispatchEvidence; }
     public Map<String, Object> healthDiagnostics() {
         var current = EmbeddedBaritoneRuntime.searchDiagnostics(this);
-        if (!current.isEmpty()) healthEvidence = current;
-        return healthEvidence;
+        if (!healthLatched && !current.isEmpty()) healthEvidence = current;
+        if (dispatchRecovery.isEmpty()) return healthEvidence;
+        var facts = new LinkedHashMap<String, Object>(healthEvidence);
+        facts.put("dispatch_recovery", dispatchRecovery); facts.put("dispatch_restart_count", dispatchWatchdog.restarts());
+        return Map.copyOf(facts);
+    }
+
+    /** 纯行走与施工共用的驱动健康检查：只在角色可安全交接且没有待确认动作时恢复丢失的搜索请求。 */
+    void observeDrivenState(LocalPlayerContext context, boolean pathingTickObserved) {
+        if (terminalFailure || pendingFailureType != null || pendingPause) return;
+        healthLatched = false;
+        boolean path = EmbeddedBaritoneRuntime.hasConcretePath(this);
+        boolean nativeWait = EmbeddedBaritoneRuntime.preparingNativeAction();
+        boolean ready = context.permitsNativeActions() && context.mutationAvailable() && player.onGround() && isSafeToCancel() && !nativeWait;
+        boolean work = path || EmbeddedBaritoneRuntime.planningInFlight(this) || calculationFailed || goal == null || goal.isAt(feet());
+        var action = dispatchWatchdog.observe(context.tickRevision(), ready, work, progress.recent(player.level().getGameTime(), 0));
+        if (nativeWait || path && stallTicks() > 200) {
+            latchHealth("execution_blocked", nativeWait ? "native_action_confirmation" : "movement_execution");
+        }
+        if (action == NavigationDispatchWatchdog.Action.NONE) return;
+        latchHealth("planning_stall", pathingTickObserved ? "pathing_control" : "pathing_event_dispatch");
+        dispatchRecovery = healthEvidence;
+        if (action == NavigationDispatchWatchdog.Action.RESTART && EmbeddedBaritoneRuntime.recoverIdleRoute(this, compiled, context)) {
+            Constants.LOG.warn("[maicraft-path] restored undispatched goal with unchanged terrain permission {}; {}", permit, healthDiagnostics());
+            return;
+        }
+        failWhenSafe(FailureType.PLANNING_STALL, "planning_stall: authorized navigation never submitted a search after bounded recovery; " + healthDiagnostics());
+    }
+
+    private void latchHealth(String classification, String component) {
+        var facts = new LinkedHashMap<String, Object>(EmbeddedBaritoneRuntime.searchDiagnostics(this));
+        facts.put("classification", classification); facts.put("component", component);
+        healthEvidence = Map.copyOf(facts); healthLatched = true;
     }
 
     // 搜索尚未提交时也保存调度事实，任务超时或缺少路径事件不能再被解释成 A* 已判定无路。
@@ -539,6 +576,11 @@ public final class EmbeddedBaritoneNavigator {
                          String phase, Map<String, Object> scaffold) {
         dispatchEvidence = Map.of("phase", phase, "actor_tick", tick, "drive_requested", requested,
                 "scheduler_allowed", allowed, "mutation_available", mutationAvailable, "scaffold_preparation", scaffold);
+        // 正常菜单确认与人工暂停不计入搜索丢失；回执仍指出当前真正阻塞身体执行的环节。
+        if (!requested || !allowed || phase.equals("preparing_scaffold")) {
+            dispatchWatchdog.observe(tick, false, false, false);
+            latchHealth("execution_blocked", phase.equals("preparing_scaffold") ? "inventory_preparation" : "body_dispatch");
+        }
     }
 
     public FailureType failType() {
