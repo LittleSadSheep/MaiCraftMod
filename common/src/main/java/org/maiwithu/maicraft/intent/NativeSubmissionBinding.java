@@ -11,6 +11,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.core.task.base.NativeSubmissionJournal;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestActionRequest;
 
 /** 用持久总任务身份绑定单次原生提交；先保存任务再预留操作编号，重启或补前置步骤都不能重复放行。 */
 final class NativeSubmissionBinding {
@@ -74,6 +75,12 @@ final class NativeSubmissionBinding {
     }
 
     private static JsonObject identityGoal(Goal source) {
+        if (QuestAbilityAdapter.ABILITY.equals(source.ability())) {
+            // 刷新选择项引用、大小写或目标说明都不等于再领一次；同一父步骤按原生对象固定消费身份。
+            JsonObject identity = new JsonObject(), parameters = FtbQuestActionRequest.parse(source.parameters()).json();
+            parameters.remove("choice_uri"); identity.addProperty("ability", source.ability()); identity.add("parameters", parameters);
+            return identity;
+        }
         JsonObject goal = source.toJson(); JsonObject parameters = goal.getAsJsonObject("parameters");
         // v2重启后只更新场地观察不代表再次消费；仅忽略这一个临时引用，配方、预算、地点和旧附魔目标均原样计入身份。
         if ((MachineAbilityAdapter.OPERATE.equals(source.ability()) || MachineAbilityAdapter.BUILD.equals(source.ability()))

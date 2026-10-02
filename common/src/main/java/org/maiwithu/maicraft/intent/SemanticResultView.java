@@ -156,6 +156,8 @@ public final class SemanticResultView {
     }
 
     private static Object sanitizeEntry(String key, Object value) {
+        // 任务书回执中的箱包组件槽位、传送位置和物品变化都是已观察事实，不能再按内部动作字段删掉。
+        if (key.equals("quest_action")) return value;
         // 无路快照及调度中的身体格、备料槽位和许可都是观察事实，不能当作内部路线脚本删掉。
         if (key.equals("ground_failure") || key.equals("ground_dispatch") || key.equals("ground_health")) return value;
         // 原生资源和库存成员标识用于判断是否同一视图，不能把其中的坐标片段洗成同一占位词而合并不同置物台。

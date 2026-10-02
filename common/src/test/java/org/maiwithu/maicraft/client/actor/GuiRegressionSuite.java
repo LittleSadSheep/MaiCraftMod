@@ -147,6 +147,9 @@ import org.maiwithu.maicraft.core.task.supply.BuildSupplyHandoffTest;
 import org.maiwithu.maicraft.core.task.supply.BuildSupplyUncertaintyTest;
 import org.maiwithu.maicraft.core.task.supply.MaterialSupplyReturnPolicyTest;
 import org.maiwithu.maicraft.intent.ChatAbilityTest;
+import org.maiwithu.maicraft.intent.QuestAbilityContractTest;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestActionTargetTest;
+import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestActionSessionTest;
 import org.maiwithu.maicraft.intent.AcquireGoalTest;
 import org.maiwithu.maicraft.intent.CookGoalTest;
 import org.maiwithu.maicraft.intent.ExactInteractionTargetTest;
@@ -193,6 +196,11 @@ public final class GuiRegressionSuite {
         // 聊天被界面挡住时由执行器原生关闭并续发，旧物品事务和消息提交各自只结算一次。
         ChatGuiPreparationTest.main(args);
         ChatAbilityTest.main(args);
+        // 任务书按钮只发一次原生请求，暂停、重启、重复任务重置与大回执都要保留真实效果。
+        FtbQuestActionTargetTest.main(args);
+        FtbQuestActionSessionTest.main(args);
+        FtbQuestSubmissionTest.main(args);
+        QuestAbilityContractTest.main(args);
         MenuVisibilityTest.main(args);
         // 普通任务终局和世界动作都原生退出挡路页面，菜单步骤仍保留自己需要的真实容器。
         GuiRecoveryTest.main(args);
