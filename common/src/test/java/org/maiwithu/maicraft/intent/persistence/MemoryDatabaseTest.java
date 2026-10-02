@@ -27,6 +27,20 @@ public final class MemoryDatabaseTest {
             check(new MemoryDatabase(file).read("state", "world", 100).equals("任务一"), "重启必须从真实数据库恢复");
             check(database.read("machines", "world", 100, 100, (json, docs) -> docs.apply("blueprint")).equals("完整蓝图"), "机器蓝图独立归档");
             check(database.read("state", "other-world", 100).equals("另一世界"), "世界身份不能混用");
+            // 多份工程各有稳定编号，重复原生预约不能靠替换单条记录取得第二次提交资格。
+            check(database.writeRecord("native", "world", "operation", "已预约", true), "首次预约应真实入库");
+            check(!database.writeRecord("native", "world", "operation", "重复预约", true), "唯一预约被覆盖");
+            check(database.readRecord("native", "world", "operation", 100).equals("已预约"), "预约内容发生变化");
+            database.writeRecord("receipts", "world", "temporary", "观察原件", true);
+            database.deleteRecord("receipts", "world", "temporary");
+            check(!database.containsRecord("receipts", "world", "temporary") && database.containsRecord("native", "world", "operation"),
+                    "回执清理删除了原生预约");
+            var identity = new StateIdentity("a".repeat(64), directory);
+            var documentsStore = new MemoryDocuments(identity, "models");
+            Path legacy = directory.resolve("model.json"); Files.writeString(legacy, "原模型");
+            check(documentsStore.load("model", legacy, 100, value -> value).equals("原模型"), "旧模型未迁移");
+            Files.writeString(legacy, "过时模型");
+            check(documentsStore.load("model", legacy, 100, value -> value).equals("原模型"), "旧文件覆盖了数据库模型");
             // 导入旧 JSON 时已有数据库记录优先，不能用旧快照和旧图纸覆盖较新的施工进度。
             database.write("state", "world", "旧任务", Map.of("stale", "旧图纸"), true);
             check(database.read("state", "world", 100).equals("任务一"), "重复迁移覆盖了新进度");
