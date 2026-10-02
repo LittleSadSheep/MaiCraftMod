@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import org.maiwithu.maicraft.core.build.BuildingBudgetReport;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeReferences;
 
 /** 向模型说明公开语义字段的契约，不暴露内部动作细节。 */
 public final class SemanticAbilityCatalog {
@@ -16,6 +17,9 @@ public final class SemanticAbilityCatalog {
 
     public static JsonObject describe(String ability) {
         JsonObject description = describeContract(ability);
+        // 模型已经选定能力后，相关资料随完整契约出现；入口只供具体知识缺口使用，不增加执行前置步骤。
+        JsonArray references = KnowledgeReferences.forAbility(ability);
+        if (!references.isEmpty()) description.add("related_knowledge", references);
         if (MachineAbilityAdapter.DESIGN.equals(ability) || MachineAbilityAdapter.BUILD.equals(ability)
                 || MachineAbilityAdapter.MODIFY.equals(ability)) {
             var budget = MachinePlanningBudget.current();
