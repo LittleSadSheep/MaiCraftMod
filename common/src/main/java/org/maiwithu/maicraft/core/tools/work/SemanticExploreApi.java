@@ -29,6 +29,13 @@ public final class SemanticExploreApi {
 
     public static SemanticExploreTaskRecord newRecord(
             ToolContext context, String target, Integer maxDistance, Boolean mayAlterTerrain, String transportMode) {
+        return newRecord(context, target, maxDistance, mayAlterTerrain, transportMode, null, null, null);
+    }
+
+    /** 方向和开口角随任务保存，移动子任务只接收 Mod 从该扇区观察到的航点。 */
+    public static SemanticExploreTaskRecord newRecord(
+            ToolContext context, String target, Integer maxDistance, Boolean mayAlterTerrain, String transportMode,
+            String direction, Integer angleDegrees, Integer minDistance) {
         int distance = Math.clamp(
                 maxDistance == null ? DEFAULT_MAX_DISTANCE : maxDistance,
                 SemanticExploreTaskRecord.MIN_DISTANCE,
@@ -37,6 +44,6 @@ public final class SemanticExploreApi {
                 MIN_INITIAL_LEASE_TICKS, MAX_INITIAL_LEASE_TICKS);
         return new SemanticExploreTaskRecord(
                 context.toolCallId(), context.deadline(initialLease), target, distance,
-                Boolean.TRUE.equals(mayAlterTerrain), TransportMode.parse(transportMode));
+                Boolean.TRUE.equals(mayAlterTerrain), TransportMode.parse(transportMode), direction, angleDegrees, minDistance);
     }
 }

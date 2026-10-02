@@ -118,6 +118,9 @@ public final class SemanticExploreCompanionTask
     private String canonicalTarget;
     private String inputFailure;
     private BlockPos origin;
+    private ExplorationSector.Area sector;
+    private boolean survey;
+    private String surveyStopReason;
     private Stage stage;
 
     private int observationColumn;
@@ -172,6 +175,7 @@ public final class SemanticExploreCompanionTask
 
     @Override protected void onStart() {
         origin = player.blockPosition().immutable();
+        sector = r.sector.at(origin.getX(), origin.getZ(), player.getYRot());
         spiral = new SpiralWalker(origin, WAYPOINT_GRID);
         ClientLevel level = ClientRuntime.requireContext(player).level();
         if (!resolveTarget(level, r.target)) {
@@ -200,9 +204,12 @@ public final class SemanticExploreCompanionTask
 
     private boolean resolveTarget(ClientLevel level, String raw) {
         String target = raw.trim();
-        if ("coast".equalsIgnoreCase(target)) {
-            targetKind = TargetKind.COAST;
-            canonicalTarget = "coast";
+        if ("survey".equals(target)) {
+            // 自由跑图没有预设群系；观察完一轮就继续推进，不能把脚下任意群系当作抵达目标。
+            survey = true;
+            targetKind = TargetKind.BIOME;
+            canonicalTarget = "survey";
+            biomeMatch = holder -> true;
             return true;
         }
         var registry = level.registryAccess().lookupOrThrow(Registries.BIOME);
@@ -294,7 +301,7 @@ public final class SemanticExploreCompanionTask
                 if (biomeYIndex >= biomeSampleCount(level)) {
                     advanceObservationColumn();
                 }
-                if (found != null && !rejectedTargets.contains(found.approach().asLong())) {
+                if (!survey && found != null && !rejectedTargets.contains(found.approach().asLong())) {
                     return startTargetTravel(found);
                 }
             }
@@ -354,6 +361,8 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState startTargetTravel(TargetCandidate found) {
+        // 较近的侧后方群系不能替代指定方向上的目标；候选落脚点与最终站位都按同一扇区核实。
+        if (!sector.accepts(found.approach().getX(), found.approach().getZ())) return TaskState.RUNNING;
         // 前往语义目的地前先看到其证据位置，不能凭已加载的地下生物群系或墙后水域导航进去。
         if (!ObservationVisibility.block(player, found.evidence()))
             return TaskState.RUNNING;
@@ -365,6 +374,12 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState startNextWaypoint(ClientLevel level) {
+        // 抵达请求范围边缘后结束本轮跑图；这只证明真实推进到边缘，不宣称每个区块都已覆盖。
+        if (survey && waypointReached > 0 && horizontalDistance(origin, player.blockPosition())
+                >= r.maxDistance - Math.min(16, r.maxDistance / 8)) {
+            surveyStopReason = "radius_reached";
+            return TaskState.SUCCESS;
+        }
         if (waypointAttempts >= r.maxWaypoints) {
             return exhausted();
         }
@@ -451,7 +466,8 @@ public final class SemanticExploreCompanionTask
         TargetCandidate verified = null;
         if (targetKind == TargetKind.BIOME) {
             BlockPos feet = player.blockPosition();
-            if (level.isLoaded(feet) && biomeMatch.test(level.getBiome(feet))) {
+            if (level.isLoaded(feet) && biomeMatch.test(level.getBiome(feet))
+                    && sector.accepts(feet.getX(), feet.getZ())) {
                 verified = new TargetCandidate(feet, feet,
                         "body position is inside " + biomeId(level, feet));
             }
@@ -692,6 +708,10 @@ public final class SemanticExploreCompanionTask
     }
 
     private BlockPos nextWaypoint(ClientLevel level) {
+        if (r.sector.direction() != null) {
+            return ExplorationFrontiers.next(player.blockPosition(), sector, r.maxDistance,
+                    attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()));
+        }
         selectedWaypointShoreReturn = false;
         waypointSelectionDeferred = false;
         if (targetKind.frontierSurfacePreference == FrontierSurfacePreference.DRY_LAND) {
@@ -894,6 +914,10 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState exhausted() {
+        if (survey && waypointReached > 0) {
+            surveyStopReason = "reachable_frontiers_exhausted";
+            return TaskState.SUCCESS;
+        }
         fail("bounded exploration finished without verifying " + canonicalTarget
                         + "; searched only the initial client view and terrain loaded by real "
                         + "travel within "
@@ -977,8 +1001,13 @@ public final class SemanticExploreCompanionTask
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("target", canonicalTarget == null ? r.target : canonicalTarget);
         data.put("verified", verifiedPosition != null);
+        if (survey) {
+            data.put("survey_stop_reason", surveyStopReason == null ? "interrupted_or_blocked" : surveyStopReason);
+            data.put("coverage", "sampled_observed_terrain_not_exhaustive");
+        }
         data.put("scope", "initial_client_view_and_first_person_loaded_terrain");
         data.put("max_distance", r.maxDistance);
+        if (sector != null) data.put("search_sector", sector.describe());
         data.put("origin", Map.of("x", origin.getX(), "y", origin.getY(), "z", origin.getZ()));
         data.put("final_position", Map.of(
                 "x", player.getX(), "y", player.getY(), "z", player.getZ()));
@@ -1042,6 +1071,7 @@ public final class SemanticExploreCompanionTask
     }
 
     @Override protected String successMessage() {
+        if (survey) return "map survey finished: " + surveyStopReason + "; only actually observed terrain is recorded";
         return "verified " + canonicalTarget + " at " + shortPos(verifiedPosition)
                 + " after real first-person exploration";
     }

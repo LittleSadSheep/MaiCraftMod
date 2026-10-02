@@ -23,6 +23,7 @@ public final class SemanticExploreTaskRecord extends TaskRecord
     public final int maxWaypoints;
     public final boolean mayAlterTerrain;
     public final TransportMode transportMode;
+    public final ExplorationSector sector;
     private Position verifiedPosition;
 
     public SemanticExploreTaskRecord(
@@ -34,6 +35,14 @@ public final class SemanticExploreTaskRecord extends TaskRecord
     public SemanticExploreTaskRecord(
             String toolCallId, long deadlineGameTime, String target,
             int maxDistance, boolean mayAlterTerrain, TransportMode transportMode) {
+        this(toolCallId, deadlineGameTime, target, maxDistance, mayAlterTerrain, transportMode, null, null, null);
+    }
+
+    /** 探索请求只声明目标和方向扇区；相对方向在角色实际开始任务时才固定。 */
+    public SemanticExploreTaskRecord(
+            String toolCallId, long deadlineGameTime, String target,
+            int maxDistance, boolean mayAlterTerrain, TransportMode transportMode,
+            String direction, Integer angleDegrees, Integer minDistance) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.transportMode = transportMode == null ? TransportMode.AUTO : transportMode;
         if (this.transportMode == TransportMode.JETPACK || this.transportMode == TransportMode.ELEVATOR) {
@@ -44,8 +53,10 @@ public final class SemanticExploreTaskRecord extends TaskRecord
             throw new IllegalArgumentException(
                     "explore target is required: coast, a namespaced biome id, or #biome_tag");
         }
-        this.target = target.trim();
+        // 海岸按玩家约定就是沙滩群系，不再要求岸边另外满足海洋水域特征。
+        this.target = "coast".equalsIgnoreCase(target.trim()) ? "minecraft:beach" : target.trim();
         this.maxDistance = Math.clamp(maxDistance, MIN_DISTANCE, MAX_DISTANCE);
+        this.sector = ExplorationSector.of(direction, angleDegrees, minDistance, this.maxDistance);
         int rings = Math.max(1, (this.maxDistance + WAYPOINT_GRID - 1) / WAYPOINT_GRID);
         // 覆盖范围由目标区域决定，不使用任意尝试次数上限。在 MAX_DISTANCE 下仍是较小的有限网格，运行时会对已访问边界去重。
         this.maxWaypoints = Math.max(8, rings * rings * 4);

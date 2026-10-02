@@ -1,0 +1,33 @@
+package org.maiwithu.maicraft.core.task.explore;
+
+import java.util.Set;
+import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+
+/** 扇区里按不同角度寻找已加载的新落点；窄扇区也能推进，不要求恰好撞上整数网格。 */
+public final class ExplorationFrontiers {
+    private ExplorationFrontiers() {}
+
+    public static BlockPos next(BlockPos current, ExplorationSector.Area sector, int radius,
+            Set<Long> attempted, Predicate<BlockPos> loaded) {
+        BlockPos best = null;
+        double bestScore = -Double.MAX_VALUE;
+        double half = sector.request().angleDegrees() / 2.0;
+        for (int ray = 0; ray <= 16; ray++) {
+            double angle = Math.toRadians(sector.bearing() - half + ray * half / 8);
+            for (int distance = 80; distance >= 16; distance -= 16) {
+                BlockPos candidate = new BlockPos(current.getX() + (int) Math.round(Math.sin(angle) * distance),
+                        current.getY(), current.getZ() - (int) Math.round(Math.cos(angle) * distance));
+                double fromOrigin = Math.hypot(candidate.getX() - sector.originX(), candidate.getZ() - sector.originZ());
+                if (fromOrigin > radius || !sector.contains(candidate.getX(), candidate.getZ()) || !loaded.test(candidate)) continue;
+                // 已走过或已证实走不通的十六格邻域不再反复选；真正可达性交给原生移动核实。
+                if (attempted.stream().map(BlockPos::of).anyMatch(previous ->
+                        Math.hypot(previous.getX() - candidate.getX(), previous.getZ() - candidate.getZ()) < 16)) continue;
+                double score = fromOrigin + distance * 0.2 - Math.abs(ray - 8) * 0.1;
+                if (score > bestScore) { best = candidate; bestScore = score; }
+            }
+        }
+        if (best != null) attempted.add(BlockPos.asLong(best.getX(), 0, best.getZ()));
+        return best;
+    }
+}
