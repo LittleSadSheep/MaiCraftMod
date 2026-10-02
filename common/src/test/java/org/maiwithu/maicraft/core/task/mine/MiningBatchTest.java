@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.mine;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -65,7 +66,41 @@ public final class MiningBatchTest {
         check(MiningBatch.shouldCollect(0, 24, 1, 0, true), "a dangerous or expiring drop did not preempt batching");
         check(MiningBatch.shouldCollect(0, 24, 1, 1200, false), "loot was left behind indefinitely to extend a batch");
         pickupUsesTheRealTouchEnvelope();
+        settleReportsGroundLeftovers();
         System.out.println("MiningBatchTest: passed");
+    }
+
+    /** 数量达标但归属掉落物仍在场时，回执必须如实报数并留下证据，不得宣称全部 settle（021）。 */
+    private static void settleReportsGroundLeftovers() throws Exception {
+        Field field = Unsafe.class.getDeclaredField("theUnsafe");
+        field.setAccessible(true);
+        Unsafe memory = (Unsafe) field.get(null);
+        var taskClass = MineCompanionTask.class;
+        Method record = taskClass.getDeclaredMethod("recordSettledRemainingDrops");
+        record.setAccessible(true);
+        Field note = taskClass.getDeclaredField("progressNote"); note.setAccessible(true);
+        Field live = taskClass.getDeclaredField("liveOwnedDrops"); live.setAccessible(true);
+        Field evidence = taskClass.getDeclaredField("remainingLiveDrops"); evidence.setAccessible(true);
+
+        Object task = memory.allocateInstance(taskClass);
+        ItemEntity drop = new ObservedDrop(new net.minecraft.world.item.ItemStack(
+                net.minecraft.world.item.Items.RAW_IRON, 1));
+        drop.setPos(283.5, 62.0, 163.5);
+        live.set(task, java.util.List.of(drop));
+
+        record.invoke(task);
+        check(String.valueOf(note.get(task)).contains("still on the ground uncollected"),
+                "a settled count with live matching drops must not claim every drop was collected");
+        var listed = (java.util.List<?>) evidence.get(task);
+        check(listed.size() == 1 && listed.getFirst().toString().contains("minecraft:raw_iron"),
+                "the settle receipt must list the leftover drop as evidence");
+
+        live.set(task, java.util.List.of());
+        record.invoke(task);
+        check(String.valueOf(note.get(task)).contains("settled every loaded attributable matching drop"),
+                "a clean field keeps the original settled wording");
+        check(((java.util.List<?>) evidence.get(task)).isEmpty(),
+                "a clean field must not keep stale leftover evidence");
     }
 
     private static void pickupUsesTheRealTouchEnvelope() throws Exception {
@@ -85,6 +120,16 @@ public final class MiningBatchTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    /** 与 DroppedItemPickupTest.ObservedItem 同款：绕开惰性实体的未初始化物品字段。 */
+    private static final class ObservedDrop extends ItemEntity {
+        private final net.minecraft.world.item.ItemStack stack;
+        private ObservedDrop(net.minecraft.world.item.ItemStack stack) {
+            super(net.minecraft.world.entity.EntityType.ITEM, null);
+            this.stack = stack;
+        }
+        @Override public net.minecraft.world.item.ItemStack getItem() { return stack; }
     }
 
     private static final class TestWorld implements BlockGetter {

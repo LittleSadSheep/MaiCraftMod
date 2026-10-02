@@ -160,6 +160,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private int ambiguousMergedDropCount;
     /** 角色靠近但背包尚未增加时的等待计数；每次确认物品入包后清零。 */
     private int dropCloseTicks;
+    /** 数量达标结算时仍在场内的归属掉落物快照；数量到达与地上收净是两件事，回执分开说。 */
+    private List<Map<String, Object>> remainingLiveDrops = List.of();
     private final PickupNavigationRetry pickupNavigationRetry = new PickupNavigationRetry();
     private int lastVerifiedGathered;
     /** 无掉落画像(创造)下的进度计数:破坏的目标方块数——背包增量在
@@ -336,7 +338,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 上层取物任务如何看待这种失败另有规则，不由这一段决定。
         if (gathered >= r.count) {
             if (unreachableDropCount > 0) return unreachableDropFailure();
-            progressNote = "gathered all requested and settled every loaded attributable matching drop";
+            recordSettledRemainingDrops();
             return TaskState.SUCCESS;
         }
         if (expectedOutputBudgetExhausted(gathered)) {
@@ -723,6 +725,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                             "item_id", BuiltInRegistries.ITEM.getKey(unreachable.getItem().getItem()).toString(),
                             "count", unreachable.getItem().getCount(),
                             "block_state", player.level().getBlockState(unreachable.blockPosition()).toString(),
+                            "pickup_delay_pending", unreachable.hasPickUpDelay(),
+                            "envelope_wait_ticks", dropCloseTicks,
                             "navigation_failure", String.valueOf(nav.failReason()),
                             "navigation_outcome", String.valueOf(nav.outcomeSummary()));
                     progressNote = "left " + unreachableDropCount
@@ -750,6 +754,23 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return liveOwnedDrops.stream()
                 .min(Comparator.comparingDouble(player::distanceToSqr))
                 .orElse(null);
+    }
+
+    /**
+     * 数量达标不等于地上收净：结算时仍可见的归属掉落物如实列证据。
+     * 笼统宣称"全部 settle"曾让"背包零变化"的收取回归被回执掩盖（021）。
+     */
+    private void recordSettledRemainingDrops() {
+        remainingLiveDrops = liveOwnedDrops.stream().limit(8)
+                .map(drop -> Map.<String, Object>of(
+                        "item", BuiltInRegistries.ITEM.getKey(drop.getItem().getItem()).toString(),
+                        "count", drop.getItem().getCount(),
+                        "position", List.of(drop.getX(), drop.getY(), drop.getZ())))
+                .toList();
+        progressNote = remainingLiveDrops.isEmpty()
+                ? "gathered all requested and settled every loaded attributable matching drop"
+                : "gathered all requested; " + liveOwnedDrops.size()
+                        + " matching drop(s) are still on the ground uncollected";
     }
 
     private boolean inCurrentWorkBatch(BlockPos target) {
@@ -1452,6 +1473,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("confirmed_harvests_truncated", truncatedHarvests);
         data.put("unreachable_drop_count", unreachableDropCount);
         if (!uncollectedDropEvidence.isEmpty()) data.put("uncollected_drop", uncollectedDropEvidence);
+        if (!remainingLiveDrops.isEmpty()) {
+            data.put("remaining_live_drops", remainingLiveDrops);
+            data.put("remaining_live_drops_note",
+                    "count reached while these attributable matching drops were still on the ground; "
+                            + "delivery is decided by inventory totals, not by this list");
+        }
         // 混入旧堆只作为来源观察，不代表未收取；材料数量和任务结论仍由实际背包与原生通行结果决定。
         data.put("ambiguous_merged_drop_count", ambiguousMergedDropCount);
         data.put("pickup_scope", "matching loaded drops near confirmed breaks, regardless of ownership; inventory gains do not prove origin");
