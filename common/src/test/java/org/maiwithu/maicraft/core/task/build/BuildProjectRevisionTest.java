@@ -5,7 +5,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
+import java.sql.DriverManager;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.readMemory;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,26 +50,29 @@ public final class BuildProjectRevisionTest {
                     """);
             arguments.getAsJsonObject("semantic_contract").addProperty("scene_id", parent.sceneId());
             String id = projects.save(DIMENSION, arguments, oldTargets);
-            Path project = root.resolve("build-projects").resolve(WORLD).resolve(id + ".json");
-            Path sidecar = project.resolveSibling(id + ".scaffolds.json");
             h.set(FIRST, Blocks.POLISHED_ANDESITE.defaultBlockState()); h.set(SECOND, Blocks.POLISHED_ANDESITE.defaultBlockState());
             h.set(SUPPORT, LOG);
             var oldPlan = plan(id, oldTargets); projects.bindScaffolds(oldPlan, h.level);
             // 仅夹具模拟此前已经取得的原生支撑确认；修订入口不能补造这一事实。
             oldPlan.scaffoldLedger().confirmed(SUPPORT, LOG);
-            var before = Snapshot.read(project, sidecar); JsonObject oldArguments = projects.load(id, DIMENSION);
-            rejectUnchanged(before, project, sidecar, () -> projects.reviseFromScene(id, h.level, UUID.randomUUID().toString(), child.sceneId(), revised));
+            var before = Snapshot.read(root, id); JsonObject oldArguments = projects.load(id, DIMENSION);
+            // 修订只准替换项目要求；实际支撑账即使原文相同也不应被重新写入。
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + identity.databaseFile()); var sql = connection.createStatement()) {
+                sql.execute("CREATE TRIGGER retained_scaffolds BEFORE UPDATE ON memory_records WHEN OLD.scope='state/build-scaffolds' "
+                        + "BEGIN SELECT RAISE(ABORT,'scaffold_rewrite'); END");
+            }
+            rejectUnchanged(before, root, id, () -> projects.reviseFromScene(id, h.level, UUID.randomUUID().toString(), child.sceneId(), revised));
             var unrelated = scenes.save(scene(), parent.anchor());
-            rejectUnchanged(before, project, sidecar, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), unrelated.sceneId(), revised));
-            rejectUnchanged(before, project, sidecar, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised.subList(0, 2)));
-            rejectUnchanged(before, project, sidecar, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(),
+            rejectUnchanged(before, root, id, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), unrelated.sceneId(), revised));
+            rejectUnchanged(before, root, id, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised.subList(0, 2)));
+            rejectUnchanged(before, root, id, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(),
                     List.of(revised.getFirst(), revised.get(1), target(SUPPORT.east(), true))));
-            rejectUnchanged(before, project, sidecar, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(),
+            rejectUnchanged(before, root, id, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(),
                     List.of(revised.getFirst(), revised.get(1), target(SUPPORT, false))));
             // 同种原木轴向变了也不是原记录；已经消失的支撑需独立结算，修订时不能悄悄覆盖旧账。
             for (BlockState changed : List.of(Blocks.OAK_LOG.defaultBlockState(), Blocks.AIR.defaultBlockState())) {
                 h.set(SUPPORT, changed);
-                rejectUnchanged(before, project, sidecar, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised));
+                rejectUnchanged(before, root, id, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised));
             }
             h.set(SUPPORT, LOG);
             var result = projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised);
@@ -84,12 +89,12 @@ public final class BuildProjectRevisionTest {
             projects.bindScaffolds(resumed, h.level);
             check(resumed.scaffoldLedger().snapshot().equals(Map.of(SUPPORT, LOG)) && resumed.completed() == 0 && resumed.placed() == 0,
                     "the revised project binds its original native support ledger without inventing construction completion");
-            check(before.sidecar().equals(Files.readString(sidecar)) && before.sidecarTime().equals(Files.getLastModifiedTime(sidecar)),
+            check(before.sidecar().equals(readMemory(root, "build-scaffolds", WORLD, id)),
                     "successful revision and binding leave the original support sidecar untouched");
             check(h.level.getBlockState(FIRST).is(Blocks.POLISHED_ANDESITE) && h.level.getBlockState(SECOND).is(Blocks.POLISHED_ANDESITE)
                     && h.blockUses() == 0 && h.itemUses() == 0, "editing the plan does not dig either opening or mutate the player's materials");
-            var after = Snapshot.read(project, sidecar);
-            rejectUnchanged(after, project, sidecar, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised));
+            var after = Snapshot.read(root, id);
+            rejectUnchanged(after, root, id, () -> projects.reviseFromScene(id, h.level, parent.sceneId(), child.sceneId(), revised));
         }
         System.out.println("BuildProjectRevisionTest: scene lineage, fixed coordinates, preserved scaffold ownership and atomic refusal passed");
     }
@@ -106,15 +111,15 @@ public final class BuildProjectRevisionTest {
              "objects":[{"name":"cover","type":"cube","location":[6.5,2,6.5],"dimensions":[1,2,1],"material":"stone"},
                         {"name":"support_clearance","type":"cube","location":[3.5,1.5,3.5],"dimensions":[1,1,1],"material":"air"}]}
             """); }
-    private record Snapshot(String project, FileTime projectTime, String sidecar, FileTime sidecarTime) {
-        static Snapshot read(Path project, Path sidecar) throws Exception {
-            return new Snapshot(Files.readString(project), Files.getLastModifiedTime(project), Files.readString(sidecar), Files.getLastModifiedTime(sidecar));
+    private record Snapshot(String project, String sidecar) {
+        static Snapshot read(Path root, String id) throws Exception {
+            return new Snapshot(readMemory(root, "build-projects", WORLD, id), readMemory(root, "build-scaffolds", WORLD, id));
         }
     }
-    private static void rejectUnchanged(Snapshot before, Path project, Path sidecar, Runnable revision) throws Exception {
+    private static void rejectUnchanged(Snapshot before, Path root, String id, Runnable revision) throws Exception {
         boolean rejected = false;
         try { revision.run(); } catch (IllegalArgumentException | IllegalStateException expected) { rejected = true; }
-        check(rejected && before.equals(Snapshot.read(project, sidecar)), "invalid revision must not overwrite the project or its native support ledger");
+        check(rejected && before.equals(Snapshot.read(root, id)), "invalid revision must not overwrite the project or its native support ledger");
     }
     private static JsonObject json(String text) { return JsonParser.parseString(text).getAsJsonObject(); }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

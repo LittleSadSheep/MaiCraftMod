@@ -84,14 +84,14 @@ public final class BuildingPersistenceBudgetTest {
         rejects(() -> BuildProjectScaffolds.encode(three)); rejects(() -> BuildProjectScaffolds.decode(encoded));
         configure(directory, "maxScaffolds=3\n"); check(BuildProjectScaffolds.decode(encoded).size() == 3, "提高支撑记录预算未生效");
 
-        // 只直接测试 sidecar 的文件读写边界；不调用世界恢复，绝不把这些夹具记录当作真实放置证据。
+        // 直接测试支撑记录的 SQLite 读写预算；不调用世界恢复，也不把夹具当成真实放置证据。
         var store = new BuildProjectStore(new StateIdentity(WORLD, directory)); String id = UUID.randomUUID().toString();
         Path sidecar = directory.resolve("budget-scaffolds.json"); var hundred = scaffolds(100);
-        var write = BuildProjectStore.class.getDeclaredMethod("saveScaffolds", Path.class, String.class, String.class, Map.class);
+        var write = BuildProjectStore.class.getDeclaredMethod("saveScaffolds", String.class, String.class, Map.class);
         var read = BuildProjectStore.class.getDeclaredMethod("readScaffolds", Path.class, String.class, String.class);
         write.setAccessible(true); read.setAccessible(true);
-        configure(directory, "maxScaffoldBytes=4096\n"); rejects(() -> invoke(write, store, sidecar, id, DIMENSION, hundred));
-        configure(directory, "maxScaffoldBytes=65536\n"); invoke(write, store, sidecar, id, DIMENSION, hundred);
+        configure(directory, "maxScaffoldBytes=4096\n"); rejects(() -> invoke(write, store, id, DIMENSION, hundred));
+        configure(directory, "maxScaffoldBytes=65536\n"); invoke(write, store, id, DIMENSION, hundred);
         check(((Map<?, ?>) invoke(read, store, sidecar, id, DIMENSION)).size() == 100, "支撑字节预算升高后没有完整恢复记录");
         configure(directory, "maxScaffoldBytes=4096\n"); rejects(() -> invoke(read, store, sidecar, id, DIMENSION));
     }

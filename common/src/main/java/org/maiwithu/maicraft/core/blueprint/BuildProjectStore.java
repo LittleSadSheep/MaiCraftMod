@@ -5,10 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,18 +18,22 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import org.maiwithu.maicraft.intent.persistence.MemoryDocuments;
 import java.util.HashMap;
 import java.util.Comparator;
 import java.util.stream.Collectors;
 
 /**
- * 把已经决定的建筑位置、材料和施工要求保存到当前世界的文件里，供取消或重启后续建。
+ * 把已经决定的建筑位置、材料和施工要求保存到当前世界的数据库记录，供取消或重启后续建。
  * 不保存可信的“已完成百分比”；重新施工时仍要读取世界，判断哪些格子真正完成。
  */
 public final class BuildProjectStore {
     private final StateIdentity identity;
+    private final MemoryDocuments projects, scaffolds;
 
-    public BuildProjectStore(StateIdentity identity) { this.identity = identity; }
+    public BuildProjectStore(StateIdentity identity) {
+        this.identity = identity; projects = new MemoryDocuments(identity, "build-projects"); scaffolds = new MemoryDocuments(identity, "build-scaffolds");
+    }
 
     public static Optional<BuildProjectStore> available() {
         return StateIdentity.resolve(Minecraft.getInstance()).map(BuildProjectStore::new);
@@ -54,7 +55,8 @@ public final class BuildProjectStore {
         String id = UUID.nameUUIDFromBytes(physical.toString().getBytes(StandardCharsets.UTF_8)).toString();
         JsonObject arguments = new JsonObject(); arguments.addProperty("machine_native_stage", true);
         // 已有档案先走严格恢复，损坏或被替换的支撑不能通过覆盖项目文件掩盖。
-        if (Files.notExists(file(id))) save(id, dimension, arguments, plan.targets);
+        try { if (!projects.exists(id, file(id))) save(id, dimension, arguments, plan.targets); }
+        catch (IOException failure) { throw new IllegalStateException("could not restore machine stage project", failure); }
         plan.project(id, updated -> save(id, dimension, arguments, updated.targets));
         bindScaffolds(plan, level);
     }
@@ -119,29 +121,22 @@ public final class BuildProjectStore {
         frozen.add("project_targets", BuildProjectTargets.encode(targets));
         root.add("arguments", frozen);
         // 冻结目标通常比作者模型大得多，按独立项目预算落盘，避免大建筑能开工却无法续建。
-        write(file(id), root, BuildingBudgets.current().maxProjectBytes());
+        file(id); // 项目编号仍按原 UUID 规则校验，不能因取消文件路径而接纳其他身份。
+        write(projects, id, root, BuildingBudgets.current().maxProjectBytes());
     }
 
-    private static void write(Path file, JsonObject root, int limit) {
+    private static void write(MemoryDocuments documents, String id, JsonObject root, int limit) {
         byte[] bytes = root.toString().getBytes(StandardCharsets.UTF_8);
         if (bytes.length > limit) throw new IllegalArgumentException("build project exceeds storage limit");
-        // 先写同目录临时文件，再替换正式文件；系统不支持原子替换时退回普通替换。失败会报给调用者。
-        Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+        // 项目或支撑账各自一次提交；小账更新不会重写整栋建筑的冻结目标。
         try {
-            Files.createDirectories(file.getParent());
-            Files.write(temporary, bytes);
-            try { Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
-            catch (AtomicMoveNotSupportedException unsupported) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
+            documents.save(id, root.toString(), limit, false);
         } catch (IOException failure) {
             throw new IllegalStateException("could not persist the frozen build project", failure);
-        } finally {
-            try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
         }
     }
 
-    /** 支撑放在轻量独立文件，只在已确认的支撑集合变化时更新，不逐刻重写整栋建筑的数千格目标。 */
+    /** 支撑放在轻量独立记录，只在已确认的集合变化时更新，不逐刻重写整栋建筑的数千格目标。 */
     public void bindScaffolds(BuildTaskRecord plan, Level level) {
         String id = plan.projectId(), dimension = level.dimension().location().toString();
         JsonObject arguments = load(id, dimension);
@@ -158,63 +153,61 @@ public final class BuildProjectStore {
         Map<BlockPos, BlockState> saved = readScaffolds(sidecar, id, dimension);
         Map<BlockPos, BlockState> observed = BuildProjectScaffolds.observed(saved, level, plan.targets);
         // 所有条目均核验后才能绑定回调；加载本身不触发空账写入，旧版本没有文件就保持空账。
-        plan.scaffoldPersistence(observed, current -> saveScaffolds(sidecar, id, dimension, current));
-        if (!observed.equals(saved)) saveScaffolds(sidecar, id, dimension, observed);
+        plan.scaffoldPersistence(observed, current -> saveScaffolds(id, dimension, current));
+        if (!observed.equals(saved)) saveScaffolds(id, dimension, observed);
     }
 
     private Map<BlockPos, BlockState> readScaffolds(Path sidecar, String id, String dimension) {
-        if (Files.notExists(sidecar)) return Map.of();
         try {
-            // 支撑只保存原生已确认的自有记录；调大文件预算不改变身份核验或恢复所有权的条件。
-            int limit = BuildingBudgets.current().maxScaffoldBytes();
-            byte[] bytes;
-            try (var input = Files.newInputStream(sidecar)) { bytes = input.readNBytes(Math.addExact(limit, 1)); }
-            if (bytes.length == 0 || bytes.length > limit) throw new IllegalArgumentException("invalid scaffold ledger size");
-            JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
-            if (root.get("version").getAsInt() != 1 || !id.equals(root.get("project_id").getAsString())
-                    || !identity.key().equals(root.get("world_key").getAsString()) || !dimension.equals(root.get("dimension").getAsString())
-                    || !"native_confirmed_scaffold".equals(root.get("evidence").getAsString()))
-                throw new IllegalArgumentException("saved scaffold identity mismatch");
-            return BuildProjectScaffolds.decode(root.getAsJsonArray("confirmed_scaffolds"));
+            // 旧账完整核对身份和原生证据后才迁移；没有支撑账仍为空，不能收编附近方块。
+            var saved = scaffolds.load(id, sidecar, BuildingBudgets.current().maxScaffoldBytes(), json -> decodeScaffolds(json, id, dimension));
+            return saved == null ? Map.of() : saved;
         } catch (IOException invalid) { throw new IllegalArgumentException("could not read saved scaffold ledger", invalid); }
     }
 
-    private void saveScaffolds(Path sidecar, String id, String dimension, Map<BlockPos, BlockState> scaffolds) {
+    private Map<BlockPos, BlockState> decodeScaffolds(String json, String id, String dimension) {
+        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+        if (root.get("version").getAsInt() != 1 || !id.equals(root.get("project_id").getAsString())
+                || !identity.key().equals(root.get("world_key").getAsString()) || !dimension.equals(root.get("dimension").getAsString())
+                || !"native_confirmed_scaffold".equals(root.get("evidence").getAsString()))
+            throw new IllegalArgumentException("saved scaffold identity mismatch");
+        return BuildProjectScaffolds.decode(root.getAsJsonArray("confirmed_scaffolds"));
+    }
+
+    private void saveScaffolds(String id, String dimension, Map<BlockPos, BlockState> owned) {
         JsonObject root = new JsonObject(); root.addProperty("version", 1); root.addProperty("project_id", id);
         root.addProperty("world_key", identity.key()); root.addProperty("dimension", dimension);
-        root.addProperty("evidence", "native_confirmed_scaffold"); root.add("confirmed_scaffolds", BuildProjectScaffolds.encode(scaffolds));
-        write(sidecar, root, BuildingBudgets.current().maxScaffoldBytes());
+        root.addProperty("evidence", "native_confirmed_scaffold"); root.add("confirmed_scaffolds", BuildProjectScaffolds.encode(owned));
+        write(scaffolds, id, root, BuildingBudgets.current().maxScaffoldBytes());
     }
 
     // 读取后核对版本、项目编号、世界和维度，再检查每格保存状态仍可表达；返回副本，调用方改参数不会改磁盘记录。
     public JsonObject load(String id, String dimension) {
         try {
-            Path file = file(id);
-            // 续建与保存使用同一配置；仍读边界外的一个字节，不能让增长文件绕过读取预算。
-            int limit = BuildingBudgets.current().maxProjectBytes();
-            long size = Files.size(file);
-            if (size <= 0 || size > limit) throw new IOException("invalid build project size");
-            byte[] bytes;
-            try (var input = Files.newInputStream(file)) { bytes = input.readNBytes(Math.addExact(limit, 1)); }
-            if (bytes.length > limit) throw new IOException("invalid build project size");
-            JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
-            if (root.get("version").getAsInt() != 1 || !id.equals(root.get("project_id").getAsString())
-                    || !identity.key().equals(root.get("world_key").getAsString()))
-                throw new IllegalArgumentException("build project identity mismatch");
-            if (!dimension.equals(root.get("dimension").getAsString()))
-                throw new IllegalArgumentException("build project belongs to another dimension; return there to continue");
-            JsonObject arguments = root.getAsJsonObject("arguments").deepCopy();
-            if (!id.equals(arguments.get("project_id").getAsString()))
-                throw new IllegalArgumentException("build project argument identity mismatch");
-            BuildProjectTargets.decode(arguments.getAsJsonArray("project_targets"));
-            arguments.addProperty("broaden_material_families", false);
-            return arguments;
+            JsonObject restored = projects.load(id, file(id), BuildingBudgets.current().maxProjectBytes(), json -> decodeProject(json, id, dimension));
+            if (restored == null) throw new IOException("build project is missing");
+            return restored;
         } catch (IOException failure) {
             throw new IllegalArgumentException("build project is unavailable in this world: " + id, failure);
         }
     }
 
-    // 只接受标准 UUID，按世界键分目录保存，不能把项目编号当成任意文件路径。
+    private JsonObject decodeProject(String json, String id, String dimension) {
+        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+        if (root.get("version").getAsInt() != 1 || !id.equals(root.get("project_id").getAsString())
+                || !identity.key().equals(root.get("world_key").getAsString()))
+            throw new IllegalArgumentException("build project identity mismatch");
+        if (!dimension.equals(root.get("dimension").getAsString()))
+            throw new IllegalArgumentException("build project belongs to another dimension; return there to continue");
+        JsonObject arguments = root.getAsJsonObject("arguments").deepCopy();
+        if (!id.equals(arguments.get("project_id").getAsString()))
+            throw new IllegalArgumentException("build project argument identity mismatch");
+        BuildProjectTargets.decode(arguments.getAsJsonArray("project_targets"));
+        arguments.addProperty("broaden_material_families", false);
+        return arguments;
+    }
+
+    // 只接受标准 UUID；旧档案按世界键定位，不能把项目编号当成任意文件路径。
     private Path file(String id) {
         if (id == null || !UUID.fromString(id).toString().equals(id))
             throw new IllegalArgumentException("project_id must be a canonical UUID");
