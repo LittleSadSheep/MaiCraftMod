@@ -22,7 +22,8 @@ public final class PvpTactics {
 
     public static boolean attackReady(LocalPlayer self, Player other) {
         // 使用当前武器的真实攻击充能，并等待对手受击保护结束，不能按固定点击频率乱挥。
-        return Swing.mayStrike(false, other.hurtTime > 0, self.getAttackStrengthScale(0.0F));
+        return Swing.mayStrike(false, other.hurtTime > 0, self.getAttackStrengthScale(0.0F))
+                && PvpEngagement.strikeReady(self, other);
     }
 
     public static Band band(LocalPlayer self, Player other, boolean ranged) {
