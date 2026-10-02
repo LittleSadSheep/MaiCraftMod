@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.intent;
 
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.*;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -129,9 +131,8 @@ public final class BuildingSceneRuntimeTest {
                 sceneReport(goal(missing), f.player, store);
                 throw new AssertionError("an unresolvable model was saved before native-state validation");
             } catch (IllegalArgumentException expected) { }
-            try (var files = Files.list(root.resolve("build-scenes").resolve(world))) {
-                check(files.count() == 2, "a failed registry check cannot publish another scene revision");
-            }
+            // 注册表检查失败时数据库版本数不增加，不能留下半份可用于施工的模型。
+            check(countMemory(root, "build-scenes", world) == 2, "a failed registry check cannot publish another scene revision");
             check(f.blockUses() == 0 && f.itemUses() == 0, "scene compilation and storage must not issue game interactions");
         }
     }
