@@ -123,7 +123,7 @@ public final class SableStructureBridge {
             Object container = source.open();
             if (container == null) return failed("unknown", "Sable client container is unavailable");
             List<?> nativeStructures = (List<?>) required(call(container, "getAllSubLevels"));
-            int total = nativeStructures.size(), probes = 0, removed = 0;
+            int total = nativeStructures.size(), probes = 0, removed = 0, rangeExcluded = 0, listEntriesRead = 0;
             Map<String, String> selectionErrors = new LinkedHashMap<>();
             Object preferred = preferredStorageHit == null ? null : read("preferred_hit", selectionErrors,
                     () -> containing(container, preferredStorageHit));
@@ -131,6 +131,7 @@ public final class SableStructureBridge {
             List<Candidate> candidates = new ArrayList<>();
             for (int i = -1; i < total && i < MAX_METADATA_PROBES && probes < MAX_METADATA_PROBES; i++) {
                 Object nativeStructure = i < 0 ? preferred : nativeStructures.get(i);
+                if (i >= 0) listEntriesRead++;
                 if ((i < 0 && preferred == null) || visited.put(nativeStructure, true) != null) continue;
                 probes++;
                 Map<String, String> errors = new LinkedHashMap<>();
@@ -141,7 +142,7 @@ public final class SableStructureBridge {
                 boolean priority = nativeStructure == preferred;
                 if (priority || box == null || distance <= OBSERVATION_RADIUS * OBSERVATION_RADIUS) {
                     candidates.add(new Candidate(nativeStructure, box, errors, priority ? -1 : distance));
-                }
+                } else rangeExcluded++;
             }
             candidates.sort(Comparator.<Candidate>comparingInt(c -> c.distance() < 0 ? 0
                             : presentation && StructurePresentation.small(c.bounds()) ? 2 : 1)
@@ -154,11 +155,15 @@ public final class SableStructureBridge {
                 identities.put(candidate.nativeStructure(), structure);
             }
             int omitted = Math.max(0, total - removed - structures.size());
-            boolean truncated = omitted > 0 || structures.stream().anyMatch(s -> s.errors().containsKey("loaded_chunks_truncated"));
+            int metadataUnscanned = Math.max(0, total - listEntriesRead);
+            // 已知边界在观察范围外时只是没有展开，不能因此阻止麦麦在已知空旷的附近微调。
+            // 尚未扫描的列表、范围内详情超额及区块截断仍属于未知；准星优先不能掩盖剩余列表预算。
+            boolean truncated = metadataUnscanned > 0 || candidates.size() > structures.size()
+                    || structures.stream().anyMatch(s -> s.errors().containsKey("loaded_chunks_truncated"));
             boolean partial = truncated || !selectionErrors.isEmpty() || structures.stream().anyMatch(s -> !s.errors().isEmpty());
             return new Frame(partial ? "partial" : structures.isEmpty() ? "ready_empty" : "ready",
                     partial ? "observation is incomplete; inspect budgets and structure errors " + selectionErrors : null,
-                    structures, container, identities, total, omitted, probes, truncated);
+                    structures, container, identities, total, omitted, probes, rangeExcluded, metadataUnscanned, truncated);
         } catch (ClassNotFoundException absent) {
             return failed("not_installed", "Sable is not installed");
         } catch (NoSuchMethodException unavailable) {
@@ -177,26 +182,33 @@ public final class SableStructureBridge {
         private final List<Structure> structures;
         private final Object container;
         private final Map<Object, Structure> identities;
-        private final int total, omitted, metadataProbes;
+        private final int total, omitted, metadataProbes, rangeExcluded, metadataUnscanned;
         private final boolean truncated;
 
         private Frame(String state, String error, List<Structure> structures, Object container,
-                Map<Object, Structure> identities, int total, int omitted, int metadataProbes, boolean truncated) {
+                Map<Object, Structure> identities, int total, int omitted, int metadataProbes,
+                int rangeExcluded, int metadataUnscanned, boolean truncated) {
             this.state = state;
             this.error = error;
             this.structures = List.copyOf(structures);
             this.container = container;
             this.identities = new IdentityHashMap<>(identities);
             this.total = total; this.omitted = omitted; this.metadataProbes = metadataProbes; this.truncated = truncated;
+            this.rangeExcluded = rangeExcluded; this.metadataUnscanned = metadataUnscanned;
         }
 
         public String state() { return state; }
         public String error() { return error; }
         public List<Structure> structures() { return structures; }
-        /** 原生列表长度；不可用时为 -1。省略字段表示排除了已观察到的移除项。 */
+        /** 全局原生列表长度；不可用时为 -1，附近为空不表示其他地点没有结构。 */
         public int total() { return total; }
+        /** 未展开的全局条目数，包含已确认的范围外项；不能独自证明附近观察不完整。 */
         public int omitted() { return omitted; }
         public int metadataProbes() { return metadataProbes; }
+        /** 已取得有限边界并明确排除在范围外的结构；准星优先保留的远处目标不计入此数。 */
+        public int rangeExcluded() { return rangeExcluded; }
+        /** 因列表或元数据预算而未遍历的条目；不能假定这些结构也在范围外。 */
+        public int metadataUnscanned() { return metadataUnscanned; }
         public boolean truncated() { return truncated; }
 
         // 用原生对象身份核对命中属于这一份观察；同 UUID 的新对象也不能冒充旧观察中的结构。
@@ -362,7 +374,7 @@ public final class SableStructureBridge {
     }
 
     private static Frame failed(String state, String error) {
-        return new Frame(state, error, List.of(), null, Map.of(), -1, -1, 0, false);
+        return new Frame(state, error, List.of(), null, Map.of(), -1, -1, 0, -1, -1, false);
     }
 
     private record Candidate(Object nativeStructure, AABB bounds, Map<String, String> errors, double distance) {}

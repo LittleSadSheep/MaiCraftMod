@@ -29,6 +29,7 @@ public final class SableStructureBridgeTest {
         availabilityAndFields();
         identityAndRemoval();
         boundedSelection();
+        localCompleteness();
         presentationSelection();
         loadedChunkBudget();
         System.out.println("SableStructureBridgeTest: passed");
@@ -105,8 +106,51 @@ public final class SableStructureBridgeTest {
         check(frame.structures().get(1).worldBounds().minX == 1.0, "nearby structures were not ordered by bounds distance");
         NativeShip far = new NativeShip(new Counts()); far.world = preferred.world;
         var range = observe(new NativeContainer(List.of(far)), Vec3.ZERO, null);
-        check(range.state().equals("partial") && range.structures().isEmpty() && range.omitted() == 1,
-                "range-limited evidence was presented as an empty world");
+        // 只确认附近为空，仍报告全局有一个结构在范围外；不能让远处已知物体阻塞本地站位。
+        check(range.state().equals("ready_empty") && range.structures().isEmpty() && range.omitted() == 1
+                        && range.total() == 1 && range.rangeExcluded() == 1 && range.metadataUnscanned() == 0 && !range.truncated(),
+                "已知范围外结构被错误当成局部观察缺失");
+        var obstacles = PhysicalObstacleSnapshot.capture(null, range.structures(), Vec3.ZERO, range.state());
+        check(obstacles.state().equals("ready_empty") && obstacles.boxes().isEmpty(), "范围内已知为空仍污染了导航观察状态");
+    }
+
+    private static void localCompleteness() {
+        // 范围筛选不放宽未知边界、详细对象预算或尚未探测的列表；这些仍不能证明附近可通行。
+        NativeShip far = new NativeShip(new Counts()); far.world = new NativeBounds(1000,0,0,1001,1,1);
+        NativeShip near = new NativeShip(new Counts());
+        var mixed = observe(new NativeContainer(List.of(far,near)), Vec3.ZERO, null);
+        check(mixed.state().equals("ready") && mixed.structures().size()==1 && mixed.total()==2
+                && mixed.rangeExcluded()==1 && !mixed.truncated(), "远处结构不应污染已完整观察的附近结构");
+        NativeShip unknown = new NativeShip(new Counts()); unknown.world = null;
+        var missing = observe(new NativeContainer(List.of(far,unknown)), Vec3.ZERO, null);
+        check(missing.state().equals("partial") && missing.rangeExcluded()==1
+                && missing.structures().getFirst().errors().containsKey("world_bounds"), "未知边界被当成确定范围外");
+        unknown.world = new NativeBounds(Double.NaN,0,0,1,1,1);
+        check(observe(new NativeContainer(List.of(unknown)), Vec3.ZERO, null).state().equals("partial"), "非有限边界被当成空旷区域");
+        NativeShip boundary = new NativeShip(new Counts()); boundary.world = new NativeBounds(128,0,0,129,1,1);
+        check(observe(new NativeContainer(List.of(boundary)), Vec3.ZERO, null).rangeExcluded()==0, "范围边界上的结构被提前排除");
+        boundary.world = new NativeBounds(128.001,0,0,129,1,1);
+        check(observe(new NativeContainer(List.of(boundary)), Vec3.ZERO, null).rangeExcluded()==1, "确定超出范围的边界没有记数");
+        var farMany = new ArrayList<NativeShip>();
+        for(int i=0;i<129;i++) { var ship=new NativeShip(new Counts());ship.world=far.world;farMany.add(ship); }
+        var unscanned = observe(new NativeContainer(farMany), Vec3.ZERO, null);
+        check(unscanned.state().equals("partial") && unscanned.truncated() && unscanned.rangeExcluded()==128
+                && unscanned.metadataUnscanned()==1 && unscanned.total()==129, "未探测的最后一项不能推断为也在远处");
+        var nearMany = new ArrayList<NativeShip>();
+        for(int i=0;i<17;i++) nearMany.add(new NativeShip(new Counts()));
+        nearMany.add(far);
+        var detailLimit = observe(new NativeContainer(nearMany), Vec3.ZERO, null);
+        check(detailLimit.state().equals("partial") && detailLimit.truncated() && detailLimit.rangeExcluded()==1
+                && detailLimit.metadataUnscanned()==0 && detailLimit.structures().size()==16, "范围内详情截断不能被范围外计数抵消");
+        var gaze = new NativeContainer(List.of(far));gaze.hit=far.plot;
+        var selected = observe(gaze, Vec3.ZERO, STORAGE);
+        check(selected.state().equals("ready") && selected.structures().size()==1 && selected.rangeExcluded()==0
+                && selected.metadataUnscanned()==0, "原生准星优先对象应保留，不能同时算作范围排除");
+        // 原生列表与准星句柄若在同次读取间发生变化，额外的优先目标仍要计入详情预算。
+        var changedList = new NativeContainer(nearMany.subList(0,16));changedList.hit=far.plot;
+        check(observe(changedList, Vec3.ZERO, STORAGE).state().equals("partial"), "额外准星对象掩盖了范围内详情截断");
+        var unknownWithFar = PhysicalObstacleSnapshot.capture(null, List.of(), Vec3.ZERO, unscanned.state());
+        check(unknownWithFar.state().equals("partial"), "未知列表被障碍快照清洗成可用局部证据");
     }
 
     private static void loadedChunkBudget() throws Exception {
