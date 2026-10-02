@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.task.base.NativeSubmissionTaskRecord;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 走真实语义父任务的聊天绑定和检查点恢复，核对任务身份先落盘，旧操作恢复后无法再次取得发送许可。 */
@@ -50,7 +51,9 @@ public final class ChatDurableCheckpointTest {
             check(!Files.exists(marker), "父任务身份未落盘时不能提前预留聊天操作");
             writes.removeFirst().run();
             awaitPermit(child);
-            check(Files.exists(marker), "取得许可前应已保留聊天专属操作编号");
+            // 父检查点完成后，聊天预约也必须在 SQLite 落盘，才能交出原生发送许可。
+            check(new MemoryDatabase(identity.databaseFile()).containsRecord(identity.scope() + "/native-submissions/chat",
+                    identity.key(), operation.toString()) && !Files.exists(marker), "取得许可前应已保留聊天专属操作编号");
 
             // 用全新存储器读磁盘，模拟进程丢掉会话内存，但请求编号和当前步骤必须仍能恢复。
             var loaded = new IntentStateStore().load(identity);
