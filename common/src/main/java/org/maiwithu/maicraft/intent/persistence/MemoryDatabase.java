@@ -109,7 +109,8 @@ public final class MemoryDatabase {
         } catch (SQLException failure) { throw new IOException("memory_record_read_failed", failure); }
     }
 
-    private Connection open() throws SQLException, IOException {
+    // 同库的探索索引复用版本检查、WAL 和同步策略，不能另开一套绕过世界记忆规则的数据库。
+    Connection open() throws SQLException, IOException {
         var config = new SQLiteConfig();
         config.setBusyTimeout(5000);
         // 附魔、聊天等原生提交依赖持久化回执；FULL 保证 WAL 事务同步后才交还消费许可。
