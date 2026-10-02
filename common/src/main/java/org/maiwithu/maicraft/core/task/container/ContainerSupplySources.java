@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -122,8 +123,10 @@ public final class ContainerSupplySources {
         return true;
     }
     public static void rememberVisible(LocalPlayer player, BlockPos at, AbstractContainerMenu menu, List<Integer> slots) {
+        // 被动盘点早于本刻 beginTick，使用只读身份戳核对当前玩家与世界，不索取尚未建立的动作上下文。
+        if (ClientRuntime.actor().observationStamp(player).isEmpty()) return;
         // 只有当前真实显示、且服务器已同步内容的菜单能更新库存线索；取存后用新数量覆盖旧观察。
-        if (!StockEvidence.isContainerSynchronized(player, menu) || !MenuVisibility.matches(ClientRuntime.requireContext(player).minecraft(), menu)) return;
+        if (!StockEvidence.isContainerSynchronized(player, menu) || !MenuVisibility.matches(Minecraft.getInstance(), menu)) return;
         var footprint = footprint(player.level(), at); if (footprint.isEmpty()) return;
         Map<ResourceLocation, Long> counts = new LinkedHashMap<>();
         for (int slot : slots) { var stack = menu.getSlot(slot).getItem(); StockEvidence.add(counts, stack, stack.getCount()); }

@@ -16,6 +16,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -29,6 +30,7 @@ public final class ContainerInvestigationTest {
         ranksStockedUnknownThenEmpty();
         fixedOriginAndWallsLimitInvestigation();
         synchronizedMenusRefreshCompleteMemory();
+        passiveMenusRefreshBetweenActorTicks();
     }
 
     private static void ranksStockedUnknownThenEmpty() throws Exception {
@@ -88,6 +90,61 @@ public final class ContainerInvestigationTest {
                     "durable memory survives expiration of the session stock cache");
             check(memory.receipt().containsKey("container_memory_id") && memory.receipt().containsKey("last_observed_items"), "default receipt includes identity and actual contents");
         } finally { reset(); }
+    }
+
+    private static void passiveMenusRefreshBetweenActorTicks() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var entities = ContainerSupplySourcesTest.worldEntities(h); BlockPos at = new BlockPos(3, 1, 3);
+            ContainerSupplySourcesTest.addBarrel(h, entities, at);
+            var minecraft = Minecraft.getInstance(); var menu = ChestMenu.threeRows(17, h.inventory);
+            h.player.containerMenu = menu; minecraft.screen = new ContainerScreen(menu, h.inventory, Component.literal("被动盘点"));
+            MachineMenu.rememberNativeOpened(h.player, menu, at);
+            menu.getSlot(0).set(new ItemStack(Items.OAK_PLANKS)); menu.getSlot(1).set(new ItemStack(Items.GOLD_INGOT, 4));
+            StockEvidence.containerSynchronized(menu);
+
+            // 原生开箱与同步完成后结束动作刻；下一次 beginTick 尚未执行时，正式被动入口仍须记住整箱库存。
+            observeBetweenActorTicks(h);
+            var memory = ContainerSupplySources.memory(h.player, at);
+            var planks = ResourceLocation.parse("minecraft:oak_planks");
+            check(memory != null && memory.items().get(planks) == 1 && memory.items().get(GOLD) == 4,
+                    "passive observation without an actor context retains every synchronized item");
+            String id = memory.id(); long firstTick = memory.observedTick();
+
+            // 同一箱子随后被原生取空目标槽，下一次被动采样覆盖旧数量，仍保留其他物品及稳定标识。
+            menu.getSlot(0).set(ItemStack.EMPTY); h.nextTick(); observeBetweenActorTicks(h);
+            memory = ContainerSupplySources.memory(h.player, at);
+            check(memory.id().equals(id) && memory.rank(List.of(planks)) == 2 && memory.items().get(GOLD) == 4
+                            && memory.observedTick() > firstTick,
+                    "a later passive sample updates the old memory instead of silently skipping it");
+            long lastTick = memory.observedTick();
+
+            // 用户已换界面或当前身体已离开时，旧菜单不能污染记忆；这个检查仍不需要新的动作授权。
+            menu.getSlot(1).set(ItemStack.EMPTY);
+            var replacement = ChestMenu.threeRows(18, h.inventory);
+            minecraft.screen = new ContainerScreen(replacement, h.inventory, Component.literal("其他界面"));
+            ContainerSupplySources.rememberVisible(h.player, at, menu, List.of(0, 1));
+            check(ContainerSupplySources.memory(h.player, at).observedTick() == lastTick
+                    && ContainerSupplySources.memory(h.player, at).items().get(GOLD) == 4, "a mismatched visible menu cannot overwrite remembered contents");
+            minecraft.screen = new ContainerScreen(menu, h.inventory, Component.literal("旧身体界面"));
+            minecraft.player = null;
+            try { ContainerSupplySources.rememberVisible(h.player, at, menu, List.of(0, 1)); }
+            finally { minecraft.player = h.player; }
+            check(ContainerSupplySources.memory(h.player, at).items().get(GOLD) == 4, "an old player cannot update current-world memory");
+            minecraft.level = null;
+            try { ContainerSupplySources.rememberVisible(h.player, at, menu, List.of(0, 1)); }
+            finally { minecraft.level = h.level; }
+            check(ContainerSupplySources.memory(h.player, at).items().get(GOLD) == 4, "an old world cannot update current-world memory");
+            check(ClientRuntime.actor().activeContext().isEmpty() && h.blockUses() == 0 && h.itemUses() == 0 && h.inventory.isEmpty(),
+                    "passive observation neither opens a native action context nor performs an inventory transfer");
+        } finally { reset(); }
+    }
+
+    private static void observeBetweenActorTicks(InteractionWorldTestHarness h) throws Exception {
+        // 对齐正式入口每二十刻采样的条件，再通过真实 endTick 关闭上下文，复现客户端观察先于 beginTick 的时序。
+        while (h.level.getGameTime() % 20 != 0) h.nextTick();
+        ClientRuntime.actor().endTick(ClientRuntime.requireContext(h.player));
+        check(ClientRuntime.actor().activeContext().isEmpty(), "the passive sample runs before the next actor beginTick");
+        StockEvidence.observe(h.player);
     }
 
     private static void reset() { ContainerSupplySources.reset(); IntentRuntime.get().containerMemory().clear(); }
