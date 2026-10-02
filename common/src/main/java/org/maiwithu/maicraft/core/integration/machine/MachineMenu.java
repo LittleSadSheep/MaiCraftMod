@@ -129,6 +129,12 @@ public final class MachineMenu {
                 && MenuVisibility.matches(Minecraft.getInstance(), player.containerMenu);
     }
 
+    /** 只提供已由原生开菜单回执确认的当前位置，供被动库存观察登记箱子记忆。 */
+    public static BlockPos openedPosition(LocalPlayer player) {
+        Origin origin = ORIGINS.get(player.containerMenu);
+        return origin != null && openedAt(player, origin.position()) ? origin.position() : null;
+    }
+
     /**
      * 读取当前菜单和实际携带物品。只有本流程打开、仍可见、鼠标没有拿物品且来源仍有效的菜单才给存取编号。
      * 编号最多保留十六份，离开原菜单的旧编号定期清理；报告不解释配方或控制数据的业务含义。

@@ -23,7 +23,7 @@ public final class ContainerMemory {
             BlockPos at = first(blocks);
             Map<String, Long> contents = new LinkedHashMap<>();
             items.forEach((item, count) -> contents.put(item.toString(), count));
-            return Map.of("container_id", id(), "label", "箱子 " + at.getX() + "," + at.getY() + "," + at.getZ(),
+            return Map.of("container_memory_id", id(), "label", "箱子 " + at.getX() + "," + at.getY() + "," + at.getZ(),
                     "dimension", dimension, "coordinates", List.of(at.getX(), at.getY(), at.getZ()),
                     "last_observed_items", Map.copyOf(contents), "observed_at_tick", observedTick,
                     "observed_at_epoch_ms", observedEpochMillis, "stock_status", "historical_menu_observation");

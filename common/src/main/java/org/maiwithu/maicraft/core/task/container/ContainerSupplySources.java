@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.state.properties.ChestType;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import java.util.Collections;
@@ -42,27 +43,43 @@ public final class ContainerSupplySources {
     private ContainerSupplySources() {}
     public static List<Candidate> candidates(LocalPlayer player, BlockPos center, int radius,
             List<ResourceLocation> items, Set<BlockPos> visited, List<String> protectedLabels) {
-        // 缺料不是探索箱子的许可：只去最近实际看见目标材料的容器，未知、空箱或过期线索都跳过。
-        List<Candidate> found = new ArrayList<>(); Set<BlockPos> seen = new HashSet<>(); int examined = 0;
+        // 自动存余料仍只续用近期有对应材料的容器，避免调查取物时顺便把东西塞进陌生箱子。
+        return select(player, center, radius, items, visited, protectedLabels, false).stream().limit(MAX_ATTEMPTS).toList();
+    }
+    public static List<Candidate> investigate(LocalPlayer player, BlockPos origin, int radius,
+            List<ResourceLocation> items, Set<BlockPos> visited, List<String> protectedLabels) {
+        return select(player, origin, Math.min(ContainerSearchScope.MAX_RADIUS, radius), items, visited, protectedLabels, true);
+    }
+    private static List<Candidate> select(LocalPlayer player, BlockPos center, int radius,
+            List<ResourceLocation> items, Set<BlockPos> visited, List<String> protectedLabels, boolean investigate) {
+        // 同一轮按有货记忆、从未翻过、无货记忆排序；整个调查范围固定在调用起点，不随角色走动扩张。
+        List<Candidate> found = new ArrayList<>(); Set<BlockPos> seen = new HashSet<>();
         int chunks = (radius + 15) / 16;
-        outer: for (int x = -chunks; x <= chunks; x++) for (int z = -chunks; z <= chunks; z++) {
+        for (int x = -chunks; x <= chunks; x++) for (int z = -chunks; z <= chunks; z++) {
             var chunk = player.clientLevel.getChunkSource().getChunk((center.getX() >> 4) + x, (center.getZ() >> 4) + z,
                     ChunkStatus.FULL, false);
             if (chunk == null) continue;
             for (BlockPos raw : List.copyOf(chunk.getBlockEntities().keySet())) {
-                if (++examined > MAX_SCANNED) break outer;
                 BlockPos at = raw.immutable();
                 if (at.distSqr(center) > (long) radius * radius || seen.contains(at) || visited.contains(at) || !allowed(player, at, protectedLabels)) continue;
                 List<BlockPos> footprint = footprint(player.level(), at); seen.addAll(footprint);
                 if (footprint.stream().anyMatch(visited::contains)) continue;
+                // 两半大箱只开一次；至少有一半可见才可调查，点击点使用实际露出的那一半。
+                BlockPos visible = footprint.stream().filter(cell -> cell.distSqr(center) <= (long) radius * radius
+                        && ObservationVisibility.block(player, cell)).findFirst().orElse(null);
+                if (visible == null) continue;
                 Map<BlockPos, Object> identities = identities(player.level(), footprint);
-                var stock = CACHE.latest(player, player.level(), at, identities, player.level().getGameTime());
-                if (stock == null || items.stream().noneMatch(id -> stock.storedCount(id) > 0)) continue;
-                found.add(new Candidate(at, BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock()), footprint, 0));
+                var stock = investigate ? CACHE.recall(player, player.level(), at, identities)
+                        : CACHE.latest(player, player.level(), at, identities, player.level().getGameTime());
+                var memory = memory(player, at);
+                int rank = stock != null ? (items.stream().anyMatch(id -> stock.storedCount(id) > 0) ? 0 : 2)
+                        : memory == null ? 1 : memory.rank(items);
+                if (!investigate && (stock == null || rank != 0)) continue;
+                found.add(new Candidate(visible, BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(visible).getBlock()), footprint, rank));
             }
         }
         return found.stream().sorted(Comparator.comparingInt(Candidate::stockRank)
-                .thenComparingDouble(value -> value.position().distSqr(center)).thenComparingLong(value -> value.position().asLong())).limit(MAX_ATTEMPTS).toList();
+                .thenComparingDouble(value -> value.position().distSqr(center)).thenComparingLong(value -> value.position().asLong())).toList();
     }
     public static List<BlockPos> footprint(Level level, BlockPos at) {
         // 大箱子的两半是一份库存；两边都仍在、且互相连接，才允许把它当作同一个取料来源。
@@ -110,8 +127,18 @@ public final class ContainerSupplySources {
         var footprint = footprint(player.level(), at); if (footprint.isEmpty()) return;
         Map<ResourceLocation, Long> counts = new LinkedHashMap<>();
         for (int slot : slots) { var stack = menu.getSlot(slot).getItem(); StockEvidence.add(counts, stack, stack.getCount()); }
-        CACHE.record(player, player.level(), identities(player.level(), footprint), new StockEvidence.Snapshot(
-                StockEvidence.Source.CONTAINER, counts, Set.of(), player.level().getGameTime()));
+        var stock = new StockEvidence.Snapshot(StockEvidence.Source.CONTAINER, counts, Set.of(), player.level().getGameTime());
+        CACHE.record(player, player.level(), identities(player.level(), footprint), stock);
+        IntentRuntime.get().containerMemory().observe(player.level().dimension().location().toString(), blockIds(player.level(), footprint), stock);
+    }
+    public static ContainerMemory.Entry memory(LocalPlayer player, BlockPos at) {
+        return IntentRuntime.get().containerMemory().recall(player.level().dimension().location().toString(),
+                blockIds(player.level(), footprint(player.level(), at)));
+    }
+    private static Map<BlockPos, String> blockIds(Level level, List<BlockPos> footprint) {
+        Map<BlockPos, String> blocks = new LinkedHashMap<>();
+        footprint.forEach(at -> blocks.put(at, BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString()));
+        return blocks;
     }
     public static void reset() { CACHE.clear(); }
     /** 汇总附近最近实际看过的库存，供选工具或备料参考；这里不开箱、不扫描区域，也不保证货还在。 */
@@ -136,12 +163,15 @@ public final class ContainerSupplySources {
             while (entries.size() > 64) entries.remove(entries.keySet().iterator().next());
         }
         StockEvidence.Snapshot latest(Object owner, Object level, BlockPos at, Map<BlockPos, Object> identities, long tick) {
-            // 箱子任一半被换掉、观察过期或换了存档，就作废旧数量，不能拿上一只箱子的货继续算。
+            // 过期数量不能参与现货预算，但仍保留为下次开箱的访问顺序线索。
+            var stock = recall(owner, level, at, identities);
+            return stock == null || tick < stock.observedGameTick() || tick - stock.observedGameTick() > StockEvidence.MAX_AGE_TICKS ? null : stock;
+        }
+        StockEvidence.Snapshot recall(Object owner, Object level, BlockPos at, Map<BlockPos, Object> identities) {
             bind(owner, level); Entry entry = entries.get(at); if (entry == null) return null;
-            if (tick < entry.stock.observedGameTick() || tick - entry.stock.observedGameTick() > StockEvidence.MAX_AGE_TICKS
-                    || !entry.identities.keySet().equals(identities.keySet())
+            if (!entry.identities.keySet().equals(identities.keySet())
                     || entry.identities.entrySet().stream().anyMatch(value -> identities.get(value.getKey()) != value.getValue())) {
-                entries.remove(at); return null;
+                entries.values().removeIf(value -> value == entry); return null;
             }
             return entry.stock;
         }

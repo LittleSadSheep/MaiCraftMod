@@ -9,5 +9,6 @@ public final class ContainerSearchRegressionSuite {
     public static void main(String[] args) throws Exception {
         ContainerMemoryCheckpointTest.main(args);
         NavigationBodyRangeTest.main(args);
+        ContainerInvestigationTest.main(args);
     }
 }

@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.core.integration.ae2.Ae2ResourceSupply;
 import org.maiwithu.maicraft.core.integration.create.CreateStockObservation;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
+import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
+import java.util.stream.IntStream;
 
 /**
  * 记住玩家最近在外部菜单里看到的库存，供取材料时参考。
@@ -104,6 +106,12 @@ public final class StockEvidence {
             CACHE.record(player, player.clientLevel, inventory(player), stock);
             // 打开普通容器不能抹掉仍有效的无线网络观察；两本缓存都按背包实际增加量扣减已取出的库存。
             if (stock.source() == Source.AE2) NETWORK_CACHE.record(player, player.clientLevel, inventory(player), stock);
+            // use_container 打开的箱子也自主登记；只沿已确认的菜单来源记忆，不从准星或最近箱子猜坐标。
+            if (stock.source() == Source.CONTAINER) {
+                var at = MachineMenu.openedPosition(player);
+                if (at != null) ContainerSupplySources.rememberVisible(player, at, menu, IntStream.range(0, menu.slots.size())
+                        .filter(slot -> menu.getSlot(slot).container != player.getInventory()).boxed().toList());
+            }
         });
     }
 
