@@ -7,6 +7,7 @@ import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import org.maiwithu.maicraft.intent.PhysicsAbilityContractTest;
 import org.maiwithu.maicraft.core.task.physics.StructureDesignTest;
+import org.maiwithu.maicraft.server.physics.PhysicsSnapshotServiceTest;
 
 /** 用可算出结果的飞艇验证配重、偏置推进与姿态变换，不依赖启动 Minecraft 或 Sable。 */
 public final class PhysicsBalanceRegression {
@@ -37,6 +38,7 @@ public final class PhysicsBalanceRegression {
         PhysicsParametersTest.run();
         PhysicsAbilityContractTest.run();
         StructureDesignTest.run();
+        PhysicsSnapshotServiceTest.run();
         System.out.println("PhysicsBalanceRegression: passed");
     }
     static PhysicsBody vessel(List<PhysicsBody.Load> loads) {

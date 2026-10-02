@@ -12,18 +12,43 @@ import net.minecraft.server.level.ServerPlayer;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBody;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsTrim;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.maiwithu.maicraft.network.ProtocolJson;
+import org.maiwithu.maicraft.network.ServerOperationException;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 
 /** 同一份船体采样连续分页交付；翻页不会重新读取移动后的姿态或把别人的快照接到当前船。 */
 public final class PhysicsSnapshotService {
     private static final Gson GSON = new Gson();
+    private static final Logger LOG = LoggerFactory.getLogger("maicraft.physics");
     private static final String CONTAINER = "dev.ryanhcode.sable.api.sublevel.SubLevelContainer";
     private static final LinkedHashMap<UUID, Snapshot> SNAPSHOTS = new LinkedHashMap<>();
     private record Snapshot(UUID owner, WeakReference<ServerLevel> world, PhysicsBody measured,
                             PhysicsBody preflight, BlockPos origin, List<PhysicsTrim.Ballast> candidates, long created) {}
     private PhysicsSnapshotService() {}
     public static JsonObject inspect(ServerPlayer player, JsonObject request) {
+        // 物理观察不提交施工；原生签名或结果编码失败时保留具体原因，服务器日志记录完整异常链。
+        String structure = request.has("structure_id") ? request.get("structure_id").toString() : "missing";
+        return readBounded(structure, () -> inspectNative(player, request));
+    }
+    static JsonObject readBounded(String structure, Supplier<JsonObject> read) {
+        try {
+            JsonObject result = Objects.requireNonNull(read.get(), "physics snapshot returned null");
+            ProtocolJson.encode(result);
+            return result;
+        } catch (ServerOperationException rejected) { throw rejected; }
+        catch (RuntimeException | LinkageError failed) {
+            LOG.error("[maicraft-physics] physics.snapshot failed for structure {}", structure, failed);
+            String detail = failed.getClass().getSimpleName() + ": " + failed.getMessage();
+            if (failed.getCause() != null) detail += "; cause=" + failed.getCause();
+            throw ServerOperationException.notApplied("physics_snapshot_failed", detail);
+        }
+    }
+    private static JsonObject inspectNative(ServerPlayer player, JsonObject request) {
         UUID structureId = UUID.fromString(ServerAccess.text(request, "structure_id"));
         Object ship = find(player, structureId);
         UUID id; Snapshot snapshot;
@@ -96,10 +121,7 @@ public final class PhysicsSnapshotService {
     }
     public static Object find(ServerPlayer player, UUID id) {
         Object container = NativeApi.call(null, CONTAINER, "getContainer", player.serverLevel());
-        Object ship = NativeApi.call(container, null, "getSubLevel", id);
-        if (ship == null || NativeApi.truth(NativeApi.call(ship, null, "isRemoved"))
-                || !NativeApi.truth(NativeApi.call(ship, null, "isFinalized")))
-            throw ServerAccess.denied("structure_unavailable", "物理结构未加载或仍在装配");
+        Object ship = resolveServerStructure(container, id);
         Object bounds = NativeApi.call(ship, null, "boundingBox");
         double distance = 0;
         String[] axes = {"X", "Y", "Z"}; double[] point = {player.getX(), player.getY(), player.getZ()};
@@ -110,6 +132,13 @@ public final class PhysicsSnapshotService {
         }
         if (!Double.isFinite(distance) || distance > 128 * 128)
             throw ServerAccess.denied("structure_out_of_range", "需要在物理结构附近观察");
+        return ship;
+    }
+    static Object resolveServerStructure(Object container, UUID id) {
+        Object ship = NativeApi.call(container, null, "getSubLevel", id);
+        // finalized 是客户端接收初始区块后的标记，ServerSubLevel 没有该方法；服务器按原生容器与移除状态查找。
+        if (ship == null || NativeApi.truth(NativeApi.call(ship, null, "isRemoved")))
+            throw ServerAccess.denied("structure_unavailable", "服务器中的物理结构不存在或已移除");
         return ship;
     }
 }
