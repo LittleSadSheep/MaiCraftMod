@@ -45,6 +45,10 @@ public final class NavigationFailureEvidenceTest {
             var transport = field(PlayerNav.class, "navigator").get(nav);
             var ground = field(transport.getClass(), "ground").get(transport);
             field(EmbeddedBaritoneNavigator.class, "failureEvidence").set(ground, facts);
+            // 尚未推进路径时也保留调度和备料槽位，不能在默认结果或存档中洗成“搜索无路”。
+            ((EmbeddedBaritoneNavigator) ground).observeDispatch(true, true, true, 9, "preparing_scaffold",
+                    Map.of("source_slot", 18, "pending", true));
+            var dispatch = ((EmbeddedBaritoneNavigator) ground).dispatchEvidence();
             var task = new MoveToCompanionTask(w.player, new MoveToTaskRecord("failure-evidence", 1000, 12D, 1D, 12D, null, true));
             field(AbstractCompanionTask.class, "nav").set(task, nav);
             // 失败后角色已被人挪走，默认终态仍必须呈现导致这次失败的冻结现场。
@@ -55,11 +59,15 @@ public final class NavigationFailureEvidenceTest {
             var semantic = SemanticResultView.result(result);
             check(facts.equals(((Map<?, ?>) semantic.data().get("navigation")).get("ground_failure")),
                     "semantic projection retains body cells rather than treating them as an internal route");
+            check(dispatch.equals(((Map<?, ?>) semantic.data().get("navigation")).get("ground_dispatch")),
+                    "semantic projection retains native inventory and dispatch evidence");
             // 再经过真实持久化结果整理，保证重启后任务查询仍能看到同一份材料与起点观察。
             var safe = IntentStateCodec.class.getDeclaredMethod("safeElement", JsonElement.class); safe.setAccessible(true);
             var gson = new Gson(); var saved = (JsonElement) safe.invoke(null, gson.toJsonTree(semantic.data()));
             check(saved.getAsJsonObject().getAsJsonObject("navigation").get("ground_failure").equals(gson.toJsonTree(facts)),
                     "checkpoint serialization preserves the complete observed no-path context");
+            check(saved.getAsJsonObject().getAsJsonObject("navigation").get("ground_dispatch").equals(gson.toJsonTree(dispatch)),
+                    "checkpoint serialization preserves the dispatch stage and source inventory slot");
         }
         System.out.println("NavigationFailureEvidenceTest: passed");
     }

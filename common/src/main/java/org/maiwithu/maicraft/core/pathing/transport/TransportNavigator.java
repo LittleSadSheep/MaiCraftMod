@@ -309,6 +309,7 @@ public final class TransportNavigator {
                 "cleanup_pending", stopped && TransportRuntime.owns(this),
                 // 即使最后选择地面路线，默认回执也能看到失败起点的障碍、材料和通行许可。
                 "ground_failure", ground.failureEvidence(),
+                "ground_dispatch", ground.dispatchEvidence(),
                 "preparing_jetpack_departure", departureApproach != null, "departure_preparations", departurePreparations,
                 "approaching_unloaded_destination", loadedTravel.active(), "intermediate_landings_completed", loadedTravel.completed());
     }

@@ -37,6 +37,7 @@ import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Set;
+import java.util.List;
 
 public class MovementPillar extends Movement {
 
@@ -47,6 +48,15 @@ public class MovementPillar extends Movement {
     @Override
     public double calculateCost(CalculationContext context) {
         return cost(context, src.x, src.y, src.z);
+    }
+
+    @Override
+    public List<BlockPos> toPlace(BlockStateInterface blocks) {
+        // 梯子攀爬和水柱上浮复用垫柱移动类型，但没有放块动作，不能为它们无谓地打开材料背包。
+        BlockState feet = blocks.get0(src);
+        if (MovementHelper.isClimbable(feet.getBlock())
+                || MovementHelper.isWater(feet) && MovementHelper.isWater(blocks.get0(dest))) return List.of();
+        return super.toPlace(blocks);
     }
 
     @Override

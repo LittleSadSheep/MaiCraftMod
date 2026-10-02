@@ -31,6 +31,8 @@ import org.maiwithu.maicraft.core.pathing.settings.ScaffoldMaterials;
 import org.maiwithu.maicraft.entity.InputDriver;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CollisionGeometry;
+import baritone.pathing.movement.Movement;
+import baritone.utils.BlockStateInterface;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.world.phys.Vec3;
@@ -125,6 +127,8 @@ public final class EmbeddedBaritoneRuntime {
         var result = new LinkedHashMap<String, Object>();
         result.put("has_owner", owner != null);
         result.put("pending_owner", pendingStart != null);
+        result.put("scaffold_preparation", BUILD_SCAFFOLDS.diagnostics());
+        result.put("dispatch", owner == null ? Map.of() : owner.dispatchEvidence());
         result.put("last_drive_tick", lastSwimDriveTick);
         result.put("physical_obstacles", Map.of("state", physicalObstacles.state(),
                 "boxes", physicalObstacles.boxes().size(), "block_reads", physicalObstacles.blockReads(),
@@ -286,8 +290,11 @@ public final class EmbeddedBaritoneRuntime {
         // 普通推进需要本次调度允许且导航提出驱动请求；已经失去调用者但仍要安全落地的旧导航，可继续必要收尾。
         boolean drive = current.requiresOrphanContinuation()
                 || (schedulerAllowsBodyWork && requested);
+        current.observeDispatch(requested, schedulerAllowsBodyWork, context.mutationAvailable(),
+                context.tickRevision(), "awaiting_dispatch", BUILD_SCAFFOLDS.diagnostics());
         if (!drive) {
-            BUILD_SCAFFOLDS.cancel(current);
+            // 关包确认可能已经用掉本刻额度；这是同一准备动作的正常等待，不能每刻取消再重开背包。
+            if (!context.permitsNativeActions() || context.mutationAvailable()) BUILD_SCAFFOLDS.cancel(current);
             lastSwimDriveTick = Long.MIN_VALUE;
             baritone.getInputOverrideHandler().clearAllKeys();
             ((LookBehavior) baritone.getLookBehavior()).clearTarget();
@@ -310,6 +317,8 @@ public final class EmbeddedBaritoneRuntime {
 
         try {
             if (prepareBuildScaffold(context, current)) {
+                current.observeDispatch(requested, schedulerAllowsBodyWork, context.mutationAvailable(),
+                        context.tickRevision(), "preparing_scaffold", BUILD_SCAFFOLDS.diagnostics());
                 baritone.getInputOverrideHandler().clearAllKeys();
                 InputDriver.halt(context.player());
                 return;
@@ -317,6 +326,8 @@ public final class EmbeddedBaritoneRuntime {
             refreshPhysicalObstacles(context.player());
             lastSwimDriveTick = context.level().getGameTime();
             tickingContext = context;
+            current.observeDispatch(requested, schedulerAllowsBodyWork, context.mutationAvailable(),
+                    context.tickRevision(), "driving_pathfinder", BUILD_SCAFFOLDS.diagnostics());
             BiFunction<EventState, TickEvent.Type, TickEvent> events =
                     TickEvent.createNextProvider();
             baritone.getGameEventHandler().onTick(
@@ -596,8 +607,16 @@ public final class EmbeddedBaritoneRuntime {
     private static boolean prepareBuildScaffold(LocalPlayerContext context, EmbeddedBaritoneNavigator current) {
         if (BUILD_SCAFFOLDS.pending()) return !BUILD_SCAFFOLDS.advance(context, current);
         if (current.permit() != TerrainPermit.TERRAFORM || !context.player().onGround() || ACTIONS.pending()) return false;
+        // 先算路再准备材料：背包里有垫块不代表这一趟就要用；平地走路、下挖和等待首条路线都无需开包。
+        var executor = backend == null ? null : backend.getPathingBehavior().getCurrent();
+        if (executor == null) return false;
         var choice = BuildPlacementRegistry.scaffoldChoice(context.player());
         if (choice == null || choice.inventorySlot() < 9) return false;
+        int index = executor.getPosition();
+        var movements = executor.getPath().movements();
+        if (index < 0 || index >= movements.size() || !(movements.get(index) instanceof Movement movement)) return false;
+        movement.resetBlockCache();
+        if (movement.toPlace(new BlockStateInterface(backend.getPlayerContext())).isEmpty()) return false;
         // 角色落地时先准备材料，避免 Baritone 在材料选择完成前启动依赖放置的跳跃。
         return !BUILD_SCAFFOLDS.select(context, current, context.player());
     }

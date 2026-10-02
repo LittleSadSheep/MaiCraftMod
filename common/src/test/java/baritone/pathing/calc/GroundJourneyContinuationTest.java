@@ -47,6 +47,7 @@ import sun.misc.Unsafe;
 public final class GroundJourneyContinuationTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        boolean startup = args.length > 0 && args[0].equals("startup_19");
         try (var w = new InteractionWorldTestHarness()) {
             var memory = (Unsafe) field(Unsafe.class, "theUnsafe").get(null);
             // 设置只供原生设置加载使用的目录与线程，测试不会启动游戏或向存档写入方块。
@@ -76,15 +77,18 @@ public final class GroundJourneyContinuationTest {
                     new Object[]{"fallDamageBudget", new FallDamageBudget(20, 0, 3, 1, 0, 0, 0, 0, .08, 0, false)}))
                 field(CalculationContext.class, (String) value[0]).set(calc, value[1]);
             calc.backtrackCostFavoringCoefficient = 1;
-            var goal = new GoalBlock(100, 1, 3); scene.feet = new BetterBlockPos(1, 1, 3);
+            // 启动回放使用报告中的十九格平地距离，空背包即可算出路线，不依赖任何垫块或 GUI。
+            if (startup) { scene.loadedThrough = 63; scene.flat = true; scene.wide = true; }
+            var goal = new GoalBlock(startup ? 20 : 100, 1, 3); scene.feet = new BetterBlockPos(1, 1, 3);
             check(w.inventory.isEmpty() && !calc.allowBreak && !calc.hasThrowaway, "no jetpack, tools or bridge material is available");
             IPath previous = null; int segments = 0;
             while (!goal.isInGoal(scene.feet) && segments++ < 15) {
                 field(CalculationContext.class, "collisionGeometry").set(calc,
                         new CollisionGeometry(scene, true, Vec3.atBottomCenterOf(scene.feet), scene.feet));
                 var search = new AStarPathFinder(scene.feet, scene.feet.x, scene.feet.y, scene.feet.z, goal, new Favoring(null, calc), calc);
-                var result = search.calculate(150, 1000);
-                check(result.getType() == (scene.loadedThrough >= 100 ? PathCalculationResult.Type.SUCCESS_TO_GOAL
+                // 独立进程首次装载方块与碰撞类也计入搜索耗时，给予冷启动余量，不把合法分段误当导航卡死。
+                var result = search.calculate(startup ? 2000 : 150, startup ? 2000 : 1000);
+                check(result.getType() == (scene.loadedThrough >= goal.getGoalPos().getX() ? PathCalculationResult.Type.SUCCESS_TO_GOAL
                         : PathCalculationResult.Type.SUCCESS_SEGMENT), "real search must return a safe segment until destination loads: " + result.getType());
                 var path = result.getPath().orElseThrow();
                 check(path.getGoal() == goal && path.getDest().getX() > scene.feet.getX(), "every segment keeps the same final goal and advances");
@@ -94,6 +98,11 @@ public final class GroundJourneyContinuationTest {
                 }
                 if (previous != null) seamlessHandoff(memory, backend, ctx, goal, previous, path);
                 previous = path; scene.feet = path.getDest(); scene.loadedThrough += 16;
+            }
+            if (startup) {
+                check(goal.isInGoal(scene.feet) && segments == 1 && previous.positions().size() == 20,
+                        "fresh session must calculate all nineteen walking steps on the first request");
+                System.out.println("GroundJourneyContinuationTest: fresh 19-block path passed"); return;
             }
             check(goal.isInGoal(scene.feet) && segments > 2, "one ground journey reaches the strict remote destination across multiple frontiers");
             // 逃命只给威胁圈，仍用真正的地面A*绕开前方悬崖；没有喷气背包，也没有预选的32格落点。
@@ -144,13 +153,14 @@ public final class GroundJourneyContinuationTest {
     }
     // 路中央依次放岩浆与无支撑悬崖，侧面留真实地面；未加载区域仅作不可穿越边界。
     private static final class Terrain extends ClientLevel {
-        int loadedThrough; BetterBlockPos feet; boolean wide;
+        int loadedThrough; BetterBlockPos feet; boolean wide, flat;
         private Terrain() { super(null, null, null, null, 0, 0, null, null, false, 0); }
-        // 长途接续场景逐条加载窄区块；撤退场景提供完整已知邻域，单独验证任选安全方向的路径。
-        @Override public boolean isLoaded(BlockPos p) { return p.getX() >= 0 && p.getX() <= loadedThrough && p.getZ() >= (wide ? -64 : 0) && p.getZ() < (wide ? 64 : 16); }
+        // 长途接续场景逐条加载窄区块；冷启动平地与撤退场景提供完整邻域，避免测试夹具先耗尽区块边界探测额度。
+        @Override public boolean isLoaded(BlockPos p) { return p.getX() >= (flat ? -64 : 0) && p.getX() <= loadedThrough && p.getZ() >= (wide ? -64 : 0) && p.getZ() < (wide ? 64 : 16); }
         @Override public BlockState getBlockState(BlockPos p) {
             if (!isLoaded(p)) return Blocks.BEDROCK.defaultBlockState();
             if (p.getY() != 0) return Blocks.AIR.defaultBlockState();
+            if (flat) return Blocks.STONE.defaultBlockState();
             if (p.getZ() >= 2 && p.getZ() <= 4) {
                 if (p.getX() >= 8 && p.getX() <= 11) return Blocks.LAVA.defaultBlockState();
                 if (p.getX() >= 24 && p.getX() <= 28) return Blocks.AIR.defaultBlockState();

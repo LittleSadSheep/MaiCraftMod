@@ -46,6 +46,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.InstantClearanceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationFailureEvidenceTest;
+import org.maiwithu.maicraft.core.pathing.baritone.NavigationStartupPreparationTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
@@ -166,6 +167,8 @@ public final class NavigationRegressionSuite {
         InstantClearanceTest.main(args);
         // 无路现场在导航清理和玩家换位置后仍进入默认任务回执。
         NavigationFailureEvidenceTest.main(args);
+        // 初始背包布局与界面等待不能在真正需要放块前阻塞首条路线。
+        NavigationStartupPreparationTest.main(args);
         WaterBucketFallTest.main(args);
         LandingSurfaceRulesTest.main(args);
         NativeBucketLandingTest.main(args);

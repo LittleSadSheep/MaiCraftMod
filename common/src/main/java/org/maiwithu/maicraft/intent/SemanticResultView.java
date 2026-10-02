@@ -156,8 +156,8 @@ public final class SemanticResultView {
     }
 
     private static Object sanitizeEntry(String key, Object value) {
-        // 无路快照中的身体格、材料和许可都是已经观察到的事实，不能当作内部路线脚本删掉。
-        if (key.equals("ground_failure")) return value;
+        // 无路快照及调度中的身体格、备料槽位和许可都是观察事实，不能当作内部路线脚本删掉。
+        if (key.equals("ground_failure") || key.equals("ground_dispatch")) return value;
         // 原生资源和库存成员标识用于判断是否同一视图，不能把其中的坐标片段洗成同一占位词而合并不同置物台。
         if (Set.of("resource_id", "storage_id", "membership").contains(key)) {
             if (value instanceof String text) return text;

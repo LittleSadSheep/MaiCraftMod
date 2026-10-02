@@ -75,6 +75,7 @@ public final class EmbeddedBaritoneNavigator {
     private FailureType failureType = FailureType.NO_PATH;
     private String failureReason = "embedded pathing has not failed";
     private Map<String, Object> failureEvidence = Map.of();
+    private Map<String, Object> dispatchEvidence = Map.of();
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -520,6 +521,14 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public Map<String, Object> failureEvidence() { return failureEvidence; }
+    public Map<String, Object> dispatchEvidence() { return dispatchEvidence; }
+
+    // 搜索尚未提交时也保存调度事实，任务超时或缺少路径事件不能再被解释成 A* 已判定无路。
+    void observeDispatch(boolean requested, boolean allowed, boolean mutationAvailable, long tick,
+                         String phase, Map<String, Object> scaffold) {
+        dispatchEvidence = Map.of("phase", phase, "actor_tick", tick, "drive_requested", requested,
+                "scheduler_allowed", allowed, "mutation_available", mutationAvailable, "scaffold_preparation", scaffold);
+    }
 
     public FailureType failType() {
         return failureType;
@@ -534,7 +543,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public String outcomeSummary() {
-        if (events.isEmpty()) return "baritone_events={}";
+        if (events.isEmpty()) return "baritone_events={}; dispatch=" + dispatchEvidence;
         StringBuilder out = new StringBuilder("baritone_events={");
         boolean first = true;
         for (Map.Entry<PathEvent, Integer> entry : events.entrySet()) {
@@ -542,7 +551,8 @@ public final class EmbeddedBaritoneNavigator {
             first = false;
             out.append(entry.getKey().name().toLowerCase()).append(':').append(entry.getValue());
         }
-        return out.append('}').toString();
+        // 算出过路线也可能随后卡在取垫块，已有路径事件不能遮住当前调度阶段。
+        return out.append("}; dispatch=").append(dispatchEvidence).toString();
     }
 
     public boolean planningInFlight() {

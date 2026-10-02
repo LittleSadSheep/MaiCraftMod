@@ -554,9 +554,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected String timeoutMessage() {
         int gy = player.blockPosition().getY();
         double remaining = repDistance();
+        // 行走超时时把是否进入搜索、是否在备料一起写入日志，不能仅凭剩余距离推断地形无路。
         return "timed out " + String.format("%.1f", remaining) + " blocks from target (now at "
                 + bx(gy) + "); verified route progress stopped long enough for the progress lease"
-                + " to expire. Reassess the obstruction or continue from this position.";
+                + " to expire. Reassess the obstruction or continue from this position."
+                + (nav == null ? "" : "; " + nav.outcomeSummary());
     }
 
     @Override
