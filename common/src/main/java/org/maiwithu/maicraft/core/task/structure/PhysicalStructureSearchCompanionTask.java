@@ -149,6 +149,7 @@ public final class PhysicalStructureSearchCompanionTask
         origin = player.blockPosition().immutable();
         sector = r.sector.at(origin.getX(), origin.getZ(), player.getYRot());
         spiral = new SpiralWalker(origin, FRONTIER_GRID);
+        StructureProfileResources.refresh();
         profile = StructureEvidenceProfiles.resolve(r.structureId);
         if (profile == null) {
             failIssue(

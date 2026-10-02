@@ -5,6 +5,7 @@ import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.intent.ExplorationIntentTest;
 import org.maiwithu.maicraft.intent.TravelTransportContractTest;
 import org.maiwithu.maicraft.mcp.ExplorationCatalogTest;
+import org.maiwithu.maicraft.core.task.structure.StructureProfileResourcesTest;
 
 /** 先核对方向和可见前沿，再回放公开契约与注册目录；实际走路仍交给游戏内原生寻路。 */
 public final class ExplorationRegressionSuite {
@@ -15,6 +16,7 @@ public final class ExplorationRegressionSuite {
         ExplorationIntentTest.main(args);
         TravelTransportContractTest.main(args);
         ExplorationCatalogTest.main(args);
+        StructureProfileResourcesTest.main(args);
         System.out.println("ExplorationRegressionSuite: passed");
     }
 }

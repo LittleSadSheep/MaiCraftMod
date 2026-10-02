@@ -53,12 +53,13 @@ public final class StructureEvidenceProfiles {
             Set<Block> targetBlocks) {}
 
     private static final Map<String, Profile> PROFILES = profiles();
+    private static volatile Map<String, Profile> resourceProfiles = Map.of();
 
     private StructureEvidenceProfiles() {}
 
     // 把配置里的方块名字换成当前游戏实际存在的方块。只要某一必需组完全没有可识别的方块，整份配置就不可用。
     public static ResolvedProfile resolve(String structureId) {
-        Profile profile = PROFILES.get(structureId);
+        Profile profile = resourceProfiles.getOrDefault(structureId, PROFILES.get(structureId));
         if (profile == null) return null;
         List<ResolvedGroup> groups = new ArrayList<>();
         Set<Block> all = new LinkedHashSet<>();
@@ -77,12 +78,17 @@ public final class StructureEvidenceProfiles {
     }
 
     public static boolean hasProfile(String structureId) {
-        return PROFILES.containsKey(structureId);
+        return PROFILES.containsKey(structureId) || resourceProfiles.containsKey(structureId);
     }
 
     public static Set<String> registeredIds() {
-        return PROFILES.keySet();
+        Set<String> ids = new LinkedHashSet<>(PROFILES.keySet());
+        ids.addAll(resourceProfiles.keySet());
+        return Collections.unmodifiableSet(ids);
     }
+
+    /** 资源包重载后替换整套扩展，已开始的搜索继续使用当时解析好的证据规则。 */
+    static void installResources(Map<String, Profile> profiles) { resourceProfiles = Map.copyOf(profiles); }
 
     private static Set<Block> resolveBlocks(Collection<String> ids) {
         Set<Block> resolved = new LinkedHashSet<>();
@@ -96,7 +102,7 @@ public final class StructureEvidenceProfiles {
     }
 
     // 每项依次写：结构名、允许维度、聚集半径、整团最低数量、线索说明和每组最低数量。
-    // 这份表目前固定写在 Java 里；扩展配置要修改源码，没有运行时注册入口。
+    // 原版线索保留默认表；模组通过资源包或配置补充，不用把未知结构猜成最相近的原版建筑。
     private static Map<String, Profile> profiles() {
         Map<String, Profile> out = new LinkedHashMap<>();
 

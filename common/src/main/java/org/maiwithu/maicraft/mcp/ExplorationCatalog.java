@@ -13,6 +13,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import org.maiwithu.maicraft.core.task.structure.StructureEvidenceProfiles;
+import org.maiwithu.maicraft.core.task.structure.StructureProfileResources;
 
 /** 只在请求时列出当前模组环境的探索种类；登记过的群系不代表角色已经去过那里。 */
 public final class ExplorationCatalog {
@@ -46,6 +47,7 @@ public final class ExplorationCatalog {
                 rows.add(item);
             });
             case "structures" -> {
+                StructureProfileResources.refresh();
                 Set<String> ids = new LinkedHashSet<>(StructureEvidenceProfiles.registeredIds());
                 registries.lookup(Registries.STRUCTURE).ifPresent(registry -> registry.listElements()
                         .forEach(holder -> ids.add(holder.key().location().toString())));
@@ -64,7 +66,15 @@ public final class ExplorationCatalog {
             }
             default -> throw new IllegalArgumentException("exploration catalog focus must be biomes, biome_tags or structures");
         }
-        return page(category, rows, query, offset, limit);
+        JsonObject result = page(category, rows, query, offset, limit);
+        if ("structures".equals(category)) {
+            // 多人客户端可能没有结构生成注册表，说明目录来源，不能把证据别名冒充服务器完整名单。
+            result.addProperty("native_structure_registry_available", registries.lookup(Registries.STRUCTURE).isPresent());
+            result.addProperty("catalog_sources", "available_native_registry_and_visible_evidence_profiles");
+            if (!StructureProfileResources.problems().isEmpty())
+                result.add("profile_errors", new Gson().toJsonTree(StructureProfileResources.problems()));
+        }
+        return result;
     }
 
     /** 查询按名称、模组 ID 和标签匹配；固定排序和显式 next_offset 保留全部结果，不静默截断。 */
