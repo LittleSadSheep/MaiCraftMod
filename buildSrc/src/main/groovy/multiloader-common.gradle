@@ -14,6 +14,11 @@ java {
     withSourcesJar()
 }
 
+// 联网查百科时由同一 HTML 解析器保留正文与表格，两个加载器和离线回归使用一致的解析行为。
+dependencies {
+    implementation "org.jsoup:jsoup:${jsoup_version}"
+}
+
 // 设置编译依赖仓库；Sponge 与 Parchment 的指定坐标走各自限定仓库，减少错误来源匹配。
 repositories {
     mavenCentral()

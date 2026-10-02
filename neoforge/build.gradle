@@ -76,6 +76,11 @@ neoForge {
 
 // 发布与开发客户端都加载同一 SQLite 驱动，任务消费前的落盘确认才有实际数据库可用。
 dependencies {
+    // 联网资料解析与 Fabric 使用相同版本，并一同装入发布包。
+    jarJar(implementation('org.jsoup:jsoup')) {
+        version { strictly "[${jsoup_version},2.0)"; prefer jsoup_version }
+    }
+    additionalRuntimeClasspath "org.jsoup:jsoup:${jsoup_version}"
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }

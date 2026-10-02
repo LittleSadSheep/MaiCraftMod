@@ -13,6 +13,12 @@ public final class WebAccess {
 
     public static boolean wiki(URI uri) { return WIKIS.contains(host(uri)); }
 
+    // Wiki 主动公布的主命名空间站点地图只含条目索引，用于本地标题匹配，不访问被禁止的搜索接口。
+    static boolean sitemap(URI uri) {
+        return wiki(uri) && uri.getRawQuery() == null && uri.getPath() != null
+                && uri.getPath().matches("/images/sitemaps/(index\\.xml|NS_0-[0-9]+\\.xml(\\.gz)?)");
+    }
+
     public static URI article(String value) {
         URI uri;
         try { uri = URI.create(value); }
@@ -26,7 +32,7 @@ public final class WebAccess {
     public static void requireFetch(URI uri) throws WebKnowledgeException {
         if (!baseAllowed(uri) || uri.getRawFragment() != null
                 || !(uri.getPath().equals("/robots.txt") && uri.getRawQuery() == null
-                || wiki(uri) && uri.getPath().equals("/api.php")
+                || sitemap(uri)
                 || uri.getRawQuery() == null && articlePath(uri)))
             throw new WebKnowledgeException("url_not_allowed", "The destination is outside the adapted encyclopedia routes");
     }
