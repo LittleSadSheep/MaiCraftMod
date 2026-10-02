@@ -74,6 +74,14 @@ neoForge {
     }
 }
 
+// 发布与开发客户端都加载同一 SQLite 驱动，任务消费前的落盘确认才有实际数据库可用。
+dependencies {
+    jarJar(implementation('org.xerial:sqlite-jdbc')) {
+        version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
+    }
+    additionalRuntimeClasspath "org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"
+}
+
 // 若运行数据生成得到资源，这个目录会参与打包；当前是否真的生成了标签要检查提供器和输出文件。
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 if (providers.gradleProperty('maicraftBlueprintTestWorld').isPresent()) {

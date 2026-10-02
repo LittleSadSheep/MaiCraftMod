@@ -21,6 +21,8 @@ neoForge {
 
 // Mixin 等依赖供编译和注解处理使用，游戏运行时由加载器提供；测试可另有专门的运行依赖。
 dependencies {
+    // 公共存储回归使用与游戏相同的 SQLite 原生驱动，确认实际落盘与事务回滚。
+    implementation "org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
     compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7.1'
     compileOnly group: 'org.ow2.asm', name: 'asm-tree', version: '9.7.1'
@@ -62,6 +64,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 独立验证数据库事务，避免任务进程内缓存掩盖实际的持久化失败。
+    memoryRegression: [
+        entry: 'org.maiwithu.maicraft.intent.persistence.MemoryDatabaseTest',
+        heap: '512m', directory: 'memory-regression', timeoutSeconds: 60,
+        purpose: '验证 SQLite 记忆隔离、迁移与事务回滚'
+    ],
     // 翻箱记忆与供料顺序独立核对，避免一次菜单变化被误记成箱内没有物品。
     containerSearchRegression: [
         entry: 'org.maiwithu.maicraft.core.task.container.ContainerSearchRegressionSuite',
