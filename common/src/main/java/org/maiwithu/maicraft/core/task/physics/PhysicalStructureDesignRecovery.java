@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.UUID;
 import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
@@ -72,7 +73,7 @@ final class PhysicalStructureDesignRecovery {
         return new PhysicalStructureDesignStore.History(targets,evidence,evidence.get("status").getAsString().equals("partial_checkpoint_recovery"));
     }
     private static void collect(JsonObject goal,JsonObject step,String source,String dimension,UUID id,
-            java.util.List<Event> events,JsonArray unknowns) {
+            List<Event> events,JsonArray unknowns) {
         if(!"maicraft:physical_balance".equals(text(goal,"ability"))) return;
         var parameters=goal.getAsJsonObject("parameters");
         if(!"apply".equals(text(parameters,"operation"))||!id.toString().equals(text(parameters,"structure_id"))) return;
