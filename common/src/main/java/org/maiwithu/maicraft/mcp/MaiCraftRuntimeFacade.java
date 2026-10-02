@@ -550,6 +550,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                     BuiltInRegistries.BLOCK.containsKey(ResourceLocation.parse("create:shaft")),
                     Minecraft.getInstance().player != null && Minecraft.getInstance().player.isAlive());
             SemanticAbilityAvailability.production(item, ability, serverAssistance);
+            SemanticAbilityAvailability.physics(item, ability, serverAssistance);
             item.addProperty("mode", abilityMode(ability));
             item.add("contract", SemanticAbilityCatalog.describe(ability));
             abilities.add(item);

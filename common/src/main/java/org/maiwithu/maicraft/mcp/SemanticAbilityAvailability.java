@@ -13,7 +13,7 @@ final class SemanticAbilityAvailability {
         boolean readOnly = switch (id) {
             case "maicraft:remember_place", "maicraft:inspect_machine", "maicraft:design_machine",
                     "maicraft:design_build", "maicraft:wait_for_condition",
-                    "maicraft:find_block" -> true;
+                    "maicraft:find_block", "maicraft:physical_balance" -> true;
             default -> false;
         };
         boolean supported = !id.equals("maicraft:connect_mechanical_power") || createInstalled;
@@ -61,5 +61,17 @@ final class SemanticAbilityAvailability {
         production.addProperty("supported", supported);
         production.addProperty("additional_requirements", "manifest configuration operations must also be supported; materials, permissions and sustained output are verified during execution");
         ability.add("production_enhancement", production);
+    }
+
+    static void physics(JsonObject ability,String id,JsonObject assistance) {
+        if(!id.equals("maicraft:physical_balance")) return;
+        // 没有权威采样后端时明确告知分析不可用；已经授权的原生补丁施工仍独立检查真实条件。
+        var operations=assistance.getAsJsonObject("operations");
+        var operation=operations==null?null:operations.getAsJsonObject("physics.snapshot");
+        var physics=new JsonObject();physics.addProperty("required_operation","physics.snapshot");
+        physics.addProperty("analysis_available",operation!=null&&operation.has("supported")&&operation.get("supported").getAsBoolean()
+                &&operation.has("backend")&&operation.get("backend").getAsString().equals("server"));
+        physics.addProperty("apply_requires","explicit edits, current body control, native reach and real materials; prediction is advisory");
+        ability.add("physics_observation",physics);
     }
 }
