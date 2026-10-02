@@ -47,6 +47,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.NavigationActionPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.InstantClearanceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationFailureEvidenceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationStartupPreparationTest;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerRecoveryTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
@@ -169,6 +170,8 @@ public final class NavigationRegressionSuite {
         NavigationFailureEvidenceTest.main(args);
         // 初始背包布局与界面等待不能在真正需要放块前阻塞首条路线。
         NavigationStartupPreparationTest.main(args);
+        // 工作线程被旧世界读取卡住时，新请求仍能恢复，且取消队列不遗留占位。
+        PathPlannerRecoveryTest.main(args);
         WaterBucketFallTest.main(args);
         LandingSurfaceRulesTest.main(args);
         NativeBucketLandingTest.main(args);
