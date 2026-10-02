@@ -137,7 +137,7 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         cleanup();
         // 路上真动过的地形跟着每一种收场走:成功也好失败也罢,拆了什么就说什么
         String enRoute = journey.isEmpty() ? "" : " En route I had to " + journey.describe() + ".";
-        Map<String, Object> data = new LinkedHashMap<>(resultData());
+        Map<String, Object> data = new LinkedHashMap<>(resultData(finalState));
         if (guiFailure != null) {
             data.put("gui_preparation", guiFailure.evidence());
             data.put("outcome_uncertain", Boolean.TRUE.equals(data.get("outcome_uncertain")) || guiFailure.uncertain());
@@ -178,6 +178,11 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     /** 具体任务填写数量、失败原因等附加结果，默认没有附加信息。 */
     protected Map<String, Object> resultData() {
         return new HashMap<>();
+    }
+
+    /** 取消、真正超时和自然结束分别结算；需要区分原因的任务可读取终态，原有回执保持原入口。 */
+    protected Map<String, Object> resultData(TaskState finalState) {
+        return resultData();
     }
 
     /** 任务确实成功后向调用者说明完成了什么。 */
