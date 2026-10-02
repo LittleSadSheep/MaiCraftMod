@@ -42,7 +42,8 @@ public final class ConstructionOwnership {
         if (world == minecraft.level && minecraft.player.getUUID().equals(playerId)) return identity != null;
         var resolved = StateIdentity.resolve(minecraft); if (resolved.isEmpty()) return false;
         var base = resolved.get(); var owner = minecraft.player.getUUID();
-        var next = new StateIdentity(base.key(), base.directory().resolve("owned-construction").resolve(owner.toString()));
+        // 施工认领沿用世界和玩家身份；旧文件仍可恢复，新的认领与任务记忆存入同一数据库。
+        var next = base.child("owned-construction").child(owner.toString());
         if (!next.equals(identity)) {
             flush(); identity = next; ledger = new Ledger(); dirty = false; nextSave = 0; machineTasks.clear();
             var loaded = STORE.load(next);

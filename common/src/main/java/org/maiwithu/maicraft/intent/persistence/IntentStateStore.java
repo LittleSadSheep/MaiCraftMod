@@ -4,14 +4,10 @@ package org.maiwithu.maicraft.intent.persistence;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -24,7 +20,7 @@ import org.maiwithu.maicraft.core.Constants;
 import java.util.Objects;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
-/** 把任务进度写进磁盘文件：游戏线程先留一份文本，后台依次写入，避免每次保存都卡住游戏。 */
+/** 游戏线程先留下完整任务快照，后台提交 SQLite 事务；重连恢复与消费屏障共用真实落盘回执。 */
 public final class IntentStateStore {
     public static final int VERSION = 1;
     // 保存与恢复每次读取有效启动配置，不能让较早加载的类把大建筑检查点锁死在旧四 MiB 常量。
@@ -50,12 +46,12 @@ public final class IntentStateStore {
         this.writerExecutor = Objects.requireNonNull(writerExecutor);
     }
 
-    public enum Status { ABSENT, LOADED, CORRUPT, OVER_BUDGET }
+    public enum Status { ABSENT, LOADED, CORRUPT, OVER_BUDGET, UNAVAILABLE }
     public enum FlushResult { SAVED, FAILED, TIMED_OUT, INTERRUPTED }
 
     public record LoadResult(Status status, JsonObject root) {}
 
-    /** 优先读进程内刚接受的文本，没有才按配置限额读盘；损坏文件移到旁边保留。 */
+    /** 优先恢复本进程最新快照，再读数据库；只有库中没有记录时才迁移旧 JSON。 */
     public LoadResult load(StateIdentity identity) {
         int limit = maxBytes();
         String captured;
@@ -70,40 +66,43 @@ public final class IntentStateStore {
             return new LoadResult(Status.LOADED, root);
         }
         Path file = file(identity);
-        if (!Files.exists(file)) { clearRecoveryBlock(identity); return new LoadResult(Status.ABSENT, new JsonObject()); }
+        var database = new MemoryDatabase(identity.databaseFile());
+        boolean stored = false;
         try {
-            long bytes = Files.size(file);
-            // 玩家调低限额不代表旧任务损坏：保留原路径，并阻止未加载的旧进度被空检查点覆盖。
-            if (bytes > limit) return overBudget(identity);
-            if (bytes <= 0L) {
-                throw new IOException("semantic state size is outside bounds");
-            }
-            byte[] payload;
-            try (var input = Files.newInputStream(file)) {
-                payload = input.readNBytes(limit + 1);
-            }
-            if (payload.length > limit) return overBudget(identity);
-            if (payload.length == 0) {
-                throw new IOException("semantic state size is outside bounds");
-            }
-            String json = new String(payload, StandardCharsets.UTF_8);
-            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-            if (!root.has("version") || root.get("version").getAsInt() != VERSION) {
-                throw new IOException("unsupported semantic state version");
-            }
-            if (!root.has("identity_key")
-                    || !identity.key().equals(root.get("identity_key").getAsString())) {
-                throw new IOException("semantic state identity mismatch");
+            String json = database.read(identity.scope(), identity.key(), limit);
+            stored = json != null;
+            if (!stored) json = LegacyMemoryFiles.read(file, limit);
+            if (json == null) { clearRecoveryBlock(identity); return new LoadResult(Status.ABSENT, new JsonObject()); }
+            JsonObject root = decode(json, identity);
+            if (!stored) {
+                // 旧任务完整校验后一次导入；并发导入时重新读取胜出的数据库记录，绝不覆盖更新进度。
+                database.write(identity.scope(), identity.key(), json, Map.of(), true);
+                stored = true;
+                root = decode(database.read(identity.scope(), identity.key(), limit), identity);
             }
             clearRecoveryBlock(identity);
             return new LoadResult(Status.LOADED, root);
-        } catch (RuntimeException | IOException invalid) {
-            quarantine(file);
-            clearRecoveryBlock(identity);
-            Constants.LOG.warn("MaiCraft semantic state was invalid and quarantined ({})",
-                    invalid.getClass().getSimpleName());
+        } catch (MemoryDatabase.OverBudget exceeded) { return overBudget(identity); }
+        catch (IOException unavailable) {
+            // 数据库损坏、锁定或迁移失败不能被当成新世界，否则重启可能重复消费已有任务。
+            blockRecovery(identity, "Semantic state recovery is blocked by memory storage at " + identity.databaseFile()
+                    + ". The checkpoint is preserved; restore database access and restart the client before starting new tasks.");
+            Constants.LOG.warn("Could not restore MaiCraft memory database", unavailable);
+            return new LoadResult(Status.UNAVAILABLE, new JsonObject());
+        } catch (RuntimeException invalid) {
+            if (stored) preserveUnrestored(identity);
+            else { quarantine(file); clearRecoveryBlock(identity); }
+            Constants.LOG.warn("MaiCraft semantic checkpoint could not be decoded ({})", invalid.getClass().getSimpleName());
             return new LoadResult(Status.CORRUPT, new JsonObject());
         }
+    }
+
+    private static JsonObject decode(String json, StateIdentity identity) {
+        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+        if (!root.has("version") || root.get("version").getAsInt() != VERSION
+                || !root.has("identity_key") || !identity.key().equals(root.get("identity_key").getAsString()))
+            throw new IllegalArgumentException("semantic state version or identity mismatch");
+        return root;
     }
 
     /** 先复制成不会再变的文本，马上返回“稍后写完”的凭据；收到返回值不等于磁盘已经保存成功。 */
@@ -239,7 +238,8 @@ public final class IntentStateStore {
                 }
             }
             try {
-                write(save.identity, save.json.getBytes(StandardCharsets.UTF_8));
+                new MemoryDatabase(save.identity.databaseFile()).write(save.identity.scope(), save.identity.key(),
+                        save.json, Map.of(), false);
                 save.completion.complete(null);
             } catch (IOException | RuntimeException failure) {
                 save.completion.completeExceptionally(failure);
@@ -261,26 +261,6 @@ public final class IntentStateStore {
         return json;
     }
 
-    private static void write(StateIdentity identity, byte[] payload) throws IOException {
-        // 先同步临时文件再替换正式检查点；附魔等消费屏障只有在完整任务身份已保存后才能获准继续。
-        Files.createDirectories(identity.directory());
-        Path destination = file(identity);
-        Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
-        try {
-            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-                ByteBuffer bytes = ByteBuffer.wrap(payload); while (bytes.hasRemaining()) channel.write(bytes);
-                channel.force(true);
-            }
-            try { Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
-            catch (AtomicMoveNotSupportedException unsupported) {
-                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
-    }
-
     private static final class PendingSave {
         private final StateIdentity identity;
         private final String json;
@@ -291,11 +271,6 @@ public final class IntentStateStore {
             this.identity = identity;
             this.json = json;
         }
-    }
-
-    /** 文件能解析成 JSON，但任务内容不合法时，把它改名保留，避免下次直接当正常状态使用。 */
-    public void quarantine(StateIdentity identity) {
-        quarantine(file(identity));
     }
 
     private static Path file(StateIdentity identity) {

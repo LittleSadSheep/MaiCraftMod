@@ -66,7 +66,7 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 def regressionSuites = [
     // 独立验证数据库事务，避免任务进程内缓存掩盖实际的持久化失败。
     memoryRegression: [
-        entry: 'org.maiwithu.maicraft.intent.persistence.MemoryDatabaseTest',
+        entry: 'org.maiwithu.maicraft.intent.persistence.MemoryRegressionSuite',
         heap: '512m', directory: 'memory-regression', timeoutSeconds: 60,
         purpose: '验证 SQLite 记忆隔离、迁移与事务回滚'
     ],

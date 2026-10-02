@@ -123,7 +123,8 @@ public final class EnchantDurableCheckpointTest {
             var method = IntentRuntime.class.getDeclaredMethod("captureCheckpoint", boolean.class); method.setAccessible(true);
             return (boolean) method.invoke(runtime, true);
         }
-        Path file() { return identity.directory().resolve(identity.key() + ".json"); }
+        // 消费预约必须等待 SQLite 检查点完成，不能仅凭内存里已有父任务就放行。
+        Path file() { return identity.databaseFile(); }
     }
     private static Field field(String name) throws Exception { Field value = IntentRuntime.class.getDeclaredField(name); value.setAccessible(true); return value; }
     private static final class ManualExecutor implements Executor {

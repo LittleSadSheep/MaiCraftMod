@@ -117,9 +117,10 @@ public final class IntentRecoveryBudgetTest {
 
     private static void malformedJsonStillQuarantines(Path directory) throws Exception {
         configure(directory, ""); StateIdentity identity = identity(directory); Files.createDirectories(identity.directory());
-        Files.writeString(stateFile(identity), "{\"tasks\":[");
+        Path legacy = identity.directory().resolve(identity.key() + ".json");
+        Files.writeString(legacy, "{\"tasks\":[");
         // 截断的 JSON 仍按原来的损坏文件流程隔离，与已经通过 JSON 和世界身份验证的内容不兼容区分。
-        check(new IntentStateStore().load(identity).status() == IntentStateStore.Status.CORRUPT && !Files.exists(stateFile(identity)),
+        check(new IntentStateStore().load(identity).status() == IntentStateStore.Status.CORRUPT && !Files.exists(legacy),
                 "真正无法解析的 JSON 仍应隔离");
         try (var files = Files.list(identity.directory())) { check(files.allMatch(path -> path.getFileName().toString().endsWith(".corrupt")), "隔离文件应保留排错证据"); }
     }
@@ -164,7 +165,8 @@ public final class IntentRecoveryBudgetTest {
         Files.createDirectories(config.getParent()); Files.writeString(config, text); BuildingBudgets.initialize(game);
     }
     private static StateIdentity identity(Path directory) { return new StateIdentity("1".repeat(64), directory.resolve("state")); }
-    private static Path stateFile(StateIdentity identity) { return identity.directory().resolve(identity.key() + ".json"); }
+    // 恢复失败后核对真实数据库文件，确保退出和重生没有把空任务写回。
+    private static Path stateFile(StateIdentity identity) { return identity.databaseFile(); }
     private static void rejectSave(IntentStateStore store, StateIdentity identity) throws Exception {
         try { store.saveAsync(identity, new JsonObject()); } catch (IOException expected) { return; }
         throw new AssertionError("未恢复的旧检查点不能接受覆盖保存");
