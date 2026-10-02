@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
+import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -109,6 +110,7 @@ public final class PhysicalStructureSearchCompanionTask
     private int evidenceApproaches;
     private SpiralWalker spiral;
     private ExplorationSector.Area sector;
+    private ClientExplorationMemory memory;
     private EvidenceMatch activeEvidence;
     private EvidenceMatch verifiedEvidence;
     private String issueCode;
@@ -182,6 +184,7 @@ public final class PhysicalStructureSearchCompanionTask
         indexedLevel = player.clientLevel;
         indexedBlocks = profile.targetBlocks();
         TargetIndex.register(indexedLevel, indexedBlocks);
+        memory = new ClientExplorationMemory(player);
     }
 
     @Override
@@ -194,6 +197,7 @@ public final class PhysicalStructureSearchCompanionTask
                     FailureType.INTERRUPTED);
             return TaskState.FAILED;
         }
+        if (memory != null) memory.tick();
         if (!insideScope(player.blockPosition())) {
             stopActiveChild(TaskState.FAILED);
             failIssue(
@@ -494,6 +498,7 @@ public final class PhysicalStructureSearchCompanionTask
 
     // 找到足够的方块线索后，按请求决定立即报告，或先靠近再查一次。线索匹配本身不代表一定有路能到。
     private TaskState beginEvidence(EvidenceMatch match) {
+        rememberEvidence(match, false);
         activeEvidence = match;
         if (!r.reachStructure) {
             verifiedEvidence = match;
@@ -587,6 +592,7 @@ public final class PhysicalStructureSearchCompanionTask
                 && horizontalDistance(match.position(), activeEvidence.position())
                         <= profile.profile().clusterRadius() * 2.0) {
             verifiedEvidence = match;
+            rememberEvidence(match, true);
             return TaskState.SUCCESS;
         }
         if (activeEvidence != null) rejectedEvidence.add(activeEvidence.position().asLong());
@@ -620,6 +626,13 @@ public final class PhysicalStructureSearchCompanionTask
         hits.sort(Comparator.comparingDouble(
                 position -> position.distSqr(player.blockPosition())));
         return new EvidenceScan(matchEvidence(hits), complete, hits.size());
+    }
+
+    /** 先记看到的组合，走到并复查后升级到访状态；证据不等同于服务器结构生成元数据。 */
+    private void rememberEvidence(EvidenceMatch match, boolean reached) {
+        if (memory != null) memory.observeStructure(r.structureId, match.position(), reached,
+                Map.of("description", profile.profile().evidenceDescription(), "group_counts", match.groupCounts(),
+                        "block_counts", match.blockCounts(), "recognition", "visible_block_pattern; natural_generation_not_proven"));
     }
 
     /**
@@ -886,6 +899,7 @@ public final class PhysicalStructureSearchCompanionTask
 
     @Override
     protected void cleanup() {
+        if (memory != null) memory.close();
         if (cleaned) return;
         cleaned = true;
         stopActiveChild(TaskState.CANCELLED);
@@ -922,6 +936,7 @@ public final class PhysicalStructureSearchCompanionTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("structure_id", r.structureId);
+        if (memory != null) data.put("exploration_memory", memory.receipt());
         data.put(
                 "canonical_profile",
                 profile == null ? r.structureId : profile.profile().canonicalId());

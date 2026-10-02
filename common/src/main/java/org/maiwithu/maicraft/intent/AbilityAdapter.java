@@ -306,6 +306,8 @@ final class AbilityAdapter {
         String discovery=exploreTarget(goal);
         // “往下找个平台”还没有坐标；这里只记方向和搜索范围，边移动边观察时再确定落脚处。
         if ("platform".equals(discovery)) {
+            if (goal.parameters().has("angle_degrees") || goal.parameters().has("min_distance"))
+                throw new IllegalArgumentException("platform discovery does not accept biome exploration sector fields");
             if (destination!=null || goal.target()!=null && !"nearest".equals(goal.target().kind())
                     || goal.parameters().has("block_id") || goal.parameters().has("block")
                     || goal.parameters().has("biome_id") || goal.parameters().has("biome_tag"))
@@ -323,6 +325,8 @@ final class AbilityAdapter {
             return new IntentAction.Tool("travel_region",parameters.toString());
         }
         if ("surface".equals(discovery)) {
+            if (goal.parameters().has("angle_degrees") || goal.parameters().has("min_distance"))
+                throw new IllegalArgumentException("surface discovery is direction-free");
             // “回地表”同样没有坐标：判据是脚下这一列露天，与方向无关，也不接受其他目的地。
             if (destination!=null || goal.target()!=null && !"nearest".equals(goal.target().kind())
                     || goal.parameters().has("block_id") || goal.parameters().has("block")
