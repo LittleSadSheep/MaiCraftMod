@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.BiFunction;
+import net.minecraft.client.multiplayer.ClientLevel;
 
 /** 已有安全前缀之后的小段原生挪位：完整支撑优先站立，真实临边或低顶才潜行；不寻路、不改地形或身体位置。 */
 public final class BuildEdgeMotion {
@@ -42,6 +44,11 @@ public final class BuildEdgeMotion {
     private boolean released, observedSneak, alignment, requestedSneak = true;
     private String postureReason = "partial_support_edge";
     private Map<String, Object> geometryCheck = Map.of();
+    private Map<String, Object> standingGeometryCheck = Map.of();
+    // 生产读取原生物理快照；离线回归只替换这个只读来源，不替换移动或碰撞判据。
+    private final BiFunction<ClientLevel, Vec3, PhysicalObstacleSnapshot> physicalObservation = PhysicalObstacleSnapshot::capture;
+    private String releaseInput = "not_requested";
+    private long releaseRequestTick = Long.MIN_VALUE;
 
     public BuildEdgeMotion(Vec3 approachFeet, Vec3 edgeFeet, LongSet forbidden, Predicate<BlockPos> permittedBody) {
         if (!finite(approachFeet) || !finite(edgeFeet) || Math.abs(approachFeet.y - edgeFeet.y) > 1e-5
@@ -89,15 +96,25 @@ public final class BuildEdgeMotion {
         boolean fullSupport = alignment && BuildFootprintSupport.complete(player.level(), player.level()::isLoaded,
                 player.getBbWidth(), observed, target, drift);
         boolean standingSafe = fullSupport && safe(player, observed, target, drift, player.getDimensions(Pose.STANDING).height());
+        standingGeometryCheck = fullSupport ? geometryCheck : Map.of();
         requestedSneak = !standingSafe;
-        postureReason = !alignment || !fullSupport ? "partial_support_edge" : standingSafe ? "full_support_standing" : "low_clearance_crouch";
+        // 未能证明站立安全可能来自观测缺失；只有站立碰撞且潜行复核通过，才把原因记为低净空。
+        postureReason = !alignment || !fullSupport ? "partial_support_edge" : standingSafe ? "full_support_standing"
+                : observationUnavailable(standingGeometryCheck) ? "standing_observation_unavailable" : "standing_safety_unverified";
         double requiredHeight = player.getDimensions(requestedSneak ? Pose.CROUCHING : Pose.STANDING).height();
         if (!bounded(drift)) {
             // 惯性会把身体带出已证明的短段时保留这项具体原因，不误报成需要再垫一层方块。
             geometryCheck = Map.of("reason", "projected_drift_outside_proven_segment");
             return fail(context, "edge_support_or_sweep_changed");
         }
-        if (!standingSafe && !safe(player, observed, target, drift, requiredHeight)) return fail(context, "edge_support_or_sweep_changed");
+        if (!standingSafe) {
+            if (!safe(player, observed, target, drift, requiredHeight)) {
+                if (fullSupport && observationUnavailable(geometryCheck)) postureReason = "geometry_observation_unavailable";
+                return fail(context, geometryFailure("edge_support_or_sweep_changed"));
+            }
+            if (fullSupport && Set.of("anchor_block_collision", "physical_structure_or_entity_collision")
+                    .contains(standingGeometryCheck.get("reason"))) postureReason = "low_clearance_crouch";
+        }
         // 姿态必须由原生玩家刻兑现后才移动；普通重力 vy=-0.0784 不算漂浮，停止输入仍靠真实摩擦减速。
         boolean postureReady = requestedSneak ? observedSneak : !player.isShiftKeyDown() && player.getPose() == Pose.STANDING;
         if (!postureReady || horizontal(velocity) > .08) {
@@ -125,8 +142,9 @@ public final class BuildEdgeMotion {
         Vec3 at = player.position(), speed = player.getDeltaMovement();
         Vec3 drift = at.add(speed.x * 3, 0, speed.z * 3);
         if (!player.onGround() || player.isInWater() || player.isPassenger() || !finite(speed)
-                || !bounded(at) || !bounded(drift) || !safe(player, at, at, drift, player.getBbHeight()))
+                || !bounded(at) || !bounded(drift))
             fail(context, "edge_hold_support_changed");
+        else if (!safe(player, at, at, drift, player.getBbHeight())) fail(context, geometryFailure("edge_hold_support_changed"));
         command(context, Vec3.ZERO, 0);
         return status;
     }
@@ -135,19 +153,35 @@ public final class BuildEdgeMotion {
         // 主人暂停或取消后本控制器不再续 Shift；运动中的支撑失败仍由 fail 停住，只有任务边界显式释放。
         if (context != null && owns(context) && !released) {
             status = Status.FAILED; if (failure.isEmpty()) failure = "edge_motion_stopped";
-            released = true; context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision());
+            released = true; submitRelease(context);
         }
     }
     /** 只有调用方确认离开边缘或脚下已补成可靠平台时才显式放开；此后本对象不再续任何输入。 */
     public void release(LocalPlayer player) {
         LocalPlayerContext context = context(player);
         released = true;
-        if (context != null && owns(context)) context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision());
+        submitRelease(context);
         if (status == Status.RUNNING) { status = Status.FAILED; failure = "edge_motion_released"; }
     }
     public String failure() { return failure; }
     public boolean requiresSneak() { return requestedSneak; }
     public String postureReason() { return postureReason; }
+    private void submitRelease(LocalPlayerContext context) {
+        // 控制器退休与实际停止请求分别记账；没有同一身体/控制版本时，不能声称已发送停止输入。
+        releaseRequestTick = Long.MIN_VALUE; // 每次释放尝试独立记账，失败尝试不能继承上一次成功的时间戳。
+        if (context == null || !owns(context)) { releaseInput = "not_submitted_no_owned_context"; return; }
+        releaseInput = "submission_failed";
+        context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision());
+        releaseInput = "submitted"; releaseRequestTick = context.tickRevision();
+    }
+    public Map<String, Object> releaseEvidence() {
+        // applyMovement 只提交控制请求，并不证明原生玩家刻已经清掉按键或恢复站姿。
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("controller_retired", released); out.put("stop_input_request", releaseInput);
+        out.put("native_input_release", "not_observed"); out.put("scope", "latest_controller_stop_request_only");
+        if (releaseRequestTick != Long.MIN_VALUE) out.put("request_tick", releaseRequestTick);
+        return Map.copyOf(out);
+    }
     public Map<String, Object> evidence() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("state", status.name().toLowerCase(Locale.ROOT)); out.put("failure", failure);
@@ -157,7 +191,11 @@ public final class BuildEdgeMotion {
         if (observed != null) out.put("actual_feet", coordinates(observed));
         out.put("velocity", coordinates(velocity)); out.put("observed_sneak", observedSneak);
         out.put("stable_ticks", stableTicks); out.put("elapsed_ticks", owner == null ? 0 : Math.max(0, lastTick - startedTick));
+        if (lastTick != Long.MIN_VALUE) out.put("observation_actor_tick", lastTick); // 明确身体观察来自哪一刻，不冒称释放后的新位置。
         out.put("released", released);
+        out.put("released_scope", "controller_no_longer_renews_input");
+        out.put("release", releaseEvidence());
+        if (!standingGeometryCheck.isEmpty()) out.put("standing_geometry_check", standingGeometryCheck);
         if (!geometryCheck.isEmpty()) out.put("geometry_check", geometryCheck);
         return Map.copyOf(out);
     }
@@ -166,7 +204,7 @@ public final class BuildEdgeMotion {
         try {
             var world = player.level(); double width = player.getBbWidth();
             if (!dimensions(width, height)) { geometryCheck = Map.of("reason", "invalid_body_dimensions"); return false; }
-            var physical = PhysicalObstacleSnapshot.capture(player.clientLevel, from);
+            var physical = physicalObservation.apply(player.clientLevel, from);
             if (!Set.of("not_installed", "ready", "ready_empty").contains(physical.state())) {
                 geometryCheck = Map.of("reason", "physical_observation_unavailable", "state", physical.state()); return false;
             }
@@ -190,6 +228,16 @@ public final class BuildEdgeMotion {
         } catch (RuntimeException | LinkageError unavailable) {
             geometryCheck = Map.of("reason", "geometry_observation_failed", "exception", unavailable.getClass().getSimpleName()); return false;
         }
+    }
+
+    private String geometryFailure(String fallback) {
+        // 原生判据仍拒绝未证明安全的短段，但观测缺失不冒充地形或支撑已经变化。
+        return observationUnavailable(geometryCheck) ? "edge_geometry_observation_unavailable" : fallback;
+    }
+    private static boolean observationUnavailable(Map<String, Object> check) {
+        return Set.of("physical_observation_unavailable", "geometry_observation_failed", "invalid_body_dimensions",
+                "entity_collision_budget_exceeded", "anchor_geometry_unloaded", "anchor_geometry_read_budget_exceeded",
+                "anchor_collision_shape_budget_exceeded").contains(check.get("reason"));
     }
     // GroundCorridor 按解析区间证明全程支撑，能接受真实的窄边接触，但任何中间缺口、撞身或危险格都拒绝。
     static boolean safeSweep(BlockGetter world, Predicate<BlockPos> loaded, double width, double height, LongSet forbidden,

@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.core.combat.Battlefield;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 import static org.maiwithu.maicraft.client.actor.MobDefenseDamageTest.field;
 import static org.maiwithu.maicraft.client.actor.MobDefenseDamageTest.invoke;
@@ -56,7 +57,13 @@ public final class MeleeReceiptSettlementTest {
             var receipt = (NativeActionReceipt) field(field(task, "meleeAction"), "receipt");
             receipt.finish(NativeActionReceipt.Status.CONFIRMED_APPLIED, "测试中已到达的原生确认");
             f.h.level.entities.remove(11);
-            check(!(Boolean) invoke(task, "settleSubmittedMelee"), "读取冻结确认不要求目标继续存在");
+            // 已确认的历史回执无需重新取得身体控制权，更不能为了统计而再次发起原生攻击。
+            var contextField = ActorControlTestHarness.field(ClientActorBoundary.class, "activeContext");
+            var actor = ClientRuntime.actor(); Object saved = contextField.get(actor);
+            try {
+                contextField.set(actor, null);
+                check(!(Boolean) invoke(task, "settleSubmittedMelee"), "读取冻结确认不要求目标继续存在或仍有动作上下文");
+            } finally { contextField.set(actor, saved); }
             invoke(task, "settleFinishedTargets"); task.result(TaskState.CANCELLED);
             var record = (AttackTaskRecord) field(task, "r");
             check(record.strikes() == 1 && record.lost().contains(11) && record.defeated().isEmpty()

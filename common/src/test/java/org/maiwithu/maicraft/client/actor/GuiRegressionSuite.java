@@ -258,6 +258,7 @@ public final class GuiRegressionSuite {
         // 檐边末段使用真实潜行姿态与碰撞摩擦，保持部分足底支撑并能原路退回。
         BuildEdgeMotionTest.main(args);
         BuildEdgeMotionNativeTest.main(args);
+        BuildMotionEvidenceTest.main(args); // 同一原生身体上验证不完整观察和释放快照，不靠清空诊断通过验收。
         BuildEdgeHandoffTest.main(args);
         // 补齐半阶对齐的余速侧偏边界，主方向可走不代表惯性方向也可走。
         BuildAnchorDriftTest.main(args);

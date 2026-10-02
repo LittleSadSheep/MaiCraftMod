@@ -255,7 +255,8 @@ public final class BuildEdgeMotionNativeTest {
     private static BuildEdgeMotion motion(Vec3 from, Vec3 to) { return new BuildEdgeMotion(from, to, new LongOpenHashSet(), p -> true); }
     private static boolean moving(LocalPlayer player) { return Math.abs(player.input.forwardImpulse) + Math.abs(player.input.leftImpulse) > 1e-7; }
 
-    private static final class Fixture implements AutoCloseable {
+    // 同包诊断回归复用真实原生姿态夹具，只替换物理观察来源以复现 partial 和 unknown。
+    static final class Fixture implements AutoCloseable {
         final InteractionWorldTestHarness h = new InteractionWorldTestHarness();
         final NativePlayer player = h.h.allocate(NativePlayer.class);
         Fixture() throws Exception {

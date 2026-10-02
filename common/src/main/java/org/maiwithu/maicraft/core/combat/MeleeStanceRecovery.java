@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashMap;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -49,7 +50,14 @@ public final class MeleeStanceRecovery {
     }
 
     public void stop(LocalPlayer player) {
-        if (alignment != null) { alignment.release(player); alignment = null; }
+        if (alignment != null) {
+            // 原失败观察保留在顶层并标明释放前时点；停止请求另附事实，不把 released 改成臆测的原生姿态确认。
+            var snapshot = new LinkedHashMap<>(alignment.evidence());
+            snapshot.put("snapshot_phase", "before_release");
+            try { alignment.release(player); }
+            finally { snapshot.put("release", alignment.releaseEvidence()); lastEvidence = Map.copyOf(snapshot); }
+            alignment = null;
+        }
         cell = null;
     }
 

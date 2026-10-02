@@ -81,7 +81,9 @@ public final class BuildEdgeRecovery {
     }
     /** 只重试地形／站位变化；换世界、失去控制、未落地或许可变化必须交还对应流程。 */
     static boolean recoverable(String failure) {
+        // 观测缺失保持原来的恢复资格，只细化事实标签，不因此改变重规划和退出策略。
         return List.of("edge_support_or_sweep_changed", "edge_hold_support_changed", "edge_stance_moved_after_arrival",
+                "edge_geometry_observation_unavailable",
                 "placement_return_obstructed_before_click", "placement_access_live_click_unavailable").contains(failure);
     }
     public void pause() {
