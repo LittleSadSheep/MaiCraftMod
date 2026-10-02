@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.intent.Goal;
@@ -20,6 +21,9 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.intent.ObservedGameEvidence;
+import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import java.nio.charset.StandardCharsets;
@@ -71,7 +75,8 @@ public final class IntentStateCodec {
             IntentTaskRecord.DecisionSnapshot decision,
             IntentTaskRecord.DecisionAnswer pendingAnswer,
             IntentTaskRecord.TerminalSnapshot terminal,
-            boolean chatSubmissionTracked) {}
+            boolean chatSubmissionTracked,
+            Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes) {}
 
     public record Decoded(
             List<Plan> plans,
@@ -154,6 +159,19 @@ public final class IntentStateCodec {
         // 已接受的步骤不能在保存时截短，进度与按步骤关联的结果也必须一同保全。
         value.add("steps", steps);
         value.addProperty("step_index", task.stepIndex());
+        // 运行中取物步骤的范围随父任务落盘，未知标记也保存，不能在二次恢复时变成新的许可。
+        JsonArray scopes = new JsonArray();
+        task.containerSearchScopes().forEach((index, scope) -> {
+            JsonObject item = new JsonObject(); item.addProperty("step_index", index);
+            item.addProperty("status", scope.isPresent() ? "known" : "unknown");
+            scope.ifPresent(bound -> {
+                BlockPos at = bound.origin();
+                item.add("origin", worldPosition(new Goal.WorldPosition(at.getX(), at.getY(), at.getZ(), bound.dimension())));
+                item.addProperty("radius", bound.radius());
+            });
+            scopes.add(item);
+        });
+        value.add("container_search_scopes", scopes);
 
         JsonArray completed = new JsonArray();
         task.stepResults().forEach(step -> {
@@ -439,7 +457,33 @@ public final class IntentStateCodec {
                 Map.copyOf(internalAreaProtections),
                 List.copyOf(attempts),
                 decision, answer, terminal,
-                value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean());
+                value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean(),
+                decodeContainerSearchScopes(value, steps));
+    }
+
+    private static Map<Integer, Optional<ContainerSearchScope>> decodeContainerSearchScopes(JsonObject value, List<Goal> steps) {
+        // 范围属于当初的许可事实，非法半径不能钳制后冒充原值，缺字段则留给父任务报告未知。
+        var result = new LinkedHashMap<Integer, Optional<ContainerSearchScope>>();
+        for (var element : array(value, "container_search_scopes", steps.size())) {
+            JsonObject row = element.getAsJsonObject(); int index = row.get("step_index").getAsBigDecimal().intValueExact();
+            if (index < 0 || index >= steps.size() || !"maicraft:acquire_items".equals(steps.get(index).ability()))
+                throw new IllegalArgumentException("container search scope is outside an acquisition step");
+            Optional<ContainerSearchScope> scope;
+            switch (text(row, "status")) {
+                case "unknown" -> scope = Optional.empty();
+                case "known" -> {
+                    JsonObject at = row.getAsJsonObject("origin");
+                    String dimension = ResourceLocation.parse(text(at, "dimension")).toString();
+                    BlockPos origin = new BlockPos(at.get("x").getAsBigDecimal().intValueExact(), at.get("y").getAsBigDecimal().intValueExact(), at.get("z").getAsBigDecimal().intValueExact());
+                    int radius = row.get("radius").getAsBigDecimal().intValueExact();
+                    if (radius < 1 || radius > ContainerSearchScope.MAX_RADIUS) throw new IllegalArgumentException("invalid persisted container radius");
+                    scope = Optional.of(new ContainerSearchScope(dimension, origin, radius));
+                }
+                default -> throw new IllegalArgumentException("invalid container search scope status");
+            }
+            if (result.put(index, scope) != null) throw new IllegalArgumentException("duplicate container search scope");
+        }
+        return Map.copyOf(result);
     }
 
     private static JsonArray packedCells(List<Long> cells) {

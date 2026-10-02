@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.player.LocalPlayer;
@@ -96,6 +97,17 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */
     public final int storageSearchRadius;
     public ContainerSearchScope storageScope;
+    public boolean storageScopeUnknown;
+    private BooleanSupplier storageScopeCheckpoint = () -> true;
+
+    /** 恢复范围必须来自原语义步骤；缺失时保留未知，库存不足也不能借当前站位获得新的翻箱范围。 */
+    public void bindStorageScope(ContainerSearchScope saved, BooleanSupplier checkpoint) {
+        storageScope = saved == null ? null : new ContainerSearchScope(saved.dimension(), saved.origin(), Math.min(saved.radius(), storageSearchRadius));
+        storageScopeUnknown = saved == null; storageScopeCheckpoint = Objects.requireNonNull(checkpoint);
+    }
+
+    /** 首次调查前等待原范围真正落盘，后续箱子复用同一份已确认许可。 */
+    public boolean prepareStorageScope() { return storageScopeCheckpoint.getAsBoolean(); }
 
     /** 在公开工具接单时冻结原点，排队期间玩家移动不会改变本次翻箱范围。 */
     public SemanticAcquireTaskRecord captureStorageOrigin(LocalPlayer player) {
