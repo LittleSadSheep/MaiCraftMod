@@ -33,8 +33,9 @@ public final class SemanticEntitySearchTool implements MaiCraftTool {
 
     @Override
     public String description() {
+        // 寻找实体必须先获得视线证据，墙后的已加载实体仍留待移动后重新观察。
         return "Find real entities by namespaced type and semantic relationship. The Mod scans "
-                + "currently loaded client evidence first, then walks bounded first-person frontiers "
+                + "visible loaded client evidence with direct line of sight first, then walks bounded first-person frontiers "
                 + "and rescans. It never accepts runtime entity IDs or coordinates, queries a seed or "
                 + "server locate authority, forces chunks, or treats named/tamed/owned/leashed, "
                 + "vehicle-held or explicitly protected entities as wild/unowned. Physical enclosure "

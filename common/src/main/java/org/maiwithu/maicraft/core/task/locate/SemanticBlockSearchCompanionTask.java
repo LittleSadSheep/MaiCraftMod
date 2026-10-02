@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.core.task.locate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -13,6 +15,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -33,6 +36,9 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private String failureCode;
     /** 具体位置只在 Mod 内部保存；公开结果仅输出数量与距离统计。 */
     private final Map<BlockPos, Block> observed = new LinkedHashMap<>();
+    // 一批查完再排除已看过的位置，近处墙后的同类方块不能占满窗口、遮住远处可见目标。
+    private final Set<BlockPos> excluded = new HashSet<>();
+    private final Set<BlockPos> inspected = new HashSet<>();
 
     public SemanticBlockSearchCompanionTask(LocalPlayer player, SemanticBlockSearchTaskRecord record) {
         super(player, record);
@@ -48,9 +54,10 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     protected TaskState onTick() {
         ClientLevel level = player.clientLevel;
         int chunkRadius = Math.max(1, (r.maxDistance + 15) / 16);
-        // 同一查询键跨刻续进；want 取请求计数，攒够且比下一环可能最近值还近时才收工。
+        // 索引仅提供候选；逐批核对视线，隐藏目标不会构成发现证据。
+        int batch = Math.max(64, r.count);
         TargetIndex.Result result = TargetIndex.query(
-                level, origin, r.blockTargets, r.count, chunkRadius, SCAN_BUILD_BUDGET);
+                level, origin, r.blockTargets, batch, chunkRadius, SCAN_BUILD_BUDGET, excluded);
         absorb(result.hits());
         if (observed.size() >= r.count) {
             return TaskState.SUCCESS;
@@ -59,11 +66,15 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
             r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
             return TaskState.RUNNING;
         }
-        return exhausted();
+        if (result.hits().size() < batch) return exhausted();
+        excluded.addAll(result.hits());
+        r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
+        return TaskState.RUNNING;
     }
 
     private void absorb(List<BlockPos> hits) {
         for (BlockPos pos : hits) {
+            if (!inspected.add(pos.immutable())) continue;
             // 索引条目可能滞后于真实世界（客户端预测），使用位置前先核对实际状态。
             BlockState state = player.clientLevel.getBlockState(pos);
             if (!r.blockTargets.contains(state.getBlock())) {
@@ -74,6 +85,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
             if (dx * dx + dz * dz > (double) r.maxDistance * r.maxDistance) {
                 continue;
             }
+            // 已加载只说明客户端有地形数据；必须能从眼睛看见，才向模型报告找到。
+            if (!ObservationVisibility.block(player, pos)) continue;
             if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
                 // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
                 double distance = Math.sqrt(pos.distSqr(origin));
@@ -96,7 +109,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         }
         return failSearch(
                 "no_block_evidence_within_bound",
-                "the loaded-chunk scan within the bounded radius found no matching block; "
+                "the line-of-sight scan within the bounded loaded radius found no visible matching block; "
                         + "this is not evidence that none exists outside loaded terrain",
                 FailureType.TARGET_LOST);
     }
@@ -127,7 +140,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("observed_acceptable_count", observed.size());
         data.put("observed_acceptable_by_block_id", Map.copyOf(observedById));
         data.put("verified", observed.size() >= r.count);
-        data.put("scope", "loaded_client_blocks");
+        data.put("scope", "visible_loaded_client_blocks");
+        data.put("visibility_required", true);
         data.put("max_distance", r.maxDistance);
         data.put("search_geometry", "horizontal_radius_across_loaded_sections");
         data.put("distance_metric", "euclidean_3d");
@@ -157,7 +171,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
                         ? ", nearest observed about " + Math.round(nearestMatchDistance) + " blocks away in 3D"
                                 + " (horizontal " + Math.round(nearestHorizontalDistance) + ", height offset " + nearestVerticalOffset + ")"
                         : "")
-                + " through loaded client chunks";
+                + " through direct line of sight in loaded client chunks";
     }
 
     @Override

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.scan.SpiralWalker;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import java.util.function.Predicate;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -353,6 +354,9 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState startTargetTravel(TargetCandidate found) {
+        // 前往语义目的地前先看到其证据位置，不能凭已加载的地下生物群系或墙后水域导航进去。
+        if (!ObservationVisibility.block(player, found.evidence()))
+            return TaskState.RUNNING;
         candidate = found;
         targetAttempts++;
         startMove(found.approach(), true);

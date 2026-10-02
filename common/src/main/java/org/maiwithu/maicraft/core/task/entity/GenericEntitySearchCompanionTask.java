@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.scan.SpiralWalker;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import java.util.UUID;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -178,6 +179,8 @@ public final class GenericEntitySearchCompanionTask
                 continue;
             }
             if (r.excludes(entity.getUUID())) continue;
+            // 探索移动只为获得新的真实视野，不能把关门屋内或墙后的生物当成已找到。
+            if (!ObservationVisibility.entity(player, entity)) continue;
             if (!EntitySemanticSafety.matchesRelation(entity, r.relation)) continue;
             loadedMatching++;
             if (r.harmIntent && !entity.isAttackable()) {

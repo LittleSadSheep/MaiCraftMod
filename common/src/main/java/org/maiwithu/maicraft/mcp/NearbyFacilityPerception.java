@@ -15,6 +15,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 
 /**
  * 附近可立即使用的方块设施盘点：只报类型、计数与最近距离，不给坐标——
@@ -47,6 +48,8 @@ final class NearbyFacilityPerception {
             if (!BLOCK_IDS.contains(id.toString()) && !state.is(BlockTags.BEDS) && !state.is(BlockTags.ANVIL)
                     && !state.is(BlockTags.CAULDRONS))
                 continue;
+            // 设施盘点与探索使用同一视线；不会向模型透露关门房屋内可被加载到的箱子和工作台。
+            if (!ObservationVisibility.block(player, pos)) continue;
             Match match = matches.computeIfAbsent(id.toString(), ignored -> new Match());
             match.count++;
             match.nearest = Math.min(match.nearest,

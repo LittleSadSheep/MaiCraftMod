@@ -27,8 +27,9 @@ public final class SemanticBlockSearchTool implements MaiCraftTool {
 
     @Override
     public String description() {
+        // 公开描述说明只有直接可见目标才计入找到的数量，避免模型把加载范围当作透视。
         return "Find named blocks by scanning the currently loaded client chunks around the "
-                + "standing place. Reports verified counts, matching block ids and a "
+                + "standing place with direct line of sight from the player's eyes. Reports verified counts, matching block ids and a "
                 + "nearest-distance statistic only; concrete positions stay inside the Mod and "
                 + "a later semantic ability resolves the actual block itself. No frontier "
                 + "walking, chunk forcing or coordinate output; unloaded terrain stays unknown.";

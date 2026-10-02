@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchCompanionTask;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.SemanticBlockSearchApi;
+import org.maiwithu.maicraft.core.scan.ObservationVisibilityTest;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
@@ -32,6 +33,8 @@ public final class SemanticBlockSearchTest {
         scanReportsCountsAndDistanceWithoutCoordinates();
         deepMatchesReportThreeDimensionalDistance();
         absenceFailsWithHonestScopeNote();
+        // 视线与分页属于发现证据的一部分，随方块探索入口一起回归。
+        ObservationVisibilityTest.main(args);
         // 设施盘点段与 find_block 同守"证据不出坐标、缺席带范围声明"的纪律。
         org.maiwithu.maicraft.mcp.NearbyFacilityPerceptionTest.main(args);
         System.out.println("SemanticBlockSearchTest: passed");
