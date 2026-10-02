@@ -15,16 +15,13 @@ import java.util.function.Predicate;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
@@ -38,7 +35,6 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
-import java.util.Locale;
 
 /**
  * 先观察已加载地形，再前往内部边界、加载周围地形并重复，直到角色亲自核实语义目标。全程不读取种子或生成器，也不调用区块加载接口。
@@ -54,53 +50,19 @@ public final class SemanticExploreCompanionTask
             SurfaceKind kind, BlockPos approach, BlockPos evidence, int waterDepth) {}
     private record TargetCandidate(
             BlockPos approach, BlockPos evidence, String description) {}
-    private record WaterEvidence(
-            boolean oceanBiome, boolean largeConnectedWater,
-            int forwardRun, int lateralWidth, int deepestColumn, int score) {
-        boolean qualifiesAsCoast() {
-            // “海岸”必须是邻接海洋的干燥陆地，而非大型湖泊边缘。水域规模仍可用于排序，但不能替代已加载客户端地形中实际观察到的海洋生物群系证据。
-            return oceanBiome;
-        }
-    }
-    private record ScoredCoast(
-            TargetCandidate candidate, boolean preferredShore,
-            double travelDistance, int evidenceScore) {}
-    private record FrontierChoice(BlockPos position, boolean crossesObservedWater) {}
-
     private static final int OBSERVATION_RADIUS = 112;
     private static final int BIOME_OBSERVATION_STEP = 4;
-    private static final int COAST_OBSERVATION_STEP = 8;
     private static final int BIOME_Y_STEP = 32;
     private static final int BIOME_SAMPLES_PER_TICK = 192;
-    private static final int COAST_COLUMNS_PER_TICK = 4;
-    private static final int COAST_LOCAL_RADIUS = 4;
-    /** 在候选干燥岸边之外测得的有界连续水域证据。 */
-    private static final int LARGE_WATER_FORWARD_PROBE = 12;
-    private static final int LARGE_WATER_SIDE_PROBE = 6;
-    private static final int LARGE_WATER_MIN_FORWARD_RUN = 8;
-    private static final int LARGE_WATER_MIN_LATERAL_WIDTH = 7;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    /** 新的观察中心必须能看到角色当前所在区块之外的地形。 */
-    private static final int MIN_FRONTIER_PROGRESS = 16;
-    /** 每次目标选择可抽样的已加载柱列数量上限；它限制单次选择工作量，不限制行进时间。 */
-    private static final int FRONTIER_DIRECTION_PROBES = 16;
-    private static final int FRONTIER_DIRECTION_PASSES = 2;
-    private static final int FRONTIER_RAY_STRIDE = 8;
-    private static final int[] SHORE_RETURN_RADII = {
-            1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 88, 112
-    };
     /** 初始路段期限；只要路线持续取得已核实进展，MoveTo 就会续期自己的任务记录。 */
     private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
-    private static final int MAX_REPORTED_FAILURES = 16;
-    private static final int MAX_REPORTED_FRONTIERS = 16;
     private static final int MAX_SPIRAL_PROBES = 10_000;
 
     private static final List<ColumnOffset> BIOME_OBSERVATION_OFFSETS =
             buildOffsets(BIOME_OBSERVATION_STEP);
-    private static final List<ColumnOffset> COAST_OBSERVATION_OFFSETS =
-            buildOffsets(COAST_OBSERVATION_STEP);
 
     private Predicate<Holder<Biome>> biomeMatch;
     private String canonicalTarget;
@@ -109,6 +71,8 @@ public final class SemanticExploreCompanionTask
     private ExplorationSector.Area sector;
     private boolean survey;
     private String surveyStopReason;
+    private ClientExplorationMemory memory;
+    private ClientLevel startingLevel;
     private Stage stage;
 
     private int observationColumn;
@@ -140,15 +104,7 @@ public final class SemanticExploreCompanionTask
     private int targetAttempts;
     private final Set<Long> rejectedTargets = new HashSet<>();
     private final Set<Long> attemptedWaypoints = new HashSet<>();
-    private final Set<Long> failedShoreReturnWaypoints = new HashSet<>();
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
-    private boolean waypointSelectionDeferred;
-    private boolean selectedWaypointShoreReturn;
-    private boolean activeWaypointShoreReturn;
-    private int frontierDirectionPass;
-    private int dryLandWaypoints;
-    private int shoreReturnWaypoints;
-    private int observedWaterCrossingWaypoints;
 
     private SpiralWalker spiral;
 
@@ -166,14 +122,22 @@ public final class SemanticExploreCompanionTask
         sector = r.sector.at(origin.getX(), origin.getZ(), player.getYRot());
         spiral = new SpiralWalker(origin, WAYPOINT_GRID);
         ClientLevel level = ClientRuntime.requireContext(player).level();
+        startingLevel = level;
         if (!resolveTarget(level, r.target)) {
             fail(inputFailure, FailureType.UNSUPPORTED);
             return;
         }
+        memory = new ClientExplorationMemory(player);
         beginObservation();
     }
 
     @Override protected TaskState onTick() {
+        // 传送到其他维度后结束旧范围，不能把新世界观察挂到出发时的跑图任务上。
+        if (player.clientLevel != startingLevel) {
+            fail("dimension changed during exploration", FailureType.INTERRUPTED);
+            return TaskState.FAILED;
+        }
+        memory.tick();
         double bodyDistance = horizontalDistance(origin, player.blockPosition());
         farthestBodyDistance = Math.max(farthestBodyDistance, bodyDistance);
         if (bodyDistance > r.maxDistance + SCOPE_TOLERANCE) {
@@ -208,7 +172,8 @@ public final class SemanticExploreCompanionTask
             }
             TagKey<Biome> tag = TagKey.create(Registries.BIOME, id);
             if (registry.get(tag).isEmpty()) {
-                inputFailure = "unknown biome tag in the client registry: " + target;
+                inputFailure = "unknown biome tag in the client registry: " + target
+                        + "; query perceive(view=exploration, focus=biome_tags) for installed tags";
                 return false;
             }
             canonicalTarget = "#" + id;
@@ -219,7 +184,7 @@ public final class SemanticExploreCompanionTask
         ResourceKey<Biome> key = id == null ? null : ResourceKey.create(Registries.BIOME, id);
         if (key == null || registry.get(key).isEmpty()) {
             inputFailure = "unknown biome in the client registry: " + target
-                    + " (use a namespaced biome id or #biome_tag)";
+                    + "; query perceive(view=exploration, focus=biomes) for installed biomes";
             return false;
         }
         canonicalTarget = id.toString();
@@ -260,6 +225,8 @@ public final class SemanticExploreCompanionTask
                 continue;
             }
             if (biomeYIndex == 0) {
+                // 沿途可见的群系都属于跑图成果，即使它不是本次指定目标也保留到长期记忆。
+                memory.observeBiome(surfaceTravelCell(level, x, z), false);
                 loadedSampleCount++;
                 observedLoadedColumns.add(BlockPos.asLong(x, 0, z));
                 observedMinX = Math.min(observedMinX, x);
@@ -338,6 +305,7 @@ public final class SemanticExploreCompanionTask
         // 前往语义目的地前先看到其证据位置，不能凭已加载的地下生物群系或墙后水域导航进去。
         if (!ObservationVisibility.block(player, found.evidence()))
             return TaskState.RUNNING;
+        memory.observeBiome(found.approach(), false);
         candidate = found;
         targetAttempts++;
         startMove(found.approach(), true);
@@ -356,16 +324,10 @@ public final class SemanticExploreCompanionTask
             return exhausted();
         }
         BlockPos waypoint = nextWaypoint(level);
-        if (waypoint == null && waypointSelectionDeferred) {
-            waypointSelectionDeferred = false;
-            return TaskState.RUNNING;
-        }
         if (waypoint == null) {
             return exhausted();
         }
         activeWaypoint = waypoint;
-        activeWaypointShoreReturn = selectedWaypointShoreReturn;
-        selectedWaypointShoreReturn = false;
         waypointAttempts++;
         startMove(waypoint, false);
         stage = Stage.TRAVEL_WAYPOINT;
@@ -418,14 +380,9 @@ public final class SemanticExploreCompanionTask
             waypointReached++;
         } else {
             waypointFailed++;
-            if (activeWaypointShoreReturn && activeWaypoint != null) {
-                failedShoreReturnWaypoints.add(BlockPos.asLong(
-                        activeWaypoint.getX(), 0, activeWaypoint.getZ()));
-            }
             recordLegFailure("exploration_waypoint", activeWaypoint, result);
         }
         activeWaypoint = null;
-        activeWaypointShoreReturn = false;
         beginObservation();
         return TaskState.RUNNING;
     }
@@ -568,172 +525,6 @@ public final class SemanticExploreCompanionTask
         return null;
     }
 
-    /**
-     * 为要求干燥陆地接近路线的语义目标选择观察中心。目标类型只声明地表条件，此选择器不对特定生物群系或实体做特判。
-     * 这里只抽样已加载事实，实际可达性留给第一人称子任务核实。
-     */
-    private BlockPos nextDryLandWaypoint(ClientLevel level) {
-        BlockPos current = BlockHelper.playerFeet(
-                level, player.getX(), player.getY(), player.getZ()).immutable();
-        if (player.isInWater()) {
-            BlockPos shore = nearestLoadedDryLand(level, current);
-            if (shore == null) return deferFrontierDirectionPass();
-            attemptedWaypoints.add(BlockPos.asLong(shore.getX(), 0, shore.getZ()));
-            selectedWaypointShoreReturn = true;
-            shoreReturnWaypoints++;
-            frontierDirectionPass = 0;
-            return shore;
-        }
-
-        double rotation = frontierDirectionPass * Math.PI / FRONTIER_DIRECTION_PROBES;
-        List<FrontierChoice> choices = new ArrayList<>();
-        for (int direction = 0; direction < FRONTIER_DIRECTION_PROBES; direction++) {
-            double angle = rotation
-                    + Math.PI * 2.0 * direction / FRONTIER_DIRECTION_PROBES;
-            BlockPos desired = new BlockPos(
-                    current.getX() + (int) Math.round(Math.cos(angle) * MAX_LEG_DISTANCE),
-                    current.getY(),
-                    current.getZ() + (int) Math.round(Math.sin(angle) * MAX_LEG_DISTANCE));
-            FrontierChoice choice = sampledDryFrontierToward(level, current, desired);
-            if (choice != null && isNovelWaypoint(choice.position())) choices.add(choice);
-        }
-        if (choices.isEmpty()) return deferFrontierDirectionPass();
-
-        // 保留向外螺旋的覆盖顺序；若本轮仍有全程干燥的扩展路线，就不选择已观察到的涉水路线。
-        boolean hasAllDryChoice = choices.stream()
-                .anyMatch(choice -> !choice.crossesObservedWater());
-        BlockPos desired = spiral.next(player.blockPosition().getY());
-        FrontierChoice selected = choices.stream()
-                .filter(choice -> !hasAllDryChoice || !choice.crossesObservedWater())
-                .min(Comparator
-                        .comparingDouble((FrontierChoice choice) -> horizontalDistance(
-                                choice.position(), desired))
-                        .thenComparing((first, second) -> Double.compare(
-                                horizontalDistance(current, second.position()),
-                                horizontalDistance(current, first.position()))))
-                .orElse(null);
-        if (selected == null) return deferFrontierDirectionPass();
-        attemptedWaypoints.add(BlockPos.asLong(
-                selected.position().getX(), 0, selected.position().getZ()));
-        if (selected.crossesObservedWater()) observedWaterCrossingWaypoints++;
-        else dryLandWaypoints++;
-        frontierDirectionPass = 0;
-        return selected.position();
-    }
-
-    /**
-     * 在已加载地形中抽样一条射线，不把水面当作目的地。只有观测完整段水域，并且水域两侧都至少有同等长度的干燥路面后，远岸才可作为候选，
-     * 避免凭猜测认定远岸并让搜索转成开放水域探索。
-     */
-    private FrontierChoice sampledDryFrontierToward(
-            ClientLevel level, BlockPos current, BlockPos desired) {
-        double dx = desired.getX() - current.getX();
-        double dz = desired.getZ() - current.getZ();
-        double length = Math.sqrt(dx * dx + dz * dz);
-        if (length < 1.0) return null;
-        double ux = dx / length;
-        double uz = dz / length;
-        double farthest = Math.min(MAX_LEG_DISTANCE,
-                Math.max(length, minimumFrontierProgress()));
-        BlockPos lastDryBeforeWater = null;
-        BlockPos verifiedFarShore = null;
-        boolean enteredWater = false;
-        int waterSamples = 0;
-        int farShoreDrySamples = 0;
-        long previousColumn = Long.MIN_VALUE;
-        for (int step = FRONTIER_RAY_STRIDE;
-                step <= farthest;
-                step += FRONTIER_RAY_STRIDE) {
-            int x = (int) Math.round(current.getX() + ux * step);
-            int z = (int) Math.round(current.getZ() + uz * step);
-            long column = BlockPos.asLong(x, 0, z);
-            if (column == previousColumn) continue;
-            previousColumn = column;
-            if (!insideScope(x, z)) break;
-            SurfaceInfo surface = surfaceInfo(level, x, z);
-            if (surface.kind() == SurfaceKind.UNKNOWN) break;
-            if (!enteredWater) {
-                if (surface.kind() == SurfaceKind.WATER) {
-                    enteredWater = true;
-                    waterSamples = 1;
-                } else if (horizontalDistance(current, surface.approach())
-                        >= minimumFrontierProgress()) {
-                    lastDryBeforeWater = surface.approach();
-                }
-                continue;
-            }
-            if (surface.kind() == SurfaceKind.WATER) {
-                if (farShoreDrySamples > 0) break;
-                waterSamples++;
-                continue;
-            }
-            farShoreDrySamples++;
-            if (farShoreDrySamples >= waterSamples
-                    && horizontalDistance(current, surface.approach())
-                            >= minimumFrontierProgress()) {
-                verifiedFarShore = surface.approach();
-            }
-        }
-        return verifiedFarShore != null
-                ? new FrontierChoice(verifiedFarShore, true)
-                : lastDryBeforeWater == null
-                        ? null : new FrontierChoice(lastDryBeforeWater, false);
-    }
-
-    private BlockPos nearestLoadedDryLand(ClientLevel level, BlockPos current) {
-        BlockPos best = null;
-        double bestDistance = Double.POSITIVE_INFINITY;
-        double rotation = frontierDirectionPass * Math.PI / FRONTIER_DIRECTION_PROBES;
-        for (int radius : SHORE_RETURN_RADII) {
-            for (int direction = 0; direction < FRONTIER_DIRECTION_PROBES; direction++) {
-                double angle = rotation
-                        + Math.PI * 2.0 * direction / FRONTIER_DIRECTION_PROBES;
-                int x = current.getX() + (int) Math.round(Math.cos(angle) * radius);
-                int z = current.getZ() + (int) Math.round(Math.sin(angle) * radius);
-                if (!insideScope(x, z)) continue;
-                SurfaceInfo surface = surfaceInfo(level, x, z);
-                if (surface.kind() != SurfaceKind.LAND || surface.approach() == null
-                        || isFailedShoreReturnNeighborhood(surface.approach())) continue;
-                double distance = horizontalDistance(current, surface.approach());
-                if (distance < bestDistance) {
-                    best = surface.approach();
-                    bestDistance = distance;
-                }
-            }
-            if (best != null) break;
-        }
-        return best;
-    }
-
-    private boolean isFailedShoreReturnNeighborhood(BlockPos candidate) {
-        for (long packed : failedShoreReturnWaypoints) {
-            if (horizontalDistance(candidate, BlockPos.of(packed)) <= 4.0) return true;
-        }
-        return false;
-    }
-
-    private boolean isNovelWaypoint(BlockPos candidate) {
-        double separation = minimumFrontierProgress();
-        for (long packed : attemptedWaypoints) {
-            if (horizontalDistance(candidate, BlockPos.of(packed)) < separation) return false;
-        }
-        return true;
-    }
-
-    private int minimumFrontierProgress() {
-        return Math.max(1, Math.min(MIN_FRONTIER_PROGRESS, r.maxDistance / 2));
-    }
-
-    private BlockPos deferFrontierDirectionPass() {
-        frontierDirectionPass++;
-        if (frontierDirectionPass < FRONTIER_DIRECTION_PASSES) {
-            waypointSelectionDeferred = true;
-        } else {
-            frontierDirectionPass = 0;
-        }
-        return null;
-    }
-
     private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
@@ -765,7 +556,6 @@ public final class SemanticExploreCompanionTask
 
     private void noteUnloaded(int x, int z) {
         unloadedSampleCount++;
-        if (unloadedFrontiers.size() >= MAX_REPORTED_FRONTIERS) return;
         BlockPos sample = new BlockPos(x, 0, z);
         for (BlockPos existing : unloadedFrontiers) {
             if (existing.distManhattan(sample) < 32) return;
@@ -774,7 +564,6 @@ public final class SemanticExploreCompanionTask
     }
 
     private void recordLegFailure(String kind, BlockPos target, TaskResult result) {
-        if (legFailures.size() >= MAX_REPORTED_FAILURES) return;
         Map<String, Object> failure = new LinkedHashMap<>();
         failure.put("kind", kind);
         failure.put("x", target.getX());
@@ -837,7 +626,8 @@ public final class SemanticExploreCompanionTask
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("target", canonicalTarget == null ? r.target : canonicalTarget);
-        data.put("verified", verifiedPosition != null);
+        if (memory != null) data.put("exploration_memory", memory.receipt());
+        if (!survey) data.put("verified", verifiedPosition != null);
         if (survey) {
             data.put("survey_stop_reason", surveyStopReason == null ? "interrupted_or_blocked" : surveyStopReason);
             data.put("coverage", "sampled_observed_terrain_not_exhaustive");
@@ -864,7 +654,8 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_reached", waypointReached);
         data.put("waypoints_failed", waypointFailed);
         data.put("target_approaches_attempted", targetAttempts);
-        data.put("failed_legs", List.copyOf(legFailures));
+        // 路段失败完整保留在任务证据中；默认回执可按既有归档机制分页，不能按固定条数丢弃卡点。
+        data.put("travel_failures", List.copyOf(legFailures));
 
         List<Map<String, Object>> centers = exploredCenters.stream()
                 .map(pos -> Map.<String, Object>of(
@@ -891,7 +682,7 @@ public final class SemanticExploreCompanionTask
             suggestions.add("increase max_distance or choose another semantic landmark");
             suggestions.add("continue from the final position to search a different loaded frontier");
             if (!r.mayAlterTerrain && waypointFailed > 0) {
-                suggestions.add("review failed_legs; enable may_alter_terrain only if those route changes are acceptable");
+                suggestions.add("review travel_failures; enable may_alter_terrain only if those route changes are acceptable");
             }
             data.put("suggestions", suggestions);
         }
@@ -914,6 +705,7 @@ public final class SemanticExploreCompanionTask
     }
 
     @Override protected void cleanup() {
+        if (memory != null) memory.close();
         stopActiveChild(TaskState.CANCELLED);
         super.cleanup();
     }
