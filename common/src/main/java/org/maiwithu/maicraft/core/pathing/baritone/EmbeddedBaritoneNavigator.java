@@ -83,6 +83,8 @@ public final class EmbeddedBaritoneNavigator {
     private boolean healthLatched;
     private final NavigationDispatchWatchdog dispatchWatchdog = new NavigationDispatchWatchdog();
     private Map<String, Object> dispatchRecovery = Map.of();
+    private Map<String, Object> probeRecovery = Map.of();
+    private int probeRestarts;
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -277,6 +279,19 @@ public final class EmbeddedBaritoneNavigator {
             }
         }
         if (!terrainProbe.isDone()) {
+            if (terrainProbe.stalled()) {
+                var evidence = terrainProbe.diagnostics(true);
+                boolean recovered = probeRestarts == 0 && terrainProbe.recover();
+                if (!recovered && terrainProbe.isDone() && !terrainProbe.isCompletedExceptionally()) return PlayerNav.Status.RUNNING;
+                probeRecovery = Map.of("classification", "planning_stall", "component", "terrain_probe", "search", evidence);
+                cancelTerrainProbe(); healthEvidence = probeRecovery; healthLatched = true;
+                if (recovered) {
+                    probeRestarts++; started = false; calculationFailed = false; driveRequested = false;
+                    Constants.LOG.warn("[maicraft-path] terrain probe stalled; retrying the original route under unchanged permission; {}", evidence);
+                    return PlayerNav.Status.RUNNING;
+                }
+                return failWhenSafe(FailureType.PLANNING_STALL, "planning_stall: read-only terrain probe did not return after bounded recovery; " + healthDiagnostics());
+            }
             driveRequested = false;
             return PlayerNav.Status.RUNNING;
         }
@@ -537,9 +552,10 @@ public final class EmbeddedBaritoneNavigator {
     public Map<String, Object> healthDiagnostics() {
         var current = EmbeddedBaritoneRuntime.searchDiagnostics(this);
         if (!healthLatched && !current.isEmpty()) healthEvidence = current;
-        if (dispatchRecovery.isEmpty()) return healthEvidence;
+        if (dispatchRecovery.isEmpty() && probeRecovery.isEmpty()) return healthEvidence;
         var facts = new LinkedHashMap<String, Object>(healthEvidence);
         facts.put("dispatch_recovery", dispatchRecovery); facts.put("dispatch_restart_count", dispatchWatchdog.restarts());
+        facts.put("terrain_probe_recovery", probeRecovery); facts.put("terrain_probe_restart_count", probeRestarts);
         return Map.copyOf(facts);
     }
 
@@ -579,7 +595,10 @@ public final class EmbeddedBaritoneNavigator {
         // 正常菜单确认与人工暂停不计入搜索丢失；回执仍指出当前真正阻塞身体执行的环节。
         if (!requested || !allowed || phase.equals("preparing_scaffold")) {
             dispatchWatchdog.observe(tick, false, false, false);
-            latchHealth("execution_blocked", phase.equals("preparing_scaffold") ? "inventory_preparation" : "body_dispatch");
+            if (terrainProbe != null && !terrainProbe.isDone()) {
+                healthEvidence = Map.of("classification", "planning", "component", "terrain_probe", "search", terrainProbe.diagnostics(false));
+                healthLatched = true;
+            } else latchHealth("execution_blocked", phase.equals("preparing_scaffold") ? "inventory_preparation" : "body_dispatch");
         }
     }
 

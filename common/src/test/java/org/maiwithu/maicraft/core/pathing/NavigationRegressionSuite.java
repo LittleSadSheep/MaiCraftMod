@@ -49,6 +49,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.InstantClearanceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationFailureEvidenceTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationStartupPreparationTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationDispatchWatchdogTest;
+import org.maiwithu.maicraft.core.pathing.baritone.TerrainProbeCancellationTest;
 import org.maiwithu.maicraft.core.pathing.calc.PathPlannerRecoveryTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
@@ -177,6 +178,7 @@ public final class NavigationRegressionSuite {
         NavigationDispatchWatchdogTest.main(args);
         // 工作线程被旧世界读取卡住时，新请求仍能恢复，且取消队列不遗留占位。
         PathPlannerRecoveryTest.main(args);
+        TerrainProbeCancellationTest.main(args);
         WaterBucketFallTest.main(args);
         LandingSurfaceRulesTest.main(args);
         NativeBucketLandingTest.main(args);

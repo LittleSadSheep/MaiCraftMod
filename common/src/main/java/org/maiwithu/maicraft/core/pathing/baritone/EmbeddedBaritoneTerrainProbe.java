@@ -12,6 +12,7 @@ import baritone.pathing.movement.CalculationContext;
 import baritone.utils.pathing.Favoring;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
@@ -54,10 +55,10 @@ public final class EmbeddedBaritoneTerrainProbe {
                 context);
         long primaryTimeout = Baritone.settings().primaryTimeoutMS.value;
         long failureTimeout = Baritone.settings().failureTimeoutMS.value;
-        ProbeFuture future = new ProbeFuture(search);
+        ProbeFuture future = new ProbeFuture(search, Math.max(10_000L, failureTimeout + 5_000L));
 
         // 后台计算前后都检查是否取消；取消时也通知搜索器停止，不能只把等待结果的对象丢掉。
-        PathPlannerPool.submit(() -> {
+        future.calculation = PathPlannerPool.submit(() -> {
             if (future.isCancelled()) return null;
             PathCalculationResult calculation = search.calculate(primaryTimeout, failureTimeout);
             if (future.isCancelled()) return null;
@@ -65,7 +66,8 @@ public final class EmbeddedBaritoneTerrainProbe {
                     .map(path -> TerrainBill.planned(path, context.bsi))
                     .orElseGet(TerrainBill::new);
             return new Result(calculation, bill);
-        }).whenComplete((result, failure) -> {
+        });
+        future.calculation.whenComplete((result, failure) -> {
             if (failure != null) future.completeExceptionally(failure);
             else if (result != null) future.complete(result);
         });
@@ -91,9 +93,20 @@ public final class EmbeddedBaritoneTerrainProbe {
     /** 普通 future，其取消操作会传递到底层一次性 Baritone A* 搜索。 */
     public static final class ProbeFuture extends CompletableFuture<Result> {
         private final AbstractNodeCostSearch search;
+        private final long timeoutMillis;
+        private CompletableFuture<Result> calculation;
 
-        private ProbeFuture(AbstractNodeCostSearch search) {
-            this.search = search;
+        private ProbeFuture(AbstractNodeCostSearch search, long timeoutMillis) {
+            this.search = search; this.timeoutMillis = timeoutMillis;
+        }
+
+        // 只读复算同样可能卡在区块读取，必须使用真实工作请求的预算与诊断，不能无限等待建议。
+        public boolean stalled() { return !isDone() && PathPlannerPool.ageMillis(calculation) > timeoutMillis; }
+        public Map<String, Object> diagnostics(boolean stack) { return PathPlannerPool.describe(calculation, stack); }
+        public boolean recover() {
+            boolean recovered = PathPlannerPool.recover(calculation);
+            if (recovered) search.cancel();
+            return recovered;
         }
 
         @Override
@@ -102,6 +115,7 @@ public final class EmbeddedBaritoneTerrainProbe {
                 return false;
             }
             search.cancel();
+            if (calculation != null) calculation.cancel(mayInterruptIfRunning);
             return super.cancel(mayInterruptIfRunning);
         }
     }
