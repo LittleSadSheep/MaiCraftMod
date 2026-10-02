@@ -63,7 +63,7 @@ final class PhysicsBlockEdits implements BlockGetter {
             // 一次性相减可保留“替换唯一方块”的合法质量，不会出现临时零质量的虚构刚体。
             Matrix3d delta = inertia(this,pos,after,newMass).sub(inertia(level,pos,before,oldMass));
             body = body.ballast(newMass-oldMass, point, delta);
-            if (before.hasBlockEntity() || after.hasBlockEntity()) unknowns.add("补丁 " + pos.subtract(origin) + " 改动方块实体，配置、动力接线及内部载荷须在施工后重新读取");
+            if (before.hasBlockEntity() || after.hasBlockEntity()) unknowns.add("unmodeled:补丁 " + pos.subtract(origin) + " 改动方块实体，配置、动力接线及内部载荷须在施工后重新读取");
         }
         var loads = body.loads().stream().filter(load -> {
             BlockPos pos = BlockPos.containing(load.point().x()+origin.getX(),load.point().y()+origin.getY(),load.point().z()+origin.getZ());
@@ -82,7 +82,9 @@ final class PhysicsBlockEdits implements BlockGetter {
         return multiplier == null ? new Matrix3d().scaling(mass/6)
                 : new Matrix3d().scaling(multiplier.x*mass,multiplier.y*mass,multiplier.z*mass);
     }
-    public BlockState getBlockState(BlockPos pos) { return replacements.getOrDefault(pos,level.getBlockState(pos)); }
+    public BlockState getBlockState(BlockPos pos) {
+        BlockState proposed=replacements.get(pos); return proposed==null?level.getBlockState(pos):proposed;
+    }
     public BlockEntity getBlockEntity(BlockPos pos) { return replacements.containsKey(pos) ? null : level.getBlockEntity(pos); }
     public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
     public int getHeight() { return level.getHeight(); }
