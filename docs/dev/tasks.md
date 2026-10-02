@@ -43,7 +43,7 @@
 
 [PlanView](../../common/src/main/java/org/maiwithu/maicraft/mcp/PlanView.java) 避免在编译回执中复印原蓝图。`plan(plan_id=..., path=...)` 恢复保存的输入，明确标记没有重新验证现场；执行仍走原来的材料、场地和原生动作检查。
 
-[ResponseArchive](../../common/src/main/java/org/maiwithu/maicraft/mcp/ResponseArchive.java) 处理其余超大载荷，把原始数据冻结在服务拥有的临时压缩文件里。页面保留对象键、数组索引和连续文本偏移，省略值附上明确引用。宿主可自行缓存完整内容，模型只展开当前需要的部分。临时引用失效时明确报错，不把缺失当成空证据；临时文件写入失败则回退交付原回执，保留已经发生的游戏事实。
+[ResponseArchive](../../common/src/main/java/org/maiwithu/maicraft/mcp/ResponseArchive.java) 处理其余超大载荷，把原始数据压缩后冻结到服务拥有的临时 SQLite 中，并按压缩字节计算容量。页面保留对象键、数组索引和连续文本偏移，省略值附上明确引用。宿主可自行缓存完整内容，模型只展开当前需要的部分。临时引用失效时明确报错，不把缺失当成空证据；数据库写入失败则回退交付原回执，保留已经发生的游戏事实。服务关闭时清理本会话临时库。
 
 传输只发送一份普通 JSON 文本；Attention v3 的任务事件保留游标、类型、身份和关键效果标记，当前决策从任务记录读取。身体伤害等事件继续保留自己的证据，过滤任务事件不能滤掉身体安全信息。
 

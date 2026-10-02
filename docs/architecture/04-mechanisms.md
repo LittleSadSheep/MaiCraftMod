@@ -259,9 +259,22 @@ else                                       { 失败 / 报告不确定 }
 <游戏目录>/config/maicraft/memory.sqlite
 ```
 
-任务检查点保存计划、**总任务单**、请求键、地标和容器记忆。机器档案、完整蓝图与玩家施工归属也使用这一个 SQLite 文件。
+任务检查点保存计划、**总任务单**、请求键、地标和容器记忆。机器档案、完整蓝图、玩家施工归属、作者模型、续建项目、支撑账、原生预约和服务端未决请求也使用这一个 SQLite 文件。
 
-`MemoryDatabase` 的 `memory_records` 表以 `scope`、`identity_key`、`document_key` 为联合主键。任务使用 `state`，施工归属使用 `state/owned-construction/<玩家 UUID>`，机器使用 `machines`。空文档键表示完整检查点或机器索引，蓝图指纹表示不可变图纸。复杂任务和机器内容沿用已有 JSON 编码及校验，数据库负责隔离、事务与持久化；当前不拆分任务内部步骤为独立 SQL 表。
+`MemoryDatabase` 的 `memory_records` 表以 `scope`、`identity_key`、`document_key` 为联合主键。复杂任务、项目和机器内容沿用已有编码及校验，数据库负责隔离、事务与持久化；当前不拆分任务内部步骤为独立 SQL 表。
+
+| 分区 | 记录与编号 |
+| --- | --- |
+| `state` | 世界检查点，空文档键 |
+| `state/owned-construction/<玩家 UUID>` | 该玩家在当前世界的施工归属 |
+| `machines` | 世界与玩家机器索引，空文档键；独立图纸使用内容指纹 |
+| `state/build-scenes` | 作者模型版本，原 `scene_id` |
+| `state/build-projects` | 冻结施工目标，原 `project_id` |
+| `state/build-scaffolds` | 原生确认支撑账，原 `project_id`；轻量更新不改写冻结目标 |
+| `state/native-submissions/<机制>` | 附魔、聊天和其他原生提交预约，原操作 UUID |
+| `server-mutations` | 客户端服务端未决请求，按旧日志名称区分 |
+
+`MemoryDocuments` 只在库中缺少该编号时读取旧文件，领域校验通过后唯一插入；源文件保留。`MutationJournal` 先合并旧正式文件和 `.pending` 的未决身份，再一次入库。旧原生预约即使为空或截断也保留原文并阻止再次提交；数据库中的空未决集合和空支撑账同样是有效记录，不能被旧文件重新填回。
 
 | 特性 | 说明 |
 | --- | --- |
@@ -272,7 +285,9 @@ else                                       { 失败 / 报告不确定 }
 | 损坏 | 旧 JSON 语法损坏仍加 `.corrupt` 保留；数据库不可读或库内检查点损坏时保留原记录并阻止覆盖 |
 | 超容量 | 不加载，也**不覆盖**旧记录；预算按每份检查点或图纸的 UTF-8 内容计算 |
 
-正常退出游戏后备份整个 `config/maicraft/`。运行期间 SQLite 可能存在 `memory.sqlite-wal` 与 `memory.sqlite-shm`，不能只拷贝主文件作为一致备份。原生动作提交日志和作者模型资源仍沿用各自目录，数据库中的历史任务也不能代替这些消费证据。
+正常退出游戏后备份整个 `config/maicraft/`。运行期间 SQLite 可能存在 `memory.sqlite-wal` 与 `memory.sqlite-shm`，不能只拷贝主文件作为一致备份。旧目录用于兼容导入和保留迁移源，不再写入新的内部状态 JSON。
+
+`ResponseArchive` 把大回执压缩后存入本服务创建的临时 SQLite，保留原来的 URI、份数、压缩字节预算和未使用三十分钟失效规则。停止服务时删除临时库；这种会话引用从来不承担跨进程恢复。配置、外部蓝图文件以及 JSON/NBT 导出是文件接口，继续按其格式读写。
 
 ### 恢复的纪律
 

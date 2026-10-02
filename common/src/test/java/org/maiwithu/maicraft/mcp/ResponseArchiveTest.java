@@ -3,6 +3,10 @@ package org.maiwithu.maicraft.mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.concurrent.atomic.AtomicLong;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.DriverManager;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 
 /** 大观察按冻结回执找回，页间不会换成新的世界状态；失效引用明确报错，不能触发重做游戏动作。 */
 public final class ResponseArchiveTest {
@@ -15,6 +19,7 @@ public final class ResponseArchiveTest {
             JsonArray evidence = new JsonArray(); for (int i = 0; i < 900; i++) evidence.add("observed-block-" + i);
             raw.add("a/b~c", evidence);
             var compact = archive.present(raw).getAsJsonObject();
+            sqliteRows(archive, 1);
             // 超大回执完整交付并附冻结引用；原始观察不被外层改写。
             check(compact.get("accepted").getAsBoolean() && compact.get("task_id").getAsString().equals("accepted-task"), "acceptance survives large receipts");
             check(!compact.get("partial").getAsBoolean() && !compact.has("response_partial")
@@ -45,6 +50,7 @@ public final class ResponseArchiveTest {
             archive.present(raw); archive.present(raw); rejected(archive, id);
             String newest = archive.present(raw).getAsJsonObject().get("details_uri").getAsString();
             clock.set(31 * 60 * 1000L); rejected(archive, newest);
+            sqliteRows(archive, 0);
         }
         System.out.println("ResponseArchiveTest: passed");
     }
@@ -86,6 +92,17 @@ public final class ResponseArchiveTest {
     private static void rejected(ResponseArchive archive, String uri) {
         try { archive.read(uri); throw new AssertionError("invalid or expired receipt was readable: " + uri); }
         catch (IllegalArgumentException expected) { /* 找回失败必须明确，不返回伪造的空证据。 */ }
+    }
+    private static void sqliteRows(ResponseArchive archive, int expected) {
+        // 从数据库核对完整回执确实落盘且过期后删除，不能用 Java 条目表冒充归档或清理成功。
+        try {
+            var field = ResponseArchive.class.getDeclaredField("directory"); field.setAccessible(true); Path directory = (Path) field.get(archive);
+            try (var paths = Files.list(directory)) { check(paths.noneMatch(path -> path.toString().endsWith(".json.gz")), "回执仍使用旧压缩文件存储"); }
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve(MemoryDatabase.FILE_NAME));
+                 var sql = connection.createStatement(); var result = sql.executeQuery("SELECT count(*) FROM memory_records WHERE scope='receipts'")) {
+                result.next(); check(result.getInt(1) == expected, "SQLite 回执数量不符合归档和过期结果");
+            }
+        } catch (Exception failure) { throw new AssertionError(failure); }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

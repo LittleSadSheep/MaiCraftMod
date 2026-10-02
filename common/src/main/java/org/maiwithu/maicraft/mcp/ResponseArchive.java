@@ -5,6 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.URI;
@@ -18,12 +20,14 @@ import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
+import java.util.Base64;
 import java.util.function.LongSupplier;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.intent.persistence.MemoryDatabase;
 
-/** 网络层的大回执完整交付并冻结到压缩文件，随后读取不会重新采样或操作玩家。 */
+/** 网络层的大回执完整交付并冻结到会话临时 SQLite；仍按压缩字节计费，读取不重新采样或操作玩家。 */
 final class ResponseArchive implements AutoCloseable {
     static final String PREFIX = "maicraft://receipts/";
     static final int INLINE_CHARS = 8000;
@@ -33,9 +37,10 @@ final class ResponseArchive implements AutoCloseable {
     private final long byteBudget;
     private final LongSupplier clock;
     private Path directory;
+    private MemoryDatabase database;
     private long bytes;
     private boolean closed;
-    private record Entry(Path file, long bytes, long usedAt) {}
+    private record Entry(long bytes, long usedAt) {}
 
     ResponseArchive() { this(32, 64L << 20, System::currentTimeMillis); }
     ResponseArchive(int capacity, long byteBudget, LongSupplier clock) {
@@ -85,11 +90,11 @@ final class ResponseArchive implements AutoCloseable {
         Entry stored = entries.get(id);
         if (stored == null) throw new IllegalArgumentException("receipt_expired: query task/get or repeat the read-only observation; do not repeat execute to recover a receipt");
         String uri = PREFIX + id;
-        try (var reader = new InputStreamReader(new GZIPInputStream(Files.newInputStream(stored.file())), StandardCharsets.UTF_8)) {
+        try (var reader = new InputStreamReader(new GZIPInputStream(new ByteArrayInputStream(compressed(id))), StandardCharsets.UTF_8)) {
             JsonElement storedValue = JsonParser.parseReader(reader);
             JsonObject page = offset == 0 ? JsonReadback.complete(storedValue, path)
                     : JsonReadback.page(storedValue, path, offset, limit, child -> link(uri, child, 0, 5));
-            entries.remove(id); entries.put(id, new Entry(stored.file(), stored.bytes(), clock.getAsLong()));
+            entries.remove(id); entries.put(id, new Entry(stored.bytes(), clock.getAsLong()));
             page.addProperty("snapshot_only", true); page.addProperty("details_uri", uri);
             if (page.has("next_offset")) page.addProperty("next_uri", link(uri, path, page.get("next_offset").getAsInt(), limit));
             return page;
@@ -98,16 +103,30 @@ final class ResponseArchive implements AutoCloseable {
 
     private String retain(JsonElement value) throws IOException {
         expire();
-        if (directory == null) directory = Files.createTempDirectory("maicraft-mcp-receipts-");
-        String id = UUID.randomUUID().toString(); Path file = directory.resolve(id + ".json.gz");
-        try (var writer = new OutputStreamWriter(new GZIPOutputStream(Files.newOutputStream(file)), StandardCharsets.UTF_8)) {
+        if (directory == null) {
+            directory = Files.createTempDirectory("maicraft-mcp-receipts-");
+            database = new MemoryDatabase(directory.resolve(MemoryDatabase.FILE_NAME));
+        }
+        String id = UUID.randomUUID().toString(); var buffer = new ByteArrayOutputStream();
+        try (var writer = new OutputStreamWriter(new GZIPOutputStream(buffer), StandardCharsets.UTF_8)) {
             new Gson().toJson(value, writer);
-        } catch (IOException failure) { Files.deleteIfExists(file); throw failure; }
-        long length = Files.size(file); bytes += length;
-        entries.put(id, new Entry(file, length, clock.getAsLong()));
+        }
+        // 回执只在本次服务会话内有效，使用独立临时数据库；归档提交后才发布可读取的 URI。
+        byte[] compressed = buffer.toByteArray();
+        if (!database.writeRecord("receipts", "session", id, Base64.getEncoder().encodeToString(compressed), true))
+            throw new IOException("receipt_id_conflict");
+        long length = compressed.length; bytes += length;
+        entries.put(id, new Entry(length, clock.getAsLong()));
         // 常规份数和压缩字节都有预算；单份特别大的已完成回执仍保留到下一次归档，不能接单后丢失它的证据。
         while (entries.size() > capacity || bytes > byteBudget && entries.size() > 1) remove(entries.firstEntry().getKey());
         return PREFIX + id;
+    }
+
+    private byte[] compressed(String id) throws IOException {
+        String encoded = database.readRecord("receipts", "session", id, Integer.MAX_VALUE);
+        if (encoded == null) throw new IOException("receipt_record_missing");
+        try { return Base64.getDecoder().decode(encoded); }
+        catch (IllegalArgumentException invalid) { throw new IOException("receipt_record_corrupt", invalid); }
     }
 
     private void expire() {
@@ -117,7 +136,7 @@ final class ResponseArchive implements AutoCloseable {
 
     private void remove(String id) {
         Entry removed = entries.remove(id); bytes -= removed.bytes();
-        try { Files.deleteIfExists(removed.file()); }
+        try { database.deleteRecord("receipts", "session", id); }
         catch (IOException failure) { Constants.LOG.warn("[maicraft-mcp] Could not remove an expired receipt", failure); }
     }
 
@@ -128,10 +147,13 @@ final class ResponseArchive implements AutoCloseable {
     synchronized void reopen() { closed = false; }
 
     @Override public synchronized void close() {
-        // 只清理本服务创建的临时文件；游戏任务和世界检查点不属于回执缓存。
+        // 只清理本服务创建的会话临时数据库；游戏任务和消费预约位于另一份长期数据库。
         closed = true;
         for (String id : entries.keySet().toArray(String[]::new)) remove(id);
-        if (directory != null) try { Files.deleteIfExists(directory); directory = null; }
+        if (directory != null) try {
+            Files.deleteIfExists(directory.resolve(MemoryDatabase.FILE_NAME));
+            Files.deleteIfExists(directory); directory = null; database = null;
+        }
         catch (IOException failure) { Constants.LOG.warn("[maicraft-mcp] Could not remove receipt directory", failure); }
     }
 }
