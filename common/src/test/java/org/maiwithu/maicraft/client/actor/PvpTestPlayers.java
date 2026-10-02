@@ -30,6 +30,8 @@ final class PvpTestPlayers {
         ActorControlTestHarness.field(Player.class, "abilities").set(other, new Abilities());
         ActorControlTestHarness.field(Player.class, "attributes").set(other, new AttributeMap(Player.createAttributes().build()));
         position(other, new Vec3(x, 1, 3.5)); other.setDeltaMovement(Vec3.ZERO);
+        // 伤害包按实体编号解析攻击者；本地身体也必须像真实客户端一样存在于世界实体表中。
+        f.h.level.entities.put(f.h.player.getId(), f.h.player);
         f.h.level.entities.put(id, other);
         return other;
     }

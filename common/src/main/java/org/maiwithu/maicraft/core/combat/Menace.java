@@ -16,6 +16,7 @@ import net.minecraft.world.entity.monster.Creeper;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 估计战斗中应离目标多远，以及玩家是否该撤退。
@@ -98,6 +99,8 @@ public final class Menace {
      */
     // 敌对类别和爆炸物先算威胁；中立生物可由实际受伤证据或明确的 AI 目标进入威胁集合。
     public static boolean threatens(Entity foe, Entity self) {
+        // 玩家仅在明确对战时进入危险距离计算；旁观者和未经授权的玩家不会触发主动 PVP。
+        if (foe instanceof Player other && self instanceof LocalPlayer local && PvpEngagement.accepts(local, other)) return true;
         if (hostile(foe) || explodes(foe)) {
             return true;
         }
@@ -167,6 +170,9 @@ public final class Menace {
      * 照样打得到。
      */
     public static double strikeRangeOf(Entity attacker, Entity victim) {
+        // 玩家按实际交互触及属性估计攻击距离，不能沿用僵尸等 Mob 的近战包围盒公式。
+        if (attacker instanceof Player other)
+            return Math.max(0, other.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE)) + victim.getBbWidth() / 2.0;
         double perAxis = attacker.getBbWidth() / 2.0 + MOB_ATTACK_REACH + victim.getBbWidth() / 2.0;
         return perAxis * Math.sqrt(2.0);
     }
