@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.Swing;
 import org.maiwithu.maicraft.core.combat.MeleeStanceRecovery;
+import org.maiwithu.maicraft.core.combat.PvpEngagement;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.goals.GoalAvoidEntities;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -130,6 +131,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private final Map<Integer, Float> observedHealth = new HashMap<>();
     private final Map<Integer, Entity> observedTargets = new HashMap<>();
     private final LootSweep loot;
+    private PvpEngagement pvp;
 
     /**
      * 这一场经手过的 id。无差别模式没有事先的名单,不记下来就无处结算战果
@@ -170,12 +172,18 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     @Override
     protected void onStart() {
+        // 点名玩家时建立本次对战；同时冻结首次目标对象，避免开打前编号复用串到另一名玩家。
+        pvp = new PvpEngagement(player, r);
+        pvp.activate();
+        PvpEngagement.opponents(player).forEach(other -> observedTargets.put(other.getId(), other));
     }
 
     @Override
     // 每刻先观察战场；自卫途中有攻击者时暂停拾取，持续记录掉落，安全后再恢复收集。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
+        // 临时避险结束后继续同一场对战，已暂停或结束的任务不能借此重新获得许可。
+        if (pvp != null) pvp.activate();
 
         // 被困后靠反击走出两格也算真实进展，不能因当刻不是撤退动作而永久保留“无路可退”。
         retreat.observe(player.position());
@@ -1114,6 +1122,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        // 临时自救不结束对战；取消、替换和失去身体则立刻撤销对手许可。
+        if (pvp != null && why != StopReason.PREEMPTED) pvp.close();
         // 更高优先级自救接管时释放短距离移动，恢复后按新的实际脚位重新验证。
         stanceRecovery.stop(player); super.stop(companion, why);
     }
@@ -1122,6 +1132,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 结束时依次停射击、近战和举盾，清物品选择，松开身体输入，再停止导航。
     // 这些 stop 仍可能受共享动作记录冲突影响，不能把清掉字段等同于动作已在游戏中结束。
     protected void cleanup() {
+        if (pvp != null) pvp.close(); // 先撤销对战，避免手部清理异常遗留许可。
         abortShot();
         if (meleeAction != null) meleeAction.stop();
         if (shieldAction != null) shieldAction.stop();

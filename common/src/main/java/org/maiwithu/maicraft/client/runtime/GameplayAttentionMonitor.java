@@ -19,6 +19,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.combat.PvpEngagement;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -514,6 +515,8 @@ public final class GameplayAttentionMonitor {
             LocalPlayer player, float before, float after, LivingEntity attacker, boolean packetEvidence,
             String damageType) {
         Player attackingPlayer = attacker instanceof Player value && value != player ? value : null;
+        // 已经点名交战的对手还击属于战斗过程；陌生玩家仍按原有暂停和解释意图流程处理。
+        boolean pvpExchange = attackingPlayer != null && PvpEngagement.accepts(player, attackingPlayer);
         float delta = Math.max(0F, before - after);
         boolean fatal = player.getHealth() <= 0.0F;
 
@@ -546,11 +549,11 @@ public final class GameplayAttentionMonitor {
                         "causing_item_id",
                         BuiltInRegistries.ITEM.getKey(held.getItem()).toString());
             }
-            cause.addProperty("interpretation", "possible_stop_or_follow_request");
-            cause.addProperty("requires_llm_decision", true);
+            cause.addProperty("interpretation", pvpExchange ? "authorized_pvp_exchange" : "possible_stop_or_follow_request");
+            cause.addProperty("requires_llm_decision", !pvpExchange);
         }
 
-        if (attackingPlayer != null && player.getHealth() > 0.0F) {
+        if (attackingPlayer != null && !pvpExchange && player.getHealth() > 0.0F) {
             TaskRecord active = CompanionTickDispatcher.current();
             if (active instanceof IntentTaskRecord intent
                     && intent.pause(player.level().getGameTime(), "player_attention")) {
@@ -562,8 +565,8 @@ public final class GameplayAttentionMonitor {
         }
 
         long tick = player.level().getGameTime();
-        if (attackingPlayer != null) {
-            // 玩家袭击：立刻上报，不并入生物伤害片段——它要求上层解释意图，不能被合并掉。
+        if (attackingPlayer != null && !pvpExchange) {
+            // 未授权玩家袭击立即上报；已授权对战沿用伤害片段，避免每次还击都要求模型暂停判断。
             DamageEpisode attack = new DamageEpisode(
                     player, player.level(), tick, attacker, cause, packetEvidence);
             attack.record(tick, delta, before, after);

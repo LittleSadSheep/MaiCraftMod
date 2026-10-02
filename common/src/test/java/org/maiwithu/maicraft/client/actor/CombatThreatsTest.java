@@ -35,6 +35,7 @@ public final class CombatThreatsTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         recordsMeleeAndProjectiles();
+        PvpEngagementTest.main(args); // 先验证点名玩家的任务许可，再运行自动自卫，防止 PVP 状态泄漏。
         rejectsUnrelatedDamage();
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();
