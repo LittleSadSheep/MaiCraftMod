@@ -236,6 +236,41 @@ v1 网络配方、配置、供料与生产证明仍依赖协商到的服务端�
 
 v1 成功要求真实加工事件、声明的时间跨度和目标物品的原生交付。世界流体加工的 `native_recipe_verified` 表示原生配方事件已验证；仅观察到产物拾取与背包变化时，`evidence_scope="client_observed_output_and_inventory"`，不宣称原生配方事件已确认。这些有限过程也不证明持续产线；库存增加、机器旋转或一次接口调用成功都不能单独证明持续生产。
 
+### 地图探索与跑图记忆
+
+`maicraft:explore` 可指定 `biome_id`、`biome_tag` 或 `structure_id`；不指定种类时执行跑图勘察。
+`direction` 支持水平八方和 `forward/backward/left/right`，相对方向在出发时固定。
+`angle_degrees` 是扇区的**总开口角**，指定方向后默认 90°；扇区外更近的地点不能代替目标，行走路线仍允许绕障碍。
+`min_distance` 指定候选地点离起点的最小距离，定向探索默认 16 格。
+`coast` 等价于 `minecraft:beach`；其他海岸或模组群系可通过群系 ID、标签选择。
+
+先按当前模组注册表列出或查询种类，省略 `query` 即为 list，按 `next_query` 翻页：
+
+```json
+{"view":"exploration","focus":"biomes","query":"forest","limit":5}
+```
+
+`focus` 还可取 `biome_tags` 或 `structures`。结构目录说明可用的可见证据规则；客户端未同步完整结构注册表时会标出目录范围。
+模组可在 `assets/<namespace>/maicraft/structure_evidence/*.json` 提供结构规则，本地规则放在 `config/maicraft/structure_evidence/*.json`。
+规则声明 `canonicalId`、`dimensions`、`clusterRadius`、`minimumTotal`、`evidenceDescription` 与 `groups`（每组有 `label`、`minimum`、`blockIds`）。
+可见方块组合只能证明符合特征，不证明建筑由世界生成器生成。
+
+```json
+{"goal":{"ability":"maicraft:explore","outcome":"向北寻找森林","parameters":{"biome_tag":"minecraft:is_forest","direction":"north","angle_degrees":100,"max_distance":768}}}
+```
+
+探索只通过实际移动加载地形，并把沿途看见及到访的群系、目标结构写入共用 `config/maicraft/memory.sqlite` 的 `exploration` 分区。
+世界、维度和空间区域分别标识；重新启动后可查询，普通身体状态不加载全部历史。
+默认回执只给保存状态及本次跑图的 `run:...` 查询入口，可跨重启分页找回该次发现；历史地点展示最近观察，使用前需重新确认现状。
+
+```json
+{"view":"exploration","focus":"discoveries","query":"forest","limit":5}
+```
+
+地点摘要返回 `details_focus` 和可直接用于 `maicraft:travel` 的 `travel_target`。
+选中 `details_focus` 可读取坐标及完整证据；`focus=pending` 可查看保存失败后保留的待写记录。
+自由跑图到达范围边缘或没有新前沿时结束，并报告实际原因，不宣称已经覆盖全部区块。
+
 ### 机器记忆与后台生产
 
 固定设备可以把动力、电力等声明为 `external_inputs`，优先接入主城已有设施。每种介质默认只设一个入口；确需分网时最多三个，且每个入口都要说明理由。语义设计为入口列出 `consumers`，布局器生成真实被动连接器和内部支路；显式蓝图则保存入口的相对坐标、方块及连接面。入口本身不会产生应力、电能或物资。

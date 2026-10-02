@@ -1,4 +1,5 @@
 package org.maiwithu.maicraft.intent;
+import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -255,6 +256,11 @@ public final class IntentRuntime {
         if (label == null) return null;
         Landmark remembered = landmarks.get(normalizeLabel(label));
         if (remembered != null) return remembered;
+        // 跑图查询返回的稳定标签按需从独立记忆分区解析，不挤占手工地标容量。
+        if (label.startsWith("exploration:")) {
+            var found = ClientExplorationMemory.resolveLabel(label);
+            return found == null ? null : new Landmark(label, found, LandmarkAreaRole.ORDINARY);
+        }
         var minecraft = Minecraft.getInstance();
         var location = minecraft == null ? null : ClientMachineCatalog.resolveLabel(minecraft.player,label);
         return location == null ? null : new Landmark(label,location,LandmarkAreaRole.ORDINARY);

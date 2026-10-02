@@ -1,4 +1,5 @@
 package org.maiwithu.maicraft.mcp;
+import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 
 import org.maiwithu.maicraft.core.inventory.InventoryComponentFacts;
 
@@ -319,9 +320,14 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             case "landmarks" -> landmarks(player);
             // 注册目录按需分页读取，默认身体状态不会夹带整套模组群系和历史跑图成果。
-            case "exploration" -> ExplorationCatalog.read(player.registryAccess(),
-                    nullableString(arguments, "focus") == null ? "biomes" : nullableString(arguments, "focus"),
-                    nullableString(arguments, "query"), arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
+            case "exploration" -> {
+                String focus = nullableString(arguments, "focus");
+                yield focus != null && List.of("biomes", "biome_tags", "structures").contains(focus)
+                        ? ExplorationCatalog.read(player.registryAccess(), focus, nullableString(arguments, "query"),
+                                arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt())
+                        : ExplorationMemoryView.read(ClientExplorationMemory.identity(), focus, nullableString(arguments, "query"),
+                                arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
+            }
             case "machines" -> {
                 var report = ClientMachineCatalog.view(player, nullableString(arguments,"focus"));
                 report.add("production_watches",ClientMachineWatches.view(player));

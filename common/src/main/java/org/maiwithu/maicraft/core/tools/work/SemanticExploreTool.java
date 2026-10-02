@@ -21,7 +21,7 @@ public final class SemanticExploreTool implements MaiCraftTool {
     @Override public String name() { return "explore"; }
 
     @Override public String description() {
-        return "Explore and physically travel until a semantic destination is verified. Give only "
+        return "Explore a bounded map sector. target=survey records observations; biome targets require arrival verification. Give "
                 + "target='coast' (minecraft:beach), a namespaced biome id such as minecraft:desert, or a biome tag "
                 + "such as #minecraft:is_forest. One task repeatedly observes loaded client terrain, "
                 + "chooses bounded internal waypoints, walks with normal first-person pathing, loads "

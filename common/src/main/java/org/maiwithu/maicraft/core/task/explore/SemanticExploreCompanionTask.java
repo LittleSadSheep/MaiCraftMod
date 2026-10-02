@@ -546,6 +546,10 @@ public final class SemanticExploreCompanionTask
             surveyStopReason = "reachable_frontiers_exhausted";
             return TaskState.SUCCESS;
         }
+        if (survey) {
+            fail("map survey could not reach a new frontier; any actual observations remain in exploration memory", FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
         fail("bounded exploration finished without verifying " + canonicalTarget
                         + "; searched only the initial client view and terrain loaded by real "
                         + "travel within "
@@ -696,11 +700,13 @@ public final class SemanticExploreCompanionTask
     }
 
     @Override protected String timeoutMessage() {
+        if (survey) return "map survey stopped making movement progress; actually observed places remain in exploration memory";
         return "semantic exploration stopped making verifiable progress before " + canonicalTarget
                 + " was verified; the explored range and unloaded frontier are in data";
     }
 
     @Override protected String cancelledMessage() {
+        if (survey) return "map survey was interrupted; actually observed places remain in exploration memory";
         return "semantic exploration was interrupted before verification";
     }
 
