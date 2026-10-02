@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.act.ToolSelect;
 import org.maiwithu.maicraft.core.integration.machine.control.DriverStation;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireCompanionTask;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -33,6 +34,8 @@ import org.maiwithu.maicraft.core.task.inventory.SelectInventorySlotCompanionTas
 import org.maiwithu.maicraft.core.task.inventory.SelectInventorySlotTaskRecord;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTask;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
+import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
+import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
@@ -42,6 +45,10 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
     private final List<Map<String,Object>> effects=new ArrayList<>();
     private Task preparation; private NativeActionReceipt action;
     private int index, approached=-1, aimTicks; private boolean placing; private long blockedSince=-1;
+    private StructureWorksiteSearch worksites;
+    private final List<Map<String,Object>> approachHistory=new ArrayList<>();
+    private Map<String,Object> lastGaze=Map.of(),route=Map.of();
+    private boolean relocating,mustReposition;
     private SableStructureBridge.Structure ship;
     private JsonArray declared;
     public StructureEditTask(LocalPlayer player,StructureEditTaskRecord record) { super(player,record); }
@@ -51,9 +58,18 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         // 最后一块拆完后 Sable 可以删除整条结构；已经确认的动作仍按完成结算。
         if(index>=r.edits.size()) return TaskState.SUCCESS;
         if(preparation!=null) {
-            TaskState state=runChild(preparation); if(state==null) return TaskState.RUNNING;
+            // 局部站位路线失败后保留完整导航回执，再试尚未检查的站位；仍有进展的导航继续由原执行器推进。
+            TaskState state=runChild(preparation);
+            if(state==null) return TaskState.RUNNING;
             var result=preparation.result(state); preparation=null;
-            if(!result.success()) { fail(result.message(),FailureType.UNKNOWN); return TaskState.FAILED; }
+            if(relocating) {
+                worksites.record(Map.of("route",route,"state",state.name(),"success",result.success(),"message",result.message(),"data",result.data()));
+                relocating=false;mustReposition=!result.success();aimTicks=0;
+                // 只对明确无路或搜索停滞换位；交通效果未明及内部错误必须原样交回，不能机械重试原生副作用。
+                if(!result.success()&&lastFailure()!=FailureType.NO_PATH&&lastFailure()!=FailureType.PLANNING_STALL) {
+                    fail(result.message(),lastFailure());return TaskState.FAILED;
+                }
+            } else if(!result.success()) { fail(result.message(),FailureType.UNKNOWN); return TaskState.FAILED; }
         }
         ship=SableStructureBridge.find(player.clientLevel,r.structureId);
         if(ship==null||ship.pose()==null||ship.plotCenter()==null) { fail("目标物理结构不可读",FailureType.TARGET_LOST); return TaskState.FAILED; }
@@ -70,11 +86,12 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             }
             if(completed.kind()==NativeActionReceipt.Kind.CREATIVE_SET_SLOT) return TaskState.RUNNING;
             effects.add(Map.of("index",index,"action",placing?"place":"remove","native_confirmed",true));
-            if(placing||wanted(edit).isAir()) { index++; approached=-1; }
+            resetApproach();
+            if(placing||wanted(edit).isAir()) index++;
             return TaskState.RUNNING;
         }
         BlockState actual=player.level().getBlockState(pos), desired=wanted(edit);
-        if(actual.is(desired.getBlock()) && (desired.isAir()||matchesProperties(actual,edit))) { index++; approached=-1; return TaskState.RUNNING; }
+        if(actual.is(desired.getBlock()) && (desired.isAir()||matchesProperties(actual,edit))) { resetApproach();index++;return TaskState.RUNNING; }
         // 默认不在飞行中加配重；船体移动时等待停稳，不擅自关闭原本维持浮力的推进器。
         if(moving(ship)) {
             if(blockedSince<0) blockedSince=player.level().getGameTime();
@@ -92,7 +109,7 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
                 var record=new SemanticAcquireTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),
                         List.of(BuiltInRegistries.ITEM.getKey(item)),1,SemanticAcquireTaskRecord.DEFAULT_SOURCES,false,
                         SemanticAcquireTaskRecord.SourceHint.empty(),List.of(),16).captureStorageOrigin(player);
-                preparation=new SemanticAcquireCompanionTask(player,record); approached=-1;
+                preparation=new SemanticAcquireCompanionTask(player,record);
             }
             return TaskState.RUNNING;
         }
@@ -100,21 +117,20 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             preparation=new SelectInventorySlotCompanionTask(player,new SelectInventorySlotTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),slot));
             return TaskState.RUNNING;
         }
-        BlockPos support=pos; Vec3 aim=DriverStation.aim(player,ship,pos); Direction face=null;
-        if(placing) {
-            var click=StructureEditTarget.placement(player,ship,pos);
-            if(click==null) { fail("目标格没有可点击的原生支撑面",FailureType.NO_PATH); return TaskState.FAILED; }
-            support=click.support();face=click.face();aim=click.world();
-        }
-        if(aim==null||aim.distanceTo(player.getEyePosition())>player.blockInteractionRange()-.1) {
-            if(approached==index) { fail("已靠近结构但施工格仍超出原生触及范围",FailureType.NO_PATH); return TaskState.FAILED; }
-            approached=index; preparation=new BoardStructureTask(player,new BoardStructureTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),r.structureId,Vec3.atCenterOf(pos)));
-            return TaskState.RUNNING;
-        }
         ctx.body().applyMovement(new BodyControlPort.Movement(0,0,false,placing,false),ctx.tickRevision());
+        var faces=StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing);
+        lastGaze=StructureEditApproach.gaze(ctx,faces);
+        if(faces.isEmpty()) { fail("目标格没有已加载的原生施工面",FailureType.NO_PATH);return TaskState.FAILED; }
+        var click=StructureEditApproach.current(ctx,ship,pos,placing,faces);
+        // 身在触及距离内也可能看不见外侧面；先选真正可见的地面施工站位，再交回普通导航。
+        if(click==null||mustReposition) return approach(ctx,pos,faces);
+        BlockPos support=click.support();Vec3 aim=click.world();Direction face=click.face();
         InputDriver.lookAt(player,aim); BlockHitResult hit=DriverStation.hit(player,ship,support);
         if(hit==null||placing&&(hit.getDirection()!=face||!player.isShiftKeyDown())) {
-            if(++aimTicks>100) { fail("原生视线持续无法命中施工面，保留已完成效果和剩余补丁",FailureType.NO_PATH); return TaskState.FAILED; }
+            if(++aimTicks>100) {
+                ensureSearch(ctx,pos);worksites.record(Map.of("aim_failed",lastGaze));
+                mustReposition=true;aimTicks=0;
+            }
             return TaskState.RUNNING;
         }
         aimTicks=0;
@@ -130,6 +146,32 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             },80);
         }
         return TaskState.RUNNING;
+    }
+    private void ensureSearch(LocalPlayerContext ctx,BlockPos pos) {
+        if(worksites==null) worksites=new StructureWorksiteSearch(ship.pose().toWorld(Vec3.atCenterOf(pos)),player.position(),
+                player.blockInteractionRange(),StructureEditApproach.eyeHeight(ctx,placing));
+    }
+    private TaskState approach(LocalPlayerContext ctx,BlockPos pos,List<StructureEditTarget.Click> faces) {
+        ensureSearch(ctx,pos);var space=JetpackRoute.observed(ctx);
+        var site=worksites.advance(feet->StructureEditApproach.probe(ctx,ship,pos,placing,faces,space,feet));
+        if(site!=null) {
+            preparation=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(r.getToolCallId(),r.getDeadlineGameTime(),site.landing().feet(),false));
+            route=Map.of("kind","ground_worksite","feet_world",StructureEditApproach.vector(site.landing().landingPoint()));
+        } else if(!worksites.exhausted()) return TaskState.RUNNING;
+        else if(approached!=index) {
+            // 地面候选耗尽时仍保留原来的登船路径；抵达甲板不算施工成功，下一刻必须重新验证目标面。
+            approached=index;preparation=new BoardStructureTask(player,new BoardStructureTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),r.structureId,Vec3.atCenterOf(pos)));
+            route=Map.of("kind","board_structure");
+        } else {
+            fail("附近地面站位及登船尝试均未建立可用施工视线；保留已完成效果、差异和站位回执",FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        relocating=true;aimTicks=0;return TaskState.RUNNING;
+    }
+    private void resetApproach() {
+        // 换下一格或拆完后改为放置时，旧站位事实归档；新目标重新观察，不复用旧面和路线。
+        if(worksites!=null) approachHistory.add(Map.of("index",index,"placing",placing,"search",worksites.diagnostics()));
+        worksites=null;approached=-1;mustReposition=false;aimTicks=0;
     }
     private static boolean moving(SableStructureBridge.Structure s) {
         if(s.lastPose()==null) return true;
@@ -153,9 +195,20 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         }
         return true;
     }
+    @Override public void stop(LocalPlayer companion,Task.StopReason why) {
+        // 自救或其他任务接管身体时一并暂停施工移位，恢复后由同一子任务继续核对实际位置。
+        if(preparation!=null) preparation.stop(companion,why);
+        super.stop(companion,why);
+    }
     @Override protected void cleanup() {
         var ctx=ClientRuntime.actor().activeContext().orElse(null);
-        if(preparation!=null) { preparation.result(TaskState.CANCELLED); preparation=null; }
+        if(preparation!=null) {
+            var result=preparation.result(TaskState.CANCELLED);preparation=null;
+            // 外层取消或超时时仍交付这一段实际导航的收场证据，不把尚未到达的站位记为成功。
+            if(relocating&&worksites!=null) worksites.record(Map.of("route",route,"state","CANCELLED",
+                    "success",false,"message",result.message(),"data",result.data()));
+            relocating=false;
+        }
         if(ctx!=null&&action!=null) {
             if(action.kind()==NativeActionReceipt.Kind.BREAK_BLOCK) ctx.actions().cancelBreakingForTaskBoundary(ctx,action,"配平施工结束");
             else ctx.actions().retireOneShotForTaskBoundary(ctx,action,"配平施工结束");
@@ -171,6 +224,7 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             diff.add(Map.of("expected",edit,"actual",actual==null?"unknown_unloaded":actual.toString(),"matches",actual!=null&&actual.is(wanted(edit).getBlock())&&matchesProperties(actual,edit)));
         }
         return Map.of("structure_id",r.structureId.toString(),"completed_effects",List.copyOf(effects),"declared_structure_diff",diff,
-                "design_scope","current_loaded_world","processed_targets",index,"total_targets",r.edits.size(),"balance_verified",false);
+                "design_scope","current_loaded_world","processed_targets",index,"total_targets",r.edits.size(),"balance_verified",false,
+                "construction_approach",Map.of("history",List.copyOf(approachHistory),"current_search",worksites==null?Map.of():worksites.diagnostics(),"last_gaze",lastGaze));
     }
 }

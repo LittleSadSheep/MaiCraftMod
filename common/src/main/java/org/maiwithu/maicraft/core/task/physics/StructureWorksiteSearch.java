@@ -14,6 +14,7 @@ final class StructureWorksiteSearch {
     record Site(TransportTargets.Destination landing,StructureEditTarget.Click click) {}
     record Probe(Site site,boolean unloaded,boolean unknown) {}
     private final List<BlockPos> cells;
+    private final BlockPos minFeet,maxFeet;
     private final List<Map<String,Object>> attempts=new ArrayList<>();
     private int scanned,unloaded,unknown;
 
@@ -22,6 +23,7 @@ final class StructureWorksiteSearch {
         double radius=Math.min(8,Math.max(1,reach))+1;
         var low=BlockPos.containing(focus.x-radius,focus.y-eyeHeight-radius,focus.z-radius);
         var high=BlockPos.containing(focus.x+radius,focus.y-eyeHeight+radius+1,focus.z+radius);
+        minFeet=low;maxFeet=high;
         var ordered=new ArrayList<BlockPos>();
         for(BlockPos p:BlockPos.betweenClosed(low,high)) ordered.add(p.immutable());
         ordered.sort(Comparator.comparingDouble(p->Vec3.atBottomCenterOf(p).distanceToSqr(player)));
@@ -43,6 +45,8 @@ final class StructureWorksiteSearch {
     Map<String,Object> diagnostics() {
         // 扫描有明确边界，不能把局部候选耗尽描述成整片世界都没有可行站位。
         return Map.of("scope","nearby_main_world_landings","scanned_cells",scanned,"total_cells",cells.size(),
+                "min_feet_world",List.of(minFeet.getX(),minFeet.getY(),minFeet.getZ()),
+                "max_feet_world",List.of(maxFeet.getX(),maxFeet.getY(),maxFeet.getZ()),
                 "unloaded_cells",unloaded,"unknown_cells",unknown,"scan_exhausted",exhausted(),"attempts",List.copyOf(attempts));
     }
 }
