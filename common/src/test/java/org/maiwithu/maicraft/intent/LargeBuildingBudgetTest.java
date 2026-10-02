@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.intent;
 
+import static org.maiwithu.maicraft.intent.persistence.MemoryRecordsTestSupport.readMemory;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.nio.charset.StandardCharsets;
@@ -80,8 +82,8 @@ public final class LargeBuildingBudgetTest {
             // 保存真实解析结果后释放原目标；再用新Store模拟重启恢复，避免为比对一直留着两份完整JSON。
             started = System.nanoTime();
             String projectId = new BuildProjectStore(new StateIdentity(WORLD, directory)).save(DIMENSION, build, targets);
-            Path projectFile = directory.resolve("build-projects").resolve(WORLD).resolve(projectId + ".json");
-            long projectBytes = Files.size(projectFile);
+            // 容量按项目记录本身计算，不把同库模型和 SQLite 页开销当成冻结工程内容。
+            long projectBytes = readMemory(directory, "build-projects", WORLD, projectId).getBytes(StandardCharsets.UTF_8).length;
             check(projectBytes > 8L * 1024 * 1024 && projectBytes <= BuildingBudgets.current().maxProjectBytes(), "夹具必须真实跨过旧8MiB项目上限且在新预算内");
             targets = null; build = null;
             restoreProject(directory, projectId, expected);
