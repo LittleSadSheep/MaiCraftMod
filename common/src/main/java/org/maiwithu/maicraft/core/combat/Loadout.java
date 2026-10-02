@@ -7,6 +7,8 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 分别挑一把近战武器和一把远程武器，供战斗任务按距离选择。
@@ -61,6 +63,7 @@ public final class Loadout {
         Pick chargedCrossbow = null;
         Pick bow = null;
         Pick loadableCrossbow = null;
+        boolean breakingShield = target instanceof Player other && other.isBlocking();
 
         // 主手选择器只支持背包与快捷栏；副手候选不能挡住真正可用的主手武器。
         for (int slot = 0; slot < Math.min(36, inventory.getContainerSize()); slot++) {
@@ -85,7 +88,11 @@ public final class Loadout {
                 continue;
             }
             double score = WeaponDamage.against(player, target, stack);
-            if (score > 0.0 && (bestMelee == null || score > bestMelee.score())) {
+            // 对手正在举盾时，优先拿可用的斧尝试原版破盾；盾放下后恢复原有伤害评分，切换由动作门控执行。
+            boolean axe = stack.getItem() instanceof AxeItem;
+            boolean previousAxe = bestMelee != null && bestMelee.stack().getItem() instanceof AxeItem;
+            if (score > 0.0 && (bestMelee == null || breakingShield && axe && !previousAxe
+                    || (!breakingShield || axe == previousAxe) && score > bestMelee.score())) {
                 bestMelee = new Pick(slot, stack, score);
             }
         }

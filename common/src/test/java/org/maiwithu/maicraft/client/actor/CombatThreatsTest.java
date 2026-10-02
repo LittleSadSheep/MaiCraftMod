@@ -27,6 +27,11 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.damagesource.DamageSources;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.Pose;
+import com.mojang.serialization.Lifecycle;
+import net.minecraft.core.MappedRegistry;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.damagesource.DamageTypes;
 
 /** 使用真实伤害包解析来源，测试替身只提供已加载实体和可控游戏时间。 */
 public final class CombatThreatsTest {
@@ -37,6 +42,7 @@ public final class CombatThreatsTest {
         recordsMeleeAndProjectiles();
         PvpEngagementTest.main(args); // 先验证点名玩家的任务许可，再运行自动自卫，防止 PVP 状态泄漏。
         PvpThreatTest.main(args); // 验证玩家也进入撤退和伤害事实，不能只会点名挥刀。
+        PvpTacticsTest.main(args); // 用真实目标位置、充能和背包测试进退、瞄准与破盾选装。
         rejectsUnrelatedDamage();
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();
@@ -160,6 +166,10 @@ public final class CombatThreatsTest {
             ActorControlTestHarness.field(Entity.class, "entityData").set(h.player, builder.build());
             h.player.setId(1); h.player.setHealth(20);
             var sources = h.h.allocate(DamageSources.class);
+            // 为真实武器评分提供玩家攻击伤害类型，不用空白来源绕过原版物品的目标伤害计算。
+            var damageTypes = new MappedRegistry<DamageType>(Registries.DAMAGE_TYPE, Lifecycle.stable());
+            Registry.registerForHolder(damageTypes, DamageTypes.PLAYER_ATTACK, DAMAGE.value()); damageTypes.freeze();
+            ActorControlTestHarness.field(DamageSources.class, "damageTypes").set(sources, damageTypes);
             ActorControlTestHarness.field(sources.getClass(), "generic").set(sources, new DamageSource(DAMAGE));
             ActorControlTestHarness.field(h.level.getClass(), "damageSources").set(h.level, sources);
             ActorControlTestHarness.field(Player.class, "attackStrengthTicker").setInt(h.player, 100);

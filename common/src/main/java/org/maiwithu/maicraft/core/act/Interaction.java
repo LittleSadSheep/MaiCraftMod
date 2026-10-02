@@ -16,6 +16,9 @@ import org.maiwithu.maicraft.core.FailureType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import org.maiwithu.maicraft.core.combat.PvpTactics;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -476,7 +479,8 @@ public final class Interaction {
         if (!aimReady(aimPoint)) {
             return false;
         }
-        HitResult aimed = nativeRaytrace(player, REACH);
+        // 近战遵守当前身体的真实实体触及属性，不能沿用右键方块的四点五格范围。
+        HitResult aimed = nativeRaytrace(player, Math.max(0, player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE)));
         if (!(aimed instanceof EntityHitResult entityHit)
                 || entityHit.getEntity() != entity) {
             return false;
@@ -713,6 +717,7 @@ public final class Interaction {
     // 近战目标在移动时稍微朝它前方瞄，并把瞄点留在身体框内。
     // 相邻帧只移动一部分瞄点，避免怪物小幅晃动就带着镜头猛抖。
     private Vec3 stableEntityAimPoint(Entity target) {
+        if (target instanceof Player other) return PvpTactics.aimPoint(other); // 横移玩家使用受碰撞箱约束的短时提前量。
         AABB box = target.getBoundingBox();
         Vec3 center = box.getCenter();
         Vec3 motion = target.getDeltaMovement();
