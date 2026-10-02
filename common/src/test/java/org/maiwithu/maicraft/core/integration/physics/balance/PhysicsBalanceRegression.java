@@ -5,10 +5,12 @@ import java.util.Map;
 import java.util.UUID;
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
+import org.maiwithu.maicraft.intent.PhysicsAbilityContractTest;
+import org.maiwithu.maicraft.core.task.physics.StructureDesignTest;
 
 /** 用可算出结果的飞艇验证配重、偏置推进与姿态变换，不依赖启动 Minecraft 或 Sable。 */
 public final class PhysicsBalanceRegression {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         PhysicsBody body = vessel(List.of(new PhysicsBody.Load("balloon", "balloon_lift", v(0, 2, 0),
                 v(0, 100, 0), PhysicsVector.ZERO, PhysicsBody.Frame.WORLD, false, 0)));
         var idle = wrench(body, body.rotation(), 0);
@@ -32,6 +34,9 @@ public final class PhysicsBalanceRegression {
         check(body.center().equals(PhysicsVector.ZERO), "预测配重不应改动原始快照");
         PhysicsDynamicsTest.run();
         BalloonEnvelopeTest.run();
+        PhysicsParametersTest.run();
+        PhysicsAbilityContractTest.run();
+        StructureDesignTest.run();
         System.out.println("PhysicsBalanceRegression: passed");
     }
     static PhysicsBody vessel(List<PhysicsBody.Load> loads) {

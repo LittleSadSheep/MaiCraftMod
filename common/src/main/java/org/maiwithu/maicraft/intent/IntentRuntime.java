@@ -56,6 +56,7 @@ public final class IntentRuntime {
     private static final long SAVE_INTERVAL_NANOS = 5_000_000_000L;
 
     private static final Set<String> CORE_ABILITIES = Set.of(
+            PhysicsAbilityAdapter.ABILITY,
             ChatAbilityAdapter.ABILITY,
             "maicraft:remember_place",
             "maicraft:sleep",

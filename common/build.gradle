@@ -68,6 +68,7 @@ def regressionSuites = [
     physicsBalanceRegression: [
         entry: 'org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBalanceRegression',
         heap: '512m', directory: 'physics-balance-regression', timeoutSeconds: 90,
+        purpose: '验证起飞前配平、蒙皮容积、启停扰动与原生补丁契约',
     ],
     // 跑图候选按扇区核实，群系与结构目录分页读取，避免用反方向近目标或固定原版名单替代请求。
     explorationRegression: [

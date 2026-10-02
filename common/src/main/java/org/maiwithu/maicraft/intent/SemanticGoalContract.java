@@ -52,6 +52,8 @@ final class SemanticGoalContract {
         }
         validateTarget(goal, path, ability, restoredHistory);
         validateConstraints(goal, path, ability);
+        // 起飞前就检查局部补丁和工况，防止执行中把观察请求误当成开桨或建造。
+        if (PhysicsAbilityAdapter.ABILITY.equals(ability)) PhysicsAbilityAdapter.validate(goal);
         if (ChatAbilityAdapter.ABILITY.equals(ability)) {
             try { ChatMessage.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {

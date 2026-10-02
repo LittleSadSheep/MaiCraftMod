@@ -53,6 +53,8 @@ final class AbilityAdapter {
             return GeneralAbilityAdapter.adapt(goal, player, runtime);
         }
         return switch (goal.ability()) {
+            // 配平分析只读，只有明确的 apply 补丁才会创建真实施工动作。
+            case PhysicsAbilityAdapter.ABILITY -> PhysicsAbilityAdapter.adapt(goal,player);
             case ChatAbilityAdapter.ABILITY -> ChatAbilityAdapter.adapt(goal);
             case "maicraft:remember_place" -> remember(goal, player, runtime);
             case "maicraft:sleep" -> sleep(goal, player);

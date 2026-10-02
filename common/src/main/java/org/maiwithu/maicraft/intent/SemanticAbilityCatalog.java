@@ -38,6 +38,7 @@ public final class SemanticAbilityCatalog {
 
     private static JsonObject describeContract(String ability) {
         return switch (ability) {
+            case PhysicsAbilityAdapter.ABILITY -> PhysicsAbilityAdapter.contract();
             case ChatAbilityAdapter.ABILITY -> contract(
                     "Open the real game chat box, visibly type one complete message or slash-prefixed command, then submit it once through native chat handling. Uses the current player's permissions and loader command hooks. No foreground window or keyboard simulation is required. Existing human chat, containers and manual pause menus are preserved; an invisible background focus-loss pause may be replaced. Human input/Esc cancels automation, and task pause retains the draft. Success means submitted_to_client, not confirmed server delivery or command execution. Follow Attention for task status and maicraft://chatflow for received replies. Reuse one execute request_key for transport retries. Restarted operations with a prior reservation or untracked legacy history are not resent automatically; inspect history before starting a new send.",
                     targets(), fields(
