@@ -32,7 +32,7 @@ public final class SemanticExploreTool implements MaiCraftTool {
 
     @Override public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("target", "Semantic destination: coast (minecraft:beach), biome id, or #biome_tag.")
+                .string("target", "Destination: coast (minecraft:beach), biome id, #biome_tag, or survey to explore without a target kind.")
                 // 方向只约束探索候选，Mod 仍负责选路并在原生地形上绕障碍。
                 .optionalString("direction", "Horizontal cardinal/diagonal or forward/backward/left/right; fixed at start.")
                 .optionalInteger("angle_degrees", "Full directional sector width; default 90 with direction, otherwise 360.", 1, 360)
