@@ -4,6 +4,8 @@ plugins {
 }
 // Fabric 模块直接编译公共源码，因此要提供 Minecraft、官方映射、Fabric Loader/API 以及公共源码用到的注解。
 dependencies {
+    // 查询百科所需的解析器随 Mod 分发，避免开发环境能读而玩家安装后缺类。
+    include(implementation("org.jsoup:jsoup:${jsoup_version}"))
     // 发布包内置 SQLite；游戏重连时无需依赖开发机的 Gradle 缓存。
     include(implementation("org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"))
     minecraft "com.mojang:minecraft:${minecraft_version}"

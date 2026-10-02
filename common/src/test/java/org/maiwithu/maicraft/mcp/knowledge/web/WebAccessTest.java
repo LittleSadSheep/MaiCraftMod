@@ -7,7 +7,11 @@ import java.net.URI;
 public final class WebAccessTest {
     public static void main(String[] args) throws Exception {
         check(WebAccess.article("https://www.mcmod.cn/item/42.html#recipe").toString().endsWith("42.html"));
-        WebAccess.requireFetch(URI.create("https://zh.minecraft.wiki/api.php?action=query"));
+        WebAccess.requireFetch(URI.create("https://zh.minecraft.wiki/images/sitemaps/NS_0-0.xml"));
+        try {
+            WebAccess.requireFetch(URI.create("https://minecraft.wiki/api.php?action=query"));
+            throw new AssertionError("API should not be fetched");
+        } catch (WebKnowledgeException expected) {}
         for (String url : new String[]{"http://www.mcmod.cn/item/1.html", "https://www.mcmod.cn.evil.test/item/1.html",
                 "https://user@www.mcmod.cn/item/1.html", "https://www.mcmod.cn:444/item/1.html",
                 "https://127.0.0.1/item/1.html", "https://search.mcmod.cn/s?key=stone",
