@@ -57,6 +57,10 @@ final class PhysicalStructurePerception {
         out.addProperty("total_loaded_structures", frame.total());
         out.addProperty("omitted_structures", frame.omitted());
         out.addProperty("metadata_probes", frame.metadataProbes());
+        // 全局未展开数量与附近是否完整分别交付，避免模型把确定在远处的结构当成未知局部碰撞。
+        out.addProperty("range_excluded_structures", frame.rangeExcluded());
+        out.addProperty("metadata_unscanned_entries", frame.metadataUnscanned());
+        out.addProperty("completeness_scope", "within_range_and_native_look_target");
         out.addProperty("truncated", frame.truncated());
         SableStructureBridge.HitResolution resolution = hit.getType() == HitResult.Type.BLOCK
                 ? frame.resolveHit(hit.getBlockPos()) : new SableStructureBridge.HitResolution("miss", null, null);
