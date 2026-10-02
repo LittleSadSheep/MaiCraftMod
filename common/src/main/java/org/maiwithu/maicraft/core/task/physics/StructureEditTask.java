@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -51,10 +52,25 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
     private boolean relocating,mustReposition;
     private SableStructureBridge.Structure ship;
     private JsonArray declared;
+    private CompletableFuture<PhysicalStructureDesignStore.Registration> registration;
+    private JsonObject declarationEvidence=new JsonObject();
+    private Object declarationWorld;
     public StructureEditTask(LocalPlayer player,StructureEditTaskRecord record) { super(player,record); }
-    @Override protected void onStart() { declared=PhysicalStructureDesign.merge(player.level(),r.structureId,r.edits); }
+    @Override protected void onStart() {
+        declarationWorld=player.level();declarationEvidence.addProperty("persistence_status","pending");
+        registration=PhysicalStructureDesign.merge(player,r.structureId,r.edits);
+    }
     @Override protected TaskState onTick() {
         var ctx=ClientRuntime.requireContext(player);
+        // 先恢复并落盘完整声明，再备料施工；存储故障是执行失败，历史未知或实际 diff 不符本身不会拦截施工。
+        if(declarationWorld!=player.level()) { fail("登记结构设计后世界或维度已切换",FailureType.TARGET_LOST);return TaskState.FAILED; }
+        if(declared==null) {
+            if(!registration.isDone()) return TaskState.RUNNING;
+            var saved=registration.join();declared=saved.targets();declarationEvidence=saved.evidence();
+            if(!"saved".equals(declarationEvidence.get("persistence_status").getAsString())) {
+                fail("无法持久登记整机声明；尚未提交本次施工动作，原记录和失败详情均保留",FailureType.UNKNOWN);return TaskState.FAILED;
+            }
+        }
         // 最后一块拆完后 Sable 可以删除整条结构；已经确认的动作仍按完成结算。
         if(index>=r.edits.size()) return TaskState.SUCCESS;
         if(preparation!=null) {
@@ -220,11 +236,15 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         var diff=new ArrayList<Map<String,Object>>();
         for(var raw:declared==null?r.edits:declared) {
             var edit=raw.getAsJsonObject(); BlockPos local=position(edit);
-            BlockState actual=ship==null||!ship.isLoaded(local.offset(ship.plotCenter()))?null:player.level().getBlockState(local.offset(ship.plotCenter()));
-            diff.add(Map.of("expected",edit,"actual",actual==null?"unknown_unloaded":actual.toString(),"matches",actual!=null&&actual.is(wanted(edit).getBlock())&&matchesProperties(actual,edit)));
+            BlockState actual=ship==null||ship.plotCenter()==null||!ship.isLoaded(local.offset(ship.plotCenter()))?null:player.level().getBlockState(local.offset(ship.plotCenter()));
+            // 旧设计的模组方块可能已卸载；仍展示该声明及当前实际值，不能因旧方块缺注册而丢掉整机回执。
+            var expectedBlock=BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(edit.get("block_id").getAsString()));
+            diff.add(Map.of("expected",edit,"actual",actual==null?"unknown_unloaded":actual.toString(),"matches",
+                    actual!=null&&expectedBlock.isPresent()&&actual.is(expectedBlock.get())&&matchesProperties(actual,edit)));
         }
         return Map.of("structure_id",r.structureId.toString(),"completed_effects",List.copyOf(effects),"declared_structure_diff",diff,
-                "design_scope","current_loaded_world","processed_targets",index,"total_targets",r.edits.size(),"balance_verified",false,
+                "design_scope","persistent_world_dimension_structure","design_declaration",declarationEvidence,
+                "processed_targets",index,"total_targets",r.edits.size(),"balance_verified",false,
                 "construction_approach",Map.of("history",List.copyOf(approachHistory),"current_search",worksites==null?Map.of():worksites.diagnostics(),"last_gaze",lastGaze));
     }
 }
