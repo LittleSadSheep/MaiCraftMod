@@ -31,6 +31,43 @@ public final class MemoryDatabase {
         return read(scope, identity, limit, limit, (json, documents) -> json);
     }
 
+    /** 项目、模型和原生预约各自按稳定编号读取；换世界后同号记录仍相互隔离。 */
+    public String readRecord(String scope, String identity, String key, int limit) throws IOException {
+        if (Files.notExists(file)) return null;
+        try (var connection = open()) { return readRow(connection, scope, identity, key, limit); }
+        catch (SQLException failure) { throw new IOException("memory_read_failed", failure); }
+    }
+
+    /** 原生预约用唯一插入决定唯一提交者；普通项目修订可显式替换同一编号。 */
+    public boolean writeRecord(String scope, String identity, String key, String json, boolean onlyIfAbsent) throws IOException {
+        Files.createDirectories(file.getParent());
+        String conflict = onlyIfAbsent ? "DO NOTHING" : "DO UPDATE SET payload=excluded.payload";
+        try (var connection = open(); var statement = connection.prepareStatement("INSERT INTO memory_records VALUES(?,?,?,?) "
+                + "ON CONFLICT(scope,identity_key,document_key) " + conflict)) {
+            bind(statement, scope, identity, key, json);
+            // 单条语句使用 SQLite 自动提交；返回时已同步，不能提前让角色继续消费或发布模型版本。
+            return statement.executeUpdate() != 0;
+        } catch (SQLException failure) { throw new IOException("memory_record_write_failed", failure); }
+    }
+
+    public boolean containsRecord(String scope, String identity, String key) throws IOException {
+        if (Files.notExists(file)) return false;
+        try (var connection = open(); var statement = connection.prepareStatement(
+                "SELECT 1 FROM memory_records WHERE scope=? AND identity_key=? AND document_key=?")) {
+            statement.setString(1, scope); statement.setString(2, identity); statement.setString(3, key);
+            try (var result = statement.executeQuery()) { return result.next(); }
+        } catch (SQLException failure) { throw new IOException("memory_record_lookup_failed", failure); }
+    }
+
+    /** 临时回执到期后只删除该回执，不触及任务、图纸或防止重复消费的永久预约。 */
+    public void deleteRecord(String scope, String identity, String key) throws IOException {
+        if (Files.notExists(file)) return;
+        try (var connection = open(); var statement = connection.prepareStatement(
+                "DELETE FROM memory_records WHERE scope=? AND identity_key=? AND document_key=?")) {
+            statement.setString(1, scope); statement.setString(2, identity); statement.setString(3, key); statement.executeUpdate();
+        } catch (SQLException failure) { throw new IOException("memory_record_delete_failed", failure); }
+    }
+
     /** 目录和引用图纸在同一读事务里解码，避免施工改图时拼接两个保存版本。 */
     public <T> T read(String scope, String identity, int limit, int documentLimit,
                       BiFunction<String, Function<String, String>, T> decode) throws IOException {
@@ -109,7 +146,8 @@ public final class MemoryDatabase {
         } catch (SQLException failure) { throw new IOException("memory_record_read_failed", failure); }
     }
 
-    private Connection open() throws SQLException, IOException {
+    // 同库的探索索引复用版本检查、WAL 和同步策略，不能另开一套绕过世界记忆规则的数据库。
+    Connection open() throws SQLException, IOException {
         var config = new SQLiteConfig();
         config.setBusyTimeout(5000);
         // 附魔、聊天等原生提交依赖持久化回执；FULL 保证 WAL 事务同步后才交还消费许可。
