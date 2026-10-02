@@ -18,12 +18,16 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
+import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 
 public final class DamageAttentionTest {
     public static void main(String[] args) throws Exception {
         neutralAttackerUsesTheSameDefense();
-        playerDamagePausesBeforeHealthChanges();
+        // 同样的还击包分别验证未授权暂停和已点名对战继续，不能通过全局关闭玩家提醒来支持 PVP。
+        playerDamagePausesBeforeHealthChanges(false);
+        playerDamagePausesBeforeHealthChanges(true);
         System.out.println("DamageAttentionTest: neutral retaliation and packet-driven player attention passed");
     }
 
@@ -48,13 +52,10 @@ public final class DamageAttentionTest {
         }
     }
 
-    private static void playerDamagePausesBeforeHealthChanges() throws Exception {
+    private static void playerDamagePausesBeforeHealthChanges(boolean duel) throws Exception {
         try (var f = new CombatThreatsTest.Fixture()) {
-            var visitor = f.h.h.allocate(f.h.player.getClass()); visitor.setId(22);
-            ActorControlTestHarness.field(Entity.class, "type").set(visitor, EntityType.PLAYER);
-            ActorControlTestHarness.field(Player.class, "gameProfile").set(visitor, new GameProfile(UUID.randomUUID(), "Visitor"));
-            ActorControlTestHarness.field(Player.class, "inventory").set(visitor, new Inventory(visitor));
-            f.h.level.entities.put(22, visitor);
+            var visitor = PvpTestPlayers.create(f, 22, 2);
+            ActorControlTestHarness.field(Player.class, "gameProfile").set(visitor, new GameProfile(visitor.getUUID(), "Visitor"));
             var goal = new Goal("maicraft:travel", "Keep travelling", null, "{}", "{}", List.of(), List.of());
             var task = new IntentTaskRecord(UUID.randomUUID(), null, goal); task.setState(TaskState.RUNNING);
             var brainField = ActorControlTestHarness.field(CompanionTickDispatcher.class, "brain");
@@ -64,19 +65,28 @@ public final class DamageAttentionTest {
             var slot = f.h.h.allocate(current.getType());
             ActorControlTestHarness.field(slot.getClass(), "record").set(slot, task); current.set(brain, slot);
             var events = new ArrayList<String>();
+            AttackCompanionTask fight = null;
             try (var subscription = IntentRuntime.get().subscribeAttention(e -> events.add(e.toString()))) {
                 brainField.set(null, brain);
+                if (duel) {
+                    fight = new AttackCompanionTask(f.h.player, new AttackTaskRecord("duel", 1000, List.of(22), false));
+                    fight.start(f.h.player);
+                }
                 f.hit(null, visitor); // 即使真实弹体已不存在，箭矢数据包仍会标明射手。
                 check(f.h.player.getLastHurtByMob() == null, "client AI attacker fields must stay empty");
-                check(GameplayAttentionMonitor.observeDamagePackets(f.h.player, 20, 20) && task.paused(),
-                        "a real player damage packet pauses the task even before its separate health update");
+                check(GameplayAttentionMonitor.observeDamagePackets(f.h.player, 20, 20) && task.paused() != duel,
+                        "只有明确对战中的还击可以继续，陌生玩家的伤害仍暂停任务");
                 check(CombatThreats.attackers(f.h.player).isEmpty(), "player attention must never authorize automatic PvP");
                 check(events.stream().anyMatch(e -> e.contains("Visitor") && e.contains("requires_llm_decision")
-                        && e.contains(task.externalId().toString())), "the attention event identifies the attacker and paused task");
+                        && e.contains(duel ? "authorized_pvp_exchange" : task.externalId().toString())),
+                        "通知区分已授权对战与需要模型解释的玩家袭击");
                 int count = events.size();
                 check(!GameplayAttentionMonitor.observeDamagePackets(f.h.player, 20, 20) && events.size() == count,
                         "the same packet must not be published twice");
-            } finally { brainField.set(null, previousBrain); }
+            } finally {
+                if (fight != null) fight.result(TaskState.CANCELLED);
+                brainField.set(null, previousBrain);
+            }
         }
     }
 

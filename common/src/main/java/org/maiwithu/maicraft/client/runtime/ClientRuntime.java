@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.mcp.RuntimeFacade;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.client.preview.PreviewController;
+import org.maiwithu.maicraft.core.combat.PvpEngagement;
 import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
 import org.maiwithu.maicraft.client.server.ClientMachineWatches;
 import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
@@ -256,6 +257,7 @@ public final class ClientRuntime {
     }
 
     private static void bodyGone(boolean saveSemanticState) {
+        PvpEngagement.clear(); // 离线或换身体时结束旧玩家对战，不把交战许可带入下一次连接。
         CombatThreats.clear();
         // 先记住“刚才做到哪了”，再停止旧玩家的任务；反过来会只记下“任务已取消”，下次就接不上了。
         EmbeddedBaritoneRuntime.bodyGone();
