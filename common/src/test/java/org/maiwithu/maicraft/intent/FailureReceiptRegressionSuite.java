@@ -24,6 +24,8 @@ public final class FailureReceiptRegressionSuite {
         IntentAttentionEvidenceTest.main(args);
         // 缺口对应的资料和能力契约必须随失败到达，不能把原生未知消费变成可自动重试。
         RecoveryKnowledgeTest.main(args);
+        // 失败码自带的替代入口与知识引用必须是真实可读的入口，内部与 ad-hoc 失败保持沉默。
+        FailureGuidanceTest.main(args);
         MachineMenuRecoveryTest.main(args); MachineMenuObservationTest.main(args);
         CraftingGridPlacementTest.main(args);
         EnchantWorkflowGuardTest.main(args); EnchantTransactionPauseTest.main(args);

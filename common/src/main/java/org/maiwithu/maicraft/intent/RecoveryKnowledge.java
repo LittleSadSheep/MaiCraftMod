@@ -7,8 +7,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
+import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeReferences;
 import org.maiwithu.maicraft.task.TaskResult;
@@ -36,6 +38,10 @@ final class RecoveryKnowledge {
         Map<String, JsonObject> resources = new LinkedHashMap<>(), abilities = new LinkedHashMap<>();
         for (var value : KnowledgeReferences.forAbility(goal.ability())) resource(resources, value.getAsJsonObject());
         ability(abilities, goal.ability(), "这次未完成步骤的参数、边界和原生操作契约");
+        // 失败码自带的成因知识：塌落、工具等级等卡片解释"为什么会这样失败"，与能力资料互补。
+        FailureType type = failureType(facts);
+        if (type != null) for (String uri : type.knowledgeRefs())
+            resource(resources, KnowledgeReferences.resource(uri, "失败成因相关的机制常识（" + type.name().toLowerCase(Locale.ROOT) + "）"));
         JsonObject handoff = object(facts.get("planning_handoff"));
         JsonObject blocked = object(facts.get("blocked_need"));
         if (blocked.isEmpty()) blocked = object(handoff.get("blocked_need"));
@@ -78,6 +84,10 @@ final class RecoveryKnowledge {
                 "planning_handoff", "inventory_capacity", "issues", "preparation_failure", "wireless_stock_evidence");
         JsonObject option = new JsonObject(); option.addProperty("id", ID); option.addProperty("risk", "read_only");
         option.addProperty("summary", "先使用本次回执的实际效果、未完成部分和未知项；具体知识缺口可按以下入口读取，由模型选择下一步。");
+        // 失败码级替代入口只列名字；"对账后可考虑"的措辞在这里统一加上，防止被读成换路重试的许可。
+        if (type != null && type.alternatives() != null)
+            option.addProperty("alternatives",
+                    "After reconciling this receipt's effects, consider: " + type.alternatives() + ".");
         option.add("evidence_fields", evidence);
         option.addProperty("evidence_scope", "Field names refer to this result's original data. Missing fields are not proof of no effects; existing observations are reused.");
         JsonArray knowledge = new JsonArray(), contracts = new JsonArray(); resources.values().forEach(knowledge::add); abilities.values().forEach(contracts::add);
@@ -111,4 +121,11 @@ final class RecoveryKnowledge {
     }
     private static JsonObject object(JsonElement value) { return value != null && value.isJsonObject() ? value.getAsJsonObject() : new JsonObject(); }
     private static JsonArray array(JsonElement value) { return value != null && value.isJsonArray() ? value.getAsJsonArray() : new JsonArray(); }
+    /** failure_type 由任务基类统一写入（小写枚举名）；machine 系 ad-hoc 码不是枚举成员，不强行指路。 */
+    private static FailureType failureType(JsonObject facts) {
+        JsonElement value = facts.get("failure_type");
+        if (value == null || !value.isJsonPrimitive()) return null;
+        try { return FailureType.valueOf(value.getAsString().toUpperCase(Locale.ROOT)); }
+        catch (IllegalArgumentException unrecognized) { return null; }
+    }
 }
