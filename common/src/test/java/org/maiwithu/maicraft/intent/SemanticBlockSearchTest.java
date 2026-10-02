@@ -17,6 +17,8 @@ import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchCompanionTask;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.SemanticBlockSearchApi;
 import org.maiwithu.maicraft.core.scan.ObservationVisibilityTest;
+import org.maiwithu.maicraft.core.scan.LoadedBlockScanTest;
+import java.util.UUID;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
@@ -33,6 +35,9 @@ public final class SemanticBlockSearchTest {
         scanReportsCountsAndDistanceWithoutCoordinates();
         deepMatchesReportThreeDimensionalDistance();
         absenceFailsWithHonestScopeNote();
+        denseHiddenStoneConvergesWithProgress();
+        cancellationIsNotTimeoutOrExhaustion();
+        LoadedBlockScanTest.main(args);
         // 视线与分页属于发现证据的一部分，随方块探索入口一起回归。
         ObservationVisibilityTest.main(args);
         // 设施盘点段与 find_block 同守"证据不出坐标、缺席带范围声明"的纪律。
@@ -49,14 +54,14 @@ public final class SemanticBlockSearchTest {
             var task = new SemanticBlockSearchCompanionTask(h.player,
                     new SemanticBlockSearchTaskRecord("depth-report", 1000, List.of(Blocks.REDSTONE_ORE), 1, 16));
             task.start(h.player);
-            var absorb = SemanticBlockSearchCompanionTask.class.getDeclaredMethod("absorb", List.class); absorb.setAccessible(true);
+            var absorb = SemanticBlockSearchCompanionTask.class.getDeclaredMethod("observe", BlockPos.class); absorb.setAccessible(true);
             var report = SemanticBlockSearchCompanionTask.class.getDeclaredMethod("resultData"); report.setAccessible(true);
-            absorb.invoke(task, List.of(deep));
+            absorb.invoke(task, deep);
             var underground = (Map<?, ?>) report.invoke(task);
             check(underground.get("nearest_match_distance").equals(9.1)
                     && underground.get("nearest_match_horizontal_distance").equals(1.0)
                     && underground.get("nearest_match_vertical_offset").equals(-9), "deep ore distance includes vertical separation");
-            absorb.invoke(task, List.of(sameLevel));
+            absorb.invoke(task, sameLevel);
             var result = task.result(TaskState.SUCCESS);
             check(result.data().get("nearest_match_distance").equals(4.0)
                     && result.data().get("nearest_match_vertical_offset").equals(0)
@@ -143,6 +148,58 @@ public final class SemanticBlockSearchTest {
             state = task.tick(h.player);
         }
         return state;
+    }
+
+    private static void denseHiddenStoneConvergesWithProgress() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 整个已加载区块里有十四层石头，地表被完整草方块遮住；只能得出本次可见扫描没有发现。
+            h.position(new Vec3(8.5, 15, 8.5));
+            for (int y = 0; y < 15; y++) for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++)
+                h.set(new BlockPos(x, y, z), (y == 14 ? Blocks.GRASS_BLOCK : Blocks.STONE).defaultBlockState());
+            var task = new SemanticBlockSearchCompanionTask(h.player,
+                    new SemanticBlockSearchTaskRecord("dense-hidden-stone", 1000, List.of(Blocks.STONE), 1, 16));
+            task.start(h.player);
+            TaskState state = TaskState.RUNNING;
+            long previous = -1; int ticks = 0;
+            var gate = new ProgressGate(); UUID id = UUID.randomUUID();
+            while (state == TaskState.RUNNING && ticks < 1024) {
+                h.nextTick(); state = task.tick(h.player); ticks++;
+                var progress = SemanticResultView.data(task.progress());
+                long done = ((Number) progress.get("done")).longValue();
+                check(done > previous, "a dense hidden column must advance instead of restarting its prefix");
+                previous = done;
+                if (ticks == 1) check(gate.consider(id, progress, 0).message() != null,
+                        "standard scan counters must enter the attention progress gate");
+            }
+            check(state == TaskState.FAILED, "a completely hidden finite column must exhaust naturally");
+            var result = task.result(state); var data = result.data();
+            check(data.get("visibility_candidates_checked").equals(14L * 256), "every hidden stone is checked exactly once");
+            check(data.get("examined_block_states").equals(4096L) && data.get("unloaded_sections").equals(8),
+                    "actual block reads and unknown unloaded sections stay separate");
+            check(Boolean.TRUE.equals(data.get("scan_complete")) && data.get("observed_acceptable_count").equals(0),
+                    "exhaustion records zero visible matches without claiming stone is absent");
+            check(data.get("failure_code").equals("no_block_evidence_within_bound") && !result.timedOut(), "natural exhaustion is not timeout");
+            check(h.player.position().equals(new Vec3(8.5, 15, 8.5)) && h.blockUses() == 0 && h.itemUses() == 0,
+                    "read-only discovery never moves or uses the world");
+            System.out.println("Dense hidden stone: " + ticks + " ticks, 3584 unique candidates, no visible match");
+        }
+    }
+
+    private static void cancellationIsNotTimeoutOrExhaustion() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            for (TaskState terminal : List.of(TaskState.CANCELLED, TaskState.TIMEOUT)) {
+                var task = new SemanticBlockSearchCompanionTask(h.player,
+                        new SemanticBlockSearchTaskRecord("stop-reason", 1000, List.of(Blocks.STONE), 1, 16));
+                task.start(h.player);
+                var result = task.result(terminal);
+                check(result.data().get("failure_code").equals(terminal == TaskState.CANCELLED ? "find_block_cancelled" : "find_block_timeout"),
+                        "terminal receipt must use the actual stop reason");
+                check(Boolean.FALSE.equals(result.data().get("scan_complete")) && Boolean.FALSE.equals(result.data().get("verified")),
+                        "an interrupted scan cannot assert exhaustion or discovery");
+                check(result.timedOut() == (terminal == TaskState.TIMEOUT) && result.interrupted() == (terminal == TaskState.CANCELLED),
+                        "structured failure code agrees with the native result flags");
+            }
+        }
     }
 
     private static boolean noCoordinates(Object value) {

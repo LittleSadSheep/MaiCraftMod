@@ -4,8 +4,7 @@ package org.maiwithu.maicraft.core.task.locate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Locale;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -14,18 +13,19 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.FailureType;
-import org.maiwithu.maicraft.core.scan.TargetIndex;
+import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * 只读扫描已加载区块中的目标方块；不移动身体也不改变世界。
- * 索引查询跨刻续进；卸载的区块被跳过，因此"查过没有"不等于"世界里没有"。
+ * 段内游标跨刻续进；卸载的区块被跳过，因此"查过没有"不等于"世界里没有"。
  */
 public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTask<SemanticBlockSearchTaskRecord> {
-    /** 单次查询的索引构建预算，与交互定位共用同一量级。 */
-    private static final int SCAN_BUILD_BUDGET = 384;
+    /** 视线核查也纳入每刻时间片；密集石层分刻查完，不用固定候选数量截掉未检查的事实。 */
+    private static final int SCAN_WORK_PER_TICK = 4096;
+    private static final long SCAN_NANOS_PER_TICK = 2_000_000L;
     /** 扫描仍在推进时按此时间片为任务续期。 */
     private static final int PROGRESS_LEASE_TICKS = 200;
 
@@ -34,11 +34,10 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private double nearestHorizontalDistance;
     private int nearestVerticalOffset;
     private String failureCode;
+    private ClientLevel scannedLevel;
+    private LoadedBlockScan scan;
     /** 具体位置只在 Mod 内部保存；公开结果仅输出数量与距离统计。 */
     private final Map<BlockPos, Block> observed = new LinkedHashMap<>();
-    // 一批查完再排除已看过的位置，近处墙后的同类方块不能占满窗口、遮住远处可见目标。
-    private final Set<BlockPos> excluded = new HashSet<>();
-    private final Set<BlockPos> inspected = new HashSet<>();
 
     public SemanticBlockSearchCompanionTask(LocalPlayer player, SemanticBlockSearchTaskRecord record) {
         super(player, record);
@@ -47,54 +46,50 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     @Override
     protected void onStart() {
         origin = player.blockPosition().immutable();
-        TargetIndex.register(player.clientLevel, r.blockTargets);
+        scannedLevel = player.clientLevel;
+        scan = new LoadedBlockScan(scannedLevel, origin, r.blockTargets, r.maxDistance);
     }
 
     @Override
     protected TaskState onTick() {
-        ClientLevel level = player.clientLevel;
-        int chunkRadius = Math.max(1, (r.maxDistance + 15) / 16);
-        // 索引仅提供候选；逐批核对视线，隐藏目标不会构成发现证据。
-        int batch = Math.max(64, r.count);
-        TargetIndex.Result result = TargetIndex.query(
-                level, origin, r.blockTargets, batch, chunkRadius, SCAN_BUILD_BUDGET, excluded);
-        absorb(result.hits());
+        if (player.clientLevel != scannedLevel)
+            return failSearch("find_block_world_changed", "the observed world changed before the scan completed", FailureType.INTERRUPTED);
+        long before = scan.processedCells();
+        // 一次只沿同一个游标推进；隐藏目标继续逐个按原生视线判断，不再换排除集合重扫全范围。
+        scan.advance(SCAN_WORK_PER_TICK, SCAN_NANOS_PER_TICK, pos -> {
+            observe(pos);
+            return observed.size() >= r.count;
+        });
         if (observed.size() >= r.count) {
             return TaskState.SUCCESS;
         }
-        if (!result.complete()) {
+        if (scan.complete()) return exhausted();
+        if (scan.processedCells() > before) {
             r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
-            return TaskState.RUNNING;
         }
-        if (result.hits().size() < batch) return exhausted();
-        excluded.addAll(result.hits());
-        r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
         return TaskState.RUNNING;
     }
 
-    private void absorb(List<BlockPos> hits) {
-        for (BlockPos pos : hits) {
-            if (!inspected.add(pos.immutable())) continue;
-            // 索引条目可能滞后于真实世界（客户端预测），使用位置前先核对实际状态。
-            BlockState state = player.clientLevel.getBlockState(pos);
-            if (!r.blockTargets.contains(state.getBlock())) {
-                continue;
-            }
-            double dx = pos.getX() - origin.getX();
-            double dz = pos.getZ() - origin.getZ();
-            if (dx * dx + dz * dz > (double) r.maxDistance * r.maxDistance) {
-                continue;
-            }
-            // 已加载只说明客户端有地形数据；必须能从眼睛看见，才向模型报告找到。
-            if (!ObservationVisibility.block(player, pos)) continue;
-            if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
-                // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
-                double distance = Math.sqrt(pos.distSqr(origin));
-                if (nearestMatchDistance < 0 || distance < nearestMatchDistance) {
-                    nearestMatchDistance = distance;
-                    nearestHorizontalDistance = Math.sqrt(dx * dx + dz * dz);
-                    nearestVerticalOffset = pos.getY() - origin.getY();
-                }
+    private void observe(BlockPos pos) {
+        // 候选位置使用前复核实际状态；视线仍由现有原生碰撞射线判断。
+        BlockState state = player.clientLevel.getBlockState(pos);
+        if (!r.blockTargets.contains(state.getBlock())) {
+            return;
+        }
+        double dx = pos.getX() - origin.getX();
+        double dz = pos.getZ() - origin.getZ();
+        if (dx * dx + dz * dz > (double) r.maxDistance * r.maxDistance) {
+            return;
+        }
+        // 已加载只说明客户端有地形数据；必须能从眼睛看见，才向模型报告找到。
+        if (!ObservationVisibility.block(player, pos)) return;
+        if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
+            // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
+            double distance = Math.sqrt(pos.distSqr(origin));
+            if (nearestMatchDistance < 0 || distance < nearestMatchDistance) {
+                nearestMatchDistance = distance;
+                nearestHorizontalDistance = Math.sqrt(dx * dx + dz * dz);
+                nearestVerticalOffset = pos.getY() - origin.getY();
             }
         }
     }
@@ -103,14 +98,14 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         if (!observed.isEmpty()) {
             return failSearch(
                     "insufficient_block_count",
-                    "the loaded-chunk scan observed only " + observed.size() + "/"
+                    "the visible loaded-block scan observed only " + observed.size() + "/"
                             + r.count + " matching positions",
                     FailureType.TARGET_LOST);
         }
         return failSearch(
                 "no_block_evidence_within_bound",
                 "the line-of-sight scan within the bounded loaded radius found no visible matching block; "
-                        + "this is not evidence that none exists outside loaded terrain",
+                        + "this is not evidence that none exists in hidden or unloaded terrain, or beyond the bound",
                 FailureType.TARGET_LOST);
     }
 
@@ -118,12 +113,6 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         failureCode = code;
         fail(message, type);
         return TaskState.FAILED;
-    }
-
-    @Override
-    protected void cleanup() {
-        TargetIndex.unregister(player.clientLevel, r.blockTargets);
-        super.cleanup();
     }
 
     @Override
@@ -146,6 +135,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("search_geometry", "horizontal_radius_across_loaded_sections");
         data.put("distance_metric", "euclidean_3d");
         data.put("distance_scope", "nearest verified observed match; not a reachability result");
+        data.putAll(progress());
         if (nearestMatchDistance >= 0) {
             data.put("nearest_match_distance",
                     Math.round(nearestMatchDistance * 10.0) / 10.0);
@@ -153,13 +143,42 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
             data.put("nearest_match_vertical_offset", nearestVerticalOffset);
         }
         if (observed.size() < r.count) {
-            String code = failureCode == null ? "find_block_timeout" : failureCode;
-            data.put("failure_code", code);
+            if (failureCode != null) data.put("failure_code", failureCode);
             data.put("recoverable", true);
             data.put("requires_narration", true);
             data.put("suggestions", List.of(
                     "travel or explore to load the likely area, then retry",
                     "stop without treating the partial observed count as success"));
+        }
+        return data;
+    }
+
+    @Override
+    protected Map<String, Object> resultData(TaskState terminal) {
+        Map<String, Object> data = new LinkedHashMap<>(resultData());
+        // 用户叫停不能冒充自然超时，更不能将尚未检查完的石层写成无目标结论。
+        data.put("scan_outcome", terminal.name().toLowerCase(Locale.ROOT));
+        if (terminal == TaskState.CANCELLED || terminal == TaskState.TIMEOUT)
+            data.put("failure_code", terminal == TaskState.CANCELLED ? "find_block_cancelled" : "find_block_timeout");
+        else if (terminal == TaskState.FAILED) data.putIfAbsent("failure_code", "find_block_failed");
+        if (terminal == TaskState.CANCELLED)
+            data.put("suggestions", List.of("retain partial observations; cancellation does not establish that the remaining scope has no target"));
+        return data;
+    }
+
+    /** done/total 表示扫描游标处理的体积；未加载与调色板跳过另列，不能当成逐格观察数量。 */
+    @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("task", name()); data.put("phase", "scanning_loaded_block_candidates");
+        data.put("progress_unit", "section_cells_processed_including_unloaded_or_palette_skips");
+        data.put("visible_matches", observed.size());
+        data.put("scan_complete", scan != null && scan.complete());
+        if (scan != null) {
+            data.put("done", scan.processedCells()); data.put("total", scan.totalCells());
+            data.put("examined_block_states", scan.examinedStates()); data.put("visibility_candidates_checked", scan.candidates());
+            data.put("finished_sections", scan.finishedSections()); data.put("total_sections", scan.totalSections());
+            data.put("unloaded_sections", scan.unloadedSections()); data.put("palette_empty_sections", scan.emptySections());
         }
         return data;
     }
