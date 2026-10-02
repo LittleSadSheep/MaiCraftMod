@@ -22,6 +22,9 @@ import org.maiwithu.maicraft.core.integration.ftbquests.FtbTaskConditionsTest;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestRewardsTest;
 import org.maiwithu.maicraft.mcp.knowledge.FtbReadOnlyResourcesTest;
 import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSourceTest;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebAccessTest;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebHttpClientTest;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeSourcesTest;
 
 // 验证知识资源库与 HTTP 的只读行为，先初始化原版注册信息以便检查真实方块属性。
 public final class KnowledgeRegressionSuite {
@@ -62,6 +65,11 @@ public final class KnowledgeRegressionSuite {
         if (document == null || !document.text().contains("facing") || source.read("file:///private") != null)
             throw new AssertionError("Registry document must expose actual properties and reject filesystem URIs");
         KnowledgeHttpTest.main(args);
+        // 联网知识独立回放访问规则、页面解析和公开交接，不向实际百科发起自动测试流量。
+        WebAccessTest.main(args);
+        WebHttpClientTest.main(args);
+        WebKnowledgeSourcesTest.main(args);
+        WebKnowledgeHttpTest.main(args);
         System.out.println("KnowledgeRegressionSuite: passed");
     }
 }

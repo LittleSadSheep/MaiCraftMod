@@ -22,6 +22,10 @@ import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.client.actor.MenuVisibility;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
+import org.maiwithu.maicraft.mcp.knowledge.web.KnowledgeEnvironment;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.SharedConstants;
+import java.util.stream.Collectors;
 
 /**
  * Fabric 的客户端接线入口，把加载器事件连接到公共运行时、预览和消息观察。
@@ -37,6 +41,10 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         // 接单前载入清障类型白名单，让挖路和施工第一次下手就遵守同一份玩家配置。
         ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
         FabricOptionalServerClient.install();
+        // 查阅模组教程前记下实际客户端版本，联网线程不再触碰游戏世界或读取服务端配置。
+        KnowledgeEnvironment.install("fabric", SharedConstants.getCurrentVersion().getName(),
+                FabricLoader.getInstance().getAllMods().stream().collect(Collectors.toMap(
+                        mod -> mod.getMetadata().getId(), mod -> mod.getMetadata().getVersion().getFriendlyString(), (first, second) -> first)));
         // 先建立工具和任务执行器的对应关系，客户端启动后再开放 MCP 接单。
         MaiCraftCore.init();
         ClientLifecycleEvents.CLIENT_STARTED.register(client ->
