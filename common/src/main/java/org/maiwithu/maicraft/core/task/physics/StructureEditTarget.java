@@ -14,19 +14,12 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import org.maiwithu.maicraft.core.integration.physics.StructurePose;
 
 /** 按原生轮廓选择可见的支撑面；半砖和楼梯不能按整格中心猜测点击位置。 */
 final class StructureEditTarget {
     record Click(BlockPos support, Direction face, Vec3 world) {}
     private StructureEditTarget() {}
-    static Click placement(LocalPlayer player,SableStructureBridge.Structure ship,BlockPos target) {
-        var candidates=targets(player.level(),ship::isLoaded,ship.pose(),target,true);
-        var visible=visible(player,player.getEyePosition(),candidates);
-        return visible!=null?visible:candidates.stream()
-                .min(Comparator.comparingDouble(c->c.world().distanceToSqr(player.getEyePosition()))).orElse(null);
-    }
     // 候选面只描述可点击几何；不能把最近但被甲板顶面挡住的外侧面冒充可见施工面。
     static List<Click> targets(BlockGetter level,Predicate<BlockPos> loaded,StructurePose pose,BlockPos target,boolean placing) {
         var result=new ArrayList<Click>();
