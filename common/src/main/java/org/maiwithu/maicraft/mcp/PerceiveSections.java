@@ -67,8 +67,7 @@ final class PerceiveSections {
         result.addProperty("description", "Select top-level sections for one view only. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
-                + "Default surroundings omits terrain_overview and nearby_facilities; request them explicitly "
-                + "(terrain sampling and the facility scan only run when named). "
+                + "Default surroundings omits terrain_overview and nearby_facilities; name one to run that sampling or scan. "
                 + "Focus diagnostics require focus. Unproduced requested sections appear in " + UNAVAILABLE + ".");
         return result;
     }
