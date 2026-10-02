@@ -51,18 +51,19 @@ public final class ClientRuntime {
     public static synchronized void start(RuntimeFacade facade) {
         Objects.requireNonNull(facade, "facade");
         if (mcp != null && mcp.isRunning()) return;
-        EmbeddedMcpService candidate = new EmbeddedMcpService(
-                McpConfig.local(DEFAULT_MCP_PORT), facade);
+        EmbeddedMcpService candidate = null;
         try {
+            // 同机对战可为对手客户端分配独立端口；配置失败只关闭 MCP，游戏仍能报告启动原因。
+            candidate = new EmbeddedMcpService(McpConfig.localForProcess(DEFAULT_MCP_PORT), facade);
             candidate.start();
             mcp = candidate;
             lastMcpError = null;
             Constants.LOG.info("MaiCraft embedded MCP listening on http://127.0.0.1:{}/mcp",
                     candidate.port());
         } catch (IOException | RuntimeException failure) {
-            candidate.close();
+            if (candidate != null) candidate.close();
             mcp = null;
-            lastMcpError = "could not listen on port " + DEFAULT_MCP_PORT + ": "
+            lastMcpError = "could not start local MCP service: "
                     + (failure.getMessage() == null
                     ? failure.getClass().getSimpleName() : failure.getMessage());
             Constants.LOG.error("MaiCraft embedded MCP failed to start; /maicraft status remains available",

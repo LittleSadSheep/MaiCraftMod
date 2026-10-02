@@ -38,6 +38,21 @@ public record McpConfig(
         }
     }
 
+    /** 多个真实客户端同时测试时，各进程显式选择自己的回环端口，避免连接到另一名玩家。 */
+    public static McpConfig localForProcess(int defaultPort) {
+        String configured = System.getProperty("maicraft.mcp.port");
+        int port = defaultPort;
+        if (configured != null) {
+            try {
+                port = Integer.parseInt(configured.strip());
+            } catch (NumberFormatException invalid) {
+                throw new IllegalArgumentException("maicraft.mcp.port must be an integer between 0 and 65535", invalid);
+            }
+        }
+        // 继续复用回环地址与端口校验；错误配置停止 MCP 启动，不自动抢占默认客户端的端口。
+        return local(port);
+    }
+
     public static McpConfig local(int port) {
         // 客户端启动时按同一份建筑配置创建服务；后续只改文件不会改变已运行服务器的请求预算。
         return new McpConfig(
