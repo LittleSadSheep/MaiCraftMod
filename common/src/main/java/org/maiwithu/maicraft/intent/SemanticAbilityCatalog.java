@@ -150,7 +150,8 @@ public final class SemanticAbilityCatalog {
                             field("allow_harm", "boolean", "Required explicit consent because combat can harm or kill."),
                             field("confirm_risky_target", "boolean", "Second confirmation for players, tame/named or non-hostile targets.")));
             case GeneralAbilityAdapter.INTERACT -> contract(
-                    "Use one semantic block or entity; MaiCraft resolves the loaded target, approaches it and performs the ordinary interaction.",
+                    "Use one semantic block or entity; MaiCraft resolves the loaded target, approaches it and performs the ordinary interaction. "
+                            + "With a block_id and selection=nearest it self-locates the closest matching station within the radius — no coordinates needed.",
                     targets("coordinates", "entity", "player", "nearest", "landmark", "area"),
                     fields(
                             field("block_id", "resource_id", "Optional namespaced block type to use."),
@@ -249,7 +250,9 @@ public final class SemanticAbilityCatalog {
                             field("area_role", "ordinary|managed_settlement",
                                     "Optional typed policy, default ordinary. Use managed_settlement only when the player explicitly identifies this area as a managed base, city or settlement; labels themselves never imply this role.")));
             case "maicraft:travel" -> contract(
-                    "Reach a destination area; ordinary travel accepts nearby reachable ground, while an explicit exact request requires one cell. Biome/coast discovery verifies the requested region rather than an invented precise point.",
+                    "Reach a destination area; ordinary travel accepts nearby reachable ground, while an explicit exact request requires one cell. "
+                            + "With may_alter_terrain it digs/bridges/pillars its way there; elevator_floor rides observed elevators without coordinates; "
+                            + "semantic_target discovers platforms, open-sky surface, biomes or coasts rather than an invented precise point.",
                     targets("coordinates", "landmark", "player", "entity", "nearest", "area", "prior_result"),
                     fields(
                             field("destination", "object", "Travel-only coordinates {x,z,y?,dimension?}; omit target and other destination fields. Omit y only when height is unknown. Supplied y remains a height hint. Existing coordinates targets still require all three axes."),
@@ -380,7 +383,8 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Remembered places whose merchants must not be selected."),
                             field("radius", "integer", "Bounded loaded-merchant search radius; default 32.")));
             case "maicraft:acquire_items" -> contract(
-                    "Make requested inventory facts true using allowed sources from the player's current location. "
+                    "Make requested inventory facts true using allowed sources from the player's current location — "
+                            + "mine digs exposed ore sources, harvest replants mature crops, and storage, trade, craft, cook, hunt and nearby collections are further families. "
                             + "To acquire elsewhere, use a sequence with travel first; nearest accepts no label, position or relation.",
                     targets("nearest"),
                     fields(
