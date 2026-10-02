@@ -10,7 +10,9 @@
 
 `display_recipes` 保留展示 ID、类别与原生 backing 配方 ID 的区别。null 或合成的展示 ID 不能直接充当生产所需的原生 `recipe_id`。`supports_recipe_tree=false` 的展示不适合作为普通定量递归清单。数量、物品组件、返还容器与副产物均须按返回证据解释；EMI 的默认物品查询也不代表已穷尽所有组件变体。
 
-配方页的 `pitfalls` 自动带出查询物品以及本页工作站、催化剂、原料和产物的可用知识。同一物品只出现一次，`roles` 和 `recipe_indices` 标明它关联的工艺；`notes` 包含已注册 Ponder 入口、完整默认物品说明、Create Shift/Ctrl 条件与操作，以及已有的带版本原生传输参考。思索条目提供 `scene_count`、`resource_uri` 和可直接用于 `perceive` 的 `read_arguments`；发现入口不编译故事板，也不回放结构。
+配方页的 `pitfalls` 自动带出查询物品以及本页工作站、催化剂、原料和产物的可用知识。`pitfalls_schema_version=2` 时，完整说明在同一回执的 `pitfall_notes` 中，各物品通过 `note_indices` 引用；相同来源、版本和内容只写一次，每次新请求都重新提供全部定义。说明包括已注册 Ponder 入口、完整默认物品说明、Create Shift/Ctrl 条件与操作，以及已有的带版本原生传输参考。思索条目提供 `scene_count`、`resource_uri` 和可直接用于 `perceive` 的 `read_arguments`；发现入口不编译故事板，也不回放结构。
+
+`pitfall_index.queried_items` 直接定位查询物品，`pitfall_index.recipes` 按配方和工作站／催化剂／原料／产物角色列出 `pitfalls` 的索引。物品总览保留 `roles` 和 `recipe_indices`；精确角色对应关系来自 `related_resources[].recipe_roles`，不会把“甲配方的原料、乙配方的产物”误连为两份配方的共同角色。索引和定义均在本次返回中，读取这些提示不需要再发工具请求。
 
 `related_resources` 保留本页全部可见物品及共享替代组的关联。`ponder_status` 区分已发现、目录确认无场景和未知，`pitfalls_sources` 说明 Ponder 未安装、目录不完整或读取失败，`item_tooltip_status` 保留原生提示读取失败；空 `pitfalls` 不证明机器没有特殊条件。知识范围限于当前配方页与默认物品形式，组件特有行为、未展示候选和现场机器状态仍以相应证据为准。提示仅供模型理解和决策，不是施工准入条件或运行成功证明。
 

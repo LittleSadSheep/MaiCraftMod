@@ -15,15 +15,19 @@ import org.maiwithu.maicraft.core.integration.create.CreateTooltipKnowledge;
 import org.maiwithu.maicraft.core.integration.ponder.PonderAccess;
 import org.maiwithu.maicraft.core.integration.ponder.ReflectivePonderAccess;
 
-/** 查配方时同时交付相关物品的原生用法和已注册思索入口，供模型自行决定下一步如何设计。 */
-final class RecipeItemKnowledge {
+/** 配方与现场观察共用物品原生用法和已注册思索入口，供模型自行决定下一步如何设计。 */
+public final class ItemKnowledge {
     private final PonderAccess ponder;
     private final CreateTooltipKnowledge tooltips = new CreateTooltipKnowledge();
 
-    RecipeItemKnowledge() { this(new ReflectivePonderAccess()); }
-    RecipeItemKnowledge(PonderAccess ponder) { this.ponder = ponder; }
+    public ItemKnowledge() { this(new ReflectivePonderAccess()); }
+    ItemKnowledge(PonderAccess ponder) { this.ponder = ponder; }
 
     void attach(JsonObject report, JsonArray resources) {
+        attach(report, resources, "Queried item and item identities visible on this recipe page, including shared alternatives.");
+    }
+
+    public void attach(JsonObject report, JsonArray resources, String scope) {
         // 每页只读一次注册目录；查材料不会编译所有故事板，更不会启动演示世界或操作玩家。
         PonderAccess.Snapshot snapshot = ponder.snapshot();
         Map<String, Integer> sceneCounts = new LinkedHashMap<>();
@@ -34,7 +38,7 @@ final class RecipeItemKnowledge {
         JsonArray pitfalls = new JsonArray();
         for (JsonElement resource : resources) {
             JsonObject link = resource.getAsJsonObject(), item = new JsonObject();
-            for (String key : List.of("item_id", "roles", "recipe_indices"))
+            for (String key : List.of("item_id", "roles", "recipe_indices", "recipe_roles", "evidence_refs"))
                 if (link.has(key)) item.add(key, link.get(key).deepCopy());
             String id = link.get("item_id").getAsString();
             JsonArray notes = new JsonArray();
@@ -52,8 +56,9 @@ final class RecipeItemKnowledge {
             appendUsage(ResourceLocation.parse(id), link, notes);
             if (!notes.isEmpty()) { item.add("notes", notes); pitfalls.add(item); }
         }
-        report.add("pitfalls", pitfalls);
-        report.addProperty("pitfalls_scope", "Queried item and item identities visible on this recipe page, including shared alternatives. "
+        // 同一回执先给完整说明，再给各物品的引用和按配方排列的索引；下一次请求仍重新提供完整说明。
+        KnowledgePitfalls.present(report, pitfalls);
+        report.addProperty("pitfalls_scope", scope + " "
                 + "Default-stack descriptions and versioned references are knowledge, not current machine observations or action authorization; scenes are not compiled.");
     }
 

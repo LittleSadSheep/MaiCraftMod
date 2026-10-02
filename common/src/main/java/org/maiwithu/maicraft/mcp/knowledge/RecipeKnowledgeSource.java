@@ -24,11 +24,11 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
     @FunctionalInterface interface Reader { JsonObject read(Query query); }
     record Query(ResourceLocation item, boolean uses, int offset, int limit) {}
     private final Reader reader;
-    private final RecipeItemKnowledge itemKnowledge;
+    private final ItemKnowledge itemKnowledge;
 
     public RecipeKnowledgeSource() { this(RecipeKnowledgeSource::inspect); }
-    RecipeKnowledgeSource(Reader reader) { this(reader, new RecipeItemKnowledge()); }
-    RecipeKnowledgeSource(Reader reader, RecipeItemKnowledge itemKnowledge) { this.reader = reader; this.itemKnowledge = itemKnowledge; }
+    RecipeKnowledgeSource(Reader reader) { this(reader, new ItemKnowledge()); }
+    RecipeKnowledgeSource(Reader reader, ItemKnowledge itemKnowledge) { this.reader = reader; this.itemKnowledge = itemKnowledge; }
 
     // 目录与搜索不加载配方正文，避免一个材料目标把整张合成树塞进外部规划模型的上下文。
     @Override public List<KnowledgeDocument.Entry> entries() { return List.of(); }
@@ -145,6 +145,7 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
         JsonObject link = links.computeIfAbsent(id.toString(), value -> {
             JsonObject entry = new JsonObject(); entry.addProperty("item_id", value); entry.addProperty("recipe_uri", uri(id));
             entry.add("roles", new JsonArray()); entry.add("recipe_indices", new JsonArray());
+            entry.add("recipe_roles", new JsonObject());
             if (BuiltInRegistries.ITEM.containsKey(id) && BuiltInRegistries.ITEM.get(id) instanceof BlockItem blockItem) {
                 ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(blockItem.getBlock());
                 entry.addProperty("block_uri", MinecraftKnowledgeSource.BLOCK + blockId.getNamespace() + "/" + blockId.getPath());
@@ -155,5 +156,12 @@ public final class RecipeKnowledgeSource implements KnowledgeLibrary.Source {
         JsonArray roles = link.getAsJsonArray("roles"), indices = link.getAsJsonArray("recipe_indices");
         if (!roles.asList().contains(new JsonPrimitive(role))) roles.add(role);
         if (recipeIndex >= 0 && !indices.asList().contains(new JsonPrimitive(recipeIndex))) indices.add(recipeIndex);
+        // 物品可能在甲配方作原料、乙配方作产物；逐配方保留角色，不能用两个集合的笛卡尔积误导模型。
+        if (recipeIndex >= 0) {
+            JsonObject byRecipe = link.getAsJsonObject("recipe_roles"); String index = Integer.toString(recipeIndex);
+            if (!byRecipe.has(index)) byRecipe.add(index, new JsonArray());
+            JsonArray recipeRoles = byRecipe.getAsJsonArray(index);
+            if (!recipeRoles.asList().contains(new JsonPrimitive(role))) recipeRoles.add(role);
+        }
     }
 }

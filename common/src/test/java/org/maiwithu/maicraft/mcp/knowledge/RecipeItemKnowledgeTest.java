@@ -22,7 +22,7 @@ public final class RecipeItemKnowledgeTest {
             }
             @Override public PonderTranscript compile(Entry entry) { throw new AssertionError("Discovery must not compile a scene"); }
         };
-        var knowledge = new RecipeItemKnowledge(access);
+        var knowledge = new ItemKnowledge(access);
         JsonArray resources = JsonParser.parseString("""
                 [{"item_id":"minecraft:stone","roles":["inputs","outputs"],"recipe_indices":[3,4]},
                  {"item_id":"minecraft:hopper","roles":["workstations"],"recipe_indices":[3]},
@@ -35,11 +35,12 @@ public final class RecipeItemKnowledgeTest {
         var stone = pitfalls.get(0).getAsJsonObject();
         check(stone.getAsJsonArray("recipe_indices").size() == 2 && stone.getAsJsonArray("roles").size() == 2,
                 "hints identify all affected recipes and roles");
-        var ponder = stone.getAsJsonArray("notes").get(0).getAsJsonObject();
+        var ponder = report.getAsJsonArray("pitfall_notes").get(stone.getAsJsonArray("note_indices").get(0).getAsInt()).getAsJsonObject();
         check(ponder.get("scene_count").getAsInt() == 2 && ponder.getAsJsonObject("read_arguments")
                 .get("resource_uri").getAsString().equals(PonderKnowledgeSource.componentUri("minecraft:stone")),
                 "confirmed Ponder hints have directly usable read arguments");
-        var transfer = pitfalls.get(1).getAsJsonObject().getAsJsonArray("notes").get(0).getAsJsonObject();
+        var transfer = report.getAsJsonArray("pitfall_notes").get(pitfalls.get(1).getAsJsonObject()
+                .getAsJsonArray("note_indices").get(0).getAsInt()).getAsJsonObject();
         check(transfer.getAsJsonObject("contract").has("source_version")
                 && !transfer.getAsJsonObject("contract").get("world_transfer_verified").getAsBoolean(),
                 "native transfer reference retains version and unverified world status");

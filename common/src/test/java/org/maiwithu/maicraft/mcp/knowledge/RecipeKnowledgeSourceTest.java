@@ -72,7 +72,7 @@ public final class RecipeKnowledgeSourceTest {
         JsonArray groups = new JsonArray(); groups.add(alternatives);
         page.getAsJsonArray("display_recipes").get(0).getAsJsonObject().add("alternative_groups", groups);
         int[] snapshots = {0}, pages = {0};
-        var knowledge = new RecipeItemKnowledge(new PonderAccess() {
+        var knowledge = new ItemKnowledge(new PonderAccess() {
             @Override public Snapshot snapshot() {
                 snapshots[0]++;
                 return new Snapshot("available", "fixture", List.of(new Entry("stick", "minecraft:stick", "fixture:stick", List.of(), null)));
