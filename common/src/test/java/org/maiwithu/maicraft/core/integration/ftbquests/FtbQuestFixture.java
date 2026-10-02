@@ -34,9 +34,10 @@ public final class FtbQuestFixture {
     public static class Node {
         final long id;
         final String title;
-        public boolean visible = true, completed;
+        public boolean visible = true, completed, valid = true;
         public Node(long id, String title) { this.id = id; this.title = title; }
         public long getId() { return id; }
+        public boolean isValid() { return valid; }
         public Component getTitle() { return Component.literal(title); }
         public boolean isVisible(Team team) { return visible; }
         public Kind getObjectType() { return new Kind(this instanceof Chapter ? "chapter" : "quest"); }
@@ -50,6 +51,7 @@ public final class FtbQuestFixture {
         public boolean isDisableGui() { return disabled; }
         public String getLocale() { return "zh_cn"; }
         public void forAllChapters(Consumer<Chapter> consumer) { chapters.forEach(consumer); }
+        public Quest getQuest(long id) { return chapters.stream().flatMap(chapter -> chapter.quests.stream()).filter(quest -> quest.id == id).findFirst().orElse(null); }
     }
     public static final class Team {
         public UUID id = UUID.randomUUID();
@@ -68,7 +70,7 @@ public final class FtbQuestFixture {
         public long getProgress(Task task) { return task.progress; }
         public boolean isRewardBlocked(Reward reward) { return reward.blocked; }
         public Claim getClaimType(UUID player, Reward reward) {
-            return new Claim(reward.teamReward ? reward.sharedClaimed : reward.claimedPlayers.contains(player), true);
+            return new Claim(reward.teamReward ? reward.sharedClaimed : reward.claimedPlayers.contains(player), reward.claimAvailable);
         }
         public Optional<Date> getRewardClaimTime(UUID player, Reward reward) {
             return getClaimType(player, reward).isClaimed() ? Optional.of(new Date(1000)) : Optional.empty();
@@ -137,13 +139,16 @@ public final class FtbQuestFixture {
         public final String type;
         public long progress = 2;
         public int definitionReads;
+        public boolean screenOnly = true, consuming = true;
+        private boolean enableButton;
+        public final List<ItemStack> displayItems = new ArrayList<>();
         public Task(long id, String title, String type) { super(id, title); this.type = type; }
         public Type getType() { return new Type(type); }
         public long getMaxProgress() { return 8; }
         public String formatMaxProgress() { return "8"; }
         public String formatProgress(Team team, long progress) { return Long.toString(progress); }
         public boolean isOptionalForProgression(Team team) { return false; }
-        public boolean consumesResources() { return true; }
+        public boolean consumesResources() { return consuming; }
         public HolderLookup.Provider holderLookup() { return RegistryAccess.EMPTY; }
         public void writeData(CompoundTag data, HolderLookup.Provider provider) {
             definitionReads++; data.putString("item", "minecraft:iron_ingot"); data.putLong("count", 8);
@@ -151,7 +156,7 @@ public final class FtbQuestFixture {
         }
         public ItemStack getItemStack() { return new ItemStack(Items.IRON_INGOT); }
         public boolean isOnlyFromCrafting() { return true; }
-        public boolean isTaskScreenOnly() { return true; }
-        public List<ItemStack> getValidDisplayItems() { return List.of(getItemStack()); }
+        public boolean isTaskScreenOnly() { return screenOnly; }
+        public List<ItemStack> getValidDisplayItems() { return displayItems.isEmpty() ? List.of(getItemStack()) : List.copyOf(displayItems); }
     }
 }

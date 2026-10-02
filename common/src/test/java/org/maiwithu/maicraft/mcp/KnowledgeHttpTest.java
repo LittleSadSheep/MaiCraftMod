@@ -228,6 +228,16 @@ public final class KnowledgeHttpTest {
         fixture.quest.visible = true;
         check(send("resources/subscribe", uri(FtbQuestsKnowledgeSource.INDEX)).getAsJsonObject("error").get("code").getAsInt() == -32602,
                 "任务书明确按需读取，不假装支持订阅更新");
+        // 超过旧分页和大回执阈值时，标准 Resource 与模型实际使用的工具入口都必须保留全部候选。
+        for (int i = 0; i < 70; i++) fixture.chapter.quests.add(new FtbQuestFixture.Quest(200 + i, "可见任务 " + i, fixture.chapter));
+        String chapter = FtbQuestsKnowledgeSource.CHAPTER + "0000000000000001";
+        var full = send("resources/read", uri(chapter)).getAsJsonObject("result").getAsJsonArray("contents").get(0).getAsJsonObject();
+        request.getAsJsonObject("arguments").addProperty("resource_uri", chapter);
+        var complete = send("tools/call", request).getAsJsonObject("result");
+        var modelBody = json(complete.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString());
+        if (modelBody.has("json")) modelBody = modelBody.getAsJsonObject("json");
+        check(modelBody.getAsJsonArray("quests").size() == 71 && !modelBody.has("next_uri")
+                && modelBody.getAsJsonArray("quests").equals(json(full.get("text").getAsString()).getAsJsonArray("quests")), "大任务列表到 HTTP 模型正文仍保持完整");
     }
 
     private JsonObject send(String method, JsonObject params) throws Exception {

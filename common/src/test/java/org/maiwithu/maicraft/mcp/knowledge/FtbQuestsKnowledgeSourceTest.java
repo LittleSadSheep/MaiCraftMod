@@ -21,9 +21,9 @@ public final class FtbQuestsKnowledgeSourceTest {
         String chapter = FtbQuestsKnowledgeSource.CHAPTER + "0000000000000001";
         String quest = FtbQuestsKnowledgeSource.QUEST + "FEDCBA9876543210";
         JsonObject first = report(source, chapter);
-        String next = first.get("next_uri").getAsString();
-        check(first.getAsJsonArray("quests").size() == 40 && report(source, next).getAsJsonArray("quests").size() == 6,
-                "长章节分页且后续页保留全部可见目标");
+        String next = chapter + "?offset=40&revision=" + first.get("query_revision").getAsString();
+        check(first.getAsJsonArray("quests").size() == 46 && !first.has("next_uri") && report(source, next).getAsJsonArray("quests").size() == 6,
+                "选定章节完整返回，旧 offset 链接仍可读取剩余范围");
         JsonObject listRequest = JsonParser.parseString("{\"action\":\"list\"}").getAsJsonObject();
         String cursor = library.request(listRequest).get("nextCursor").getAsString();
         fixture.task.progress = 7;
@@ -40,7 +40,7 @@ public final class FtbQuestsKnowledgeSourceTest {
                 "不可见任务同时从搜索和直接 URI 读取消失");
         rejected(source, next);
         fixture.quest.visible = true;
-        next = report(source, chapter).get("next_uri").getAsString();
+        next = chapter + "?offset=40&revision=" + report(source, chapter).get("query_revision").getAsString();
         fixture.file.selfTeamData.id = UUID.randomUUID(); rejected(source, next);
 
         // 未安装、未同步、锁定与空书分别保留状态，不用空数组掩盖任务书不可读。

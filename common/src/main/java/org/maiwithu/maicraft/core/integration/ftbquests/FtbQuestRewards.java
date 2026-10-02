@@ -36,7 +36,7 @@ final class FtbQuestRewards {
             JsonArray entries = new JsonArray();
             JsonArray identities = new JsonArray(); rewards.forEach(reward -> identities.add(identity(reward)));
             out.addProperty("revision", FtbRewardTables.digest(identities.toString()));
-            for (Object reward : rewards.subList(start(offset, rewards.size()), Math.min(offset + 40, rewards.size()))) {
+            for (Object reward : rewards.subList(start(offset, rewards.size()), rewards.size())) {
                 JsonObject row = state(reward, team, player); row.addProperty("path", id(reward)); entries.add(row);
             }
             out.add("entries", entries); page(out, path, offset, rewards.size()); return out;
@@ -73,6 +73,7 @@ final class FtbQuestRewards {
     }
     static void page(JsonObject result, String path, int offset, int total) {
         result.addProperty("path", path); result.addProperty("offset", offset); result.addProperty("total", total);
-        if (total - offset > 40) result.addProperty("next_offset", offset + 40);
+        // 一个任务的可见奖励完整返回；更深的奖励定义仍沿明确的子资源读取，不自动展开循环奖池。
+        result.addProperty("complete", true);
     }
 }

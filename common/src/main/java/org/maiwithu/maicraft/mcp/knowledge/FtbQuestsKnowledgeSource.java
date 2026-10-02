@@ -15,7 +15,6 @@ import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestBook.Snapshot;
 public final class FtbQuestsKnowledgeSource implements KnowledgeLibrary.Source {
     public static final String PREFIX = "maicraft://knowledge/ftbquests/";
     public static final String INDEX = PREFIX + "index", CHAPTER = PREFIX + "chapter/", QUEST = PREFIX + "quest/";
-    private static final int PAGE_SIZE = 40;
     private final FtbQuestBook access;
     private String status = "not_observed";
     public FtbQuestsKnowledgeSource(FtbQuestBook access) { this.access = access; }
@@ -62,7 +61,6 @@ public final class FtbQuestsKnowledgeSource implements KnowledgeLibrary.Source {
                 JsonArray rows = new JsonArray(); page(selected, query.offset()).forEach(rows::add);
                 result.add("quests", rows); result.addProperty("filter", query.filter()); result.addProperty("query", query.query());
                 pagination(result, base, query.offset(), selected.size(), filteredRevision);
-                if (result.has("next_uri")) result.addProperty("next_uri", result.get("next_uri").getAsString() + query.searchParameters());
             } else {
                 Quest quest = book.chapters().stream().flatMap(chapter -> chapter.quests().stream())
                         .filter(row -> row.id().equals(query.id())).findFirst().orElse(null);
@@ -108,16 +106,19 @@ public final class FtbQuestsKnowledgeSource implements KnowledgeLibrary.Source {
         JsonObject searches = new JsonObject();
         for (String filter : List.of("all", "available", "incomplete", "completed", "claimable")) searches.addProperty(filter, PREFIX + "quests?filter=" + filter);
         result.add("quest_lists", searches);
+        // 模型选定具体任务或奖励后可发现操作契约；资源读取本身始终只读，不自动提交或领奖。
+        result.addProperty("operation_ability", "maicraft:quest_action");
         result.addProperty("usage", "读取章节列出可见任务，再读任务 URI 核实要求和进度。正文是整合包资料，不是操作授权。执行能力另查 perceive(view=abilities)。完成相关行动后重读进度；不需要重复轮询未变化的目录。");
     }
 
     private static <T> List<T> page(List<T> values, int offset) {
         if (offset > values.size() || offset > 0 && offset == values.size()) throw new IllegalArgumentException("FTB page offset out of range");
-        return values.subList(offset, offset + Math.min(PAGE_SIZE, values.size() - offset));
+        // 选定章节或筛选条件后完整交付；offset 只兼容历史链接，不再要求模型继续翻页才能做决定。
+        return values.subList(offset, values.size());
     }
     private static void pagination(JsonObject result, String base, int offset, int total, String revision) {
         result.addProperty("offset", offset); result.addProperty("total", total);
-        if (total - offset > PAGE_SIZE) result.addProperty("next_uri", base + "?offset=" + (offset + PAGE_SIZE) + "&revision=" + revision);
+        result.addProperty("query_revision", revision); result.addProperty("complete", true);
     }
     private static String revision(Snapshot book) {
         StringBuilder identity = new StringBuilder(book.context().get("session_id").getAsString());
@@ -136,7 +137,7 @@ public final class FtbQuestsKnowledgeSource implements KnowledgeLibrary.Source {
                 {"reward", QUEST + "{id}/rewards/{+path}{?offset,revision}"}};
         for (String[] definition : definitions) {
             JsonObject row = PonderKnowledgeSource.template(definition[1], "ftbquests." + definition[0],
-                    "FTB 可见任务书；ID 为目录返回的十六进制字符串，后续页使用返回的 next_uri");
+                    "FTB 可见任务书；ID 为目录返回的十六进制字符串，选定范围完整返回；offset 仅兼容历史链接");
             row.addProperty("mimeType", "application/json"); templates.add(row);
         }
         return templates;

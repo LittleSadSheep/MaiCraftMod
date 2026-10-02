@@ -29,6 +29,10 @@ public final class FtbQuestRewardsTest {
         check(table.get("total_weight").getAsDouble() == 4 && table.get("empty_weight").getAsDouble() == 1
                 && table.getAsJsonArray("entries").get(0).getAsJsonObject().get("guaranteed_when_table_rolls").getAsBoolean(), "空奖与零权重自动奖励分别保留");
         String child = table.getAsJsonArray("entries").get(0).getAsJsonObject().get("path").getAsString();
+        check(table.getAsJsonArray("entries").get(0).getAsJsonObject().getAsJsonObject("content").get("item_id").getAsString().equals("minecraft:apple"), "选择候选包含完整叶子内容");
+        String revision = FtbRewardTables.revision(loot.table); bonus.data.putBoolean("only_one", true);
+        check(!revision.equals(FtbRewardTables.revision(loot.table)), "同名奖励的发放条件变化也会撤销旧引用");
+        bonus.data.remove("only_one");
         check(FtbQuestRewards.read(f.quest, team, f.player, child, 0).get("claim_scope").getAsString().equals("parent_reward"), "奖池条目不拥有独立领取状态");
         loot.table.entries.add(new Weighted(shared, 1));
         try { FtbQuestRewards.read(f.quest, team, f.player, child, 0); throw new AssertionError("过期索引应拒绝"); }

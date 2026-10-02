@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.core.integration.ftbquests;
 
 import java.util.UUID;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture.Chapter;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture.Link;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture.Quest;
@@ -41,6 +43,14 @@ public final class FtbQuestAccessTest {
                 && task.get("task_screen_only").getAsBoolean() && task.get("match_components").getAsString().equals("exact"),
                 "保留消耗、合成来源、任务屏幕和组件匹配条件");
         check(!task.getAsJsonObject("conditions").get("crafting_only_effective").getAsBoolean(), "消耗型提交不额外要求合成事件");
+        // 命名不同的真实候选不能因超过展示上限而丢失，模型要能比较最后一个候选。
+        for (int i = 0; i < 20; i++) {
+            var candidate = fixture.task.getItemStack(); candidate.set(DataComponents.CUSTOM_NAME, Component.literal("材料 " + i));
+            fixture.task.displayItems.add(candidate);
+        }
+        var allItems = FtbQuestTasks.read(fixture.task, fixture.file.selfTeamData);
+        check(allItems.getAsJsonArray("display_examples").size() == 20
+                && allItems.getAsJsonArray("display_examples").get(19).getAsJsonObject().get("name").getAsString().equals("材料 19"), "全部候选完整交付");
         // 隐藏详情时连任务条件都不展开，隐藏正文时保留允许玩家查看的任务目标。
         fixture.quest.hideDetails = true; fixture.quest.startable = false;
         check(!fixture.access.snapshot().chapters().getFirst().quests().getFirst().details().get().has("tasks"), "锁定详情不读条件");

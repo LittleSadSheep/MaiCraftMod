@@ -19,6 +19,7 @@ public final class FtbRewardFixture {
     public static final class Reward extends Node {
         public final String type;
         public boolean teamReward, blocked, sharedClaimed;
+        public boolean claimAvailable = true;
         public String auto = "disabled";
         public final Set<UUID> claimedPlayers = new HashSet<>();
         public final CompoundTag data = new CompoundTag();

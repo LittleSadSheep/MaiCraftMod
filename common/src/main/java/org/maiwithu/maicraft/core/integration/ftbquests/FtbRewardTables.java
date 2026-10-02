@@ -29,10 +29,7 @@ final class FtbRewardTables {
     static List<?> rows(Object table) { return (List<?>) call(table, "getWeightedRewards"); }
     static String revision(Object table) {
         JsonArray identity = new JsonArray(); identity.add(id(table));
-        for (Object row : rows(table)) {
-            JsonObject entry = FtbQuestApi.identity(call(row, "getReward"));
-            entry.addProperty("weight", (Number) call(row, "getWeight")); identity.add(entry);
-        }
+        for (Object row : rows(table)) identity.add(describe(row));
         return digest(identity.toString());
     }
     static String digest(String text) {
@@ -53,10 +50,9 @@ final class FtbRewardTables {
         out.addProperty("total_weight", total);
         if (includeEmpty) out.addProperty("empty_weight", (Number) FtbQuestData.field(table, "emptyWeight"));
         List<?> rows = rows(table); JsonArray entries = new JsonArray();
-        for (int i = FtbQuestRewards.start(offset, rows.size()); i < Math.min(offset + 40, rows.size()); i++) {
-            Object weighted = rows.get(i), child = call(weighted, "getReward"); JsonObject entry = identity(child);
+        for (int i = FtbQuestRewards.start(offset, rows.size()); i < rows.size(); i++) {
+            Object weighted = rows.get(i); JsonObject entry = describe(weighted);
             double weight = ((Number) call(weighted, "getWeight")).doubleValue();
-            entry.addProperty("type", FtbQuestRewards.type(child)); entry.addProperty("weight", weight);
             // 原生随机表的零权重项在有效抽奖时自动发放；分母为零时并不会产生任何奖励。
             if (random) {
                 entry.addProperty("guaranteed_when_table_rolls", weight == 0 && total > 0);
@@ -66,5 +62,17 @@ final class FtbRewardTables {
         }
         out.add("entries", entries); FtbQuestRewards.page(out, path, offset, rows.size());
         return out;
+    }
+    private static JsonObject describe(Object weighted) {
+        Object child = call(weighted, "getReward"); JsonObject row = identity(child);
+        row.addProperty("type", FtbQuestRewards.type(child)); row.addProperty("weight", (Number) call(weighted, "getWeight"));
+        // 选择奖励时直接比较全部叶子内容，不必逐个补读；内容变化也撤销旧选择引用，嵌套奖池仍按明确链接读取。
+        if (!isTable(child)) {
+            JsonObject content = new JsonObject();
+            try { FtbRewardContents.append(content, child, FtbQuestRewards.type(child)); }
+            catch (RuntimeException | LinkageError unavailable) { content.addProperty("content_status", "api_unavailable"); }
+            row.add("content", content);
+        }
+        return row;
     }
 }

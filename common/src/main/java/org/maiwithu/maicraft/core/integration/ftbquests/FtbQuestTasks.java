@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.List;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.server.machine.NativeApi;
@@ -60,15 +61,19 @@ public final class FtbQuestTasks {
         conditions.add("item_id", result.get("item_id")); conditions.add("consume_items", result.get("consumes_resources"));
         conditions.addProperty("crafting_only_effective", !flag(task, "consumesResources") && flag(task, "isOnlyFromCrafting"));
         conditions.add("task_screen_only", result.get("task_screen_only")); conditions.add("match_components", result.get("match_components"));
-        // 过滤器可能匹配很多材料；只列展示样例并标明总数，真实匹配仍由 FTB 的任务定义决定。
+        // 过滤器的全部展示候选参与材料判断，不能只给前十六项；真实匹配仍由 FTB 的任务定义决定。
         List<?> items = (List<?>) call(task, "getValidDisplayItems");
         JsonArray examples = new JsonArray();
-        for (Object item : items.subList(0, Math.min(16, items.size()))) {
+        for (Object item : items) {
             ItemStack example = (ItemStack) item;
             JsonObject row = new JsonObject(); row.addProperty("item_id", BuiltInRegistries.ITEM.getKey(example.getItem()).toString());
-            row.addProperty("name", example.getHoverName().getString()); examples.add(row);
+            row.addProperty("name", example.getHoverName().getString());
+            // 同名附魔书等候选可能组件不同，保留原生栈内容；个别组件不可编码时只把这一项标为未知。
+            try { row.add("stack", FtbQuestData.json(example.saveOptional((HolderLookup.Provider) call(task, "holderLookup")))); }
+            catch (RuntimeException unavailable) { row.addProperty("components_unavailable", true); }
+            examples.add(row);
         }
         result.add("display_examples", examples); result.addProperty("display_example_count", items.size());
-        result.addProperty("display_examples_truncated", items.size() > examples.size());
+        result.addProperty("display_examples_truncated", false);
     }
 }

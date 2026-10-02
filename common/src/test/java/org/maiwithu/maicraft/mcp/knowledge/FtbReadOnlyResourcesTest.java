@@ -20,8 +20,9 @@ public final class FtbReadOnlyResourcesTest {
         String reward = read(source, quest).getAsJsonObject("quest").getAsJsonObject("rewards").getAsJsonArray("entries")
                 .get(0).getAsJsonObject().get("uri").getAsString();
         JsonObject table = read(source, reward).getAsJsonObject("rewards").getAsJsonObject("table");
-        check(read(source, table.get("next_uri").getAsString()).getAsJsonObject("rewards").getAsJsonObject("table")
-                .getAsJsonArray("entries").size() == 5, "奖励表能沿返回 URI 读取全部页");
+        check(table.getAsJsonArray("entries").size() == 45 && !table.has("next_uri")
+                && read(source, reward + "?offset=40&revision=" + table.get("page_revision").getAsString()).getAsJsonObject("rewards").getAsJsonObject("table")
+                .getAsJsonArray("entries").size() == 5, "当前奖池完整返回，保留旧链接兼容");
         String child = table.getAsJsonArray("entries").get(0).getAsJsonObject().get("uri").getAsString();
         check(read(source, child).getAsJsonObject("rewards").getAsJsonObject("reward").get("item_id").getAsString().equals("minecraft:apple"), "候选条目按需读取完整内容");
         f.quest.hideDetails = true; f.quest.startable = false;
@@ -32,8 +33,9 @@ public final class FtbReadOnlyResourcesTest {
         choice.claimedPlayers.add(f.player);
         check(read(source, all + "?filter=claimable").getAsJsonArray("quests").isEmpty(), "领取状态变化立即影响筛选");
         for (int i = 0; i < 45; i++) f.chapter.quests.add(new Quest(200 + i, "未完成目标 " + i, f.chapter));
-        String next = read(source, all + "?filter=incomplete&q=%E7%9B%AE%E6%A0%87").get("next_uri").getAsString();
-        check(next.contains("filter=incomplete") && next.contains("q="), "下一页保留中文查询与状态筛选");
+        var selected = read(source, all + "?filter=incomplete&q=%E7%9B%AE%E6%A0%87");
+        check(selected.getAsJsonArray("quests").size() == 45 && !selected.has("next_uri"), "筛选后完整交付全部匹配目标");
+        String next = all + "?filter=incomplete&q=%E7%9B%AE%E6%A0%87&offset=40&revision=" + selected.get("query_revision").getAsString();
         f.chapter.quests.get(1).completed = true;
         rejected(source, next);
         Image visible = new Image(300, "机器布局说明"), hidden = new Image(301, "未解锁配方"); hidden.visible = false;
