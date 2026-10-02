@@ -40,33 +40,71 @@ public final class McpTaskLifecycleTest {
         restoredCancellationPreservesCurrentWork();
         fullHistoryRejectsBeforeAcceptingMoreWork();
         networkCancellationRespectsClientDispatch();
-        progressEventsThrottlePerTask();
+        progressEventsFollowScoreboard();
         System.out.println("McpTaskLifecycleTest: passed");
     }
 
-    private static void progressEventsThrottlePerTask() throws Exception {
+    private static void progressEventsFollowScoreboard() throws Exception {
         try (var f = new Fixture()) {
-            // 长任务靠进度事件中途醒来；节流到每 100 刻至多一条，避免每刻观察刷屏。
+            // 进度事件只跟记分牌走：变了才说，过 40 刻地板；无键沉默，绝不编 "still working"。
+            // 套件共享同一个事件流，计数与取最新都按本任务编号过滤。
             var record = f.record();
             f.tasks().put(record.externalId(), record);
-            f.runtime.publishProgress(record, Map.of("phase", "approaching_sources", "gathered", 17), 1_000);
-            f.runtime.publishProgress(record, Map.of("phase", "approaching_sources", "gathered", 18), 1_050);
-            var events = f.runtime.attention(0, 50).getAsJsonArray("events");
-            check(countType(events, "task_progress") == 1, "间隔内的进度观察应被节流成一条事件");
-            f.runtime.publishProgress(record, Map.of("phase", "approaching_sources", "gathered", 19), 1_101);
-            events = f.runtime.attention(0, 50).getAsJsonArray("events");
-            var latest = lastOf(events, "task_progress");
-            check(countType(events, "task_progress") == 2, "过了间隔进度事件恢复发送");
-            check(latest != null
-                    && latest.get("task_id").getAsString().equals(record.externalId().toString())
-                    && latest.getAsJsonObject("data").get("gathered").getAsInt() == 19,
-                    "进度事件应带任务编号和当前观察数据");
-            // 终态清掉节流记账；同任务再次发进度不被旧间隔吞掉。
+            f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 17, "total", 64), 1_000);
+            var events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            var first = lastProgressFor(events, record);
+            check(countProgressFor(events, record) == 1, "首个记分牌观察应立即发布");
+            check(first != null && first.get("message").getAsString().equals("17/64 · acquiring"),
+                    "摘要应由框架按记分牌渲染");
+            // 记分牌没变（专有字段变了）不发事件：细节随下次发布的 data 携带。
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "acquiring", "done", 17, "total", 64, "source", "mine"), 1_010);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "记分牌未变化不应发布事件");
+            // 地板窗口内的变化进待发区合并，只报最新值；地板过后由下一次观察触发补发。
+            f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 18, "total", 64), 1_020);
+            f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 19, "total", 64), 1_030);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "地板窗口内的变化不应立即发布");
+            f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 19, "total", 64), 1_041);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            var merged = lastProgressFor(events, record);
+            check(countProgressFor(events, record) == 2, "地板过后应发布合并后的进度");
+            check(merged != null && merged.get("message").getAsString().equals("19/64 · acquiring")
+                    && merged.getAsJsonObject("data").get("done").getAsInt() == 19,
+                    "合并事件应携带最新记分牌与观察数据");
+            // 一个标准键都没有的观察：沉默——没有信息量的话不发。
+            f.runtime.publishProgress(record, Map.of("task", "move_to"), 1_050);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 2, "无标准键的观察应保持静默");
+            // 终态清掉门卫记账；同任务再次发进度不被旧状态吞掉。
             f.runtime.terminal(record, TaskState.SUCCESS, TaskResult.ok("done"));
-            f.runtime.publishProgress(record, Map.of("phase", "digging"), 1_150);
-            events = f.runtime.attention(0, 50).getAsJsonArray("events");
-            check(countType(events, "task_progress") == 3, "终态清空进度记账后新进度应立即发送");
+            f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 20, "total", 64), 1_060);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 3, "终态清空记账后新进度应立即发送");
         }
+    }
+
+    private static int countProgressFor(JsonArray events, IntentTaskRecord record) {
+        String taskId = record.externalId().toString();
+        int count = 0;
+        for (var element : events) {
+            JsonObject event = element.getAsJsonObject();
+            if ("task_progress".equals(event.get("type").getAsString())
+                    && taskId.equals(event.get("task_id").getAsString())) count++;
+        }
+        return count;
+    }
+
+    private static JsonObject lastProgressFor(JsonArray events, IntentTaskRecord record) {
+        String taskId = record.externalId().toString();
+        JsonObject found = null;
+        for (var element : events) {
+            JsonObject event = element.getAsJsonObject();
+            if ("task_progress".equals(event.get("type").getAsString())
+                    && taskId.equals(event.get("task_id").getAsString())) found = event;
+        }
+        return found;
     }
 
     private static int countType(JsonArray events, String type) {

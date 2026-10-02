@@ -14,6 +14,7 @@
 | `started` | 任务已登记 |
 | `step_completed` / `step_skipped` | 某一步完成 / 被明确跳过 |
 | `plan_changed` | 插入了前置目标，或替换了当前步骤 |
+| `task_progress` | 记分牌进度：done/total 计数、remaining/initial 移动距离、phase 阶段 |
 | `decision` | **需要你回答** |
 | `paused` / `resumed` | 暂停 / 恢复 |
 | `completed` / `failed` / `cancelled` | 终态 |
@@ -21,6 +22,18 @@
 | `runtime.unavailable` | 身体断开，需要重新对齐 |
 
 **事件只提示"发生了什么"**；完整事实在任务记录里，用 `task(get, path=...)` 按需读。
+
+### task_progress 的记分牌契约
+
+任务通过 `progress()` 报告五个可选标准键：`done`/`total`（计数任务的已有/目标）、
+`remaining`/`initial`（移动任务的剩余/出发时距离，单位格）、`phase`（阶段）。
+事件摘要由框架统一渲染成 `17/64 · acquiring` 或 `剩余 48/200 格 · moving`；
+任务专有细节随事件 `data` 原样携带，摘要不重复任务名（信封自带 task_id）。
+
+发布规则：**记分牌变了才发布**，最短间隔 40 刻（2 秒），窗口内的多次变化合并报
+最新值；一个标准键都没有的任务不发进度事件——没有信息量的话不说，不存在
+"still working" 兜底。「还活着」由长轮询超时唤醒表达，不需要心跳。移动任务的
+剩余距离不单调（绕路会变大），如实显示——那正是卡死的可见征兆。
 
 ---
 

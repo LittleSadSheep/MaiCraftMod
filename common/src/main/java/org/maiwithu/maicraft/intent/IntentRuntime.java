@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -54,8 +53,6 @@ public final class IntentRuntime {
     private static final int MAX_REQUEST_KEYS = IntentStateCodec.MAX_REQUEST_KEYS;
     private static final int MAX_LANDMARKS = IntentStateCodec.MAX_LANDMARKS;
     private static final long SAVE_INTERVAL_NANOS = 5_000_000_000L;
-    /** 进度事件的最小间隔（游戏刻）；与任务单 active_execution 的观察节奏同量级。 */
-    private static final long PROGRESS_EVENT_INTERVAL_TICKS = 100;
 
     private static final Set<String> CORE_ABILITIES = Set.of(
             ChatAbilityAdapter.ABILITY,
@@ -103,8 +100,8 @@ public final class IntentRuntime {
     private final ContainerMemory containers = new ContainerMemory(this::markDirty);
 
     public ContainerMemory containerMemory() { return containers; }
-    /** 每个任务上次发进度事件的游戏刻；节流长任务进度，不让每刻观察都变成一条事件。 */
-    private final Map<UUID, Long> progressPublishAt = new HashMap<>();
+    /** 进度事件的门卫：记分牌变化驱动 + 地板间隔 + 无键静默，契约见 task-progress-contract。 */
+    private final ProgressGate progressGate = new ProgressGate();
     private final AttentionFeed attention = new AttentionFeed();
     private final ChatFlow chatFlow = new ChatFlow();
     private final IntentStateStore stateStore = new IntentStateStore();
@@ -756,7 +753,7 @@ public final class IntentRuntime {
 
     void terminal(IntentTaskRecord record, TaskState state, TaskResult result) {
         markDirty();
-        progressPublishAt.remove(record.externalId());
+        progressGate.forget(record.externalId());
         String type = switch (state) {
             case SUCCESS -> "completed";
             case CANCELLED -> "cancelled";
@@ -768,26 +765,22 @@ public final class IntentRuntime {
     }
 
     /**
-     * 长任务的节流进度事件：数据与任务单 active_execution 同源，事件让等待方中途醒来，
-     * 不必等到终态才知道"砍到几个、走到哪一步"。仅节流，不改变观察内容。
+     * 长任务的进度事件：记分牌（done/total、remaining/initial、phase）变了才发布，
+     * 过 40 刻地板；词汇契约与触发规则见 `.omo/drafts/task-progress-contract.md`。
+     * 无键观察保持沉默；超 2 分钟无键改记一次日志提醒开发者，不进事件流。
      */
     void publishProgress(IntentTaskRecord record, Map<String, Object> observation, long gameTime) {
-        Long last = progressPublishAt.get(record.externalId());
-        if (last != null && gameTime - last < PROGRESS_EVENT_INTERVAL_TICKS) return;
-        progressPublishAt.put(record.externalId(), gameTime);
+        ProgressGate.Decision decision = progressGate.consider(record.externalId(), observation, gameTime);
+        if (decision == null) return;
+        if (decision.keylessWarn()) {
+            Constants.LOG.warn("task {} ran long without any scoreboard field (done/total/phase/remaining/initial)",
+                    record.goal().ability());
+            return;
+        }
         JsonObject data = new JsonObject();
         observation.forEach((key, value) ->
                 data.add(key, GSON.toJsonTree(value == null ? "" : value)));
-        publish("task_progress", record, progressMessage(observation), data);
-    }
-
-    /** 进度事件的一句话摘要；只挑通用字段，各能力的专有证据仍完整留在 data 里。 */
-    private static String progressMessage(Map<String, Object> observation) {
-        StringJoiner parts = new StringJoiner(", ");
-        if (observation.get("phase") != null) parts.add(String.valueOf(observation.get("phase")));
-        if (observation.get("gathered") != null) parts.add("gathered " + observation.get("gathered"));
-        if (observation.get("known_sources") != null) parts.add("known_sources " + observation.get("known_sources"));
-        return parts.length() == 0 ? "still working" : parts.toString();
+        publish("task_progress", record, decision.message(), data);
     }
 
     public JsonObject attention(long afterCursor, int limit) {
