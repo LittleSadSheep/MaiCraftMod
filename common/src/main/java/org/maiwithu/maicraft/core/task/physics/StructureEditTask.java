@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -55,6 +56,10 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
     private CompletableFuture<PhysicalStructureDesignStore.Registration> registration;
     private JsonObject declarationEvidence=new JsonObject();
     private Object declarationWorld;
+    private boolean wrenching;
+    private int rotations;
+    private BlockState rotationState;
+    private Set<Direction> rotationFaces=Set.of();
     public StructureEditTask(LocalPlayer player,StructureEditTaskRecord record) { super(player,record); }
     @Override protected void onStart() {
         declarationWorld=player.level();declarationEvidence.addProperty("persistence_status","pending");
@@ -101,13 +106,16 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
                 fail("原生结构操作未确认: "+completed.detail(),FailureType.UNKNOWN); return TaskState.FAILED;
             }
             if(completed.kind()==NativeActionReceipt.Kind.CREATIVE_SET_SLOT) return TaskState.RUNNING;
-            effects.add(Map.of("index",index,"action",placing?"place":"remove","native_confirmed",true));
+            effects.add(Map.of("index",index,"action",wrenching?"rotate":placing?"place":"remove","native_confirmed",true,
+                    "actual",player.level().getBlockState(pos).toString()));
             resetApproach();
-            if(placing||wanted(edit).isAir()) index++;
+            // 放下机翼后再核对明确朝向；可以原生扳手调向时继续同一格，不能仅因物品已落地就漏掉方向要求。
+            BlockState live=player.level().getBlockState(pos);
+            if(placing&&(matchesProperties(live,edit)||wrenchFaces(live,edit).isEmpty())||wanted(edit).isAir())finishTarget();
             return TaskState.RUNNING;
         }
         BlockState actual=player.level().getBlockState(pos), desired=wanted(edit);
-        if(actual.is(desired.getBlock()) && (desired.isAir()||matchesProperties(actual,edit))) { resetApproach();index++;return TaskState.RUNNING; }
+        if(actual.is(desired.getBlock()) && (desired.isAir()||matchesProperties(actual,edit))) {finishTarget();return TaskState.RUNNING;}
         // 默认不在飞行中加配重；船体移动时等待停稳，不擅自关闭原本维持浮力的推进器。
         if(moving(ship)) {
             if(blockedSince<0) blockedSince=player.level().getGameTime();
@@ -115,12 +123,19 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             return TaskState.RUNNING;
         }
         blockedSince=-1;
-        placing=actual.canBeReplaced()&&!desired.isAir();
-        Item item=placing?desired.getBlock().asItem():null;
-        int slot=placing?PlayerInv.findSlot(player.getInventory(),item):ToolSelect.bestSlot(player,actual);
-        if(placing&&(slot<0||slot>=36)) {
+        if(rotations>=12) {
+            effects.add(Map.of("index",index,"property_adjustment","native_rotation_limit_reached","actual",actual.toString()));
+            finishTarget();return TaskState.RUNNING;
+        }
+        var allowed=actual.is(desired.getBlock())?wrenchFaces(actual,edit):Set.<Direction>of();
+        wrenching=!allowed.isEmpty();placing=!wrenching&&actual.canBeReplaced()&&!desired.isAir();
+        Item item=wrenching?BuiltInRegistries.ITEM.get(ResourceLocation.parse("create:wrench")):placing?desired.getBlock().asItem():null;
+        int slot=item!=null?PlayerInv.findSlot(player.getInventory(),item):ToolSelect.bestSlot(player,actual);
+        if(item!=null&&(slot<0||slot>=36)) {
             if(player.getAbilities().instabuild) {
-                if(ctx.mutationAvailable()) action=ctx.actions().creativeSetSlot(ctx,player.getInventory().selected,new ItemStack(item,64),80);
+                // 扳手和其他不可堆叠工具按原生堆叠上限领取，不能沿用施工方块的一组数量。
+                if(ctx.mutationAvailable()) action=ctx.actions().creativeSetSlot(ctx,player.getInventory().selected,
+                        new ItemStack(item,Math.min(64,item.getDefaultInstance().getMaxStackSize())),80);
             } else {
                 var record=new SemanticAcquireTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),
                         List.of(BuiltInRegistries.ITEM.getKey(item)),1,SemanticAcquireTaskRecord.DEFAULT_SOURCES,false,
@@ -135,6 +150,8 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         }
         ctx.body().applyMovement(new BodyControlPort.Movement(0,0,false,placing,false),ctx.tickRevision());
         var faces=StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing);
+        // 普通右键扳手旋转、潜行右键却会拆走方块，因此只选择可达设计方向的真实命中面并保持站立。
+        if(wrenching)faces=faces.stream().filter(candidate->allowed.contains(candidate.face())).toList();
         lastGaze=StructureEditApproach.gaze(ctx,faces);
         if(faces.isEmpty()) { fail("目标格没有已加载的原生施工面",FailureType.NO_PATH);return TaskState.FAILED; }
         var click=StructureEditApproach.current(ctx,ship,pos,placing,faces);
@@ -142,7 +159,7 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         if(click==null||mustReposition) return approach(ctx,pos,faces);
         BlockPos support=click.support();Vec3 aim=click.world();Direction face=click.face();
         InputDriver.lookAt(player,aim); BlockHitResult hit=DriverStation.hit(player,ship,support);
-        if(hit==null||placing&&(hit.getDirection()!=face||!player.isShiftKeyDown())) {
+        if(hit==null||(placing||wrenching)&&hit.getDirection()!=face||placing&&!player.isShiftKeyDown()||wrenching&&player.isShiftKeyDown()) {
             if(++aimTicks>100) {
                 ensureSearch(ctx,pos);worksites.record(Map.of("aim_failed",lastGaze));
                 mustReposition=true;aimTicks=0;
@@ -151,8 +168,9 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         }
         aimTicks=0;
         if(!ctx.mutationAvailable()) return TaskState.RUNNING;
-        if(!placing) action=ctx.actions().startBreaking(ctx,hit,200);
+        if(!placing&&!wrenching) action=ctx.actions().startBreaking(ctx,hit,200);
         else {
+            if(wrenching)rotations++;
             BlockState before=actual;
             action=ctx.actions().useBlock(ctx,InteractionHand.MAIN_HAND,hit,new NativeConfirmation() {
                 public boolean requiresBlockAcknowledgement() { return true; }
@@ -162,6 +180,20 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             },80);
         }
         return TaskState.RUNNING;
+    }
+    private Set<Direction> wrenchFaces(BlockState actual,JsonObject edit) {
+        if(actual!=rotationState) {
+            rotationState=actual;
+            try {rotationFaces=StructureWrenchPlan.faces(actual,edit);}
+            catch(RuntimeException unavailable) {
+                // 属性规划读取失败只保留实际差异，不抹去已经完成的拆放，也不伪造新的点击。
+                rotationFaces=Set.of();effects.add(Map.of("index",index,"property_adjustment_unknown",unavailable.toString()));
+            }
+        }
+        return rotationFaces;
+    }
+    private void finishTarget() {
+        resetApproach();index++;rotations=0;rotationState=null;rotationFaces=Set.of();wrenching=false;
     }
     private void ensureSearch(LocalPlayerContext ctx,BlockPos pos) {
         if(worksites==null) worksites=new StructureWorksiteSearch(ship.pose().toWorld(Vec3.atCenterOf(pos)),player.position(),
@@ -204,12 +236,7 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
                 .orElseThrow(()->new IllegalArgumentException("未知目标方块")).defaultBlockState();
     }
     private static boolean matchesProperties(BlockState state,JsonObject edit) {
-        if(!edit.has("properties")) return true;
-        for(var entry:edit.getAsJsonObject("properties").entrySet()) {
-            var property=state.getBlock().getStateDefinition().getProperty(entry.getKey());
-            if(property==null||!state.getValue(property).toString().equalsIgnoreCase(entry.getValue().getAsString())) return false;
-        }
-        return true;
+        return StructureWrenchPlan.matches(state,edit);
     }
     @Override public void stop(LocalPlayer companion,Task.StopReason why) {
         // 自救或其他任务接管身体时一并暂停施工移位，恢复后由同一子任务继续核对实际位置。
