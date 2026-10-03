@@ -58,6 +58,15 @@ public abstract class TaskRecord {
         return deadlineGameTime > Long.MAX_VALUE - paused ? Long.MAX_VALUE : deadlineGameTime + paused;
     }
     public final TaskState getState() { return state; }
+    /** 本能抢占和人工暂停期间不消耗任务内部的无进展预算；与截止时间使用同一暂停计数。 */
+    public final long activeGameTime(long gameTime) {
+        return gameTime - (deadlineClock.pausedTicks - pausedBaseline);
+    }
+    /** 新能力在启动时创建一次：只报告真实进展，公共预算统一处理暂停、父子续期和截止时间。 */
+    public final ProgressBudget progressBudget(long allowanceTicks) {
+        return new ProgressBudget(allowanceTicks, this::activeGameTime,
+                () -> deadlineClock.progressRevision, () -> deadlineClock.progressRevision++, this::extendDeadlineTo);
+    }
     public final TaskResult getResult() { return result; }
 
     /** 只允许把截止时间推后，较早的时间会被忽略；游戏中在客户端主线程调用。 */

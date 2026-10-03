@@ -1,9 +1,10 @@
 package org.maiwithu.maicraft.task;
 
-/** 同一总任务及其子任务共用暂停计数；自卫、其他槽位和后续新任务各自计时。 */
+/** 同一总任务及其子任务共用暂停和真实进展计数；自卫、其他槽位和后续新任务各自计时。 */
 final class TaskDeadlineClock {
     private static final ThreadLocal<TaskDeadlineClock> ACTIVE = new ThreadLocal<>();
     long pausedTicks;
+    long progressRevision;
 
     static TaskDeadlineClock active() { return ACTIVE.get(); }
     static TaskDeadlineClock inherit() {

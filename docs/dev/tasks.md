@@ -81,6 +81,34 @@
 
 这些状态描述的是运行时停在哪一步，不能单凭 `running_tasks` 就断言某次放置或某个机器工序已经成功。
 
+## 新能力的无进展预算
+
+持续执行的能力使用公共 [ProgressBudget](../../common/src/main/java/org/maiwithu/maicraft/task/ProgressBudget.java)。
+例如 600 刻表示连续 600 个活动游戏刻没有新进展；真实进展会立即补满，任务总耗时可以超过该值。
+`record.progressBudget(600)` 绑定任务时钟，统一排除抢占、暂停时间，并把真实子任务进展传给父流程。
+辅助流程没有独立任务单时，在父任务执行作用域内使用 `ProgressBudget.currentTask(600)`。
+
+```java
+// 在能力创建时保留同一个预算对象；反复重试不能另建对象来刷新余量。
+private final ProgressBudget inactivity;
+
+// 构造时绑定任务单。confirmedUnits 必须是本任务累计确认的工作量。
+inactivity = record.progressBudget(30 * 20);
+
+// 每刻推进后检查：新增确认量补满预算，相同计数或重试归零都不补时。
+boolean stalled = inactivity.observeCounter(player.level().getGameTime(), confirmedUnits);
+```
+
+没有累计数量时，用 `observe(now, newVerifiedFact)` 报告新的位移、差异核查或已确认操作。
+后台线程仍存活、future 尚未完成、普通轮询、重复重算相同范围都不算进展。
+`diagnostics(now)` 提供 `allowance`、`idle`、`remaining`；暂停和父子传递由公共层处理。
+接收子任务进展只续期，不反向发布新进展，避免父子互相空转续命。
+预算耗尽只说明流程没有新进展，不能据此宣称地形无路、目标不存在或原生效果没有发生；回执仍保留已确认事实。
+
+后台寻路在完成节点展开、路径核查或地形清单后调用 `PathPlannerPool.madeProgress(stage)`。
+诊断中的 `age_ms` 保留总耗时，停滞判断使用 `no_progress_ms`。
+能够交付可走分段时，A* 仍按短计算切片及时交出路线；切片长度不作为整个旅行任务的失败期限。
+
 ## 谁能使用玩家身体
 
 [TaskSelector](../../common/src/main/java/org/maiwithu/maicraft/task/TaskSelector.java) 依次询问：自救行为、同步任务、当前任务。每组取第一个能运行的候选者。
