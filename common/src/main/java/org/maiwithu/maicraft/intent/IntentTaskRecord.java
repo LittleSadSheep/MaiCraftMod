@@ -407,7 +407,7 @@ public final class IntentTaskRecord extends TaskRecord {
         changed();
     }
 
-    private static boolean deathRecovery(DecisionSnapshot snapshot) {
+    static boolean deathRecovery(DecisionSnapshot snapshot) {
         return snapshot != null && snapshot.contextJson() != null
                 && snapshot.contextJson().contains("death_recovery");
     }

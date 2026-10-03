@@ -32,7 +32,17 @@ public final class StandaloneDeathRecoveryTest {
         check(!host.allStepsSucceeded(), "零步骤承载记录不得虚报 all_steps_succeeded");
 
         // 答复 respawn 后收尾：记录终态化但仍可查阅，不能凭空消失。
+        // 先按 Facade 的真实顺序过 validateDecisionAnswer：承载记录的"步骤"是恢复目标本身，
+        // 落到语义步骤校验会把合法答复拒成 unknown_ability（实机复验 013 的断裂点）。
         UUID decisionId = decision.id();
+        runtime.validateDecisionAnswer(host, "respawn", new JsonObject());
+        try {
+            runtime.validateDecisionAnswer(host, "respawn",
+                    new com.google.gson.JsonParser().parse("{\"goal\":{}}").getAsJsonObject());
+            check(false, "死亡恢复答复不得携带语义改写细节");
+        } catch (RuntimeException expected) {
+            // 契约拒绝多余细节是既定语义，防止答复路径被塞入未经授权的目标。
+        }
         check(host.answer(decisionId, "respawn", new JsonObject()), "全局恢复态的 respawn 答复必须被接受");
         runtime.finishDeathRecovery(host, TaskState.SUCCESS,
                 new TaskResult(true, "Native respawn was requested.", false, false, Map.of()), 10);
@@ -44,10 +54,12 @@ public final class StandaloneDeathRecoveryTest {
         // 原生重生没能发出：换发新决策编号重新挂起，旧编号的迟到答复必须被拒；随后按应用成功收尾。
         IntentTaskRecord host2 = runtime.openDeathRecoveryDecision(false, false, new JsonObject());
         UUID firstId = host2.decisionSnapshot().id();
+        runtime.validateDecisionAnswer(host2, "respawn", new JsonObject());
         check(host2.answer(firstId, "respawn", new JsonObject()), "第二次死亡的决策应可答复");
         runtime.requestDeathDecision(host2, false, false, new JsonObject());
         UUID secondId = host2.decisionSnapshot().id();
         check(!firstId.equals(secondId), "重挂决策必须换新编号");
+        runtime.validateDecisionAnswer(host2, "respawn", new JsonObject());
         check(host2.answer(secondId, "respawn", new JsonObject()), "新编号必须可答复");
         check(!host2.answer(firstId, "respawn", new JsonObject()),
                 "旧编号的迟到答复必须被拒绝，不能落到新问题上");

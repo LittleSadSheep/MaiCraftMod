@@ -746,6 +746,17 @@ public final class IntentRuntime {
             IntentTaskRecord record, String choice, JsonObject details) {
         JsonObject supplied = details == null ? new JsonObject() : details;
         IntentTaskRecord.DecisionSnapshot pending = record.decisionSnapshot();
+        // 死亡恢复决策由 GameplayAttentionMonitor 按选项同步应用（重生/观战/取消），不走语义改写；
+        // 承载记录的"步骤"是恢复目标本身（executableSteps 返回自身），不是已登记能力，
+        // 落到下面的语义步骤校验会把合法答复拒成 unknown_ability（实机复验 013 断裂点）。
+        if (IntentTaskRecord.deathRecovery(pending)) {
+            if (!supplied.isEmpty()) {
+                throw new SemanticContractException(
+                        "decision_details_not_allowed", "answer.details", null,
+                        "death_recovery answers accept no details; the native action is applied directly.");
+            }
+            return;
+        }
         if ("retry".equals(choice) && pending != null) {
             JsonObject context = pending.context();
             JsonObject failure = context.has("failure") && context.get("failure").isJsonObject()
