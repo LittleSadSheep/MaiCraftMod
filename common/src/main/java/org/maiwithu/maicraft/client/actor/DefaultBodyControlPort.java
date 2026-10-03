@@ -92,6 +92,26 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         setLook(yaw, pitch, leaseTickRevision);
     }
 
+    @Override public boolean tryAuxiliaryLook(float yaw, float pitch, long leaseTickRevision) {
+        requireLease(leaseTickRevision);
+        if (interactionLookLease == leaseTickRevision) return false;
+        // 跑动中低头插灯只改变视线；已有路线转向器继续工作，普通移动则按原世界方向补偿横移。
+        if (movementLease == leaseTickRevision && steering == null) {
+            Movement original = movement;
+            float oldYaw = controlledPlayer.getYRot();
+            steering = nextYaw -> preserveHeading(original, oldYaw, nextYaw);
+        }
+        requestImmediateLook(yaw, pitch, leaseTickRevision);
+        return true;
+    }
+
+    static Movement preserveHeading(Movement original, float oldYaw, float nextYaw) {
+        double angle = Math.toRadians(nextYaw - oldYaw), cos = Math.cos(angle), sin = Math.sin(angle);
+        return new Movement((float) Mth.clamp(original.forward() * cos - original.strafe() * sin, -1, 1),
+                (float) Mth.clamp(original.strafe() * cos + original.forward() * sin, -1, 1),
+                original.jumping(), original.sneaking(), original.sprinting());
+    }
+
     private void setLook(float yaw, float pitch, long leaseTickRevision) {
         targetYaw = Mth.wrapDegrees(yaw);
         targetPitch = Mth.clamp(pitch, -90.0f, 90.0f);

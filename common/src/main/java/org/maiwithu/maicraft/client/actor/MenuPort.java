@@ -6,6 +6,11 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 
 /** 菜单操作接口：前一次还没结束就不能点下一次；查询结果本身不发新点击。 */
 public interface MenuPort {
+    /** 一次原生副手交换，保持世界画面和主手槽不变；默认实现不支持时由调用方等待。 */
+    default MenuReceipt swapInventoryToOffhand(LocalPlayerContext context, int inventorySlot, int timeoutTicks) {
+        throw new UnsupportedOperationException("native offhand staging is unavailable");
+    }
+
     /** 聊天等后继动作先等已提交的搬运或关闭结清，不能用新界面打断物品同步。 */
     boolean hasPendingTransaction();
 

@@ -124,6 +124,30 @@ public final class DefaultMenuPort implements MenuPort {
         return receipt;
     }
 
+    @Override public MenuReceipt swapInventoryToOffhand(LocalPlayerContext context, int inventorySlot, int timeoutTicks) {
+        // 把整叠火把通过原生 SWAP 放进副手，旧副手物品回到原格；不切主手，也不反复开关背包。
+        DefaultLocalPlayerContext current = requireSubmission(context);
+        if (inventorySlot < 0 || inventorySlot >= 36 || current.minecraft().screen != null
+                || current.player().containerMenu != current.player().inventoryMenu
+                || !current.player().inventoryMenu.getCarried().isEmpty() || current.player().isUsingItem())
+            throw new IllegalStateException("offhand staging requires an idle player inventory and world view");
+        requireIdle();
+        var inventory = current.player().getInventory();
+        var confirmation = MenuConfirmation.inventorySwap(inventorySlot, 40,
+                inventory.getItem(inventorySlot).copy(), inventory.getItem(40).copy());
+        var menu = current.player().inventoryMenu;
+        int menuSlot = inventorySlot < 9 ? inventorySlot + 36 : inventorySlot;
+        current.claimMutation();
+        var receipt = create(MenuReceipt.Kind.CLICK, current, menu, menuSlot, timeoutTicks, false, confirmation);
+        try {
+            current.gameMode().handleInventoryMouseClick(menu.containerId, menuSlot, 40, ClickType.SWAP, current.player());
+            interactionSubmitted(current);
+        } catch (RuntimeException failure) {
+            receipt.finish(MenuReceipt.Status.UNCERTAIN, "offhand swap entered native submission; outcome unknown");
+        }
+        return receipt;
+    }
+
     @Override
     public MenuReceipt placeRecipe(LocalPlayerContext context, RecipeHolder<?> recipe, boolean shift,
                                     MenuConfirmation confirmation, int timeoutTicks) {

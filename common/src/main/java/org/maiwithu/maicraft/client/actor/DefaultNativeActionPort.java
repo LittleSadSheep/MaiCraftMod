@@ -21,6 +21,18 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private NativeActionReceipt active;
+    private NativeActionReceipt auxiliary;
+
+    @Override public NativeActionReceipt tryAuxiliaryBlockUse(LocalPlayerContext context, BlockHitResult hit,
+                                                              NativeConfirmation confirmation, int timeoutTicks) {
+        // 主手持续操作和旧副手点击优先结算；本刻主任务没出手时，才允许一次副手原生放置。
+        if (!context.mutationAvailable() || !settledForRoutinePause()
+                || context.menus().hasPendingTransaction() || auxiliary != null && !auxiliary.terminal()) return null;
+        NativeActionReceipt previous = active;
+        auxiliary = useBlock(context, InteractionHand.OFF_HAND, hit, confirmation, timeoutTicks);
+        active = previous;
+        return auxiliary;
+    }
     /** 非紧急生活动作等旧点击、停挖和取消蓄力都结清后接手，不能打断正在收尾的身体动作。 */
     boolean settledForRoutinePause() { return (active == null || active.terminal())
             && pendingBreakCancellationReason == null && pendingMainHandCancellation == null; }
@@ -535,6 +547,8 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         if (active != null && !active.terminal()) {
             active.finish(NativeActionReceipt.Status.UNCERTAIN, reason);
         }
+        // 换世界、死亡或 F8 交还身体时，副手的旧等待也必须结束，不能带到新操作者身上。
+        if (auxiliary != null && !auxiliary.terminal()) auxiliary.finish(NativeActionReceipt.Status.UNCERTAIN, reason);
         pendingBreakCancellationReason = null;
     }
 
@@ -589,11 +603,13 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private void requireActive(NativeActionReceipt receipt, NativeActionReceipt.Kind kind) {
-        if (receipt == null || receipt != active || receipt.kind() != kind) {
+        if (receipt == null || receipt != active && receipt != auxiliary || receipt.kind() != kind) {
             throw new IllegalArgumentException("the receipt is not the active native action");
         }
     }
     void advance(LocalPlayerContext context) {
+        // 副手仅做只读确认；即使主任务已经开始下一块矿，也不能重新提交旧火把。
+        if (auxiliary != null && !auxiliary.terminal()) poll(context, auxiliary);
         if (advanceMainHandCancellation(context)) return;
         // 每刻先读旧结果；如果有任务已经结束却还没来得及松开挖掘，就先处理这次停止。
         NativeActionReceipt receipt = active;

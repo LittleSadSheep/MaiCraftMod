@@ -8,6 +8,12 @@ import net.minecraft.world.phys.BlockHitResult;
 
 /** 发起真实玩家操作，并提供后续查询；提交一次动作与确认它做成了是两个阶段。 */
 public interface NativeActionPort {
+    /** 随行副手只借用本刻空闲操作机会；回执独立等待，不占住主任务下一刻的挖掘或交互。 */
+    default NativeActionReceipt tryAuxiliaryBlockUse(LocalPlayerContext context, BlockHitResult hit,
+                                                    NativeConfirmation confirmation, int timeoutTicks) {
+        return null;
+    }
+
     NativeActionReceipt startBreaking(LocalPlayerContext context, BlockHitResult hit, int timeoutTicks);
 
     NativeActionReceipt cancelBreaking(LocalPlayerContext context, NativeActionReceipt receipt);

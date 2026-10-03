@@ -66,6 +66,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 随行补光独立验证副手、镜头与主任务并行，避免用真实角色承担重复消耗风险。
+    lightingRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.AuxiliaryActionTest',
+        heap: '512m', directory: 'lighting-regression', timeoutSeconds: 60,
+        purpose: '验证随行副手补光与主任务资源协作'
+    ],
     // 主动寻死只走原生危险动作；独立回放保护豁免、危险变化和死亡证据，避免真实角色承担测试风险。
     suicideRegression: [
         entry: 'org.maiwithu.maicraft.core.task.suicide.SuicideRegressionSuite',
