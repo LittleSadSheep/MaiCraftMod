@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord;
 public final class SemanticBlockSearchTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
 
-    private record Args(List<String> block_ids, Integer count, Integer max_distance) {}
+    private record Args(List<String> block_ids, Integer count, Integer max_distance, String purpose) {}
 
     @Override
     public String name() {
@@ -32,6 +32,7 @@ public final class SemanticBlockSearchTool implements MaiCraftTool {
                 + "standing place with direct line of sight from the player's eyes. Reports verified counts, matching block ids and a "
                 + "nearest-distance statistic. When lava is requested, finishes the bounded scan even for count=1 and also reports "
                 + "connected visible surface pools, straight-bank length, platform fill costs and remaining-source lower bounds. "
+                + "Use purpose=portal_casting to require count suitable pools, each with a casting start row and at least 15 sources left after filling. "
                 + "A block match is not proof of a usable casting pool; native access and fluid outcomes remain unverified. Concrete positions stay inside the Mod and "
                 + "a later semantic ability resolves the actual block itself. No frontier "
                 + "walking, chunk forcing or coordinate output; unloaded terrain stays unknown.";
@@ -40,11 +41,14 @@ public final class SemanticBlockSearchTool implements MaiCraftTool {
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .stringArray("block_ids",
-                        "Acceptable namespaced block ids; never coordinates.", 1)
+                .optionalStringArray("block_ids",
+                        "Acceptable namespaced block ids, required for blocks; may be omitted for portal_casting.")
                 .optionalInteger("count",
-                        "Required distinct observed positions; partial counts fail.",
+                        "Required matching block positions, or matching pools for purpose=portal_casting; partial counts fail.",
                         1, SemanticBlockSearchTaskRecord.MAX_COUNT)
+                // 用途只改变只读查找的成功条件，不授权移动、整形池岸或倒桶。
+                .optionalEnum("purpose", "blocks by default; portal_casting requires observed casting geometry and source reserve.",
+                        "blocks", "portal_casting")
                 .optionalInteger("max_distance",
                         "Bounded loaded-world scan radius from the standing place.",
                         SemanticBlockSearchTaskRecord.MIN_DISTANCE, SemanticBlockSearchTaskRecord.MAX_DISTANCE)
@@ -59,7 +63,8 @@ public final class SemanticBlockSearchTool implements MaiCraftTool {
                 ctx(toolCallId, player),
                 parsed == null ? null : parsed.block_ids(),
                 parsed == null ? null : parsed.count(),
-                parsed == null ? null : parsed.max_distance());
+                parsed == null ? null : parsed.max_distance(),
+                parsed == null ? null : parsed.purpose());
         setTask(player, record, args, reply);
     }
 }

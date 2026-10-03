@@ -38,6 +38,8 @@ public final class SemanticBlockSearchTest {
         denseHiddenStoneConvergesWithProgress();
         cancellationIsNotTimeoutOrExhaustion();
         lavaSearchExpandsBeyondOneSource();
+        // 指定浇筑用途后按合适的池子结算，普通方块查找保留原来的成功条件。
+        PortalLavaPoolSearchTest.main(args);
         LoadedBlockScanTest.main(args);
         // 视线与分页属于发现证据的一部分，随方块探索入口一起回归。
         ObservationVisibilityTest.main(args);

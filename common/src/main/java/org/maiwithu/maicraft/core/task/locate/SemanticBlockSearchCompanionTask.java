@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.dimension.PortalLavaPoolSurvey;
+import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord.Purpose;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.ProgressBudget;
 
@@ -73,7 +74,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         scanBudget.observeCounter(player.level().getGameTime(), scan.processedCells()
                 + (lavaPools == null ? 0 : lavaPools.processed()));
         if (lavaPools != null && !lavaPools.complete()) return TaskState.RUNNING;
-        if (observed.size() >= r.count) {
+        if (matchesRequested()) {
             return TaskState.SUCCESS;
         }
         if (scan.complete()) return exhausted();
@@ -106,6 +107,11 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     }
 
     private TaskState exhausted() {
+        // 用户明确查找浇筑池时，发现岩浆但没有足量候选仍是未找到；所有小池事实继续保留给模型探索决策。
+        if (r.purpose == Purpose.PORTAL_CASTING) return failSearch(
+                matchedCount() == 0 ? "no_suitable_lava_pool_within_bound" : "insufficient_casting_pool_count",
+                "observed " + matchedCount() + "/" + r.count + " lava pools with a casting start row and the required source reserve; "
+                        + "only visible loaded terrain was checked, so hidden or unloaded pools remain unknown", FailureType.TARGET_LOST);
         if (!observed.isEmpty()) {
             return failSearch(
                     "insufficient_block_count",
@@ -126,6 +132,14 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         return TaskState.FAILED;
     }
 
+    private int matchedCount() {
+        return r.purpose == Purpose.PORTAL_CASTING ? lavaPools == null ? 0 : lavaPools.matchingPools() : observed.size();
+    }
+
+    private boolean matchesRequested() {
+        return matchedCount() >= r.count && (r.purpose != Purpose.PORTAL_CASTING || lavaPools != null && lavaPools.complete());
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Integer> observedById = new LinkedHashMap<>();
@@ -137,9 +151,13 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
                 .map(BuiltInRegistries.BLOCK::getKey)
                 .map(ResourceLocation::toString).toList());
         data.put("requested_count", r.count);
-        data.put("observed_acceptable_count", observed.size());
-        data.put("observed_acceptable_by_block_id", Map.copyOf(observedById));
-        data.put("verified", observed.size() >= r.count);
+        // 用途筛选的 count 单位是池子，同时保留原始可见方块总数，不能把一池三十格说成找到三十个池子。
+        data.put("search_purpose", r.purpose.id());
+        data.put("count_unit", r.purpose == Purpose.PORTAL_CASTING ? "casting_lava_pools" : "block_positions");
+        data.put("observed_acceptable_count", matchedCount());
+        data.put("observed_block_count", observed.size());
+        data.put(r.purpose == Purpose.PORTAL_CASTING ? "observed_blocks_by_block_id" : "observed_acceptable_by_block_id", Map.copyOf(observedById));
+        data.put("verified", matchesRequested());
         data.put("scope", "visible_loaded_client_blocks");
         data.put("visibility_required", true);
         data.put("max_distance", r.maxDistance);
@@ -154,7 +172,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
             data.put("nearest_match_horizontal_distance", Math.round(nearestHorizontalDistance * 10.0) / 10.0);
             data.put("nearest_match_vertical_offset", nearestVerticalOffset);
         }
-        if (observed.size() < r.count) {
+        if (!matchesRequested()) {
             if (failureCode != null) data.put("failure_code", failureCode);
             data.put("recoverable", true);
             data.put("requires_narration", true);
@@ -188,6 +206,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("visible_matches", observed.size());
         data.put("scan_complete", scan != null && scan.complete());
         if (lavaPools != null) data.put("lava_pool_analysis_complete", lavaPools.complete());
+        if (lavaPools != null) data.put("matching_casting_pools", lavaPools.matchingPools());
         if (scan != null) {
             data.put("done", scan.processedCells()); data.put("total", scan.totalCells());
             data.put("examined_block_states", scan.examinedStates()); data.put("visibility_candidates_checked", scan.candidates());
@@ -199,6 +218,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
 
     @Override
     protected String successMessage() {
+        if (r.purpose == Purpose.PORTAL_CASTING) return "verified " + matchedCount() + "/" + r.count
+                + " lava pools with observed casting geometry and source reserve; native bucket access and casting remain unverified";
         return "verified " + observed.size() + "/" + r.count + " matching block positions"
                 + (nearestMatchDistance >= 0
                         ? ", nearest observed about " + Math.round(nearestMatchDistance) + " blocks away in 3D"
@@ -210,8 +231,9 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     @Override
     protected String timeoutMessage() {
         return "block scan stopped before completing the loaded-radius sweep with "
-                + observed.size() + "/" + r.count
-                + " matching positions; partial evidence was not reported as success";
+                + matchedCount() + "/" + r.count
+                + (r.purpose == Purpose.PORTAL_CASTING ? " matching casting pools" : " matching positions")
+                + "; partial evidence was not reported as success";
     }
 
     @Override

@@ -152,12 +152,14 @@ public final class SemanticAbilityCatalog {
                             + "Reports counts, matching ids and distances. For minecraft:lava, even count=1 completes the bounded scan and returns lava_pool_survey: "
                             + "connected visible surface-source counts, straight-bank lengths and casting candidates with platform fill costs and remaining-source lower bounds. "
                             + "Compare candidate.reserve_observed (at least 15 sources after filling) before choosing lava_cast; a block match alone does not establish a usable pool. "
+                            + "Set purpose=portal_casting to make success require count matching pools with that geometry and reserve; block selectors may be omitted and default to lava. "
                             + "Hidden connections, depth, bucket access and native fluid outcomes remain unverified. If evidence is insufficient, explore or change viewpoint instead of repeating the same scan.",
                     targets("current_place", "nearest"),
                     fields(
                             field("block_id", "resource_id", "One acceptable registered block type."),
                             field("block_ids", "array<resource_id>", "Acceptable registered block types."),
-                            field("count", "integer", "Required distinct observed positions; a partial count is not success."),
+                            field("purpose", "blocks|portal_casting", "Default blocks. portal_casting searches only lava and counts suitable connected pools, with a casting start row and at least 15 sources after planned filling; native access and fluid outcomes remain unverified."),
+                            field("count", "integer", "Required observed block positions, or matching pools with purpose=portal_casting; default 1. Partial counts fail."),
                             field("max_distance", "integer", "Bounded loaded-world scan radius from the standing place; default 64, maximum 128.")));
             case GeneralAbilityAdapter.COMBAT -> contract(
                     "Defend against or engage semantic living targets visible in loaded terrain; MaiCraft resolves concrete entities and combat movement.",
