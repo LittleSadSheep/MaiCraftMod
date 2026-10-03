@@ -147,7 +147,12 @@ public final class SemanticAbilityCatalog {
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that matching evidence must not use.")));
             case GeneralAbilityAdapter.FIND_BLOCK -> contract(
-                    "Find named blocks through loaded client evidence; MaiCraft owns the scan and keeps concrete positions internal. Only verified counts, matching block ids and a nearest-distance statistic are reported.",
+                    // 岩浆查找随默认回执交付整池事实，模型不必靠连续查询单格岩浆猜测池子的规模。
+                    "Find named blocks through visible loaded client evidence; MaiCraft owns the scan and keeps concrete positions internal. "
+                            + "Reports counts, matching ids and distances. For minecraft:lava, even count=1 completes the bounded scan and returns lava_pool_survey: "
+                            + "connected visible surface-source counts, straight-bank lengths and casting candidates with platform fill costs and remaining-source lower bounds. "
+                            + "Compare candidate.reserve_observed (at least 15 sources after filling) before choosing lava_cast; a block match alone does not establish a usable pool. "
+                            + "Hidden connections, depth, bucket access and native fluid outcomes remain unverified. If evidence is insufficient, explore or change viewpoint instead of repeating the same scan.",
                     targets("current_place", "nearest"),
                     fields(
                             field("block_id", "resource_id", "One acceptable registered block type."),

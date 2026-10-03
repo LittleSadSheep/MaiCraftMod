@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * 一次只读的已加载方块证据查询。公开结果只含数量与最近距离统计；
+ * 一次只读的已加载方块证据查询。公开数量、距离及岩浆的连通池与整形预算；
  * 具体位置保留在 Mod 内部，后续交互由对应能力自行定位。
  */
 public final class SemanticBlockSearchTaskRecord extends TaskRecord {

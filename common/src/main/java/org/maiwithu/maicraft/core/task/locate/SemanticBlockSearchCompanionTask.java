@@ -11,11 +11,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.dimension.PortalLavaPoolSurvey;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.ProgressBudget;
 
@@ -37,8 +39,9 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private String failureCode;
     private ClientLevel scannedLevel;
     private LoadedBlockScan scan;
+    private PortalLavaPoolSurvey lavaPools;
     private final ProgressBudget scanBudget;
-    /** 具体位置只在 Mod 内部保存；公开结果仅输出数量与距离统计。 */
+    /** 具体位置只在 Mod 内部保存，供可见池面连通分析；公开回执保留数量、方位及施工预算。 */
     private final Map<BlockPos, Block> observed = new LinkedHashMap<>();
 
     public SemanticBlockSearchCompanionTask(LocalPlayer player, SemanticBlockSearchTaskRecord record) {
@@ -51,6 +54,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         origin = player.blockPosition().immutable();
         scannedLevel = player.clientLevel;
         scan = new LoadedBlockScan(scannedLevel, origin, r.blockTargets, r.maxDistance);
+        // 查找岩浆时一并调查可见池面，不能把默认 count=1 命中的孤立源格当成足够浇筑的整池。
+        if (r.blockTargets.contains(Blocks.LAVA)) lavaPools = new PortalLavaPoolSurvey(scannedLevel, origin);
     }
 
     @Override
@@ -60,10 +65,14 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         // 一次只沿同一个游标推进；隐藏目标继续逐个按原生视线判断，不再换排除集合重扫全范围。
         scan.advance(SCAN_WORK_PER_TICK, SCAN_NANOS_PER_TICK, pos -> {
             observe(pos);
-            return observed.size() >= r.count;
+            return lavaPools == null && observed.size() >= r.count;
         });
+        // 岩浆扫描沿原游标走完，再分刻分析连通池；不会借此走路、透视或加载新的区块。
+        if (lavaPools != null && scan.complete()) lavaPools.advance(64, SCAN_NANOS_PER_TICK);
         // 单调的扫描游标直接接入公共预算；相同游标的轮询不能给父任务或本任务补时。
-        scanBudget.observeCounter(player.level().getGameTime(), scan.processedCells());
+        scanBudget.observeCounter(player.level().getGameTime(), scan.processedCells()
+                + (lavaPools == null ? 0 : lavaPools.processed()));
+        if (lavaPools != null && !lavaPools.complete()) return TaskState.RUNNING;
         if (observed.size() >= r.count) {
             return TaskState.SUCCESS;
         }
@@ -85,6 +94,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         // 已加载只说明客户端有地形数据；必须能从眼睛看见，才向模型报告找到。
         if (!ObservationVisibility.block(player, pos)) return;
         if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
+            if (lavaPools != null) lavaPools.observeVisible(pos, state);
             // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
             double distance = Math.sqrt(pos.distSqr(origin));
             if (nearestMatchDistance < 0 || distance < nearestMatchDistance) {
@@ -137,6 +147,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("distance_metric", "euclidean_3d");
         data.put("distance_scope", "nearest verified observed match; not a reachability result");
         data.putAll(progress());
+        if (lavaPools != null) data.put("lava_pool_survey", lavaPools.facts());
         if (nearestMatchDistance >= 0) {
             data.put("nearest_match_distance",
                     Math.round(nearestMatchDistance * 10.0) / 10.0);
@@ -171,10 +182,12 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     @Override
     public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("task", name()); data.put("phase", "scanning_loaded_block_candidates");
+        data.put("task", name()); data.put("phase", lavaPools != null && scan != null && scan.complete()
+                ? "analyzing_visible_lava_pools" : "scanning_loaded_block_candidates");
         data.put("progress_unit", "section_cells_processed_including_unloaded_or_palette_skips");
         data.put("visible_matches", observed.size());
         data.put("scan_complete", scan != null && scan.complete());
+        if (lavaPools != null) data.put("lava_pool_analysis_complete", lavaPools.complete());
         if (scan != null) {
             data.put("done", scan.processedCells()); data.put("total", scan.totalCells());
             data.put("examined_block_states", scan.examinedStates()); data.put("visibility_candidates_checked", scan.candidates());
