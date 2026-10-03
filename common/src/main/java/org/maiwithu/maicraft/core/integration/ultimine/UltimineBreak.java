@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.act.BlockDigger;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.entity.InputDriver;
 
 /** 对准指定面 → 原生预览 → 持键挖触发块 → 松键 → 复查整批；每次只拥有一个真实破坏事务。 */
@@ -51,6 +52,9 @@ public final class UltimineBreak implements AutoCloseable {
         var context = ClientRuntime.requireContext(player);
         BlockState state = read(origin);
         if (state == null) return interrupt("ultimine_origin_unloaded");
+        // 原生尚在挖掘时也复核目标材料与明确保护；服务器把石头换成机器后不能沿旧准星继续拆。
+        if (!state.isAir() && (!allowed.test(origin) || NavigationSafetyContext.protectsMutation(origin)))
+            return interrupt("ultimine_origin_outside_current_permission");
         BlockDigger.DigResult dig;
         if (state.isAir()) {
             // 触发块消失后只能轮询原交易；再点一次会误击通道后方另一块。
@@ -133,6 +137,7 @@ public final class UltimineBreak implements AutoCloseable {
         return evidence(observe());
     }
     public BlockPos origin() { return origin; }
+    public List<BlockPos> observedSelection() { return batch == null ? List.of() : batch.positions(); }
     public boolean inFlight() { return attempted && result == null; }
     @Override public void close() {
         if (closed) return;

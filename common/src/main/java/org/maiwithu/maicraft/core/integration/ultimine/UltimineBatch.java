@@ -61,5 +61,6 @@ public final class UltimineBatch {
 
     public BlockPos origin() { return origin; }
     public int size() { return before.size(); }
+    public List<BlockPos> positions() { return List.copyOf(before.keySet()); }
     public static List<Integer> position(BlockPos at) { return List.of(at.getX(), at.getY(), at.getZ()); }
 }

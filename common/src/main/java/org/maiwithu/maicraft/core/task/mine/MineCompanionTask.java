@@ -14,6 +14,8 @@ import org.maiwithu.maicraft.core.pathing.moves.ActionCosts;
 import org.maiwithu.maicraft.core.pathing.moves.CalculationContext;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import org.maiwithu.maicraft.core.act.BlockDigger;
+import org.maiwithu.maicraft.core.integration.ultimine.UltimineBreak;
+import org.maiwithu.maicraft.core.integration.ultimine.UltimineSession;
 
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
@@ -241,7 +243,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private int lastQueryChunkRadius;
 
     // 按玩家正常速度逐刻挖掘，与寻路执行器共用 BlockDigger，确保两条破坏路径读取同一进度。
-    private final BlockDigger digger;
+    private UltimineBreak chainBreak;
+    private final List<Map<String, Object>> ultimineActions = new ArrayList<>();
+    private boolean miningUncertain;
     /** 保留请求中的目标；BlockDigger.current() 可能暂时指向遮挡视线的方块，不能把它误当成真正矿物目标。 */
     private BlockPos activeTarget;
     private BlockPos harvestTarget;
@@ -251,7 +255,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     public MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record) {
         super(player, record);
-        this.digger = new BlockDigger(player);
         this.naturalLogSource = record.naturalLogsOnly
                 && record.targets.stream().anyMatch(block -> block.defaultBlockState().is(BlockTags.LOGS));
     }
@@ -331,17 +334,19 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             noteProgress();
         }
         Level level = player.level();
-
-        // 切换任务前先结算已确认的破坏，使新掉落实体保留正确来源，即使另一批掉落物此时已经可以收集。
-        BlockPos effective = digger.current();
-        if (activeTarget != null && effective != null && level.getBlockState(effective).isAir()) {
-            acceptDigResult(activeTarget, digger.settleGone(effective.equals(activeTarget)));
+        // 连锁事务独占本轮动作，先结算触发块、完整选区及松键，再决定拾取或下一处矿源。
+        if (miningUncertain) {
+            fail("native mining was interrupted with unresolved effects; inspect the full ultimine receipt", FailureType.UNKNOWN);
+            return TaskState.FAILED;
+        }
+        if (chainBreak != null) {
+            mineProgress(activeTarget);
             return TaskState.RUNNING;
         }
         // 接单之后被换成别的方块或卸载时，停止原生挖掘；不能按坐标误拆新放入的机器。
         if (r.exactHarvest() && brokenTargets == 0 && (!level.isLoaded(r.searchCenter())
                 || level.getBlockState(r.searchCenter()) != r.exactState())) {
-            digger.cancel(); fail("exact harvest source changed or unloaded before confirmed break", FailureType.TARGET_LOST);
+            fail("exact harvest source changed or unloaded before confirmed break", FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
         observeNavigationBreakOrigins();
@@ -368,7 +373,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 材料凑够、掉落物有危险、等得太久或工具耗尽时，先停挖去捡；否则同一批近处矿可继续挖。
         if (!drops.isEmpty() && (toolExhausted || expectedOutputAttemptLimitReached(gathered) || !canDeferPickup(gathered))) {
             if (activeTarget != null) {
-                digger.cancel();
                 activeTarget = null;
                 clearNoShot();
             }
@@ -402,14 +406,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (nav != null && !nav.yieldForExternalAction()) {
                 return TaskState.RUNNING;
             }
-            effective = digger.current();
-            if (effective != null && level.getBlockState(effective).isAir()) {
-                acceptDigResult(activeTarget,
-                        digger.settleGone(effective.equals(activeTarget)));
-                return TaskState.RUNNING;
-            }
             if (level.getBlockState(activeTarget).isAir()) {
-                digger.cancel();
                 knownOres.remove(activeTarget);
                 activeTarget = null;
                 return TaskState.RUNNING;
@@ -1074,15 +1071,40 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  按格记账的地方,因为它是唯一一件关于那一格的可复现事实。 */
     // 第一次选定目标时记下原方块状态。天然树供料只挖目标，其余采矿允许 BlockDigger 先清遮挡。
     private void mineProgress(BlockPos pos) {
-        if (!pos.equals(harvestTarget)) {
-            harvestTarget = pos.immutable();
-            harvestBefore = player.level().getBlockState(pos);
+        activeTarget = pos.immutable();
+        if (chainBreak == null) chainBreak = new UltimineBreak(player, pos, null,
+                r.exactHarvest() ? UltimineSession.Mode.SINGLE : UltimineSession.Mode.MINING,
+                this::allowedMiningCell, at -> at.equals(feet().below()) || at.equals(feet().below(2)));
+        var result = chainBreak.tick();
+        if (result.status() == UltimineBreak.Status.RUNNING) return;
+        // FTB 显示出的剩余矿脉也是原生观察；下一轮可复访它，不能重新退回“从未看见”。
+        for (BlockPos at : chainBreak.observedSelection()) {
+            if (player.level().isLoaded(at) && r.targets.contains(player.level().getBlockState(at).getBlock()))
+                observedSources.observe(dimension(), at, BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock()).toString());
         }
-        if (activeTarget == null) {
-            activeTarget = pos.immutable();
+        ultimineActions.add(result.evidence()); chainBreak.close(); chainBreak = null;
+        for (var entry : result.removed().entrySet()) {
+            harvestTarget = entry.getKey(); harvestBefore = entry.getValue();
+            acceptDigResult(entry.getKey(), BlockDigger.DigResult.BROKE_TARGET);
+            // 原生连锁把整批产物集中丢在触发块，不能逐个走进埋藏副目标的位置寻找不存在的掉落。
+            if (!entry.getKey().equals(pos)) anticipatedDrops.remove(entry.getKey());
         }
-        acceptDigResult(activeTarget, naturalLogSource || r.exactHarvest()
-                ? digger.digTargetStep(activeTarget) : digger.digStep(activeTarget));
+        if (result.status() == UltimineBreak.Status.NO_SHOT) acceptDigResult(pos, BlockDigger.DigResult.NO_SHOT);
+        else if (result.status() == UltimineBreak.Status.FAILED || result.uncertain()) {
+            miningUncertain |= result.uncertain();
+            fail("native mining could not settle: " + result.evidence().get("reason"),
+                    result.uncertain() ? FailureType.UNKNOWN : FailureType.TARGET_LOST);
+        }
+    }
+
+    // 只允许本次材料族和范围；天然树仍需原有树干证据，连锁不会获得拆木屋的额外权限。
+    private boolean allowedMiningCell(BlockPos at) {
+        if (!r.inSearchScope(at) || !player.level().isLoaded(at)) return false;
+        BlockState state = player.level().getBlockState(at);
+        if (state.isAir()) return true;
+        if (r.exactHarvest()) return state == r.exactState();
+        return r.targets.contains(state.getBlock()) && (!r.naturalLogsOnly || !state.is(BlockTags.LOGS)
+                || naturalTrees.accepts(at, player.level(), player.level()::isLoaded));
     }
 
     // 天然树供料使用普通行走规则；其他采矿使用允许挖路、垫路的导航规则。
@@ -1114,12 +1136,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         switch (result) {
             case BROKE_TARGET -> {
                 if (target.equals(harvestTarget) && harvestBefore != null && !harvestBefore.isAir()) {
-                    if (confirmedHarvests.size() < 32) confirmedHarvests.add(Map.of(
+                    confirmedHarvests.add(Map.of(
                             "position", Map.of("x", target.getX(), "y", target.getY(), "z", target.getZ()),
                             "block_id", BuiltInRegistries.BLOCK.getKey(harvestBefore.getBlock()).toString(),
                             "block_state", harvestBefore.toString(),
                             "natural_tree_filter_enabled", r.naturalLogsOnly && harvestBefore.is(BlockTags.LOGS)));
-                    else truncatedHarvests++;
                 }
                 harvestTarget = null;
                 harvestBefore = null;
@@ -1142,7 +1163,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     if (++noShotTicks >= MAX_NO_SHOT_TICKS) {
                         unworkable.add(target.immutable());
                         knownOres.remove(target);
-                        digger.cancel();   // 释放此矿物上进行中的挖掘锁存状态。
                         activeTarget = null;
                         clearNoShot();
                     }
@@ -1552,7 +1572,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     @Override
     // 上层即使发现材料已经够，也要先让本轮已产生的掉落物和导航挖掘完成收尾。
     public boolean mustSettleBeforeSatisfiedCancellation() {
-        if (brokenTargets > 0
+        if (chainBreak != null || brokenTargets > 0
                 || !anticipatedDrops.isEmpty()
                 || !attributedDropIds.isEmpty()
                 || unreachableDropCount > 0) {
@@ -1593,18 +1613,29 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 随后释放挖掘器并注销目标索引，避免任务结束后继续控制角色或扫描方块。
         InputDriver.halt(player);
         super.cleanup();
-        digger.cancel();
+        closeChain();
         activeTarget = null;
         if (!r.exactHarvest()) TargetIndex.unregister(player.clientLevel, r.targets);
     }
 
+    // 身体维护或用户取消时先松开本任务的连锁键；已有但未确认的破坏保留不确定性，不借重启掩盖。
+    private void closeChain() {
+        if (chainBreak == null) return;
+        var evidence = chainBreak.interruptedEvidence(); ultimineActions.add(evidence);
+        miningUncertain |= Boolean.TRUE.equals(evidence.get("outcome_uncertain"));
+        chainBreak.close(); chainBreak = null;
+    }
+    @Override public void stop(LocalPlayer companion, StopReason why) { closeChain(); super.stop(companion, why); }
+
     @Override
-    // 返回得到多少材料、确认挖了哪些位置，以及还有哪些掉落物没有处理好；详细收获最多保留 32 条。
+    // 完整返回本轮采集与连锁选区的实际差异；数量达标、原生破坏和掉落归属分别保留。
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
+        if (!ultimineActions.isEmpty()) data.put("ultimine_actions", List.copyOf(ultimineActions));
+        if (miningUncertain) data.put("outcome_uncertain", true);
         if (!lastMiningObservation.isEmpty()) data.put("mining_observation", lastMiningObservation);
         if (expectedOutputMissing) {
             data.put("failure_code", "expected_mining_output_not_observed");

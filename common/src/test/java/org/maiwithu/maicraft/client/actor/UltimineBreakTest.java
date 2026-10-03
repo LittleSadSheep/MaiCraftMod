@@ -54,7 +54,7 @@ public final class UltimineBreakTest {
             check(h.mode.breakStarts == 1, "the controller submits the seed only once");
         }
     }
-    private static final class NativeControl implements UltimineControl {
+    static final class NativeControl implements UltimineControl {
         private final List<BlockPos> selected;
         int held, released; boolean closed;
         NativeControl(List<BlockPos> selected) { this.selected = selected; }
