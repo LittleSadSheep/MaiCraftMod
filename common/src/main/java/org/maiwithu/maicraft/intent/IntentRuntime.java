@@ -59,6 +59,7 @@ public final class IntentRuntime {
     private static final Set<String> CORE_ABILITIES = Set.of(
             PhysicsAbilityAdapter.ABILITY,
             PhysicalAssemblyAbilityAdapter.ABILITY,
+            PhysicalControlAbilityAdapter.ABILITY,
             QuestAbilityAdapter.ABILITY,
             ChatAbilityAdapter.ABILITY,
             SuicideAbilityAdapter.ABILITY, // 让模型通过正式能力发现与执行入口提交主动寻死。

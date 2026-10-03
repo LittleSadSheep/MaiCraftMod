@@ -20,6 +20,10 @@ Offroad 轮座使用 Create 压路机物品的放置规则：初始放置格下�
 
 ## 操作
 
+起飞或行驶前用 `maicraft:physical_control` 配置原生部件。世界目标使用锚点加 `position` 偏移；已有结构使用 `structure_id` 与相对 `origin_storage` 的偏移。默认 `inspect` 只读。`set_speed` 设置 Create 创造电机或转速控制器的旋钮值，范围是非零 -256..256；面板符号可能随朝向转换为不同 `actual_rpm`，停止应使用真实离合或刹车。`set_throttle` 的 `value` 是 0..15 的实际输出信号，执行器处理反相属性。
+
+`set_link_mode` 用 `receiver=true/false` 设置 Create 红石链路收发模式；`set_frequency` 用 `frequency_items=[第一物品,第二物品]` 配置有序频率，`minecraft:air` 清空相应位置。角色实际持有物品并命中原生频率区域，回执保留实际物品及染色身份；不会注入 NBT 或凭空写库存。已经匹配的配置不重复点击，等待未确认也不重放。世界设计可带 `design_id`，结构自动复查已保存的全部声明；配置、结构差异和实际运行验证分别返回。
+
 | operation | 行为 |
 | --- | --- |
 | analyze | 读取服务端原生质量、惯量、作用点力和力偶，并计算起飞前工况 |

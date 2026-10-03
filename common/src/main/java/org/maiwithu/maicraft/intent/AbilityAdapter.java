@@ -59,6 +59,7 @@ final class AbilityAdapter {
             case PhysicsAbilityAdapter.ABILITY -> PhysicsAbilityAdapter.adapt(goal,player);
             // 物理创建先走原生粘接/组装流程，结果保留真实结构身份与整机差异。
             case PhysicalAssemblyAbilityAdapter.ABILITY -> PhysicalAssemblyAbilityAdapter.adapt(goal,player,runtime);
+            case PhysicalControlAbilityAdapter.ABILITY -> PhysicalControlAbilityAdapter.adapt(goal,player,runtime);
             // 任务书动作只操作模型指定的任务或奖励，提交与领奖均走持久化的单次原生执行。
             case QuestAbilityAdapter.ABILITY -> QuestAbilityAdapter.adapt(goal);
             case ChatAbilityAdapter.ABILITY -> ChatAbilityAdapter.adapt(goal);

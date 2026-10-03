@@ -13,10 +13,10 @@ final class SemanticAbilityAvailability {
         boolean readOnly = switch (id) {
             case "maicraft:remember_place", "maicraft:inspect_machine", "maicraft:design_machine",
                     "maicraft:design_build", "maicraft:wait_for_condition",
-                    "maicraft:find_block", "maicraft:physical_balance", "maicraft:physical_assembly" -> true;
+                    "maicraft:find_block", "maicraft:physical_balance", "maicraft:physical_assembly", "maicraft:physical_control" -> true;
             default -> false;
         };
-        boolean supported = !id.equals("maicraft:connect_mechanical_power")&&!id.equals("maicraft:physical_assembly") || createInstalled;
+        boolean supported = !id.equals("maicraft:connect_mechanical_power")&&!id.equals("maicraft:physical_assembly")&&!id.equals("maicraft:physical_control") || createInstalled;
         ability.addProperty("registered", true);
         ability.addProperty("supported", supported);
         JsonArray preconditions = new JsonArray();

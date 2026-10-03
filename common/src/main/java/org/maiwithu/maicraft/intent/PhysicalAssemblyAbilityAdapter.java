@@ -17,15 +17,26 @@ final class PhysicalAssemblyAbilityAdapter {
     private PhysicalAssemblyAbilityAdapter() {}
     static void validate(Goal goal) {
         var parameters=PhysicalAssemblyParameters.parse(goal.parameters());
-        if(parameters.structureId()!=null) {
+        validateTarget(goal,parameters.structureId());
+    }
+    static void validateTarget(Goal goal,UUID structureId) {
+        if(structureId!=null) {
             if(goal.target()!=null)throw new IllegalArgumentException("structure_id 使用该结构的局部坐标，不能同时指定世界锚点");
         } else if(goal.target()==null||!TARGETS.contains(goal.target().kind()))
             throw new IllegalArgumentException("未组装的方块需要明确的世界锚点或已记地标");
     }
     static IntentAction adapt(Goal goal,LocalPlayer player,IntentRuntime runtime) {
         validate(goal);var parameters=PhysicalAssemblyParameters.parse(goal.parameters());
+        String dimension=player.level().dimension().location().toString();BlockPos anchor=anchor(goal,player,runtime,parameters.structureId());
+        String call="physical-assembly-"+UUID.randomUUID();long deadline=player.level().getGameTime()+20*60*15;
+        return new IntentAction.Native(parameters.operation()==PhysicalAssemblyParameters.Operation.BOND
+                ?new PhysicalBondTaskRecord(call,deadline,parameters,anchor,dimension)
+                :new PhysicalAssemblerTaskRecord(call,deadline,parameters,anchor,dimension));
+    }
+    static BlockPos anchor(Goal goal,LocalPlayer player,IntentRuntime runtime,UUID structureId) {
         String dimension=player.level().dimension().location().toString();BlockPos anchor=BlockPos.ZERO;
-        if(parameters.structureId()==null) {
+        // 组装与控制共用坐标绑定；读到船体存储坐标时绝不能把它误作角色要前往的世界位置。
+        if(structureId==null) {
             var target=goal.target();Goal.WorldPosition at;
             if(target.kind().equals("coordinates"))at=target.position();
             else if(target.kind().equals("current_place")) {
@@ -34,10 +45,7 @@ final class PhysicalAssemblyAbilityAdapter {
             if(at==null||at.dimension()!=null&&!dimension.equals(at.dimension()))throw new IllegalArgumentException("世界锚点未解析或属于另一维度");
             anchor=new BlockPos(at.x(),at.y(),at.z());
         }
-        String call="physical-assembly-"+UUID.randomUUID();long deadline=player.level().getGameTime()+20*60*15;
-        return new IntentAction.Native(parameters.operation()==PhysicalAssemblyParameters.Operation.BOND
-                ?new PhysicalBondTaskRecord(call,deadline,parameters,anchor,dimension)
-                :new PhysicalAssemblerTaskRecord(call,deadline,parameters,anchor,dimension));
+        return anchor;
     }
     static JsonObject contract() {
         var out=new JsonObject();out.addProperty("summary","原生强力胶/蜂蜜胶选区粘接、物理组装器创建/拆回结构及胶层观察。LLM决定布局与修改，Mod只执行原生操作并返回实际结果和完整声明差异；默认起飞/行驶前使用。");

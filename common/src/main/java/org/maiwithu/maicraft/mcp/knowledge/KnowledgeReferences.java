@@ -16,6 +16,7 @@ public final class KnowledgeReferences {
         switch (ability) {
             case "maicraft:physical_balance" -> references.add(resource(KnowledgeLibrary.PHYSICS,"起飞前工况、配重补丁、气球容积和预测证据边界"));
             case "maicraft:physical_assembly" -> references.add(resource(KnowledgeLibrary.PHYSICS,"原生强力胶/蜂蜜胶、物理组装器、坐标转换与完整设计继承"));
+            case "maicraft:physical_control" -> references.add(resource(KnowledgeLibrary.PHYSICS,"原生电机旋钮、油门信号及无线控制配置"));
             case "maicraft:build", "maicraft:design_build" -> {
                 references.add(resource(BuildingModelContract.INDEX_URI, "建筑模型的当前格式、图元和完整 Schema"));
                 references.add(resource(KnowledgeLibrary.BLUEPRINT, "建筑蓝图、场景组合与续建说明"));
