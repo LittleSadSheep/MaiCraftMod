@@ -1,4 +1,5 @@
 package org.maiwithu.maicraft.core.task.fish;
+import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.task.ProgressBudget;
 import org.maiwithu.maicraft.core.FailureType;
 
@@ -11,6 +12,7 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import org.maiwithu.maicraft.core.task.base.Precondition;
+import org.maiwithu.maicraft.core.tools.perception.BodyEnvironmentObservation;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.task.TaskState;
@@ -95,6 +97,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private int phaseTicks;
     private int failedCasts;
     private int positionFailures;
+    // 失败当刻的身体和站位判断随回执保存，稍后角色移动也不能改写这次未能抛竿的原因。
+    private JsonObject positioningObservation;
     private ItemEntity lootTarget;
     private NativePickupReceipt lootReceipt;
     private int lootCloseTicks;
@@ -159,7 +163,14 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         if (stance == null || target == null) {
             FishingSetup setup = findFishingSetup();
             if (setup == null) {
-                fail("no safe dry fishing stance with reachable water nearby; move close to a shoreline and try fish again",
+                String reason = positioningObservation.get("reason").getAsString();
+                // 原地已经干燥却没有可用抛竿落点时，明确报告缺少落点，不能暗示角色仍泡在水里。
+                String message = reason.equals("no_cast_target_from_current_dry_stance")
+                        ? "already at a dry stance, but no unobstructed cast target was found from the current position"
+                        : "no dry stance with an unobstructed cast target was found in the local search";
+                fail(message + "; in_water=" + positioningObservation.get("in_water")
+                                + ", underwater=" + positioningObservation.get("underwater")
+                                + "; inspect the observed position and water access before retrying fish",
                         FailureType.OUT_OF_REACH);
                 return TaskState.FAILED;
             }
@@ -188,6 +199,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 stance = null;
                 target = null;
                 if (++positionFailures >= MAX_POSITION_FAILURES) {
+                    observePositioningFailure("nearby_stances_unreachable", isDryStance(feet()));
                     fail("nearby dry fishing stances were unreachable; move onto a clear shoreline and try fish again",
                             FailureType.NO_PATH);
                     yield TaskState.FAILED;
@@ -201,10 +213,12 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     // 只有当前不是干燥站位时，才搜索附近其他站位。这是 D21 记录的状态依赖限制。
     private FishingSetup findFishingSetup() {
         BlockPos current = feet();
-        if (isDryStance(current) && !rejectedStances.contains(current)) {
+        boolean currentDry = isDryStance(current);
+        if (currentDry && !rejectedStances.contains(current)) {
             BlockPos water = findCastTarget(current, player.getEyePosition());
             if (water != null) return new FishingSetup(current, water);
-            // 角色已安全站在陆地，但抛竿范围内没有水。远距离寻找水域属于模型的定位与移动步骤，不属于当前钓鱼任务。
+            // 原地干燥但没有通过距离、水面和弹道检查的落点；这不能证明附近无水，后续选址仍交给模型。
+            observePositioningFailure("no_cast_target_from_current_dry_stance", true);
             return null;
         }
 
@@ -230,7 +244,24 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             BlockPos water = findCastTarget(candidate, eye);
             if (water != null) return new FishingSetup(candidate, water);
         }
+        // 附近站位与落点组合搜索失败，不等于当前身体入水，也不等于整个区域没有水。
+        observePositioningFailure("no_local_stance_with_cast_target", currentDry);
         return null;
+    }
+
+    private void observePositioningFailure(String reason, boolean currentDry) {
+        // 身体实况、站位几何和抛竿搜索结论分开记录；原生浸水状态不能从失败提示反推。
+        positioningObservation = BodyEnvironmentObservation.describe(player);
+        positioningObservation.addProperty("reason", reason);
+        positioningObservation.addProperty("current_stance_dry", currentDry);
+        positioningObservation.addProperty("cast_min_horizontal_distance", MIN_CAST_DISTANCE);
+        positioningObservation.addProperty("cast_max_horizontal_distance", CAST_SEARCH_RADIUS);
+        positioningObservation.addProperty("cast_vertical_range", CAST_SEARCH_Y);
+        if (!reason.equals("no_cast_target_from_current_dry_stance")) {
+            positioningObservation.addProperty("stance_search_radius", STANCE_SEARCH_RADIUS);
+            positioningObservation.addProperty("stance_search_vertical_range", STANCE_SEARCH_Y);
+            positioningObservation.addProperty("stance_check_limit", MAX_STANCE_CHECKS);
+        }
     }
 
     // 先收回已有鱼钩，再重查站位、水面和轨迹；准备好后进入瞄准，不在这里直接抛竿。
@@ -259,6 +290,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             target = findCastTarget(stance, player.getEyePosition());
         }
         if (target == null) {
+            observePositioningFailure("no_cast_target_from_current_dry_stance", true);
             fail("no unobstructed fishing cast is available from this dry stance; move along the shoreline and try again",
                     FailureType.OUT_OF_REACH);
             return TaskState.FAILED;
@@ -811,10 +843,12 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     @Override
     protected Map<String, Object> resultData() {
+        // 失败证据直接进入默认任务回执，模型无需再勘测同一片洞穴才能知道当时是否入水。
         Map<String, Object> data = new HashMap<>();
         data.put("requested", r.requested);
         data.put("caught", r.caught());
         data.put("casts", r.casts());
+        if (positioningObservation != null) data.put("positioning_observation", positioningObservation.deepCopy());
         return data;
     }
 

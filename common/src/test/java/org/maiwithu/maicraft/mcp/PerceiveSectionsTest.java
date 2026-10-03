@@ -29,7 +29,28 @@ public final class PerceiveSectionsTest {
         publicToolsSurviveClientSchemaChecks();
         designAvailabilityDoesNotDemandExecutionResources();
         selectedResourceDefaultsToKnowledge();
+        surroundingsRetainsCurrentBodyFacts();
         System.out.println("PerceiveSectionsTest: passed");
+    }
+
+    private static void surroundingsRetainsCurrentBodyFacts() {
+        // 洞穴附近即使存在水域或干地，默认周边回执也要明确告诉模型角色本身没有入水。
+        JsonObject observed = JsonParser.parseString("""
+                {"position":{"x":-71.5,"y":8,"z":-130.5},"game_time":400,
+                 "on_ground":true,"in_water":false,"underwater":false,"swimming":false,"sprinting":false}
+                """).getAsJsonObject();
+        var defaults = PerceiveSections.requested(PublicToolCatalog.validateAndNormalize("perceive", request("surroundings", "{}")));
+        JsonObject shown = PerceiveSections.select(observed, defaults);
+        for (String key : observed.keySet()) check(observed.get(key).equals(shown.get(key)),
+                "default surroundings lost the body's actual " + key);
+        for (String view : List.of("situation", "surroundings")) {
+            var requested = PublicToolCatalog.validateAndNormalize("perceive", request(view,
+                    "{\"sections\":[\"on_ground\",\"in_water\",\"underwater\",\"swimming\"]}"));
+            JsonObject body = PerceiveSections.select(observed, PerceiveSections.requested(requested));
+            check(body.size() == 4 && body.get("on_ground").getAsBoolean()
+                    && !body.get("in_water").getAsBoolean() && !body.get("underwater").getAsBoolean(),
+                    "a body-only request must preserve explicit false values in " + view);
+        }
     }
 
     private static void selectedResourceDefaultsToKnowledge() {

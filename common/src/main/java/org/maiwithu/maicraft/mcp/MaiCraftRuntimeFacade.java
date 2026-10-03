@@ -17,7 +17,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import org.maiwithu.maicraft.core.scan.DroppedItemObservation;
@@ -61,6 +60,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.tools.perception.LocalFloorSense;
+import org.maiwithu.maicraft.core.tools.perception.BodyEnvironmentObservation;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
@@ -478,18 +478,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     private JsonObject situation(LocalPlayer player) {
         // 直接读取当前身体状态和背包摘要；这些是观察结果，不表示某个目标已经完成。
-        JsonObject result = new JsonObject();
-        result.addProperty("dimension", player.level().dimension().location().toString());
-        result.add("position", position(player));
+        JsonObject result = BodyEnvironmentObservation.describe(player);
         result.add("view", PhysicalStructurePerception.view(player));
         result.addProperty("health", player.getHealth());
         result.addProperty("max_health", player.getMaxHealth());
         result.addProperty("food", player.getFoodData().getFoodLevel());
         result.addProperty("air", player.getAirSupply());
-        result.addProperty("in_water", player.isInWater());
-        result.addProperty("underwater", player.isEyeInFluid(FluidTags.WATER));
-        result.addProperty("swimming", player.isSwimming());
-        result.addProperty("sprinting", player.isSprinting());
         WorldTimeSemantics.Phase timePhase = WorldTimeSemantics.phase(player.level());
         result.addProperty("day", WorldTimeSemantics.isDaytime(player.level()));
         result.addProperty("is_daytime", WorldTimeSemantics.isDaytime(player.level()));
@@ -498,7 +492,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("day_index", WorldTimeSemantics.dayIndex(player.level()));
         result.addProperty("weather", player.level().isThundering()
                 ? "thunder" : player.level().isRaining() ? "rain" : "clear");
-        result.addProperty("game_time", player.level().getGameTime());
         result.add("inventory", inventorySummary(player));
         // 随身储物与主背包分开显示：没观察过的包明确未知，不把未打开当成空包。
         result.add("carried_storage", new Gson().toJsonTree(BackpackStock.facts(player)));
@@ -514,9 +507,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     private JsonObject surroundings(LocalPlayer player, String focus, int limit, boolean terrain, boolean facilities) {
         // 汇总附近实体、告示牌、可走区域和船／电梯；大范围地形与设施盘点来自点名后才执行的采样与扫描。
-        JsonObject result = new JsonObject();
-        result.add("position", position(player));
-        result.addProperty("dimension", player.level().dimension().location().toString());
+        // 角色先知道自己是否站稳、是否入水，再看周围候选地面，不能把区域内的水误认为身体所在位置。
+        JsonObject result = BodyEnvironmentObservation.describe(player);
         result.addProperty("sky_light", player.level().getMaxLocalRawBrightness(player.blockPosition()));
         player.level().getBiome(player.blockPosition()).unwrapKey()
                 .ifPresent(key -> result.addProperty("biome", key.location().toString()));
@@ -781,14 +773,6 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         // 当前手里的装配进度直接可见，省去仅为看组件而额外取放物品的原生动作。
         InventoryComponentFacts.observe(stack, player.registryAccess()).entrySet().forEach(entry -> value.add(entry.getKey(), entry.getValue()));
         target.add(key, value);
-    }
-
-    private static JsonObject position(LocalPlayer player) {
-        JsonObject result = new JsonObject();
-        result.addProperty("x", player.getX());
-        result.addProperty("y", player.getY());
-        result.addProperty("z", player.getZ());
-        return result;
     }
 
     private IntentTaskRecord currentIntent() {

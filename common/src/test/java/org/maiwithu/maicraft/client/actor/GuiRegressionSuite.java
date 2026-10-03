@@ -374,6 +374,8 @@ public final class GuiRegressionSuite {
         TorchLightingBehaviorTest.main(args);
         NightRestRouteTest.main(args);
         FishingBiteTest.main(args);
+        // 钓鱼准备失败也要保留干地、水中及原地没有落点的区别，避免模型凭笼统错误猜测站位。
+        FishingPositionObservationTest.main(args);
         StockEvidenceTest.main(args);
         // 通用整理先验证保留清单，避免存余料时一并拿走马上要用的工具与施工材料。
         InventoryKeepPlanTest.main(args);

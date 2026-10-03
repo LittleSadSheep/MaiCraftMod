@@ -11,7 +11,7 @@ import java.util.TreeSet;
 
 /**
  * 感知先决定需要哪些事实，再等待相关采样并投影回执。
- * 普通周边只读附近安全、告示牌与设备；大范围地形须显式点名。
+ * 普通周边读取自身落地和浸水状态、附近安全、告示牌与设备；大范围地形须显式点名。
  * 段名和视图由同一清单校验，未产出的指定段明确列出，不能把缺少观察当作世界里不存在。
  */
 final class PerceiveSections {
@@ -25,16 +25,17 @@ final class PerceiveSections {
     // situation 的可选段：基础身体状态 + 背包装备 +（按 focus 追加的）诊断段。
     private static final Set<String> SITUATION = Set.of(
             "dimension", "position", "view", "health", "max_health", "food", "air",
-            "in_water", "underwater", "swimming", "sprinting", "day", "is_daytime",
+            "on_ground", "in_water", "underwater", "swimming", "sprinting", "day", "is_daytime",
             "time_phase", "time_of_day", "day_index", "weather", "game_time",
             "inventory", "carried_storage", "equipment", "vehicle_type", "task",
             "elevators", "actor", "tick_stage", "controlling_task", "navigation",
             "collision_geometry", "transport", "landing_assist", "jetpack", "physical_structures");
 
-    // surroundings 的可选段：位置与光照、邻近实体与告示牌、脚下可走面、地形缩略、电梯、视线与物理结构。
+    // 周边观察同时交付角色自身的落地和浸水事实，避免把附近可站区域或水面误认为当前站位。
     // nearby_facilities 是按需扫描的策展设施盘点，与 terrain_overview 一样默认不构建，点名才付出扫描代价。
     private static final Set<String> SURROUNDINGS = Set.of(
-            "position", "dimension", "sky_light", "biome", "nearby_entities", "nearby_signs",
+            "position", "dimension", "game_time", "on_ground", "in_water", "underwater", "swimming", "sprinting",
+            "sky_light", "biome", "nearby_entities", "nearby_signs",
             "sign_observation", "local_decision_summary", "terrain_overview", "elevators",
             "nearby_facilities",
             "view", "physical_structures");
@@ -54,7 +55,7 @@ final class PerceiveSections {
         return Set.of();
     }
 
-    /** 模型选观察段之前，从校验所用的同一清单生成说明，避免把周围环境当成身体状态查询。 */
+    /** 模型选观察段之前，从校验所用的同一清单生成说明，让自身状态和周边事实都有明确入口。 */
     static JsonObject schema() {
         var items = new JsonObject();
         items.addProperty("type", "string");
@@ -65,16 +66,18 @@ final class PerceiveSections {
         result.addProperty("maxItems", 32);
         result.add("items", items);
         // 模型先按视图选事实，再显式点名昂贵扫描；保留全部段名和缺段回执，减少围绕同一规则的重复解释。
-        result.addProperty("description", "Return only named sections. "
+        result.addProperty("description", "Select sections. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
-                + "inventory includes offhand/armor; see location_counts. "
+                // 模型判断是否需要离水时优先读取原生身体状态；附近有水、可站地面或抛竿失败均不能替代它。
+                + "Body flags describe self, not nearby water or shore. "
+                + "inventory: offhand/armor included (location_counts). "
                 // 掉落引用来自当前观察，LLM 可直接选择物品堆，由拾取任务追踪其移动后的位置。
-                + "nearby_entities includes each dropped stack's drop_ref, item_id, name, count, position and components; "
-                + "use maicraft:collect_items with parameters.drop_ref to collect one selected stack. "
-                + "terrain_overview is an opt-in flight landing-site pre-selection scan (intended_use), not walking routes; nearby_facilities too. "
-                + "Set focus for diagnostics. "
-                + "Missing sections are listed in " + UNAVAILABLE + ".");
+                + "nearby_entities drops: drop_ref, item_id, name, count, position, components. "
+                + "Collect via maicraft:collect_items(parameters.drop_ref). "
+                + "terrain_overview: opt-in flight landing-site scan, not walking routes; nearby_facilities: opt-in. "
+                + "focus: diagnostics. "
+                + "Missing: " + UNAVAILABLE + ".");
         return result;
     }
 
