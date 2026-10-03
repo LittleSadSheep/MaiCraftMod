@@ -186,6 +186,10 @@ public final class IntentTaskRecord extends TaskRecord {
         Map<String, Object> review = BuildPreviewGate.waitingProgress(this);
         if (activeExecution == null && review.isEmpty()) return null;
         JsonObject current = activeExecution == null ? new JsonObject() : activeExecution.deepCopy();
+        // 暂停或死亡结算后不会再推进旧子任务，缓存的寻死进度必须立即反映保护已经恢复。
+        if (current.has("survival_reflexes_suppressed") && (paused() || getState().isTerminal() || decision != null
+                || stepIndex >= steps.size() || !SuicideAbilityAdapter.ABILITY.equals(steps.get(stepIndex).ability())))
+            current.addProperty("survival_reflexes_suppressed", false);
         PROGRESS_JSON.toJsonTree(review).getAsJsonObject().entrySet().forEach(entry -> current.add(entry.getKey(), entry.getValue()));
         return current;
     }

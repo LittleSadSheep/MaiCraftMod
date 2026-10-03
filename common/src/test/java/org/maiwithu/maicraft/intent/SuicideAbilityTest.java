@@ -43,6 +43,7 @@ public final class SuicideAbilityTest {
                     "首刻的饥饿自救不能永久挡住已授权寻死");
             SuicideTaskTest.begin(task, world);
             record.pause(world.level.getGameTime(), "paused_by_mcp");
+            check(!record.activeExecution().get("survival_reflexes_suppressed").getAsBoolean(), "暂停查询不能复述旧的保护豁免");
             check(!task.suppressesSurvivalReflexes()
                     && TaskSelector.select(List.of(reflex), null, task, List.of(), world.player) == reflex,
                     "宿主暂停后立即恢复自救顺序");
@@ -55,6 +56,7 @@ public final class SuicideAbilityTest {
             check(result.success() && result.toJson().contains("death_observed") && !task.suppressesSurvivalReflexes(),
                     "公开回执必须保留死亡事实且结束保护豁免");
             check(!task.observeDeath(world.player), "父任务也不能重复结算死亡");
+            check(!record.activeExecution().get("survival_reflexes_suppressed").getAsBoolean(), "死亡结算后的缓存回执应立即恢复保护状态");
         }
         try (var world = new InteractionWorldTestHarness()) {
             SuicideTaskTest.prepare(world);
