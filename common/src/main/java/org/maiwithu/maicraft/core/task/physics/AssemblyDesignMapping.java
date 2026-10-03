@@ -12,9 +12,12 @@ import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
 final class AssemblyDesignMapping {
     private AssemblyDesignMapping() {}
     static JsonArray declarations(PhysicalAssemblyParameters parameters,BlockPos anchor,String dimension) {
+        return declarations(parameters,anchor,dimension,parameters.projectId()==null?null:BuildProjectStore.current());
+    }
+    static JsonArray declarations(PhysicalAssemblyParameters parameters,BlockPos anchor,String dimension,BuildProjectStore store) {
         var source=new JsonArray();
         if(parameters.projectId()!=null) {
-            var project=BuildProjectStore.current().load(parameters.projectId().toString(),dimension);
+            var project=store.load(parameters.projectId().toString(),dimension);
             source=fromProject(project.getAsJsonArray("project_targets"),anchor);
         }
         // 当前明确补丁覆盖同格旧声明，其余完整工程目标继续保留。
@@ -55,7 +58,8 @@ final class AssemblyDesignMapping {
         for(var raw:declarations) {
             var cell=raw.getAsJsonObject().deepCopy();
             // 原生以整格中心作四分之一圈转动；整数格旋转保持相同结果，避免用移动后包围盒猜锚点。
-            position(cell,point(cell).offset(origin).subtract(source).rotate(rotation).offset(destination));result.add(cell);
+            position(cell,point(cell).offset(origin).subtract(source).rotate(rotation).offset(destination));
+            AssemblyDeclaredRotation.apply(cell,rotation);result.add(cell);
         }
         return result;
     }

@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.core.build.BuildingBudgets;
 
 /** 明确胶种、选区和组装器偏移；同一组坐标只能属于选定的世界锚点或一个已观察结构。 */
 public record PhysicalAssemblyParameters(Operation operation,Adhesive adhesive,UUID structureId,
-        BlockPos first,BlockPos second,BlockPos assembler,UUID projectId,JsonArray declarations) {
+        BlockPos first,BlockPos second,BlockPos assembler,UUID projectId,UUID designId,JsonArray declarations) {
     public enum Operation { INSPECT, BOND, ASSEMBLE, DISASSEMBLE }
     public enum Adhesive {
         SUPER("create:super_glue","com.simibubi.create.content.contraptions.glue.SuperGlueEntity",
@@ -31,13 +31,15 @@ public record PhysicalAssemblyParameters(Operation operation,Adhesive adhesive,U
     @Override public JsonArray declarations() { return declarations.deepCopy(); }
     public AABB region(BlockPos origin) { return AABB.encapsulatingFullBlocks(origin.offset(first),origin.offset(second)); }
     public static PhysicalAssemblyParameters parse(JsonObject input) {
-        for(String key:input.keySet()) if(!Set.of("operation","adhesive","structure_id","first","second","assembler","project_id","declarations").contains(key))
+        for(String key:input.keySet()) if(!Set.of("operation","adhesive","structure_id","first","second","assembler","project_id","design_id","declarations").contains(key))
             throw new IllegalArgumentException("未知物理组装参数: "+key);
         Operation operation=Operation.valueOf(text(input,"operation","inspect").toUpperCase(Locale.ROOT));
         Adhesive adhesive=input.has("adhesive")?Adhesive.parse(text(input,"adhesive",null)):null;
+        if(adhesive!=null&&operation!=Operation.BOND)throw new IllegalArgumentException("adhesive 只用于明确的 bond 操作");
         UUID id=input.has("structure_id")?UUID.fromString(text(input,"structure_id",null)):null;
         UUID project=input.has("project_id")?UUID.fromString(text(input,"project_id",null)):null;
-        if(project!=null&&id!=null) throw new IllegalArgumentException("世界建筑 project_id 只能在组装前绑定；已有结构沿用自身的完整声明");
+        UUID design=input.has("design_id")?UUID.fromString(text(input,"design_id",null)):null;
+        if((project!=null||design!=null)&&id!=null) throw new IllegalArgumentException("世界建筑 project_id/design_id 只能在组装前绑定；已有结构沿用自身的完整声明");
         if(operation==Operation.BOND&&(adhesive==null||!input.has("first")||!input.has("second")))
             throw new IllegalArgumentException("粘接必须明确胶种及 first、second 两个选区端点");
         // 原生组装包会切换状态；参数先区分创建和拆回，不能把重复提交误变成相反动作。
@@ -54,7 +56,7 @@ public record PhysicalAssemblyParameters(Operation operation,Adhesive adhesive,U
                 throw new IllegalArgumentException("声明目标只接受 position、block_id 和 properties");
             position(cell.getAsJsonObject(),"position");
         }
-        return new PhysicalAssemblyParameters(operation,adhesive,id,position(input,"first"),position(input,"second"),position(input,"assembler"),project,declarations);
+        return new PhysicalAssemblyParameters(operation,adhesive,id,position(input,"first"),position(input,"second"),position(input,"assembler"),project,design,declarations);
     }
     private static BlockPos position(JsonObject input,String field) {
         if(!input.has(field)) return BlockPos.ZERO;

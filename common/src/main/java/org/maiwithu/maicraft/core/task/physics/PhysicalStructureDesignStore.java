@@ -21,6 +21,17 @@ final class PhysicalStructureDesignStore {
     PhysicalStructureDesignStore(StateIdentity identity) {
         this.identity=identity;database=new MemoryDatabase(identity.databaseFile());scope=identity.scope()+"/physical-structure-designs";
     }
+    Registration read(String dimension,UUID id,JsonArray comparison,Supplier<History> recover) {
+        try {
+            String json=database.readRecord(scope,identity.key(),dimension+"/"+id,BuildingBudgets.current().maxProjectBytes());
+            JsonObject current;
+            if(json==null) {
+                History history=recover.get();current=document(dimension,id,history.targets());current.add("history",history.evidence());
+            } else current=decode(json,dimension,id);
+            // 观察时临时比较给出的方案，不改写此前登记的整机声明。
+            current.add("targets",mergeTargets(current.getAsJsonArray("targets"),comparison));return registration(current,"read",null);
+        } catch(Exception failed) {return registration(document(dimension,id,comparison.deepCopy()),"unavailable",failed.toString());}
+    }
     Registration merge(String dimension,UUID id,JsonArray edits,Supplier<History> recover) {
         ResourceLocation.parse(dimension);
         String key=dimension+"/"+id;

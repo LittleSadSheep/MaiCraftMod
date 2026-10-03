@@ -39,6 +39,15 @@ public final class PhysicalAssemblyGeometryTest {
         var inherited=AssemblyDesignMapping.fromProject(project,new BlockPos(10,20,30));
         check(inherited.size()==1&&inherited.get(0).getAsJsonObject().getAsJsonObject("properties").size()==1,"未声明默认属性或空气被扩充成设计要求");
         check(AssemblyDesignMapping.point(inherited.get(0).getAsJsonObject()).equals(new BlockPos(1,0,0)),"建筑绝对坐标未转换到作者锚点");
+        var facing=JsonParser.parseString("{\"block_id\":\"minecraft:oak_stairs\",\"properties\":{\"facing\":\"north\"}}").getAsJsonObject();
+        AssemblyDeclaredRotation.apply(facing,Rotation.CLOCKWISE_90);
+        check(facing.getAsJsonObject("properties").size()==1&&facing.getAsJsonObject("properties").get("facing").getAsString().equals("east"),"拆回后方向应旋转，未声明属性不能被补齐");
+        var wire=JsonParser.parseString("{\"block_id\":\"minecraft:redstone_wire\",\"properties\":{\"north\":\"side\"}}").getAsJsonObject();
+        AssemblyDeclaredRotation.apply(wire,Rotation.CLOCKWISE_90);
+        check(wire.getAsJsonObject("properties").size()==1&&wire.getAsJsonObject("properties").get("east").getAsString().equals("side"),"连接属性名未随设计转动");
+        var bell=JsonParser.parseString("{\"block_id\":\"minecraft:bell\",\"properties\":{\"facing\":\"north\",\"attachment\":\"double_wall\"}}").getAsJsonObject();
+        AssemblyDeclaredRotation.apply(bell,Rotation.CLOCKWISE_90);
+        check(bell.getAsJsonObject("properties").get("attachment").getAsString().equals("double_wall"),"不能用原生搬移修补结果偷偷修改作者要求");
     }
     private static void check(boolean ok,String why) {if(!ok)throw new AssertionError(why);}
 }

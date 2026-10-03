@@ -7,6 +7,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
@@ -16,6 +17,8 @@ final class PhysicalStructureDesign {
     private static final ThreadPoolExecutor WRITER=new ThreadPoolExecutor(1,1,30,TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(4),run->{var thread=new Thread(run,"maicraft-physical-design");thread.setDaemon(true);return thread;});
     private PhysicalStructureDesign() {}
+    // 世界设计与船体设计共用有界后台队列，读取大工程时不阻塞游戏刻。
+    static <T> CompletableFuture<T> background(Supplier<T> work) {return CompletableFuture.supplyAsync(work,WRITER);}
     static CompletableFuture<PhysicalStructureDesignStore.Registration> merge(LocalPlayer player,UUID id,JsonArray edits) {
         JsonArray frozen=edits.deepCopy();
         try {
