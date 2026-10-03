@@ -37,6 +37,8 @@ final class PhysicsAbilityAdapter {
         field(fields,"max_ballast_blocks","integer","0..64, default 8; candidate search can return improved_not_balanced or no_balanced_candidate_found.");
         // 同一轮胎的承重与驱动分开，模型收油门时不能把地面支撑一并关掉。
         field(fields,"controls","object","Source ID to hypothetical multiplier in [-4,4], default 1. For wheels it scales drive RPM only, preserving suspension and friction. Propulsion/drive is zero in stopped mode. This does not send control inputs.");
+        // 车停着也能指定松刹车的运行工况；未声明的轮胎保留真实信号，不假定已经接好刹车电路。
+        field(fields,"wheel_brakes","object","Optional observed wheel load ID to {running:0..1,stopped:0..1}, up to 64 wheels. 0 releases and 1 fully applies brakes. Interpolated during isolated start/stop transitions; suspension remains active. Omitted wheels retain measured braking. Never changes real throttle, circuits or force snapshots; actual brake control must be verified separately.");
         field(fields,"duration_seconds","number","1..30, default 6; simulation horizon per operating mode.");
         field(fields,"max_tilt_degrees","number","Allowed predicted tilt, default 8 degrees.");
         field(fields,"max_vertical_acceleration","number","Allowed vertical acceleration, default 0.25 blocks/s².");

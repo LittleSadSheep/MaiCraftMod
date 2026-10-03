@@ -26,6 +26,15 @@ final class PhysicsParametersTest {
         rejects(()->PhysicsBalanceParameters.parse(root),"不完整航速被接受");
         root.add("reference_velocity",JsonParser.parseString("{\"x\":257,\"y\":0,\"z\":0}"));
         rejects(()->PhysicsBalanceParameters.parse(root),"超出试算范围的航速被接受");
+        // 起飞前只能声明明确的刹车两端工况，缺字段和越界信号都不能偷偷补成另一种试算。
+        root.remove("reference_velocity");
+        root.add("wheel_brakes",JsonParser.parseString("{\"wheel:1\":{\"running\":0,\"stopped\":1}}"));
+        check(PhysicsBalanceParameters.parse(root).wheelBrakes().get("wheel:1").equals(new PhysicsWheel.Brakes(0,1)),"刹车工况没有按来源冻结");
+        for(String invalid:new String[]{"[]","{\"wheel:1\":{\"running\":0}}","{\"wheel:1\":{\"running\":-0.1,\"stopped\":1}}",
+                "{\"wheel:1\":{\"running\":0,\"stopped\":2}}","{\"wheel:1\":{\"running\":\"0\",\"stopped\":1}}"}) {
+            root.add("wheel_brakes",JsonParser.parseString(invalid));
+            rejects(()->PhysicsBalanceParameters.parse(root),"无效刹车工况被接受: "+invalid);
+        }
     }
     private static void rejects(Runnable action,String message) {
         try { action.run(); throw new AssertionError(message); } catch(IllegalArgumentException expected) { }

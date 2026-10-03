@@ -5,7 +5,21 @@ public record PhysicsWheel(String itemId, double radius, double strength, double
                            PhysicsVector forward, PhysicsVector side, double driveSign, double rpm,
                            double brake, double friction, double extension, PhysicsVector groundPoint,
                            PhysicsVector groundNormal, String groundStructureId, String contactState,
-                           boolean forceApplied,PhysicsVector mount,Double referenceRpm) {
+                           boolean forceApplied,PhysicsVector mount,Double referenceRpm,Brakes referenceBrakes) {
+    /** 两端值都是假设工况；启停过渡按同一动力进度松开或压下刹车，不代表实际油门已改变。 */
+    public record Brakes(double running,double stopped) {
+        public Brakes {
+            if(!Double.isFinite(running)||!Double.isFinite(stopped)||running<0||running>1||stopped<0||stopped>1)
+                throw new IllegalArgumentException("运行和停车刹车比例必须在 0..1 之间");
+        }
+        public double at(double power){return stopped+(running-stopped)*Math.clamp(power,0,1);}
+    }
+    public PhysicsWheel(String itemId,double radius,double strength,double steeringRadians,PhysicsVector forward,PhysicsVector side,
+                        double driveSign,double rpm,double brake,double friction,double extension,PhysicsVector groundPoint,
+                        PhysicsVector groundNormal,String groundStructureId,String contactState,boolean forceApplied,PhysicsVector mount,Double referenceRpm) {
+        this(itemId,radius,strength,steeringRadians,forward,side,driveSign,rpm,brake,friction,extension,groundPoint,groundNormal,
+                groundStructureId,contactState,forceApplied,mount,referenceRpm,null);
+    }
     public PhysicsWheel(String itemId,double radius,double strength,double steeringRadians,PhysicsVector forward,PhysicsVector side,
                         double driveSign,double rpm,double brake,double friction,double extension,PhysicsVector groundPoint,
                         PhysicsVector groundNormal,String groundStructureId,String contactState,boolean forceApplied) {
@@ -24,8 +38,13 @@ public record PhysicsWheel(String itemId, double radius, double strength, double
     public PhysicsWheel atMount(PhysicsVector localMount) {return copy(localMount,referenceRpm);}
     /** 候选转速单列，实际 rpm 与原生施力证据仍来自原快照，不会被试算改写。 */
     public PhysicsWheel predictAt(double speed) {return copy(mount,speed);}
+    /** 单独附加候选刹车设置；brake 字段始终是实测值，默认不擅自补出不存在的刹车控制。 */
+    public PhysicsWheel withBrakes(Brakes settings) {
+        return new PhysicsWheel(itemId,radius,strength,steeringRadians,forward,side,driveSign,rpm,brake,friction,extension,
+                groundPoint,groundNormal,groundStructureId,contactState,forceApplied,mount,referenceRpm,settings);
+    }
     private PhysicsWheel copy(PhysicsVector localMount,Double speed) {
         return new PhysicsWheel(itemId,radius,strength,steeringRadians,forward,side,driveSign,rpm,brake,friction,extension,
-                groundPoint,groundNormal,groundStructureId,contactState,forceApplied,localMount,speed);
+                groundPoint,groundNormal,groundStructureId,contactState,forceApplied,localMount,speed,referenceBrakes);
     }
 }

@@ -10,13 +10,14 @@ import java.util.UUID;
 /** 计划阶段明确船体、试算工况及补丁，分析不会被隐式升级为真实施工或启动推进器。 */
 public record PhysicsBalanceParameters(UUID structureId, String operation, double rpm, String balloonFill,
                                        int maxBallastBlocks, PhysicsSimulation.Limits limits,
-                                       Map<String,Double> controls, PhysicsVector referenceVelocity, JsonObject request) {
-    public PhysicsBalanceParameters { controls=Map.copyOf(controls); request=request.deepCopy(); }
+                                       Map<String,Double> controls, PhysicsVector referenceVelocity,
+                                       Map<String,PhysicsWheel.Brakes> wheelBrakes,JsonObject request) {
+    public PhysicsBalanceParameters { controls=Map.copyOf(controls);wheelBrakes=Map.copyOf(wheelBrakes); request=request.deepCopy(); }
     @Override public JsonObject request() { return request.deepCopy(); }
     public static PhysicsBalanceParameters parse(JsonObject args) {
         Set<String> accepted=Set.of("structure_id","operation","reference_rpm","balloon_fill","max_ballast_blocks",
                 "duration_seconds","max_tilt_degrees","max_vertical_acceleration","max_angular_acceleration",
-                "perturbation_degrees","controls","edits","ballast_candidates","reference_velocity");
+                "perturbation_degrees","controls","edits","ballast_candidates","reference_velocity","wheel_brakes");
         for(String key:args.keySet()) if(!accepted.contains(key)) throw new IllegalArgumentException("未知配平参数: "+key);
         if(!args.has("structure_id")||!args.get("structure_id").isJsonPrimitive()||!args.getAsJsonPrimitive("structure_id").isString())
             throw new IllegalArgumentException("需要观察到的结构 UUID");
@@ -60,7 +61,7 @@ public record PhysicsBalanceParameters(UUID structureId, String operation, doubl
         }
         if(operation.equals("apply") && (!args.has("edits")||args.getAsJsonArray("edits").isEmpty()))
             throw new IllegalArgumentException("施工必须提供选定的 edits；推荐不会自动替换设计");
-        return new PhysicsBalanceParameters(id,operation,rpm,fill,(int)maximum,limits,controls,referenceVelocity,args);
+        return new PhysicsBalanceParameters(id,operation,rpm,fill,(int)maximum,limits,controls,referenceVelocity,PhysicsWheelScenarios.parse(args),args);
     }
     private static double number(JsonObject args,String key,double fallback,double min,double max) {
         if(args.has(key)&&(!args.get(key).isJsonPrimitive()||!args.getAsJsonPrimitive(key).isNumber())) throw new IllegalArgumentException("参数必须为数字: "+key);

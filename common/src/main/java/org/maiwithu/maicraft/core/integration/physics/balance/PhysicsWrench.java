@@ -41,8 +41,11 @@ public record PhysicsWrench(PhysicsVector force, PhysicsVector torque,
             }
             if(load.wheel()!=null&&load.wheel().referenceRpm()!=null) {
                 // 车轮的倍率只调驱动，停机和松油门仍保留悬挂及摩擦；实测快照没有参考转速，仍直接展示原生点力。
-                source=PhysicsWheelDynamics.force(body,load.point(),load.wheel(),attitude,position,velocity,angularVelocity,
-                        load.wheel().referenceRpm()*propulsion*setting);
+                var wheel=load.wheel();
+                // 明确声明了刹车工况时才在隔离模型中随启停插值；未声明的轮胎保持实测刹车，悬挂始终参与。
+                double brake=wheel.referenceBrakes()==null?wheel.brake():wheel.referenceBrakes().at(propulsion);
+                source=PhysicsWheelDynamics.force(body,load.point(),wheel,attitude,position,velocity,angularVelocity,
+                        wheel.referenceRpm()*propulsion*setting,brake);
                 setting=1;
             }
             PhysicsVector applied = (load.frame() == PhysicsBody.Frame.BODY

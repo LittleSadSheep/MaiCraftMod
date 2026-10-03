@@ -7,7 +7,12 @@ public final class PhysicsWheelDynamics {
     private PhysicsWheelDynamics() {}
     public static PhysicsVector force(PhysicsBody body,PhysicsVector point,PhysicsWheel wheel,PhysicsBody.Rotation attitude,
                                       PhysicsVector position,PhysicsVector velocity,PhysicsVector omega,double driveRpm) {
+        return force(body,point,wheel,attitude,position,velocity,omega,driveRpm,wheel.brake());
+    }
+    public static PhysicsVector force(PhysicsBody body,PhysicsVector point,PhysicsWheel wheel,PhysicsBody.Rotation attitude,
+                                      PhysicsVector position,PhysicsVector velocity,PhysicsVector omega,double driveRpm,double brake) {
         if(!Double.isFinite(driveRpm))throw new IllegalArgumentException("车轮试算转速必须有限");
+        if(!Double.isFinite(brake)||brake<0||brake>1)throw new IllegalArgumentException("车轮试算刹车比例必须在 0..1 之间");
         if(wheel.radius()<=0||wheel.groundPoint()==null)return PhysicsVector.ZERO;
         PhysicsVector arm=attitude.world(point.subtract(body.center()));
         PhysicsVector worldPoint=position.add(arm),normal=wheel.groundNormal();
@@ -25,8 +30,8 @@ public final class PhysicsWheelDynamics {
         double spring=(REST-springLength)*effective*40-localVelocity.y()*effective;
         PhysicsVector force=attitude.local(normal).scale(spring);
         double surface=Math.min(wheel.friction(),1),strength=effective*2;
-        double rolling=-(.075+wheel.brake()*.3)*surface*strength*localVelocity.dot(wheel.forward());
-        double driving=driveRpm*wheel.driveSign()*(1-wheel.brake())*surface*1.75;
+        double rolling=-(.075+brake*.3)*surface*strength*localVelocity.dot(wheel.forward());
+        double driving=driveRpm*wheel.driveSign()*(1-brake)*surface*1.75;
         // 停动力只收回驱动项，悬挂和滚阻继续存在；原生刹车同时削弱驱动并增大滚动阻力。
         return force.add(wheel.forward().scale(rolling+driving))
                 .add(wheel.side().scale(-.6*wheel.friction()*strength*localVelocity.dot(wheel.side())));

@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.core.integration.physics.balance;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import com.google.gson.Gson;
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import static org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBalanceRegression.*;
@@ -47,6 +49,30 @@ final class PhysicsWheelDynamicsTest {
                 car.position().add(v(0,.005,0)),car.velocity(),car.angularVelocity(),car.gravity(),car.loads(),car.unknowns());
         var kept=PhysicsTrim.recommend(settling,List.of(new PhysicsTrim.Ballast("lower","minecraft:iron_block",v(0,-2,0),2,1)),1,Map.of(),PhysicsSimulation.Limits.defaults());
         check(kept.validation().predictedBalanced()&&kept.proposedBallast().isEmpty(),"已通过动态配平的车辆被推荐额外配重");
+        // 真实车保持满刹车，在副本中比较松刹车启动和重新刹停；采样对象及默认工况不能被覆盖。
+        var brakedLoads=new ArrayList<PhysicsBody.Load>();var brakes=new LinkedHashMap<String,PhysicsWheel.Brakes>();
+        for(var load:car.loads()) {
+            brakedLoads.add(new PhysicsBody.Load(load.id(),load.group(),load.point(),load.force(),load.torque(),load.frame(),false,0,0,null,
+                    wheel(load.point(),1,.75).atMount(load.wheel().mount()).predictAt(16)));
+            brakes.put(load.id(),new PhysicsWheel.Brakes(0,1));
+        }
+        var parked=new PhysicsBody(car.structureId(),car.dimension(),car.tick(),car.mass(),car.center(),car.inertia(),car.rotation(),
+                car.position(),car.velocity(),car.angularVelocity(),car.gravity(),brakedLoads,List.of());
+        near(wrench(parked,parked.rotation(),1).force().z(),0,"默认分析不应擅自松开实测刹车");
+        var scenario=PhysicsWheelScenarios.apply(parked,brakes);
+        near(wrench(scenario,scenario.rotation(),1).force().z(),112,"候选运行工况没有松刹车");
+        near(wrench(scenario,scenario.rotation(),0).force().length(),0,"停车工况丢失轮胎支撑或没有取消驱动");
+        near(brakes.values().iterator().next().at(.5),.5,"启停过渡没有连续改变刹车");
+        check(parked.loads().stream().allMatch(l->l.wheel().brake()==1&&l.wheel().referenceBrakes()==null),"试算污染了真实刹车记录");
+        var startStop=PhysicsSimulation.assess(scenario,PhysicsSimulation.Limits.defaults(),Map.of());
+        var cruise=startStop.trials().stream().filter(t->t.mode().equals("running")&&t.perturbation().equals("none")).findFirst().orElseThrow();
+        var stopped=startStop.trials().stream().filter(t->t.mode().equals("stopping")).findFirst().orElseThrow();
+        check(cruise.trajectory().getLast().velocity().z()>.1,"停车中的实车无法预览松刹车后的行驶");
+        check(stopped.trajectory().getLast().velocity().length()<.01,"停止工况没有回到满刹车并收敛");
+        var gson=new Gson();var tire=scenario.loads().getFirst().wheel();
+        check(gson.fromJson(gson.toJson(tire),PhysicsWheel.class).equals(tire),"假设工况在结构化回执中丢失");
+        try {PhysicsWheelScenarios.apply(parked,Map.of("missing",new PhysicsWheel.Brakes(0,1)));throw new AssertionError("不存在的轮胎被补造");}
+        catch(IllegalArgumentException expected){}
     }
     private static PhysicsWheel wheel(PhysicsVector point,double brake,double radius) {
         return new PhysicsWheel("offroad:small_tire",radius,10,0,v(0,0,1),v(1,0,0),1,0,brake,1,

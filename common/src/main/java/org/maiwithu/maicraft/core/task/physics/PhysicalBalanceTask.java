@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsSimulation;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsTrim;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsWrench;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsComputation;
+import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsWheelScenarios;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
@@ -71,6 +72,8 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
     private JsonObject analyze(PhysicsSnapshotReader.Observation observation) {
         var gson=new Gson(); var out=new JsonObject();
         var measured=observation.measured(); var model=observation.preflight();
+        // 出发前直接比较松刹车与停车，不必为了取得候选信号让真实车辆先动起来。
+        model=PhysicsWheelScenarios.apply(model,r.parameters.wheelBrakes());
         // 参考航速只用于候选工况，实测箭头仍保留原生速度，避免把假设飞行冒充已经发生。
         if(r.parameters.referenceVelocity()!=null)model=model.movingAt(r.parameters.referenceVelocity());
         out.addProperty("structure_id",measured.structureId().toString()); out.addProperty("snapshot_id",observation.snapshotId().toString());
@@ -80,6 +83,7 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
         if(observation.motion()!=null)out.add("native_motion_phases",gson.toJsonTree(observation.motion()));
         out.add("measured_body",gson.toJsonTree(measured)); out.add("preflight_body",gson.toJsonTree(model));
         if(r.parameters.referenceVelocity()!=null)out.add("reference_velocity",gson.toJsonTree(r.parameters.referenceVelocity()));
+        if(!r.parameters.wheelBrakes().isEmpty())out.add("wheel_brake_scenarios",gson.toJsonTree(r.parameters.wheelBrakes()));
         out.add("measured_forces",gson.toJsonTree(PhysicsWrench.evaluate(measured,measured.rotation(),measured.position(),
                 measured.angularVelocity(),Map.of(),1)));
         out.addProperty("coordinate_rule","补丁坐标是 origin_storage 的局部方块偏移；力向量的 BODY/WORLD 坐标系独立标注");
