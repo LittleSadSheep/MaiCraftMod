@@ -22,7 +22,8 @@ final class PhysicalControlAbilityAdapter {
                 p,anchor,player.level().dimension().location().toString()));
     }
     static JsonObject contract() {
-        var out=new JsonObject();out.addProperty("summary","起飞/行驶前读取或设置物理部件：Create 电机/转速控制器旋钮、Simulated 油门信号、Create 红石链路收发模式与两项频率。使用真实走位、命中、物品与原生协议，配置成功不等于载具运行验证。");
+        // 能力列表也公开航空配置入口，模型无需先猜操作名才能发现供气旋钮和螺旋桨成型流程。
+        var out=new JsonObject();out.addProperty("summary","起飞/行驶前配置物理部件：电机转速、油门信号、无线收发频率、热气燃烧器容量，以及螺旋桨轴承组装/减速拆回。使用真实走位、命中、物品与原生协议，配置结果和载具运行验证分别返回。");
         var targets=new JsonArray();for(String kind:new String[]{"coordinates","landmark","area","current_place"})targets.add(kind);out.add("accepted_target_kinds",targets);
         out.add("accepted_preferences",new JsonObject());out.add("accepted_hard_constraints",new JsonArray());
         var fields=new JsonObject();
