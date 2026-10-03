@@ -29,6 +29,9 @@ public final class SuicideAbilityTest {
         respawn.setAccessible(true);
         check((Boolean) respawn.invoke(null, record(goal("{}"))), "主动寻死默认请求原生重生");
         check(!(Boolean) respawn.invoke(null, record(goal("{\"auto_respawn\":false}"))), "明确禁止自动重生应保留死亡决定");
+        // 全局运行偏好也接受自动重生设置，不能因它放在 preferences 就覆盖调用者明确的 false。
+        var manual = new Goal("maicraft:suicide", "主动死亡后等待决定", null, "{}", "{\"auto_respawn\":false}", List.of(), List.of());
+        check(!(Boolean) respawn.invoke(null, record(manual)), "preferences 中的重生偏好同样有效");
         try (var world = new InteractionWorldTestHarness()) {
             SuicideTaskTest.prepare(world);
             Goal suicide = goal("{\"method\":\"lava\",\"keep_inventory_confirmed\":true,\"search_radius\":4}");

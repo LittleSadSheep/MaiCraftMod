@@ -288,11 +288,11 @@ public final class GameplayAttentionMonitor {
         IntentTaskRecord active = currentIntent();
         // 先保存当前步骤的重生偏好，再结算主动寻死；结算后步骤可能前移或整个任务已经离开槽位。
         boolean deliberateAutoRespawn = active != null && suicideAutoRespawn(active);
+        boolean recoverRequested = active != null && semanticBoolean(active, "recover_after_death");
         boolean expectedDeath = CompanionTickDispatcher.observeExpectedDeath(player);
         boolean hardcore = player.level().getLevelData().isHardcore();
         boolean spectator = player.isSpectator();
         boolean autoRequested = expectedDeath ? deliberateAutoRespawn : active != null && semanticBoolean(active, "auto_respawn");
-        boolean recoverRequested = active != null && semanticBoolean(active, "recover_after_death");
         IntentRuntime runtime = IntentRuntime.get();
         boolean checkpointSaved = active != null && runtime.checkpointDeath();
         Map<String, Integer> inventory = inventoryCounts(player);
@@ -426,8 +426,9 @@ public final class GameplayAttentionMonitor {
         // 当前寻死步骤默认包含正常重生；明确 false 仍保留死亡屏幕给调用者决定。
         if (record.stepIndex() < 0 || record.stepIndex() >= record.steps().size()) return false;
         Goal step = record.steps().get(record.stepIndex());
-        if (step.parameters().has("auto_respawn")) return goalBoolean(step, "auto_respawn");
-        if (record.goal().parameters().has("auto_respawn")) return goalBoolean(record.goal(), "auto_respawn");
+        if (step.parameters().has("auto_respawn") || step.preferences().has("auto_respawn")) return goalBoolean(step, "auto_respawn");
+        if (record.goal().parameters().has("auto_respawn") || record.goal().preferences().has("auto_respawn"))
+            return goalBoolean(record.goal(), "auto_respawn");
         return true;
     }
 
