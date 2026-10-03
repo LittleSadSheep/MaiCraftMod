@@ -42,6 +42,7 @@ public final class FluidPlacementTaskTest {
         lavaPlacementAvoidsFutureFlow();
         sourceRemovalUsesOneAcknowledgedBucket();
         nativeReactionRemainsConfirmed();
+        castingNeverEncasesThePlayer();
         System.out.println("FluidPlacementTaskTest: passed");
     }
 
@@ -72,6 +73,33 @@ public final class FluidPlacementTaskTest {
                             && Boolean.FALSE.equals(result.data().get("source_fluid_verified"))
                             && "minecraft:obsidian".equals(result.data().get("observed_block_id")),
                     "动作成功、源格未达成和实际黑曜石必须分别反馈");
+        }
+    }
+
+    private static void castingNeverEncasesThePlayer() throws Exception {
+        for (boolean lava : new boolean[]{false, true}) try (var f = fixture()) {
+            // 复现实机事故：角色站在待浇筑格里，即使能瞄到脚下支撑面，也必须先走到格外。
+            f.set(AT.below(), Blocks.STONE.defaultBlockState()); f.position(new Vec3(lava ? 3.5 : 2.65, 1, 3.5));
+            // 水桶用例从边缘滑入目标，岩浆桶用例已站在格内，两者都不能先提交再等身体反射救场。
+            if (!lava) f.player.setDeltaMovement(.1, 0, 0);
+            f.inventory.setItem(0, new ItemStack(lava ? Items.LAVA_BUCKET : Items.WATER_BUCKET));
+            f.mode.itemUse = player -> {
+                f.level.blockSequence++; f.set(AT, Blocks.OBSIDIAN.defaultBlockState());
+                f.inventory.setItem(0, new ItemStack(Items.BUCKET));
+            };
+            var record = new FluidPlacementTaskRecord("occupied-casting-cell", 1000, AT,
+                    (lava ? Blocks.LAVA : Blocks.WATER).defaultBlockState(), task().installation);
+            var running = new FluidPlacementTask(f.player, record); running.start(f.player);
+            ActorControlTestHarness.field(FluidPlacementTask.class, "selected").setBoolean(running, true);
+            check(running.tick(f.player) == TaskState.RUNNING && f.itemUses() == 0
+                    && "leaving_bucket_target".equals(running.progress().get("phase")),
+                    "occupied casting cell relocates without submitting or rejecting the design");
+            // 挪到旁边围挡顶面后继续同一张任务单；实际凝固仍通过服务器确认，而不是更换落点。
+            f.position(new Vec3(2.5, 2, 3.5)); f.player.setDeltaMovement(Vec3.ZERO); f.nextTick(); submit(f, running);
+            f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1,
+                    "the same target is poured once after leaving the player body");
+            running.result(TaskState.SUCCESS);
         }
     }
 

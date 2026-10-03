@@ -97,7 +97,11 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         // 沿路已走到另一个能实际倒桶的脚位就直接使用；旧候选格不可达时，不应继续绕路去满足旧导航终点。
         boolean currentRejected = relocate && rejected.contains(PlayerNav.playerFeet(player).asLong());
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
-        // 流体允许进入角色所在格，也允许空中使用桶；只要真实射线能对准目标，就由原生使用和身体反射接手。
+        // 施工落桶格可能在原生反应中立刻凝固；先退出自己的身体占位，再执行同一个目标，避免黑曜石把人挤进岩浆。
+        if (occupiesPlacementCell()) {
+            if (!currentRejected) { rejectStand("body_intersects_bucket_target"); waiting("leaving_bucket_target"); return TaskState.RUNNING; }
+            return approach();
+        }
         if (currentRejected || visible == null) return approach();
         if (!settleNavigation()) return TaskState.RUNNING;
         relocate = false;
@@ -118,6 +122,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
         actionAvailable = context.mutationAvailable();
         if (!actionAvailable) { waiting("awaiting_native_action"); return TaskState.RUNNING; }
+        // 等待相机和动作端口期间身体仍可能滑动，出手前再次核对占位，不只相信导航曾经到达。
+        if (occupiesPlacementCell()) { rejectStand("body_intersects_bucket_target"); return TaskState.RUNNING; }
         evidence = new FluidPlacementReceipt(player, r.target, r.expected); submitted = true;
         waiting("awaiting_bucket_receipt");
         // 满桶沿原生 USE_ITEM 的射线放置，不能把背后的墙或机器当作右键激活目标，也不直接改格子或背包。
@@ -128,6 +134,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
 
     private boolean targetSatisfied() { return r.removedSource == null ? FluidPlacementRules.matches(world.getBlockState(r.target),r.expected)
             : world.getBlockState(r.target).isAir(); }
+    private boolean occupiesPlacementCell() {
+        // 包含下一刻惯性扫过的身体体积；回收源格没有生成方块，不需要套用放置站位约束。
+        return r.removedSource == null && player.getBoundingBox().expandTowards(player.getDeltaMovement()).intersects(new AABB(r.target));
+    }
     private String placementProblem() {
         if (r.removedSource == null) return FluidPlacementRules.placementProblem(world,r.target,r.expected);
         // 回收只作用于本次明确声明的那个源格；流体类型或源状态变了就停，不向别处补发取水动作。
@@ -178,7 +188,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         actualRayAvailable = visibleFrom(player.getEyePosition()) != null;
         bodyOverTarget = player.getBoundingBox().intersects(new AABB(r.target));
         bodyInLavaFlow = unsafeLavaBody(player.getBoundingBox());
-        if (!actualRayAvailable) rejectStand();
+        if (occupiesPlacementCell()) rejectStand("body_intersects_bucket_target");
+        else if (!actualRayAvailable) rejectStand();
         else { relocate = false; aimTicks = 0; aimGate.reset(); waiting("stance_ready"); }
         return TaskState.RUNNING;
     }

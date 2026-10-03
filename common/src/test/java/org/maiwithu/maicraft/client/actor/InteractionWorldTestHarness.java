@@ -71,6 +71,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     final Object previous = global.get(null);
 
     public InteractionWorldTestHarness() throws Exception {
+        // 夹具角色初始站定；施工检查还会读取真实惯性，不能让未执行原版构造器的空速度代替静止。
+        player.setDeltaMovement(Vec3.ZERO);
         TargetIndex.dropAll();
         level.entities = new LinkedHashMap<>();
         level.section = new LevelChunkSection(new PalettedContainer<>(Block.BLOCK_STATE_REGISTRY,
