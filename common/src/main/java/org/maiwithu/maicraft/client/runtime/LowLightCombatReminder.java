@@ -72,9 +72,9 @@ public final class LowLightCombatReminder {
         JsonArray suggestions = new JsonArray();
         suggestions.add("考虑在反复遇袭的工作区域放置火把，或使用 maicraft:light_area 补光；缺料时先准备光源。");
         suggestions.add("根据当前敌人和任务决定是否先避险或处理威胁；照明不能清除已有怪物，也不保证阻止所有生物生成。");
-        board.update(ID, "附近区域在最近 60 秒游戏时间内已确认 " + hits.size()
-                + " 次敌对生物攻击，当前脚部有效亮度为 " + now.localLight()
-                + "。请考虑补光；尚未确认怪物的生成位置或遇袭原因。", evidence, suggestions, now.tick());
+        // 主提醒直接解释低光、遇袭与可用补光功能；命中数和未确认的刷怪来源保留在结构化证据里。
+        board.update(ID, "当前亮度较低，你可能正频繁遭遇怪物攻击。可使用补光功能（maicraft:light_area）减少怪物刷新。",
+                evidence, suggestions, now.tick());
     }
 
     /** 新身体不得累计上一条命的攻击，也不继承旧现场的亮度结论。 */

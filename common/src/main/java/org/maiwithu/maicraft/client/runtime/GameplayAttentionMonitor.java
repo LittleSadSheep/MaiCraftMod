@@ -59,6 +59,8 @@ public final class GameplayAttentionMonitor {
      * 在每次客户端游戏更新结束、选任务控制身体之前观察一次。首次观察和换世界时只建立基准，不补发旧变化。
      */
     public static void tick(LocalPlayer player) {
+        // 先复核常驻提醒：死亡或换身体立即清空，活着时更新补光后和离开现场后的真实状态。
+        GameplayReminders.tick(player);
         ClientLevel level = player.clientLevel;
         String dimension = level.dimension().location().toString();
         String phase = WorldTimeSemantics.phase(level).id();
@@ -137,6 +139,8 @@ public final class GameplayAttentionMonitor {
         previousTimePhase = null;
         previousWeather = null;
         previousEffectiveHealth = Float.NaN;
+        // 连接及身体观察重置时，旧世界的风险建议不能出现在下一次工具回执里。
+        GameplayReminders.reset();
         ChatMonitor.reset();
         activeReflexes.clear();
         // 换世界/断线时丢掉未收尾的伤害片段：那些命中属于上一个身体与上一个世界。
@@ -514,6 +518,8 @@ public final class GameplayAttentionMonitor {
     public static boolean observeDamagePackets(LocalPlayer player, float before, float after) {
         var notices = CombatThreats.consumeDamage(player);
         for (var notice : notices) {
+            // 在伤害片段合并之前逐包计数，让同一只怪物的连续命中也能触发低光生活提醒。
+            GameplayReminders.damaged(player, notice.attacker());
             damaged(player, before, after, notice.attacker(), true, notice.damageType());
         }
         return !notices.isEmpty();

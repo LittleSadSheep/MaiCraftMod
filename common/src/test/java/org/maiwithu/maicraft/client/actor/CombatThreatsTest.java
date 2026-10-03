@@ -59,6 +59,8 @@ public final class CombatThreatsTest {
         RangedDistanceBandTest.main(args); // 高台目标按同一水平距离进射程，真实弹道仍守三维上限。
         DamageAttentionTest.main(args);
         DamageEpisodeTest.main(args);
+        // 低光遇袭提醒复用原生包，不改变自卫、玩家交互或伤害片段的既有结算。
+        GameplayRemindersTest.main(args);
         CombatHandOwnershipTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }

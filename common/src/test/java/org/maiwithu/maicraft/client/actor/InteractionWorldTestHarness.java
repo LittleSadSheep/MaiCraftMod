@@ -27,6 +27,7 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -75,6 +76,9 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         player.setDeltaMovement(Vec3.ZERO);
         TargetIndex.dropAll();
         level.entities = new LinkedHashMap<>();
+        // 通用交互场景默认白天地面；低光回归单独降低有效照度，不让普通战斗混入补光提醒。
+        level.localLight = level.skyLight = 15;
+        level.lightAvailable = true;
         level.section = new LevelChunkSection(new PalettedContainer<>(Block.BLOCK_STATE_REGISTRY,
                 Blocks.AIR.defaultBlockState(), PalettedContainer.Strategy.SECTION_STATES), null);
         level.chunks = h.allocate(LoadedChunks.class);
@@ -181,6 +185,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         LoadedChunks chunks;
         public int blockReads, searches;
         public boolean clientHeightmapsOnly;
+        public int blockLight, skyLight, localLight;
+        public boolean lightAvailable;
         long time;
         private TestLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         @Override public boolean isLoaded(BlockPos pos) { return pos.getX() >> 4 == 0 && pos.getZ() >> 4 == 0; }
@@ -209,6 +215,12 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
             return testBorder;
         }
         @Override public long getGameTime() { return time; }
+        // 使用可控原生光照读数，分别回放夜间天空光、火把光和暂时缺失的照度信息。
+        @Override public int getBrightness(LightLayer layer, BlockPos pos) {
+            if (!lightAvailable) throw new IllegalStateException("lighting unavailable");
+            return layer == LightLayer.BLOCK ? blockLight : skyLight;
+        }
+        @Override public int getMaxLocalRawBrightness(BlockPos pos) { return localLight; }
         @Override public Entity getEntity(int id) { return entities.get(id); }
         @Override public Iterable<Entity> entitiesForRendering() { return List.copyOf(entities.values()); }
         @Override public List<Entity> getEntities(Entity entity, AABB bounds, Predicate<? super Entity> filter) {
