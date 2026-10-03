@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.integration.physics.StructureLookDirection;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -39,7 +40,8 @@ public final class InputDriver {
 
     // 从眼睛到目标点算出左右、上下两个角度，再交给身体控制器转头。
     public static void lookAt(LocalPlayer player, Vec3 point) {
-        Vec3 delta = point.subtract(player.getEyePosition());
+        // 控制器的位置是世界坐标；原生相机会再叠加载具转角，先逆变换才能在转弯和倾斜后仍瞄准同一部件。
+        Vec3 delta = StructureLookDirection.toCamera(player,point.subtract(player.getEyePosition()));
         double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(delta.y, horizontal) * Mth.RAD_TO_DEG);
