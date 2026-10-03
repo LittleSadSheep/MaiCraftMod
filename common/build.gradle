@@ -228,6 +228,12 @@ def regressionSuites = [
         heap: '512m', directory: 'portal-regression', timeoutSeconds: 45,
         purpose: '验证传送门准备、权限与原生激活'
     ],
+    // lava_cast 选址诚实选择：可达候选挑选、拒绝原因、零源岩浆 vs 全部不可达区分、契约不允许桶装岩浆顶替。
+    portalCastingHonestSelectionRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.dimension.PortalCastingHonestSelectionTest',
+        heap: '512m', directory: 'portal-casting-honest-selection-regression', timeoutSeconds: 45,
+        purpose: '验证 lava_cast 选址可达性、拒绝原因与契约诚实性'
+    ],
     semanticBlockSearchRegression: [
         entry: 'org.maiwithu.maicraft.intent.SemanticBlockSearchTest',
         heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
@@ -260,6 +266,12 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.core.task.mine.ProspectingTest',
         heap: '512m', directory: 'prospecting-regression', timeoutSeconds: 120,
         purpose: '验证生成带小表、探矿决策与掘进驱动的预算与诚实回执'
+    ],
+    // 接近性动土独立回放：mine 认领接近源的挖路许可（天然树源不再例外）、无路失败区分验证目标与未验证候选。
+    mineApproachTerrainRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.MineApproachTerrainTest',
+        heap: '512m', directory: 'mine-approach-terrain-regression', timeoutSeconds: 90,
+        purpose: '验证接近性动土授权映射、无路失败口径与 travel 高度提示语义'
     ],
     // 探矿编排交接独立回放：公平空手 + 授权 → 下降子任务 → 掘进采矿；授权关与表外物品不派。
     acquisitionProspectingRegression: [
