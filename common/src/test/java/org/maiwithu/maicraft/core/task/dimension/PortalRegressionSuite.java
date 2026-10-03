@@ -15,6 +15,8 @@ public final class PortalRegressionSuite {
         // 有池无水、有水无池以及已有水桶都要分别回报，不能只验收资源齐全的场景。
         PortalCastingPreparationTest.main(args);
         PortalCastingTerrainTest.main(args);
+        // 岩浆搜索的池面预算必须与施工共用同一导流平台，避免观察说够用而施工另扣一笔。
+        PortalLavaPoolSurveyTest.main(args);
         RecoveryKnowledgeTest.main(args);
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
