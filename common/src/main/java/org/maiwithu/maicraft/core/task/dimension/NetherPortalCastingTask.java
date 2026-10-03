@@ -34,6 +34,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
     private final BiFunction<LocalPlayer, TaskRecord, Task> factory;
     private final List<Map<String, Object>> receipts = new ArrayList<>();
     private final Set<BlockPos> unavailableSources = new HashSet<>();
+    private Set<BlockPos> platformFillSnapshot = Set.of();
     private PortalCastingSurvey survey;
     private NetherPortalCastingLayout layout;
     private List<PortalCastingStep> steps = List.of();
@@ -99,6 +100,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             case PREPARE_SITE -> {
                 var missing = PortalCastingTerrain.missingPlatform(world, layout);
                 if (missing.isEmpty()) yield next();
+                platformFillSnapshot = Set.copyOf(missing);
                 var need = PortalCastingStep.supplies(player, true, missing.size());
                 if (need != null) yield supply(need);
                 yield start(PortalCastingStep.platform(player, id(), deadline(), missing, layout, r.policy),
@@ -203,6 +205,20 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             if (operation.startsWith("fill_") && Boolean.FALSE.equals(result.data().get("bucket_submitted")) && sourceAttempts++ < 8) {
                 unavailableSources.add(mutation); return TaskState.RUNNING;
             }
+            // 站台一格未放置时换下一个候选；放置过的站台属于真实消耗，回执必须保留已放置方块作为证据。
+            if ("prepare_bank_platform".equals(operation)) {
+                var stillMissing = PortalCastingTerrain.missingPlatform(world, layout);
+                if (stillMissing.size() >= platformFillSnapshot.size()) {
+                    var fallback = survey.nextFallback(true);
+                    if (fallback != null) {
+                        layout = fallback.layout();
+                        steps = PortalCastingStep.plan(layout);
+                        cursor = 0; cleared = false; drainStarted = -1;
+                        return TaskState.RUNNING;
+                    }
+                    return siteUnreachableFailure();
+                }
+            }
             issue = "casting_" + operation + "_failed";
             // 默认失败说明直接给出最后一个原生卡点，不让模型翻遍前面已经完成的每桶历史才能决策。
             fail(issue + ": " + result.message(), FailureType.TARGET_LOST); return TaskState.FAILED;
@@ -221,9 +237,14 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         String detail = switch (code) {
             case "casting_lava_pool_not_observed" -> "No usable lava-pool bank was observed in the loaded search area. Water preparation completed; no casting construction started. Explore another area or travel to a known pool before retrying.";
             case "find_water_source_not_observed" -> "No carried water bucket or collectable water source was observed in the loaded search area. No casting construction started. Locate water in newly explored terrain or obtain a water bucket before retrying.";
+            case "casting_no_reachable_candidate" -> "All compliant lava-pool candidates within the loaded search area were reachable on paper but no real stance could be worked from. Each candidate's distance and rejection reason is reported; this is not evidence that the surrounding terrain lacks a pool, only that no surveyed site was buildable.";
             default -> code;
         };
         fail(detail, FailureType.TARGET_LOST); return TaskState.FAILED;
+    }
+
+    private TaskState siteUnreachableFailure() {
+        return failure("casting_no_reachable_candidate");
     }
     NetherPortalCastingLayout layout() { return layout; }
     String stage() { return operation; }
@@ -248,6 +269,10 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
                 data.put("recovery_options", List.of(Map.of("id", "locate_casting_resources",
                         "missing_resource", issue.equals("casting_lava_pool_not_observed") ? "lava_pool" : "water",
                         "summary", "Choose a known resource location or explore fresh terrain, then use current observations. find_block only scans loaded visible terrain; repeating this casting request in the same unchanged area does not locate new resources.")));
+            if (issue.equals("casting_no_reachable_candidate"))
+                data.put("recovery_options", List.of(Map.of("id", "locate_casting_resources",
+                        "missing_resource", "reachable_standing_position",
+                        "summary", "Use travel to a different pool at a known lava position, or explore to load fresh terrain; the surveyed pools were compliant but no stance was reachable from the current loaded area.")));
             if (!receipts.isEmpty() && Boolean.FALSE.equals(receipts.getLast().get("success")))
                 data.put("native_failure", receipts.getLast());
         }
