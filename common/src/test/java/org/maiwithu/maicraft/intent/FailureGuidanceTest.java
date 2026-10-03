@@ -28,8 +28,9 @@ public final class FailureGuidanceTest {
         check(option.get("alternatives").getAsString().contains("may_alter_terrain")
                 && option.get("alternatives").getAsString().startsWith("After reconciling"),
                 "alternatives are framed as post-reconciliation considerations");
+        // 精简包装后的 URI 仍直接指向同一机制知识卡，不能为了缩短回执丢失恢复依据。
         check(option.getAsJsonArray("knowledge").asList().stream().anyMatch(value ->
-                        value.getAsJsonObject().get("resource_uri").getAsString().endsWith("gravity-blocks")),
+                        value.getAsString().endsWith("gravity-blocks")),
                 "no_path points at the gravity knowledge card");
         // 内部异常与 ad-hoc 码不指路：错误的建议比没有建议更糟。
         var internal = firstOption(RecoveryKnowledge.attach(goal,

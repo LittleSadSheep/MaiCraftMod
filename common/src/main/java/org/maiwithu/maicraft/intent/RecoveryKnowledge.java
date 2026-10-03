@@ -90,8 +90,16 @@ final class RecoveryKnowledge {
                     "After reconciling this receipt's effects, consider: " + type.alternatives() + ".");
         option.add("evidence_fields", evidence);
         option.addProperty("evidence_scope", "Field names refer to this result's original data. Missing fields are not proof of no effects; existing observations are reused.");
-        JsonArray knowledge = new JsonArray(), contracts = new JsonArray(); resources.values().forEach(knowledge::add); abilities.values().forEach(contracts::add);
+        // 原生材料与失败事实已在同一回执前文完整交付；知识入口只保留去重后的地址，统一给一次读取格式。
+        // 不按条数截断：上百种材料的每个精确入口仍可直接读取，但不逐项重复 URI、物品编号和参数包装。
+        JsonArray knowledge = new JsonArray(), contracts = new JsonArray();
+        resources.keySet().forEach(knowledge::add); abilities.keySet().forEach(contracts::add);
         option.add("knowledge", knowledge); option.add("ability_contracts", contracts);
+        JsonObject templates = new JsonObject(), readKnowledge = new JsonObject(), readAbility = new JsonObject();
+        readKnowledge.addProperty("view", "knowledge"); readKnowledge.addProperty("resource_uri", "<knowledge entry>");
+        readAbility.addProperty("view", "abilities"); readAbility.addProperty("focus", "<ability_contracts entry>");
+        templates.add("knowledge", readKnowledge); templates.add("ability_contracts", readAbility);
+        option.add("read_templates", templates);
         JsonArray options = new JsonArray(); options.add(option);
         for (JsonElement old : previous) {
             JsonObject oldObject = object(old);

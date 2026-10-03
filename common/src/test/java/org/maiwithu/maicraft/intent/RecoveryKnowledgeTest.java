@@ -2,11 +2,16 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeReferences;
+import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -28,10 +33,12 @@ public final class RecoveryKnowledgeTest {
                 "knowledge keeps settlement and unknown-consumption markers intact");
         check(options.get(1).equals(JsonParser.parseString(source.toJson()).getAsJsonObject().getAsJsonObject("data")
                 .getAsJsonArray("recovery_options").get(0)), "existing native recovery option remains unchanged");
-        check(knowledge.getAsJsonArray("knowledge").asList().stream().anyMatch(value -> value.getAsJsonObject()
-                .get("resource_uri").getAsString().endsWith("minecraft/iron_ingot")), "exact blocked material has a direct recipe entry");
+        check(knowledge.getAsJsonArray("knowledge").asList().stream().anyMatch(value -> value.getAsString()
+                .endsWith("minecraft/iron_ingot")), "exact blocked material has a direct recipe entry");
         for (String group : List.of("knowledge", "ability_contracts")) for (var hint : knowledge.getAsJsonArray(group)) {
-            JsonObject read = hint.getAsJsonObject().getAsJsonObject("read_arguments");
+            // 使用同一份读取模板还原每个入口；压缩包装之后仍必须能调用原有知识接口。
+            JsonObject read = knowledge.getAsJsonObject("read_templates").getAsJsonObject(group).deepCopy();
+            read.addProperty(group.equals("knowledge") ? "resource_uri" : "focus", hint.getAsString());
             if (read.get("view").getAsString().equals("knowledge"))
                 check(KnowledgeLibrary.perceptionRequest(read).get("action").getAsString().equals("read"), "knowledge reference selects a document");
             else check(IntentRuntime.KNOWN_ABILITIES.contains(read.get("focus").getAsString()), "ability reference selects an existing contract");
@@ -51,7 +58,29 @@ public final class RecoveryKnowledgeTest {
         runtime.terminal(record, TaskState.FAILED, result);
         var delivered = runtime.attention(cursor, 20).getAsJsonArray("events").get(0).getAsJsonObject().getAsJsonObject("data");
         check(delivered.getAsJsonObject("data").get("recovery_options").equals(options), "default failure notification preserves full structured recovery hints");
+        wideMaterialKnowledge(goal);
         System.out.println("RecoveryKnowledgeTest: passed");
+    }
+
+    private static void wideMaterialKnowledge(Goal goal) {
+        // 大标签的全部材料都保留精确入口；用旧包装实测字节变化，防止把固定截断误当成压缩。
+        var items = new ArrayList<String>(); JsonArray legacy = new JsonArray();
+        for (int i = 0; i < 128; i++) {
+            var id = ResourceLocation.parse("test:material_" + i); items.add(id.toString());
+            legacy.add(KnowledgeReferences.recipe(id, "这次 blocked_need 中的材料来源与原生工艺"));
+        }
+        var facts = Map.<String, Object>of("blocked_need", Map.of("item_ids", items, "missing", 4),
+                "completed_effects", List.of("已有实物仍在背包"), "outcome_uncertain", true);
+        var result = RecoveryKnowledge.attach(goal, TaskResult.cancelled("材料缺口", "operator").withData(facts));
+        var data = JsonParser.parseString(result.toJson()).getAsJsonObject().getAsJsonObject("data");
+        var knowledge = data.getAsJsonArray("recovery_options").get(0).getAsJsonObject().getAsJsonArray("knowledge");
+        check(knowledge.size() == items.size() + 1, "所有材料入口和配方总入口完整保留");
+        check(data.getAsJsonObject("blocked_need").getAsJsonArray("item_ids").size() == items.size()
+                && data.get("outcome_uncertain").getAsBoolean() && data.has("completed_effects"), "材料事实、效果与未知项不能为缩短回执而丢失");
+        int before = legacy.toString().getBytes(StandardCharsets.UTF_8).length;
+        int after = knowledge.toString().getBytes(StandardCharsets.UTF_8).length;
+        check(after * 2 < before, "仅去重知识包装就应显著减小体积");
+        System.out.println("RecoveryKnowledgeTest: 128 material links " + before + " -> " + after + " UTF-8 bytes");
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }
