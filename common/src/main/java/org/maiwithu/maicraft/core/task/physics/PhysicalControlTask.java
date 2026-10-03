@@ -38,7 +38,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     private ItemStack selected=ItemStack.EMPTY;
     private Map<String,Object> before=Map.of(),after=Map.of();
     private int index;private boolean done,submitted;
-    private long movingSince=-1,designSince=-1;
+    private long movingSince=-1,designSince=-1,configurationObservedSince=-1;
     private CompletableFuture<PhysicalStructureDesignStore.Registration> design;
     private JsonArray declarations=new JsonArray();private JsonObject designEvidence=new JsonObject();
     private String afterUnknown;
@@ -50,6 +50,13 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         if(action!=null) {
             action=ctx.actions().poll(ctx,action);if(!action.terminal())return TaskState.RUNNING;
             if(action.status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED)return failed("原生设置未确认，保留当前状态且不重放输入: "+action.detail(),FailureType.UNKNOWN);
+            if(NativePhysicalControl.propeller(r.parameters.operation())) {
+                // 右键已由服务器处理后，另等桨叶成型或减速拆回；设计错误和未成型作为观察结果，不抹去已确认输入。
+                if(configurationObservedSince<0)configurationObservedSince=world.getGameTime();
+                after=NativePhysicalControl.state(entity());
+                if(!NativePhysicalControl.matches(entity(),r.parameters,index,selected)&&!after.containsKey("assembly_error")
+                        &&world.getGameTime()-configurationObservedSince<300)return TaskState.RUNNING;
+            }
             var receipt=action;action=null;if(watch!=null){watch.close();watch=null;}
             try {after=NativePhysicalControl.state(entity());}catch(RuntimeException unavailable){after=Map.of();afterUnknown=unavailable.toString();}
             effects.add(Map.of("step",index,"before",before,"after",after,"native_action_status",receipt.status().name()));
@@ -76,7 +83,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         if(NativePhysicalControl.matches(entity,r.parameters,index,selected)) {
             effects.add(Map.of("step",index,"already_matched",true,"after",after));advance();return TaskState.RUNNING;
         }
-        if(r.parameters.operation()==SET_SPEED&&!NativePhysicalControl.speedAccessible(entity,player))
+        if(NativePhysicalControl.valueBox(r.parameters.operation())&&!NativePhysicalControl.settingAccessible(entity,player))
             return failed("当前原生旋钮不接受此玩家或主手物品的操作",FailureType.UNKNOWN);
         if(!approachReady(entity)) {
             if(approach.failure()!=null)return failed(approach.failure(),FailureType.NO_PATH);return TaskState.RUNNING;
@@ -89,13 +96,15 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         if(player.isShiftKeyDown()||!PhysicalControlAim.valid(entity,r.parameters,index,hit)||!ctx.mutationAvailable())return TaskState.RUNNING;
         before=NativePhysicalControl.state(entity);
         int step=index;ItemStack expected=selected.copy();
-        boolean blockMode=r.parameters.operation()==SET_LINK_MODE;
+        boolean propeller=NativePhysicalControl.propeller(r.parameters.operation());
+        boolean blockMode=r.parameters.operation()==SET_LINK_MODE||propeller;
         if(!blockMode)watch=ServerBlockEntityReceipts.watch(world,entity.getBlockPos());
         var expectedWatch=watch;
         NativeConfirmation confirm=new NativeConfirmation() {
             public boolean requiresBlockAcknowledgement(){return blockMode;}
             public Verdict observe(LocalPlayerContext fresh) {
                 if(fresh.level()!=world)return Verdict.DIVERGED;
+                if(propeller)return Verdict.APPLIED; // 原生方块交互确认与后续桨叶实际成型分开结算。
                 if(!blockMode&&!expectedWatch.advanced())return Verdict.PENDING;
                 return NativePhysicalControl.matches(entity(),r.parameters,step,expected)?Verdict.APPLIED:Verdict.PENDING;
             }
@@ -154,13 +163,16 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     @Override public Map<String,Object> progress() {
         // 操作者应能分清正在拿材料、换站位还是等服务器确认，不能只看到一个持续不变的任务类名。
         return Map.of("task",name(),"operation",r.parameters.operation().name().toLowerCase(Locale.ROOT),"configuration_step",index+1,
-                "phase",done?"checking_full_design":action!=null?"confirming_native_input":approach.moving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
+                "phase",done?"checking_full_design":configurationObservedSince>=0?"observing_propeller_state":action!=null?"confirming_native_input":approach.moving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
                 "hand",hand.progress(),"approach",approach.evidence());
     }
     @Override protected Map<String,Object> resultData() {
         var out=new LinkedHashMap<String,Object>();out.put("operation",r.parameters.operation().name().toLowerCase(Locale.ROOT));
         out.put("native_submitted",submitted);out.put("completed_effects",List.copyOf(effects));out.put("actual_configuration",after);
-        out.put("native_configuration_confirmed",done&&r.parameters.operation()!=INSPECT);
+        boolean desired=!(NativePhysicalControl.propeller(r.parameters.operation()))
+                || after.get("assembled") instanceof Boolean assembled && assembled==(r.parameters.operation()==ASSEMBLE_PROPELLER);
+        out.put("native_configuration_confirmed",done&&r.parameters.operation()!=INSPECT&&desired);
+        if(NativePhysicalControl.propeller(r.parameters.operation()))out.put("requested_propeller_state_observed",desired);
         out.put("structure_id",r.parameters.structureId()==null?"world":r.parameters.structureId().toString());
         out.put("component_offset",List.of(r.parameters.position().getX(),r.parameters.position().getY(),r.parameters.position().getZ()));
         out.put("design_declaration",designEvidence);out.put("declared_structure_diff",AssemblyDeclarationView.diff(frame,declarations));

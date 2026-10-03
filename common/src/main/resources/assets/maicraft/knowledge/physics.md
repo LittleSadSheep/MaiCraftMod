@@ -24,6 +24,10 @@ Offroad 轮座使用 Create 压路机物品的放置规则：初始放置格下�
 
 `set_link_mode` 用 `receiver=true/false` 设置 Create 红石链路收发模式；`set_frequency` 用 `frequency_items=[第一物品,第二物品]` 配置有序频率，`minecraft:air` 清空相应位置。角色实际持有物品并命中原生频率区域，回执保留实际物品及染色身份；不会注入 NBT 或凭空写库存。已经匹配的配置不重复点击，等待未确认也不重放。世界设计可带 `design_id`，结构自动复查已保存的全部声明；配置、结构差异和实际运行验证分别返回。
 
+`set_burner_volume` 用整数 `value` 设置热气燃烧器在满红石信号下的容量。先 `inspect` 读取 `minimum_volume`、`maximum_volume`、`volume_step`；请求按原生面板刻度向下取档，最小值为 5。回执返回实际 `volume_setting`、`received_signal` 与 `gas_output`。容量旋钮不会启动燃烧器，实际启停和比例输出由真实红石电路决定；气球仍须有有效蒙皮空间。
+
+`assemble_propeller`、`disassemble_propeller` 对螺旋桨轴承或陀螺螺旋桨轴承执行空手右键，不需要 `value`。前者成型桨叶，后者使用原生减速拆回。两者先在停稳船体上配置。检查 `assembled`、`assembly_error` 和 `requested_propeller_state_observed`；右键已确认但未成型时保留原生结果及整机差异，由模型调整设计。转子运行后，其桨叶可能已进入独立运动装置，原结构声明中缺格与飞行功能验证须分别解释。
+
 | operation | 行为 |
 | --- | --- |
 | analyze | 读取服务端原生质量、惯量、作用点力和力偶，并计算起飞前工况 |

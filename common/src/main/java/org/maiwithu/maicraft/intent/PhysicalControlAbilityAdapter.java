@@ -26,11 +26,12 @@ final class PhysicalControlAbilityAdapter {
         var targets=new JsonArray();for(String kind:new String[]{"coordinates","landmark","area","current_place"})targets.add(kind);out.add("accepted_target_kinds",targets);
         out.add("accepted_preferences",new JsonObject());out.add("accepted_hard_constraints",new JsonArray());
         var fields=new JsonObject();
-        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency.");
+        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, assemble_propeller, disassemble_propeller. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
         field(fields,"structure_id","string","Observed structure UUID; omit target. position is relative to origin_storage. Otherwise target is the world anchor.");
         field(fields,"position","object","Integer {x,y,z} component offset, default zero. Execution re-resolves the current pose and native hit region.");
         field(fields,"design_id","string","Optional saved world design for full post-configuration diff; omit with structure_id, which retains its own declarations.");
-        field(fields,"value","integer","Required only for set_speed or set_throttle. Speed is the native signed dial value, nonzero -256..256; observed actual_rpm may differ with facing or drivetrain. Throttle is actual output signal 0..15, accounting for inverted levers.");
+        // 起飞前先设置供气容量，再通过实际红石控制启停；面板容量本身不证明气球已有升力。
+        field(fields,"value","integer","Required for set_speed, set_throttle or set_burner_volume. Speed: native signed dial, nonzero -256..256; actual_rpm may differ with facing. Throttle: actual output signal 0..15. Burner: hot-air volume at full signal, at least 5 and within the observed native maximum; rounded down to the native volume_step with a minimum of 5. Actual volume_setting, signal and gas_output are returned; this does not power the burner.");
         field(fields,"receiver","boolean","Required only for set_link_mode: true receives, false transmits. Native wrench toggles only if actual mode differs.");
         field(fields,"frequency_items","array<string>","Required only for set_frequency: two ordered item IDs. Each slot uses a real carried/supplied stack and native right click; minecraft:air clears a slot. Actual item/color frequency identity is returned. No inventory or NBT injection.");
         out.add("parameters",fields);

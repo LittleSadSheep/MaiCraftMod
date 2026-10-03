@@ -21,6 +21,14 @@ public final class PhysicalControlContractTest {
             var frequency=json("{\"operation\":\"set_frequency\",\"frequency_items\":[\"minecraft:iron_ingot\",\"minecraft:redstone\"]}");
             SemanticGoalContract.validate(goal(worldTarget,frequency),IntentRuntime.KNOWN_ABILITIES);
             check(PhysicalControlParameters.parse(frequency).frequencyItems().equals(List.of("minecraft:iron_ingot","minecraft:redstone")),"无线频率顺序被改写");
+            // 供气容量是明确的配置意图，不能误按油门十五档限制，也不接受低于原生最小值的零供气旋钮。
+            SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":125}")),IntentRuntime.KNOWN_ABILITIES);
+            rejects(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":0}")));
+            // 成型与拆回是明确的幂等目标，不接受含糊的开关值，也不要求模型发送点击脚本。
+            for(String operation:List.of("assemble_propeller","disassemble_propeller")) {
+                SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\""+operation+"\"}")),IntentRuntime.KNOWN_ABILITIES);
+                rejects(goal(worldTarget,json("{\"operation\":\""+operation+"\",\"value\":1}")));
+            }
             check(SemanticAbilityCatalog.parameterNames(PhysicalControlAbilityAdapter.ABILITY).containsAll(List.of("value","receiver","frequency_items","structure_id")),"控制能力契约未对模型公开");
             for(String invalid:List.of("{\"operation\":\"set_speed\",\"value\":0}","{\"operation\":\"set_speed\",\"value\":1.5}",
                     "{\"operation\":\"set_throttle\",\"value\":16}","{\"operation\":\"set_link_mode\",\"receiver\":\"true\"}",

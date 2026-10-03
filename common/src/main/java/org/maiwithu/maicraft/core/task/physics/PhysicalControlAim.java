@@ -16,12 +16,12 @@ final class PhysicalControlAim {
     private PhysicalControlAim() {}
     static Vec3 aim(LocalPlayer player,PhysicalAssemblyFrame frame,BlockPos offset,BlockEntity entity,
                     PhysicalControlParameters p,int index,Vec3 eye) {
-        if(p.operation()!=SET_SPEED&&p.operation()!=SET_FREQUENCY)return frame.aim(player,offset,eye,false);
+        if(!NativePhysicalControl.valueBox(p.operation())&&p.operation()!=SET_FREQUENCY)return frame.aim(player,offset,eye,false);
         if(p.operation()==SET_FREQUENCY) {
             Object slot=ControlReflection.construct("com.simibubi.create.content.redstone.link.RedstoneLinkFrequencySlot",index==0);
             return candidate(player,frame,offset,entity,p,index,eye,slot);
         }
-        Object slot=NativeApi.call(NativePhysicalControl.speed(entity),NativePhysicalControl.VALUE,"getSlotPositioning");
+        Object slot=NativeApi.call(NativePhysicalControl.setting(entity),NativePhysicalControl.VALUE,"getSlotPositioning");
         for(Direction side:Direction.values()) {
             Vec3 point=withSide(slot,side,()->candidate(player,frame,offset,entity,p,index,eye,slot));
             if(point!=null)return point;
@@ -43,8 +43,8 @@ final class PhysicalControlAim {
         if(hit==null)return false;
         if(p.operation()==SET_FREQUENCY)
             return NativeApi.truth(NativeApi.call(NativePhysicalControl.link(entity),null,"testHit",index==0,hit.getLocation()));
-        if(p.operation()==SET_SPEED) {
-            Object setting=NativePhysicalControl.speed(entity),slot=NativeApi.call(setting,NativePhysicalControl.VALUE,"getSlotPositioning");
+        if(NativePhysicalControl.valueBox(p.operation())) {
+            Object setting=NativePhysicalControl.setting(entity),slot=NativeApi.call(setting,NativePhysicalControl.VALUE,"getSlotPositioning");
             return withSide(slot,hit.getDirection(),()->NativeApi.truth(NativeApi.call(setting,NativePhysicalControl.VALUE,"testHit",hit.getLocation())));
         }
         return true;
