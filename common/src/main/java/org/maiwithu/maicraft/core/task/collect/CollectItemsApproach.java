@@ -14,17 +14,25 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
+import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 
 /** 采掘和补拾取共用原版接触范围选择落脚点；短靠近仍核对实底、碰撞和保护格，不修改池子或玩家。 */
 public final class CollectItemsApproach {
     private CollectItemsApproach() {}
 
     public static GoalCompiler.Compiled goal(LocalPlayer player, Collection<ItemEntity> drops) {
+        return goal(player, drops, false);
+    }
+
+    /** 已授权开路时也提交需要补齐身体空间的接触站位，让真实导航计算挖路代价并执行原生清障。 */
+    public static GoalCompiler.Compiled goal(LocalPlayer player, Collection<ItemEntity> drops, boolean mayAlterTerrain) {
         var cells = new LinkedHashSet<BlockPos>();
         for (var drop : drops) {
             // 掉落格可能是刚挖出的坑或水面；先加入能从岸边接触的真实落脚点，再保留原格交给正常导航判断。
@@ -34,11 +42,39 @@ public final class CollectItemsApproach {
             var max = BlockPos.containing(box.maxX + half + .5, box.maxY + 1.5, box.maxZ + half + .5);
             var corridor = corridor(player);
             for (var cell : BlockPos.betweenClosed(min, max)) {
-                if (contactPoint(player, drop, cell, corridor) != null) cells.add(cell.immutable());
+                if (contactPoint(player, drop, cell, corridor) != null
+                        || mayAlterTerrain && preparableContact(player, drop, cell)) cells.add(cell.immutable());
             }
             cells.add(drop.blockPosition());
         }
         return cells.isEmpty() ? null : GoalCompiler.mineField(List.of(), List.copyOf(cells));
+    }
+
+    private static boolean preparableContact(LocalPlayer player, ItemEntity drop, BlockPos feet) {
+        var world = player.level();
+        Vec3 point = Vec3.atBottomCenterOf(feet);
+        AABB body = player.getBoundingBox().move(point.subtract(player.position()));
+        if (!body.inflate(1, .5, 1).intersects(drop.getBoundingBox())) return false;
+        BlockPos floor = feet.below();
+        // 这里仅扩大寻路候选，绝不把尚未挖开的洞口判为已经走通；脚下必须有真实支撑且保持原位。
+        if (!world.isLoaded(floor) || !world.getWorldBorder().isWithinBounds(floor)) return false;
+        var support = world.getBlockState(floor);
+        if (!support.isCollisionShapeFullBlock(world, floor) || TransportLanding.unsafe(world, floor, support)) return false;
+        if (!EmbeddedBaritoneRuntime.physicalObstacles().clearSegment(point, point,
+                body.getXsize(), body.getYsize())) return false;
+        var min = BlockPos.containing(body.minX + 1e-5, body.minY + 1e-5, body.minZ + 1e-5);
+        var max = BlockPos.containing(body.maxX - 1e-5, body.maxY - 1e-5, body.maxZ - 1e-5);
+        for (var cell : BlockPos.betweenClosed(min, max)) {
+            if (!world.isLoaded(cell) || !world.getWorldBorder().isWithinBounds(cell)
+                    || NavigationSafetyContext.forbidsBody(cell)) return false;
+            var state = world.getBlockState(cell);
+            if (TransportLanding.unsafe(world, cell, state)) return false;
+            if (state.getCollisionShape(world, cell).toAabbs().stream().noneMatch(box -> box.move(cell).intersects(body))) continue;
+            // 脚位和头顶的天然障碍可由导航补挖；容器、明确保护和名单外构件不能借拾取获得拆除权限。
+            if (!ClearanceWhitelist.allows(state) || NavigationSafetyContext.protectsMutation(cell)
+                    || state.hasBlockEntity() || state.getDestroySpeed(world, cell) < 0) return false;
+        }
+        return true;
     }
 
     public static Vec3 nudgePoint(LocalPlayer player, ItemEntity drop) {

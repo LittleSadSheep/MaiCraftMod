@@ -27,6 +27,7 @@ public final class CollectItemsTool implements MaiCraftTool {
                 + "A lost reference is reported as unconfirmed, never replaced with another stack. "
                 + "Without drop_ref, optionally restrict item_ids (omit both to collect everything). "
                 + "Nearby incidental pickups remain possible under native pickup rules. "
+                + "may_alter_terrain=true permits normal navigation to clear permitted natural obstacles on the pickup approach. "
                 + "Optional radius (default 16). Use after manual interactions; attack collects its own drops. "
                 + "BACKGROUND: acceptance means collection is already running; wait for task_finished, do not poll or resend unchanged.";
     }
@@ -38,6 +39,8 @@ public final class CollectItemsTool implements MaiCraftTool {
                 .optionalString("drop_ref", "One exact observed stack reference; follows its current position.")
                 .optionalStringArray("item_ids", "Optional namespaced item id(s) to collect; omit to collect all.")
                 .optionalInteger("radius", "Optional search radius in blocks (default 16).", 1, 48)
+                // 一格洞口不足以通行时，模型可在同一拾取目标中明确允许原生开路，执行器自行选择落脚点。
+                .optionalBool("may_alter_terrain", "Allow pickup navigation to dig, bridge or pillar under the clearance whitelist and protections; default false.")
                 .build();
     }
 

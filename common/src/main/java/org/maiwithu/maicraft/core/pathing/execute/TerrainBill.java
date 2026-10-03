@@ -93,6 +93,17 @@ public final class TerrainBill {
         return places.values().stream().mapToInt(List::size).sum();
     }
 
+    /** 完整导出本账本的方块种类和位置；拾取开路回执不能沿用人类摘要的六坐标展示上限。 */
+    public Map<String, Object> snapshot() {
+        return Map.of("broken", positions(breaks), "placed", positions(places));
+    }
+    private static Map<String, List<List<Integer>>> positions(Map<Block, List<BlockPos>> byKind) {
+        var result = new LinkedHashMap<String, List<List<Integer>>>();
+        byKind.forEach((block, cells) -> result.put(block == null ? "unspecified_material" : BuiltInRegistries.BLOCK.getKey(block).toString(),
+                cells.stream().map(at -> List.of(at.getX(), at.getY(), at.getZ())).toList()));
+        return Map.copyOf(result);
+    }
+
     /**
      * 清单正文,例如
      * {@code break 2 oak_planks (120,64,-33; 120,65,-33) and 1 glass (122,65,-33), and place 2 blocks}。

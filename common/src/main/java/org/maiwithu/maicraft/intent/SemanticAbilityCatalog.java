@@ -240,11 +240,13 @@ public final class SemanticAbilityCatalog {
                     "Walk to loose drops and collect through native contact. Copy drop_ref from perceive surroundings nearby_entities "
                             + "to select one exact stack; its current position is tracked as it moves. Lost targets remain unconfirmed, "
                             + "never substituted. Without drop_ref, collect nearby item_ids or all items when omitted. "
-                            + "Native pickup may also absorb incidental nearby items. No separate travel request is needed.",
+                            + "Native pickup may also absorb incidental nearby items. With may_alter_terrain=true, pickup navigation can clear permitted natural obstacles to reach a contact stance, including a one-block mining hole. It respects the clearance whitelist and protected areas. Completion requires native pickup and inventory evidence, not merely approaching within travel tolerance. No separate travel or break request is needed.",
                     targets("current_place"),
                     fields(field("drop_ref", "string", "Optional exact stack reference from nearby_entities."),
                             field("item_ids", "array<resource_id>", "Optional non-empty registered item filter; applies together with drop_ref."),
-                            field("radius", "integer", "Loaded search range from the actor, 1–48 blocks; default 16.")));
+                            field("radius", "integer", "Loaded search range from the actor, 1–48 blocks; default 16."),
+                            // 开路授权随拾取目标进入执行器；模型选物品和许可，执行器负责脚位、头顶与最后的原生收取。
+                            field("may_alter_terrain", "boolean", "Allow pickup navigation to dig, bridge or pillar where the clearance whitelist and protections permit. Default false. Use true when collecting mining drops requires opening body clearance.")));
             case GeneralAbilityAdapter.DROP -> contract(
                     "Irreversibly drop an explicit quantity of one carried item.",
                     targets("current_place"),

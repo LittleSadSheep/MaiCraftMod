@@ -25,6 +25,8 @@ public final class CollectItemsTaskRecord extends TaskRecord {
     public final Set<UUID> targetUuids;
     /** 公开掉落引用所在维度；走路中换维度时停止追踪，避免重用旧引用。 */
     public final ResourceLocation targetDimension;
+    /** 拾取接近阶段可继承明确的开路授权；普通拾取和机器内部收料默认只走现有通道。 */
+    public final boolean mayAlterTerrain;
 
     /** 实时进度；目标物品被收入背包时更新。 */
     private int collected = 0;
@@ -43,12 +45,19 @@ public final class CollectItemsTaskRecord extends TaskRecord {
     public CollectItemsTaskRecord(String toolCallId, long deadlineGameTime,
                                   Set<Item> filter, int radius, String label, Set<UUID> targetUuids,
                                   ResourceLocation targetDimension) {
+        this(toolCallId, deadlineGameTime, filter, radius, label, targetUuids, targetDimension, false);
+    }
+
+    public CollectItemsTaskRecord(String toolCallId, long deadlineGameTime, Set<Item> filter, int radius,
+                                  String label, Set<UUID> targetUuids, ResourceLocation targetDimension,
+                                  boolean mayAlterTerrain) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.filter = Set.copyOf(filter);
         this.radius = radius;
         this.label = label;
         this.targetUuids = Set.copyOf(targetUuids);
         this.targetDimension = targetDimension;
+        this.mayAlterTerrain = mayAlterTerrain;
     }
 
     boolean permits(UUID uuid) { return targetUuids.isEmpty() || targetUuids.contains(uuid); }

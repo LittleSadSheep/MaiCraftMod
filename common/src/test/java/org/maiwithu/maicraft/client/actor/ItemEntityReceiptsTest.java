@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 
 import java.util.UUID;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.Entity;
@@ -49,6 +50,8 @@ public final class ItemEntityReceiptsTest {
         ActorControlTestHarness.field(Entity.class, "id").setInt(item, id);
         ActorControlTestHarness.field(Entity.class, "uuid").set(item, UUID.randomUUID());
         ActorControlTestHarness.field(Entity.class, "position").set(item, position);
+        // 物品坐标与原版缓存的方块格同步，接近拾取的测试才能读取和真实客户端一致的落点。
+        ActorControlTestHarness.field(Entity.class, "blockPosition").set(item, BlockPos.containing(position));
         ActorControlTestHarness.field(Entity.class, "onGround").setBoolean(item, true);
         item.setBoundingBox(new AABB(position.x - .125, position.y, position.z - .125, position.x + .125, position.y + .25, position.z + .125));
         world.level.entities.put(id, item); return item;

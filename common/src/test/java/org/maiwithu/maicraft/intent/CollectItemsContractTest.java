@@ -33,6 +33,12 @@ public final class CollectItemsContractTest {
             var action = (IntentAction.Native) GeneralAbilityAdapter.adapt(goal, world.player, null);
             var record = (CollectItemsTaskRecord) action.record();
             check(record.targetUuids.equals(Set.of(drop.getUUID())), "MCP 目标必须传递观察选中的身份");
+            check(!record.mayAlterTerrain, "未授权的普通拾取仍只走现有通道");
+            // 选中的物品身份不变，开路许可完整进入同一拾取任务，不另生成旅行或挖块目标。
+            parameters.addProperty("may_alter_terrain", true);
+            goal = goal(parameters); SemanticGoalContract.validate(goal, IntentRuntime.KNOWN_ABILITIES);
+            record = (CollectItemsTaskRecord) ((IntentAction.Native) GeneralAbilityAdapter.adapt(goal, world.player, null)).record();
+            check(record.mayAlterTerrain && record.targetUuids.equals(Set.of(drop.getUUID())), "开路授权不改变原掉落引用");
             // 组件中可能有槽位和深层数据；这些是已观察内容，展示及重启不能按内部执行字段删掉。
             var components = new JsonObject(); components.addProperty("slots", "物品内容".repeat(1500));
             observation.add("components", components);
@@ -46,7 +52,8 @@ public final class CollectItemsContractTest {
                     && restored.tasks().getFirst().goal().parameters().equals(parameters), "持久化保留组件和原选择引用");
             for (String invalid : List.of("{\"item_ids\":[]}", "{\"item_ids\":[\"missing:item\"]}",
                     "{\"item_ids\":[false]}", "{\"drop_ref\":\"bad\"}", "{\"drop_ref\":null}",
-                    "{\"radius\":0}", "{\"radius\":1.5}", "{\"radius\":\"16\"}")) {
+                    "{\"radius\":0}", "{\"radius\":1.5}", "{\"radius\":\"16\"}",
+                    "{\"may_alter_terrain\":\"true\"}", "{\"may_alter_terrain\":1}", "{\"may_alter_terrain\":null}")) {
                 try { SemanticGoalContract.validate(goal(JsonParser.parseString(invalid).getAsJsonObject()), IntentRuntime.KNOWN_ABILITIES);
                     throw new AssertionError("invalid selection accepted: " + invalid); }
                 catch (IllegalArgumentException expected) { }

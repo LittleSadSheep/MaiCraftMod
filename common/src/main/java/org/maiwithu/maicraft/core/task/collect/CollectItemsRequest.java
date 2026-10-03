@@ -12,7 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 先解释模型选中的类型或物品堆，再提交普通靠近拾取；拼错的选择不能扩大成全部拾取。 */
-public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation dimension, UUID target) {
+public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation dimension, UUID target, boolean mayAlterTerrain) {
     public CollectItemsRequest {
         filter = Set.copyOf(filter);
     }
@@ -59,7 +59,15 @@ public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation
                 throw new IllegalArgumentException("invalid drop_ref; copy the complete reference from nearby_entities");
             }
         }
-        return new CollectItemsRequest(filter, radius, dimension, target);
+        // LLM 只声明是否允许为收取开路；脚位、头顶清障和路线仍由拾取执行器依据当前世界决定。
+        boolean mayAlterTerrain = false;
+        if (args.has("may_alter_terrain")) {
+            var value = args.get("may_alter_terrain");
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
+                throw new IllegalArgumentException("may_alter_terrain must be a boolean");
+            mayAlterTerrain = value.getAsBoolean();
+        }
+        return new CollectItemsRequest(filter, radius, dimension, target, mayAlterTerrain);
     }
 
     public CollectItemsTaskRecord task(LocalPlayer player, ToolContext context) {
@@ -68,6 +76,6 @@ public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation
         String label = target != null ? "selected drop" : filter.isEmpty() ? "all items" : "selected item types";
         // 所选引用交给执行器逐刻核对；目标已消失时必须报告未确认拾取，不能按空范围成功收尾。
         return new CollectItemsTaskRecord(context.toolCallId(), context.deadline(60 * 20),
-                filter, radius, label, target == null ? Set.of() : Set.of(target), dimension);
+                filter, radius, label, target == null ? Set.of() : Set.of(target), dimension, mayAlterTerrain);
     }
 }

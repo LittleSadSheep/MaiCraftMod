@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.intent.CollectItemsContractTest;
 public final class PickupRegressionSuite {
     public static void main(String[] args) throws Exception {
         DroppedItemPickupTest.main(args);
+        PickupClearanceTest.main(args);
         // 主动扔掉的材料需要完整批次与跨任务避让，不能被下一趟拾取路线无意捡回。
         DropBatchPlanTest.main(args);
         DropCompanionTaskTest.main(args);

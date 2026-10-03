@@ -619,7 +619,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /** 已生成的产物按原版接触范围选择站位，避免要求角色站进刚挖空的格子。 */
     private GoalCompiler.Compiled dropFieldCompiled() {
-        if (!liveOwnedDrops.isEmpty()) return CollectItemsApproach.goal(player, liveOwnedDrops);
+        // 普通采矿已有开路授权，收尾继续使用 collect_items 的接触站位；定点单格采收仍保留其原范围。
+        if (!liveOwnedDrops.isEmpty()) return CollectItemsApproach.goal(player, liveOwnedDrops, travelContext().permit().mayAlter());
         if (drops.isEmpty()) return GoalCompiler.standOn(feet());
         return GoalCompiler.mineField(List.of(), new ArrayList<>(drops));
     }

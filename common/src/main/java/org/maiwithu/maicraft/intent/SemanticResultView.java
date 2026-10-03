@@ -173,7 +173,7 @@ public final class SemanticResultView {
         // 实际选中的箱体是动作证据，保留身份供模型对照输入箱蓝图，不额外授权操作。
         if (key.equals("container_observation")) return value;
         // 所选掉落的组件、位置和未收取引用都是观察证据，任务查询不能删去模型再次选择所需的事实。
-        if (key.equals("drop_collection")) return value;
+        if (key.equals("drop_collection") || key.equals("pickup_navigation")) return value;
         // 照明回执里的暗格、未加载位置和已提交灯位都是实测事实，不能被通用坐标过滤删掉。
         if (key.equals("lighting_observation") || key.equals("automatic_lighting")) return value;
         // 连锁完整选区、已挖格、剩余障碍和通道层位都是原生观察；不能把 cells 或 target_y 当路线脚本删掉。

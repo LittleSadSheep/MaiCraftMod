@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.task.ProgressBudget;
 
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
 import org.maiwithu.maicraft.core.task.base.PickupNavigationRetry;
@@ -42,6 +43,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     /** 掉落实体消失或角色接触后，等待数据包同步的有界窗口。 */
     private static final int PICKUP_SYNC_TICKS = 20;
     private final ProgressBudget pickupProgress;
+    private TerrainBill pickupTerrain = new TerrainBill();
 
     private Phase phase = Phase.SCAN;
     private NativePickupReceipt pickup;
@@ -91,6 +93,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         this.lastUncollectedDetail = null;
         this.firstObservedEntityCounts.clear();
         this.skipped.reset();
+        this.pickupTerrain = new TerrainBill();
     }
 
     @Override
@@ -270,7 +273,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private GoalCompiler.Compiled targetGoal() {
         ItemEntity live = pickup == null ? null : pickup.liveEntity(player);
         return live == null || !r.targetUuids.isEmpty() && (!live.getUUID().equals(pickupUuid) || !r.permits(live.getUUID()))
-                ? null : CollectItemsApproach.goal(player, List.of(live));
+                ? null : CollectItemsApproach.goal(player, List.of(live), r.mayAlterTerrain);
     }
 
     private boolean pickupReceived() {
@@ -279,8 +282,8 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     private PlayerNav approachNavigation() {
         var next = PlayerNav.toRevalidating(player, this::targetGoal, WALK_SPEED,
-                this::pickupReceived, PlayerNav.ContextProvider.DEFAULT);
-        // 指定物品堆只复用现有步行与浅水通行，持续跟随该堆，不为捡取自动尝试其他交通。
+                this::pickupReceived, r.mayAlterTerrain ? PlayerNav.ContextProvider.TERRAFORM : PlayerNav.ContextProvider.DEFAULT);
+        // 指定物品堆持续跟随原身份；开路许可交给同一地面导航，不再要求模型另开旅行与挖块任务。
         return r.targetUuids.isEmpty() ? next : next.walkingOnly();
     }
 
@@ -370,6 +373,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         data.put("collected", r.getCollected());
         data.put("collected_items", Map.copyOf(collectedItems));
         data.put("radius", r.radius);
+        data.put("pickup_navigation", Map.of("may_alter_terrain", r.mayAlterTerrain, "confirmed_terrain_changes", pickupTerrain.snapshot()));
         data.put("unreachable_drop_stacks", unreachable);
         data.put("disappeared_without_inventory_receipt", disappearedWithoutReceipt);
         data.put("pickup_rejected_after_contact", pickupRejected);
@@ -383,6 +387,13 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
                     "observations", List.copyOf(targetObservations.values())));
         }
         return data;
+    }
+
+    @Override protected void stopNav() {
+        // 每段导航结清后保存真实挖放记录，重寻、失败和取消都不丢失为拾取已经开出的通道。
+        PlayerNav active = nav;
+        super.stopNav();
+        if (active != null) pickupTerrain.addAll(active.ledger());
     }
 
     private String reference(UUID uuid) {
