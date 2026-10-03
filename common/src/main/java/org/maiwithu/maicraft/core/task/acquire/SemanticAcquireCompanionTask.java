@@ -793,7 +793,8 @@ public final class SemanticAcquireCompanionTask
         need.efficientBatchStarted |= efficient && bootstrap == 0 && missing(need) >= WorkToolPreparation.BATCH_SIZE;
         MineBlockTaskRecord record = new MineBlockTaskRecord(
                 childId(prospecting ? "prospect-mine" : "mine"), now + budget, blocks, deficit,
-                blockLabel(blocks), progressItems, efficient, true);
+                blockLabel(blocks), progressItems, efficient, true)
+                .withApproachTerrainAlter(r.approachTerrainAlter);
         // 默认采矿使用当前已加载视距；主人明确限定半径时仍冻结原范围，不能借扩大搜索越界取材。
         // 探矿掘进会走出地表半径，必须保持已加载视距，否则索引会越查越空。
         if (prospecting) {

@@ -31,7 +31,8 @@ public final class SemanticAcquireApi {
     private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
     private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
     private static final Set<String> PARAMETERS = Set.of("item_id", "item_ids", "item_tag", "item_tags",
-            "count", "allowed_sources", "allow_harm", "allow_prospecting", "source_hint", "protected_labels", "radius", "preferred_materials");
+            "count", "allowed_sources", "allow_harm", "allow_prospecting", "may_alter_terrain",
+            "source_hint", "protected_labels", "radius", "preferred_materials");
     private static final Set<String> HINT_FIELDS = Set.of("block_ids", "block_tags", "entity_type_ids",
             "expected_item_ids", "trade_profession_ids", "description");
 
@@ -56,6 +57,8 @@ public final class SemanticAcquireApi {
         integer(args, "radius", SemanticAcquireTaskRecord.DEFAULT_RADIUS, 1, SemanticAcquireTaskRecord.MAX_RADIUS);
         bool(args, "allow_harm", false);
         bool(args, "allow_prospecting", false);
+        // mine 家族的接近性动土默认随采矿授权开启；显式 false 才收窄回普通行走。
+        bool(args, "may_alter_terrain", true);
         for (String source : strings(args.get("allowed_sources"), "allowed_sources"))
             SemanticAcquireTaskRecord.Source.parse(source);
         strings(args.get("protected_labels"), "protected_labels");
@@ -152,6 +155,7 @@ public final class SemanticAcquireApi {
                 .captureStorageOrigin(player)
                 .withLoadedMiningView(!args.has("radius") || args.get("radius").isJsonNull())
                 .withProspecting(allowProspecting)
+                .withApproachTerrainAlter(bool(args, "may_alter_terrain", true))
                 .withPreferredMaterials(resourceIds(args.get("preferred_materials"), "preferred_materials", true));
     }
 

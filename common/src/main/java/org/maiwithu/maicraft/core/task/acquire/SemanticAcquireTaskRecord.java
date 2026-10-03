@@ -103,6 +103,12 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
      */
     public boolean allowProspecting;
 
+    /**
+     * 采矿接近源时允许挖阶梯、隧道或垫高；这是 mine 家族语义的一部分，默认开启，
+     * 只有调用方显式传 may_alter_terrain=false 才收窄。目标筛选（天然树闸门、保护名单）不受影响。
+     */
+    public boolean approachTerrainAlter = true;
+
     public SemanticAcquireTaskRecord withLoadedMiningView(boolean enabled) {
         miningUsesLoadedView = enabled;
         return this;
@@ -110,6 +116,11 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
 
     public SemanticAcquireTaskRecord withProspecting(boolean enabled) {
         allowProspecting = enabled;
+        return this;
+    }
+
+    public SemanticAcquireTaskRecord withApproachTerrainAlter(boolean enabled) {
+        approachTerrainAlter = enabled;
         return this;
     }
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */

@@ -31,6 +31,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final boolean requireEfficientTool;
     /** 只把通过天然树外观检查的原木当作材料，避免顺手拆木屋。 */
     public final boolean naturalLogsOnly;
+    /** 接近源时允许挖阶梯、隧道或垫高；这属于采矿语义的一部分，默认开启。单格采收不受此字段影响，始终只走现有路线。 */
+    private boolean approachTerrainAlter = true;
     private BlockPos searchCenter;
     private int searchRadius;
     private BlockState exactState;
@@ -86,6 +88,16 @@ public final class MineBlockTaskRecord extends TaskRecord {
     }
     public boolean exactHarvest() { return exactState != null; }
     public BlockState exactState() { return exactState; }
+
+    /** 收窄接近阶段的动土许可；默认 true，只有调用方显式禁止时才关闭。 */
+    public MineBlockTaskRecord withApproachTerrainAlter(boolean enabled) {
+        approachTerrainAlter = enabled;
+        return this;
+    }
+    /** 接近阶段是否允许为够到源而动土；单格采收始终返回 false，其授权从不覆盖通道和周围机架。 */
+    public boolean approachTerrainAlter() {
+        return !exactHarvest() && approachTerrainAlter;
+    }
 
     /** 探矿模式与定点采收互斥，也不能冻结扫描范围——矿道会走出地表半径，冻结只会让索引越查越空。 */
     public MineBlockTaskRecord withProspecting(int targetY) {

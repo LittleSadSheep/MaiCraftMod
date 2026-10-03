@@ -513,6 +513,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("final_y", player.getY());
         data.put("final_z", player.getZ());
         data.put("ground_y", gy);
+        // 目标带高度提示时交付实际站位与提示的对照；调用方靠它察觉"仍在坑底/坡下"这类容差内却不够用的到达。
+        if (r.y != null) {
+            data.put("target_y_hint", by);
+            data.put("y_hint_delta", gy - by);
+        }
         data.put("planning_idle_budget", planningBudget.diagnostics(player.level().getGameTime()));
         data.put("planning_budget_unit", "active_game_ticks");
         data.put("ground_flight_mode",groundFlight.diagnostics());
@@ -524,6 +529,16 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return data;
     }
 
+    /** 与请求高度提示的对照说明；提示与站位同高时不必解释。 */
+    private String heightHintNote(int gy) {
+        if (r.y == null) return "";
+        int delta = gy - by;
+        return " The requested height hint was y=" + by
+                + (delta == 0 ? ", matching the standing height."
+                        : "; standing " + Math.abs(delta) + " block(s) "
+                        + (delta > 0 ? "above" : "below") + " it, within the vertical tolerance.");
+    }
+
     /** 按目标类型说明到达结果；此处是内部文字，外层还可能删去具体坐标。 */
     @Override
     protected String successMessage() {
@@ -531,7 +546,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return switch (r.kind) {
             case BLOCK -> r.requiresStrictStance() ? "reached the exact cell " + bx + "," + by + "," + bz + "."
                     : "arrived within " + r.horizontalRadius + " blocks horizontally and " + r.verticalTolerance
-                            + " blocks vertically of the destination; supported at y=" + gy + ".";
+                            + " blocks vertically of the destination; supported at y=" + gy + "."
+                            + heightHintNote(gy);
             case COLUMN -> "arrived at location x=" + bx + " z=" + bz
                     + (player.isInWater() ? ", in water at y=" : ", standing on the ground at y=") + gy + ".";
             case YLEVEL -> "reached elevation y=" + gy
