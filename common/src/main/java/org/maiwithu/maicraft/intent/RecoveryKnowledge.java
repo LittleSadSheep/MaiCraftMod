@@ -71,6 +71,13 @@ final class RecoveryKnowledge {
                 case "continue_mining_from_another_semantic_area", "continue_from_another_semantic_area" ->
                         ability(abilities, "maicraft:travel", "原回执提供了更换区域选项，查看语义移动参数");
                 case "semantic_prerequisite" -> ability(abilities, "maicraft:sequence", "需要组合原回执中的语义前置目标时查阅");
+                case "locate_casting_resources" -> {
+                    // 缺水或缺池时提供真正能跑图、走到已知地点和取水的契约；不把同一区域的重复扫描当成探索。
+                    ability(abilities, ExplorationIntent.ABILITY, "前往新地形寻找尚未观察到的浇筑资源");
+                    ability(abilities, "maicraft:travel", "前往已经知道的水源或岩浆池附近");
+                    ability(abilities, GeneralAbilityAdapter.FIND_BLOCK, "只在新到达的已加载可见区域核对具体水源或岩浆");
+                    ability(abilities, GeneralAbilityAdapter.INTERACT, "用空桶对实际水源执行原生取水");
+                }
                 default -> { /* 未识别的原生建议完整保留，不从文字推导新的动作或授权。 */ }
             }
         }
@@ -81,7 +88,8 @@ final class RecoveryKnowledge {
                 "remaining_effects", "pending_effects", "not_performed", "skipped_steps", "skipped_effects", "construction_progress", "blueprint_diff");
         fields(evidence, facts, "uncertainty", "outcome_uncertain", "mechanical_retry_allowed", "pending_output", "unresolved_mutations");
         fields(evidence, facts, "observations", "failure_observation", "latest_snapshot", "machine", "operating_state", "ground_failure",
-                "planning_handoff", "inventory_capacity", "issues", "preparation_failure", "wireless_stock_evidence");
+                "planning_handoff", "inventory_capacity", "issues", "preparation_failure", "wireless_stock_evidence",
+                "resource_preparation", "construction_phase_started");
         JsonObject option = new JsonObject(); option.addProperty("id", ID); option.addProperty("risk", "read_only");
         option.addProperty("summary", "先使用本次回执的实际效果、未完成部分和未知项；具体知识缺口可按以下入口读取，由模型选择下一步。");
         // 失败码级替代入口只列名字；"对账后可考虑"的措辞在这里统一加上，防止被读成换路重试的许可。

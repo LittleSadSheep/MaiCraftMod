@@ -109,9 +109,11 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 `maicraft:travel_dimension` 和 `maicraft:reach_milestone` 可设置 `prepare_portal=true`，在没有观察到有效传送门时准备入口。下界门优先复用完整黑曜石框、补齐标准小门的缺块，或在附近已加载的安全空地新建十块黑曜石框，再使用打火石或已有火焰弹点火。建造和修复还需 `may_alter_terrain=true`；缺料按 `material_policy` 和 `allowed_sources` 获取，临时施工支撑也计入供料需求。
 
-主世界可显式选择 `portal_method="lava_cast"`，使用单桶岩浆池手法：观察池岸、备桶取水、处理浅池底框、搭六块导流模具、循环取岩浆浇筑、收水并点火。工具和模具缺料沿既有策略补给；不要求持有黑曜石或钻石镐。只想建门时使用 `maicraft:prepare_portal`，参数例如 `{"portal_method":"lava_cast","may_alter_terrain":true}`，完成后停在门外。默认搜索当前已加载的 128 格范围，可用 `max_search_radius` 调整；没有观察到池岸时返回事实，由模型选择探索地点。
+主世界可显式选择 `portal_method="lava_cast"`，使用单桶岩浆池手法：先备桶取水，再观察池岸、处理浅池底框、搭六块导流模具、循环取岩浆浇筑、收水并点火。工具和模具缺料沿既有策略补给；不要求持有黑曜石或钻石镐。只想建门时使用 `maicraft:prepare_portal`，参数例如 `{"portal_method":"lava_cast","may_alter_terrain":true}`，完成后停在门外。默认只搜索已加载的 128 格范围，可用 `max_search_radius` 调整；缺水或缺池时返回 `resource_preparation` 和 `construction_phase_started`，由模型选择探索新区域或前往已知资源点。接受目标不代表资源齐全或已经施工；`find_block` 只扫描已加载可见地形，不能代替角色走出去探索。
 
 浇筑回执分别提供 `casting_actions_completed`、每步原生效果、整扇门的 `portal_observation.differences` 和 `portal_prepared`。倒桶成功不等于黑曜石成型或门已点燃；产物不符时保留现场，不自动重倒或拆除错误产物。临时导流模具保留在现场，供模型决定后续整理。
+
+池岸不平整时，执行器可在四格起手区后清理操作空间，原生补出连续岸边和后排站台。需要新造池岸或填掉岩浆源时，先扣除计划填格，再确认至少保留十五格相连表层源岩浆；回执中的 `site_preparation` 给出填格、源格消耗与保守余量。这是按“十格门框加首桶水损耗”预留的估计，实际流体反应仍单独观察；不能由余量数字保证任意池形都能成功。
 
 末地入口会复用已加载的完整门框，必要时通过原生末影之眼寻找要塞；核对十二个门框的朝向，只为没有眼的格子补眼。搜索和嵌眼需要 `allow_rare_consumables=true`。准备期间保留 `protected_labels` 和上层区域保护，供料后重新检查现场；点击必须得到原生确认，并观察到完整传送门表面后才继续穿门。不会制造末地门框或末地返回门，受阻和未确认的操作会返回原因。
 

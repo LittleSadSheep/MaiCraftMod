@@ -59,6 +59,7 @@ public final class RecoveryKnowledgeTest {
         var delivered = runtime.attention(cursor, 20).getAsJsonArray("events").get(0).getAsJsonObject().getAsJsonObject("data");
         check(delivered.getAsJsonObject("data").get("recovery_options").equals(options), "default failure notification preserves full structured recovery hints");
         wideMaterialKnowledge(goal);
+        castingResources();
         System.out.println("RecoveryKnowledgeTest: passed");
     }
 
@@ -81,6 +82,25 @@ public final class RecoveryKnowledgeTest {
         int after = knowledge.toString().getBytes(StandardCharsets.UTF_8).length;
         check(after * 2 < before, "仅去重知识包装就应显著减小体积");
         System.out.println("RecoveryKnowledgeTest: 128 material links " + before + " -> " + after + " UTF-8 bytes");
+    }
+    private static void castingResources() {
+        // 地狱门缺水时，实际准备事实和跑图入口一起交给模型；这些入口不会替模型自动选方向或改写许可。
+        var goal = new Goal("maicraft:prepare_portal", "浇筑地狱门", null, "{\"portal_method\":\"lava_cast\"}", "{}", List.of(), List.of());
+        var facts = Map.<String, Object>of("construction_phase_started", false,
+                "resource_preparation", Map.of("initial_water_prepared", false, "water_buckets", 0),
+                "recovery_options", List.of(Map.of("id", "locate_casting_resources", "missing_resource", "water")));
+        var result = RecoveryKnowledge.attach(goal, TaskResult.fail("find_water_source_not_observed", facts));
+        var data = JsonParser.parseString(result.toJson()).getAsJsonObject().getAsJsonObject("data");
+        var hint = data.getAsJsonArray("recovery_options").get(0).getAsJsonObject();
+        var abilities = hint.getAsJsonArray("ability_contracts").toString();
+        check(abilities.contains("maicraft:explore") && abilities.contains("maicraft:travel")
+                && abilities.contains("maicraft:interact"), "resource absence names physical exploration and collection abilities");
+        check(!data.get("construction_phase_started").getAsBoolean()
+                && data.getAsJsonObject("resource_preparation").get("water_buckets").getAsInt() == 0,
+                "preparation facts survive recovery wrapping");
+        check(hint.getAsJsonObject("evidence_fields").getAsJsonArray("observations").toString().contains("resource_preparation"),
+                "resource preparation is directly indexed for the model");
+        check(RecoveryKnowledge.attach(goal, result).toJson().equals(result.toJson()), "repeated presentation does not duplicate discovery advice");
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }

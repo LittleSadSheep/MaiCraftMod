@@ -320,7 +320,10 @@ public final class SemanticAbilityCatalog {
                             field("allow_rare_consumables", "boolean", "Structure only: permit real ender-eye throws, default false.")));
             // 独立备门把浇筑手法交给模型选择，执行器负责取放桶、补料和完整门框观察，完成后不自动穿门。
             case "maicraft:prepare_portal" -> contract(
-                    "Prepare and ignite a portal, then stop outside it. lava_cast uses one bucket, an observed Overworld lava pool, a temporary mold and native water/lava reactions. Action completion, whole-frame differences and portal activation are reported separately.",
+                    "Prepare and ignite a portal, then stop outside it. lava_cast uses one bucket, an observed Overworld lava pool, a temporary mold and native water/lava reactions. "
+                            + "It prepares water before selecting the pool, but only searches loaded terrain; it does not explore distant resources. Use existing evidence to choose a site with a pool and water bucket/source. "
+                            + "When resources are absent, use explore or travel to a known resource, then retry from the new area. find_block only scans loaded visible terrain. "
+                            + "Acceptance is not proof of resource readiness or started construction: read resource_preparation and construction_phase_started. Action completion, whole-frame differences and portal activation are reported separately.",
                     targets("current_place"), fields(
                             field("destination_dimension", "resource_id", "Portal destination; default minecraft:the_nether."),
                             field("portal_method", "obsidian|lava_cast", "Default obsidian. Choose lava_cast for the single-bucket lava-pool technique; no diamond pickaxe or carried obsidian required."),
@@ -338,7 +341,7 @@ public final class SemanticAbilityCatalog {
                             field("destination_dimension", "resource_id", "Required destination dimension, such as minecraft:the_nether or minecraft:the_end."),
                             field("max_search_radius", "integer", "Bounded loaded-world portal evidence radius; default 128."),
                             field("prepare_portal", "boolean", "If no active portal is observed, obtain materials and prepare one; default false. Nether construction/repair also needs may_alter_terrain; End eyes need allow_rare_consumables."),
-                            field("portal_method", "obsidian|lava_cast", "Preparation method; default obsidian. lava_cast uses the single-bucket Overworld lava-pool technique."),
+                            field("portal_method", "obsidian|lava_cast", "Preparation method; default obsidian. lava_cast needs an observed pool and a water bucket or local collectable water. It prepares water first but does not explore for missing resources; use explore/travel before retrying an unchanged absence report."),
                             field("allow_rare_consumables", "boolean", "Permit stronghold eye throws and End frame eye insertion; default false."),
                             field("allow_combat", "boolean", "Permit hostile hunting for portal supplies; default false."),
                             field("max_search_distance", "integer", "Physical stronghold search limit during preparation; default and maximum 4096."),
@@ -367,7 +370,7 @@ public final class SemanticAbilityCatalog {
                             field("max_search_distance", "integer", "Bounded physical structure and End search distance; maximum 4096."),
                             field("max_portal_search_radius", "integer", "Bounded loaded active-portal evidence radius; default 128."),
                             field("prepare_portal", "boolean", "Enable Nether frame construction/repair and End frame activation when needed; default false."),
-                            field("portal_method", "obsidian|lava_cast", "Nether preparation method; default obsidian. lava_cast uses one bucket at an observed Overworld lava pool."),
+                            field("portal_method", "obsidian|lava_cast", "Nether preparation method; default obsidian. lava_cast needs an observed pool and a water bucket or local collectable water. It prepares water first but does not explore for missing resources; use explore/travel before retrying an unchanged absence report."),
                             field("minimum_health", "number", "Health floor for a separately permitted boss encounter; default 10."),
                             field("allow_combat", "boolean", "Separate consent for hostile combat; never inferred from terrain permission."),
                             field("allow_rare_consumables", "boolean", "Separate consent for typed rare resource use such as eyes or gateway pearls."),
