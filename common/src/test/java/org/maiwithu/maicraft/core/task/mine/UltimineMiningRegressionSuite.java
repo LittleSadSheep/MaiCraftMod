@@ -14,5 +14,6 @@ public final class UltimineMiningRegressionSuite {
         UltimineBreakTest.main(args);
         MineUltimineTaskTest.main(args);
         ProspectTunnelPlanTest.main(args);
+        ProspectTunnelDriverTest.main(args);
     }
 }

@@ -32,6 +32,10 @@ public final class UltimineBreak implements AutoCloseable {
     private Status outcome = Status.COMPLETE;
     private String reason = "preparing_native_selection";
     private Result result;
+    private int maximumBlocks = Integer.MAX_VALUE;
+    private boolean singleFallback;
+    /** 探矿余量不足容纳完整原生选区时先松键，再单格补缺口；不裁剪选区后冒充原生执行。 */
+    public UltimineBreak maximumBlocks(int count) { maximumBlocks = Math.max(1, count); return this; }
 
     public UltimineBreak(LocalPlayer player, BlockPos origin, Direction face, UltimineSession.Mode mode,
                          Predicate<BlockPos> allowed, Predicate<BlockPos> preserve) {
@@ -77,8 +81,12 @@ public final class UltimineBreak implements AutoCloseable {
 
     private boolean prepare(BlockHitResult hit) {
         // 命中面由原生射线产生；授权只检查实际原生选区，不从区块索引自行扩展矿脉。
-        var decision = control.prepareSelection(ClientRuntime.requireContext(player), hit, allowed, preserve);
-        reason = decision.code();
+        var context = ClientRuntime.requireContext(player);
+        var decision = singleFallback ? control.finish(context) : control.prepareSelection(context, hit, allowed, preserve);
+        reason = singleFallback ? "ultimine_selection_exceeds_remaining_excavation_budget" : decision.code();
+        if (decision.ready() && decision.completeSelection().size() > maximumBlocks) {
+            singleFallback = true; control.finish(context); return false;
+        }
         switch (decision.status()) {
             case READY, SINGLE_BLOCK -> {
                 armed = decision.ready();

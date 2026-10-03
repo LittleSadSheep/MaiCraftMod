@@ -21,10 +21,13 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSession;
 public final class UltimineBreakTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        scenario(false); scenario(true);
+        scenario(false); scenario(true); scenario(true, 1);
         System.out.println("UltimineBreakTest: native break, partial effects and key release passed");
     }
     private static void scenario(boolean partial) throws Exception {
+        scenario(partial, Integer.MAX_VALUE);
+    }
+    private static void scenario(boolean partial, int budget) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             h.enableCraftingTransactions(); h.h.minecraft.screen = null; h.position(new Vec3(8.5, 1, 8.5));
             ActorControlTestHarness.field(LivingEntity.class, "activeEffects").set(h.player, new HashMap<>());
@@ -40,7 +43,7 @@ public final class UltimineBreakTest {
                 if (!partial) selection.forEach(cell -> h.set(cell, Blocks.AIR.defaultBlockState()));
             };
             var action = new UltimineBreak(h.player, origin, Direction.NORTH, UltimineSession.Mode.SMALL_TUNNEL,
-                    selection::contains, at -> false, nativeControl);
+                    selection::contains, at -> false, nativeControl).maximumBlocks(budget);
             UltimineBreak.Result result = null;
             for (int tick = 0; tick < 180; tick++) {
                 h.nextTick(); result = action.tick(); DiscardFireTest.align(h);
@@ -48,9 +51,11 @@ public final class UltimineBreakTest {
             }
             check(result != null && result.status() == UltimineBreak.Status.COMPLETE, "native transaction completes: " + result);
             check(result.removed().size() == (partial ? 1 : 3) && !result.uncertain(), "only observed native effects are counted");
-            check(result.evidence().get("remaining").equals(partial ? 2 : 0), "unbroken secondary blocks remain explicit");
-            check(nativeControl.held >= 2 && nativeControl.released >= 3 && nativeControl.closed,
+            check(result.evidence().get("remaining").equals(partial && budget > 1 ? 2 : 0), "unbroken secondary blocks remain explicit");
+            check((budget == 1 ? nativeControl.held == 0 : nativeControl.held >= 2) && nativeControl.released >= 3 && nativeControl.closed,
                     "chain key stays held through the native break and release is settled before handoff");
+            if (budget == 1) check(Boolean.FALSE.equals(result.evidence().get("native_chain_started")),
+                    "insufficient excavation budget releases the native chain before a single-block repair");
             check(h.mode.breakStarts == 1, "the controller submits the seed only once");
         }
     }
