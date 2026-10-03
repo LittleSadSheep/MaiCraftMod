@@ -140,7 +140,8 @@ public final class IntentTaskRecord extends TaskRecord {
     }
     /** 当前有效清单每一步都须留下成功证据；恢复或替换后的清单不能自动证明最初请求的游戏产物。 */
     public boolean allStepsSucceeded() {
-        return stepIndex == steps.size() && stepResults.size() == steps.size()
+        // 零步骤记录（如死亡恢复承载单）不是"全部成功"；真正的任务单至少有一个可执行步骤。
+        return stepIndex == steps.size() && !steps.isEmpty() && stepResults.size() == steps.size()
                 && stepResults.stream().allMatch(StepSnapshot::success);
     }
     public List<AttemptSnapshot> attempts() { return List.copyOf(attempts); }
@@ -409,6 +410,12 @@ public final class IntentTaskRecord extends TaskRecord {
     private static boolean deathRecovery(DecisionSnapshot snapshot) {
         return snapshot != null && snapshot.contextJson() != null
                 && snapshot.contextJson().contains("death_recovery");
+    }
+
+    /** 死亡已由其他途径解决（如人工点击重生）；遗留的恢复问题作废，终态记录不再接受迟到答复。 */
+    void clearPendingDecision() {
+        decision = null;
+        changed();
     }
 
     private void changed() {

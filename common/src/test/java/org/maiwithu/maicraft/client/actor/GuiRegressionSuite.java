@@ -169,6 +169,8 @@ public final class GuiRegressionSuite {
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。
         // 死亡恢复决策在 body_gone 抢先终结任务后仍必须可回答，重生入口不能死锁。
         org.maiwithu.maicraft.intent.DeathDecisionSurvivesCancelTest.main(args);
+        // 死亡瞬间没有任务承接时，恢复决策挂全局承载记录：task answer 仍可达，答复与人工重生各有收尾。
+        org.maiwithu.maicraft.intent.StandaloneDeathRecoveryTest.main(args);
         TaskSlotFailureTest.main(args);
         // 嵌套取材只扫描已声明的附近范围，空搜加工设备不能把整片已加载世界都扫一遍。
         MiningSearchScopeTest.main(args);

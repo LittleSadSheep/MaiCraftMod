@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.task.TaskState;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -442,7 +443,18 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 if (deathEffect == GameplayAttentionMonitor.DeathDecisionEffect.NONE) {
                     intents.resumed(record);
                 } else {
-                    GameplayAttentionMonitor.applyDeathDecision(deathEffect, player, record);
+                    boolean applied = GameplayAttentionMonitor.applyDeathDecision(deathEffect, player, record);
+                    if (intents.isDeathRecoveryHost(record)) {
+                        if (applied) {
+                            finishDeathRecoveryHost(deathEffect, record, now);
+                        } else {
+                            // 原生动作没能发出：换发新决策编号重新挂起，迟到答复不会落在已消费的问题上。
+                            intents.requestDeathDecision(record,
+                                    contextBoolean(pendingDecision, "hardcore"),
+                                    contextBoolean(pendingDecision, "spectator"),
+                                    pendingDecision == null ? new JsonObject() : pendingDecision.context());
+                        }
+                    }
                 }
             }
             default -> throw new IllegalArgumentException("unknown task action: " + action);
@@ -565,6 +577,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty(
                 "boundary",
                 "Submit declared semantic fields; MaiCraft owns routes, gestures and confirmation. Registration/support is not proof of current executability.");
+        // 运行时级授权键不进各能力参数表：任何 goal.parameters 都可携带，由运行时读取（death_recovery 用）。
+        JsonObject runtimeKeys = new JsonObject();
+        runtimeKeys.addProperty("auto_respawn",
+                "accepted in goal.parameters of any ability; the runtime immediately requests native respawn when the agent dies, without a decision round-trip");
+        runtimeKeys.addProperty("recover_after_death",
+                "accepted in goal.parameters of any ability; after respawn the task stays paused for safety reassessment and item recovery");
+        result.add("runtime_goal_keys", runtimeKeys);
         return result;
     }
 
@@ -763,6 +782,26 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         IntentTaskRecord record = intents.task(id);
         if (record == null) throw new IllegalArgumentException("unknown task_id: " + id);
         return record;
+    }
+
+    /** 无宿主死亡恢复态：答复已同步应用，承载记录随之结算；task get 仍可按原编号查阅，不会凭空消失。 */
+    private void finishDeathRecoveryHost(
+            GameplayAttentionMonitor.DeathDecisionEffect effect, IntentTaskRecord record, long now) {
+        if (effect == GameplayAttentionMonitor.DeathDecisionEffect.CANCEL_TASK) {
+            intents.finishDeathRecovery(record, TaskState.CANCELLED,
+                    TaskResult.cancelled("death recovery answered: cancel_task", "death_recovery_answer"), now);
+            return;
+        }
+        boolean spectate = effect == GameplayAttentionMonitor.DeathDecisionEffect.REQUEST_NATIVE_SPECTATE;
+        intents.finishDeathRecovery(record, TaskState.SUCCESS, new TaskResult(true,
+                spectate ? "Native spectate was requested by answering the death decision."
+                        : "Native respawn was requested by answering the death decision.",
+                false, false, Map.of()), now);
+    }
+
+    private static boolean contextBoolean(IntentTaskRecord.DecisionSnapshot decision, String key) {
+        JsonObject context = decision == null ? null : decision.context();
+        return context != null && context.has(key) && context.get(key).getAsBoolean();
     }
 
     private static String publicState(IntentTaskRecord record) {

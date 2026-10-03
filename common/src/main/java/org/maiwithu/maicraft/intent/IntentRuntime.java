@@ -99,6 +99,9 @@ public final class IntentRuntime {
     private final LinkedHashMap<UUID, IntentTaskRecord> tasks = new LinkedHashMap<>();
     private final LinkedHashMap<String, UUID> requestKeys = new LinkedHashMap<>();
     private final LinkedHashMap<String, Landmark> landmarks = new LinkedHashMap<>();
+    // 死亡瞬间没有任务承接决策时，恢复问题挂在这份独立承载记录上：不进任务注册表也不进检查点，
+    // 它的目标不是可执行能力，持久化会让恢复校验把整份旧进度判成无法恢复。
+    private IntentTaskRecord deathRecovery;
     // 自主开箱形成的标识与库存随同一世界检查点保存，断线重连后继续作为历史线索使用。
     private final ContainerMemory containers = new ContainerMemory(this::markDirty);
 
@@ -219,6 +222,9 @@ public final class IntentRuntime {
     }
 
     public IntentTaskRecord task(UUID id) {
+        if (id != null && deathRecovery != null && deathRecovery.externalId().equals(id)) {
+            return deathRecovery;
+        }
         return tasks.get(id);
     }
 
@@ -231,6 +237,7 @@ public final class IntentRuntime {
 
     public List<IntentTaskRecord> tasks(int limit) {
         List<IntentTaskRecord> all = new ArrayList<>(tasks.values());
+        if (deathRecovery != null) all.add(deathRecovery);
         int from = Math.max(0, all.size() - Math.max(1, limit));
         List<IntentTaskRecord> result = new ArrayList<>(all.subList(from, all.size()));
         Collections.reverse(result);
@@ -391,10 +398,54 @@ public final class IntentRuntime {
                                 "cancel_task", "Cancel the semantic task and leave respawn to the player.")),
                 context.toString());
         Minecraft minecraft = Minecraft.getInstance();
-        long gameTime = minecraft.level == null ? 0L : minecraft.level.getGameTime();
+        long gameTime = minecraft == null || minecraft.level == null
+                ? 0L : minecraft.level.getGameTime();
         record.requestDecision(snapshot, gameTime);
         decision(record, snapshot);
         captureCheckpoint(true);
+    }
+
+    private static final Goal DEATH_RECOVERY_GOAL = new Goal(
+            "maicraft:death_recovery",
+            "Recover from the agent's death: answer the pending death decision to respawn, spectate or cancel.",
+            null, "{}", "{}", List.of(), List.of());
+
+    /**
+     * 死亡瞬间没有任务承接决策时，把恢复问题挂到独立的承载记录上。
+     *
+     * <p>承载记录不占用身体调度槽、不进任务注册表与检查点，但经 {@link #task(UUID)} 与
+     * {@link #tasks(int)} 原样可达：task list 看得到问题，task answer 能直接答复，
+     * 身体不在场（死亡屏幕）也成立。同一时刻只有一份；再次死亡时替换旧记录。
+     */
+    public IntentTaskRecord openDeathRecoveryDecision(
+            boolean hardcore, boolean spectator, JsonObject suppliedContext) {
+        IntentTaskRecord host = new IntentTaskRecord(UUID.randomUUID(), null, DEATH_RECOVERY_GOAL);
+        host.bindDirty(this::markDirty);
+        deathRecovery = host;
+        requestDeathDecision(host, hardcore, spectator, suppliedContext);
+        return host;
+    }
+
+    public boolean isDeathRecoveryHost(IntentTaskRecord record) {
+        return record != null && deathRecovery == record;
+    }
+
+    /** 死亡恢复承载记录收尾：终态化并发布结算事件；引用保留供 task get 查阅，换世界或下一次死亡时清除。 */
+    public void finishDeathRecovery(
+            IntentTaskRecord record, TaskState state, TaskResult result, long gameTime) {
+        if (deathRecovery != record) return;
+        record.clearPendingDecision();
+        record.terminal(state, result, gameTime);
+        terminal(record, state, result);
+        markDirty();
+    }
+
+    /** 死亡已由任务外的途径解决（人工点击重生）：作废遗留恢复问题并结算承载记录；没有待答记录时静默。 */
+    public void finishSupersededDeathRecovery(long gameTime) {
+        if (deathRecovery == null || deathRecovery.decisionSnapshot() == null) return;
+        TaskResult result = TaskResult.cancelled(
+                "respawn completed without answering the death decision", "respawned_by_player");
+        finishDeathRecovery(deathRecovery, TaskState.CANCELLED, result, gameTime);
     }
 
     /** 保存最后检查点，并给后台写盘最多两秒；已脱离身体的交接快照不被取消后的记录覆盖。 */
@@ -600,6 +651,8 @@ public final class IntentRuntime {
         requestKeys.clear();
         landmarks.clear();
         containers.clear();
+        // 死亡恢复承载记录属于上一条命与上一个连接；换世界后旧决策不再可答，防止迟到答复触达新身体。
+        deathRecovery = null;
         attention.clear();
         // 换了世界或连接，聊天区消息也属于上一轮，随任务语义一起作废。
         chatFlow.clear();

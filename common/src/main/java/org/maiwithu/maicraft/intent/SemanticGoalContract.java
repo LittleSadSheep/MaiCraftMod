@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
@@ -34,10 +36,12 @@ final class SemanticGoalContract {
         }
         validateOnFailure(goal, path, ability, parentIsSequence);
 
-        validateObjectKeys(goal.parameters(), SemanticAbilityCatalog.parameterNames(ability),
+        validateObjectKeys(goal.parameters(), withRuntimeAuthorizationKeys(
+                        SemanticAbilityCatalog.parameterNames(ability)),
                 path + ".parameters", ability, "unknown_parameter");
         validateProtectedLabels(goal.parameters(), path + ".parameters", ability);
-        validateObjectKeys(goal.preferences(), SemanticAbilityCatalog.preferenceNames(ability),
+        validateObjectKeys(goal.preferences(), withRuntimeAuthorizationKeys(
+                        SemanticAbilityCatalog.preferenceNames(ability)),
                 path + ".preferences", ability, "unknown_preference");
         // 取物数量、来源与地点要求在接单前说明白，不能接管角色后再忽略或改写请求。
         if (!restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability)) {
@@ -176,6 +180,19 @@ final class SemanticGoalContract {
     private static final Set<String> GOAL_LEVEL_FIELDS =
             Set.of("ability", "outcome", "target", "constraints", "children", "parameters", "preferences",
                     "on_failure");
+
+    /**
+     * 运行时级死亡自恢复授权键：由 GameplayAttentionMonitor 在死亡时读取，任何能力都可携带。
+     * 不进各能力的参数表——授权属于任务意图而非某个能力的工序参数；能力发现入口同步展示这份名单。
+     */
+    private static final Set<String> RUNTIME_AUTHORIZATION_KEYS =
+            Set.of("auto_respawn", "recover_after_death");
+
+    private static Set<String> withRuntimeAuthorizationKeys(Set<String> declared) {
+        Set<String> merged = new HashSet<>(declared);
+        merged.addAll(RUNTIME_AUTHORIZATION_KEYS);
+        return Collections.unmodifiableSet(merged);
+    }
 
     private static void validateObjectKeys(
             JsonObject values, Set<String> allowed, String path, String ability, String code) {

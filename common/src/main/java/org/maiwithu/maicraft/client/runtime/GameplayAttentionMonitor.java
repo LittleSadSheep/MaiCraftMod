@@ -205,6 +205,8 @@ public final class GameplayAttentionMonitor {
     // 重生后的任务绑定完成才报告库存对比，并解除死亡阶段的自动行为锁；没有自动开始捡回遗物。
     public static synchronized void afterSemanticBind(LocalPlayer player) {
         if (player == null || lifeState != LifeState.RESPAWN_OBSERVED || lastDeath == null) return;
+        // 人工点击重生也解决了死亡：作废还挂着答复的无宿主恢复态，避免迟到答复在新身体上再触发一次重生。
+        IntentRuntime.get().finishSupersededDeathRecovery(player.level().getGameTime());
         Map<String, Integer> currentInventory = inventoryCounts(player);
         IntentTaskRecord restored = lastDeath.taskId() == null
                 ? null : IntentRuntime.get().task(lastDeath.taskId());
@@ -257,9 +259,13 @@ public final class GameplayAttentionMonitor {
         };
     }
 
-    public static synchronized void applyDeathDecision(
+    /**
+     * 同步应用死亡决策：重生/观战立即发原生请求，取消任务交给调度器。
+     * 返回原生动作是否成功发出——失败时调用方必须换发新决策，迟到的答复不能落在已消费的问题上。
+     */
+    public static synchronized boolean applyDeathDecision(
             DeathDecisionEffect effect, LocalPlayer player, IntentTaskRecord record) {
-        if (effect == null || effect == DeathDecisionEffect.NONE) return;
+        if (effect == null || effect == DeathDecisionEffect.NONE) return false;
         if (effect == DeathDecisionEffect.CANCEL_TASK) {
             boolean cancelled = record != null
                     && CompanionTickDispatcher.cancel(record.publicId());
@@ -267,10 +273,10 @@ public final class GameplayAttentionMonitor {
             data.addProperty("task_cancelled", cancelled);
             data.addProperty("respawn_requested", false);
             publish("agent.death_decision_applied",
-                    "The semantic task was cancelled; respawn remains a separate player decision.", data);
-            return;
+                    "The cancel_task decision was applied; respawn remains a separate player decision.", data);
+            return true;
         }
-        requestNativeRespawn(player, effect == DeathDecisionEffect.REQUEST_NATIVE_SPECTATE, false);
+        return requestNativeRespawn(player, effect == DeathDecisionEffect.REQUEST_NATIVE_SPECTATE, false);
     }
 
     // 先保存当前任务和此刻可见库存，再报告死亡；只有目标带自动重生要求且模式允许时才尝试自动请求。
@@ -302,8 +308,9 @@ public final class GameplayAttentionMonitor {
         data.addProperty("recover_after_death_requested", recoverRequested);
         data.addProperty("semantic_task_checkpointed", checkpointSaved);
         data.addProperty("checkpoint_save_failed", active != null && !checkpointSaved);
-        data.addProperty("requires_llm_decision", active != null && !autoAllowed);
-        data.addProperty("manual_respawn_required", active == null);
+        // 死亡恢复决策已不依赖任务宿主：没有活动任务时也挂出可应答的恢复态，等待的就只是答复。
+        data.addProperty("requires_llm_decision", !autoAllowed);
+        data.addProperty("manual_respawn_required", !nativeRespawnAvailable(player));
         data.addProperty("inventory_total_at_death", lastDeath.inventoryTotal());
         data.add("inventory_summary_at_death", inventorySummary(inventory));
         data.addProperty("item_recovery_started", false);
@@ -314,7 +321,18 @@ public final class GameplayAttentionMonitor {
         }
         publish("agent.died", "The agent died; semantic recovery state was captured for review.", data);
 
-        if (active == null) return;
+        if (active == null) {
+            if (!autoAllowed) {
+                // 没有任务承接决策（快任务完成后的死亡、被接管清场后的死亡）也必须挂出恢复态：
+                // 否则死亡屏幕上四个 MCP 入口无一能触达重生按钮，只能靠人点（issue 013 死锁变体）。
+                IntentTaskRecord host =
+                        runtime.openDeathRecoveryDecision(hardcore, spectator, deathDecisionContext());
+                lastDeath = new DeathSnapshot(host.externalId(), lastDeath.dimension(),
+                        lastDeath.position(), lastDeath.gameTime(), lastDeath.inventory(),
+                        lastDeath.inventoryTotal(), lastDeath.recoverAfterDeath());
+            }
+            return;
+        }
         if (autoAllowed) {
             if (active.pauseSnapshot() == null
                     && active.pause(player.level().getGameTime(), "death_respawning")) {
