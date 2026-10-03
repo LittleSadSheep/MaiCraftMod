@@ -48,6 +48,7 @@ public final class AcquisitionRecipePlanningTest {
             includeCookingInputsWithoutConversionLoops(world);
             batchAlternativesShareOneNearestSourceQuery(world);
             carriedJungleLogsPrepareToolsWithoutPreference(world);
+            reserveExistingGoalOutputs(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -55,6 +56,26 @@ public final class AcquisitionRecipePlanningTest {
             check(world.blockUses() == 0 && world.itemUses() == 0, "配方推演不得提前操作游戏");
         }
         System.out.println("AcquisitionRecipePlanningTest: passed");
+    }
+
+    private static void reserveExistingGoalOutputs(InteractionWorldTestHarness world) throws Exception {
+        // 用原生一换一配方复现链路/发信器转换：已有两件、目标三件，往返转换不能制造第三件。
+        world.inventory.clearContent();world.inventory.setItem(0,new ItemStack(Items.STICK,2));
+        var forward=new RecipeHolder<>(ResourceLocation.parse("test:stick_from_coal"),new ShapelessRecipe("",CraftingBookCategory.MISC,
+                new ItemStack(Items.STICK),NonNullList.of(Ingredient.EMPTY,Ingredient.of(Items.COAL))));
+        var reverse=new RecipeHolder<>(ResourceLocation.parse("test:coal_from_stick"),new ShapelessRecipe("",CraftingBookCategory.MISC,
+                new ItemStack(Items.COAL),NonNullList.of(Ingredient.EMPTY,Ingredient.of(Items.STICK))));
+        install(world,List.of(forward,reverse));
+        var stick=BuiltInRegistries.ITEM.getKey(Items.STICK);var coal=BuiltInRegistries.ITEM.getKey(Items.COAL);
+        var need=new AcquisitionNeed(List.of(stick),3,0,Set.of(stick),Set.of(),Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY,SemanticAcquireTaskRecord.Source.CRAFT));
+        var recipe=candidate(stick,"test:stick_from_coal",List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(coal),1,1)));
+        var planner=new AcquisitionRecipePlanner(world.player,false,16,List.of());
+        check(!planner.materialPlan(recipe,need).feasible(),"不能把已计入目标数量的成品消耗进往返转换循环");
+        check(world.inventory.getItem(0).getCount()==2,"补料推演不能消耗已有成品");
+        // 真正新增的转换原料可以继续做成第三件，不能因存在反向配方而禁止合法现货加工。
+        world.inventory.setItem(1,new ItemStack(Items.COAL));world.nextTick();
+        check(planner.materialPlan(recipe,need).feasible()&&planner.materialPlan(recipe,need).supplies().isEmpty(),"已有独立原料应允许完成原需求");
     }
 
     private static void carriedJungleLogsPrepareToolsWithoutPreference(InteractionWorldTestHarness world) throws Exception {

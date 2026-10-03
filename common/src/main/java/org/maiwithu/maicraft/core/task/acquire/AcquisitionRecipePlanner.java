@@ -384,6 +384,9 @@ final class AcquisitionRecipePlanner {
             Map<ResourceLocation, Long> pool = new HashMap<>(recipeCarriedStock);
             recipeObservedStock.forEach((id, amount) -> pool.merge(id, amount,
                     (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b));
+            // 最终数量已包含的成品不是免费前置材料：缺第三个链路时不能把已有两个改成发信器再换回来。
+            // 这里只预留当前需求的成品；采木前制作工具仍可使用祖先需求中已有的原木。
+            pool.keySet().removeAll(parent.itemIds);
             return RecipeMaterialPlan.estimate(ingredients, pool, item -> processRecipes(item, parent),
                     item -> sourceCost(item, parent), parent.lineageItems, unavailable, preferredMaterials);
         });
