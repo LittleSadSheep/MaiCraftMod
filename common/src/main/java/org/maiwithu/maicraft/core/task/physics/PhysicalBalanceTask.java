@@ -90,7 +90,7 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
                     r.parameters.controls(),r.parameters.limits());
             out.add("recommendation",gson.toJsonTree(recommendation));
             var patch=new JsonArray();
-            for(var placement:recommendation.placements()) {
+            for(var placement:recommendation.proposedBallast()) {
                 var cell=new JsonObject();var position=new JsonObject();
                 position.addProperty("x",(int)Math.floor(placement.point().x()));position.addProperty("y",(int)Math.floor(placement.point().y()));
                 position.addProperty("z",(int)Math.floor(placement.point().z()));cell.add("position",position);cell.addProperty("block_id",placement.blockId());patch.add(cell);

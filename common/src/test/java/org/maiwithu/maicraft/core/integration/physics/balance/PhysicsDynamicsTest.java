@@ -2,6 +2,8 @@ package org.maiwithu.maicraft.core.integration.physics.balance;
 
 import java.util.List;
 import java.util.Map;
+import com.google.gson.Gson;
+import org.maiwithu.maicraft.intent.SemanticResultView;
 import static org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBalanceRegression.*;
 
 /** 运行时能托住船体却无法停机的设计必须被识别；配重建议同时接受关桨与开桨检验。 */
@@ -28,7 +30,12 @@ final class PhysicsDynamicsTest {
         var trim = PhysicsTrim.recommend(vessel(List.of(heavyLift)),
                 List.of(new PhysicsTrim.Ballast("starboard", "minecraft:iron_block", v(6, -2, 0), 2, 1)),
                 1, Map.of(), limits);
-        check(trim.placements().size() == 1 && trim.validation().predictedBalanced(), "配重应同时补足质量并对齐浮力作用线");
+        check(trim.proposedBallast().size() == 1 && trim.validation().predictedBalanced(), "配重应同时补足质量并对齐浮力作用线");
+        // 配重是供模型评估的语义方案，不应被旧的内部放置脚本字段过滤掉材料、作用点或质量。
+        var gson=new Gson();var visible=gson.toJsonTree(SemanticResultView.data(Map.of("recommendation",gson.toJsonTree(trim)))).getAsJsonObject();
+        var proposed=visible.getAsJsonObject("recommendation").getAsJsonArray("proposedBallast");
+        check(proposed!=null&&proposed.size()==1&&proposed.get(0).getAsJsonObject().get("mass").getAsDouble()==2
+                &&proposed.get(0).getAsJsonObject().getAsJsonObject("point").get("x").getAsDouble()==6,"对外回执丢失配重候选细节");
         check(trim.afterScore() < trim.beforeScore(), "推荐应改善两个工况的最差偏差");
         var cruisePropeller=new PhysicsBody.Load("cruise","propulsion",v(0,0,0),v(100,0,0),PhysicsVector.ZERO,
                 PhysicsBody.Frame.BODY,true,0,10);
