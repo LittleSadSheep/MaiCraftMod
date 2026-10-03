@@ -228,6 +228,8 @@ public final class NavigationRegressionSuite {
         ElevatorExitReplanTest.main(args);
         ElevatorRemoteStagingTest.main(args);
         LandingAssistTest.main(args);
+        // 放置射线反复失配时按候选顺序降级，不把坠落时间烧在同一个对不上的方案上。
+        org.maiwithu.maicraft.core.pathing.baritone.landing.LandingCandidateDegradeTest.main(args);
         BoatLandingAssistTest.main(args);
         BoatCatchReplayTest.main(args);
         NativeConfirmationTest.main(args);

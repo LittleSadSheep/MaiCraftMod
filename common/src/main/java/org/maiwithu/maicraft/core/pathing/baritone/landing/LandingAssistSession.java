@@ -67,6 +67,11 @@ public final class LandingAssistSession {
     private String detail = "prepare before leaving the supporting edge";
     private String placementGate = "preparing_material";
     private long startedTick = Long.MIN_VALUE, materialReadyTick = Long.MIN_VALUE;
+    /** 放置射线连续对不上的刻数；超过预算就降到下一个候选，坠落中每一刻都不可再生。 */
+    private int placementMismatchTicks;
+    private static final int PLACEMENT_MISMATCH_DEGRADE_TICKS = 6;
+    /** 当前方案在候选列表中的位置；降级只向后走，不回访已放弃的方案。 */
+    private int degradeCursor;
     private int actionTicksAtStart = -1;
     private double initialDrop, initialDownwardSpeed;
     private Map<String,String> rejectedCandidates = Map.of();
@@ -144,10 +149,17 @@ public final class LandingAssistSession {
     }
     private void bindMaterial(LandingAssistPlan selected) {
         if (selected.kind()==LandingAssistPlan.Kind.BOAT) {
-            plan=selected; preparation=null; materialBound=true; boat=new LandingBoatRescue(selected,airborneObserved); return;
+            plan=selected; preparation=null; materialBound=true; boat=new LandingBoatRescue(selected,airborneObserved);
         }
-        plan = selected; preparation = selected.existing() ? null : new LandingPreparation(selected.kind().item);
-        materialBound = true;
+        else {
+            plan = selected; preparation = selected.existing() ? null : new LandingPreparation(selected.kind().item);
+            materialBound = true;
+        }
+        // 降级游标同步到刚绑定的候选：之后的换方案只考虑列表中更靠后的选项。
+        if (automaticCandidates != null) {
+            int index = automaticCandidates.indexOf(selected);
+            if (index >= 0) degradeCursor = index;
+        }
     }
     private int remainingActionTicks(LocalPlayerContext context) {
         if (context.player().onGround()) return Integer.MAX_VALUE;
@@ -353,8 +365,15 @@ public final class LandingAssistSession {
         }
         BlockHitResult hit = trace(context, false);
         if (plan.kind() == LandingAssistPlan.Kind.WATER) {
-            if (!acceptWaterHit(context,hit)) { placementGate = "native_bucket_target_mismatch"; return; }
-        } else if (!matchesPlacement(hit)) { placementGate = "native_ray_not_on_placement_face"; return; }
+            if (!acceptWaterHit(context,hit)) {
+                if (degradeAfterRepeatedMismatch(context)) return;
+                placementGate = "native_bucket_target_mismatch"; return;
+            }
+        } else if (!matchesPlacement(hit)) {
+            if (degradeAfterRepeatedMismatch(context)) return;
+            placementGate = "native_ray_not_on_placement_face"; return;
+        }
+        placementMismatchTicks = 0;
         InteractionHand hand = preparation.hand();
         if (!context.player().getItemInHand(hand).is(plan.kind().item)) { fail("prepared landing item left the selected hand"); return; }
         int count = context.player().getItemInHand(hand).getCount();
@@ -648,6 +667,38 @@ public final class LandingAssistSession {
     private boolean survivesHay(LocalPlayerContext context) {
         return plan.kind() != LandingAssistPlan.Kind.HAY
                 || plan.survives(FallDamageBudget.capture(context.player()), context.player().getY(), true);
+    }
+    /**
+     * 放置射线连续多刻对不上时，按候选顺序换到下一个可立即执行的方案；
+     * 坠落时间不可再生，同一格上反复瞄准只会以触地失败收场（issue 039）。
+     * 只接受已有格或已携带材料的候选，中途不再发起补料；没有可换方案时保持原行为。
+     */
+    private boolean degradeAfterRepeatedMismatch(LocalPlayerContext context) {
+        if (automaticCandidates == null) return false;
+        if (++placementMismatchTicks < PLACEMENT_MISMATCH_DEGRADE_TICKS) return false;
+        for (int i = degradeCursor + 1; i < automaticCandidates.size(); i++) {
+            LandingAssistPlan candidate = automaticCandidates.get(i);
+            if (candidate.kind() == LandingAssistPlan.Kind.BOAT) {
+                if (LandingBoatRescue.carried(context.player()) != null) { rebindCandidate(candidate); return true; }
+                continue;
+            }
+            boolean carried = IntStream.range(0, context.player().getInventory().getContainerSize())
+                    .anyMatch(j -> context.player().getInventory().getItem(j).is(candidate.kind().item));
+            if (candidate.existing() || carried) { rebindCandidate(candidate); return true; }
+        }
+        return false;
+    }
+    private void rebindCandidate(LandingAssistPlan selected) {
+        materialSupply = null;
+        bindMaterial(selected);
+        // 接触证据属于被放弃的旧方案；新方案必须自己证明水流接触或干草支撑。
+        waterContactObserved = false;
+        hayContactObserved = false;
+        stableTicks = 0;
+        placementMismatchTicks = 0;
+        landingChanges++;
+        placementGate = "degraded_to_next_landing_candidate";
+        detail = "repeated placement aim mismatch; steering to the next landing candidate";
     }
     // 干草允许记录减伤后的存活；其他方式要求没有观察到生命损失，水还必须观察到实际接触水并清零摔落距离。
     private void finish(String outcome) {
