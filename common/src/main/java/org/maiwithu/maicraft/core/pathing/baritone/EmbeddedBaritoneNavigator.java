@@ -94,6 +94,7 @@ public final class EmbeddedBaritoneNavigator {
     private Map<String, Object> dispatchRecovery = Map.of();
     private Map<String, Object> probeRecovery = Map.of();
     private int probeRestarts;
+    private NavigationDismount dismount;
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -218,7 +219,16 @@ public final class EmbeddedBaritoneNavigator {
         if (reached.getAsBoolean()) return arriveWhenSafe();
         // 原任务重新得到调度后才恢复驱动；暂停期间若运行器已被防卫使用，会通过started=false重新取得路线。
         runtimeSuspended = false;
-        if (player.isPassenger()) player.stopRiding();
+        // 配置载具后再走路时，先由服务器确认原生下车；仅改本地乘坐状态会让下次入座被服务器拒绝。
+        if (player.isPassenger() || dismount != null) {
+            if (dismount == null) { EmbeddedBaritoneRuntime.suspend(this); dismount = new NavigationDismount(); }
+            driveRequested = false;
+            var state = dismount.tick(ClientRuntime.requireContext(player));
+            if (state == NavigationDismount.State.FAILED)
+                return failWhenSafe(FailureType.UNKNOWN, "native_dismount_unconfirmed: " + dismount.detail());
+            if (state == NavigationDismount.State.WAITING) return PlayerNav.Status.RUNNING;
+            dismount = null;
+        }
 
         // 每次重新取目标要求；位置、半径或保护条件变化时，需要更新路线，不能只比较对象是不是同一个。
         GoalCompiler.Compiled fresh = compiledSupplier.get();
@@ -451,6 +461,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private PlayerNav.Status arrive() {
+        clearDismount();
         cancelTerrainProbe();
         pendingPause = false;
         arrivedLatched = true;
@@ -461,6 +472,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private PlayerNav.Status fail(FailureType type, String reason) {
+        clearDismount();
         healthDiagnostics(); // 退役共享运行器前冻结搜索与恢复证据，后续任务不能覆盖本次失败现场。
         cancelTerrainProbe();
         failureType = type;
@@ -647,6 +659,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public String outcomeSummary() {
+        if (dismount != null) return "native_dismount=" + dismount.detail();
         if (events.isEmpty()) return "baritone_events={}; dispatch=" + dispatchEvidence + "; health=" + healthDiagnostics();
         StringBuilder out = new StringBuilder("baritone_events={");
         boolean first = true;
@@ -677,6 +690,7 @@ public final class EmbeddedBaritoneNavigator {
 
     /** 玩家手动接管时丢弃本地规划，但不提交原生世界动作。 */
     public void abandon() {
+        clearDismount();
         cancelTerrainProbe();
         stopped = true; terminalFailure = true; driveRequested = false;
         pendingPause = false; pendingFailureType = null;
@@ -696,6 +710,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     private void completePause() {
+        clearDismount();
         // 此任务挂起期间，另一个第一人称行为可能改变世界。诊断 A* 绑定失败路线的冻结区块视图，
         // 因此恢复时应丢弃旧结果并重新检查，不能报告过时地形证据。
         cancelTerrainProbe();
@@ -713,5 +728,9 @@ public final class EmbeddedBaritoneNavigator {
         if (!isSafeToCancel()) return false;
         var context = ClientRuntime.requireContext(player);
         return context.permitsNativeActions() && context.mutationAvailable();
+    }
+
+    private void clearDismount() {
+        if (dismount != null) { dismount.cancel(player); dismount = null; }
     }
 }

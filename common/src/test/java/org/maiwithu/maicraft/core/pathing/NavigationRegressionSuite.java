@@ -56,6 +56,7 @@ import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgressTest;
 import org.maiwithu.maicraft.task.ProgressBudgetTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
+import org.maiwithu.maicraft.core.pathing.baritone.NavigationDismountTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationPolicySnapshotTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest;
@@ -245,6 +246,7 @@ public final class NavigationRegressionSuite {
         ClientSurfaceHeightTest.main(args);
         AcquisitionProtectionTest.main(args);
         NavigationPolicySnapshotTest.main(args);
+        NavigationDismountTest.main(args);
         System.out.println("NavigationRegressionSuite: passed");
     }
 }
