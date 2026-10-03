@@ -15,6 +15,7 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -260,11 +261,23 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         InteractionHand usedHand;
         Consumer<Player> itemUse, itemRelease;
         Runnable beforeBlockUse;
+        Consumer<BlockPos> breaking;
+        int breakStarts;
         boolean inventoryClicks, synchronizedClicks;
         boolean craftingClicks;
         Runnable afterCraftingClick;
         int menuClicks;
         private UseMode() { super(null, null); }
+        // 丢弃侧袋与扑火回放只注入原生破坏后观察到的方块变化，正式执行仍由真实 gameMode 操作世界。
+        @Override public boolean startDestroyBlock(BlockPos pos, Direction side) {
+            if (breaking == null) return super.startDestroyBlock(pos, side);
+            breakStarts++; breaking.accept(pos); return true;
+        }
+        @Override public boolean continueDestroyBlock(BlockPos pos, Direction side) {
+            if (breaking == null) return super.continueDestroyBlock(pos, side);
+            breaking.accept(pos); return true;
+        }
+        @Override public void stopDestroyBlock() { if (breaking == null) super.stopDestroyBlock(); }
         // 配方请求只记次数；具体槽位分包同步由合成测试推进，不能在这里提前生成产物。
         @Override public void handlePlaceRecipe(int containerId, RecipeHolder<?> recipe, boolean shift) { recipePlacements++; }
         @Override public void handleInventoryMouseClick(int containerId, int slot, int button, ClickType type, Player player) {
