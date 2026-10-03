@@ -113,8 +113,13 @@ final class NativePhysicalControl {
             out.put("overstressed",NativeApi.call(entity,null,"isOverStressed"));
             out.put("supported_operations",List.of("inspect","set_speed"));
         } else if(NativeApi.is(entity,PROPELLER)) {
-            out.put("assembled",NativeApi.call(entity,null,"isRunning"));
-            out.put("actual_rpm",NativeApi.call(entity,null,"getSpeed"));
+            boolean assembled=NativeApi.truth(NativeApi.call(entity,null,"isRunning"));
+            double rpm=((Number)NativeApi.call(entity,null,"getSpeed")).doubleValue();
+            out.put("assembled",assembled);out.put("actual_rpm",rpm);
+            out.put("overstressed",NativeApi.call(entity,null,"isOverStressed"));
+            out.put("rotor",NativePropellerState.capture(entity,assembled));
+            // 原生机械轴承在零转速时只接受右键而不成型；说明当前事实，不据此阻止已授权的尝试。
+            if(!assembled&&rpm==0)out.put("assembly_observation","native bearing requires nonzero kinetic speed to assemble");
             out.put("rotation_speed",NativeApi.call(entity,null,"getRotationSpeed"));
             Object failure=NativeApi.call(entity,null,"getLastAssemblyException");
             if(failure!=null)out.put("assembly_error",((Component)NativeApi.field(failure,null,"component")).getString());

@@ -28,6 +28,8 @@ Offroad 轮座使用 Create 压路机物品的放置规则：初始放置格下�
 
 `assemble_propeller`、`disassemble_propeller` 对螺旋桨轴承或陀螺螺旋桨轴承执行空手右键，不需要 `value`。前者成型桨叶，后者使用原生减速拆回。两者先在停稳船体上配置。检查 `assembled`、`assembly_error` 和 `requested_propeller_state_observed`；右键已确认但未成型时保留原生结果及整机差异，由模型调整设计。转子运行后，其桨叶可能已进入独立运动装置，原结构声明中缺格与飞行功能验证须分别解释。
 
+原生机械轴承在零转速时不会成型；先提供实际动力，并核对 `actual_rpm` 和 `overstressed`。不会因这个预测提前禁止右键。成型后的 `rotor.blocks` 返回原生转子的全部成员与相对其锚点的坐标，`entity_uuid` 标识对应运动装置；同步尚未到达会明确返回等待状态。结合这些成员解释世界或船体声明中的缺格，不能仅凭 `assembled=true` 认定所有设计桨叶都已连接。
+
 | operation | 行为 |
 | --- | --- |
 | analyze | 读取服务端原生质量、惯量、作用点力和力偶，并计算起飞前工况 |

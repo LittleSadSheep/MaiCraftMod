@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.core.task.physics.AssemblyWorldDesignStoreTest;
 import org.maiwithu.maicraft.intent.PhysicalAssemblyContractTest;
 import org.maiwithu.maicraft.intent.PhysicalControlContractTest;
 import org.maiwithu.maicraft.core.task.physics.NativeBurnerDialTest;
+import org.maiwithu.maicraft.core.task.physics.NativePropellerStateTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureLookDirectionTest;
 import org.maiwithu.maicraft.core.task.physics.BondMaterialSettlementTest;
 import org.maiwithu.maicraft.core.task.physics.StructureWrenchPlanTest;
@@ -66,6 +67,7 @@ public final class PhysicsBalanceRegression {
         PhysicalAssemblyContractTest.run();
         PhysicalControlContractTest.run();
         NativeBurnerDialTest.run();
+        NativePropellerStateTest.run();
         StructureLookDirectionTest.run();
         BondMaterialSettlementTest.run();
         StructureWrenchPlanTest.run();
