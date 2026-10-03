@@ -97,8 +97,19 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     /** 公开取物未指定半径时，采矿覆盖当前有效视距内的已加载区块；其他附近来源仍沿用各自半径。 */
     public boolean miningUsesLoadedView;
 
+    /**
+     * 公平扫描空手后允许「下降到已知生成带 + 掘进找矿」。授权只有模型显式给出这一项；
+     * 下降深度、矿道几何与预算全部内部固定，不做成参数。表外物品探矿如实拒绝。
+     */
+    public boolean allowProspecting;
+
     public SemanticAcquireTaskRecord withLoadedMiningView(boolean enabled) {
         miningUsesLoadedView = enabled;
+        return this;
+    }
+
+    public SemanticAcquireTaskRecord withProspecting(boolean enabled) {
+        allowProspecting = enabled;
         return this;
     }
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */

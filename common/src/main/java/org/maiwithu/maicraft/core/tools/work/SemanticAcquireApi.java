@@ -31,7 +31,7 @@ public final class SemanticAcquireApi {
     private static final long MIN_INITIAL_LEASE_TICKS = 3L * 60L * 20L;
     private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
     private static final Set<String> PARAMETERS = Set.of("item_id", "item_ids", "item_tag", "item_tags",
-            "count", "allowed_sources", "allow_harm", "source_hint", "protected_labels", "radius", "preferred_materials");
+            "count", "allowed_sources", "allow_harm", "allow_prospecting", "source_hint", "protected_labels", "radius", "preferred_materials");
     private static final Set<String> HINT_FIELDS = Set.of("block_ids", "block_tags", "entity_type_ids",
             "expected_item_ids", "trade_profession_ids", "description");
 
@@ -55,6 +55,7 @@ public final class SemanticAcquireApi {
         integer(args, "count", 1, 1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT);
         integer(args, "radius", SemanticAcquireTaskRecord.DEFAULT_RADIUS, 1, SemanticAcquireTaskRecord.MAX_RADIUS);
         bool(args, "allow_harm", false);
+        bool(args, "allow_prospecting", false);
         for (String source : strings(args.get("allowed_sources"), "allowed_sources"))
             SemanticAcquireTaskRecord.Source.parse(source);
         strings(args.get("protected_labels"), "protected_labels");
@@ -134,6 +135,11 @@ public final class SemanticAcquireApi {
 
         long ticks = Math.clamp(2L * 60L * 20L + (long) count * 80L,
                 MIN_INITIAL_LEASE_TICKS, MAX_INITIAL_LEASE_TICKS);
+        boolean allowProspecting = bool(args, "allow_prospecting", false);
+        if (allowProspecting) {
+            // 探矿包含下降与掘进，数量满足前可能长时间没有库存增量；初始期限要覆盖整个探矿预算。
+            ticks = Math.max(ticks, 15L * 60L * 20L);
+        }
         boolean huntAllowed = allowHarm && (sources.isEmpty()
                 || sources.contains(SemanticAcquireTaskRecord.Source.HUNT));
         if (huntAllowed) {
@@ -145,6 +151,7 @@ public final class SemanticAcquireApi {
                 sources, allowHarm, hint, protectedLabels, radius, args.has("radius") ? radius : ContainerSearchScope.MAX_RADIUS)
                 .captureStorageOrigin(player)
                 .withLoadedMiningView(!args.has("radius") || args.get("radius").isJsonNull())
+                .withProspecting(allowProspecting)
                 .withPreferredMaterials(resourceIds(args.get("preferred_materials"), "preferred_materials", true));
     }
 

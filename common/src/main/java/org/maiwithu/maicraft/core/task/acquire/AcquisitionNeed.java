@@ -60,6 +60,11 @@ final class AcquisitionNeed {
     /** mine 子任务如实报了采区耗尽（mined_out）；父层汇总终态时据此保真失败类型，不再压回 no_material。 */
     boolean mineChildMinedOut;
 
+    /** 探矿编排阶段：公平空手 + 授权后先下降到生成带，再派掘进采矿；每个需求只走一轮。 */
+    boolean prospectingDescendStarted;
+    boolean prospectingMineStarted;
+    int prospectingY;
+
     AcquisitionNeed(
             List<ResourceLocation> itemIds,
             int requiredFinalCount,
