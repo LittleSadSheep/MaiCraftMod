@@ -86,7 +86,10 @@ public final class VehicleFeedbackPilot {
             }
             case SETTLE -> {
                 if(stable>=8) {
-                    if(++probeIndex<probes.size()) transition(Phase.PROBE);
+                    // 每次恢复中性并停稳后再选下一档；已经测到同方向推进时保留低档，避免为校准继续猛踩油门。
+                    probeIndex++;
+                    while(probeIndex<probes.size()&&responseKnown(probes.get(probeIndex)))probeIndex++;
+                    if(probeIndex<probes.size()) transition(Phase.PROBE);
                     else if(propulsion==null) stop("no propulsion response was observed for the connected controls");
                     else transition(Phase.DRIVE);
                 } else if(tick-phaseTick>80) stop("neutral control response did not settle after calibration");
@@ -108,6 +111,14 @@ public final class VehicleFeedbackPilot {
         }
     }
     public void stop(String reason) { if(failure.isEmpty()) failure=reason; if(!terminal() && phase!=Phase.BRAKE) transition(Phase.BRAKE); }
+    private boolean responseKnown(Probe probe) {
+        if(!probe.input().propulsion())return false;
+        double delta=probe.value()-probe.input().neutral();
+        return responses.stream().anyMatch(r->r.propulsion()&&r.input().equals(probe.input().id())
+                &&r.localVelocity().horizontalDistance()>.003
+                &&Math.signum(r.value()-probe.input().neutral())==Math.signum(delta)
+                &&Math.abs(r.value()-probe.input().neutral())<Math.abs(delta));
+    }
     public void cancel() { cancelled=true; stop("driving cancelled; neutral controls requested"); }
     private boolean near(Vec3 point) { return point.subtract(destination).horizontalDistance()<=3 && Math.abs(point.y-destination.y)<=3; }
     private void transition(Phase next) { phase=next; phaseTick=-1; stable=0; }

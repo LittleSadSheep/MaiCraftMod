@@ -1,15 +1,17 @@
 package org.maiwithu.maicraft.core.integration.machine.control;
 
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.List;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.actor.*;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
-import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.task.physics.PhysicalStructureApproach;
 
 /** 座位确认和原生控制共用一个可取消的交通工具租约。 */
@@ -27,6 +29,7 @@ public final class VehicleDriveSession implements TransportSession {
     private long started=-1;
     private Vec3 previous;
     private VehicleCircuitGuard circuitGuard;
+    private Map<String,Object> obstruction=Map.of();
     public VehicleDriveSession(MachineControlInspection.Observation observation,VehicleControlPlan plan,DriverStation station,Vec3 target) {
         this.observation=observation; this.plan=plan; this.station=station;
         controls=new NativeVehicleControls(observation,plan); pilot=new VehicleFeedbackPilot(plan,target);
@@ -85,7 +88,9 @@ public final class VehicleDriveSession implements TransportSession {
         Vec3 delta=previous==null ? Vec3.ZERO:position.subtract(previous); previous=position;
         Vec3 up=structure.pose().normalToWorld(new Vec3(0,1,0));
         if(up.y<.7) pilot.stop("structure tilt exceeds the current controller's observed stability range");
-        if(delta.lengthSqr()>.00001 && !clearAhead(ctx,structure,delta)) pilot.stop("vehicle path is obstructed or unobserved");
+        // 上车引起的悬挂沉降先由中性工况消散；推进校准开始后再外推行驶碰撞，不能把沉降误作驶向地面的路线。
+        if(pilot.phase()!=VehicleFeedbackPilot.Phase.BASELINE&&delta.lengthSqr()>.00001 && !clearAhead(ctx,structure,delta))
+            pilot.stop("vehicle path is obstructed or unobserved");
         Vec3 forward=structure.pose().normalToWorld(new Vec3(0,0,1));
         boolean applied=controls.apply(ctx,structure,pilot.command());
         pilot.observe(ctx.tickRevision(),new VehicleFeedbackPilot.Sample(position,Math.atan2(forward.x,forward.z)),applied);
@@ -93,11 +98,25 @@ public final class VehicleDriveSession implements TransportSession {
         return Result.running(phase());
     }
     private boolean clearAhead(LocalPlayerContext ctx,SableStructureBridge.Structure structure,Vec3 delta) {
-        if(structure.worldBounds()==null) return false;
+        if(structure.worldBounds()==null){obstruction=Map.of("reason","structure_bounds_unavailable");return false;}
+        if(!Double.isFinite(delta.lengthSqr())||delta.lengthSqr()>1) {
+            obstruction=Map.of("reason","motion_exceeds_local_corridor","motion_delta",List.of(delta.x,delta.y,delta.z));return false;
+        }
         var next=structure.worldBounds().expandTowards(delta.scale(12)).deflate(.08);
-        return ctx.level().hasChunksAt(BlockPos.containing(next.minX,next.minY,next.minZ),
-                BlockPos.containing(next.maxX,next.maxY,next.maxZ)) && ctx.level().noCollision(ctx.player(),next);
+        // 按实际客户端区块缓存检查整段路线，避免 ClientLevel 的宽松区块接口把未知地形当成空气。
+        for(int x=(int)Math.floor(next.minX)>>4;x<=((int)Math.floor(next.maxX)>>4);x++)
+            for(int z=(int)Math.floor(next.minZ)>>4;z<=((int)Math.floor(next.maxZ)>>4);z++)
+                if(!ctx.level().getChunkSource().hasChunk(x,z)){obstruction=Map.of("reason","unloaded","chunk",List.of(x,z));return false;}
+        if(ctx.level().noCollision(ctx.player(),next))return true;
+        // 记录触发停车的真实查询范围及第一个原生阻挡形状，模型才能区分施工脚手架、地面与未知实体阻挡。
+        var facts=new LinkedHashMap<String,Object>();
+        facts.put("reason","native_collision");facts.put("swept_bounds",bounds(next));facts.put("motion_delta",List.of(delta.x,delta.y,delta.z));
+        for(var shape:ctx.level().getBlockCollisions(ctx.player(),next))if(!shape.isEmpty()) {
+            facts.put("first_block_collision_bounds",bounds(shape.bounds()));break;
+        }
+        obstruction=Map.copyOf(facts);return false;
     }
+    private static List<Double> bounds(AABB box){return List.of(box.minX,box.minY,box.minZ,box.maxX,box.maxY,box.maxZ);}
     private Result finish(boolean success,String code,String detail,boolean uncertain) {
         hand.reset();
         controls.releaseGestures();
@@ -116,6 +135,7 @@ public final class VehicleDriveSession implements TransportSession {
     @Override public String phase() { return !seated ? "boarding_driver_seat":pilot.phase().name().toLowerCase(); }
     @Override public Map<String,Object> diagnostics() {
         return Map.of("structure_id",observation.structureId().toString(),"driver_seat",station.seat().toShortString(),
-                "seat_confirmed",seated,"phase",phase(),"control_inputs",plan.inputs(),"applied",controls.applied(),"motion",pilot.diagnostics());
+                "seat_confirmed",seated,"phase",phase(),"control_inputs",plan.inputs(),"applied",controls.applied(),"motion",pilot.diagnostics(),
+                "native_control_effects",controls.effects(),"obstruction",obstruction);
     }
 }

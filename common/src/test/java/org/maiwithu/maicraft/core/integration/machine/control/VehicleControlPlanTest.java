@@ -9,8 +9,9 @@ public final class VehicleControlPlanTest {
         var analog=circuit(THROTTLE,false);
         var plan=VehicleControlPlan.compile(analog);
         check(plan.usable(),"known analog disconnect circuit should compile");
-        check(plan.inputs().getFirst().neutral()==15 && plan.inputs().getFirst().probes().equals(List.of(13.0)),
-                "analog transmission neutral is high, with a low amplitude test toward drive");
+        // 先用小幅度松刹车，弱响应时才逐步增加；各档都仍在原生信号范围内。
+        check(plan.inputs().getFirst().neutral()==15 && plan.inputs().getFirst().probes().equals(List.of(13.0,11.0,7.0,0.0)),
+                "analog transmission starts with a low amplitude probe and retains bounded stronger alternatives");
         check(!VehicleControlPlan.compile(circuit(KEY,false)).usable(),"held-to-stop key cannot be safely released without an independent stop");
         var inverted=VehicleControlPlan.compile(circuit(KEY,true));
         check(inverted.usable() && inverted.inputs().getFirst().neutral()==0,"trace torch inversion to a safe release-to-stop key");

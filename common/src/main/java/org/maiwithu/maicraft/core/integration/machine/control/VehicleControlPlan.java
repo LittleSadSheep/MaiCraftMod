@@ -14,10 +14,13 @@ public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
         public double clamp(double value) { return Math.clamp(value,minimum,maximum); }
         public List<Double> probes() {
             if(kind==KEY) return List.of(1-neutral);
-            double step=kind==THROTTLE ? 2 : Math.min(15,maximum);
             var values=new ArrayList<Double>();
-            if(neutral-step>=minimum) values.add(neutral-step);
-            if(neutral+step<=maximum) values.add(neutral+step);
+            // 满刹车附近两档可能还不足以带动重车；逐级试探，每档之间停稳，已有响应的方向不再加大输入。
+            var steps=kind==THROTTLE&&propulsion?List.of(2.0,4.0,8.0,15.0):List.of(kind==THROTTLE?2.0:Math.min(15,maximum));
+            for(double step:steps) {
+                if(neutral-step>=minimum) values.add(neutral-step);
+                if(neutral+step<=maximum) values.add(neutral+step);
+            }
             return values;
         }
     }

@@ -2,6 +2,8 @@ package org.maiwithu.maicraft.core.integration.machine.control;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -22,6 +24,7 @@ public final class NativeVehicleControls {
     private final MachineControlInspection.Observation observation;
     private final VehicleControlPlan plan;
     private final Map<String,Double> applied=new LinkedHashMap<>();
+    private final List<Map<String,Object>> effects=new ArrayList<>();
     private final Map<BlockPos,Boolean> typewriters=new LinkedHashMap<>();
     private final Set<String> submitted=new LinkedHashSet<>();
     private NativeActionReceipt receipt;
@@ -108,7 +111,12 @@ public final class NativeVehicleControls {
         if(completed.status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             uncertain=true; pendingId=null; throw new IllegalStateException("vehicle input unconfirmed: "+completed.detail());
         }
-        if(pendingId!=null) { applied.put(pendingId,pendingValue); pendingId=null; }
+        if(pendingId!=null) {
+            // 停车会清理临时按键缓存，但每次已确认的油门或方向输入都保留，不能让最终回执丢失驾驶证据。
+            effects.add(Map.of("control",pendingId,"value",pendingValue,"observed_tick",ctx.tickRevision(),
+                    "native_status",completed.status().name(),"confirmation_detail",completed.detail()));
+            applied.put(pendingId,pendingValue); pendingId=null;
+        }
         return true;
     }
     private static boolean aim(LocalPlayerContext ctx,SableStructureBridge.Structure structure,BlockPos pos) {
@@ -160,4 +168,5 @@ public final class NativeVehicleControls {
     public boolean changed() { return changed; }
     public boolean uncertain() { return uncertain; }
     public Map<String,Double> applied() { return Map.copyOf(applied); }
+    public List<Map<String,Object>> effects() { return List.copyOf(effects); }
 }

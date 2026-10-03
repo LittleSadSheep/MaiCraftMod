@@ -18,6 +18,16 @@ public final class VehicleFeedbackPilotTest {
         var pending=new VehicleFeedbackPilot(plan,new Vec3(0,0,10));
         for(int tick=0;tick<60;tick++) pending.observe(tick,new VehicleFeedbackPilot.Sample(Vec3.ZERO,0),false);
         check(pending.phase()==VehicleFeedbackPilot.Phase.BASELINE,"unconfirmed inputs cannot advance calibration");
+        // 重车在轻微松刹车时几乎不动，允许下一档测出响应，但不能在测出低档响应后继续试探全油门。
+        var weak=new VehicleFeedbackPilot(new VehicleControlPlan(List.of(drive),List.of()),new Vec3(0,0,6));
+        Vec3 weakAt=Vec3.ZERO;double minimumSignal=15;
+        for(int tick=0;tick<1000&&!weak.terminal();tick++) {
+            double signal=weak.command().get("unfamiliar_control");minimumSignal=Math.min(minimumSignal,signal);
+            weakAt=weakAt.add(0,0,Math.max(0,13-signal)*.025);
+            weak.observe(tick,new VehicleFeedbackPilot.Sample(weakAt,0),true);
+        }
+        check(weak.succeeded()&&minimumSignal==11,"weak initial response must escalate once, then retain the proven low-power drive");
+        check(weak.command().get("unfamiliar_control")==15,"arrival must restore persistent full brake");
         var spinning=new VehicleFeedbackPilot(plan,new Vec3(0,0,1));
         for(int tick=0;tick<500&&!spinning.terminal();tick++) spinning.observe(tick,new VehicleFeedbackPilot.Sample(Vec3.ZERO,tick*.05),true);
         check(spinning.terminal()&&!spinning.succeeded(),"a rotating hull is not a stopped arrival");
