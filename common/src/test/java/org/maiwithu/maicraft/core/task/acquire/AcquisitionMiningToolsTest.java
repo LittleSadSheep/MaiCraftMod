@@ -20,6 +20,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord.Source;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
@@ -78,7 +79,18 @@ public final class AcquisitionMiningToolsTest {
             invoke(task, "attemptMine", needs.peek());
             assertMining(task, 8, false);
             check(needs.size() == 1, "续采不能再次创建缺料石斧需求");
+            // 配方已部分加工后失效也只结束这次效率准备，不把材料变动升级成原采集任务失败。
+            world.inventory.setItem(0, new ItemStack(Items.BIRCH_LOG, 3));
+            var changed = start(world, "birch_log", 8);
+            var changedNeeds = (Deque<?>) field(changed, "needs");
+            ((AcquisitionNeed) changedNeeds.peek()).effectsObserved = true;
+            var fail = changed.getClass().getDeclaredMethod("failAcquisition", String.class, String.class, FailureType.class);
+            fail.setAccessible(true);
+            check(fail.invoke(changed, "committed_recipe_unavailable", "材料已变动", FailureType.NO_MATERIAL) == TaskState.RUNNING,
+                    "已承诺的效率配方失效也应返回原采集");
+            invoke(changed, "attemptMine", (AcquisitionNeed) changedNeeds.peek()); assertMining(changed, 5, false);
             // 木镐取得三块圆石后，即使还只缺一块也应先准备石镐，再继续开采。
+            world.inventory.clearContent();
             world.inventory.setItem(0, new ItemStack(Items.WOODEN_PICKAXE));
             assertMining(start(world, "cobblestone", 4), 3, true);
             world.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 3));

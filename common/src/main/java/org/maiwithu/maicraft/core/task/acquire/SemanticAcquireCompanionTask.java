@@ -1758,6 +1758,24 @@ public final class SemanticAcquireCompanionTask
         return value instanceof Number number && number.intValue() > 0;
     }
 
+    /** 工具只是效率准备时，已确认的备料效果保留在回执；缺料可以回到原任务，未知消费和真正许可边界仍须先结清。 */
+    private boolean resumeAfterOptionalToolFailure() {
+        AcquisitionNeed optionalTool = needs.stream().filter(pending -> pending.optionalWorkTool).findFirst().orElse(null);
+        if (optionalTool == null || outcomeUncertain || needs.stream().anyMatch(pending -> pending.decisionRequired)) return false;
+        AcquisitionNeed completed;
+        do { completed = needs.pop(); optionalTool.effectsObserved |= completed.effectsObserved; }
+        while (completed != optionalTool);
+        AcquisitionNeed parent = needs.peek();
+        // 富余材料升级失败先回到石制标准；石制准备也失败则本需求继续采集，避免反复索要同一把斧头。
+        parent.preferredToolTierCap = optionalTool.stockOnlyTool ? 1 : 0;
+        parent.miningToolPrerequisitePushed = false;
+        parent.effectsObserved |= optionalTool.effectsObserved;
+        failureNeed = null;
+        addIssue("mine", "optional_work_tool_unavailable", "settled optional tool preparation; resume the original acquisition",
+                Map.of("attempted_tool_ids", itemStrings(optionalTool.itemIds), "partial_effects", optionalTool.effectsObserved));
+        return true;
+    }
+
     private TaskState exhaustNeed(AcquisitionNeed need) {
         // 最终需求所有来源都失败就报告做不到；小需求失败则回到原配方，视是否已经动过东西决定能否换方案。
         if (need.depth == 0) {
@@ -1785,20 +1803,7 @@ public final class SemanticAcquireCompanionTask
                     FailureType.NO_MATERIAL);
         }
         // 效率工具链缺料时结清已发生的效果，再回到原采集；真实工具门槛仍在下一次派发前检查。
-        AcquisitionNeed optionalTool = needs.stream().filter(pending -> pending.optionalWorkTool).findFirst().orElse(null);
-        if (optionalTool != null && !outcomeUncertain && needs.stream().noneMatch(pending -> pending.decisionRequired)) {
-            AcquisitionNeed completed;
-            do { completed = needs.pop(); optionalTool.effectsObserved |= completed.effectsObserved; }
-            while (completed != optionalTool);
-            AcquisitionNeed parent = needs.peek();
-            // 富余材料升级失败先回到石制标准；石制准备也失败则本需求继续采集，避免反复索要同一把斧头。
-            parent.preferredToolTierCap = optionalTool.stockOnlyTool ? 1 : 0;
-            parent.miningToolPrerequisitePushed = false;
-            parent.effectsObserved |= optionalTool.effectsObserved;
-            addIssue("mine", "optional_work_tool_unavailable", "settled optional tool preparation; resume the original acquisition",
-                    Map.of("attempted_tool_ids", itemStrings(optionalTool.itemIds), "partial_effects", optionalTool.effectsObserved));
-            return TaskState.RUNNING;
-        }
+        if (resumeAfterOptionalToolFailure()) return TaskState.RUNNING;
         // 先有界记住普通路线尚不能提供的子材料，再照常试其他未产生副作用的配方；不能让第一条失败叶子劫持全局规划。
         rememberProcessPlanningNeed(need);
         if (!needs.isEmpty() && needs.peek() == need) needs.pop();
@@ -1808,15 +1813,6 @@ public final class SemanticAcquireCompanionTask
                     "recursive_need_parent_missing",
                     "a recursive recipe need ended without its parent",
                     FailureType.INTERNAL);
-        }
-        if (need.stockOnlyTool && !need.decisionRequired) {
-            parent.preferredToolTierCap = 1;
-            parent.miningToolPrerequisitePushed = false;
-            parent.effectsObserved |= need.effectsObserved;
-            addIssue("mine", "tool_upgrade_stock_unavailable",
-                    "the upgrade could not be supplied from existing stock; prepare the ordinary work tool instead",
-                    Map.of("attempted_tool_ids", itemStrings(need.itemIds)));
-            return TaskState.RUNNING;
         }
         if (need.decisionRequired) {
             addIssue("planner", "prerequisite_decision_required",
@@ -2213,6 +2209,9 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState failAcquisition(String code, String message, FailureType type) {
+        // 已花过材料也不把可选石斧升级变成硬门槛；配方现场失效后按实际效果结清，并继续能做的原采集。
+        if (("committed_recipe_unavailable".equals(code) || "committed_prerequisite_unmet".equals(code))
+                && resumeAfterOptionalToolFailure()) return TaskState.RUNNING;
         if (("allowed_sources_exhausted".equals(code) || "committed_prerequisite_unmet".equals(code)) && !outcomeUncertain) {
             // 别的普通路线可能顺手补齐了旧叶子；交接时只保留仍缺少实物的候选，不请外部再做已经够用的材料。
             processPlanningNeeds.removeIf(need -> missing(need) <= 0);
