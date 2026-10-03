@@ -57,12 +57,9 @@ final class PortalCastingTerrain {
     static Preparation inspect(ClientLevel world, NetherPortalCastingLayout layout, BlockPos searchOrigin, int radius) {
         var fill = missingPlatform(world, layout);
         int replaced = (int) fill.stream().filter(at -> source(world, at)).count();
-        boolean newBank = false;
-        for (int across = -1; across <= 2; across++) newBank |= !sturdy(world, layout.cell(across, 0, 1));
-        boolean reserve = newBank || replaced > 0;
-        // 完整岸边后补一块不消耗岩浆的站台，不额外改变原来能尝试的模板；改造弯岸则保留用户要求的大于十四格余量。
-        int remaining = reserve ? remainingSources(world, layout.origin(), searchOrigin, radius, Set.copyOf(fill)) : 0;
-        return new Preparation(fill, replaced, remaining, reserve, !reserve || remaining >= MINIMUM_REMAINING_SOURCES);
+        // 天然直岸与整形弯岸使用同一余量口径；四格起手位置不能把后续无岩浆可取的小坑误选成整池。
+        int remaining = remainingSources(world, layout.origin(), searchOrigin, radius, Set.copyOf(fill));
+        return new Preparation(fill, replaced, remaining, true, remaining >= MINIMUM_REMAINING_SOURCES);
     }
 
     private static int remainingSources(ClientLevel world, BlockPos seed, BlockPos origin, int radius, Set<BlockPos> filled) {

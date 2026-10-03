@@ -20,6 +20,10 @@ public final class PortalCastingSurveyTest {
                 world.set(layout.cell(x, 0, 1), Blocks.STONE.defaultBlockState());
             }
             check(PortalCastingSurvey.atShore(world.level, layout), "a shallow pool permits native bottom excavation");
+            // 四格直岸虽然能起手，却供不起整扇门；只读选址必须分别报告几何可用和源格余量不足。
+            var small = PortalCastingTerrain.inspect(world.level, layout, layout.origin(), 16);
+            check(!small.reserveObserved() && small.remainingLowerBound() == 4,
+                    "a natural straight bank cannot bypass the connected source reserve");
             world.set(layout.cell(0, 0, 0), Blocks.LAVA.defaultBlockState().setValue(LiquidBlock.LEVEL, 1));
             check(!PortalCastingSurvey.atShore(world.level, layout), "flowing lava cannot be scooped as a source");
             world.set(layout.cell(0, 0, 0), Blocks.LAVA.defaultBlockState());
