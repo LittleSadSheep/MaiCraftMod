@@ -19,6 +19,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
+import org.maiwithu.maicraft.core.scan.DroppedItemObservation;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
@@ -512,13 +514,19 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
         JsonArray entities = new JsonArray();
         AABB area = player.getBoundingBox().inflate(16.0);
-        List<Entity> nearby = player.level().getEntities(player, area, entity -> true)
+        List<Entity> nearby = player.level().getEntities(player, area, entity -> !entity.isRemoved()
+                        && (!(entity instanceof ItemEntity drop) || !drop.getItem().isEmpty()))
                 .stream().sorted(Comparator.comparingDouble(player::distanceToSqr)).toList();
         int hostileCount = (int) nearby.stream().filter(entity -> entity instanceof Enemy).count();
-        for (Entity entity : nearby.stream().limit(16).toList()) {
+        // 模型按每堆的物品、数量和位置选择拾取目标；附近实体多时也必须保留完整候选。
+        for (Entity entity : nearby) {
             JsonObject item = new JsonObject();
             item.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
             item.addProperty("distance", Math.round(player.distanceTo(entity) * 10.0) / 10.0);
+            if (entity instanceof ItemEntity drop) {
+                DroppedItemObservation.describe(player, drop).entrySet()
+                        .forEach(entry -> item.add(entry.getKey(), entry.getValue()));
+            }
             entities.add(item);
         }
         result.add("nearby_entities", entities);

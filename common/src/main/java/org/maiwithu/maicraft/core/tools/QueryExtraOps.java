@@ -10,6 +10,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import org.maiwithu.maicraft.core.scan.DroppedItemObservation;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -44,7 +46,6 @@ public final class QueryExtraOps {
 
     // ---- scan_nearby_entities：扫描附近实体 ----
 
-    private static final int MAX_RESULTS = 20;
     private static final double MIN_RADIUS = 1.0;
     private static final double MAX_RADIUS = 64.0;
 
@@ -61,6 +62,8 @@ String type_filter,
 
         List<ScoredEntity> matched = new ArrayList<>(raw.size());
         for (Entity e : raw) {
+            // 已移除或尚未同步物品内容的实体不能成为拾取前的有效候选。
+            if (e.isRemoved() || e instanceof ItemEntity drop && drop.getItem().isEmpty()) continue;
             String cat = categorise(e);
             if (!matches(filter, cat)) continue;
             matched.add(new ScoredEntity(e, cat, self.distanceTo(e)));
@@ -68,9 +71,8 @@ String type_filter,
         matched.sort(Comparator.comparingDouble(s -> s.distance));
 
         JsonArray entities = new JsonArray();
-        int limit = Math.min(matched.size(), MAX_RESULTS);
-        for (int i = 0; i < limit; i++) {
-            ScoredEntity s = matched.get(i);
+        // 扫描范围内的每堆都交给模型比较，不能因前二十个实体占满列表而藏掉想捡的物品。
+        for (ScoredEntity s : matched) {
             JsonObject o = new JsonObject();
             o.addProperty("id", s.entity.getId());
             o.addProperty("type", s.entity.getType().getDescriptionId());
@@ -81,6 +83,10 @@ String type_filter,
             pos.addProperty("z", s.entity.getZ());
             o.add("position", pos);
             o.addProperty("distance", s.distance);
+            if (s.entity instanceof ItemEntity drop) {
+                DroppedItemObservation.describe(self, drop).entrySet()
+                        .forEach(entry -> o.add(entry.getKey(), entry.getValue()));
+            }
             if (s.entity instanceof LivingEntity le) {
                 o.addProperty("hp", le.getHealth());
                 o.addProperty("max_hp", le.getMaxHealth());
@@ -91,7 +97,7 @@ String type_filter,
         JsonObject root = new JsonObject();
         root.add("entities", entities);
         root.addProperty("total_found", matched.size());
-        root.addProperty("truncated", matched.size() > MAX_RESULTS);
+        root.addProperty("truncated", false);
         root.addProperty("radius_searched", radius);
         root.addProperty("filter", filter);
         return root.toString();
