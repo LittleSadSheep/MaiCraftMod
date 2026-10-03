@@ -58,7 +58,7 @@ public record PhysicalAssemblyParameters(Operation operation,Adhesive adhesive,U
         }
         return new PhysicalAssemblyParameters(operation,adhesive,id,position(input,"first"),position(input,"second"),position(input,"assembler"),project,design,declarations);
     }
-    private static BlockPos position(JsonObject input,String field) {
+    static BlockPos position(JsonObject input,String field) {
         if(!input.has(field)) return BlockPos.ZERO;
         if(!input.get(field).isJsonObject()) throw new IllegalArgumentException(field+" 必须是坐标对象");
         var value=input.getAsJsonObject(field);
@@ -76,7 +76,7 @@ public record PhysicalAssemblyParameters(Operation operation,Adhesive adhesive,U
         }
         return new BlockPos(point[0],point[1],point[2]);
     }
-    private static String text(JsonObject input,String key,String fallback) {
+    static String text(JsonObject input,String key,String fallback) {
         if(!input.has(key)) return fallback;
         if(!input.get(key).isJsonPrimitive()||!input.getAsJsonPrimitive(key).isString()) throw new IllegalArgumentException(key+" 必须是文字");
         return input.get(key).getAsString();

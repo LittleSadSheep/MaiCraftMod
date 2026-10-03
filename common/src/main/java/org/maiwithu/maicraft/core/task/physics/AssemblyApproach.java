@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.physics;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -29,6 +30,9 @@ final class AssemblyApproach {
     private Map<String,Object> navigation=Map.of();
     private final List<Map<String,Object>> history=new ArrayList<>();
     boolean ready(LocalPlayer player,PhysicalAssemblyFrame frame,BlockPos offset,boolean honey,String call,long deadline) {
+        return ready(player,frame,offset,eye->frame.aim(player,offset,eye,honey),call,deadline);
+    }
+    boolean ready(LocalPlayer player,PhysicalAssemblyFrame frame,BlockPos offset,Function<Vec3,Vec3> aimAt,String call,long deadline) {
         if(failure!=null)return false;
         if(target==null||!target.equals(offset)) {
             close();
@@ -44,7 +48,7 @@ final class AssemblyApproach {
             String kind=String.valueOf(navigation.get("failure_type"));
             if(!result.success()&&!kind.equals("no_path")&&!kind.equals("planning_stall")) {failure=result.message();return false;}
         }
-        if(frame.aim(player,offset,player.getEyePosition(),honey)!=null)return true;
+        if(aimAt.apply(player.getEyePosition())!=null)return true;
         var ctx=ClientRuntime.requireContext(player);
         if(search==null)search=new StructureWorksiteSearch(frame.world(offset),player.position(),player.blockInteractionRange(),player.getEyeHeight(Pose.STANDING));
         var space=JetpackRoute.observed(ctx);
@@ -54,7 +58,8 @@ final class AssemblyApproach {
             var landing=TransportLanding.inspect(player.level(),player.level()::isLoaded,feet,body.width()+.16,body.height()+.08,NavigationSafetyContext.forbiddenBodyCells());
             if(landing.destination()==null)return new StructureWorksiteSearch.Probe(null,landing.unloaded(),landing.unknown());
             Vec3 at=landing.destination().landingPoint();
-            Vec3 aim=frame.aim(player,offset,at.add(0,player.getEyeHeight(Pose.STANDING),0),honey);
+            // 配置频率或旋钮时也按真实小命中区选站位，不能只证明看见了整个方块。
+            Vec3 aim=aimAt.apply(at.add(0,player.getEyeHeight(Pose.STANDING),0));
             if(aim==null||!space.clear(at,at))return new StructureWorksiteSearch.Probe(null,false,false);
             // 此处只保存规划瞄准点；真正发请求前仍检查实时射线，空气角点不会伪造成方块点击。
             return new StructureWorksiteSearch.Probe(new StructureWorksiteSearch.Site(landing.destination(),

@@ -54,6 +54,10 @@ record PhysicalAssemblyFrame(ClientLevel level,SableStructureBridge.Structure st
         boolean air=honey&&airSelection(storage(offset));
         return selected(hit,storage(offset),air)?hit:null;
     }
+    BlockHitResult hitFrom(LocalPlayer player,BlockPos offset,Vec3 eye,Vec3 direction) {
+        var hit=ray(player,eye,direction,false);
+        return selected(hit,storage(offset),false)?hit:null;
+    }
     private static boolean selected(BlockHitResult hit,BlockPos target,boolean air) {
         return hit!=null&&hit.getBlockPos().equals(target)&&hit.getType()==(air?HitResult.Type.MISS:HitResult.Type.BLOCK);
     }
