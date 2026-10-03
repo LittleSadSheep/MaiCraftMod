@@ -10,6 +10,7 @@ public final class PortalRegressionSuite {
         // 浇筑模板先核对四种池岸方向，水流效果另由实机验收。
         NetherPortalCastingLayoutTest.main(args);
         PortalCastingSurveyTest.main(args);
+        PortalCastingWorkflowTest.main(args);
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
         PortalPreparationSiteTest.main(args);
