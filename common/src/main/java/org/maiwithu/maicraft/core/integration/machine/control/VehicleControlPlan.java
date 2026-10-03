@@ -16,10 +16,12 @@ public record VehicleControlPlan(List<Input> inputs, List<String> limitations) {
             if(kind==KEY) return List.of(1-neutral);
             var values=new ArrayList<Double>();
             // 满刹车附近两档可能还不足以带动重车；逐级试探，每档之间停稳，已有响应的方向不再加大输入。
-            var steps=kind==THROTTLE&&propulsion?List.of(2.0,4.0,8.0,15.0):List.of(kind==THROTTLE?2.0:Math.min(15,maximum));
+            // 方向盘经比较器量化后，小角度可能还没有可用转向；两边分别逐档尝试，并保留原生角度上限。
+            var steps=kind==STEERING_WHEEL?List.of(Math.min(15,maximum),Math.min(30,maximum),Math.min(60,maximum),Math.min(120,maximum),maximum)
+                    :kind==THROTTLE&&propulsion?List.of(2.0,4.0,8.0,15.0):List.of(2.0);
             for(double step:steps) {
-                if(neutral-step>=minimum) values.add(neutral-step);
-                if(neutral+step<=maximum) values.add(neutral+step);
+                if(neutral-step>=minimum&&!values.contains(neutral-step)) values.add(neutral-step);
+                if(neutral+step<=maximum&&!values.contains(neutral+step)) values.add(neutral+step);
             }
             return values;
         }

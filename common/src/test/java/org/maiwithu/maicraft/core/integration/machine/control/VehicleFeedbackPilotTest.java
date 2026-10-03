@@ -28,6 +28,18 @@ public final class VehicleFeedbackPilotTest {
         }
         check(weak.succeeded()&&minimumSignal==11,"weak initial response must escalate once, then retain the proven low-power drive");
         check(weak.command().get("unfamiliar_control")==15,"arrival must restore persistent full brake");
+        // 两侧的小方向盘档位不足时继续校准；各找到一个有效档位后停止增加，取消时仍回正并保持刹车。
+        var weakSteering=new VehicleFeedbackPilot(plan,new Vec3(10,0,30));Vec3 steeringAt=Vec3.ZERO;double steeringYaw=0,largest=0;int steeringTick=0;
+        for(;steeringTick<1500&&!weakSteering.terminal()&&weakSteering.phase()!=VehicleFeedbackPilot.Phase.DRIVE;steeringTick++) {
+            var command=weakSteering.command();double angle=command.get("unfamiliar_steering");largest=Math.max(largest,Math.abs(angle));
+            double velocity=(15-command.get("unfamiliar_control"))*.01;
+            steeringYaw+=angle*.00002*(velocity>0?1:0);steeringAt=steeringAt.add(Math.sin(steeringYaw)*velocity,0,Math.cos(steeringYaw)*velocity);
+            weakSteering.observe(steeringTick,new VehicleFeedbackPilot.Sample(steeringAt,steeringYaw),true);
+        }
+        check(weakSteering.phase()==VehicleFeedbackPilot.Phase.DRIVE&&largest==30,"弱转向应在两侧有效档位停止升级，而非试到最大角度");
+        weakSteering.cancel();
+        for(int i=0;i<20&&!weakSteering.terminal();i++)weakSteering.observe(steeringTick+i,new VehicleFeedbackPilot.Sample(steeringAt,steeringYaw),true);
+        check(weakSteering.terminal()&&!weakSteering.succeeded()&&weakSteering.command().equals(plan.neutral()),"校准后取消仍应回正、刹车且不冒称抵达");
         var spinning=new VehicleFeedbackPilot(plan,new Vec3(0,0,1));
         for(int tick=0;tick<500&&!spinning.terminal();tick++) spinning.observe(tick,new VehicleFeedbackPilot.Sample(Vec3.ZERO,tick*.05),true);
         check(spinning.terminal()&&!spinning.succeeded(),"a rotating hull is not a stopped arrival");

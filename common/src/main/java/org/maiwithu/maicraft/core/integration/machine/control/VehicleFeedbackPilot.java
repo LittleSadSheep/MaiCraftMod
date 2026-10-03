@@ -72,8 +72,10 @@ public final class VehicleFeedbackPilot {
                 else if(tick-phaseTick>80) stop("neutral controls did not stop the structure before calibration");
             }
             case PROBE -> {
-                if(tick-phaseTick>=12) {
-                    Probe probe=probes.get(probeIndex); double elapsed=tick-phaseTick;
+                Probe probe=probes.get(probeIndex);
+                // 比较器、无线链路和轮座追随角都有原生延迟；转向观察窗口覆盖这些延迟后再判断响应。
+                if(tick-phaseTick>=(probe.input().kind()==ControlCircuit.Kind.STEERING_WHEEL?24:12)) {
+                    double elapsed=tick-phaseTick;
                     Vec3 velocity=local(sample.position().subtract(start.position()).scale(1/elapsed),start.yaw());
                     double turn=wrap(sample.yaw()-start.yaw())/elapsed;
                     if(!probe.input().propulsion() && propulsion!=null) turn-=propulsion.yawRate();
@@ -112,10 +114,11 @@ public final class VehicleFeedbackPilot {
     }
     public void stop(String reason) { if(failure.isEmpty()) failure=reason; if(!terminal() && phase!=Phase.BRAKE) transition(Phase.BRAKE); }
     private boolean responseKnown(Probe probe) {
-        if(!probe.input().propulsion())return false;
+        boolean drive=probe.input().propulsion();
+        if(!drive&&probe.input().kind()!=ControlCircuit.Kind.STEERING_WHEEL)return false;
         double delta=probe.value()-probe.input().neutral();
-        return responses.stream().anyMatch(r->r.propulsion()&&r.input().equals(probe.input().id())
-                &&r.localVelocity().horizontalDistance()>.003
+        return responses.stream().anyMatch(r->r.propulsion()==drive&&r.input().equals(probe.input().id())
+                &&(drive?r.localVelocity().horizontalDistance()>.003:Math.abs(r.yawRate())>.0005)
                 &&Math.signum(r.value()-probe.input().neutral())==Math.signum(delta)
                 &&Math.abs(r.value()-probe.input().neutral())<Math.abs(delta));
     }
