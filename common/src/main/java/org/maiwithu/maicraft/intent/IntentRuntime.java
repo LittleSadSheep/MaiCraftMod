@@ -59,6 +59,7 @@ public final class IntentRuntime {
             PhysicsAbilityAdapter.ABILITY,
             QuestAbilityAdapter.ABILITY,
             ChatAbilityAdapter.ABILITY,
+            SuicideAbilityAdapter.ABILITY, // 让模型通过正式能力发现与执行入口提交主动寻死。
             "maicraft:remember_place",
             "maicraft:sleep",
             "maicraft:travel",

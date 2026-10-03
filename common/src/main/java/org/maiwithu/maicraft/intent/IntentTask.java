@@ -87,6 +87,23 @@ final class IntentTask implements Task {
         return !record.paused();
     }
 
+    @Override public boolean suppressesSurvivalReflexes() {
+        // 首刻也要让寻死适配器获得执行机会，否则饥饿反射可能永远挡住明确的寻死请求。
+        // 暂停、等待决定和步骤结束均自动撤销豁免，不依赖一次必须执行成功的“重新开保护”。
+        return !record.paused() && record.decisionSnapshot() == null && !record.getState().isTerminal()
+                && record.stepIndex() < record.steps().size()
+                && SuicideAbilityAdapter.ABILITY.equals(currentGoal().ability())
+                && (child == null || child.suppressesSurvivalReflexes());
+    }
+
+    @Override public boolean observeDeath(LocalPlayer body) {
+        // 死亡事件发生在普通 tick 之前；先把这个子步骤写成已完成，再保存检查点，重生后就不会再次寻死。
+        if (body != player || child == null || !child.observeDeath(body)) return false;
+        childRecord.setState(TaskState.SUCCESS);
+        record.setState(finishChild());
+        return true;
+    }
+
     @Override
     public TaskState tick(LocalPlayer ignored) {
         try {
@@ -775,6 +792,9 @@ final class IntentTask implements Task {
             item.put("success", step.success());
             item.put("skipped", step.skipped());
             item.put("message", step.message());
+            // 寻死的动作完成、保护恢复与尚未观察到的重生必须随默认完成回执交付，不能只留下“完成”摘要。
+            if (SuicideAbilityAdapter.ABILITY.equals(step.ability()))
+                item.put("confirmed_effect", SemanticResultView.jsonValue(step.result()));
             steps.add(item);
         }
         int skipped = record.skippedStepCount();
@@ -969,6 +989,9 @@ final class IntentTask implements Task {
                 : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
                 : wait != null ? "waiting_for_condition" : "preparing_step"));
         addBuildProjects(progress);
+        // 子任务表达的是执行意图，父任务暂停时实际已允许自救接手；公开状态按当前调度条件纠正。
+        if (progress.containsKey("survival_reflexes_suppressed"))
+            progress.put("survival_reflexes_suppressed", suppressesSurvivalReflexes());
         // 内部机器任务等待人工蓝图确认时，总任务同步展示真实等待原因，供调用者结束无效轮询。
         progress.putAll(BuildPreviewGate.waitingProgress(record));
         return Map.copyOf(progress);

@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
+import org.maiwithu.maicraft.core.task.suicide.SuicideRequest;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 检查目标使用了已声明的能力、参数名和目标类型；大多数参数的具体值仍交给各能力自己检查。 */
@@ -74,6 +75,13 @@ final class SemanticGoalContract {
             try { ChatMessage.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
+        // 主动寻死的方式与预算必须在接管身体前确定，不能默默放宽未知参数。
+        if (SuicideAbilityAdapter.ABILITY.equals(ability)) {
+            try { SuicideRequest.parse(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_suicide_contract", path + ".parameters", ability, invalid.getMessage());
             }
         }
         // 等待的时长和条件在接单前确定，不能等到角色已经暂停干活才发现参数被误读。

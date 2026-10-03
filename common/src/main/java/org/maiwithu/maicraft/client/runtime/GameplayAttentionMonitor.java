@@ -212,6 +212,8 @@ public final class GameplayAttentionMonitor {
                 ? null : IntentRuntime.get().task(lastDeath.taskId());
         JsonObject data = new JsonObject();
         data.addProperty("task_checkpoint_preserved", restored != null);
+        // 重生是随后观察到的新事实；主动寻死已经完成时，不能继续把它描述成等待恢复的未完成任务。
+        data.addProperty("respawn_observed", true);
         data.addProperty("task_paused_for_reassessment",
                 restored != null && restored.pauseSnapshot() != null);
         if (restored != null) {
@@ -226,8 +228,10 @@ public final class GameplayAttentionMonitor {
         data.addProperty("item_recovery_started", false);
         data.addProperty("item_recovery_claimed", false);
         data.addProperty("next_required_step",
-                "reassess safety and prove fresh owned drops before any recovery attempt");
-        publish("agent.respawned", "Respawn completed; semantic work remains paused for reassessment.", data);
+                restored != null && restored.getState().isTerminal()
+                        ? "choose the next goal from the observed respawn state"
+                        : "reassess safety and prove fresh owned drops before any recovery attempt");
+        publish("agent.respawned", "Native respawn completed; inspect the recorded task state before continuing.", data);
         // 这里只解除死亡阶段锁，没有清除原任务里的 death_recovery 决定；手动重生后仍可能被旧决定挡住 resume。
         lifeState = LifeState.ALIVE;
     }
@@ -282,9 +286,12 @@ public final class GameplayAttentionMonitor {
     // 先保存当前任务和此刻可见库存，再报告死亡；只有目标带自动重生要求且模式允许时才尝试自动请求。
     private static synchronized void deathDetected(LocalPlayer player) {
         IntentTaskRecord active = currentIntent();
+        // 先保存当前步骤的重生偏好，再结算主动寻死；结算后步骤可能前移或整个任务已经离开槽位。
+        boolean deliberateAutoRespawn = active != null && suicideAutoRespawn(active);
+        boolean expectedDeath = CompanionTickDispatcher.observeExpectedDeath(player);
         boolean hardcore = player.level().getLevelData().isHardcore();
         boolean spectator = player.isSpectator();
-        boolean autoRequested = active != null && semanticBoolean(active, "auto_respawn");
+        boolean autoRequested = expectedDeath ? deliberateAutoRespawn : active != null && semanticBoolean(active, "auto_respawn");
         boolean recoverRequested = active != null && semanticBoolean(active, "recover_after_death");
         IntentRuntime runtime = IntentRuntime.get();
         boolean checkpointSaved = active != null && runtime.checkpointDeath();
@@ -302,6 +309,7 @@ public final class GameplayAttentionMonitor {
         boolean autoAllowed = autoRequested && nativeRespawnAvailable(player);
         JsonObject data = new JsonObject();
         data.addProperty("hardcore", hardcore);
+        data.addProperty("expected_death_completed", expectedDeath);
         data.addProperty("spectator", spectator);
         data.addProperty("auto_respawn_requested", autoRequested);
         data.addProperty("auto_respawn_allowed", autoAllowed);
@@ -321,7 +329,9 @@ public final class GameplayAttentionMonitor {
         }
         publish("agent.died", "The agent died; semantic recovery state was captured for review.", data);
 
-        if (active == null) {
+        if (active == null || active.getState().isTerminal()) {
+            // 单步寻死已成功离槽也仍可原生重生；发包失败则使用现有独立恢复决定，不把成功任务改成失败。
+            if (autoAllowed && requestNativeRespawn(player, false, true)) return;
             if (!autoAllowed) {
                 // 没有任务承接决策（快任务完成后的死亡、被接管清场后的死亡）也必须挂出恢复态：
                 // 否则死亡屏幕上四个 MCP 入口无一能触达重生按钮，只能靠人点（重生决策死锁的变体）。
@@ -331,6 +341,7 @@ public final class GameplayAttentionMonitor {
                         lastDeath.position(), lastDeath.gameTime(), lastDeath.inventory(),
                         lastDeath.inventoryTotal(), lastDeath.recoverAfterDeath());
             }
+            else runtime.openDeathRecoveryDecision(hardcore, spectator, deathDecisionContext());
             return;
         }
         if (autoAllowed) {
@@ -409,6 +420,15 @@ public final class GameplayAttentionMonitor {
         TaskRecord current = CompanionTickDispatcher.current();
         return current instanceof IntentTaskRecord intent && !intent.getState().isTerminal()
                 ? intent : null;
+    }
+
+    private static boolean suicideAutoRespawn(IntentTaskRecord record) {
+        // 当前寻死步骤默认包含正常重生；明确 false 仍保留死亡屏幕给调用者决定。
+        if (record.stepIndex() < 0 || record.stepIndex() >= record.steps().size()) return false;
+        Goal step = record.steps().get(record.stepIndex());
+        if (step.parameters().has("auto_respawn")) return goalBoolean(step, "auto_respawn");
+        if (record.goal().parameters().has("auto_respawn")) return goalBoolean(record.goal(), "auto_respawn");
+        return true;
     }
 
     // 当前步骤为 true 或整任务为 true 都算请求；步骤明确填 false 不能覆盖整任务的 true。

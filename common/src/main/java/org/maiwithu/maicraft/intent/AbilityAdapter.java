@@ -60,6 +60,8 @@ final class AbilityAdapter {
             // 任务书动作只操作模型指定的任务或奖励，提交与领奖均走持久化的单次原生执行。
             case QuestAbilityAdapter.ABILITY -> QuestAbilityAdapter.adapt(goal);
             case ChatAbilityAdapter.ABILITY -> ChatAbilityAdapter.adapt(goal);
+            // 只有明确提交寻死目标才临时停用自保；其他饥饿和返程任务保持原行为。
+            case SuicideAbilityAdapter.ABILITY -> SuicideAbilityAdapter.adapt(goal);
             case "maicraft:remember_place" -> remember(goal, player, runtime);
             case "maicraft:sleep" -> sleep(goal, player);
             case "maicraft:travel" -> travel(goal, player, runtime);
