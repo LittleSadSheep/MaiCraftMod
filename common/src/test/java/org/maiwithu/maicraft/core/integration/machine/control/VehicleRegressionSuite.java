@@ -12,6 +12,7 @@ public final class VehicleRegressionSuite {
         ControlInspectionReportTest.main(args);
         VehicleControlPlanTest.main(args);
         VehicleFeedbackPilotTest.main(args);
+        VehicleMotionEvidenceTest.run();
         VehicleMachineContractTest.main(args);
     }
 }

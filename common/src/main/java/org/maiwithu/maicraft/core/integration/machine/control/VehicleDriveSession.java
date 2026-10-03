@@ -30,6 +30,7 @@ public final class VehicleDriveSession implements TransportSession {
     private Vec3 previous;
     private VehicleCircuitGuard circuitGuard;
     private Map<String,Object> obstruction=Map.of();
+    private final VehicleMotionEvidence motionEvidence=new VehicleMotionEvidence();
     public VehicleDriveSession(MachineControlInspection.Observation observation,VehicleControlPlan plan,DriverStation station,Vec3 target) {
         this.observation=observation; this.plan=plan; this.station=station;
         controls=new NativeVehicleControls(observation,plan); pilot=new VehicleFeedbackPilot(plan,target);
@@ -92,6 +93,8 @@ public final class VehicleDriveSession implements TransportSession {
         if(pilot.phase()!=VehicleFeedbackPilot.Phase.BASELINE&&delta.lengthSqr()>.00001 && !clearAhead(ctx,structure,delta))
             pilot.stop("vehicle path is obstructed or unobserved");
         Vec3 forward=structure.pose().normalToWorld(new Vec3(0,0,1));
+        // 回执保留实测行驶转角、路程和最大倾斜，便于模型区分部件校准成功与车体真正完成路线。
+        motionEvidence.observe(position,Math.atan2(forward.x,forward.z),up,pilot.phase()==VehicleFeedbackPilot.Phase.DRIVE);
         boolean applied=controls.apply(ctx,structure,pilot.command());
         pilot.observe(ctx.tickRevision(),new VehicleFeedbackPilot.Sample(position,Math.atan2(forward.x,forward.z)),applied);
         if(pilot.terminal()) return finish(pilot.succeeded(),pilot.succeeded()?"vehicle_arrived":"vehicle_control_stopped",pilot.failure(),!pilot.succeeded());
@@ -136,6 +139,6 @@ public final class VehicleDriveSession implements TransportSession {
     @Override public Map<String,Object> diagnostics() {
         return Map.of("structure_id",observation.structureId().toString(),"driver_seat",station.seat().toShortString(),
                 "seat_confirmed",seated,"phase",phase(),"control_inputs",plan.inputs(),"applied",controls.applied(),"motion",pilot.diagnostics(),
-                "native_control_effects",controls.effects(),"obstruction",obstruction);
+                "native_control_effects",controls.effects(),"obstruction",obstruction,"motion_evidence",motionEvidence.facts());
     }
 }
