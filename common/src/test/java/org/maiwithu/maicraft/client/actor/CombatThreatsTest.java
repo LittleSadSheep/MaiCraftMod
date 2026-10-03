@@ -51,6 +51,7 @@ public final class CombatThreatsTest {
         forgetsRetiredEntitiesAndBodies();
         armorCannotHideCriticalHealth();
         MobDefenseDamageTest.main(args);
+        BreathDefenseTest.main(args); // 低氧抢占后仍能打退近处溺尸，游泳路线和原生攻击门控保持有效。
         CreeperDefenseTest.main(args);
         CombatOutcomeTest.main(args);
         // 追击范围使用本次参与者，防止无关敌怪不断接力把角色赶离工位。

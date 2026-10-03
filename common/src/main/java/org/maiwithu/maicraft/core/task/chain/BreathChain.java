@@ -19,6 +19,10 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.combat.CombatThreats;
+import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
+import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
+import java.util.List;
 
 /**
  * 自主上浮补气生存链，为玩家角色补上原版 Mob 自带的浮水本能。自动化 LocalPlayer 输入不会持续按住跳跃键：寻路只会在执行移动时让角色划水上浮，
@@ -49,6 +53,8 @@ public final class BreathChain implements Task, Reflex {
     private final SwimAirBudget airBudget = new SwimAirBudget();
     private float attentionStartHealth;
     private int swimTicks;
+    // 换气独占的是逃生路线；近身攻击者仍交给既有近战执行器，不另开追击或水下弓战。
+    private AttackCompanionTask defense;
 
     public BreathChain() {
     }
@@ -86,12 +92,23 @@ public final class BreathChain implements Task, Reflex {
 
     @Override
     public TaskState tick(LocalPlayer companion) {
+        // 先反击，再恢复本刻逃生输入；近战瞄准或撤销旧攻击可能 halt，不能让它清掉上浮和横游。
+        if (defense == null && !CombatThreats.attackers(companion).isEmpty()) {
+            defense = new AttackCompanionTask(companion,
+                    new AttackTaskRecord("breath-defense-" + companion.level().getGameTime(), Long.MAX_VALUE, List.of(), true));
+            defense.start(companion);
+        }
+        if (defense != null) defense.tickEmergencyMelee();
+        return tickRecovery(companion);
+    }
+
+    private TaskState tickRecovery(LocalPlayer companion) {
         if (!episodeActive) {
             attentionStartHealth = companion.getHealth();
             swimTicks = 0;
             GameplayAttentionMonitor.reflexStarted(
                     id(), "air supply is low while submerged", "emergency movement",
-                    "no item consumption expected", "drowning damage or death if air is not reached");
+                    "nearby self-defense may consume weapon durability", "drowning damage or death if air is not reached");
         }
         episodeActive = true;
         swimTicks++;
@@ -127,12 +144,11 @@ public final class BreathChain implements Task, Reflex {
         if (!view.clear(here, next)) { escape = null; return TaskState.RUNNING; }
         double horizontal = Math.hypot(next.x - here.x, next.z - here.z);
         // 在低顶通道按实际路径保持或降低高度；走到畅通水柱后才按跳跃上浮，避免上推把身体卡死在拐角。
-        if (horizontal > .18) {
-            InputDriver.lookAt(companion, new Vec3(next.x, companion.getEyeY(), next.z));
-        }
+        double desiredYaw = Math.toDegrees(Math.atan2(next.z - here.z, next.x - here.x)) - 90;
+        // 逃生视角让位于本刻近战瞄准；下方按实际朝向重投影按键，回头打溺尸仍沿原通道游向空气。
+        if (horizontal > .18) InputDriver.lookForNavigation(companion, (float) desiredYaw, 0);
         var context = ClientRuntime.requireContext(companion);
         // 镜头平滑转向期间也按当前实际朝向投影按键，避免刚绕过拐角就沿旧视角游回墙上。
-        double desiredYaw = Math.toDegrees(Math.atan2(next.z - here.z, next.x - here.x)) - 90;
         context.body().applySteering(yaw -> new BodyControlPort.Movement(
                 horizontal > .18 ? (float) Math.cos(Math.toRadians(desiredYaw - yaw)) : 0,
                 horizontal > .18 ? (float) -Math.sin(Math.toRadians(desiredYaw - yaw)) : 0,
@@ -159,7 +175,7 @@ public final class BreathChain implements Task, Reflex {
         GameplayAttentionMonitor.reflexFinished(
                 id(), companion.isEyeInFluid(FluidTags.WATER)
                         ? "air recovery no longer needed" : "breathable air reached", swimTicks,
-                "no item consumption observed",
+                "nearby self-defense may consume weapon durability",
                 healthLost > 0.0F ? "health lost during reflex: " + healthLost : "no health loss observed");
         episodeActive = false;
         worstAir = Integer.MAX_VALUE;
@@ -173,12 +189,20 @@ public final class BreathChain implements Task, Reflex {
 
     @Override
     public void stop(LocalPlayer companion, StopReason why) {
+        // 换气结束或身体交接时一并清理其近战子动作；不宣称击败敌人，后续自卫重新观察实际威胁。
+        if (defense != null) {
+            // 死亡或换身体后可能已没有可用原生入口；此时只释放旧输入，不向旧身体查询或提交动作。
+            if (ClientRuntime.actor().activeContext().filter(c -> c.player() == companion && c.isCurrent()).isPresent())
+                defense.result(TaskState.CANCELLED);
+            else defense.stop(companion, why);
+            defense = null;
+        }
         // 没有需要跨 tick 释放的身体状态；本次事件记录会在下次休眠检查时关闭，或由新一次入水事件替代。
         if (episodeActive && why != StopReason.PREEMPTED) {
             float healthLost = Math.max(0.0F, attentionStartHealth - companion.getHealth());
             GameplayAttentionMonitor.reflexFinished(
                     id(), "body or reflex unavailable; air recovery unconfirmed", swimTicks,
-                    "no item consumption observed",
+                    "nearby self-defense may consume weapon durability",
                     healthLost > 0.0F ? "health lost during reflex: " + healthLost : "no health loss observed");
             episodeActive = false;
             worstAir = Integer.MAX_VALUE;

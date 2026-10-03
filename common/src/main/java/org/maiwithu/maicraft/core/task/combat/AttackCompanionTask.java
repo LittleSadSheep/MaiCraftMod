@@ -276,6 +276,15 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         return state;
     }
 
+    /** 换气子任务只复用近战反击：不追敌、不拾取、不举盾或蓄力减慢游泳；调用者随后续订逃生移动。 */
+    public void tickEmergencyMelee() {
+        if (player.isDeadOrDying()) return;
+        // 被换气抢占的旧工作可能还有点击或菜单回执；先收自己的刀，再等旧操作结清，不能抢用原生动作槽。
+        if (settleSubmittedMelee() || !ClientRuntime.actor().settledForRoutinePause()) return;
+        // 仍由同一战场授权、武器选择、原生冷却和命中回执决定出刀；水中旁观者不会自动成为敌人。
+        tickWeapon(surveyField());
+    }
+
     // ==================== 局面 ====================
 
     /**
