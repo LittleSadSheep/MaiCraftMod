@@ -115,7 +115,19 @@ public final class KnowledgeHttpTest {
                     + "?path=%2Fjson%2Fpitfalls%2F39");
             check(payload(send("tools/call", recipeCall)).get("value").equals(recipe.getAsJsonArray("pitfalls").get(39)),
                     "frozen receipt path resolves the final hint without rereading the recipe");
-            var operationSearch = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"build machien\",\"limit\":3}}")));
+            // 名称与概要经真实 HTTP 包装仍一次交付全部；宿主传旧页长也不能裁掉角色可选的动作。
+            var abilityNames = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"limit\":1}}")))
+                    .getAsJsonArray("semantic_abilities");
+            check(abilityNames.size() > 20 && abilityNames.asList().stream().allMatch(JsonElement::isJsonPrimitive),
+                    "HTTP names index is complete without descriptions");
+            var abilitySummaries = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"detail\":\"summary\",\"limit\":1}}")))
+                    .getAsJsonArray("semantic_abilities");
+            check(abilitySummaries.size() == abilityNames.size()
+                    && abilitySummaries.asList().getLast().getAsJsonObject().get("ability").equals(abilityNames.asList().getLast()),
+                    "HTTP summaries retain the final ability without another request");
+            var allMatches = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"maicraft\",\"limit\":1}}")));
+            check(allMatches.getAsJsonArray("semantic_abilities").size() == abilityNames.size(), "HTTP search retains every matching ability");
+            var operationSearch = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"abilities\",\"query\":\"build machien\"}}")));
             check(!operationSearch.get("contract_loaded").getAsBoolean()
                     && !operationSearch.getAsJsonArray("semantic_abilities").isEmpty(), "HTTP operation metadata search");
             verifyQuests(quests, allResources);
@@ -289,8 +301,10 @@ public final class KnowledgeHttpTest {
     private record Runtime(KnowledgeLibrary library) implements RuntimeFacade {
         public CompletionStage<JsonElement> knowledge(JsonObject args) { return CompletableFuture.completedFuture(library.request(args)); }
         public CompletionStage<JsonElement> perceive(JsonObject args) {
-            if ("abilities".equals(args.get("view").getAsString()) && args.has("query"))
-                return CompletableFuture.completedFuture(AbilitySearch.search(args.get("query").getAsString(), args.get("limit").getAsInt()));
+            // 发现动作仅委派真实目录与搜索，不加载玩家现场，也不执行查询得到的动作。
+            if ("abilities".equals(args.get("view").getAsString()))
+                return CompletableFuture.completedFuture(args.has("query")
+                        ? AbilitySearch.search(args.get("query").getAsString()) : AbilitySearch.index(args));
             throw new AssertionError("World perception must not be used for knowledge");
         }
         public CompletionStage<JsonElement> plan(JsonObject args) { throw new AssertionError("No planning"); }

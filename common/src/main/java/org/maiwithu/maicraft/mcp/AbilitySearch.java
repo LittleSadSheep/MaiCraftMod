@@ -7,27 +7,29 @@ import java.util.ArrayList;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
 
-/** 能力发现只返回标识和用途；选定能力后才读取完整契约与现场可用性。 */
+/** 先列全能力名，再按需读用途或直接 focus 契约，避免选动作前反复翻页。 */
 final class AbilitySearch {
     private AbilitySearch() {}
 
-    static JsonObject index(int offset, int limit) {
+    static JsonObject index(JsonObject arguments) {
+        // 首次选取采集、移动或施工能力时一次给全名称；比较用途时展开全部概要，两层都不分页。
+        boolean summary = arguments.has("detail") && !arguments.get("detail").isJsonNull()
+                && "summary".equals(arguments.get("detail").getAsString());
         var ids = IntentRuntime.KNOWN_ABILITIES.stream().filter(id -> !SemanticAbilityCatalog.compatibilityAlias(id)).sorted().toList();
-        if (offset < 0 || offset > ids.size() || limit < 1 || limit > 20) throw new IllegalArgumentException("Invalid ability page");
-        JsonArray rows = new JsonArray(); int end = Math.min(ids.size(), offset + limit);
-        // 尚未选能力时只展示用途；完整参数、例子和后端检查属于一次明确的 focus 读取。
-        for (int i = offset; i < end; i++) {
-            JsonObject row = new JsonObject(); row.addProperty("ability", ids.get(i));
-            row.add("summary", SemanticAbilityCatalog.describe(ids.get(i)).get("summary")); rows.add(row);
+        JsonArray rows = new JsonArray();
+        for (String id : ids) {
+            if (summary) {
+                // 名称还不足以选定动作时才加载用途；只读名称不会构造整份参数契约或查询玩家现场。
+                JsonObject row = new JsonObject(); row.addProperty("ability", id);
+                row.add("summary", SemanticAbilityCatalog.describe(id).get("summary")); rows.add(row);
+            } else rows.add(id);
         }
         JsonObject result = new JsonObject(); result.add("semantic_abilities", rows);
-        result.addProperty("total", ids.size()); result.addProperty("contract_loaded", false);
-        if (end < ids.size()) result.addProperty("next_offset", end);
+        if (summary) { result.addProperty("total", ids.size()); result.addProperty("contract_loaded", false); }
         return result;
     }
 
-    static JsonObject search(String query, int limit) {
-        if (limit < 1 || limit > 20) throw new IllegalArgumentException("Ability search limit must be 1..20");
+    static JsonObject search(String query) {
         var matcher = new MetadataSearch.Query(query);
         var matches = new ArrayList<JsonObject>();
         for (String ability : IntentRuntime.KNOWN_ABILITIES) {
@@ -44,9 +46,10 @@ final class AbilitySearch {
             var read = new JsonObject(); read.addProperty("view", "abilities"); read.addProperty("focus", ability);
             row.add("read_arguments", read); matches.add(row);
         }
-        var results = new JsonArray(); MetadataSearch.ranked(matches, "ability").stream().limit(limit).forEach(results::add);
+        // 搜索仍按相关性排序，但一次交付全部命中，避免模型因数量上限漏掉可选的原生动作。
+        var results = new JsonArray(); MetadataSearch.ranked(matches, "ability").forEach(results::add);
         var out = new JsonObject(); out.add("semantic_abilities", results); out.addProperty("query", query);
-        out.addProperty("total_matches", matches.size()); out.addProperty("truncated", matches.size() > limit);
+        out.addProperty("total_matches", matches.size());
         out.addProperty("contract_loaded", false); out.addProperty("runtime_availability", "not_queried");
         matcher.describe(out, matches.isEmpty());
         out.addProperty("next_step", "Use the selected read_arguments to inspect its full contract and current availability. Product names belong to view=knowledge with query. Search does not prove an operation can execute.");

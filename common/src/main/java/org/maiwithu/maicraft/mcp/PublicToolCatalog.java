@@ -91,14 +91,14 @@ final class PublicToolCatalog {
 
     private static final List<JsonObject> TOOLS = List.of(
             // 建造先勘测并沿用返回的锚点，避免为找工具参数先遍历任务历史或整套教材；执行后再等注意流。
-            // 入口先说明能观察什么、怎样等待；检索规则放回参数，施工锚点的用法放在规划入口，便于模型顺着操作读。
+            // 入口说明观察与等待；能力先一次列全名称，再让模型直接 focus 所选动作，概要只按需读取。
             tool(PERCEIVE,
                     "Observe the world, find an ability, or read reference material. To wait for a task, reuse its next_attention arguments.",
                     perceiveSchema("""
                             {
                               "type":"object",
                               "properties": {
-                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge","web_knowledge"],"default":"situation","description":"Read body and inventory with situation, nearby facts with surroundings, build geometry with construction_site, visible power with kinetic_sources, or saved observations with machines. abilities lists actions. web_knowledge needs exactly one of query or url; version compatibility is unverified."},
+                                "view":{"type":"string","enum":["situation","surroundings","construction_site","kinetic_sources","abilities","tasks","attention","landmarks","exploration","machines","machine_menu","knowledge","web_knowledge"],"default":"situation","description":"Read body and inventory with situation, nearby facts with surroundings, build geometry with construction_site, visible power with kinetic_sources, or saved observations with machines. abilities lists all action IDs. web_knowledge needs exactly one of query or url; version compatibility is unverified."},
                                 "url":{"type":["string","null"],"maxLength":2048,"description":"Read a Minecraft Wiki /w/ or www.mcmod.cn item/class/post article over HTTPS, without URL query parameters. Selects web_knowledge; omit query, source and language."},
                                 "source":{"type":["string","null"],"enum":["minecraft_wiki","mcmod",null],"description":"Choose a web_knowledge search source; default minecraft_wiki. MC百科 robots forbid search; use an article url instead."},
                                 "language":{"type":["string","null"],"enum":["zh","en",null],"description":"Choose the web_knowledge Wiki search language; default zh. A url sets its own language."},
@@ -106,14 +106,15 @@ final class PublicToolCatalog {
                                 "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"Name the construction_site, or omit to generate a label for its anchor."},
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"Use 1..8 for construction_site (default 8), or 8..64 for kinetic_sources (default 32). Power scans also cap height and exclude hidden or protected outlets."},
                                 "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Search knowledge, abilities, exploration, web_knowledge or kinetic_sources by keyword. Only exploration allows a catalog focus with query. Omit resource_uri and url."},
-                                "focus":{"type":["string","null"],"maxLength":256,"description":"Read an ability by ID, or maicraft:server_assistance; omit for its paged index. For situation, prefix travel, elevators, physical_structures, navigation or transport with maicraft:. Use sign text for surroundings, a block ID for kinetic_sources, or search words for knowledge. Exploration accepts discoveries (default), biomes, biome_tags, structures, pending, run:<id> or returned details_focus."},
+                                "focus":{"type":["string","null"],"maxLength":256,"description":"Read an ability's full contract by ID, or maicraft:server_assistance; omit for all ability names. For situation, prefix travel, elevators, physical_structures, navigation or transport with maicraft:. Use sign text for surroundings, a block ID for kinetic_sources, or search words for knowledge. Exploration accepts discoveries (default), biomes, biome_tags, structures, pending, run:<id> or returned details_focus."},
+                                "detail":{"type":["string","null"],"enum":["names","summary",null],"description":"Abilities index only: names (default) returns all IDs; summary adds descriptions for all. Omit query/focus. Use focus for parameters."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Read a returned resource_uri, details_uri or next_uri. Selects knowledge. Receipt pages are frozen and temporary; unread contents remain unknown."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Follow this task plus important body events in attention. tasks gives its summary; use task with get and path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
                                  "after_cursor":{"type":"integer","minimum":0,"maximum":9007199254740991,"default":0,"description":"For attention, copy cursor from the response, never latest_cursor. Reuse next_attention to page safely."},
                                  "wait_ms":{"type":"integer","minimum":0,"maximum":60000,"default":0,"description":"For attention, usually use 30000. Returns early on completion, decisions, pauses, missing tasks or resync. Timeout leaves the task running."},
-                                 "limit":{"type":"integer","minimum":1,"maximum":20,"description":"Defaults to 5. For web_knowledge, read 1..5 search results; default 3."},
-                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"Copy next_offset for exploration/abilities/tasks pages."},
+                                 "limit":{"type":"integer","minimum":1,"maximum":20,"description":"Ignored by abilities (always complete). Defaults to 5; web_knowledge defaults to 3 and accepts 1..5."},
+                                 "offset":{"type":"integer","minimum":0,"default":0,"description":"Copy next_offset for exploration/tasks pages. Abilities has no pagination."},
                                 "server_id":{"type":"string","minLength":1,"maxLength":128,"default":"minecraft-server"}
                               },
                               "additionalProperties":false
@@ -228,13 +229,20 @@ final class PublicToolCatalog {
     private static void validatePerceive(JsonObject value) {
         // 不同查看方式接受不同字段，例如等待时长只属于 Attention，文档地址只属于知识读取。
         only(value, "view", "focus", "query", "resource_uri", "task_id", "stream_id", "after_cursor", "wait_ms", "limit", "label", "radius",
-                "sections", "offset", "server_id", "url", "source", "language", "subject_id");
+                "sections", "offset", "server_id", "url", "source", "language", "subject_id", "detail");
         // 已选中文档 URI 就直接读知识；调用者明确指定的其他视图仍会校验，避免先做一次无关身体观察。
         defaults(value, "view", present(value, "url") ? WebKnowledgeService.VIEW : present(value, "resource_uri") ? "knowledge" : "situation");
         String view = string(value, "view", 1, 32, false);
         defaults(value, "after_cursor", 0, "wait_ms", 0, "limit", WebKnowledgeService.VIEW.equals(view) ? 3 : 5,
                 "offset", 0, "server_id", "minecraft-server");
         if (!VIEWS.contains(view)) throw bad("view has an unsupported value");
+        // 选动作先读完整名称表；概要目录显式选择，两层都不能因数量上限藏掉后面的施工或交互能力。
+        boolean abilityIndex = "abilities".equals(view) && !present(value, "query") && !present(value, "focus");
+        if (present(value, "detail")) {
+            if (!abilityIndex) throw bad("detail is only supported by the abilities index without query or focus");
+            if (!Set.of("names", "summary").contains(string(value, "detail", 1, 16, false)))
+                throw bad("detail must be names or summary");
+        } else if (abilityIndex) value.addProperty("detail", "names");
         // 查外部机制沿资料线程读取，专用参数不能混入身体观察或原生配方查询。
         if (WebKnowledgeService.VIEW.equals(view)) {
             if (present(value, "focus")) throw bad("web_knowledge uses query or url, not focus");
@@ -272,9 +280,10 @@ final class PublicToolCatalog {
         int waitMs = integer(value, "wait_ms", 0, 60_000);
         integer(value, "limit", 1, 20);
         int offset = integer(value, "offset", 0, Integer.MAX_VALUE);
-        if (offset != 0 && !"exploration".equals(view) && (!Set.of("abilities", "tasks").contains(view)
+        // 能力目录和搜索每次完整交付；非零页码只属于跑图目录或任务列表。
+        if (offset != 0 && !"exploration".equals(view) && (!"tasks".equals(view)
                 || present(value, "focus") || present(value, "query") || present(value, "task_id")))
-            throw bad("offset is only supported by exploration, abilities or tasks indexes");
+            throw bad("offset is only supported by exploration or tasks indexes; abilities are always complete");
         string(value, "server_id", 1, 128, false);
         boolean hasTask = present(value, "task_id");
         if (hasTask && !Set.of("tasks", "attention").contains(view)) {

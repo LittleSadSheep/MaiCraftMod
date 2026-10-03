@@ -70,7 +70,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 四个入口不等于只有四种功能。运行时提供多项 `maicraft:*` 语义能力，包括 `chat`、`inspect_machine`、`design_machine`、`operate_machine`、`build_machine`、`connect_mechanical_power`、`travel`、`acquire_items`、`craft`、`build` 和 `combat` 等。它们作为 `goal.ability` 交给 `plan` 或 `execute`。
 
-`perceive(view="abilities")` 默认返回能力用途的小目录；可先用 `query` 搜索，再用 `focus="maicraft:能力名"` 读取选定能力的参数和限制。AI 客户端据此提交语义目标，具体路径与原生操作由 Mod 执行。
+`perceive(view="abilities")` 默认一次返回全部公开能力名，`semantic_abilities` 是能力 ID 字符串数组，不附概要。选定后直接用 `focus="maicraft:能力名"` 读取完整参数和限制，两次调用即可定位并读取契约。需要比较用途时，可选 `detail="summary"` 一次读取全部“能力名＋概要”，或用 `query` 获取全部匹配候选；概要层不是读取契约的前置步骤。能力查询不分页，`limit` 不截断结果，非零 `offset` 不再接受。AI 客户端据此提交语义目标，具体路径与原生操作由 Mod 执行。
 
 例如将以下参数交给 `execute`，会自动打开聊天框、逐字输入并发送；`plan` 只校验和规划，不打开界面：
 

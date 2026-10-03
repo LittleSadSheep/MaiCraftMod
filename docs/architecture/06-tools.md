@@ -29,6 +29,7 @@ MCP 的 `tools/list` 里**只有四个工具**。它们是**通道**，不是功
 | --- | --- |
 | `view` | 看哪一类：`situation` / `surroundings` / `abilities` / `tasks` / `attention` / `landmarks` / `machines` / `knowledge` … |
 | `focus` | 在选定的 view 里精确读一个对象（例如某个能力的契约） |
+| `detail` | 仅能力目录：默认 `names` 一次列全能力名；`summary` 一次返回全部名字和概要，与 `query` / `focus` 互斥 |
 | `query` | 模糊搜索候选（与 `focus`、`resource_uri` 互斥） |
 | `resource_uri` | 直接读知识或冻结回执；**给了就默认 `view=knowledge`** |
 | `task_id` | 只看某一个任务（仅 `tasks` / `attention`） |
@@ -37,6 +38,8 @@ MCP 的 `tools/list` 里**只有四个工具**。它们是**通道**，不是功
 
 **边界**：不同 view 只接受自己的字段。例如 `sections` 只给 `situation` / `surroundings`，
 `wait_ms` 只给 `attention`；填错就地拒绝，**不静默忽略**。
+
+`perceive(view="abilities")` 的 `semantic_abilities` 默认是完整的能力 ID 字符串数组。模型选中名称后可直接调用 `perceive(view="abilities", focus="maicraft:能力名")` 读取参数、限制与现场可用性；无需先读取可选概要层。`detail="summary"` 一次返回全部名字与用途，`query` 一次返回全部匹配候选。能力查询不分页，`limit` 不裁剪结果，非零 `offset` 明确拒绝。
 
 **到语义部分**：`attention` / `tasks` / `landmarks` 读 `IntentRuntime` 的记录；
 其余 view 是现场观察。

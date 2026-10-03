@@ -248,11 +248,11 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private JsonElement perceiveOnClient(JsonObject arguments) {
         // 注意流与轻量能力搜索先分流；其余现场状态、完整能力和任务查询要求玩家处于可用世界。
         if ("attention".equals(arguments.get("view").getAsString())) return attentionOnClient(arguments);
-        // 查找能力名称无需读取身体或场地；精确 focus 仍走下方完整契约与真实可用性检查。
+        // 默认一次列全能力名，按需搜索或展开概要；选中后 focus 直接读取契约与真实可用性，无需经过概要层。
         if ("abilities".equals(arguments.get("view").getAsString()) && nullableString(arguments, "query") != null)
-            return AbilitySearch.search(nullableString(arguments, "query"), arguments.get("limit").getAsInt());
+            return AbilitySearch.search(nullableString(arguments, "query"));
         if ("abilities".equals(arguments.get("view").getAsString()) && nullableString(arguments, "focus") == null)
-            return AbilitySearch.index(arguments.get("offset").getAsInt(), arguments.get("limit").getAsInt());
+            return AbilitySearch.index(arguments);
         Minecraft minecraft = requireWorld();
         LocalPlayer player = minecraft.player;
         intents.bindForRequest(minecraft, player);

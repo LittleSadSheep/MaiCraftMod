@@ -17,10 +17,15 @@ public final class McpProtocolBudgetTest {
         JsonObject get = JsonParser.parseString("{\"action\":\"get\",\"task_id\":\"00000000-0000-4000-8000-000000000001\"}").getAsJsonObject();
         check(PublicToolCatalog.validateAndNormalize("task", get).get("limit").getAsInt() == 5, "small default history page");
         var index = JsonParser.parseString("{\"view\":\"abilities\",\"offset\":5}").getAsJsonObject();
+        // 能力名称、概要和搜索都完整交付，旧页码应明确报错；任务历史仍可按页读取。
+        for (String mode : new String[]{"names", "summary", "search"}) {
+            index.remove("detail"); index.remove("query");
+            index.addProperty(mode.equals("search") ? "query" : "detail", mode.equals("search") ? "build" : mode);
+            try { PublicToolCatalog.validateAndNormalize("perceive", index); throw new AssertionError("abilities still accepts pagination"); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage().contains("offset"), "obsolete page is identified"); }
+        }
+        index.remove("query"); index.addProperty("view", "tasks");
         PublicToolCatalog.validateAndNormalize("perceive", index);
-        index.addProperty("query", "build");
-        try { PublicToolCatalog.validateAndNormalize("perceive", index); throw new AssertionError("search silently ignored index offset"); }
-        catch (IllegalArgumentException expected) { /* 同一次请求只能读取一种页，不能悄悄忽略页码。 */ }
         System.out.println("McpProtocolBudgetTest: passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
