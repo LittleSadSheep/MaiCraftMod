@@ -32,11 +32,12 @@ import java.util.function.Supplier;
 
 /** 按顺序执行：观察 → 获取材料 → 建造/修复 → 使用原生物品 → 核实真实传送门。 */
 public final class PortalPreparationTask extends AbstractCompanionTask<PortalPreparationTaskRecord> {
-    private enum Phase { SURVEY, SUPPLY, RETURN, BUILD, LOCATE, MOVE, ACTIVATE, VERIFY }
+    private enum Phase { SURVEY, SUPPLY, RETURN, BUILD, CAST, LOCATE, MOVE, ACTIVATE, VERIFY }
     private final ClientLevel world;
     private final BiFunction<LocalPlayer, TaskRecord, Task> childFactory;
     private PortalSiteSurvey survey;
     private PortalPreparationSite site;
+    private NetherPortalCastingTask casting;
     private Phase phase = Phase.SURVEY;
     private Task child;
     private TaskRecord childRecord;
@@ -75,6 +76,16 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             if (p.dimension() == null || p.dimension().equals(current)) protection.add(new BlockPos(p.x(), p.y(), p.z()));
         }
         protectedLabels = List.copyOf(protection);
+        // 只有已选择的主世界浇筑方案才进入单桶流程；普通门框和末地门继续使用对应的原生工序。
+        if (!end && r.policy.method() == PortalPreparationPolicy.Method.LAVA_CAST) {
+            if (!"minecraft:overworld".equals(current)) {
+                blocked("casting_requires_overworld", "The selected lava-pool casting method is an Overworld construction method."); return;
+            }
+            phase = Phase.CAST;
+            childRecord = new PortalPreparationTaskRecord(callId(), deadline(), r.destination, r.radius, r.mayAlterTerrain, r.policy);
+            casting = new NetherPortalCastingTask(player, (PortalPreparationTaskRecord) childRecord);
+            child = casting; return;
+        }
         survey = new PortalSiteSurvey(world, player.blockPosition(), r.radius, end);
     }
 
@@ -183,6 +194,15 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         TaskResult result = guarded(() -> child.result(settled));
         child = null; childRecord = null;
         if (result == null) return blocked("portal_child_unconfirmed", "The preparation child ended without a result.");
+        if (phase == Phase.CAST) {
+            // 保留每次原生动作和整扇门差异；成型不符只结束本次施工，不冒称建门成功，也不重新施工。
+            childEvidence = result.data() == null ? Map.of() : Map.copyOf(result.data());
+            if (terminal != TaskState.SUCCESS || !result.success())
+                return blocked(childEvidence.getOrDefault("issue_code", "portal_casting_failed").toString(), result.message());
+            site = new PortalPreparationSite(casting.layout().frame(), null);
+            if (!site.ready(world)) { issue = "portal_casting_outcome_differs"; return TaskState.SUCCESS; }
+            phase = Phase.VERIFY; return TaskState.RUNNING;
+        }
         if (terminal != TaskState.SUCCESS || !result.success()) {
             Map<String, Object> evidence = new LinkedHashMap<>();
             for (String key : List.of("issue_code", "allowed_dimensions", "recovery_options", "failure_type", "requires_narration", "target_item_family"))
@@ -225,6 +245,8 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>(childEvidence);
         data.put("portal_prepared", complete); data.put("preparation_phase", phase.name().toLowerCase(Locale.ROOT));
+        if (casting != null && casting.layout() != null)
+            data.put("portal_observation", casting.layout().observation(p -> PortalPreparationSite.read(world, p)));
         if (issue != null) { data.put("issue_code", issue); data.put("requires_decision", true); }
         if (blockedFacts != null) data.put("blocked_facts", blockedFacts);
         return data;
@@ -251,5 +273,8 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             super.cleanup();
         }
     }
-    @Override protected String successMessage() { return "portal preparation verified from the active portal surface"; }
+    @Override protected String successMessage() {
+        return complete ? "portal preparation verified from the active portal surface"
+                : "Native casting actions completed; the observed frame needs a model decision before further work.";
+    }
 }

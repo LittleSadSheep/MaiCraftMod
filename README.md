@@ -109,6 +109,10 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 `maicraft:travel_dimension` 和 `maicraft:reach_milestone` 可设置 `prepare_portal=true`，在没有观察到有效传送门时准备入口。下界门优先复用完整黑曜石框、补齐标准小门的缺块，或在附近已加载的安全空地新建十块黑曜石框，再使用打火石或已有火焰弹点火。建造和修复还需 `may_alter_terrain=true`；缺料按 `material_policy` 和 `allowed_sources` 获取，临时施工支撑也计入供料需求。
 
+主世界可显式选择 `portal_method="lava_cast"`，使用单桶岩浆池手法：观察池岸、备桶取水、处理浅池底框、搭六块导流模具、循环取岩浆浇筑、收水并点火。工具和模具缺料沿既有策略补给；不要求持有黑曜石或钻石镐。只想建门时使用 `maicraft:prepare_portal`，参数例如 `{"portal_method":"lava_cast","may_alter_terrain":true}`，完成后停在门外。默认搜索当前已加载的 128 格范围，可用 `max_search_radius` 调整；没有观察到池岸时返回事实，由模型选择探索地点。
+
+浇筑回执分别提供 `casting_actions_completed`、每步原生效果、整扇门的 `portal_observation.differences` 和 `portal_prepared`。倒桶成功不等于黑曜石成型或门已点燃；产物不符时保留现场，不自动重倒或拆除错误产物。临时导流模具保留在现场，供模型决定后续整理。
+
 末地入口会复用已加载的完整门框，必要时通过原生末影之眼寻找要塞；核对十二个门框的朝向，只为没有眼的格子补眼。搜索和嵌眼需要 `allow_rare_consumables=true`。准备期间保留 `protected_labels` 和上层区域保护，供料后重新检查现场；点击必须得到原生确认，并观察到完整传送门表面后才继续穿门。不会制造末地门框或末地返回门，受阻和未确认的操作会返回原因。
 
 例如，前往下界可使用 `details.parameters={"destination_dimension":"minecraft:the_nether","prepare_portal":true,"may_alter_terrain":true}`；前往末地再设置 `allow_rare_consumables=true`。未开启 `prepare_portal` 时保持只使用已有有效传送门的行为。

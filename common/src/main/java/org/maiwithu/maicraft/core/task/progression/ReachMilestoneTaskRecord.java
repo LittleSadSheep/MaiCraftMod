@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy.Method;
 
 /**
  * 一个语义生存进度目标。具体前置条件、实体、结构、传送门格、路线和背包位置都刻意不包含在此边界中。
@@ -53,6 +54,8 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
     public final boolean allowRareConsumables;
     public final boolean mayAlterTerrain;
     public final boolean preparePortal;
+    /** 里程碑必须保留模型选择的建门手法，不能在材料子任务中退回采掘黑曜石。 */
+    public final Method portalMethod;
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy;
     public final List<String> protectedLabels;
@@ -80,7 +83,18 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
             List<SemanticAcquireTaskRecord.Source> allowedSources,
             SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy, List<String> protectedLabels,
             boolean preparePortal) {
+        this(toolCallId, deadlineGameTime, milestone, maxSearchDistance, portalSearchRadius, minimumHealth,
+                allowCombat, allowRareConsumables, mayAlterTerrain, allowedSources, materialPolicy, protectedLabels,
+                preparePortal, Method.OBSIDIAN);
+    }
+
+    public ReachMilestoneTaskRecord(String toolCallId, long deadlineGameTime, Milestone milestone,
+            int maxSearchDistance, int portalSearchRadius, float minimumHealth, boolean allowCombat,
+            boolean allowRareConsumables, boolean mayAlterTerrain, List<SemanticAcquireTaskRecord.Source> allowedSources,
+            SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy, List<String> protectedLabels,
+            boolean preparePortal, Method portalMethod) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
+        this.portalMethod = Objects.requireNonNull(portalMethod);
         this.milestone = Objects.requireNonNull(milestone, "milestone");
         this.maxSearchDistance = Math.clamp(
                 maxSearchDistance, MIN_SEARCH_DISTANCE, MAX_SEARCH_DISTANCE);

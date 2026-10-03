@@ -2,10 +2,13 @@
 package org.maiwithu.maicraft.core.task.dimension;
 
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.task.TaskFactory;
 import java.util.Objects;
 
 /** 内部传送门准备子任务；真实传送门方块格绝不会作为坐标交由模型指定。 */
 public final class PortalPreparationTaskRecord extends TaskRecord {
+    // 独立备门只负责真实建成和点火，不让“建一扇门”隐含授权角色穿门旅行。
+    static { TaskFactory.register(PortalPreparationTaskRecord.class, PortalPreparationTask::new); }
     final String destination;
     final int radius;
     final boolean mayAlterTerrain;

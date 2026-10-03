@@ -212,6 +212,11 @@ public final class DimensionTravelCompanionTask
             failIssue(preparationData.getOrDefault("issue_code", "portal_preparation_failed").toString(), result.message());
             return TaskState.FAILED;
         }
+        // 施工动作结束但门框尚未成型时结束旅行目标，保留施工成功事实，不能循环启动新的浇筑。
+        if (!Boolean.TRUE.equals(preparationData.get("portal_prepared"))) {
+            failIssue("portal_not_prepared", "Native preparation completed, but no active portal was verified; inspect the returned frame differences.");
+            return TaskState.FAILED;
+        }
         phase = Phase.FIND;
         return TaskState.RUNNING;
     }

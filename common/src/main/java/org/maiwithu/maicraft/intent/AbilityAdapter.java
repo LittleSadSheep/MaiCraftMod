@@ -29,6 +29,8 @@ import org.maiwithu.maicraft.core.pathing.goal.RegionalGoal;
 import org.maiwithu.maicraft.core.task.lighting.SemanticLightAreaTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationTaskRecord;
 
 /**
  * 把模型填好的目标翻译成下一步该做什么，例如“去营地”变成调用移动工具。
@@ -62,6 +64,7 @@ final class AbilityAdapter {
             case "maicraft:sleep" -> sleep(goal, player);
             case "maicraft:travel" -> travel(goal, player, runtime);
             case "maicraft:travel_dimension" -> travelDimension(goal);
+            case "maicraft:prepare_portal" -> preparePortal(goal, player);
             case "maicraft:find_structure" -> findStructure(goal);
             case ExplorationIntent.ABILITY -> ExplorationIntent.adapt(goal);
             case "maicraft:reach_milestone" -> reachMilestone(goal);
@@ -447,6 +450,21 @@ final class AbilityAdapter {
         return new IntentAction.Tool("goto", parameters.toString());
     }
 
+    /** 单独建门只接收施工手法和附近范围，最终坐标由池岸勘查确定，成功后停在门外。 */
+    private static IntentAction preparePortal(Goal goal, LocalPlayer player) {
+        if (goal.target() != null && !"current_place".equals(goal.target().kind()))
+            throw new IllegalArgumentException("prepare_portal searches around current_place; travel to the desired area first");
+        JsonObject args = goal.parameters();
+        args.addProperty("prepare_portal", true);
+        String destination = string(args, "destination_dimension");
+        if (destination == null) destination = "minecraft:the_nether";
+        return new IntentAction.Native(new PortalPreparationTaskRecord("prepare-portal-" + UUID.randomUUID(),
+                player.level().getGameTime() + 20L * 60 * 30, destination,
+                integer(args, "max_search_radius", 128, 16, 512),
+                bool(args, "may_alter_terrain", false) || bool(goal.preferences(), "may_alter_terrain", false),
+                PortalPreparationPolicy.parse(args)));
+    }
+
     private static IntentAction travelDimension(Goal goal) {
         // 只告诉底层要去哪一维度、最多找多远；传送门的位置和实际穿门步骤由跨维度任务负责。
         JsonObject parameters = goal.parameters();
@@ -476,7 +494,7 @@ final class AbilityAdapter {
             args.addProperty("may_alter_terrain", true);
         }
         for (String key : List.of("prepare_portal", "allow_rare_consumables", "allow_combat",
-                "max_search_distance", "allowed_sources", "material_policy", "protected_labels")) {
+                "max_search_distance", "allowed_sources", "material_policy", "protected_labels", "portal_method")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("dimension_travel", args.toString());
@@ -569,7 +587,7 @@ final class AbilityAdapter {
         }
         for (String key : List.of(
                 "minimum_health", "allow_combat", "allow_rare_consumables",
-                "allowed_sources", "material_policy", "protected_labels", "prepare_portal")) {
+                "allowed_sources", "material_policy", "protected_labels", "prepare_portal", "portal_method")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("reach_milestone", args.toString());

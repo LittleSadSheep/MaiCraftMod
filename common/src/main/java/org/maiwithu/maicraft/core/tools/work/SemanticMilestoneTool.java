@@ -13,6 +13,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.progression.ReachMilestoneTaskRecord;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
 /** 单一语义里程碑能力背后的隐藏执行器。 */
@@ -61,6 +62,7 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                         ReachMilestoneTaskRecord.MAX_PORTAL_RADIUS)
                 .optionalBool("allow_combat", "Permit hostile combat required by the milestone.")
                 .optionalBool("prepare_portal", "Prepare missing active portals; construction and eyes retain their separate permissions.")
+                .optionalEnum("portal_method", "Nether frame method; lava_cast uses the single-bucket Overworld lava-pool technique.", "obsidian", "lava_cast")
                 .optionalBool(
                         "allow_rare_consumables",
                         "Permit typed rare progression consumption such as eyes or gateway pearls.")
@@ -109,7 +111,8 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                 Boolean.TRUE.equals(parsed.allow_combat()),
                 Boolean.TRUE.equals(parsed.allow_rare_consumables()),
                 Boolean.TRUE.equals(parsed.may_alter_terrain()),
-                sources, policy, parsed.protected_labels(), Boolean.TRUE.equals(parsed.prepare_portal()));
+                sources, policy, parsed.protected_labels(), Boolean.TRUE.equals(parsed.prepare_portal()),
+                PortalPreparationPolicy.parse(input).method());
         setTask(player, record, input, reply);
     }
 }

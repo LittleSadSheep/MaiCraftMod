@@ -49,6 +49,7 @@ public final class SemanticDimensionTravelTool implements MaiCraftTool {
                         "may_alter_terrain",
                         "Explicit permission for the route to dig, bridge or pillar; default false.")
                 .optionalBool("prepare_portal", "Prepare an absent active portal; Nether construction also needs terrain permission.")
+                .optionalEnum("portal_method", "Nether frame method; lava_cast uses one bucket at an observed Overworld lava pool.", "obsidian", "lava_cast")
                 .optionalBool("allow_rare_consumables", "Permit stronghold eye throws and End frame eye insertion.")
                 .optionalBool("allow_combat", "Permit hostile hunting for portal materials.")
                 .optionalInteger("max_search_distance", "Physical stronghold search limit when preparation is enabled.", 128, 4096)

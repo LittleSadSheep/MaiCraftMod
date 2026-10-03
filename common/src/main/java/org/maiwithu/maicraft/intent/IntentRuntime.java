@@ -63,6 +63,7 @@ public final class IntentRuntime {
             "maicraft:sleep",
             "maicraft:travel",
             "maicraft:travel_dimension",
+            "maicraft:prepare_portal",
             "maicraft:find_structure",
             ExplorationIntent.ABILITY,
             "maicraft:reach_milestone",

@@ -302,6 +302,19 @@ public final class SemanticAbilityCatalog {
                             field("may_alter_terrain", "boolean", "Explicit permission to dig, bridge or pillar; default false."),
                             field("reach_structure", "boolean", "Structure only: reach and recheck evidence, default true."),
                             field("allow_rare_consumables", "boolean", "Structure only: permit real ender-eye throws, default false.")));
+            // 独立备门把浇筑手法交给模型选择，执行器负责取放桶、补料和完整门框观察，完成后不自动穿门。
+            case "maicraft:prepare_portal" -> contract(
+                    "Prepare and ignite a portal, then stop outside it. lava_cast uses one bucket, an observed Overworld lava pool, a temporary mold and native water/lava reactions. Action completion, whole-frame differences and portal activation are reported separately.",
+                    targets("current_place"), fields(
+                            field("destination_dimension", "resource_id", "Portal destination; default minecraft:the_nether."),
+                            field("portal_method", "obsidian|lava_cast", "Default obsidian. Choose lava_cast for the single-bucket lava-pool technique; no diamond pickaxe or carried obsidian required."),
+                            field("max_search_radius", "integer", "Loaded-world search radius, 16..512; default 128. Explore first if no pool is observed."),
+                            field("may_alter_terrain", "boolean", "Required for construction: permits the declared mold, bottom excavation and frame replacement."),
+                            field("material_policy", "string", "ordinary, storage_available or inventory_only for tools and mold supplies; native fluid collection is part of lava_cast."),
+                            field("allowed_sources", "array<string>", "Permitted acquisition sources for supplies."),
+                            field("allow_combat", "boolean", "Permit hunting for supplies; default false."),
+                            field("allow_rare_consumables", "boolean", "Permit End portal eye consumption; default false."),
+                            field("protected_labels", "array<string>", "Remembered places to preserve.")));
             case "maicraft:travel_dimension" -> contract(
                     "Reach another dimension through a real portal. With prepare_portal, MaiCraft can prepare a Nether or End entry portal before walking through and verifying the new dimension.",
                     targets("current_place", "landmark", "area", "prior_result"),
@@ -309,6 +322,7 @@ public final class SemanticAbilityCatalog {
                             field("destination_dimension", "resource_id", "Required destination dimension, such as minecraft:the_nether or minecraft:the_end."),
                             field("max_search_radius", "integer", "Bounded loaded-world portal evidence radius; default 128."),
                             field("prepare_portal", "boolean", "If no active portal is observed, obtain materials and prepare one; default false. Nether construction/repair also needs may_alter_terrain; End eyes need allow_rare_consumables."),
+                            field("portal_method", "obsidian|lava_cast", "Preparation method; default obsidian. lava_cast uses the single-bucket Overworld lava-pool technique."),
                             field("allow_rare_consumables", "boolean", "Permit stronghold eye throws and End frame eye insertion; default false."),
                             field("allow_combat", "boolean", "Permit hostile hunting for portal supplies; default false."),
                             field("max_search_distance", "integer", "Physical stronghold search limit during preparation; default and maximum 4096."),
@@ -337,6 +351,7 @@ public final class SemanticAbilityCatalog {
                             field("max_search_distance", "integer", "Bounded physical structure and End search distance; maximum 4096."),
                             field("max_portal_search_radius", "integer", "Bounded loaded active-portal evidence radius; default 128."),
                             field("prepare_portal", "boolean", "Enable Nether frame construction/repair and End frame activation when needed; default false."),
+                            field("portal_method", "obsidian|lava_cast", "Nether preparation method; default obsidian. lava_cast uses one bucket at an observed Overworld lava pool."),
                             field("minimum_health", "number", "Health floor for a separately permitted boss encounter; default 10."),
                             field("allow_combat", "boolean", "Separate consent for hostile combat; never inferred from terrain permission."),
                             field("allow_rare_consumables", "boolean", "Separate consent for typed rare resource use such as eyes or gateway pearls."),
