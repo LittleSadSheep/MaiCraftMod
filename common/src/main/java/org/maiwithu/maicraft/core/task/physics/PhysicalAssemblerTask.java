@@ -109,6 +109,8 @@ public final class PhysicalAssemblerTask extends AbstractCompanionTask<PhysicalA
                 &&(observation==null||!observation.get("native_input_observed").getAsBoolean()))
             return failure("原生输入未确认，保留观察回执且不重放组装请求",FailureType.UNKNOWN);
         if(observation==null||!observation.get("complete").getAsBoolean())return TaskState.RUNNING;
+        // 服务器可能一刻内完成搬移；先结清原生输入的稳定确认，避免任务收尾把已执行拉杆记为未知。
+        if(action!=null&&!action.terminal())return TaskState.RUNNING;
         String outcome=observation.has("outcome")?observation.get("outcome").getAsString():"unknown";
         boolean changed=outcome.equals("assembled")||outcome.equals("disassembled");
         if(!changed&&observation.has("observation_error"))return failure(observation.get("observation_error").getAsString(),FailureType.UNKNOWN);

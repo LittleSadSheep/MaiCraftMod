@@ -18,7 +18,8 @@ import org.maiwithu.maicraft.core.task.physics.PhysicalAssemblyParameters.Adhesi
 final class NativeAssemblyApi {
     static final String ASSEMBLER="dev.simulated_team.simulated.content.blocks.physics_assembler.PhysicsAssemblerBlockEntity";
     record Bond(UUID id,Adhesive adhesive,AABB bounds) {
-        Map<String,Object> evidence() { return Map.of("entity_id",id.toString(),"adhesive",adhesive.item,
+        // 粘接后交付胶层的持久身份，便于模型区分新旧连接；不使用会被语义回执移除的临时实体编号字段。
+        Map<String,Object> evidence() { return Map.of("glue_id",id.toString(),"adhesive",adhesive.item,
                 "bounds",List.of(bounds.minX,bounds.minY,bounds.minZ,bounds.maxX,bounds.maxY,bounds.maxZ)); }
     }
     private NativeAssemblyApi() {}

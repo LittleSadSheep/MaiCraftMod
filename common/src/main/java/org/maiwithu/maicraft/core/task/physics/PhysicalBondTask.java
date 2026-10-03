@@ -48,6 +48,7 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
     private JsonObject designEvidence=new JsonObject();
     private CompletableFuture<PhysicalStructureDesignStore.Registration> design;
     private int selectionRetries;
+    private BondMaterialSettlement materialSettlement;
     public PhysicalBondTask(LocalPlayer player,PhysicalBondTaskRecord record) {super(player,record);world=player.level();}
     @Override protected void onStart() {design=AssemblyDesignSession.prepare(player,r.parameters,r.anchor,r.dimension);}
     @Override protected TaskState onTick() {
@@ -62,7 +63,10 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
             action=ctx.actions().poll(ctx,action);if(!action.terminal())return TaskState.RUNNING;
             materialAfter=material();
             if(action.status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED)return stopWith("未能确认原生粘接效果；保留材料和胶层事实，不重放请求",FailureType.UNKNOWN);
-            confirmed=true;return TaskState.SUCCESS;
+            confirmed=true;
+            // 新胶层先同步时继续只读等待背包结算，防止下一轮设计把尚未到达的耐久扣减当成免费粘接。
+            if(materialSettlement==null)materialSettlement=new BondMaterialSettlement(materialBefore,world.getGameTime());
+            return materialSettlement.observe(world.getGameTime(),materialAfter)?TaskState.SUCCESS:TaskState.RUNNING;
         }
         if(supply!=null) {
             TaskState state=runChild(supply);if(state==null)return TaskState.RUNNING;
@@ -160,6 +164,7 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
                 "completed_effects",created.stream().map(NativeAssemblyApi.Bond::evidence).toList(),"material",Map.of("before",materialBefore,"after",materialAfter),
                 "approach",approach.evidence(),"supply",supplyEvidence));
         result.put("design_declaration",designEvidence);result.put("declared_structure_diff",AssemblyDeclarationView.diff(frame,declarations));
+        if(materialSettlement!=null)result.put("material_settlement",materialSettlement.evidence());
         if(designEvidence.has("world_design_id"))result.put("design_id",designEvidence.get("world_design_id").getAsString());
         return result;
     }
