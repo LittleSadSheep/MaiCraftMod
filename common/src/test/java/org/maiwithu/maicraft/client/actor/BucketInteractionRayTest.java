@@ -20,6 +20,8 @@ import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.world.InteractionHand;
+import org.maiwithu.maicraft.core.task.lighting.AutomaticLighting;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** 使用真实原版方块/流体射线，测试原生任务镜头门控和角色 USE_ITEM 派发。 */
 public final class BucketInteractionRayTest {
@@ -29,6 +31,7 @@ public final class BucketInteractionRayTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         bucketUse(Items.BUCKET);
         bucketUse(Items.WATER_BUCKET);
+        mainHandBucketDoesNotUseOffhandTorch();
         sourceDisappearsBeforePress();
         filledBucketMustPlaceInTargetCell();
         pourFromShoreUsesVisibleSupport();
@@ -94,6 +97,30 @@ public final class BucketInteractionRayTest {
             check(act(task) == TaskState.RUNNING && f.mode.items == 1 && f.mode.blocks == 0,
                     "a bucket must submit one native USE_ITEM and never activate the backing machine");
         }
+    }
+
+    private static void mainHandBucketDoesNotUseOffhandTorch() throws Exception {
+        var lighting = AutomaticLighting.get();
+        try (var f = world(Items.WATER_BUCKET)) {
+            var original = f.player.position();
+            AutomaticLightingTest.prepareBody(f); f.position(original);
+            f.inventory.setItem(40, new ItemStack(Items.TORCH, 8));
+            lighting.configure(f.player, true, 8, List.of());
+            var task = task(f);
+            act(task);
+            lighting.tick(ClientRuntime.requireContext(f.player), true);
+            check(f.mode.blocks == 0, "水桶瞄准时补光必须让出准星");
+            converge(f, task); act(task);
+            lighting.tick(ClientRuntime.requireContext(f.player), true);
+            check(f.mode.items == 1 && f.mode.usedHand == InteractionHand.MAIN_HAND && f.mode.blocks == 0,
+                    "LLM 水桶任务只派发主手 useItem，不进入原版双手右键回退");
+            // 桶的回执尚未回来时持续运行辅助调度，不能利用后续刻的空闲额度误放副手火把。
+            for (int tick = 0; tick < 4; tick++) {
+                f.nextTick(); act(task); lighting.tick(ClientRuntime.requireContext(f.player), true);
+            }
+            check(f.mode.items == 1 && f.mode.blocks == 0 && f.player.getOffhandItem().getCount() == 8,
+                    "等待主手使用回执期间没有补光点击或副手消耗");
+        } finally { lighting.reset(); }
     }
 
     private static void sourceDisappearsBeforePress() throws Exception {

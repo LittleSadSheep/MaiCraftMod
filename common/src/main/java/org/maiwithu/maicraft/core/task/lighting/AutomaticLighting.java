@@ -10,6 +10,8 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.item.Items;
+import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.core.task.base.LandmarkProtection;
@@ -123,6 +125,10 @@ public final class AutomaticLighting {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("enabled", enabled); result.put("minimum_light", minimum); result.put("state", state);
         result.put("source", "minecraft:torch"); result.put("hand", "offhand");
+        // 启用只是配置完成，副手准备可能尚未执行；直接给出当前火把分布，不能让期望手别冒充实际持有。
+        result.put("torch_inventory", Map.of("total_count", PlayerInv.count(player.getInventory(), Items.TORCH),
+                "backpack_count", PlayerInv.carriedCount(player.getInventory(), Items.TORCH),
+                "off_hand_count", player.getOffhandItem().is(Items.TORCH) ? player.getOffhandItem().getCount() : 0));
         result.put("scope", "visited_feet_and_eyes_only"); result.put("dimension", player.level().dimension().location().toString());
         result.put("observed_cells", observed); result.put("minimum_observed_block_light", observed == 0 ? null : lowest);
         result.put("below_target", dark); result.put("unloaded_cells", unknown); result.put("placements", List.copyOf(placements));

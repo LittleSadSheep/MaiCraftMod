@@ -6,14 +6,45 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.player.Inventory;
 import org.maiwithu.maicraft.server.inventory.ResourceIdentity;
 
 /** 总数量仍按物品汇总，同时保留带组件的变体，使背包里的不同装配进度无需放到机器上才能辨认。 */
 public final class InventoryComponentFacts {
     private InventoryComponentFacts() {}
+
+    /** 背包、穿戴和副手共同组成随身总量；主手本来就在快捷栏，不能再算一次。 */
+    public static JsonArray carried(Inventory inventory, HolderLookup.Provider registries) {
+        List<ItemStack> stacks = new ArrayList<>();
+        Map<String, Map<String, Long>> locations = new LinkedHashMap<>();
+        collect(inventory.items, "backpack", stacks, locations);
+        collect(inventory.offhand, "off_hand", stacks, locations);
+        collect(inventory.armor, "armor", stacks, locations);
+        JsonArray result = inventory(stacks, registries);
+        for (var entry : result) {
+            var row = entry.getAsJsonObject();
+            JsonObject counts = new JsonObject();
+            locations.get(row.get("item_id").getAsString()).forEach(counts::addProperty);
+            // 火把从背包进入副手只改变存放位置；只读取 inventory 段时也必须看得见它的去向。
+            row.add("location_counts", counts);
+        }
+        return result;
+    }
+
+    private static void collect(Iterable<ItemStack> group, String location, List<ItemStack> stacks,
+                                Map<String, Map<String, Long>> locations) {
+        for (ItemStack stack : group) {
+            if (stack.isEmpty()) continue;
+            stacks.add(stack);
+            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            locations.computeIfAbsent(id, ignored -> new LinkedHashMap<>()).merge(location, (long) stack.getCount(), Long::sum);
+        }
+    }
 
     public static JsonObject observe(ItemStack stack, HolderLookup.Provider registries) {
         JsonObject facts = new JsonObject();

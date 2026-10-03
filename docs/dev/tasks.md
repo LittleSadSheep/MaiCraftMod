@@ -123,6 +123,8 @@ boolean stalled = inactivity.observeCounter(player.level().getGameTime(), confir
 
 `maicraft:auto_light` 的 `action=enable|disable|status` 是即时配置或查询，不申请身体，不替换当前任务。默认在自动控制期间开启，以方块光 8 为目标，火把常驻副手；仅用随身材料，主任务忙碌、没有支撑或缺料时保留暗格，不绕路。状态中的 `automatic_lighting` 完整保留已走位置的最低实测亮度、暗格、未知项与原生放置结果。断开会话后恢复默认设置。
 
+`perceive(view=situation)` 的 `inventory` 统计背包、快捷栏、副手和穿戴物品的随身总量，`location_counts` 标明 `backpack`、`off_hand` 和 `armor` 的数量。主手已经包含在快捷栏，不另加一次；`equipment` 是同一份库存的手别、护甲和耐久明细。火把换到副手只改变位置，不能被当成消耗或丢失；自动补光状态也提供 `torch_inventory` 的总数与背包、副手分布。
+
 选定区域使用 `maicraft:light_area`，默认火把、`coverage=all`、`minimum_light=8`。区域先发现范围，再规划、补料、用副手在触及范围内放置并复测；前一盏灯已覆盖的候选直接跳过，材料耗尽时交回原供料流程续作。`lighting_observation` 保留未达标位置；只有全部声明覆盖目标达到实测阈值才能声称全覆盖。光照不能清除已有怪物，也不把特殊生成机制一并宣称为安全。
 
 未获执行机会的任务槽会冻结本任务及其子任务共用的活动时钟。自卫、其他任务槽和后续新任务使用独立时钟；服务端已接收的操作、原生回执等待和现实时间超时仍按各自规则推进。修改暂停行为时必须把这些路径一起检查。

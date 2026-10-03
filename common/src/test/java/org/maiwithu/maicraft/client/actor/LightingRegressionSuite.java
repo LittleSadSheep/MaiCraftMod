@@ -9,6 +9,8 @@ public final class LightingRegressionSuite {
         AuxiliaryActionTest.main(args);
         AuxiliaryNavigationTest.main(args);
         AuxiliaryLookReturnTest.main(args);
+        InventoryHandVisibilityTest.main(args);
+        BucketInteractionRayTest.main(args);
         AutomaticLightingTest.main(args);
         AreaLightingTest.main(args);
         AutomaticLightingContractTest.main(args);

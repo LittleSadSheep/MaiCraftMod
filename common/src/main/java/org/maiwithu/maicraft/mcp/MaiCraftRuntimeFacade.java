@@ -752,12 +752,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private static JsonArray inventorySummary(LocalPlayer player) {
-        // 主背包保留原有总量，同时展示半成品等组件变体；装备和副手仍单列，不重复累计。
-        return InventoryComponentFacts.inventory(player.getInventory().items, player.registryAccess());
+        // 随身总量包含副手与穿戴，并标明各处数量；换手不会被误报为材料消失，主手也不会重复计数。
+        return InventoryComponentFacts.carried(player.getInventory(), player.registryAccess());
     }
 
     private static JsonObject equipmentSummary(LocalPlayer player) {
-        // 分开列出主手、副手和四件护甲，保留耐久信息，避免混在普通背包总数里看不清。
+        // 装备段提供已计入 inventory 的手别、护甲位置与耐久明细，不是一份额外库存。
         JsonObject result = new JsonObject();
         addStack(result, "main_hand", player.getMainHandItem(), player);
         addStack(result, "off_hand", player.getOffhandItem(), player);

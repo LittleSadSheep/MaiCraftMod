@@ -34,10 +34,11 @@ public final class RoutineTorchPlacementTest {
             h.set(ground.pos().below(), Blocks.CHEST.defaultBlockState());
             check(!RoutineTorchPlacement.stillUsable(h.player, ground, Set.of()), "inventory blocks are not torch supports");
             h.set(ground.pos().below(), Blocks.STONE.defaultBlockState());
-            // 近处天然岩壁优先挂灯，火把本身没有碰撞，不需要为照明再规划一段走路。
+            // 视线已经朝向近处岩壁时就地挂灯；不能为了墙面优先级强迫正在前进的角色回头。
             h.set(new BlockPos(6, 2, 4), Blocks.STONE.defaultBlockState());
+            h.player.setYRot(-90); h.player.setXRot(0);
             var wall = RoutineTorchPlacement.find(h.player, Set.of());
-            check(wall != null && wall.desiredState().is(Blocks.WALL_TORCH), "nearby rock wall is preferred");
+            check(wall != null && wall.desiredState().is(Blocks.WALL_TORCH), "rock wall already in view is preferred");
             h.set(new BlockPos(5, 2, 4), Blocks.STONE.defaultBlockState());
             check(!RoutineTorchPlacement.stillUsable(h.player, wall, Set.of()), "new obstruction invalidates the old proposal");
             check(!RoutineTorchPlacement.usable(h.player, h.player.blockPosition(), Blocks.TORCH.defaultBlockState(),
