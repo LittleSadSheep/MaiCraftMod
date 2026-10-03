@@ -15,6 +15,11 @@ public abstract class SableForceObservationMixin {
     @Inject(method = "prePhysicsTickBegin", at = @At("RETURN"), require = 0, remap = false)
     private void maicraft$beginForceObservation(CallbackInfo callback) { NativePhysicsCapture.begin(this); }
 
+    @Inject(method="prePhysicsTick",at=@At("HEAD"),require=0,remap=false)
+    private void maicraft$observeForceInput(@Coerce Object system,@Coerce Object handle,double timeStep,CallbackInfo callback) {
+        NativePhysicsCapture.forceInput(this,handle);
+    }
+
     @Inject(method = "applyQueuedForces", at = @At("HEAD"), require = 0, remap = false)
     private void maicraft$captureForces(@Coerce Object system, @Coerce Object handle, double timeStep, CallbackInfo callback) {
         NativePhysicsCapture.capture(this, handle, timeStep);

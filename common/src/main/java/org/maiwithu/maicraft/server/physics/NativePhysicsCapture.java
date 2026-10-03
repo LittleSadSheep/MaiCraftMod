@@ -17,6 +17,7 @@ import org.joml.Vector3d;
 import org.joml.Vector3dc;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBody;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsVector;
+import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsMotion;
 import org.maiwithu.maicraft.server.machine.NativeApi;
 
 /** 玩家请求分析后才短期旁听物理子步；复制冲量、作用点和质量，不向真实船体施加任何力。 */
@@ -28,6 +29,7 @@ public final class NativePhysicsCapture {
     private static final class Lease {
         long until; boolean previous; PhysicsBody body; String error;
         double timeStep;
+        PhysicsVector inputVelocity,inputAngularVelocity;PhysicsMotion motion;
         boolean collecting,directObserved;
         PhysicsVector directForce=PhysicsVector.ZERO,directTorque=PhysicsVector.ZERO;
     }
@@ -42,6 +44,15 @@ public final class NativePhysicsCapture {
         Lease lease = WATCHES.get(ship); return lease == null ? null : lease.error;
     }
     public static boolean observing(Object ship) {Lease lease=WATCHES.get(ship);return lease!=null&&lease.collecting;}
+    static PhysicsMotion motion(Object ship) {Lease lease=WATCHES.get(ship);return lease==null?null:lease.motion;}
+    public static void forceInput(Object ship,Object handle) {
+        Lease lease=WATCHES.get(ship);if(lease==null||!lease.collecting)return;
+        try {
+            // 轮胎等先算力再批量提交；在原生执行器开始前复制其输入速度，后续预测不借用已经被本次冲量改动的速度。
+            lease.inputVelocity=vector(NativeApi.call(handle,null,"getLinearVelocity",new Vector3d()));
+            lease.inputAngularVelocity=vector(NativeApi.call(handle,null,"getAngularVelocity",new Vector3d()));
+        } catch(RuntimeException|LinkageError missing) {lease.inputVelocity=null;lease.inputAngularVelocity=null;failure(lease,ship,"force_input",missing);}
+    }
     static double timeStep(Object ship) {
         // 帆面原生算法在升力计算中使用子步冲量；预测必须复用实际采样时长，不能假定每刻只有一次物理更新。
         Lease lease=WATCHES.get(ship);
@@ -54,6 +65,7 @@ public final class NativePhysicsCapture {
         if (level(ship).getGameTime() > lease.until) { WATCHES.remove(ship); return; }
         try {
             lease.collecting=true;lease.directObserved=false;lease.directForce=PhysicsVector.ZERO;lease.directTorque=PhysicsVector.ZERO;
+            lease.inputVelocity=null;lease.inputAngularVelocity=null;lease.motion=null;
             NativeWheelCapture.beginStep(ship);
             lease.previous = NativeApi.truth(NativeApi.call(ship, null, "isTrackingIndividualQueuedForces"));
             NativeApi.call(ship, null, "enableIndividualQueuedForcesTracking", true);
@@ -164,11 +176,16 @@ public final class NativePhysicsCapture {
             }
         } else unknowns.add("直接刚体冲量总计未被本次采样钩子确认；只列出已确认的原生分组、执行器点力及重力");
         unknowns.add("外部直接修改速度或位置的操作不属于当前受力积分记录");
+        var afterVelocity=vector(NativeApi.call(handle,null,"getLinearVelocity",new Vector3d()));
+        var afterAngular=vector(NativeApi.call(handle,null,"getAngularVelocity",new Vector3d()));
+        lease.motion=new PhysicsMotion(lease.inputVelocity,lease.inputAngularVelocity,afterVelocity,afterAngular,dt);
+        if(lease.inputVelocity==null)unknowns.add("unmodeled:未取得执行器开始前的速度，暂保留直接冲量提交后的样本");
+        unknowns.add("船体速度与力的输入阶段对齐；直接冲量提交后的速度另列 native_motion_phases，实际位移仍需比较连续姿态");
         return new PhysicsBody((UUID) NativeApi.call(ship, null, "getUniqueId"), level(ship).dimension().location().toString(),
                 level(ship).getGameTime(), ((Number) NativeApi.call(mass, null, "getMass")).doubleValue(), center,
                 PhysicsBody.Inertia.of((Matrix3dc) NativeApi.call(mass, null, "getInertiaTensor")), rotation, worldCenter,
-                vector(NativeApi.call(handle, null, "getLinearVelocity", new Vector3d())),
-                vector(NativeApi.call(handle, null, "getAngularVelocity", new Vector3d())),
+                lease.inputVelocity==null?afterVelocity:lease.inputVelocity,
+                lease.inputAngularVelocity==null?afterAngular:lease.inputAngularVelocity,
                 vector(NativeApi.call(null, DIMENSION, "getGravity", level(ship))), loads, unknowns);
     }
     @SuppressWarnings({"rawtypes", "unchecked"})

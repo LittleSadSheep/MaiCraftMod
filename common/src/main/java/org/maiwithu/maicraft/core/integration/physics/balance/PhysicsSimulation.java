@@ -33,25 +33,37 @@ public final class PhysicsSimulation {
     public static Assessment assess(PhysicsBody body, Limits limits, Map<String, Double> settings) {
         for (String id : settings.keySet()) if (body.loads().stream().noneMatch(load -> load.id().equals(id)))
             throw new IllegalArgumentException("推力设置引用了未观察到的来源: " + id);
-        var stopped = wrench(body, body.rotation(), settings, 0);
-        var running = wrench(body, body.rotation(), settings, 1);
         List<Trial> trials = new ArrayList<>();
-        for (String mode : List.of("stopped", "running", "starting", "stopping"))
-            trials.add(run(body, limits, settings, mode, PhysicsVector.ZERO, "none"));
+        var parked=run(body,limits,settings,"stopped",PhysicsVector.ZERO,"none");
+        var cruise=run(body,limits,settings,"running",PhysicsVector.ZERO,"none");
+        trials.add(parked);trials.add(cruise);
+        // 加配重后悬挂会先压缩到新的姿态；用完整沉降轨迹判断过程，再以最终状态检查稳态，而非把瞬时下沉当成永久失衡。
+        var stoppedBody=finalBody(body,parked);var runningBody=finalBody(body,cruise);
+        var stopped=wrench(stoppedBody,stoppedBody.rotation(),settings,0);
+        var running=wrench(runningBody,runningBody.rotation(),settings,1);
+        trials.add(run(stoppedBody,limits,settings,"starting",PhysicsVector.ZERO,"none"));
+        trials.add(run(runningBody,limits,settings,"stopping",PhysicsVector.ZERO,"none"));
         // 同时测试左右倾、前后倾；只有一个方向扶正时，不能把平面配平当成整船稳定。
         for (String mode : List.of("stopped", "running")) for (int axis : new int[]{0, 2}) for (int sign : new int[]{-1, 1}) {
             PhysicsVector disturbance = axis == 0 ? new PhysicsVector(sign, 0, 0) : new PhysicsVector(0, 0, sign);
-            trials.add(run(body, limits, settings, mode, disturbance, (axis == 0 ? "pitch_" : "roll_") + sign));
+            trials.add(run(mode.equals("stopped")?stoppedBody:runningBody, limits, settings, mode, disturbance, (axis == 0 ? "pitch_" : "roll_") + sign));
         }
-        boolean idle = equilibrium(stopped, limits), cruise = equilibrium(running, limits);
-        boolean idleRestoring = restoring(body, settings, 0, limits), cruiseRestoring = restoring(body, settings, 1, limits);
+        boolean idle = equilibrium(stopped, limits), powered = equilibrium(running, limits);
+        boolean idleRestoring = restoring(stoppedBody, settings, 0, limits), cruiseRestoring = restoring(runningBody, settings, 1, limits);
         List<String> limitations = new ArrayList<>(body.unknowns());
         limitations.add("隔离刚体预测：未复演地形碰撞、绳索及多刚体约束、传动网络重建、气球充气和流体变化");
         limitations.add("来源推力按已观察或明确声明的工况计算；预测通过仍须在游戏中核验停机、运行和启停");
         boolean complete=body.unknowns().stream().noneMatch(reason->reason.startsWith("unmodeled:"));
-        return new Assessment("isolated_rigid_body", idle, cruise, idleRestoring, cruiseRestoring,
-                complete && idle && cruise && idleRestoring && cruiseRestoring && trials.stream().allMatch(Trial::withinLimits),
+        return new Assessment("isolated_rigid_body", idle, powered, idleRestoring, cruiseRestoring,
+                complete && idle && powered && idleRestoring && cruiseRestoring && trials.stream().allMatch(Trial::withinLimits),
                 complete, false, stopped, running, List.copyOf(trials), List.copyOf(limitations));
+    }
+
+    private static PhysicsBody finalBody(PhysicsBody body,Trial trial) {
+        if(trial.numericalFailure()||trial.trajectory().isEmpty())return body;
+        var end=trial.trajectory().getLast();
+        return new PhysicsBody(body.structureId(),body.dimension(),body.tick(),body.mass(),body.center(),body.inertia(),end.rotation(),
+                end.position(),end.velocity(),end.angularVelocity(),body.gravity(),body.loads(),body.unknowns());
     }
 
     private static boolean equilibrium(PhysicsWrench wrench, Limits limits) {
@@ -62,7 +74,7 @@ public final class PhysicsSimulation {
     private static PhysicsWrench wrench(PhysicsBody body, PhysicsBody.Rotation rotation,
                                         Map<String, Double> settings, double propulsion) {
         // 静止检查没有迎流，巡航检查使用声明的参考速度；停桨滑行另由停止过程保留实际速度来计算。
-        return PhysicsWrench.evaluate(body, rotation, body.position(),propulsion==0?PhysicsVector.ZERO:body.velocity(),PhysicsVector.ZERO,
+        return PhysicsWrench.evaluate(body, rotation, body.position(),propulsion==0?PhysicsVector.ZERO:body.velocity(),propulsion==0?PhysicsVector.ZERO:body.angularVelocity(),
                 controls(body, settings, propulsion), propulsion,true);
     }
     private static Map<String, Double> controls(PhysicsBody body, Map<String, Double> settings, double propulsion) {
@@ -86,7 +98,8 @@ public final class PhysicsSimulation {
                 : perturb(body.rotation(), disturbance, limits.perturbationDegrees());
         // 起步场景从静止加速，不能直接继承巡航速度而跳过固定翼缺少升力的滑跑阶段。
         PhysicsVector position = body.position(), velocity = mode.equals("stopped")||mode.equals("starting") ? PhysicsVector.ZERO : body.velocity();
-        PhysicsVector omega = disturbance.length() == 0 ? body.angularVelocity() : PhysicsVector.ZERO;
+        // 倾角扰动只改变姿态，不瞬间抹掉车辆转弯或船体已有的角速度。
+        PhysicsVector omega = body.angularVelocity();
         Map<String, Double> commands = new LinkedHashMap<>(controls(body, settings,
                 mode.equals("running") || mode.equals("stopping") ? 1 : 0));
         List<Sample> trajectory = new ArrayList<>();
@@ -129,8 +142,8 @@ public final class PhysicsSimulation {
         double height = g == 0 ? 0 : -position.subtract(body.position()).dot(body.gravity()) / g;
         double vertical = g == 0 ? 0 : -velocity.dot(body.gravity()) / g;
         boolean pass = !failure && peak <= limits.maxTiltDegrees()
-                && maxVerticalSpeed <= limits.maxVerticalAcceleration() * duration
-                && peakSpeed <= Math.toRadians(limits.maxTiltDegrees());
+                && maxVerticalSpeed <= limits.maxVerticalAcceleration() * duration;
+        // 轮胎快速扶正或车辆匀速转弯可以有较高角速度；倾角不能当成角速度阈值，实际峰值仍完整留在回执中。
         return new Trial(mode, name, peak, tilt(attitude, body.gravity()), height, vertical,
                 peakSpeed, pass, failure, List.copyOf(trajectory));
     }

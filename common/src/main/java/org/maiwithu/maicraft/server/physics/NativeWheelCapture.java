@@ -97,13 +97,15 @@ public final class NativeWheelCapture {
         PhysicsWheel wheel=sample.wheel();
         if(wheel!=null)wheel=new PhysicsWheel(wheel.itemId(),wheel.radius(),wheel.strength(),wheel.steeringRadians(),wheel.forward(),wheel.side(),
                 wheel.driveSign(),wheel.rpm(),wheel.brake(),wheel.friction(),wheel.extension(),wheel.groundPoint(),wheel.groundNormal(),wheel.groundStructureId(),
-                wheel.contactState().equals("contact_pending_application")?"contact":wheel.contactState(),true);
+                wheel.contactState().equals("contact_pending_application")?"contact":wheel.contactState(),true,wheel.mount(),wheel.referenceRpm());
         return new Sample(sample.mount(),sample.point(),sample.impulse(),wheel,sample.queued(),true,sample.unknowns());
     }
     static PhysicsBody.Load load(Sample sample,BlockPos origin,double dt) {
         var offset=new PhysicsVector(origin.getX(),origin.getY(),origin.getZ());
+        BlockPos mount=sample.mount().subtract(origin);
+        var metadata=sample.wheel()==null?null:sample.wheel().atMount(new PhysicsVector(mount.getX(),mount.getY(),mount.getZ()));
         return new PhysicsBody.Load("wheel:"+sample.mount().subtract(origin).toShortString(),"offroad:wheel_contact",sample.point().subtract(offset),
-                sample.applied()?sample.impulse().scale(1/dt):PhysicsVector.ZERO,PhysicsVector.ZERO,PhysicsBody.Frame.BODY,false,0,0,null,sample.wheel());
+                sample.applied()?sample.impulse().scale(1/dt):PhysicsVector.ZERO,PhysicsVector.ZERO,PhysicsBody.Frame.BODY,false,0,0,null,metadata);
     }
     static Snapshot read(Object ship,BlockPos origin,double dt) {
         var loads=new ArrayList<PhysicsBody.Load>();var unknowns=new ArrayList<String>();Frame frame=FRAMES.get(ship);

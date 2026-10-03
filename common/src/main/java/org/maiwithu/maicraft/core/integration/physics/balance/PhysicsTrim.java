@@ -54,8 +54,8 @@ public final class PhysicsTrim {
         }
         var validation = PhysicsSimulation.assess(best.body(), limits, settings);
         List<String> reasons = new ArrayList<>();
-        if (!validation.stoppedEquilibrium()) reasons.add("停机仍有升降或旋转趋势；配重无法替代缺少的持续升力");
-        if (!validation.runningEquilibrium()) reasons.add("运行推力线仍偏离质心，或推进同时改变了升力；需要移动推进器或调整差动推力");
+        if (!validation.stoppedEquilibrium()) reasons.add("停机仍有升降或旋转趋势；检查持续浮力或轮胎支撑，配重不能替代缺少的支撑");
+        if (!validation.runningEquilibrium()) reasons.add("运行后仍有过量升降或旋转；检查推进器、车轮驱动作用线与重心和支撑分布");
         if (!validation.restoringStopped() || !validation.restoringRunning())
             reasons.add("倾斜后未证实双向扶正；考虑降低质心、提高持续浮力作用点或增加可控扶正执行器");
         String state = validation.predictedBalanced() ? "predicted_balanced"
@@ -72,7 +72,7 @@ public final class PhysicsTrim {
                     Math.abs(stopped.verticalAcceleration())<=limits.maxVerticalAcceleration()&&stopped.angularAcceleration().length()<=limits.maxAngularAcceleration()));
         }
         // 中间状态只作施工提示，不因预测会倾斜而禁止主人明确要求的原生拆放。
-        if(sequence.stream().anyMatch(step->!step.stoppedEquilibrium())) reasons.add("部分施工中间状态未在无支撑停机工况配平，宜在停稳或有支撑条件下施工");
+        if(sequence.stream().anyMatch(step->!step.stoppedEquilibrium())) reasons.add("部分施工中间状态尚未配平或悬挂仍需重新压缩，宜停稳施工并在每次改造后复核");
         return new Recommendation(state, best.placements(), before, best.score(), best.body(), validation,List.copyOf(sequence), List.copyOf(reasons));
     }
 

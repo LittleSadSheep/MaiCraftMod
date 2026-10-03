@@ -1,6 +1,8 @@
 package org.maiwithu.maicraft.core.integration.physics.balance;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import static org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBalanceRegression.*;
@@ -20,16 +22,26 @@ final class PhysicsWheelDynamicsTest {
         near(PhysicsWheelDynamics.force(body,point,wheel,body.rotation(),body.position().add(v(0,2,0)),PhysicsVector.ZERO,PhysicsVector.ZERO,16).length(),0,"离地轮胎仍在提供支撑或驱动");
         near(force(body,point,wheel(point,0,0),PhysicsVector.ZERO,16).length(),0,"没有装轮胎的轮座产生了地面力");
         PhysicsVector sum=body.gravity().scale(body.mass()),torque=PhysicsVector.ZERO;
+        var loads=new ArrayList<PhysicsBody.Load>();
         var tilted=PhysicsBody.Rotation.of(new Quaterniond().rotationZ(.02));
         for(int x:new int[]{-1,1})for(int z:new int[]{-1,1}) {
             var at=v(x,-.5,z);var tire=wheel(at,0,.75);sum=sum.add(force(body,at,tire,PhysicsVector.ZERO,0));
             var local=PhysicsWheelDynamics.force(body,at,tire,tilted,body.position(),PhysicsVector.ZERO,PhysicsVector.ZERO,0);
             torque=torque.add(tilted.world(at).cross(tilted.world(local)));
+            loads.add(new PhysicsBody.Load("wheel:"+x+","+z,"offroad:wheel_contact",at,PhysicsVector.ZERO,PhysicsVector.ZERO,
+                    PhysicsBody.Frame.BODY,false,0,0,null,tire.atMount(v(x,0,z)).predictAt(0)));
         }
         near(sum.length(),0,"四轮平衡停车不应被报告为持续下落");
         check(torque.z()<0,"侧倾后受压车轮没有产生原生扶正力矩");
         var heavier=body.ballast(10,PhysicsVector.ZERO,new Matrix3d().zero());
         check(force(heavier,point,wheel,PhysicsVector.ZERO,0).y()>25,"加配重后悬挂法向质量仍冻结在旧车体上");
+        var car=new PhysicsBody(body.structureId(),body.dimension(),body.tick(),body.mass(),body.center(),body.inertia(),body.rotation(),
+                body.position(),body.velocity(),body.angularVelocity(),body.gravity(),loads,List.of());
+        var assessment=PhysicsSimulation.assess(car,PhysicsSimulation.Limits.defaults(),Map.of());
+        check(assessment.stoppedEquilibrium()&&assessment.restoringStopped()&&assessment.predictedBalanced(),"四轮弹簧在停车及扰动后的稳定支撑未被计入完整预测: "+assessment);
+        var measured=new PhysicsBody.Load("native_wheel","offroad:wheel_contact",point,v(0,123,0),PhysicsVector.ZERO,
+                PhysicsBody.Frame.BODY,false,0,0,null,wheel);
+        near(wrench(vessel(List.of(measured)),body.rotation(),0).force().y(),23,"实测轮胎载荷被模型参数覆盖");
     }
     private static PhysicsWheel wheel(PhysicsVector point,double brake,double radius) {
         return new PhysicsWheel("offroad:small_tire",radius,10,0,v(0,0,1),v(1,0,0),1,0,brake,1,
