@@ -21,8 +21,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private NativeActionReceipt active;
-    /** 非紧急生活动作只在旧点击和停挖请求都结清后接手，不能打断未确认的施工或取物。 */
-    boolean settledForRoutinePause() { return (active == null || active.terminal()) && pendingBreakCancellationReason == null; }
+    /** 非紧急生活动作等旧点击、停挖和取消蓄力都结清后接手，不能打断正在收尾的身体动作。 */
+    boolean settledForRoutinePause() { return (active == null || active.terminal())
+            && pendingBreakCancellationReason == null && pendingMainHandCancellation == null; }
 
     @Override public NativeActionReceipt dropSelected(LocalPlayerContext context, ItemStack expectedSelected, boolean fullStack,
                                                       NativeConfirmation confirmation, int timeoutTicks) {
@@ -51,6 +52,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     boolean hasPendingMenuTransaction() { return activeProtocolUsesMenu && active != null && !active.terminal(); }
     /** 旧任务留下的挖掘还未实际停止时保留此回执，由 {@link #advance} 完成停手。 */
     private String pendingBreakCancellationReason;
+    // 任务已经退出但本刻无操作名额时，端口暂时接住持用，下一刻切槽取消而不是松弓射箭。
+    private record HeldCancellation(NativeActionReceipt receipt, ItemStack item) {}
+    private HeldCancellation pendingMainHandCancellation;
     /** 记录哪次待确认的物品使用已松开，以及首次观察到松开的时间。 */
     private NativeActionReceipt abandonedItemUse;
     private long abandonedItemUseSinceTick = -1;
@@ -313,6 +317,38 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         return submitProtocol(context, operation, submission, confirmation, timeoutTicks, true);
     }
 
+    public boolean deferMainHandUseCancellation(Object owner, LocalPlayerContext context, NativeActionReceipt receipt) {
+        // 只能接收当前任务确实持有的主手动作；租约继续绑定原身体、回执、槽位、物品和递减的持用计时。
+        requireSubmission(context);
+        if (!ownsItemUse(receipt) || !ItemUseInputLease.owns(owner, context, receipt)
+                || context.player().getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
+        ItemStack item = context.player().getUseItem().copy();
+        ItemUseInputLease.release(owner);
+        if (!ItemUseInputLease.renew(this, context, receipt, InteractionHand.MAIN_HAND, item)) return false;
+        pendingMainHandCancellation = new HeldCancellation(receipt, item);
+        return true;
+    }
+
+    private boolean advanceMainHandCancellation(LocalPlayerContext context) {
+        HeldCancellation pending = pendingMainHandCancellation;
+        if (pending == null) return false;
+        // 起手回执可能已经成功；先处理取消，再走普通终态早退。后来者或新的控制版本不继承旧取消。
+        if (pending.receipt.bodyEpoch() != context.bodyEpoch()
+                || pending.receipt.controlRevision() != context.controlRevision()
+                || !context.permitsNativeActions() || !ItemUseInputLease.owns(this, context, pending.receipt)) {
+            clearMainHandCancellation();
+            return false;
+        }
+        if (context.mutationAvailable()) cancelMainHandUse(context, pending.receipt);
+        else ItemUseInputLease.renew(this, context, pending.receipt, InteractionHand.MAIN_HAND, pending.item);
+        return true;
+    }
+
+    private void clearMainHandCancellation() {
+        pendingMainHandCancellation = null;
+        ItemUseInputLease.release(this);
+    }
+
     @Override
     public NativeActionReceipt cancelMainHandUse(LocalPlayerContext context, NativeActionReceipt receipt) {
         DefaultLocalPlayerContext current = requireSubmission(context);
@@ -494,6 +530,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
 
     void revokeForBoundary(String reason) {
         ItemUseInputLease.revoke(this);
+        clearMainHandCancellation(); // 交还身体后，旧取消不得切换新操作者的槽位。
         // 换身体或控制权时旧结果不再可信，结束为不确定；这里只改等待记录，不再次发世界操作。
         if (active != null && !active.terminal()) {
             active.finish(NativeActionReceipt.Status.UNCERTAIN, reason);
@@ -510,6 +547,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
     }
 
     private void install(NativeActionReceipt receipt) {
+        clearMainHandCancellation(); // 新原生动作接管时丢弃旧债，不替后来者松手或换物。
         active = receipt;
         // 新的一次点击不继承上一次举盾的持用状态，避免无线终端被当作已经松开的盾牌。
         activeItemUseWasHeld = false;
@@ -556,6 +594,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         }
     }
     void advance(LocalPlayerContext context) {
+        if (advanceMainHandCancellation(context)) return;
         // 每刻先读旧结果；如果有任务已经结束却还没来得及松开挖掘，就先处理这次停止。
         NativeActionReceipt receipt = active;
         if (receipt == null || receipt.terminal()) {
