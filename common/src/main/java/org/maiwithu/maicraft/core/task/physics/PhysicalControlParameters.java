@@ -8,17 +8,21 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 控制意图只指定部件与原生设置，不接收点击脚本、任意 NBT 或直接施力。 */
 public record PhysicalControlParameters(Operation operation,UUID structureId,UUID designId,BlockPos position,Integer value,
-                                        Boolean receiver,List<String> frequencyItems) {
+                                        Boolean receiver,List<String> frequencyItems,int crankTicks) {
     public enum Operation { INSPECT, SET_SPEED, SET_THROTTLE, SET_LINK_MODE, SET_FREQUENCY, SET_BURNER_VOLUME,
-        ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER }
+        ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER, TURN_CRANK }
     public PhysicalControlParameters {position=position.immutable();frequencyItems=List.copyOf(frequencyItems);}
     public static PhysicalControlParameters parse(JsonObject input) {
-        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items").contains(key))
+        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds").contains(key))
             throw new IllegalArgumentException("未知物理控制参数: "+key);
         Operation op=Operation.valueOf(PhysicalAssemblyParameters.text(input,"operation","inspect").toUpperCase(Locale.ROOT));
+        // 只有手摇明确允许有界重复；旋钮、组装和频率设置不能通过附带持续时间变成反复点击。
+        if(input.has("duration_seconds")&&op!=Operation.TURN_CRANK)throw new IllegalArgumentException("duration_seconds 仅用于 turn_crank");
+        int crankTicks=op==Operation.TURN_CRANK?CreateManualInput.durationTicks(input):0;
         UUID id=input.has("structure_id")?UUID.fromString(PhysicalAssemblyParameters.text(input,"structure_id",null)):null;
         UUID design=input.has("design_id")?UUID.fromString(PhysicalAssemblyParameters.text(input,"design_id",null)):null;
         if(id!=null&&design!=null)throw new IllegalArgumentException("结构沿用自身声明，不能同时指定世界 design_id");
@@ -54,6 +58,6 @@ public record PhysicalControlParameters(Operation operation,UUID structureId,UUI
             }
             frequency=items;
         }
-        return new PhysicalControlParameters(op,id,design,PhysicalAssemblyParameters.position(input,"position"),value,receiver,frequency);
+        return new PhysicalControlParameters(op,id,design,PhysicalAssemblyParameters.position(input,"position"),value,receiver,frequency,crankTicks);
     }
 }

@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import org.maiwithu.maicraft.core.integration.machine.control.ControlReflection;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import static org.maiwithu.maicraft.core.task.physics.PhysicalControlParameters.Operation.*;
 
 /** 读取原生设置并构造玩家协议；旋钮、网络频率和油门实际状态均由原模组结算，不直接调用设置器。 */
@@ -36,6 +37,7 @@ final class NativePhysicalControl {
             case SET_THROTTLE -> NativeApi.is(entity,THROTTLE);
             case SET_BURNER_VOLUME -> NativeApi.is(entity,NativeBurnerDial.BURNER);
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.is(entity,PROPELLER);
+            case TURN_CRANK -> entity!=null&&CreateManualInput.supported(entity.getLevel(),entity.getBlockPos());
             case SET_LINK_MODE,SET_FREQUENCY -> NativeApi.is(entity,LINK);
         };
         if(!valid)throw new IllegalArgumentException("当前部件不支持所选原生控制操作");
@@ -67,6 +69,7 @@ final class NativePhysicalControl {
             case SET_SPEED -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==p.value();
             case SET_BURNER_VOLUME -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==NativeBurnerDial.applied(p.value(),NativeBurnerDial.maximum());
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.truth(NativeApi.call(entity,null,"isRunning"))==(p.operation()==ASSEMBLE_PROPELLER);
+            case TURN_CRANK -> false; // 每次手摇都有明确持续窗口，已有转速不能冒充本次已操作。
             case SET_THROTTLE -> ((Number)NativeApi.call(entity,THROTTLE,"getState")).intValue()==p.value();
             case SET_LINK_MODE -> property(entity,"receiver")==p.receiver();
             case SET_FREQUENCY -> frequencyMatches(entity,index,selected);
@@ -74,7 +77,7 @@ final class NativePhysicalControl {
     }
     static String requiredItem(BlockEntity entity,PhysicalControlParameters p,int index) {
         // 桨叶轴承只有空手右键才执行原生组装或减速拆回，不能带着扳手把它旋转成另一朝向。
-        if(propeller(p.operation()))return "minecraft:air";
+        if(propeller(p.operation())||p.operation()==TURN_CRANK)return "minecraft:air";
         if(p.operation()==SET_FREQUENCY)return p.frequencyItems().get(index);
         if(p.operation()==SET_LINK_MODE||valueBox(p.operation())&&NativeApi.truth(NativeApi.call(setting(entity),VALUE,"onlyVisibleWithWrench")))return "create:wrench";
         return null;
@@ -108,7 +111,11 @@ final class NativePhysicalControl {
         out.put("block_state",entity.getBlockState().toString());
         // 配置结算后无线接收端仍可能等下一次同步；保留读取来源，不能把客户端旧值冒充实时服务端信号。
         out.put("observation_source","client_synced_native_fields_may_lag_server");
-        if(NativeApi.is(entity,MOTOR)||NativeApi.is(entity,SPEED)) {
+        if(CreateManualInput.supported(entity.getLevel(),entity.getBlockPos())) {
+            out.put("actual_rpm",NativeApi.call(entity,null,"getSpeed"));
+            out.put("overstressed",NativeApi.call(entity,null,"isOverStressed"));
+            out.put("supported_operations",List.of("inspect","turn_crank"));
+        } else if(NativeApi.is(entity,MOTOR)||NativeApi.is(entity,SPEED)) {
             out.put("speed_setting",NativeApi.call(setting(entity),null,"getValue"));out.put("actual_rpm",NativeApi.call(entity,null,"getSpeed"));
             out.put("overstressed",NativeApi.call(entity,null,"isOverStressed"));
             out.put("supported_operations",List.of("inspect","set_speed"));

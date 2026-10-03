@@ -23,11 +23,13 @@ final class PhysicalControlAbilityAdapter {
     }
     static JsonObject contract() {
         // 能力列表也公开航空配置入口，模型无需先猜操作名才能发现供气旋钮和螺旋桨成型流程。
-        var out=new JsonObject();out.addProperty("summary","起飞/行驶前配置物理部件：电机转速、油门信号、无线收发频率、热气燃烧器容量，以及螺旋桨轴承组装/减速拆回。使用真实走位、命中、物品与原生协议，配置结果和载具运行验证分别返回。");
+        var out=new JsonObject();out.addProperty("summary","配置并操作物理部件：电机转速、油门信号、无线收发频率、热气容量、螺旋桨组装/拆回，以及按结构实时位置手摇供能。使用真实走位、命中、物品与原生协议，配置结果和载具运行验证分别返回。");
         var targets=new JsonArray();for(String kind:new String[]{"coordinates","landmark","area","current_place"})targets.add(kind);out.add("accepted_target_kinds",targets);
         out.add("accepted_preferences",new JsonObject());out.add("accepted_hard_constraints",new JsonArray());
         var fields=new JsonObject();
-        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, assemble_propeller, disassemble_propeller. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
+        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, assemble_propeller, disassemble_propeller, turn_crank. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
+        // 手摇是移动结构上的普通原生操作；每次重算世界瞄准点，持续时长不开放给其他设置的机械重放。
+        field(fields,"duration_seconds","number","Optional only for turn_crank, finite 0..30. Zero or omitted means one native activation. Positive duration maintains empty-hand uses with fresh structure pose and actual ray checks. Confirmed uses and observed kinetic stress are retained; supply does not prove vehicle motion or production.");
         field(fields,"structure_id","string","Observed structure UUID; omit target. position is relative to origin_storage. Otherwise target is the world anchor.");
         field(fields,"position","object","Integer {x,y,z} component offset, default zero. Execution re-resolves the current pose and native hit region.");
         field(fields,"design_id","string","Optional saved world design for full post-configuration diff; omit with structure_id, which retains its own declarations.");
@@ -36,7 +38,7 @@ final class PhysicalControlAbilityAdapter {
         field(fields,"receiver","boolean","Required only for set_link_mode: true receives, false transmits. Native wrench toggles only if actual mode differs.");
         field(fields,"frequency_items","array<string>","Required only for set_frequency: two ordered item IDs. Each slot uses a real carried/supplied stack and native right click; minecraft:air clears a slot. Actual item/color frequency identity is returned. No inventory or NBT injection.");
         out.add("parameters",fields);
-        out.addProperty("execution_boundary","inspect is read-only. Settings are configured before departure; an explicit throttle operation may stop a moving structure. Missing confirmation never causes input replay. Native operation facts, current configuration and full registered-block diff are separate.");
+        out.addProperty("execution_boundary","inspect is read-only. Settings are configured before departure; explicit throttle and crank operation may control a moving structure. Missing confirmation never causes input replay. Native operation facts, current configuration and full registered-block diff are separate.");
         return out;
     }
     private static void field(JsonObject fields,String name,String type,String description) {

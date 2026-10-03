@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.integration.machine.assembly.ServerBlockEntityReceipts;
+import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
@@ -42,6 +43,8 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     private CompletableFuture<PhysicalStructureDesignStore.Registration> design;
     private JsonArray declarations=new JsonArray();private JsonObject designEvidence=new JsonObject();
     private String afterUnknown;
+    private final CreateManualInput.UsageEvidence crankUsage=new CreateManualInput.UsageEvidence();
+    private long crankStarted=-1,nextCrankAt;private int crankUses;
     public PhysicalControlTask(LocalPlayer player,PhysicalControlTaskRecord record){super(player,record);world=player.level();}
     @Override protected TaskState onTick() {
         if(done)return finishDesign();
@@ -50,6 +53,13 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         if(action!=null) {
             action=ctx.actions().poll(ctx,action);if(!action.terminal())return TaskState.RUNNING;
             if(action.status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED)return failed("原生设置未确认，保留当前状态且不重放输入: "+action.detail(),FailureType.UNKNOWN);
+            if(r.parameters.operation()==TURN_CRANK) {
+                // 每次先结清实际手摇与网络响应，再决定是否续摇；移动船体的下一次瞄准会重新读取实时姿态。
+                crankUses++;crankUsage.observe(world,frame.storage(r.parameters.position()),crankUses);
+                after=NativePhysicalControl.state(entity());action=null;nextCrankAt=world.getGameTime()+4;
+                if(r.parameters.crankTicks()==0||world.getGameTime()-crankStarted>=r.parameters.crankTicks())advance();
+                return TaskState.RUNNING;
+            }
             if(NativePhysicalControl.propeller(r.parameters.operation())) {
                 // 右键已由服务器处理后，另等桨叶成型或减速拆回；设计错误和未成型作为观察结果，不抹去已确认输入。
                 if(configurationObservedSince<0)configurationObservedSince=world.getGameTime();
@@ -66,8 +76,12 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         BlockEntity entity=entity();NativePhysicalControl.require(entity,r.parameters);
         after=NativePhysicalControl.state(entity);
         if(r.parameters.operation()==INSPECT){done=true;return TaskState.RUNNING;}
+        if(r.parameters.operation()==TURN_CRANK&&crankStarted>=0) {
+            if(world.getGameTime()-crankStarted>=r.parameters.crankTicks()){done=true;return TaskState.RUNNING;}
+            if(world.getGameTime()<nextCrankAt)return TaskState.RUNNING;
+        }
         // 频率和电机配置在停稳时完成；明确的油门操作仍可用于收车，不以“还在移动”拦截停机输入。
-        if(r.parameters.operation()!=SET_THROTTLE&&!frame.stationary()) {
+        if(r.parameters.operation()!=SET_THROTTLE&&r.parameters.operation()!=TURN_CRANK&&!frame.stationary()) {
             if(movingSince<0)movingSince=world.getGameTime();
             if(world.getGameTime()-movingSince>200)return failed("设置部件前需要先让结构停稳",FailureType.NO_PATH);
             return TaskState.RUNNING;
@@ -97,10 +111,11 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         before=NativePhysicalControl.state(entity);
         int step=index;ItemStack expected=selected.copy();
         boolean propeller=NativePhysicalControl.propeller(r.parameters.operation());
-        boolean blockMode=r.parameters.operation()==SET_LINK_MODE||propeller;
+        boolean crank=r.parameters.operation()==TURN_CRANK;
+        boolean blockMode=r.parameters.operation()==SET_LINK_MODE||propeller||crank;
         if(!blockMode)watch=ServerBlockEntityReceipts.watch(world,entity.getBlockPos());
         var expectedWatch=watch;
-        NativeConfirmation confirm=new NativeConfirmation() {
+        NativeConfirmation confirm=crank?CreateManualInput.confirmation(world,entity.getBlockPos()):new NativeConfirmation() {
             public boolean requiresBlockAcknowledgement(){return blockMode;}
             public Verdict observe(LocalPlayerContext fresh) {
                 if(fresh.level()!=world)return Verdict.DIVERGED;
@@ -111,6 +126,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         };
         // 频率与收发模式使用真实物品右键；旋钮和油门使用对应原生玩家协议，均只有这一笔输入。
         if(r.parameters.operation()==SET_FREQUENCY||blockMode) {
+            if(crank&&crankStarted<0)crankStarted=world.getGameTime();
             submitted=true;action=ctx.actions().useBlock(ctx,InteractionHand.MAIN_HAND,hit,confirm,100);
         }
         else {
@@ -168,7 +184,13 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     }
     @Override protected Map<String,Object> resultData() {
         var out=new LinkedHashMap<String,Object>();out.put("operation",r.parameters.operation().name().toLowerCase(Locale.ROOT));
-        out.put("native_submitted",submitted);out.put("completed_effects",List.copyOf(effects));out.put("actual_configuration",after);
+        var completed=new ArrayList<>(effects);
+        if(r.parameters.operation()==TURN_CRANK) {
+            // 后续失败或取消也保留已确认的手摇次数和运行应力；停摇后的零转速不能覆盖这些实际效果。
+            if(crankUses>0)completed.add(Map.of("operation","turn_crank","confirmed_native_uses",crankUses,"started_tick",crankStarted));
+            out.put("manual_generator",crankUsage.data());out.put("requested_duration_ticks",r.parameters.crankTicks());
+        }
+        out.put("native_submitted",submitted);out.put("completed_effects",List.copyOf(completed));out.put("actual_configuration",after);
         boolean desired=!(NativePhysicalControl.propeller(r.parameters.operation()))
                 || after.get("assembled") instanceof Boolean assembled && assembled==(r.parameters.operation()==ASSEMBLE_PROPELLER);
         out.put("native_configuration_confirmed",done&&r.parameters.operation()!=INSPECT&&desired);

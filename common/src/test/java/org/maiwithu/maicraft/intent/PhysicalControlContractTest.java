@@ -29,6 +29,13 @@ public final class PhysicalControlContractTest {
                 SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\""+operation+"\"}")),IntentRuntime.KNOWN_ABILITIES);
                 rejects(goal(worldTarget,json("{\"operation\":\""+operation+"\",\"value\":1}")));
             }
+            // 移动船体上的手摇沿用普通手摇时长边界；不到一刻的明确时长仍保留一刻，其他操作不接受持续重放。
+            var crank=json("{\"operation\":\"turn_crank\",\"duration_seconds\":0.01}");
+            SemanticGoalContract.validate(goal(worldTarget,crank),IntentRuntime.KNOWN_ABILITIES);
+            check(PhysicalControlParameters.parse(crank).crankTicks()==1,"手摇正时长不能被舍掉成无时长");
+            check(PhysicalControlParameters.parse(json("{\"operation\":\"turn_crank\"}")).crankTicks()==0,"默认应只激活一次");
+            rejects(goal(worldTarget,json("{\"operation\":\"turn_crank\",\"duration_seconds\":31}")));
+            rejects(goal(worldTarget,json("{\"operation\":\"inspect\",\"duration_seconds\":1}")));
             check(SemanticAbilityCatalog.parameterNames(PhysicalControlAbilityAdapter.ABILITY).containsAll(List.of("value","receiver","frequency_items","structure_id")),"控制能力契约未对模型公开");
             for(String invalid:List.of("{\"operation\":\"set_speed\",\"value\":0}","{\"operation\":\"set_speed\",\"value\":1.5}",
                     "{\"operation\":\"set_throttle\",\"value\":16}","{\"operation\":\"set_link_mode\",\"receiver\":\"true\"}",
