@@ -71,11 +71,14 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
     private JsonObject analyze(PhysicsSnapshotReader.Observation observation) {
         var gson=new Gson(); var out=new JsonObject();
         var measured=observation.measured(); var model=observation.preflight();
+        // 参考航速只用于候选工况，实测箭头仍保留原生速度，避免把假设飞行冒充已经发生。
+        if(r.parameters.referenceVelocity()!=null)model=model.movingAt(r.parameters.referenceVelocity());
         out.addProperty("structure_id",measured.structureId().toString()); out.addProperty("snapshot_id",observation.snapshotId().toString());
         out.addProperty("observed_tick",measured.tick()); out.addProperty("dimension",measured.dimension());
         out.addProperty("workflow","preflight"); out.addProperty("native_flight_verified",false);
         out.add("origin_storage",gson.toJsonTree(observation.origin()));
         out.add("measured_body",gson.toJsonTree(measured)); out.add("preflight_body",gson.toJsonTree(model));
+        if(r.parameters.referenceVelocity()!=null)out.add("reference_velocity",gson.toJsonTree(r.parameters.referenceVelocity()));
         out.add("measured_forces",gson.toJsonTree(PhysicsWrench.evaluate(measured,measured.rotation(),measured.position(),
                 measured.angularVelocity(),Map.of(),1)));
         out.addProperty("coordinate_rule","补丁坐标是 origin_storage 的局部方块偏移；力向量的 BODY/WORLD 坐标系独立标注");

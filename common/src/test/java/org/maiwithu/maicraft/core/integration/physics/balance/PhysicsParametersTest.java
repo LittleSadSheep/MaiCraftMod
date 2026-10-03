@@ -19,6 +19,13 @@ final class PhysicsParametersTest {
         rejects(()->PhysicsBalanceParameters.parse(root),"扰动应小于验收倾角");
         root.remove("perturbation_degrees");root.addProperty("teleport",true);
         rejects(()->PhysicsBalanceParameters.parse(root),"不得接受直接改动物理位置的额外参数");
+        // 飞行速度只能成为明确的试算工况，缺轴、字符串或越界速度不得默默补成另一种场景。
+        root.remove("teleport");root.add("reference_velocity",JsonParser.parseString("{\"x\":10,\"y\":0,\"z\":-2}"));
+        check(PhysicsBalanceParameters.parse(root).referenceVelocity().equals(v(10,0,-2)),"参考航速没有保留方向或大小");
+        root.getAsJsonObject("reference_velocity").remove("y");
+        rejects(()->PhysicsBalanceParameters.parse(root),"不完整航速被接受");
+        root.add("reference_velocity",JsonParser.parseString("{\"x\":257,\"y\":0,\"z\":0}"));
+        rejects(()->PhysicsBalanceParameters.parse(root),"超出试算范围的航速被接受");
     }
     private static void rejects(Runnable action,String message) {
         try { action.run(); throw new AssertionError(message); } catch(IllegalArgumentException expected) { }

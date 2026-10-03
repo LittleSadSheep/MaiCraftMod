@@ -66,7 +66,8 @@ public final class PhysicsTrim {
         for(var load:body.loads()) if(load.propulsion()) stoppedSettings.put(load.id(),0.0);
         for(var placement:best.placements()) {
             stage=stage.ballast(placement.mass(),placement.point(),new Matrix3d().scaling(placement.mass()/6));
-            var stopped=PhysicsWrench.evaluate(stage,stage.rotation(),stage.position(),PhysicsVector.ZERO,stoppedSettings,0,false);
+            // 施工中的停稳状态没有巡航迎流，不能借用机翼在高速时的升力掩盖临时失衡。
+            var stopped=PhysicsWrench.evaluate(stage,stage.rotation(),stage.position(),PhysicsVector.ZERO,PhysicsVector.ZERO,stoppedSettings,0,false);
             sequence.add(new ConstructionStep(sequence.size()+1,stage.mass(),stage.center(),stopped.torque(),stopped.verticalAcceleration(),
                     Math.abs(stopped.verticalAcceleration())<=limits.maxVerticalAcceleration()&&stopped.angularAcceleration().length()<=limits.maxAngularAcceleration()));
         }
@@ -80,7 +81,8 @@ public final class PhysicsTrim {
         for (double power : new double[]{0, .25, .5, .75, 1}) {
             var controls = new LinkedHashMap<String, Double>();
             for (var load : body.loads()) controls.put(load.id(), settings.getOrDefault(load.id(), 1.0) * (load.propulsion() ? power : 1));
-            var forces = PhysicsWrench.evaluate(body, body.rotation(), body.position(), PhysicsVector.ZERO, controls, power,false);
+            // 比较起步到参考航速之间的候选工况，避免给固定翼推荐仅在巡航迎流下才能成立的停机配重。
+            var forces = PhysicsWrench.evaluate(body, body.rotation(), body.position(), body.velocity().scale(power),PhysicsVector.ZERO,controls,power,false);
             double vertical = Math.abs(forces.verticalAcceleration()) / limits.maxVerticalAcceleration();
             double angular = forces.angularAcceleration().length() / limits.maxAngularAcceleration();
             worst = Math.max(worst, vertical * vertical + angular * angular);

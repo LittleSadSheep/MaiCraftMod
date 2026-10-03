@@ -54,17 +54,31 @@ public record PhysicsBody(UUID structureId, String dimension, long tick, double 
 
     public enum Frame { BODY, WORLD }
 
+    /** 起飞前只改变预测副本的参考航速，让模型比较不同滑跑或巡航速度，真实结构及实测样本保持原状。 */
+    public PhysicsBody movingAt(PhysicsVector referenceVelocity) {
+        return new PhysicsBody(structureId,dimension,tick,mass,center,inertia,rotation,position,referenceVelocity,
+                angularVelocity,gravity,loads,unknowns);
+    }
+
     /** 作用点随船体移动；气球浮力保持世界方向，螺旋桨推力随船体转动，纯力偶单独保留。 */
     public record Load(String id, String group, PhysicsVector point, PhysicsVector force,
-                       PhysicsVector torque, Frame frame, boolean propulsion, double responseSeconds, double airflow) {
+                       PhysicsVector torque, Frame frame, boolean propulsion, double responseSeconds, double airflow,
+                       PhysicsAerodynamics aerodynamics) {
         public Load(String id,String group,PhysicsVector point,PhysicsVector force,PhysicsVector torque,
                     Frame frame,boolean propulsion,double responseSeconds) {
-            this(id,group,point,force,torque,frame,propulsion,responseSeconds,0);
+            this(id,group,point,force,torque,frame,propulsion,responseSeconds,0,null);
+        }
+        public Load(String id,String group,PhysicsVector point,PhysicsVector force,PhysicsVector torque,
+                    Frame frame,boolean propulsion,double responseSeconds,double airflow) {
+            this(id,group,point,force,torque,frame,propulsion,responseSeconds,airflow,null);
         }
         public Load {
             if (id == null || id.isBlank() || group == null || point == null || force == null || torque == null
                     || frame == null || !Double.isFinite(responseSeconds+airflow) || responseSeconds < 0 || airflow < 0)
                 throw new IllegalArgumentException("受力来源缺少作用点、方向或响应时间");
+            // 帆面随结构朝向转动，停桨后仍产生气动载荷，不能把它误标为随开关消失的推进器。
+            if(aerodynamics!=null&&(frame!=Frame.BODY||propulsion))
+                throw new IllegalArgumentException("升力面必须使用船体坐标且不能归为推进开关");
         }
     }
 

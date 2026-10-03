@@ -27,6 +27,7 @@ public final class NativePhysicsCapture {
     private static final String DIMENSION = "dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData";
     private static final class Lease {
         long until; boolean previous; PhysicsBody body; String error;
+        double timeStep;
         boolean collecting,directObserved;
         PhysicsVector directForce=PhysicsVector.ZERO,directTorque=PhysicsVector.ZERO;
     }
@@ -39,6 +40,12 @@ public final class NativePhysicsCapture {
     }
     public static String error(Object ship) {
         Lease lease = WATCHES.get(ship); return lease == null ? null : lease.error;
+    }
+    static double timeStep(Object ship) {
+        // 帆面原生算法在升力计算中使用子步冲量；预测必须复用实际采样时长，不能假定每刻只有一次物理更新。
+        Lease lease=WATCHES.get(ship);
+        if(lease==null||lease.body==null||lease.timeStep<=0)throw new IllegalStateException("尚无完整物理子步样本");
+        return lease.timeStep;
     }
     public static void begin(Object ship) {
         Lease lease = WATCHES.get(ship);
@@ -56,7 +63,7 @@ public final class NativePhysicsCapture {
     public static void capture(Object ship, Object handle, double dt) {
         Lease lease = WATCHES.get(ship);
         if (lease == null || !lease.collecting) return;
-        try { lease.body = read(ship, handle, dt); lease.error = null; }
+        try { lease.body = read(ship, handle, dt); lease.timeStep=dt; lease.error = null; }
         catch (RuntimeException | LinkageError missing) { lease.body = null; failure(lease,ship,"capture",missing); }
         finally {
             lease.collecting=false;

@@ -61,8 +61,9 @@ public final class PhysicsSimulation {
     }
     private static PhysicsWrench wrench(PhysicsBody body, PhysicsBody.Rotation rotation,
                                         Map<String, Double> settings, double propulsion) {
-        return PhysicsWrench.evaluate(body, rotation, body.position(), PhysicsVector.ZERO,
-                controls(body, settings, propulsion), propulsion);
+        // 静止检查没有迎流，巡航检查使用声明的参考速度；停桨滑行另由停止过程保留实际速度来计算。
+        return PhysicsWrench.evaluate(body, rotation, body.position(),propulsion==0?PhysicsVector.ZERO:body.velocity(),PhysicsVector.ZERO,
+                controls(body, settings, propulsion), propulsion,true);
     }
     private static Map<String, Double> controls(PhysicsBody body, Map<String, Double> settings, double propulsion) {
         Map<String, Double> values = new LinkedHashMap<>();
@@ -83,7 +84,8 @@ public final class PhysicsSimulation {
                              String mode, PhysicsVector disturbance, String name) {
         PhysicsBody.Rotation attitude = disturbance.length() == 0 ? body.rotation()
                 : perturb(body.rotation(), disturbance, limits.perturbationDegrees());
-        PhysicsVector position = body.position(), velocity = mode.equals("stopped") ? PhysicsVector.ZERO : body.velocity();
+        // 起步场景从静止加速，不能直接继承巡航速度而跳过固定翼缺少升力的滑跑阶段。
+        PhysicsVector position = body.position(), velocity = mode.equals("stopped")||mode.equals("starting") ? PhysicsVector.ZERO : body.velocity();
         PhysicsVector omega = disturbance.length() == 0 ? body.angularVelocity() : PhysicsVector.ZERO;
         Map<String, Double> commands = new LinkedHashMap<>(controls(body, settings,
                 mode.equals("running") || mode.equals("stopping") ? 1 : 0));

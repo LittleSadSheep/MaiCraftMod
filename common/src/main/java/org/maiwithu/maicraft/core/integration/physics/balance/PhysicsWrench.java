@@ -32,11 +32,17 @@ public record PhysicsWrench(PhysicsVector force, PhysicsVector torque,
         for (var load : body.loads()) {
             double setting = controls.getOrDefault(load.id(), load.propulsion() ? propulsion : 1.0);
             if (!Double.isFinite(setting)) throw new IllegalArgumentException("推力设置必须是有限数值");
+            PhysicsVector arm = attitude.world(load.point().subtract(body.center()));
+            PhysicsVector source=load.force();
+            if(load.aerodynamics()!=null) {
+                // 飞机加速、转弯或左右翼速度不同时，逐面使用真实作用点速度重新计算升力与阻力。
+                var localVelocity=attitude.local(velocity.add(angularVelocity.cross(arm)));
+                source=source.add(load.aerodynamics().force(localVelocity));
+            }
             PhysicsVector applied = (load.frame() == PhysicsBody.Frame.BODY
-                    ? attitude.world(load.force()) : load.force()).scale(setting);
+                    ? attitude.world(source) : source).scale(setting);
             PhysicsVector couple = (load.frame() == PhysicsBody.Frame.BODY
                     ? attitude.world(load.torque()) : load.torque()).scale(setting);
-            PhysicsVector arm = attitude.world(load.point().subtract(body.center()));
             if(load.propulsion()&&load.airflow()>1e-9&&applied.length()>1e-9) {
                 // 起飞加速后迎流会降低推力；偏置桨还要使用作用点的转动速度，而不是只看船中心速度。
                 PhysicsVector pointVelocity=velocity.add(angularVelocity.cross(arm));

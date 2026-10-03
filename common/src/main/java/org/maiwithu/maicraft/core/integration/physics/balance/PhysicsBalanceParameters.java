@@ -10,13 +10,13 @@ import java.util.UUID;
 /** 计划阶段明确船体、试算工况及补丁，分析不会被隐式升级为真实施工或启动推进器。 */
 public record PhysicsBalanceParameters(UUID structureId, String operation, double rpm, String balloonFill,
                                        int maxBallastBlocks, PhysicsSimulation.Limits limits,
-                                       Map<String,Double> controls, JsonObject request) {
+                                       Map<String,Double> controls, PhysicsVector referenceVelocity, JsonObject request) {
     public PhysicsBalanceParameters { controls=Map.copyOf(controls); request=request.deepCopy(); }
     @Override public JsonObject request() { return request.deepCopy(); }
     public static PhysicsBalanceParameters parse(JsonObject args) {
         Set<String> accepted=Set.of("structure_id","operation","reference_rpm","balloon_fill","max_ballast_blocks",
                 "duration_seconds","max_tilt_degrees","max_vertical_acceleration","max_angular_acceleration",
-                "perturbation_degrees","controls","edits","ballast_candidates");
+                "perturbation_degrees","controls","edits","ballast_candidates","reference_velocity");
         for(String key:args.keySet()) if(!accepted.contains(key)) throw new IllegalArgumentException("未知配平参数: "+key);
         if(!args.has("structure_id")||!args.get("structure_id").isJsonPrimitive()||!args.getAsJsonPrimitive("structure_id").isString())
             throw new IllegalArgumentException("需要观察到的结构 UUID");
@@ -24,6 +24,14 @@ public record PhysicsBalanceParameters(UUID structureId, String operation, doubl
         String operation=args.has("operation")?args.get("operation").getAsString():"analyze";
         if(!Set.of("analyze","simulate","recommend","apply").contains(operation)) throw new IllegalArgumentException("未知配平操作");
         double rpm=number(args,"reference_rpm",64,-256,256);
+        PhysicsVector referenceVelocity=null;
+        if(args.has("reference_velocity")) {
+            // 模型在地面就能比较巡航迎流；该速度只属于隔离副本，不向真实结构写入运动状态。
+            if(!args.get("reference_velocity").isJsonObject())throw new IllegalArgumentException("参考速度需要世界坐标向量 {x,y,z}");
+            var vector=args.getAsJsonObject("reference_velocity");
+            if(!vector.keySet().equals(Set.of("x","y","z")))throw new IllegalArgumentException("参考速度必须完整声明 x、y、z");
+            referenceVelocity=new PhysicsVector(number(vector,"x",Double.NaN,-256,256),number(vector,"y",Double.NaN,-256,256),number(vector,"z",Double.NaN,-256,256));
+        }
         String fill=args.has("balloon_fill")?args.get("balloon_fill").getAsString():"target";
         if(!Set.of("target","current").contains(fill)) throw new IllegalArgumentException("balloon_fill 应为 target 或 current");
         double maximum=number(args,"max_ballast_blocks",8,0,64);
@@ -52,7 +60,7 @@ public record PhysicsBalanceParameters(UUID structureId, String operation, doubl
         }
         if(operation.equals("apply") && (!args.has("edits")||args.getAsJsonArray("edits").isEmpty()))
             throw new IllegalArgumentException("施工必须提供选定的 edits；推荐不会自动替换设计");
-        return new PhysicsBalanceParameters(id,operation,rpm,fill,(int)maximum,limits,controls,args);
+        return new PhysicsBalanceParameters(id,operation,rpm,fill,(int)maximum,limits,controls,referenceVelocity,args);
     }
     private static double number(JsonObject args,String key,double fallback,double min,double max) {
         if(args.has(key)&&(!args.get(key).isJsonPrimitive()||!args.getAsJsonPrimitive(key).isNumber())) throw new IllegalArgumentException("参数必须为数字: "+key);
