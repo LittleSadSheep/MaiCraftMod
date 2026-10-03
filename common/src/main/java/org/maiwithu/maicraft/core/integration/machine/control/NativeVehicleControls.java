@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.task.physics.PhysicalStructureApproach;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlReflection.*;
 import static org.maiwithu.maicraft.core.integration.machine.control.ControlCircuit.Kind.*;
 
@@ -59,7 +60,7 @@ public final class NativeVehicleControls {
                         ControlComponents.CREATE+"redstone.link.controller.LinkedControllerItem"))
                     throw new IllegalStateException("typewriter requires an empty main hand and no offhand frequency-copy controller");
                 if(Boolean.TRUE.equals(call(be,"isInUse"))) throw new IllegalStateException("typewriter is controlled by another player");
-                if(!aim(ctx,structure,pos) || !ctx.mutationAvailable()) return false;
+                if(!aim(ctx,structure,pos,input.kind()) || !ctx.mutationAvailable()) return false;
                 var hit=DriverStation.hit(ctx.player(),structure,pos);
                 receipt=ctx.actions().useBlock(ctx,InteractionHand.MAIN_HAND,hit,new NativeConfirmation() {
                     public boolean requiresBlockAcknowledgement() { return true; }
@@ -67,7 +68,7 @@ public final class NativeVehicleControls {
                 },40);
                 typewriters.put(pos,true); changed=true; return false;
             }
-            if(!aim(ctx,structure,pos) || !ctx.mutationAvailable()) return false;
+            if(!aim(ctx,structure,pos,input.kind()) || !ctx.mutationAvailable()) return false;
             if(input.kind()==STEERING_WHEEL && Boolean.TRUE.equals(field(be,"held")) && !applied.containsKey(input.id()))
                 throw new IllegalStateException("steering wheel is already being held");
             final double target=value; final long tick=ctx.tickRevision();
@@ -119,10 +120,12 @@ public final class NativeVehicleControls {
         }
         return true;
     }
-    private static boolean aim(LocalPlayerContext ctx,SableStructureBridge.Structure structure,BlockPos pos) {
-        var point=DriverStation.aim(ctx.player(),structure,pos);
+    private static boolean aim(LocalPlayerContext ctx,SableStructureBridge.Structure structure,BlockPos pos,ControlCircuit.Kind kind) {
+        // 坐在方向盘旁时，油门中心可能被挡住；从实际可见的轮廓面瞄准，不能因此把整个控制器判成不可操作。
+        var point=kind==THROTTLE?PhysicalStructureApproach.visibleAim(ctx.player(),structure,pos,ctx.player().getEyePosition())
+                :DriverStation.aim(ctx.player(),structure,pos);
         if(point==null || point.distanceTo(ctx.player().getEyePosition())>ctx.player().blockInteractionRange())
-            throw new IllegalStateException("seated control moved outside native reach");
+            throw new IllegalStateException("seated control has no visible reachable surface: "+pos.toShortString());
         InputDriver.lookAt(ctx.player(),point);
         return DriverStation.hit(ctx.player(),structure,pos)!=null;
     }

@@ -8,6 +8,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
@@ -64,6 +65,13 @@ public final class StructureEditApproachTest {
             h.set(new BlockPos(8,1,5),Blocks.AIR.defaultBlockState());
             h.set(new BlockPos(8,2,5),Blocks.AIR.defaultBlockState());
             check(PhysicalStructureApproach.visibleAim(h.player,ship,seat,h.player.getEyePosition())!=null,"遮挡清除后重新读取当前射线");
+            // 细支架只挡住控制器中心时仍可点击其侧缘；不应把所有可见表面都随中心射线一起拒绝。
+            h.set(new BlockPos(8,2,5),Blocks.OAK_FENCE.defaultBlockState());
+            var eye=h.player.getEyePosition();var toward=Vec3.atCenterOf(seat).subtract(eye).normalize();
+            var centerHit=h.level.clip(new ClipContext(eye,eye.add(toward.scale(h.player.blockInteractionRange())),
+                    ClipContext.Block.OUTLINE,ClipContext.Fluid.NONE,h.player));
+            check(!centerHit.getBlockPos().equals(seat),"夹具必须真的挡住控制器中心");
+            check(PhysicalStructureApproach.visibleAim(h.player,ship,seat,eye)!=null,"中心被挡但侧面露出的控制器应仍可操作");
             check(h.blockUses()==0,"搜索和瞄准回归不应直接提交任何放置");
         }
     }
