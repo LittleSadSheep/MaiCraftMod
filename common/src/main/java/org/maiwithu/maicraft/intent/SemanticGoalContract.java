@@ -16,21 +16,23 @@ final class SemanticGoalContract {
     private SemanticGoalContract() {}
 
     static void validate(Goal goal, Set<String> knownAbilities) {
-        validate(goal, knownAbilities, "goal", false);
+        validate(goal, knownAbilities, "goal", false, false);
     }
 
     /** 旧等待、取物和烹饪参数曾被宽松接收；保留历史供查询、取消和修订，重新执行仍须通过当前检查。 */
     static void validateRestored(Goal goal, Set<String> knownAbilities) {
-        validate(goal, knownAbilities, "goal", true);
+        validate(goal, knownAbilities, "goal", true, false);
     }
 
-    private static void validate(Goal goal, Set<String> knownAbilities, String path, boolean restoredHistory) {
+    private static void validate(Goal goal, Set<String> knownAbilities, String path, boolean restoredHistory,
+                                 boolean parentIsSequence) {
         // 不认识的能力或参数名立即报错，错误中带完整位置，方便调用者找到需要修改的字段。
         String ability = goal.ability();
         if (!knownAbilities.contains(ability)) {
             throw violation("unknown_ability", path + ".ability", ability,
                     "Unknown semantic ability '" + ability + "'.");
         }
+        validateOnFailure(goal, path, ability, parentIsSequence);
 
         validateObjectKeys(goal.parameters(), SemanticAbilityCatalog.parameterNames(ability),
                 path + ".parameters", ability, "unknown_parameter");
@@ -144,14 +146,36 @@ final class SemanticGoalContract {
 
         for (int i = 0; i < goal.children().size(); i++) {
             // 组合目标的每个子目标也要经过同样检查，不能把不合法参数藏到子步骤里。
-            validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]", restoredHistory);
+            validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]", restoredHistory,
+                    SEQUENCE.equals(ability));
+        }
+    }
+
+    /** on_failure 只表达“这一步失败后兄弟步骤继续”，不是能力的业务参数，也只对 sequence 直接子级有意义。 */
+    private static void validateOnFailure(Goal goal, String path, String ability, boolean parentIsSequence) {
+        if ("stop".equals(goal.onFailure())) return;
+        if (!"continue".equals(goal.onFailure())) {
+            throw violation("invalid_on_failure", path + ".on_failure", ability,
+                    "on_failure accepts \"stop\" (default) or \"continue\".");
+        }
+        if (!parentIsSequence) {
+            throw violation("on_failure_not_allowed", path + ".on_failure", ability,
+                    "on_failure is accepted only on direct children of maicraft:sequence; "
+                            + "tolerated failures are declared per step, not per task.");
+        }
+        if (SEQUENCE.equals(ability)) {
+            // 嵌套 sequence 会被摊平成扁平清单，“整个内层失败后外层继续”需要分组语义支撑，尚未提供。
+            throw violation("on_failure_nested_sequence", path + ".on_failure", ability,
+                    "on_failure is not accepted on a sequence child; flatten the inner steps and declare "
+                            + "on_failure on the first inner leaf instead.");
         }
     }
 
     // goal 顶层字段被误嵌进 parameters/preferences 是高频提交错误（实测 build 的 target 曾整会话反复试错）；
     // 拒绝时点名正确位置，省一轮改写重发。
     private static final Set<String> GOAL_LEVEL_FIELDS =
-            Set.of("ability", "outcome", "target", "constraints", "children", "parameters", "preferences");
+            Set.of("ability", "outcome", "target", "constraints", "children", "parameters", "preferences",
+                    "on_failure");
 
     private static void validateObjectKeys(
             JsonObject values, Set<String> allowed, String path, String ability, String code) {

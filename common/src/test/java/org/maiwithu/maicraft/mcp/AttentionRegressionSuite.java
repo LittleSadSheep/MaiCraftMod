@@ -48,6 +48,8 @@ public final class AttentionRegressionSuite {
         PriorResultResolverTest.main(args);
         // 明确跳过允许继续清单，但查询、通知和恢复不能把被略过的目标算作实际成功。
         SequenceSkipTest.main(args);
+        // on_failure=continue 让被容忍的失败接续兄弟步骤，但部分失败仍以 FAILED 终态结算。
+        org.maiwithu.maicraft.intent.SequenceToleratedFailureTest.main(args);
         // 聊天恢复后必须沿用已经保存的操作身份，不能因新建会话就再次发送。
         ChatDurableCheckpointTest.main(args);
         // 收到的聊天保留作者与截断事实，不能冒充任务事件，也不接收动作栏洪泛。

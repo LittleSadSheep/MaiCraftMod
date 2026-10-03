@@ -42,6 +42,18 @@ sequence 的 children
 
 执行中的步骤表只提供只读视图。改动通过 [IntentTaskRecord](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentTaskRecord.java) 的恢复、替换和参数更新方法完成，避免直接改列表时漏掉保护范围或保存通知。
 
+## 声明可容忍的失败（on_failure）
+
+默认一损俱损：任一步失败，整个总任务立即终态。如果编排者知道某步只是顺路目标（例如"顺手合成火把"后面的"回地表"并不依赖它），可以在该子目标上声明 `on_failure: "continue"`：这一步确认失败后记入账本，接着执行兄弟步骤，不必拆单重发。
+
+边界与语义：
+
+- `on_failure` 只允许出现在 sequence 的**直接子级**；顶层目标、嵌套 sequence、其他位置都会被计划期校验拒绝。嵌套分组想要同等效果，把内层步骤平铺后在首个内层步骤上声明。
+- 词表只有 `stop`（缺省）与 `continue`。continue 只对**确认失败**放行；超时和取消效果不确定或属于调用方主动停，一律照旧全停。
+- **部分失败算完全失败**：只要存在事实失败（含被容忍的），整体终态仍是 FAILED；只有显式跳过而没有任何事实失败时才是 SUCCESS。跳过是"决定不做"，容忍失败是"做了没成"，两者终态不同是刻意的区分。
+- 被容忍的失败记为 `success=false`、`skipped=false` 的真实失败，不混入跳过。终态回执带 `tolerated_failure_count` 与完整失败账本（`completed_effects` 逐步列出失败与成功、`remaining_effects` 为空）。
+- 失败步骤的位置不再作为后续 `prior_result` 的依据；引用它的兄弟步骤会得到明确的解析失败，而不是拿到 stale 坐标。
+
 ## 跳过之后，到底算完成了什么
 
 例如第一步“记住营地”没有指定地点，用户决定跳过，然后第二步正常结束：
@@ -66,6 +78,7 @@ Attention 使用独立的 `step_skipped` 事件。后续失败的效果账本也
 ## 已有验证
 
 - [SequenceSkipTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SequenceSkipTest.java)：真实询问和跳过、继续后续目标、查询和通知、旧检查点恢复、残留位置不被复用。
+- [SequenceToleratedFailureTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SequenceToleratedFailureTest.java)：on_failure 的挂载位置与词表校验、容忍失败后兄弟步骤接续、整体仍报 FAILED 与账本披露、缺省 stop 对照。
 - [SequenceProtectionTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SequenceProtectionTest.java)：分组保护范围经过修改、恢复和替换仍有效，且不会流到兄弟步骤。
 - [TaskStepPersistenceTest](../../common/src/test/java/org/maiwithu/maicraft/intent/TaskStepPersistenceTest.java)：实际步骤清单和处理位置在持久化往返中保留。
 - [WaitGoalTest](../../common/src/test/java/org/maiwithu/maicraft/intent/WaitGoalTest.java)：即使连续两步立即满足，也各自留下结果，全部处理后才结束流程。
