@@ -19,7 +19,7 @@ import java.util.Objects;
  * 只负责连锁挖掘的就绪检查和持键：准星命中面 → 原生完整选区 → 持住启用键挖到确认 → 松开。
  * 实际开始、持续破坏和确认方块消失仍由所属挖掘任务按普通游戏流程完成。
  */
-public final class UltimineSession implements AutoCloseable {
+public final class UltimineSession implements UltimineControl {
     /** 同一原生持键流程分别服务蓝图清障面和材料矿脉，采矿不能沿用施工的九格授权。 */
     public enum Mode { CLEARANCE, MINING, DESCENDING_TUNNEL, SMALL_TUNNEL, SINGLE }
     private final Mode mode;

@@ -62,6 +62,9 @@ public final class BlockDigger {
     }
     public boolean hasPendingBreak() { return receipt != null && !receipt.terminal(); }
     private boolean preferTopFace;
+    private Direction requiredFace;
+    /** 通道形状由命中面决定；只接受射线真实命中的指定面，不能把顶面点击伪装成水平开路。 */
+    public void requiredFace(Direction face) { requiredFace = face; }
     public void preferTopFace(boolean value) { preferTopFace = value; }
     private int blockHitDelay;    // 方块破坏后的冷却时间（reset() 后保留）。
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
@@ -464,7 +467,8 @@ public final class BlockDigger {
             Vec3 end = eye.add(dir.normalize().scale(reach));
             BlockHitResult res = level.clip(new ClipContext(
                     eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-            if (res.getType() == HitResult.Type.BLOCK && res.getBlockPos().equals(pos)) {
+            if (res.getType() == HitResult.Type.BLOCK && res.getBlockPos().equals(pos)
+                    && (requiredFace == null || res.getDirection() == requiredFace)) {
                 return res;
             }
         }
