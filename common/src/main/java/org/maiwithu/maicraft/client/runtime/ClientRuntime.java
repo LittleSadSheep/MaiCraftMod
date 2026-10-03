@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.mcp.McpConfig;
 import org.maiwithu.maicraft.mcp.RuntimeFacade;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
+import org.maiwithu.maicraft.core.task.lighting.AutomaticLighting;
+import org.maiwithu.maicraft.task.AfterNavigationAction;
 import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.core.combat.PvpEngagement;
 import org.maiwithu.maicraft.core.task.build.BuildPreviewGate;
@@ -129,6 +131,10 @@ public final class ClientRuntime {
         } finally {
             try {
                 EmbeddedBaritoneRuntime.tick(context, pathingMayDrive);
+                AfterNavigationAction.run(context);
+                // 先执行主任务和路线，再借剩余资源插灯；因此补光不会撤掉移动租约或抢走精确瞄准。
+                AutomaticLighting.get().tick(context, "running_tasks".equals(tickStage)
+                        && CompanionTickDispatcher.allowsAuxiliaryWork());
             } finally {
                 ACTOR.endTick(context);
             }
@@ -265,6 +271,7 @@ public final class ClientRuntime {
         TransportRuntime.abandon();
         if (saveSemanticState) IntentRuntime.get().bodyUnavailable();
         CompanionTickDispatcher.bodyGone();
+        AutomaticLighting.get().reset();
         BlockSearch.cancelAll();
         TargetIndex.dropAll();
         boolean preserveDeathRecovery = saveSemanticState

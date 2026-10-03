@@ -49,6 +49,7 @@
 | `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | 入口核对 |
 | `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | 入口核对 |
 | `light_area` | 给实际识别出的区域补光 | `AbilityAdapter.lightArea` | 入口核对 |
+| `auto_light` | 启停或查询随行副手补光，不替换当前任务 | `AutomaticLightingAdapter` → `AutomaticLighting` | 随行与区域覆盖通过 `lightingRegression` 回放 |
 | `inspect_machine` | 观察机器及其接口和结构 | `MachineAbilityAdapter.inspect` | 入口核对 |
 | `design_machine` | 检查机器布局及需求 | `MachineAbilityAdapter.design` | 入口核对 |
 | `build_machine` | 供料、搭建并核对机器结构 | `MachineAbilityAdapter.build` | 入口核对 |

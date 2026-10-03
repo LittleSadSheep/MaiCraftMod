@@ -23,7 +23,7 @@ public final class CoreReflexes {
         ReflexRegistry.register(new BreathChain());
         ReflexRegistry.register(new MobDefenseChain());
         ReflexRegistry.register(new NightRestChain());
-        // 这里只登记说明；每个身体实例实际使用的补光链由 BrainChains 创建。
+        // 保留补光说明名；实际随行行为由帧末辅助通道执行，不进入反射抢占队列。
         ReflexRegistry.register(new TorchLightingChain());
     }
 }

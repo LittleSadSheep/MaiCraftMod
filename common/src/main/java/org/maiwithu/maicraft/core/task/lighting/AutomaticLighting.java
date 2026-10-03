@@ -47,12 +47,13 @@ public final class AutomaticLighting {
         owner = player;
         placer = new OffhandTorchPlacer();
         visited.clear(); placements.clear(); lastAttemptOrigin = null;
+        state = enabled ? "waiting_for_movement" : "disabled"; observationProblem = null;
     }
 
     public void reset() {
         owner = null; placer = new OffhandTorchPlacer(); visited.clear(); placements.clear();
         enabled = true; minimum = 8; protectedLabels = List.of(); lastAttemptOrigin = null;
-        state = "waiting_for_movement";
+        state = "waiting_for_movement"; observationProblem = null;
     }
 
     public void tick(LocalPlayerContext context, boolean allowed) {

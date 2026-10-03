@@ -22,6 +22,9 @@ import org.maiwithu.maicraft.api.Internal;
  */
 @Internal
 public final class CompanionTickDispatcher {
+    /** 帧末随行助手不能抢占自救或主任务；只读调度结果，不触发任务交接。 */
+    public static boolean allowsAuxiliaryWork() { return brain != null && brain.allowsAuxiliaryWork(); }
+
 
     private static final long HANDOFF_LIFETIME_NANOS = 30_000_000_000L;
     private static final int MAX_CONNECTED_PORTAL_CELLS = 256;

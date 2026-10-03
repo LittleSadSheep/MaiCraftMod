@@ -101,6 +101,12 @@ final class CompanionBrain {
         return current.record();
     }
 
+    boolean allowsAuxiliaryWork() {
+        // 自救与明确独占身体的动作不借出资源；普通工作仍由原槽执行，辅助动作只用剩余的准星和操作机会。
+        return (holder == null || holder == currentProxy || holder == syncProxy)
+                && (holder == null || !holder.suppressesSurvivalReflexes());
+    }
+
     // 先结清寻死目标再保存重生检查点；普通任务返回 false，仍按原有死亡恢复流程处理。
     boolean observeDeath(LocalPlayer player) {
         boolean expected = current.observeDeath(player);
