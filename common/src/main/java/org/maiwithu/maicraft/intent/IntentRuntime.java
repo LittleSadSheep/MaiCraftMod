@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.core.task.container.ContainerMemory;
+import org.maiwithu.maicraft.core.task.mine.ObservedSourceMemory;
 
 /**
  * 保存客户端业务任务的计划、公开 ID、进度、决策和持久化状态，供 MCP 查询。
@@ -107,8 +108,11 @@ public final class IntentRuntime {
     private IntentTaskRecord deathRecovery;
     // 自主开箱形成的标识与库存随同一世界检查点保存，断线重连后继续作为历史线索使用。
     private final ContainerMemory containers = new ContainerMemory(this::markDirty);
+    // 挖掘公平闸门的记忆半边：见过一次的挖掘目标位置随同一世界检查点保存，重新遮挡也不会退回不可挖。
+    private final ObservedSourceMemory observedSources = new ObservedSourceMemory(this::markDirty);
 
     public ContainerMemory containerMemory() { return containers; }
+    public ObservedSourceMemory observedSourceMemory() { return observedSources; }
     /** 进度事件的门卫：记分牌变化驱动 + 地板间隔 + 无键静默，契约见 task-progress-contract。 */
     private final ProgressGate progressGate = new ProgressGate();
     private final AttentionFeed attention = new AttentionFeed();
@@ -546,6 +550,7 @@ public final class IntentRuntime {
             try {
                 IntentStateCodec.Decoded decoded = IntentStateCodec.decode(loaded.root());
                 containers.restore(loaded.root().getAsJsonArray("containers"));
+                observedSources.restore(loaded.root().getAsJsonArray("observed_sources"));
                 for (Plan plan : decoded.plans()) {
                     validateRestoredGoal(plan.goal());
                     if (plans.putIfAbsent(plan.id(), plan) != null) {
@@ -650,6 +655,7 @@ public final class IntentRuntime {
         // 普通保存和原生提交前的检查点共用完整记忆，避免其中一条保存路径把箱子记录覆盖掉。
         JsonObject root = IntentStateCodec.encode(stateIdentity.key(), plans.values(), tasks.values(), requestKeys, landmarks.values());
         root.add("containers", containers.snapshot());
+        root.add("observed_sources", observedSources.snapshot());
         return root;
     }
 
@@ -660,6 +666,7 @@ public final class IntentRuntime {
         requestKeys.clear();
         landmarks.clear();
         containers.clear();
+        observedSources.clear();
         // 死亡恢复承载记录属于上一条命与上一个连接；换世界后旧决策不再可答，防止迟到答复触达新身体。
         deathRecovery = null;
         attention.clear();

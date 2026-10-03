@@ -63,6 +63,8 @@ import org.maiwithu.maicraft.core.task.entity.EntitySemanticSafety;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchCompanionTask;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
+import org.maiwithu.maicraft.core.task.mine.OreGenerationBand;
+import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
 import org.maiwithu.maicraft.core.tools.CraftOps;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
@@ -86,6 +88,10 @@ public final class SemanticAcquireCompanionTask
     private static final long COLLECT_TICKS = 60L * 20L;
     private static final long MINE_MIN_TICKS = 60L * 20L;
     private static final long MINE_PER_UNIT_TICKS = 30L * 20L;
+    /** 探矿下降子任务期限：几十格垂直掘进给足导航预算，超时如实失败。 */
+    private static final long PROSPECT_DESCEND_TICKS = 6L * 60L * 20L;
+    /** 探矿采矿子任务期限：覆盖 MineCompanionTask 内部 10 分钟活跃预算加掉落收尾。 */
+    private static final long PROSPECT_MINE_TICKS = 13L * 60L * 20L;
     private static final long STORAGE_TICKS = 10L * 60L * 20L;
     private static final long HUNT_TICKS = 120L * 20L;
     private static final int HUNT_SEARCH_DISTANCE = 512;
@@ -635,6 +641,42 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
+    /** 公平空手 + 授权开 → 派下降子任务；授权关、表外物品或维度不符时如实记录并放行既有推进。 */
+    private TaskState startProspectingIfAuthorized(AcquisitionNeed need) {
+        var plan = OreGenerationBand.plan(r.allowProspecting, need.itemIds,
+                player.level().dimension().location().toString(),
+                need.prospectingDescendStarted, need.prospectingMineStarted);
+        switch (plan.step()) {
+            case UNKNOWN_BAND -> addIssue("mine", "prospecting_band_unknown",
+                    "mining came back empty-handed; prospecting is allowed but this item has no"
+                            + " known natural generation band, so no descent depth is guessed",
+                    Map.of("item_ids", itemStrings(need.itemIds)));
+            case OTHER_DIMENSION -> addIssue("mine", "prospecting_other_dimension",
+                    "mining came back empty-handed; the known generation band for this item lies"
+                            + " in another dimension, and no descent was started here",
+                    Map.of("band_dimension", plan.band().dimension(),
+                            "current_dimension", player.level().dimension().location().toString()));
+            case DESCEND -> {
+                need.prospectingDescendStarted = true;
+                need.prospectingY = plan.band().prospectY();
+                long now = player.level().getGameTime();
+                MoveToTaskRecord descend = MoveToTaskRecord.strictStance(
+                        childId("prospect-descend"), now + PROSPECT_DESCEND_TICKS,
+                        new BlockPos(player.getBlockX(), plan.band().prospectY(), player.getBlockZ()),
+                        true);
+                addIssue("mine", "prospecting_descend_started",
+                        "fair scan came back empty-handed with prospecting allowed; descending to the"
+                                + " item's known generation band before digging prospect tunnels",
+                        Map.of("prospect_y", plan.band().prospectY()));
+                renewProgressLease();
+                return startChild(need, SemanticAcquireTaskRecord.Source.MINE, descend,
+                        "descend to the natural generation band for tunnel prospecting");
+            }
+            default -> { }
+        }
+        return null;
+    }
+
     private TaskState attemptMine(AcquisitionNeed need) {
         if (need.unresolvedMaterialSource) {
             // 工艺缺口不等于地上有同名方块；仍可使用现货，但不能盲找木板、设备等加工品来掩盖缺失步骤。
@@ -646,11 +688,26 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
         List<String> refs = new ArrayList<>();
-        for (ResourceLocation itemId : need.itemIds) {
-            Item item = BuiltInRegistries.ITEM.get(itemId);
-            // 自动备木料只寻找可直接采集的来源；不能因合成暂缺原木，就绕过天然树筛选去拆现成木板。
-            Block directSource = SemanticSourceKnowledge.directMineBlock(item);
-            if (directSource != null) refs.add(BuiltInRegistries.BLOCK.getKey(directSource).toString());
+        if (need.prospectingMineStarted) {
+            // 探矿腿的目标方块族来自生成带表：普通矿与深层矿变体一并覆盖，不再按物品直翻方块。
+            OreGenerationBand band = OreGenerationBand.forItems(need.itemIds);
+            if (band == null) {
+                addIssue("mine", "prospecting_band_unknown",
+                        "the prospecting leg lost its generation band; no descent depth is guessed",
+                        Map.of("item_ids", itemStrings(need.itemIds)));
+                advanceSource(need);
+                return TaskState.RUNNING;
+            }
+            for (Block block : band.targetBlocks()) {
+                refs.add(BuiltInRegistries.BLOCK.getKey(block).toString());
+            }
+        } else {
+            for (ResourceLocation itemId : need.itemIds) {
+                Item item = BuiltInRegistries.ITEM.get(itemId);
+                // 自动备木料只寻找可直接采集的来源；不能因合成暂缺原木，就绕过天然树筛选去拆现成木板。
+                Block directSource = SemanticSourceKnowledge.directMineBlock(item);
+                if (directSource != null) refs.add(BuiltInRegistries.BLOCK.getKey(directSource).toString());
+            }
         }
         refs.addAll(sourceHint(need).blockRefs());
         Set<Block> blocks = ToolParse.parseBlocks(refs);
@@ -732,19 +789,29 @@ public final class SemanticAcquireCompanionTask
         int deficit = WorkToolPreparation.batchLimit(player, blocks, Math.min(256, missing(need)));
         if (bootstrap > 0) deficit = Math.min(deficit, bootstrap);
         long now = player.level().getGameTime();
-        long budget = Math.max(MINE_MIN_TICKS, deficit * MINE_PER_UNIT_TICKS);
+        boolean prospecting = need.prospectingMineStarted;
+        long budget = prospecting
+                ? PROSPECT_MINE_TICKS
+                : Math.max(MINE_MIN_TICKS, deficit * MINE_PER_UNIT_TICKS);
         Set<Item> progressItems = need.itemIds.stream()
                 .map(BuiltInRegistries.ITEM::get)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         boolean efficient = MineBlockTaskRecord.hasEfficientTool(player, blocks);
         need.efficientBatchStarted |= efficient && bootstrap == 0 && missing(need) >= WorkToolPreparation.BATCH_SIZE;
         MineBlockTaskRecord record = new MineBlockTaskRecord(
-                childId("mine"), now + budget, blocks, deficit, blockLabel(blocks),
-                progressItems, efficient, true);
+                childId(prospecting ? "prospect-mine" : "mine"), now + budget, blocks, deficit,
+                blockLabel(blocks), progressItems, efficient, true);
         // 默认采矿使用当前已加载视距；主人明确限定半径时仍冻结原范围，不能借扩大搜索越界取材。
-        if (!r.miningUsesLoadedView) record.withinRadius(player.blockPosition(), r.searchRadius);
+        // 探矿掘进会走出地表半径，必须保持已加载视距，否则索引会越查越空。
+        if (prospecting) {
+            record.withProspecting(need.prospectingY);
+        } else if (!r.miningUsesLoadedView) {
+            record.withinRadius(player.blockPosition(), r.searchRadius);
+        }
         return startChild(need, SemanticAcquireTaskRecord.Source.MINE,
-                record, "mine BlockItem-derived or semantic source blocks");
+                record, prospecting
+                        ? "dig prospect tunnels at the generation band, mining what they expose"
+                        : "mine BlockItem-derived or semantic source blocks");
     }
 
     private long toolMaterialBudget(AcquisitionNeed need, Item item) {
@@ -1208,7 +1275,10 @@ public final class SemanticAcquireCompanionTask
             advanceSource(completedNeed);
             return TaskState.RUNNING;
         }
-        if (progress == 0 || terminal != TaskState.SUCCESS) {
+        // 探矿下降是中间步骤：正常到达没有库存增量，不能记成子任务未完成。
+        boolean prospectDescendChild = completedSource == SemanticAcquireTaskRecord.Source.MINE
+                && completedRecord instanceof MoveToTaskRecord;
+        if ((progress == 0 || terminal != TaskState.SUCCESS) && !prospectDescendChild) {
             addIssue(completedSource.name().toLowerCase(), "child_task_incomplete",
                     result == null ? "child task ended without a result" : result.message(),
                     result == null || result.data() == null ? Map.of() : result.data());
@@ -1267,10 +1337,33 @@ public final class SemanticAcquireCompanionTask
             case MINE -> {
                 // mine 子任务的采区耗尽（mined_out）要保真记住：全部来源耗尽时父层终态
                 // 才能以 MINED_OUT 收场，recoveryOptions 的"换区域重扫"选项才有判定依据。
-                if (structuredFailure
-                        && result != null && result.data() != null
-                        && "mined_out".equals(result.data().get("failure_type"))) {
+                String failureType = result == null || result.data() == null
+                        ? null : String.valueOf(result.data().get("failure_type"));
+                if (structuredFailure && "mined_out".equals(failureType)) {
                     completedNeed.mineChildMinedOut = true;
+                }
+                // 探矿编排第二步：下降子任务（MINE 来源下的移动记录）结束后接掘进采矿。
+                if (completedRecord instanceof MoveToTaskRecord
+                        && completedNeed.prospectingDescendStarted
+                        && !completedNeed.prospectingMineStarted) {
+                    completedNeed.prospectingMineStarted = true;
+                    if (terminal == TaskState.SUCCESS) {
+                        addIssue("mine", "prospecting_descend_arrived",
+                                "descended to the natural generation band; switching to tunnel prospecting",
+                                Map.of("prospect_y", completedNeed.prospectingY));
+                        return attemptMine(completedNeed);
+                    }
+                    addIssue("mine", "prospecting_descend_failed",
+                            result == null ? "descend ended without a result" : result.message(),
+                            result == null || result.data() == null ? Map.of() : result.data());
+                    advanceSource(completedNeed);
+                    return TaskState.RUNNING;
+                }
+                // 探矿编排第一步：公平扫描空手且授权开着时，按生成带表决定是否下降探矿。
+                if (progress == 0 && structuredFailure && "mined_out".equals(failureType)
+                        && !completedNeed.prospectingDescendStarted) {
+                    TaskState routed = startProspectingIfAuthorized(completedNeed);
+                    if (routed != null) return routed;
                 }
                 if (progress == 0 || structuredFailure) {
                     advanceSource(completedNeed);

@@ -68,8 +68,11 @@ public final class MiningSearchScopeTest {
     private static void finishQuery(InteractionWorldTestHarness h, MineCompanionTask task) throws Exception {
         var query = MineCompanionTask.class.getDeclaredMethod("runQuery"); query.setAccessible(true);
         var complete = MineCompanionTask.class.getDeclaredField("lastQueryComplete"); complete.setAccessible(true);
-        for (int i = 0; i < 64; i++) { h.nextTick(); query.invoke(task); if (complete.getBoolean(task)) return; }
-        throw new AssertionError("bounded local query did not finish");
+        for (int i = 0; i < 64; i++) { h.nextTick(); query.invoke(task); if (complete.getBoolean(task)) break; }
+        if (!complete.getBoolean(task)) throw new AssertionError("bounded local query did not finish");
+        // 查询命中先过公平闸门（即时可见 ∨ 观察记忆），真实任务每刻在 upkeep 里结算；测试里显式驱动同一入口。
+        var drainGate = MineCompanionTask.class.getDeclaredMethod("drainGate"); drainGate.setAccessible(true);
+        for (int i = 0; i < 4; i++) { h.nextTick(); drainGate.invoke(task); }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }
