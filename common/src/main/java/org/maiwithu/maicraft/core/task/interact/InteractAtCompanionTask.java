@@ -96,6 +96,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean terrainApproach;
     private int approachAttempts, approachCandidates;
     private Map<String, Object> approachFailureEvidence = Map.of();
+    /** 提交原生使用那一刻的目标格快照；与到期快照对照，用于裁决服务端分歧与确认缺口（issue 032）。 */
+    private Map<String, Object> submissionFacts = Map.of();
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
         super(player, record);
@@ -297,6 +299,18 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
             }
             receipt = PressReceipt.before(player, r.aim);
+            // 提交瞬间的目标格与射线事实先冻结；到期回执要和这份快照对照才能裁决分歧来源。
+            if (r.aim != null) {
+                Map<String, Object> facts = new HashMap<>();
+                var submitState = player.level().isLoaded(r.aim) ? player.level().getBlockState(r.aim) : null;
+                facts.put("aim_block_id", submitState == null ? "unloaded"
+                        : BuiltInRegistries.BLOCK.getKey(submitState.getBlock()).toString());
+                if (submitState != null && !submitState.getFluidState().isEmpty())
+                    facts.put("aim_fluid_is_source", submitState.getFluidState().isSource());
+                if (hit instanceof BlockHitResult submittedHit)
+                    facts.put("submission_ray_hit", submittedHit.getBlockPos().toShortString());
+                submissionFacts = Map.copyOf(facts);
+            }
             // 保存点击前的菜单身份，后续只给这次原生点击新打开的界面登记来源。
             menuBeforeUse = player.containerMenu;
             // 捕获这次交换前已有的持料，避免同种同数互换未产生数量差时只剩一条超时信息。
@@ -525,6 +539,19 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         }
         // 普通机械交互超时也可能已经交换物品；完成通知不能把缺少确认改写为可直接重试。
         if (interaction != null) data.putAll(interaction.useEvidence());
+        // 原生使用以不确定收场时补到期快照：目标格与主手的客户端事实，与提交快照对照，
+        // 用于裁决"服务端点击刻未生效（源仍在、主手未变）"与"动态流体已改写目标格"（issue 032）。
+        if ("UNCERTAIN".equals(data.get("native_action_status")) && r.aim != null) {
+            Map<String, Object> postExpiry = new HashMap<>(submissionFacts);
+            var expiryState = player.level().isLoaded(r.aim) ? player.level().getBlockState(r.aim) : null;
+            postExpiry.put("expiry_aim_block_id", expiryState == null ? "unloaded"
+                    : BuiltInRegistries.BLOCK.getKey(expiryState.getBlock()).toString());
+            if (expiryState != null && !expiryState.getFluidState().isEmpty())
+                postExpiry.put("expiry_aim_fluid_is_source", expiryState.getFluidState().isSource());
+            postExpiry.put("expiry_main_hand_item", BuiltInRegistries.ITEM
+                    .getKey(player.getMainHandItem().getItem()).toString());
+            data.put("post_expiry_facts", postExpiry);
+        }
         if (!deployerHandBefore.isEmpty()) {
             var hand = new HashMap<String,Object>(); hand.put("before",deployerHandBefore);
             var after = CreateDeployerHandEvidence.capture(player.level(),r.aim);
