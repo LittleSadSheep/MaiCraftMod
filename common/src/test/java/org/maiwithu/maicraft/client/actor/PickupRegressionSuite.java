@@ -10,6 +10,11 @@ public final class PickupRegressionSuite {
         DropBatchPlanTest.main(args);
         DropCompanionTaskTest.main(args);
         DiscardedItemsTest.main(args);
+        // 垃圾留在通道外；原生点火后核实余物并扑灭，取消也保留扑火收尾。
+        DiscardSitePlanTest.main(args);
+        DiscardFireTest.main(args);
+        DiscardPocketTaskTest.main(args);
+        DiscardRecoveryTest.main(args);
         CombatPickupOwnershipTest.main(args);
         CombatOutcomeTest.main(args);
         ShearingDropReceiptTest.main(args);

@@ -30,10 +30,14 @@ public final class DropItemsTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        // 调用者只给精确数量；执行器负责停步朝远处、原生分堆和后续拾取范围避让，无需模型逐件下达指令。
-        return "Drop an exact quantity by looking toward open space and throwing whole batches. Partial stacks "
+        // 先保住必经通道，再整份丢弃；已有打火石可原生销毁，点火和未烧掉的余物都必须如实回报并扑火。
+        return "Discard an exact quantity in whole batches while keeping passages usable. Partial stacks "
                 + "are split in the inventory and thrown together, including when the inventory is full. "
                 + "Observed discarded entities are avoided by later navigation while they remain in this world. "
+                + "If flint and steel is carried, ignite the actual landing cell when surrounding items and blocks can be preserved, "
+                + "observe whether the items disappear, then extinguish the fire with a native left click. "
+                + "Without usable ignition, prefer an open area or a small excavated side pocket. "
+                + "If an attempted burn leaves items blocking the only passage, recover those exact entities before relocating them. "
                 + "Prefer depositing in a nearby chest when items should be kept. count above what you carry "
                 + "drops everything you have of it. Returns confirmed dropped count, remaining inventory, "
                 + "batch count and observed discard avoidance; an unobserved landing remains unknown.";

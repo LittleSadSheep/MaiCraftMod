@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.client.actor.DiscardedItems;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.List;
@@ -34,8 +35,16 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     private int step;
     private DropBatchPlan.Click pendingClick;
     private final DropAim aim = new DropAim();
+    private DiscardSitePreparation site = new DiscardSitePreparation();
+    private boolean siteReady;
+    private DiscardFire fire;
+    private DiscardRecovery recovery;
+    private boolean recoveryAccounted;
+    private boolean allowBurn = true;
+    private int recovered, thrown;
+    private final List<Map<String, Object>> disposalAttempts = new ArrayList<>();
     private final List<DiscardedItems.Watch> watches = new ArrayList<>();
-    private final VisibleMenuSession menuSession = new VisibleMenuSession();
+    private VisibleMenuSession menuSession = new VisibleMenuSession();
 
     public DropCompanionTask(LocalPlayer player, DropItemsTaskRecord record) {
         super(player, record);
@@ -49,6 +58,23 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
             if (!menuSession.worldReady(context)) return TaskState.RUNNING;
             target = Math.min(r.count, PlayerInv.count(player.getInventory(), r.item)); initialized = true;
             if (target == 0) { fail("no " + r.label + " in inventory to drop", FailureType.NO_MATERIAL); return TaskState.FAILED; }
+        }
+        if (recovery != null) {
+            TaskState state = recovery.tick(player); r.extendDeadlineTo(player.level().getGameTime() + DROP_PROGRESS_LEASE_TICKS);
+            if (state == TaskState.RUNNING) return state;
+            accountRecovery();
+            if (state != TaskState.SUCCESS) { fail("unburned passage items could not be recovered; see native pickup evidence", FailureType.UNKNOWN); return state; }
+            // 真正回收入包后才重选位置；第二次只用不堵路的空地或侧袋，不再对同一份耐火余物反复点火。
+            recovery = null; fire = null; site = new DiscardSitePreparation(false); siteReady = false; allowBurn = false;
+            menuSession = new VisibleMenuSession(); plan = List.of(); step = 0;
+        }
+        if (!siteReady) {
+            // 有打火石先选可尝试销毁的位置；其余情况先确认通道外空地或挖好侧袋，准备期间物品仍留在背包里。
+            TaskState preparation = site.tick(context);
+            if (preparation == TaskState.FAILED) { fail(site.failure(), FailureType.NO_PATH); return preparation; }
+            r.extendDeadlineTo(player.level().getGameTime() + DROP_PROGRESS_LEASE_TICKS);
+            if (preparation != TaskState.SUCCESS) return TaskState.RUNNING;
+            siteReady = true; aim.direction(site.plan().direction());
         }
         if (receipt != null) {
             receipt = context.menus().poll(context, receipt);
@@ -64,7 +90,24 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         if (dropped >= target) {
             doneMessage = "dropped " + dropped + "x " + r.label
                     + (dropped < r.count ? " (only had " + dropped + ")" : "");
-            return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
+            if (!menuSession.close(context)) return TaskState.RUNNING;
+            // 丢弃数量已确认之后才按真实落点点火；销毁检查和扑火不能改写已经完成的原生投掷数量。
+            if (fire == null) fire = new DiscardFire(watches, allowBurn);
+            r.extendDeadlineTo(player.level().getGameTime() + DROP_PROGRESS_LEASE_TICKS);
+            TaskState state = fire.tick(context);
+            if (state == TaskState.SUCCESS && site.plan().requiresBurn()) {
+                if (watches.stream().anyMatch(DiscardedItems.Watch::pending)) return TaskState.RUNNING;
+                if (!fire.remaining().isEmpty()) {
+                    fire.close(context);
+                    recovery = new DiscardRecovery(player, r.getToolCallId(), watches, fire.remaining());
+                    recoveryAccounted = false;
+                    return TaskState.RUNNING;
+                }
+            }
+            return state;
+        }
+        if (Vec3.atBottomCenterOf(site.plan().stance()).subtract(player.position()).horizontalDistanceSqr() > .09) {
+            fail("discard stance changed before throwing; remaining items were retained", FailureType.STANCE_DUD); return TaskState.FAILED;
         }
         if (!aim.ready(context) || !menuSession.inventoryReady(context)) return TaskState.RUNNING;
         if (step >= plan.size()) {
@@ -92,7 +135,15 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
 
     private void acceptClick() {
         if (pendingClick.dropped() > 0) batches++;
+        thrown += pendingClick.dropped();
         dropped += pendingClick.dropped(); step++; receipt = null; pendingClick = null;
+    }
+
+    private void accountRecovery() {
+        // 回收已经有原生入包证据时立即保留数量；取消恰好落在实体移除等待窗口，也不能丢掉已拿回的物品事实。
+        if (recoveryAccounted) return;
+        disposalAttempts.add(Map.of("site", site.result(), "fire", fire.result(), "recovery", recovery.result()));
+        recovered += recovery.collected(); dropped = Math.max(0, dropped - recovery.collected()); recoveryAccounted = true;
     }
 
     @Override
@@ -101,7 +152,13 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         if (receipt != null && receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) acceptClick();
         uncertain |= pendingClick != null && pendingClick.dropped() > 0
                 && (receipt == null || receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED);
-        menuSession.cleanup(player); super.cleanup();
+        menuSession.cleanup(player);
+        try {
+            var context = ClientRuntime.requireContext(player); site.close(context);
+            if (fire != null) fire.close(context);
+            if (recovery != null) { recovery.close(player); accountRecovery(); }
+        } catch (RuntimeException unavailable) { /* 身体交接后保留未结现场，不借新身体重复投掷或点火。 */ }
+        super.cleanup();
     }
 
     @Override
@@ -112,8 +169,13 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         data.put("remaining_in_inventory", PlayerInv.count(player.getInventory(), r.item));
         data.put("drop_batches", batches);
         data.put("drop_attempts", attempts);
+        data.put("confirmed_thrown_units", thrown);
+        data.put("recovered_after_burn", recovered);
+        data.put("disposal_attempts", List.copyOf(disposalAttempts));
         data.put("outcome_uncertain", uncertain);
         data.put("discarded_item_avoidance", watches.stream().map(DiscardedItems.Watch::result).toList());
+        data.put("discard_site", site.result());
+        if (fire != null) data.put("discard_fire", fire.result());
         return data;
     }
 
