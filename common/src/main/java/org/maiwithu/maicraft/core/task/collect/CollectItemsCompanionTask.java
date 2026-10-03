@@ -14,6 +14,10 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.core.registries.BuiltInRegistries;
+import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.scan.DroppedItemObservation;
+import org.maiwithu.maicraft.client.actor.ItemEntityReceipts;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,6 +25,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Set;
 
 /**
  * 反复寻找匹配的地面物品并走近，让服务器按正常拾取规则把物品放进背包。
@@ -37,6 +44,14 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private Phase phase = Phase.SCAN;
     private NativePickupReceipt pickup;
     private UUID pickupUuid;
+    private String pickupItemId;
+    private int pickupAccountedUnits;
+    private long pickupCursor;
+    private long selectedReceiptWait = Long.MIN_VALUE;
+    /** 所选物品堆的已确认收取和现场快照分开保留；失效引用不能因扫描为空而被当作已完成。 */
+    private final Set<UUID> completedTargets = new HashSet<>();
+    private final Map<UUID, JsonObject> targetObservations = new LinkedHashMap<>();
+    private final Map<String, Integer> collectedItems = new LinkedHashMap<>();
     private int contactTicks;
     private int unreachable;
     private int disappearedWithoutReceipt;
@@ -59,6 +74,13 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         this.phase = Phase.SCAN;
         this.pickup = null;
         this.pickupUuid = null;
+        this.pickupItemId = null;
+        this.pickupAccountedUnits = 0;
+        this.pickupCursor = ItemEntityReceipts.cursor(player);
+        this.selectedReceiptWait = Long.MIN_VALUE;
+        this.completedTargets.clear();
+        this.targetObservations.clear();
+        this.collectedItems.clear();
         this.contactTicks = 0;
         this.unreachable = 0;
         this.disappearedWithoutReceipt = 0;
@@ -72,6 +94,11 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     protected TaskState onTick() {
         if (player.isDeadOrDying()) {
             return TaskState.CANCELLED;
+        }
+        // 引用属于原观察维度；跨维度后先停止移动，交付未收取事实供模型重新选择。
+        if (r.targetDimension != null && !r.targetDimension.equals(player.level().dimension().location())) {
+            fail("the selected drop is in another dimension", FailureType.TARGET_LOST);
+            return TaskState.FAILED;
         }
         return switch (phase) {
             case SCAN -> tickScan();
@@ -93,7 +120,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             if (disappearedWithoutReceipt > 0) {
                 fail("collected " + r.getCollected() + " " + r.label + ", but "
                                 + disappearedWithoutReceipt + " tracked drop stack(s) disappeared "
-                                + "without a synchronized matching inventory increase"
+                                + "without matching pickup and inventory confirmation"
                                 + detailSuffix(),
                         FailureType.TARGET_LOST);
                 return TaskState.FAILED;
@@ -105,12 +132,19 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
-            // 半径范围内没有剩余物品；即使数量为零，也可用回执确认“此处没有物品”。
+            if (!completedTargets.containsAll(r.targetUuids)) {
+                // 开始前就消失、离开范围或类型已变化的指定物品不能返回零件成功，也不能换成别处同类物品。
+                fail("selected drop stack(s) are unavailable within the search radius or item filter; "
+                        + "pickup remains unconfirmed", FailureType.TARGET_LOST);
+                return TaskState.FAILED;
+            }
+            // 普通范围扫描没有剩余候选可正常结束；指定物品则须已逐堆确认收取。
             return TaskState.SUCCESS;
         }
         // 掉落所在格不能站立不代表无法拾取；由接触站位与正常导航尝试从周围靠近。
         pickup = NativePickupReceipt.begin(player, best);
         pickupUuid = best.getUUID();
+        pickupItemId = BuiltInRegistries.ITEM.getKey(best.getItem().getItem()).toString();
         contactTicks = 0;
         nav = approachNavigation();
         phase = Phase.APPROACH;
@@ -131,9 +165,26 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
             fail("the tracked drop identity changed before pickup", FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
+        refreshTargetObservation(current);
         NativePickupReceipt.State receiptState = pickup.poll(player, PICKUP_SYNC_TICKS);
+        // 逐刻保存本人已收取的部分，后续失联或换维度也不能抹掉先前已确认的效果。
+        if (r.targetDimension != null) recordCollected(pickup.confirmedUnits(player));
         if (receiptState == NativePickupReceipt.State.RECEIVED) {
-            r.addCollected(pickup.confirmedUnits(player));
+            // 模型点名的物品堆还须有服务器发给本人的同 UUID 拾取包；别人拿走后背包碰巧增量不能冒充完成。
+            if (r.targetDimension != null
+                    && ItemEntityReceipts.pickedUp(player, pickupUuid, pickupCursor) < pickup.expectedUnits()) {
+                if (selectedReceiptWait == Long.MIN_VALUE) selectedReceiptWait = player.level().getGameTime();
+                if (nav != null) nav.pause();
+                else InputDriver.halt(player);
+                if (player.level().getGameTime() - selectedReceiptWait < PICKUP_SYNC_TICKS) return TaskState.RUNNING;
+                recordCollected(pickup.confirmedUnits(player));
+                disappearedWithoutReceipt++;
+                lastUncollectedDetail = "the selected drop has no matching native pickup confirmation for this player";
+                finishTarget();
+                return TaskState.RUNNING;
+            }
+            recordCollected(pickup.confirmedUnits(player));
+            completedTargets.add(pickupUuid);
             finishTarget();
             return TaskState.RUNNING;
         }
@@ -161,7 +212,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
                 return TaskState.RUNNING;
             }
             if (!NativePickupReceipt.canAccept(player, live.getItem())) {
-                r.addCollected(pickup.confirmedUnits(player));
+                recordCollected(pickup.confirmedUnits(player));
                 fail("reached and contacted a loaded " + r.label + " drop, but no main-inventory "
                                 + "slot can accept its remaining stack; collected "
                                 + r.getCollected() + " before the inventory filled",
@@ -226,7 +277,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private PlayerNav approachNavigation() {
         var next = PlayerNav.toRevalidating(player, this::targetGoal, WALK_SPEED,
                 this::pickupReceived, PlayerNav.ContextProvider.DEFAULT);
-        // 内部受限收取只复用现有步行与浅水通行，不为捡一堆已确认物品自动尝试其他交通。
+        // 指定物品堆只复用现有步行与浅水通行，持续跟随该堆，不为捡取自动尝试其他交通。
         return r.targetUuids.isEmpty() ? next : next.walkingOnly();
     }
 
@@ -269,6 +320,9 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private void finishTarget() {
         pickup = null;
         pickupUuid = null;
+        pickupItemId = null;
+        pickupAccountedUnits = 0;
+        selectedReceiptWait = Long.MIN_VALUE;
         contactTicks = 0;
         stopNav();
         phase = Phase.SCAN;
@@ -280,14 +334,15 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private ItemEntity nearestItem() {
-        // 普通拾取按类型找最近物品；内部已限定身份时先筛UUID，不能因另一堆更近就转移收取目标。
+        // 普通拾取按类型找最近物品；指定一堆时先筛 UUID，不能因另一堆同类物品更近就转移目标。
         AABB box = player.getBoundingBox().inflate(r.radius);
         List<ItemEntity> candidates = new ArrayList<>();
         for (Entity e : player.level().getEntities(player, box)) {
-            if (!(e instanceof ItemEntity ie) || ie.isRemoved()) continue;
+            if (!(e instanceof ItemEntity ie) || ie.isRemoved() || ie.getItem().isEmpty()) continue;
             if (!r.permits(ie.getUUID())) continue;
             if (!r.filter.isEmpty() && !r.filter.contains(ie.getItem().getItem())) continue;
             firstObservedEntityCounts.putIfAbsent(ie.getId(), ie.getItem().getCount());
+            if (!r.targetUuids.isEmpty()) targetObservations.put(ie.getUUID(), DroppedItemObservation.describe(player, ie));
             candidates.add(ie);
         }
         return skipped.pick(candidates, Comparator.comparingDouble(player::distanceToSqr)).orElse(null);
@@ -302,15 +357,49 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     @Override
     protected Map<String, Object> resultData() {
+        // 背包满、超时或中断可能发生在整堆收完之前；报告已同步的本人收取，重复查询不重复累加。
+        if (pickup != null && r.targetDimension != null) {
+            refreshTargetObservation(pickup.liveEntity(player));
+            recordCollected(pickup.confirmedUnits(player));
+        }
         Map<String, Object> data = new HashMap<>();
         data.put("label", r.label);
         data.put("collected", r.getCollected());
+        data.put("collected_items", Map.copyOf(collectedItems));
         data.put("radius", r.radius);
         data.put("unreachable_drop_stacks", unreachable);
         data.put("disappeared_without_inventory_receipt", disappearedWithoutReceipt);
         data.put("pickup_rejected_after_contact", pickupRejected);
         if (lastUncollectedDetail != null) data.put("last_uncollected_detail", lastUncollectedDetail);
+        if (!r.targetUuids.isEmpty()) {
+            // 回执逐一列出所选、已确认和未确认引用，保留位置及组件，让模型直接决定下一次走向。
+            data.put("drop_collection", Map.of(
+                    "requested_drop_refs", r.targetUuids.stream().map(this::reference).sorted().toList(),
+                    "collected_drop_refs", r.targetUuids.stream().filter(completedTargets::contains).map(this::reference).sorted().toList(),
+                    "unconfirmed_drop_refs", r.targetUuids.stream().filter(uuid -> !completedTargets.contains(uuid)).map(this::reference).sorted().toList(),
+                    "observations", List.copyOf(targetObservations.values())));
+        }
         return data;
+    }
+
+    private String reference(UUID uuid) {
+        return (r.targetDimension == null ? player.level().dimension().location() : r.targetDimension) + "|" + uuid;
+    }
+
+    private void refreshTargetObservation(ItemEntity current) {
+        // 收尾查询也保留最后看到的位置与余量；原实体被替换时沿用旧快照，不把另一堆混进回执。
+        if (current == null || !current.getUUID().equals(pickupUuid) || !pickup.sameStackKind(current)) return;
+        var observed = targetObservations.get(current.getUUID());
+        if (observed != null) DroppedItemObservation.refresh(observed, player, current);
+    }
+
+    private void recordCollected(int count) {
+        // 只把已有原生拾取流程确认的数量记到对应物品，部分入包也在失败回执中保留。
+        if (r.targetDimension != null) count = Math.min(count, ItemEntityReceipts.pickedUp(player, pickupUuid, pickupCursor));
+        int additional = Math.max(0, count - pickupAccountedUnits);
+        pickupAccountedUnits += additional;
+        r.addCollected(additional);
+        if (additional > 0) collectedItems.merge(pickupItemId, additional, Integer::sum);
     }
 
     @Override

@@ -172,6 +172,8 @@ public final class SemanticResultView {
         if (key.equals("control_analysis")) return value;
         // 实际选中的箱体是动作证据，保留身份供模型对照输入箱蓝图，不额外授权操作。
         if (key.equals("container_observation")) return value;
+        // 所选掉落的组件、位置和未收取引用都是观察证据，任务查询不能删去模型再次选择所需的事实。
+        if (key.equals("drop_collection")) return value;
         // 只读失败证据完整保留，不能把嵌套坐标再次过滤成空对象，让调用者反复查询仍无法定位。
         if (key.equals("failure_position") || key.equals("remaining_scaffolds")) return value;
         // 已经实际挖过的方块是供人核查的事实，保留全部位置与状态，不能把后续采掘效果悄悄截掉。
