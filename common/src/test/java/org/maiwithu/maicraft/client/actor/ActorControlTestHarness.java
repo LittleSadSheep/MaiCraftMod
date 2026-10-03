@@ -17,6 +17,8 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ClickAction;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.item.ItemEntity;
+import java.util.function.Consumer;
 
 /**
  * 构造只供控制测试使用的客户端、玩家和操作端口，并手动推进身体控制版本；没有正常启动游戏，未初始化的能力不能直接拿来推断实机行为。
@@ -71,6 +73,13 @@ final class ActorControlTestHarness {
         ((TestPlayer) player).menuClose = () -> { player.containerMenu = player.inventoryMenu; minecraft.screen = null; };
     }
 
+    /** 菜单仍执行原生扣数，夹具只记录交给投掷入口的完整物品堆，不在无服务器世界里构造掉落实体。 */
+    List<ItemStack> simulateItemDrops() {
+        var drops = new ArrayList<ItemStack>();
+        ((TestPlayer) player).menuDrop = stack -> drops.add(stack.copy());
+        return drops;
+    }
+
     Object visibility() throws Exception {
         return field(DefaultMenuPort.class, "visibility").get(actor.menus());
     }
@@ -109,11 +118,16 @@ final class ActorControlTestHarness {
         boolean sprinting;
         boolean sleeping;
         Runnable menuClose;
+        Consumer<ItemStack> menuDrop;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public void setSprinting(boolean value) { sprinting = value; }
         @Override public boolean isSprinting() { return sprinting; }
         @Override public boolean isSleeping() { return sleeping; }
         @Override public void closeContainer() { if (menuClose == null) super.closeContainer(); else menuClose.run(); }
+        @Override public ItemEntity drop(ItemStack stack, boolean includeThrower) {
+            if (menuDrop == null) return super.drop(stack, includeThrower);
+            menuDrop.accept(stack); return null;
+        }
         @Override public void swing(InteractionHand hand) { /* no network in this fixture */ }
         // 无窗口菜单回归仍走真实材料搬运，但不启动首次游玩教程的渲染提示。
         @Override public void updateTutorialInventoryAction(ItemStack carried, ItemStack clicked, ClickAction action) { }

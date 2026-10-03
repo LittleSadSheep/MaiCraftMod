@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
@@ -76,10 +78,18 @@ public final class DefaultMenuPort implements MenuPort {
         requireIdle();
         requireVisible(current);
         AbstractContainerMenu menu = current.player().containerMenu;
-        if (slot < 0 || slot >= menu.slots.size()) throw new IllegalArgumentException("menu slot is out of range");
+        // 满背包分出余量后允许原生界面外左键整份投掷；其他负槽号和操作仍是无效菜单请求。
+        boolean outsideDrop = slot == -999 && clickType == ClickType.PICKUP && (button == 0 || button == 1);
+        if (!outsideDrop && (slot < 0 || slot >= menu.slots.size())) throw new IllegalArgumentException("menu slot is out of range");
         current.claimMutation();
         MenuReceipt receipt = create(MenuReceipt.Kind.CLICK, current, menu, slot, timeoutTicks, false, confirmation);
         try {
+            // 菜单丢弃也按服务端朝向出手；先同步已经转到的真实视角，避免打开背包后仍按旧的低头方向丢在脚边。
+            if (clickType == ClickType.THROW || outsideDrop) {
+                var player = current.player();
+                current.connection().send(new ServerboundMovePlayerPacket.Rot(
+                        player.getYRot(), player.getXRot(), player.onGround()));
+            }
             current.gameMode().handleInventoryMouseClick(menu.containerId, slot, button, clickType, current.player());
             interactionSubmitted(current);
         } catch (RuntimeException failure) {
