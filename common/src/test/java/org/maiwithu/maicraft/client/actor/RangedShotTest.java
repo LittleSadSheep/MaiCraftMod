@@ -32,6 +32,8 @@ public final class RangedShotTest {
 
     public static void main(String[] args) throws Exception {
         bowSurvivesNativeReleaseCheck();
+        cancelledTaskCannotReleaseChargedBow();
+        deferredCancellationCannotTouchLaterUse();
         waitingForRangeKeepsNativeDraw();
         foreignUseIsNotBorrowedOrCancelled();
         chargedWaitsAndFiresOnce();
@@ -103,9 +105,8 @@ public final class RangedShotTest {
             check(f.h.h.connection.packets.stream().noneMatch(
                             p -> p instanceof ServerboundSetCarriedItemPacket),
                     "no carried-item packet may be sent when this tick's mutation budget is already spent");
-            // 下一刻名额恢复后仍能完成切槽取消，动作端口不被这次收尾卡死。
-            f.h.nextTick();
-            call(shot, "abort");
+            // 下一刻只推进正常运行时，不再要求已被任务丢弃的射击对象重试 abort。
+            nativeNext(f);
             check(!f.h.player.isUsingItem() && f.h.inventory.selected == 1
                             && f.h.h.connection.packets.stream().anyMatch(
                             p -> p instanceof ServerboundSetCarriedItemPacket),
@@ -141,6 +142,63 @@ public final class RangedShotTest {
             usingTick.invoke(f.h.player, f.h.player.getUseItem());
         }
         f.h.nextTick(); f.h.h.actions.advance(f.h.h.context);
+    }
+
+    private static void cancelledTaskCannotReleaseChargedBow() throws Exception {
+        // 已拉满、操作名额已用、任务只清理一次；此后不再调用 shot.abort，只走正常原版输入检查与端口 advance。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            cancelChargedTaskOnce(f);
+            check(f.h.player.isUsingItem() && f.h.inventory.selected == 0, "预算耗尽的当前刻不能额外切槽");
+            nativeNext(f);
+            check(f.h.mode.releases == 0 && !f.h.player.isUsingItem() && f.h.inventory.selected == 1,
+                    "运行时必须切槽取消，不能让原版松手路径把已蓄力的箭射出");
+            nativeNext(f);
+            check(f.h.mode.items == 1 && f.h.mode.releases == 0 && f.h.h.connection.packets.stream()
+                    .filter(p -> p instanceof ServerboundSetCarriedItemPacket).count() == 1,
+                    "任务丢弃射击状态后仍能一次性完成取消，不重放使用或重复切槽");
+        }
+    }
+
+    private static void cancelChargedTaskOnce(CombatThreatsTest.Fixture f) throws Exception {
+        f.h.inventory.setItem(0, new ItemStack(Items.BOW));
+        f.h.mode.itemUse = p -> p.startUsingItem(InteractionHand.MAIN_HAND);
+        var shot = shot(f.h.player, false); tick(shot, MISALIGNED);
+        for (int i = 0; i < 20; i++) { nativeNext(f); tick(shot, MISALIGNED); }
+        check(f.h.player.getTicksUsingItem() >= 20, "确实已经原生蓄力，不能只测试起手后无箭可射的取消");
+        var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("cancel-held-bow", 1000, List.of(), true));
+        task.start(f.h.player); ActorControlTestHarness.field(AttackCompanionTask.class, "shot").set(task, shot);
+        f.h.h.context.claimMutation(); task.result(TaskState.CANCELLED);
+        check(ActorControlTestHarness.field(AttackCompanionTask.class, "shot").get(task) == null, "真实任务已经丢弃射击状态");
+    }
+
+    private static void deferredCancellationCannotTouchLaterUse() throws Exception {
+        // 旧任务已经排队取消后，新回执接管进食；原生端口不能把旧弓的切槽债应用到面包上。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            cancelChargedTaskOnce(f); f.h.player.stopUsingItem(); f.h.nextTick();
+            f.h.inventory.setItem(0, new ItemStack(Items.BREAD));
+            var other = Interaction.useInAir(f.h.player, InteractionHand.MAIN_HAND, Interaction.Timing.hold()); other.tick();
+            nativeNext(f);
+            check(f.h.player.isUsingItem() && f.h.inventory.selected == 0 && f.h.mode.releases == 0
+                    && f.h.h.connection.packets.stream().noneMatch(p -> p instanceof ServerboundSetCarriedItemPacket),
+                    "后来者自己的使用回执和租约保持有效，不被旧取消切槽");
+            other.stop();
+        }
+        // 同一槽位同一把弓重新起手，倒计时回升也表示另一次持用，不能只按物品相同就取消。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            cancelChargedTaskOnce(f); f.h.player.stopUsingItem(); f.h.player.startUsingItem(InteractionHand.MAIN_HAND);
+            f.h.nextTick(); f.h.h.actions.advance(f.h.h.context);
+            check(f.h.player.isUsingItem() && f.h.inventory.selected == 0
+                    && f.h.h.connection.packets.stream().noneMatch(p -> p instanceof ServerboundSetCarriedItemPacket),
+                    "同物品的新持用也不能继承旧取消");
+        }
+        // 控制权交回玩家后，运行时只丢弃旧取消，不能再切换玩家当前选择的武器。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            cancelChargedTaskOnce(f); f.h.h.actions.revokeForBoundary("test human handoff");
+            f.h.nextTick(); f.h.h.actions.advance(f.h.h.context);
+            check(!ItemUseInputLease.project(f.h.h.minecraft, false) && f.h.inventory.selected == 0
+                    && f.h.h.connection.packets.stream().noneMatch(p -> p instanceof ServerboundSetCarriedItemPacket),
+                    "身体边界撤销持用和取消责任，旧任务不干预新操作者");
+        }
     }
 
     private static void waitingForRangeKeepsNativeDraw() throws Exception {

@@ -97,18 +97,18 @@ final class RangedShot {
     // 取消蓄力用切槽；松开弓会真的发射，不能用作取消。已经发出的箭不能撤回。
     void abort() {
         if (receipt != null && receipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
-            // 任务收尾可能发生在本刻操作名额已被占用的时刻（例如同刻先举过盾），
-            // 名额不可用或没有进行中的操作入口时先不切槽，把回执留给运行时逐刻收尾，
-            // 避免清理阶段直接把客户端打崩；与 Interaction.stop 的收尾守卫同一套约定。
+            // 清理只执行一次；本刻无名额时把持用租约和取消责任一并交给原生端口，跨过下刻松手检查再切槽。
             LocalPlayerContext context = ClientRuntime.actor()
                     .activeContext().filter(c -> c.player() == player).orElse(null);
-            // 旧射击流程不能取消后来者的持用；同刻预算耗尽时仍保留既有延后取消行为。
-            if (context != null && context.mutationAvailable() && context.actions() instanceof DefaultNativeActionPort actions
+            // 旧射击流程不能取消后来者的持用。
+            if (context != null && context.permitsNativeActions() && context.body().automationOwnsControls()
+                    && context.actions() instanceof DefaultNativeActionPort actions
                     && actions.ownsItemUse(receipt) && player.getInventory().selected == selectedSlot
                     && HeldUseItems.same(heldUseBefore, player.getMainHandItem(), player::registryAccess)
                     && (!player.isUsingItem() || player.getUsedItemHand() == InteractionHand.MAIN_HAND
                     && HeldUseItems.same(heldUseBefore, player.getUseItem(), player::registryAccess))) {
-                receipt = context.actions().cancelMainHandUse(context, receipt);
+                if (context.mutationAvailable()) receipt = actions.cancelMainHandUse(context, receipt);
+                else actions.deferMainHandUseCancellation(this, context, receipt);
             }
         }
         misfire(failure.isEmpty() ? "cancelled" : failure);
