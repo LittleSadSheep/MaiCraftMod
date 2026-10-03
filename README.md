@@ -113,6 +113,8 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 `maicraft:find_block` 查找 `minecraft:lava` 时，即使 `count=1` 也会完成范围内的可见调查，并在默认回执的 `lava_pool_survey` 中按同层连通面分池，报告源格数、方位、距离、已观察直岸长度及浇筑候选的填岸材料和剩余源格下界。孤立源格和流水不会被合并成足量岩浆池；候选 `reserve_observed` 表示填岸后已观察余量至少十五格，不保证寻路、取桶或水流结算成功。隐藏连接、池深和未加载区域仍是未知，需要模型按事实决定换视点或继续探索。
 
+明确寻找适合浇筑的池子时，可指定 `maicraft:find_block` 参数 `{"purpose":"portal_casting","count":1,"max_distance":128}`，省略的方块类型自动设为岩浆。此时 `count` 按符合浇筑布局、填岸后仍保留至少十五格源岩浆的连通池计数，单个源格和不足量的小池不能使任务成功。回执给出 `count_unit="casting_lava_pools"`、匹配池数和各池的 `matches_portal_casting`；没有符合项时报告 `no_suitable_lava_pool_within_bound`，保留所有局部观察供继续探索。这是只读查找，不自动走出搜索范围或开始施工。
+
 浇筑回执分别提供 `casting_actions_completed`、每步原生效果、整扇门的 `portal_observation.differences` 和 `portal_prepared`。倒桶成功不等于黑曜石成型或门已点燃；产物不符时保留现场，不自动重倒或拆除错误产物。临时导流模具保留在现场，供模型决定后续整理。
 
 池岸不平整时，执行器可在四格起手区后清理操作空间，原生补出连续岸边和后排站台，并给导流水保留侧边和后方台面。天然直岸与整形弯岸都先扣除计划填格，再确认至少保留十五格相连表层源岩浆；回执中的 `site_preparation` 给出填格、源格消耗与保守余量。这是按“十格门框加首桶水损耗”预留的估计，实际流体反应仍单独观察；不能由余量数字保证任意池形都能成功。

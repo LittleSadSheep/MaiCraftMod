@@ -27,7 +27,7 @@ public final class PortalLavaPoolSurvey {
     private Iterator<BlockPos> sites;
     private BlockPos nearest;
     private Candidate preferred;
-    private int flowing, submerged, longestBank;
+    private int flowing, submerged, longestBank, matchingPools;
     private long processed;
     private boolean started, complete;
 
@@ -69,7 +69,11 @@ public final class PortalLavaPoolSurvey {
             } else if (sites != null && sites.hasNext()) inspect(sites.next());
             else if (sites == null && !pool.isEmpty()) sites = pool.iterator();
             else {
-                if (!pool.isEmpty()) { results.add(poolFacts()); pool.clear(); }
+                if (!pool.isEmpty()) {
+                    // 池面分析完整后才计为用途匹配；邻近孤立源或另一片池子的余量不能替这个池子凑数。
+                    if (preferred != null && preferred.reserveObserved()) matchingPools++;
+                    results.add(poolFacts()); pool.clear();
+                }
                 sites = null; nearest = null; preferred = null; longestBank = 0;
                 if (remaining.isEmpty()) { complete = true; continue; }
                 BlockPos seed = remaining.iterator().next(); remaining.remove(seed); pending.add(seed);
@@ -113,6 +117,7 @@ public final class PortalLavaPoolSurvey {
                 : (dz < 0 ? "north" : dz > 0 ? "south" : "") + (dx < 0 ? "west" : dx > 0 ? "east" : ""));
         facts.put("longest_observed_straight_bank", longestBank);
         facts.put("casting_start_row_observed", preferred != null);
+        facts.put("matches_portal_casting", preferred != null && preferred.reserveObserved());
         if (preferred != null) {
             // 公共回执保留语义方位与整形预算；实际方块坐标仍由 Mod 内部的浇筑能力解析。
             facts.put("candidate", Map.of("shore_direction", preferred.layout.shore().getSerializedName(),
@@ -130,11 +135,13 @@ public final class PortalLavaPoolSurvey {
         facts.put("flowing_lava_observed", flowing); facts.put("submerged_or_unknown_surface_sources", submerged);
         facts.put("minimum_remaining_sources", PortalCastingTerrain.MINIMUM_REMAINING_SOURCES);
         facts.put("pools", List.copyOf(results));
+        facts.put("matching_portal_casting_pools", matchingPools);
         facts.put("candidate_scope", "loaded template geometry and visible resource budget; path, bucket access and native fluid outcomes unverified");
         if (!complete && !pool.isEmpty()) facts.put("pending_pool_observed_sources", pool.size());
         return facts;
     }
 
     public boolean complete() { return complete; }
+    public int matchingPools() { return matchingPools; }
     public long processed() { return processed; }
 }

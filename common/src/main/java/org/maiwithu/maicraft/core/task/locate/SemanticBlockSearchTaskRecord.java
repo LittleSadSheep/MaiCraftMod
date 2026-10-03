@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.core.task.locate;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 
@@ -19,9 +21,24 @@ public final class SemanticBlockSearchTaskRecord extends TaskRecord {
     public static final int MAX_BLOCK_IDS = 32;
     public static final int MAX_COUNT = 32;
 
+    /** 明确找浇筑池时按池子验收；普通查块仍按方块数量验收，不能只改描述却沿用单格成功条件。 */
+    public enum Purpose {
+        BLOCKS, PORTAL_CASTING;
+        public static Purpose parse(String value) {
+            if (value == null) return BLOCKS;
+            return switch (value.trim().toLowerCase(Locale.ROOT)) {
+                case "blocks" -> BLOCKS;
+                case "portal_casting" -> PORTAL_CASTING;
+                default -> throw new IllegalArgumentException("find_block purpose must be blocks or portal_casting");
+            };
+        }
+        public String id() { return name().toLowerCase(Locale.ROOT); }
+    }
+
     public final List<Block> blockTargets;
     public final int count;
     public final int maxDistance;
+    public final Purpose purpose;
 
     static {
         TaskFactory.register(SemanticBlockSearchTaskRecord.class, SemanticBlockSearchCompanionTask::new);
@@ -33,8 +50,17 @@ public final class SemanticBlockSearchTaskRecord extends TaskRecord {
             List<Block> blockTargets,
             int count,
             int maxDistance) {
+        this(toolCallId, deadlineGameTime, blockTargets, count, maxDistance, Purpose.BLOCKS);
+    }
+
+    public SemanticBlockSearchTaskRecord(String toolCallId, long deadlineGameTime, List<Block> blockTargets,
+                                         int count, int maxDistance, Purpose purpose) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.blockTargets = validateTargets(blockTargets);
+        this.purpose = purpose == null ? Purpose.BLOCKS : purpose;
+        // 只读浇筑调查只接受岩浆；不能把石头等其他候选悄悄算成符合用途的池子。
+        if (this.purpose == Purpose.PORTAL_CASTING && !this.blockTargets.equals(List.of(Blocks.LAVA)))
+            throw new IllegalArgumentException("portal_casting requires minecraft:lava only");
         this.count = Math.clamp(count, 1, MAX_COUNT);
         this.maxDistance = Math.clamp(maxDistance, MIN_DISTANCE, MAX_DISTANCE);
     }
@@ -44,6 +70,7 @@ public final class SemanticBlockSearchTaskRecord extends TaskRecord {
 
     @Override
     public String describe() {
+        if (purpose == Purpose.PORTAL_CASTING) return "在已加载可见范围寻找 " + count + " 处具备浇筑布局与岩浆余量的池子";
         return "在已加载范围寻找 " + count + " 处目标方块证据（"
                 + blockTargets.size() + " 种可接受类型）";
     }

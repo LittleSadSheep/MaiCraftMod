@@ -41,6 +41,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
+import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord.Purpose;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsRequest;
@@ -395,6 +396,7 @@ public final class GeneralAbilityAdapter {
     private static IntentAction findBlock(Goal goal) {
         // 先把可接受的方块种类整理成去重名单；没注册的名字集中记录，稍后一次告诉调用者。
         JsonObject p = goal.parameters();
+        Purpose purpose = Purpose.parse(string(p, "purpose"));
         LinkedHashSet<String> requested = new LinkedHashSet<>();
         List<String> invalid = new ArrayList<>();
         if (p.has("block_ids") && p.get("block_ids").isJsonArray()) {
@@ -408,6 +410,8 @@ public final class GeneralAbilityAdapter {
         }
         String one = string(p, "block_id");
         if (one != null) addBlockId(one, requested, invalid);
+        // 明确要求适合浇筑的池子时，自动补全岩浆类型；验收仍由同一用途字段传到底层任务。
+        if (purpose == Purpose.PORTAL_CASTING && requested.isEmpty()) requested.add("minecraft:lava");
         if (!invalid.isEmpty()) {
             return decision(goal,
                     "find_block received unknown or invalid namespaced block ids: " + invalid,
@@ -420,6 +424,9 @@ public final class GeneralAbilityAdapter {
                     List.of(option("retry", "Provide namespaced block_ids and an optional count."),
                             option("cancel", "Cancel block search.")), null);
         }
+        if (purpose == Purpose.PORTAL_CASTING && !requested.equals(Set.of("minecraft:lava")))
+            return decision(goal, "portal_casting searches minecraft:lava only.",
+                    List.of(option("retry", "Use purpose=portal_casting with minecraft:lava or omit block_ids.")), null);
 
         JsonArray ids = new JsonArray();
         requested.forEach(ids::add);
@@ -427,6 +434,7 @@ public final class GeneralAbilityAdapter {
         args.add("block_ids", ids);
         args.addProperty("count", integer(p, "count", 1, 1, 32));
         args.addProperty("max_distance", integer(p, "max_distance", 64, 4, 128));
+        args.addProperty("purpose", purpose.id());
         return new IntentAction.Tool("find_block", args.toString());
     }
 
