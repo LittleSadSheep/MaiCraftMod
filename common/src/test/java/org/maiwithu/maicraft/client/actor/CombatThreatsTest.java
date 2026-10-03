@@ -56,6 +56,7 @@ public final class CombatThreatsTest {
         // 追击范围使用本次参与者，防止无关敌怪不断接力把角色赶离工位。
         RetreatThreatsTest.main(args);
         RangedShotTest.main(args);
+        RangedDistanceBandTest.main(args); // 高台目标按同一水平距离进射程，真实弹道仍守三维上限。
         DamageAttentionTest.main(args);
         DamageEpisodeTest.main(args);
         CombatHandOwnershipTest.main(args);

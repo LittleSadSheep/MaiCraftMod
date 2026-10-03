@@ -921,7 +921,11 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             abortShot();
             return TaskState.RUNNING;
         }
-        if (player.distanceTo(target) > firingRange) {
+        // 普通弓战沿用走位环的水平距离，避免高台目标把角色拉到永远不能发射的位置；真实三维上限仍由下方弹道检查守住。
+        // 玩家对战与严格水晶目标继续使用各自的三维射距和爆炸安全判据，不借高差扩大其授权范围。
+        double firingDistance = pvpTarget() || strictCrystalTarget() ? player.distanceTo(target)
+                : Math.hypot(player.getX() - target.getX(), player.getZ() - target.getZ());
+        if (firingDistance > firingRange) {
             return TaskState.RUNNING;   // 射程外:不放,但<b>也不取消</b>,弓接着拉
         }
         boolean crossbow = RangedShot.isCrossbow(weapon);
