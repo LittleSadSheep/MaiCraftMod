@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +15,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.stats.Stats;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameRules;
@@ -51,6 +53,13 @@ public final class PortalCastingTestHarness {
             if (pending != null) {
                 if (!pending.isDone()) return;
                 Files.writeString(directory.resolve(ready ? "observation.json" : "ready.json"), JSON.toJson(pending.join()));
+                // 保留逐次身体和现场变化，死亡后也能核对角色是怎样离开安全站位的；静态石台已在起始凭证里。
+                var sample = new LinkedHashMap<>(pending.join());
+                var changed = ((List<?>) sample.get("blocks")).stream().filter(row ->
+                        !"minecraft:stone".equals(((Map<?, ?>) row).get("block"))).toList();
+                sample.put("blocks", changed);
+                Files.writeString(directory.resolve("timeline.jsonl"), new Gson().toJson(sample) + "\n",
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                 pending = null; ready = true; nextObservation = game.level.getGameTime() + 40; return;
             }
             // 重启只继续观察旧现场；已经写过起始凭证的副本不能再次补桶、恢复岩浆或擦掉失败产物。
@@ -112,6 +121,8 @@ public final class PortalCastingTestHarness {
                 inventory.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum));
         return Map.of("game_time", world.getGameTime(), "dimension", world.dimension().location().toString(),
                 "feet", List.of(player.getX(), player.getY(), player.getZ()), "health", player.getHealth(),
+                "deaths", player.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS)),
+                "last_damage", player.getLastDamageSource() == null ? "none" : player.getLastDamageSource().getMsgId(),
                 "inventory", inventory, "blocks", blocks);
     }
 }
