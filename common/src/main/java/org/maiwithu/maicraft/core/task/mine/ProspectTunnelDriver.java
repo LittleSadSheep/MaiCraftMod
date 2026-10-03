@@ -123,7 +123,8 @@ final class ProspectTunnelDriver implements AutoCloseable {
     }
     @Override public void close() {
         if (action != null) {
-            interrupted = action.interruptedEvidence(); uncertain |= Boolean.TRUE.equals(interrupted.get("outcome_uncertain"));
+            var result = action.interruptedResult(); interrupted = result.evidence(); uncertain |= result.uncertain();
+            effects.add(new Effect(action.origin(), result)); removed += result.removed().size();
             action.close(); action = null;
             if (uncertain) failure = "native_tunnel_interrupted_with_unresolved_effects";
         }

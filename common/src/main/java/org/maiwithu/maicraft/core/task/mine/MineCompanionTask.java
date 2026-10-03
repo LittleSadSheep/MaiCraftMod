@@ -67,7 +67,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 /**
  * 持续找材料：查附近已加载的目标方块，走近并挖掉，再靠近地上物品让游戏自然拾取。
  * 例如要 8 个粗铁，通常看背包比开始时多了多少粗铁，而不是只数挖了几块铁矿。
- * 附近有目标但走不到、工具不合适、背包装不下，会分别报告；目前不启用找不到矿就盲挖隧道的分支。
+ * 附近有目标但走不到、工具不合适、背包装不下，会分别报告；显式授权探矿后才主动开通道暴露来源。
  * 挖掘目标遵守公平闸门：索引命中的候选只有「即时可见 ∨ 观察记忆里见过」（{@link ObservedSourceMemory}）
  * 才进入可挖名单，不允许按上帝视角索引直接瞄准埋藏矿；挖隧道穿石头的路径掘进不受此约束。
  * 这个任务自己管理找矿、挖矿和捡物品的切换，公共父类负责开始、停止和返回结果。
@@ -100,16 +100,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final boolean EXPLORE_FOR_BLOCKS = false;
 
     // ---- 探矿驱动预算（授权「挖着找」后生效；内部常量，不做成模型参数）----
-    /** 掘进块数预算：1×2 断面每前进一格挖 2 块，128 块 ≈ 64 格主矿道加同量级分支。
-     *  原版 1.18+ 钻石在推荐层位每区块约 3-4 次生成尝试，这个量级足以在数条区块带上
-     *  期望遇到目标矿脉；超出预算如实收手，不把玩家周边挖成蜂窝。 */
+    /** 到层位后的水平掘进预算；下降所需的身体断面另按实际高度差计入，整批副目标同样消耗预算。 */
     private static final int PROSPECT_MAX_BLOCKS = 128;
     /** 活跃刻预算：10 分钟。普通速度挖掘 128 块约需 5-8 分钟，余量给移动与掉落收取。 */
     private static final int PROSPECT_MAX_TICKS = 10 * 60 * 20;
-    /** 主矿道每前进这么多格开一条侧分支；8 格是分支矿道的常见间距，侧向暴露带与主矿道重叠最小。 */
-    private static final int PROSPECT_SEGMENT_BLOCKS = 8;
-    /** 导航连续失败这么多次就收手：岩浆、深谷等地形让探矿继续只会空转烧预算。 */
-    private static final int PROSPECT_MAX_PATH_FAILURES = 12;
     /** 同一格连续这么多刻拉不出射线,就记进 {@link #unworkable} —— 够到测试说它能挖,
      *  可射线始终成不了(瞄准量化、站位上方有个檐口)。没有这条,挖掘会永远等一个
      *  不会来的射线。 */
@@ -206,8 +200,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     private boolean navIsBranch;
     private boolean navIsDrop;
-    /** 探矿掘进专用的导航标记；stopNav 必须清除，避免旧探矿路线绑架下一段控制。 */
-    private boolean navIsProspect;
     private BlockPos branchPoint;
     private int branchY;
     /** 距下一次允许查询的冷却(tick)。 */
@@ -217,13 +209,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 上一次查询时同伴所在 chunk(打包 long)——跨 chunk 视为看到新地形,触发补查。 */
     private long lastQueryChunk = Long.MIN_VALUE;
     private int branchTicks;
-    /** 探矿驱动状态：活跃刻、当前掘进目标、走向、分支侧与连续导航失败数。 */
+    /** 探矿共享完整原生回执，目标矿物数量与所有开路方块数量分别记账。 */
     private int prospectTicks;
-    private BlockPos prospectGoal;
-    private Direction prospectHeading;
-    private int prospectSide = 1;
-    private boolean prospectInBranch;
-    private int prospectPathFailures;
+    private int prospectBlockBudget;
+    private int excavatedBlocks;
+    private ProspectTunnelDriver tunnelDriver;
     private String progressNote = "done";
     /** 当前连续返回 {@code NO_SHOT} 的矿物位置及持续刻数。 */
     private BlockPos noShotPos;
@@ -301,6 +291,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         runQuery();
         lastProgressTick = player.level().getGameTime();
         lastProgressPos = feet();
+        if (r.prospecting()) prospectBlockBudget = PROSPECT_MAX_BLOCKS
+                + Math.max(0, feet().getY() - r.prospectY()) * ((int) Math.ceil(player.getBoundingBox().getYsize()) + 1);
         // 与 goto 的 start 日志对称:一任务一条,让日志里能看到任务确实启动了
         Constants.LOG.info(
                 "[maicraft-task] mine start targets={} count={} feet={} firstQuery={} hit(s) mapComplete={}",
@@ -343,6 +335,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             mineProgress(activeTarget);
             return TaskState.RUNNING;
         }
+        // 开路也持有原生连锁事务；先让这一条实际选区收尾，才允许拾取或新暴露矿物抢占。
+        if (tunnelDriver != null && tunnelDriver.breaking()) {
+            if (!driveProspecting()) return prospectFailure();
+            return TaskState.RUNNING;
+        }
         // 接单之后被换成别的方块或卸载时，停止原生挖掘；不能按坐标误拆新放入的机器。
         if (r.exactHarvest() && brokenTargets == 0 && (!level.isLoaded(r.searchCenter())
                 || level.getBlockState(r.searchCenter()) != r.exactState())) {
@@ -365,6 +362,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             drainGate();
             NavProfiler.end("mine.upkeep", tUpkeep);
         }
+        if (tunnelDriver != null && (!knownOres.isEmpty() || !drops.isEmpty() || gathered >= r.count)
+                && !tunnelDriver.yieldForMining()) return TaskState.RUNNING;
         if (batch == null && !navIsDrop && !drops.isEmpty()) {
             BlockPos continuation = reachableTarget();
             if (continuation != null && anticipatedDrops.keySet().stream()
@@ -519,15 +518,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (r.prospecting() && driveProspecting()) return TaskState.RUNNING;
             if (unreachableDropCount > 0) return unreachableDropFailure();
             if (r.prospecting()) {
-                // 探矿后仍空手 = 诚实失败：只陈述真实掘进量与扫描口径，不构成"世界中不存在"的证据。
-                progressNote = "prospect budget spent: dug " + brokenTargets + " blocks over "
-                        + prospectTicks + " active ticks toward prospect Y " + r.prospectY()
-                        + ", gathered " + r.getMined() + "/" + r.count;
-                fail("prospect tunnels exhausted their budget (" + progressNote
-                        + "). Unexplored areas remain unknown — this does not prove "
-                        + r.label + " does not exist elsewhere.",
-                        FailureType.MINED_OUT);
-                return TaskState.FAILED;
+                return prospectFailure();
             }
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
@@ -564,60 +555,52 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.RUNNING;
     }
 
-    // ---- 探矿驱动：授权「挖着找」后，空候选时掘进主矿道与分支，边暴露边采 ----
+    // ---- 探矿驱动：授权后按通行断面开路，边暴露边采 ----
 
     /**
-     * 探矿驱动每刻推进一段。只在公平查询空手时被调到——目标一进入可挖名单，上层
-     * 既有挖矿循环优先接手，本方法天然让位。掘进经寻路 TERRAFORM 完成，复用既有
-     * 挖掘下降机制，不新造原语；途中挖掉的块计入同一份掘进预算。
+     * 空候选时按剩余断面选择原生通道挖掘，动作确认后才沿已打通的路径前进。
+     * 暴露矿物后先交接在途连锁与导航，再由采矿循环接手；开路的每个实际破坏格独立计入预算。
      *
      * @return true = 继续探矿；false = 预算耗尽或地形反复失败，交回诚实收手路径。
      */
     private boolean driveProspecting() {
         prospectTicks++;
-        if (prospectTicks > PROSPECT_MAX_TICKS || brokenTargets >= PROSPECT_MAX_BLOCKS) {
-            return false;
-        }
-        if (prospectGoal == null) {
-            // 矿道走向由角色当前视角决定（就近取水平主方向），不需要外部指定。
-            prospectHeading = Direction.fromYRot(player.getYRot());
-            prospectGoal = feet().relative(prospectHeading, PROSPECT_SEGMENT_BLOCKS);
-        }
-        if (nav == null || !navIsProspect) {
-            stopNav();
-            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(prospectGoal), MINE_SPEED,
-                    () -> reachableTarget() != null, travelContext());
-            navIsProspect = true;
-        }
-        return switch (nav.tick()) {
-            case RUNNING -> true;
-            case ARRIVED -> {
-                advanceProspectLeg();
-                stopNav();
-                yield true;
+        if (tunnelDriver == null) tunnelDriver = new ProspectTunnelDriver(player, r.prospectY());
+        // 预算到点也先结清已经提交的原生动作，不能松键后丢弃整批破坏事实。
+        if (!tunnelDriver.breaking() && (prospectTicks > PROSPECT_MAX_TICKS || excavatedBlocks >= prospectBlockBudget)) return false;
+        boolean running = tunnelDriver.tick(prospectBlockBudget - excavatedBlocks);
+        collectTunnelEffects();
+        return running;
+    }
+    // 正常结束与暂停都共用同一本原生账，确认过的石头和矿物不会因任务交接而漏记。
+    private void collectTunnelEffects() {
+        for (var effect : tunnelDriver.drainEffects()) {
+            var result = effect.result(); ultimineActions.add(result.evidence());
+            excavatedBlocks += result.removed().size();
+            boolean sourceBroken = false;
+            for (var entry : result.removed().entrySet()) {
+                if (!r.targets.contains(entry.getValue().getBlock())) continue;
+                sourceBroken = true; harvestTarget = entry.getKey(); harvestBefore = entry.getValue();
+                acceptDigResult(entry.getKey(), BlockDigger.DigResult.BROKE_TARGET);
+                anticipatedDrops.remove(entry.getKey());
             }
-            case FAILED -> {
-                stopNav();
-                // 地形失败（岩浆、塌方）先换向重试；反复失败说明这一带不适合继续，转诚实收手。
-                if (++prospectPathFailures > PROSPECT_MAX_PATH_FAILURES) yield false;
-                prospectHeading = prospectHeading.getClockWise();
-                prospectGoal = feet().relative(prospectHeading, PROSPECT_SEGMENT_BLOCKS);
-                yield true;
-            }
-        };
+            if (!result.removed().isEmpty()) { noteProgress(); gatePending.replaceAll((at, retry) -> 0L); queryCooldown = 0; }
+            if (sourceBroken && WorkProfile.of(player).dropsLoot()) anticipatedDrops.put(effect.origin(), player.level().getGameTime() + DROP_LOITER_TICKS);
+            miningUncertain |= result.uncertain();
+        }
     }
 
-    /** 主矿道每前进一段开一条侧分支，分支尽头回到主轴继续，左右交替。 */
-    private void advanceProspectLeg() {
-        if (prospectInBranch) {
-            prospectSide = -prospectSide;
-            prospectInBranch = false;
-            prospectGoal = feet().relative(prospectHeading, PROSPECT_SEGMENT_BLOCKS);
+    /** 探矿缺路与预算耗尽分别报告；石头开路量不能再用目标矿物计数冒充。 */
+    private TaskState prospectFailure() {
+        if (tunnelDriver != null && tunnelDriver.failure() != null) {
+            miningUncertain |= tunnelDriver.uncertain();
+            fail("prospect tunnel stopped: " + tunnelDriver.failure(), miningUncertain ? FailureType.UNKNOWN : FailureType.NO_PATH);
         } else {
-            prospectInBranch = true;
-            prospectGoal = feet().relative(
-                    prospectHeading.getClockWise(), PROSPECT_SEGMENT_BLOCKS * prospectSide);
+            progressNote = "prospect budget spent: dug " + excavatedBlocks + " blocks over " + prospectTicks
+                    + " active ticks toward Y " + r.prospectY() + ", gathered " + r.getMined() + "/" + r.count;
+            fail(progressNote + ". Unexplored areas remain unknown.", FailureType.MINED_OUT);
         }
+        return TaskState.FAILED;
     }
 
     // ---- 矿物寻路目标：只追踪当前批次；批次为空时退化为原地目标，避免无效寻路 ----
@@ -1069,7 +1052,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  {@link #MAX_NO_SHOT_TICKS} 就把<b>那一格</b>记进 {@link #unworkable} 继续往下走,
      *  而不是永远等一个不会来的射线。<b>记的是这一格,不是猜一格</b> —— 这是唯一一处
      *  按格记账的地方,因为它是唯一一件关于那一格的可复现事实。 */
-    // 第一次选定目标时记下原方块状态。天然树供料只挖目标，其余采矿允许 BlockDigger 先清遮挡。
+    // 普通采矿从已知触发块展开原生矿脉，定点采收仍只处理授权的一格；真实选区在开挖前快照。
     private void mineProgress(BlockPos pos) {
         activeTarget = pos.immutable();
         if (chainBreak == null) chainBreak = new UltimineBreak(player, pos, null,
@@ -1572,7 +1555,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     @Override
     // 上层即使发现材料已经够，也要先让本轮已产生的掉落物和导航挖掘完成收尾。
     public boolean mustSettleBeforeSatisfiedCancellation() {
-        if (chainBreak != null || brokenTargets > 0
+        if (chainBreak != null || tunnelDriver != null && tunnelDriver.breaking() || brokenTargets > 0
                 || !anticipatedDrops.isEmpty()
                 || !attributedDropIds.isEmpty()
                 || unreachableDropCount > 0) {
@@ -1603,7 +1586,6 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         super.stopNav();
         navIsBranch = false;
         navIsDrop = false;
-        navIsProspect = false;
     }
 
     @Override
@@ -1614,6 +1596,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         InputDriver.halt(player);
         super.cleanup();
         closeChain();
+        if (tunnelDriver != null) { tunnelDriver.close(); collectTunnelEffects(); miningUncertain |= tunnelDriver.uncertain(); }
         activeTarget = null;
         if (!r.exactHarvest()) TargetIndex.unregister(player.clientLevel, r.targets);
     }
@@ -1621,16 +1604,27 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     // 身体维护或用户取消时先松开本任务的连锁键；已有但未确认的破坏保留不确定性，不借重启掩盖。
     private void closeChain() {
         if (chainBreak == null) return;
-        var evidence = chainBreak.interruptedEvidence(); ultimineActions.add(evidence);
-        miningUncertain |= Boolean.TRUE.equals(evidence.get("outcome_uncertain"));
+        var result = chainBreak.interruptedResult(); ultimineActions.add(result.evidence());
+        miningUncertain |= result.uncertain();
+        for (var entry : result.removed().entrySet()) {
+            harvestTarget = entry.getKey(); harvestBefore = entry.getValue();
+            acceptDigResult(entry.getKey(), BlockDigger.DigResult.BROKE_TARGET);
+        }
         chainBreak.close(); chainBreak = null;
     }
-    @Override public void stop(LocalPlayer companion, StopReason why) { closeChain(); super.stop(companion, why); }
+    @Override public void stop(LocalPlayer companion, StopReason why) {
+        closeChain();
+        if (tunnelDriver != null) { tunnelDriver.close(); collectTunnelEffects(); miningUncertain |= tunnelDriver.uncertain(); }
+        super.stop(companion, why);
+    }
 
     @Override
     // 完整返回本轮采集与连锁选区的实际差异；数量达标、原生破坏和掉落归属分别保留。
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
+        // 取消可能夹在副目标同步与下一次任务 tick 之间；已确认来源的最终库存仍以此刻真实背包核对。
+        if (countedExpectedItems && (!r.exactHarvest() || brokenTargets > 0))
+            r.setMined(Math.max(0, progressItemCount() - progressItemBaseline));
         data.put("target", r.label);
         data.put("requested", r.count);
         data.put("gathered", r.getMined());
@@ -1672,10 +1666,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (r.prospecting()) {
             Map<String, Object> prospect = new LinkedHashMap<>();
             prospect.put("prospect_y", r.prospectY());
-            prospect.put("blocks_dug", brokenTargets);
+            prospect.put("blocks_dug", excavatedBlocks);
             prospect.put("active_ticks", prospectTicks);
-            prospect.put("budget_blocks", PROSPECT_MAX_BLOCKS);
+            prospect.put("budget_blocks", prospectBlockBudget);
             prospect.put("budget_ticks", PROSPECT_MAX_TICKS);
+            if (tunnelDriver != null) prospect.put("tunnel", tunnelDriver.evidence());
             data.put("prospecting", prospect);
         }
         data.put("confirmed_harvests", List.copyOf(confirmedHarvests));

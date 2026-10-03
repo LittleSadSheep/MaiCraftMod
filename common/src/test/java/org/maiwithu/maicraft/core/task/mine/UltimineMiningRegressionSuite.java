@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicyTe
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineBatchTest;
 import org.maiwithu.maicraft.client.actor.UltimineBreakTest;
 import org.maiwithu.maicraft.client.actor.MineUltimineTaskTest;
+import org.maiwithu.maicraft.intent.HarvestEvidenceContractTest;
 
 /** 连锁采集独立回放，核对原生整脉授权并保留施工九格行为。 */
 public final class UltimineMiningRegressionSuite {
@@ -15,5 +16,6 @@ public final class UltimineMiningRegressionSuite {
         MineUltimineTaskTest.main(args);
         ProspectTunnelPlanTest.main(args);
         ProspectTunnelDriverTest.main(args);
+        HarvestEvidenceContractTest.main(args);
     }
 }

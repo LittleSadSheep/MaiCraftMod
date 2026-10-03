@@ -88,9 +88,7 @@ public final class SemanticAcquireCompanionTask
     private static final long COLLECT_TICKS = 60L * 20L;
     private static final long MINE_MIN_TICKS = 60L * 20L;
     private static final long MINE_PER_UNIT_TICKS = 30L * 20L;
-    /** 探矿下降子任务期限：几十格垂直掘进给足导航预算，超时如实失败。 */
-    private static final long PROSPECT_DESCEND_TICKS = 6L * 60L * 20L;
-    /** 探矿采矿子任务期限：覆盖 MineCompanionTask 内部 10 分钟活跃预算加掉落收尾。 */
+    /** 同一探矿任务完成斜下开路、水平通道与采矿，期限覆盖活跃预算及原生掉落收尾。 */
     private static final long PROSPECT_MINE_TICKS = 13L * 60L * 20L;
     private static final long STORAGE_TICKS = 10L * 60L * 20L;
     private static final long HUNT_TICKS = 120L * 20L;
@@ -641,7 +639,7 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 公平空手 + 授权开 → 派下降子任务；授权关、表外物品或维度不符时如实记录并放行既有推进。 */
+    /** 公平空手且已授权时派统一探矿任务，由实时通道断面驱动下降，到层后继续水平找矿。 */
     private TaskState startProspectingIfAuthorized(AcquisitionNeed need) {
         var plan = OreGenerationBand.plan(r.allowProspecting, need.itemIds,
                 player.level().dimension().location().toString(),
@@ -658,19 +656,14 @@ public final class SemanticAcquireCompanionTask
                             "current_dimension", player.level().dimension().location().toString()));
             case DESCEND -> {
                 need.prospectingDescendStarted = true;
+                need.prospectingMineStarted = true;
                 need.prospectingY = plan.band().prospectY();
-                long now = player.level().getGameTime();
-                MoveToTaskRecord descend = MoveToTaskRecord.strictStance(
-                        childId("prospect-descend"), now + PROSPECT_DESCEND_TICKS,
-                        new BlockPos(player.getBlockX(), plan.band().prospectY(), player.getBlockZ()),
-                        true);
                 addIssue("mine", "prospecting_descend_started",
-                        "fair scan came back empty-handed with prospecting allowed; descending to the"
-                                + " item's known generation band before digging prospect tunnels",
+                        "fair scan came back empty-handed; open a walkable descending passage to the"
+                                + " generation band, then a horizontal tunnel, using native Ultimine when available",
                         Map.of("prospect_y", plan.band().prospectY()));
                 renewProgressLease();
-                return startChild(need, SemanticAcquireTaskRecord.Source.MINE, descend,
-                        "descend to the natural generation band for tunnel prospecting");
+                return attemptMine(need);
             }
             default -> { }
         }

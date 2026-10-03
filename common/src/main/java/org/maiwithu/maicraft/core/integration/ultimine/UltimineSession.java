@@ -74,7 +74,8 @@ public final class UltimineSession implements UltimineControl {
             if (origin == null) {
                 // 固定本次准星实际命中的方块与面；施工沿该面清障，采矿从该矿块触发原生整脉。
                 origin = hit.getBlockPos().immutable(); face = hit.getDirection(); player = context.player(); world = context.level();
-                heading = context.player().getDirection();
+                // 原生水平通道取命中面的反方向；只有点击顶底面的斜下形状才借用角色朝向，不能被斜看的镜头带偏。
+                heading = face.getAxis().isVertical() ? context.player().getDirection() : face.getOpposite();
                 bodyEpoch = context.bodyEpoch(); controlRevision = context.controlRevision(); tool = normalizedTool(context.player().getMainHandItem());
                 openedTick = context.level().getGameTime(); initialRevision = preview == null ? -1 : preview.revision();
             }

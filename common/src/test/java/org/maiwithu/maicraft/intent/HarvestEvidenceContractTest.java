@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.intent;
 
 import com.google.gson.Gson;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import org.maiwithu.maicraft.task.TaskResult;
 
@@ -38,7 +39,26 @@ public final class HarvestEvidenceContractTest {
         check(!projected.success() && projected.timedOut() && !projected.interrupted(), "结果投影应保留原有终态");
         check(projected.message().equals(raw.message()), "到达说明保留实际位置，不能逼模型另查现场");
         check(child.containsKey("route") && child.containsKey("position"), "投影不能修改原始任务证据");
+        nativeMiningEvidence(gson);
         System.out.println("HarvestEvidenceContractTest: passed");
+    }
+
+    private static void nativeMiningEvidence(Gson gson) {
+        // 大矿脉和通道的完整世界差异经过父任务 JSON 包装后仍可直接读取，无须再找历史日志补坐标。
+        var cells = new ArrayList<Map<String, Object>>();
+        for (int i = 0; i < 70; i++) cells.add(Map.of("position", List.of(i, -59, 4),
+                "before_state", "minecraft:deepslate", "after_state", i < 65 ? "minecraft:air" : "minecraft:deepslate",
+                "status", i < 65 ? "removed" : "remaining"));
+        var facts = Map.of("ultimine_actions", List.of(Map.of("cells", cells, "selected_cells", 70, "origin", List.of(0, -59, 4))),
+                "prospecting", Map.of("target_y", -59, "blocks_dug", 65));
+        for (Object encoded : List.of(facts, gson.toJsonTree(facts), gson.toJson(facts))) {
+            var visible = gson.toJsonTree(SemanticResultView.data(Map.of("attempts", List.of(Map.of("child_data", encoded)))))
+                    .getAsJsonObject().getAsJsonArray("attempts").get(0).getAsJsonObject().getAsJsonObject("child_data");
+            var batch = visible.getAsJsonArray("ultimine_actions").get(0).getAsJsonObject();
+            check(batch.getAsJsonArray("cells").size() == 70 && batch.get("selected_cells").getAsInt() == 70,
+                    "完整选区与剩余格不因数组长度或字段后缀被截断");
+            check(visible.getAsJsonObject("prospecting").get("target_y").getAsInt() == -59, "通道层位保留为实际探矿证据");
+        }
     }
 
     private static void check(boolean condition, String message) {

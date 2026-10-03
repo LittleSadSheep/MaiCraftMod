@@ -22,6 +22,7 @@ public final class UltimineBreakTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         scenario(false); scenario(true); scenario(true, 1);
+        interrupted(false); interrupted(true);
         System.out.println("UltimineBreakTest: native break, partial effects and key release passed");
     }
     private static void scenario(boolean partial) throws Exception {
@@ -57,6 +58,27 @@ public final class UltimineBreakTest {
             if (budget == 1) check(Boolean.FALSE.equals(result.evidence().get("native_chain_started")),
                     "insufficient excavation budget releases the native chain before a single-block repair");
             check(h.mode.breakStarts == 1, "the controller submits the seed only once");
+        }
+    }
+    private static void interrupted(boolean confirmed) throws Exception {
+        // 用户暂停分别落在待确认与已确认但还没松键的窗口；前者保留未知，后者保留真实整批破坏。
+        try (var h = new InteractionWorldTestHarness()) {
+            h.enableCraftingTransactions(); h.h.minecraft.screen = null; h.position(new Vec3(8.5, 1, 8.5));
+            ActorControlTestHarness.field(LivingEntity.class, "activeEffects").set(h.player, new HashMap<>());
+            BlockPos origin = new BlockPos(8, 2, 10); List<BlockPos> cells = List.of(origin, origin.south());
+            cells.forEach(at -> h.set(at, Blocks.DIRT.defaultBlockState()));
+            var nativeControl = new NativeControl(cells);
+            int[] swings = {0};
+            h.mode.breaking = at -> { if (++swings[0] >= 3 && confirmed) cells.forEach(cell -> h.set(cell, Blocks.AIR.defaultBlockState())); };
+            var action = new UltimineBreak(h.player, origin, null, UltimineSession.Mode.MINING, cells::contains, at -> false, nativeControl);
+            for (int tick = 0; tick < 150; tick++) {
+                h.nextTick(); action.tick(); DiscardFireTest.align(h);
+                if (confirmed ? nativeControl.released > 0 : h.mode.breakStarts > 0) break;
+            }
+            var interrupted = action.interruptedResult(); action.close();
+            check(nativeControl.closed && h.mode.breakStarts == 1, "task boundary releases its native key without another seed submission");
+            check(interrupted.uncertain() != confirmed && interrupted.removed().size() == (confirmed ? 2 : 0),
+                    "cancellation preserves confirmed effects and never promotes an unresolved break");
         }
     }
     static final class NativeControl implements UltimineControl {

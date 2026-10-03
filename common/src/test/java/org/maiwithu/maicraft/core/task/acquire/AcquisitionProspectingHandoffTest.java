@@ -39,17 +39,17 @@ public final class AcquisitionProspectingHandoffTest {
     /** 授权开 + 表内物品：公平空手后下一张子任务单是下降，目标 Y = 生成带推荐值。 */
     private static void authorizedDescendsToBand() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
             var task = task(h, List.of("minecraft:diamond"), true);
             startStubMine(task, "mined_out");
             tickActiveChild(task);
             var active = activeRecord(task);
-            check(active instanceof MoveToTaskRecord,
-                    "公平空手 + 授权开 → 下一张单是下降子任务，实际: " + active);
-            if (active instanceof MoveToTaskRecord descend) {
-                check(descend.y != null && descend.y.intValue() == -59,
-                        "下降目标 Y 必须是生成带推荐值 -59，实际: " + descend.y);
-                check(descend.mayAlterTerrain, "下降复用既有移动机制掘进，需要开路授权");
-                check(descend.exact, "下降是内部工作站位，要求精确到点");
+            check(active instanceof MineBlockTaskRecord,
+                    "公平空手 + 授权开 → 统一探矿任务负责下降与到层后的水平通道，实际: " + active);
+            if (active instanceof MineBlockTaskRecord mine) {
+                check(mine.prospecting() && mine.prospectY() == -59,
+                        "通道目标层必须取生成带推荐值 -59");
+                check(mine.searchCenter() == null, "下降不能被旧地表扫描中心限制");
             }
             Object need = get(task, "rootNeed");
             check(intField(need, "prospectingY") == -59, "需求侧记住探矿目标层");

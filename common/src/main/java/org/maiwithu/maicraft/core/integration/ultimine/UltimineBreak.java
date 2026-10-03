@@ -91,6 +91,10 @@ public final class UltimineBreak implements AutoCloseable {
             case READY, SINGLE_BLOCK -> {
                 armed = decision.ready();
                 List<BlockPos> selection = armed ? decision.completeSelection() : List.of(origin);
+                // 准备期间别的玩家或重力方块可能改变预览；等待原生刷新，不把过期选区送进破坏交易。
+                if (selection.stream().anyMatch(at -> read(at) == null || read(at).isAir())) {
+                    reason = "ultimine_waiting_for_selection_refresh"; return false;
+                }
                 batch = new UltimineBatch(origin, selection, this::read);
                 attempted = true; return true;
             }
@@ -141,8 +145,18 @@ public final class UltimineBreak implements AutoCloseable {
     }
     /** 暂停或取消也留下完整现场；不把尚未确认的触发块与副目标记成已完成采集。 */
     public Map<String, Object> interruptedEvidence() {
+        // 原点已经消失时先结清已有回执；不能仅因用户此刻暂停就把已经确认的整批效果改成未知。
+        if (!originConfirmed && origin.equals(digger.current()) && read(origin) != null && read(origin).isAir()) {
+            try { originConfirmed = digger.settleGone(true) == BlockDigger.DigResult.BROKE_TARGET; }
+            catch (RuntimeException unavailable) { uncertain = true; }
+        }
         uncertain |= attempted && !originConfirmed; reason = "ultimine_task_interrupted";
-        return evidence(observe());
+        var observation = observe(); uncertain |= observation.unknown() > 0;
+        return evidence(observation);
+    }
+    public Result interruptedResult() {
+        var evidence = interruptedEvidence();
+        return new Result(Status.FAILED, observe().removed(), evidence, uncertain);
     }
     public BlockPos origin() { return origin; }
     public List<BlockPos> observedSelection() { return batch == null ? List.of() : batch.positions(); }

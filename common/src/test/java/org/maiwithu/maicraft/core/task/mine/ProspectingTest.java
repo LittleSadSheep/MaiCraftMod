@@ -113,15 +113,17 @@ public final class ProspectingTest {
             }
             check(state != TaskState.FAILED || resultMentionsProspect(task),
                     "探矿授权下空候选不得走「附近没有」的即时终局：" + state);
-            check(field(task, "prospectGoal") != null, "探矿驱动已建立掘进目标");
-            int dug = intField(task, "brokenTargets");
+            check(field(task, "tunnelDriver") != null, "探矿驱动已建立按通行断面推进的掘进任务");
+            int dug = intField(task, "excavatedBlocks");
             // 预算烧完：下一刻必须诚实收手，回执只陈述真实掘进量，不带透视暗示。
             setIntField(task, "prospectTicks", intConstant("PROSPECT_MAX_TICKS"));
+            // 预算停止前先结束夹具里尚未提交的瞄准准备；真实已提交动作必须等原生回执结清。
+            ((ProspectTunnelDriver) field(task, "tunnelDriver")).close();
             h.nextTick();
             state = task.tick(h.player);
             check(state == TaskState.FAILED && resultMentionsProspect(task),
                     "掘进预算耗尽后诚实失败并叙述探矿过程");
-            check(intField(task, "brokenTargets") >= dug, "掘进计数单调");
+            check(intField(task, "excavatedBlocks") >= dug, "开路块数独立记账且单调增加");
         }
     }
 
