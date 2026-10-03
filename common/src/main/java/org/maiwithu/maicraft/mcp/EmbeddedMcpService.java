@@ -369,20 +369,6 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject callTool(Session session, JsonObject params, JsonElement requestId) {
-        JsonObject result = invokeTool(session, params, requestId);
-        // 动作成功、失败、知识正文与冻结回执均在交付时补当前提醒；读取旧回执不会把旧风险冒充现场。
-        // 独立文本块保留原回执的格式和成败，也让只读取 MCP content 的宿主看到完整提醒。
-        JsonArray reminders = runtime.reminders();
-        if (!reminders.isEmpty()) {
-            JsonObject payload = new JsonObject(); payload.add("reminders", reminders);
-            JsonObject content = new JsonObject(); content.addProperty("type", "text");
-            content.addProperty("text", GSON.toJson(payload));
-            result.getAsJsonArray("content").add(content);
-        }
-        return result;
-    }
-
-    private JsonObject invokeTool(Session session, JsonObject params, JsonElement requestId) {
         // 接口参数合法才转给游戏运行时；等待回复在网络线程完成，不让游戏线程停在这里。
         only(params, "name", "arguments", "_meta");
         optionalMeta(params);
@@ -569,7 +555,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
     }
 
-    private static JsonObject knowledgeToolResult(JsonObject value) {
+    private JsonObject knowledgeToolResult(JsonObject value) {
         // 文档正文直接作为文本内容返回，结构化部分只放地址和格式，避免同一大段正文重复出现两遍。
         JsonArray content = new JsonArray(), metadata = new JsonArray();
         for (JsonElement element : value.getAsJsonArray("contents")) {
@@ -579,6 +565,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
         JsonObject structured = new JsonObject(); structured.add("resources", metadata);
         JsonObject result = new JsonObject(); result.add("content", content); result.add("structuredContent", structured);
+        // 文档正文保持原格式；它没有普通业务 JSON 外壳，当前游戏提醒作为额外文本交付。
+        JsonObject reminders = withReminders(new JsonObject()).getAsJsonObject();
+        if (!reminders.isEmpty()) {
+            JsonObject reminder = new JsonObject(); reminder.addProperty("type", "text");
+            reminder.addProperty("text", GSON.toJson(reminders)); content.add(reminder);
+        }
         result.addProperty("isError", false); return result;
     }
 
@@ -835,7 +827,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private JsonObject toolResult(JsonElement value, boolean isError) {
         // 角色状态和任务回执只发送一份 JSON 文本，旧版 MCP 客户端也能读取；避免宿主把两份相同证据都放进上下文。
-        JsonElement payload = responseArchive.present(nonNull(value));
+        // 先冻结原业务结果，再把当前提醒写进主回执；只读取第一段文本的客户端也不能漏掉低光遇袭。
+        JsonElement payload = withReminders(responseArchive.present(nonNull(value)));
         String text = GSON.toJson(payload);
         JsonObject contentItem = new JsonObject();
         contentItem.addProperty("type", "text");
@@ -846,6 +839,16 @@ public final class EmbeddedMcpService implements AutoCloseable {
         JsonObject result = new JsonObject();
         result.add("content", content);
         result.addProperty("isError", isError);
+        return result;
+    }
+
+    private JsonElement withReminders(JsonElement value) {
+        // 成功、错误与旧回执读取共用当前快照，不消费提醒，也不把旧风险写回已经冻结的业务原件。
+        JsonArray reminders = runtime.reminders();
+        if (reminders.isEmpty()) return value;
+        JsonObject result = value.isJsonObject() ? value.getAsJsonObject().deepCopy() : new JsonObject();
+        if (!value.isJsonObject()) result.add("value", value.deepCopy());
+        result.add("reminders", reminders);
         return result;
     }
 

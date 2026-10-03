@@ -70,7 +70,7 @@ public final class ReminderHttpTest {
                     .equals("# 补光资料\n保持原文") && knowledge.has("structuredContent"), "知识正文格式不被提醒包装改变");
             checkReminders(knowledge, runtime);
             runtime.board.clear(); runtime.fail = false;
-            check(call("perceive", json("{\"view\":\"situation\"}")).getAsJsonArray("content").size() == 1,
+            check(!firstPayload(call("perceive", json("{\"view\":\"situation\"}"))).has("reminders"),
                     "现场提醒撤下后不再附旧提醒或空包装");
         }
         System.out.println("ReminderHttpTest: passed");
@@ -78,8 +78,10 @@ public final class ReminderHttpTest {
 
     private static void checkReminders(JsonObject result, Runtime runtime) {
         JsonArray content = result.getAsJsonArray("content");
-        check(content.size() == 2, "每次工具返回均有独立提醒文本块");
-        JsonArray reminders = json(content.get(1).getAsJsonObject().get("text").getAsString()).getAsJsonArray("reminders");
+        // 普通回执的第一段 JSON 必须携带提醒；只有保持原文的知识正文使用附加文本块。
+        boolean document = result.has("structuredContent");
+        check(content.size() == (document ? 2 : 1), "普通回执仅一份 JSON，文档保持原文并另附提醒");
+        JsonArray reminders = json(content.get(document ? 1 : 0).getAsJsonObject().get("text").getAsString()).getAsJsonArray("reminders");
         check(reminders.equals(runtime.reminders()), "返回完整且最新的证据，多次读取不消费提醒");
         check(reminders.get(0).getAsJsonObject().get("message").getAsString().equals(
                 "当前亮度较低，你可能正频繁遭遇怪物攻击。可使用补光功能（maicraft:light_area）减少怪物刷新。"),
