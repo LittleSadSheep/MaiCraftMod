@@ -84,9 +84,17 @@ public final class PortalCastingTestHarness {
             var block = at.getY() <= 99 ? Blocks.STONE : Blocks.AIR;
             world.setBlockAndUpdate(at, block.defaultBlockState());
         }
-        for (BlockPos at : BlockPos.betweenClosed(-3, 99, -7, 5, 99, -1))
-            world.setBlockAndUpdate(at, Blocks.LAVA.defaultBlockState());
-        world.setBlockAndUpdate(new BlockPos(-6, 99, 3), Blocks.WATER.defaultBlockState());
+        boolean curved = System.getProperty("maicraft.portalTest.world", "").contains("-Curved-");
+        for (BlockPos at : BlockPos.betweenClosed(-3, 99, -7, 5, 99, -1)) {
+            // 圆弧池每个天然直岸都短于四格，必须由角色真正填出岸线；夹具不替执行器铺站台。
+            int dx = at.getX() - 1, dz = at.getZ() + 4;
+            if (!curved || dx * dx + dz * dz <= 12) world.setBlockAndUpdate(at, Blocks.LAVA.defaultBlockState());
+        }
+        if (curved) {
+            // 水面比岸边脚位低三格，旧的向上一格候选范围会漏掉全部岸台；保留原生可见的三格宽水坑。
+            for (BlockPos at : BlockPos.betweenClosed(-7, 97, 2, -5, 99, 4)) world.setBlockAndUpdate(at, Blocks.AIR.defaultBlockState());
+        }
+        world.setBlockAndUpdate(new BlockPos(-6, curved ? 97 : 99, 3), Blocks.WATER.defaultBlockState());
         player.setGameMode(GameType.SURVIVAL);
         player.teleportTo(.5, 100, 3.5);
         player.setHealth(player.getMaxHealth()); player.getFoodData().setFoodLevel(20);
@@ -101,7 +109,8 @@ public final class PortalCastingTestHarness {
         world.setDayTime(6000);
         world.getGameRules().getRule(GameRules.RULE_DOMOBSPAWNING).set(false, world.getServer());
         var result = new LinkedHashMap<>(observe(player));
-        result.put("fixture", "shallow_lava_pool_empty_bucket_no_obsidian_no_diamonds");
+        result.put("fixture", curved ? "curved_lava_pool_high_water_bank_empty_bucket_no_obsidian"
+                : "shallow_lava_pool_empty_bucket_no_obsidian_no_diamonds");
         result.put("fixture_only", true); return result;
     }
 
@@ -110,7 +119,7 @@ public final class PortalCastingTestHarness {
         var blocks = new ArrayList<Map<String, Object>>();
         var world = player.serverLevel();
         // 服务端只读记录真实流体、门框和门面，不根据客户端任务的成功字样推断验收通过。
-        for (BlockPos at : BlockPos.betweenClosed(-8, 98, -9, 10, 105, 8)) {
+        for (BlockPos at : BlockPos.betweenClosed(-8, 97, -9, 10, 105, 8)) {
             var state = world.getBlockState(at);
             if (state.isAir()) continue;
             blocks.add(Map.of("position", List.of(at.getX(), at.getY(), at.getZ()),

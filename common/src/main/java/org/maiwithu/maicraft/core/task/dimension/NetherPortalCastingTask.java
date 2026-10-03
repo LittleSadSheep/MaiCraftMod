@@ -80,6 +80,15 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             if (need != null) return supply(need);
             initialSupplied = true;
         }
+        // 已经空着的操作空间只需核对一次，不为每个空气格空等一个游戏刻；真正拆块仍逐次走原生回执。
+        while (cursor < steps.size() && steps.get(cursor).kind() == PortalCastingStep.Kind.CLEAR) {
+            BlockPos at = steps.get(cursor).target();
+            BlockState actual = PortalPreparationSite.read(world, at);
+            if (actual == null || NavigationSafetyContext.protectsMutation(at)) break;
+            if (!actual.isAir() && actual.getFluidState().isEmpty()
+                    && !(actual.is(Blocks.OBSIDIAN) && layout.frame().frame().contains(at))) break;
+            next();
+        }
         if (cursor >= steps.size()) { complete = true; return TaskState.SUCCESS; }
         var step = steps.get(cursor);
         BlockPos at = step.target();

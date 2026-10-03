@@ -29,6 +29,13 @@ public final class PortalCastingTerrainTest {
                     "fourteen remaining sources do not satisfy the requested greater-than-fourteen reserve");
             check(PortalCastingTerrain.clearance(layout).stream().noneMatch(layout.mold()::contains),
                     "worksite clearance preserves the later mold positions");
+            // 两列后排落水都应优先回到门内低一格的坑，而不是从台面边缘绕进剩余岩浆。
+            for (int across : new int[]{0, 1}) for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos fallingColumn = layout.cell(across, 0, 2);
+                if (side == layout.shore().getOpposite()) continue;
+                check(PortalCastingTerrain.platform(layout).contains(fallingColumn.relative(side, 2)),
+                        "side and rear drops cannot tie the two-block route back into the casting trench");
+            }
         }
         System.out.println("PortalCastingTerrainTest: curved bank, reserved source counts and scoped platform passed");
     }
