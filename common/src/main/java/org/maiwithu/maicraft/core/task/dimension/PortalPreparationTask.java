@@ -229,7 +229,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         // 失败回执自带"卡在哪"：阶段、站位、扫描范围与该阶段的关键缺口，
         // 模型据此能直接判断下一步，不用再盲查世界状态。
         var facts = new LinkedHashMap<String, Object>();
-        facts.put("phase", phase.name().toLowerCase(Locale.ROOT));
+        facts.put("phase", preparationPhase());
         facts.put("dimension", world.dimension().location().toString());
         facts.put("feet", List.of(player.getX(), player.getY(), player.getZ()));
         if (site != null) {
@@ -244,12 +244,17 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     }
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>(childEvidence);
-        data.put("portal_prepared", complete); data.put("preparation_phase", phase.name().toLowerCase(Locale.ROOT));
+        data.put("portal_prepared", complete);
+        data.put("preparation_phase", preparationPhase());
         if (casting != null && casting.layout() != null)
             data.put("portal_observation", casting.layout().observation(p -> PortalPreparationSite.read(world, p)));
         if (issue != null) { data.put("issue_code", issue); data.put("requires_decision", true); }
         if (blockedFacts != null) data.put("blocked_facts", blockedFacts);
         return data;
+    }
+    // CAST 是内部子任务类型；对外显示正在找水、取水或选池，不能从接单起就让模型误以为已经在浇筑。
+    private String preparationPhase() {
+        return phase == Phase.CAST && casting != null ? casting.stage() : phase.name().toLowerCase(Locale.ROOT);
     }
     @Override public Map<String, Object> progress() {
         var data = new LinkedHashMap<>(resultData());

@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.core.task.dimension;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -22,6 +25,8 @@ final class PortalCastingSurvey implements AutoCloseable {
     private final Set<BlockPos> examined = new HashSet<>();
     private int window = 128;
     private boolean complete, closed;
+    private String poolStatus = "not_surveyed";
+    private final Map<String, Object> sourceObservations = new LinkedHashMap<>();
 
     PortalCastingSurvey(ClientLevel world, BlockPos origin, int radius) {
         this.world = world; this.origin = origin.immutable(); this.radius = radius;
@@ -30,6 +35,7 @@ final class PortalCastingSurvey implements AutoCloseable {
 
     NetherPortalCastingLayout tick() {
         if (complete) return null;
+        poolStatus = "scanning";
         var query = TargetIndex.query(world, origin, List.of(Blocks.LAVA), window,
                 (radius + 15) / 16, 8, Set.of(), true);
         int budget = 8;
@@ -39,13 +45,13 @@ final class PortalCastingSurvey implements AutoCloseable {
             examined.add(seed);
             for (Direction shore : Direction.Plane.HORIZONTAL) {
                 var candidate = new NetherPortalCastingLayout(seed, shore);
-                if (atShore(world, candidate)) return candidate;
+                if (atShore(world, candidate)) { poolStatus = "observed"; return candidate; }
             }
         }
         if (!query.complete()) return null;
         // 原生索引窗口满了就继续展开，不能把最近一批地下源格当成整个搜索范围已无池岸。
         if (query.hits().size() >= window && window < Integer.MAX_VALUE / 2) window *= 2;
-        else complete = true;
+        else { complete = true; poolStatus = "not_observed_in_loaded_scope"; }
         return null;
     }
 
@@ -73,7 +79,19 @@ final class PortalCastingSurvey implements AutoCloseable {
                 .filter(p -> !excluded.contains(p) && !NavigationSafetyContext.protectsMutation(p))
                 .filter(p -> world.isLoaded(p) && world.getBlockState(p).is(fluid)
                         && world.getFluidState(p).isSource()).findFirst().orElse(null);
+        // 记录的是本次局部源格查询；未扫描与扫描后没找到必须分开，不能把附近没有说成整个世界没有。
+        var facts = new LinkedHashMap<String, Object>();
+        facts.put("status", position != null ? "observed" : query.complete() ? "not_observed_in_loaded_scope" : "scanning");
+        facts.put("scan_complete", query.complete()); facts.put("observed_game_time", world.getGameTime());
+        if (position != null) facts.put("observed_source", NetherPortalCastingLayout.position(position));
+        sourceObservations.put(BuiltInRegistries.BLOCK.getKey(fluid).toString(), facts);
         return new Source(position, query.complete(), query.hits().size());
+    }
+
+    /** 把已经完成的资源调查随缺口交付，让模型选择探索新区域，而不是重复扫描同一片已查过的地形。 */
+    Map<String, Object> observations() {
+        return Map.of("origin", NetherPortalCastingLayout.position(origin), "radius", radius, "loaded_only", true,
+                "lava_pool_status", poolStatus, "source_lookups", Map.copyOf(sourceObservations));
     }
 
     boolean complete() { return complete; }

@@ -11,6 +11,8 @@ public final class PortalRegressionSuite {
         NetherPortalCastingLayoutTest.main(args);
         PortalCastingSurveyTest.main(args);
         PortalCastingWorkflowTest.main(args);
+        // 有池无水、有水无池以及已有水桶都要分别回报，不能只验收资源齐全的场景。
+        PortalCastingPreparationTest.main(args);
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
         PortalPreparationSiteTest.main(args);

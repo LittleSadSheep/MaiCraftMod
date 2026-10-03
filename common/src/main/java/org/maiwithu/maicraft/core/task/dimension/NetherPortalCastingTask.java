@@ -40,7 +40,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
     private TaskRecord childRecord;
     private PortalPreparationSupplies.Need supplyNeed;
     private BlockPos mutation;
-    private String operation = "survey", issue = "";
+    private String operation = "prepare_water", issue = "";
     private int cursor, serial, sourceAttempts;
     private long drainStarted = -1;
     private boolean nextAfterChild, cleared, initialSupplied, waterPrepared, complete, cleaned;
@@ -58,7 +58,17 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
     @Override protected TaskState onTick() {
         if (player.level() != world) return failure("casting_world_changed");
         if (child != null) return tickChild();
+        // 先拿桶并真正装水，再找可浇筑的池岸；附近没有岩浆不能让取水阶段永远得不到执行。
+        if (!waterPrepared) {
+            if (PlayerInv.count(player.getInventory(), Items.WATER_BUCKET) > 0) waterPrepared = true;
+            else {
+                if (PlayerInv.count(player.getInventory(), Items.BUCKET) == 0)
+                    return supply(new PortalPreparationSupplies.Need(List.of(Items.BUCKET), 1, "single casting bucket"));
+                return fill(Blocks.WATER);
+            }
+        }
         if (layout == null) {
+            operation = "survey_lava_pool";
             layout = survey.tick();
             if (layout == null) return survey.complete() ? failure("casting_lava_pool_not_observed") : TaskState.RUNNING;
             steps = PortalCastingStep.plan(layout);
@@ -68,10 +78,6 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             var need = PortalCastingStep.supplies(player, true);
             if (need != null) return supply(need);
             initialSupplied = true;
-        }
-        if (!waterPrepared) {
-            if (PlayerInv.count(player.getInventory(), Items.WATER_BUCKET) > 0) waterPrepared = true;
-            else return fill(Blocks.WATER);
         }
         if (cursor >= steps.size()) { complete = true; return TaskState.SUCCESS; }
         var step = steps.get(cursor);
@@ -119,7 +125,9 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
     private TaskState fill(Block fluid) {
         operation = fluid == Blocks.WATER ? "find_water_source" : "find_lava_source";
         if (PlayerInv.count(player.getInventory(), Items.BUCKET) == 0) return failure("casting_empty_bucket_missing");
-        var excluded = new HashSet<>(layout.footprint()); excluded.addAll(unavailableSources);
+        var excluded = new HashSet<BlockPos>();
+        if (layout != null) excluded.addAll(layout.footprint());
+        excluded.addAll(unavailableSources);
         var observed = survey.source(fluid, player.blockPosition(), excluded);
         if (observed.position() == null) return observed.complete() ? failure(operation + "_not_observed") : TaskState.RUNNING;
         return start(remove(observed.position(), world.getBlockState(observed.position())), observed.position(), false,
@@ -134,7 +142,9 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         return new FluidPlacementTaskRecord(id(), deadline(), at, expected, layout.footprint());
     }
     private FluidPlacementTaskRecord remove(BlockPos at, BlockState source) {
-        var scope = new HashSet<>(layout.footprint()); scope.add(at);
+        var scope = new HashSet<BlockPos>();
+        if (layout != null) scope.addAll(layout.footprint());
+        scope.add(at);
         return FluidPlacementTaskRecord.removeSource(id(), deadline(), at, source, scope);
     }
     private long deadline() { return Math.max(r.getDeadlineGameTime(), world.getGameTime() + 6000); }
@@ -185,17 +195,38 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
     }
 
     private TaskState next() { cursor++; cleared = false; drainStarted = -1; return TaskState.RUNNING; }
-    private TaskState failure(String code) { issue = code; fail(code, FailureType.TARGET_LOST); return TaskState.FAILED; }
+    private TaskState failure(String code) {
+        issue = code;
+        String detail = switch (code) {
+            case "casting_lava_pool_not_observed" -> "No usable lava-pool bank was observed in the loaded search area. Water preparation completed; no casting construction started. Explore another area or travel to a known pool before retrying.";
+            case "find_water_source_not_observed" -> "No carried water bucket or collectable water source was observed in the loaded search area. No casting construction started. Locate water in newly explored terrain or obtain a water bucket before retrying.";
+            default -> code;
+        };
+        fail(detail, FailureType.TARGET_LOST); return TaskState.FAILED;
+    }
     NetherPortalCastingLayout layout() { return layout; }
+    String stage() { return operation; }
 
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>();
         data.put("method", "lava_cast"); data.put("casting_actions_completed", complete);
         data.put("casting_step", cursor); data.put("casting_step_count", steps.size()); data.put("operation", operation);
         data.put("native_steps", List.copyOf(receipts));
+        // 接受备门目标不等于已经开始施工；缺水、未查到池岸与已做完的装水动作分别呈现。
+        data.put("construction_phase_started", layout != null && waterPrepared && initialSupplied);
+        data.put("resource_preparation", Map.of("initial_water_prepared", waterPrepared,
+                "empty_buckets", PlayerInv.count(player.getInventory(), Items.BUCKET),
+                "water_buckets", PlayerInv.count(player.getInventory(), Items.WATER_BUCKET),
+                "lava_pool_selected", layout != null,
+                "search", survey == null ? Map.of() : survey.observations()));
+        if (supplyNeed != null) data.put("pending_supply", Map.of("purpose", supplyNeed.purpose(), "count", supplyNeed.count()));
         if (layout != null) data.put("portal_observation", layout.observation(p -> PortalPreparationSite.read(world, p)));
         if (!issue.isEmpty()) {
             data.put("issue_code", issue);
+            if (issue.equals("casting_lava_pool_not_observed") || issue.equals("find_water_source_not_observed"))
+                data.put("recovery_options", List.of(Map.of("id", "locate_casting_resources",
+                        "missing_resource", issue.equals("casting_lava_pool_not_observed") ? "lava_pool" : "water",
+                        "summary", "Choose a known resource location or explore fresh terrain, then use current observations. find_block only scans loaded visible terrain; repeating this casting request in the same unchanged area does not locate new resources.")));
             if (!receipts.isEmpty() && Boolean.FALSE.equals(receipts.getLast().get("success")))
                 data.put("native_failure", receipts.getLast());
         }
