@@ -20,6 +20,7 @@ public final class UltimineSelectionPolicyTest {
         everyPotentialCellKeepsItsProtectionAndDropRequirements();
         durabilityReservesTheWholeNativeSelection();
         missingOptionalModCanBeClosedWithoutInitializingIt();
+        miningUsesTheWholeNativeVeinWithoutExpandingItsAuthority();
         System.out.println("UltimineSelectionPolicyTest: " + checks + " checks passed");
     }
     private static void admitsOnlyTheWholeAuthorizedNativeSquare() {
@@ -89,6 +90,34 @@ public final class UltimineSelectionPolicyTest {
             check(!UltimineNative.available(), "missing Ultimine is detected before taking any native input");
             new UltimineSession().close(); checks++;
         }
+    }
+    private static void miningUsesTheWholeNativeVeinWithoutExpandingItsAuthority() {
+        // 原生预览可以沿矿脉跨过九格平面和普通视线遮挡；没有范围授权的副目标仍不得连带挖除。
+        List<BlockPos> vein = List.of(ORIGIN, ORIGIN.east(), ORIGIN.east().above(), ORIGIN.east(2).above());
+        var preview = new Preview(UltimineSelectionPolicy.SHAPELESS, UltimineSelectionPolicy.SHAPELESS_CLASS,
+                0, vein.size(), vein, true, true, "allowed", 2);
+        var accepted = UltimineSelectionPolicy.admitMining(preview, ORIGIN, at -> SAFE);
+        check(accepted.allowed() && accepted.completeSelection().equals(vein)
+                && accepted.potentialSelection().equals(vein), "native buried vein is kept complete without requiring a square");
+        var cropped = new Preview(preview.shapeId(), preview.implementation(), 0, 4, vein.subList(0, 2), true, true, "allowed", 3);
+        check(!UltimineSelectionPolicy.admitMining(cropped, ORIGIN, at -> SAFE).allowed(), "truncated native vein cannot authorize unseen omitted positions");
+        var denied = new Preview(preview.shapeId(), preview.implementation(), 0, 4, vein, true, false, "exhausted", 4);
+        check(!UltimineSelectionPolicy.admitMining(denied, ORIGIN, at -> SAFE).allowed(), "native hunger or permission denial is respected");
+        for (Cell unsafe : List.of(new Cell(false, true, false, false, false, false),
+                new Cell(true, false, false, false, false, false), new Cell(true, true, true, false, false, false),
+                new Cell(true, true, false, true, false, false), new Cell(true, true, false, false, true, false),
+                new Cell(true, true, false, false, false, true), new Cell(true, true, false, false, false, false, false))) {
+            check(!UltimineSelectionPolicy.admitMining(preview, ORIGIN, at -> at.equals(vein.getLast()) ? unsafe : SAFE).allowed(),
+                    "every native secondary ore keeps loading, source, preservation and harvesting requirements");
+        }
+        // 单格定点与施工九格仍走原有分支；连锁采集不能把其他形状或重复位置当作矿脉。
+        check(!UltimineSelectionPolicy.admitMining(preview(List.of(ORIGIN, ORIGIN.east()), 2), ORIGIN, at -> SAFE).allowed(),
+                "construction square is not admitted as a vein");
+        for (List<BlockPos> invalid : List.of(List.of(ORIGIN), List.of(ORIGIN, ORIGIN), List.of(ORIGIN.east(), ORIGIN.above()))) {
+            var candidate = new Preview(preview.shapeId(), preview.implementation(), 0, invalid.size(), invalid, true, true, "allowed", 5);
+            check(!UltimineSelectionPolicy.admitMining(candidate, ORIGIN, at -> SAFE).allowed(), "single, duplicate or wrong-origin preview falls back");
+        }
+        new UltimineSession(UltimineSession.Mode.MINING).close();
     }
     private static Preview preview(List<BlockPos> blocks, int actual) { return new Preview(UltimineSelectionPolicy.SQUARE, UltimineSelectionPolicy.SQUARE_CLASS, 2, actual, blocks, true, true, "allowed", 1); }
     private static void rejects(Preview preview, View view, int durability, String code) {

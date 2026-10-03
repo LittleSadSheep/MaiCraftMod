@@ -48,12 +48,16 @@ public final class UltimineNative {
     }
     public static int shapeCount() { return ((Number) NativeApi.call(NativeApi.constant(SHAPES, "INSTANCE"), SHAPES, "shapeCount")).intValue(); }
     public static int squareIndex() {
+        return shapeIndex(UltimineSelectionPolicy.SQUARE, UltimineSelectionPolicy.SQUARE_CLASS);
+    }
+    /** 施工选择九格面，采矿选择原生整脉；只定位已注册的真实实现，再由原生菜单切换。 */
+    public static int shapeIndex(String id, String implementation) {
         int count = shapeCount(); if (count < 1 || count > 64) return -1;
         Object registry = NativeApi.constant(SHAPES, "INSTANCE");
         for (int i = 0; i < count; i++) {
             Object shape = NativeApi.call(registry, SHAPES, "getShape", i);
-            if (shape.getClass().getName().equals(UltimineSelectionPolicy.SQUARE_CLASS)
-                    && NativeApi.call(shape, SHAPE, "getName").toString().equals(UltimineSelectionPolicy.SQUARE)) return i;
+            if (shape.getClass().getName().equals(implementation)
+                    && NativeApi.call(shape, SHAPE, "getName").toString().equals(id)) return i;
         }
         return -1;
     }

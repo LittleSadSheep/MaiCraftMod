@@ -66,6 +66,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 连锁采矿独立检查原生预览、范围与真实产物，避免借施工清障回归掩盖采集链路缺口。
+    ultimineMiningRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.UltimineMiningRegressionSuite',
+        heap: '512m', directory: 'ultimine-mining-regression', timeoutSeconds: 90,
+        purpose: '验证 FTB 原生整脉采集与掉落结算'
+    ],
     // 随行补光独立验证副手、镜头与主任务并行，避免用真实角色承担重复消耗风险。
     lightingRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.LightingRegressionSuite',

@@ -11,6 +11,8 @@ import net.minecraft.core.Direction;
 public final class UltimineSelectionPolicy {
     public static final String SQUARE = "ftbultimine:small_square";
     public static final String SQUARE_CLASS = "dev.ftb.mods.ftbultimine.shape.SmallSquareShape";
+    public static final String SHAPELESS = "ftbultimine:shapeless";
+    public static final String SHAPELESS_CLASS = "dev.ftb.mods.ftbultimine.shape.ShapelessShape";
     public record Preview(String shapeId, String implementation, int shapeIndex, int actualCount,
                           List<BlockPos> visibleBlocks, boolean pressed, boolean allowed, String reason, long revision) {
         public Preview { visibleBlocks = visibleBlocks.stream().map(BlockPos::immutable).toList(); }
@@ -25,6 +27,31 @@ public final class UltimineSelectionPolicy {
         public Admission { completeSelection = List.copyOf(completeSelection); potentialSelection = List.copyOf(potentialSelection); }
     }
     private UltimineSelectionPolicy() {}
+
+    /** 采矿沿原生整脉预览采集；预览本身是 FTB 提供的观察，埋藏副目标不再要求逐格先露出表面。 */
+    public static Admission admitMining(Preview preview, BlockPos origin, View view) {
+        if (preview == null || origin == null || view == null) return rejected("ultimine_preview_missing");
+        if (!preview.pressed) return rejected("ultimine_native_key_not_active");
+        if (!preview.allowed) return rejected("ultimine_native_restriction: " + preview.reason);
+        if (!SHAPELESS.equals(preview.shapeId) || !SHAPELESS_CLASS.equals(preview.implementation))
+            return rejected("ultimine_mining_requires_native_shapeless");
+        if (preview.actualCount <= 0 || preview.actualCount != preview.visibleBlocks.size())
+            return rejected("ultimine_preview_incomplete_or_truncated");
+        if (new HashSet<>(preview.visibleBlocks).size() != preview.actualCount || !preview.visibleBlocks.contains(origin))
+            return rejected("ultimine_native_selection_inconsistent");
+        if (preview.actualCount == 1) return rejected("ultimine_only_one_remaining_block");
+        // 逐格核对本次材料族、范围和保护，不能因为服务器合并了标签就顺带拆掉别种材料或机器。
+        for (BlockPos at : preview.visibleBlocks) {
+            Cell cell = view.inspect(at);
+            if (cell == null || !cell.loaded) return rejected("ultimine_envelope_unloaded");
+            if (!cell.authorized || cell.preserved) return rejected("ultimine_selection_outside_mining_permission");
+            if (cell.blockEntity) return rejected("ultimine_envelope_contains_block_entity");
+            if (cell.unbreakable || cell.fluid) return rejected("ultimine_envelope_contains_unsafe_block");
+            if (!cell.correctTool) return rejected("ultimine_tool_cannot_harvest_entire_envelope");
+        }
+        // 耐久、饥饿和经验由 FTB 原生限制结算；允许它只采完半脉，任务随后报告实际变化并收取掉落。
+        return new Admission(true, "ultimine_complete_native_vein_admitted", preview.visibleBlocks, preview.visibleBlocks);
+    }
 
     public static Admission admit(Preview preview, BlockPos origin, Direction face, View view) {
         return admit(preview, origin, face, view, Integer.MAX_VALUE);
