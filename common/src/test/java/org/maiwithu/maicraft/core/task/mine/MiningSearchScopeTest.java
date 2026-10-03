@@ -52,6 +52,16 @@ public final class MiningSearchScopeTest {
                     && scope.get("query_chunk_radius").equals(1) && scope.get("radius_blocks").equals(2)
                     && scope.get("center").equals(List.of(8, 1, 8)) && h.blockUses() == 0,
                     "read-only scanning reports its actual scope, chunk window and filter switch without mining");
+            // 同一已加载区块的远角超过默认十六格：不声明小半径时应仍被完整视距索引发现。
+            h.position(new Vec3(0.5, 1, 0.5));
+            BlockPos corner = new BlockPos(15, 1, 15); h.set(corner, Blocks.DIRT.defaultBlockState());
+            var broad = new MineCompanionTask(h.player, new MineBlockTaskRecord("loaded-view", 1000,
+                    Set.of(Blocks.DIRT), 1, "dirt"));
+            broad.start(h.player); finishQuery(h, broad);
+            check(((List<?>) field.get(broad)).contains(corner), "已加载的远角不能被附近十六格球体裁掉");
+            var broadScope = (Map<?, ?>) broad.result(TaskState.CANCELLED).data().get("search_scope");
+            check("loaded_view".equals(broadScope.get("mode")) && !broadScope.containsKey("radius_blocks")
+                    && Boolean.TRUE.equals(broadScope.get("loaded_chunks_only")), "回执如实说明已加载视距搜索");
         }
         System.out.println("MiningSearchScopeTest: passed");
     }

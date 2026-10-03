@@ -144,6 +144,7 @@ public final class SemanticAcquireApi {
                 context.toolCallId(), context.deadline(ticks), itemIds, count,
                 sources, allowHarm, hint, protectedLabels, radius, args.has("radius") ? radius : ContainerSearchScope.MAX_RADIUS)
                 .captureStorageOrigin(player)
+                .withLoadedMiningView(!args.has("radius") || args.get("radius").isJsonNull())
                 .withPreferredMaterials(resourceIds(args.get("preferred_materials"), "preferred_materials", true));
     }
 

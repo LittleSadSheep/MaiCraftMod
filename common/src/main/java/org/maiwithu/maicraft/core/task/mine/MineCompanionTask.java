@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.task.mine;
 import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 
 import org.maiwithu.maicraft.task.TaskState;
@@ -66,7 +67,7 @@ import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
 public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTaskRecord> {
 
     private static final int MAX_ORES = 64;            // 限制同时跟踪的目标位置数量，避免一次查询缓存过多矿点。
-    /** 目标查询的最大 chebyshev 区块环半径。 */
+    /** 本地视距配置尚不可读时的查询窗口；索引始终只读取客户端已加载区块。 */
     private static final int QUERY_MAX_CHUNK_RADIUS = 32;
     /** 名单低于此数触发补货查询——索引由方块变更钩子实时维护,自己挖掉的目标即时出账,
      *  所以只在名单快吃完时才需要真正去查。 */
@@ -200,6 +201,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private boolean lastQueryComplete;
     /** 最近一次来源查询的实际中心；未声明范围时随玩家移动，回执据此声明真实扫描口径。 */
     private BlockPos lastQueryCenter;
+    private int lastQueryChunkRadius;
 
     // 按玩家正常速度逐刻挖掘，与寻路执行器共用 BlockDigger，确保两条破坏路径读取同一进度。
     private final BlockDigger digger;
@@ -1148,11 +1150,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         excluded.addAll(naturalTrees.rejected);
         int rejectedBefore = naturalTrees.rejected.size();
         naturalTrees.beginQuery();
-        // 语义取材只扫描冻结的附近范围；直接采矿调用未声明范围时继续使用原有最大区块环。
+        // 明确半径按原起点查；默认覆盖当前有效渲染视距，逐刻续扫所有高度的已加载区块。
         BlockPos queryCenter = r.searchCenter() == null ? feet() : r.searchCenter();
         lastQueryCenter = queryCenter.immutable();
+        lastQueryChunkRadius = queryChunkRadius();
         TargetIndex.Result res = TargetIndex.query(sl, queryCenter, r.targets,
-                MAX_ORES, r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS), QUERY_BUILD_BUDGET, excluded);
+                MAX_ORES, lastQueryChunkRadius, QUERY_BUILD_BUDGET, excluded);
         lastQueryComplete = res.complete();
         Constants.LOG.debug(
                 "[maicraft-task] mine query feet={} raw={} complete={} known(before merge)={}",
@@ -1160,6 +1163,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 knownOres.size());
         mergeHits(res.hits());
         lastQueryComplete &= !naturalTrees.budgetDeferred && rejectedBefore == naturalTrees.rejected.size();
+    }
+
+    private int queryChunkRadius() {
+        if (r.searchCenter() != null) return r.queryChunkRadius(0);
+        var options = ClientRuntime.requireContext(player).minecraft().options;
+        // 原生有效视距同时遵守客户端设置和服务器下发的视距，不能按固定十六格遗漏屏幕远处的树。
+        return options == null ? QUERY_MAX_CHUNK_RADIUS : Math.max(0, options.getEffectiveRenderDistance());
     }
 
     /** 将新发现且仍可处理的命中位置并入 knownOres，再由 prune 对照实时世界复核并保留最近的 {@link #MAX_ORES} 个目标。 */
@@ -1353,7 +1363,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             // “附近没有”必须携带扫描口径：覆盖范围之外、未加载区块与更深地层都不构成不存在的证据。
             String scope = lastQueryCenter == null ? "the declared search scope"
                     : "the scanned scope (center " + lastQueryCenter.toShortString()
-                            + ", chunk radius " + r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS) + ")";
+                            + ", chunk radius " + lastQueryChunkRadius + ")";
             fail("no reachable " + r.label + " found in " + scope
                     + "; sources outside this scope, in unloaded chunks or deeper underground were not"
                     + " covered — widen the radius, move closer, or use find_block to locate deeper"
@@ -1455,8 +1465,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (queryCenter != null) {
             Map<String, Object> scope = new LinkedHashMap<>();
             scope.put("center", List.of(queryCenter.getX(), queryCenter.getY(), queryCenter.getZ()));
-            scope.put("query_chunk_radius", r.searchCenter() != null
-                    ? r.queryChunkRadius(QUERY_MAX_CHUNK_RADIUS) : QUERY_MAX_CHUNK_RADIUS);
+            scope.put("query_chunk_radius", lastQueryChunkRadius);
+            scope.put("mode", r.exactHarvest() ? "exact_source" : r.searchCenter() == null ? "loaded_view" : "explicit_radius");
+            scope.put("loaded_chunks_only", true);
             scope.put("index_complete", lastQueryComplete);
             scope.put("natural_logs_only", r.naturalLogsOnly);
             if (r.searchCenter() != null) scope.put("radius_blocks", r.searchRadius());

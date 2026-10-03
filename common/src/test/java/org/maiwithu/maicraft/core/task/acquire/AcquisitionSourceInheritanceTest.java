@@ -89,6 +89,13 @@ public final class AcquisitionSourceInheritanceTest {
             check(child.searchRadius() == 3 && child.searchCenter().equals(world.player.blockPosition())
                     && child.inSearchScope(child.searchCenter().east(3)) && !child.inSearchScope(child.searchCenter().east(4)),
                     "semantic mining preserves its declared local radius");
+            // 未指定半径的公开采矿改用视距；派发时不能再把十六格附近拾取半径套回子任务。
+            record.withLoadedMiningView(true);
+            var broad = new SemanticAcquireCompanionTask(world.player, record); broad.onStart();
+            Object broadRoot = field(broad, "rootNeed"); attempt.invoke(broad, broadRoot);
+            var broadChild = (MineBlockTaskRecord) field(broad, "activeRecord");
+            check(broadChild.searchCenter() == null && broadChild.inSearchScope(world.player.blockPosition().east(80)),
+                    "默认采矿让原生已加载视距决定搜索范围");
         }
     }
 

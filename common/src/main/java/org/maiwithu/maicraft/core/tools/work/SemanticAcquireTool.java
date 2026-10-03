@@ -64,7 +64,7 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 .optionalStringArray("protected_labels",
                         "Remembered places or possessions that must not be touched.")
                 .optionalInteger("radius",
-                        "Loaded-world radius for nearby evidence (default 16); containers default to 32 from the fixed request origin, and an explicit smaller radius narrows that bound.", 1, 48)
+                        "Explicit nearby search radius. If omitted, mining searches the effective loaded view, other nearby evidence defaults to 16 blocks, and containers to 32 from the fixed request origin.", 1, 48)
                 .optionalObject("source_hint",
                         "Optional semantic source evidence. It never contains positions, routes, clicks or slots.",
                         hint -> hint

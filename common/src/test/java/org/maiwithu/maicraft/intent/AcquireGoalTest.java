@@ -41,11 +41,14 @@ public final class AcquireGoalTest {
         }
         for (int count : List.of(1, 256, 257, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)) {
             var request = record(arguments("{\"count\":" + count + ",\"radius\":48,\"allow_harm\":false}"));
-            check(request.count == count && request.searchRadius == 48 && !request.allowHarm,
+            check(request.count == count && request.searchRadius == 48 && !request.allowHarm && !request.miningUsesLoadedView,
                     "合法目标数量和半径必须原样保留");
         }
         var defaults = record(arguments("{}"));
         check(defaults.count == 1 && defaults.searchRadius == 16 && !defaults.allowHarm, "缺省仍是一件物品、不伤害生物");
+        // 默认采矿覆盖已加载视距；显式 null 与省略一致，明确半径才收窄采矿。
+        check(defaults.miningUsesLoadedView && record(arguments("{\"radius\":null}")).miningUsesLoadedView,
+                "默认采矿不能继续沿用附近拾取的十六格扫描圈");
         // 显式限定来源时，只保留调用者许可；默认取物仍可查随身库存，但单独补拾取不能因此开包。
         check(defaults.allowedSources.equals(SemanticAcquireTaskRecord.DEFAULT_SOURCES), "默认取物来源保持完整");
         for (var source : SemanticAcquireTaskRecord.Source.values()) {

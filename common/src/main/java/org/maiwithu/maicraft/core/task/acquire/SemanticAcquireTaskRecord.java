@@ -94,6 +94,13 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public final SourceHint sourceHint;
     public final List<String> protectedLabels;
     public final int searchRadius;
+    /** 公开取物未指定半径时，采矿覆盖当前有效视距内的已加载区块；其他附近来源仍沿用各自半径。 */
+    public boolean miningUsesLoadedView;
+
+    public SemanticAcquireTaskRecord withLoadedMiningView(boolean enabled) {
+        miningUsesLoadedView = enabled;
+        return this;
+    }
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */
     public final int storageSearchRadius;
     public ContainerSearchScope storageScope;
