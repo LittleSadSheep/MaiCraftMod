@@ -18,11 +18,19 @@ public record Goal(String ability,
                    String preferencesJson,
                    List<Constraint> constraints,
                    List<Goal> children,
-                   List<String> inheritedProtectionLabels) {
+                   List<String> inheritedProtectionLabels,
+                   String onFailure) {
 
     public Goal(String ability, String outcome, SemanticTarget target, String parametersJson,
                 String preferencesJson, List<Constraint> constraints, List<Goal> children) {
-        this(ability, outcome, target, parametersJson, preferencesJson, constraints, children, List.of());
+        this(ability, outcome, target, parametersJson, preferencesJson, constraints, children, List.of(), "stop");
+    }
+
+    public Goal(String ability, String outcome, SemanticTarget target, String parametersJson,
+                String preferencesJson, List<Constraint> constraints, List<Goal> children,
+                List<String> inheritedProtectionLabels) {
+        this(ability, outcome, target, parametersJson, preferencesJson, constraints, children,
+                inheritedProtectionLabels, "stop");
     }
 
     public Goal {
@@ -37,6 +45,13 @@ public record Goal(String ability,
                 ? List.of() : new LinkedHashSet<>(inheritedProtectionLabels));
         if (inheritedProtectionLabels.stream().anyMatch(String::isBlank))
             throw new IllegalArgumentException("inherited protection labels must not be blank");
+        // 这里只归一缺省值；取值合法性与挂载位置（仅 sequence 直接子级）由 SemanticGoalContract 检查。
+        onFailure = onFailure == null || onFailure.isBlank() ? "stop" : onFailure;
+    }
+
+    /** 该步骤确认失败后是否容忍兄弟步骤继续（maicraft:sequence 子级声明 on_failure=continue）。 */
+    public boolean toleratesFailure() {
+        return "continue".equals(onFailure);
     }
 
     public static Goal fromJson(JsonObject source) {
@@ -60,6 +75,9 @@ public record Goal(String ability,
                 children.add(fromJson(element.getAsJsonObject()));
             }
         }
+        String onFailure = source.has("on_failure") && source.get("on_failure").isJsonPrimitive()
+                && source.get("on_failure").getAsJsonPrimitive().isString()
+                ? source.get("on_failure").getAsString() : "stop";
         return new Goal(
                 ability,
                 outcome,
@@ -67,7 +85,9 @@ public record Goal(String ability,
                 objectString(source, "parameters"),
                 objectString(source, "preferences"),
                 constraints,
-                children);
+                children,
+                List.of(),
+                onFailure);
     }
 
     public JsonObject parameters() {
@@ -81,13 +101,13 @@ public record Goal(String ability,
 
     public Goal withParameters(JsonObject parameters) {
         return new Goal(ability, outcome, target, parameters.toString(), preferencesJson, constraints, children,
-                inheritedProtectionLabels);
+                inheritedProtectionLabels, onFailure);
     }
 
     public Goal withTarget(SemanticTarget nextTarget) {
         // 例如把“前一步找到的地方”换成 Mod 确认的位置，其他要求保持原样。
         return new Goal(ability, outcome, nextTarget, parametersJson, preferencesJson, constraints, children,
-                inheritedProtectionLabels);
+                inheritedProtectionLabels, onFailure);
     }
 
     /** 分组范围作为执行元数据携带，不塞进子能力未声明的参数，也不改写原始请求。 */
@@ -96,7 +116,7 @@ public record Goal(String ability,
         inherited.addAll(inheritedProtectionLabels);
         if (inherited.equals(new LinkedHashSet<>(inheritedProtectionLabels))) return this;
         return new Goal(ability, outcome, target, parametersJson, preferencesJson, constraints, children,
-                List.copyOf(inherited));
+                List.copyOf(inherited), onFailure);
     }
 
     public List<String> protectionLabels() {
@@ -137,6 +157,8 @@ public record Goal(String ability,
         JsonArray childArray = new JsonArray();
         children.forEach(value -> childArray.add(value.toJson()));
         result.add("children", childArray);
+        // 缺省 stop 不写回 JSON，旧检查点与旧请求的字段形状保持不变。
+        if (!"stop".equals(onFailure)) result.addProperty("on_failure", onFailure);
         return result;
     }
 

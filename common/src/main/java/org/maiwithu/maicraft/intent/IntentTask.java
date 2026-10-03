@@ -115,10 +115,9 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickSemanticParent() {
-        // 所有步骤都记为完成后，才报告整个目标成功。
+        // 所有步骤都记为完成后，按统一结算报告：存在事实失败（含被容忍的）整体仍报 FAILED。
         if (record.stepIndex() >= record.steps().size()) {
-            terminalResult = completionResult();
-            return TaskState.SUCCESS;
+            return finishCompletion();
         }
 
         IntentTaskRecord.DecisionAnswer answer = record.takeAnswer();
@@ -139,7 +138,7 @@ final class IntentTask implements Task {
                 // 用户明确跳过只推进清单，不把尚未确认的目标记为成功；已有尝试仍保留在历史中。
                 discardContinuation(currentGoal());
                 completeStep(TaskResult.fail("step skipped by explicit decision", Map.of("skipped", true)), true);
-                return record.stepIndex() >= record.steps().size() ? TaskState.SUCCESS : TaskState.RUNNING;
+                return record.stepIndex() >= record.steps().size() ? finishCompletion() : TaskState.RUNNING;
             }
             if ("recover".equals(answer.choice()) || "replace_goal".equals(answer.choice())) {
                 if ("replace_goal".equals(answer.choice())) discardContinuation(currentGoal());
@@ -458,12 +457,33 @@ final class IntentTask implements Task {
                 failure.message(),
                 failure.toJson(),
                 player.level().getGameTime()));
+        if (toleratesStepFailure(failureState)) {
+            // on_failure=continue 只对确认失败放行：失败记入步骤账本后接续兄弟步骤，
+            // 整体终态由完成结算统一裁决（存在事实失败仍报 FAILED）。
+            completeToleratedFailure(failure);
+            return TaskState.RUNNING;
+        }
         var data = new LinkedHashMap<String, Object>(failure.data());
         data.put("requires_decision", false);
         terminalResult = new TaskResult(false, failure.message(), failure.timedOut(), failure.interrupted(), data);
         chain = List.of();
         chainIndex = 0;
         return failureState == TaskState.TIMEOUT ? TaskState.TIMEOUT : TaskState.FAILED;
+    }
+
+    /** 容忍边界：仅确认失败且还有兄弟步骤；超时与取消效果不确定或调用方主动停，一律全停。 */
+    private boolean toleratesStepFailure(TaskState failureState) {
+        return failureState == TaskState.FAILED && currentGoal().toleratesFailure()
+                && record.stepIndex() + 1 < record.steps().size();
+    }
+
+    private void completeToleratedFailure(TaskResult failure) {
+        Goal goal = record.steps().get(record.stepIndex());
+        record.addStepResult(new IntentTaskRecord.StepSnapshot(
+                record.stepIndex(), goal.ability(), false, failure.message(), failure.toJson(), false));
+        runtime.stepProcessed(record);
+        chain = List.of();
+        chainIndex = 0;
     }
 
     /** 只为明确的机器结构变化补回最新观察，保留原生动作的已发生效果和重试限制。 */
@@ -607,10 +627,16 @@ final class IntentTask implements Task {
 
     private TaskState afterImmediate() {
         if (record.stepIndex() >= record.steps().size()) {
-            terminalResult = completionResult();
-            return TaskState.SUCCESS;
+            return finishCompletion();
         }
         return TaskState.RUNNING;
+    }
+
+    /** 清单全部处理后的统一结算：部分失败也算完全失败，账本承担诚实披露。 */
+    private TaskState finishCompletion() {
+        TaskResult completion = completionResult();
+        terminalResult = completion;
+        return completion.success() ? TaskState.SUCCESS : TaskState.FAILED;
     }
 
     private void completeStep(TaskResult result) {
@@ -753,6 +779,23 @@ final class IntentTask implements Task {
         }
         int skipped = record.skippedStepCount();
         // 改成检查机器后只能报告观察结果；请求中的期望产物、被替换的施工和被略过的目标都不是完成证据。
+        int tolerated = toleratedFailureCount();
+        if (tolerated > 0) {
+            // 存在事实失败（含 on_failure=continue 容忍的失败）：整体终态 FAILED，
+            // 全部已处理步骤改走失败账本披露，不在成功回执里夹带失败事实。
+            String message = "Finished the remaining work, but " + tolerated + " step(s) failed and their "
+                    + "on_failure=continue let later siblings run; a tolerated failure still ends the task "
+                    + "as failed. Inspect completed_effects for what actually happened.";
+            var data = new LinkedHashMap<String, Object>();
+            data.put("task_id", record.externalId().toString());
+            data.put("steps", steps);
+            data.put("tolerated_failure_count", tolerated);
+            data.put("skipped_step_count", skipped);
+            data.put("completion_scope", "executed_steps");
+            data.put("all_steps_succeeded", false);
+            data.put("requires_decision", false);
+            return withEffectLedger(new TaskResult(false, message, false, false, Map.copyOf(data)));
+        }
         String message = skipped > 0
                 ? "Finished the remaining work; " + skipped + " step(s) were skipped by explicit decision."
                 : record.stepResults().size() == 1 ? record.stepResults().getFirst().message()
@@ -761,6 +804,12 @@ final class IntentTask implements Task {
                 "skipped_step_count", skipped, "skipped_steps", skippedSteps(),
                 "completion_scope", "executed_steps",
                 "all_steps_succeeded", record.allStepsSucceeded()));
+    }
+
+    /** 被 on_failure=continue 容忍的失败步骤：记过结果但没成功，也没有被显式跳过。 */
+    private int toleratedFailureCount() {
+        return (int) record.stepResults().stream()
+                .filter(step -> !step.success() && !step.skipped()).count();
     }
 
     private List<Integer> skippedSteps() {

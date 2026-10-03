@@ -75,7 +75,8 @@ final class PublicToolCatalog {
                   "parameters":{"type":"object","default":{},"description":"Use fields from perceive(view=abilities,focus=ability)."},
                   "preferences":{"type":"object","default":{},"description":"Leave empty unless this ability declares accepted_preferences."},
                   "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Use only this ability's parameter-free hard constraints."},
-                  "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered steps for maicraft:sequence only."}
+                  "children":{"type":"array","items":{"$ref":"#/$defs/goal"},"maxItems":32,"default":[],"description":"Ordered steps for maicraft:sequence only."},
+                  "on_failure":{"type":"string","enum":["stop","continue"]}
                 },
                 "required":["ability","outcome"], "additionalProperties":false
               }
@@ -398,9 +399,9 @@ final class PublicToolCatalog {
     private static void validateGoal(JsonObject goal, int depth) {
         // 限制嵌套深度和每一层子目标数量；当前没有在这里累计展开后的总步骤数。
         if (depth > 32) throw bad("goal nesting is too deep");
-        only(goal, "ability", "outcome", "target", "parameters", "preferences", "constraints", "children");
+        only(goal, "ability", "outcome", "target", "parameters", "preferences", "constraints", "children", "on_failure");
         defaults(goal, "parameters", new JsonObject(), "preferences", new JsonObject(),
-                "constraints", new JsonArray(), "children", new JsonArray());
+                "constraints", new JsonArray(), "children", new JsonArray(), "on_failure", "stop");
         String ability = string(goal, "ability", 1, 256, false);
         resource(ability, "ability");
         // 目标描述填错时直接指出字段位置和类型，避免模型为修正请求外壳重新查询整本能力目录。
@@ -413,6 +414,12 @@ final class PublicToolCatalog {
         object(goal, "parameters");
         // 这里仅确认 parameters 是对象，不检查里面 count 等各能力参数的整数类型或数值范围。
         object(goal, "preferences");
+        // 取值在入口就给明确拒绝；挂载位置（仅 sequence 直接子级）由语义契约检查。
+        if (present(goal, "on_failure")) {
+            String onFailure = string(goal, "on_failure", 1, 16, false);
+            if (!onFailure.equals("stop") && !onFailure.equals("continue"))
+                throw bad("goal.on_failure accepts \"stop\" (default) or \"continue\"");
+        }
         JsonArray constraints = array(goal, "constraints", 32);
         constraints.forEach(item -> validateConstraint(asObject(item, "constraint")));
         JsonArray children = array(goal, "children", 32);
