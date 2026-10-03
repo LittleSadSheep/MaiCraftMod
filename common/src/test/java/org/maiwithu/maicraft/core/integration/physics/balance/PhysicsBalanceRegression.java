@@ -68,6 +68,7 @@ public final class PhysicsBalanceRegression {
         CreateRollerPlacementTest.run();
         BuildRedirectedPlacementTest.run();
         BuildBatchCompletionTest.main(args);
+        PhysicsWheelDynamicsTest.run();
         System.out.println("PhysicsBalanceRegression: passed");
     }
     static PhysicsBody vessel(List<PhysicsBody.Load> loads) {
