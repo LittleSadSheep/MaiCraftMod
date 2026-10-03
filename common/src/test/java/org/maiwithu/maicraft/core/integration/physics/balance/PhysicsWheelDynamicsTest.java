@@ -42,6 +42,11 @@ final class PhysicsWheelDynamicsTest {
         var measured=new PhysicsBody.Load("native_wheel","offroad:wheel_contact",point,v(0,123,0),PhysicsVector.ZERO,
                 PhysicsBody.Frame.BODY,false,0,0,null,wheel);
         near(wrench(vessel(List.of(measured)),body.rotation(),0).force().y(),23,"实测轮胎载荷被模型参数覆盖");
+        // 初始车身稍高时会先沉降，但本就稳定；推荐不能为改善这一瞬间的评分而增加无必要的重物。
+        var settling=new PhysicsBody(car.structureId(),car.dimension(),car.tick(),car.mass(),car.center(),car.inertia(),car.rotation(),
+                car.position().add(v(0,.005,0)),car.velocity(),car.angularVelocity(),car.gravity(),car.loads(),car.unknowns());
+        var kept=PhysicsTrim.recommend(settling,List.of(new PhysicsTrim.Ballast("lower","minecraft:iron_block",v(0,-2,0),2,1)),1,Map.of(),PhysicsSimulation.Limits.defaults());
+        check(kept.validation().predictedBalanced()&&kept.proposedBallast().isEmpty(),"已通过动态配平的车辆被推荐额外配重");
     }
     private static PhysicsWheel wheel(PhysicsVector point,double brake,double radius) {
         return new PhysicsWheel("offroad:small_tire",radius,10,0,v(0,0,1),v(1,0,0),1,0,brake,1,

@@ -19,7 +19,7 @@ public final class PhysicsTrim {
     public record Placement(String candidateId, String blockId, PhysicsVector point, double mass) {}
     public record ConstructionStep(int placed, double mass, PhysicsVector center, PhysicsVector stoppedTorque,
                                    double verticalAcceleration, boolean stoppedEquilibrium) {}
-    public record Recommendation(String state, List<Placement> placements, double beforeScore, double afterScore,
+    public record Recommendation(String state, List<Placement> proposedBallast, double beforeScore, double afterScore,
                                  PhysicsBody predictedBody, PhysicsSimulation.Assessment validation,
                                  List<ConstructionStep> constructionSequence, List<String> reasons) {}
     private record Choice(PhysicsBody body, List<Placement> placements, double score) {}
@@ -31,6 +31,10 @@ public final class PhysicsTrim {
         if (candidates.stream().map(Ballast::id).distinct().count() != candidates.size())
             throw new IllegalArgumentException("配重候选编号重复");
         double before = score(body, settings, limits);
+        var initial=PhysicsSimulation.assess(body,limits,settings);
+        // 悬挂沉降后已通过全部启停和扰动检验时保留当前设计，不为降低瞬时力误差额外消耗铁块。
+        if(initial.predictedBalanced())return new Recommendation("predicted_balanced",List.of(),before,before,body,initial,List.of(),
+                List.of("当前布局已通过完整工况与扰动预测，无需额外配重；瞬时评分包含悬挂沉降前的偏差"));
         Choice best = new Choice(body, List.of(), before);
         List<Choice> frontier = List.of(best);
         // 多个配重可以互相抵消横向力矩；保留多条候选，避免第一块暂时变差就放弃可行组合。
@@ -52,7 +56,7 @@ public final class PhysicsTrim {
             if (next.getFirst().score() < best.score() - 1e-9) best = next.getFirst();
             frontier = List.copyOf(next.subList(0, Math.min(24, next.size())));
         }
-        var validation = PhysicsSimulation.assess(best.body(), limits, settings);
+        var validation = best.placements().isEmpty()?initial:PhysicsSimulation.assess(best.body(), limits, settings);
         List<String> reasons = new ArrayList<>();
         if (!validation.stoppedEquilibrium()) reasons.add("停机仍有升降或旋转趋势；检查持续浮力或轮胎支撑，配重不能替代缺少的支撑");
         if (!validation.runningEquilibrium()) reasons.add("运行后仍有过量升降或旋转；检查推进器、车轮驱动作用线与重心和支撑分布");
