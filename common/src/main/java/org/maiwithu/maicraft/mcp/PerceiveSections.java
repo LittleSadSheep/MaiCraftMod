@@ -68,6 +68,9 @@ final class PerceiveSections {
         result.addProperty("description", "Return only named sections. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
+                // 掉落引用来自当前观察，LLM 可直接选择物品堆，由拾取任务追踪其移动后的位置。
+                + "nearby_entities includes each dropped stack's drop_ref, item_id, name, count, position and components; "
+                + "use maicraft:collect_items with parameters.drop_ref to collect one selected stack. "
                 + "terrain_overview is an opt-in flight landing-site pre-selection scan (intended_use), not walking routes; nearby_facilities too. "
                 + "Set focus for diagnostics. "
                 + "Missing sections are listed in " + UNAVAILABLE + ".");

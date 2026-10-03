@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.task.collect.CollectItemsRequest;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -54,6 +55,13 @@ final class SemanticGoalContract {
             try { CookAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_cooking_contract", path, ability, invalid.getMessage());
+            }
+        }
+        // 接单前检查物品堆引用及类型筛选，拒绝空数组和错字，不能把指定拾取放宽成全捡。
+        if (!restoredHistory && GeneralAbilityAdapter.COLLECT.equals(ability)) {
+            try { CollectItemsRequest.parse(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_collection_contract", path + ".parameters", ability, invalid.getMessage());
             }
         }
         validateTarget(goal, path, ability, restoredHistory);

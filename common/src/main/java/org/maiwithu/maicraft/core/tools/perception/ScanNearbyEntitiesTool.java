@@ -31,11 +31,14 @@ public final class ScanNearbyEntitiesTool implements MaiCraftTool {
 
     @Override
     public String description() {
+        // 先认出地上的具体物品与位置，再把对应引用交给拾取工具；无需为了辨认而先走过去。
         return "List entities within a radius around you, sorted by distance. Use type_filter to "
                 + "narrow: 'hostile' for monsters, 'passive' for animals/items, 'player' for players, "
-                + "'all' for everything. Returns at most 20 entities; truncated:true means more exist. "
+                + "'all' for everything. Returns all matching loaded entities in range. "
                 + "Each entry has id, type, position, distance, hp, and category. Pass "
-                + "the returned runtime ids to attack; it cannot attack anything outside that set.";
+                + "the returned runtime ids to attack; it cannot attack anything outside that set. "
+                + "Dropped items also include drop_ref, item_id, name, count and components; "
+                + "pass one selected drop_ref to collect_items to approach that exact stack.";
     }
 
     @Override

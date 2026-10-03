@@ -210,6 +210,16 @@ public final class SemanticAbilityCatalog {
                     "Fish with a carried rod using normal first-person casting and retrieval.",
                     targets("current_place", "area", "landmark"),
                     fields(field("count", "integer", "Number of catches requested, not casts or clicks.")));
+            // 先用附近实体中的具体物品和位置选择一堆，再将引用交给执行器追踪，不要求模型猜路线。
+            case GeneralAbilityAdapter.COLLECT -> contract(
+                    "Walk to loose drops and collect through native contact. Copy drop_ref from perceive surroundings nearby_entities "
+                            + "to select one exact stack; its current position is tracked as it moves. Lost targets remain unconfirmed, "
+                            + "never substituted. Without drop_ref, collect nearby item_ids or all items when omitted. "
+                            + "Native pickup may also absorb incidental nearby items. No separate travel request is needed.",
+                    targets("current_place"),
+                    fields(field("drop_ref", "string", "Optional exact stack reference from nearby_entities."),
+                            field("item_ids", "array<resource_id>", "Optional non-empty registered item filter; applies together with drop_ref."),
+                            field("radius", "integer", "Loaded search range from the actor, 1–48 blocks; default 16.")));
             case GeneralAbilityAdapter.DROP -> contract(
                     "Irreversibly drop an explicit quantity of one carried item.",
                     targets("current_place"),

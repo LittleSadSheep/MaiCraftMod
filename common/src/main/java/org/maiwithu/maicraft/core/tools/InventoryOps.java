@@ -3,22 +3,18 @@ package org.maiwithu.maicraft.core.tools;
 import org.maiwithu.maicraft.agent.tool.ToolArgs;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.task.TaskRecord;
-import org.maiwithu.maicraft.core.task.collect.CollectItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.inventory.DropItemsTaskRecord;
 import org.maiwithu.maicraft.core.task.inventory.EatItemTaskRecord;
 import org.maiwithu.maicraft.core.task.inventory.EquipTaskRecord;
 import org.maiwithu.maicraft.core.task.inventory.UnequipTaskRecord;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
- * 把装备、进食、丢弃和拾取的内部参数转换成任务单，并给出默认范围和初始时间预算。
+ * 把装备、进食和丢弃的内部参数转换成任务单，并给出初始时间预算；拾取选择由 CollectItemsRequest 统一检查。
  * 这里不执行菜单点击；执行过程中真正能否完成，还要由任务读取玩家和世界状态。
  */
 public final class InventoryOps {
@@ -30,10 +26,6 @@ public final class InventoryOps {
 
     private static final int DROP_MAX_COUNT = 999;
     private static final long DROP_TIMEOUT_TICKS = 10 * 20;
-
-    private static final int COLLECT_DEFAULT_RADIUS = 16;
-    private static final int COLLECT_MAX_RADIUS = 48;
-    private static final long COLLECT_TIMEOUT_TICKS = 60 * 20;   // 为角色接近掉落物并等待拾取结算预留 60 秒。
 
     // 穿戴和卸下共用这个入口；只有 action=unequip 走卸下分支，其他值在本层都按穿戴处理。
     public TaskRecord equipItem(
@@ -108,41 +100,6 @@ int count,
         String label = BuiltInRegistries.ITEM.getKey(item).getPath();
         return new DropItemsTaskRecord(ctx.toolCallId(), ctx.deadline(DROP_TIMEOUT_TICKS),
                 item, count, label);
-    }
-
-    // 无效物品编号被略过，过滤集合空时变成收集所有物品；全写错也会走这个分支，范围会意外扩大（D12）。
-    public TaskRecord collectItems(
-List<String> item_ids,
-Integer radius,
-            ToolContext ctx) {
-        // 从 ID 列表宽松构造筛选集合：无法解析或未知的 ID 会跳过；未提供列表则得到空集合，即“匹配所有物品”。
-        Set<Item> filter = new LinkedHashSet<>();
-        if (item_ids != null) {
-            for (String el : item_ids) {
-                if (el == null) continue;
-                ResourceLocation id = ResourceLocation.tryParse(el);
-                if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
-                    filter.add(BuiltInRegistries.ITEM.get(id));
-                }
-            }
-        }
-
-        int searchRadius = COLLECT_DEFAULT_RADIUS;
-        if (radius != null) {
-            searchRadius = radius;
-            if (searchRadius < 1) searchRadius = 1;
-            if (searchRadius > COLLECT_MAX_RADIUS) searchRadius = COLLECT_MAX_RADIUS;
-        }
-
-        String label = filter.isEmpty() ? "all items" : labelFor(filter);
-        return new CollectItemsTaskRecord(ctx.toolCallId(), ctx.deadline(COLLECT_TIMEOUT_TICKS),
-                filter, searchRadius, label);
-    }
-
-    private static String labelFor(Set<Item> filter) {
-        Item first = filter.iterator().next();
-        String path = BuiltInRegistries.ITEM.getKey(first).getPath();
-        return filter.size() == 1 ? path : path + "+" + (filter.size() - 1);
     }
 
 }

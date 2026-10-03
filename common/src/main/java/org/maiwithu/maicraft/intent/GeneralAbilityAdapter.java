@@ -43,6 +43,8 @@ import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.task.TaskResult;
+import org.maiwithu.maicraft.core.task.collect.CollectItemsRequest;
+import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 
 /**
  * 把战斗、跟随、吃东西、装备和交互等目标，转换成已经实现的具体工具调用。
@@ -60,6 +62,7 @@ public final class GeneralAbilityAdapter {
     public static final String EQUIP = "maicraft:equip";
     public static final String FISH = "maicraft:fish";
     public static final String DROP = "maicraft:drop_items";
+    public static final String COLLECT = "maicraft:collect_items";
     public static final String CONTAINER = "maicraft:use_container";
     public static final String MANAGE_CONTAINER = "maicraft:manage_container";
     public static final String FIND_ENTITY = "maicraft:find_entity";
@@ -67,7 +70,7 @@ public final class GeneralAbilityAdapter {
 
     private static final Set<String> ABILITIES = Set.of(
             COMBAT, INTERACT, FOLLOW, CONSUME, EQUIP, FISH, DROP, CONTAINER, MANAGE_CONTAINER,
-            FIND_ENTITY, FIND_BLOCK, USE_ITEM, HARVEST_BLOCK);
+            FIND_ENTITY, FIND_BLOCK, USE_ITEM, HARVEST_BLOCK, COLLECT);
     private static final Set<String> EXECUTION_FIELDS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "x", "y", "z", "button",
             "hold_ticks", "slot_index", "source_slot", "destination_slot", "from_slot",
@@ -109,6 +112,9 @@ public final class GeneralAbilityAdapter {
             case EQUIP -> equip(goal, player);
             case FISH -> fish(goal, player);
             case DROP -> drop(goal, player);
+            // 模型复用刚观察到的物品堆引用，直接进入靠近与原生拾取，无需先另发移动任务。
+            case COLLECT -> new IntentAction.Native(CollectItemsRequest.parse(parameters).task(player,
+                    new ToolContext("semantic-collect-" + UUID.randomUUID(), player.level().getGameTime())));
             case CONTAINER -> interact(goal, player, runtime, true);
             case MANAGE_CONTAINER -> manageContainer(goal, player);
             case FIND_ENTITY -> findEntity(goal);
