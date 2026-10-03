@@ -13,10 +13,10 @@ final class SemanticAbilityAvailability {
         boolean readOnly = switch (id) {
             case "maicraft:remember_place", "maicraft:inspect_machine", "maicraft:design_machine",
                     "maicraft:design_build", "maicraft:wait_for_condition",
-                    "maicraft:find_block", "maicraft:physical_balance" -> true;
+                    "maicraft:find_block", "maicraft:physical_balance", "maicraft:physical_assembly" -> true;
             default -> false;
         };
-        boolean supported = !id.equals("maicraft:connect_mechanical_power") || createInstalled;
+        boolean supported = !id.equals("maicraft:connect_mechanical_power")&&!id.equals("maicraft:physical_assembly") || createInstalled;
         ability.addProperty("registered", true);
         ability.addProperty("supported", supported);
         JsonArray preconditions = new JsonArray();
@@ -64,6 +64,14 @@ final class SemanticAbilityAvailability {
     }
 
     static void physics(JsonObject ability,String id,JsonObject assistance) {
+        if(id.equals("maicraft:physical_assembly")) {
+            var operations=assistance.getAsJsonObject("operations");var operation=operations==null?null:operations.getAsJsonObject("physics.assembly");
+            var assembly=new JsonObject();assembly.addProperty("required_for_assembly","physics.assembly");
+            assembly.addProperty("assembly_observation_available",operation!=null&&operation.has("supported")&&operation.get("supported").getAsBoolean()
+                    &&operation.has("backend")&&operation.get("backend").getAsString().equals("server"));
+            assembly.addProperty("bond_requires","installed selected adhesive, actual material, current native endpoint rays and action permission");
+            ability.add("assembly_observation",assembly);return;
+        }
         if(!id.equals("maicraft:physical_balance")) return;
         // 没有权威采样后端时明确告知分析不可用；已经授权的原生补丁施工仍独立检查真实条件。
         var operations=assistance.getAsJsonObject("operations");

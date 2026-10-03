@@ -71,6 +71,7 @@ final class SemanticGoalContract {
         validateConstraints(goal, path, ability);
         // 起飞前就检查局部补丁和工况，防止执行中把观察请求误当成开桨或建造。
         if (PhysicsAbilityAdapter.ABILITY.equals(ability)) PhysicsAbilityAdapter.validate(goal);
+        if (PhysicalAssemblyAbilityAdapter.ABILITY.equals(ability)) PhysicalAssemblyAbilityAdapter.validate(goal);
         // 在角色接管前确认 FTB 对象编号与动作种类，不接受混用任务、奖励或自行编写点击序列。
         if (QuestAbilityAdapter.ABILITY.equals(ability)) QuestAbilityAdapter.validate(goal);
         if (ChatAbilityAdapter.ABILITY.equals(ability)) {

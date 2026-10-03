@@ -2,6 +2,20 @@
 
 使用 `maicraft:physical_balance`。默认在船体停稳时完成观察、假设试算、候选比较、施工和复核；不会在飞行中自动添加配重，也不会为了分析而启动轴承、改变红石或写入世界。
 
+## 从世界方块创建物理结构
+
+使用 `maicraft:physical_assembly`，由 LLM 决定布局、胶种与修改。先用现有建造能力完成方块，再粘接并操作物理组装器。`inspect` 只读；`bond` 使用指定胶水和原生选区请求；`assemble` 创建结构；`disassemble` 让原生组装器对齐并拆回世界方块。
+
+未组装时，用 `target` 指定世界坐标、地标或区域锚点；`first`、`second`、`assembler` 和 `declarations.position` 都是相对锚点的整数偏移。已组装时指定观察到的 `structure_id` 并省略 `target`，偏移相对 `origin_storage`。不能把远处存储区坐标当作世界地点。
+
+粘接必须明确 `adhesive=create:super_glue` 或 `simulated:honey_glue`，以及包含两端整格的 `first`、`second`。执行器会取胶、走位并核对真实射线；蜂蜜胶空气角点遵循原生 Alt 射线终点。胶层存在只证明粘接实体已观察，不能证明所有部件已经连接或载具能运行。原生范围、物料、加载和交互限制仍照常生效。
+
+`assembler` 是物理组装器偏移，缺省为零。创建和拆回使用同一个原生切换入口，所以 `assemble` 只接受世界目标，`disassemble` 必须指定已有结构 UUID；已经提交的请求不会为了等待或恢复而机械重放。服务端需要提供只读 `physics.assembly` 回执。
+
+可用实际建造回执中的 `project_id` 继承该世界保存的全部明确目标，也可直接给 `declarations=[{position:{x,y,z},block_id,properties?:{...}}]`。粘接或拆回回执的 `design_id` 可用于后续世界施工和重新组装，单格补丁不会清掉其余声明。未声明空气不是清空约束。拆回方向按原生旋转变换，原生联动造成的设计差异仍如实保留。
+
+默认回执包括 `native_observation`、`completed_effects`、`structure_changed`、`design_declaration` 和 `declared_structure_diff`。原生请求已处理不等于结构创建成功；检查实际 `outcome`、新 `structure_id` 和差异。原生明确创建的结构不会因后置观察或声明保存失败而被改报成“没有创建”，未确认项会单独列出。驾驶、推进、供气和飞行稳定性仍需独立运行验收。
+
 ## 操作
 
 | operation | 行为 |

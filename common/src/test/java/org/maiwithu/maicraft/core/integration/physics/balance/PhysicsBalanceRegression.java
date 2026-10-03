@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.task.physics.PhysicalStructureDesignRecoveryTe
 import org.maiwithu.maicraft.core.task.physics.PhysicalAssemblyParametersTest;
 import org.maiwithu.maicraft.core.task.physics.PhysicalAssemblyGeometryTest;
 import org.maiwithu.maicraft.core.task.physics.AssemblyWorldDesignStoreTest;
+import org.maiwithu.maicraft.intent.PhysicalAssemblyContractTest;
 import org.maiwithu.maicraft.server.physics.PhysicsSnapshotServiceTest;
 
 /** 用可算出结果的飞艇验证配重、偏置推进与姿态变换，不依赖启动 Minecraft 或 Sable。 */
@@ -52,6 +53,7 @@ public final class PhysicsBalanceRegression {
         PhysicalAssemblyParametersTest.run();
         PhysicalAssemblyGeometryTest.run();
         AssemblyWorldDesignStoreTest.run();
+        PhysicalAssemblyContractTest.run();
         PhysicsSnapshotServiceTest.run();
         System.out.println("PhysicsBalanceRegression: passed");
     }

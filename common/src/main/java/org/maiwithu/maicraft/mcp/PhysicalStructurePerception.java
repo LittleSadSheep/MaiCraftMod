@@ -131,6 +131,7 @@ final class PhysicalStructurePerception {
         out.add("structures", structures);
         // 看见结构后可直接进入起飞前分析，UUID 沿用这份观察，不要求模型猜世界坐标。
         out.addProperty("balance_ability", "maicraft:physical_balance");
+        out.addProperty("assembly_ability", "maicraft:physical_assembly");
         out.addProperty("identity_rule", "UUID identifies a physical structure; re-observe its current pose. Missing from this bounded frame does not mean destroyed.");
         out.addProperty("navigation_rule", "use travel structure_id to board an observed vessel; native boarding selects and tracks its local deck. Never use plot storage coordinates as world travel goals. Small structures remain collision obstacles even when collapsed here.");
         return out;

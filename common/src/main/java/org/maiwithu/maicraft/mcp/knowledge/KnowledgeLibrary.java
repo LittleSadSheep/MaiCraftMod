@@ -61,7 +61,7 @@ public final class KnowledgeLibrary {
         // 材料需求先选择工艺再考虑设备；入口说明保持独立，默认能力描述不展开整套配方。
         docs.put(RECIPES, load("recipes", "从材料需求规划工艺和机器", "EMI 配方树、工作站、Ponder 教程、已有设施复用与实际产出验收。"));
         // 配平资料解释起飞前假设和原生施工回执，避免模型把数学通过当作已经试飞成功。
-        docs.put(PHYSICS, load("physics", "起飞前受力分析与物理配平", "Sable Aeronautics 重心 惯量 螺旋桨 气球蒙皮 浮力 启停模拟 配重 physics balance"));
+        docs.put(PHYSICS, load("physics", "物理组装、起飞前分析与配平", "Sable Aeronautics Offroad 强力胶 蜂蜜胶 物理组装器 重心 惯量 螺旋桨 气球蒙皮 浮力 启停模拟 配重 physics assembly balance"));
         // 游戏机制常识：原版规则与 mod 行为事实，失败回执指路与契约文案按需指向单条，正文按需读取。
         for (String[] entry : GAME_MECHANICS)
             docs.put(GAME_MECHANICS_PREFIX + entry[0], load("game_mechanics/" + entry[0], entry[1], entry[2]));
