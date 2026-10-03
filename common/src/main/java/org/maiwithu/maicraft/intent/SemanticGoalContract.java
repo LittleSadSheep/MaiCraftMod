@@ -42,6 +42,8 @@ final class SemanticGoalContract {
                         SemanticAbilityCatalog.parameterNames(ability)),
                 path + ".parameters", ability, "unknown_parameter");
         validateProtectedLabels(goal.parameters(), path + ".parameters", ability);
+        // 在接单前核实阈值和开关，错误配置不能挤掉正在挖矿的任务。
+        if (AutomaticLightingAdapter.ABILITY.equals(ability)) AutomaticLightingAdapter.parse(goal);
         validateObjectKeys(goal.preferences(), withRuntimeAuthorizationKeys(
                         SemanticAbilityCatalog.preferenceNames(ability)),
                 path + ".preferences", ability, "unknown_preference");

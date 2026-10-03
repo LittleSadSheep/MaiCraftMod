@@ -192,7 +192,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             result.addProperty("accepted", true);
             result.addProperty("outcome", record.goal().outcome());
             if (requestKey != null) result.addProperty("request_key", requestKey);
-            result.addProperty("control_status", repeatedRequest ? "not_requested" : IntentRuntime.isReadOnlyDesign(goal)
+            result.addProperty("control_status", repeatedRequest ? "not_requested" : IntentRuntime.isIndependentRequest(goal)
                     ? "not_required" : "takeover_requested");
             result.add("next_attention", AttentionSnapshot.continuation(
                     intents.attentionCheckpoint(), record.externalId().toString()));
@@ -202,7 +202,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
 
     /** 普通执行先请求接管玩家，创建任务失败时撤回新请求；只展示房屋设计时不用接管。 */
     static IntentTaskRecord dispatchExecution(Goal goal, LocalPlayer player, Supplier<IntentTaskRecord> execute) {
-        if (IntentRuntime.isReadOnlyDesign(goal)) return execute.get();
+        // 随行补光配置在旧任务执行中也可提交，不能为了开关照明重新接管身体。
+        if (IntentRuntime.isIndependentRequest(goal)) return execute.get();
         ClientActorBoundary.AutomationRequest control = ClientRuntime.requestAutomationControl(player);
         // 此处只处理新提交；创建任务失败时撤回本次新请求，不能撤销此前已生效的控制权。
         try { return execute.get(); }

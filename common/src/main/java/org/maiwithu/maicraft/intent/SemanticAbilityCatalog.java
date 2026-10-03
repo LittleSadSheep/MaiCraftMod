@@ -20,6 +20,14 @@ public final class SemanticAbilityCatalog {
         // 模型已经选定能力后，相关资料随完整契约出现；入口只供具体知识缺口使用，不增加执行前置步骤。
         JsonArray references = KnowledgeReferences.forAbility(ability);
         if (!references.isEmpty()) description.add("related_knowledge", references);
+        if (AcquireAbilityAdapter.ABILITY.equals(ability) || GeneralAbilityAdapter.HARVEST_BLOCK.equals(ability)
+                || "maicraft:find_block".equals(ability)) {
+            // 挖矿选材契约直接给出随行补光用法，模型无须停矿另开一串逐格插灯任务。
+            JsonArray tips = new JsonArray();
+            tips.add("挖矿或找矿前备好火把。maicraft:auto_light(action=enable,minimum_light=8) 可在当前任务执行中启用；默认随行开启，整叠火把放副手，低于目标方块光时边走边放，不绕路、不替换任务。忙于挖掘、战斗、菜单或没有支撑时让位，缺火把只报告，不自动离开采集。");
+            tips.add("用 auto_light(action=status) 查看已走路线的实际最低光、暗格和未知项；自动模式不保证远离路线的洞穴全覆盖。基地或指定区域使用 light_area，默认 coverage=all、minimum_light=8，并按实测补漏。光照验收不等于消灭已有怪物或阻止所有特殊刷怪。");
+            description.add("tips", tips);
+        }
         if (MachineAbilityAdapter.DESIGN.equals(ability) || MachineAbilityAdapter.BUILD.equals(ability)
                 || MachineAbilityAdapter.MODIFY.equals(ability)) {
             var budget = MachinePlanningBudget.current();
@@ -486,12 +494,12 @@ public final class SemanticAbilityCatalog {
                             field("replace_existing", "boolean", "Explicit permission to replace occupied cells; default false."),
                             field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint supply and construction must preserve.")));
             case "maicraft:light_area" -> contract(
-                    "Discover a semantic area's connected block boundary, construct lighting and verify actual block-light coverage.",
+                    "Light a selected area, defaulting to offhand torches and full actual block-light coverage at level 8. Move and place in reach, then verify and repair dark cells. For route-following lighting without replacing the current task, use auto_light.",
                     targets("area", "landmark", "coordinates", "current_place", "prior_result"),
                     fields(
                             field("radius", "integer", "Optional explicit player-authored geometric boundary. Do not invent one; when omitted MaiCraft progressively closes the connected component from the semantic landmark seed."),
                             field("minimum_light", "integer", "Required observed block-light threshold, 1-15."),
-                            field("coverage", "string", "All, most, crop_growth or player_visibility; defines which observed cells count. Use crop_growth for a cultivated farm so farmland/crops, not open terrain, define its component."),
+                            field("coverage", "string", "all (default), most, crop_growth or player_visibility. Only all requires every sampled walkable cell to reach the threshold. Use crop_growth for cultivated farmland/crops."),
                             field("block_id", "resource_id", "Optional preferred light-source item/block, never a placement instruction."),
                             field("light_preferences", "array<resource_id>", "Ordered aesthetic source preferences; carried alternatives remain usable."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only; storage is inspected before automatic crafting."),
@@ -501,6 +509,12 @@ public final class SemanticAbilityCatalog {
                             field("style", "string", "Auto, ground or unobtrusive; MaiCraft still chooses cells. Wall and hanging layouts are not yet supported."),
                             field("max_placements", "integer", "Optional explicit total placement budget; omit it to let measured coverage and convergence end the task."),
                             field("placement_preference", "string", "Safe-candidate tie-break after measured coverage gain: coverage_optimal (default), central_unplanted (crop_growth only) or unobtrusive; MaiCraft still chooses cells.")));
+            case AutomaticLightingAdapter.ABILITY -> contract(
+                    "Configure or inspect session-scoped automatic lighting without replacing or pausing the current task or taking manual controls. Enabled by default while automation owns the body. Uses carried torches in the offhand; primary actions and rescue have priority. Never detours, acquires materials, breaks terrain or changes navigation. Checks block light at visited feet/eyes, waits for each native receipt and light propagation, and avoids repeating placement from one standing position. Success means configuration applied, not future coverage. Status reports actual dark cells, unloaded cells and placement outcomes; use light_area to repair a whole area.",
+                    targets(), fields(
+                            field("action", "string", "enable (default), disable or status. A standalone execute is immediate and leaves the current task attached."),
+                            field("minimum_light", "integer", "Target block light 1-13, default 8; independent of daylight. Torches emit 14. High thresholds may be unreachable without detouring; reported gaps are not success."),
+                            field("protected_labels", "array<string>", "Remembered regions whose blocks and supports must remain untouched; current task protections also apply.")));
             case "maicraft:connect_mechanical_power" -> contract(
                     "Connect two semantic mechanical networks while respecting axes, stress and protected terrain.",
                     targets("landmark", "area", "prior_result"),

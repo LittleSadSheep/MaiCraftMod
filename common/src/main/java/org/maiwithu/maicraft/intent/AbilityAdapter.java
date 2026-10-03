@@ -80,6 +80,7 @@ final class AbilityAdapter {
             case "maicraft:build" -> build(goal, player, runtime);
             case BuildDesignAdapter.ABILITY -> BuildDesignAdapter.design(goal, player, runtime);
             case "maicraft:light_area" -> lightArea(goal, player, runtime);
+            case AutomaticLightingAdapter.ABILITY -> AutomaticLightingAdapter.adapt(goal, player);
             case "maicraft:connect_mechanical_power" ->
                     connectPower(goal, player, runtime, continuationToken);
             case AcquireAbilityAdapter.ABILITY -> AcquireAbilityAdapter.adapt(goal);
@@ -716,7 +717,8 @@ final class AbilityAdapter {
                 || !explicitRadius;
         // 指定 area 或未给半径时，交给照明任务从附近已加载方块判断区域边界。
         String coverage = string(parameters, "coverage");
-        if (coverage == null) coverage = "most";
+        // 基地补光默认验收全部目标地面，不能留下少量暗格却用九成覆盖宣布完成。
+        if (coverage == null) coverage = "all";
         if (!List.of("all", "most", "crop_growth", "player_visibility").contains(coverage)) {
             return decision(goal,
                     "Unsupported lighting coverage: " + coverage,

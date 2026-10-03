@@ -78,6 +78,7 @@ public final class IntentRuntime {
             "maicraft:build",
             BuildDesignAdapter.ABILITY,
             "maicraft:light_area",
+            AutomaticLightingAdapter.ABILITY,
             "maicraft:connect_mechanical_power",
             "maicraft:inspect_machine",
             "maicraft:design_machine",
@@ -157,6 +158,11 @@ public final class IntentRuntime {
         return BuildDesignAdapter.ABILITY.equals(goal.ability()) || BuildingSceneContract.noConstruction(goal);
     }
 
+    /** 配置随行照明与只读设计都不申请身体，也不替换正在运行的任务。 */
+    public static boolean isIndependentRequest(Goal goal) {
+        return isReadOnlyDesign(goal) || AutomaticLightingAdapter.ABILITY.equals(goal.ability());
+    }
+
     IntentTaskRecord execute(LocalPlayer player, Goal goal, UUID planId, String requestKey,
                             Predicate<PreviewSession> publishDesign) {
         return execute(player,goal,planId,requestKey,publishDesign,BuildingSceneStore::current);
@@ -195,18 +201,19 @@ public final class IntentRuntime {
         }
         markDirty();
         publish("started", record, "Started: " + goal.outcome(), new JsonObject());
-        if (isReadOnlyDesign(goal)) {
+        if (isIndependentRequest(goal)) {
             TaskResult result;
             try {
-                var action = BuildingSceneContract.supports(goal)
+                var action = AutomaticLightingAdapter.ABILITY.equals(goal.ability())
+                        ? AutomaticLightingAdapter.adapt(goal, player) : BuildingSceneContract.supports(goal)
                         ? BuildingSceneAdapter.adapt(goal, player, this, publishDesign,sceneStores)
                         : BuildDesignAdapter.design(goal, player, this, publishDesign);
                 if (!(action instanceof IntentAction.Report report))
-                    throw new IllegalStateException("read-only design returned an executable action");
+                    throw new IllegalStateException("independent request returned a body action");
                 result = report.result();
             } catch (RuntimeException failure) {
-                result = TaskResult.fail("Read-only design failed: " + failure.getMessage(),
-                        Map.of("failure_code", "preview_design_failed", "construction_started", false));
+                result = TaskResult.fail("Independent request failed: " + failure.getMessage(),
+                        Map.of("failure_code", isReadOnlyDesign(goal) ? "preview_design_failed" : "lighting_configuration_failed", "construction_started", false));
             }
             Map<String, Object> data = new LinkedHashMap<>(result.data() == null ? Map.of() : result.data());
             data.put("task_id", taskId.toString());
