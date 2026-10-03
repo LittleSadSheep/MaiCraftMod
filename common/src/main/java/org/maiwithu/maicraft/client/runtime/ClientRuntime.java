@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.core.integration.machine.catalog.ClientMachineCatal
 import org.maiwithu.maicraft.core.integration.ponder.PonderReplayRuntime;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
+import org.maiwithu.maicraft.core.task.inventory.DiscardFireCleanup;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
 
 /**
@@ -170,6 +171,8 @@ public final class ClientRuntime {
 
     /** 先处理尚未结束的交通动作，再推进调度赢家，最后判断导航是否还能使用本刻操作额度。 */
     private static boolean advanceTasks(LocalPlayerContext context) {
+        // 原生丢弃之后的扑火优先收尾，避免取消任务让自己点燃的火留给下一件施工任务。
+        if (DiscardFireCleanup.tick(context)) { tickStage = "settling_discard_fire"; return false; }
         if (TransportRuntime.tickCleanup(context)) {
             tickStage = "settling_transport";
             return context.mutationAvailable();

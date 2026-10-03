@@ -9,6 +9,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -40,6 +42,12 @@ public final class DiscardedItems {
             area = player.getBoundingBox().inflate(8); deadline = player.level().getGameTime() + 100;
             before = snapshot(player, area); cursor = ItemEntityReceipts.cursor(player);
         }
+        /** 点火收场只处理这一批已经观察到的物品，合并后的接收堆也沿同一归属继续观察。 */
+        public List<ObservedDrop> remaining() {
+            return tracked.values().stream().filter(value -> value.watches.contains(this)).map(value -> value.drop).toList();
+        }
+        public boolean pending() { return pending.contains(this); }
+        public boolean observed() { return !observed.isEmpty(); }
         public Map<String, Object> result() {
             // 库存扣减与地上实体证据分别报告；未观察到落点时明确保留未知，不能编一个预计位置当作真实落点。
             return Map.of("amount", amount, "entity_observed", !observed.isEmpty(), "observation_pending", pending.contains(this),
@@ -56,6 +64,8 @@ public final class DiscardedItems {
         AABB box;
         Map<UUID, ObservedDrop> neighbors;
         long seen;
+        boolean mixed;
+        final Set<Watch> watches = new LinkedHashSet<>();
         Tracked(LocalPlayer player, ObservedDrop drop, ItemEntity entity) { update(player, drop, entity); }
         void update(LocalPlayer player, ObservedDrop next, ItemEntity entity) {
             drop = next; box = entity.getBoundingBox(); seen = player.level().getGameTime();
@@ -86,7 +96,10 @@ public final class DiscardedItems {
                 if (previous != null && !ItemStack.isSameItemSameComponents(previous.stack(), watch.kind)) continue;
                 int increase = drop.stack().getCount() - (previous == null ? 0 : previous.stack().getCount());
                 if (increase <= 0) continue;
-                credited += increase; watch.observed.put(drop.uuid(), drop); remember(player, drop);
+                credited += increase; watch.observed.put(drop.uuid(), drop);
+                boolean preexisting = previous != null && previous.stack().getCount() > 0 && !tracked.containsKey(drop.uuid());
+                var value = remember(player, drop);
+                if (value != null) { value.watches.add(watch); value.mixed |= preexisting || increase > watch.amount; }
             }
             if (credited >= watch.amount || now >= watch.deadline) pending.remove(watch);
         }
@@ -109,7 +122,13 @@ public final class DiscardedItems {
                 if (candidate.uuid().equals(entry.getKey()) || !ItemStack.isSameItemSameComponents(candidate.stack(), value.drop.stack())) continue;
                 var previous = value.neighbors.get(candidate.uuid());
                 if (candidate.stack().getCount() > (previous == null ? 0 : previous.stack().getCount())) {
-                    remember(player, candidate); merged = true;
+                    boolean untrackedRemainder = previous != null && previous.stack().getCount() > 0 && !tracked.containsKey(candidate.uuid());
+                    var receiver = remember(player, candidate);
+                    if (receiver != null) receiver.mixed |= value.mixed || untrackedRemainder;
+                    if (receiver != null) for (var watch : value.watches) {
+                        receiver.watches.add(watch); watch.observed.put(candidate.uuid(), candidate);
+                    }
+                    merged = true;
                 }
             }
             // 实体移除与接收堆增量可能分包到达，短暂保留最后现场，不能一收到移除包就让路径穿过合堆位置。
@@ -121,9 +140,12 @@ public final class DiscardedItems {
         forbidden = LongSets.unmodifiable(cells);
     }
 
-    private static void remember(LocalPlayer player, ObservedDrop drop) {
-        if (world.getEntity(drop.entityId()) instanceof ItemEntity item && item.getUUID().equals(drop.uuid()))
-            tracked.put(drop.uuid(), new Tracked(player, drop, item));
+    private static Tracked remember(LocalPlayer player, ObservedDrop drop) {
+        if (!(world.getEntity(drop.entityId()) instanceof ItemEntity item) || !item.getUUID().equals(drop.uuid())) return null;
+        var value = tracked.get(drop.uuid());
+        if (value == null) { value = new Tracked(player, drop, item); tracked.put(drop.uuid(), value); }
+        else value.update(player, drop, item);
+        return value;
     }
 
     private static Map<UUID, ObservedDrop> snapshot(LocalPlayer player, AABB area) {
@@ -143,4 +165,9 @@ public final class DiscardedItems {
 
     /** 只交付不可变格集给导航；异步搜索继续使用既有冻结快照，不读取客户端实体对象。 */
     public static LongSet forbiddenBodyCells() { return forbidden; }
+
+    /** 合入了现场其他物品的堆仍需避让，但不能因其中有本次垃圾就授权整堆烧毁。 */
+    public static boolean burnable(ObservedDrop drop) {
+        var value = tracked.get(drop.uuid()); return value != null && !value.mixed;
+    }
 }
