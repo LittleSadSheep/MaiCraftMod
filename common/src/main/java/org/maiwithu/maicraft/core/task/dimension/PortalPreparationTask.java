@@ -207,7 +207,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     private TaskState blocked(String code, String message) {
         issue = code;
         // 失败回执自带"卡在哪"：阶段、站位、扫描范围与该阶段的关键缺口，
-        // 模型据此能直接判断下一步，不用再盲查世界状态（009）。
+        // 模型据此能直接判断下一步，不用再盲查世界状态。
         var facts = new LinkedHashMap<String, Object>();
         facts.put("phase", phase.name().toLowerCase(Locale.ROOT));
         facts.put("dimension", world.dimension().location().toString());

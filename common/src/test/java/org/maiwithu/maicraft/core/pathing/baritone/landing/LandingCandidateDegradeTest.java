@@ -13,7 +13,7 @@ import net.minecraft.world.item.Items;
 
 /**
  * 放置射线连续失配时按候选顺序降级：只向后走、只接已有格或已携带材料，
- * 接触证据随旧方案作废；没有可换方案时保持原行为（issue 039）。
+ * 接触证据随旧方案作废；没有可换方案时保持原行为。
  */
 public final class LandingCandidateDegradeTest {
     public static void main(String[] args) throws Exception {

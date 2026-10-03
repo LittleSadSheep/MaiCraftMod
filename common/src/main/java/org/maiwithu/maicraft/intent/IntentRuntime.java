@@ -839,7 +839,7 @@ public final class IntentRuntime {
 
     /**
      * 长任务的进度事件：记分牌（done/total、remaining/initial、phase）变了才发布，
-     * 过 40 刻地板；词汇契约与触发规则见 `.omo/drafts/task-progress-contract.md`。
+     * 过 40 刻地板；词汇契约与触发规则见 docs/architecture/07-attention.md。
      * 无键观察保持沉默；超 2 分钟无键改记一次日志提醒开发者，不进事件流。
      */
     void publishProgress(IntentTaskRecord record, Map<String, Object> observation, long gameTime) {

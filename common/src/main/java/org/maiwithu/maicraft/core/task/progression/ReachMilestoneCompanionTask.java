@@ -65,7 +65,7 @@ public final class ReachMilestoneCompanionTask
     private String issueCode;
     private List<String> recoveryOptions = List.of();
     private String completionFact;
-    /** 最近一次子任务失败的原始回执数据；聚合层原样透传，不再只留类型码（009）。 */
+    /** 最近一次子任务失败的原始回执数据；聚合层原样透传，不再只留类型码。 */
     private Map<String, Object> childEvidence = Map.of();
 
     public ReachMilestoneCompanionTask(LocalPlayer player, ReachMilestoneTaskRecord record) {
@@ -300,7 +300,7 @@ public final class ReachMilestoneCompanionTask
             TaskResult result,
             ProgressionFacts facts) {
         // 聚合只替换类型码与恢复建议；子任务带回的阶段/站位/扫描范围等卡点事实原样保留，
-        // 否则唯一对外入口看不到 child 层已有的诊断（009 实机验收失败的根因）。
+        // 否则唯一对外入口看不到 child 层已有的诊断（聚合丢弃 child 诊断曾导致实机验收失败）。
         childEvidence = result == null || result.data() == null
                 ? Map.of() : Map.copyOf(result.data());
         String childIssue = issue(result);

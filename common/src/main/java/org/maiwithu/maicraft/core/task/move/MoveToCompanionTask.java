@@ -52,7 +52,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
      *  时间足以让角色被水流带到可达的水下目标附近，也能及时放弃水面上方不可达的目标。 */
     private static final int MAX_SETTLE_TICKS = 60;
     /** 连续算路宽限上限：规划一直未产出可走路线且零实际进展超过此时限，就按规划停滞收场，
-     *  不能让 "planningInFlight" 无限续期把卡死伪装成 still working（012 实测 4 分钟零位移）。 */
+     *  不能让 "planningInFlight" 无限续期把卡死伪装成 still working（实测 4 分钟零位移）。 */
     private static final long PLANNING_STALL_CEILING_TICKS = 30 * 20;
 
     private final int bx;
@@ -63,7 +63,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private double bestDist = Double.MAX_VALUE;   // 到目标曾达到的最近距离。
     private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
     private long planningSinceTick = -1;          // 零进展连续算路的起点；有实际进展或算路结束即复位。
-    /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 .omo/drafts/task-progress-contract.md）。 */
+    /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 docs/architecture/07-attention.md）。 */
     private static final int DISTANCE_QUANTUM_BLOCKS = 16;
     /** 出发时（或路线重估后）的分母；剩余变大说明在绕路或新路线更长，分母跟着刷新。 */
     private int initialRemaining = -1;

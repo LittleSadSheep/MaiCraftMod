@@ -324,7 +324,7 @@ public final class GameplayAttentionMonitor {
         if (active == null) {
             if (!autoAllowed) {
                 // 没有任务承接决策（快任务完成后的死亡、被接管清场后的死亡）也必须挂出恢复态：
-                // 否则死亡屏幕上四个 MCP 入口无一能触达重生按钮，只能靠人点（issue 013 死锁变体）。
+                // 否则死亡屏幕上四个 MCP 入口无一能触达重生按钮，只能靠人点（重生决策死锁的变体）。
                 IntentTaskRecord host =
                         runtime.openDeathRecoveryDecision(hardcore, spectator, deathDecisionContext());
                 lastDeath = new DeathSnapshot(host.externalId(), lastDeath.dimension(),

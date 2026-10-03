@@ -70,7 +70,7 @@ public final class MiningBatchTest {
         System.out.println("MiningBatchTest: passed");
     }
 
-    /** 数量达标但归属掉落物仍在场时，回执必须如实报数并留下证据，不得宣称全部 settle（021）。 */
+    /** 数量达标但归属掉落物仍在场时，回执必须如实报数并留下证据，不得宣称全部 settle。 */
     private static void settleReportsGroundLeftovers() throws Exception {
         Field field = Unsafe.class.getDeclaredField("theUnsafe");
         field.setAccessible(true);

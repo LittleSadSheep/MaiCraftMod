@@ -670,7 +670,7 @@ public final class LandingAssistSession {
     }
     /**
      * 放置射线连续多刻对不上时，按候选顺序换到下一个可立即执行的方案；
-     * 坠落时间不可再生，同一格上反复瞄准只会以触地失败收场（issue 039）。
+     * 坠落时间不可再生，同一格上反复瞄准只会以触地失败收场。
      * 只接受已有格或已携带材料的候选，中途不再发起补料；没有可换方案时保持原行为。
      */
     private boolean degradeAfterRepeatedMismatch(LocalPlayerContext context) {

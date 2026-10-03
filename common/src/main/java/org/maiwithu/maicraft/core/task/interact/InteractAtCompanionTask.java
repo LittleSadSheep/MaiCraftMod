@@ -96,7 +96,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean terrainApproach;
     private int approachAttempts, approachCandidates;
     private Map<String, Object> approachFailureEvidence = Map.of();
-    /** 提交原生使用那一刻的目标格快照；与到期快照对照，用于裁决服务端分歧与确认缺口（issue 032）。 */
+    /** 提交原生使用那一刻的目标格快照；与到期快照对照，用于裁决服务端分歧与确认缺口。 */
     private Map<String, Object> submissionFacts = Map.of();
 
     public InteractAtCompanionTask(LocalPlayer player, InteractAtTaskRecord record) {
@@ -540,7 +540,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         // 普通机械交互超时也可能已经交换物品；完成通知不能把缺少确认改写为可直接重试。
         if (interaction != null) data.putAll(interaction.useEvidence());
         // 原生使用以不确定收场时补到期快照：目标格与主手的客户端事实，与提交快照对照，
-        // 用于裁决"服务端点击刻未生效（源仍在、主手未变）"与"动态流体已改写目标格"（issue 032）。
+        // 用于裁决"服务端点击刻未生效（源仍在、主手未变）"与"动态流体已改写目标格"。
         if ("UNCERTAIN".equals(data.get("native_action_status")) && r.aim != null) {
             Map<String, Object> postExpiry = new HashMap<>(submissionFacts);
             var expiryState = player.level().isLoaded(r.aim) ? player.level().getBlockState(r.aim) : null;

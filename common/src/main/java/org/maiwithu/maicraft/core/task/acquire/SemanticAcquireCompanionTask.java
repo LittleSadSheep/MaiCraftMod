@@ -2576,7 +2576,7 @@ public final class SemanticAcquireCompanionTask
         }
         AcquisitionNeed need = activeNeed == null ? needs.peek() : activeNeed;
         if (need != null) {
-            // 记分牌标准键 done/total 进事件摘要；契约见 .omo/drafts/task-progress-contract.md。
+            // 记分牌标准键 done/total 进事件摘要；契约见 docs/architecture/07-attention.md。
             data.put("total", need.requiredFinalCount);
             if (need.lastObservedCount >= 0) data.put("done", need.lastObservedCount);
             data.put("acceptable_item_count", need.itemIds.size());

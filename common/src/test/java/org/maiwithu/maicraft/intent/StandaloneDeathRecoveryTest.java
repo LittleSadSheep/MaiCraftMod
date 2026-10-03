@@ -33,7 +33,7 @@ public final class StandaloneDeathRecoveryTest {
 
         // 答复 respawn 后收尾：记录终态化但仍可查阅，不能凭空消失。
         // 先按 Facade 的真实顺序过 validateDecisionAnswer：承载记录的"步骤"是恢复目标本身，
-        // 落到语义步骤校验会把合法答复拒成 unknown_ability（实机复验 013 的断裂点）。
+        // 落到语义步骤校验会把合法答复拒成 unknown_ability（实机复验发现的断裂点）。
         UUID decisionId = decision.id();
         runtime.validateDecisionAnswer(host, "respawn", new JsonObject());
         try {

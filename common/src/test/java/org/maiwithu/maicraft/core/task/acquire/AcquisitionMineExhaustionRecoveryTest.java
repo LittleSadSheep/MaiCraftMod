@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * mine 子任务如实报采区耗尽（mined_out）后，父层终态必须保真为 MINED_OUT，
- * recovery_options 才会给出"换区域重扫"；压回 no_material 会让调用方误判成许可缺口（issue 004）。
+ * recovery_options 才会给出"换区域重扫"；压回 no_material 会让调用方误判成许可缺口。
  */
 public final class AcquisitionMineExhaustionRecoveryTest {
     public static void main(String[] args) throws Exception {

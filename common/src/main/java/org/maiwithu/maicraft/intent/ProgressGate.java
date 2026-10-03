@@ -10,7 +10,7 @@ import java.util.UUID;
 /**
  * 进度事件的门卫：记分牌变了才有话可说，说了还要过地板间隔。
  * 词汇契约（done/total、remaining/initial、phase）与触发规则的权威文档在
- * `.omo/drafts/task-progress-contract.md`；一个标准键都没有的观察无话可说——
+ * docs/architecture/07-attention.md；一个标准键都没有的观察无话可说——
  * 保持沉默，绝不编造 "still working" 之类的填充话。
  */
 final class ProgressGate {

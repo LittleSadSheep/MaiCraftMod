@@ -758,7 +758,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     /**
      * 数量达标不等于地上收净：结算时仍可见的归属掉落物如实列证据。
-     * 笼统宣称"全部 settle"曾让"背包零变化"的收取回归被回执掩盖（021）。
+     * 笼统宣称"全部 settle"曾让"背包零变化"的收取回归被回执掩盖。
      */
     private void recordSettledRemainingDrops() {
         remainingLiveDrops = liveOwnedDrops.stream().limit(8)
