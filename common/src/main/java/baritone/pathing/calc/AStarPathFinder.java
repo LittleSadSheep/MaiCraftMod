@@ -15,6 +15,9 @@
  */
 
 package baritone.pathing.calc;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
+import org.maiwithu.maicraft.task.ProgressBudget;
+import java.util.concurrent.TimeUnit;
 
 import baritone.Baritone;
 import baritone.api.pathing.calc.IPath;
@@ -71,7 +74,9 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
             logDebug("slowPath is on, path timeout will be " + Baritone.settings().slowPathTimeoutMS.value + "ms instead of " + primaryTimeout + "ms");
         }
         long primaryTimeoutTime = startTime + (slowPath ? Baritone.settings().slowPathTimeoutMS.value : primaryTimeout);
-        long failureTimeoutTime = startTime + (slowPath ? Baritone.settings().slowPathTimeoutMS.value : failureTimeout);
+        long idleTimeout = slowPath ? Baritone.settings().slowPathTimeoutMS.value : failureTimeout;
+        ProgressBudget expansionBudget = new ProgressBudget(TimeUnit.MILLISECONDS.toNanos(Math.max(1, idleTimeout)));
+        expansionBudget.observe(System.nanoTime(), false);
         boolean failing = true;
         int numNodes = 0;
         int numMovementsConsidered = 0;
@@ -84,7 +89,9 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
         while (!openSet.isEmpty() && numEmptyChunk < pathingMaxChunkBorderFetch && !cancelRequested) {
             if ((numNodes & (timeCheckInterval - 1)) == 0) { // only call this once every 64 nodes (about half a millisecond)
                 long now = System.currentTimeMillis(); // since nanoTime is slow on windows (takes many microseconds)
-                if (now - failureTimeoutTime >= 0 || (!failing && now - primaryTimeoutTime >= 0)) {
+                // 已有可走分段时按原切片交付路线；尚无分段时，只有节点展开停滞才消耗失败预算。
+                if (idleTimeout <= 0 || expansionBudget.observe(System.nanoTime(), false)
+                        || (!failing && now - primaryTimeoutTime >= 0)) {
                     break;
                 }
                 if (now >= nextPreviewTime) {
@@ -202,6 +209,9 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                     }
                 }
             }
+            // 已核查完一个节点的移动候选才续期，等待区块锁或反复轮询不会伪造进展。
+            expansionBudget.observe(System.nanoTime(), true);
+            PathPlannerPool.madeProgress("node_expansion");
         }
         if (cancelRequested) {
             return Optional.empty();

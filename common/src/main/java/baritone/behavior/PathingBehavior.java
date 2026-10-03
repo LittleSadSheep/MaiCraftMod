@@ -15,6 +15,7 @@
  */
 
 package baritone.behavior;
+import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgress;
 
 import baritone.Baritone;
 import baritone.api.behavior.IPathingBehavior;
@@ -85,6 +86,11 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private Level recoveryWorld;
     private Map<String, Object> lastRecovery = Map.of();
     private long drivenTicks;
+    private PlanningWorkProgress planningWork;
+    private BlockPos workOrigin;
+    private Goal workGoal;
+    private Level workWorld;
+    private LoadedFrontier workFrontier;
     private BlockPos failedPlanAheadStart;
     private LoadedFrontier calculationFrontier, failedPlanAheadFrontier;
     private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
@@ -122,8 +128,14 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
      * remaining client-thread event mailbox and its one-tick failure latch.</p>
      */
     public void discardPendingPathEvents() {
+        discardPendingPathEvents(true);
+    }
+
+    /** 自动重发同一导航只清掉旧事件，不能顺带清掉检查量高水位来刷新无进展预算。 */
+    public void discardPendingPathEvents(boolean resetWork) {
         toDispatch.clear();
         calcFailedLastTick = false;
+        if (resetWork) { planningWork = null; workOrigin = null; workGoal = null; workWorld = null; workFrontier = null; }
     }
 
     @Override
@@ -530,6 +542,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         calculationWorld = ctx.world();
         // 记搜索开始时的边界，避免计算期间加载的区块被失败回执吞掉而失去重试机会。
         calculationFrontier = LoadedFrontier.capture(start, ctx.world()::isLoaded);
+        // 重试同一问题保留检查量高水位；实际换起点、目标或加载新地形后才接受新一轮计算进展。
+        if (!Objects.equals(workOrigin, start) || !Objects.equals(workGoal, goal) || workWorld != ctx.world()
+                || workFrontier == null || workFrontier.hasNewTerrain(ctx.world()::isLoaded)) workProgress().newScope();
+        workOrigin = start.immutable(); workGoal = goal; workWorld = ctx.world(); workFrontier = calculationFrontier;
         inProgress = pathfinder;
         pendingCalculation = PathPlannerPool.submit(() -> pathfinder.calculate(primaryTimeout, failureTimeout));
     }
@@ -537,9 +553,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     /** Poll without blocking; installation and executor creation happen on the client thread. */
     private void acceptCalculatedPath() {
         if (pendingCalculation == null) return;
+        planningProgressRevision();
         if (!pendingCalculation.isDone()) {
-            // 超过 A* 自身预算仍未返回，说明阻塞发生在排队或内部读取；不能继续无限延长上层进度租约。
-            if (PathPlannerPool.ageMillis(pendingCalculation) > calculationTimeoutMillis) recoverStalledCalculation();
+            // 节点展开或路径核查每次推进都补满预算；只在排队或内部读取持续无进展时恢复线程。
+            if (PathPlannerPool.noProgressMillis(pendingCalculation) > calculationTimeoutMillis) recoverStalledCalculation();
             return;
         }
         PathCalculationResult result;
@@ -616,6 +633,15 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     }
 
     public boolean calculationStalled() { return calculationStalled; }
+    /** 客户端只读工作线程发布的计数，不遍历仍在修改的路径节点。 */
+    public long planningProgressRevision() {
+        return workProgress().observe(PathPlannerPool.completedUnits(pendingCalculation));
+    }
+    // 只在客户端首次计算或读取诊断时建立计数器，空闲导航同样可以给出零进展事实。
+    private PlanningWorkProgress workProgress() {
+        if (planningWork == null) planningWork = new PlanningWorkProgress();
+        return planningWork;
+    }
     public long drivenTicks() { return drivenTicks; }
     public boolean calculationErrored() { return lastCalculationResult == PathCalculationResult.Type.EXCEPTION; }
 
@@ -628,6 +654,9 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         facts.put("component", "baritone_search"); facts.put("pathing_ticks", drivenTicks);
         facts.put("last_result", lastCalculationResult == null ? "none" : lastCalculationResult.name().toLowerCase());
         facts.put("search", PathPlannerPool.describe(pendingCalculation, false));
+        facts.put("planning_progress_revision", planningProgressRevision());
+        facts.put("work_high_water", workProgress().highWater());
+        facts.put("idle_budget_ms", calculationTimeoutMillis);
         facts.put("recovery_count", searchRecoveries); facts.put("last_recovery", lastRecovery == null ? Map.of() : lastRecovery);
         return Map.copyOf(facts);
     }

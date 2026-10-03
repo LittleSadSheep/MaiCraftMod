@@ -101,7 +101,8 @@ public final class EmbeddedBaritoneTerrainProbe {
         }
 
         // 只读复算同样可能卡在区块读取，必须使用真实工作请求的预算与诊断，不能无限等待建议。
-        public boolean stalled() { return !isDone() && PathPlannerPool.ageMillis(calculation) > timeoutMillis; }
+        public boolean stalled() { return !isDone() && PathPlannerPool.noProgressMillis(calculation) > timeoutMillis; }
+        public long completedUnits() { return PathPlannerPool.completedUnits(calculation); }
         public Map<String, Object> diagnostics(boolean stack) { return PathPlannerPool.describe(calculation, stack); }
         public boolean recover() {
             boolean recovered = PathPlannerPool.recover(calculation);

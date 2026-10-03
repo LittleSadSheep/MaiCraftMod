@@ -26,6 +26,7 @@ public final class PathPlannerPool {
     private static final AtomicInteger COUNTER = new AtomicInteger();
     private static final AtomicInteger PEAK = new AtomicInteger();
     private static final AtomicLong COMPLETED = new AtomicLong();
+    private static final ThreadLocal<Work<?>> ACTIVE_WORK = new ThreadLocal<>();
 
     /** 通常只运行一个搜索；第二个 worker 仅用于处理取消过程中的短暂重叠。 */
     private static final int POOL_SIZE = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors() - 2));
@@ -47,16 +48,21 @@ public final class PathPlannerPool {
         final long submitted = System.nanoTime();
         volatile Thread worker;
         volatile long started;
+        volatile long progressedAt;
+        volatile long completedUnits;
+        volatile String progressStage = "queued";
         Work(Generation generation, Supplier<T> task) { this.generation = generation; this.task = task; }
         @Override public void run() {
             synchronized (this) {
                 if (isDone()) { generation.jobs.remove(this); return; }
                 worker = Thread.currentThread(); started = System.nanoTime();
+                progressedAt = started; progressStage = "started";
             }
             PEAK.accumulateAndGet(liveThreads(), Math::max);
+            ACTIVE_WORK.set(this);
             try { complete(task.get()); }
             catch (Throwable failure) { completeExceptionally(failure); }
-            finally { synchronized (this) { worker = null; generation.jobs.remove(this); COMPLETED.incrementAndGet(); } }
+            finally { ACTIVE_WORK.remove(); synchronized (this) { worker = null; generation.jobs.remove(this); COMPLETED.incrementAndGet(); } }
         }
         @Override public synchronized boolean cancel(boolean interrupt) {
             boolean changed = super.cancel(interrupt);
@@ -102,6 +108,9 @@ public final class PathPlannerPool {
         var result = new LinkedHashMap<String, Object>();
         result.put("phase", work.isDone() ? "completed" : worker == null ? "queued" : "running");
         result.put("age_ms", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - work.submitted));
+        result.put("no_progress_ms", noProgressMillis(work));
+        result.put("completed_work_units", work.completedUnits);
+        result.put("progress_stage", work.progressStage);
         result.put("generation", work.generation.number);
         result.put("active_workers", work.generation.executor.getActiveCount());
         result.put("queued_searches", work.generation.executor.getQueue().size());
@@ -123,6 +132,26 @@ public final class PathPlannerPool {
 
     public static long ageMillis(CompletableFuture<?> future) {
         return future instanceof Work<?> work ? TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - work.submitted) : 0;
+    }
+
+    /** 完成节点展开或路径核查后才打点；线程仍活着、重复轮询与请求年龄都不能代替计算进展。 */
+    public static void madeProgress(String stage) {
+        Work<?> work = ACTIVE_WORK.get();
+        if (work == null || work.isDone()) return;
+        work.progressStage = stage;
+        work.progressedAt = System.nanoTime();
+        work.completedUnits++;
+    }
+
+    public static long completedUnits(CompletableFuture<?> future) {
+        return future instanceof Work<?> work ? work.completedUnits : 0;
+    }
+
+    /** 未开始的计算按排队停滞计时；开始后每个已完成工作单元都让无进展预算重新回满。 */
+    public static long noProgressMillis(CompletableFuture<?> future) {
+        if (!(future instanceof Work<?> work)) return 0;
+        long since = work.progressedAt == 0 ? work.submitted : work.progressedAt;
+        return Math.max(0, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - since));
     }
 
     /** 只有已确认超时的本代请求可触发隔离；丢弃旧结果并给原任务一个独立计算通道，不冒充已经算出路线。 */

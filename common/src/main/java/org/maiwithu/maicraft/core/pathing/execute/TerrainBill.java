@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.pathing.execute;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 
 import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.movement.IMovement;
@@ -50,6 +51,8 @@ public final class TerrainBill {
                 // 规划器知道需要放置的格子，但有意不选择具体临时材料；材料选择由后续语义任务负责。
                 bill.addPlace(pos, null);
             }
+            // 只读复算正在按冻结地形逐段汇总差异时，同样补满计算的无进展预算。
+            PathPlannerPool.madeProgress("terrain_bill_movement");
         }
         return bill;
     }

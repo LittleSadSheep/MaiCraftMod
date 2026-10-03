@@ -15,6 +15,7 @@
  */
 
 package baritone.pathing.calc;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
 
 import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.goals.Goal;
@@ -125,6 +126,8 @@ class Path extends PathBase {
                 return true;
             } else {
                 movements.add(move);
+                // 长路线的逐段原生移动核查也算计算进展，不能在收尾组装时被总耗时误判卡死。
+                PathPlannerPool.madeProgress("path_movement_verified");
             }
         }
         return false;
@@ -153,7 +156,10 @@ class Path extends PathBase {
         }
         verified = true;
         boolean failed = assembleMovements();
-        movements.forEach(m -> m.checkLoadedChunk(context));
+        movements.forEach(m -> {
+            m.checkLoadedChunk(context);
+            PathPlannerPool.madeProgress("path_chunk_verified");
+        });
 
         if (failed) { // at least one movement became impossible during calculation
             CutoffPath res = new CutoffPath(this, movements().size());
