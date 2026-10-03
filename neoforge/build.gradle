@@ -41,6 +41,14 @@ neoForge {
                 systemProperty 'maicraft.preview.enabled', 'false'
                 // 设计和观察也属于本轮自动测试，进世界就交出身体，让本能自卫不必等到首个施工指令。
                 systemProperty 'maicraft.automation.on_join', 'true'
+                // 单桶验收只在专用副本准备岩浆池和起始物品；施工仍经正式 MCP 与第一人称执行器。
+                def portalWorld = providers.gradleProperty('maicraftPortalTestWorld')
+                if (portalWorld.isPresent()) {
+                    if (portalWorld.get() != worldName || !worldName.startsWith('TEST-Portal-Cast-'))
+                        throw new GradleException('Portal casting tests require their own TEST-Portal-Cast- world')
+                    systemProperty 'maicraft.portalTest.world', worldName
+                    systemProperty 'maicraft.mcp.port', '8768'
+                }
                 // 直接生成蓝图只存在于显式测试源码集，且绑定本次独立超平坦世界；日常构建不会包含该执行器。
                 def blueprintWorld = providers.gradleProperty('maicraftBlueprintTestWorld')
                 if (blueprintWorld.isPresent()) {
@@ -91,6 +99,9 @@ dependencies {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 if (providers.gradleProperty('maicraftBlueprintTestWorld').isPresent()) {
     sourceSets.main.java.srcDir 'src/blueprintTest/java'
+}
+if (providers.gradleProperty('maicraftPortalTestWorld').isPresent()) {
+    sourceSets.main.java.srcDir 'src/portalTest/java'
 }
 // 即使在测试启动参数下顺手打包，也不把直接改世界的测试夹具带进发布 JAR。
 tasks.withType(Jar).configureEach { exclude 'org/maiwithu/maicraft/neoforge/testing/**' }
