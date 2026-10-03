@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.client.actor.DiscardedItems;
 
 /**
  * 让一段任务代码及其子调用共用两份名单：“不能改动的格”和“身体不能进入的格”。
@@ -103,7 +104,8 @@ public final class NavigationSafetyContext {
     /** 当前不可变集合；ContextFactory 在线程化搜索派发前会复制它。 */
     public static LongSet forbiddenBodyCells() {
         LongSet cells = FORBIDDEN_BODY_CELLS.get();
-        return cells == null ? LongSets.emptySet() : cells;
+        // 后续施工、采集和普通走路都避开主动丢弃物；原有任务保护照常合并，不能被新的拾取范围覆盖。
+        return combined(cells, DiscardedItems.forbiddenBodyCells());
     }
 
     // 只回答这格是否在“不能改动”名单里；不在名单里也不等于已经获得所有破坏权限。
