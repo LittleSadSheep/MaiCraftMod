@@ -31,6 +31,13 @@ public final class OffhandTorchPlacer {
     public String state() { return state; }
     public BuildTaskRecord.Target target() { return target; }
 
+    /** 区域任务退出时结清已经提交的一支；无法确认则留下未知，不让下一轮自动重发旧灯位。 */
+    public NativeActionReceipt retire(LocalPlayerContext context) {
+        if (placement == null) return null;
+        if (!placement.terminal()) context.actions().retireOneShotForTaskBoundary(context, placement, "lighting pass ended");
+        return poll(context);
+    }
+
     public NativeActionReceipt poll(LocalPlayerContext context) {
         if (placement == null) return null;
         placement = context.actions().poll(context, placement);
@@ -88,6 +95,7 @@ public final class OffhandTorchPlacer {
     public static boolean idle(LocalPlayerContext context) {
         var player = context.player();
         return context.permitsNativeActions() && context.mutationAvailable() && ClientRuntime.actor().settledForRoutinePause()
+                && context.body().auxiliaryLookAvailable(context.tickRevision())
                 && context.minecraft().screen == null && player.containerMenu == player.inventoryMenu
                 && player.inventoryMenu.getCarried().isEmpty() && !player.isUsingItem()
                 && player.isAlive() && player.onGround() && !player.isPassenger() && !player.isInWater()

@@ -94,7 +94,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     @Override public boolean tryAuxiliaryLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
-        if (interactionLookLease == leaseTickRevision) return false;
+        if (!auxiliaryLookAvailable(leaseTickRevision)) return false;
         // 跑动中低头插灯只改变视线；已有路线转向器继续工作，普通移动则按原世界方向补偿横移。
         if (movementLease == leaseTickRevision && steering == null) {
             Movement original = movement;
@@ -103,6 +103,11 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         }
         requestImmediateLook(yaw, pitch, leaseTickRevision);
         return true;
+    }
+
+    @Override public boolean auxiliaryLookAvailable(long leaseTickRevision) {
+        requireLease(leaseTickRevision);
+        return interactionLookLease != leaseTickRevision;
     }
 
     static Movement preserveHeading(Movement original, float oldYaw, float nextYaw) {

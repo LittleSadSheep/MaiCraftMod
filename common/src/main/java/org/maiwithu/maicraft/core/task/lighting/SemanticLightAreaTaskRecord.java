@@ -42,7 +42,8 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
         }
 
         public static Coverage parse(String value) {
-            if (value == null || value.isBlank()) return MOST;
+            // 未明确放宽覆盖率时，基地每个已观察可行走地面都必须达到目标亮度。
+            if (value == null || value.isBlank()) return ALL;
             return switch (value.strip().toLowerCase(Locale.ROOT)) {
                 case "all" -> ALL;
                 case "most" -> MOST;
@@ -138,7 +139,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
         this.radius = radius <= 0 ? 0
                 : Math.clamp(radius, MIN_RADIUS, MAX_EXPLICIT_RADIUS);
         this.minimumLight = Math.clamp(minimumLight, 1, 15);
-        this.coverage = coverage == null ? Coverage.MOST : coverage;
+        this.coverage = coverage == null ? Coverage.ALL : coverage;
         this.style = style == null ? Style.AUTO : style;
         this.placementPreference = placementPreference == null
                 ? PlacementPreference.COVERAGE_OPTIMAL : placementPreference;

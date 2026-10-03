@@ -22,6 +22,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.CropBlock;
@@ -126,7 +127,7 @@ public final class SemanticLightAreaCompanionTask
     private int passes;
     private int requestedPlacements;
     private int settledAt;
-    private BuildCompanionTask buildChild;
+    private Task buildChild;
     private BuildTaskRecord buildRecord;
     private int observedBuildProgress;
     private int passBaselineLitCells;
@@ -813,7 +814,9 @@ public final class SemanticLightAreaCompanionTask
         boolean consume = !WorkProfile.of(player).freeMaterials();
         int requiredMaterials = targets.stream()
                 .mapToInt(BuildTaskRecord.Target::materialCount).sum();
-        int availableMaterials = PlayerInv.buildableCount(player.getInventory(), source.item());
+        // 副手火把是本轮真正可用的材料；其他灯具仍沿用施工器可选择的背包范围。
+        int availableMaterials = source.item() == Items.TORCH ? PlayerInv.count(player.getInventory(), source.item())
+                : PlayerInv.buildableCount(player.getInventory(), source.item());
         if (consume && availableMaterials < requiredMaterials) {
             ResourceLocation sourceId = BuiltInRegistries.ITEM.getKey(source.item());
             pendingSupplySource = sourceId.toString();
@@ -862,21 +865,28 @@ public final class SemanticLightAreaCompanionTask
             List<BuildTaskRecord.Target> targets,
             boolean consume,
             String candidateFingerprint) {
-        for (BuildTaskRecord.Target target : targets) {
-            attemptedPositions.add(target.pos().asLong());
-        }
+        boolean fastTorches = source.item() == Items.TORCH && consume;
+        // 快速轮可能中途缺料；只有实际出手的灯位才算尝试，未提交的候选留给补料后的同一区域续作。
+        if (!fastTorches) for (BuildTaskRecord.Target target : targets) attemptedPositions.add(target.pos().asLong());
         String parent = r.getToolCallId() == null ? "light_area" : r.getToolCallId();
         long now = player.level().getGameTime();
         buildRecord = new BuildTaskRecord(
                 parent + "-lighting-pass-" + (passes + 1),
                 now + BuildTool.timeoutTicksFor(targets.size(), consume),
                 targets, false, consume, false);
-        buildChild = new BuildCompanionTask(player, buildRecord);
-        buildChild.protectNavigationCells(protectedNavigationCells);
+        // 火把走副手随行放置，其他灯具仍使用完整施工流程；两条路径最后都复核同一份实际光照样本。
+        if (fastTorches) {
+            buildChild = new TorchLightingPass(player, buildRecord, targetCells.stream().map(Sample::pos).toList(),
+                    r.minimumLight, protectedMutationCells, protectedNavigationCells);
+        } else {
+            var builder = new BuildCompanionTask(player, buildRecord);
+            builder.protectNavigationCells(protectedNavigationCells);
+            buildChild = builder;
+        }
         observedBuildProgress = 0;
         passBaselineLitCells = litCells;
         activeCandidateFingerprint = candidateFingerprint;
-        requestedPlacements += targets.size();
+        if (!fastTorches) requestedPlacements += targets.size();
         passes++;
         r.extendDeadlineTo(buildRecord.getDeadlineGameTime());
         stage = Stage.BUILD;
@@ -887,6 +897,10 @@ public final class SemanticLightAreaCompanionTask
         propagateBuildProgress();
         if (terminal == null) return TaskState.RUNNING;
         lastBuildResult = buildChild.result(terminal);
+        if (buildChild instanceof TorchLightingPass torches) {
+            requestedPlacements += torches.attemptedPositions().size();
+            torches.attemptedPositions().forEach(pos -> attemptedPositions.add(pos.asLong()));
+        }
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("pass", passes);
         receipt.put("success", lastBuildResult.success());
@@ -985,6 +999,7 @@ public final class SemanticLightAreaCompanionTask
             ItemStack stack = player.getInventory().getItem(slot);
             if (!stack.isEmpty()) carried.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
+        if (player.getOffhandItem().is(Items.TORCH)) carried.merge(Items.TORCH, player.getOffhandItem().getCount(), Integer::sum);
         List<Item> ordered = new ArrayList<>();
         addItem(pinnedSuppliedSource, ordered);
         for (String raw : r.lightPreferences) {
@@ -1019,10 +1034,12 @@ public final class SemanticLightAreaCompanionTask
 
     private int sourcePriority(String id, boolean carried) {
         if (id.equals(pinnedSuppliedSource)) return -1;
+        // 未指定其他灯具时固定默认火把，避免背包里一块稀有光源让整个基地改用昂贵材料。
+        if (r.lightPreferences.isEmpty() && id.equals("minecraft:torch")) return 0;
         for (int i = 0; i < r.lightPreferences.size(); i++) {
             if (id.equals(r.lightPreferences.get(i))) return i;
         }
-        if (carried) return r.lightPreferences.size();
+        if (carried) return r.lightPreferences.size() + 1;
         int fallback = DEFAULT_LIGHT_IDS.indexOf(id);
         if (fallback >= 0) return r.lightPreferences.size() + 1 + fallback;
         return r.lightPreferences.size() + DEFAULT_LIGHT_IDS.size() + 2;
@@ -1341,6 +1358,13 @@ public final class SemanticLightAreaCompanionTask
         data.put("target_cells", targetCells.size());
         data.put("lit_cells", litCells);
         data.put("dark_cell_count", darkCells.size());
+        // 默认回执直接交付未达标格与实测亮度，模型无需从旧规划或理论覆盖反推补漏位置。
+        data.put("lighting_observation", Map.of("minimum_required", r.minimumLight,
+                "minimum_observed_block_light", targetCells.stream().mapToInt(sample -> player.level().isLoaded(sample.pos())
+                        ? player.level().getBrightness(LightLayer.BLOCK, sample.pos()) : -1).min().orElse(-1),
+                "dark_cells", darkCells.stream().map(sample -> Map.of("position",
+                        List.of(sample.pos().getX(), sample.pos().getY(), sample.pos().getZ()), "block_light", sample.light())).toList(),
+                "sampled_cells", targetCells.size(), "lit_cells", litCells, "boundary_verified", areaBoundaryVerified));
         data.put("loaded_columns", loadedColumns);
         data.put("unloaded_columns", unloadedColumns);
         data.put("seed_columns_observed", seedColumnsObserved);

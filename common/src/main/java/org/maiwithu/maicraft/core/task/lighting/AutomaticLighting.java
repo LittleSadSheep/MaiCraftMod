@@ -72,12 +72,16 @@ public final class AutomaticLighting {
             state = receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED ? "light_settling" : "placement_unconfirmed";
         }
         // 关闭只停止新动作，已经发出的火把继续读回执；自救、暂停与区域补光独占时同样只观察。
-        if (!enabled || !allowed || !OffhandTorchPlacer.idle(context)) return;
+        if (!enabled || !context.permitsNativeActions()) return;
+        if (CompanionTickDispatcher.current() instanceof SemanticLightAreaTaskRecord) return;
         // 指定区域拥有自己的灯位与验收；随行助手不能同时插灯污染该任务的材料和覆盖回执。
         if (CompanionTickDispatcher.current() instanceof IntentTaskRecord intent && (intent.paused()
                 || intent.stepIndex() < intent.steps().size() && intent.steps().get(intent.stepIndex()).ability().equals("maicraft:light_area"))) return;
         BlockPos feet = context.player().blockPosition(), eye = BlockPos.containing(context.player().getEyePosition());
+        if (!context.level().isLoaded(feet) || !context.level().isLoaded(eye)) { state = "light_sample_unloaded"; return; }
         visited.add(feet.immutable()); visited.add(eye.immutable());
+        // 主任务忙碌时经过的暗格也属于真实路线，先保留观察再让位，不能只抽取成功插灯的片段宣称覆盖。
+        if (!allowed || !OffhandTorchPlacer.idle(context)) { state = "yielding_to_primary"; return; }
         int light = Math.min(context.level().getBrightness(LightLayer.BLOCK, feet), context.level().getBrightness(LightLayer.BLOCK, eye));
         if (light >= minimum) { state = "bright_enough"; return; }
         // 同一站位只尝试一支，避免高阈值、遮挡或服务端拒绝造成连续撒灯；继续移动后重新实测。
