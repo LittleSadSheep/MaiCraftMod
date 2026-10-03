@@ -40,7 +40,35 @@ public final class RecipeMaterialPlanTest {
         knownRoutePrecedesWideUnknownBranches();
         woolRecoloringDoesNotHidePlainMaterialRoute();
         materialPreferencesReachDeepInputsAndFallBack();
+        carriedAncestorMaterialsRemainUsable();
         System.out.println("RecipeMaterialPlanTest: passed");
+    }
+
+    private static void carriedAncestorMaterialsRemainUsable() {
+        // 为继续采同一种原木而准备斧头时，原木虽在祖先链中，背包已有实物仍可加工成木板和木棍。
+        var oak = id("oak_log"); var oakPlanks = id("oak_planks"); var stick = id("stick");
+        var recipes = Map.of(PLANK, List.of(new Recipe(4, List.of(need(LOG, 1)))),
+                oakPlanks, List.of(new Recipe(4, List.of(need(oak, 1)))),
+                stick, List.of(new Recipe(4, List.of(new Need(List.of(oakPlanks, PLANK), 2)))));
+        var stocked = RecipeMaterialPlan.estimate(List.of(need(stick, 2)), Map.of(LOG, 3L),
+                item -> recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(item.equals(LOG) || item.equals(oak), 40), Set.of(LOG));
+        check(stocked.feasible() && stocked.supplies().isEmpty() && stocked.remaining().get(LOG) == 2,
+                "采集祖先中的现有原木应先用于工具材料，不能被循环规则抹掉后另找木种");
+        // 只允许扣掉确实存在的数量；库存不足时不能递归制造祖先物品来填补缺口。
+        var shortStock = RecipeMaterialPlan.estimate(List.of(need(PLANK, 8)), Map.of(LOG, 1L),
+                item -> recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(item.equals(LOG) || item.equals(oak), 40), Set.of(LOG));
+        check(!shortStock.feasible(), "不能把允许使用现货扩成允许循环补足祖先缺额");
+        var absent = RecipeMaterialPlan.estimate(List.of(need(PLANK, 4)), Map.of(),
+                item -> recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(item.equals(LOG) || item.equals(oak), 40), Set.of(LOG));
+        check(!absent.feasible(), "没有祖先现货时循环限制仍须生效");
+        // 两条配件路线共享唯一一根原木，祖先现货不能因为允许使用而重复记账。
+        var shared = RecipeMaterialPlan.estimate(List.of(need(PLANK, 4), need(PART, 1)), Map.of(LOG, 1L),
+                item -> item.equals(PART) ? List.of(new Recipe(1, List.of(need(LOG, 1)))) : recipes.getOrDefault(item, List.of()),
+                item -> new RecipeMaterialPlan.Source(false, 10000), Set.of(LOG));
+        check(!shared.feasible(), "祖先现货仍按共享数量账扣除，只能消费一次");
     }
 
     private static void materialPreferencesReachDeepInputsAndFallBack() {

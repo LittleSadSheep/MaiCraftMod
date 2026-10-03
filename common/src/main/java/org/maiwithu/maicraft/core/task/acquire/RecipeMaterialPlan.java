@@ -133,7 +133,7 @@ public final class RecipeMaterialPlan {
         // 窄替代组仍先安排，同价分支保留各自库存账，避免先吃掉另一支唯一能用的材料。
         for (Need need : merge(needs).stream().sorted(Comparator.comparingInt(row -> row.alternatives().size())).toList()) {
             List<State> candidates = new ArrayList<>();
-            for (State state : states) for (Allocation allocation : allocate(need, state, blocked, preferred)) {
+            for (State state : states) for (Allocation allocation : allocate(need, state, preferred)) {
                 State base = allocation.state(); int deficit = allocation.missing();
                 if (deficit == 0) { candidates.add(base); continue; }
                 // 固定预算内先考察现货或已知获取方式更近的路线，不能让前面的未知分支把普通木材路线挤出搜索。
@@ -210,20 +210,22 @@ public final class RecipeMaterialPlan {
         for (Need input : recipe.ingredients()) {
             double cheapest = Double.POSITIVE_INFINITY;
             for (ResourceLocation item : input.alternatives()) {
-                if (blocked.contains(item)) continue;
+                // 先承认已有实物，再判断能否继续补缺额；工具链里的祖先原木也可以直接加工。
                 long missing = Math.max(0L, input.count() - pool.get(item));
                 if (missing == 0) cheapest = 0;
-                else if (!unavailable.contains(item)) cheapest = Math.min(cheapest, missing * (double) sources.apply(item).unitCost());
+                else if (!blocked.contains(item) && !unavailable.contains(item))
+                    cheapest = Math.min(cheapest, missing * (double) sources.apply(item).unitCost());
             }
             score += cheapest;
         }
         return score / recipe.outputCount();
     }
 
-    private static List<Allocation> allocate(Need need, State state, Set<ResourceLocation> blocked,
-            Set<ResourceLocation> preferred) {
+    private static List<Allocation> allocate(Need need, State state, Set<ResourceLocation> preferred) {
+        // 循环限制只禁止再次生产或获取祖先缺额，不能抹掉背包及获准仓库中已经观察到的材料。
+        // 先按共享数量账扣现货；剩余不足仍由 expand 的 blocked 检查阻止递归绕回原需求。
         List<ResourceLocation> available = need.alternatives().stream()
-                .filter(item -> !blocked.contains(item) && state.pool.get(item) > 0).toList();
+                .filter(item -> state.pool.get(item) > 0).toList();
         if (available.isEmpty()) return List.of(new Allocation(new State(state), need.count()));
         List<Allocation> allocations = new ArrayList<>(); Set<Map<ResourceLocation, Long>> seen = new HashSet<>();
         // 替代材料分别优先试一次；例如铁和金都能做配件时，也保留把铁留给另一个固定配方的选择。

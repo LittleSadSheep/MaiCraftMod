@@ -47,6 +47,7 @@ public final class AcquisitionRecipePlanningTest {
             stockAwareMaterialTree(world);
             includeCookingInputsWithoutConversionLoops(world);
             batchAlternativesShareOneNearestSourceQuery(world);
+            carriedJungleLogsPrepareToolsWithoutPreference(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -54,6 +55,41 @@ public final class AcquisitionRecipePlanningTest {
             check(world.blockUses() == 0 && world.itemUses() == 0, "配方推演不得提前操作游戏");
         }
         System.out.println("AcquisitionRecipePlanningTest: passed");
+    }
+
+    private static void carriedJungleLogsPrepareToolsWithoutPreference(InteractionWorldTestHarness world) throws Exception {
+        // 复现采八根丛林原木时先准备石斧：祖先仍保留丛林原木，已有三根必须用于木棍前置。
+        world.inventory.clearContent();
+        world.inventory.setItem(0, new ItemStack(Items.JUNGLE_LOG, 3));
+        var wood = Ingredient.of(Items.OAK_PLANKS, Items.JUNGLE_PLANKS);
+        install(world, List.of(recipe("oak_planks", Items.OAK_PLANKS, Ingredient.of(Items.OAK_LOG)),
+                recipe("jungle_planks", Items.JUNGLE_PLANKS, Ingredient.of(Items.JUNGLE_LOG)),
+                recipe("sticks", Items.STICK, wood, wood)));
+        var jungle = BuiltInRegistries.ITEM.getKey(Items.JUNGLE_LOG);
+        var planks = BuiltInRegistries.ITEM.getKey(Items.JUNGLE_PLANKS);
+        var stick = BuiltInRegistries.ITEM.getKey(Items.STICK);
+        var cobble = BuiltInRegistries.ITEM.getKey(Items.COBBLESTONE);
+        var axe = BuiltInRegistries.ITEM.getKey(Items.STONE_AXE);
+        var tool = new AcquisitionNeed(List.of(axe), 1, 1, Set.of(jungle, axe), Set.of(), Set.of(),
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT,
+                        SemanticAcquireTaskRecord.Source.MINE));
+        var recipe = candidate(axe, "minecraft:stone_axe", List.of(
+                new CraftRecoveryCandidate.IngredientDemand(List.of(cobble), 3, 3),
+                new CraftRecoveryCandidate.IngredientDemand(List.of(stick), 2, 2)));
+        var planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
+        var ordinary = planner.materialPlan(recipe, tool);
+        check(ordinary.feasible() && ordinary.supplies().size() == 1
+                && ordinary.supplies().getFirst().alternatives().equals(List.of(cobble)), "已有丛林原木时只应补圆石，不另找橡木");
+        check(ordinary.crafts().getFirst().alternatives().equals(List.of(planks))
+                && ordinary.remaining().get(jungle) == 2, "工具中间件应消耗一根现有丛林原木");
+        planner.preferMaterials(List.of(jungle));
+        var hinted = planner.materialPlan(recipe, tool);
+        check(ordinary.supplies().equals(hinted.supplies()) && ordinary.crafts().equals(hinted.crafts()),
+                "正确使用现货不能依赖调用者预先填写丛林木偏好");
+        // 圆石也已到手后，整棵工具材料树必须由现货覆盖；推演本身不扣真实背包。
+        world.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 3)); world.nextTick();
+        check(planner.materialPlan(recipe, tool).supplies().isEmpty() && world.inventory.getItem(0).getCount() == 3,
+                "材料齐备后不应另开世界采集，规划也不能预支真实原木");
     }
 
     private static void overlappingIngredients(InteractionWorldTestHarness world) throws Exception {
