@@ -354,12 +354,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.RUNNING;
         }
 
-        if (toolExhausted) {
-            if (unreachableDropCount > 0) return unreachableDropFailure();
-            fail("the prepared harvesting tool is exhausted; collected this batch's owned drops "
-                    + "and stopped before switching to bare-hand mining", FailureType.WRONG_TOOL);
-            return TaskState.FAILED;
-        }
+        // 效率工具耗尽只改变拾取和用时，仍可徒手掉落的原木、泥土继续挖；矿石的真实掉落门槛由逐格筛选处理。
 
         // 0) 持续处理已选目标，直到挖掉或确认不可处理。BlockDigger.current() 可能暂时指向遮挡方块，不能覆盖语义目标。
         // 已经选中的这一格尽量接着挖。先让寻路结束必须连贯完成的跳跃／挖掘，避免两边同时控制玩家。

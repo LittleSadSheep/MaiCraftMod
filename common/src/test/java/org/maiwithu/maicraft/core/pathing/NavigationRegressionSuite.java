@@ -92,6 +92,7 @@ import org.maiwithu.maicraft.core.task.acquire.AcquisitionProtectionTest;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifierTest;
 import org.maiwithu.maicraft.core.task.mine.MiningBatchTest;
 import org.maiwithu.maicraft.core.task.mine.MiningToolRequirementTest;
+import org.maiwithu.maicraft.core.task.mine.HarvestToolTierTest;
 import org.maiwithu.maicraft.core.task.mine.NaturalTreeSourceTest;
 import org.maiwithu.maicraft.core.task.mine.NearbyMaterialSourcesTest;
 import org.maiwithu.maicraft.core.task.mine.NoPathVerdictTest;
@@ -142,6 +143,7 @@ public final class NavigationRegressionSuite {
         NearbyMaterialSourcesTest.main(args);
         NoPathVerdictTest.main(args);
         MiningToolRequirementTest.main(args);
+        HarvestToolTierTest.main(args);
         LocalFloorSenseTest.main(args);
         BlueprintImportTest.main(args);
         IntentStateStoreTest.main(args);

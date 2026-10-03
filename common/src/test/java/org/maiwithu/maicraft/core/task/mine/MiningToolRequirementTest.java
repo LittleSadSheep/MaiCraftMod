@@ -35,7 +35,7 @@ public final class MiningToolRequirementTest {
         axe.setDamageValue(axe.getMaxDamage() - 1);
         check(MineBlockTaskRecord.hasEfficientTool(inventory, logs), "a tool with one real use left was treated as broken");
         axe.setDamageValue(axe.getMaxDamage());
-        check(!MineBlockTaskRecord.hasEfficientTool(inventory, logs), "a depleted stack authorized bare-hand fallback");
+        check(!MineBlockTaskRecord.hasEfficientTool(inventory, logs), "耗尽的工具不能冒充仍有采集效率");
         inventory.set(36, new ItemStack(Items.IRON_AXE));
         check(!MineBlockTaskRecord.hasEfficientTool(inventory, logs), "a slot outside the main inventory counted as staged work gear");
         inventory.set(17, new ItemStack(Items.IRON_AXE));
@@ -48,7 +48,7 @@ public final class MiningToolRequirementTest {
                 "bootstrap mining unexpectedly requires the tool it is collecting ingredients to craft");
         check(new MineBlockTaskRecord("prepared", 100, logs, 24, "logs", Set.of(Items.BIRCH_LOG), true)
                         .requireEfficientTool,
-                "prepared work did not retain its no-bare-hand-fallback contract");
+                "已经准备的效率工具应保留耗尽后先收掉落物的提示");
         System.out.println("MiningToolRequirementTest: passed");
     }
 

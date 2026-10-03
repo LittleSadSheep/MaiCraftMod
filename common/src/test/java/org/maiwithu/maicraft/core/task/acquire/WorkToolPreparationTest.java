@@ -51,6 +51,17 @@ public final class WorkToolPreparationTest {
         expect(Blocks.DIRT.defaultBlockState(), 24, 0, 0, 3, "stone_shovel", false);
         expect(Blocks.HAY_BLOCK.defaultBlockState(), 24, 0, 0, 3, "stone_hoe", false);
         expect(Blocks.OBSIDIAN.defaultBlockState(), 24, 0, 0, 1, "diamond_pickaxe", false);
+        // 以真正取得的三块石料为升级依据；木镐即使磨损也不代表已经拿到了材料。
+        var usedWoodenPick = new ItemStack(Items.WOODEN_PICKAXE); usedWoodenPick.setDamageValue(20);
+        check(WorkToolPreparation.bootstrapLimit(List.of(usedWoodenPick), List.of(Blocks.STONE.defaultBlockState())) == 3,
+                "挖掘次数不能冒充已取得三块石料");
+        check(choose(List.of(new ItemStack(Items.WOODEN_PICKAXE)), Blocks.STONE.defaultBlockState(),
+                1, 0, 0, 3).requirement().acceptableItemIds().getFirst().getPath().equals("stone_pickaxe"),
+                "具备石料后最后一块也应使用石镐");
+        check(choose(List.of(new ItemStack(Items.WOODEN_AXE)), wood, 24, 0, 0, 3) != null,
+                "木斧仍不满足常规石制效率标准");
+        check(WorkToolPreparation.batchLimit(List.of(new ItemStack(Items.WOODEN_AXE)), List.of(wood), 24) == 24,
+                "木镐的三块石料规则不能套到伐木动作");
         check(choose(List.of(new ItemStack(Items.IRON_AXE)), wood, 24, 0, 0, 3) == null,
                 "reuse an adequate carried tool without buying a redundant lower-tier one");
         check(choose(List.of(new ItemStack(Items.STONE_PICKAXE)), wood, 24, 0, 0, 3) != null,

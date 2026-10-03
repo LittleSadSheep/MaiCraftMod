@@ -12,7 +12,7 @@ import java.util.Set;
 import java.util.List;
 
 /**
- * 采矿任务单：要找哪些方块、要多少新材料，以及是否只许砍天然树、是否必须有高效工具。
+ * 采矿任务单：要找哪些方块、要多少新材料，以及是否只许砍天然树、是否曾为本批准备效率工具。
  * 任务单复制目标集合，防止调用方之后改列表影响正在执行的工作；具体寻找和采集由 MineCompanionTask 完成。
  */
 public final class MineBlockTaskRecord extends TaskRecord {
@@ -27,7 +27,7 @@ public final class MineBlockTaskRecord extends TaskRecord {
     public final String label;
     /** 明确哪些物品才算目标产物，例如挖铁矿只数粗铁。空集合表示由执行器观察背包变化来猜产物。 */
     public final Set<Item> progressItems;
-    /** 工具耗尽后要结束这批工作，不退回空手慢挖。 */
+    /** 效率工具耗尽后先收掉落物；历史字段名保留，但不能阻止仍可采出材料的徒手动作。 */
     public final boolean requireEfficientTool;
     /** 只把通过天然树外观检查的原木当作材料，避免顺手拆木屋。 */
     public final boolean naturalLogsOnly;

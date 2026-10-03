@@ -666,9 +666,16 @@ public final class SemanticAcquireCompanionTask
                 need.efficientBatchStarted ? Math.max(WorkToolPreparation.BATCH_SIZE, missing(need)) : missing(need),
                 toolMaterialBudget(need, Items.IRON_INGOT), toolMaterialBudget(need, Items.DIAMOND),
                 need.preferredToolTierCap);
+        // 石斧所需原木先正常采回；同一工具已在准备链上时，不能要求先有它才能收集制造它的原料。
+        if (workTool != null) {
+            var proposed = workTool.requirement().acceptableItemIds();
+            if (needs.stream().filter(pending -> pending.toolPrerequisite)
+                    .anyMatch(pending -> pending.itemIds.stream().anyMatch(proposed::contains))) workTool = null;
+        }
         int bootstrap = workTool != null && !workTool.stockOnly()
                 ? WorkToolPreparation.bootstrapLimit(player, blocks) : 0;
         SemanticSourceKnowledge.ToolRequirement tool = SemanticSourceKnowledge.missingTool(player, blocks);
+        boolean optionalUpgrade = tool == null && bootstrap == 0 && workTool != null;
         if (tool == null && bootstrap == 0 && workTool != null) tool = workTool.requirement();
         boolean stockOnlyUpgrade = workTool != null && tool == workTool.requirement() && workTool.stockOnly();
         if (tool != null) {
@@ -694,23 +701,27 @@ public final class SemanticAcquireCompanionTask
                 advanceSource(need);
                 return TaskState.RUNNING;
             }
-            Set<ResourceLocation> lineage = new LinkedHashSet<>(need.lineageItems);
+            // 取工具会推进采集能力，属于新的材料准备链；保留工具祖先防循环，释放原木／圆石祖先以便复用当前木种。
+            Set<ResourceLocation> lineage = needs.stream().filter(pending -> pending.toolPrerequisite)
+                    .flatMap(pending -> pending.itemIds.stream()).collect(Collectors.toCollection(LinkedHashSet::new));
             lineage.addAll(toolItems);
             List<SemanticAcquireTaskRecord.Source> toolSources =
                     AcquisitionSources.forTool(need.allowedSources, stockOnlyUpgrade);
             AcquisitionNeed toolNeed = new AcquisitionNeed(
                     toolItems, count(toolItems) + 1,
-                    need.depth + 1, lineage, need.lineageRecipes, Set.of(),
+                    need.depth + 1, lineage, Set.of(), Set.of(),
                     toolSources);
             toolNeed.stockOnlyTool = stockOnlyUpgrade;
+            toolNeed.optionalWorkTool = optionalUpgrade;
             toolNeed.toolPrerequisite = true;
             toolNeed.lastObservedCount = count(toolNeed.itemIds);
             need.miningToolPrerequisitePushed = true;
             addIssue("mine", "preparing_harvesting_tool",
-                    "prepare a durable efficient tool before this batch, using available materials",
+                    optionalUpgrade ? "prepare an efficient tool inside this acquisition before continuing the batch"
+                            : "prepare the tool required for native harvesting drops",
                     Map.of("tool_family", tool.toolFamily(),
                             "minimum_tier", tool.minimumTier(),
-                            "acceptable_tool_count", tool.acceptableItemIds().size()));
+                            "acceptable_tool_count", tool.acceptableItemIds().size(), "optional_upgrade", optionalUpgrade));
             needs.push(toolNeed);
             renewProgressLease();
             return TaskState.RUNNING;
@@ -1771,6 +1782,21 @@ public final class SemanticAcquireCompanionTask
                     "allowed_sources_exhausted",
                     "none of the allowed source families could make the final inventory fact true",
                     FailureType.NO_MATERIAL);
+        }
+        // 效率工具链缺料时结清已发生的效果，再回到原采集；真实工具门槛仍在下一次派发前检查。
+        AcquisitionNeed optionalTool = needs.stream().filter(pending -> pending.optionalWorkTool).findFirst().orElse(null);
+        if (optionalTool != null && !outcomeUncertain && needs.stream().noneMatch(pending -> pending.decisionRequired)) {
+            AcquisitionNeed completed;
+            do { completed = needs.pop(); optionalTool.effectsObserved |= completed.effectsObserved; }
+            while (completed != optionalTool);
+            AcquisitionNeed parent = needs.peek();
+            // 富余材料升级失败先回到石制标准；石制准备也失败则本需求继续采集，避免反复索要同一把斧头。
+            parent.preferredToolTierCap = optionalTool.stockOnlyTool ? 1 : 0;
+            parent.miningToolPrerequisitePushed = false;
+            parent.effectsObserved |= optionalTool.effectsObserved;
+            addIssue("mine", "optional_work_tool_unavailable", "settled optional tool preparation; resume the original acquisition",
+                    Map.of("attempted_tool_ids", itemStrings(optionalTool.itemIds), "partial_effects", optionalTool.effectsObserved));
+            return TaskState.RUNNING;
         }
         // 先有界记住普通路线尚不能提供的子材料，再照常试其他未产生副作用的配方；不能让第一条失败叶子劫持全局规划。
         rememberProcessPlanningNeed(need);

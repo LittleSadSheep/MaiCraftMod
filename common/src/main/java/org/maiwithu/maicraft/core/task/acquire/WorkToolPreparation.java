@@ -13,6 +13,7 @@ import net.minecraft.world.item.HoeItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.PickaxeItem;
+import net.minecraft.world.item.TieredItem;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -136,10 +137,14 @@ public final class WorkToolPreparation {
                 work, iron, diamonds, preferredTierCap);
     }
 
-    // 小于四单位的开局工作不主动升级；较大工作先选一种来源的工具族和最低等级，再结合存量偏好找参考工具。
+    // 已有木制工具时即使只剩一块目标也评估石制效率；父任务按实际取得的石料备料，不按使用次数判失败。
     static Choice missing(List<ItemStack> inventory, List<BlockState> sources, int work,
                           long iron, long diamonds, int preferredTierCap) {
-        if (work < BATCH_SIZE) return null;
+        if (preferredTierCap == 0) return null;
+        boolean woodenWork = inventory.stream().anyMatch(stack -> wooden(stack)
+                && sources.stream().anyMatch(state -> stack.getDestroySpeed(state) > 1
+                    && (!state.requiresCorrectToolForDrops() || stack.isCorrectToolForDrops(state))));
+        if (work < BATCH_SIZE && !woodenWork) return null;
         BlockState source = sources.stream()
                 .filter(state -> !family(state).equals("harvesting_tool"))
                 .min(Comparator.comparingInt(WorkToolPreparation::requiredTier)
@@ -168,4 +173,8 @@ public final class WorkToolPreparation {
 
     private static int requiredTier(BlockState state) { return SemanticSourceKnowledge.tierRank(state); }
     private static String family(BlockState state) { return SemanticSourceKnowledge.toolFamily(state); }
+    private static boolean wooden(ItemStack stack) {
+        return stack.getItem() instanceof TieredItem tool
+                && tool.getTier().getIncorrectBlocksForDrops().equals(BlockTags.INCORRECT_FOR_WOODEN_TOOL);
+    }
 }

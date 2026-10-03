@@ -57,6 +57,7 @@ import org.maiwithu.maicraft.core.scan.SearchGeometryTest;
 import org.maiwithu.maicraft.core.scan.TargetIndexInvalidationTest;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionSettlementTest;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparationTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionMiningToolsTest;
 import org.maiwithu.maicraft.core.task.build.BuildExecutionContextTest;
 import org.maiwithu.maicraft.core.task.build.MachineBlueprintGeometryTest;
 import org.maiwithu.maicraft.core.task.supply.BuildBatchCompletionTest;
@@ -213,6 +214,8 @@ public final class MachineRegressionSuite {
             throw new AssertionError("Cancellation lost or leaked native partial-effect evidence");
         }
         WorkToolPreparationTest.main(args);
+        try { AcquisitionMiningToolsTest.main(args); }
+        catch (Exception failure) { throw new AssertionError(failure); }
         SemanticInteractionToolTest.main(args);
         ToolRegistryTest.main(args);
         NearbySignPerceptionTest.main(args);

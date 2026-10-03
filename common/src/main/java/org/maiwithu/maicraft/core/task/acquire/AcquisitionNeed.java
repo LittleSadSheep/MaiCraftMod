@@ -41,6 +41,8 @@ final class AcquisitionNeed {
     boolean miningToolPrerequisitePushed;
     int preferredToolTierCap = 3;
     boolean stockOnlyTool;
+    /** 为提速而补的工具可在缺料后放弃，不能把可徒手完成的原采集改判为缺少必需工具。 */
+    boolean optionalWorkTool;
     boolean toolPrerequisite;
     boolean efficientBatchStarted;
     boolean effectsObserved;
