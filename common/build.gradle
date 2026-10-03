@@ -243,6 +243,30 @@ def regressionSuites = [
         heap: '512m', directory: 'spiral-walker-regression', timeoutSeconds: 45,
         purpose: '验证螺旋步进的转向次序、边长增长与落点合成'
     ],
+    // 挖掘公平闸门独立回放：上帝视角索引命中的埋藏矿不能成为可挖目标，回执不得携带透视信息。
+    fairMineGateRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.FairMineGateTest',
+        heap: '512m', directory: 'fair-mine-gate-regression', timeoutSeconds: 90,
+        purpose: '验证挖掘目标只认即时可见或观察记忆见过，空手回执无透视泄漏'
+    ],
+    // 授权探矿独立回放：生成带表只认公开数据、决策按授权与维度分步、掘进预算耗尽诚实收手。
+    prospectingRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.ProspectingTest',
+        heap: '512m', directory: 'prospecting-regression', timeoutSeconds: 120,
+        purpose: '验证生成带小表、探矿决策与掘进驱动的预算与诚实回执'
+    ],
+    // 探矿编排交接独立回放：公平空手 + 授权 → 下降子任务 → 掘进采矿；授权关与表外物品不派。
+    acquisitionProspectingRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.acquire.AcquisitionProspectingHandoffTest',
+        heap: '512m', directory: 'acquisition-prospecting-regression', timeoutSeconds: 90,
+        purpose: '验证探矿编排交接：下降目标 Y 取生成带推荐值，掘进授权显式携带'
+    ],
+    // 能力指针防漂移：契约与回执文本点名的能力必须仍在能力表里，改名漏改文本在此失败。
+    abilityPointerDriftRegression: [
+        entry: 'org.maiwithu.maicraft.intent.AbilityPointerDriftTest',
+        heap: '512m', directory: 'ability-pointer-drift-regression', timeoutSeconds: 90,
+        purpose: '验证契约与 find_block 指路文本点名的能力均在 KNOWN_ABILITIES 中'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。
