@@ -46,6 +46,15 @@ public final class SuicideTask implements Task {
     }
 
     @Override public TaskState tick(LocalPlayer body) {
+        try { return advance(body); }
+        catch (RuntimeException failure) {
+            // 规则读取、界面或导航异常也走同一松键出口，回执保留真实错误，不能留着“仍在寻死”的旧说明。
+            return finish("Native suicide execution stopped: " + failure.getClass().getSimpleName()
+                    + ": " + failure.getMessage(), TaskState.FAILED);
+        }
+    }
+
+    private TaskState advance(LocalPlayer body) {
         if (ended) return deathObserved ? TaskState.SUCCESS : TaskState.FAILED;
         if (body != player || player.isRemoved()) return finish("The original body is unavailable.", TaskState.CANCELLED);
         if (observeDeath(body)) return TaskState.SUCCESS;
