@@ -40,6 +40,16 @@ public final class VehicleFeedbackPilotTest {
         weakSteering.cancel();
         for(int i=0;i<20&&!weakSteering.terminal();i++)weakSteering.observe(steeringTick+i,new VehicleFeedbackPilot.Sample(steeringAt,steeringYaw),true);
         check(weakSteering.terminal()&&!weakSteering.succeeded()&&weakSteering.command().equals(plan.neutral()),"校准后取消仍应回正、刹车且不冒称抵达");
+        // 低速车的最大每刻转角可能仍小于快速行驶阈值；方向稳定且单位距离转角明确时，驾驶阶段仍应使用它。
+        var creeping=new VehicleFeedbackPilot(plan,new Vec3(12,0,12));Vec3 creepAt=Vec3.ZERO;double creepYaw=0;
+        for(int tick=0;tick<2000&&!creeping.terminal()&&creeping.phase()!=VehicleFeedbackPilot.Phase.DRIVE;tick++) {
+            var command=creeping.command();double velocity=(15-command.get("unfamiliar_control"))*.003;
+            creepYaw+=command.get("unfamiliar_steering")*.000001*(velocity>0?1:0);
+            creepAt=creepAt.add(Math.sin(creepYaw)*velocity,0,Math.cos(creepYaw)*velocity);
+            creeping.observe(tick,new VehicleFeedbackPilot.Sample(creepAt,creepYaw),true);
+        }
+        check(creeping.phase()==VehicleFeedbackPilot.Phase.DRIVE&&creeping.command().get("unfamiliar_steering")==180,
+                "实际缓慢转向不能被忽略成只会直行；应使用已测试的有效方向");
         var spinning=new VehicleFeedbackPilot(plan,new Vec3(0,0,1));
         for(int tick=0;tick<500&&!spinning.terminal();tick++) spinning.observe(tick,new VehicleFeedbackPilot.Sample(Vec3.ZERO,tick*.05),true);
         check(spinning.terminal()&&!spinning.succeeded(),"a rotating hull is not a stopped arrival");

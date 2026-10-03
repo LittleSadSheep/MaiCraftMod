@@ -48,7 +48,7 @@ public final class VehicleFeedbackPilot {
             double desiredHeading=Math.atan2(target.x,target.z);
             double driveHeading=previous.yaw()+Math.atan2(drive.localVelocity().x,drive.localVelocity().z);
             double error=wrap(desiredHeading-driveHeading);
-            if(Math.abs(error)>.10) responses.stream().filter(r->!r.propulsion() && r.yawRate()*error>0 && Math.abs(r.yawRate())>.0005)
+            if(Math.abs(error)>.10) responses.stream().filter(r->!r.propulsion() && r.yawRate()*error>0 && usefulTurn(r))
                     .max(Comparator.comparingDouble(r->Math.abs(r.yawRate())))
                     .ifPresent(r->result.put(r.input(),r.value()));
         }
@@ -121,6 +121,11 @@ public final class VehicleFeedbackPilot {
                 &&(drive?r.localVelocity().horizontalDistance()>.003:Math.abs(r.yawRate())>.0005)
                 &&Math.signum(r.value()-probe.input().neutral())==Math.signum(delta)
                 &&Math.abs(r.value()-probe.input().neutral())<Math.abs(delta));
+    }
+    private static boolean usefulTurn(Response response) {
+        double turn=Math.abs(response.yawRate()),speed=response.localVelocity().horizontalDistance();
+        // 慢速收车时每刻转角虽小，单位行驶距离仍有明确转向；保留噪声下限，再按曲率识别这种有效响应。
+        return turn>.0005 || turn>.00005&&speed>.003&&turn/speed>.01;
     }
     public void cancel() { cancelled=true; stop("driving cancelled; neutral controls requested"); }
     private boolean near(Vec3 point) { return point.subtract(destination).horizontalDistance()<=3 && Math.abs(point.y-destination.y)<=3; }
