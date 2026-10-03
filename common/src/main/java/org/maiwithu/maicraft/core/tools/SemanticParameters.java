@@ -84,7 +84,11 @@ public final class SemanticParameters {
     public static void rejectUnknown(JsonObject object, Set<String> allowed, String label) {
         // 明确提供但不认识的字段必须报错，不能把玩家的限制或数量要求悄悄丢掉。
         for (String key : object.keySet()) {
-            if (!allowed.contains(key)) throw new IllegalArgumentException(label + " does not accept " + key);
+            if (allowed.contains(key)) continue;
+            // 拒绝必须带出合法键集合：调用方只能看到这条文本，不说合法集合它只能逐键盲试。
+            String accepted = String.join(", ", allowed.stream().sorted().toList());
+            throw new IllegalArgumentException(label + " does not accept " + key
+                    + "; accepted keys: " + accepted);
         }
     }
 }
