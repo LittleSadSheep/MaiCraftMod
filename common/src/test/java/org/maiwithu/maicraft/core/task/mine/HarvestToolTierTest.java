@@ -41,6 +41,10 @@ public final class HarvestToolTierTest {
             // 金镐虽快但不能掉钻石；真正执行时应选择主背包里的铁镐。
             world.inventory.clearContent();
             world.inventory.setItem(0, new ItemStack(Items.GOLDEN_PICKAXE));
+            // 只有副手有铁镐时，当前主手仍不能采出钻石；前置判定不能比实际工具切换器多算槽位。
+            world.inventory.setItem(40, new ItemStack(Items.IRON_PICKAXE));
+            check(!BlockHelper.canHarvest(world.inventory, Blocks.DIAMOND_ORE.defaultBlockState()), "副手镐不能担保主手采矿掉落");
+            world.inventory.setItem(40, ItemStack.EMPTY);
             world.inventory.setItem(20, new ItemStack(Items.IRON_PICKAXE));
             check(ToolSelect.bestSlot(world.player, Blocks.DIAMOND_ORE.defaultBlockState()) == 20,
                     "采收正确性必须优先于挖掘速度");

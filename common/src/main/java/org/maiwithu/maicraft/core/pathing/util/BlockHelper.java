@@ -346,13 +346,16 @@ public final class BlockHelper {
      * 因此成本模型会拒绝该目标，break/mine 工具也会阻止操作。此处与 {@code switchToBestTool} 共用全背包扫描；后者可把背包里的工具换到手上，
      * 所以判定、成本和实际执行都检查完整背包，而不只检查快捷栏。
      */
-    // 看是否具备取得正常掉落物的工具；背包扫描范围由传入容器决定，这里不负责把该物品装备到手上。
+    // 看主背包是否有能正常取得掉落物的可用工具；这里只核对实物，切到主手仍由动作执行器完成。
     public static boolean canHarvest(Container inv, BlockState state) {
         if (!state.requiresCorrectToolForDrops()) {
             return true;
         }
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            if (inv.getItem(i).isCorrectToolForDrops(state)) {
+        // 与实际切主手的工具选择器保持一致：副手和盔甲格的镐不能替主手保证掉落，耗尽的工具也不能担保采收。
+        for (int i = 0; i < Math.min(36, inv.getContainerSize()); i++) {
+            var tool = inv.getItem(i);
+            if ((!tool.isDamageableItem() || tool.getDamageValue() < tool.getMaxDamage())
+                    && tool.isCorrectToolForDrops(state)) {
                 return true;
             }
         }

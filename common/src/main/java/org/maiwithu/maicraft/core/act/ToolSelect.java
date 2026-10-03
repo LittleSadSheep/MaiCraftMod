@@ -39,7 +39,9 @@ public final class ToolSelect {
         int usableSlots = Math.min(36, inv.getContainerSize());
         for (int i = 0; i < usableSlots; i++) {
             ItemStack s = inv.getItem(i);
-            if (s.isDamageableItem() && s.getMaxDamage() - s.getDamageValue() < minimumDurability) continue;
+            // 先排除已经耗尽的实物，再比较本批耐久；不能因旧栈仍在槽位里而把坏镐选回主手。
+            if (s.isDamageableItem() && (s.getDamageValue() >= s.getMaxDamage()
+                    || s.getMaxDamage() - s.getDamageValue() < minimumDurability)) continue;
             float spd = s.getDestroySpeed(state);
             if (spd <= 1.0f) continue;
             if (!tierGated || s.isCorrectToolForDrops(state)) {
