@@ -26,7 +26,33 @@ public final class GoalCheckpointCompatibilityTest {
         verify(new Goal("maicraft:cook", "旧版烹饪地点",
                 new Goal.SemanticTarget("prior_result", null, null, null),
                 "{\"item_id\":\"minecraft:iron_ingot\"}", "{}", List.of(), List.of()));
+        verifySequenceSteps();
         System.out.println("GoalCheckpointCompatibilityTest: passed");
+    }
+
+    private static void verifySequenceSteps() throws Exception {
+        var constructor=IntentRuntime.class.getDeclaredConstructor();constructor.setAccessible(true);
+        var runtime=constructor.newInstance();
+        var identity=new StateIdentity("8".repeat(64),Files.createTempDirectory("sequence-goal-"));
+        field("stateIdentity").set(runtime,identity);
+        var store=(IntentStateStore)field("stateStore").get(runtime);
+        var step=new Goal("maicraft:wait_for_condition","分析失败后仍继续收车",null,"{\"after_s\":1}","{}",
+                List.of(),List.of(),List.of(),"continue");
+        var goal=new Goal("maicraft:sequence","保留试运行后的收车步骤",null,"{}","{}",List.of(),List.of(step));
+        SemanticGoalContract.validate(goal,IntentRuntime.KNOWN_ABILITIES);
+        var plan=Plan.compile(goal,0);
+        var original=new IntentTaskRecord(UUID.randomUUID(),plan.id(),goal,identity.key());
+        original.addAttempt(new IntentTaskRecord.AttemptSnapshot(0,step,TaskState.FAILED,"fixture analysis failed",TaskResult.fail("analysis failed").toJson(),1));
+        store.saveAsync(identity,IntentStateCodec.encode(identity.key(),List.of(plan),List.of(original),
+                Map.of("sequence-goal",original.externalId()),List.of())).join();
+        // 真实恢复入口必须同时恢复摊平步骤和失败尝试，不能删掉 continue 声明或清空整个存档绕过异常。
+        var restore=IntentRuntime.class.getDeclaredMethod("restoreBound",long.class);restore.setAccessible(true);restore.invoke(runtime,100L);
+        runtime.requireRecoveredState();var restored=runtime.task(original.externalId());
+        check(restored!=null&&restored.paused()&&restored.steps().getFirst().toleratesFailure(),"组合步骤的失败容忍声明未恢复");
+        check(restored.attempts().getFirst().goal().toleratesFailure(),"历史失败尝试丢失原步骤语义");
+        check(restored.goal().equals(goal)&&runtime.taskForRequestKey("sequence-goal")==restored,"重启后丢失组合目标或请求身份");
+        try {runtime.compile(step,101);throw new AssertionError("恢复兼容不能放宽新请求的顶层 on_failure 规则");}
+        catch(SemanticContractException expected) {check(expected.violationCode().equals("on_failure_not_allowed"),"错误的独立请求应仍被拒绝");}
     }
 
     private static void verify(Goal goal) throws Exception {

@@ -561,9 +561,10 @@ public final class IntentRuntime {
                 }
                 for (IntentStateCodec.TaskSnapshot snapshot : decoded.tasks()) {
                     validateRestoredGoal(snapshot.goal());
-                    for (Goal step : snapshot.steps()) validateRestoredGoal(step);
+                    // 原生试运行后的分析可能允许失败后继续刹车；摊平保存的步骤不能在重启时被误当成独立请求。
+                    for (Goal step : snapshot.steps()) validateRestoredGoal(step,true);
                     for (IntentTaskRecord.AttemptSnapshot attempt : snapshot.attempts()) {
-                        validateRestoredGoal(attempt.goal());
+                        validateRestoredGoal(attempt.goal(),true);
                     }
                     IntentTaskRecord record = IntentTaskRecord.restored(
                             snapshot.id(), snapshot.planId(), snapshot.goal(),
@@ -754,7 +755,11 @@ public final class IntentRuntime {
 
     /** 恢复历史不等于重新批准执行；仍保留结构、容量与内部动作边界，避免旧记录锁住整个世界的任务。 */
     private void validateRestoredGoal(Goal goal) {
-        SemanticGoalContract.validateRestored(goal, KNOWN_ABILITIES);
+        validateRestoredGoal(goal,false);
+    }
+
+    private void validateRestoredGoal(Goal goal,boolean storedStep) {
+        SemanticGoalContract.validateRestored(goal, KNOWN_ABILITIES,storedStep);
         IntentStateCodec.requirePersistableGoal(goal);
         rejectMicroInstructions(goal);
     }

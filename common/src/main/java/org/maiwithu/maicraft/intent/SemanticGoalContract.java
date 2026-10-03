@@ -25,7 +25,12 @@ final class SemanticGoalContract {
 
     /** 旧等待、取物和烹饪参数曾被宽松接收；保留历史供查询、取消和修订，重新执行仍须通过当前检查。 */
     static void validateRestored(Goal goal, Set<String> knownAbilities) {
-        validate(goal, knownAbilities, "goal", true, false);
+        validateRestored(goal,knownAbilities,false);
+    }
+
+    /** 检查点把组合任务摊平成步骤保存；恢复这些步骤时仍保留原来的兄弟步骤语义。 */
+    static void validateRestored(Goal goal, Set<String> knownAbilities,boolean storedStep) {
+        validate(goal, knownAbilities, "goal", true, storedStep);
     }
 
     private static void validate(Goal goal, Set<String> knownAbilities, String path, boolean restoredHistory,
