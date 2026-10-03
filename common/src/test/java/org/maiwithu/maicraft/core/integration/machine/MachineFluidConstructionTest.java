@@ -80,6 +80,7 @@ public final class MachineFluidConstructionTest {
         constructionKeepsNativeReceipt(plan);
         modificationRecoversDeclaredSourcesBeforeBuilding();
         reactionProducesBlueprintDiff();
+        unavailableComparisonSaysSo();
         System.out.println("MachineFluidConstructionTest: passed");
     }
     private static void reactionProducesBlueprintDiff() throws Exception {
@@ -101,6 +102,29 @@ public final class MachineFluidConstructionTest {
                             && diff.getAsJsonArray("differences").size() == 1 && diff.toString().contains("minecraft:obsidian")
                             && ((Number) result.data().get("verified_source_fluid_targets")).intValue() == 0,
                     "回执给出真实黑曜石差异，已处理一桶不能冒充已有一个水源");
+            check(result.message().contains("blueprint differences are attached"), "有真实对档时收尾话术才声称差异已附");
+        }
+    }
+
+    /** 对档前置缺失时收尾话术必须如实说"不可用"，不能沿用"差异已附"的样板（issue 024）。 */
+    private static void unavailableComparisonSaysSo() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            var document = JsonParser.parseString("{\"blocks\":[{\"offset\":[3,1,3],\"block_id\":\"minecraft:water\"}]}").getAsJsonObject();
+            var plan = MachineConstructionPlan.compile(BlockPos.ZERO, MachineBlueprintDocument.compile(document, MachineConstructionPlan.registry()), false);
+            var task = new MachineBuildTask(world.player, new MachineBuildTaskRecord("diff-unavailable", 1000, plan,
+                    "minecraft:overworld", MaterialPolicy.INVENTORY_ONLY, List.of()));
+            var begin = MachineBuildTask.class.getDeclaredMethod("beginComparison"); begin.setAccessible(true);
+            check(begin.invoke(task) == TaskState.SUCCESS, "无档案时对档以占位收场，不再等待");
+            var result = task.result(TaskState.SUCCESS);
+            var diff = (JsonObject) result.data().get("blueprint_diff");
+            check(!diff.get("comparison_complete").getAsBoolean()
+                            && "full_machine_blueprint_unavailable".equals(diff.get("reason").getAsString())
+                            && !Boolean.TRUE.equals(result.data().get("machine_geometry_verified")),
+                    "对档占位如实标注不可用原因，整机几何不虚报已核实");
+            check(result.message().contains("comparison is unavailable")
+                            && result.message().contains("full_machine_blueprint_unavailable")
+                            && !result.message().contains("differences are attached"),
+                    "无对档时收尾话术不得声称差异已附");
         }
     }
 

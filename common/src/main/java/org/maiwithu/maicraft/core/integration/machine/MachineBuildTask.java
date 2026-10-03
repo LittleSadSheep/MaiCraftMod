@@ -550,7 +550,13 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         supply.cancel(player); BuildPreviewGate.release(r); super.cleanup();
     }
     // 结构完工不替组件选择操作入口；无容器菜单的工作面也可正常加工，供料和实物产出仍须另外验证。
-    @Override protected String successMessage() { return "Native construction actions completed; observations and blueprint differences are attached. Actual machine operation and output remain unverified."; }
+    // 收尾话术与 resultData 的实际附着物一致：对档占位（comparison_complete:false）不得声称"差异已附"（issue 024）。
+    @Override protected String successMessage() {
+        if (comparison != null) return "Native construction actions completed; observations and full-machine blueprint differences are attached. Actual machine operation and output remain unverified.";
+        String reason = comparisonIssue == null ? "unknown" : String.valueOf(comparisonIssue.get("reason"));
+        return "Native construction actions completed; observations are attached, but the full-machine blueprint comparison is unavailable ("
+                + reason + "). Actual machine operation and output remain unverified.";
+    }
     @Override public Map<String,Object> progress() {
         // 让上层建造/加工任务透出真正等待的原生阶段，避免站位或瞄准停滞只剩一个笼统的建造中状态。
         var data=new LinkedHashMap<String,Object>(); data.put("task",name()); data.put("phase",phase.name().toLowerCase(Locale.ROOT));
