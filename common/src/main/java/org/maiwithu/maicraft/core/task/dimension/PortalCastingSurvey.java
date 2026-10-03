@@ -53,7 +53,8 @@ final class PortalCastingSurvey implements AutoCloseable {
                 terrain = proposed;
                 if (!proposed.reserveObserved()) continue;
                 // 同一池边优先少填岩浆、少用方块的朝向；弯岸可以原生填直，不必只等待天然完整岸线。
-                if (preparation == null || terrainCost(proposed) < terrainCost(preparation)) {
+                if (preparation == null || proposed.sourcesReplaced() < preparation.sourcesReplaced()
+                        || proposed.sourcesReplaced() == preparation.sourcesReplaced() && proposed.fill().size() < preparation.fill().size()) {
                     selected = candidate; preparation = proposed;
                 }
             }
@@ -78,9 +79,6 @@ final class PortalCastingSurvey implements AutoCloseable {
                     || NavigationSafetyContext.protectsMutation(at) || NavigationSafetyContext.forbidsBody(at)) return false;
         }
         return true;
-    }
-    private static int terrainCost(PortalCastingTerrain.Preparation preparation) {
-        return preparation.sourcesReplaced() * 9 + preparation.fill().size();
     }
 
     /** 每桶取材前刷新源格，排除门框与模具；流水或已经凝固的旧命中都不能再次取桶。 */

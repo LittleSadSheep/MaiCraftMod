@@ -29,7 +29,7 @@ public final class PortalCastingWorkflowTest {
             for (int x = 4; x <= 11; x++) for (int z = 6; z <= 12; z++)
                 world.set(new BlockPos(x, 1, z), z == 6 ? Blocks.STONE.defaultBlockState() : Blocks.LAVA.defaultBlockState());
             world.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
-            world.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 16));
+            world.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 64));
             world.inventory.setItem(2, new ItemStack(Items.STONE_PICKAXE));
             var policy = new PortalPreparationPolicy(true, false, false, 128, MaterialPolicy.INVENTORY_ONLY, List.of(), List.of());
             int[] pours = {0};

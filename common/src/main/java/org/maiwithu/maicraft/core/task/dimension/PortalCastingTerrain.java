@@ -30,7 +30,8 @@ final class PortalCastingTerrain {
 
     static List<BlockPos> platform(NetherPortalCastingLayout layout) {
         var cells = new ArrayList<BlockPos>();
-        for (int behind = 1; behind <= 2; behind++) for (int across = -1; across <= 2; across++)
+        // 后方落水列距门内回流坑只有两格；左右和背后各多留一格台面，避免弯池的旁支形成同样近的落水口。
+        for (int behind = 1; behind <= 4; behind++) for (int across = -2; across <= 3; across++)
             cells.add(layout.cell(across, 0, behind));
         return List.copyOf(cells);
     }
