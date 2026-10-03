@@ -42,6 +42,8 @@ public final class NativeVehicleControls {
     public boolean apply(LocalPlayerContext ctx,SableStructureBridge.Structure structure,Map<String,Double> desired) {
         last=ctx;
         if(!poll(ctx)) return false;
+        // 入座前换空手可能仍在结清背包关闭；先完成原生界面交接，再提交世界中的油门和方向盘协议。
+        if(!ctx.menus().ensureWorldVisible(ctx)) return false;
         for(var input:plan.inputs()) {
             double value=input.clamp(desired.getOrDefault(input.id(),input.neutral()));
             var original=observation.cell(input.id()); BlockPos pos=original.pos();
