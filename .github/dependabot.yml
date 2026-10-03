@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  # 固定的 Action 提交由机器人每周检查更新，更新 PR 仍经过 CI 并由维护者决定是否合并。
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: '10:00'
+      timezone: Asia/Singapore
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  # Minecraft、映射和加载器版本需要配套验证；自动更新仅覆盖随 Mod 分发的数据库与网页解析器。
+  - package-ecosystem: gradle
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: '10:00'
+      timezone: Asia/Singapore
+    open-pull-requests-limit: 3
+    allow:
+      - dependency-name: org.xerial:sqlite-jdbc
+      - dependency-name: org.jsoup:jsoup
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]

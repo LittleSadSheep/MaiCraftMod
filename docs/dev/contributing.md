@@ -76,6 +76,18 @@
 
 测试夹具会直接构造玩家、世界或菜单的必要部分，便于重复验证具体行为。夹具通过不等于实际整合包已经验收。实际联机、模组版本差异、画面和交互体验仍要在专用测试世界检查。
 
+## GitHub 自动检查
+
+向 `dev`、`main` 推送或提交以这两个分支为目标的 PR，会触发 `CI`；也可以在 Actions 页面手动运行。Windows 和 Linux 都使用 Java 21、仓库 Wrapper 和单 worker 执行完整 `build`，覆盖公共回归及 Fabric、NeoForge 安装包。工作流使用 `bash ./gradlew`，不依赖检出时的可执行权限。
+
+构建通过后，在该次 Actions 运行的 Artifacts 中下载 `maicraft-<系统>-<提交 SHA>`，按加载器选择对应 JAR。这里是用于测试的构建产物，保存 14 天，不会创建或发布 Release。`diagnostics-<系统>-<提交 SHA>` 同样保留 14 天，包含构建日志和生成的测试报告；独立 `main` 回归的断言结果在 `gradle-build.log` 中。
+
+`CodeQL` 在 PR、`main` 推送、每周定时及手动触发时扫描 Java 与 GitHub Actions。Java 扫描显式编译三个模块，结果显示在仓库的 Security → Code scanning。扫描和离线回归都不能代替游戏内验收。
+
+Dependabot 每周一新加坡时间 10:00 检查 Actions，以及 SQLite JDBC、jsoup 的非主版本更新，向 `dev` 提交更新 PR。Minecraft、映射和加载器版本继续配套人工升级。Action 固定到提交 SHA；更新 PR 需正常检查和审阅，不自动合并。
+
+这些配置使用 GitHub 自动提供的令牌，无需额外仓库 Secret。定时扫描和 Dependabot 配置需要进入远端默认分支 `main` 后生效；手动触发按钮也以默认分支中的工作流为准。
+
 ## 单人世界自动验收
 
 从模板复制到新的存档目录，再通过快速启动参数进入副本。副本目录必须尚不存在，避免把新一轮测试混进旧施工现场：

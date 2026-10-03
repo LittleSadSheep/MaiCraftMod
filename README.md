@@ -4,6 +4,8 @@
 ![Java 21](https://img.shields.io/badge/Java-21-e76f00)
 ![Fabric & NeoForge](https://img.shields.io/badge/Loader-Fabric%20%7C%20NeoForge-6f4cbb)
 ![License GPL-3.0-only](https://img.shields.io/badge/License-GPL--3.0--only-blue)
+[![CI](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/codeql.yml)
 
 > 让支持 MCP 的 AI 代理在 Minecraft 中感知环境、规划目标，并通过真实的第一人称操作完成任务。
 
@@ -145,6 +147,8 @@ Linux 或 macOS 使用：
 - NeoForge：`neoforge/build/libs/maicraft-neoforge-1.21.1-<version>.jar`
 
 将与你的加载器匹配、文件名不含 `sources` 的 JAR 放入客户端 `mods` 目录。Fabric 版本还需要 Fabric API。
+
+CI 构建通过后，也可以从 [GitHub Actions](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml) 对应运行的 Artifacts 下载双加载器测试包；产物保留 14 天，不会自动发布 Release。自动检查与日志说明见[开发指南](docs/dev/contributing.md#github-自动检查)。
 
 要启用服务端增强，在服务器 `mods` 目录中安装对应加载器的 MaiCraft JAR；建议客户端与服务端使用相同版本。单人世界由同一个客户端安装提供集成服务端支持。连接未安装 MaiCraft 的服务器时，普通客户端感知、建造及已有原生操作继续可用。
 

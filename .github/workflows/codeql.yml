@@ -1,0 +1,76 @@
+name: CodeQL
+
+# PR 检查待合并代码；集成分支推送和每周扫描持续复查默认分支的安全问题。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [dev, main]
+  schedule:
+    - cron: '41 20 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle and validate wrapper
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # 扫描器与 Gradle 会同时占用内存，为三个模块的实际编译保留空间。
+          ram: 3072
+          threads: 2
+
+      - name: Compile all mod entry points
+        if: matrix.language == 'java-kotlin'
+        # 显式编译公共逻辑和两个加载器入口，让扫描使用真实 Minecraft 类路径；回归由 CI 负责。
+        # 禁用编译结果缓存，确保 CodeQL 能观察本次 javac 执行，而不是复用未追踪的类文件。
+        run: >-
+          bash ./gradlew :common:classes :fabric:classes :neoforge:classes
+          --no-daemon --no-parallel --max-workers=1 --no-build-cache --console=plain --stacktrace
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:${{ matrix.language }}

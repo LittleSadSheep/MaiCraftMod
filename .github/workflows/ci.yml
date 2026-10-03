@@ -1,0 +1,83 @@
+name: CI
+
+# 开发分支、集成分支和 PR 都运行完整回归，防止只编译成功却漏掉角色行为测试。
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支或 PR 有新提交时取消旧构建，让结果对应最新代码。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and regressions (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # SQLite 与 LWJGL 使用原生库，同时验证玩家常用的 Windows 和 Linux 构建环境。
+        os: [ubuntu-24.04, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          # PR 只读取缓存；两个常用分支可保存依赖，减少 Minecraft 映射的重复下载。
+          cache-read-only: ${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main') }}
+
+      - name: Build both loaders and run all regressions
+        # build 包含 common:check 中的独立 main 回归；串行执行避免大型建筑测试与编译争抢内存。
+        # Bash 的 pipefail 会保留 Gradle 失败状态，同时保存原始输出供排查角色行为回归。
+        run: |
+          mkdir -p build/ci
+          bash ./gradlew build --no-daemon --no-parallel --max-workers=1 \
+            --console=plain --stacktrace --continue 2>&1 | tee build/ci/gradle-build.log
+
+      - name: Upload installable mods
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maicraft-${{ runner.os }}-${{ github.sha }}
+          # 只交付两个加载器的安装包；公共模块、源码和开发包不能直接放进玩家的 mods 目录。
+          path: |
+            fabric/build/libs/*.jar
+            neoforge/build/libs/*.jar
+            !**/*-sources.jar
+            !**/*-dev.jar
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diagnostics-${{ runner.os }}-${{ github.sha }}
+          # 独立 main 测试主要写标准输出，必须连同 Gradle 日志保存，不能只上传 JUnit 报告。
+          path: |
+            build/ci/gradle-build.log
+            **/build/reports/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
