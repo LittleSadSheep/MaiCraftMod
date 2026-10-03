@@ -32,12 +32,19 @@ public final class AutomaticLightingContractTest {
         try (var h = new InteractionWorldTestHarness()) {
             var boundary = MaiCraftRuntimeFacade.class.getDeclaredMethod("dispatchExecution", Goal.class, LocalPlayer.class, Supplier.class);
             boundary.setAccessible(true);
+            // 查询本身不构成开启授权；主任务进行中也应读到默认关闭状态。
+            AutomaticLighting.get().reset();
+            var initial = runtime.execute(h.player, goal("{\"action\":\"status\"}"), null, "lighting-initial-status");
+            check(!initial.terminalSnapshot().result().getAsJsonObject("data").getAsJsonObject("automatic_lighting")
+                    .get("enabled").getAsBoolean(), "默认状态查询不能暗中启用补光");
             for (String action : List.of("enable", "status", "disable")) {
                 var goal = goal("{\"action\":\"" + action + "\"}");
                 var result = (IntentTaskRecord) boundary.invoke(null, goal, h.player,
                         (Supplier<IntentTaskRecord>) () -> runtime.execute(h.player, goal, null, "lighting-" + action));
                 check(result.getState() == TaskState.SUCCESS && result.terminalSnapshot().result().getAsJsonObject("data")
                         .has("automatic_lighting"), "配置与查询返回可读终态");
+                check(result.terminalSnapshot().result().getAsJsonObject("data").getAsJsonObject("automatic_lighting")
+                        .get("enabled").getAsBoolean() == !action.equals("disable"), "只有开启指令启用，关闭即时生效");
                 check(field(slot.getClass(), "record").get(slot) == mining && mining.getState() == TaskState.RUNNING,
                         "配置不能替换、暂停或取消挖矿");
                 check(runtime.execute(h.player, goal, null, "lighting-" + action) == result, "重试复用原任务");

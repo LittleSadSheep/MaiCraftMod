@@ -34,6 +34,6 @@ public final class TorchLightingChain implements Reflex {
 
     @Override public String id() { return "routine_torch_lighting"; }
     @Override public String describe() {
-        return "自动控制时默认随行补光，低于目标方块光时用副手火把边走边放；不绕路，不抢占主任务。通过 auto_light 启停和查询，整片区域使用 light_area。";
+        return "随行补光默认关闭，LLM 可通过 auto_light 按需开启或随时关闭；开启后低于目标方块光时用副手火把边走边放，不绕路、不抢占主任务。整片区域使用 light_area。";
     }
 }

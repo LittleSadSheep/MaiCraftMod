@@ -121,7 +121,7 @@ boolean stalled = inactivity.observeCounter(player.level().getGameTime(), confir
 
 导航按键通过 `applyNavigationMovement` 保留路线朝向，补光转头不能再次旋转这些按键。辅助瞄准必须通过 `finishAuxiliaryLook` 归还：未提交点击时恢复借用前的真实姿态和镜头状态，已提交时恢复主任务的视角目标；后来的主动作瞄准优先。起跳准备和沿边缘潜行不借出准星。自动灯位优先靠近当前视线，避免按固定方向顺序反复回头。
 
-`maicraft:auto_light` 的 `action=enable|disable|status` 是即时配置或查询，不申请身体，不替换当前任务。默认在自动控制期间开启，以方块光 8 为目标，火把常驻副手；仅用随身材料，主任务忙碌、没有支撑或缺料时保留暗格，不绕路。状态中的 `automatic_lighting` 完整保留已走位置的最低实测亮度、暗格、未知项与原生放置结果。断开会话后恢复默认设置。
+`maicraft:auto_light` 的 `action=enable|disable|status` 是即时配置或查询，不申请身体，不替换当前任务。默认关闭，由 LLM 按需显式开启，并可随时关闭；查询状态不会开启补光。开启后以方块光 8 为目标，火把常驻副手，仅用随身材料；主任务忙碌、没有支撑或缺料时保留暗格，不绕路。关闭立即停止新放置，已经提交的动作只继续结算原回执。状态中的 `automatic_lighting` 完整保留已走位置的最低实测亮度、暗格、未知项与原生放置结果。断开会话或重置后恢复关闭，需要重新开启。
 
 `perceive(view=situation)` 的 `inventory` 统计背包、快捷栏、副手和穿戴物品的随身总量，`location_counts` 标明 `backpack`、`off_hand` 和 `armor` 的数量。主手已经包含在快捷栏，不另加一次；`equipment` 是同一份库存的手别、护甲和耐久明细。火把换到副手只改变位置，不能被当成消耗或丢失；自动补光状态也提供 `torch_inventory` 的总数与背包、副手分布。
 

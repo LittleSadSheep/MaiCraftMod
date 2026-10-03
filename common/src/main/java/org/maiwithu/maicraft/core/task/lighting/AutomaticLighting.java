@@ -24,13 +24,14 @@ public final class AutomaticLighting {
     private static final AutomaticLighting INSTANCE = new AutomaticLighting();
     private LocalPlayer owner;
     private OffhandTorchPlacer placer = new OffhandTorchPlacer();
-    private boolean enabled = true;
+    // 进入游戏时不自行换副手或插灯；只有 LLM 显式要求开启后，才允许随行补光借用身体。
+    private boolean enabled = false;
     private int minimum = 8;
     private List<String> protectedLabels = List.of();
     private final Set<BlockPos> visited = new LinkedHashSet<>();
     private final List<Map<String, Object>> placements = new ArrayList<>();
     private BlockPos lastAttemptOrigin;
-    private String state = "waiting_for_movement";
+    private String state = "disabled";
     private String observationProblem;
 
     public static AutomaticLighting get() { return INSTANCE; }
@@ -54,8 +55,9 @@ public final class AutomaticLighting {
 
     public void reset() {
         owner = null; placer = new OffhandTorchPlacer(); visited.clear(); placements.clear();
-        enabled = true; minimum = 8; protectedLabels = List.of(); lastAttemptOrigin = null;
-        state = "waiting_for_movement"; observationProblem = null;
+        // 新会话重新等待开启指令，不继承上次连接的补光授权。
+        enabled = false; minimum = 8; protectedLabels = List.of(); lastAttemptOrigin = null;
+        state = "disabled"; observationProblem = null;
     }
 
     public void tick(LocalPlayerContext context, boolean allowed) {
@@ -75,7 +77,8 @@ public final class AutomaticLighting {
             state = receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED ? "light_settling" : "placement_unconfirmed";
         }
         // 关闭只停止新动作，已经发出的火把继续读回执；自救、暂停与区域补光独占时同样只观察。
-        if (!enabled || !context.permitsNativeActions()) return;
+        if (!enabled) { state = "disabled"; return; }
+        if (!context.permitsNativeActions()) return;
         if (CompanionTickDispatcher.current() instanceof SemanticLightAreaTaskRecord) return;
         // 指定区域拥有自己的灯位与验收；随行助手不能同时插灯污染该任务的材料和覆盖回执。
         if (CompanionTickDispatcher.current() instanceof IntentTaskRecord intent && (intent.paused()

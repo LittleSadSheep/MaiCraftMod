@@ -25,6 +25,17 @@ public final class AutomaticLightingTest {
             h.inventory.setItem(12, new ItemStack(Items.TORCH, 16));
             h.inventory.setItem(0, new ItemStack(Items.IRON_PICKAXE));
             h.inventory.setItem(40, new ItemStack(Items.SHIELD));
+            // 即使处于暗处且带着火把，初始状态与会话重置后都不能自行换掉副手或开始放置。
+            var initial = new AutomaticLighting();
+            tick(h, initial, true);
+            check(!(boolean) initial.snapshot(h.player).get("enabled") && initial.snapshot(h.player).get("state").equals("disabled"),
+                    "初始补光关闭");
+            initial.configure(h.player, true, 8, List.of()); initial.reset();
+            h.nextTick(); tick(h, initial, true);
+            check(!(boolean) initial.snapshot(h.player).get("enabled") && h.blockUses() == 0
+                    && h.mode.menuClicks == 0 && h.player.getOffhandItem().is(Items.SHIELD),
+                    "会话重置后等待新的开启指令，保留原副手");
+            h.nextTick();
             lighting.configure(h.player, true, 8, List.of());
             var busy = ClientRuntime.requireContext(h.player);
             busy.body().requestLook(0, 0, busy.tickRevision());
@@ -67,6 +78,7 @@ public final class AutomaticLightingTest {
             for (int i = 0; i < 8; i++) { h.nextTick(); tick(h, lighting, true); }
             status = lighting.snapshot(h.player);
             check(h.blockUses() == 2 && ((List<?>) status.get("placements")).size() == 2, "关闭仍结算已提交的那支灯");
+            check(!(boolean) status.get("enabled") && status.get("state").equals("disabled"), "旧回执结清后仍保持关闭");
             var projected = SemanticResultView.data(Map.of("automatic_lighting", status));
             check(projected.get("automatic_lighting").equals(status), "任务投影保留全部暗格和灯位事实");
             h.level.lightAvailable = false;

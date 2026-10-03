@@ -24,7 +24,7 @@ public final class SemanticAbilityCatalog {
                 || "maicraft:find_block".equals(ability)) {
             // 挖矿选材契约直接给出随行补光用法，模型无须停矿另开一串逐格插灯任务。
             JsonArray tips = new JsonArray();
-            tips.add("挖矿或找矿前备好火把。maicraft:auto_light(action=enable,minimum_light=8) 可在当前任务执行中启用；默认随行开启，整叠火把放副手，低于目标方块光时边走边放，不绕路、不替换任务。忙于挖掘、战斗、菜单或没有支撑时让位，缺火把只报告，不自动离开采集。");
+            tips.add("随行补光默认关闭。挖矿或找矿需要照明时，先备好火把，再用 maicraft:auto_light(action=enable,minimum_light=8) 显式开启；可随时用 action=disable 关闭，不替换当前任务。开启后整叠火把放副手，低于目标方块光时边走边放，不绕路。忙于挖掘、战斗、菜单或没有支撑时让位，缺火把只报告，不自动离开采集。");
             tips.add("用 auto_light(action=status) 查看已走路线的实际最低光、暗格和未知项；自动模式不保证远离路线的洞穴全覆盖。基地或指定区域使用 light_area，默认 coverage=all、minimum_light=8，并按实测补漏。光照验收不等于消灭已有怪物或阻止所有特殊刷怪。");
             description.add("tips", tips);
         }
@@ -524,9 +524,9 @@ public final class SemanticAbilityCatalog {
                             field("max_placements", "integer", "Optional explicit total placement budget; omit it to let measured coverage and convergence end the task."),
                             field("placement_preference", "string", "Safe-candidate tie-break after measured coverage gain: coverage_optimal (default), central_unplanted (crop_growth only) or unobtrusive; MaiCraft still chooses cells.")));
             case AutomaticLightingAdapter.ABILITY -> contract(
-                    "Configure or inspect session-scoped automatic lighting without replacing or pausing the current task or taking manual controls. Enabled by default while automation owns the body. Uses carried torches in the offhand; primary actions and rescue have priority. Never detours, acquires materials, breaks terrain or changes navigation. Checks block light at visited feet/eyes, waits for each native receipt and light propagation, and avoids repeating placement from one standing position. Success means configuration applied, not future coverage. Status reports actual dark cells, unloaded cells and placement outcomes; use light_area to repair a whole area.",
+                    "Configure or inspect session-scoped automatic lighting without replacing or pausing the current task or taking manual controls. Disabled by default and after session reset; explicitly enable when lighting is needed. Disable at any time to stop new placements; already submitted actions only finish receipt observation. Uses carried torches in the offhand while automation owns the body; primary actions and rescue have priority. Never detours, acquires materials, breaks terrain or changes navigation. Checks block light at visited feet/eyes, waits for each native receipt and light propagation, and avoids repeating placement from one standing position. Success means configuration applied, not future coverage. Status reports actual dark cells, unloaded cells and placement outcomes; use light_area to repair a whole area.",
                     targets(), fields(
-                            field("action", "string", "enable (default), disable or status. A standalone execute is immediate and leaves the current task attached."),
+                            field("action", "string", "enable (default for an explicit auto_light request), disable or status. A standalone execute is immediate and leaves the current task attached; status never enables lighting."),
                             field("minimum_light", "integer", "Target block light 1-13, default 8; independent of daylight. Torches emit 14. High thresholds may be unreachable without detouring; reported gaps are not success."),
                             field("protected_labels", "array<string>", "Remembered regions whose blocks and supports must remain untouched; current task protections also apply.")));
             case "maicraft:connect_mechanical_power" -> contract(
