@@ -136,7 +136,8 @@ public final class TorchLightingChain implements Task, Reflex {
     }
 
     public static NativeConfirmation confirmation(LocalPlayer player, BuildTaskRecord.Target target) {
-        int before = PlayerInv.carriedCount(player.getInventory(), Items.TORCH);
+        // 火把常驻副手后，消耗必须按全身库存核对；背包与副手交换不能冒充一次放置。
+        int before = PlayerInv.count(player.getInventory(), Items.TORCH);
         // 世界方块与火把扣减都符合，且收到本次服务器预测确认号后才记一支成功；本地画面预测不算。
         return new NativeConfirmation() {
             @Override public boolean requiresBlockAcknowledgement() { return true; }
@@ -145,9 +146,10 @@ public final class TorchLightingChain implements Task, Reflex {
             private Verdict observe(LocalPlayerContext context, boolean acknowledged) {
                 if (!context.level().isLoaded(target.pos())) return Verdict.PENDING;
                 var live = context.level().getBlockState(target.pos());
-                int consumed = before - PlayerInv.carriedCount(context.player().getInventory(), Items.TORCH);
+                int consumed = before - PlayerInv.count(context.player().getInventory(), Items.TORCH);
                 if (consumed < 0 || consumed > 1 || !live.isAir() && !live.equals(target.desiredState())) return Verdict.DIVERGED;
-                if (live.equals(target.desiredState()) && consumed == 1) return Verdict.APPLIED;
+                if (live.equals(target.desiredState()) && (consumed == 1
+                        || context.player().getAbilities().instabuild && consumed == 0)) return Verdict.APPLIED;
                 if (acknowledged && live.isAir() && consumed == 0) return Verdict.NOT_APPLIED;
                 return Verdict.PENDING;
             }

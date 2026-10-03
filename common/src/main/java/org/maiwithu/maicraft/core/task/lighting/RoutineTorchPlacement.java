@@ -5,7 +5,6 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
@@ -55,8 +54,8 @@ public final class RoutineTorchPlacement {
                 || NavigationSafetyContext.forbidsBody(at) || !level.getBlockState(at).isAir()
                 || !level.getFluidState(at).isEmpty() || new AABB(at).intersects(player.getBoundingBox().inflate(.1))) return false;
         BlockState base = level.getBlockState(support);
-        // 机器、箱子、农田、矿石和临时装饰不作默认灯座，避免右键开菜单或把灯挂在马上要采的矿上。
-        if (!terrain(base) || base.hasBlockEntity() || !base.getFluidState().isEmpty()
+        // 箱子、机器和工作台不作默认灯座，避免打开界面；基地木板、砖墙等普通结实表面也可直接挂灯。
+        if (base.hasBlockEntity() || base.getMenuProvider(level, support) != null || !base.getFluidState().isEmpty()
                 || !base.isFaceSturdy(level, support, face) || !expected.canSurvive(level, at)) return false;
         Vec3 point = Vec3.atCenterOf(support).add(Vec3.atLowerCornerOf(face.getNormal()).scale(.5));
         if (player.getEyePosition().distanceToSqr(point) > Math.pow(Math.min(4.25, player.blockInteractionRange()), 2)) return false;
@@ -69,12 +68,6 @@ public final class RoutineTorchPlacement {
         BlockState expected = target.desiredState();
         Direction face = expected.is(Blocks.WALL_TORCH) ? expected.getValue(WallTorchBlock.FACING) : Direction.UP;
         return usable(player, target.pos(), expected, target.pos().relative(face.getOpposite()), face, protectedCells);
-    }
-
-    private static boolean terrain(BlockState state) {
-        return state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER) || state.is(BlockTags.DIRT)
-                || state.is(Blocks.STONE) || state.is(Blocks.DEEPSLATE) || state.is(Blocks.COBBLESTONE)
-                || state.is(Blocks.COBBLED_DEEPSLATE) || state.is(Blocks.DIRT) || state.is(Blocks.GRAVEL) || state.is(Blocks.SAND);
     }
 
     private static BuildTaskRecord.Target target(BlockPos at, BlockState expected) {
