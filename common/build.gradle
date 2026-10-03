@@ -68,7 +68,7 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 def regressionSuites = [
     // 随行补光独立验证副手、镜头与主任务并行，避免用真实角色承担重复消耗风险。
     lightingRegression: [
-        entry: 'org.maiwithu.maicraft.client.actor.AuxiliaryActionTest',
+        entry: 'org.maiwithu.maicraft.client.actor.LightingRegressionSuite',
         heap: '512m', directory: 'lighting-regression', timeoutSeconds: 60,
         purpose: '验证随行副手补光与主任务资源协作'
     ],

@@ -186,6 +186,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         public int blockReads, searches;
         public boolean clientHeightmapsOnly;
         public int blockLight, skyLight, localLight;
+        // 区域照明回放按格注入实际读数，模拟隔墙暗角；默认场景仍沿用统一光照。
+        public Map<BlockPos, Integer> blockLightByCell;
         public boolean lightAvailable;
         long time;
         private TestLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
@@ -218,7 +220,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         // 使用可控原生光照读数，分别回放夜间天空光、火把光和暂时缺失的照度信息。
         @Override public int getBrightness(LightLayer layer, BlockPos pos) {
             if (!lightAvailable) throw new IllegalStateException("lighting unavailable");
-            return layer == LightLayer.BLOCK ? blockLight : skyLight;
+            return layer == LightLayer.BLOCK ? blockLightByCell == null ? blockLight
+                    : blockLightByCell.getOrDefault(pos, blockLight) : skyLight;
         }
         @Override public int getMaxLocalRawBrightness(BlockPos pos) { return localLight; }
         @Override public Entity getEntity(int id) { return entities.get(id); }
@@ -290,6 +293,8 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         }
         @Override public void attack(Player player, Entity target) { attacks++; }
         @Override public InteractionResult useItemOn(LocalPlayer player, InteractionHand hand, BlockHitResult hit) {
+            // 补光须真正调用副手放置，测试不能只凭背包位置推断交互用了哪只手。
+            usedHand = hand;
             if (beforeBlockUse != null) beforeBlockUse.run();
             ((TestLevel) player.level()).blockSequence++;
             blocks++; return InteractionResult.PASS;
