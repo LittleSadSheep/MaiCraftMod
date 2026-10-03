@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.LinkedHashMap;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
@@ -19,7 +20,7 @@ import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 
 /** 模具与浇筑顺序在接单时固定；每一步使用实时方块、背包和原生回执推进。 */
 record PortalCastingStep(Kind kind, BlockPos target) {
-    enum Kind { CLEAR, BUILD, POUR_WATER, TAKE_WATER, CAST, DRAIN }
+    enum Kind { CLEAR, PREPARE_SITE, BUILD, POUR_WATER, TAKE_WATER, CAST, DRAIN }
     static final List<Item> SUPPORTS = List.of(Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.NETHERRACK, Items.DIRT);
     private static final List<Item> PICKS = List.of(Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE,
             Items.GOLDEN_PICKAXE, Items.DIAMOND_PICKAXE, Items.NETHERITE_PICKAXE);
@@ -30,6 +31,7 @@ record PortalCastingStep(Kind kind, BlockPos target) {
         layout.upperFrame().stream().filter(p -> p.getY() > layout.origin().getY())
                 .forEach(p -> steps.add(new PortalCastingStep(Kind.CLEAR, p)));
         layout.clearance().forEach(p -> steps.add(new PortalCastingStep(Kind.CLEAR, p)));
+        steps.add(new PortalCastingStep(Kind.PREPARE_SITE, layout.origin()));
         steps.add(new PortalCastingStep(Kind.BUILD, layout.placeholder()));
         steps.add(new PortalCastingStep(Kind.POUR_WATER, layout.initialWater()));
         steps.add(new PortalCastingStep(Kind.CLEAR, layout.placeholder()));
@@ -45,12 +47,16 @@ record PortalCastingStep(Kind kind, BlockPos target) {
 
     /** 单桶先装水，之后水留在世界内时才循环装岩浆；不要求先挖到黑曜石或钻石。 */
     static PortalPreparationSupplies.Need supplies(LocalPlayer player, boolean initial) {
+        return supplies(player, initial, 0);
+    }
+    static PortalPreparationSupplies.Need supplies(LocalPlayer player, boolean initial, int platformBlocks) {
         if (initial && PlayerInv.count(player.getInventory(), Items.BUCKET) + PlayerInv.count(player.getInventory(), Items.WATER_BUCKET) == 0)
             return new PortalPreparationSupplies.Need(List.of(Items.BUCKET), 1, "single casting bucket");
         if (initial && PICKS.stream().noneMatch(item -> PlayerInv.count(player.getInventory(), item) > 0))
             return new PortalPreparationSupplies.Need(List.of(Items.STONE_PICKAXE), 1, "excavate shallow pool bottom");
-        if (SUPPORTS.stream().mapToInt(item -> PlayerInv.count(player.getInventory(), item)).sum() < (initial ? 7 : 1))
-            return new PortalPreparationSupplies.Need(SUPPORTS, initial ? 7 : 1, "temporary portal mold");
+        int count = (initial ? 7 : 1) + platformBlocks;
+        if (SUPPORTS.stream().mapToInt(item -> PlayerInv.count(player.getInventory(), item)).sum() < count)
+            return new PortalPreparationSupplies.Need(SUPPORTS, count, "portal work platform and temporary mold");
         return null;
     }
 
@@ -64,6 +70,23 @@ record PortalCastingStep(Kind kind, BlockPos target) {
         record.materialSupplyProtection(List.copyOf(layout.footprint()));
         record.toolSupply(new BuildTaskRecord.ToolSupply(policy.materialPolicy(), policy.sources(true),
                 policy.allowCombat(), policy.protectedLabels()));
+        return record;
+    }
+
+    /** 沿实有材料逐格分配整形用块；土和圆石可以共同补台，不要求所有填格都使用同一种余料。 */
+    static BuildTaskRecord platform(LocalPlayer player, String id, long deadline, List<BlockPos> cells,
+                                    NetherPortalCastingLayout layout, PortalPreparationPolicy policy) {
+        var stock = new LinkedHashMap<Item, Integer>();
+        SUPPORTS.forEach(item -> stock.put(item, PlayerInv.count(player.getInventory(), item)));
+        var targets = new ArrayList<BuildTaskRecord.Target>();
+        for (BlockPos at : cells) {
+            Item item = stock.entrySet().stream().filter(e -> e.getValue() > 0).findFirst().orElseThrow().getKey();
+            stock.put(item, stock.get(item) - 1);
+            targets.add(new BuildTaskRecord.Target(Block.byItem(item), item, at, "浇筑池岸与桶操作站台", null, null, null));
+        }
+        var record = new BuildTaskRecord(id, deadline, targets, true);
+        record.automaticMachineModification(Set.copyOf(cells)); record.materialSupplyProtection(List.copyOf(layout.footprint()));
+        record.toolSupply(new BuildTaskRecord.ToolSupply(policy.materialPolicy(), policy.sources(true), policy.allowCombat(), policy.protectedLabels()));
         return record;
     }
 

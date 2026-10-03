@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.dimension;
 
 import org.maiwithu.maicraft.intent.PortalPreparationContractTest;
+import org.maiwithu.maicraft.intent.RecoveryKnowledgeTest;
 
 /** 不打开游戏窗口，测试传送门准备契约和原生动作边界。 */
 public final class PortalRegressionSuite {
@@ -13,6 +14,8 @@ public final class PortalRegressionSuite {
         PortalCastingWorkflowTest.main(args);
         // 有池无水、有水无池以及已有水桶都要分别回报，不能只验收资源齐全的场景。
         PortalCastingPreparationTest.main(args);
+        PortalCastingTerrainTest.main(args);
+        RecoveryKnowledgeTest.main(args);
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
         PortalPreparationSiteTest.main(args);

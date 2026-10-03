@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTaskRecord;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -75,7 +76,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         }
         // 起手只准备普通工具和一只桶；模具材料消耗完时内部补给，仍接着同一张施工单。
         if (!initialSupplied) {
-            var need = PortalCastingStep.supplies(player, true);
+            var need = PortalCastingStep.supplies(player, true, PortalCastingTerrain.missingPlatform(world, layout).size());
             if (need != null) return supply(need);
             initialSupplied = true;
         }
@@ -86,6 +87,14 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         if (actual == null) return failure("casting_target_unloaded");
         if (NavigationSafetyContext.protectsMutation(at)) return failure("casting_target_protected");
         return switch (step.kind()) {
+            case PREPARE_SITE -> {
+                var missing = PortalCastingTerrain.missingPlatform(world, layout);
+                if (missing.isEmpty()) yield next();
+                var need = PortalCastingStep.supplies(player, true, missing.size());
+                if (need != null) yield supply(need);
+                yield start(PortalCastingStep.platform(player, id(), deadline(), missing, layout, r.policy),
+                        at, true, "prepare_bank_platform");
+            }
             case CLEAR -> {
                 if (actual.isAir() || !actual.getFluidState().isEmpty()
                         || actual.is(Blocks.OBSIDIAN) && layout.frame().frame().contains(at)) yield next();
@@ -157,8 +166,11 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
     }
     private <T> T guarded(Supplier<T> action) {
         if (layout == null) return action.get();
+        // 一批补台可以同时修改所声明的多个格子；其余门框、模具和后续操作空间继续受到导航保护。
+        var writable = childRecord instanceof BuildTaskRecord build
+                ? build.targets.stream().map(BuildTaskRecord.Target::pos).toList() : mutation == null ? List.<BlockPos>of() : List.of(mutation);
         return NavigationSafetyContext.withPreservedStructures(layout.footprint().stream()
-                .filter(p -> !p.equals(mutation)).toList(), action);
+                .filter(p -> !writable.contains(p)).toList(), action);
     }
 
     private TaskState tickChild() {

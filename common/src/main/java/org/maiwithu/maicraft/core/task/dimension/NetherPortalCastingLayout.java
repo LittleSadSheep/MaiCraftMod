@@ -45,7 +45,7 @@ public record NetherPortalCastingLayout(BlockPos origin, Direction shore) {
 
     /** 给高处落水保留岸后通道；只清理模板点名的空间，不扩大成整片场地平整。 */
     public List<BlockPos> clearance() {
-        return List.of(cell(1, 1, 1), cell(1, 2, 1), castingWater(), cell(1, 1, 2));
+        return PortalCastingTerrain.clearance(this);
     }
 
     public List<BlockPos> bottom() { return List.of(cell(0, -1, 0), cell(1, -1, 0)); }
@@ -60,6 +60,7 @@ public record NetherPortalCastingLayout(BlockPos origin, Direction shore) {
     public Set<BlockPos> footprint() {
         var cells = new LinkedHashSet<>(frame().frame());
         cells.addAll(frame().interior()); cells.addAll(mold()); cells.addAll(clearance());
+        cells.addAll(PortalCastingTerrain.platform(this));
         return Set.copyOf(cells);
     }
 

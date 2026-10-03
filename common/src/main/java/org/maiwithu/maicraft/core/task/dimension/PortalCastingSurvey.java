@@ -27,6 +27,7 @@ final class PortalCastingSurvey implements AutoCloseable {
     private boolean complete, closed;
     private String poolStatus = "not_surveyed";
     private final Map<String, Object> sourceObservations = new LinkedHashMap<>();
+    private PortalCastingTerrain.Preparation terrain;
 
     PortalCastingSurvey(ClientLevel world, BlockPos origin, int radius) {
         this.world = world; this.origin = origin.immutable(); this.radius = radius;
@@ -43,10 +44,20 @@ final class PortalCastingSurvey implements AutoCloseable {
             if (seed.distSqr(origin) > (double) radius * radius || examined.contains(seed)) continue;
             if (budget-- == 0) return null;
             examined.add(seed);
+            NetherPortalCastingLayout selected = null;
+            PortalCastingTerrain.Preparation preparation = null;
             for (Direction shore : Direction.Plane.HORIZONTAL) {
                 var candidate = new NetherPortalCastingLayout(seed, shore);
-                if (atShore(world, candidate)) { poolStatus = "observed"; return candidate; }
+                if (!atShore(world, candidate)) continue;
+                var proposed = PortalCastingTerrain.inspect(world, candidate, origin, radius);
+                terrain = proposed;
+                if (!proposed.reserveObserved()) continue;
+                // 同一池边优先少填岩浆、少用方块的朝向；弯岸可以原生填直，不必只等待天然完整岸线。
+                if (preparation == null || terrainCost(proposed) < terrainCost(preparation)) {
+                    selected = candidate; preparation = proposed;
+                }
             }
+            if (selected != null) { terrain = preparation; poolStatus = "observed"; return selected; }
         }
         if (!query.complete()) return null;
         // 原生索引窗口满了就继续展开，不能把最近一批地下源格当成整个搜索范围已无池岸。
@@ -58,10 +69,8 @@ final class PortalCastingSurvey implements AutoCloseable {
     static boolean atShore(ClientLevel world, NetherPortalCastingLayout layout) {
         for (int x = -1; x <= 2; x++) {
             var lava = PortalPreparationSite.read(world, layout.cell(x, 0, 0));
-            var bank = PortalPreparationSite.read(world, layout.cell(x, 0, 1));
-            if (lava == null || !lava.is(Blocks.LAVA) || !lava.getFluidState().isSource()
-                    || bank == null || !bank.getFluidState().isEmpty()
-                    || !bank.isFaceSturdy(world, layout.cell(x, 0, 1), Direction.UP)) return false;
+            // 门前仍保留四格真源岩浆；后面的岸线缺口由已声明的站台施工填补。
+            if (lava == null || !lava.is(Blocks.LAVA) || !lava.getFluidState().isSource()) return false;
         }
         for (BlockPos at : layout.footprint()) {
             var state = PortalPreparationSite.read(world, at);
@@ -69,6 +78,9 @@ final class PortalCastingSurvey implements AutoCloseable {
                     || NavigationSafetyContext.protectsMutation(at) || NavigationSafetyContext.forbidsBody(at)) return false;
         }
         return true;
+    }
+    private static int terrainCost(PortalCastingTerrain.Preparation preparation) {
+        return preparation.sourcesReplaced() * 9 + preparation.fill().size();
     }
 
     /** 每桶取材前刷新源格，排除门框与模具；流水或已经凝固的旧命中都不能再次取桶。 */
@@ -90,8 +102,11 @@ final class PortalCastingSurvey implements AutoCloseable {
 
     /** 把已经完成的资源调查随缺口交付，让模型选择探索新区域，而不是重复扫描同一片已查过的地形。 */
     Map<String, Object> observations() {
-        return Map.of("origin", NetherPortalCastingLayout.position(origin), "radius", radius, "loaded_only", true,
-                "lava_pool_status", poolStatus, "source_lookups", Map.copyOf(sourceObservations));
+        var facts = new LinkedHashMap<String, Object>();
+        facts.put("origin", NetherPortalCastingLayout.position(origin)); facts.put("radius", radius); facts.put("loaded_only", true);
+        facts.put("lava_pool_status", poolStatus); facts.put("source_lookups", Map.copyOf(sourceObservations));
+        if (terrain != null) facts.put("site_preparation", terrain.facts());
+        return facts;
     }
 
     boolean complete() { return complete; }
