@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.intent.PhysicalAssemblyContractTest;
 import org.maiwithu.maicraft.core.task.physics.BondMaterialSettlementTest;
 import org.maiwithu.maicraft.core.task.physics.StructureWrenchPlanTest;
 import org.maiwithu.maicraft.server.physics.PhysicsSnapshotServiceTest;
+import org.maiwithu.maicraft.server.physics.NativeWheelCaptureTest;
 
 /** 用可算出结果的飞艇验证配重、偏置推进与姿态变换，不依赖启动 Minecraft 或 Sable。 */
 public final class PhysicsBalanceRegression {
@@ -60,6 +61,7 @@ public final class PhysicsBalanceRegression {
         BondMaterialSettlementTest.run();
         StructureWrenchPlanTest.run();
         PhysicsSnapshotServiceTest.run();
+        NativeWheelCaptureTest.run();
         System.out.println("PhysicsBalanceRegression: passed");
     }
     static PhysicsBody vessel(List<PhysicsBody.Load> loads) {

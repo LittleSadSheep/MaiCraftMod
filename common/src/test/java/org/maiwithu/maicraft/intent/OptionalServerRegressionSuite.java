@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.intent;
 
 import org.maiwithu.maicraft.network.OptionalAssemblyHookTest;
+import org.maiwithu.maicraft.network.OptionalWheelHookTest;
 
 import org.maiwithu.maicraft.client.server.MachineSnapshotEnrichmentTest;
 import org.maiwithu.maicraft.client.server.ServerActorMutationGateTest;
@@ -84,6 +85,7 @@ import org.maiwithu.maicraft.server.machine.watch.MachineWatchProgressTest;
 public final class OptionalServerRegressionSuite {
     public static void main(String[] args) throws Exception {
         OptionalAssemblyHookTest.main(args);
+        OptionalWheelHookTest.main(args);
         CreateConfigurationContractTest.main(args);
         ProtocolRegressionSuite.main(args);
         OptionalServerPayloadTest.main(args);
