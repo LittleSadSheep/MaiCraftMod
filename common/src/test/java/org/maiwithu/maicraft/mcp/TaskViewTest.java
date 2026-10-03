@@ -47,6 +47,14 @@ public final class TaskViewTest {
         var compactContext = compact.getAsJsonObject("decision").getAsJsonObject("context");
         check(!compactContext.get("ordinary_retry_allowed").getAsBoolean()
                 && compactContext.getAsJsonObject("failure").getAsJsonObject("data").get("outcome_uncertain").getAsBoolean(), "unsafe consumption is visible before answering");
+        // decision 自带可照抄的应答样板；样本文身必须直接通过 task 工具的 schema 校验。
+        var example = compact.getAsJsonObject("decision").getAsJsonObject("answer_example");
+        check(example.get("action").getAsString().equals("answer")
+                && example.get("task_id").getAsString().equals(task.externalId().toString())
+                && example.getAsJsonObject("answer").get("decision_id").getAsString().equals(decision.id().toString())
+                && example.getAsJsonObject("answer").get("choice").getAsString().equals("cancel"),
+                "decision ships a copyable answer example");
+        PublicToolCatalog.validateAndNormalize("task", example.deepCopy());
         JsonObject request = new JsonObject(); request.addProperty("action", "get");
         request.addProperty("task_id", task.externalId().toString()); request.addProperty("path", "/goal/parameters/blocks");
         request.addProperty("limit", 20); JsonArray recovered = new JsonArray();

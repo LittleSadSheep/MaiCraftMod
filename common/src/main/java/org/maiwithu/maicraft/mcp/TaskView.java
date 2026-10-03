@@ -63,7 +63,7 @@ final class TaskView {
             if (record.pauseSnapshot() != null && record.decisionSnapshot() == null)
                 result.addProperty("pause_reason", record.pauseSnapshot().reason());
             if (record.decisionSnapshot() != null) {
-                result.add("decision", decision(record.decisionSnapshot())); paths.add("/decision");
+                result.add("decision", decision(record)); paths.add("/decision");
             }
         }
         result.add("detail_paths", paths);
@@ -84,7 +84,8 @@ final class TaskView {
         return result;
     }
 
-    private static JsonObject decision(IntentTaskRecord.DecisionSnapshot source) {
+    private static JsonObject decision(IntentTaskRecord record) {
+        IntentTaskRecord.DecisionSnapshot source = record.decisionSnapshot();
         JsonObject result = new JsonObject(); result.addProperty("decision_id", source.id().toString());
         result.addProperty("question", source.question()); JsonArray options = new JsonArray();
         source.options().forEach(option -> {
@@ -98,6 +99,13 @@ final class TaskView {
         if (context.has("failure") && context.get("failure").isJsonObject())
             context.add("failure", result(context.getAsJsonObject("failure"), "/decision/context/failure"));
         result.add("context", context);
+        // decision 附可照抄的应答样板；模型改 choice 即可提交，不必再翻工具 schema 试参数位置。
+        JsonObject example = new JsonObject(); example.addProperty("action", "answer");
+        example.addProperty("task_id", record.externalId().toString());
+        JsonObject answer = new JsonObject(); answer.addProperty("decision_id", source.id().toString());
+        if (!source.options().isEmpty()) answer.addProperty("choice", source.options().get(0).choice());
+        example.add("answer", answer);
+        result.add("answer_example", example);
         return result;
     }
 
