@@ -48,6 +48,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineMenuPolicyTest;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudgetTest;
 import org.maiwithu.maicraft.core.integration.machine.assembly.MachineAssemblyTest;
 import org.maiwithu.maicraft.core.integration.machine.control.VehicleRegressionSuite;
+import org.maiwithu.maicraft.client.actor.BlockDiggerTargetingTest;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutAeNetworksTest;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutInstanceIdentityTest;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutItemOutputsTest;
@@ -90,6 +91,7 @@ public final class MachineRegressionSuite {
         MachineSurveyModelTest.main(args);
         ConstructionSiteGeometryTest.main(args);
         VehicleRegressionSuite.main(args);
+        try {BlockDiggerTargetingTest.run();}catch(Exception failure){throw new RuntimeException(failure);}
         MachineDesignReviewTest.main(args);
         MachineDesignConstraintsTest.main(args);
         CreateBeltGeometryTest.main(args);

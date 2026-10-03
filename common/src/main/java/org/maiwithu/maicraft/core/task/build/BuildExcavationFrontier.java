@@ -11,6 +11,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
+import org.maiwithu.maicraft.core.act.NativeBreakingTargeting;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineNative;
 import org.maiwithu.maicraft.core.integration.ultimine.UltimineSelectionPolicy;
@@ -131,7 +132,9 @@ public final class BuildExcavationFrontier {
             AABB box = player.getBoundingBox().move(body.subtract(player.position()));
             if (!level.noCollision(player, box)) continue;
             Vec3 eye = body.add(0, player.getEyeHeight(), 0);
-            if (FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, reach) != null)
+            // 站位证明同时纳入原生可动把手；不能反复把角色送到只能点中前方油门的位置。
+            if (FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, target, reach,null,
+                    hit->NativeBreakingTargeting.visible(level,eye,hit.getLocation().subtract(eye),hit)) != null)
                 result.add(NavGoal.exact(feet));
         }
         return result;

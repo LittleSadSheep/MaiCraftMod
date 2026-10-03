@@ -13,6 +13,7 @@ import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 
 /**
@@ -47,6 +48,7 @@ public final class UltimineSession implements UltimineControl {
     private int heldBreakTicks;
     private long lastHeldTick = Long.MIN_VALUE;
     private boolean lastNativePressed, lastKeyDown;
+    private Map<String,Object> preparationGaze=Map.of();
 
     /** 工具已放入并选中快捷栏、可见准星已对准目标面后，才准备原生连锁。 */
     public Decision prepare(LocalPlayerContext context, BlockHitResult hit, Set<BlockPos> allowedClearCells, Predicate<BlockPos> preserve) {
@@ -67,6 +69,17 @@ public final class UltimineSession implements UltimineControl {
             if (closed) return released(context, fallback == null ? "ultimine_session_finished" : fallback);
             // 定点采收及临时降级只确认原生松键，不把机器的一格授权扩大为整脉或通道。
             if (mode == Mode.SINGLE) return single(context, "ultimine_single_source_only");
+            // 转头由身体刻推进，而渲染准星可能仍停在上一帧；让原生选取重新计算真实命中，不能把计划射线写成准星。
+            var minecraft=context.minecraft();
+            if(minecraft.gameRenderer!=null&&minecraft.getCameraEntity()==context.player())minecraft.gameRenderer.pick(1.0F);
+            var gaze=new LinkedHashMap<String,Object>();
+            gaze.put("wanted_block",hit.getBlockPos().toShortString());gaze.put("wanted_face",hit.getDirection().getName());
+            gaze.put("player_camera",minecraft.getCameraEntity()==context.player());
+            gaze.put("actual_type",minecraft.hitResult==null?"unavailable":minecraft.hitResult.getType().name());
+            if(minecraft.hitResult instanceof BlockHitResult actual) {
+                gaze.put("actual_block",actual.getBlockPos().toShortString());gaze.put("actual_face",actual.getDirection().getName());
+            }
+            preparationGaze=Map.copyOf(gaze);
             if (!sameHit(context, hit)) return result(Status.WAITING, "ultimine_waiting_for_exact_crosshair");
             permitted = allowed;
             preserved = preserve == null ? ignored -> false : preserve;
@@ -163,8 +176,9 @@ public final class UltimineSession implements UltimineControl {
     public Map<String, Object> holdEvidence() {
         return Map.of("held_break_ticks", heldBreakTicks,
                 "native_pressed_at_last_break_tick", lastNativePressed, "key_down_at_last_break_tick", lastKeyDown,
-                "hit_face", face == null ? "none" : face.getName());
+                "hit_face", face == null ? "none" : face.getName(),"preparation_gaze",preparationGaze);
     }
+    public Map<String,Object> preparationGaze(){return preparationGaze;}
     /** 挖掘回执确认后才松键；WAITING 表示原生尚未处理松键，调用方仍须等待再开始下一次破坏。 */
     public Decision finish(LocalPlayerContext context) { inFlight = false; closed = true; return released(context, "ultimine_batch_finished"); }
     @Override public void close() { UltimineInputLease.release(this); acquired = false; closed = true; }

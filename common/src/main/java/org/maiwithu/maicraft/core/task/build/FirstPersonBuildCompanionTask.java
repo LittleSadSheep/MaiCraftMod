@@ -945,7 +945,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (clearanceDeniedAt != null) { beginClearanceReport(clearanceDeniedAt); return false; }
         ultimineEvidence = Map.of("status", decision.status().name().toLowerCase(Locale.ROOT),
                 "reason", decision.code(), "native_selected_cells", decision.completeSelection().size(),
-                "confirmed_native_batches", ultimineBatches);
+                "confirmed_native_batches", ultimineBatches,"preparation_gaze",ultimine.preparationGaze());
         return switch (decision.status()) {
             case READY -> { ultimineArmed = true; yield true; }
             case SINGLE_BLOCK -> true;

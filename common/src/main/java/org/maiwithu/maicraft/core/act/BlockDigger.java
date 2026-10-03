@@ -459,7 +459,7 @@ public final class BlockDigger {
         };
         if (preferTopFace) {
             // 自上而下刨坑时先试着瞄准上表面；返回的仍是实际射线命中面，不把侧面伪装成上面。
-            Vec3 center = aims[0]; aims[0] = aims[2]; aims[2] = center;
+            Vec3 center = aims[0]; aims[0] = aims[1]; aims[1] = center;
         }
         for (Vec3 aim : aims) {
             Vec3 dir = aim.subtract(eye);
@@ -468,7 +468,9 @@ public final class BlockDigger {
             BlockHitResult res = level.clip(new ClipContext(
                     eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
             if (res.getType() == HitResult.Type.BLOCK && res.getBlockPos().equals(pos)
-                    && (requiredFace == null || res.getDirection() == requiredFace)) {
+                    && (requiredFace == null || res.getDirection() == requiredFace)
+                    // 油门把手不在普通方块选择形状里；被原生把手抢先命中的瞄准点需换面或换站位。
+                    && NativeBreakingTargeting.visible(level,eye,dir,res)) {
                 return res;
             }
         }
