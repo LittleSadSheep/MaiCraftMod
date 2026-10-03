@@ -26,6 +26,8 @@ import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementRul
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementAim;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTask;
 import org.maiwithu.maicraft.core.integration.machine.assembly.FluidPlacementTaskRecord;
+import org.maiwithu.maicraft.core.integration.machine.assembly.AssemblyInteractionGeometry;
+import net.minecraft.world.entity.Pose;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
@@ -43,6 +45,7 @@ public final class FluidPlacementTaskTest {
         sourceRemovalUsesOneAcknowledgedBucket();
         nativeReactionRemainsConfirmed();
         castingNeverEncasesThePlayer();
+        sourceCanBeCollectedFromHighBank();
         System.out.println("FluidPlacementTaskTest: passed");
     }
 
@@ -73,6 +76,22 @@ public final class FluidPlacementTaskTest {
                             && Boolean.FALSE.equals(result.data().get("source_fluid_verified"))
                             && "minecraft:obsidian".equals(result.data().get("observed_block_id")),
                     "动作成功、源格未达成和实际黑曜石必须分别反馈");
+        }
+    }
+
+    private static void sourceCanBeCollectedFromHighBank() throws Exception {
+        try (var f = fixture()) {
+            // 湖面附近没有水面高度的干燥站位，唯一岸台高两格；空桶仍能从岸台用原生射线触及水源。
+            for (int x = 0; x <= 9; x++) for (int z = 0; z <= 9; z++)
+                f.set(new BlockPos(x, 1, z), Blocks.WATER.defaultBlockState());
+            BlockPos feet = new BlockPos(5, 3, 3); f.set(feet.below(), Blocks.STONE.defaultBlockState());
+            f.position(new Vec3(8.5, 3, 7.5));
+            var search = AssemblyInteractionGeometry.searchStand(f.player, AT, Set.of(), eye -> {
+                var hit = FluidPlacementAim.find(f.level, f.player, eye, AT, 4.5, Items.BUCKET);
+                return hit == null ? null : hit.getLocation();
+            }, Pose.STANDING, 4.5);
+            check(feet.equals(search.position()) && search.standingCandidates() == 1 && search.visibleCandidates() == 1,
+                    "native source collection includes a reachable bank two blocks above the water cell");
         }
     }
 

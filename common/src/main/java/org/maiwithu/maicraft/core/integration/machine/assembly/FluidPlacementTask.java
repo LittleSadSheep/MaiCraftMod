@@ -49,6 +49,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     private int aimTicks;
     private int stanceAttempts;
     private int navigationTicks;
+    private int standingCandidates, visibleCandidates;
     private String lastStanceRejection = "";
     private long waitingSince;
     private String stage = "preflight";
@@ -158,9 +159,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
             waiting("approaching_stance");
             if (stance == null) {
                 if (stanceAttempts >= MAX_STANCE_ATTEMPTS) return failure("fluid_stance_budget_exhausted");
-                stance = AssemblyInteractionGeometry.nearestStand(player, r.target, rejected, eye -> {
+                var search = AssemblyInteractionGeometry.searchStand(player, r.target, rejected, eye -> {
                     var hit = visibleFrom(eye); return hit == null ? null : hit.getLocation();
-                }, Pose.STANDING);
+                }, Pose.STANDING, player.blockInteractionRange());
+                stance = search.position(); standingCandidates = search.standingCandidates(); visibleCandidates = search.visibleCandidates();
                 stanceAttempts++;
                 navigationTicks = 0;
             }
@@ -227,8 +229,13 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     }
     private TaskState failure(String code) {
         failureCode = code;
-        fail(code, code.startsWith("fluid_stance_") || code.equals("fluid_target_has_no_native_bucket_stance")
-                ? FailureType.NO_PATH : FailureType.UNSUPPORTED);
+        boolean stanceFailure = code.startsWith("fluid_stance_") || code.equals("fluid_target_has_no_native_bucket_stance");
+        // 普通游戏日志也要留下取水/倒水、目标和站位事实，远程用户不提供完整 MCP 回执时仍能定位卡点。
+        String detail = stanceFailure ? code + "; operation=" + (r.removedSource == null ? "place_source" : "collect_source")
+                + "; target=" + r.target.toShortString() + "; feet=" + player.position()
+                + "; standing_candidates=" + standingCandidates + "; visible_aims=" + visibleCandidates
+                + "; reach=" + player.blockInteractionRange() + "; last_rejection=" + lastStanceRejection : code;
+        fail(detail, stanceFailure ? FailureType.NO_PATH : FailureType.UNSUPPORTED);
         return TaskState.FAILED;
     }
     private void waiting(String next) { if (!stage.equals(next)) { stage = next; waitingSince = world.getGameTime(); } }
@@ -265,6 +272,10 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         data.put("body_in_possible_lava_flow", bodyInLavaFlow);
         data.put("native_action_available",actionAvailable); data.put("aim_wait_ticks",aimTicks);
         data.put("stance_attempts",stanceAttempts); data.put("rejected_stances",rejected.size());
+        // 远程排错必须知道这是取源还是放源，以及查到了多少站脚处，不能只留一个通用 NO_PATH。
+        data.put("standing_candidates_in_range", standingCandidates); data.put("visible_aims_observed", visibleCandidates);
+        data.put("bucket_target", List.of(r.target.getX(), r.target.getY(), r.target.getZ()));
+        data.put("bucket_operation", r.removedSource == null ? "place_source" : "collect_source");
         data.put("navigation_active",nav!=null); data.put("in_selected_stance_cell",atStance());
         // 让模型看到这次候选导航为何结束，以及是否只是在原地计算路线；这些事实不会授权重复倒桶。
         data.put("navigation_ticks", navigationTicks); data.put("last_stance_rejection", lastStanceRejection);
