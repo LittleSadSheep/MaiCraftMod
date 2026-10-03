@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry
 import org.maiwithu.maicraft.entity.InputDriver;
 import java.util.LinkedHashMap;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.task.ProgressBudget;
 
 /** 一次有界回收接近：原生搭垫脚块到已验证站位，途中所有观察到的现成方块均禁止拆改。 */
 final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, BuildPlacementRegistry.Provider {
@@ -38,7 +39,9 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
     private final PlayerNav.ContextProvider parent;
     private final BuildPlacementRegistry.Provider owner;
     private final Scope scope;
-    private final long deadline;
+    private final ProgressBudget progressBudget = ProgressBudget.currentTask(DEADLINE_TICKS);
+    private long observedNavProgress = Long.MIN_VALUE;
+    private int observedSupports;
     private PlayerNav nav;
     private Status status = Status.RUNNING, finishing;
     private String failure = "", phase = "observing_protected_terrain";
@@ -55,7 +58,8 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
         this.ready = Objects.requireNonNull(ready); this.parent = Objects.requireNonNull(parent);
         if (!(parent instanceof BuildPlacementRegistry.Provider provider))
             throw new IllegalArgumentException("cleanup construction access requires the original scaffold ownership provider");
-        owner = provider; deadline = level.getGameTime() + DEADLINE_TICKS;
+        owner = provider;
+        progressBudget.observe(level.getGameTime(), false);
         scope = new Scope(level, PlayerNav.playerFeet(player), candidate, siteMin, siteMax);
     }
 
@@ -66,14 +70,20 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
             if (nav != null) nav.abandon(); failure = "cleanup_access_body_changed"; return status = Status.FAILED;
         }
         if (finishing != null) return settleStop();
-        if (level.getGameTime() >= deadline) return fail("cleanup_access_deadline");
+        long progress = nav == null ? Long.MIN_VALUE : nav.lastVerifiedProgressTick();
+        boolean advanced = progress > observedNavProgress || confirmedSupports > observedSupports;
+        observedNavProgress = progress; observedSupports = confirmedSupports;
+        if (progressBudget.observe(level.getGameTime(), advanced)) return fail("cleanup_access_idle_budget_exhausted");
         if (!scope.inside(PlayerNav.playerFeet(player))) return fail("cleanup_access_left_observed_scope");
         if (!scope.complete()) {
             if (lastSnapshotTick == level.getGameTime()) return Status.RUNNING;
             if (!EmbeddedBaritoneRuntime.yieldActiveForExternalAction(player)) return Status.RUNNING;
             acquiredBody = true;
             InputDriver.halt(player);
-            totalReads += scope.scan(SNAPSHOT_PER_TICK);
+            int scanned = scope.scan(SNAPSHOT_PER_TICK);
+            totalReads += scanned;
+            // 首次保护快照的游标前进才算观察进展，下面每刻重复读取邻域不能反复续命。
+            if (scanned > 0) progressBudget.observe(level.getGameTime(), true);
             lastSnapshotTick = level.getGameTime();
             if (scope.failure != null) return fail(scope.failure);
             if (!scope.complete()) return Status.RUNNING;
@@ -103,7 +113,7 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
     boolean isSafeToCancel() { return nav == null || nav.isSafeToCancel(); }
     void stop() { if (status == Status.RUNNING) fail("cleanup_access_stopped"); }
     String failure() { return failure; }
-    long deadline() { return deadline; }
+    long deadline() { return level.getGameTime() + progressBudget.remaining(level.getGameTime()); }
     private Status fail(String reason) { if (failure.isEmpty()) failure = reason; return finish(Status.FAILED); }
     private Status finish(Status result) {
         if (finishing == null) { finishing = result; if (nav != null) nav.stop(); }
@@ -155,7 +165,8 @@ final class BuildScaffoldCleanupAccess implements PlayerNav.ContextProvider, Bui
         out.put("snapshot_cells", scope.volume); out.put("snapshot_complete", scope.complete()); out.put("protected_observed_blocks", scope.protectedCells.size());
         out.put("scope_min", List.of(scope.min.getX(), scope.min.getY(), scope.min.getZ()));
         out.put("scope_max", List.of(scope.max.getX(), scope.max.getY(), scope.max.getZ()));
-        out.put("confirmed_new_supports", confirmedSupports); out.put("remaining_ticks", Math.max(0, deadline - level.getGameTime()));
+        out.put("confirmed_new_supports", confirmedSupports); out.put("remaining_ticks", progressBudget.remaining(level.getGameTime()));
+        out.put("idle_budget", progressBudget.diagnostics(level.getGameTime()));
         out.put("safe_to_cancel", isSafeToCancel()); out.put("route_created", nav != null);
         if (nav != null) { out.put("planning", nav.planningInFlight()); out.put("navigation", nav.outcomeSummary()); }
         return Map.copyOf(out);

@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.ProgressBudget;
 
 /**
  * 只读扫描已加载区块中的目标方块；不移动身体也不改变世界。
@@ -36,11 +37,13 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private String failureCode;
     private ClientLevel scannedLevel;
     private LoadedBlockScan scan;
+    private final ProgressBudget scanBudget;
     /** 具体位置只在 Mod 内部保存；公开结果仅输出数量与距离统计。 */
     private final Map<BlockPos, Block> observed = new LinkedHashMap<>();
 
     public SemanticBlockSearchCompanionTask(LocalPlayer player, SemanticBlockSearchTaskRecord record) {
         super(player, record);
+        scanBudget = record.progressBudget(PROGRESS_LEASE_TICKS);
     }
 
     @Override
@@ -54,19 +57,17 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     protected TaskState onTick() {
         if (player.clientLevel != scannedLevel)
             return failSearch("find_block_world_changed", "the observed world changed before the scan completed", FailureType.INTERRUPTED);
-        long before = scan.processedCells();
         // 一次只沿同一个游标推进；隐藏目标继续逐个按原生视线判断，不再换排除集合重扫全范围。
         scan.advance(SCAN_WORK_PER_TICK, SCAN_NANOS_PER_TICK, pos -> {
             observe(pos);
             return observed.size() >= r.count;
         });
+        // 单调的扫描游标直接接入公共预算；相同游标的轮询不能给父任务或本任务补时。
+        scanBudget.observeCounter(player.level().getGameTime(), scan.processedCells());
         if (observed.size() >= r.count) {
             return TaskState.SUCCESS;
         }
         if (scan.complete()) return exhausted();
-        if (scan.processedCells() > before) {
-            r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
-        }
         return TaskState.RUNNING;
     }
 

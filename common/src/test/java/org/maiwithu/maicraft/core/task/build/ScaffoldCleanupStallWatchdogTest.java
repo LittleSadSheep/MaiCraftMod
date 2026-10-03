@@ -31,8 +31,17 @@ public final class ScaffoldCleanupStallWatchdogTest {
             FieldAccess.set(task, "scaffoldQueue", List.of(deepA, deepB));
             Method arm = FirstPersonBuildCompanionTask.class.getDeclaredMethod("armScaffoldWatch");
             arm.setAccessible(true); arm.invoke(task);
-            // 把看门狗基准拨到阈值之外：此刻台账与身体都无变化，应当立即判死。
-            FieldAccess.setLong(task, "scaffoldWatchTick", h.level.getGameTime() - 601);
+            var clock = h.level.getClass().getDeclaredField("time"); clock.setAccessible(true);
+            Method watch = FirstPersonBuildCompanionTask.class.getDeclaredMethod("scaffoldWatchStalled"); watch.setAccessible(true);
+            var childProgress = record.progressBudget(600);
+            // 台账暂未缩短、身体尚未移动时，辅助流程确认的新计算片段仍应补满父流程预算。
+            for (int part = 1; part <= 3; part++) {
+                clock.setLong(h.level, h.level.getGameTime() + 400);
+                childProgress.observeCounter(h.level.getGameTime(), part);
+                check(!(Boolean) watch.invoke(task), "持续取得子流程进展时不能按总耗时放弃清理");
+            }
+            // 推进真实活动时钟，台账、身体与子流程都没有进展，公共预算才应当耗尽。
+            clock.setLong(h.level, h.level.getGameTime() + 601);
             Method step = FirstPersonBuildCompanionTask.class.getDeclaredMethod("stepPhase");
             step.setAccessible(true);
             check(step.invoke(task) == TaskState.RUNNING, "看门狗放弃清理后转入最终状态验收而不是失败");
@@ -62,10 +71,6 @@ public final class ScaffoldCleanupStallWatchdogTest {
             @SuppressWarnings({"unchecked", "rawtypes"})
             Object value = Enum.valueOf((Class<? extends Enum>) field.getType(), constant);
             field.set(owner, value);
-        }
-        static void setLong(Object owner, String name, long value) throws Exception {
-            var field = FirstPersonBuildCompanionTask.class.getDeclaredField(name); field.setAccessible(true);
-            field.setLong(owner, value);
         }
     }
 }

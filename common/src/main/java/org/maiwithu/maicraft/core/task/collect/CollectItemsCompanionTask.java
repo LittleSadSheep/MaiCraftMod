@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.collect;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.ProgressBudget;
 
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -40,6 +41,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private static final double WALK_SPEED = 1.0;
     /** 掉落实体消失或角色接触后，等待数据包同步的有界窗口。 */
     private static final int PICKUP_SYNC_TICKS = 20;
+    private final ProgressBudget pickupProgress;
 
     private Phase phase = Phase.SCAN;
     private NativePickupReceipt pickup;
@@ -66,6 +68,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     public CollectItemsCompanionTask(LocalPlayer player, CollectItemsTaskRecord record) {
         super(player, record);
+        pickupProgress = record.progressBudget(20L * 20);
     }
 
     @Override
@@ -399,7 +402,11 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         int additional = Math.max(0, count - pickupAccountedUnits);
         pickupAccountedUnits += additional;
         r.addCollected(additional);
-        if (additional > 0) collectedItems.merge(pickupItemId, additional, Integer::sum);
+        if (additional > 0) {
+            collectedItems.merge(pickupItemId, additional, Integer::sum);
+            // 连续拾取只按已确认入包数量补时，物品消失和重复回执不能把剩余预算刷满。
+            pickupProgress.observeCounter(player.level().getGameTime(), r.getCollected());
+        }
     }
 
     @Override

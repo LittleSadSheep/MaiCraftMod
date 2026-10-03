@@ -109,8 +109,8 @@ public final class BuildScaffoldCleanupAccessTest {
                     "an actually ready cleanup stance finishes without manufacturing a navigation result");
             var expired = new BuildScaffoldCleanupAccess(h.player, NavGoal.exact(GOAL), () -> false, new Parent());
             for (int i = 0; i < 600; i++) h.nextTick();
-            check(expired.tick() == BuildScaffoldCleanupAccess.Status.FAILED && expired.failure().equals("cleanup_access_deadline"),
-                    "one approach has a finite physical game-tick deadline independent of planner activity");
+            check(expired.tick() == BuildScaffoldCleanupAccess.Status.FAILED && expired.failure().equals("cleanup_access_idle_budget_exhausted"),
+                    "an approach with no confirmed progress exhausts its active game-tick budget");
             check(h.blockUses() == 0 && h.itemUses() == 0, "readiness and timeout do not consume blocks or operate a menu");
         }
     }

@@ -1,4 +1,5 @@
 package org.maiwithu.maicraft.core.task.fish;
+import org.maiwithu.maicraft.task.ProgressBudget;
 import org.maiwithu.maicraft.core.FailureType;
 
 import org.maiwithu.maicraft.core.Constants;
@@ -102,9 +103,12 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private final FirstPersonActionGate rodSelection = new FirstPersonActionGate();
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     private NativeActionReceipt rodReceipt;
+    private final ProgressBudget catchProgress;
+    private ProgressBudget lootProgress;
 
     public FishCompanionTask(LocalPlayer player, FishTaskRecord record) {
         super(player, record);
+        catchProgress = record.progressBudget(120L * 20);
     }
 
     @Override
@@ -350,9 +354,11 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         phaseTicks++;
         if (phaseTicks <= LOOT_DISCOVERY_TICKS) caught.discover(player.level(), lootBox());
 
-        if (phaseTicks >= LOOT_COLLECTION_TIMEOUT) {
+        // 收获期间实际靠近、算路与确认入包都补满无进展预算，不能把长距离取回战利品按总耗时打断。
+        if (lootProgress == null) lootProgress = r.progressBudget(LOOT_COLLECTION_TIMEOUT);
+        if (lootProgress.observe(player.level().getGameTime(), false)) {
             int remaining = liveCaught().size();
-            fail("reeled in fishing loot but timed out while retrieving " + remaining
+            fail("reeled in fishing loot but made no verified retrieval progress for the idle budget; remaining " + remaining
                     + " dropped loot item(s)", FailureType.NO_PATH);
             return TaskState.FAILED;
         }
@@ -368,6 +374,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             NativePickupReceipt.State receiptState = lootReceipt.poll(
                     player, LOOT_CLOSE_WAIT_TICKS);
             if (receiptState == NativePickupReceipt.State.RECEIVED) {
+                lootProgress.observe(player.level().getGameTime(), true);
                 clearLootTarget();
             } else if (receiptState == NativePickupReceipt.State.AWAITING_INVENTORY_SYNC) {
                 if (nav != null) nav.pause();
@@ -459,6 +466,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         }
         // 这里累计的是完成一次收获，不是物品件数；一竿钓到垃圾或宝藏也会计一次。
         r.caughtOne();
+        catchProgress.observeCounter(player.level().getGameTime(), r.caught());
         Constants.LOG.debug("[maicraft-fish] caught-and-received={}/{} casts={} lootUnits={}",
                 r.caught(), r.requested, r.casts(), Math.max(receivedUnits, 1));
         clearLootTracking();
@@ -477,6 +485,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     // 收竿前先记地上已有物品和背包数量，之后把新看到的东西拿来比较，避免直接把旧物品算成本次产出。
     private void beginLootCollection() {
+        lootProgress = r.progressBudget(LOOT_COLLECTION_TIMEOUT);
+        lootProgress.observe(player.level().getGameTime(), true);
         caught.clear();
         abandonedLoot.clear();
         lootTarget = null;

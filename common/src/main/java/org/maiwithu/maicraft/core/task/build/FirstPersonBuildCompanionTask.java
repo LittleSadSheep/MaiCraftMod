@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.build;
+import org.maiwithu.maicraft.task.ProgressBudget;
 
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
@@ -205,10 +206,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastScaffoldDescent = Map.of();
     private final Set<BlockPos> rejectedScaffoldDescents = new HashSet<>();
     private BuildScaffoldCleanupAccess scaffoldAccess;
-    /** 清理阶段看门狗：台账收缩与身体位移双冻结超过阈值即放弃剩余支撑，不阻塞交付。 */
+    /** 清理阶段台账、身体和辅助流程都无进展超过阈值时放弃剩余支撑，不阻塞交付。 */
     private static final int SCAFFOLD_STALL_TICKS = 600;
     private static final double SCAFFOLD_STALL_MOVE_SQR = 4.0;
-    private long scaffoldWatchTick;
+    private ProgressBudget scaffoldBudget;
     private int scaffoldWatchLedger = -1;
     private BlockPos scaffoldWatchFeet;
     private final Map<BlockPos, NavGoal> scaffoldAccessGoals = new LinkedHashMap<>();
@@ -2015,19 +2016,23 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 || phase == Phase.SCAFFOLD_DESCENT || phase == Phase.SCAFFOLD_ACCESS;
     }
 
-    /** 台账收缩或身体位移任一发生都算进展，看门狗基准随之刷新；只有双冻结持续到阈值才判死。 */
+    /** 台账变化、身体位移或辅助流程确认新事实后立即补满预算，连续停滞达到阈值才结束清理。 */
     private boolean scaffoldWatchStalled() {
         long now = player.level().getGameTime();
-        if (now - scaffoldWatchTick < SCAFFOLD_STALL_TICKS) return false;
-        if (r.scaffoldLedger().snapshot().size() != scaffoldWatchLedger
-                || player.blockPosition().distSqr(scaffoldWatchFeet) > SCAFFOLD_STALL_MOVE_SQR) {
-            armScaffoldWatch(); return false;
+        if (scaffoldBudget == null) armScaffoldWatch();
+        boolean progressed = r.scaffoldLedger().snapshot().size() != scaffoldWatchLedger
+                || player.blockPosition().distSqr(scaffoldWatchFeet) > SCAFFOLD_STALL_MOVE_SQR;
+        if (progressed) {
+            scaffoldWatchLedger = r.scaffoldLedger().snapshot().size();
+            scaffoldWatchFeet = player.blockPosition().immutable();
         }
-        return true;
+        // 父流程也接收回收接近子流程的真实计算与原生操作进展，暂停时不消耗剩余时间。
+        return scaffoldBudget.observe(now, progressed);
     }
 
     private void armScaffoldWatch() {
-        scaffoldWatchTick = player.level().getGameTime();
+        if (scaffoldBudget == null) scaffoldBudget = r.progressBudget(SCAFFOLD_STALL_TICKS);
+        scaffoldBudget.observe(player.level().getGameTime(), true);
         scaffoldWatchLedger = r.scaffoldLedger().snapshot().size();
         scaffoldWatchFeet = player.blockPosition().immutable();
     }
