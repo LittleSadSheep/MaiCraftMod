@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTrav
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackPlatform;
+import org.maiwithu.maicraft.core.integration.physics.StructureDeparture;
 
 /** 将当前观察到能尝试的飞行／电梯方案按估计耗时排序；只是挑候选，实际整段路是否可走还要执行时验证。 */
 final class TransportPlan {
@@ -25,6 +26,12 @@ final class TransportPlan {
         // 按用户选的交通方式过滤候选；地面模式不会在这里新开飞行或电梯，同一楼层不重复生成电梯候选。
         List<Offer> offers = new ArrayList<>();
         List<String> unavailable = new ArrayList<>();
+        // 下车后可能仍站在活动座面，主世界方块寻路没有这层支撑；先用真实甲板碰撞走到地面再续行。
+        if (mode == TransportMode.AUTO) {
+            var departure = StructureDeparture.find(context, goal.center(), forbidden);
+            if (departure != null) offers.add(new Offer("structure_exit", BlockPos.containing(departure.destination()),
+                    20 + departure.destination().distanceTo(context.player().position()) * 6, () -> departure));
+        }
         if (targets.destinations().isEmpty()) unavailable.add("no supported, unobstructed landing satisfies the destination; " + targets.diagnostic());
         var floors = new HashSet<Integer>();
         if (mode != TransportMode.ELEVATOR && mode != TransportMode.GROUND) {

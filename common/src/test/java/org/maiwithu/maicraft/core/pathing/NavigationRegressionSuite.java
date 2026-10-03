@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshotTe
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridgeTest;
 import org.maiwithu.maicraft.core.integration.physics.ShipBoardingGeometryTest;
 import org.maiwithu.maicraft.core.integration.physics.StructurePoseTest;
+import org.maiwithu.maicraft.core.integration.physics.StructureExitPathTest;
 import org.maiwithu.maicraft.core.integration.physics.StructurePresentationTest;
 import org.maiwithu.maicraft.core.pathing.baritone.BaritonePlayerFeetTest;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudgetTest;
@@ -247,6 +248,7 @@ public final class NavigationRegressionSuite {
         AcquisitionProtectionTest.main(args);
         NavigationPolicySnapshotTest.main(args);
         NavigationDismountTest.main(args);
+        StructureExitPathTest.main(args);
         System.out.println("NavigationRegressionSuite: passed");
     }
 }
