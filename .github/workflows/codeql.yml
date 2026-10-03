@@ -1,20 +1,15 @@
 name: CodeQL
 
-# PR 检查待合并代码；集成分支推送和每周扫描持续复查默认分支的安全问题。
+# 与构建检查一致，仅在开发成果合入并推送 main 后扫描集成代码。
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [dev, main]
-  schedule:
-    - cron: '41 20 * * 0'
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

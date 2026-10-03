@@ -78,15 +78,17 @@
 
 ## GitHub 自动检查
 
-向 `dev`、`main` 推送或提交以这两个分支为目标的 PR，会触发 `CI`；也可以在 Actions 页面手动运行。Windows 和 Linux 都使用 Java 21、仓库 Wrapper 和单 worker 执行完整 `build`，覆盖公共回归及 Fabric、NeoForge 安装包。工作流使用 `bash ./gradlew`，不依赖检出时的可执行权限。
+开发成果合入并推送到 `main` 后才触发 `CI`，包括 GitHub PR 合并与本地快进合并后的推送。`dev` 推送、PR 打开或更新、定时和手动操作不触发构建。Windows 和 Linux 都使用 Java 21、仓库 Wrapper 和单 worker 执行完整 `build`，覆盖公共回归及 Fabric、NeoForge 安装包。工作流使用 `bash ./gradlew`，不依赖检出时的可执行权限。
 
-构建通过后，在该次 Actions 运行的 Artifacts 中下载 `maicraft-<系统>-<提交 SHA>`，按加载器选择对应 JAR。这里是用于测试的构建产物，保存 14 天，不会创建或发布 Release。`diagnostics-<系统>-<提交 SHA>` 同样保留 14 天，包含构建日志和生成的测试报告；独立 `main` 回归的断言结果在 `gradle-build.log` 中。
+CI 先把 `gradle.properties` 的补丁版本递增，例如 `0.1.0 → 0.1.1`，通过 GitHub 签名的机器人提交写回 `main`，再检出该提交构建。重跑同一次集成时复用版本；旧事件遇到更新的主分支时跳过，避免覆盖新合入的代码。构建失败也保留已登记的版本，便于原次运行重试。后续开发需将主分支的版本提交合回 `dev`，再继续集成。
 
-`CodeQL` 在 PR、`main` 推送、每周定时及手动触发时扫描 Java 与 GitHub Actions。Java 扫描显式编译三个模块，结果显示在仓库的 Security → Code scanning。扫描和离线回归都不能代替游戏内验收。
+构建通过后，在该次 Actions 运行的 Artifacts 中下载 `maicraft-<版本>-<系统>-<构建提交 SHA>`，按加载器选择对应 JAR。这里是用于测试的构建产物，保存 14 天，不会创建或发布 Release。`diagnostics-<系统>-<集成提交 SHA>` 同样保留 14 天，包含构建日志和生成的测试报告；独立 `main` 回归的断言结果在 `gradle-build.log` 中。
+
+`CodeQL` 同样只在合入并推送 `main` 时扫描 Java 与 GitHub Actions。Java 扫描显式编译三个模块，结果显示在仓库的 Security → Code scanning。扫描和离线回归都不能代替游戏内验收。
 
 Dependabot 每周一新加坡时间 10:00 检查 Actions，以及 SQLite JDBC、jsoup 的非主版本更新，向 `dev` 提交更新 PR。Minecraft、映射和加载器版本继续配套人工升级。Action 固定到提交 SHA；更新 PR 需正常检查和审阅，不自动合并。
 
-这些配置使用 GitHub 自动提供的令牌，无需额外仓库 Secret。定时扫描和 Dependabot 配置需要进入远端默认分支 `main` 后生效；手动触发按钮也以默认分支中的工作流为准。
+这些配置使用 GitHub 自动提供的令牌，无需额外仓库 Secret 或个人签名私钥。仅版本回写任务拥有仓库内容写权限；机器人提交不会再次触发 CI。若分支规则禁止机器人直接写入，版本任务会明确失败，需要按仓库维护策略允许该回写。工作流与 Dependabot 配置需进入远端 `main` 后生效。
 
 ## 单人世界自动验收
 
