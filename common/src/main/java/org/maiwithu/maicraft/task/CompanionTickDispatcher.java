@@ -85,6 +85,12 @@ public final class CompanionTickDispatcher {
         return brain == null ? "none" : brain.controllingTask();
     }
 
+    /** 只向当前绑定的旧身体交付死亡观察，不能把新身体或断线当成寻死完成。 */
+    public static boolean observeExpectedDeath(LocalPlayer player) {
+        requireClientThread();
+        return player != null && player == boundPlayer && brain != null && brain.observeDeath(player);
+    }
+
 
 
     /** 返回已占用的任务槽，先列同步任务，再列当前后台任务。 */

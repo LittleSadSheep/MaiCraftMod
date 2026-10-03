@@ -36,6 +36,19 @@ final class TaskSlot {
         return record != null && record.getState() == TaskState.RUNNING && task.canRun(player);
     }
 
+    // 保护豁免由槽位中的活任务提供，不写全局开关；取消、失败和换身体清空槽位时不会泄漏豁免。
+    boolean suppressesSurvivalReflexes() {
+        return record != null && record.getState() == TaskState.RUNNING && task.suppressesSurvivalReflexes();
+    }
+
+    boolean observeDeath(LocalPlayer player) {
+        // 断线、移除和普通重绑都不是死亡证据；原生健康状态确认后才允许任务结算预期死亡。
+        if (record == null || record.getState() != TaskState.RUNNING || !player.isDeadOrDying()) return false;
+        boolean expected = task.observeDeath(player);
+        settleIfTerminal(player);
+        return expected;
+    }
+
     /** 换一件事做：先结束旧任务，再准备新任务；真正往下做，要等调度器选到它。 */
     void put(LocalPlayer player, TaskRecord next) {
         if (next == null) {

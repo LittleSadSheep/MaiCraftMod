@@ -23,6 +23,10 @@ public final class TaskSelector {
      */
     public static Task select(List<Task> reflexes, Task sync, Task current,
                               List<Task> idle, LocalPlayer companion) {
+        // 寻死是显式身体任务：仅在它仍可运行时跳过保护和临时动作，结束或暂停后自然恢复原优先顺序。
+        if (current != null && current.canRun(companion) && current.suppressesSurvivalReflexes()) {
+            return current;
+        }
         if (reflexes != null) {
             for (Task reflex : reflexes) {
                 if (reflex != null && reflex.canRun(companion)) {

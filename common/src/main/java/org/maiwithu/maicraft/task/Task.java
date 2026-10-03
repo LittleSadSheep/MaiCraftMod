@@ -42,6 +42,12 @@ public interface Task {
         return true;
     }
 
+    /** 显式寻死期间由当前任务独占身体，避免吃饭、逃生或防摔把已授权的动作反向撤回；暂停后由调度器恢复反射。 */
+    default boolean suppressesSurvivalReflexes() { return false; }
+
+    /** 死亡观察先于普通任务 tick；只有以死亡为目标且已有执行证据的任务可以在这里结清目标。 */
+    default boolean observeDeath(LocalPlayer companion) { return false; }
+
     /**
      * 接单时的一次性准备；TaskSlot 在创建执行器后调用，实际逐刻动作等调度器选中后再由 tick 推进。
      * 被抢占后重新拿到身体不会再调这里，那是恢复原任务，不是重新开工。

@@ -101,6 +101,13 @@ final class CompanionBrain {
         return current.record();
     }
 
+    // 先结清寻死目标再保存重生检查点；普通任务返回 false，仍按原有死亡恢复流程处理。
+    boolean observeDeath(LocalPlayer player) {
+        boolean expected = current.observeDeath(player);
+        shipResults();
+        return expected;
+    }
+
     String controllingTask() {
         return holder == null ? "none" : holder == currentProxy ? "current_task"
                 : holder == syncProxy ? "synchronous_task" : holder.getClass().getName();
@@ -246,6 +253,10 @@ final class CompanionBrain {
         @Override
         public boolean canRun(LocalPlayer player) {
             return slot.canRun(player);
+        }
+
+        @Override public boolean suppressesSurvivalReflexes() {
+            return slot.suppressesSurvivalReflexes();
         }
 
         @Override

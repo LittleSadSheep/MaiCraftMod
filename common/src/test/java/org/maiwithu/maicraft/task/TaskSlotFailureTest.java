@@ -17,6 +17,7 @@ public final class TaskSlotFailureTest {
             startFailureSettlesOnce(world.player);
             tickFailureSettlesOnce(world.player);
             cancelSourcesNameTheirOrigin(world.player);
+            deliberateDeathRestoresReflexes(world.player);
         }
         TaskDeadlinePauseTest.main(args);
         System.out.println("TaskSlotFailureTest: passed");
@@ -46,6 +47,40 @@ public final class TaskSlotFailureTest {
         // 执行器交不出结果时走兜底结果；来源也要随兜底结果写进 JSON，不能只停在任务单字段里。
         check(lost.getResult() != null
                 && lost.getResult().toJson().contains("cancel_source"), "兜底取消结果应携带 cancel_source 字段");
+    }
+
+    private static void deliberateDeathRestoresReflexes(LocalPlayer player) {
+        // 显式寻死抢到身体后不能被自救反向接管；暂停、取消和结算死亡都要恢复普通自保顺序。
+        List<TaskRecord> completed = new ArrayList<>();
+        var slot = new TaskSlot(completed::add);
+        var record = new TestRecord();
+        boolean[] paused = {false};
+        Task reflex = new TestTask(false, false);
+        Task deliberate = new Task() {
+            @Override public boolean canRun(LocalPlayer body) { return !paused[0]; }
+            @Override public boolean suppressesSurvivalReflexes() { return true; }
+            @Override public TaskState tick(LocalPlayer body) { return TaskState.RUNNING; }
+            @Override public void stop(LocalPlayer body, StopReason reason) { }
+            @Override public String name() { return "deliberate_death"; }
+            @Override public boolean observeDeath(LocalPlayer body) {
+                record.setState(TaskState.SUCCESS); return true;
+            }
+        };
+        TaskFactory.register(TestRecord.class, (body, next) -> deliberate);
+        slot.put(player, record);
+        check(TaskSelector.select(List.of(reflex), null, deliberate, List.of(), player) == deliberate,
+                "寻死执行期间应跳过自救反射");
+        paused[0] = true;
+        check(TaskSelector.select(List.of(reflex), null, deliberate, List.of(), player) == reflex,
+                "暂停寻死后应立即恢复自救");
+        check(!slot.observeDeath(player), "活着或断线不能算寻死完成");
+        player.setHealth(0);
+        check(slot.observeDeath(player) && record.getState() == TaskState.SUCCESS && completed.size() == 1,
+                "确认死亡应结清一次成功回执");
+        check(!slot.suppressesSurvivalReflexes() && !slot.observeDeath(player), "死亡结算后不能遗留保护豁免");
+        player.setHealth(20); paused[0] = false;
+        slot.put(player, new TestRecord()); slot.cancel(player);
+        check(!slot.suppressesSurvivalReflexes(), "取消后不能遗留保护豁免");
     }
 
     private static void creationFailureReleasesSlot(LocalPlayer player) {
