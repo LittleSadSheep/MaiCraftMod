@@ -596,7 +596,8 @@ public final class SemanticAbilityCatalog {
                 + "Item inputs bind existing consumers without adding containers/transporters; supply via native manual interaction or explicitly authored transport. "
                 + "These declarations require actual transfer verification. supply_preference defaults to external; "
                 + "onsite requires onsite_reason explaining a deliberate local source. In survival, known creative-only "
-                + "materials require real carried items or installed recipe evidence; that evidence is not a complete acquisition plan. "
+                // 续建完整蓝图时复用场地内已存在的全部声明部件，不要求角色在背包里保留重复的一份。
+                + "materials require real carried items, installed recipe evidence, or every declared block of that material already present at the bound site; acquisition remains separate. "
                 + "Build first, then inspect; connect_external_input supports kinetic/energy, not item routing. Kinetic inputs may compare nearby loaded sources when source_label is omitted. "
                 + "run_production is separate. Read remembered ports from perceive(machines).";
     }

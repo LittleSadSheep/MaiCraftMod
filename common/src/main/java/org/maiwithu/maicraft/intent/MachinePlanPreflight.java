@@ -43,8 +43,14 @@ public final class MachinePlanPreflight {
                         : PonderBlueprintStore.resolve(parameters.get("blueprint_uri").getAsString());
                 var layout = MachineConstructionPlan.reviewExplicit(
                         MachineBlueprintDocument.compile(blueprint, MachineConstructionPlan.registry()));
-                // 在线规划提前识别已知创造资源误用；普通建材缺口仍交给开工后的统一补料，不恢复全面备料门槛。
-                if (layout.buildable() && player != null) layout = MachineSurvivalMaterials.requireSurvivalBlueprint(player, layout);
+                // 规划与实际开工共用绑定锚点，已装好的声明部件无需再从背包里重复证明一次。
+                if (layout.buildable() && player != null) {
+                    issuePath="goal.parameters.snapshot_id";
+                    var snapshot=MachineAbilityAdapter.boundSnapshot(step,player,runtime,true);
+                    check.addProperty("site_anchor_verified",true);
+                    issuePath="goal.parameters.blueprint";
+                    layout=MachineSurvivalMaterials.requireSurvivalBlueprint(player,layout,snapshot.center());
+                }
                 valid &= layout.buildable();
                 check.addProperty("valid", layout.buildable());
                 // 返回诊断、材料清单与动力接口即可决定下一步；逐格放置依赖留给 Mod，避免再抄整张图。
@@ -52,11 +58,6 @@ public final class MachinePlanPreflight {
                         "physical_layout_compiled", "native_installation_validated", "physical_target_count",
                         "site_and_material_preflight_pending", "external_inputs", "survival_materials"))
                     if (layout.report().has(field)) check.add(field, layout.report().get(field).deepCopy());
-                if (layout.buildable() && player != null) {
-                    issuePath = "goal.parameters.snapshot_id";
-                    MachineAbilityAdapter.boundSnapshot(step, player, runtime, true);
-                    check.addProperty("site_anchor_verified", true);
-                }
             } catch (IllegalArgumentException invalid) {
                 // 错误蓝图就地返回可修订的诊断，尚未登记可执行计划，更不会开始角色动作。
                 valid = false;

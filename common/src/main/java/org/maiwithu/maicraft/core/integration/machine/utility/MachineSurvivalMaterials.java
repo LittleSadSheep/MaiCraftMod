@@ -5,9 +5,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Function;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -35,6 +38,11 @@ public final class MachineSurvivalMaterials {
     /** 注入的是实物与已安装配方证据，不能用蓝图 metadata 自报“可获取”绕过预检。 */
     public static JsonObject review(boolean instabuild, Collection<String> materialIds,
             Predicate<String> actuallyCarried, Predicate<String> installedRecipeResultKnown) {
+        return review(instabuild,materialIds,actuallyCarried,installedRecipeResultKnown,ignored->false);
+    }
+
+    static JsonObject review(boolean instabuild, Collection<String> materialIds,
+            Predicate<String> actuallyCarried, Predicate<String> installedRecipeResultKnown,Predicate<String> alreadyInstalled) {
         JsonObject report = new JsonObject(); JsonArray rows = new JsonArray(), suggestions = new JsonArray(), alternateDesigns = new JsonArray();
         boolean blocked = false, conditional = false; Set<String> suggested = new LinkedHashSet<>();
         for (String id : new LinkedHashSet<>(materialIds)) {
@@ -43,6 +51,7 @@ public final class MachineSurvivalMaterials {
             String status;
             if (instabuild) status = "creative_mode_allowed";
             else if (actuallyCarried.test(id)) status = "carried_build_material";
+            else if (alreadyInstalled.test(id)) status = "declared_blocks_already_present";
             else if (installedRecipeResultKnown.test(id)) { status = "conditional_recipe_evidence"; conditional = true; }
             else {
                 status = "known_creative_material_without_acquisition_evidence"; blocked = true;
@@ -70,14 +79,18 @@ public final class MachineSurvivalMaterials {
         report.addProperty("acquisition_plan_verified", false);
         report.addProperty("ordinary_missing_materials_are_not_rejected", true);
         report.addProperty("automatic_substitution", false);
-        report.addProperty("evidence_contract", "A carried item or installed static recipe result permits this known-only check. "
-                + "Neither proves sufficient quantities, obtainable recipe inputs or executable custom recipe conditions.");
+        report.addProperty("evidence_contract", "A carried item, an installed static recipe result, or all matching declared blocks already present permits this known-only check. "
+                + "Existing blocks do not prove configuration or operation; acquisition evidence does not prove quantities or executable recipe inputs.");
         report.add("known_creative_materials", rows); report.add("suggested_external_inputs", suggestions);
         report.add("alternate_design_requirements", alternateDesigns);
         return report;
     }
 
     public static JsonObject review(LocalPlayer player, JsonObject compiledBlueprint, JsonObject compiledReport) {
+        return review(player,compiledBlueprint,compiledReport,null);
+    }
+
+    private static JsonObject review(LocalPlayer player, JsonObject compiledBlueprint, JsonObject compiledReport,BlockPos anchor) {
         if (player == null) throw new IllegalArgumentException("survival material review requires the current player");
         Set<String> ids = materialIds(compiledBlueprint, compiledReport), carried = new LinkedHashSet<>();
         boolean creative = player.getAbilities().instabuild;
@@ -87,17 +100,45 @@ public final class MachineSurvivalMaterials {
             if (BuiltInRegistries.ITEM.containsKey(key)
                     && PlayerInv.buildableCount(player.getInventory(), BuiltInRegistries.ITEM.get(key)) > 0) carried.add(id);
         }
-        Set<String> needed = new LinkedHashSet<>(ids); needed.retainAll(KNOWN_CREATIVE.keySet()); needed.removeAll(carried);
+        // 同一蓝图续建时，已装在目标格里的电机不再要求背包还剩一份；未知区块和新增目标仍交给原有供料检查。
+        Set<String> existing=existingMaterials(compiledBlueprint,compiledReport,anchor,pos->player.level().isLoaded(pos)
+                ?BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(pos).getBlock()).toString():null);
+        Set<String> needed = new LinkedHashSet<>(ids); needed.retainAll(KNOWN_CREATIVE.keySet()); needed.removeAll(carried);needed.removeAll(existing);
         Set<String> recipes = new LinkedHashSet<>(); JsonObject scan = new JsonObject();
         if (!creative && !needed.isEmpty()) scanRecipes(player, needed, recipes, scan);
         else scan.addProperty("status", "not_needed");
-        JsonObject report = review(creative, ids, carried::contains, recipes::contains);
+        JsonObject report = review(creative, ids, carried::contains, recipes::contains,existing::contains);
         report.add("recipe_scan", scan); return report;
     }
 
     /** 保留原蓝图供修改；阻断的是施工资格，不自动把创造马达换成另一套动力系统。 */
     public static SemanticMachineLayout.Result requireSurvivalBlueprint(LocalPlayer player, SemanticMachineLayout.Result layout) {
-        return withReview(layout, review(player, layout.blueprint(), layout.report()));
+        return requireSurvivalBlueprint(player,layout,null);
+    }
+
+    public static SemanticMachineLayout.Result requireSurvivalBlueprint(LocalPlayer player, SemanticMachineLayout.Result layout,BlockPos anchor) {
+        return withReview(layout, review(player, layout.blueprint(), layout.report(),anchor));
+    }
+
+    static Set<String> existingMaterials(JsonObject blueprint,JsonObject report,BlockPos anchor,Function<BlockPos,String> observedBlock) {
+        if(anchor==null||!blueprint.has("blocks"))return Set.of();
+        var counts=new LinkedHashMap<String,Integer>();var missing=new LinkedHashSet<String>();
+        for(var raw:blueprint.getAsJsonArray("blocks")) {
+            var cell=raw.getAsJsonObject();
+            // 附件和容器内容仍要真实物品，不能拿一个同名外壳替代需要安装或填入的材料。
+            if(cell.has("item_id"))missing.add(cell.get("item_id").getAsString());
+            if(!cell.has("block_id"))continue;
+            String id=cell.get("block_id").getAsString();if(!KNOWN_CREATIVE.containsKey(id))continue;
+            counts.merge(id,1,Integer::sum);var offset=cell.getAsJsonArray("offset");
+            BlockPos at=anchor.offset(offset.get(0).getAsInt(),offset.get(1).getAsInt(),offset.get(2).getAsInt());
+            if(!id.equals(observedBlock.apply(at)))missing.add(id);
+        }
+        if(report.has("initial_contents"))for(var raw:report.getAsJsonArray("initial_contents")) {
+            var content=raw.getAsJsonObject();if(content.has("item_id"))missing.add(content.get("item_id").getAsString());
+        }
+        if(report.has("logical_material_counts"))for(var e:report.getAsJsonObject("logical_material_counts").entrySet())
+            if(e.getValue().getAsDouble()>counts.getOrDefault(e.getKey(),0))missing.add(e.getKey());
+        var result=new LinkedHashSet<>(counts.keySet());result.removeAll(missing);return Set.copyOf(result);
     }
 
     static SemanticMachineLayout.Result withReview(SemanticMachineLayout.Result layout, JsonObject review) {

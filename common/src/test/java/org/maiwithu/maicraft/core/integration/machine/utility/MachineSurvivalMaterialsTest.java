@@ -6,6 +6,8 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.Map;
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 
 /** 创造物品误选、整合包配方例外、已有实物和普通缺料之间保持独立。 */
@@ -72,6 +74,22 @@ public final class MachineSurvivalMaterialsTest {
         check(report.get("buildable").getAsBoolean() && !report.has("survival_materials"), "review does not mutate caller report");
         var invalid = new SemanticMachineLayout.Result(false, blueprint, report);
         check(!MachineSurvivalMaterials.withReview(invalid, ordinary).buildable(), "passing materials cannot override geometry failure");
+        // 四轮车把电机装进车体后背包会归零，续建应复用这些原生方块；缺一个、新增一个或未加载都不能补造实物。
+        var installed=json("{\"blocks\":[{\"offset\":[-1,0,1],\"block_id\":\"create:creative_motor\"},{\"offset\":[1,0,1],\"block_id\":\"create:creative_motor\"}]}");
+        BlockPos anchor=new BlockPos(40,70,80);
+        var actual=Map.of(anchor.offset(-1,0,1),"create:creative_motor",anchor.offset(1,0,1),"create:creative_motor");
+        var existing=MachineSurvivalMaterials.existingMaterials(installed,new JsonObject(),anchor,actual::get);
+        check(existing.equals(Set.of("create:creative_motor")),"all existing targets are resolved relative to the bound construction anchor");
+        var reused=MachineSurvivalMaterials.review(false,existing,none,unexpected,existing::contains);
+        check(reused.get("allowed").getAsBoolean()&&reused.toString().contains("declared_blocks_already_present"),"existing machinery must not require duplicate carried material");
+        check(MachineSurvivalMaterials.existingMaterials(installed,new JsonObject(),anchor,p->p.equals(anchor.offset(-1,0,1))?"create:creative_motor":null).isEmpty(),
+                "an unloaded or missing second motor cannot be invented from the first");
+        check(MachineSurvivalMaterials.existingMaterials(installed,new JsonObject(),anchor.offset(0,1,0),actual::get).isEmpty(),"a different construction height cannot reuse the old blocks");
+        check(MachineSurvivalMaterials.existingMaterials(installed,new JsonObject(),null,p->{throw new AssertionError("unbound design read the world");}).isEmpty(),"unbound designs need acquisition evidence");
+        check(MachineSurvivalMaterials.existingMaterials(installed,json("{\"initial_contents\":[{\"item_id\":\"create:creative_motor\"}]}"),anchor,actual::get).isEmpty(),
+                "already installed blocks cannot supply declared container contents");
+        check(MachineSurvivalMaterials.existingMaterials(installed,json("{\"logical_material_counts\":{\"create:creative_motor\":3}}"),anchor,actual::get).isEmpty(),
+                "extra logical material demand cannot be hidden by two existing blocks");
     }
 
     private static JsonObject json(String text) { return JsonParser.parseString(text).getAsJsonObject(); }

@@ -281,10 +281,10 @@ final class MachineAbilityAdapter {
     private static IntentAction design(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         // 组件关系图交给后台算布局，明确蓝图则直接检查；报告里的“审阅完成”不表示设计一定能建成。
         JsonObject p = goal.parameters();
-        var layout = compileLayout(p, player);
-        if (layout == null) return IntentAction.Pending.INSTANCE;
         MachineSnapshots.Snapshot snapshot = goal.parameters().has("snapshot_id")
                 ? boundSnapshot(goal, player, runtime) : null;
+        var layout = compileLayout(p, player,snapshot==null?null:snapshot.center());
+        if (layout == null) return IntentAction.Pending.INSTANCE;
         JsonObject report = p.has("design") ? MachineDesignReview.review(p.getAsJsonObject("design"),
                 id -> registered(id, true), id -> registered(id, false)) : new JsonObject();
         report.addProperty("review_kind", p.has("design") ? "semantic_design" : "blueprint");
@@ -456,11 +456,12 @@ final class MachineAbilityAdapter {
             if (!bool(p, "allow_use", false)) throw bad("machine_production_not_authorized: allow_use is required to run the declared production chain");
             MachineProductionIntent.requireRuntime(p.getAsJsonObject("production"));
         }
-        var layout = compileLayout(p, player);
+        // 先绑定真实施工锚点，再区分背包材料与已安装部件；不因完整蓝图包含自己的旧电机而拒绝续建。
+        MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime, true);
+        var layout = compileLayout(p, player,snapshot.center());
         if (layout == null) return IntentAction.Pending.INSTANCE;
         if (p.has("production") && !MachineUtilityInputs.parse(layout.blueprint()).isEmpty())
             throw bad("external_utility_connection_is_separate: build without production, connect_external_input, then run_production");
-        MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime, true);
         if (layout.buildable()) {
             boolean modification = MODIFY.equals(goal.ability());
             // 建造授权覆盖蓝图点名格的地形和旧部件；保留选项仅在调用方主动收紧时生效，不新增逐次许可门槛。
@@ -547,7 +548,7 @@ final class MachineAbilityAdapter {
         return bool(p, "replace_existing", !preserve);
     }
 
-    private static SemanticMachineLayout.Result compileLayout(JsonObject p, LocalPlayer player) {
+    private static SemanticMachineLayout.Result compileLayout(JsonObject p, LocalPlayer player,BlockPos siteCenter) {
         // 关系图需要计算具体布局；蓝图已经给出每格目标，只需按方块规则解析和检查。
         SemanticMachineLayout.Result result;
         if (p.has("design")) result = MachineLayoutJobs.poll(player, p.getAsJsonObject("design"));
@@ -556,7 +557,9 @@ final class MachineAbilityAdapter {
                     : PonderBlueprintStore.resolve(requiredString(p, "blueprint_uri", 2048));
             result = MachineConstructionPlan.reviewExplicit(MachineBlueprintDocument.compile(blueprint, MachineConstructionPlan.registry()));
         }
-        return result == null ? null : MachineSurvivalMaterials.requireSurvivalBlueprint(player,result);
+        if(result==null||!result.buildable())return result;
+        BlockPos anchor=siteCenter==null?null:p.has("design")?MachineConstructionPlan.floorAnchor(siteCenter,result):siteCenter;
+        return MachineSurvivalMaterials.requireSurvivalBlueprint(player,result,anchor);
     }
 
     private static void validateSeparateUtilityConstruction(JsonObject p) {
