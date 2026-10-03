@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.intent.AttentionFeedTest;
+import org.maiwithu.maicraft.intent.ReminderBoardTest;
 import org.maiwithu.maicraft.intent.IntentAttentionEvidenceTest;
 import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
@@ -19,6 +20,8 @@ import org.maiwithu.maicraft.client.chat.ChatMonitorTest;
 public final class AttentionRegressionSuite {
     public static void main(String[] args) throws Exception {
         AttentionFeedTest.main(args);
+        // 持续游戏风险须在工具读取后继续保留，事件节流不能删掉模型所需的最新依据。
+        ReminderBoardTest.main(args);
         ChatFlowTest.main(args);
         AttentionWaitTest.main(args);
         // 大份任务证据按路径与分页找回，不能因宿主压缩上下文而只能重新执行动作。
