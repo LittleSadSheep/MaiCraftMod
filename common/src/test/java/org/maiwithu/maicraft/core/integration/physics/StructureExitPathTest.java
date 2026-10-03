@@ -18,6 +18,14 @@ public final class StructureExitPathTest {
         check(!StructureExitPath.clear(List.of(ground,seat),List.of(new AABB(-2.5,0,-.5,-1.5,2,.5)),start,end,.64,1.84),"禁入格不能被地面支撑掩盖");
         var step = new AABB(-1.5,0,-.5,-.5,1.5,.5);
         check(StructureExitPath.clear(List.of(ground,seat,step),start,end,.64,1.84),"允许先踩低一级车沿再落地");
+        // 角色还在看向控制台时，移动仍沿出口方向，镜头旋转不能把第一步带到车头另一侧。
+        for (float yaw : new float[]{0,45,90,180,-135}) {
+            var command = StructureDeparture.toward(new Vec3(-1,0,-1),yaw);
+            double angle = Math.toRadians(yaw);
+            double x = -command.forward()*Math.sin(angle)+command.strafe()*Math.cos(angle);
+            double z = command.forward()*Math.cos(angle)+command.strafe()*Math.sin(angle);
+            check(x < 0 && Math.abs(x-z)<1e-6,"所有初始视角都应保持相同出口方向");
+        }
         System.out.println("StructureExitPathTest: passed");
     }
     private static void check(boolean okay,String detail) { if (!okay) throw new AssertionError(detail); }

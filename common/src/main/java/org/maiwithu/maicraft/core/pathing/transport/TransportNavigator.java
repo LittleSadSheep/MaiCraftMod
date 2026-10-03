@@ -108,7 +108,8 @@ public final class TransportNavigator {
             if (transportResult == null) return PlayerNav.Status.RUNNING;
             var result = transportResult;
             attempts.add(Map.of("mode", offers.get(offerIndex - 1).mode(), "success", result.state() == TransportSession.State.SUCCEEDED,
-                    "code", result.code(), "detail", result.detail(), "uncertain", result.uncertain()));
+                    // 实际落点、设备响应和通道证据属于此次尝试；失败后不能只剩一句摘要而丢掉定位依据。
+                    "code", result.code(), "detail", result.detail(), "uncertain", result.uncertain(), "evidence", session.diagnostics()));
             session = null; transportResult = null;
             if (result.uncertain() && !(paused && "transport_control_transferred".equals(result.code()))) {
                 failure = result.detail(); failureType = FailureType.UNKNOWN;

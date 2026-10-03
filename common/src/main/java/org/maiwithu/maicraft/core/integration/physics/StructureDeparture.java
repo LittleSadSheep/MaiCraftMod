@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
@@ -100,7 +101,12 @@ public final class StructureDeparture implements TransportSession {
         }
         // 按真实移动方向步行，落点附近松开前进等待落地，不改玩家位置或载具碰撞关系。
         if (player.position().subtract(destination).horizontalDistance() < .18) InputDriver.halt(player);
-        else { InputDriver.stepToward(player,destination,false); moved = true; }
+        else {
+            // 转头有平滑延迟，前进和横移按当刻真实朝向重新投影，不能先沿旧视线走出已验证的离车通道。
+            InputDriver.lookAt(player,destination.add(0,player.getEyeHeight(),0));
+            Vec3 delta = destination.subtract(player.position());
+            ctx.body().applySteering(yaw -> toward(delta,yaw),player.getYRot(),ctx.tickRevision()); moved = true;
+        }
         return Result.running("walking_off_structure");
     }
     @Override public void requestStop() { stopping = true; }
@@ -110,4 +116,11 @@ public final class StructureDeparture implements TransportSession {
     @Override public String phase() { return "walking_off_structure"; }
     @Override public Map<String,Object> diagnostics() { return Map.of("structure_id",structureId.toString(),
             "landing",List.of(destination.x,destination.y,destination.z),"grounded",grounded,"movement_submitted",moved); }
+    static BodyControlPort.Movement toward(Vec3 delta,float yaw) {
+        double length = delta.horizontalDistance(), angle = Math.toRadians(yaw);
+        if (length < .01) return BodyControlPort.Movement.STOPPED;
+        double x = delta.x / length * .45, z = delta.z / length * .45;
+        return new BodyControlPort.Movement((float)(-x*Math.sin(angle)+z*Math.cos(angle)),
+                (float)(x*Math.cos(angle)+z*Math.sin(angle)),false,false,false);
+    }
 }
