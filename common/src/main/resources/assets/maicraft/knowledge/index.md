@@ -20,6 +20,7 @@
   - [关键掉率与方差](maicraft://knowledge/game_mechanics/drop-rates)：燧石 10% 掉率是常态，连挖几块不掉不是故障。
   - [工具等级与挖掘资格](maicraft://knowledge/game_mechanics/tool-tiers)：等级不够挖不动或不掉落；黑曜石需钻石镐。
   - [mine 源查询的公平语义与探矿授权](maicraft://knowledge/game_mechanics/mine-source-scope)：只取即时可见或见过的源；allow_prospecting 授权后按已知生成带下降掘进，表外物品如实拒绝。
+  - [食物与饥饿](maicraft://knowledge/game_mechanics/food)：进食规则与自动选食、打猎/耕种/加工获取链；被动生物需 confirm_risky_target，农田采收自带留种补种。
 - 方块说明：使用 `maicraft://knowledge/block/{namespace}/{path}`，例如 `maicraft://knowledge/block/create/deployer`。页面给出状态属性、普通物品说明、可用的 Create Shift/Ctrl 说明，以及该组件的 Ponder 场景链接。
 
 LLM 可调用 `perceive(view="knowledge", query="物品名称或关键词", limit=5)`，先取得少量候选，再按返回的 URI 读取正文。搜索只比较名称、注册 ID 和已有目录描述；名称与 ID 支持有限错字、漏字和相邻字母颠倒，输入不是正则表达式或 shell 命令。精确命中排在近似命中前，`match` 说明匹配依据；`ranking_score` 是排序值，不是概率。注册对象还提供 `subject_id`，后续按真实身份读取，不能因为近似匹配自动更改玩家目标。`total_matches` 与 `truncated` 说明候选是否读完，结果有歧义时继续缩小关键词。
