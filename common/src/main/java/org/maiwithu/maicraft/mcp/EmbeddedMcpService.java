@@ -369,6 +369,20 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject callTool(Session session, JsonObject params, JsonElement requestId) {
+        JsonObject result = invokeTool(session, params, requestId);
+        // 动作成功、失败、知识正文与冻结回执均在交付时补当前提醒；读取旧回执不会把旧风险冒充现场。
+        // 独立文本块保留原回执的格式和成败，也让只读取 MCP content 的宿主看到完整提醒。
+        JsonArray reminders = runtime.reminders();
+        if (!reminders.isEmpty()) {
+            JsonObject payload = new JsonObject(); payload.add("reminders", reminders);
+            JsonObject content = new JsonObject(); content.addProperty("type", "text");
+            content.addProperty("text", GSON.toJson(payload));
+            result.getAsJsonArray("content").add(content);
+        }
+        return result;
+    }
+
+    private JsonObject invokeTool(Session session, JsonObject params, JsonElement requestId) {
         // 接口参数合法才转给游戏运行时；等待回复在网络线程完成，不让游戏线程停在这里。
         only(params, "name", "arguments", "_meta");
         optionalMeta(params);

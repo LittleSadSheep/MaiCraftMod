@@ -163,7 +163,7 @@ bindForRequest + requireRecoveredState    世界可用？旧检查点恢复了�
 ```text
 tools/call
   ▼
-EmbeddedMcpService.callTool
+EmbeddedMcpService.callTool → invokeTool
   ├─ 名字是不是四个之一？
   ├─ PublicToolCatalog.validateAndNormalize   形状校验
   ├─ execute 专属：没给 request_key 就自动生成
@@ -181,6 +181,9 @@ EmbeddedMcpService.callTool
 **共同点**：都在 `onClient` 里切到游戏线程
 （见[结构地图](01-structure.md)的"`onClient`：把请求搬到游戏线程"一节），
 除非走了上面那三条旁路。
+
+业务返回后，`callTool` 统一附加当前有效的 `reminders` 文本块；未订阅 Attention 的宿主
+也会在成功、错误或知识返回中收到游戏生活提醒，详见 [Attention 与等待](07-attention.md)。
 
 ---
 

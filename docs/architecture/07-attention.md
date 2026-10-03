@@ -20,6 +20,7 @@
 | `completed` / `failed` / `cancelled` | 终态 |
 | `state_restored` | 从检查点恢复 |
 | `runtime.unavailable` | 身体断开，需要重新对齐 |
+| `agent.reminder` | 游戏生活提醒出现、持续或撤下；`data.status` 区分 `active` / `cleared` |
 
 **事件只提示"发生了什么"**；完整事实在任务记录里，用 `task(get, path=...)` 按需读。
 
@@ -137,9 +138,39 @@
 
 ---
 
+## 八、游戏生活提醒：Attention 与每次工具回执同时交付
+
+`ReminderBoard` 按规则 ID 保存当前有效提醒。出现时发布 `agent.reminder`，持续时最多每
+600 游戏刻（正常刻速下 30 秒）再次发布，撤下时只发布一次原因。它属于重要事件，指定
+`task_id` 的等待也能收到。读取提醒不会消费它，多个宿主互不影响。
+
+四个工具的每次业务返回都在 MCP `content` 中额外附带一份 JSON 文本：
+`{"reminders":[...]}`。成功、参数错误、运行时错误、知识正文和冻结回执读取共用这个出口，
+无需订阅 Attention。没有有效提醒时不添加空文本块。提醒保留 ID、主提示、观察游戏刻、
+完整 `evidence` 和 `suggested_actions`；原业务回执、`isError` 与知识正文保持各自含义。
+冻结回执保存原业务结果，读取它时另附此刻有效的提醒。`maicraft://attention` 资源也直接
+携带当前提醒，重连不必先翻完旧事件。
+
+首条规则 `repeated_attacks_in_low_light` 在最近 1200 游戏刻内，累计至少 3 次距当前
+位置不超过 16 格、发生在低光处的已确认敌对生物攻击，并且当前脚部有效亮度低于 8 时触发：
+
+> 当前亮度较低，你可能正频繁遭遇怪物攻击。可使用补光功能（maicraft:light_area）减少怪物刷新。
+
+证据包括命中次数、攻击者种类计数、地点、方块光、天空光和有效亮度。8 是提醒阈值，
+不是所有生物的生成判据；伤害包也不证明生成地点，所以 `spawn_source_verified=false`。
+环境伤害、玩家攻击、中立动物攻击和只有血量下降的观察不计入这条规则。
+
+亮度恢复会清空旧命中；离场、攻击过期或照度不可用会撤下提醒。死亡、重生、换维度及
+断线不继承旧身体的记录。撤下只表示规则当前不适用，不宣称补光完成或怪物已清除。
+提醒不暂停任务、不判断蓝图是否正确，也不自动插火把；模型据此自行选择后续目标。
+新增规则复用提醒板与统一出口，避免在每个工具里分别拼提示。
+
+---
+
 ## 相关代码
 
 - 事件发布：`IntentRuntime`（`publish` / `terminal` / `gameEvent`）
 - 等待实现：`AttentionWait`
 - 读取与投影：`AttentionSnapshot`、`TaskView`、`JsonReadback`
 - 大结果：`ResponseArchive`
+- 生活提醒：`ReminderBoard`、`GameplayReminders`、`LowLightCombatReminder`

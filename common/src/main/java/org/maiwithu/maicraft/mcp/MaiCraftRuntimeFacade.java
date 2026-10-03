@@ -27,6 +27,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
+import org.maiwithu.maicraft.client.runtime.GameplayReminders;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -222,8 +223,15 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         args.addProperty("after_cursor", 0);
         // 资源订阅重连也只交付少量近期消息，避免每次门铃读取重复列出二十份任务记录。
         args.addProperty("limit", 5);
-        return onClient(() -> attentionOnClient(args));
+        return onClient(() -> {
+            JsonObject result = attentionOnClient(args);
+            // 资源重连可能只读到旧事件页，仍把当前有效提醒直接交付，避免反复翻页才知道正在遇袭。
+            if (result.get("runtime_available").getAsBoolean()) result.add("reminders", reminders());
+            return result;
+        });
     }
+
+    @Override public JsonArray reminders() { return GameplayReminders.snapshot(); }
 
     @Override
     public CompletionStage<JsonElement> readChat() {

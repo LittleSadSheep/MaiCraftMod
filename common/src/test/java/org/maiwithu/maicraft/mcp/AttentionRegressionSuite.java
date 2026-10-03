@@ -62,5 +62,7 @@ public final class AttentionRegressionSuite {
         ChatMonitorTest.main(args);
         AttentionSnapshotTest.main(args);
         AttentionHttpTest.main(args);
+        // 未订阅注意流的宿主也从每次工具结果拿到风险提醒，失败与知识旁路均不能遗漏。
+        ReminderHttpTest.main(args);
     }
 }

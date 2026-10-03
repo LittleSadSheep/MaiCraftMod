@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.mcp;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
 
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
@@ -39,6 +40,9 @@ public interface RuntimeFacade {
     CompletionStage<JsonElement> task(JsonObject arguments);
 
     CompletionStage<JsonElement> readAttention();
+
+    /** 返回游戏线程最近核实的提醒快照；网络出口可直接读取，不能在这里操作身体或等待游戏线程。 */
+    default JsonArray reminders() { return new JsonArray(); }
 
     /** 读取聊天流快照；与 Attention 相互独立，供专门对话的 Agent 订阅使用。 */
     CompletionStage<JsonElement> readChat();
