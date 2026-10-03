@@ -168,6 +168,24 @@ def regressionSuites = [
         heap: '512m', directory: 'navigation-startup-regression', timeoutSeconds: 200,
         purpose: '验证冷启动寻路和按需垫块准备'
     ],
+    // 任务释放后贴边站立的安定反射独立回放：触发、潜行退避与交还，不与坠落救援混跑。
+    settleReflexRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.SettleChainControlTest',
+        heap: '512m', directory: 'settle-reflex-regression', timeoutSeconds: 60,
+        purpose: '验证贴边安定反射的触发、潜行退避与控制交还'
+    ],
+    // 接近寻路准入闸门的拒绝记录单独核对：样本、去重与轮次清空是回执对账的事实源。
+    descentAdmissionRegression: [
+        entry: 'org.maiwithu.maicraft.core.pathing.baritone.landing.DescentAdmissionLogTest',
+        heap: '512m', directory: 'descent-admission-regression', timeoutSeconds: 60,
+        purpose: '验证被拒下降记录的样本、去重与轮次清空'
+    ],
+    // 瞄准遮挡的自动换站位重试独立验证：接近型才换位、只换一次、回执带换位计数。
+    occludedStanceRetryRegression: [
+        entry: 'org.maiwithu.maicraft.intent.OccludedStanceRetryTest',
+        heap: '512m', directory: 'occluded-stance-retry-regression', timeoutSeconds: 60,
+        purpose: '验证瞄准遮挡后的自动换站位重试与回执计数'
+    ],
     // 聊天独立回放界面收尾与持久发送，不让其他游戏操作回归遮住消息提交结论。
     chatRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.ChatRegressionSuite',

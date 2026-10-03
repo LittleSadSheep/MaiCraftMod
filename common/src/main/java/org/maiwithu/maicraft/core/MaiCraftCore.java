@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.core.task.chain.BreathChain;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
 import org.maiwithu.maicraft.core.task.chain.NightRestChain;
+import org.maiwithu.maicraft.core.task.chain.SettleChain;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerCompanionTask;
@@ -155,6 +156,9 @@ public final class MaiCraftCore {
         // 已经入水且缺氧时，换气优先于水桶落地后的回收收尾；仍在空中坠落时换气链不会触发。
         BrainChains.register(5,
                 BreathChain::new);
+        // 坠落归落地救援，站稳但贴着深落差边缘归这条：先退离边缘，再让自卫等其他反射接管。
+        BrainChains.register(20,
+                SettleChain::new);
         BrainChains.register(30,
                 MobDefenseChain::new);
         // 日常休息放在紧急自救之后，只在原生操作结清且附近确有安全床时暂停普通工作。

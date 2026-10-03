@@ -23,6 +23,7 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.RotationUtils;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
+import baritone.pathing.movement.DescentAdmissionLog;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
@@ -36,6 +37,7 @@ import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.List;
 import java.util.Set;
 
 public class MovementDescend extends Movement {
@@ -120,7 +122,11 @@ public class MovementDescend extends Movement {
             return; // the water will freeze when we try to walk into it
         }
         if (!MovementHelper.isWater(below)
-                && !context.canLandWithoutDamage(x, y, z, y, destX, y - 2, destZ, below)) return;
+                && !context.canLandWithoutDamage(x, y, z, y, destX, y - 2, destZ, below)) {
+            DescentAdmissionLog.rejected(BlockPos.asLong(destX, y - 2, destZ), 1,
+                    "injurious_drop_without_protection");
+            return;
+        }
 
         // we walk half the block plus 0.3 to get to the edge, then we walk the other 0.2 while simultaneously falling (math.max because of how it's in parallel)
         double walk = WALK_OFF_BLOCK_COST;
@@ -209,12 +215,23 @@ public class MovementDescend extends Movement {
                 continue;
             }
             if (!MovementHelper.canWalkOn(context, destX, newY, destZ, ontoBlock)) {
+                DescentAdmissionLog.rejected(BlockPos.asLong(destX, newY, destZ), fallHeight,
+                        "landing_column_not_standable");
                 return false;
             }
             boolean harmless = context.canLandWithoutDamage(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
-            if (reachedMinimum && !harmless
-                    && (!context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1).isEmpty()
-                        || context.landingBoatPlan(new BlockPos(x, y, z), new BlockPos(destX, newY + 1, destZ)) != null)) {
+            var dropPlans = reachedMinimum && !harmless
+                    ? context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1)
+                    : List.of();
+            var dropBoat = reachedMinimum && !harmless
+                    ? context.landingBoatPlan(new BlockPos(x, y, z), new BlockPos(destX, newY + 1, destZ))
+                    : null;
+            if (reachedMinimum && !harmless && dropPlans.isEmpty() && dropBoat == null) {
+                // 有预测伤害且既无既有辅助也不可自动布置：准入闸门在此拒绝，样本留给接近回执对账。
+                DescentAdmissionLog.rejected(BlockPos.asLong(destX, newY, destZ), effectiveStartHeight - newY,
+                        "injurious_drop_without_protection");
+            }
+            if (reachedMinimum && !harmless && (!dropPlans.isEmpty() || dropBoat != null)) {
                 res.x = destX; res.y = newY + 1; res.z = destZ;
                 res.cost = tentativeCost + context.placeBucketCost();
                 return true;

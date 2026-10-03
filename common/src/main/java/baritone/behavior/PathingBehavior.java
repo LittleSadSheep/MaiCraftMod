@@ -32,6 +32,7 @@ import baritone.pathing.calc.AStarPathFinder;
 import baritone.pathing.calc.AbstractNodeCostSearch;
 import baritone.pathing.calc.LoadedFrontier;
 import baritone.pathing.movement.CalculationContext;
+import baritone.pathing.movement.DescentAdmissionLog;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.path.PathExecutor;
 import baritone.utils.PathRenderer;
@@ -324,6 +325,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             return false;
         }
         queuePathEvent(PathEvent.CALC_STARTED);
+        DescentAdmissionLog.beginSearch();
         findPathInNewThread(expectedSegmentStart, true);
         return true;
     }
@@ -658,6 +660,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         facts.put("work_high_water", workProgress().highWater());
         facts.put("idle_budget_ms", calculationTimeoutMillis);
         facts.put("recovery_count", searchRecoveries); facts.put("last_recovery", lastRecovery == null ? Map.of() : lastRecovery);
+        facts.put("rejected_descents", DescentAdmissionLog.snapshot());
         return Map.copyOf(facts);
     }
 
