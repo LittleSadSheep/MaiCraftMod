@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import org.maiwithu.maicraft.entity.InputDriver;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.core.task.physics.PhysicalStructureApproach;
 
 /** 座位确认和原生控制共用一个可取消的交通工具租约。 */
 public final class VehicleDriveSession implements TransportSession {
@@ -43,6 +44,8 @@ public final class VehicleDriveSession implements TransportSession {
         }
         InputDriver.halt(ctx.player());
         if(!seated) {
+            // 施工和换位可能留下潜行输入；上车前释放并等待真实姿态恢复，避免原生交互成为下车或拆卸。
+            InputDriver.sneak(ctx.player(),false);
             if(stopping) return finish(false,"vehicle_cancelled","cancelled before driving",mount!=null);
             if(ctx.tickRevision()-started>240) return finish(false,"driver_seat_unconfirmed","native seating did not confirm",mount!=null);
             if(mount!=null) {
@@ -62,7 +65,7 @@ public final class VehicleDriveSession implements TransportSession {
             }
             if(station.seated(ctx.player())) { seated=true; return Result.running("driver_seat_confirmed"); }
             if(ctx.player().isShiftKeyDown()) return Result.running("releasing_sneak_before_seating");
-            var aim=DriverStation.aim(ctx.player(),structure,station.seat());
+            var aim=PhysicalStructureApproach.visibleAim(ctx.player(),structure,station.seat(),ctx.player().getEyePosition());
             if(aim==null) return finish(false,"driver_seat_lost","seat geometry unavailable",false);
             InputDriver.lookAt(ctx.player(),aim);
             var hit=DriverStation.hit(ctx.player(),structure,station.seat());

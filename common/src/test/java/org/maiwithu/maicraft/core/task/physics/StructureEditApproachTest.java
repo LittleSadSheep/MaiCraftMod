@@ -55,6 +55,15 @@ public final class StructureEditApproachTest {
             h.player.setYRot(0);h.player.setXRot(0);
             check(StructureEditApproach.current(ctx,ship,target,true,faces)!=null,"抵达外侧后可重新建立规划视线");
             check(DriverStation.hit(h.player,ship,east.support())==null,"未转头前不能把规划射线当作原生点击命中");
+            // 上车也必须看见座位轮廓；隔着近距离车壳时换位，不能仅靠距离跳过导航并空等上车回执。
+            var seat=new BlockPos(7,1,5);
+            check(PhysicalStructureApproach.visibleAim(h.player,ship,seat,h.player.getEyePosition())!=null,"无遮挡座位应能找到实际可见面");
+            h.set(new BlockPos(8,1,5),Blocks.STONE.defaultBlockState());
+            h.set(new BlockPos(8,2,5),Blocks.STONE.defaultBlockState());
+            check(PhysicalStructureApproach.visibleAim(h.player,ship,seat,h.player.getEyePosition())==null,"距离内被车壳挡住的座位仍需换位");
+            h.set(new BlockPos(8,1,5),Blocks.AIR.defaultBlockState());
+            h.set(new BlockPos(8,2,5),Blocks.AIR.defaultBlockState());
+            check(PhysicalStructureApproach.visibleAim(h.player,ship,seat,h.player.getEyePosition())!=null,"遮挡清除后重新读取当前射线");
             check(h.blockUses()==0,"搜索和瞄准回归不应直接提交任何放置");
         }
     }

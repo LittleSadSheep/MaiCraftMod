@@ -93,6 +93,8 @@ final class NativePhysicalControl {
         var out=new LinkedHashMap<String,Object>();
         out.put("block_id",BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock()).toString());
         out.put("block_state",entity.getBlockState().toString());
+        // 配置结算后无线接收端仍可能等下一次同步；保留读取来源，不能把客户端旧值冒充实时服务端信号。
+        out.put("observation_source","client_synced_native_fields_may_lag_server");
         if(NativeApi.is(entity,MOTOR)||NativeApi.is(entity,SPEED)) {
             out.put("speed_setting",NativeApi.call(speed(entity),null,"getValue"));out.put("actual_rpm",NativeApi.call(entity,null,"getSpeed"));
             out.put("overstressed",NativeApi.call(entity,null,"isOverStressed"));
