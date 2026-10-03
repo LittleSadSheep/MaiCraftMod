@@ -13,6 +13,8 @@ public final class StructureExitPathTest {
         check(StructureExitPath.clear(List.of(ground,seat),start,end,.64,1.84),"可以从两格高座面向外走到地面");
         var wall = new AABB(-1.4,0,-1,-1,4,1);
         check(!StructureExitPath.clear(List.of(ground,seat,wall),start,end,.64,1.84),"中途围挡会阻止离车候选");
+        check(StructureExitPath.clear(List.of(ground,seat,new AABB(-.5,2.5,.5,.8,4,1.5)),
+                new Vec3(.2,2,.2),new Vec3(-2,0,-1),.64,1.84),"贴近控制台的起点允许向外脱离保守碰撞余量");
         check(!StructureExitPath.clear(List.of(seat),start,end,.64,1.84),"未观察到地面不能当作可落脚");
         check(!StructureExitPath.clear(List.of(ground,new AABB(-.5,0,-.5,.5,4,.5)),new Vec3(0,4,0),end,.64,1.84),"离车不能擅自跳下高甲板");
         check(!StructureExitPath.clear(List.of(ground,seat),List.of(new AABB(-2.5,0,-.5,-1.5,2,.5)),start,end,.64,1.84),"禁入格不能被地面支撑掩盖");

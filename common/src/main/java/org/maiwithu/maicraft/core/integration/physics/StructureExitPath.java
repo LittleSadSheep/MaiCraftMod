@@ -15,6 +15,7 @@ public final class StructureExitPath {
         double distance = from.subtract(to).horizontalDistance();
         if (distance < .01 || distance > 5 || from.y - to.y > 3 || to.y > from.y + .6) return false;
         Vec3 previous = from;
+        var obstacles = new PhysicalObstacleSnapshot(boxes,0,0,"observed");
         int steps = (int) Math.ceil(distance / .15);
         for (int i = 0; i <= steps; i++) {
             Vec3 column = from.lerp(to, (double) i / steps);
@@ -31,7 +32,9 @@ public final class StructureExitPath {
                     .minmax(body(new Vec3(feet.x, top, feet.z), width, height));
             AABB down = body(feet.add(0, .002, 0), width, height)
                     .minmax(body(new Vec3(feet.x, top, feet.z), width, height));
-            for (AABB box : boxes) if (box.intersects(across) || box.intersects(down)) return false;
+            // 原生身体可能已贴在旋转部件的保守包围盒内；首点是已知站姿，后续只允许沿最近面向外脱离。
+            if (i>0 && (!obstacles.clearSegment(new Vec3(previous.x,top,previous.z),new Vec3(feet.x,top,feet.z),width,height)
+                    || !obstacles.clearSegment(new Vec3(feet.x,top,feet.z),feet.add(0,.002,0),width,height))) return false;
             // 禁入格和危险地面连脚底接触一起检查，不能把岩浆旁或保护区内的近路当成离车出口。
             for (AABB box : forbidden) if (box.intersects(across.inflate(0,.01,0)) || box.intersects(down.inflate(0,.01,0))) return false;
             previous = feet;
