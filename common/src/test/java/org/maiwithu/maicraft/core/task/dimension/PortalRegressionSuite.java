@@ -7,6 +7,8 @@ import org.maiwithu.maicraft.intent.PortalPreparationContractTest;
 public final class PortalRegressionSuite {
     public static void main(String[] args) throws Exception {
         NetherPortalFrameTest.main(args);
+        // 浇筑模板先核对四种池岸方向，水流效果另由实机验收。
+        NetherPortalCastingLayoutTest.main(args);
         EndPortalFrameTest.main(args);
         PortalActivationTest.main(args);
         PortalPreparationSiteTest.main(args);
