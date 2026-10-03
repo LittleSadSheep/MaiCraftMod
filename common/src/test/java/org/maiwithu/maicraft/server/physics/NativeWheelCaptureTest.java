@@ -10,6 +10,8 @@ import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsWheel;
 /** 模拟轮胎先算冲量、稍后批量施力；没有应用证据的临时力不能被加入真实整车合力。 */
 public final class NativeWheelCaptureTest {
     public static void run() {
+        check(NativeWheelParameters.minimumFriction(new LegacyTire())==0,"旧版原生轮胎不应被要求提供尚不存在的最低摩擦字段");
+        check(NativeWheelParameters.minimumFriction(new ModernTire())==.8,"新版轮胎自带的最低摩擦被忽略");
         var zero=PhysicsVector.ZERO;var up=new PhysicsVector(0,1,0);
         var wheel=new PhysicsWheel("offroad:small_tire",.75,10,0,new PhysicsVector(0,0,1),new PhysicsVector(1,0,0),
                 1,32,0,.6,1,new PhysicsVector(5,70,5),up,null,"contact_pending_application",false);
@@ -31,5 +33,7 @@ public final class NativeWheelCaptureTest {
         var noGround=new NativeWheelCapture.Sample(origin,zero,up,gson.fromJson(missing,PhysicsWheel.class),true,false,List.of());
         check(NativeWheelCapture.applied(noGround).wheel().contactState().equals("no_ground"),"施力确认被误用来捏造地面");
     }
+    public static final class LegacyTire {public float radius(){return .75f;}}
+    public static final class ModernTire {public double minimumFriction(){return .8;}}
     private static void check(boolean okay,String why) {if(!okay)throw new AssertionError(why);}
 }

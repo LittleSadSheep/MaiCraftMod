@@ -19,6 +19,8 @@ final class PreflightComponents {
         for (var load : measured.loads()) if (!load.propulsion() && !load.group().endsWith(":balloon_lift")) loads.add(load);
         for (Object actor : (Iterable<?>) NativeApi.call(plot, null, "getBlockEntityActors")) {
             if (!(actor instanceof BlockEntity entity)) continue;
+            // 轮胎的驱动与停车承重由专用模型分开处理，不能按普通推进器在停机时整体关闭。
+            if(NativeApi.is(actor,NativeWheelParameters.WHEEL))continue;
             if (!NativeApi.is(actor, PreflightPropellers.PROPELLER)) {
                 unknowns.add("unmodeled:尚无起飞前工况模型的原生执行器 "+entity.getBlockPos().subtract(origin)+" "+entity.getClass().getSimpleName());
                 continue;

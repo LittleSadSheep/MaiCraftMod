@@ -22,7 +22,7 @@ final class PhysicsAbilityAdapter {
     }
     static JsonObject contract() {
         var out=new JsonObject();
-        out.addProperty("summary","起飞前物理受力分析、螺旋桨启停与帆面气动模拟、气球蒙皮与配重推荐。analyze/simulate/recommend 只读；apply 通过玩家原生操作施工明确 edits，并返回实际差异。比较停机、运行、启停和四向扰动，预测不冒充飞行验证。完整原生受力需要服务端 physics.snapshot。");
+        out.addProperty("summary","起飞前物理受力分析、螺旋桨启停、帆面气动和轮胎接地模拟、气球蒙皮与配重推荐。analyze/simulate/recommend 只读；apply 通过玩家原生操作施工明确 edits，并返回实际差异。比较停机、运行、启停和四向扰动，预测不冒充飞行验证。完整原生受力需要服务端 physics.snapshot。");
         out.add("accepted_target_kinds",new JsonArray()); out.add("accepted_preferences",new JsonObject()); out.add("accepted_hard_constraints",new JsonArray());
         out.addProperty("execution_boundary","LLM chooses the patch. Prediction is advisory, never a gate on native edits. Default workflow is preflight; do not add ballast automatically during flight.");
         var fields=new JsonObject();
@@ -35,7 +35,8 @@ final class PhysicsAbilityAdapter {
         field(fields,"edits","array","Up to 64 {position:{x,y,z},block_id,properties?:{name:value}} cells, integer offsets -256..256 per axis. minecraft:air removes a block. Simulation changes isolated mass, fixed sail aerodynamics and balloon geometry; apply performs native placement/mining then reports actual states.");
         field(fields,"ballast_candidates","array","Optional up to 64 {id,position:{x,y,z},block_id} empty attached cells. Default searches nearby lower iron-block positions. Material mass comes from server physics data.");
         field(fields,"max_ballast_blocks","integer","0..64, default 8; candidate search can return improved_not_balanced or no_balanced_candidate_found.");
-        field(fields,"controls","object","Source ID to hypothetical force multiplier in [-4,4], default 1; propulsion is still zero in stopped mode. This does not send control inputs.");
+        // 同一轮胎的承重与驱动分开，模型收油门时不能把地面支撑一并关掉。
+        field(fields,"controls","object","Source ID to hypothetical multiplier in [-4,4], default 1. For wheels it scales drive RPM only, preserving suspension and friction. Propulsion/drive is zero in stopped mode. This does not send control inputs.");
         field(fields,"duration_seconds","number","1..30, default 6; simulation horizon per operating mode.");
         field(fields,"max_tilt_degrees","number","Allowed predicted tilt, default 8 degrees.");
         field(fields,"max_vertical_acceleration","number","Allowed vertical acceleration, default 0.25 blocks/s².");

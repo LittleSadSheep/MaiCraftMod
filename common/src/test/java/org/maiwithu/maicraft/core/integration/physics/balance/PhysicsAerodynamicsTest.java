@@ -35,7 +35,8 @@ final class PhysicsAerodynamicsTest {
         var cruise=body.movingAt(v(10,0,0));
         var assessment=PhysicsSimulation.assess(cruise,new PhysicsSimulation.Limits(1,8,.25,.035,2),Map.of());
         near(assessment.stopped().contributions().get(1).forceWorld().y(),0,"停车工况错误继承巡航升力");
-        near(assessment.running().contributions().get(1).forceWorld().y(),4.75,"运行工况没有采用声明航速");
+        near(assessment.trials().stream().filter(t->t.mode().equals("running")&&t.perturbation().equals("none")).findFirst().orElseThrow()
+                .trajectory().getFirst().velocity().x(),10,"运行工况没有从声明航速开始");
         check(assessment.trials().stream().filter(t->t.mode().equals("starting")).allMatch(t->t.trajectory().getFirst().velocity().length()==0),"起步场景跳过静止滑跑");
         near(body.velocity().length(),0,"设置预测航速污染了原始观察");
         // 原生阻力组混有其他来源时，动态帆面只贡献与采样时的差值，不能顺便删掉水阻或重复计入旧升力。

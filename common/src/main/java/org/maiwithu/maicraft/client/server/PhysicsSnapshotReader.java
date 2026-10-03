@@ -10,11 +10,12 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBody;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsTrim;
+import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsMotion;
 
 /** 客户端自动读完受力分页；同一轮的船体、快照编号、维度和页偏移必须一致。 */
 public final class PhysicsSnapshotReader implements AutoCloseable {
     public record Observation(UUID snapshotId, PhysicsBody measured, PhysicsBody preflight,
-                              List<PhysicsTrim.Ballast> candidates, int[] origin) {}
+                              List<PhysicsTrim.Ballast> candidates, int[] origin,PhysicsMotion motion) {}
     private final JsonObject request;
     private final Level world;
     private long progressTick;
@@ -27,6 +28,7 @@ public final class PhysicsSnapshotReader implements AutoCloseable {
     private final JsonArray measuredUnknowns=new JsonArray(), preflightUnknowns=new JsonArray();
     private final List<PhysicsTrim.Ballast> candidates=new ArrayList<>();
     private int[] origin;
+    private PhysicsMotion motion;
     private Observation result;
     public PhysicsSnapshotReader(LocalPlayer player,JsonObject options) {
         world=player.level(); progressTick=world.getGameTime(); request=new JsonObject();
@@ -63,6 +65,8 @@ public final class PhysicsSnapshotReader implements AutoCloseable {
         if(snapshotId==null) {
             snapshotId=incoming; measured=page.getAsJsonObject("measured").deepCopy(); preflight=page.getAsJsonObject("preflight").deepCopy();
             origin=gson.fromJson(page.get("origin_storage"),int[].class);
+            // 所有分页沿用第一份采样的阶段证据，不能把翻页期间的新速度拼进旧受力中。
+            if(page.has("native_motion_phases"))motion=gson.fromJson(page.get("native_motion_phases"),PhysicsMotion.class);
         }
         progressTick=world.getGameTime();
         for(var item:page.getAsJsonArray("ballast_candidates")) candidates.add(gson.fromJson(item,PhysicsTrim.Ballast.class));
@@ -74,7 +78,7 @@ public final class PhysicsSnapshotReader implements AutoCloseable {
         }
         measured.add("loads",measuredLoads); preflight.add("loads",preflightLoads);
         measured.add("unknowns",measuredUnknowns); preflight.add("unknowns",preflightUnknowns);
-        result=new Observation(snapshotId,gson.fromJson(measured,PhysicsBody.class),gson.fromJson(preflight,PhysicsBody.class),List.copyOf(candidates),origin.clone());
+        result=new Observation(snapshotId,gson.fromJson(measured,PhysicsBody.class),gson.fromJson(preflight,PhysicsBody.class),List.copyOf(candidates),origin.clone(),motion);
         return result;
     }
     @Override public void close() { if(pending!=null) { ServerAssistClient.cancel(pending.id()); pending=null; } }

@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsBody;
+import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsMotion;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsTrim;
 import java.util.List;
 import java.util.Objects;
@@ -28,7 +29,7 @@ public final class PhysicsSnapshotService {
     private static final String CONTAINER = "dev.ryanhcode.sable.api.sublevel.SubLevelContainer";
     private static final LinkedHashMap<UUID, Snapshot> SNAPSHOTS = new LinkedHashMap<>();
     private record Snapshot(UUID owner, WeakReference<ServerLevel> world, PhysicsBody measured,
-                            PhysicsBody preflight, BlockPos origin, List<PhysicsTrim.Ballast> candidates, long created) {}
+                            PhysicsBody preflight, BlockPos origin, List<PhysicsTrim.Ballast> candidates, long created,PhysicsMotion motion) {}
     private PhysicsSnapshotService() {}
     public static JsonObject inspect(ServerPlayer player, JsonObject request) {
         // 物理观察不提交施工；原生签名或结果编码失败时保留具体原因，服务器日志记录完整异常链。
@@ -80,10 +81,11 @@ public final class PhysicsSnapshotService {
             }
             // 质量及候选方块确定后，再按同一份隔离布局计算新增、移除或转向的机翼载荷。
             model=PreflightAerodynamics.model(ship,measured,model,overlay);
+            model=PreflightWheels.model(model,overlay,rpm);
             model=PreflightGasVolumes.model(ship,model,overlay,filled);
             snapshot = new Snapshot(player.getUUID(), new WeakReference<>(player.serverLevel()), measured,
                     model, origin, PreflightBallast.candidates(overlay,model,request.has("ballast_candidates") ? request.getAsJsonArray("ballast_candidates") : null),
-                    player.level().getGameTime());
+                    player.level().getGameTime(),NativePhysicsCapture.motion(ship));
             id = UUID.randomUUID(); SNAPSHOTS.put(id, snapshot);
             while (SNAPSHOTS.size() > 128) SNAPSHOTS.remove(SNAPSHOTS.keySet().iterator().next());
         }
@@ -98,13 +100,14 @@ public final class PhysicsSnapshotService {
         out.addProperty("tick", snapshot.measured().tick()); out.addProperty("dimension", snapshot.measured().dimension());
         out.addProperty("offset", offset); out.addProperty("next_offset", end); out.addProperty("has_more", end < total);
         out.add("origin_storage", GSON.toJsonTree(new int[]{snapshot.origin().getX(), snapshot.origin().getY(), snapshot.origin().getZ()}));
+        out.add("native_motion_phases",GSON.toJsonTree(snapshot.motion()));
         out.add("ballast_candidates",slice(snapshot.candidates(),offset,end));
         out.add("measured", header(snapshot.measured())); out.add("preflight", header(snapshot.preflight()));
         out.add("measured_loads", page(snapshot.measured(), offset, end)); out.add("preflight_loads", page(snapshot.preflight(), offset, end));
         out.add("measured_unknowns",slice(snapshot.measured().unknowns(),offset,end));
         out.add("preflight_unknowns",slice(snapshot.preflight().unknowns(),offset,end));
         // 持续翻页只续期这份不可变快照，不用新一刻的船体事实替换旧页。
-        SNAPSHOTS.put(id,new Snapshot(snapshot.owner(),snapshot.world(),snapshot.measured(),snapshot.preflight(),snapshot.origin(),snapshot.candidates(),player.level().getGameTime()));
+        SNAPSHOTS.put(id,new Snapshot(snapshot.owner(),snapshot.world(),snapshot.measured(),snapshot.preflight(),snapshot.origin(),snapshot.candidates(),player.level().getGameTime(),snapshot.motion()));
         return out;
     }
     private static JsonObject header(PhysicsBody body) {

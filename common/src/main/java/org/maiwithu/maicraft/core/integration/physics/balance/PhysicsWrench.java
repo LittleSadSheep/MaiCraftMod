@@ -39,6 +39,12 @@ public record PhysicsWrench(PhysicsVector force, PhysicsVector torque,
                 var localVelocity=attitude.local(velocity.add(angularVelocity.cross(arm)));
                 source=source.add(load.aerodynamics().force(localVelocity));
             }
+            if(load.wheel()!=null&&load.wheel().referenceRpm()!=null) {
+                // 车轮的倍率只调驱动，停机和松油门仍保留悬挂及摩擦；实测快照没有参考转速，仍直接展示原生点力。
+                source=PhysicsWheelDynamics.force(body,load.point(),load.wheel(),attitude,position,velocity,angularVelocity,
+                        load.wheel().referenceRpm()*propulsion*setting);
+                setting=1;
+            }
             PhysicsVector applied = (load.frame() == PhysicsBody.Frame.BODY
                     ? attitude.world(source) : source).scale(setting);
             PhysicsVector couple = (load.frame() == PhysicsBody.Frame.BODY

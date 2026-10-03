@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.joml.Vector3d;
 import org.maiwithu.maicraft.core.integration.physics.balance.PhysicsVector;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import java.util.Arrays;
 
 /** 从实际装上的轮胎和 Create 旋钮读取参数；不替玩家安装轮胎、改转速或发送红石信号。 */
 final class NativeWheelParameters {
@@ -21,7 +22,7 @@ final class NativeWheelParameters {
         ItemStack item=(ItemStack)NativeApi.call(wheel,null,"getHeldItem");
         var type=(DataComponentType<?>)NativeApi.constant("dev.ryanhcode.offroad.index.OffroadDataComponents","TIRE");
         Object tire=item.get(type);
-        double radius=tire==null?0:number(tire,"radius"),minimum=tire==null?0:number(tire,"minimumFriction");
+        double radius=tire==null?0:number(tire,"radius"),minimum=minimumFriction(tire);
         Object behaviour=NativeApi.constant("com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollValueBehaviour","TYPE");
         double strength=number(NativeApi.call(wheel,null,"getBehaviour",behaviour),"getValue");
         Direction facing=wheel.getBlockState().getValue(BlockStateProperties.HORIZONTAL_FACING);
@@ -38,4 +39,9 @@ final class NativeWheelParameters {
         return Math.max(minimum,value<1?.1+.9*value:value);
     }
     private static double number(Object target,String method) {return ((Number)NativeApi.call(target,null,method)).doubleValue();}
+    static double minimumFriction(Object tire) {
+        // 已安装 Offroad 1.3.0 尚无轮胎最低摩擦字段，其原生算法不做这次限幅；新版本有该访问器时才读取实际值。
+        return tire!=null&&Arrays.stream(tire.getClass().getMethods()).anyMatch(method->method.getName().equals("minimumFriction")&&method.getParameterCount()==0)
+                ?number(tire,"minimumFriction"):0;
+    }
 }

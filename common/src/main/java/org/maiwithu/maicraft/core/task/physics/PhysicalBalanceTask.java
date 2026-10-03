@@ -77,6 +77,7 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
         out.addProperty("observed_tick",measured.tick()); out.addProperty("dimension",measured.dimension());
         out.addProperty("workflow","preflight"); out.addProperty("native_flight_verified",false);
         out.add("origin_storage",gson.toJsonTree(observation.origin()));
+        if(observation.motion()!=null)out.add("native_motion_phases",gson.toJsonTree(observation.motion()));
         out.add("measured_body",gson.toJsonTree(measured)); out.add("preflight_body",gson.toJsonTree(model));
         if(r.parameters.referenceVelocity()!=null)out.add("reference_velocity",gson.toJsonTree(r.parameters.referenceVelocity()));
         out.add("measured_forces",gson.toJsonTree(PhysicsWrench.evaluate(measured,measured.rotation(),measured.position(),
