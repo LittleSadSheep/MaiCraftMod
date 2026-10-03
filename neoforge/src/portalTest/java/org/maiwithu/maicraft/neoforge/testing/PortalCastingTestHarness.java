@@ -95,6 +95,9 @@ public final class PortalCastingTestHarness {
             for (BlockPos at : BlockPos.betweenClosed(-7, 97, 2, -5, 99, 4)) world.setBlockAndUpdate(at, Blocks.AIR.defaultBlockState());
         }
         world.setBlockAndUpdate(new BlockPos(-6, curved ? 97 : 99, 3), Blocks.WATER.defaultBlockState());
+        // 查池场景在出生点近处放一个孤立源，真实查询必须继续发现后面的圆弧池，不能只交付最近的一格。
+        if (System.getProperty("maicraft.portalTest.world", "").contains("-Survey-"))
+            world.setBlockAndUpdate(new BlockPos(3, 99, 5), Blocks.LAVA.defaultBlockState());
         player.setGameMode(GameType.SURVIVAL);
         player.teleportTo(.5, 100, 3.5);
         player.setHealth(player.getMaxHealth()); player.getFoodData().setFoodLevel(20);

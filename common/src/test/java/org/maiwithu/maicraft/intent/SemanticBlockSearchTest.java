@@ -37,6 +37,7 @@ public final class SemanticBlockSearchTest {
         absenceFailsWithHonestScopeNote();
         denseHiddenStoneConvergesWithProgress();
         cancellationIsNotTimeoutOrExhaustion();
+        lavaSearchExpandsBeyondOneSource();
         LoadedBlockScanTest.main(args);
         // 视线与分页属于发现证据的一部分，随方块探索入口一起回归。
         ObservationVisibilityTest.main(args);
@@ -67,6 +68,31 @@ public final class SemanticBlockSearchTest {
                     && result.data().get("nearest_match_vertical_offset").equals(0)
                     && "euclidean_3d".equals(result.data().get("distance_metric")), "nearest observed selection follows actual 3D distance");
             check(result.message().contains("in 3D") && result.message().contains("height offset 0"), "the short receipt preserves the distance meaning");
+        }
+    }
+
+    private static void lavaSearchExpandsBeyondOneSource() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 默认只要求一个方块也要继续观察整池；否则较近的孤立岩浆会遮住后方足量的池面证据。
+            h.position(new Vec3(4.5, 3, .5));
+            h.set(new BlockPos(1, 1, 1), Blocks.LAVA.defaultBlockState());
+            for (int x = 3; x <= 8; x++) for (int z = 3; z <= 7; z++)
+                h.set(new BlockPos(x, 1, z), Blocks.LAVA.defaultBlockState());
+            var task = new SemanticBlockSearchCompanionTask(h.player,
+                    new SemanticBlockSearchTaskRecord("lava-pools", 1000, List.of(Blocks.LAVA), 1, 16));
+            task.start(h.player);
+            var terminal = TaskState.RUNNING;
+            for (int tick = 0; tick < 256 && terminal == TaskState.RUNNING; tick++) {
+                h.nextTick(); terminal = task.tick(h.player);
+            }
+            check(terminal == TaskState.SUCCESS, "default lava query completes its pool analysis");
+            var result = task.result(terminal).data();
+            var survey = (Map<?, ?>) result.get("lava_pool_survey");
+            var pools = (List<?>) survey.get("pools");
+            check(survey.get("observed_surface_sources").equals(31) && pools.size() == 2,
+                    "one isolated source does not stop scanning before the larger pool");
+            check(Boolean.TRUE.equals(survey.get("analysis_complete")) && noCoordinates(result),
+                    "the complete pool report stays semantic and read-only");
         }
     }
 

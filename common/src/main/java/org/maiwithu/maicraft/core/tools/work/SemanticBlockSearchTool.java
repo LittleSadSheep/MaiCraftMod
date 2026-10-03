@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord;
 
-/** 语义方块发现；具体位置保留在 Mod 内部，公开结果只含数量与距离统计。 */
+/** 语义方块发现；坐标留在 Mod 内部，岩浆额外报告可见连通池与浇筑整形预算。 */
 public final class SemanticBlockSearchTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
 
@@ -30,7 +30,9 @@ public final class SemanticBlockSearchTool implements MaiCraftTool {
         // 公开描述说明只有直接可见目标才计入找到的数量，避免模型把加载范围当作透视。
         return "Find named blocks by scanning the currently loaded client chunks around the "
                 + "standing place with direct line of sight from the player's eyes. Reports verified counts, matching block ids and a "
-                + "nearest-distance statistic only; concrete positions stay inside the Mod and "
+                + "nearest-distance statistic. When lava is requested, finishes the bounded scan even for count=1 and also reports "
+                + "connected visible surface pools, straight-bank length, platform fill costs and remaining-source lower bounds. "
+                + "A block match is not proof of a usable casting pool; native access and fluid outcomes remain unverified. Concrete positions stay inside the Mod and "
                 + "a later semantic ability resolves the actual block itself. No frontier "
                 + "walking, chunk forcing or coordinate output; unloaded terrain stays unknown.";
     }
