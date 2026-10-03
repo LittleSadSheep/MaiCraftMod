@@ -34,8 +34,10 @@ final class DiscardFire {
     private long waitUntil, started = -1;
     private int ignitions, extinguished;
     private boolean queued;
+    private final boolean allowIgnition;
 
-    DiscardFire(List<DiscardedItems.Watch> watches) { this.watches = List.copyOf(watches); }
+    DiscardFire(List<DiscardedItems.Watch> watches) { this(watches, true); }
+    DiscardFire(List<DiscardedItems.Watch> watches, boolean allowIgnition) { this.watches = List.copyOf(watches); this.allowIgnition = allowIgnition; }
     TaskState tick(LocalPlayerContext context) {
         DiscardedItems.observe(context.player());
         if (phase == Phase.DONE) return TaskState.SUCCESS;
@@ -65,7 +67,7 @@ final class DiscardFire {
             phase = Phase.EXTINGUISH; action = new DiscardBlockAction(cell, DiscardBlockAction.Kind.EXTINGUISH);
             return TaskState.RUNNING;
         }
-        if (PlayerInv.count(context.player().getInventory(), Items.FLINT_AND_STEEL) == 0) return done();
+        if (!allowIgnition || PlayerInv.count(context.player().getInventory(), Items.FLINT_AND_STEEL) == 0) return done();
         if (watches.stream().anyMatch(DiscardedItems.Watch::pending)) return TaskState.RUNNING;
         boolean waitingForGround = false;
         for (var drop : remaining()) {
@@ -86,7 +88,7 @@ final class DiscardFire {
         return done();
     }
     private TaskState done() { phase = Phase.DONE; return TaskState.SUCCESS; }
-    private List<ObservedDrop> remaining() {
+    List<ObservedDrop> remaining() {
         return watches.stream().flatMap(watch -> watch.remaining().stream()).collect(Collectors.toMap(
                 ObservedDrop::uuid, drop -> drop, (left, right) -> right, LinkedHashMap::new)).values().stream().toList();
     }

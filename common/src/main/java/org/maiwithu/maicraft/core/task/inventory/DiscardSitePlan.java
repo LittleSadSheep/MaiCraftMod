@@ -16,20 +16,37 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.DiscardedItems;
+import org.maiwithu.maicraft.core.PlayerInv;
+import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 /** 先保住通道两端的连通，再选择丢弃侧袋；没有现成空地时只在身侧开四格深、两格高的小空间。 */
-public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation) {
+public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation, boolean requiresBurn) {
     private static final int RADIUS = 12;
     public DiscardSitePlan { stance = stance.immutable(); excavation = List.copyOf(excavation); }
+    public DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation) { this(stance, direction, excavation, false); }
 
     public static DiscardSitePlan find(LocalPlayer player, Set<BlockPos> rejected) {
+        return find(player, rejected, true);
+    }
+    static DiscardSitePlan find(LocalPlayer player, Set<BlockPos> rejected, boolean allowBurn) {
         Level world = player.level(); BlockPos origin = player.blockPosition();
         Set<BlockPos> connected = connected(world, origin);
         List<BlockPos> stances = connected.stream().filter(pos -> !rejected.contains(pos))
                 .sorted(Comparator.comparingDouble(pos -> pos.distSqr(origin))).toList();
         Direction facing = Direction.fromYRot(player.getYRot());
         List<Direction> directions = List.of(facing, facing.getClockWise(), facing.getCounterClockWise(), facing.getOpposite());
+        if (allowBurn && PlayerInv.count(player.getInventory(), Items.FLINT_AND_STEEL) > 0 && !rejected.contains(origin)) {
+            DiscardSitePlan burnSite = null;
+            for (Direction direction : directions) {
+                var plan = new DiscardSitePlan(origin, direction, List.of());
+                if (!plan.clear(world)) continue;
+                if (preservesRoutes(connected, origin, origin, plan.pickupEnvelope(player)) && !blocksFrontier(world, connected, plan.pickupEnvelope(player))) return plan;
+                if (burnSite == null) burnSite = new DiscardSitePlan(origin, direction, List.of(), true);
+            }
+            // 有打火石可以直接在走廊中原生销毁；此位置必须等烧毁，烧不掉时父任务先回收，再换侧袋。
+            if (burnSite != null) return burnSite;
+        }
         // 优先利用同一已加载步行区域的现成空地；删除预计拾取范围后，原通道其余部分仍须互相可达。
         for (BlockPos stance : stances) for (Direction direction : directions) {
             var plan = new DiscardSitePlan(stance, direction, List.of());

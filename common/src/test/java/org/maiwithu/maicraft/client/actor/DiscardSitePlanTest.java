@@ -8,6 +8,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.task.inventory.DiscardSitePlan;
 
 /** 直线巷道两头仍能走，空地优先，侧袋挖掘有界；区块边缘和不可挖围墙不能伪装成可堵的死路。 */
@@ -25,6 +27,11 @@ public final class DiscardSitePlanTest {
             check(pocket.excavation().stream().noneMatch(pos -> pos.getX() == 8), "the existing passage remains intact");
             corridor(world, true);
             check(DiscardSitePlan.find(world.player, Set.of()) == null, "bedrock walls and unloaded corridor exits cannot be turned into a safe disposal area");
+            // 打火石允许先尝试原生销毁，即使围墙是基岩；烧不掉的实际余物必须走回收兜底，不能提前拒绝点火。
+            world.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            var burn = DiscardSitePlan.find(world.player, Set.of());
+            check(burn != null && burn.requiresBurn() && burn.excavation().isEmpty(), "native burning remains available in a bedrock corridor");
+            world.inventory.clearContent();
             // 前方确有开阔房间时先沿走廊过去，不因为角色当前站在窄处就优先拆墙。
             corridor(world, false); world.position(new Vec3(8.5, 1, 2.5));
             for (int x = 2; x <= 13; x++) for (int z = 6; z <= 13; z++) for (int y = 1; y <= 2; y++)

@@ -27,6 +27,7 @@ public final class DiscardedItems {
     private static long lastTick;
     private static final List<Watch> pending = new ArrayList<>();
     private static final Map<UUID, Tracked> tracked = new LinkedHashMap<>();
+    private static final Set<Watch> recovering = new LinkedHashSet<>();
     private static LongSet forbidden = LongSets.emptySet();
     private DiscardedItems() {}
 
@@ -54,7 +55,7 @@ public final class DiscardedItems {
                     "entities", observed.values().stream().map(drop -> {
                         var live = tracked.get(drop.uuid()); var position = live == null ? drop.position() : live.drop.position();
                         return Map.of("uuid", drop.uuid().toString(), "position", List.of(position.x, position.y, position.z),
-                                "avoided", live != null);
+                                "avoided", live != null && live.watches.stream().noneMatch(recovering::contains));
                     }).toList());
         }
     }
@@ -83,7 +84,7 @@ public final class DiscardedItems {
         ClientLevel level = player == null ? null : player.clientLevel;
         long now = level == null ? 0 : level.getGameTime();
         if (owner != player || world != level || now < lastTick) {
-            pending.clear(); tracked.clear(); forbidden = LongSets.emptySet(); owner = player; world = level;
+            pending.clear(); tracked.clear(); recovering.clear(); forbidden = LongSets.emptySet(); owner = player; world = level;
         }
         lastTick = now;
         if (level == null) return;
@@ -135,7 +136,7 @@ public final class DiscardedItems {
             if (merged || now - value.seen > 5) tracked.remove(entry.getKey());
         }
         var cells = new LongOpenHashSet();
-        for (var value : tracked.values()) addPickupCells(cells, value.box,
+        for (var value : tracked.values()) if (value.watches.stream().noneMatch(recovering::contains)) addPickupCells(cells, value.box,
                 player.getBoundingBox().getXsize(), player.getBoundingBox().getYsize());
         forbidden = LongSets.unmodifiable(cells);
     }
@@ -169,5 +170,10 @@ public final class DiscardedItems {
     /** 合入了现场其他物品的堆仍需避让，但不能因其中有本次垃圾就授权整堆烧毁。 */
     public static boolean burnable(ObservedDrop drop) {
         var value = tracked.get(drop.uuid()); return value != null && !value.mixed;
+    }
+    /** 仅为这批烧不掉且挡路的垃圾临时允许原生回收；收场后其他寻路继续遵守全部遗留物避让。 */
+    public static void recovering(LocalPlayer player, List<Watch> watches, boolean enabled) {
+        if (enabled) recovering.addAll(watches); else recovering.removeAll(watches);
+        observe(player);
     }
 }
