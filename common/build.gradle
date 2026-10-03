@@ -228,6 +228,12 @@ def regressionSuites = [
         heap: '512m', directory: 'portal-regression', timeoutSeconds: 45,
         purpose: '验证传送门准备、权限与原生激活'
     ],
+    // lava_cast 选址诚实选择：可达候选挑选、拒绝原因、零源岩浆 vs 全部不可达区分、契约不允许桶装岩浆顶替。
+    portalCastingHonestSelectionRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.dimension.PortalCastingHonestSelectionTest',
+        heap: '512m', directory: 'portal-casting-honest-selection-regression', timeoutSeconds: 45,
+        purpose: '验证 lava_cast 选址可达性、拒绝原因与契约诚实性'
+    ],
     semanticBlockSearchRegression: [
         entry: 'org.maiwithu.maicraft.intent.SemanticBlockSearchTest',
         heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,

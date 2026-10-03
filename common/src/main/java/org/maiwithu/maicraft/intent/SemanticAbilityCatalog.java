@@ -330,6 +330,7 @@ public final class SemanticAbilityCatalog {
             // 独立备门把浇筑手法交给模型选择，执行器负责取放桶、补料和完整门框观察，完成后不自动穿门。
             case "maicraft:prepare_portal" -> contract(
                     "Prepare and ignite a portal, then stop outside it. lava_cast uses one bucket, an observed Overworld lava pool, a temporary mold and native water/lava reactions. "
+                            + "The observed lava pool is both the material source and the portal site; a carried lava bucket does not substitute for it, and the casting task builds no portal without a verified pool bank. "
                             + "It prepares water before selecting the pool, but only searches loaded terrain; it does not explore distant resources. Use existing evidence to choose a site with a pool and water bucket/source. "
                             + "When resources are absent, use explore or travel to a known resource, then retry from the new area. find_block only scans loaded visible terrain. "
                             + "Acceptance is not proof of resource readiness or started construction: read resource_preparation and construction_phase_started. Action completion, whole-frame differences and portal activation are reported separately.",
