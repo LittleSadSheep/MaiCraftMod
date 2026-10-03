@@ -148,14 +148,19 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         long extra = Math.min(MAX_EXTRA_TICKS, 600 + (long) (repDistance() * TICKS_PER_BLOCK));
         r.extendDeadlineTo(player.level().getGameTime() + extra);
         // 完整坐标与只给水平坐标使用各自的到达范围；BLOCK 在此表示坐标目标，不是 FIND 的方块类型搜索。
-        nav = (r.kind == MoveToTaskRecord.Kind.BLOCK
+        nav = navigationOptions(r.kind == MoveToTaskRecord.Kind.BLOCK
                 ? PlayerNav.to(player, this::blockCompiled, WALK_SPEED, this::reached, terrain())
-                : PlayerNav.toGoal(player, this::goal, WALK_SPEED, this::reached, terrain()))
-                .withTransportMode(r.transportMode).withTerrainProbe();
+                : PlayerNav.toGoal(player, this::goal, WALK_SPEED, this::reached, terrain()));
         Constants.LOG.info(
                 "[maicraft-task] goto start kind={} target={},{},{} solid={}",
                 r.kind, bx, by, bz,
                 r.kind == MoveToTaskRecord.Kind.BLOCK && targetCellSolid());
+    }
+
+    private PlayerNav navigationOptions(PlayerNav candidate) {
+        // 保留实际行走和可用交通；局部交互站位不再为了诊断“假如能挖路”而阻塞父级的其他站位。
+        candidate.withTransportMode(r.transportMode);
+        return r.skipTerrainProbe?candidate:candidate.withTerrainProbe();
     }
 
     /** 将任务单里的目的地要求交给导航；找方块时用已经选出的候选位置。 */
@@ -327,8 +332,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // FIND:打不通就近候选 -> 除名,朝余下候选重开导航
                 if (r.kind == MoveToTaskRecord.Kind.FIND && finder.rotateAfterFailure()) {
                     stopNav();
-                    nav = PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain())
-                            .withTransportMode(r.transportMode).withTerrainProbe();
+                    nav = navigationOptions(PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain()));
                     yield TaskState.RUNNING;
                 }
                 // 水中可能还会自然漂近或下沉，非精确移动再等一小段时间；一直没有靠近就继续处理失败。
@@ -347,8 +351,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     nearRetried = true;
                     stopNav();
                     NavGoal retry = nearRetryGoal();
-                    nav = PlayerNav.toGoal(player, () -> retry, WALK_SPEED, this::closeEnoughToSucceed,
-                            terrain()).withTransportMode(r.transportMode).withTerrainProbe();
+                    nav = navigationOptions(PlayerNav.toGoal(player, () -> retry, WALK_SPEED, this::closeEnoughToSucceed,terrain()));
                     yield TaskState.RUNNING;
                 }
                 String also = nearRetried
@@ -491,8 +494,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private TaskState tickFindDiscovery() {
         finder.drain();
         if (finder.hasCandidates()) {
-            nav = PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain())
-                    .withTransportMode(r.transportMode).withTerrainProbe();
+            nav = navigationOptions(PlayerNav.to(player, finder::contract, WALK_SPEED, this::reached, terrain()));
             return null;
         }
         if (finder.exhausted()) {

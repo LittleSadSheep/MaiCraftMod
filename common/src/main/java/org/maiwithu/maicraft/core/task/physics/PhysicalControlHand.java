@@ -62,6 +62,8 @@ final class PhysicalControlHand {
     }
     String failure(){return failure;}
     Map<String,Object> evidence(){return supplyEvidence;}
+    Map<String,Object> progress(){return Map.of("requested_item",requested==null?"keep_current_hand":requested,
+            "selection_pending",selection.pending(),"supply",supply==null?Map.of():supply.progress());}
     void stop(LocalPlayer player,Task.StopReason why){if(supply!=null)supply.stop(player,why);}
     void close(){if(supply!=null){supply.result(TaskState.CANCELLED);supply=null;}selection.reset();}
 }

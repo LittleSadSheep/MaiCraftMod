@@ -13,6 +13,10 @@ public final class MoveToContractTest {
         if (!exact.requiresStrictStance()) throw new AssertionError("Full coordinates must require supported exact arrival");
         var internal = MoveToTaskRecord.strictStance("internal", 600, new BlockPos(-399, 65, 330), true);
         if (internal.kind != exact.kind || !internal.requiresStrictStance()) throw new AssertionError("Internal and public exact goals diverged");
+        // 候选操作站位不需要挖路假设诊断，仍保留精确到达、地形许可和自动交通的原约束。
+        var worksite=MoveToTaskRecord.strictStance("worksite",600,new BlockPos(4,3,4),false).withoutTerrainProbe();
+        if(!worksite.skipTerrainProbe||worksite.mayAlterTerrain||!worksite.requiresStrictStance()||worksite.transportMode!=TransportMode.AUTO
+                ||exact.skipTerrainProbe||internal.skipTerrainProbe)throw new AssertionError("局部换位选项改变了到达或原生通行权限");
         var column = new MoveToTaskRecord("column", 600, -399D, null, 330D, null, false);
         var nearby = new MoveToTaskRecord("nearby", 600, -72D, 103D, -4D, null, false, false,
                 TransportMode.JETPACK, false, false, 3, 2);

@@ -65,7 +65,7 @@ final class AssemblyApproach {
             return new StructureWorksiteSearch.Probe(new StructureWorksiteSearch.Site(landing.destination(),
                     new StructureEditTarget.Click(frame.storage(offset),Direction.UP,aim)),false,false);
         });
-        if(candidate!=null) movement=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(call,deadline,candidate.landing().feet(),false));
+        if(candidate!=null) movement=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(call,deadline,candidate.landing().feet(),false).withoutTerrainProbe());
         else if(search.exhausted()) {
             if(frame.structure()!=null&&!boarded) {
                 boarded=true;movement=new BoardStructureTask(player,new BoardStructureTaskRecord(call,deadline,frame.structure().id(),Vec3.atCenterOf(frame.storage(offset))));
@@ -74,7 +74,9 @@ final class AssemblyApproach {
         return false;
     }
     String failure() { return failure; }
-    Map<String,Object> evidence() { return Map.of("previous_targets",List.copyOf(history),"search",search==null?Map.of():search.diagnostics()); }
+    boolean moving(){return movement!=null;}
+    Map<String,Object> evidence() { return Map.of("previous_targets",List.copyOf(history),"search",search==null?Map.of():search.diagnostics(),
+            "movement",movement==null?Map.of():movement.progress()); }
     void stop(LocalPlayer player,Task.StopReason why) { if(movement!=null)movement.stop(player,why); }
     void close() {
         if(movement!=null) {

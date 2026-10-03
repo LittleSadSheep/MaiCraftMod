@@ -36,6 +36,9 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     public final boolean exact;
     public final double horizontalRadius;
     public final double verticalTolerance;
+    /** 候选交互站位失败后由父任务换位，不为单个候选继续探测未授权改地形的假想路线。 */
+    public boolean skipTerrainProbe;
+    public MoveToTaskRecord withoutTerrainProbe(){skipTerrainProbe=true;return this;}
     /** 成功的实时身体操作回执；不会复制到公开的 TaskResult。 */
     private Position verifiedPosition;
 

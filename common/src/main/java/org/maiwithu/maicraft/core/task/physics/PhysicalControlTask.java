@@ -67,6 +67,8 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         }
         movingSince=-1;
         if(!player.mayBuild()||player.isSpectator())return failed("当前玩家没有原生修改权限",FailureType.UNKNOWN);
+        // 导航可能正在准备飞行装备或自己的菜单；先让已开始的走位结算，不能每刻用取工具流程抢关它的界面。
+        if(approach.moving()&&!approachReady(entity))return approach.failure()==null?TaskState.RUNNING:failed(approach.failure(),FailureType.NO_PATH);
         if(!hand.ready(player,NativePhysicalControl.requiredItem(entity,r.parameters,index),r.getToolCallId(),r.getDeadlineGameTime())) {
             if(hand.failure()!=null)return failed(hand.failure(),FailureType.NO_MATERIAL);return TaskState.RUNNING;
         }
@@ -76,8 +78,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         }
         if(r.parameters.operation()==SET_SPEED&&!NativePhysicalControl.speedAccessible(entity,player))
             return failed("当前原生旋钮不接受此玩家或主手物品的操作",FailureType.UNKNOWN);
-        if(!approach.ready(player,frame,r.parameters.position(),eye->PhysicalControlAim.aim(player,frame,r.parameters.position(),entity,r.parameters,index,eye),
-                r.getToolCallId(),r.getDeadlineGameTime())) {
+        if(!approachReady(entity)) {
             if(approach.failure()!=null)return failed(approach.failure(),FailureType.NO_PATH);return TaskState.RUNNING;
         }
         if(!ctx.menus().ensureWorldVisible(ctx))return TaskState.RUNNING;
@@ -110,6 +111,10 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
                     ()->ctx.connection().send(new ServerboundCustomPayloadPacket(packet)),confirm,100);
         }
         return TaskState.RUNNING;
+    }
+    private boolean approachReady(BlockEntity entity) {
+        return approach.ready(player,frame,r.parameters.position(),eye->PhysicalControlAim.aim(player,frame,r.parameters.position(),entity,r.parameters,index,eye),
+                r.getToolCallId(),r.getDeadlineGameTime());
     }
     private BlockEntity entity() {
         var pos=frame.storage(r.parameters.position());
@@ -146,6 +151,12 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         super.cleanup();
     }
     @Override protected String successMessage(){return r.parameters.operation()==INSPECT?"原生物理部件设置已读取":"原生部件配置已结算，实际转速、信号与结构差异分别返回";}
+    @Override public Map<String,Object> progress() {
+        // 操作者应能分清正在拿材料、换站位还是等服务器确认，不能只看到一个持续不变的任务类名。
+        return Map.of("task",name(),"operation",r.parameters.operation().name().toLowerCase(Locale.ROOT),"configuration_step",index+1,
+                "phase",done?"checking_full_design":action!=null?"confirming_native_input":approach.moving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
+                "hand",hand.progress(),"approach",approach.evidence());
+    }
     @Override protected Map<String,Object> resultData() {
         var out=new LinkedHashMap<String,Object>();out.put("operation",r.parameters.operation().name().toLowerCase(Locale.ROOT));
         out.put("native_submitted",submitted);out.put("completed_effects",List.copyOf(effects));out.put("actual_configuration",after);
