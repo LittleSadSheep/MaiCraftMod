@@ -44,6 +44,9 @@ public interface BodyControlPort {
     /** 主动作本刻未占用准星时允许随行交互；移动仍沿原路线，不能由辅助动作停步或改道。 */
     default boolean tryAuxiliaryLook(float yaw, float pitch, long leaseTickRevision) { return false; }
 
+    /** 随行点击借用准星后必须归还；未提交动作时恢复原镜头，已提交时恢复主任务的视角目标。 */
+    default void finishAuxiliaryLook(boolean submitted, long leaseTickRevision) {}
+
     /** 连副手准备也先检查准星归属，避免战斗瞄准期间把正在准备使用的盾换成火把。 */
     default boolean auxiliaryLookAvailable(long leaseTickRevision) { return false; }
 

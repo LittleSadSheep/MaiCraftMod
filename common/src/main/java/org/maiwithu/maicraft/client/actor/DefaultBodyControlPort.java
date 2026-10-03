@@ -42,6 +42,24 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private float pitchVelocity;
     private long lastLookUpdateNanos;
     private boolean cameraInitialized;
+    private AuxiliaryLook auxiliaryLook;
+
+    /** 保存借用前的真实姿态和镜头控制状态；原生点击被拒绝时不能把试探转头留给主任务。 */
+    private record PlayerLook(float yaw, float pitch, float head, float body,
+                              float oldYaw, float oldPitch, float oldHead, float oldBody) {
+        static PlayerLook capture(LocalPlayer player) {
+            return new PlayerLook(player.getYRot(), player.getXRot(), player.yHeadRot, player.yBodyRot,
+                    player.yRotO, player.xRotO, player.yHeadRotO, player.yBodyRotO);
+        }
+        void restore(LocalPlayer player) {
+            player.setYRot(yaw); player.setXRot(pitch); player.setYHeadRot(head); player.setYBodyRot(body);
+            player.yRotO = oldYaw; player.xRotO = oldPitch; player.yHeadRotO = oldHead; player.yBodyRotO = oldBody;
+        }
+    }
+    private record AuxiliaryLook(Float yaw, Float pitch, long lookLease, long interactionLease,
+                                 float cameraYaw, float cameraPitch, float yawVelocity, float pitchVelocity,
+                                 long lastUpdate, boolean initialized, Movement movement, Steering steering,
+                                 boolean navigationRelative, PlayerLook pose) {}
 
     @Override
     public boolean automationOwnsControls() {
@@ -89,6 +107,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     // 记录想看的方向，左右转角绕回一圈之内，上下视角限制在垂直范围内。
     public void requestLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
+        // 主动作重新要求瞄准时立即拥有镜头，迟到的辅助收尾不能把它改回旧路线。
+        auxiliaryLook = null;
         interactionLookLease = leaseTickRevision;
         setLook(yaw, pitch, leaseTickRevision);
     }
@@ -103,6 +123,9 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     @Override public boolean tryAuxiliaryLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
         if (!auxiliaryLookAvailable(leaseTickRevision)) return false;
+        var saved = new AuxiliaryLook(targetYaw, targetPitch, lookLease, interactionLookLease,
+                cameraYaw, cameraPitch, yawVelocity, pitchVelocity, lastLookUpdateNanos, cameraInitialized,
+                movement, steering, navigationRelativeMovement, PlayerLook.capture(controlledPlayer));
         // 跑动中低头插灯只改变视线；已有路线转向器继续工作，普通移动则按原世界方向补偿横移。
         if (movementLease == leaseTickRevision && steering == null && !navigationRelativeMovement) {
             Movement original = movement;
@@ -110,12 +133,30 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             steering = nextYaw -> preserveHeading(original, oldYaw, nextYaw);
         }
         requestImmediateLook(yaw, pitch, leaseTickRevision);
+        auxiliaryLook = saved;
         return true;
+    }
+
+    @Override public void finishAuxiliaryLook(boolean submitted, long leaseTickRevision) {
+        // 交还身体、换刻或主任务已经接管时，不得用旧快照覆盖新的操作者。
+        if (!automationOwnsControls() || activeTick != leaseTickRevision || auxiliaryLook == null) return;
+        var saved = auxiliaryLook; auxiliaryLook = null;
+        targetYaw = saved.yaw(); targetPitch = saved.pitch();
+        lookLease = saved.lookLease(); interactionLookLease = saved.interactionLease();
+        if (submitted) return;
+        cameraYaw = saved.cameraYaw(); cameraPitch = saved.cameraPitch();
+        yawVelocity = saved.yawVelocity(); pitchVelocity = saved.pitchVelocity();
+        lastLookUpdateNanos = saved.lastUpdate(); cameraInitialized = saved.initialized();
+        // 只撤回辅助转头追加的移动补偿；原生回调若更新了主移动指令，保留后来者的要求。
+        if (movement == saved.movement() && navigationRelativeMovement == saved.navigationRelative()) steering = saved.steering();
+        saved.pose().restore(controlledPlayer);
     }
 
     @Override public boolean auxiliaryLookAvailable(long leaseTickRevision) {
         requireLease(leaseTickRevision);
-        return interactionLookLease != leaseTickRevision;
+        // 即将起跳或沿边缘潜行时身体仍在地面，但下一次物理更新已经有精确动作，不能借准星插灯。
+        return interactionLookLease != leaseTickRevision
+                && (movementLease != leaseTickRevision || !movement.jumping() && !movement.sneaking());
     }
 
     static Movement preserveHeading(Movement original, float oldYaw, float nextYaw) {
@@ -134,6 +175,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     @Override
     // 取消继续转头，同时清除转动惯性，避免下一次看向别处时继承旧速度。
     public void clearLook() {
+        auxiliaryLook = null;
         interactionLookLease = Long.MIN_VALUE;
         targetYaw = null;
         targetPitch = null;
@@ -164,6 +206,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     void beginTick(long tickRevision) {
+        auxiliaryLook = null;
         activeTick = tickRevision;
         // 上一刻按着前进，不代表这一刻还要前进；执行器必须每刻重新发出指令。
         if (movementLease != tickRevision) { movement = Movement.STOPPED; steering = null; }

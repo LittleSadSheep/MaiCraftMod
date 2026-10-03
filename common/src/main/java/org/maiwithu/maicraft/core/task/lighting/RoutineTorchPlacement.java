@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.core.task.lighting;
 
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.Comparator;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -27,23 +29,33 @@ public final class RoutineTorchPlacement {
 
     public static BuildTaskRecord.Target find(LocalPlayer player, Set<BlockPos> protectedCells) {
         BlockPos origin = player.blockPosition();
-        // 优先把火把挂在近处墙上，空旷洞穴再落地；候选始终在当前交互距离内。
+        var candidates = new ArrayList<BuildTaskRecord.Target>();
+        // 收集本来就够得着的墙面和地面，再优先选择当前视线附近的落点，避免固定方向顺序导致频繁回头。
         for (int height : new int[]{1, 0}) for (int distance = 1; distance <= 2; distance++) {
             for (Direction toward : Direction.Plane.HORIZONTAL) {
                 BlockPos at = origin.relative(toward, distance).above(height);
                 for (Direction wall : Direction.Plane.HORIZONTAL) {
                     Direction facing = wall.getOpposite();
                     BlockState expected = Blocks.WALL_TORCH.defaultBlockState().setValue(WallTorchBlock.FACING, facing);
-                    if (usable(player, at, expected, at.relative(wall), facing, protectedCells)) return target(at, expected);
+                    if (usable(player, at, expected, at.relative(wall), facing, protectedCells)) candidates.add(target(at, expected));
                 }
             }
         }
-        for (int distance = 1; distance <= 2; distance++) for (Direction toward : Direction.Plane.HORIZONTAL) {
-            BlockPos at = origin.relative(toward, distance);
+        // 斜向行走也提供正前方灯位，不强迫角色从东西南北四个方向里挑一个再额外横转。
+        for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
+            BlockPos at = origin.offset(dx, 0, dz);
             if (usable(player, at, Blocks.TORCH.defaultBlockState(), at.below(), Direction.UP, protectedCells))
-                return target(at, Blocks.TORCH.defaultBlockState());
+                candidates.add(target(at, Blocks.TORCH.defaultBlockState()));
         }
-        return null;
+        return candidates.stream().max(Comparator.comparingDouble(candidate -> viewAlignment(player, candidate))).orElse(null);
+    }
+
+    private static double viewAlignment(LocalPlayer player, BuildTaskRecord.Target candidate) {
+        Direction face = candidate.desiredState().is(Blocks.WALL_TORCH)
+                ? candidate.desiredState().getValue(WallTorchBlock.FACING) : Direction.UP;
+        Vec3 point = Vec3.atCenterOf(candidate.pos().relative(face.getOpposite()))
+                .add(Vec3.atLowerCornerOf(face.getNormal()).scale(.5));
+        return point.subtract(player.getEyePosition()).normalize().dot(player.getViewVector(1));
     }
 
     public static boolean usable(LocalPlayer player, BlockPos at, BlockState expected,

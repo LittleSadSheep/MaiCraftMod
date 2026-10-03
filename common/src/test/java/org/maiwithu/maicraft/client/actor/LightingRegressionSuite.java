@@ -8,6 +8,7 @@ public final class LightingRegressionSuite {
     public static void main(String[] args) throws Exception {
         AuxiliaryActionTest.main(args);
         AuxiliaryNavigationTest.main(args);
+        AuxiliaryLookReturnTest.main(args);
         AutomaticLightingTest.main(args);
         AreaLightingTest.main(args);
         AutomaticLightingContractTest.main(args);

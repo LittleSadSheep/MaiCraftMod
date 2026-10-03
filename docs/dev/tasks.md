@@ -119,6 +119,8 @@ boolean stalled = inactivity.observeCounter(player.level().getGameTime(), confir
 
 随行补光使用同刻剩余资源：主任务和导航先执行，`AfterNavigationAction` 处理区域灯位，最后 `AutomaticLighting` 检查经过位置。辅助动作不能停步、改路线或覆盖主动作瞄准；副手准备也要让位。每刻仍只提交一次原生交互，但副手一次性放置的回执独立等待，主任务下一刻可以继续使用主手。旧的 `TorchLightingChain` 只保留能力说明与确认条件，不再参与抢占。
 
+导航按键通过 `applyNavigationMovement` 保留路线朝向，补光转头不能再次旋转这些按键。辅助瞄准必须通过 `finishAuxiliaryLook` 归还：未提交点击时恢复借用前的真实姿态和镜头状态，已提交时恢复主任务的视角目标；后来的主动作瞄准优先。起跳准备和沿边缘潜行不借出准星。自动灯位优先靠近当前视线，避免按固定方向顺序反复回头。
+
 `maicraft:auto_light` 的 `action=enable|disable|status` 是即时配置或查询，不申请身体，不替换当前任务。默认在自动控制期间开启，以方块光 8 为目标，火把常驻副手；仅用随身材料，主任务忙碌、没有支撑或缺料时保留暗格，不绕路。状态中的 `automatic_lighting` 完整保留已走位置的最低实测亮度、暗格、未知项与原生放置结果。断开会话后恢复默认设置。
 
 选定区域使用 `maicraft:light_area`，默认火把、`coverage=all`、`minimum_light=8`。区域先发现范围，再规划、补料、用副手在触及范围内放置并复测；前一盏灯已覆盖的候选直接跳过，材料耗尽时交回原供料流程续作。`lighting_observation` 保留未达标位置；只有全部声明覆盖目标达到实测阈值才能声称全覆盖。光照不能清除已有怪物，也不把特殊生成机制一并宣称为安全。

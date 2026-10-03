@@ -81,15 +81,24 @@ public final class OffhandTorchPlacer {
         float pitch = (float) -Math.toDegrees(Math.atan2(delta.y, Math.hypot(delta.x, delta.z)));
         // 主任务已经瞄准矿石或敌人时直接让位；只在原地可见可达时低头，不建立任何绕路目标。
         if (!context.body().tryAuxiliaryLook(yaw, pitch, context.tickRevision())) { state = "primary_aim_busy"; return false; }
-        Vec3 end = player.getEyePosition().add(player.getViewVector(1).scale(Math.min(4.25, player.blockInteractionRange())));
-        var hit = context.level().clip(new ClipContext(player.getEyePosition(), end,
-                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-        if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(support) || hit.getDirection() != face) return false;
-        placement = context.actions().tryAuxiliaryBlockUse(context, hit, TorchLightingChain.confirmation(player, candidate), 40);
-        if (placement == null) return false;
-        target = candidate;
-        state = "awaiting_native_confirmation";
-        return true;
+        boolean submitted = false;
+        try {
+            Vec3 end = player.getEyePosition().add(player.getViewVector(1).scale(Math.min(4.25, player.blockInteractionRange())));
+            var hit = context.level().clip(new ClipContext(player.getEyePosition(), end,
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+            if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(support) || hit.getDirection() != face) {
+                state = "placement_ray_changed"; return false;
+            }
+            placement = context.actions().tryAuxiliaryBlockUse(context, hit, TorchLightingChain.confirmation(player, candidate), 40);
+            if (placement == null) { state = "native_action_busy"; return false; }
+            target = candidate; submitted = true;
+            state = "awaiting_native_confirmation";
+            return true;
+        } finally {
+            // 放不下或旧回执未结清时完整撤回镜头试探；真正出手后立即归还主目标，只留下自己的异步回执。
+            context.body().finishAuxiliaryLook(submitted, context.tickRevision());
+            if (!submitted) retryAt = context.tickRevision() + 5;
+        }
     }
 
     public static boolean idle(LocalPlayerContext context) {
