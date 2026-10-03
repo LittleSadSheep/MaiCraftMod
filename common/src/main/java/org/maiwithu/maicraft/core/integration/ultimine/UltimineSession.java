@@ -21,7 +21,7 @@ import java.util.Objects;
  */
 public final class UltimineSession implements AutoCloseable {
     /** 同一原生持键流程分别服务蓝图清障面和材料矿脉，采矿不能沿用施工的九格授权。 */
-    public enum Mode { CLEARANCE, MINING }
+    public enum Mode { CLEARANCE, MINING, DESCENDING_TUNNEL, SMALL_TUNNEL, SINGLE }
     private final Mode mode;
     public UltimineSession() { this(Mode.CLEARANCE); }
     public UltimineSession(Mode mode) { this.mode = Objects.requireNonNull(mode); }
@@ -32,6 +32,7 @@ public final class UltimineSession implements AutoCloseable {
     }
     private BlockPos origin;
     private Direction face;
+    private Direction heading;
     private LocalPlayer player;
     private Object world;
     private long bodyEpoch, controlRevision, openedTick, initialRevision, stableRevision = -1, stableTick, lastScroll;
@@ -57,13 +58,15 @@ public final class UltimineSession implements AutoCloseable {
         if (mode != Mode.MINING) throw new IllegalStateException("mining requires a mining session");
         return prepareSelection(context, hit, Objects.requireNonNull(allowed), preserve);
     }
-    private Decision prepareSelection(LocalPlayerContext context, BlockHitResult hit, Predicate<BlockPos> allowed, Predicate<BlockPos> preserve) {
+    public Decision prepareSelection(LocalPlayerContext context, BlockHitResult hit, Predicate<BlockPos> allowed, Predicate<BlockPos> preserve) {
         try {
             if (inFlight) return abort("ultimine_inflight_requires_keep_alive");
             if (!eligible(context) || hit == null || hit.getType() != HitResult.Type.BLOCK) return abort("ultimine_actor_or_hit_unavailable");
             if (!UltimineNative.available()) { close(); return result(Status.SINGLE_BLOCK, "ultimine_not_installed"); }
             if (UltimineInputLease.humanHeld(context)) { close(); return result(Status.BLOCKED, "ultimine_human_key_held"); }
             if (closed) return released(context, fallback == null ? "ultimine_session_finished" : fallback);
+            // 定点采收及临时降级只确认原生松键，不把机器的一格授权扩大为整脉或通道。
+            if (mode == Mode.SINGLE) return single(context, "ultimine_single_source_only");
             if (!sameHit(context, hit)) return result(Status.WAITING, "ultimine_waiting_for_exact_crosshair");
             permitted = allowed;
             preserved = preserve == null ? ignored -> false : preserve;
@@ -71,6 +74,7 @@ public final class UltimineSession implements AutoCloseable {
             if (origin == null) {
                 // 固定本次准星实际命中的方块与面；施工沿该面清障，采矿从该矿块触发原生整脉。
                 origin = hit.getBlockPos().immutable(); face = hit.getDirection(); player = context.player(); world = context.level();
+                heading = context.player().getDirection();
                 bodyEpoch = context.bodyEpoch(); controlRevision = context.controlRevision(); tool = normalizedTool(context.player().getMainHandItem());
                 openedTick = context.level().getGameTime(); initialRevision = preview == null ? -1 : preview.revision();
             }
@@ -115,9 +119,12 @@ public final class UltimineSession implements AutoCloseable {
             if (preview.revision() <= initialRevision) return result(Status.WAITING, "ultimine_waiting_for_fresh_full_selection");
             ItemStack held = context.player().getMainHandItem();
             int durability = held.isDamageableItem() ? held.getMaxDamage() - held.getDamageValue() : Integer.MAX_VALUE;
-            var admission = mode == Mode.MINING
-                    ? UltimineSelectionPolicy.admitMining(preview, origin, at -> inspect(context, at))
-                    : UltimineSelectionPolicy.admit(preview, origin, face, at -> inspect(context, at), durability);
+            var admission = switch (mode) {
+                case MINING -> UltimineSelectionPolicy.admitMining(preview, origin, at -> inspect(context, at));
+                case DESCENDING_TUNNEL, SMALL_TUNNEL -> UltimineSelectionPolicy.admitTunnel(
+                        preview, origin, face, heading, mode == Mode.DESCENDING_TUNNEL, at -> inspect(context, at));
+                default -> UltimineSelectionPolicy.admit(preview, origin, face, at -> inspect(context, at), durability);
+            };
             if (!admission.allowed()) return single(context, admission.code());
             if (stableRevision != preview.revision()) { stableRevision = preview.revision(); stableTick = context.level().getGameTime(); }
             // 完整选区须稳定且确实绘制到原生界面，不能拿尚未显示的内部结果直接开挖。
@@ -188,8 +195,22 @@ public final class UltimineSession implements AutoCloseable {
                 && context.controlRevision() == controlRevision && ItemStack.isSameItemSameComponents(tool, normalizedTool(context.player().getMainHandItem()));
     }
     // 原生形状身份同时核对注册名和实现，避免同名第三方形状扩大施工或采集范围。
-    private String shapeId() { return mode == Mode.MINING ? UltimineSelectionPolicy.SHAPELESS : UltimineSelectionPolicy.SQUARE; }
-    private String shapeClass() { return mode == Mode.MINING ? UltimineSelectionPolicy.SHAPELESS_CLASS : UltimineSelectionPolicy.SQUARE_CLASS; }
+    private String shapeId() {
+        return switch (mode) {
+            case MINING -> UltimineSelectionPolicy.SHAPELESS;
+            case DESCENDING_TUNNEL -> UltimineSelectionPolicy.MINING_TUNNEL;
+            case SMALL_TUNNEL -> UltimineSelectionPolicy.SMALL_TUNNEL;
+            default -> UltimineSelectionPolicy.SQUARE;
+        };
+    }
+    private String shapeClass() {
+        return switch (mode) {
+            case MINING -> UltimineSelectionPolicy.SHAPELESS_CLASS;
+            case DESCENDING_TUNNEL -> UltimineSelectionPolicy.MINING_TUNNEL_CLASS;
+            case SMALL_TUNNEL -> UltimineSelectionPolicy.SMALL_TUNNEL_CLASS;
+            default -> UltimineSelectionPolicy.SQUARE_CLASS;
+        };
+    }
     private static ItemStack normalizedTool(ItemStack stack) {
         // 正常挖掘会消耗耐久，因此绑定工具时忽略损耗数值，仍保留物品、附魔等其他身份信息。
         if (stack.isEmpty()) return ItemStack.EMPTY;

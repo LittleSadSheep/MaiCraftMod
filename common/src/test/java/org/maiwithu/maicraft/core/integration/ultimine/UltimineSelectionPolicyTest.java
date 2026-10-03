@@ -21,6 +21,7 @@ public final class UltimineSelectionPolicyTest {
         durabilityReservesTheWholeNativeSelection();
         missingOptionalModCanBeClosedWithoutInitializingIt();
         miningUsesTheWholeNativeVeinWithoutExpandingItsAuthority();
+        tunnelsFollowTheNativeFaceAndSlope();
         System.out.println("UltimineSelectionPolicyTest: " + checks + " checks passed");
     }
     private static void admitsOnlyTheWholeAuthorizedNativeSquare() {
@@ -120,6 +121,27 @@ public final class UltimineSelectionPolicyTest {
         new UltimineSession(UltimineSession.Mode.MINING).close();
     }
     private static Preview preview(List<BlockPos> blocks, int actual) { return new Preview(UltimineSelectionPolicy.SQUARE, UltimineSelectionPolicy.SQUARE_CLASS, 2, actual, blocks, true, true, "allowed", 1); }
+    private static void tunnelsFollowTheNativeFaceAndSlope() {
+        // 四个方向分别核对斜下、水平及顶面点击；不能把小型通道误按成向下直挖。
+        for (Direction heading : Direction.Plane.HORIZONTAL) {
+            for (boolean descending : List.of(false, true)) {
+                List<BlockPos> cells = new ArrayList<>();
+                for (int step = 0; step < 12; step++) cells.add(ORIGIN.relative(heading, step).below(descending ? step : 0));
+                var p = new Preview(descending ? UltimineSelectionPolicy.MINING_TUNNEL : UltimineSelectionPolicy.SMALL_TUNNEL,
+                        descending ? UltimineSelectionPolicy.MINING_TUNNEL_CLASS : UltimineSelectionPolicy.SMALL_TUNNEL_CLASS,
+                        1, cells.size(), cells, true, true, "allowed", 1);
+                check(UltimineSelectionPolicy.admitTunnel(p, ORIGIN, heading.getOpposite(), heading, descending, at -> SAFE).allowed(),
+                        "native tunnel follows the clicked face into the wall");
+                check(UltimineSelectionPolicy.admitTunnel(p, ORIGIN, Direction.UP, heading, descending, at -> SAFE).allowed() == descending,
+                        "only the descending native shape resolves a vertical hit to the player's heading");
+                check(!UltimineSelectionPolicy.admitTunnel(p, ORIGIN, heading, heading, descending, at -> SAFE).allowed(),
+                        "opposite tunnel direction cannot silently expand the excavation");
+                check(!UltimineSelectionPolicy.admitTunnel(p, ORIGIN, heading.getOpposite(), heading, descending,
+                        at -> at.equals(cells.getLast()) ? new Cell(true, false, false, false, false, false) : SAFE).allowed(),
+                        "last native tunnel block is subject to the same excavation scope");
+            }
+        }
+    }
     private static void rejects(Preview preview, View view, int durability, String code) {
         var admission = UltimineSelectionPolicy.admit(preview, ORIGIN, Direction.UP, view, durability);
         check(!admission.allowed() && admission.code().equals(code), "expected " + code + " but got " + admission.code());

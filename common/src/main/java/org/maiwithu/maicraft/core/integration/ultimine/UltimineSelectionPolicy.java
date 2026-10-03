@@ -13,6 +13,10 @@ public final class UltimineSelectionPolicy {
     public static final String SQUARE_CLASS = "dev.ftb.mods.ftbultimine.shape.SmallSquareShape";
     public static final String SHAPELESS = "ftbultimine:shapeless";
     public static final String SHAPELESS_CLASS = "dev.ftb.mods.ftbultimine.shape.ShapelessShape";
+    public static final String MINING_TUNNEL = "ftbultimine:mining_tunnel";
+    public static final String MINING_TUNNEL_CLASS = "dev.ftb.mods.ftbultimine.shape.MiningTunnelShape";
+    public static final String SMALL_TUNNEL = "ftbultimine:small_tunnel";
+    public static final String SMALL_TUNNEL_CLASS = "dev.ftb.mods.ftbultimine.shape.SmallTunnelShape";
     public record Preview(String shapeId, String implementation, int shapeIndex, int actualCount,
                           List<BlockPos> visibleBlocks, boolean pressed, boolean allowed, String reason, long revision) {
         public Preview { visibleBlocks = visibleBlocks.stream().map(BlockPos::immutable).toList(); }
@@ -31,10 +35,14 @@ public final class UltimineSelectionPolicy {
     /** 采矿沿原生整脉预览采集；预览本身是 FTB 提供的观察，埋藏副目标不再要求逐格先露出表面。 */
     public static Admission admitMining(Preview preview, BlockPos origin, View view) {
         if (preview == null || origin == null || view == null) return rejected("ultimine_preview_missing");
-        if (!preview.pressed) return rejected("ultimine_native_key_not_active");
-        if (!preview.allowed) return rejected("ultimine_native_restriction: " + preview.reason);
         if (!SHAPELESS.equals(preview.shapeId) || !SHAPELESS_CLASS.equals(preview.implementation))
             return rejected("ultimine_mining_requires_native_shapeless");
+        return admitSelection(preview, origin, view, "ultimine_complete_native_vein_admitted");
+    }
+    // 整脉与通道都只按完整原生选区核对授权；形状身份由各自入口先核实，不改写预览事实。
+    private static Admission admitSelection(Preview preview, BlockPos origin, View view, String code) {
+        if (!preview.pressed) return rejected("ultimine_native_key_not_active");
+        if (!preview.allowed) return rejected("ultimine_native_restriction: " + preview.reason);
         if (preview.actualCount <= 0 || preview.actualCount != preview.visibleBlocks.size())
             return rejected("ultimine_preview_incomplete_or_truncated");
         if (new HashSet<>(preview.visibleBlocks).size() != preview.actualCount || !preview.visibleBlocks.contains(origin))
@@ -50,7 +58,29 @@ public final class UltimineSelectionPolicy {
             if (!cell.correctTool) return rejected("ultimine_tool_cannot_harvest_entire_envelope");
         }
         // 耐久、饥饿和经验由 FTB 原生限制结算；允许它只采完半脉，任务随后报告实际变化并收取掉落。
-        return new Admission(true, "ultimine_complete_native_vein_admitted", preview.visibleBlocks, preview.visibleBlocks);
+        return new Admission(true, code, preview.visibleBlocks, preview.visibleBlocks);
+    }
+
+    /** 原生采矿通道是一条斜下线，小型通道是一条直线；分别挖三排、两排才能形成可走空间。 */
+    public static Admission admitTunnel(Preview preview, BlockPos origin, Direction face,
+                                        Direction heading, boolean descending, View view) {
+        if (preview == null || origin == null || view == null || face == null || heading == null || heading.getAxis().isVertical())
+            return rejected("ultimine_tunnel_direction_missing");
+        String id = descending ? MINING_TUNNEL : SMALL_TUNNEL;
+        String implementation = descending ? MINING_TUNNEL_CLASS : SMALL_TUNNEL_CLASS;
+        if (!id.equals(preview.shapeId) || !implementation.equals(preview.implementation))
+            return rejected("ultimine_tunnel_shape_mismatch");
+        // 采矿通道点击顶面时按玩家水平朝向延伸；小型通道必须点击迎面，否则原生会挖成竖井。
+        Direction forward = face.getAxis().isVertical() && descending ? heading : face.getOpposite();
+        if (forward != heading) return rejected("ultimine_tunnel_face_mismatch");
+        for (BlockPos at : preview.visibleBlocks) {
+            BlockPos delta = at.subtract(origin);
+            int step = delta.getX() * heading.getStepX() + delta.getZ() * heading.getStepZ();
+            if (step < 0 || !at.equals(origin.relative(heading, step).below(descending ? step : 0)))
+                return rejected("ultimine_selection_outside_native_tunnel");
+        }
+        // 完整选区的材料与保护检查复用整脉规则，不自行重算或裁短服务器给出的原生线段。
+        return admitSelection(preview, origin, view, "ultimine_complete_native_tunnel_admitted");
     }
 
     public static Admission admit(Preview preview, BlockPos origin, Direction face, View view) {
