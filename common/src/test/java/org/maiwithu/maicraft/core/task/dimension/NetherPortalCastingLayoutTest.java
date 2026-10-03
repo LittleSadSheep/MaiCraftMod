@@ -27,6 +27,15 @@ public final class NetherPortalCastingLayoutTest {
                 check(!frame.contains(layout.castingWater()) && !layout.mold().contains(layout.castingWater()),
                         "water source stays behind the finished frame");
                 check(layout.footprint().containsAll(layout.clearance()), "rear drainage remains explicitly scoped");
+                // 顶部不能隔空倒桶：起手已有两侧底脚，后续每格必须能借前一步实块或模具的原生点击面。
+                var supports = new HashSet<>(layout.mold()); supports.addAll(layout.bottom());
+                supports.add(layout.cell(-1, 0, 0)); supports.add(layout.cell(2, 0, 0));
+                for (BlockPos target : layout.upperFrame()) {
+                    boolean supported = supports.contains(target);
+                    for (Direction side : Direction.values()) supported |= supports.contains(target.relative(side));
+                    check(supported, "each successive casting cell has an existing native support face");
+                    supports.add(target);
+                }
                 // 水流产生了范围外黑曜石时只比较声明格；一格未加载必须保留未知，不能当成空气。
                 var blocks = new HashMap<BlockPos, BlockState>();
                 frame.forEach(p -> blocks.put(p, Blocks.OBSIDIAN.defaultBlockState()));

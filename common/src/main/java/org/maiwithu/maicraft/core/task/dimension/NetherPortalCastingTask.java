@@ -172,7 +172,9 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             if (operation.startsWith("fill_") && Boolean.FALSE.equals(result.data().get("bucket_submitted")) && sourceAttempts++ < 8) {
                 unavailableSources.add(mutation); return TaskState.RUNNING;
             }
-            return failure("casting_" + operation + "_failed");
+            issue = "casting_" + operation + "_failed";
+            // 默认失败说明直接给出最后一个原生卡点，不让模型翻遍前面已经完成的每桶历史才能决策。
+            fail(issue + ": " + result.message(), FailureType.TARGET_LOST); return TaskState.FAILED;
         }
         if (supplyNeed != null) {
             if (!supplyNeed.satisfied(player)) return failure("casting_supply_unverified");
@@ -192,7 +194,11 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         data.put("casting_step", cursor); data.put("casting_step_count", steps.size()); data.put("operation", operation);
         data.put("native_steps", List.copyOf(receipts));
         if (layout != null) data.put("portal_observation", layout.observation(p -> PortalPreparationSite.read(world, p)));
-        if (!issue.isEmpty()) data.put("issue_code", issue);
+        if (!issue.isEmpty()) {
+            data.put("issue_code", issue);
+            if (!receipts.isEmpty() && Boolean.FALSE.equals(receipts.getLast().get("success")))
+                data.put("native_failure", receipts.getLast());
+        }
         return data;
     }
     @Override public Map<String, Object> progress() {

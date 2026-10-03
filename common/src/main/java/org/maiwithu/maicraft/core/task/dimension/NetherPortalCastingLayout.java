@@ -50,10 +50,10 @@ public record NetherPortalCastingLayout(BlockPos origin, Direction shore) {
 
     public List<BlockPos> bottom() { return List.of(cell(0, -1, 0), cell(1, -1, 0)); }
 
-    /** 底框已凝固后才移水；两侧从低到高，顶部最后，避免新黑曜石挡住尚未完成的落桶面。 */
+    /** 底框已凝固后才移水；两侧从低到高，顶部先贴右侧模具浇近端，再借新黑曜石的侧面浇远端。 */
     public List<BlockPos> upperFrame() {
         return List.of(cell(-1, 0, 0), cell(2, 0, 0), cell(-1, 1, 0), cell(-1, 2, 0),
-                cell(2, 1, 0), cell(2, 2, 0), cell(0, 3, 0), cell(1, 3, 0));
+                cell(2, 1, 0), cell(2, 2, 0), cell(1, 3, 0), cell(0, 3, 0));
     }
 
     /** 脚手架、取材和导航共享已声明范围，不能把先浇好的门框当成可拆的过路障碍。 */
