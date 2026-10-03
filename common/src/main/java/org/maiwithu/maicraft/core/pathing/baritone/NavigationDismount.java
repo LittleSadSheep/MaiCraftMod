@@ -8,15 +8,15 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** 步行前先按原生潜行键下车，等待乘客同步；不能只在客户端摘掉座位关系。 */
-final class NavigationDismount {
-    enum State { WAITING, READY, FAILED }
+public final class NavigationDismount {
+    public enum State { WAITING, READY, FAILED }
     private NativeActionReceipt receipt;
     private String detail = "not_requested";
 
     boolean pending() { return receipt != null && !receipt.terminal(); }
-    String detail() { return detail; }
+    public String detail() { return detail; }
 
-    State tick(LocalPlayerContext ctx) {
+    public State tick(LocalPlayerContext ctx) {
         if (receipt != null) {
             ctx.actions().poll(ctx, receipt);
             detail = receipt.detail();
@@ -43,7 +43,7 @@ final class NavigationDismount {
         ctx.body().applyMovement(new BodyControlPort.Movement(0, 0, false, true, false), ctx.tickRevision());
     }
 
-    void cancel(LocalPlayer player) {
+    public void cancel(LocalPlayer player) {
         // 暂停或换任务只结清本次下车回执；旧身体或失去控制权时由角色边界清理，不能操作新角色。
         ClientRuntime.actor().activeContext().filter(ctx -> ctx.player() == player && ctx.permitsNativeActions())
                 .ifPresent(ctx -> {

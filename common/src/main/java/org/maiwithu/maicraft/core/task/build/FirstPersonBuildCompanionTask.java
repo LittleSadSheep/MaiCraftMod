@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.build;
+import org.maiwithu.maicraft.core.pathing.baritone.NavigationDismount;
 import org.maiwithu.maicraft.task.ProgressBudget;
 
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
@@ -289,6 +290,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 "unsupported blueprint effects", FailureType.UNSUPPORTED, "unsupported_blueprint_effects");
     }
 
+    private NavigationDismount departure;
     @Override protected TaskState onTick() {
         // Dev 预览还没确认就等待，点取消就结束；确认后才按当前阶段逐步施工。
         var preview = BuildPreviewGate.await(r, r);
@@ -296,6 +298,16 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.RUNNING;
         if (preview == PreviewSession.Decision.CANCELLED)
             return TaskState.CANCELLED;
+        // 驾驶后直接施工时，座位一直保持乘坐状态；先原生下车，再等待施工站稳，不能在座位上无限等落地。
+        if (player.isPassenger() || departure != null) {
+            if (departure == null) departure = new NavigationDismount();
+            var state = departure.tick(ClientRuntime.requireContext(player));
+            if (state == NavigationDismount.State.FAILED) {
+                fail("native_dismount_unconfirmed: " + departure.detail(),FailureType.UNKNOWN); return TaskState.FAILED;
+            }
+            if (state == NavigationDismount.State.WAITING) return TaskState.RUNNING;
+            departure = null;
+        }
         // 高处回收接近使用带禁拆观察的代理，整个跨刻导航期间保持其身份，原生支撑确认仍转回本项目。
         if (scaffoldAccess != null) BuildPlacementRegistry.register(player, scaffoldAccess.provider());
         else if (preflightDone) registerProvider();
@@ -2684,6 +2696,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        if (departure != null) { departure.cancel(player); departure = null; }
         if (wrenchRemoval != null) { if (why == StopReason.PREEMPTED) wrenchRemoval.pause(); else wrenchRemoval.stop(); }
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
         if (scaffoldDescent != null) scaffoldDescent.stop();
@@ -2704,6 +2717,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 暂停／取消后不再续发旧任务的 Shift；恢复时由新控制租约重新核验身体与锚点。
     }
     @Override protected void cleanup() {
+        if (departure != null) { departure.cancel(player); departure = null; }
         if (wrenchRemoval != null) wrenchRemoval.stop();
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }
         if (scaffoldDescent != null) scaffoldDescent.stop();
