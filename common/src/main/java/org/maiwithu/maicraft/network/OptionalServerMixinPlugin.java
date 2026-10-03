@@ -17,6 +17,7 @@ import org.objectweb.asm.ClassReader;
 /** 在安装原生钩子前检查可选类资源；绝不定义、转换或初始化目标类。 */
 public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
     private static volatile ClassNode worldTransformClass;
+    private static volatile ClassNode assemblyRequestClass,assemblyTransformClass;
     private static final Set<String> MEKANISM_HOOKS = Set.of("MekTransportDeliveryMixin", "MekSorterSourceMixin",
             "MekItemExtractionMixin", "MekMonitorProductionMixin", "MekCachedProductionMixin",
             "MekOutputProductionMixin", "MekInputProductionMixin");
@@ -25,6 +26,8 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
         String name = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
         // 只有安装 Sable 时旁听船体物理子步；没有该模组的服务器照常启动。
         if (name.equals("SableForceObservationMixin")||name.equals("SableImpulseObservationMixin")) return present(targetClassName);
+        // 只在原生 Simulated 已安装时旁听组装请求与返回值，不向缺少它的服务器引入类型依赖。
+        if(name.equals("SimulatedAssemblyRequestMixin")||name.equals("SimulatedAssemblyTransformMixin")) return present(targetClassName);
         if (name.equals("CreateStressObservationMixin")) return hasStressFields(targetClassName);
         // 机械手只旁听原生同步；可选模组不存在时不加载适配器，版本未命中 read 时保持观察未知。
         if (name.equals("CreateDeployerHandObservationMixin")) return present(targetClassName);
@@ -70,21 +73,32 @@ public final class OptionalServerMixinPlugin implements IMixinConfigPlugin {
         ClassNode transformed = worldTransformClass;
         return transformed != null && hasTransformCapture(transformed);
     }
+    public static boolean assemblyEvents() { return hasAssemblyCapture(assemblyRequestClass,assemblyTransformClass); }
+    static boolean hasAssemblyCapture(ClassNode request,ClassNode transform) {
+        String observer="org/maiwithu/maicraft/server/physics/NativeAssemblyCapture";
+        return calls(request,"handle",observer,"begin")&&calls(request,"handle",observer,"finish")
+                &&calls(transform,"assembleFromSingleBlock",observer,"assembled")&&calls(transform,"disassembleSubLevel",observer,"disassembled");
+    }
 
     @Override public void postApply(String targetClassName, ClassNode targetClass, String mixinClassName, IMixinInfo mixinInfo) {
         // MixinExtras 在后续 extension.postApply 才真正安装 WrapOperation；这里保留同一棵树，不能提前锁死为 false。
         if (mixinClassName.endsWith(".Ae2TransformProductionMixin")) worldTransformClass = targetClass;
+        if(mixinClassName.endsWith(".SimulatedAssemblyRequestMixin")) assemblyRequestClass=targetClass;
+        if(mixinClassName.endsWith(".SimulatedAssemblyTransformMixin")) assemblyTransformClass=targetClass;
     }
 
     static boolean hasTransformCapture(ClassNode type) {
+        return calls(type,"tryTransform","org/maiwithu/maicraft/server/machine/ae2/TransformProductionCapture","spawned");
+    }
+    private static boolean calls(ClassNode type,String entry,String observer,String callback) {
+        if(type==null) return false;
         // require=0 时未命中的包装方法也可能被复制进目标类；必须证明原生入口确实会走到只读捕获器。
         var pending = new ArrayDeque<MethodNode>(); var seen = new HashSet<String>();
-        type.methods.stream().filter(method -> method.name.equals("tryTransform")).forEach(pending::add);
+        type.methods.stream().filter(method -> method.name.equals(entry)).forEach(pending::add);
         while (!pending.isEmpty()) {
             MethodNode method = pending.removeFirst(); if (!seen.add(method.name + method.desc)) continue;
             for (var instruction : method.instructions) if (instruction instanceof MethodInsnNode call) {
-                if (call.owner.equals("org/maiwithu/maicraft/server/machine/ae2/TransformProductionCapture")
-                        && call.name.equals("spawned")) return true;
+                if (call.owner.equals(observer)&&call.name.equals(callback)) return true;
                 if (call.owner.equals(type.name)) type.methods.stream().filter(next -> next.name.equals(call.name) && next.desc.equals(call.desc))
                         .forEach(pending::add);
             }
