@@ -25,11 +25,14 @@
 | `suicide` | 死亡不掉落时通过原生危险动作主动寻死 | `SuicideAbilityAdapter` → `SuicideTask` | 已覆盖参数、危险观察、取消、保护恢复及死亡步骤结算的夹具回归；尚未实机验收 |
 | `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对 |
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
+| `prepare_portal` | 单独准备并点燃传送门，完成后停在门外 | `AbilityAdapter.preparePortal` | 入口核对 |
+| `explore` | 跑图勘察，按群系、标签或结构定向发现 | `ExplorationIntent.adapt` | 入口核对 |
 | `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 入口核对 |
 | `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | 入口核对 |
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | 入口核对 |
 | `use_item` | 有限次持用背包中的物品 | `GeneralAbilityAdapter.useItem` | 入口核对 |
 | `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | 入口核对 |
+| `collect_items` | 走到掉落物旁靠原生接触拾取 | `GeneralAbilityAdapter.adapt` 的 `COLLECT` 分支 | 入口核对 |
 | `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | 入口核对 |
 | `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | 入口核对 |
 | `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | 入口核对 |
@@ -59,6 +62,9 @@
 | `reach_milestone` | 完成阶段性生存目标 | `AbilityAdapter.reachMilestone` | 入口核对 |
 | `defeat_ender_dragon` | 完成末影龙战斗流程 | `AbilityAdapter.defeatEnderDragon` | 入口核对 |
 | `obtain_elytra` | 搜寻并取得鞘翅 | `AbilityAdapter.obtainElytra` | 入口核对 |
+| `quest_action` | 对 FTB 任务书执行一次原生提交、勾选或领奖 | `QuestAbilityAdapter` | 入口核对；能力发现不按 FTB 门控，未安装时在执行期报 `not_installed` |
+| `physical_balance` | 起飞前受力分析、启停模拟与配平推荐 | `PhysicsAbilityAdapter` | 入口核对；读原生受力需要服务端 `physics.snapshot` |
+| `physical_assembly` | 蜂蜜胶选区粘接、物理组装器创建与拆回结构 | `PhysicalAssemblyAbilityAdapter` | 入口核对；需安装 Create，粘接布局由模型决定、Mod 只执行原生操作 |
 
 `enchant` 保留兼容已有调用。默认能力发现不展示它，指定该能力查询时仍能取得契约；新机器工序走统一机器入口。能力“已登记”、当前加载的模组“支持”、眼前条件“可以执行”是三件不同的事。
 

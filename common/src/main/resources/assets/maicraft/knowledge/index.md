@@ -12,6 +12,7 @@
 - [建筑场景 v1/v2 与统一蓝图 JSON](maicraft://knowledge/blueprint)：组件、阵列、镜像、快速图元、空心与面棱材质，以及教程蓝图的构建、修改、使用。
 - [统一机器生产与原生加工](maicraft://knowledge/processes)：生产 v1/v2 格式、附魔与世界流体加工的按需机制契约，以及现场观察、材料与产出证据的边界。
 - [从材料需求规划工艺和机器](maicraft://knowledge/recipes)：按物品读取 EMI 来源／用途、区分原料与工作站、查教程并复用或补建设备，再核验实际材料到账。
+- [起飞前受力分析与物理配平](maicraft://knowledge/physics)：区分 analyze／simulate／recommend 与 apply 四种操作的证据强度，比较停机、运行、启停和扰动工况；完整原生受力需要服务端 `physics.snapshot`，预测不冒充飞行验证。
 - 游戏机制常识（原版规则与 mod 行为事实，动手前读一条即可建立正确预期）：
   - [重力方块与塌落](maicraft://knowledge/game_mechanics/gravity-blocks)：挖砾石/沙子下方引发塌方，"瞬时 no_path"多为暂时现象而非终态失败。
   - [流体流动与灌满](maicraft://knowledge/game_mechanics/fluid-flow)：挖开的空间会被水/岩浆灌满；倒水自救前先看流向。

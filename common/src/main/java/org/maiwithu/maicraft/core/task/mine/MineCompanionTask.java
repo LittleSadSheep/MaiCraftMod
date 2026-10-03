@@ -1091,16 +1091,23 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 || naturalTrees.accepts(at, player.level(), player.level()::isLoaded));
     }
 
-    // 天然树供料使用普通行走规则；其他采矿使用允许挖路、垫路的导航规则。
+    // 接近源允许按授权挖路、垫路；天然树源不再例外——"只认天然树"约束的是目标筛选（树形闸门），
+    // 不是通道。台地上的树基曾因垂直高差被无条件判 no_path（042），而挖方块的能力本应为接近源而动土。
     private PlayerNav.ContextProvider travelContext() {
-        // 单格采收的授权不覆盖通道和周围机架；接近产物也只能走现有安全路线。
-        return naturalLogSource || r.exactHarvest() ? PlayerNav.ContextProvider.DEFAULT : PlayerNav.ContextProvider.TERRAFORM;
+        return r.approachTerrainAlter() ? PlayerNav.ContextProvider.TERRAFORM : PlayerNav.ContextProvider.DEFAULT;
     }
 
     private TaskState exhaustedPath() {
+        // 不可达（这批验证目标没有路线）与不可见（另有候选没通过树形验证）是两种失败，
+        // 排障时要分得开：未验证候选不构成世界不存在的证据，只说明它们尚未被当作目标。
+        String gated = naturalLogSource
+                ? " Another " + naturalTrees.rejected.size() + " nearby " + r.label
+                + " candidate(s) failed the natural-tree check and were never treated as targets;"
+                + " that is not evidence they do not exist."
+                : "";
         fail("no route from the current stance to any of the " + knownOres.size()
                 + " verified targets; gathered " + r.getMined() + "/" + r.count + ". "
-                + failedPath.detail(), FailureType.NO_PATH);
+                + failedPath.detail() + gated, FailureType.NO_PATH);
         return TaskState.FAILED;
     }
 
