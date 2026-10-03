@@ -13,6 +13,12 @@ import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.act.Ballistics;
 import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.DefaultNativeActionPort;
+import org.maiwithu.maicraft.client.actor.HeldUseItems;
+import org.maiwithu.maicraft.client.actor.ItemUseInputLease;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * 把一发弓箭或弩箭分成跨刻操作：选好的武器开始使用，等待拉弓／装填，瞄准后松开或再次点击。
@@ -34,6 +40,9 @@ final class RangedShot {
     private boolean fired;
     private Ballistics.Aim pendingAim;
     private Entity pendingTarget;
+    private ItemStack heldUseBefore = ItemStack.EMPTY;
+    private int selectedSlot = -1;
+    private String failure = "";
 
     RangedShot(LocalPlayer player, boolean crossbow) {
         this.player = player;
@@ -53,11 +62,13 @@ final class RangedShot {
         return angleDegrees <= AIM_THRESHOLD_DEGREES && heldTicks >= releaseTicks;
     }
     double projectileVelocity(double bowFullSpeed, double crossbowSpeed) {
-        return crossbow ? crossbowSpeed : bowFullSpeed * bowPowerForTicks(Math.max(BOW_RELEASE_TICKS, held + 1));
+        // 蓄力可能在等弹道期间继续增长；弹速和松手检查使用同一份原生持用刻数，不按调用次数猜测。
+        return crossbow ? crossbowSpeed : bowFullSpeed * bowPowerForTicks(Math.max(BOW_RELEASE_TICKS, held));
     }
 
     // 一次只推进当前阶段。返回 true 表示这一轮已经结束，是否真的按这里规则判为发射还要看 fired。
     boolean tick(Ballistics.Aim aim, Entity target) {
+        maintainUse(); // 与进食、举盾一样续订已开始的原生持用，不重复右键。
         switch (state) {
             case STARTING -> startUse();
             case USING -> tickUsing(aim, target);
@@ -66,7 +77,18 @@ final class RangedShot {
             case FIRING -> settleFire();
             default -> { }
         }
-        return state == State.DONE || state == State.MISFIRE;
+        boolean finished = state == State.DONE || state == State.MISFIRE;
+        if (finished) ItemUseInputLease.release(this);
+        return finished;
+    }
+
+    void maintainUse() {
+        // 此步不消耗操作名额；射程外、暂时无弹道或本刻已有操作时，仍保持同一把弓弩的使用键。
+        if ((state != State.STARTING && state != State.USING) || receipt == null || !player.isUsingItem()) return;
+        LocalPlayerContext context = ClientRuntime.actor().activeContext().filter(c -> c.player() == player && c.isCurrent()).orElse(null);
+        if (context == null || !(context.actions() instanceof DefaultNativeActionPort actions) || !actions.ownsItemUse(receipt)) return;
+        ItemUseInputLease.renew(this, context, receipt, InteractionHand.MAIN_HAND, heldUseBefore);
+        if (ItemUseInputLease.owns(this, context, receipt)) held = player.getTicksUsingItem();
     }
 
     boolean fired() { return fired; }
@@ -80,11 +102,16 @@ final class RangedShot {
             // 避免清理阶段直接把客户端打崩；与 Interaction.stop 的收尾守卫同一套约定。
             LocalPlayerContext context = ClientRuntime.actor()
                     .activeContext().filter(c -> c.player() == player).orElse(null);
-            if (context != null && context.mutationAvailable()) {
+            // 旧射击流程不能取消后来者的持用；同刻预算耗尽时仍保留既有延后取消行为。
+            if (context != null && context.mutationAvailable() && context.actions() instanceof DefaultNativeActionPort actions
+                    && actions.ownsItemUse(receipt) && player.getInventory().selected == selectedSlot
+                    && HeldUseItems.same(heldUseBefore, player.getMainHandItem(), player::registryAccess)
+                    && (!player.isUsingItem() || player.getUsedItemHand() == InteractionHand.MAIN_HAND
+                    && HeldUseItems.same(heldUseBefore, player.getUseItem(), player::registryAccess))) {
                 receipt = context.actions().cancelMainHandUse(context, receipt);
             }
         }
-        state = State.MISFIRE;
+        misfire(failure.isEmpty() ? "cancelled" : failure);
     }
 
     // 只有尚未装填的弩和弓需要开始使用；已装填弩由构造器直接送去瞄准阶段。
@@ -92,18 +119,25 @@ final class RangedShot {
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
             ItemStack before = player.getMainHandItem().copy();
+            heldUseBefore = before; selectedSlot = player.getInventory().selected;
             receipt = context.actions().useItem(context, InteractionHand.MAIN_HAND,
                     NativeConfirmation.anyOf(
                             NativeConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, before),
                             c -> c.player().isUsingItem() || CrossbowItem.isCharged(c.player().getMainHandItem())
                                     ? NativeConfirmation.Verdict.APPLIED : NativeConfirmation.Verdict.PENDING),
                     20);
+            // 绑定原生起手后实际持用的组件，随后换手、换物或控制权变化仍会撤销这份租约。
+            if (player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND
+                    && ItemStack.isSameItem(before, player.getUseItem())
+                    && ItemStack.isSameItemSameComponents(player.getUseItem(), player.getMainHandItem()))
+                heldUseBefore = player.getUseItem().copy();
+            maintainUse();
             return;
         }
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) return;
         if (receipt.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            state = State.MISFIRE; return;
+            misfire("start_use_not_confirmed"); return;
         }
         if (crossbow && CrossbowItem.isCharged(player.getMainHandItem())) {
             if (player.isUsingItem()) releaseLoad();
@@ -113,25 +147,28 @@ final class RangedShot {
 
     // 使用状态中断就结束为失败。弩等装填时间到后松开；弓至少拉十五刻并尽量等准星对齐。
     private void tickUsing(Ballistics.Aim aim, Entity target) {
-        if (!player.isUsingItem()) { state = State.MISFIRE; return; }
-        held++;
+        if (!player.isUsingItem()) { misfire("native_use_interrupted"); return; }
+        var context = ClientRuntime.requireContext(player);
+        if (!ItemUseInputLease.owns(this, context, receipt)) { misfire("held_use_ownership_changed"); return; }
+        held = player.getTicksUsingItem(); // 沿用原有蓄力阈值，但以原版倒计时为准，避免回执等待或弹道等待造成计时漂移。
         if (crossbow) {
             if (held >= CrossbowItem.getChargeDuration(player.getMainHandItem(), player)) {
                 releaseLoad();
-            } else if (held >= CROSSBOW_LOAD_TIMEOUT) state = State.MISFIRE;
+            } else if (held >= CROSSBOW_LOAD_TIMEOUT) misfire("crossbow_load_timeout");
             return;
         }
         double angle = Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction());
         if (canRelease(angle, held, BOW_RELEASE_TICKS)) {
             pendingAim = aim; pendingTarget = target;
-            var context = ClientRuntime.requireContext(player);
+            ItemUseInputLease.release(this); // 有意松手前撤销按住投影，避免发射后原版再起一箭。
             receipt = context.actions().releaseUsingItem(context, receipt);
             state = State.FIRING;
-        } else if (held >= BOW_MAX_DRAW_TICKS) abort();
+        } else if (held >= BOW_MAX_DRAW_TICKS) { failure = "draw_aim_timeout"; abort(); }
     }
 
     private void releaseLoad() {
         var context = ClientRuntime.requireContext(player);
+        ItemUseInputLease.release(this); // 装填松手与真正发射分开，松手后不再续旧持用。
         receipt = context.actions().releaseUsingItem(context, receipt);
         state = State.RELEASING_LOAD;
     }
@@ -143,12 +180,13 @@ final class RangedShot {
         if (!receipt.terminal()) return;
         state = receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
                 && CrossbowItem.isCharged(player.getMainHandItem()) ? State.READY_TO_FIRE : State.MISFIRE;
+        if (state == State.MISFIRE) failure = "crossbow_load_not_confirmed";
         receipt = null;
     }
 
     // 已经装填好时等实际视线接近弹道方向，再右键发射。这里还要求旧 receipt 已清空。
     private void tickReady(Ballistics.Aim aim, Entity target) {
-        if (!CrossbowItem.isCharged(player.getMainHandItem())) { state = State.MISFIRE; return; }
+        if (!CrossbowItem.isCharged(player.getMainHandItem())) { misfire("crossbow_not_charged"); return; }
         if (!canRelease(Ballistics.angleDegrees(player.getViewVector(1.0f), aim.direction()), 0, 0)) return;
         var context = ClientRuntime.requireContext(player);
         if (receipt == null) {
@@ -167,13 +205,32 @@ final class RangedShot {
         receipt = context.actions().poll(context, receipt);
         if (!receipt.terminal()) return;
         if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) markFired();
-        else state = State.MISFIRE;
+        else misfire("launch_action_not_confirmed");
+    }
+
+    private void misfire(String reason) {
+        // 失败只释放自己的按住投影，保留原生回执的状态和细节，不把准备动作或蓄力时间当作已射箭。
+        failure = reason; state = State.MISFIRE; ItemUseInputLease.release(this);
+    }
+
+    Map<String, Object> evidence() {
+        // 回执供实机区分起手、蓄力、装填和发射确认；该范围不等于观察到箭实体或目标命中。
+        var data = new LinkedHashMap<String, Object>();
+        data.put("state", state.name().toLowerCase(Locale.ROOT)); data.put("weapon", crossbow ? "crossbow" : "bow");
+        data.put("native_use_ticks", held); data.put("launch_action_confirmed", fired);
+        data.put("confirmation_scope", "native_use_or_release_receipt_not_projectile_hit");
+        if (!failure.isEmpty()) data.put("failure", failure);
+        if (receipt != null) {
+            data.put("receipt_status", receipt.status().name().toLowerCase(Locale.ROOT));
+            if (receipt.detail() != null) data.put("receipt_detail", receipt.detail());
+        }
+        return Map.copyOf(data);
     }
 
     private void markFired() {
         fired = true;
         if (pendingTarget != null) {
-            Constants.LOG.info("[maicraft-attack] 射出 target={} weapon={} held={} dist={} eta={}",
+            Constants.LOG.info("[maicraft-attack] 发射动作已确认 target={} weapon={} held={} dist={} eta={}",
                     pendingTarget.getId(), crossbow ? "crossbow" : "bow", held,
                     String.format("%.1f", player.distanceTo(pendingTarget)),
                     pendingAim == null ? "?" : Math.ceil(pendingAim.travelTicks()));

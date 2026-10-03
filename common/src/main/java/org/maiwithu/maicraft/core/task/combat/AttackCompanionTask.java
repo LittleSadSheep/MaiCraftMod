@@ -150,6 +150,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private String lastStandoffLog;
 
     private RangedShot shot;
+    private Map<String, Object> lastRangedShot = Map.of();
     private final FirstPersonActionGate meleeSelection = new FirstPersonActionGate();
     private final FirstPersonActionGate rangedSelection = new FirstPersonActionGate();
     private Interaction meleeAction;
@@ -184,6 +185,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 每刻先观察战场；自卫途中有攻击者时暂停拾取，持续记录掉落，安全后再恢复收集。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
+        if (shot != null) shot.maintainUse(); // 即使本刻先等回执或导航，已开始的拉弓也要经过原版持续按住检查。
         settleSubmittedMelee(); // 先收已有攻击回执，再观察死亡和切换拾取，避免致命一击被阶段切换漏计。
         // 临时避险结束后继续同一场对战，已暂停或结束的任务不能借此重新获得许可。
         if (pvp != null) pvp.activate();
@@ -901,6 +903,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 先检查距离和弹道，再把弓弩拿到主手，最后推进拉弓／装填／发射。
     // 离得太远或没有弹道时继续等待走位，不凭估计盲射。
     private TaskState shootAt(Loadout loadout) {
+        if (shot != null) shot.maintainUse(); // 等射程、弹道或操作名额不等于松手，也不能重新开始一次右键。
         if (!ClientRuntime.requireContext(player).mutationAvailable()) return TaskState.RUNNING;
         Loadout.Pick weapon = loadout.ranged();
         if (weapon == null) {
@@ -963,6 +966,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         }
         if (shot.tick(aim, target)) {
             boolean fired = shot.fired();
+            lastRangedShot = shot.evidence(); // 在清掉状态机前保留原失败阶段和原生回执，便于实机核对。
             shot = null;
             if (!fired) rangedSelection.reset();
             // 这里给发射成功记一次 strike，没有等待这一箭真正命中目标。
@@ -1154,6 +1158,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private void abortShot() {
         if (shot != null) {
             shot.abort();
+            lastRangedShot = shot.evidence();
             shot = null;
             rangedSelection.reset();
         }
@@ -1207,6 +1212,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("lost_targets", r.lost().size());
         data.put("unreachable_targets", r.unreachable().size());
         data.put("strikes", r.strikes());
+        if (!lastRangedShot.isEmpty()) data.put("last_ranged_shot", lastRangedShot);
         data.put("strikes_scope", "confirmed_melee_receipts_and_ranged_releases"); // 与耐久消耗、尝试次数及完整命中数分开。
         data.put("loot_gained", lootGained());
         data.put("unreachable_drop_count", loot.unreachableCount());
