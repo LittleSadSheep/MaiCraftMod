@@ -38,6 +38,8 @@ dependencies {
     def nativeSuffix = nativeArch in ['aarch64', 'arm64'] ? '-arm64' :
             nativeArch in ['x86', 'i386', 'i686'] ? '-x86' : nativeArch.startsWith('arm') ? '-arm32' : ''
     testRuntimeOnly "org.lwjgl:lwjgl:3.3.3:natives-${nativePlatform}${nativeSuffix}"
+    // 预览网格分配与释放缓冲区时还会调用 jemalloc；显式提供匹配的原生库，避免借用宿主旧 DLL 或游戏遗留缓存。
+    testRuntimeOnly "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-${nativePlatform}${nativeSuffix}"
 }
 
 // 把公共 Java 源码与资源目录作为可供两个加载器模块取用的产物。公共模块不反过来解析这两份配置。
