@@ -6,22 +6,20 @@ import org.maiwithu.maicraft.task.TaskState;
 
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
-import org.maiwithu.maicraft.core.task.base.Precondition;
-import net.minecraft.world.inventory.ClickType;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
-import org.maiwithu.maicraft.client.actor.MenuConfirmation;
+import org.maiwithu.maicraft.client.actor.DiscardedItems;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 /**
- * 通过显示出来的背包界面丢弃指定物品，逐次等待结果，不直接修改背包总数。
- * 这里需要把 Inventory 下标转换成菜单槽号；当前盔甲与副手的转换有 A43 所列的实际风险。
+ * 停步朝远处看 → 原生分堆 → 整份丢弃 → 确认扣数并保留实际掉落物避让。
+ * 每次菜单点击单独核实，未知投掷绝不重发；数量不足时最多丢现有数量。
  */
 public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTaskRecord> {
     private static final long DROP_PROGRESS_LEASE_TICKS = 10L * 20L;
@@ -30,7 +28,13 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     private String doneMessage = "done";
     private MenuReceipt receipt;
     private int target;
-    private int pendingDrop;
+    private int batches, attempts;
+    private boolean initialized, uncertain;
+    private List<DropBatchPlan.Click> plan = List.of();
+    private int step;
+    private DropBatchPlan.Click pendingClick;
+    private final DropAim aim = new DropAim();
+    private final List<DiscardedItems.Watch> watches = new ArrayList<>();
     private final VisibleMenuSession menuSession = new VisibleMenuSession();
 
     public DropCompanionTask(LocalPlayer player, DropItemsTaskRecord record) {
@@ -38,35 +42,23 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     }
 
     @Override
-    protected List<Precondition> preconditions() {
-        return List.of(
-                () -> PlayerInv.count(player.getInventory(), r.item) > 0 ? null
-                        : new Precondition.Failure("no " + r.label + " in inventory to drop",
-                                FailureType.NO_MATERIAL));
-    }
-
-    @Override
-    // 最多丢身上现有数量；请求十个但只找到三个时，本轮目标会降成三个并在完成文字中说明。
-    protected void onStart() {
-        Inventory inv = player.getInventory();
-        int have = PlayerInv.count(inv, r.item);
-        target = Math.min(r.count, have);
-    }
-
-    @Override
-    // 先等上一次丢弃的菜单结果，确认后再累计数量并找下一堆；目标达到后关闭背包。
+    // 先结清旧界面返料，再固定总量；分堆不是丢弃，只有最终投掷的精确回执才能累计完成量。
     protected TaskState onTick() {
         var context = ClientRuntime.requireContext(player);
+        if (!initialized) {
+            if (!menuSession.worldReady(context)) return TaskState.RUNNING;
+            target = Math.min(r.count, PlayerInv.count(player.getInventory(), r.item)); initialized = true;
+            if (target == 0) { fail("no " + r.label + " in inventory to drop", FailureType.NO_MATERIAL); return TaskState.FAILED; }
+        }
         if (receipt != null) {
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                fail("item drop was not confirmed: " + receipt.detail(), FailureType.UNKNOWN);
+                uncertain |= pendingClick.dropped() > 0 && receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED;
+                fail("item drop or split was not confirmed: " + receipt.detail(), FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
-            receipt = null;
-            dropped += pendingDrop;
-            pendingDrop = 0;
+            acceptClick();
             r.extendDeadlineTo(player.level().getGameTime() + DROP_PROGRESS_LEASE_TICKS);
         }
         if (dropped >= target) {
@@ -74,30 +66,43 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
                     + (dropped < r.count ? " (only had " + dropped + ")" : "");
             return menuSession.close(context) ? TaskState.SUCCESS : TaskState.RUNNING;
         }
-        if (!menuSession.inventoryReady(context)) return TaskState.RUNNING;
-        int inventorySlot = PlayerInv.findSlot(player.getInventory(), r.item);
-        if (inventorySlot < 0) {
-            fail("the item stack disappeared before all requested drops were confirmed",
-                    FailureType.TARGET_LOST);
-            return TaskState.FAILED;
+        if (!aim.ready(context) || !menuSession.inventoryReady(context)) return TaskState.RUNNING;
+        if (step >= plan.size()) {
+            int inventorySlot = DropBatchPlan.source(player.getInventory(), r.item, target - dropped);
+            if (inventorySlot < 0) {
+                fail("the item stack disappeared before all requested drops were confirmed", FailureType.TARGET_LOST);
+                return TaskState.FAILED;
+            }
+            int amount = Math.min(player.getInventory().getItem(inventorySlot).getCount(), target - dropped);
+            plan = DropBatchPlan.plan(player.containerMenu, player.getInventory(), inventorySlot, amount); step = 0;
         }
-        // 当前只转换快捷栏下标，错误地把盔甲／副手的 Inventory 下标直接当菜单槽号；可能丢错物品（A43）。
-        int menuSlot = inventorySlot < 9 ? 36 + inventorySlot : inventorySlot;
-        int before = player.getInventory().getItem(inventorySlot).getCount();
-        // 整堆都需要丢时用“丢整堆”；只需其中一部分时一次丢一个，避免超过本轮目标。
-        int button = before <= target - dropped ? 1 : 0;
-        int expectedDrop = button == 1 ? before : 1;
-        receipt = context.menus().click(context, menuSlot, button, ClickType.THROW,
-                (c, ignored) -> c.player().getInventory().getItem(inventorySlot).getCount() < before
-                        ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
-                20);
-        // 先记本次打算丢的数量，确认后才累加；当前确认只要求来源格数量减少，并不验证准确减少量或地上实体。
-        pendingDrop = expectedDrop;
+        var click = plan.get(step);
+        if (!click.matches(player.containerMenu, false)) {
+            fail("drop batch inventory or cursor changed before submission", FailureType.TARGET_LOST); return TaskState.FAILED;
+        }
+        // 在原生提交前冻结实体基线；即使投掷途中取消，客户端仍跟踪已发出的物品，后继寻路不能重新捡回。
+        if (click.dropped() > 0) {
+            ItemStack kind = click.slot() == -999 ? player.containerMenu.getCarried() : player.containerMenu.getSlot(click.slot()).getItem();
+            watches.add(DiscardedItems.watch(player, kind, click.dropped())); attempts++;
+        }
+        pendingClick = click;
+        receipt = context.menus().click(context, click.slot(), click.button(), click.type(), click.confirmation(), 40);
         return TaskState.RUNNING;
     }
 
+    private void acceptClick() {
+        if (pendingClick.dropped() > 0) batches++;
+        dropped += pendingClick.dropped(); step++; receipt = null; pendingClick = null;
+    }
+
     @Override
-    protected void cleanup() { menuSession.cleanup(player); receipt = null; }
+    protected void cleanup() {
+        // 取消时保留已经冻结的完成量；未结投掷明确报告未知，鼠标上的未丢余料由原生关闭背包返还。
+        if (receipt != null && receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) acceptClick();
+        uncertain |= pendingClick != null && pendingClick.dropped() > 0
+                && (receipt == null || receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED);
+        menuSession.cleanup(player); super.cleanup();
+    }
 
     @Override
     protected Map<String, Object> resultData() {
@@ -105,6 +110,10 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         data.put("item", r.label);
         data.put("dropped", dropped);
         data.put("remaining_in_inventory", PlayerInv.count(player.getInventory(), r.item));
+        data.put("drop_batches", batches);
+        data.put("drop_attempts", attempts);
+        data.put("outcome_uncertain", uncertain);
+        data.put("discarded_item_avoidance", watches.stream().map(DiscardedItems.Watch::result).toList());
         return data;
     }
 

@@ -37,7 +37,7 @@
 | `manage_container` | 存入、取出或平衡背包数量 | `GeneralAbilityAdapter.manageContainer` | 入口核对 |
 | `consume` | 吃或使用指定物品 | `GeneralAbilityAdapter.consume` | 入口核对 |
 | `equip` | 穿戴或手持合适物品 | `GeneralAbilityAdapter.equip` | 入口核对 |
-| `drop_items` | 按要求把物品丢到目标区域 | `GeneralAbilityAdapter.drop` | 入口核对 |
+| `drop_items` | 停步朝远处按精确数量整份丢弃，后续寻路避开实际掉落物拾取范围 | `GeneralAbilityAdapter.drop` | 原生分堆、视角及漂移避让回归 |
 | `fish` | 钓鱼并确认收获 | `GeneralAbilityAdapter.fish` | 入口核对 |
 | `sleep` | 找到床并睡觉 | `AbilityAdapter.sleep` | 入口核对 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |

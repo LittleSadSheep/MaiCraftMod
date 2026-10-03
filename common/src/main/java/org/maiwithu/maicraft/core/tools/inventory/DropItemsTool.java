@@ -30,11 +30,13 @@ public final class DropItemsTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        return "Drop items from your inventory onto the ground in front of you — to hand something to "
-                + "a nearby player, or to shed junk when your inventory is full and no chest is nearby (when "
-                + "one is, prefer depositing: interact_at the chest, then transfer — dropped items despawn "
-                + "after 5 minutes). count above what you carry drops everything you have of it. Returns "
-                + "how many were dropped and how many remain.";
+        // 调用者只给精确数量；执行器负责停步朝远处、原生分堆和后续拾取范围避让，无需模型逐件下达指令。
+        return "Drop an exact quantity by looking toward open space and throwing whole batches. Partial stacks "
+                + "are split in the inventory and thrown together, including when the inventory is full. "
+                + "Observed discarded entities are avoided by later navigation while they remain in this world. "
+                + "Prefer depositing in a nearby chest when items should be kept. count above what you carry "
+                + "drops everything you have of it. Returns confirmed dropped count, remaining inventory, "
+                + "batch count and observed discard avoidance; an unobserved landing remains unknown.";
     }
 
     @Override
