@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.mine;
 import org.maiwithu.maicraft.core.WorkProfile;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -17,6 +18,7 @@ import org.maiwithu.maicraft.core.act.BlockDigger;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
+import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.base.NativePickupReceipt;
@@ -48,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -57,11 +60,14 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.pathing.moves.TerrainPermit;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 
 /**
  * 持续找材料：查附近已加载的目标方块，走近并挖掉，再靠近地上物品让游戏自然拾取。
  * 例如要 8 个粗铁，通常看背包比开始时多了多少粗铁，而不是只数挖了几块铁矿。
  * 附近有目标但走不到、工具不合适、背包装不下，会分别报告；目前不启用找不到矿就盲挖隧道的分支。
+ * 挖掘目标遵守公平闸门：索引命中的候选只有「即时可见 ∨ 观察记忆里见过」（{@link ObservedSourceMemory}）
+ * 才进入可挖名单，不允许按上帝视角索引直接瞄准埋藏矿；挖隧道穿石头的路径掘进不受此约束。
  * 这个任务自己管理找矿、挖矿和捡物品的切换，公共父类负责开始、停止和返回结果。
  */
 public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTaskRecord> {
@@ -90,6 +96,18 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      */
     // 目前关闭盲目向外挖隧道找矿。附近已加载区域查完仍没目标，就报告没有合适来源。
     private static final boolean EXPLORE_FOR_BLOCKS = false;
+
+    // ---- 探矿驱动预算（授权「挖着找」后生效；内部常量，不做成模型参数）----
+    /** 掘进块数预算：1×2 断面每前进一格挖 2 块，128 块 ≈ 64 格主矿道加同量级分支。
+     *  原版 1.18+ 钻石在推荐层位每区块约 3-4 次生成尝试，这个量级足以在数条区块带上
+     *  期望遇到目标矿脉；超出预算如实收手，不把玩家周边挖成蜂窝。 */
+    private static final int PROSPECT_MAX_BLOCKS = 128;
+    /** 活跃刻预算：10 分钟。普通速度挖掘 128 块约需 5-8 分钟，余量给移动与掉落收取。 */
+    private static final int PROSPECT_MAX_TICKS = 10 * 60 * 20;
+    /** 主矿道每前进这么多格开一条侧分支；8 格是分支矿道的常见间距，侧向暴露带与主矿道重叠最小。 */
+    private static final int PROSPECT_SEGMENT_BLOCKS = 8;
+    /** 导航连续失败这么多次就收手：岩浆、深谷等地形让探矿继续只会空转烧预算。 */
+    private static final int PROSPECT_MAX_PATH_FAILURES = 12;
     /** 同一格连续这么多刻拉不出射线,就记进 {@link #unworkable} —— 够到测试说它能挖,
      *  可射线始终成不了(瞄准量化、站位上方有个檐口)。没有这条,挖掘会永远等一个
      *  不会来的射线。 */
@@ -114,6 +132,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final int DROP_CLOSE_WAIT_TICKS = 20;
 
     private final List<BlockPos> knownOres = new ArrayList<>();
+    // 公平闸门：索引只是「已加载区块里有这种方块」，不等于角色有权瞄准——上帝视角的埋藏矿
+    // 只有「即时可见 ∨ 观察记忆里见过」才允许进入可挖目标集。路径掘进（挖隧道穿石头）不经过
+    // 此闸门，永远合法。见过的位置记入共享记忆，之后重新被遮挡也不会退回不可挖。
+    private final ObservedSourceMemory observedSources = IntentRuntime.get().observedSourceMemory();
+    /** 通过记忆、等待即时可见性判定的候选：位置 → 允许重试判定的最早游戏刻。 */
+    private final Map<BlockPos, Long> gatePending = new LinkedHashMap<>();
+    /** 每刻允许对未见候选执行的可见性判定数——单块最多 7 条射线，必须分摊，不得阻塞渲染线程。 */
+    private static final int GATE_VISIBLE_BUDGET_PER_TICK = 4;
+    /** 暂不可见候选的重试间隔(tick)：只有玩家移动或地形变化后视角才可能改变。 */
+    private static final int GATE_RETRY_GAP_TICKS = 40;
     private long nextProgressObservation;
     private Map<String, Object> lastMiningObservation = Map.of();
     /**
@@ -176,6 +204,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     private boolean navIsBranch;
     private boolean navIsDrop;
+    /** 探矿掘进专用的导航标记；stopNav 必须清除，避免旧探矿路线绑架下一段控制。 */
+    private boolean navIsProspect;
     private BlockPos branchPoint;
     private int branchY;
     /** 距下一次允许查询的冷却(tick)。 */
@@ -185,6 +215,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 上一次查询时同伴所在 chunk(打包 long)——跨 chunk 视为看到新地形,触发补查。 */
     private long lastQueryChunk = Long.MIN_VALUE;
     private int branchTicks;
+    /** 探矿驱动状态：活跃刻、当前掘进目标、走向、分支侧与连续导航失败数。 */
+    private int prospectTicks;
+    private BlockPos prospectGoal;
+    private Direction prospectHeading;
+    private int prospectSide = 1;
+    private boolean prospectInBranch;
+    private int prospectPathFailures;
     private String progressNote = "done";
     /** 当前连续返回 {@code NO_SHOT} 的矿物位置及持续刻数。 */
     private BlockPos noShotPos;
@@ -320,6 +357,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             long tUpkeep = NavProfiler.begin();
             prune();
             maybeQuery();
+            drainGate();
             NavProfiler.end("mine.upkeep", tUpkeep);
         }
         if (batch == null && !navIsDrop && !drops.isEmpty()) {
@@ -480,7 +518,20 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 默认在此停止；只有显式开启探索模式时才向外分支挖掘。返回已核实的部分库存，不让角色跑遍世界，也不把消失的方块冒充采集所得。
         // 当前配置会在这里结束“查完却没找到”的情况；下面保留的隧道探索分支不会执行。
         if (!EXPLORE_FOR_BLOCKS) {
+            // 探矿授权：空候选时继续掘进主矿道与分支，暴露的目标经公平闸门入列后由上层循环接手。
+            if (r.prospecting() && driveProspecting()) return TaskState.RUNNING;
             if (unreachableDropCount > 0) return unreachableDropFailure();
+            if (r.prospecting()) {
+                // 探矿后仍空手 = 诚实失败：只陈述真实掘进量与扫描口径，不构成"世界中不存在"的证据。
+                progressNote = "prospect budget spent: dug " + brokenTargets + " blocks over "
+                        + prospectTicks + " active ticks toward prospect Y " + r.prospectY()
+                        + ", gathered " + r.getMined() + "/" + r.count;
+                fail("prospect tunnels exhausted their budget (" + progressNote
+                        + "). Unexplored areas remain unknown — this does not prove "
+                        + r.label + " does not exist elsewhere.",
+                        FailureType.MINED_OUT);
+                return TaskState.FAILED;
+            }
             if (r.getMined() > 0) {
                 progressNote = "gathered " + r.getMined() + "/" + r.count + ", no more " + r.label + " in range";
                 fail(progressNote, FailureType.MINED_OUT);
@@ -514,6 +565,62 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             case FAILED -> { stopNav(); return TaskState.RUNNING; } // 被地形困住时停止寻路，重新扫描后再试
         }
         return TaskState.RUNNING;
+    }
+
+    // ---- 探矿驱动：授权「挖着找」后，空候选时掘进主矿道与分支，边暴露边采 ----
+
+    /**
+     * 探矿驱动每刻推进一段。只在公平查询空手时被调到——目标一进入可挖名单，上层
+     * 既有挖矿循环优先接手，本方法天然让位。掘进经寻路 TERRAFORM 完成，复用既有
+     * 挖掘下降机制，不新造原语；途中挖掉的块计入同一份掘进预算。
+     *
+     * @return true = 继续探矿；false = 预算耗尽或地形反复失败，交回诚实收手路径。
+     */
+    private boolean driveProspecting() {
+        prospectTicks++;
+        if (prospectTicks > PROSPECT_MAX_TICKS || brokenTargets >= PROSPECT_MAX_BLOCKS) {
+            return false;
+        }
+        if (prospectGoal == null) {
+            // 矿道走向由角色当前视角决定（就近取水平主方向），不需要外部指定。
+            prospectHeading = Direction.fromYRot(player.getYRot());
+            prospectGoal = feet().relative(prospectHeading, PROSPECT_SEGMENT_BLOCKS);
+        }
+        if (nav == null || !navIsProspect) {
+            stopNav();
+            nav = PlayerNav.toGoal(player, () -> NavGoal.exact(prospectGoal), MINE_SPEED,
+                    () -> reachableTarget() != null, travelContext());
+            navIsProspect = true;
+        }
+        return switch (nav.tick()) {
+            case RUNNING -> true;
+            case ARRIVED -> {
+                advanceProspectLeg();
+                stopNav();
+                yield true;
+            }
+            case FAILED -> {
+                stopNav();
+                // 地形失败（岩浆、塌方）先换向重试；反复失败说明这一带不适合继续，转诚实收手。
+                if (++prospectPathFailures > PROSPECT_MAX_PATH_FAILURES) yield false;
+                prospectHeading = prospectHeading.getClockWise();
+                prospectGoal = feet().relative(prospectHeading, PROSPECT_SEGMENT_BLOCKS);
+                yield true;
+            }
+        };
+    }
+
+    /** 主矿道每前进一段开一条侧分支，分支尽头回到主轴继续，左右交替。 */
+    private void advanceProspectLeg() {
+        if (prospectInBranch) {
+            prospectSide = -prospectSide;
+            prospectInBranch = false;
+            prospectGoal = feet().relative(prospectHeading, PROSPECT_SEGMENT_BLOCKS);
+        } else {
+            prospectInBranch = true;
+            prospectGoal = feet().relative(
+                    prospectHeading.getClockWise(), PROSPECT_SEGMENT_BLOCKS * prospectSide);
+        }
     }
 
     // ---- 矿物寻路目标：只追踪当前批次；批次为空时退化为原地目标，避免无效寻路 ----
@@ -1047,6 +1154,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             case BROKE_OCCLUDER -> {
                 noteProgress();
                 unworkable.clear();
+                // 挖开遮挡后地形视角已变，等待闸门的候选不必再等满重试间隔。
+                gatePending.replaceAll((pos, retryAt) -> 0L);
                 clearNoShot();
             }
             case PROGRESSING -> clearNoShot();
@@ -1175,17 +1284,68 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 将新发现且仍可处理的命中位置并入 knownOres，再由 prune 对照实时世界复核并保留最近的 {@link #MAX_ORES} 个目标。 */
     private void mergeHits(List<BlockPos> hits) {
         // 临时用 Set 去重：knownOres 仍由 prune 按距离排序保存为列表；避免在服务器线程上对大批候选反复线性 contains，造成 O(N²) 检查。
-        Set<BlockPos> seen = new HashSet<>(knownOres);
+        Set<BlockPos> dedupe = new HashSet<>(knownOres);
         for (BlockPos hit : hits) {
             BlockPos p = hit.immutable();
-            if (!r.inSearchScope(p) || unworkable.contains(p) || !seen.add(p)) continue;
+            if (!r.inSearchScope(p) || unworkable.contains(p) || !dedupe.add(p)) continue;
             if (r.naturalLogsOnly && player.level().getBlockState(p).is(BlockTags.LOGS)
                     && !naturalTrees.accepts(p, player.level(), player.level()::hasChunkAt)) continue;
-            knownOres.add(p);
-            watchedTargetCells.add(p);
+            // 定点授权由调用方显式指定单一来源（如同玩家手指认方块），不经索引自动瞄准，不适用公平闸门。
+            if (r.exactHarvest()) {
+                knownOres.add(p);
+                watchedTargetCells.add(p);
+                continue;
+            }
+            admitObserved(p);
         }
         prune();
     }
+
+    /** 公平闸门入口：观察记忆命中即入列；否则排入等待队列，由 {@link #drainGate()} 按每刻预算做即时可见性判定。 */
+    private void admitObserved(BlockPos p) {
+        if (observedSources.seen(dimension(), p)) {
+            knownOres.add(p);
+            watchedTargetCells.add(p);
+            return;
+        }
+        gatePending.putIfAbsent(p, 0L);
+    }
+
+    /**
+     * 每刻分摊可见性判定：通过 {@link ObservationVisibility} 的候选写入观察记忆并进入可挖名单
+     * （看一眼就记得）；暂不可见的候选留队定时重试。玩家视角或地形不变时判定结果不变，
+     * 重试间隔防止对同一批候选反复烧射线。
+     */
+    private void drainGate() {
+        if (gatePending.isEmpty() || r.exactHarvest()) return;
+        long now = player.level().getGameTime();
+        String dim = dimension();
+        int budget = GATE_VISIBLE_BUDGET_PER_TICK;
+        boolean admitted = false;
+        var iterator = gatePending.entrySet().iterator();
+        while (iterator.hasNext() && budget > 0) {
+            var entry = iterator.next();
+            if (entry.getValue() > now) continue;
+            BlockPos p = entry.getKey();
+            // 目标已被换掉、挖掉或所在区块卸载时不再花射线；有效来源会由下一次索引查询重新提供。
+            if (!player.level().isLoaded(p)) { iterator.remove(); continue; }
+            var state = player.level().getBlockState(p);
+            if (state.isAir() || !r.targets.contains(state.getBlock())) { iterator.remove(); continue; }
+            budget--;
+            if (ObservationVisibility.block(player, p)) {
+                iterator.remove();
+                observedSources.observe(dim, p, BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+                knownOres.add(p);
+                watchedTargetCells.add(p);
+                admitted = true;
+            } else {
+                entry.setValue(now + GATE_RETRY_GAP_TICKS);
+            }
+        }
+        if (admitted) prune();
+    }
+
+    private String dimension() { return player.level().dimension().location().toString(); }
 
     // 重新读候选格，去掉已消失、不再是目标、危险或当前工具采不出的格，再按离玩家远近排序截取 64 个。
     private void prune() {
@@ -1360,14 +1520,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     + " of them from any stance I could take; gathered 0",
                     FailureType.NO_PATH);
         } else {
-            // “附近没有”必须携带扫描口径：覆盖范围之外、未加载区块与更深地层都不构成不存在的证据。
+            // 「附近没有」必须携带扫描口径：覆盖范围之外、未加载区块与更深地层都不构成不存在的证据。
+            // 措辞只表达玩家可知的事实——被覆盖层遮挡的候选不能以任何数量、位置或存在暗示出现在回执里，
+            // 那本身就是透视泄漏；出路是朝目标深度掘进暴露、换位或先用 find_block 定位。
             String scope = lastQueryCenter == null ? "the declared search scope"
                     : "the scanned scope (center " + lastQueryCenter.toShortString()
                             + ", chunk radius " + lastQueryChunkRadius + ")";
-            fail("no reachable " + r.label + " found in " + scope
-                    + "; sources outside this scope, in unloaded chunks or deeper underground were not"
-                    + " covered — widen the radius, move closer, or use find_block to locate deeper"
-                    + " targets before another attempt",
+            fail("no visible or previously seen " + r.label + " sources in " + scope
+                    + "; blocks still covered by terrain are not evidence that sources exist or do not"
+                    + " exist — dig toward the expected depth to expose them, move to a different"
+                    + " vantage, or use find_block to locate a target first",
                     FailureType.MINED_OUT);
         }
         return TaskState.FAILED;
@@ -1421,6 +1583,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         super.stopNav();
         navIsBranch = false;
         navIsDrop = false;
+        navIsProspect = false;
     }
 
     @Override
@@ -1475,6 +1638,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         if (naturalLogSource) data.put("excluded_unverified_logs", naturalTrees.rejected.size());
         if (naturalLogSource) data.put("unloaded_tree_evidence", naturalTrees.unloadedEvidence);
+        if (r.prospecting()) {
+            Map<String, Object> prospect = new LinkedHashMap<>();
+            prospect.put("prospect_y", r.prospectY());
+            prospect.put("blocks_dug", brokenTargets);
+            prospect.put("active_ticks", prospectTicks);
+            prospect.put("budget_blocks", PROSPECT_MAX_BLOCKS);
+            prospect.put("budget_ticks", PROSPECT_MAX_TICKS);
+            data.put("prospecting", prospect);
+        }
         data.put("confirmed_harvests", List.copyOf(confirmedHarvests));
         data.put("confirmed_harvests_truncated", truncatedHarvests);
         data.put("unreachable_drop_count", unreachableDropCount);

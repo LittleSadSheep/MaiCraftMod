@@ -34,6 +34,8 @@ public final class MineBlockTaskRecord extends TaskRecord {
     private BlockPos searchCenter;
     private int searchRadius;
     private BlockState exactState;
+    /** 探矿目标层位；非 null 表示授权「公平扫描空手后掘进找矿」，深度由生成带表内部给出。 */
+    private Integer prospectY;
 
     /** 实时进度表示任务开始后收集到的匹配物品数，按背包物品计而非破坏方块数；红石等矿石每格会掉落多个物品。
      *  由任务每个 tick 设置，用于结束条件和调试覆盖层文字。 */
@@ -84,6 +86,24 @@ public final class MineBlockTaskRecord extends TaskRecord {
     }
     public boolean exactHarvest() { return exactState != null; }
     public BlockState exactState() { return exactState; }
+
+    /** 探矿模式与定点采收互斥，也不能冻结扫描范围——矿道会走出地表半径，冻结只会让索引越查越空。 */
+    public MineBlockTaskRecord withProspecting(int targetY) {
+        if (exactState != null) {
+            throw new IllegalStateException("prospecting cannot combine with an exact harvest source");
+        }
+        if (searchCenter != null) {
+            throw new IllegalStateException("prospecting cannot run inside a frozen search scope:"
+                    + " prospect tunnels leave the surface radius");
+        }
+        if (targetY < -64 || targetY > 320) {
+            throw new IllegalArgumentException("prospect Y " + targetY + " is outside the buildable range");
+        }
+        prospectY = targetY;
+        return this;
+    }
+    public boolean prospecting() { return prospectY != null; }
+    public int prospectY() { return prospectY; }
     /** 先缩小索引的区块环，再按方块距离筛选命中；区块边界的取整不能扩大实际候选范围。 */
     int queryChunkRadius(int fallback) { return searchCenter == null ? fallback : (searchRadius + 15) / 16; }
     public boolean inSearchScope(BlockPos pos) { return searchCenter == null || pos.distSqr(searchCenter) <= (double) searchRadius * searchRadius; }
