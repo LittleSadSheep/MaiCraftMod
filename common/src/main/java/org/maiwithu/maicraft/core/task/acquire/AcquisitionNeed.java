@@ -55,6 +55,8 @@ final class AcquisitionNeed {
     boolean decisionRequired;
     ResourceLocation preferredTradeOutput;
     int lastObservedCount = -1;
+    /** mine 子任务如实报了采区耗尽（mined_out）；父层汇总终态时据此保真失败类型，不再压回 no_material。 */
+    boolean mineChildMinedOut;
 
     AcquisitionNeed(
             List<ResourceLocation> itemIds,

@@ -394,6 +394,8 @@ public final class GuiRegressionSuite {
         InventoryWorkItemsTest.main(args);
         // 补工具也必须遵守本次取材范围，不能因为看过仓库库存就偷偷开箱或制造。
         AcquisitionSourceInheritanceTest.main(args);
+        // mine 子任务如实报采区耗尽后，父层终态保真为 MINED_OUT 并给出换区域重扫选项。
+        org.maiwithu.maicraft.core.task.acquire.AcquisitionMineExhaustionRecoveryTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
         CookingFuelTest.main(args);
         CookingBatchTest.main(args);

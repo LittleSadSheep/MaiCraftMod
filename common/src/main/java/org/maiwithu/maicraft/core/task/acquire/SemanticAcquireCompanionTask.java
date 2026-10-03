@@ -1253,6 +1253,13 @@ public final class SemanticAcquireCompanionTask
                         && (progress == 0 || structuredFailure)) advanceSource(completedNeed);
             }
             case MINE -> {
+                // mine 子任务的采区耗尽（mined_out）要保真记住：全部来源耗尽时父层终态
+                // 才能以 MINED_OUT 收场，recoveryOptions 的"换区域重扫"选项才有判定依据。
+                if (structuredFailure
+                        && result != null && result.data() != null
+                        && "mined_out".equals(result.data().get("failure_type"))) {
+                    completedNeed.mineChildMinedOut = true;
+                }
                 if (progress == 0 || structuredFailure) {
                     advanceSource(completedNeed);
                 }
@@ -1750,6 +1757,15 @@ public final class SemanticAcquireCompanionTask
                         "a known physical source is valid only in another dimension; no movement "
                                 + "or attack was started for that source",
                         FailureType.NO_MATERIAL);
+            }
+            if (need.mineChildMinedOut) {
+                // mine 子任务真实扫完并报了采区耗尽：终态保真为 MINED_OUT，
+                // recoveryOptions 据此补"换区域重扫"，压回 NO_MATERIAL 会让调用方误判成许可缺口。
+                return failAcquisition(
+                        "allowed_sources_exhausted",
+                        "none of the allowed source families could make the final inventory fact true; "
+                                + "the mine family scanned its range and reported it exhausted",
+                        FailureType.MINED_OUT);
             }
             return failAcquisition(
                     "allowed_sources_exhausted",
