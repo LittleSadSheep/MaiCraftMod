@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * find_block 全链回归：适配器去重与未注册拒绝、Api 钳制、已加载扫描的计数与距离统计、
- * 缺席时的诚实语义，以及"坐标永不进入公开回执"这一设计承诺。
+ * 缺席时的诚实语义，以及最近匹配坐标确实来自可见证据。
  */
 public final class SemanticBlockSearchTest {
     private static final ToolContext CONTEXT = new ToolContext("semantic-block-search-test", 0);
@@ -32,7 +32,7 @@ public final class SemanticBlockSearchTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         adapterCompilesSelectorsAndRejectsUnknown();
         apiClampsAndRecordRejectsInvalid();
-        scanReportsCountsAndDistanceWithoutCoordinates();
+        scanReportsCountsAndVerifiedCoordinate();
         deepMatchesReportThreeDimensionalDistance();
         absenceFailsWithHonestScopeNote();
         denseHiddenStoneConvergesWithProgress();
@@ -43,7 +43,7 @@ public final class SemanticBlockSearchTest {
         LoadedBlockScanTest.main(args);
         // 视线与分页属于发现证据的一部分，随方块探索入口一起回归。
         ObservationVisibilityTest.main(args);
-        // 设施盘点段与 find_block 同守"证据不出坐标、缺席带范围声明"的纪律。
+        // 设施盘点仍使用自己的摘要契约；两种入口的缺席结论都必须保留实际观察范围。
         org.maiwithu.maicraft.mcp.NearbyFacilityPerceptionTest.main(args);
         System.out.println("SemanticBlockSearchTest: passed");
     }
@@ -93,7 +93,7 @@ public final class SemanticBlockSearchTest {
             var pools = (List<?>) survey.get("pools");
             check(survey.get("observed_surface_sources").equals(31) && pools.size() == 2,
                     "one isolated source does not stop scanning before the larger pool");
-            check(Boolean.TRUE.equals(survey.get("analysis_complete")) && noCoordinates(result),
+            check(Boolean.TRUE.equals(survey.get("analysis_complete")) && noRuntimePositions(result),
                     "the complete pool report stays semantic and read-only");
         }
     }
@@ -128,7 +128,7 @@ public final class SemanticBlockSearchTest {
                 "counts and radius clamp to the published bounds");
     }
 
-    private static void scanReportsCountsAndDistanceWithoutCoordinates() throws Exception {
+    private static void scanReportsCountsAndVerifiedCoordinate() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             BlockPos near = new BlockPos(2, 1, 2), far = new BlockPos(5, 1, 5);
             h.set(near, Blocks.STONECUTTER.defaultBlockState());
@@ -147,7 +147,9 @@ public final class SemanticBlockSearchTest {
             check(Integer.valueOf(2).equals(byId.get("minecraft:stonecutter")), "counts are grouped by block id");
             double nearest = ((Number) data.get("nearest_match_distance")).doubleValue();
             check(nearest > 2.0 && nearest < 2.4, "the nearest-distance statistic reflects the standing place");
-            check(noCoordinates(data), "no coordinate value leaks into the public receipt");
+            // 公开坐标可供后续能力使用，但不能携带运行时 BlockPos 对象；最近位置必须是刚才真正看见的目标。
+            check(Map.of("x", 2, "y", 1, "z", 2).equals(data.get("nearest_match_position")), "nearest coordinate belongs to the verified match");
+            check(noRuntimePositions(data), "runtime position objects stay inside the executor");
         }
     }
 
@@ -230,16 +232,16 @@ public final class SemanticBlockSearchTest {
         }
     }
 
-    private static boolean noCoordinates(Object value) {
+    private static boolean noRuntimePositions(Object value) {
         if (value instanceof BlockPos) return false;
         if (value instanceof Map<?, ?> map) {
             for (var entry : map.entrySet()) {
                 if (entry.getKey() instanceof BlockPos) return false;
-                if (!noCoordinates(entry.getValue())) return false;
+                if (!noRuntimePositions(entry.getValue())) return false;
             }
         }
         if (value instanceof Iterable<?> list) {
-            for (var item : list) if (!noCoordinates(item)) return false;
+            for (var item : list) if (!noRuntimePositions(item)) return false;
         }
         return true;
     }

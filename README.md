@@ -115,6 +115,8 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 明确寻找适合浇筑的池子时，可指定 `maicraft:find_block` 参数 `{"purpose":"portal_casting","count":1,"max_distance":128}`，省略的方块类型自动设为岩浆。此时 `count` 按符合浇筑布局、填岸后仍保留至少十五格源岩浆的连通池计数，单个源格和不足量的小池不能使任务成功。回执给出 `count_unit="casting_lava_pools"`、匹配池数和各池的 `matches_portal_casting`；没有符合项时报告 `no_suitable_lava_pool_within_bound`，保留所有局部观察供继续探索。这是只读查找，不自动走出搜索范围或开始施工。
 
+`nearest_match_position` 返回实际观察到的最近匹配坐标。指定浇筑用途时，该坐标属于符合条件的池子；没有合适池时不返回更近的孤立源冒充匹配。岩浆源坐标说明池子位置，不代表角色可站的位置，取桶通路仍需执行时核实。
+
 浇筑回执分别提供 `casting_actions_completed`、每步原生效果、整扇门的 `portal_observation.differences` 和 `portal_prepared`。倒桶成功不等于黑曜石成型或门已点燃；产物不符时保留现场，不自动重倒或拆除错误产物。临时导流模具保留在现场，供模型决定后续整理。
 
 池岸不平整时，执行器可在四格起手区后清理操作空间，原生补出连续岸边和后排站台，并给导流水保留侧边和后方台面。天然直岸与整形弯岸都先扣除计划填格，再确认至少保留十五格相连表层源岩浆；回执中的 `site_preparation` 给出填格、源格消耗与保守余量。这是按“十格门框加首桶水损耗”预留的估计，实际流体反应仍单独观察；不能由余量数字保证任意池形都能成功。

@@ -70,6 +70,13 @@ public final class PortalLavaPoolSearchTest {
                 check(survey.get("matching_portal_casting_pools").equals(matches), "the full pool report agrees with the terminal count");
                 if (expected == TaskState.FAILED) check(data.get("failure_code").equals(matches == 0
                         ? "no_suitable_lava_pool_within_bound" : "insufficient_casting_pool_count"), "absence and partial pool matches stay distinct");
+                // 坐标契约来自远程查块能力；合适池筛选必须同步筛坐标，不能把更近的孤立源拿来指路。
+                if (matches == 0) check(!data.containsKey("nearest_match_position"), "no matching pool means no matching coordinate");
+                else {
+                    var position = (Map<?, ?>) data.get("nearest_match_position");
+                    check((int) position.get("x") >= 3 && (int) position.get("z") >= 3,
+                            "the returned coordinate is inside the qualifying large pool");
+                }
             }
         }
     }

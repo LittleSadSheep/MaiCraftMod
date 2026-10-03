@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
  * 一次只读的已加载方块证据查询。公开数量、距离及岩浆的连通池与整形预算；
- * 具体位置保留在 Mod 内部，后续交互由对应能力自行定位。
+ * 最近匹配位置作为已观察事实交付，完整候选位置仍在 Mod 内部用于连通分析。
  */
 public final class SemanticBlockSearchTaskRecord extends TaskRecord {
     public static final String TOOL_NAME = "find_block";

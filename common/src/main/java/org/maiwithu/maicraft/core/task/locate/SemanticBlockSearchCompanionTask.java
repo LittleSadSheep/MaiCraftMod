@@ -32,8 +32,17 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private static final long SCAN_NANOS_PER_TICK = 2_000_000L;
     /** 扫描仍在推进时按此时间片为任务续期。 */
     private static final int PROGRESS_LEASE_TICKS = 200;
+    /**
+     * 命中后的指路话术：点名直接吃坐标的能力。能力名是公开指针，
+     * AbilityPointerDriftTest 核对其仍在能力表里，改名漏改这里会立刻失败。
+     */
+    public static final String NEXT_STEP_POINTER = "Pass nearest_match_position to travel as destination, to harvest_block"
+            + " (may_alter_terrain=true with matching block_id and expected_output_item_id; the live block"
+            + " must still be a loaded solid resource without a block entity or fluid), or to interact"
+            + " to use it in place.";
 
     private BlockPos origin;
+    private BlockPos nearestMatchPos;
     private double nearestMatchDistance = -1;
     private double nearestHorizontalDistance;
     private int nearestVerticalOffset;
@@ -42,7 +51,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private LoadedBlockScan scan;
     private PortalLavaPoolSurvey lavaPools;
     private final ProgressBudget scanBudget;
-    /** 具体位置只在 Mod 内部保存，供可见池面连通分析；公开回执保留数量、方位及施工预算。 */
+    /** 全部可见位置供连通池分析；默认回执只公开最近匹配位置及完整池面预算。 */
     private final Map<BlockPos, Block> observed = new LinkedHashMap<>();
 
     public SemanticBlockSearchCompanionTask(LocalPlayer player, SemanticBlockSearchTaskRecord record) {
@@ -74,6 +83,16 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         scanBudget.observeCounter(player.level().getGameTime(), scan.processedCells()
                 + (lavaPools == null ? 0 : lavaPools.processed()));
         if (lavaPools != null && !lavaPools.complete()) return TaskState.RUNNING;
+        if (r.purpose == Purpose.PORTAL_CASTING) {
+            // 合并远程坐标回执后，先把最近目标收敛到匹配池；找不到合适池时不返回孤立源坐标冒充结果。
+            nearestMatchPos = lavaPools.nearestMatchingSource();
+            nearestMatchDistance = nearestMatchPos == null ? -1 : Math.sqrt(nearestMatchPos.distSqr(origin));
+            if (nearestMatchPos != null) {
+                double dx = nearestMatchPos.getX() - origin.getX(), dz = nearestMatchPos.getZ() - origin.getZ();
+                nearestHorizontalDistance = Math.sqrt(dx * dx + dz * dz);
+                nearestVerticalOffset = nearestMatchPos.getY() - origin.getY();
+            }
+        }
         if (matchesRequested()) {
             return TaskState.SUCCESS;
         }
@@ -100,6 +119,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
             double distance = Math.sqrt(pos.distSqr(origin));
             if (nearestMatchDistance < 0 || distance < nearestMatchDistance) {
                 nearestMatchDistance = distance;
+                nearestMatchPos = pos.immutable();
                 nearestHorizontalDistance = Math.sqrt(dx * dx + dz * dz);
                 nearestVerticalOffset = pos.getY() - origin.getY();
             }
@@ -163,7 +183,9 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("max_distance", r.maxDistance);
         data.put("search_geometry", "horizontal_radius_across_loaded_sections");
         data.put("distance_metric", "euclidean_3d");
-        data.put("distance_scope", "nearest verified observed match; not a reachability result");
+        data.put("distance_scope", r.purpose == Purpose.PORTAL_CASTING
+                ? "nearest observed source in a matching casting pool; not a reachability result"
+                : "nearest verified observed match; not a reachability result");
         data.putAll(progress());
         if (lavaPools != null) data.put("lava_pool_survey", lavaPools.facts());
         if (nearestMatchDistance >= 0) {
@@ -171,6 +193,10 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
                     Math.round(nearestMatchDistance * 10.0) / 10.0);
             data.put("nearest_match_horizontal_distance", Math.round(nearestHorizontalDistance * 10.0) / 10.0);
             data.put("nearest_match_vertical_offset", nearestVerticalOffset);
+            // 最近命中是过了视线闸的公平可知事实，坐标可以进回执供调用方直接消费。
+            data.put("nearest_match_position", Map.of(
+                    "x", nearestMatchPos.getX(), "y", nearestMatchPos.getY(), "z", nearestMatchPos.getZ()));
+            data.put("next_step", NEXT_STEP_POINTER);
         }
         if (!matchesRequested()) {
             if (failureCode != null) data.put("failure_code", failureCode);

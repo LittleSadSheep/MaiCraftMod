@@ -25,7 +25,7 @@ public final class PortalLavaPoolSurvey {
     private final ArrayDeque<BlockPos> pending = new ArrayDeque<>();
     private final List<Map<String, Object>> results = new ArrayList<>();
     private Iterator<BlockPos> sites;
-    private BlockPos nearest;
+    private BlockPos nearest, nearestMatchingSource;
     private Candidate preferred;
     private int flowing, submerged, longestBank, matchingPools;
     private long processed;
@@ -71,7 +71,12 @@ public final class PortalLavaPoolSurvey {
             else {
                 if (!pool.isEmpty()) {
                     // 池面分析完整后才计为用途匹配；邻近孤立源或另一片池子的余量不能替这个池子凑数。
-                    if (preferred != null && preferred.reserveObserved()) matchingPools++;
+                    if (preferred != null && preferred.reserveObserved()) {
+                        matchingPools++;
+                        // 用途查询的坐标必须属于真正符合条件的池子，不能把更近的孤立源交给后续移动能力。
+                        if (nearestMatchingSource == null || nearest.distSqr(origin) < nearestMatchingSource.distSqr(origin))
+                            nearestMatchingSource = nearest;
+                    }
                     results.add(poolFacts()); pool.clear();
                 }
                 sites = null; nearest = null; preferred = null; longestBank = 0;
@@ -143,5 +148,6 @@ public final class PortalLavaPoolSurvey {
 
     public boolean complete() { return complete; }
     public int matchingPools() { return matchingPools; }
+    public BlockPos nearestMatchingSource() { return nearestMatchingSource; }
     public long processed() { return processed; }
 }
