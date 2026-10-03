@@ -29,8 +29,17 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private static final long SCAN_NANOS_PER_TICK = 2_000_000L;
     /** 扫描仍在推进时按此时间片为任务续期。 */
     private static final int PROGRESS_LEASE_TICKS = 200;
+    /**
+     * 命中后的指路话术：点名直接吃坐标的能力。能力名是公开指针，
+     * AbilityPointerDriftTest 核对其仍在能力表里，改名漏改这里会立刻失败。
+     */
+    public static final String NEXT_STEP_POINTER = "Pass nearest_match_position to travel as destination, to harvest_block"
+            + " (may_alter_terrain=true with matching block_id and expected_output_item_id; the live block"
+            + " must still be a loaded solid resource without a block entity or fluid), or to interact"
+            + " to use it in place.";
 
     private BlockPos origin;
+    private BlockPos nearestMatchPos;
     private double nearestMatchDistance = -1;
     private double nearestHorizontalDistance;
     private int nearestVerticalOffset;
@@ -89,6 +98,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
             double distance = Math.sqrt(pos.distSqr(origin));
             if (nearestMatchDistance < 0 || distance < nearestMatchDistance) {
                 nearestMatchDistance = distance;
+                nearestMatchPos = pos.immutable();
                 nearestHorizontalDistance = Math.sqrt(dx * dx + dz * dz);
                 nearestVerticalOffset = pos.getY() - origin.getY();
             }
@@ -142,6 +152,10 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
                     Math.round(nearestMatchDistance * 10.0) / 10.0);
             data.put("nearest_match_horizontal_distance", Math.round(nearestHorizontalDistance * 10.0) / 10.0);
             data.put("nearest_match_vertical_offset", nearestVerticalOffset);
+            // 最近命中是过了视线闸的公平可知事实，坐标可以进回执供调用方直接消费。
+            data.put("nearest_match_position", Map.of(
+                    "x", nearestMatchPos.getX(), "y", nearestMatchPos.getY(), "z", nearestMatchPos.getZ()));
+            data.put("next_step", NEXT_STEP_POINTER);
         }
         if (observed.size() < r.count) {
             if (failureCode != null) data.put("failure_code", failureCode);
