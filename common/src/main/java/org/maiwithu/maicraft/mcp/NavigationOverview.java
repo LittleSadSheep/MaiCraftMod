@@ -53,6 +53,9 @@ final class NavigationOverview {
         var gson=new Gson();
         var result=gson.toJsonTree(scan.summary()).getAsJsonObject();
         result.addProperty("age_ticks",Math.max(0,tick-observedTick));
+        // 适用范围写成机器可读字段：这份数据服务于飞行寻路的着陆点初选，不构成步行寻路输入；
+        // 调用方据此程序化判断它能支撑什么决策，而不是把粗采样误当导航依据。
+        result.addProperty("intended_use","flight landing-site pre-selection; not a walking route");
         result.addProperty("reference","relative to the observation origin; coarse samples, not a route");
         var offset=scan.origin().subtract(player.position());
         result.add("observation_origin_offset",gson.toJsonTree(List.of(offset.x,offset.y,offset.z)));

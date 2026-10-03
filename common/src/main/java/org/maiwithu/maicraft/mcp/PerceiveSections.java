@@ -65,11 +65,12 @@ final class PerceiveSections {
         result.addProperty("maxItems", 32);
         result.add("items", items);
         // 模型先按视图选事实，再显式点名昂贵扫描；保留全部段名和缺段回执，减少围绕同一规则的重复解释。
-        result.addProperty("description", "Return only named sections from this view. "
+        result.addProperty("description", "Return only named sections. "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
-                + "Request terrain_overview or nearby_facilities explicitly to scan them. Set focus for diagnostics. "
-                + "Missing requested sections are listed in " + UNAVAILABLE + ".");
+                + "terrain_overview is an opt-in flight landing-site pre-selection scan (intended_use), not walking routes; nearby_facilities too. "
+                + "Set focus for diagnostics. "
+                + "Missing sections are listed in " + UNAVAILABLE + ".");
         return result;
     }
 
