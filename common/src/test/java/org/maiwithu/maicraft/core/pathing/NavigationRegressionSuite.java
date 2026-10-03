@@ -51,6 +51,9 @@ import org.maiwithu.maicraft.core.pathing.baritone.NavigationStartupPreparationT
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationDispatchWatchdogTest;
 import org.maiwithu.maicraft.core.pathing.baritone.TerrainProbeCancellationTest;
 import org.maiwithu.maicraft.core.pathing.calc.PathPlannerRecoveryTest;
+import org.maiwithu.maicraft.core.pathing.calc.PathPlannerProgressTest;
+import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgressTest;
+import org.maiwithu.maicraft.task.ProgressBudgetTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationCameraCourseTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationHandoffTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
@@ -113,6 +116,9 @@ import org.maiwithu.maicraft.mcp.PhysicalStructurePerceptionTest;
 public final class NavigationRegressionSuite {
     // 从输入预算到路径、落地、飞行和交通依次检查；异常直接向外传给 Gradle，让 check 失败。
     public static void main(String[] args) throws Exception {
+        ProgressBudgetTest.main(args);
+        PlanningWorkProgressTest.main(args);
+        PathPlannerProgressTest.main(args);
         InputDriverTest.main(args);
         // 清障权限先检查实际路线费用和客户端配置，确保名单外建筑始终留给绕行。
         ClearanceWhitelistTest.main(args);

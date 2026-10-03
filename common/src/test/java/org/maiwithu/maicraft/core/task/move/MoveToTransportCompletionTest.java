@@ -61,6 +61,7 @@ public final class MoveToTransportCompletionTest {
         transportFailure(memory, true, .5);
         transportFailure(memory, false, 8.5);
         planningStallFailsAfterCeiling(memory);
+        longPlanningRenewsOnlyOnProgress(memory);
         discoveryFailure(memory);
         ordinaryNearArrival(memory);
         automaticLandingResult(memory);
@@ -151,7 +152,7 @@ public final class MoveToTransportCompletionTest {
         }
     }
 
-    /** 连续算路零实际进展超过上限时按无路失败收场，不能让规划宽限无限续期把卡死伪装成 still working。 */
+    /** 连续算路没有新进展时按规划停滞收场；不把无返回结论冒充地形无路。 */
     private static void planningStallFailsAfterCeiling(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
             var record = new MoveToTaskRecord("planning-stall", 2000, 0D, 0D, 0D, null, false);
@@ -170,8 +171,30 @@ public final class MoveToTransportCompletionTest {
             var result = task.result(TaskState.FAILED);
             check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("planning_stall"),
                     "没有搜索结论的规划停滞不能伪装成地形无路");
-            check(result.message().contains("route planning never produced a walkable path"),
-                    "失败说明要点名规划器从未产出可走路线");
+            check(result.message().contains("route planning made no verified progress"),
+                    "失败说明要指出无进展预算耗尽，而不是任务总耗时过长");
+        }
+    }
+
+    private static void longPlanningRenewsOnlyOnProgress(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            var record = new MoveToTaskRecord("productive-long-planning", 600, 0D, 0D, 0D, null, false);
+            var task = f.task(record, true); task.onStart();
+            var session = new Session(TransportSession.Result.running("planning"), false);
+            field(TransportNavigator.class, "session").set(f.navigator, session);
+            field(TransportNavigator.class, "activeDestination").set(f.navigator, BlockPos.ZERO);
+            field(TransportNavigator.class, "targetFingerprint").set(f.navigator, f.compiled.semanticFingerprint());
+            // 角色尚未移动，但每十秒确认一批新规划事实；连续九十秒仍应留在同一旅行任务里。
+            for (int tick = 0; tick < 1800; tick++) {
+                f.nextTick();
+                if (tick % 200 == 0) session.verifiedProgressTick = f.player.level().getGameTime();
+                check(task.onTick() == TaskState.RUNNING, "new planning progress must refill the shared budget");
+            }
+            check(record.getDeadlineGameTime() > f.player.level().getGameTime(), "long planning renews the task deadline");
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 601 && state == TaskState.RUNNING; tick++) { f.nextTick(); state = task.onTick(); }
+            check(state == TaskState.FAILED, "once real progress stops the same budget must still expire");
+            task.result(state);
         }
     }
 
@@ -197,6 +220,7 @@ public final class MoveToTransportCompletionTest {
         Result result;
         int ticks, stops;
         final boolean live;
+        long verifiedProgressTick = Long.MIN_VALUE;
         Session(Result result) { this(result, true); }
         /** live=false 模拟没有交通进展的会话：liveness 不再充当物理进展证据。 */
         Session(Result result, boolean live) { this.result = result; this.live = live; }
@@ -205,6 +229,7 @@ public final class MoveToTransportCompletionTest {
         public void abandon() { }
         public boolean safeToInterrupt() { return result.terminal(); }
         public boolean livenessActive() { return live; }
+        public long lastVerifiedProgressTick() { return verifiedProgressTick; }
         public String phase() { return result.code(); }
         public Map<String, Object> diagnostics() { return Map.of("ticks", ticks); }
     }

@@ -36,8 +36,10 @@ public interface TransportSession {
     /** 此刻是否能安全把玩家交给另一任务，例如空中尚未落地时通常不行。 */
     boolean safeToInterrupt();
 
-    /** 是否仍有应继续等待的交通进展，供上层决定是否延长执行时间。 */
+    /** 交通会话是否仍在等待动作或维持运行；补时另取下方已确认的新进展时刻。 */
     boolean livenessActive();
+    /** 只有已确认的操作或新计算事实才更新时间；单纯保持会话打开不能续期。 */
+    default long lastVerifiedProgressTick() { return Long.MIN_VALUE; }
 
     String phase();
 

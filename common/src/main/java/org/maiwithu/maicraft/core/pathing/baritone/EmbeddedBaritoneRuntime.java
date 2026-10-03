@@ -510,6 +510,11 @@ public final class EmbeddedBaritoneRuntime {
                 && backend.getPathingBehavior().getInProgress().isPresent();
     }
 
+    static long planningProgressRevision(EmbeddedBaritoneNavigator navigator) {
+        return owner == navigator && backend != null
+                ? ((PathingBehavior) backend.getPathingBehavior()).planningProgressRevision() : 0;
+    }
+
     // 失败分类取自真实搜索结果；排队或工作线程超时不能再向采矿、建造和行走谎报为地形无解。
     static FailureType planningFailure(EmbeddedBaritoneNavigator navigator) {
         if (owner != navigator || backend == null) return FailureType.NO_PATH;
@@ -874,7 +879,7 @@ public final class EmbeddedBaritoneRuntime {
         if (backend == null || owner != navigator) return;
         ACTIONS.suspend(context, navigator, reason);
         backend.getPathingBehavior().forceCancel();
-        ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents();
+        ((PathingBehavior) backend.getPathingBehavior()).discardPendingPathEvents(false);
         backend.getCustomGoalProcess().setGoalAndPath(
                 new MaiCraftGoalAdapter(compiled.goal()));
         pendingPolicyOwner = null;

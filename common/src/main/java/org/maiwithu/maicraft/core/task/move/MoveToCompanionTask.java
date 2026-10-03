@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
+import org.maiwithu.maicraft.task.ProgressBudget;
 
 /**
  * 执行一次移动：到坐标附近、准确站到某格、改变高度，或找到某种方块走到旁边。
@@ -42,18 +43,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private static final long MAX_EXTRA_TICKS = 5 * 60 * 20;
     /** 行进期间将截止时间保持在此期限之后，使健康的多分钟挖掘路线不会半途超时；若路线卡住，也会在一个期限内结束并归还角色控制。 */
     private static final long PROGRESS_LEASE_TICKS = 30 * 20;
-    /** 进展必须在多近的时间内发生，才会续期。预留一段较宽松的间隔以容纳缓慢但合法的移动；长时间徒手挖掘会将执行器进度时钟保持为 0，
-     *  此间隔主要覆盖放置动作和路线重规划空档。 */
-    private static final int PROGRESS_GRACE_TICKS = 100;
     /** 规划器无法抵达精确目标时，若停在请求柱列附近此距离内，仍视为到达（教学性成功，避免反复抖动）。这是唯一容差；真正的精确到达仍按原目标判定。 */
     private static final double WALK_SPEED = 1.0;
     private static final double NEAR_SUCCESS_RADIUS = 3.0;
     /** 规划器无法再接近时（例如停在水下目标上方的水面），等待此数量的无进展 tick 再放弃：
      *  时间足以让角色被水流带到可达的水下目标附近，也能及时放弃水面上方不可达的目标。 */
     private static final int MAX_SETTLE_TICKS = 60;
-    /** 连续算路宽限上限：规划一直未产出可走路线且零实际进展超过此时限，就按规划停滞收场，
-     *  不能让 "planningInFlight" 无限续期把卡死伪装成 still working（实测 4 分钟零位移）。 */
-    private static final long PLANNING_STALL_CEILING_TICKS = 30 * 20;
+    /** 规划预算仅消耗无进展的活动时间；真实计算、位移或原生确认都会通过公共预算补满。 */
+    private static final long PLANNING_IDLE_TICKS = 30 * 20;
 
     private final int bx;
     private final int by;
@@ -62,7 +59,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     private double bestDist = Double.MAX_VALUE;   // 到目标曾达到的最近距离。
     private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
-    private long planningSinceTick = -1;          // 零进展连续算路的起点；有实际进展或算路结束即复位。
+    private final ProgressBudget planningBudget;
     /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 docs/architecture/07-attention.md）。 */
     private static final int DISTANCE_QUANTUM_BLOCKS = 16;
     /** 出发时（或路线重估后）的分母；剩余变大说明在绕路或新路线更长，分母跟着刷新。 */
@@ -82,6 +79,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
+        planningBudget = record.progressBudget(PLANNING_IDLE_TICKS);
         this.bx = record.x != null ? (int) Math.floor(record.x) : 0;
         this.by = record.y != null ? (int) Math.floor(record.y) : 0;
         this.bz = record.z != null ? (int) Math.floor(record.z) : 0;
@@ -271,26 +269,18 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             fail(blockedMessage("no path"), FailureType.NO_PATH);
             return TaskState.FAILED;
         }
-        // 路线仍有实际进展或正在后台算路就延长时间；绕湖可能暂时离目标更远，不能只用距离缩短判断进展。
+        // 绕湖或长距离算路可能暂时没有距离缩短，按新计算事实和真实身体进展共同续期。
         // 已到目标格、只等落地时不无限续期，避免身体悬着不落也永远不超时。
         boolean awaitingStrictLanding = strictLandingInProgress();
         boolean planning = nav.planningInFlight();
-        boolean recentProgress = nav.hasRecentPhysicalProgress(PROGRESS_GRACE_TICKS);
-        if (planning && !recentProgress) {
-            long now = player.level().getGameTime();
-            if (planningSinceTick < 0) planningSinceTick = now;
-            if (now - planningSinceTick >= PLANNING_STALL_CEILING_TICKS) {
-                fail("planning_stall: route planning never produced a walkable path in about "
-                        + PLANNING_STALL_CEILING_TICKS / 20 + " seconds; no no-path conclusion was established; "
-                        + nav.outcomeSummary(), FailureType.PLANNING_STALL);
-                return TaskState.FAILED;
-            }
-        } else {
-            planningSinceTick = -1;
-        }
-        if (!awaitingStrictLanding && (planning || recentProgress)) {
-            long now = player.level().getGameTime();
-            r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
+        long now = player.level().getGameTime();
+        boolean stalled = planningBudget.observeCounter(now,
+                awaitingStrictLanding ? 0 : nav.lastVerifiedProgressTick());
+        if (planning && stalled) {
+            fail("planning_stall: route planning made no verified progress for about "
+                    + PLANNING_IDLE_TICKS / 20 + " active seconds; no no-path conclusion was established; "
+                    + nav.outcomeSummary(), FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
         }
         // 另外记录身体是否仍在靠近，例如水中自然下沉；越接近就重新开始计算“等待稳定”的时间。
         double d = repDistance();
@@ -485,7 +475,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             case COLUMN -> Math.sqrt(horizontalDistSqr(bx, bz));
             case YLEVEL -> Math.abs(player.getY() - by);
             case FIND -> {
-                BlockPos n = finder.nearest();
+                BlockPos n = finder == null ? null : finder.nearest();
                 yield n == null ? NearestBlockFinder.BUDGET_BLOCKS
                         : Math.sqrt(player.distanceToSqr(n.getX() + 0.5, n.getY() + 0.5, n.getZ() + 0.5));
             }
@@ -523,6 +513,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("final_y", player.getY());
         data.put("final_z", player.getZ());
         data.put("ground_y", gy);
+        data.put("planning_idle_budget", planningBudget.diagnostics(player.level().getGameTime()));
+        data.put("planning_budget_unit", "active_game_ticks");
         data.put("ground_flight_mode",groundFlight.diagnostics());
         // 任务终局直接交付导航证据，避免模型为一次无路结果另开多轮观察。
         if (!finalNavigationEvidence.isEmpty()) data.put("navigation", finalNavigationEvidence);
@@ -591,15 +583,20 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     /** 规划失败且未接近到可视为到达时使用的放弃消息。必须在失败位置、导航尚未释放时捕获，
      *  这样才能在父类 {@code cleanup()} 停止导航前读取 {@code failReason}。 */
-    /** 移动任务的记分牌：remaining/initial 距离对，不用 done/total——绕路时剩余变大要如实显示。 */
+    /** 行走时如实显示剩余距离和绕路变化；尚未迈步的规划阶段另交付已确认计算量。 */
     @Override
     public Map<String, Object> progress() {
-        double distance = Math.sqrt(player.distanceToSqr(bx + 0.5, by, bz + 0.5));
+        double distance = repDistance();
         int remaining = (int) Math.round(distance / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS;
         if (initialRemaining < 0 || remaining > initialRemaining) initialRemaining = remaining;
-        boolean planning = nav.planningInFlight();
-        return Map.of("task", name(), "phase", planning ? "planning" : "moving",
-                "remaining", remaining, "initial", initialRemaining);
+        boolean planning = nav != null && nav.planningInFlight();
+        var result = new HashMap<String, Object>();
+        result.putAll(Map.of("task", name(), "phase", planning ? "planning" : "moving",
+                "remaining", remaining, "initial", initialRemaining));
+        result.put("planning_idle_budget", planningBudget.diagnostics(player.level().getGameTime()));
+        result.put("planning_budget_unit", "active_game_ticks");
+        if (planning) { result.put("done", nav.planningProgressUnits()); result.put("progress_unit", "verified_planning_work_units"); }
+        return Map.copyOf(result);
     }
 
     private String blockedMessage(String failReason) {

@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
 /** 在目标范围里找可安全站稳的静态落点；分刻检查已加载方块，不把未知或被挡住的位置当落点。 */
 public final class TransportTargets {
+    /** 已完成的落点检查量，供共享预算识别分刻扫描进展。 */
+    public int examined() { return examined; }
     private static final int MAX_GOALS = 256, MAX_CANDIDATES = 8192, MAX_RESULTS = 32;
     private static final int MAX_RADIUS = 8, MAX_PER_TICK = 128;
     private final ArrayDeque<Region> pending = new ArrayDeque<>();

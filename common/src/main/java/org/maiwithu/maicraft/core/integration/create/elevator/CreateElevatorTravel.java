@@ -47,6 +47,7 @@ public final class CreateElevatorTravel implements TransportSession {
     private int scanned, groundTicks, geometryHash;
     private ElevatorGeometry geometry;
     private long epoch = -1, now, lastProgress;
+    private long verifiedProgressTick = Long.MIN_VALUE;
     private Vec3 previousPosition;
     private Vec3 departure;
     private UUID observedCabin;
@@ -103,7 +104,9 @@ public final class CreateElevatorTravel implements TransportSession {
                     geometryHash = hash;
                 }
                 aboard = geometry.carries(cabin.local(ctx.player().position())) || bridge.recentSupport(cabin, ctx.player());
-                if (!Double.isNaN(previousCabinY) && Math.abs(cabin.entity().getY() - previousCabinY) > 0.0001) lastProgress = now;
+                if (!Double.isNaN(previousCabinY) && Math.abs(cabin.entity().getY() - previousCabinY) > 0.0001) {
+                    lastProgress = now; verifiedProgressTick = now;
+                }
                 previousCabinY = cabin.entity().getY();
             }
             Vec3 position = ctx.player().position();
@@ -117,7 +120,7 @@ public final class CreateElevatorTravel implements TransportSession {
             boolean pending = actions.pending();
             if (!actions.settle(ctx)) return running();
             effects |= actions.inventoryChanged();
-            if (pending) lastProgress = now;
+            if (pending) { lastProgress = now; verifiedProgressTick = now; }
             if (actions.failure != null) { pendingFailure = actions.failure; actions.failure = null; stopRequested = true; }
             if (actions.remoteHeld && plan != null && plan.call() != null) {
                 actions.releaseRemote(ctx, bridge, plan.call()); return running();
@@ -173,7 +176,7 @@ public final class CreateElevatorTravel implements TransportSession {
                 Plan found = ElevatorSurvey.find(ctx, destination, forbidden, bridge, candidate, evidence,requestedFloor);
                 surveyEvidence = Map.copyOf(evidence);
                 if (found != null && (best == null || found.score() < best.score())) best = found;
-                scanned++; lastProgress = now;
+                scanned++; lastProgress = now; verifiedProgressTick = now;
             }
             case APPROACH_CALL -> {
                 if (cabin.aligned(plan.fromFloor()) || cabin.targetY() == plan.fromFloor()) { setPhase(Phase.WAIT); break; }
@@ -326,6 +329,8 @@ public final class CreateElevatorTravel implements TransportSession {
         return DefaultBodyControlPort.permitsWorldMovement(context.minecraft().screen) || actions.ownsInventory(context);
     }
     @Override public boolean livenessActive() { return terminal == null && (actions.pending() || actions.pendingInventory() || motion.active() || now - lastProgress < 100); }
+    /** 轿厢实际移动、楼层调查或原生确认完成才给外层旅行补时。 */
+    @Override public long lastVerifiedProgressTick() { return verifiedProgressTick; }
     @Override public String phase() { return "elevator_" + phase.name().toLowerCase(Locale.ROOT); }
     @Override public Map<String, Object> diagnostics() {
         Map<String, Object> data = new LinkedHashMap<>();

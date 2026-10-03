@@ -47,6 +47,7 @@ public final class JetpackFlightSession implements TransportSession {
     private JetpackRoute.Plan route;
     private JetpackRoute.Plan originalRoute;
     private JetpackRoute.Search search;
+    private long verifiedProgressTick = Long.MIN_VALUE;
     private JetpackNativeAdapter.Snapshot power;
     private NativeActionReceipt receipt;
     private Vec3 landing;
@@ -178,7 +179,9 @@ public final class JetpackFlightSession implements TransportSession {
                 search = new JetpackRoute.Search(ctx.player().position(), target, power, Math.max(0,6000-departureNodes),planningLanding);
                 searchCharged = false;
             }
+            int before = search.expanded();
             search.advance(space(ctx), 128, 1_000_000);
+            if (search.expanded() > before) verifiedProgressTick = ctx.level().getGameTime();
             if (!search.done()) return running();
             chargeDepartureSearch();
             route = search.result();
@@ -346,7 +349,9 @@ public final class JetpackFlightSession implements TransportSession {
             planningTarget = target; planningLanding=landingSelected();
             search = new JetpackRoute.Search(ctx.player().position(),target,power,6000,planningLanding);
         }
+        int before = search.expanded();
         search.advance(space, 128, 1_000_000);
+        if (search.expanded() > before) verifiedProgressTick = ctx.level().getGameTime();
         if (!search.done()) return;
         var replacement = search.result();
         if (replacement == null || replacement.requiredTicks() > power.fuelTicks()) { escape(ctx, space); return; }
@@ -578,6 +583,8 @@ public final class JetpackFlightSession implements TransportSession {
     }
     @Override public boolean safeToInterrupt() { return terminal != null || grounded && !effects; }
     @Override public boolean livenessActive() { return terminal == null && (receipt != null || effects || search != null && !search.done()); }
+    /** 悬停算路按实际展开节点续时，保持飞行开关开启本身不算进展。 */
+    @Override public long lastVerifiedProgressTick() { return verifiedProgressTick; }
     @Override public String phase() { return fastDescent.active() ? "jetpack_drop_" + fastDescent.phase()
             : "jetpack_" + phase.name().toLowerCase(Locale.ROOT); }
     @Override public NavigationPathSnapshot debugPath() {

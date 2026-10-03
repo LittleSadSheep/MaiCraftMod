@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgress;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
@@ -58,6 +59,11 @@ public final class EmbeddedBaritoneNavigator {
     private NavGoal goal;
     private BlockPos plannedCenter;
     private final NavigationProgress progress = new NavigationProgress();
+    private final PlanningWorkProgress probeProgress = new PlanningWorkProgress();
+    private BlockPos probeProgressOrigin;
+    private GoalCompiler.CompiledFingerprint probeProgressGoal;
+    private long observedPlanningRevision;
+    private long planningProgressTick = Long.MIN_VALUE;
     private boolean started;
     private boolean driveRequested;
     private boolean arrivedLatched;
@@ -273,6 +279,9 @@ public final class EmbeddedBaritoneNavigator {
             return failWhenSafe(FailureType.NO_PATH, detail);
         }
         if (terrainProbe == null) {
+            // 在新站位或新目标上复算属于新问题；同一起点的自动重试保留已有检查量，避免空转续期。
+            if (!feet().equals(probeProgressOrigin) || !compiledFingerprint.equals(probeProgressGoal)) probeProgress.newScope();
+            probeProgressOrigin = feet().immutable(); probeProgressGoal = compiledFingerprint;
             terrainProbeFingerprint = compiledFingerprint;
             terrainProbePolicy = EmbeddedBaritoneRuntime.policySnapshot(this);
             terrainProbe = terrainProbePolicy == null ? null
@@ -620,6 +629,23 @@ public final class EmbeddedBaritoneNavigator {
         return progress.recent(player.level().getGameTime(), graceTicks);
     }
 
+    /** 身体位移、已确认原生操作和新增计算事实各自供给进度；活线程与重复提交不算。 */
+    public long lastVerifiedProgressTick() {
+        updatePhysicalProgress();
+        long revision = EmbeddedBaritoneRuntime.planningProgressRevision(this);
+        if (revision > observedPlanningRevision) planningProgressTick = player.level().getGameTime();
+        observedPlanningRevision = revision;
+        if (terrainProbe != null) {
+            long before = probeProgress.revision();
+            if (probeProgress.observe(terrainProbe.completedUnits()) > before) planningProgressTick = player.level().getGameTime();
+        }
+        return Math.max(progress.confirmedTick(), planningProgressTick);
+    }
+    public long planningProgressUnits() {
+        lastVerifiedProgressTick();
+        return observedPlanningRevision + probeProgress.revision();
+    }
+
     public String outcomeSummary() {
         if (events.isEmpty()) return "baritone_events={}; dispatch=" + dispatchEvidence + "; health=" + healthDiagnostics();
         StringBuilder out = new StringBuilder("baritone_events={");
@@ -634,7 +660,7 @@ public final class EmbeddedBaritoneNavigator {
     }
 
     public boolean planningInFlight() {
-        return EmbeddedBaritoneRuntime.planningInFlight(this);
+        return terrainProbe != null && !terrainProbe.isDone() || EmbeddedBaritoneRuntime.planningInFlight(this);
     }
 
     public NavigationStep executionStep(long clientRevision) {

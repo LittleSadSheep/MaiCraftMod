@@ -24,6 +24,7 @@ final class NavigationProgress {
     }
 
     void confirm(long tick) { confirmed = tick; }
+    long confirmedTick() { return confirmed; }
 
     boolean recent(long tick, int grace) {
         return confirmed != Long.MIN_VALUE && age(tick, confirmed) <= Math.max(0, grace);

@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
+import org.maiwithu.maicraft.task.ProgressBudget;
 
 /**
  * 具体任务共用的执行外壳：开始前检查条件，每个游戏刻做一点，结束时停导航并整理结果。
@@ -33,9 +34,10 @@ import org.maiwithu.maicraft.task.TaskState;
 public abstract class AbstractCompanionTask<R extends TaskRecord>
         implements Task {
 
-    /** 路还在正常往前走时，把剩余时间补到三十秒，长途移动不用仅因路远而超时。 */
+    /** 新增算路结果、身体位移或原生确认后补足三十秒，长途移动不会仅因总耗时超时。 */
     private static final long NAV_PROGRESS_LEASE_TICKS = 30L * 20L;
-    private static final int NAV_PROGRESS_GRACE_TICKS = 100;
+    private PlayerNav budgetNavigation;
+    private ProgressBudget navigationBudget;
 
     /** 这件任务操作的游戏玩家。 */
     protected final LocalPlayer player;
@@ -101,12 +103,10 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     @Override
     public final TaskState tick(LocalPlayer companion) {
         if (pendingTerminal != null) return pendingTerminal;
-        // 还在等后台算路，就把截止时间推后一刻；路线已有实际进展，则给它继续走的时间。
-        // 注意：上层会在调用这里之前检查超时，已经被上层判超时的任务无法在这里补时间。
-        if (nav != null && nav.planningInFlight()) {
-            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
-        } else if (nav != null && nav.hasRecentPhysicalProgress(NAV_PROGRESS_GRACE_TICKS)) {
-            r.extendDeadlineTo(player.level().getGameTime() + NAV_PROGRESS_LEASE_TICKS);
+        // 共用预算接收位移、原生确认和新增计算工作；只是在等同一个 future 不会无限续期。
+        if (nav != null) {
+            if (budgetNavigation != nav) { budgetNavigation = nav; navigationBudget = r.progressBudget(NAV_PROGRESS_LEASE_TICKS); }
+            navigationBudget.observeCounter(player.level().getGameTime(), nav.lastVerifiedProgressTick());
         }
         try {
             return onTick();

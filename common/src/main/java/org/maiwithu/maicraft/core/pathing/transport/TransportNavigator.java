@@ -57,6 +57,7 @@ public final class TransportNavigator {
     private String failure;
     private FailureType failureType = FailureType.NO_PATH;
     private long progressTick = Long.MIN_VALUE;
+    private long planningProgressTick = Long.MIN_VALUE;
     private Vec3 lastPosition;
     private boolean trackingGoal, transportApproach;
     private final LoadedTravelLeg loadedTravel = new LoadedTravelLeg();
@@ -100,9 +101,7 @@ public final class TransportNavigator {
             replanning = true;
             TransportRuntime.cancel(this); // 先安全退出旧路段，再接管新意图。
         }
-        if (lastPosition == null || player.position().distanceToSqr(lastPosition) > 0.01) {
-            lastPosition = player.position(); progressTick = player.level().getGameTime();
-        }
+        observeBodyProgress();
         if (session != null) {
             // 旧交通还没结束时先等它，不同时开另一种移动方式争抢玩家按键。
             if (TransportRuntime.owns(this)) TransportRuntime.drive(this, context);
@@ -190,7 +189,9 @@ public final class TransportNavigator {
                 targetFingerprint = currentGoal.semanticFingerprint(); offersPrepared = false;
             }
             if (!offersPrepared) {
+                int before = targets.examined();
                 targets.tick(context);
+                if (targets.examined() > before) planningProgressTick = player.level().getGameTime();
                 if (!targets.complete()) return PlayerNav.Status.RUNNING;
                 var compiled = effectiveGoal();
                 if (compiled == null) { failure = "navigation destination disappeared"; return PlayerNav.Status.FAILED; }
@@ -293,10 +294,32 @@ public final class TransportNavigator {
     public String failReason() { return failure == null ? ground.failReason() : failure; }
     public FailureType failType() { return failure == null ? ground.failType() : failureType; }
     public int stallTicks() { return progressTick == Long.MIN_VALUE ? 0 : (int) Math.min(Integer.MAX_VALUE, Math.max(0, player.level().getGameTime() - progressTick)); }
+    private void observeBodyProgress() {
+        if (lastPosition == null) { lastPosition = player.position(); return; }
+        if (player.position().distanceToSqr(lastPosition) > 0.01) {
+            lastPosition = player.position(); progressTick = player.level().getGameTime();
+        }
+    }
+
+    /** 所有导航能力共用真实进度时刻；扫描器存在或交通会话仍运行都不是进展事实。 */
+    public long lastVerifiedProgressTick() {
+        observeBodyProgress();
+        long latest = Math.max(progressTick, planningProgressTick);
+        if (ground != null) latest = Math.max(latest, ground.lastVerifiedProgressTick());
+        if (departureApproach != null) latest = Math.max(latest, departureApproach.lastVerifiedProgressTick());
+        if (session != null) latest = Math.max(latest, session.lastVerifiedProgressTick());
+        return latest;
+    }
+    public long planningProgressUnits() {
+        return ground.planningProgressUnits() + (targets == null ? 0 : targets.examined())
+                + (departureApproach == null ? 0 : departureApproach.planningProgressUnits());
+    }
     public boolean hasRecentPhysicalProgress(int ticks) {
-        return targets != null || session != null && session.livenessActive()
-                || departureApproach != null && departureApproach.hasRecentPhysicalProgress(ticks)
-                || player.level().getGameTime() - progressTick <= ticks || ground.hasRecentPhysicalProgress(ticks);
+        // 物理进度只取实际位移或确认动作；计算进展由 lastVerifiedProgressTick 的独立通道交付。
+        return departureApproach != null && departureApproach.hasRecentPhysicalProgress(ticks)
+                || progressTick != Long.MIN_VALUE && player.level().getGameTime() >= progressTick
+                        && player.level().getGameTime() - progressTick <= ticks
+                || ground.hasRecentPhysicalProgress(ticks);
     }
     public boolean planningInFlight() { return targets != null || session != null && session.phase().contains("plan") || ground.planningInFlight()
             || departureApproach != null && departureApproach.planningInFlight(); }

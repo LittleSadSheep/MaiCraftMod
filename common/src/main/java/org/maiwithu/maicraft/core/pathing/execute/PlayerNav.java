@@ -159,6 +159,9 @@ public final class PlayerNav {
     }
     public String outcomeSummary() { return navigator.outcomeSummary(); }
     public boolean planningInFlight() { return navigator.planningInFlight(); }
+    /** 旅行、采集和施工读同一份已验证进度，不再把“后台正在运行”直接当作续期依据。 */
+    public long lastVerifiedProgressTick() { return navigator.lastVerifiedProgressTick(); }
+    public long planningProgressUnits() { return navigator.planningProgressUnits(); }
     public NavigationStep executionStep(long clientRevision) { return navigator.executionStep(clientRevision); }
     public void stop() { navigator.stop(); }
     public void pause() { navigator.pause(); }
