@@ -922,7 +922,10 @@ public final class SemanticAcquireCompanionTask
         SemanticAcquireTaskRecord.SourceHint hint = sourceHint(need);
         if (hint.entityTypeIds().isEmpty()) {
             addIssue("hunt", "entity_source_evidence_missing",
-                    "no semantic entity type source_hint was supplied; no entity was selected",
+                    "no semantic entity type source_hint was supplied; provide "
+                            + "source_hint.entity_type_ids (entity type families such as minecraft:cod) together "
+                            + "with source_hint.expected_item_ids naming the requested item as the drop; "
+                            + "no entity was selected",
                     Map.of());
             advanceSource(need);
             return TaskState.RUNNING;
@@ -932,7 +935,8 @@ public final class SemanticAcquireCompanionTask
         if (expected.isEmpty()) {
             addIssue("hunt", "drop_relation_evidence_missing",
                     "the semantic hint does not identify any requested item as an expected product; "
-                            + "no entity was attacked",
+                            + "add source_hint.expected_item_ids listing which requested item the hinted "
+                            + "entity types drop; no entity was attacked",
                     Map.of("entity_type_ids", stringIds(hint.entityTypeIds())));
             advanceSource(need);
             return TaskState.RUNNING;

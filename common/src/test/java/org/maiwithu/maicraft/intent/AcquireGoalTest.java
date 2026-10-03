@@ -26,12 +26,26 @@ public final class AcquireGoalTest {
                 "{\"item_ids\":[1]}", "{\"item_tag\":true}", "{\"protected_labels\":[false]}",
                 "{\"allowed_sources\":[\"magic\"]}",
                 "{\"source_hint\":false}", "{\"source_hint\":{\"position\":[1,2,3]}}",
-                "{\"source_hint\":{\"description\":42}}", "{\"source_hint\":{\"block_ids\":[true]}}")) {
+                "{\"source_hint\":{\"description\":42}}", "{\"source_hint\":{\"block_ids\":[true]}}",
+                "{\"source_hint\":{\"entity_types\":[\"minecraft:cod\"]}}",
+                "{\"source_hint\":{\"entity\":[\"minecraft:cod\"]}}")) {
             try {
                 record(arguments(patch));
                 throw new AssertionError("取物入口接受了有歧义的参数: " + patch);
             } catch (IllegalArgumentException expected) { }
             rejectsGoal(goal(arguments(patch), null));
+        }
+        // 拒绝拼错的 source_hint 键时必须带出全部合法键：调用方只看得到这条文本，不列键集合就只能逐键盲试。
+        try {
+            record(arguments("{\"source_hint\":{\"entity_types\":[\"minecraft:cod\"]}}"));
+            throw new AssertionError("取物入口接受了拼错的 source_hint 键");
+        } catch (IllegalArgumentException expected) {
+            String message = expected.getMessage();
+            check(message.contains("entity_types"), "拒绝消息应点名被拒的键: " + message);
+            for (String key : List.of("block_ids", "block_tags", "entity_type_ids", "expected_item_ids",
+                    "trade_profession_ids", "description")) {
+                check(message.contains(key), "拒绝消息应列出合法键 " + key + ": " + message);
+            }
         }
         // 显式 null 与缺席同义（共享参数契约）：落到与省略该字段相同的默认值，不算歧义输入。
         for (String patch : List.of("{\"count\":null}", "{\"allow_harm\":null}", "{\"allowed_sources\":null}")) {
