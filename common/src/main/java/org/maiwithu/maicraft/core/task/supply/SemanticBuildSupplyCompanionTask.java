@@ -60,6 +60,7 @@ final class SemanticBuildSupplyCompanionTask
     private int childSerial;
     private int buildRounds;
     private boolean batchVerified;
+    private boolean nativePlacementDeviation;
     // 放置尚未开始就发现缺料时，先回供料队列；不能让清障优先分支反复启动同一个缺料批次。
     private boolean resupplyBeforeBuild;
     private int remainingCellsBeforeBuild;
@@ -266,6 +267,8 @@ final class SemanticBuildSupplyCompanionTask
             latest.put("timed_out", result.timedOut() || terminal == TaskState.TIMEOUT);
             latest.put("interrupted", result.interrupted()); finalBuildData = Map.copyOf(latest);
         }
+        // 原生放置偏移已由子任务确认；终结本轮动作并交还设计差异，不能再按“原格缺料”自动开新一批。
+        if(nativePlacementDeviation(terminal,result)) {nativePlacementDeviation=true;return TaskState.SUCCESS;}
         batchVerified = batchCompleted(terminal, result) && !buildOutcomeUncertain;
         if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return TaskState.RUNNING;
         String childCode = result == null || result.data() == null
@@ -301,9 +304,15 @@ final class SemanticBuildSupplyCompanionTask
      */
     static boolean batchCompleted(TaskState terminal, TaskResult result) {
         if (terminal != TaskState.SUCCESS || result == null || !result.success()) return false;
+        if(nativePlacementDeviation(terminal,result))return false;
         if (result.data() != null && Boolean.TRUE.equals(result.data().get("supply_access_only"))) return false;
         Object remaining = result.data() == null ? null : result.data().get("remaining_scaffolds");
         return remaining == null || remaining instanceof Collection<?> cells && cells.isEmpty();
+    }
+    static boolean nativePlacementDeviation(TaskState terminal,TaskResult result) {
+        return terminal==TaskState.SUCCESS&&result!=null&&result.success()&&result.data()!=null
+                &&Boolean.TRUE.equals(result.data().get("native_placement_completed"))
+                &&result.data().get("native_placement_deviation") instanceof Map<?,?> evidence&&!evidence.isEmpty();
     }
 
     private void advanceMaterialBinding() {
@@ -809,9 +818,14 @@ final class SemanticBuildSupplyCompanionTask
         data.put("world_change_uncertain", buildOutcomeUncertain || outcomeUnknown(finalBuildData));
         boolean traversalSatisfied = activePlan.traversabilityContract() == null
                 || traversabilityResult != null && traversabilityResult.valid();
-        boolean complete = allMatched() && traversalSatisfied && !activePlan.hasTrackedScaffolds()
+        boolean complete = !nativePlacementDeviation && allMatched() && traversalSatisfied && !activePlan.hasTrackedScaffolds()
                 && failureCode == null && !unresolvedOutcome() && !cargoCheckPending && !spoilSupply.active() && (buildRounds == 0 || batchVerified);
         data.put("goal_satisfied", complete);
+        if(nativePlacementDeviation) {
+            data.put("goal_satisfied",false);data.put("construction_complete",false);data.put("native_placement_completed",true);
+            data.put("mechanical_retry_allowed",false);data.put("native_placement_deviation",finalBuildData.get("native_placement_deviation"));
+            data.put("declared_structure_diff",finalBuildData.get("declared_structure_diff"));
+        }
         data.put("batches", List.copyOf(rounds));
         // 施工尚未开始也要直接公开缺失加工前置；保留取材回执，不把它混成某个方块放置失败。
         if (!failedSupply.isEmpty()) {
@@ -874,6 +888,7 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     @Override protected String successMessage() {
+        if(nativePlacementDeviation)return "原生放置已完成，实际落点与设计不同；保留现场和完整差异，等待模型修改方案";
         return "semantic material families selected and supplied across " + buildRounds
                 + " verified construction batch(es), and every requested build cell"
                 + (activePlan.traversabilityContract() == null ? "" : " and required route")

@@ -13,6 +13,12 @@ import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.build.BuildValidity;
 import java.util.LinkedHashMap;
 import org.maiwithu.maicraft.core.PlayerInv;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.phys.BlockHitResult;
+import org.maiwithu.maicraft.core.integration.create.CreateRollerPlacement;
 
 /**
  * 记录一次放置前的方块状态，并检查点击后是否有预期变化，包括床头、门上半等随之生成的格子。
@@ -27,6 +33,9 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
     private final Map<Long, BuildTaskRecord.Target> effectContracts;
     private final boolean predictedFootprintMatches;
     private int materialBefore = -1, materialObserved;
+    private boolean strictMaterial,redirectedConfirmed;
+    private record Redirect(BlockPos position,BlockState predicted,BlockState before) {}
+    private Redirect redirect;
 
     BuildPlacementConfirmation(BuildTaskRecord.Target target,
                                List<BuildPlacementGeometry.GeneratedCell> generated,
@@ -67,15 +76,40 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
     }
 
     BuildPlacementConfirmation trackMaterial(LocalPlayer player) {
-        // 门、床等一件物品生成两格：生存放置须同时看到扣一件，不按上下两半重复收费，也不改背包制造证据。
-        if (!player.getAbilities().instabuild && !generated.isEmpty() && target.materialCount() == 1)
+        // 所有生存放置都记录耗材；门床仍要求完整的两格与扣件证据，普通物品也不能在已扣材料后重报“没生效”。
+        strictMaterial=!generated.isEmpty()&&target.materialCount()==1;
+        if (!player.getAbilities().instabuild)
             materialObserved = materialBefore = PlayerInv.carriedCount(player.getInventory(), target.item());
         return this;
     }
+    BuildPlacementConfirmation trackNativeDestination(LocalPlayer player,BlockHitResult hit) {
+        if(!(target.item() instanceof BlockItem item))return this;
+        var original=new BlockPlaceContext(new UseOnContext(player,InteractionHand.MAIN_HAND,hit));
+        var actual=CreateRollerPlacement.context(item,original);BlockPos at=actual.getClickedPos();
+        if(!at.equals(target.pos())&&player.level().isLoaded(at)) {
+            BlockState expected=item.getBlock().getStateForPlacement(actual);
+            if(expected!=null)redirected(at,expected,player.level().getBlockState(at));
+        }
+        return this;
+    }
+    BuildPlacementConfirmation redirected(BlockPos at,BlockState expected,BlockState before) {
+        redirect=new Redirect(at.immutable(),expected,before);return this;
+    }
+    boolean redirectedConfirmed() {return redirectedConfirmed;}
+    BlockPos redirectedPosition() {return redirect==null?null:redirect.position();}
     private Verdict materialVerdict(LocalPlayerContext context, Verdict world) {
         if (materialBefore < 0) return world;
         materialObserved = PlayerInv.carriedCount(context.player().getInventory(), target.item());
+        return materialVerdict(world,materialObserved);
+    }
+    Verdict materialVerdict(Verdict world,int count) {
+        if(materialBefore<0)return world;
+        materialObserved=count;
         int consumed = materialBefore - materialObserved;
+        if(!strictMaterial) {
+            // 方块已确认时保留原生事实；目标未变但物品已减少时只等待这一单，不能换角度继续消耗同一类材料。
+            return world==Verdict.NOT_APPLIED&&consumed>0?Verdict.PENDING:world;
+        }
         if (world == Verdict.DIVERGED || consumed < 0 || consumed > 1 || world == Verdict.NOT_APPLIED && consumed != 0) return Verdict.DIVERGED;
         // 方块确认和库存同步可能先后到达；少了扣物证据就继续等同一个回执，不能再点一次或直接报成功。
         return world == Verdict.APPLIED && consumed == 0 ? Verdict.PENDING : world;
@@ -83,6 +117,13 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
 
     // 任一相关格没加载就继续等。全部仍与点击前相同时，服务器已确认则判为没生效，否则暂时无法判断。
     Verdict observe(Predicate<BlockPos> loaded, Function<BlockPos, BlockState> states, boolean acknowledged) {
+        if(redirect!=null) {
+            if(!loaded.test(redirect.position()))return Verdict.PENDING;
+            BlockState live=states.apply(redirect.position());
+            if(live.equals(redirect.before()))return acknowledged?Verdict.NOT_APPLIED:Verdict.PENDING;
+            if(live.is(redirect.predicted().getBlock())) {redirectedConfirmed=true;return Verdict.APPLIED;}
+            return Verdict.DIVERGED;
+        }
         if (!loaded.test(target.pos()) || generated.stream().anyMatch(effect -> !loaded.test(effect.pos())))
             return Verdict.PENDING;
         BlockState old = before.get(target.pos().asLong()), live = states.apply(target.pos());
@@ -125,8 +166,12 @@ final class BuildPlacementConfirmation implements NativeConfirmation {
         generated.forEach(value -> effects.add(effect(value.pos(), value.expected(), loaded, states)));
         var data = new LinkedHashMap<String, Object>();
         data.put("predicted_primary", predicted.toString()); data.put("effects", effects); data.put("requires_server_acknowledgement", true);
+        if(redirect!=null)data.put("native_destination",Map.of("rule","create_roller_item_raises_over_full_support",
+                "requested_position",target.pos().toShortString(),"position",redirect.position().toShortString(),
+                "before",redirect.before().toString(),"expected",redirect.predicted().toString(),
+                "observed",loaded.test(redirect.position())?states.apply(redirect.position()).toString():"unloaded","native_confirmed",redirectedConfirmed));
         if (materialBefore >= 0) data.put("material_confirmation", Map.of("expected_consumed", 1,
-                "carried_before", materialBefore, "last_observed_carried", materialObserved));
+                "carried_before", materialBefore, "last_observed_carried", materialObserved,"observed_consumed",materialBefore-materialObserved));
         return Map.copyOf(data);
     }
 

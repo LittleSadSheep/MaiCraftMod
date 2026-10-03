@@ -142,6 +142,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean preflightDone, providerRegistered, uncertain;
     private int preflightAt, queueAt, clearAt, gestureAt, useCount;
     private BuildPlacementConfirmation lastUseConfirmation;
+    private Map<String,Object> nativePlacementDeviation=Map.of();
     private int verifyAt, scaffoldAt;
     private List<CellPlan> queue = new ArrayList<>();
     private CellPlan cell;
@@ -1486,8 +1487,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (isTemporary(cell) && !scaffoldPermitted(cell.target().pos(), null))
             return failAfterEdgeReturn("The next support position changed before the native click", "support_step_site_changed");
         aimWaitReason = "placement_submitted";
+        var confirmation=confirmation(cell,frozen,placedPrimary).trackNativeDestination(player,hit);
         useReceipt = ctx.actions().useBlock(ctx, InteractionHand.MAIN_HAND, hit,
-                confirmation(cell, frozen, placedPrimary), USE_TIMEOUT);
+                confirmation, USE_TIMEOUT);
         phase = Phase.WAIT_USE; return TaskState.RUNNING;
     }
 
@@ -1617,6 +1619,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             return TaskState.FAILED;
         }
         useCount++;
+        if(lastUseConfirmation.redirectedConfirmed()) {
+            // 轮座被物品原生抬高也属于已经发生的放置；交付实际落点和全量差异，不补料、不重放、更不冒充原格已建好。
+            nativePlacementDeviation=lastUseConfirmation.diagnostics(player.level()::isLoaded,player.level()::getBlockState);
+            BlockPos actualPosition=lastUseConfirmation.redirectedPosition();
+            confirmedBlockChange(actualPosition);ConstructionOwnership.placed(player,actualPosition,r.getToolCallId());
+            if(placementAccess!=null&&placementAccess.edgeActive()) {phase=Phase.EDGE_RETURN;return TaskState.RUNNING;}
+            return TaskState.SUCCESS;
+        }
         confirmedBlockChange(cell.target().pos());
         ConstructionOwnership.placed(player, cell.target().pos(), r.getToolCallId());
         for (BuildPlacementGeometry.GeneratedCell effect : cell.generated()) {
@@ -1681,6 +1691,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (retryPlacementAccess(message)) return TaskState.RUNNING;
             failAt(cell.target().pos(), message, FailureType.NO_PATH, code, false); return TaskState.FAILED;
         }
+        if(!nativePlacementDeviation.isEmpty())return TaskState.SUCCESS;
         finishPlaced(); return TaskState.RUNNING;
     }
 
@@ -2368,7 +2379,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
     }
 
-    private NativeConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before, BlockState predicted) {
+    private BuildPlacementConfirmation confirmation(CellPlan plan, Map<Long, BlockState> before, BlockState predicted) {
         // 上下两半沿用本次原生预测，同时保留每格作者明确指定的摆放属性；只确认这次点击，不拆掉已正确放好的门。
         lastUseConfirmation = new BuildPlacementConfirmation(plan.target(), plan.generated(), before, predicted, targets).trackMaterial(player);
         return lastUseConfirmation;
@@ -2782,6 +2793,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 lastUseConfirmation.diagnostics(player.level()::isLoaded, player.level()::getBlockState));
         data.put("site_min", siteMin == null ? "-" : siteMin.toShortString());
         data.put("site_max", siteMax == null ? "-" : siteMax.toShortString());
+        if(!nativePlacementDeviation.isEmpty()) {
+            data.put("native_placement_completed",true);data.put("construction_complete",false);data.put("mechanical_retry_allowed",false);
+            data.put("native_placement_deviation",nativePlacementDeviation);
+            data.put("declared_structure_diff",BuildFailureEvidence.diff(r.targets,player.level()::isLoaded,player.level()::getBlockState));
+        }
 
         if (!required.isEmpty()) data.put("required_materials", itemCounts(required));
         Map<Item, Integer> outstanding = preflightDone ? currentShortfall() : missing;
@@ -2876,6 +2892,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     @Override
     protected String successMessage() {
+        if(!nativePlacementDeviation.isEmpty())return "原生放置已确认，实际落点偏离声明；已返回耗材、实际效果及完整设计差异";
         if (r.supplyAccessOnly()) return "reached the exterior ground for material supply; temporary supports remain tracked for construction";
         return "built and re-verified " + r.completed() + "/" + r.targets.size()
                 + " block(s) through first-person actions; placed " + r.placed()

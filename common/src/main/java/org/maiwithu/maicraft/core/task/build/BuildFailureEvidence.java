@@ -46,6 +46,16 @@ final class BuildFailureEvidence {
         return Map.of("block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), "attributes", attributes);
     }
 
+    /** 原生落点偏离后线性复查完整声明，保留匹配项和未匹配项；未声明格不被解释成要求清空。 */
+    static List<Map<String,Object>> diff(List<BuildTaskRecord.Target> targets,Predicate<BlockPos> loaded,Function<BlockPos,BlockState> read) {
+        return targets.stream().map(target->{
+            boolean known=loaded.test(target.pos());BlockState actual=known?read.apply(target.pos()):null;
+            return Map.<String,Object>of("position",List.of(target.pos().getX(),target.pos().getY(),target.pos().getZ()),
+                    "expected",state(target.desiredState()),"authored_properties",target.finalProperties()==null?target.exactProperties():target.finalProperties(),
+                    "actual",known?state(actual):"unknown_unloaded","matches",known&&target.matches(actual));
+        }).toList();
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static String name(Property property, Comparable value) { return property.getName(value); }
 }

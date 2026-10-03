@@ -10,6 +10,8 @@
 
 粘接必须明确 `adhesive=create:super_glue` 或 `simulated:honey_glue`，以及包含两端整格的 `first`、`second`。执行器会取胶、走位并核对真实射线；蜂蜜胶空气角点遵循原生 Alt 射线终点。胶层存在只证明粘接实体已观察，不能证明所有部件已经连接或载具能运行。原生范围、物料、加载和交互限制仍照常生效。
 
+Offroad 轮座使用 Create 压路机物品的放置规则：初始放置格下方是完整碰撞顶面时，原生上下文会向上移一格。出现此情况时，施工回执通过 `native_placement_deviation` 返回真正的落点和耗材，并给出完整 `declared_structure_diff`；原生动作完成、`goal_satisfied=false` 可以同时成立。结合地面和底盘设计修改声明后再施工，不重复提交未变的原格，也不把原生偏移当成凭空缺料。
+
 `assembler` 是物理组装器偏移，缺省为零。创建和拆回使用同一个原生切换入口，所以 `assemble` 只接受世界目标，`disassemble` 必须指定已有结构 UUID；已经提交的请求不会为了等待或恢复而机械重放。服务端需要提供只读 `physics.assembly` 回执。
 
 可用实际建造回执中的 `project_id` 继承该世界保存的全部明确目标，也可直接给 `declarations=[{position:{x,y,z},block_id,properties?:{...}}]`。粘接或拆回回执的 `design_id` 可用于后续世界施工和重新组装，单格补丁不会清掉其余声明。未声明空气不是清空约束。拆回方向按原生旋转变换，原生联动造成的设计差异仍如实保留。

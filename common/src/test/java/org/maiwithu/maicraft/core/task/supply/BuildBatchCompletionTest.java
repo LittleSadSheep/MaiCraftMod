@@ -18,6 +18,11 @@ public final class BuildBatchCompletionTest {
         check(SemanticBuildSupplyCompanionTask.batchCompleted(TaskState.SUCCESS, TaskResult.ok("verified and cleaned")), "clean receipt was rejected");
         check(SemanticBuildSupplyCompanionTask.batchCompleted(TaskState.SUCCESS,
                 TaskResult.ok("verified and cleaned", Map.of("remaining_scaffolds", List.of()))), "empty ledger was rejected");
+        // 子任务确认了上移放置不代表整份图纸已建好，供料父任务也不能为了原格为空而再索取同一材料。
+        var redirected=TaskResult.ok("原生放置已确认",Map.of("native_placement_completed",true,
+                "native_placement_deviation",Map.of("position","4,2,4"),"construction_complete",false));
+        check(SemanticBuildSupplyCompanionTask.nativePlacementDeviation(TaskState.SUCCESS,redirected),"偏移原生效果没有交回模型处理");
+        check(!SemanticBuildSupplyCompanionTask.batchCompleted(TaskState.SUCCESS,redirected),"偏移放置被计作完整施工批次");
         System.out.println("BuildBatchCompletionTest: passed");
     }
     private static void check(boolean value, String detail) { if (!value) throw new AssertionError(detail); }
