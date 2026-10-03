@@ -1,24 +1,47 @@
 name: CI
 
-# 开发分支、集成分支和 PR 都运行完整回归，防止只编译成功却漏掉角色行为测试。
+# 开发成果合入并推送 main 后才递增版本、运行完整回归及打包；本地快进合并也走同一入口。
 on:
   push:
-    branches: [dev, main]
-  pull_request:
-    branches: [dev, main]
-  workflow_dispatch:
+    branches: [main]
 
 permissions:
   contents: read
 
-# 同一分支或 PR 有新提交时取消旧构建，让结果对应最新代码。
+# main 有新的集成时取消旧构建；版本回写另用提交编号校验，防止覆盖并发更新。
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  version:
+    name: Increment patch version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      ready: ${{ steps.version.outputs.ready }}
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - name: Checkout integration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify version handling
+        run: node --test .github/scripts/bump-version.test.cjs
+      - name: Write signed version commit
+        id: version
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          # 使用 GITHUB_TOKEN 回写不会递归触发新的 push 工作流；当前构建显式检出回写后的提交。
+          script: await require('./.github/scripts/bump-version.cjs')({ github, context, core })
+
   build:
     name: Build and regressions (${{ matrix.os }})
+    needs: version
+    if: needs.version.outputs.ready == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -33,6 +56,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.version.outputs.commit }}
           persist-credentials: false
 
       - name: Set up Java 21
@@ -45,8 +69,8 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
-          # PR 只读取缓存；两个常用分支可保存依赖，减少 Minecraft 映射的重复下载。
-          cache-read-only: ${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main') }}
+          # 构建只来自已集成的 main，保存依赖供后续集成复用。
+          cache-read-only: false
 
       - name: Build both loaders and run all regressions
         # build 包含 common:check 中的独立 main 回归；串行执行避免大型建筑测试与编译争抢内存。
@@ -59,7 +83,7 @@ jobs:
       - name: Upload installable mods
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: maicraft-${{ runner.os }}-${{ github.sha }}
+          name: maicraft-${{ needs.version.outputs.version }}-${{ runner.os }}-${{ needs.version.outputs.commit }}
           # 只交付两个加载器的安装包；公共模块、源码和开发包不能直接放进玩家的 mods 目录。
           path: |
             fabric/build/libs/*.jar

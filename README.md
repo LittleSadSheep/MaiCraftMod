@@ -4,7 +4,7 @@
 ![Java 21](https://img.shields.io/badge/Java-21-e76f00)
 ![Fabric & NeoForge](https://img.shields.io/badge/Loader-Fabric%20%7C%20NeoForge-6f4cbb)
 ![License GPL-3.0-only](https://img.shields.io/badge/License-GPL--3.0--only-blue)
-[![CI](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml)
+[![CI](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/codeql.yml)
 
 > 让支持 MCP 的 AI 代理在 Minecraft 中感知环境、规划目标，并通过真实的第一人称操作完成任务。
@@ -15,7 +15,7 @@ MaiCraft 是一个客户端必装、服务端可选的 Minecraft Mod。客户端
 MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需准备一个支持 Streamable HTTP MCP 的 AI 客户端和可用模型。服务端未安装 MaiCraft 时使用客户端模式；服务端安装后，按协商到的能力启用原生机器观察、配置、供料和生产验证。
 
 > [!WARNING]
-> MaiCraft 目前处于 `0.1.0` 预览阶段，尚未发布稳定构建，也没有完成覆盖模组整合包的实机验收。请只在备份过的测试世界中使用，不要把它当作无人值守的生产级代理。
+> MaiCraft 目前处于预览阶段，尚未发布稳定构建，也没有完成覆盖模组整合包的实机验收。请只在备份过的测试世界中使用，不要把它当作无人值守的生产级代理。
 
 ## 主要能力
 
