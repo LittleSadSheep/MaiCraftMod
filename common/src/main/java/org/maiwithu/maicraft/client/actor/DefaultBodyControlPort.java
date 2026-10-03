@@ -33,6 +33,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private long interactionLookLease = Long.MIN_VALUE;
     private Movement movement = Movement.STOPPED;
     private Steering steering;
+    private boolean navigationRelativeMovement;
     private Float targetYaw;
     private Float targetPitch;
     private float cameraYaw;
@@ -67,7 +68,14 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         requireLease(leaseTickRevision);
         this.movement = movement;
         this.steering = null;
+        this.navigationRelativeMovement = false;
         this.movementLease = leaseTickRevision;
+    }
+
+    @Override public void applyNavigationMovement(Movement movement, long leaseTickRevision) {
+        // 行走方向由 Baritone 的物理旋转桥负责；这里保持其前进、横移和疾跑语义，不随补光镜头二次变换。
+        applyMovement(movement, leaseTickRevision);
+        navigationRelativeMovement = true;
     }
 
     @Override
@@ -96,7 +104,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         requireLease(leaseTickRevision);
         if (!auxiliaryLookAvailable(leaseTickRevision)) return false;
         // 跑动中低头插灯只改变视线；已有路线转向器继续工作，普通移动则按原世界方向补偿横移。
-        if (movementLease == leaseTickRevision && steering == null) {
+        if (movementLease == leaseTickRevision && steering == null && !navigationRelativeMovement) {
             Movement original = movement;
             float oldYaw = controlledPlayer.getYRot();
             steering = nextYaw -> preserveHeading(original, oldYaw, nextYaw);

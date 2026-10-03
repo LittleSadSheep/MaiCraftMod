@@ -26,6 +26,11 @@ public interface BodyControlPort {
     // 只接受当前游戏刻的指令，旧任务保存的编号不能在以后继续使用。
     void applyMovement(Movement movement, long leaseTickRevision);
 
+    /** Baritone 的按键已使用路线朝向；移动物理会自行投影，辅助转头不能再旋转这一组按键。 */
+    default void applyNavigationMovement(Movement movement, long leaseTickRevision) {
+        applyMovement(movement, leaseTickRevision);
+    }
+
     /** 镜头方向请求只在当前游戏刻有效，执行时根据玩家实际朝向重新计算转动。 */
     @FunctionalInterface
     interface Steering { Movement atYaw(float yaw); }

@@ -22,6 +22,7 @@ public final class InputDriver {
     private static boolean jumping;
     private static boolean sneaking;
     private static boolean sprinting;
+    private static boolean navigationRelative;
 
     private InputDriver() {
     }
@@ -114,6 +115,18 @@ public final class InputDriver {
             boolean requestedJump,
             boolean requestedSneak,
             boolean requestedSprint) {
+        applyMovement(player, requestedForward, requestedStrafe, requestedJump, requestedSneak, requestedSprint, false);
+    }
+
+    /** 已由路线朝向定义的按键一路保留这一依据；随后追加跳跃或潜行也不能误改为镜头相对移动。 */
+    public static void applyNavigationMovement(LocalPlayer player, float forward, float strafe,
+                                               boolean jump, boolean sneak, boolean sprint) {
+        applyMovement(player, forward, strafe, jump, sneak, sprint, true);
+    }
+
+    private static void applyMovement(LocalPlayer player, float requestedForward, float requestedStrafe,
+                                      boolean requestedJump, boolean requestedSneak, boolean requestedSprint,
+                                      boolean relativeToNavigation) {
         LocalPlayerContext context = context(player);
         if (context == null) return;
         resetFor(context);
@@ -122,6 +135,7 @@ public final class InputDriver {
         jumping = requestedJump;
         sneaking = requestedSneak;
         sprinting = permitsSprint(requestedSprint, requestedSneak, player.isInWater());
+        navigationRelative = relativeToNavigation;
         flush(context);
     }
 
@@ -155,6 +169,7 @@ public final class InputDriver {
     private static void resetFor(LocalPlayerContext context) {
         if (commandTick == context.tickRevision()) return;
         commandTick = context.tickRevision();
+        navigationRelative = false;
         forward = 0.0f;
         strafe = 0.0f;
         jumping = false;
@@ -164,8 +179,8 @@ public final class InputDriver {
 
     // 把合并后的本刻按键一次交给身体控制器，由它在合适的更新时机写入玩家。
     private static void flush(LocalPlayerContext context) {
-        context.body().applyMovement(
-                new BodyControlPort.Movement(forward, strafe, jumping, sneaking, sprinting),
-                context.tickRevision());
+        var movement = new BodyControlPort.Movement(forward, strafe, jumping, sneaking, sprinting);
+        if (navigationRelative) context.body().applyNavigationMovement(movement, context.tickRevision());
+        else context.body().applyMovement(movement, context.tickRevision());
     }
 }

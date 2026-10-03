@@ -726,7 +726,9 @@ public final class EmbeddedBaritoneRuntime {
                     .movement(player,landing,yaw,crouch),player.getYRot(),tickingContext.tickRevision());
             return;
         }
-        InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
+        // 普通路线的运动朝向由 Baritone 注入物理计算；辅助插灯只能转头，不能再把前进补偿成横移。
+        if (landingMovement == null) InputDriver.applyNavigationMovement(player, forward, strafe, jump, sneak, sprint);
+        else InputDriver.applyMovement(player, forward, strafe, jump, sneak, sprint);
     }
 
     /** 由适配后的 LookBehavior 调用；DefaultBodyControlPort 仍是唯一的镜头控制者。
