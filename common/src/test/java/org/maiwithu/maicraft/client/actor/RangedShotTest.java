@@ -1,16 +1,26 @@
 package org.maiwithu.maicraft.client.actor;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.act.Ballistics;
+import org.maiwithu.maicraft.core.act.Interaction;
+import org.maiwithu.maicraft.core.combat.Loadout;
+import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
+import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
+import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import static org.maiwithu.maicraft.client.actor.CombatThreatsTest.check;
 
@@ -21,11 +31,14 @@ public final class RangedShotTest {
     private static final Class<?> SHOT = type();
 
     public static void main(String[] args) throws Exception {
+        bowSurvivesNativeReleaseCheck();
+        waitingForRangeKeepsNativeDraw();
+        foreignUseIsNotBorrowedOrCancelled();
         chargedWaitsAndFiresOnce();
         loadsBeforeFiring();
         cancelBow(false); cancelBow(true);
         abortAtSpentMutationBoundary();
-        System.out.println("RangedShotTest: charged aim, loading, draw timeout, cancellation and spent-budget abort passed");
+        System.out.println("RangedShotTest: 原生持用续订、蓄力时钟、射程等待、装填发射和取消通过");
     }
 
     private static void chargedWaitsAndFiresOnce() throws Exception {
@@ -33,9 +46,9 @@ public final class RangedShotTest {
             var bow = charged(); f.h.inventory.setItem(0, bow);
             f.h.mode.itemUse = p -> bow.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY);
             var shot = shot(f.h.player, true);
-            for (int i = 0; i < 5; i++) { tick(shot, MISALIGNED); f.h.nextTick(); }
+            for (int i = 0; i < 5; i++) { tick(shot, MISALIGNED); nativeNext(f); }
             check(f.h.mode.items == 0, "a loaded crossbow must not use/fire before alignment");
-            for (int i = 0; i < 4 && !tick(shot, ALIGNED); i++) f.h.nextTick();
+            for (int i = 0; i < 4 && !tick(shot, ALIGNED); i++) nativeNext(f);
             check(fired(shot) && f.h.mode.items == 1, "alignment produces one confirmed shot, with no extra load click");
         }
     }
@@ -47,10 +60,12 @@ public final class RangedShotTest {
                 if (CrossbowItem.isCharged(bow)) bow.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY);
                 else p.startUsingItem(InteractionHand.MAIN_HAND);
             };
-            f.h.mode.itemRelease = p -> bow.set(DataComponents.CHARGED_PROJECTILES,
-                    ChargedProjectiles.of(new ItemStack(Items.ARROW)));
+            f.h.mode.itemRelease = p -> {
+                check(p.getTicksUsingItem() >= CrossbowItem.getChargeDuration(bow, p), "不能把提前松开的弩伪装成已装填");
+                bow.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(new ItemStack(Items.ARROW)));
+            };
             var shot = shot(f.h.player, true);
-            for (int i = 0; i < 100 && !tick(shot, ALIGNED); i++) f.h.nextTick();
+            for (int i = 0; i < 100 && !tick(shot, ALIGNED); i++) nativeNext(f);
             check(fired(shot) && f.h.mode.items == 2 && f.h.mode.releases == 1,
                     "an empty crossbow must load, release loading, then fire exactly once");
         }
@@ -62,9 +77,9 @@ public final class RangedShotTest {
             f.h.mode.itemUse = p -> p.startUsingItem(InteractionHand.MAIN_HAND);
             var shot = shot(f.h.player, false);
             if (explicit) {
-                tick(shot, MISALIGNED); f.h.nextTick(); call(shot, "abort");
+                tick(shot, MISALIGNED); nativeNext(f); call(shot, "abort");
             } else {
-                for (int i = 0; i < 60 && !tick(shot, MISALIGNED); i++) f.h.nextTick();
+                for (int i = 0; i < 60 && !tick(shot, MISALIGNED); i++) nativeNext(f);
             }
             check(!fired(shot) && f.h.mode.releases == 0 && f.h.mode.items == 1,
                     "timeout or interruption must cancel without a release packet or firing another use");
@@ -103,7 +118,78 @@ public final class RangedShotTest {
         result.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.of(new ItemStack(Items.ARROW)));
         return result;
     }
+
+    private static void bowSurvivesNativeReleaseCheck() throws Exception {
+        // 模拟原版每刻的松手检查并推进真正的持用倒计时；只证明蓄力和释放请求，不伪造箭实体或目标伤害。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.inventory.setItem(0, new ItemStack(Items.BOW));
+            f.h.mode.itemUse = p -> p.startUsingItem(InteractionHand.MAIN_HAND);
+            int[] releasedAfter = {-1}; f.h.mode.itemRelease = p -> releasedAfter[0] = p.getTicksUsingItem();
+            var shot = shot(f.h.player, false);
+            for (int i = 0; i < 60 && !tick(shot, ALIGNED); i++) nativeNext(f);
+            check(fired(shot) && releasedAfter[0] >= 15 && f.h.mode.items == 1 && f.h.mode.releases == 1,
+                    "拉弓必须通过原版松手检查，达到蓄力时间后只提交一次释放");
+            check(!ItemUseInputLease.project(f.h.h.minecraft, false), "释放后不再保持使用键或自动开始下一箭");
+        }
+    }
+
+    private static void nativeNext(CombatThreatsTest.Fixture f) throws Exception {
+        // 与 handleKeybinds 保持同一松手条件；旧测试仅保留 isUsingItem=true，会掩盖真实客户端的提前释放。
+        if (f.h.player.isUsingItem() && !ItemUseInputLease.project(f.h.h.minecraft, false)) f.h.mode.releaseUsingItem(f.h.player);
+        if (f.h.player.isUsingItem()) {
+            var usingTick = LivingEntity.class.getDeclaredMethod("updateUsingItem", ItemStack.class); usingTick.setAccessible(true);
+            usingTick.invoke(f.h.player, f.h.player.getUseItem());
+        }
+        f.h.nextTick(); f.h.h.actions.advance(f.h.h.context);
+    }
+
+    private static void waitingForRangeKeepsNativeDraw() throws Exception {
+        // 等待射程和操作名额时执行真实任务的早退分支，持用仍由原版倒计时推进，不能偷偷重启右键。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.inventory.setItem(0, new ItemStack(Items.BOW)); f.h.player.getAbilities().instabuild = true;
+            f.h.mode.itemUse = p -> p.startUsingItem(InteractionHand.MAIN_HAND);
+            var foe = f.mob(11, 20);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("ranged-hold", 1000, List.of(11), false));
+            task.start(f.h.player);
+            var shot = shot(f.h.player, false); tick(shot, MISALIGNED);
+            ActorControlTestHarness.field(AttackCompanionTask.class, "shot").set(task, shot);
+            ActorControlTestHarness.field(AttackCompanionTask.class, "target").set(task, foe);
+            var shoot = AttackCompanionTask.class.getDeclaredMethod("shootAt", Loadout.class); shoot.setAccessible(true);
+            for (int i = 0; i < 18; i++) {
+                nativeNext(f);
+                if (i == 2) f.h.h.context.claimMutation();
+                shoot.invoke(task, Loadout.forTarget(f.h.player, foe));
+            }
+            check(f.h.player.isUsingItem() && f.h.mode.items == 1 && f.h.mode.releases == 0, "早退分支仍保持原来那一次拉弓");
+            var velocity = SHOT.getDeclaredMethod("projectileVelocity", double.class, double.class); velocity.setAccessible(true);
+            double actual = (Double) velocity.invoke(shot, 3.0, 3.15);
+            check(Math.abs(actual - BowItem.getPowerForTime(f.h.player.getTicksUsingItem()) * 3.0) < 1e-5,
+                    "弹道速度使用原生蓄力读数，不使用被射程等待冻结的调用次数");
+            f.h.nextTick(); task.result(TaskState.CANCELLED);
+            check(!ItemUseInputLease.project(f.h.h.minecraft, false), "任务结束后撤销自己的持用投影");
+        }
+    }
+
+    private static void foreignUseIsNotBorrowedOrCancelled() throws Exception {
+        // 后来的持用有自己的原生回执和按键租约；旧弓流程不能把它当成继续蓄力，更不能替它松手。
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.inventory.setItem(0, new ItemStack(Items.BOW));
+            f.h.mode.itemUse = p -> p.startUsingItem(InteractionHand.MAIN_HAND);
+            var shot = shot(f.h.player, false); tick(shot, MISALIGNED); nativeNext(f); tick(shot, MISALIGNED);
+            f.h.player.stopUsingItem(); ItemUseInputLease.release(shot); f.h.nextTick();
+            f.h.inventory.setItem(0, new ItemStack(Items.BREAD));
+            var other = Interaction.useInAir(f.h.player, InteractionHand.MAIN_HAND, Interaction.Timing.hold()); other.tick();
+            check(tick(shot, MISALIGNED), "持用所有者改变后原射击结束"); call(shot, "abort");
+            check(!fired(shot) && f.h.player.isUsingItem() && f.h.mode.items == 2 && f.h.mode.releases == 0
+                    && ItemUseInputLease.project(f.h.h.minecraft, false), "不重发使用、不取消后来者、不冒称发射成功");
+            var evidence = (Map<?, ?>) call(shot, "evidence");
+            check("held_use_ownership_changed".equals(evidence.get("failure")), "保留真实持用失败阶段供实机检查");
+            nativeNext(f); other.stop();
+        }
+    }
     private static Object shot(LocalPlayer player, boolean crossbow) throws Exception {
+        // 无构造器夹具补齐真实客户端标志，避免原生弩持用刻误走服务端音效分支；倒计时仍由原版推进。
+        ActorControlTestHarness.field(Level.class, "isClientSide").setBoolean(player.level(), true);
         var constructor = SHOT.getDeclaredConstructor(LocalPlayer.class, boolean.class);
         constructor.setAccessible(true); return constructor.newInstance(player, crossbow);
     }
