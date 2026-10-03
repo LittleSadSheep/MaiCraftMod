@@ -63,14 +63,18 @@ public record PhysicsBody(UUID structureId, String dimension, long tick, double 
     /** 作用点随船体移动；气球浮力保持世界方向，螺旋桨推力随船体转动，纯力偶单独保留。 */
     public record Load(String id, String group, PhysicsVector point, PhysicsVector force,
                        PhysicsVector torque, Frame frame, boolean propulsion, double responseSeconds, double airflow,
-                       PhysicsAerodynamics aerodynamics) {
+                       PhysicsAerodynamics aerodynamics, PhysicsWheel wheel) {
         public Load(String id,String group,PhysicsVector point,PhysicsVector force,PhysicsVector torque,
                     Frame frame,boolean propulsion,double responseSeconds) {
-            this(id,group,point,force,torque,frame,propulsion,responseSeconds,0,null);
+            this(id,group,point,force,torque,frame,propulsion,responseSeconds,0,null,null);
         }
         public Load(String id,String group,PhysicsVector point,PhysicsVector force,PhysicsVector torque,
                     Frame frame,boolean propulsion,double responseSeconds,double airflow) {
-            this(id,group,point,force,torque,frame,propulsion,responseSeconds,airflow,null);
+            this(id,group,point,force,torque,frame,propulsion,responseSeconds,airflow,null,null);
+        }
+        public Load(String id,String group,PhysicsVector point,PhysicsVector force,PhysicsVector torque,
+                    Frame frame,boolean propulsion,double responseSeconds,double airflow,PhysicsAerodynamics aerodynamics) {
+            this(id,group,point,force,torque,frame,propulsion,responseSeconds,airflow,aerodynamics,null);
         }
         public Load {
             if (id == null || id.isBlank() || group == null || point == null || force == null || torque == null
@@ -79,6 +83,9 @@ public record PhysicsBody(UUID structureId, String dimension, long tick, double 
             // 帆面随结构朝向转动，停桨后仍产生气动载荷，不能把它误标为随开关消失的推进器。
             if(aerodynamics!=null&&(frame!=Frame.BODY||propulsion))
                 throw new IllegalArgumentException("升力面必须使用船体坐标且不能归为推进开关");
+            // 轮胎的悬挂支撑与驱动力属于同一原生执行器，停动力不能把承重力一起关掉。
+            if(wheel!=null&&(frame!=Frame.BODY||propulsion||aerodynamics!=null))
+                throw new IllegalArgumentException("车轮载荷必须单独使用船体坐标并保留停机支撑");
         }
     }
 

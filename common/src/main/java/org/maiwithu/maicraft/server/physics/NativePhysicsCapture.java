@@ -41,6 +41,7 @@ public final class NativePhysicsCapture {
     public static String error(Object ship) {
         Lease lease = WATCHES.get(ship); return lease == null ? null : lease.error;
     }
+    public static boolean observing(Object ship) {Lease lease=WATCHES.get(ship);return lease!=null&&lease.collecting;}
     static double timeStep(Object ship) {
         // 帆面原生算法在升力计算中使用子步冲量；预测必须复用实际采样时长，不能假定每刻只有一次物理更新。
         Lease lease=WATCHES.get(ship);
@@ -53,6 +54,7 @@ public final class NativePhysicsCapture {
         if (level(ship).getGameTime() > lease.until) { WATCHES.remove(ship); return; }
         try {
             lease.collecting=true;lease.directObserved=false;lease.directForce=PhysicsVector.ZERO;lease.directTorque=PhysicsVector.ZERO;
+            NativeWheelCapture.beginStep(ship);
             lease.previous = NativeApi.truth(NativeApi.call(ship, null, "isTrackingIndividualQueuedForces"));
             NativeApi.call(ship, null, "enableIndividualQueuedForcesTracking", true);
         } catch (RuntimeException | LinkageError missing) {
@@ -146,6 +148,12 @@ public final class NativePhysicsCapture {
             }
             if (group.endsWith(":drag") || group.endsWith(":lift")) unknowns.add(group + " 使用采样时的气动载荷，速度变化后需要重新观察");
         }
+        // Offroad 先批量施力，再进入此处；把已确认的轮胎点力从未归属总量中扣除一次，避免重复计算承重。
+        var wheels=NativeWheelCapture.read(ship,origin,dt);unknowns.addAll(wheels.unknowns());
+        for(var wheel:wheels.loads()) {
+            loads.add(wheel);recordedForce=recordedForce.add(wheel.force());
+            recordedTorque=recordedTorque.add(wheel.point().subtract(center).cross(wheel.force()));
+        }
         if(lease.directObserved) {
             // 已直接提交的冲量与仍在队列里的冲量合并一次，再扣除已列出的点力，防止重复计数。
             PhysicsVector force=lease.directForce.scale(1/dt).add(queuedForce).subtract(recordedForce);
@@ -154,7 +162,7 @@ public final class NativePhysicsCapture {
                 loads.add(new PhysicsBody.Load("unattributed_impulse","sable:unattributed_impulse",center,force,torque,PhysicsBody.Frame.BODY,false,0));
                 unknowns.add("unmodeled:存在未归属到具体设备的直接冲量或力偶，实测总量已保留，未来工况来源仍需核验");
             }
-        } else unknowns.add("直接刚体冲量未被本次采样钩子确认；只列出原生分组记录及重力");
+        } else unknowns.add("直接刚体冲量总计未被本次采样钩子确认；只列出已确认的原生分组、执行器点力及重力");
         unknowns.add("外部直接修改速度或位置的操作不属于当前受力积分记录");
         return new PhysicsBody((UUID) NativeApi.call(ship, null, "getUniqueId"), level(ship).dimension().location().toString(),
                 level(ship).getGameTime(), ((Number) NativeApi.call(mass, null, "getMass")).doubleValue(), center,
