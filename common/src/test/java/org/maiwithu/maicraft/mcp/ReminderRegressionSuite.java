@@ -16,11 +16,16 @@ import org.maiwithu.maicraft.client.runtime.InventorySpaceReminderTest;
 import org.maiwithu.maicraft.client.runtime.LowLightCombatReminderTest;
 import org.maiwithu.maicraft.client.runtime.SleepReminderTest;
 import org.maiwithu.maicraft.intent.ReminderBoardTest;
+import org.maiwithu.maicraft.intent.ReminderChurnTest;
 
 /** 独立验证生活提醒的证据、解除和多条投递；新增规则不必先跑与提醒无关的工具目录预算检查。 */
 public final class ReminderRegressionSuite {
     public static void main(String[] args) throws Exception {
         ReminderBoardTest.main(args);
+        // 实际水面进出造成的短时状态翻转，不应淹没任务决策或反复唤醒模型。
+        ReminderChurnTest.main(args);
+        // 快照即时可读，长轮询只由应发布的通知唤醒，避免短时抖动把模型拉进空转。
+        ReminderAttentionWaitTest.main(args);
         LowLightCombatReminderTest.main(args);
         FoodSupplyReminderTest.main(args);
         CombatEquipmentReminderTest.main(args);
