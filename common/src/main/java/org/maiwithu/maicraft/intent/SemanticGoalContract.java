@@ -134,6 +134,17 @@ final class SemanticGoalContract {
                                 + "Natural-language outcomes do not generate geometry.");
             }
         }
+        // place_block 在计划期就校验合成后的 build 参数包；模型看到的那份单格蓝图就是执行期提交的。
+        // build 专属参数由上方的通用未知参数白名单先行拒绝，这里不重复设卡。
+        if (GeneralAbilityAdapter.PLACE_BLOCK.equals(ability)) {
+            if (!goal.parameters().has("block_id") || !goal.parameters().get("block_id").isJsonPrimitive())
+                throw violation("invalid_place_block_contract", path + ".parameters", ability,
+                        "place_block needs a namespaced block_id");
+            try { BuildingSceneContract.validate(GeneralAbilityAdapter.synthesizePlaceBuild(goal)); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_place_block_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+        }
         if ("maicraft:travel".equals(ability)) {
             // 移动额外检查坐标与到达误差；这部分会读值，不只是检查参数名字。
             try {

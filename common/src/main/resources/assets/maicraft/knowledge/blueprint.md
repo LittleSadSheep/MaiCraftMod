@@ -6,6 +6,8 @@
 
 旧的模板建造已移除，不再接受 `purpose`、`size`、`style`、`features`、`terrain_fit` 或 `preferred_materials`。房屋尺寸、门窗、屋顶、功能分区与材质都应由 LLM 编入模型或蓝图；Mod 不会自动选址、调整尺寸或替换材质。省略 `operation` 时，`maicraft:build` 默认施工，`maicraft:design_build` 默认预览，仍须提供设计来源。
 
+放置单个方块不需要施工单：在精确坐标放下一个随身方块（含方块状态要求）提交 `maicraft:place_block` 即可，Mod 把它合成为单格蓝图并走同一条施工链路，缺料如实失败不会自动取料。多格设计与布局编排仍用 `maicraft:build`。展示框、盔甲架、画等摆设实体不是方块，本路径与 LLM 蓝图都不安装实体；它们目前只随导入的结构文件落地。
+
 接口沿用 Blender 的 `MESH` 对象、中心 `location`、`dimensions`、弧度 `rotation_euler`、具名材质和 `BOOLEAN/DIFFERENCE` 修改器。它实现可确定编译的声明式对象子集，不执行 BlenderMCP 的任意 Python / `bpy` 代码，也不宣称兼容任意网格。
 
 以下在一块 7×4 的橡木墙板上开窗，放入独立玻璃对象。`WindowCut` 是修改器引用的切割体，不会作为实体建造。开孔只减去指定墙体，不会误删玻璃等其他对象。

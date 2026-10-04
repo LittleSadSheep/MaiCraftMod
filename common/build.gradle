@@ -155,6 +155,12 @@ def regressionSuites = [
         heap: '512m', directory: 'snapshot-regression', timeoutSeconds: 45,
         purpose: '验证场地变化与失败回执中的最新快照'
     ],
+    // 单格放置原语独立核对翻译纯度与拒绝路径，避免混入 build 参数或绕过施工预检。
+    placeBlockRegression: [
+        entry: 'org.maiwithu.maicraft.intent.PlaceBlockRegressionSuite',
+        heap: '512m', directory: 'place-block-regression', timeoutSeconds: 60,
+        purpose: '验证 place_block 合成单格蓝图 build 并继承施工预检与验证'
+    ],
     buildingBudgetRegression: [
         entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
         heap: '768m', directory: 'building-budget-regression', timeoutSeconds: 120,

@@ -70,10 +70,11 @@ public final class GeneralAbilityAdapter {
     public static final String MANAGE_CONTAINER = "maicraft:manage_container";
     public static final String FIND_ENTITY = "maicraft:find_entity";
     public static final String FIND_BLOCK = "maicraft:find_block";
+    public static final String PLACE_BLOCK = "maicraft:place_block";
 
     private static final Set<String> ABILITIES = Set.of(
             COMBAT, INTERACT, FOLLOW, CONSUME, EQUIP, FISH, DROP, CONTAINER, MANAGE_CONTAINER,
-            FIND_ENTITY, FIND_BLOCK, USE_ITEM, HARVEST_BLOCK, COLLECT);
+            FIND_ENTITY, FIND_BLOCK, USE_ITEM, HARVEST_BLOCK, COLLECT, PLACE_BLOCK);
     private static final Set<String> EXECUTION_FIELDS = Set.of(
             "entity_id", "entity_ids", "entity_uuid", "x", "y", "z", "button",
             "hold_ticks", "slot_index", "source_slot", "destination_slot", "from_slot",
@@ -110,6 +111,8 @@ public final class GeneralAbilityAdapter {
             case INTERACT -> interact(goal, player, runtime, false);
             case USE_ITEM -> useItem(goal, player);
             case HARVEST_BLOCK -> harvestBlock(goal, player);
+            // 单格放置走同一条施工链路；合成规则见 synthesizePlaceBuild，执行层不出现第二条放置路径。
+            case PLACE_BLOCK -> placeBlock(goal, player, runtime);
             case FOLLOW -> follow(goal, player);
             case CONSUME -> consume(goal, player);
             case EQUIP -> equip(goal, player);
@@ -207,6 +210,66 @@ public final class GeneralAbilityAdapter {
         return new IntentAction.Native(new MineBlockTaskRecord("semantic-harvest-" + UUID.randomUUID(),
                 player.level().getGameTime() + 1200, Set.of(state.getBlock()), 1, blockId.toString(),
                 Set.of(BuiltInRegistries.ITEM.get(outputId))).onlyAt(at, state));
+    }
+
+    // 单格放置只有一次翻译：把意图合成 1 格蓝图交给施工链路，勘察、站位、落定与验证全部继承。
+    private static IntentAction placeBlock(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        if (!exactBlockTarget(goal) || !sameDimension(goal.target().position(), player))
+            return exactBlockUnavailable(goal, "Place needs exact coordinates in the current dimension.", null);
+        String conflict = placeBuildConflict(goal);
+        if (conflict != null)
+            return decision(goal, "`" + conflict + "` belongs to maicraft:build; place_block is exactly one cell.",
+                    List.of(option("replace_goal", "Use maicraft:build for multi-cell designs."),
+                            option("retry", "Retry with block_id, optional properties and replace_existing only.")), null);
+        JsonObject p = goal.parameters();
+        if (p.has("properties") && !p.get("properties").isJsonObject())
+            return decision(goal, "properties must be an object of block-state requirements.",
+                    List.of(option("retry", "Provide properties as an object, for example {facing:'north'}."),
+                            option("cancel", "Cancel the placement.")), null);
+        ResourceLocation blockId = ResourceLocation.tryParse(Objects.toString(string(p, "block_id"), ""));
+        if (blockId == null || !BuiltInRegistries.BLOCK.containsKey(blockId))
+            return exactBlockUnavailable(goal, placeTargetReason(blockId), null);
+        BlockPos at = new BlockPos(goal.target().position().x(), goal.target().position().y(), goal.target().position().z());
+        if (!player.level().isLoaded(at))
+            return exactBlockUnavailable(goal, "The exact place target is not loaded.", targetFacts(player, at, blockId));
+        return BuildingSceneAdapter.adapt(synthesizePlaceBuild(goal), player, runtime);
+    }
+
+    /** build 专属参数混进单格放置时指回施工能力；契约校验与适配共用这一份清单，避免两处口径漂移。 */
+    static String placeBuildConflict(Goal goal) {
+        for (String buildOnly : List.of("scene", "scene_id", "project_id", "operation", "blueprint", "edits"))
+            if (goal.parameters().has(buildOnly)) return buildOnly;
+        return null;
+    }
+
+    /** place_block 的唯一重写事实源：计划期校验与执行期提交同一份合成参数，单格意图落地就是一次普通单格施工。 */
+    static Goal synthesizePlaceBuild(Goal goal) {
+        JsonObject p = goal.parameters();
+        JsonArray offset = new JsonArray();
+        offset.add(0); offset.add(0); offset.add(0);
+        JsonObject cell = new JsonObject();
+        cell.addProperty("block_id", string(p, "block_id"));
+        cell.add("offset", offset);
+        if (p.has("properties")) cell.add("properties", p.getAsJsonObject("properties"));
+        JsonArray blocks = new JsonArray();
+        blocks.add(cell);
+        JsonObject blueprint = new JsonObject();
+        blueprint.addProperty("schema_version", 1);
+        blueprint.add("blocks", blocks);
+        JsonObject synthesized = new JsonObject();
+        synthesized.addProperty("operation", "build");
+        synthesized.add("blueprint", blueprint);
+        // 原子放置只消费随身材料；缺料如实失败并点名物品，自动取料是 acquire_items 的职责。
+        synthesized.addProperty("material_policy", "inventory_only");
+        if (p.has("replace_existing")) synthesized.add("replace_existing", p.get("replace_existing"));
+        return goal.withParameters(synthesized);
+    }
+
+    private static String placeTargetReason(ResourceLocation blockId) {
+        if (blockId != null && BuiltInRegistries.ENTITY_TYPE.containsKey(blockId))
+            return blockId + " is a display entity; place_block sets blocks only, and LLM-authored build "
+                    + "blueprints do not install entities (entity decorations arrive with imported structure files).";
+        return "Place needs an installed block_id to set down.";
     }
 
     private static IntentAction manageContainer(Goal goal, LocalPlayer player) {

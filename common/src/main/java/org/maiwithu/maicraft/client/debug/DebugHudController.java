@@ -16,6 +16,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import org.lwjgl.glfw.GLFW;
 import org.maiwithu.maicraft.client.preview.PreviewConfig;
 import org.maiwithu.maicraft.client.preview.PreviewController;
@@ -125,6 +126,8 @@ public final class DebugHudController {
                 && minecraft.gameMode != null && minecraft.getConnection() != null;
         rows.add(new Row("身体", (inWorld ? "就绪" : "等待世界") + " · " + controlState(inWorld),
                 inWorld ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
+
+        appendServerPerfRow(rows, minecraft);
 
         // 施工任务停在半途的最常见原因是预览还在等确认；蓝图行让这个等待可见。
         PreviewSession preview = PreviewController.current();
@@ -343,6 +346,32 @@ public final class DebugHudController {
         } catch (RuntimeException ignored) {
             return "切换中";
         }
+    }
+
+    // 性能行回答游戏服务端跑得多快：MSPT 是服务端最近一百刻的单刻平均耗时，TPS 按目标
+    // 单刻预算折算——没超预算就是满速，超了按 1000÷MSPT 等比掉速。可测量的只有集成
+    // 服务端（单人/LAN 局）；连外部服务器时客户端无从采样，缺口如实可见不装数。
+    private static void appendServerPerfRow(List<Row> rows, Minecraft minecraft) {
+        MinecraftServer server = minecraft.getSingleplayerServer();
+        if (server == null) {
+            rows.add(new Row("性能", "外部服务端 · 无法测量", ChatFormatting.GRAY));
+            return;
+        }
+        double targetMspt = server.tickRateManager().millisecondsPerTick();
+        double mspt = server.getAverageTickTimeNanos() / 1_000_000.0;
+        rows.add(new Row("性能", perfText(mspt, targetMspt), perfColor(mspt, targetMspt)));
+    }
+
+    /** TPS 折算独立成纯函数供回归覆盖：MSPT 在目标预算内给满速（1000÷目标，默认 20），超出按实际耗时折算。 */
+    static String perfText(double mspt, double targetMspt) {
+        double tps = mspt <= targetMspt ? 1000.0 / targetMspt : 1000.0 / mspt;
+        return String.format(Locale.ROOT, "TPS %.1f · MSPT %.1fms", tps, mspt);
+    }
+
+    /** 配色沿用面板语义：绿=满速，黄=轻度超预算（目标的 1.25 倍内，原版延迟图同一阈值），红=明显掉速。 */
+    static ChatFormatting perfColor(double mspt, double targetMspt) {
+        if (mspt <= targetMspt) return ChatFormatting.GREEN;
+        return mspt <= targetMspt * 1.25 ? ChatFormatting.YELLOW : ChatFormatting.RED;
     }
 
     private static void appendLatestTerminalIssue(List<Row> rows, Font font) {

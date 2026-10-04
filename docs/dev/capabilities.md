@@ -34,17 +34,8 @@
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | [只读扫描、池面用途和已知边界](mining.md)；本轮静态复盘 |
 | `use_item` | 定点使用或按新增产物有限次持用随身物品 | `GeneralAbilityAdapter.useItem` | [交互与定点使用](interaction.md) |
 | `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | [源格破坏与产物入包](mining.md)；本轮静态复盘 |
-| `collect_items` | 走到掉落物旁靠原生接触拾取 | `GeneralAbilityAdapter.adapt` 的 `COLLECT` 分支 | [点名、范围拾取及实际数量](collecting.md)；本轮静态复盘 |
-| `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | [常驻跟随与失去目标](combat.md)；本轮静态复盘 |
-| `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | [目标选择、攻击与战果回执](combat.md)；本轮静态复盘 |
-| `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md) |
-| `use_container` | 原生右键使用容器，并分别报告菜单是否出现 | `GeneralAbilityAdapter.interact` 的容器分支 | [容器能力](containers.md)：参数、原生确认与当前边界；静态核对 |
-| `manage_container` | 在单个容器存取物品或调平主背包数量 | `GeneralAbilityAdapter.manageContainer` | [容器能力](containers.md)、[菜单搬运](menu-transfers.md)：数量、部分效果与恢复；静态核对 |
-| `consume` | 吃一份随身食物并观察消耗 | `GeneralAbilityAdapter.consume` → `EatCompanionTask` | [参数、消耗证据与已知边界](daily-actions.md)；本轮静态复盘 |
-| `equip` | 手持、穿戴或卸下指定部位 | `GeneralAbilityAdapter.equip` → `EquipCompanionTask / UnequipCompanionTask` | [装备路由与未卸下事实](daily-actions.md)；本轮静态复盘 |
-| `drop_items` | 按件数分堆丢弃，可移动、开挖侧袋并尝试点火；特定走廊余物回收后换点 | `GeneralAbilityAdapter.drop` | [丢弃物品](dropping-items.md)：参数、主流程、结果边界与已有回归入口 |
-| `fish` | 钓取并收回指定竿数的战利品 | `GeneralAbilityAdapter.fish` → `FishCompanionTask` | [附近选址、收获证据与边界](daily-actions.md)；本轮静态复盘 |
-| `sleep` | 找床或放随身床，确认躺下 | `AbilityAdapter.sleep` → `SleepCompanionTask` | [上床与自然醒的区别](daily-actions.md)；本轮静态复盘 |
+| `place_block` | 在精确坐标用随身物品放置一个方块及其状态 | `GeneralAbilityAdapter.placeBlock` | 入口核对；实机验收待安排 |
+=======
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
 | `craft` | 根据格子配方补足主背包目标数量 | `AbilityAdapter.craft` | [工作台、配方和收尾](crafting.md)；本轮静态复盘 |
 | `cook` | 用炉子补足主背包成品数量 | `CookAbilityAdapter` → `SemanticCookCompanionTask` | [配方、备料、炉次收尾与恢复限制](cooking.md)；本轮静态复盘 |
