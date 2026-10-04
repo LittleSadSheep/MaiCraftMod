@@ -22,6 +22,7 @@ public final class FailureReceiptRegressionSuite {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         IntentAttentionEvidenceTest.main(args);
+        PartialNativeEffectsTest.main(args);
         // 缺口对应的资料和能力契约必须随失败到达，不能把原生未知消费变成可自动重试。
         RecoveryKnowledgeTest.main(args);
         // 失败码自带的替代入口与知识引用必须是真实可读的入口，内部与 ad-hoc 失败保持沉默。

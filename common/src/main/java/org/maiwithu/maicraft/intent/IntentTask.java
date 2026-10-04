@@ -533,11 +533,19 @@ final class IntentTask implements Task {
 
     /** 失败离开 Mod 前，统一附上已经发生和仍未完成的语义效果。 */
     private TaskResult withEffectLedger(TaskResult failure) {
-        // 失败时一起告诉调用者：前面哪些事已经做了，当前和后面还有哪些没做，避免重复开工。
+        return withEffectLedger(failure, completedEffects(), remainingEffects(), skippedSteps());
+    }
+
+    static TaskResult withEffectLedger(TaskResult failure, List<Map<String, Object>> completed,
+                                      List<Map<String, Object>> remaining, List<Integer> skipped) {
+        // 结构改造可能已经放好并转正一个齿轮箱，随后才因下一格遮挡失败；不能用“尚无完整步骤”覆盖这些原生效果。
         Map<String, Object> data = new LinkedHashMap<>(failure.data());
-        data.put("completed_effects", completedEffects());
-        data.put("remaining_effects", remainingEffects());
-        data.put("skipped_steps", skippedSteps());
+        if (!data.containsKey("completed_effects")) data.put("completed_effects", completed);
+        else if (!completed.isEmpty()) data.put("completed_step_effects", completed);
+        // 子任务的未完成方块与编排中待执行的步骤分别保留，恢复时仍能使用整机差异决定下一次补丁。
+        if (!data.containsKey("remaining_effects")) data.put("remaining_effects", remaining);
+        else if (!remaining.isEmpty()) data.put("remaining_step_effects", remaining);
+        data.put("skipped_steps", skipped);
         return new TaskResult(
                 failure.success(), failure.message(), failure.timedOut(), failure.interrupted(),
                 Map.copyOf(data));
