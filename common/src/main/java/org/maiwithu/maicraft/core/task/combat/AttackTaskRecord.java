@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.combat;
 
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -31,6 +32,7 @@ public final class AttackTaskRecord extends TaskRecord {
      * 普通攻击工具使用四参数构造器，默认值为 false，因此保留原有防御行为。
      */
     public final boolean strictAuthorized;
+    private final SheepTraits sheepTraits;
 
     private final Set<Integer> defeated = new LinkedHashSet<>();
     private final Set<Integer> lost = new LinkedHashSet<>();
@@ -46,11 +48,23 @@ public final class AttackTaskRecord extends TaskRecord {
     public AttackTaskRecord(String toolCallId, long deadlineGameTime,
                             List<Integer> entityIds, boolean indiscriminate,
                             boolean strictAuthorized) {
+        this(toolCallId, deadlineGameTime, entityIds, indiscriminate, strictAuthorized, SheepTraits.ANY);
+    }
+
+    /** 点名颜色后保持精确目标名单，剑的横扫也不能顺带伤害其他颜色的羊。 */
+    public AttackTaskRecord(String toolCallId, long deadlineGameTime, List<Integer> entityIds,
+                            boolean indiscriminate, boolean strictAuthorized, SheepTraits sheepTraits) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.entityIds = List.copyOf(entityIds);
         this.indiscriminate = indiscriminate;
-        this.strictAuthorized = strictAuthorized;
+        this.sheepTraits = sheepTraits == null ? SheepTraits.ANY : sheepTraits;
+        this.strictAuthorized = strictAuthorized || this.sheepTraits.constrained();
+        if (indiscriminate && this.sheepTraits.constrained())
+            throw new IllegalArgumentException("Sheep traits require specific attack targets");
     }
+
+    // 旧任务没有羊筛选字段，恢复时继续沿用原先的攻击范围。
+    public SheepTraits sheepTraits() { return sheepTraits == null ? SheepTraits.ANY : sheepTraits; }
 
     public Set<Integer> defeated() { return Set.copyOf(defeated); }
     public Set<Integer> lost() { return Set.copyOf(lost); }

@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.tools.work;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.tools.CombatOps;
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import net.minecraft.client.player.LocalPlayer;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -47,7 +48,8 @@ public final class AttackTool implements MaiCraftTool {
 
     @Override
     public Map<String, Object> parameterSchema() {
-        return Schema.object()
+        // 内部动作也保留羊的筛选条件，不能在语义目标转换为编号后丢失颜色要求。
+        return SheepTraits.schema(Schema.object())
                 .optionalIntArray("entity_ids",
                         "Runtime entity ids from scan_nearby_entities (1-20 distinct targets). "
                                 + "Omit entirely to fight off every hostile near you.",
@@ -59,6 +61,6 @@ public final class AttackTool implements MaiCraftTool {
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion,
                              Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
-        setTask(companion, impl.attack(a.entity_ids(), ctx(toolCallId, companion)), args, reply);
+        setTask(companion, impl.attack(a.entity_ids(), ctx(toolCallId, companion), SheepTraits.read(args)), args, reply);
     }
 }

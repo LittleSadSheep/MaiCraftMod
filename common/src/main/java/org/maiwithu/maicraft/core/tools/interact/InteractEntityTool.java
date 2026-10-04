@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.tools.interact;
 import org.maiwithu.maicraft.core.tools.BlockActionOps;
 import org.maiwithu.maicraft.core.task.interact.InteractEntityTaskRecord;
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 
 import static org.maiwithu.maicraft.task.TaskDispatch.*;
 
@@ -39,7 +40,8 @@ public final class InteractEntityTool implements MaiCraftTool {
 
     @Override
     public Map<String, Object> parameterSchema() {
-        return Schema.object()
+        // 语义交互携带的颜色条件必须抵达原生实体点击任务。
+        return SheepTraits.schema(Schema.object())
                 .enumStr("button", "left = attack/hit, right = use/interact.", "left", "right")
                 .integer("entity_id", "Target entity id (from scan_nearby_entities).")
                 .nullableInteger("hold_ticks", "0/null = single press; >0 = hold that many ticks; -1 = hold until done/timeout (e.g. attack until dead).")
@@ -55,6 +57,7 @@ public final class InteractEntityTool implements MaiCraftTool {
                 ctx(toolCallId, companion));
         // 登船、交谈等未点名道具的语义交互复用交易开窗的空手准备，实体拒绝后也不能转而打开随身 AE。
         if (Boolean.TRUE.equals(a.empty_hand())) task.forMenu();
+        task.withSheepTraits(SheepTraits.read(args));
         runSync(companion, task, reply);
     }
 }

@@ -1,4 +1,6 @@
 package org.maiwithu.maicraft.core.task.interact;
+
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.PlayerInv;
 
@@ -108,6 +110,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     @Override
     protected boolean reached() {
         return settlingShearing || entity == null || !entity.isAlive()
+                || !r.sheepTraits().matches(entity)
                 || (interaction != null && holdUntil >= 0 && player.level().getGameTime() >= holdUntil)
                 || inReachAndLos();
     }
@@ -116,6 +119,15 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     protected TaskState act() {
         // 已经完成剪刀点击后只等同步回执，羊走开也不能再次导航追上去重复剪毛。
         if (settlingShearing) return finishInteraction();
+        // 靠近期间变色便不再点击；若剪毛／染色点击已发出，只收原回执，不重复交互。
+        if (entity != null && entity.isAlive() && !r.sheepTraits().matches(entity)) {
+            if (interaction != null && interaction.entityActionSubmitted()) {
+                interaction.finishRepeating();
+                return tickInteraction();
+            }
+            fail("requested_sheep_traits_changed: target no longer matches the requested sheep", FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
         // 目标消失时，若此前左键已命中则视为成功；否则说明目标在角色接触前逃离。
         if (entity == null || !entity.isAlive()) {
             if (acted) {
@@ -198,6 +210,11 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         }
         acted = true;
 
+        return tickInteraction();
+    }
+
+    /** 原生点击后的结算共用一条路径，羊走动或状态变化都不能触发第二次剪毛。 */
+    private TaskState tickInteraction() {
         return switch (interaction.tick()) {
             case DONE -> {
                 yield finishInteraction();
@@ -320,6 +337,8 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         data.put("entity_id", r.entityId);
+        if (entity != null) data.putAll(SheepTraits.facts(entity));
+        if (r.sheepTraits().constrained()) data.put("requested_sheep_traits", r.sheepTraits().requirements());
         if (shearing != null) data.put("attributed_shearing_drop_count", shearing.attributed());
         if (r.menuOnly) data.put("menu_hand_preparation", handParking.evidence());
         if (entity != null && !entity.isPickable()) {

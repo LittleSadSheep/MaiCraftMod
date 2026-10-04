@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.intent;
 
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -380,6 +382,8 @@ public final class GeneralAbilityAdapter {
         requested.forEach(types::add);
         JsonObject args = new JsonObject();
         args.add("entity_type_ids", types);
+        // 探索新区域时保留羊筛选条件，不能在发现任意羊后就提前报完成。
+        SheepTraits.read(p).writeTo(args);
         args.addProperty("relation", relation);
         args.addProperty("count", integer(p, "count", 1, 1, 32));
         args.addProperty("max_distance", integer(p, "max_distance", 512, 16, 2_048));
@@ -513,6 +517,8 @@ public final class GeneralAbilityAdapter {
         selected.forEach(entity -> ids.add(entity.getId()));
         JsonObject args = new JsonObject();
         args.add("entity_ids", ids);
+        // 类型和距离只负责挑候选；颜色要求随选定名单传到真正挥击前，不能在交接时遗失。
+        selector.sheepTraits().writeTo(args);
         return new IntentAction.Tool("attack", args.toString());
     }
 
@@ -596,6 +602,8 @@ public final class GeneralAbilityAdapter {
             JsonObject args = new JsonObject();
             args.addProperty("button", "right");
             args.addProperty("entity_id", candidates.getFirst().getId());
+            // 剪毛、染色等动作等待靠近时仍按开始时点名的羊属性复核。
+            selector.sheepTraits().writeTo(args);
             if (itemId != null) args.addProperty("item_id", itemId);
             else args.addProperty("empty_hand", true);
             return new IntentAction.Tool("interact_entity", args.toString());
@@ -1026,7 +1034,7 @@ public final class GeneralAbilityAdapter {
             }
         }
         ResourceLocation typeId = type == null ? null : ResourceLocation.tryParse(type);
-        return new EntitySelector(type, typeId, playerName, entityName, hostileOnly);
+        return new EntitySelector(type, typeId, playerName, entityName, hostileOnly, SheepTraits.read(p));
     }
 
     private static String validateSelector(EntitySelector selector) {
@@ -1044,6 +1052,8 @@ public final class GeneralAbilityAdapter {
         return player.clientLevel.getEntities(player, area, entity -> {
                     if (entity == player || entity.isRemoved() || !entity.isAlive()) return false;
                     if (combat && !entity.isAttackable()) return false;
+                    // 先筛颜色、年龄与有毛状态，再按距离挑最近者，不能用近处黑羊替代白羊。
+                    if (!selector.sheepTraits().matches(entity)) return false;
                     if (selector.typeId() != null && !BuiltInRegistries.ENTITY_TYPE
                             .getKey(entity.getType()).equals(selector.typeId())) return false;
                     if (selector.hostileOnly() && !(entity instanceof Enemy)) return false;
@@ -1068,9 +1078,9 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction ambiguousEntities(
             Goal goal, LocalPlayer player, String question, List<Entity> entities) {
-        // 最多显示八个候选的类型、名字等，要求补充选择条件，不把游戏内编号交给模型逐个点选。
+        // 候选羊的全部颜色和状态交给模型补充条件，不按固定数量隐藏可用目标。
         JsonObject facts = new JsonObject();
-        facts.add("candidates", entityFacts(player, entities.stream().limit(8).toList()));
+        facts.add("candidates", entityFacts(player, entities));
         return decision(goal, question,
                 List.of(option("retry", "Retry with a unique name, narrower type, or selection=nearest."),
                         option("cancel", "Cancel this action.")), facts);
@@ -1081,6 +1091,7 @@ public final class GeneralAbilityAdapter {
         if (selector.typeId() != null) facts.addProperty("entity_type_id", selector.typeId().toString());
         if (selector.playerName() != null) facts.addProperty("player_name", selector.playerName());
         if (selector.entityName() != null) facts.addProperty("entity_name", selector.entityName());
+        selector.sheepTraits().writeTo(facts);
         facts.addProperty("searched_loaded_radius", radius);
         return decision(goal, "No matching entity is currently loaded and visible to the client.",
                 List.of(option("recover", "Travel or explore to load the target area, then retry."),
@@ -1098,6 +1109,8 @@ public final class GeneralAbilityAdapter {
             fact.addProperty("hostile", entity instanceof Enemy);
             fact.addProperty("named", entity.hasCustomName());
             fact.addProperty("tamed", entity instanceof TamableAnimal tame && tame.isTame());
+            // 多只同名羊仍可按毛色与剪毛状态区分，回执必须保留这些决策事实。
+            SheepTraits.observe(entity, fact);
             result.add(fact);
         }
         return result;
@@ -1368,9 +1381,10 @@ public final class GeneralAbilityAdapter {
     }
 
     private record EntitySelector(
-            String rawType, ResourceLocation typeId, String playerName, String entityName, boolean hostileOnly) {
+            String rawType, ResourceLocation typeId, String playerName, String entityName, boolean hostileOnly,
+            SheepTraits sheepTraits) {
         boolean empty() {
-            return rawType == null && playerName == null && entityName == null && !hostileOnly;
+            return rawType == null && playerName == null && entityName == null && !hostileOnly && !sheepTraits.constrained();
         }
     }
 

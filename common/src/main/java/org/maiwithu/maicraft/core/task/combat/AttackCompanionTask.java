@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.core.task.combat;
 
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.act.Ballistics;
@@ -167,6 +169,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private long retreatPlannedAt;
     private Map<String, Object> lastRetreatObservation = Map.of();
     private String lastRetreatFailure = "";
+    private final List<Map<String, Object>> changedSheepTargets = new ArrayList<>();
 
     public AttackCompanionTask(LocalPlayer player, AttackTaskRecord record) {
         super(player, record);
@@ -185,6 +188,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     // 每刻先观察战场；自卫途中有攻击者时暂停拾取，持续记录掉落，安全后再恢复收集。
     protected TaskState onTick() {
         if (player.isDeadOrDying()) return TaskState.CANCELLED;
+        // 先核对仍活着的羊是否符合原要求；变色后停止新攻击，已发出的近战只等待原回执。
+        TaskState changed = stopChangedSheepTargets();
+        if (changed != null) return changed;
         if (shot != null) shot.maintainUse(); // 即使本刻先等回执或导航，已开始的拉弓也要经过原版持续按住检查。
         settleSubmittedMelee(); // 先收已有攻击回执，再观察死亡和切换拾取，避免致命一击被阶段切换漏计。
         // 临时避险结束后继续同一场对战，已暂停或结束的任务不能借此重新获得许可。
@@ -274,6 +280,25 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         if (state == TaskState.RUNNING && meleeAction != null
                 && ClientRuntime.requireContext(player).mutationAvailable()) meleeAction.renewEntityAttackAim();
         return state;
+    }
+
+    private TaskState stopChangedSheepTargets() {
+        if (!r.sheepTraits().constrained()) return null;
+        if (changedSheepTargets.isEmpty()) for (int id : r.entityIds) {
+            Entity entity = player.clientLevel.getEntity(id);
+            if (!r.terminal(id) && entity != null && !entity.isRemoved() && entity.isAlive()
+                    && !r.sheepTraits().matches(entity)) {
+                Map<String, Object> fact = new LinkedHashMap<>(SheepTraits.facts(entity));
+                fact.put("reason", "requested_sheep_traits_changed");
+                changedSheepTargets.add(fact);
+            }
+        }
+        if (changedSheepTargets.isEmpty()) return null;
+        abortShot(); stopNav();
+        if (settleSubmittedMelee()) return TaskState.RUNNING;
+        stopMelee(); settleFinishedTargets();
+        fail("requested_sheep_traits_changed: stopped further attacks; see requested_sheep_traits and changed_sheep_targets", FailureType.TARGET_LOST);
+        return TaskState.FAILED;
     }
 
     /** 换气子任务只复用近战反击：不追敌、不拾取、不举盾或蓄力减慢游泳；调用者随后续订逃生移动。 */
@@ -1225,6 +1250,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         data.put("lost_targets", r.lost().size());
         data.put("unreachable_targets", r.unreachable().size());
         data.put("strikes", r.strikes());
+        // 属性变化不是击杀或目标失踪；把原条件和实际羊状态与已确认战果同时交付。
+        if (r.sheepTraits().constrained()) data.put("requested_sheep_traits", r.sheepTraits().requirements());
+        if (!changedSheepTargets.isEmpty()) data.put("changed_sheep_targets", List.copyOf(changedSheepTargets));
         if (!lastRangedShot.isEmpty()) data.put("last_ranged_shot", lastRangedShot);
         data.put("strikes_scope", "confirmed_melee_receipts_and_ranged_releases"); // 与耐久消耗、尝试次数及完整命中数分开。
         data.put("loot_gained", lootGained());

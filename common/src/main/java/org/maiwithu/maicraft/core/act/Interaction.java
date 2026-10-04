@@ -793,5 +793,9 @@ public final class Interaction {
         InputDriver.halt(player);
     }
     public void finishRepeating() { finishRequested = true; }
+    /** 羊被本次剪毛或染色后只结算在途点击，不能把动作造成的属性变化当成选错目标。 */
+    public boolean entityActionSubmitted() {
+        return entity != null && (receipt != null || lastUseReceipt != null || fires > 0);
+    }
     public int confirmedUses() { return fires; }
 }

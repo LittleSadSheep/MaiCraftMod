@@ -49,6 +49,15 @@ public final class GenericEntitySearchTaskRecord extends TaskRecord {
     public final int maxWaypoints;
     public final boolean mayAlterTerrain;
     public final List<String> protectedLabels;
+    private SheepTraits sheepTraits = SheepTraits.ANY;
+
+    /** 探索途中继续寻找同一毛色，不能被刚加载的另一种颜色提前结束搜索。 */
+    public GenericEntitySearchTaskRecord withSheepTraits(SheepTraits traits) {
+        sheepTraits = traits == null ? SheepTraits.ANY : traits;
+        return this;
+    }
+
+    public SheepTraits sheepTraits() { return sheepTraits == null ? SheepTraits.ANY : sheepTraits; }
 
     /** 观察结果会立即授权伤害性动作时使用的内部安全模式。 */
     public final boolean harmIntent;

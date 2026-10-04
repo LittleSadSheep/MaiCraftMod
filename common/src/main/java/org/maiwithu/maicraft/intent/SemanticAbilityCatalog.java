@@ -140,14 +140,14 @@ public final class SemanticAbilityCatalog {
             case GeneralAbilityAdapter.FIND_ENTITY -> contract(
                     "Find real entities through loaded client evidence and bounded first-person frontier exploration; MaiCraft owns every route and concrete identity.",
                     targets("entity", "nearest", "area", "landmark", "current_place"),
-                    fields(
+                    sheepFields(fields(
                             field("entity_type_id", "resource_id", "One acceptable registered entity type; never a runtime entity ID."),
                             field("entity_type_ids", "array<resource_id>", "Acceptable registered entity types; never runtime entity IDs."),
                             field("relation", "string", "Wild, hostile, unowned or any. Wild/unowned preserve named, tame, owned, leashed or vehicle-held entities; enclosure counts only inside an explicitly protected semantic area."),
                             field("count", "integer", "Required distinct observed count; a partial count is not success."),
                             field("max_distance", "integer", "Bounded physical search distance from start; default 512, maximum 2048."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
-                            field("protected_labels", "array<string>", "Remembered areas or possessions that matching evidence must not use.")));
+                            field("protected_labels", "array<string>", "Remembered areas or possessions that matching evidence must not use."))));
             case GeneralAbilityAdapter.FIND_BLOCK -> contract(
                     // 岩浆查找随默认回执交付整池事实，模型不必靠连续查询单格岩浆猜测池子的规模。
                     "Find named blocks through visible loaded client evidence; nearest_match_position reports the nearest observed match. "
@@ -167,7 +167,7 @@ public final class SemanticAbilityCatalog {
             case GeneralAbilityAdapter.COMBAT -> contract(
                     "Defend against or engage semantic living targets visible in loaded terrain; MaiCraft resolves concrete entities and combat movement.",
                     targets("entity", "player", "nearest"),
-                    fields(
+                    sheepFields(fields(
                             field("mode", "string", "Defend, engage or defeat; defend may select an immediate hostile threat."),
                             field("entity_type_id", "resource_id", "Optional namespaced entity type, never a runtime entity identifier."),
                             field("entity_name", "string", "Optional visible custom/display name."),
@@ -176,12 +176,12 @@ public final class SemanticAbilityCatalog {
                             field("count", "integer", "Maximum number of matching semantic targets."),
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("allow_harm", "boolean", "Required explicit consent because combat can harm or kill."),
-                            field("confirm_risky_target", "boolean", "Second confirmation for players, tame/named or non-hostile targets.")));
+                            field("confirm_risky_target", "boolean", "Second confirmation for players, tame/named or non-hostile targets."))));
             case GeneralAbilityAdapter.INTERACT -> contract(
                     "Use one semantic block or entity; MaiCraft resolves the loaded target, approaches it and performs the ordinary interaction. "
                             + "With a block_id and selection=nearest it self-locates the closest matching station within the radius — no coordinates needed.",
                     targets("coordinates", "entity", "player", "nearest", "landmark", "area"),
-                    fields(
+                    sheepFields(fields(
                             field("block_id", "resource_id", "Optional namespaced block type to use."),
                             field("entity_type_id", "resource_id", "Optional namespaced entity type, never a runtime entity identifier."),
                             field("entity_name", "string", "Optional visible custom/display name."),
@@ -192,7 +192,7 @@ public final class SemanticAbilityCatalog {
                             field("duration_seconds", "number", "Optional finite duration from 0 to 30 for empty-hand Create hand-crank use. Zero or omitted means one activation; the Mod repeats native uses and settles the final receipt."),
                             field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
                             field("radius", "integer", "Bounded loaded-world search radius."),
-                            field("may_alter_terrain", "boolean", "Explicit route permission; default false.")));
+                            field("may_alter_terrain", "boolean", "Explicit route permission; default false."))));
             case GeneralAbilityAdapter.USE_ITEM -> contract(
                     // 模型提交产物数量即可让原生持用批次自动准备双手、补料和换工具，失败时保留部分产物回执。
                     "Perform finite native item use. For repeated processing, submit count plus expected_output_item_id and optionally ingredient_item_id once: the Mod prepares tool/material hands, repeats only after confirmed output, and replaces exhausted tools from carried stock. Stops with partial counts on missing supplies, interruption or unconfirmed output. No block/entity click is substituted.",
@@ -640,6 +640,16 @@ public final class SemanticAbilityCatalog {
         JsonArray result = new JsonArray();
         for (String value : values) result.add(value);
         return result;
+    }
+
+    /** 羊的条件既出现在能力发现中，也进入参数白名单；模型无需把颜色写进实体名字。 */
+    private static JsonObject sheepFields(JsonObject fields) {
+        JsonObject traits = fields(
+                field("sheep_color", "string", "Optional native dye color (white, black, light_gray, etc.; all 16 colors). Only matching sheep; never fall back to another color. Rechecked before new attacks or interaction."),
+                field("sheep_baby", "boolean", "Optional sheep age filter; false requires an adult."),
+                field("sheep_sheared", "boolean", "Optional sheep shearing filter; false requires wool present."));
+        traits.entrySet().forEach(entry -> fields.add(entry.getKey(), entry.getValue()));
+        return fields;
     }
 
     private static JsonObject fields(JsonObject... fields) {

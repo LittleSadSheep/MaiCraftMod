@@ -18,6 +18,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import org.maiwithu.maicraft.core.tools.QueryExtraOps;
+import org.maiwithu.maicraft.intent.SheepCombatTest;
+import org.maiwithu.maicraft.intent.SheepSelectionTest;
 
 /** 用原生同步属性模拟混色羊群，不运行生物 AI，也不在测试中给角色实际掉落。 */
 public final class SheepTraitsTest {
@@ -58,6 +60,9 @@ public final class SheepTraitsTest {
             black.shorn = true;
             check(!wool.matches(black), "a shorn sheep cannot supply the requested wool");
         }
+        // 基础观察通过后再验证语义选羊与攻击复核，确保能力入口也实际接通。
+        SheepCombatTest.main(args);
+        SheepSelectionTest.main(args);
         System.out.println("SheepTraitsTest: passed");
     }
 

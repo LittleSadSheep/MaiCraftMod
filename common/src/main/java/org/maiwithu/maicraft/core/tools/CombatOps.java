@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.core.tools;
 
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 import java.util.List;
@@ -20,12 +21,17 @@ public final class CombatOps {
      * ——它一裂开,点名的那份 id 清单就作废了。
      */
     public TaskRecord attack(List<Integer> entityIds, ToolContext ctx) {
+        return attack(entityIds, ctx, SheepTraits.ANY);
+    }
+
+    /** 语义层已经挑出的羊仍携带颜色条件，供靠近和真正出手期间持续核对。 */
+    public TaskRecord attack(List<Integer> entityIds, ToolContext ctx, SheepTraits traits) {
         boolean indiscriminate = entityIds == null || entityIds.isEmpty();
         List<Integer> ids = indiscriminate ? List.of() : normalizeEntityIds(entityIds);
         long count = indiscriminate ? 4 : ids.size();
         long timeout = Math.min(MAX_INITIAL_LEASE_TICKS,
                 Math.max(MIN_TICKS, count * PER_TARGET_TICKS));
-        return new AttackTaskRecord(ctx.toolCallId(), ctx.deadline(timeout), ids, indiscriminate);
+        return new AttackTaskRecord(ctx.toolCallId(), ctx.deadline(timeout), ids, indiscriminate, false, traits);
     }
 
     static List<Integer> normalizeEntityIds(List<Integer> entityIds) {

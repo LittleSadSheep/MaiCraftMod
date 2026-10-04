@@ -13,6 +13,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.Schema;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 
 /** 语义实体发现；具体身份、位置和路线分段均保留在 Mod 内部。 */
 public final class SemanticEntitySearchTool implements MaiCraftTool {
@@ -44,7 +45,8 @@ public final class SemanticEntitySearchTool implements MaiCraftTool {
 
     @Override
     public Map<String, Object> parameterSchema() {
-        return Schema.object()
+        // 探索与附近战斗使用同一组羊属性，角色走远后也不放宽颜色要求。
+        return SheepTraits.schema(Schema.object())
                 .stringArray("entity_type_ids",
                         "Acceptable namespaced entity types; never runtime entity IDs.", 1)
                 .optionalEnum("relation",
@@ -75,6 +77,6 @@ public final class SemanticEntitySearchTool implements MaiCraftTool {
                 parsed == null ? null : parsed.max_distance(),
                 parsed == null ? null : parsed.may_alter_terrain(),
                 parsed == null ? null : parsed.protected_labels());
-        setTask(player, record, args, reply);
+        setTask(player, record.withSheepTraits(SheepTraits.read(args)), args, reply);
     }
 }

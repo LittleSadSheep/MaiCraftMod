@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.intent;
 
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.task.collect.CollectItemsRequest;
 
@@ -47,6 +49,9 @@ final class SemanticGoalContract {
                         SemanticAbilityCatalog.parameterNames(ability)),
                 path + ".parameters", ability, "unknown_parameter");
         validateProtectedLabels(goal.parameters(), path + ".parameters", ability);
+        // 计划阶段就检查羊毛颜色与布尔状态，错字不能接管身体后才放宽成任意羊。
+        if (goal.parameters().keySet().stream().anyMatch(key -> key.startsWith("sheep_")))
+            SheepTraits.read(goal.parameters());
         // 在接单前核实阈值和开关，错误配置不能挤掉正在挖矿的任务。
         if (AutomaticLightingAdapter.ABILITY.equals(ability)) AutomaticLightingAdapter.parse(goal);
         validateObjectKeys(goal.preferences(), withRuntimeAuthorizationKeys(

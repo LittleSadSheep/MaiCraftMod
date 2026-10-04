@@ -68,6 +68,7 @@ public final class GenericEntitySearchCompanionTask
     private record SurfaceEvidence(SurfaceKind kind, BlockPos feet) {}
 
     private record FrontierChoice(BlockPos position, String evidence) {}
+    private final List<Map<String, Object>> observedSheep = new ArrayList<>();
 
     private static final class SurfaceProbeBudget {
         private int remaining;
@@ -172,6 +173,7 @@ public final class GenericEntitySearchCompanionTask
         int loadedMatching = 0;
         Set<UUID> acceptedBefore = Set.copyOf(observedSafe.keySet());
         List<Entity> currentlySafeEntities = new ArrayList<>();
+        observedSheep.clear();
         for (Entity entity : level.getEntities(player, box, candidate ->
                 candidate != player && !candidate.isRemoved() && candidate.isAlive())) {
             ResourceLocation type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
@@ -182,6 +184,8 @@ public final class GenericEntitySearchCompanionTask
             // 探索移动只为获得新的真实视野，不能把关门屋内或墙后的生物当成已找到。
             if (!ObservationVisibility.entity(player, entity)) continue;
             if (!EntitySemanticSafety.matchesRelation(entity, r.relation)) continue;
+            // 视野中有羊并不等于找到指定颜色；不合条件的羊不能抵搜索数量。
+            if (!r.sheepTraits().matches(entity)) continue;
             loadedMatching++;
             if (r.harmIntent && !entity.isAttackable()) {
                 if (observedProtected.add(entity.getUUID())) {
@@ -202,6 +206,8 @@ public final class GenericEntitySearchCompanionTask
         currentlySafeEntities.sort(Comparator.comparingDouble(player::distanceToSqr));
         Map<UUID, ResourceLocation> currentlySafe = new LinkedHashMap<>();
         for (Entity entity : currentlySafeEntities) {
+            Map<String, Object> traits = SheepTraits.facts(entity);
+            if (!traits.isEmpty()) observedSheep.add(traits);
             currentlySafe.putIfAbsent(
                     entity.getUUID(), BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
         }
@@ -719,6 +725,9 @@ public final class GenericEntitySearchCompanionTask
         data.put("requested_count", r.count);
         data.put("observed_acceptable_count", observedSafe.size());
         data.put("observed_acceptable_by_type", Map.copyOf(observedByType));
+        // 默认搜索回执直接给出羊的实际属性，后续攻击无需为了辨色重复观察。
+        if (!observedSheep.isEmpty()) data.put("observed_sheep", List.copyOf(observedSheep));
+        if (r.sheepTraits().constrained()) data.put("requested_sheep_traits", r.sheepTraits().requirements());
         data.put("verified", observedSafe.size() >= r.count);
         data.put("scope", "loaded_client_entities_and_first_person_loaded_frontiers");
         data.put("frontier_surface_preference",
