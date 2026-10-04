@@ -34,8 +34,7 @@
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | [只读扫描、池面用途和已知边界](mining.md)；本轮静态复盘 |
 | `use_item` | 定点使用或按新增产物有限次持用随身物品 | `GeneralAbilityAdapter.useItem` | [交互与定点使用](interaction.md) |
 | `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | [源格破坏与产物入包](mining.md)；本轮静态复盘 |
-| `place_block` | 在精确坐标用随身物品放置一个方块及其状态 | `GeneralAbilityAdapter.placeBlock` | 入口核对；实机验收待安排 |
-=======
+| `place_block` | 在精确坐标用随身物品放置一个方块及其状态 | `GeneralAbilityAdapter.placeBlock` | [单格放置与施工分工](building.md)；实机验收待安排 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
 | `craft` | 根据格子配方补足主背包目标数量 | `AbilityAdapter.craft` | [工作台、配方和收尾](crafting.md)；本轮静态复盘 |
 | `cook` | 用炉子补足主背包成品数量 | `CookAbilityAdapter` → `SemanticCookCompanionTask` | [配方、备料、炉次收尾与恢复限制](cooking.md)；本轮静态复盘 |

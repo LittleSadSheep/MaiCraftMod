@@ -1,8 +1,24 @@
 # 建筑设计、预览与施工
 
-玩家说“先看看这栋房子”，调用 `maicraft:design_build`；玩家已授权在指定位置建造，调用 `maicraft:build`。两者都需要作者模型、逐格蓝图或已保存的工程编号。自然语言 `outcome` 只说明目的，不会让 Mod 自行设计房屋、调整尺寸或寻找另一块地。
+玩家说“先看看这栋房子”，调用 `maicraft:design_build`；玩家已授权在指定位置建造，调用 `maicraft:build`。两者都需要作者模型、逐格蓝图或已保存的工程编号。只放一个随身方块时调用 `maicraft:place_block`，不需要设计来源，见下文专节。自然语言 `outcome` 只说明目的，不会让 Mod 自行设计房屋、调整尺寸或寻找另一块地。
 
 LLM 负责确定形状、材质和修改方案。Mod 把设计转换为目标格，使用角色的原生移动、挖掘、持物、放置和菜单操作执行，再报告现场事实。设计保存、预览建立、原生动作确认和建筑满足要求要分别判断。本文按当前源码说明已接通的行为；与仓库最新原生施工规则尚未一致的部分集中列在文末。
+
+## 单格放置：maicraft:place_block
+
+只放一个随身方块时不需要设计来源：目标只接受 `goal.target.kind:"coordinates"` 的精确坐标，参数只有 `block_id`（必填，已注册方块）、`properties`（可选对象，声明的状态取值是终态要求，规则与逐格蓝图的 `properties` 相同）和 `replace_existing`（默认 `false`）。材料必须随身携带：适配器钉死 `inventory_only`，缺料如实失败并点名物品，不会发起取料。
+
+适配器把请求合成为一份恰好一格的逐格蓝图（锚点即坐标、偏移 `[0,0,0]`），再交给与 `maicraft:build` 完全相同的施工链路；本文“从场地到原生回执”的备料、清障、放置与核验各节同样适用。执行层没有第二条放置路径，施工链路的改进自动惠及单格放置。
+
+| 提交 | 行为 |
+| --- | --- |
+| 目标格未加载 | 暂停并要求先观察或加载；不就近替换，缺席不等于不存在 |
+| `block_id` 不是已注册方块 | 拒绝；实体 ID（展示框、盔甲架、画）会得到如实说明：它们不是方块，LLM 蓝图不安装实体，摆设只随结构文件导入落地 |
+| 混入 `scene`、`blueprint`、`operation` 等 build 参数 | 计划期被未知参数白名单拒绝；绕过计划直接执行时决策指回 `maicraft:build` |
+| 目标格被占用且未授权 | 施工 `PREFLIGHT` 拒绝并携带格证据；`replace_existing:true` 按替换策略执行 |
+| 声明的状态取值当前游戏无法表达 | 翻译层拒绝，不偷偷放上默认状态 |
+
+成功证据与 build 相同：目标格持有声明方块与状态、背包对应物品减少，`VERIFY` 终态核对通过；只看角色动作或画面变化不算完成。告示牌文字、讲台放书等放置后的 BlockEntity 内容不在放置语义内，目前也没有任何能力入口（只有结构文件导入路径会搬运告示牌文字这类装饰数据）；需要多格或布局设计时用 `maicraft:build`。
 
 ## 先确定需要哪一种操作
 
@@ -211,6 +227,7 @@ const executeRequest = {plan_id: readyPlanId};
 | 想追踪的玩家行为 | 入口与继续阅读 |
 | --- | --- |
 | 为什么参数在 plan 阶段被拒绝 | [BuildingSceneContract.validate](../../common/src/main/java/org/maiwithu/maicraft/intent/BuildingSceneContract.java)，上层接线在 [SemanticGoalContract](../../common/src/main/java/org/maiwithu/maicraft/intent/SemanticGoalContract.java) |
+| 单格放置怎样合成普通施工单 | [GeneralAbilityAdapter.placeBlock / synthesizePlaceBuild](../../common/src/main/java/org/maiwithu/maicraft/intent/GeneralAbilityAdapter.java)、[BuildingSceneAdapter.adapt](../../common/src/main/java/org/maiwithu/maicraft/intent/BuildingSceneAdapter.java) |
 | 创建、编辑、查询、导出分别做了什么 | [BuildingSceneAdapter.adapt](../../common/src/main/java/org/maiwithu/maicraft/intent/BuildingSceneAdapter.java) |
 | 只读设计为什么不占身体 | [IntentRuntime.isIndependentRequest / execute](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentRuntime.java)、[BuildDesignAdapter.design](../../common/src/main/java/org/maiwithu/maicraft/intent/BuildDesignAdapter.java) |
 | 当前脚位、地标和旧场景怎么变成锚点 | [BuildingAnchor.resolve](../../common/src/main/java/org/maiwithu/maicraft/intent/BuildingAnchor.java)、[BuildingSceneStore.load](../../common/src/main/java/org/maiwithu/maicraft/core/blueprint/BuildingSceneStore.java) |
