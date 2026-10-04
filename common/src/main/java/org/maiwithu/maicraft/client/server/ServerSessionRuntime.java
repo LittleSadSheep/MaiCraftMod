@@ -71,10 +71,7 @@ public final class ServerSessionRuntime {
                     ServerSessionRuntime::requireThread, ServerSessionRuntime::enqueue,
                     ServerSessionRuntime::submitMutation, journal);
             router.register(new ClientOperation("machine.snapshot", 1, false, new ClientMachineSnapshot()));
-            // 同一船体的原生受力页由任务连续读取，所有试算在取得完整快照后进行。
-            router.register(new ClientOperation("physics.snapshot", 1, false, null));
-            // 组装完成证据独立于玩家输入，观察请求本身不操作拉杆或搬移方块。
-            router.register(new ClientOperation("physics.assembly",1,false,null));
+            registerPhysicsObservations(router);
             router.register(new ClientOperation("machine.configure", 1, true, null));
             router.register(new ClientOperation("inventory.transfer", 1, true, null));
             router.register(new ClientOperation("inventory.ae2_supply", 1, true, null));
@@ -85,6 +82,12 @@ public final class ServerSessionRuntime {
                 router.register(new ClientOperation(operation, 1, true, null));
         }
         return router;
+    }
+
+    // 受力、组装和持续飞控都必须在双方登记只读契约；漏掉客户端登记会把真实服务端误报为不支持。
+    static void registerPhysicsObservations(ClientRequestRouter target) {
+        for(String operation:new String[]{"physics.snapshot","physics.assembly","physics.flight_state"})
+            target.register(new ClientOperation(operation,1,false,null));
     }
 
     public static void observe(Minecraft minecraft, LocalPlayerContext context) {

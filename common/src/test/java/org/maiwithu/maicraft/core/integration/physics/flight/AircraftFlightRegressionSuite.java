@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.integration.physics.flight;
 
 import org.maiwithu.maicraft.intent.AircraftFlightContractTest;
+import org.maiwithu.maicraft.client.server.FlightOperationRegistrationTest;
 
 /** 先验证控制和原生遥测规则，再验证公开目标与持久化声明；真实飞行另以游戏会话验收。 */
 public final class AircraftFlightRegressionSuite {
@@ -8,6 +9,7 @@ public final class AircraftFlightRegressionSuite {
         FlightFeedbackControllerTest.main(args);
         AircraftFlightContractTest.run();
         AircraftProfileStoreTest.run();
+        FlightOperationRegistrationTest.run();
         System.out.println("AircraftFlightRegressionSuite: passed");
     }
 }

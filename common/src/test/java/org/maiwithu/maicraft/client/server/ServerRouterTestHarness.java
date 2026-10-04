@@ -25,6 +25,11 @@ final class ServerRouterTestHarness {
     }
 
     ServerRouterTestHarness(boolean available, MutationPersistence persistence) {
+        this(available,persistence,router->{});
+    }
+
+    // 生产操作必须在连接世界前登记，扩展夹具时保持与真正启动流程相同的先后顺序。
+    ServerRouterTestHarness(boolean available,MutationPersistence persistence,Consumer<ClientRequestRouter> operations) {
         this.available = available;
         router = new ClientRequestRouter(() -> this.available, envelope -> {
             if (sendReturnsFalse) return false;
@@ -37,6 +42,7 @@ final class ServerRouterTestHarness {
         router.register(new ClientOperation("test.write", 1, true, local));
         router.register(new ClientOperation("test.remote", 1, true, null));
         router.register(new ClientOperation("test.other", 1, true, local));
+        operations.accept(router);
         router.bind(1, 1, "minecraft:overworld", 1, true, 0);
     }
 

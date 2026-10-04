@@ -21,10 +21,17 @@ public final class FlightStateReader implements AutoCloseable {
     public FlightStateReader(LocalPlayer player,UUID structureId,BlockPos typewriter){world=player.level();this.structureId=structureId;this.typewriter=typewriter==null?null:typewriter.immutable();}
     public FlightSample.Contact tick(LocalPlayer player) {
         if(player.level()!=world)throw new IllegalStateException("flight observation changed world");
-        if(!ServerAssistClient.serverSupported("physics.flight_state"))throw new IllegalStateException("server physics.flight_state unavailable");
+        if(!ServerAssistClient.serverSupported("physics.flight_state")) {
+            // 长途飞行会跨过协议观察会话的有效期；续期只重取只读遥测，不重放操纵输入。
+            if(ServerAssistClient.renegotiating("physics.flight_state"))return freshContact();
+            throw new IllegalStateException("server physics.flight_state unavailable");
+        }
         if(pending!=null) {
             var receipt=pending.snapshot();
             if(receipt.settled()) {
+                if(receipt.code().equals("session_expired")&&ServerAssistClient.takeExpiredReadForRefresh(pending.id())) {
+                    pending=null;nextRequest=world.getGameTime()+1;return freshContact();
+                }
                 pending=null;
                 if(receipt.retired()||receipt.status()!=ClientRequestReceipt.Status.SUCCEEDED||receipt.backend()!=ClientRequestReceipt.Backend.SERVER)
                     throw new IllegalStateException("native flight observation failed: "+receipt.code()+" "+receipt.message());
@@ -51,8 +58,9 @@ public final class FlightStateReader implements AutoCloseable {
             pending=ServerAssistClient.submit("physics.flight_state",request,false);
         }
         // 用客户端往返时长保守计算样本年龄，不能假定服务器与客户端的绝对 tick 总是相同。
-        return receivedTick==Long.MIN_VALUE||world.getGameTime()-receivedTick+responseAge>10?FlightSample.Contact.UNKNOWN:contact;
+        return freshContact();
     }
+    private FlightSample.Contact freshContact(){return receivedTick==Long.MIN_VALUE||world.getGameTime()-receivedTick+responseAge>10?FlightSample.Contact.UNKNOWN:contact;}
     public JsonObject evidence(){return evidence.deepCopy();}
     public boolean controllerOwned(){return evidence.has("typewriter")&&evidence.getAsJsonObject("typewriter").has("owned_by_player")
             &&evidence.getAsJsonObject("typewriter").get("owned_by_player").getAsBoolean();}
