@@ -49,7 +49,9 @@ public final class FlightFeedbackController {
         }
         boolean verticalDeparture=envelope.kind()==AIRSHIP&&phase==Phase.CLIMB
                 &&(!airborneVerified||sample.position().y<departureHeight+8);
-        if(sample.contact()==AIRBORNE&&!verticalDeparture&&(!course.corridorObserved()||!course.corridorClear())&&phase!=Phase.GO_AROUND)
+        // 已进入停机收尾后，船壳短暂弹起仍继续刹停，不能因地面旁的航路阻挡再次开动力。
+        if(sample.contact()==AIRBORNE&&!verticalDeparture&&(!course.corridorObserved()||!course.corridorClear())
+                &&phase!=Phase.GO_AROUND&&phase!=Phase.ROLLOUT)
             transition(Phase.GO_AROUND,sample,"航路阻挡或未观测，交由已观测的避让航点引导复飞");
 
         double speed=sample.forwardSpeed(),altitude=course.cruiseAltitude();

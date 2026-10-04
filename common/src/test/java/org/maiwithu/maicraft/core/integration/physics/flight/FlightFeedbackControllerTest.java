@@ -13,7 +13,7 @@ public final class FlightFeedbackControllerTest {
     private static final FlightGuidance COURSE=new FlightGuidance(new Vec3(0,100,200),new Vec3(0,100,180),
             new Vec3(0,80,300),0,100,true,true,true,true);
     public static void main(String[] args) throws Exception {
-        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();verticalAirshipDeparture();
+        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();verticalAirshipDeparture();abortedTakeoffStaysStopped();
         PhysicsFlightStateServiceTest.run();
         FlightPathProbeTest.run();
         System.out.println("FlightFeedbackControllerTest: passed");
@@ -100,6 +100,15 @@ public final class FlightFeedbackControllerTest {
         check(c.phase()==CLIMB&&command.lift()>0&&command.power()==0&&command.yaw()==0,"飞艇应先升空，不在地面同时开桨或差动倒车");
         command=c.tick(sample(9,83,0,0,AIRBORNE),course,true);
         check(c.phase()==CLIMB&&command.power()==0&&command.yaw()==0,"水平航路暂时未通不能抢走已核对的垂直离地流程");
+    }
+    private static void abortedTakeoffStaysStopped() {
+        // 原生测试中飞艇未持续离地，停机后短暂弹起；此时必须继续收尾，不能误用复飞逻辑再开桨。
+        var c=new FlightFeedbackController(FlightEnvelope.airship());
+        for(int t=1;t<=609;t++)c.tick(sample(t,80,0,0,GROUNDED),COURSE,true);
+        check(c.phase()==ROLLOUT,"无法离地后先进入停机收尾");
+        var blocked=new FlightGuidance(COURSE.waypoint(),COURSE.approachPoint(),COURSE.touchdown(),0,100,true,true,false,true);
+        var command=c.tick(sample(610,80.3,0,0,AIRBORNE),blocked,true);
+        check(c.phase()==ROLLOUT&&command.power()==0&&command.lift()==0,"停机后的短暂离地不能重新启动推进或升力");
     }
     private static FlightSample sample(long tick,double y,double speed,double z,FlightSample.Contact contact) {
         return new FlightSample(tick,new Vec3(0,y,z),new Vec3(0,0,speed),0,0,0,0,0,0,contact);

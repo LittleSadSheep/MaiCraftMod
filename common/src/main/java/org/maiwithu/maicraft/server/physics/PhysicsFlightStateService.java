@@ -28,6 +28,9 @@ public final class PhysicsFlightStateService {
         out.addProperty("state","ready");out.addProperty("tick",body.tick());
         out.add("origin_storage",GSON.toJsonTree(new int[]{origin.getX(),origin.getY(),origin.getZ()}));
         out.add("position",GSON.toJsonTree(body.position()));out.add("rotation",GSON.toJsonTree(body.rotation()));
+        // 起飞输入后读真实质量和实际作用力，供诊断充气不足或配平误差；不把目标稳态预测当作当刻升力。
+        out.addProperty("mass",body.mass());out.add("gravity",GSON.toJsonTree(body.gravity()));
+        out.add("actual_loads",GSON.toJsonTree(body.loads()));out.add("load_unknowns",GSON.toJsonTree(body.unknowns()));
         if(request.has("typewriter_position")) {
             BlockPos position=origin.offset(PhysicsBlockEdits.local(request.getAsJsonObject("typewriter_position")));
             var controller=new JsonObject();var entity=player.serverLevel().hasChunkAt(position)?player.serverLevel().getBlockEntity(position):null;
