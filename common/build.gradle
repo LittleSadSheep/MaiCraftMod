@@ -222,6 +222,12 @@ def regressionSuites = [
         heap: '512m', directory: 'occluded-stance-retry-regression', timeoutSeconds: 60,
         purpose: '验证瞄准遮挡后的自动换站位重试与回执计数'
     ],
+    // 定点交互语义入口整链验证：精确目标坐标、定点倒桶落格与门框嵌眼，级联 TargetedItemUseTest。
+    exactInteractionTargetRegression: [
+        entry: 'org.maiwithu.maicraft.intent.ExactInteractionTargetTest',
+        heap: '512m', directory: 'exact-interaction-target-regression', timeoutSeconds: 90,
+        purpose: '验证 interact/use_item 定点目标编译与定点倒桶、嵌眼链路'
+    ],
     // 聊天独立回放界面收尾与持久发送，不让其他游戏操作回归遮住消息提交结论。
     chatRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.ChatRegressionSuite',
