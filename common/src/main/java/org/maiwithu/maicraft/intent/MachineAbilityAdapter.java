@@ -177,7 +177,7 @@ final class MachineAbilityAdapter {
                         requireMachineTarget(goal);
                     }
                     case "ae2_supply" -> {
-                        // 此分支要求 nearest 不带名称；外层 PublicToolCatalog 目前却要求 nearest 带名称，公开请求会冲突。
+                        // 无名 nearest 表示使用原生可达终端；公开目标契约已允许这种形态，这里仍拒绝借名称选择另一网络。
                         only(p, "operation", "item_id", "count", "allow_crafting", "allow_use");
                         requiredString(p, "item_id", 256);
                         integer(p, "count", 1, 1, 256);
@@ -193,7 +193,7 @@ final class MachineAbilityAdapter {
                 }
             }
             case MODIFY -> {
-                // 修改目前分为连接动力和按蓝图改方块，两种操作各自接受不同参数。
+                // 结构补丁、兼容动力接线和登记外部入口分别使用自己的参数；不能把一种分支的材料或方向开关悄悄带进另一种。
                 String operation = requiredString(p, "operation", 64);
                 if ("connect_mechanical_power".equals(operation)) {
                     only(p, "operation", "snapshot_id", "source_label", "allow_modify");
@@ -433,7 +433,7 @@ final class MachineAbilityAdapter {
                     SemanticMaterialSupplyCoordinator.MaterialPolicy.parse(optionalString(p,"material_policy",64)),List.copyOf(protections));
             MachineSnapshots.consume(snapshot); return new IntentAction.Native(task);
         }
-        // 如果上次留下了可恢复编号，使用它核对原来的连接，避免重复装已经放好的部分；否则需要新观察。
+        // 有内部续接编号时核对原接线前段；没有时由修改入口读取同一目标锚点，不要求模型另发一次勘测。
         MachineSnapshots.Snapshot snapshot = continuationToken == null ? boundSnapshot(goal, player, runtime) : null;
         BlockPos destination = snapshot == null ? block(resolve(goal.target(), player, runtime)) : snapshot.center();
         String sourceLabel = requiredString(p, "source_label", 160);

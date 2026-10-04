@@ -23,13 +23,13 @@ public final class MinecraftEnchantProcessAdapter implements NativeProcessAdapte
     @Override public JsonObject contract() {
         // 完整成本契约只随匹配台子的观察或按需知识返回，不把每个机制的参数加入默认能力描述。
         return JsonParser.parseString("""
-                {"process":"minecraft:enchanting","description":"在已加载原版附魔台为一件未附魔物品选择真实报价，核验费用、成品并取回。",
-                 "parameters":{"item_id":{"type":"resource_id","required":true},"offer_tier":{"type":"integer","default":1,"minimum":1,"maximum":3},
-                  "max_levels_spent":{"type":"integer","required":true,"minimum":0,"maximum":3},
-                  "max_lapis":{"type":"integer","required":true,"minimum":0,"maximum":3}},
-                 "quote_observation":"装入自有材料后，任务progress展示三档原生报价；报价改变时停止，等级门槛与实际扣级分开报告。",
-                 "completion":"确认一次按钮的服务端结果、实际扣费、完整成品返还及关闭菜单。",
-                 "retry":"消费预约开始后不自动重发；未知结果保留人工核验。","background_watch_supported":false}
+                {"process":"minecraft:enchanting","description":"通过 operate_machine 的 run_production 使用 schema_version=2、process=minecraft:enchanting；下列字段放在 goal.parameters.production.parameters。只为主背包中的一件可附魔且未附魔物品工作，书会成为附魔书；不建台、不取料、不刷经验、不保证未显示的随机附魔。外层需要真实 snapshot_id、匹配目标及 allow_use=true。",
+                 "parameters":{"item_id":{"type":"resource_id","required":true,"description":"完整物品注册ID；选择一件现有兼容物品并保留其余组件，不能传槽位或指定多个数量。"},"offer_tier":{"type":"integer","default":1,"minimum":1,"maximum":3,"description":"原生报价档位，省略取1；0、null、小数均拒绝，不自动换档。"},
+                  "max_levels_spent":{"type":"integer","required":true,"minimum":0,"maximum":3,"description":"实际扣除的玩家等级上限，不是显示的入场等级门槛；0表示不许扣级，省略或null拒绝。创造模式仍按实际等级变化核对。"},
+                  "max_lapis":{"type":"integer","required":true,"minimum":0,"maximum":3,"description":"实际消耗的青金石件数上限；0表示不许消耗，省略或null拒绝。无限材料身体可有零青金石成本，仍读取实际报价。"}},
+                 "quote_observation":"装入自有物品和所需青金石后，progress 展示三档同步报价。提交前报价变化会重新读取并等待稳定，仍遵守原档位、费用上限及真实等级门槛。",
+                 "completion":"先持久化消费预约，再原生提交；核对新附魔、青金石与等级变化，取回成品及自有剩余材料并确认关菜单。查看 enchantment_confirmed、actual_levels_spent、actual_lapis_spent、cleanup_status、outcome_uncertain，而非只看按钮已发出。",
+                 "retry":"CONFIRMED_NOT_APPLIED 可沿同一消费身份重读报价并最多重试两次；已消费或未知结果不自动再附魔。暂停、取消、死亡或重连后先查原任务与消费预约；不要换 request_key 猜测性重做。","background_watch_supported":false}
                 """).getAsJsonObject();
     }
     @Override public void validate(JsonObject parameters) {

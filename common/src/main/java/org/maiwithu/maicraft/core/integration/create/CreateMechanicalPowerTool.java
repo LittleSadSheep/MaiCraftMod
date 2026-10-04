@@ -34,11 +34,12 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
     @Override public String name() { return "connect_mechanical_power"; }
 
     @Override public String description() {
-        return "Connect two already resolved semantic endpoint regions with verified first-person "
-                + "Create placement. Coordinates are supplied only by MaiCraft's intent runtime; "
-                + "the model never plans route cells. MaiCraft investigates the live route, "
-                + "supplies its exact material ledger, investigates again, and starts placement "
-                + "only after the fresh ledger is fully present.";
+        // 这是公共能力的内部落点：语义层负责命名端点，角色负责调查、取料、逐格施工与确认，不向模型开放点击脚本。
+        return "Internal executor for maicraft:connect_mechanical_power after semantic endpoint resolution. "
+                + "MaiCraft investigates loaded native shaft faces, chooses a transmission, supplies its bill, "
+                + "places through first-person actions and checks actual endpoint power/network evidence. "
+                + "A connected powered route does not prove belt direction or product delivery; inspect their separate receipts. "
+                + "Existing blocks are preserved. Coordinates and continuation_token come from the intent runtime, not model-authored routes.";
     }
 
     @Override public Map<String, Object> parameterSchema() {
@@ -52,8 +53,8 @@ public final class CreateMechanicalPowerTool implements MaiCraftTool {
                 .integer("destination_y", "Internally resolved destination Y.")
                 .integer("destination_z", "Internally resolved destination Z.")
                 .optionalEnum("transmission", "auto compares technologies; chain_conveyor requires 锁链传动轮; encased_chain_drive requires 链式传动箱.", "auto", "chain_conveyor", "encased_chain_drive")
-                .optionalBool("allow_free_receiver", "Allow nearest authoritative destination evidence to be a verified empty receiver.")
-                .optionalEnum("belt_direction", "Declared item transport direction of the destination belt; native result is reported separately from power.", "north", "south", "east", "west")
+                .optionalBool("allow_free_receiver", "Internal form of allow_new_receiver, default false. CHAIN_CONVEYOR forces false; AUTO with true uses the legacy free-receiver path.")
+                .optionalEnum("belt_direction", "Optional cardinal item movement for an existing belt with AUTO or CHAIN_CONVEYOR. Not accepted with ENCASED_CHAIN_DRIVE or an enabled free receiver; actual native direction is reported separately from power.", "north", "south", "east", "west")
                 .optionalEnum("material_policy", "Material source policy after route investigation.",
                         "ordinary", "storage_available", "inventory_only")
                 .optionalStringArray("allowed_sources", "Permitted semantic acquisition sources; storage is tried before crafting.")

@@ -12,7 +12,10 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuConfirmation;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 
-/** 等真实报价稳定后提交唯一一次附魔按钮；回执未确认时只观察服务端同步，任何异常都不能重新消费。 */
+/**
+ * 装料后等真实报价稳定，再沿同一消费身份提交附魔；等待期间只核对成品与费用同步。
+ * 原生明确确认按钮未执行时最多重新尝试两次，未知或已消费结果不重发，避免恢复任务时再花一份经验和青金石。
+ */
 final class EnchantTransaction {
     private final LocalPlayer player;
     private final EnchantTaskRecord record;

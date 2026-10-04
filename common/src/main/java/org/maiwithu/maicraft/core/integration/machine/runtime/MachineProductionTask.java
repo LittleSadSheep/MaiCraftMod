@@ -132,6 +132,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                     phase = Phase.BASELINE;
                 }
             }
+            // 投入新批次前先记录接收端库存与生产事件起点；既有成品和在途旧货不能当成本轮新产出。
             case BASELINE -> { if (output.baseline()) phase = Phase.SUPPLY; }
             case SUPPLY -> {
                 if (supply.tick()) {
@@ -187,6 +188,7 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
                 }
             }
             case FINAL_VERIFY -> {
+                // 产物数量与时间窗口达到后还要核对真实连接，避免把断线后偶然入箱的旧货当作完整生产链通过。
                 if (preparation.tick()) {
                     var finalProof = preparation.finalVerification();
                     if (!preparation.compilation().valid()

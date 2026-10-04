@@ -15,12 +15,16 @@ import java.util.UUID;
 import org.maiwithu.maicraft.core.integration.machine.process.MinecraftEnchantProcessAdapter;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** 附魔台目标只来自当前维度的已加载事实；准备物品、选择报价与花费确认交给同一项附魔任务。 */
+/**
+ * 兼容的单件附魔入口：定位当前维度已有附魔台，再转换为 minecraft:enchanting 原生工序。
+ * 搜索半径只用于选台；档位和消费上限交给共用菜单执行器，不借此获取材料、刷经验或改换报价档位。
+ */
 final class EnchantAbilityAdapter {
     static final String ABILITY = "maicraft:enchant";
     private EnchantAbilityAdapter() {}
 
     static void validate(Goal goal) {
+        // 旧入口直接以两项预算表达本次消费边界；它没有机器操作入口的 allow_use 参数，也没有多件附魔次数。
         EnchantParameters.parse(goal.parameters());
         var target = goal.target();
         if (target != null && !Set.of("coordinates","landmark","nearest").contains(target.kind()))

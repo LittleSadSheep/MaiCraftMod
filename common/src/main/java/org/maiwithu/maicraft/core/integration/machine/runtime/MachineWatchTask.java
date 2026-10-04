@@ -25,7 +25,10 @@ import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.server.machine.ServerAccess;
 import org.maiwithu.maicraft.server.machine.watch.WatchGoal;
 
-/** 一次性授权已知端点后归还玩家身体；服务器原生观察负责后续完成通知。 */
+/**
+ * 为未来生产登记只读观察：先走近并授权生产位置、产物位置和物品接收端，再把持续观察交给服务器。
+ * 注册成功后释放身体；这里不会按清单供料、配置或启动设备，也不会在卸载区块里假造生产进展。
+ */
 final class MachineWatchTask extends AbstractCompanionTask<MachineWatchTaskRecord> {
     private final UUID job = UUID.randomUUID();
     private final ProductionRequestSlot requests = new ProductionRequestSlot();
@@ -74,6 +77,7 @@ final class MachineWatchTask extends AbstractCompanionTask<MachineWatchTaskRecor
         }
     }
     private JsonObject specification(ProductionEvidence.Binding binding) {
+        // 后台服务采用独立的事件数、空闲和总时长预算；v1清单中的前台窗口字段不在这里转交，不能宣称两种验收等价。
         JsonObject specification = new JsonObject(); specification.addProperty("dimension",r.plan.dimension()); JsonArray processes = new JsonArray();
         for (var node : r.plan.manifest().nodes()) if (node.kind().equals("process")) {
             var outputs = r.plan.manifest().ports().stream().filter(port -> port.node().equals(node.id()) && port.direction().equals("output") && port.medium().equals("items"))

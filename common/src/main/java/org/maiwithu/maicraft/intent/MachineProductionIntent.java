@@ -64,6 +64,7 @@ final class MachineProductionIntent {
     }
 
     static boolean isNative(JsonObject production) {
+        // 只有数值版本2选择原生工序；缺版本、字符串版本等不会补成v2，随后仍由相应格式解析器报告错误。
         var version = production == null ? null : production.get("schema_version");
         return version != null && version.isJsonPrimitive() && version.getAsJsonPrimitive().isNumber()
                 && version.getAsBigDecimal().compareTo(BigDecimal.valueOf(2)) == 0;

@@ -27,7 +27,10 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.core.integration.machine.MachineChainConveyorLimit;
 
-/** 先选择完整且经济的传动方案，再进行施工并核实真实原生结果。 */
+/**
+ * 为已确定的受电端找实际来源，再按材料、轴口及请求方向选线，备料、原生施工、接链并核对网络。
+ * 新线落地和目标得到转速分别记账；即使接线完成，也不会代替配方运行或成品交付验收。
+ */
 final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTaskRecord> {
     private enum Phase { DISCOVER, PLAN, SOURCE, TARGET, EXISTING, MATERIALS, BUILD, LINKS, SOURCE_AFTER, TARGET_AFTER, DONE }
     private final Level world;
@@ -274,6 +277,7 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         phase=after?Phase.DONE:materialsReady?(resumingRoute||r.requireChainConveyor?Phase.BUILD:Phase.SOURCE):Phase.MATERIALS;return after?TaskState.SUCCESS:TaskState.RUNNING;
     }
     private TaskState existing() {
+        // 目标原本就在转动时只核验真实入口与来源网络；no_change 表示本次没有另建线路，不能说成又造好一套机器。
         var face=r.targetFace;
         if(face==null) face=target.endpoint().shaftFaces().stream().filter(side->world.isLoaded(r.target.relative(side))
                 &&KineticNativeView.kinetic(world,r.target.relative(side))).findFirst().orElse(null);

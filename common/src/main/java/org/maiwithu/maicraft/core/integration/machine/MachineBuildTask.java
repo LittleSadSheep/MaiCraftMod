@@ -53,8 +53,9 @@ import org.maiwithu.maicraft.core.task.inventory.CreativeTakeItemsTaskRecord;
 import org.maiwithu.maicraft.core.blueprint.BuildProjectStore;
 
 /**
- * 整套机器装配的流程入口：观察现场、放普通方块、装部件、封洞、放初始物品、设过滤和接口，最后复查。
- * 每个阶段把具体动作交给现有任务执行；本类负责先后顺序、等待和最终结果。结构完成后，生产是否成功仍需另外运行观察。
+ * 整套机器装配的流程入口：勘测声明格、回收待移除流体，再施工方块、原生带段、附件与部件，封洞后倒流体。
+ * 编译计划要求的初始物品、过滤及配置随后执行；子动作结清后保存整机并比较最终目标。
+ * 原生动作失败保留已完成效果；动作结束后的结构或形成差异只作观察，不能据此宣称生产成功或让模型盲目重建。
  */
 final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecord> {
     private enum Phase { SURVEY, REMOVE_FLUIDS, BLOCKS, INSTALLATIONS, ATTACHMENTS, PARTS, SEAL, FLUIDS, CONTENTS, FILTERS, CONFIGURE, VERIFY, COMMISSION, BLUEPRINT_DIFF, DONE }
