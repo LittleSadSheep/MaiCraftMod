@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.intent;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.SharedConstants;
@@ -20,6 +21,11 @@ public final class AbilityPointerDriftTest {
             "travel", "maicraft:travel",
             "harvest_block", "maicraft:harvest_block",
             "interact", "maicraft:interact");
+    /** perceive(view=situation) 公开的 focus 取值；契约写成 focus=maicraft:xxx 时指向观察段，不是能力名。 */
+    private static final Set<String> SITUATION_FOCI = Set.of(
+            "maicraft:travel", "maicraft:elevators", "maicraft:physical_structures",
+            "maicraft:navigation", "maicraft:transport");
+    private static final String FOCUS_PREFIX = "focus=";
 
     public static void main(String[] args) {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -27,8 +33,15 @@ public final class AbilityPointerDriftTest {
         check("known abilities nonempty", !known.isEmpty());
         for (String ability : known) {
             JsonObjectish desc = new JsonObjectish(SemanticAbilityCatalog.describe(ability));
-            for (Matcher m = ABILITY_TOKEN.matcher(desc.text()); m.find(); ) {
+            String text = desc.text();
+            for (Matcher m = ABILITY_TOKEN.matcher(text); m.find(); ) {
                 String token = m.group();
+                // 紧跟 focus= 的是让模型先 perceive 的观察焦点：须仍是公开的 situation 焦点，不按能力表核对。
+                if (text.startsWith(FOCUS_PREFIX, m.start() - FOCUS_PREFIX.length())) {
+                    check("catalog text of " + ability + " names live situation focus " + token,
+                            SITUATION_FOCI.contains(token));
+                    continue;
+                }
                 check("catalog text of " + ability + " names live ability " + token,
                         known.contains(token));
             }

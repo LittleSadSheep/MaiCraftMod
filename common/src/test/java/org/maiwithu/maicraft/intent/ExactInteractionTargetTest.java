@@ -119,7 +119,8 @@ public final class ExactInteractionTargetTest {
             p.addProperty("allow_effects", true); SemanticGoalContract.validate(goal.withParameters(p), GeneralAbilityAdapter.abilities());
             check(AbilityAdapter.adapt(goal.withParameters(p), h.player, null) instanceof IntentAction.Tool && h.itemUses() == 0,
                     "explicit planner choice compiles one native eating action without requesting human approval or eating during planning");
-            check(SemanticAbilityCatalog.describe(GeneralAbilityAdapter.CONSUME).toString().contains("planner explicitly accepts"), "the public contract identifies the actual decision maker");
+            // 中文契约须点名由 LLM 在已授权任务内决定是否接受食物效果，而不是再向玩家要人工审批。
+            check(SemanticAbilityCatalog.describe(GeneralAbilityAdapter.CONSUME).toString().contains("LLM可在已授权游戏任务内作此策略选择"), "the public contract identifies the actual decision maker");
         }
     }
 

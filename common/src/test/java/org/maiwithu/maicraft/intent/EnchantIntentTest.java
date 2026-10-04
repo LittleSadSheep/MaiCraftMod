@@ -42,7 +42,8 @@ public final class EnchantIntentTest {
         }
         JsonObject zero=valid.parameters();zero.addProperty("max_levels_spent",0);zero.addProperty("max_lapis",0);
         runtime.compile(valid.withParameters(zero),1);
-        check(SemanticAbilityCatalog.describe(EnchantAbilityAdapter.ABILITY).toString().contains("required XP level"), "能力须说明门槛与扣费不同");
+        // 公开契约已改为中文：报价要求的等级只是门槛，max_levels_spent 限制实际扣级，两者必须分开说明。
+        check(SemanticAbilityCatalog.describe(EnchantAbilityAdapter.ABILITY).toString().contains("不是报价的等级门槛"), "能力须说明门槛与扣费不同");
     }
 
     private static void nativeTarget() throws Exception {
