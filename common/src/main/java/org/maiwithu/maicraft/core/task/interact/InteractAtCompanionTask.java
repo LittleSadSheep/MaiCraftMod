@@ -43,8 +43,9 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 
 /**
- * 在当前位置对准方块、液体或前方按键。先选物品、等镜头真正对准，再按实际射线命中的目标执行。
- * 语义请求可让本任务自行比较站位并走近；原地点击仍沿用原行为。目标身份和原生点击效果分别核对。
+ * 公开定点请求先比较站位并走近，再准备手持物、等镜头对准并提交原生动作；内部原地请求只检查现有距离。
+ * 满桶坐标指流体落格，执行器寻找邻接支撑面后走桶的物品射线；门框嵌眼走方块交互。
+ * 不带坐标的 use_item 进入持用分支，保留当前视线与副手配置；目标身份、动作确认和实际产物分别观察。
  */
 public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTaskRecord> {
     // 单次原生右键可能就是开箱步骤；菜单交给调用方接续，不把刚打开的工作站当作遗留页面关闭。
@@ -75,7 +76,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean menuOpened;
     private int menuObservationTicks;
     private List<String> changes = List.of();
-    // 下面保存持续按住的结束时间和结果文字；这个类当前没有重新寻路的过程。
+    // 固定时长从建立交互时开始；前面的走近和选物不算手摇时长，换站位仍由同一任务维护。
     /**
      * 固定时长的按住动作在这个游戏刻松开；-1 表示没有固定结束刻。
      */
@@ -450,6 +451,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     }
 
     private TaskState useHeldItem() {
+        // 本分支没有空间目标，不另选支撑面或实体；桶会沿当前视线使用，手持加工交由物品读取当前双手。
         // 选物也不能打断其他已开始的持用；本次尚未创建交互时，任何正在使用的物品都属于外部流程。
         if (interaction == null && player.isUsingItem()) {
             fail("another native item use is already active", FailureType.UNKNOWN); return TaskState.FAILED;
@@ -487,6 +489,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
 
     private TaskState verifyExpectedOutput() {
         // 使用动画结束与服务端产物槽更新可能分包到达；只等一小段同步窗口，绝不再自动使用一次物品。
+        // 当前比较同物品类型的库存总数，未按组件或产物来源归因；并发拾取等增量需要结合现场判断。
         if (r.expectedOutputItem != null && PlayerInv.count(player.getInventory(), r.expectedOutputItem) <= expectedItemBefore) {
             if (++outputWaitTicks <= 40) return TaskState.RUNNING;
             fail("native item use completed but the expected carried output did not increase", FailureType.TARGET_LOST); return TaskState.FAILED;
@@ -572,6 +575,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     /** 释放交互，再释放导航和目标覆盖层（父类默认清理）。 */
     @Override
     protected void cleanup() {
+        // 终态只释放选物、手持和导航；已倒出的流体、消耗的眼与打开的菜单不会在这里回滚。
         if (interaction != null) interaction.stop();
         manualHandParking.cleanup(player);
         if (manualHandSelection != null && !manualHandSelection.terminal()) {

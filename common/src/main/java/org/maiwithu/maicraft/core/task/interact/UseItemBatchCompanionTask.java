@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 备双手 -> 完成一次原生加工 -> 核对新增产物 -> 按需补料换工具；不让模型重复发同一手势。 */
+/** 备双手 -> 完成一次原生加工 -> 核对新增产物 -> 从随身库存补料换工具；目标数按新增产物计，不按点击次数计。 */
 public final class UseItemBatchCompanionTask extends AbstractCompanionTask<UseItemBatchTaskRecord> {
     private Task active;
     private TaskRecord activeRecord;
@@ -62,7 +62,8 @@ public final class UseItemBatchCompanionTask extends AbstractCompanionTask<UseIt
             return TaskState.FAILED;
         }
         if (phase.equals("native_use")) {
-            // 只累计本次完成持用并确认入包的产物；菜单准备完成、动画结束和总库存碰巧增加都不是批次产量。
+            // 只累计已完成持用子任务回执里的正库存增量，不拿整批前后总差直接当产量。
+            // 单步增量仍按物品类型统计，无法独立排除并发拾取；一次多产会使 completedOutput 超过请求值。
             Object evidence = lastStep.data().get("expected_output");
             int increase = evidence instanceof Map<?, ?> counts && counts.get("observed_increase") instanceof Number n ? n.intValue() : 0;
             if (increase <= 0 || !Boolean.TRUE.equals(lastStep.data().get("native_use_completed"))) {
@@ -79,6 +80,7 @@ public final class UseItemBatchCompanionTask extends AbstractCompanionTask<UseIt
     private static String id(Item item) { return BuiltInRegistries.ITEM.getKey(item).toString(); }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        // 暂停、抢占和取消都会锁住本批次；恢复后先报告已做数量与最后一步，不自动续做可能已消耗的一次。
         interrupted = true;
         if (active != null) active.stop(companion, why);
         super.stop(companion, why);
@@ -90,6 +92,7 @@ public final class UseItemBatchCompanionTask extends AbstractCompanionTask<UseIt
     }
     @Override public Map<String, Object> progress() { return resultData(); }
     @Override protected Map<String, Object> resultData() {
+        // completedUses 只数已结清的加工次数；准备双手不计次数，剩余产量用于重新评估而非自动重放原批次。
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("phase", phase); data.put("item_id", id(r.tool)); data.put("expected_output_item_id", id(r.output));
         data.put("target_output_count", r.count); data.put("completed_output_count", completedOutput); data.put("completed_uses", completedUses);

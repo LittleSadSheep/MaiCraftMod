@@ -187,34 +187,51 @@ public final class SemanticAbilityCatalog {
                             field("allow_harm", "boolean", "Boolean must be true for every explicit combat request including defend. Omitted/null/false requests a decision and does not dispatch attack. Reflect already authorized user intent."),
                             field("confirm_risky_target", "boolean", "Boolean default false (omitted/null/false). Required true in addition to allow_harm when selected targets include players, named/tamed entities or non-Enemy creatures; confirm this semantic target, not blanket nearby harm."))));
             case GeneralAbilityAdapter.INTERACT -> contract(
-                    "Use one semantic block or entity; MaiCraft resolves the loaded target, approaches it and performs the ordinary interaction. "
-                            // 满桶坐标描述期望落格，执行器自行选择支撑面；不让模型把点击面和倒桶目标混为一谈。
-                            + "For a filled bucket, a coordinate target is the destination cell and may be air; MaiCraft aims at a suitable support face. "
-                            + "With a block_id and selection=nearest it self-locates the closest matching station within the radius — no coordinates needed. "
-                            + "Stand level with the target block: submitting across a height difference has produced no real click with stale confirmations (UNCERTAIN).",
-                    targets("coordinates", "entity", "player", "nearest", "landmark", "area"),
-                    sheepFields(fields(
-                            field("block_id", "resource_id", "Optional namespaced block type to use."),
-                            field("entity_type_id", "resource_id", "Optional namespaced entity type, never a runtime entity identifier."),
-                            field("entity_name", "string", "Optional visible custom/display name."),
-                            field("player_name", "string", "Optional exact player name."),
-                            field("item_id", "resource_id", "Optional carried item whose ordinary use is intended. Omit to prepare an empty main hand before interacting with the target."),
-                            field("item_resource_id", "string", "Block use only, requires item_id: copy an observed resource_id from situation inventory variants or equipment.main_hand to choose that exact carried component variant. Without it, a matching current held stack is preferred."),
-                            field("purpose", "string", "Open, talk, trade, use or till. Till prepares a suitable hoe when item_id is omitted."),
-                            field("duration_seconds", "number", "Optional finite duration from 0 to 30 for empty-hand Create hand-crank use. Zero or omitted means one activation; the Mod repeats native uses and settles the final receipt."),
-                            field("selection", "string", "Nearest means any nearest loaded semantic match is acceptable."),
-                            field("radius", "integer", "Bounded loaded-world search radius."),
-                            field("may_alter_terrain", "boolean", "Explicit route permission; default false."))));
+                    // 契约按实际目标分流、原生确认和已知恢复边界说明，示例不替调用者虚构现场证据。
+                    "对一个方块或实体执行普通原生右键；适合按按钮、打开目标、登船、剪毛、使用已带物品，以及 Create 手摇曲柄。不是攻击、挖掘、菜单内交易或容器存取；这些目标应选对应能力。 "
+                            + "请求层级：goal.ability=maicraft:interact，goal.outcome 描述目的；下面字段均在 goal.parameters。goal.target 可省略，或选 coordinates/entity/player/nearest/landmark/area。不要传内部 button、hold_ticks、槽位或运行期 entity_id。 "
+                            + "coordinates 使用 goal.target.position={x,y,z,dimension?}，x/y/z 为整数方块格；dimension 省略或 null 取当前维度，异维度不执行。坐标只操作该格；满桶坐标是流体落格，可为空气，不是支撑块坐标。实体描述与方块类型或坐标不能混用。 "
+                            + "非坐标方块需 block_id，省略目标或 nearest 时围绕玩家查找；landmark/area 的 position 或已记住同维度 label 作为搜索中心，解析失败不改为玩家附近。实体按类型、显示名、玩家名及羊属性取交集；entity 的 label 可作注册类型或显示名，player 的 label 可作玩家名。匹配多于一个时需 nearest 许可，否则待决策。 "
+                            + "羊属性省略表示不筛对应特征；提供任一 sheep_* 即只选羊。sheep_baby=false 要成年，sheep_sheared=false 要有毛，两者必须是真布尔，null/0/字符串拒绝。sheep_color 必须为 white/orange/magenta/light_blue/yellow/lime/pink/gray/light_gray/cyan/purple/blue/brown/green/red/black；null/空串/错拼拒绝。靠近期间再次复核，不换另一只羊。 "
+                            + "动作顺序：解析加载目标→选站位并走近→整理主手与界面→等待镜头和真实命中→提交原生动作→结算同一回执及现场变化。未指定道具通常准备空手；till 的自动备锄是例外。方块路线先尝试现有路，允许地形准备时才在失败后开路；实体分支目前未传递 may_alter_terrain。 "
+                            + "满桶以物品自身射线倒入目标，空桶要求真实可取源格；普通方块和实体使用各自原生交互。超时未知不能当未提交重发；只有明确未生效且分支允许时才会转入物品后续使用。省略道具的空手操作不启用此回退。 "
+                            + "execute 接单不表示效果完成；按 next_attention 等待。方块回执可含 native_action_kind/status、outcome_uncertain、target_observation、changes、interaction_approach，流体反应产物据实保留。实体回执目前主要提供实体/羊属性、变化和剪毛掉落数，未完整透传原生状态；目标消失后的 acted 成功分支也不能独立证明指定效果。剪下羊毛不等于已入包。 "
+                            + "purpose=open 不额外保证 menu_open_verified；正时长曲柄报告原生转动和超载，machine_production_verified 仍为 false。缺物品、目标歧义或不可用位置按当前决策补充条件；已提交或不确定时先查原任务与相关现场，再决定余下动作。暂停保留逻辑状态但释放身体，取消不回滚副作用；死亡、换世界或磁盘恢复后先检查暂停记录，不复用旧实体编号或路线。 "
+                            + "完整 plan 参数示例（坐标须替换为实际观察值）：{\"goal\":{\"ability\":\"maicraft:interact\",\"outcome\":\"打开最近的工作台\",\"target\":{\"kind\":\"nearest\"},\"parameters\":{\"block_id\":\"minecraft:crafting_table\",\"selection\":\"nearest\",\"radius\":32,\"purpose\":\"open\"}}} "
+                            + "剪毛示例：{\"goal\":{\"ability\":\"maicraft:interact\",\"outcome\":\"给最近的成年有毛白羊剪毛\",\"parameters\":{\"entity_type_id\":\"minecraft:sheep\",\"sheep_color\":\"white\",\"sheep_baby\":false,\"sheep_sheared\":false,\"item_id\":\"minecraft:shears\",\"selection\":\"nearest\",\"radius\":32}}} "
+                            + "已安装 Create 且观察到原生曲柄时的十秒手摇示例：{\"goal\":{\"ability\":\"maicraft:interact\",\"outcome\":\"空手摇曲柄并观察实际转动\",\"target\":{\"kind\":\"coordinates\",\"position\":{\"x\":10,\"y\":64,\"z\":10,\"dimension\":\"minecraft:overworld\"}},\"parameters\":{\"block_id\":\"create:hand_crank\",\"purpose\":\"use\",\"duration_seconds\":10}}} ",
+                    targets("coordinates", "entity", "player", "nearest", "landmark", "area"), sheepFields(fields(
+                            field("block_id", "resource_id", "goal.parameters.block_id：可选已注册命名空间方块 ID；非坐标方块搜索必需，坐标时可省略。提供时核对目标仍是该类型；省略/null/空白不提供类型条件。不得与实体筛选混用。"),
+                            field("entity_type_id", "resource_id", "goal.parameters.entity_type_id：可选已注册实体类型 ID，不是运行编号；省略/null/空白不筛类型。与实体名、玩家名和羊属性取交集；候选必须已加载且存活，实际视线在操作前检查。"),
+                            field("entity_name", "string", "goal.parameters.entity_name：可选非空显示名字符串，不区分大小写；省略/null/空白不筛名字。可能有同名对象；多个匹配仍需 nearest 许可或修订目标。"),
+                            field("player_name", "string", "goal.parameters.player_name：可选非空玩家档案名字符串，不区分大小写；省略/null/空白不筛玩家名；可由 target.kind=player 的 label 提供，仍受加载与范围限制。"),
+                            field("item_id", "resource_id", "goal.parameters.item_id：可选已注册随身物品 ID；显式提供时缺料待决策，不自动找料。省略/null/空白时准备空主手；purpose=till 时可自动选择并准备适用锄。"),
+                            field("item_resource_id", "string", "goal.parameters.item_resource_id：可选观察所得组件身份字符串，仅方块使用并要求 item_id；内部记录非空且最长512字符。省略/null/空白不限定变体；点名后每次提交前核对，变化或消失停止。不可用于实体，不要构造身份值。"),
+                            field("purpose", "string", "goal.parameters.purpose：可选字符串，省略/null/空白是普通右键。till 自动备锄并核对耕地，attack/break 返回改用战斗/采矿的决策。正 duration_seconds 必须 use；open/talk/trade 等其他值并不执行特定菜单流程，也不是严格枚举校验。"),
+                            field("duration_seconds", "number", "goal.parameters.duration_seconds：可选 JSON 数字，单位秒，0..30；省略或0只做一次，null/false/数字字符串/越界拒绝。正值要求 purpose=use、无 item_id、无实体筛选且目标为原生 Create 手摇曲柄；ceil(seconds*20)游戏刻从建立交互时开始，走近不计时，已提交末次动作仍结算。"),
+                            field("selection", "string", "goal.parameters.selection：可选字符串；nearest（忽略大小写）允许本轮匹配中的最近者。省略/null/空白时多个匹配待决策；其他值没有独立选择策略，不能撤销 target.kind 或 target.relation 的 nearest 许可。"),
+                            field("radius", "integer", "goal.parameters.radius：推荐整数，单位格，4..128；非坐标方块默认64，实体默认48；省略/null/解析失败用默认，解析为int后夹到4..128，0因而变为4。当前解析可能截断小数、接受数字字符串或转换过大数值，调用方应传范围内整数。方块用加载索引及水平范围；实体用扩张身体包围盒，候选阶段不检查视线。精确坐标分支忽略此字段。"),
+                            field("may_alter_terrain", "boolean", "goal.parameters.may_alter_terrain：布尔，省略/null/false默认不授权方块接近路线改地形；true允许普通路线失败后准备通路，目标仍固定。实体分支当前未传递此参数，不能用它要求实体导航开路。"))));
             case GeneralAbilityAdapter.USE_ITEM -> contract(
-                    // 明确坐标时由执行器走近并定点用物品；不带目标的加工批次继续准备双手、补料和换工具。
-                    "Use a carried item. With target.kind=coordinates, approach and use it once at that exact cell: filled buckets place into the cell (air is allowed), empty buckets collect its source, and an ender eye is inserted into the targeted frame. MaiCraft chooses the native aim and item/block action. Without coordinates, use along the current view. Repeated processing at current_place accepts count plus expected_output_item_id and optional ingredient_item_id; the Mod prepares both hands and repeats only after confirmed output.",
+                    // 契约按实际目标分流、原生确认和已知恢复边界说明，示例不替调用者虚构现场证据。
+                    "使用一个已带物品：定点分支会自动接近并对指定格使用；不带坐标则沿当前视线持用；批次按新增产物数量逐次操作。不要仅在 outcome 里写定点而省略 target。 "
+                            + "请求层级：goal.ability=maicraft:use_item；字段均在 goal.parameters。goal.target 仅接受 current_place 或 coordinates，也可省略。coordinates 使用 target.position={x,y,z,dimension?}，三轴整数单位格，dimension省略/null为当前维度；不支持实体目标和异维度操作。 "
+                            + "坐标目标只做一次，count必须1且不允许 ingredient_item_id：满桶的坐标是流体落格（可空气），空桶是取源格，末影之眼是被嵌的门框。Mod选支撑面、走近、选物、转头并复核真实射线；桶走原生物品使用，门框嵌眼走方块使用，不要求调用方给点击面。 "
+                            + "省略 target 或 current_place 不重新瞄准目标；原生物品可以影响当前视线下的世界。物品已在主手时优先用主手，其次可用已持有的副手，再从库存选择。count=1且没有原料时保留当前双手；count>1或提供原料时进入批次。批次有原料时先备副手、再备主手工具，每次完成后检查产物并从随身库存续料或换工具，不自动去仓库或采集合成。 "
+                            + "批次需要 expected_output_item_id，工具、原料（若有）和产物必须是不同物品类型。count按新增产物计，不是点击次数；一次多产可以超过目标。标称原生持用时长超过1200游戏刻的物品会要求专门活动，这不是全部任务的统一超时。 "
+                            + "先记录产物库存，再提交一次原生动作，等待同一确认；声明产物后额外等待最多40游戏刻同步。当前确认采用同物品类型库存增加，未按组件或产物来源严格归因，并发拾取可能影响增量。不得把返空桶或动作成功冒称目标流体仍保持原样。 "
+                            + "execute返回的是接单；按next_attention等候。定点回执用target_observation呈现实际前后状态，可含native_action_kind/status、outcome_uncertain与changes；声明返还物时有expected_output.before/after/observed_increase。无坐标单次还有held_item_use_started/native_use_completed/used_hand；批次返回phase、target_output_count、completed_output_count、completed_uses、remaining_output_count和last_step。 "
+                            + "批次遇缺料、未确认或任何stop（包括暂停/抢占）都会停止；恢复同一批次不会无缝续做，而是报告中断，mechanical_retry_allowed=false。先核对已完成、剩余与未知效果再决定新目标。单次暂停保留逻辑状态；取消不回滚副作用。死亡、换世界或重启后先读暂停记录与真实背包，不重放未知一次。 "
+                            + "完整plan参数示例（坐标替换为实际观察值；满桶落格而非支撑块）：{\"goal\":{\"ability\":\"maicraft:use_item\",\"outcome\":\"把熔岩倒入指定格并观察返桶\",\"target\":{\"kind\":\"coordinates\",\"position\":{\"x\":10,\"y\":64,\"z\":10,\"dimension\":\"minecraft:overworld\"}},\"parameters\":{\"item_id\":\"minecraft:lava_bucket\",\"expected_output_item_id\":\"minecraft:bucket\",\"may_alter_terrain\":false}}} "
+                            + "定点嵌眼示例：{\"goal\":{\"ability\":\"maicraft:use_item\",\"outcome\":\"给指定门框嵌眼\",\"target\":{\"kind\":\"coordinates\",\"position\":{\"x\":10,\"y\":64,\"z\":10,\"dimension\":\"minecraft:overworld\"}},\"parameters\":{\"item_id\":\"minecraft:ender_eye\",\"block_id\":\"minecraft:end_portal_frame\"}}} "
+                            + "非坐标批次示例（需携带足够蜜瓶，真实饮用并累计新增玻璃瓶）：{\"goal\":{\"ability\":\"maicraft:use_item\",\"outcome\":\"使用蜜瓶获得三只新增玻璃瓶\",\"target\":{\"kind\":\"current_place\"},\"parameters\":{\"item_id\":\"minecraft:honey_bottle\",\"count\":3,\"expected_output_item_id\":\"minecraft:glass_bottle\"}}} ",
                     targets("current_place", "coordinates"), fields(
-                            field("item_id", "resource_id", "Required carried item to select and use through its own native behavior."),
-                            field("block_id", "resource_id", "Optional current block identity at a coordinate target; omit when pouring into an empty cell."),
-                            field("may_alter_terrain", "boolean", "Permit route preparation for coordinate targets; default false. Does not change the requested use location."),
-                            field("ingredient_item_id", "resource_id", "Optional carried ingredient to equip in offhand; the tool is prepared in main hand. Native item behavior must support this pairing."),
-                            field("count", "integer", "1..64 new output items to produce at current_place, default 1. Coordinate targets require one action and no ingredient_item_id."),
-                            field("expected_output_item_id", "resource_id", "Required for batch/material preparation, optional for single use. Each completed native use must increase this carried output; reports completed and remaining counts.")));
+                            field("item_id", "resource_id", "goal.parameters.item_id：必需已注册随身物品ID；省略/null/空白要求补充，不沿用任意当前手持物；缺料待决策。批次工具与原料、产物必须互异。没有 item_resource_id 变体选择参数。"),
+                            field("block_id", "resource_id", "goal.parameters.block_id：可选已注册原方块ID，仅坐标分支读取并在提交前核对。省略/null/空白不提供显式类型条件；满桶通常省略，以便空气变流水后按现场尝试。在current_place提供它目前不会选中或验证方块。"),
+                            field("may_alter_terrain", "boolean", "goal.parameters.may_alter_terrain：布尔，仅坐标目标的接近路线使用；省略/null/false默认不改地形，true在普通路线失败后允许准备通路，不改变落格。无坐标分支忽略该字段。"),
+                            field("ingredient_item_id", "resource_id", "goal.parameters.ingredient_item_id：可选已注册随身原料ID；省略/null/空白不要求副手准备。非空即启用批次，即使count=1也需要expected_output_item_id；装备副手原料与主手工具，原生物品必须支持这种配对。坐标目标禁止提供。"),
+                            field("count", "integer", "goal.parameters.count：JSON数字且数值必须精确为整数1..64，省略为1；0/null/false/非整数数值/数字字符串/越界拒绝。非坐标批次以新增产物件数为目标，非使用次数；坐标目标只能1。一次原生使用多产时完成量可超过count。"),
+                            field("expected_output_item_id", "resource_id", "goal.parameters.expected_output_item_id：已注册且非空气的产物或返还物ID；单次可省略/null/空白，count>1或提供ingredient_item_id时必填。每次完成后要求同类型库存增加，最多再等40游戏刻；按库存增量而非组件/来源归因。定点倒桶可用minecraft:bucket检查返还，坐标未提供时不验证任何指定方块产物。")));
             case GeneralAbilityAdapter.HARVEST_BLOCK -> contract(
                     "Harvest one exact observed resource block through native breaking and pickup. Stops after one source break even if it regenerates; reports source position and carried output increase. Approaches without altering surrounding terrain. The cell directly underfoot cannot be targeted — a zero-distance stance generates no approach route. No inventory-source substitution.",
                     targets("coordinates"), fields(

@@ -8,8 +8,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 
 /**
- * 保存原地点击的方向、按键、物品和按住时间。没有坐标时沿当前朝向操作。
+ * 保存本次交互的目标、手持物和持续方式；公开定点请求额外开启自动接近，没有坐标时沿当前朝向操作。
  * expectedBlock 要求操作后出现某种方块；requiredBlock 要求操作前目标仍是指定方块，两者用途不同。
+ * 满桶的 aim 是流体落格而非被点的支撑块；expectedOutputItem 是使用后应增加的库存物品类型。
  */
 public final class InteractAtTaskRecord extends TaskRecord {
 

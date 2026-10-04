@@ -31,7 +31,7 @@ public final class InteractEntityTaskRecord extends TaskRecord {
 
     public SheepTraits sheepTraits() { return sheepTraits == null ? SheepTraits.ANY : sheepTraits; }
 
-    /** 打开交易等实体界面时必须空主手，且实体拒绝交互后不能继续使用无线终端等手持物。 */
+    /** 公开实体交互省略道具时也走此空手准备；禁止持物回退，但该标记不保证实体一定打开菜单。 */
     public InteractEntityTaskRecord forMenu() {
         if (button != MouseButton.RIGHT || holdTicks != 0 || item != null)
             throw new IllegalStateException("entity menu opening requires one empty-hand right click");

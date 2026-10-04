@@ -127,6 +127,7 @@ public final class GeneralAbilityAdapter {
         };
     }
 
+    /** 定点先交给接近与瞄准；无坐标再区分单次持用和按新增产物计数的批次，避免桶和嵌眼共用错误手势。 */
     private static IntentAction useItem(Goal goal, LocalPlayer player) {
         String itemId = itemId(goal.parameters());
         if (itemId == null) return decision(goal, "Use one named carried item through its native item action.",
@@ -597,7 +598,8 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel interaction.")), null);
         }
         if (!selector.empty()) {
-            // 生物交互先找目标并检查指定物品；这个分支始终发起右键使用，不用于攻击。
+            // 先从加载实体中按全部描述筛选；这里只编排右键并传物品/空手与羊属性，may_alter_terrain 尚未传入实体任务。
+            // 候选筛选不证明视线已通，真正跟随、选站位和准星核对由实体执行器完成。
             if (containerOnly) {
                 return decision(goal, "`use_container` currently opens loaded block containers, not entity inventories.",
                         List.of(option("replace_goal", "Use a block container target."),
@@ -669,7 +671,8 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction interactBlock(
             Goal goal, LocalPlayer player, IntentRuntime runtime, String rawBlockId, String itemId, boolean prepareTool) {
-        // 指定坐标就只操作那一格；否则围绕玩家或指定地标寻找这种方块。
+        // 坐标请求只认这一格，不因附近还有同类方块而换目标；非坐标请求才使用已加载索引。
+        // 方块搜索默认六十四格，radius 解析会夹到范围内；多个候选必须有最近选择许可。
         if (exactBlockTarget(goal)) {
             return interactExactBlock(goal, player, rawBlockId, itemId, prepareTool);
         }
@@ -811,7 +814,8 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction compileBlockInteraction(
             Goal goal, LocalPlayer player, BlockPos target, ResourceLocation id, String itemId, boolean prepareTool) {
-        // 语义层只保留目标、物品与地形许可；是否需要走近及选哪个站位由同一原生交互任务负责。
+        // 编译目标格、物品与原生前提后交给同一个执行器自动接近，不要求模型先另开走位或瞄准任务。
+        // 普通方块保留旧类型约束；满桶未声明 block_id 时只固定落格，空气变流水后仍按真实射线尝试。
         ClientLevel level = player.clientLevel;
         JsonObject use = new JsonObject();
         use.addProperty("button", "right");

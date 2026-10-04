@@ -15,7 +15,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 接收内部 interact_at 请求，交给 BlockActionOps 检查参数并建立原地点击任务；坐标、物品和结果要求原样传下去。
+ * 接收语义适配器的内部 interact_at 请求；公开 MCP 使用 interact/use_item，不能把按钮、槽位等手势当公开参数。
+ * 坐标、物品和结果要求先编成任务，再补自动接近、空手或返还物观察；是否真的提交和生效由执行器判断。
  */
 public final class InteractAtTool implements MaiCraftTool {
 
@@ -34,12 +35,13 @@ public final class InteractAtTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        return "Aim at a world point and press one mouse button — the full native click for BLOCKS, "
-                + "FLUIDS and the AIR (moving entities use interact_entity). right = use/place/activate; "
-                + "if the aimed block doesn't respond, the held item acts on its own, exactly like a real "
-                + "right-click — so aiming at WATER with a bucket scoops it, with a boat places it. "
+        // 内部任务仍区分桶射线、方块交互和明确未生效后的物品回退，确认超时不能描述成一定会继续使用物品。
+        return "Internal world-point interaction for BLOCKS, FLUIDS or current-view item use; moving entities use interact_entity. "
+                + "right = use/place/activate. Buckets use their native item ray; a filled bucket's coordinates name the destination cell, "
+                + "and an empty bucket's coordinates name the source. Ordinary block use allows held-item fallback only after a confirmed-not-applied result, "
+                + "not after an uncertain timeout. "
                 + "left = attack/break (prefer mine for digging). The result reports what actually "
-                + "changed (hands, aimed block, new entities); no change listed = the click did nothing. "
+                + "changed (hands, aimed block, new entities); an empty difference list does not prove native rejection. "
                 + "By default it acts within current reach. approach=true lets the native executor choose "
                 + "a reachable interaction stance; terrain changes require may_alter_terrain=true.";
     }

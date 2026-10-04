@@ -15,7 +15,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 接收内部 interact_entity 请求，交给 BlockActionOps 建立对实体的点击任务；靠近、对准和实际操作由执行任务完成。
+ * 接收适配器已选中的内部实体编号，建立跟随、瞄准和原生点击任务；公开 interact 只接收实体描述而非运行编号。
+ * 省略物品的公开请求会显式带 empty_hand，避免登船或交谈时误用上一次任务遗留的工具。
  */
 public final class InteractEntityTool implements MaiCraftTool {
 

@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.core.task.interact;
 import net.minecraft.world.item.Item;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** 一次提交所需新增产物量；工具替换和双手原料准备由 Mod 执行，未确认的持用绝不自动重放。 */
+/** 一次提交 1～64 件新增产物；工具、可选副手原料与产物必须是不同物品类型，避免把选物自身计成加工产量。 */
 public final class UseItemBatchTaskRecord extends TaskRecord {
     public final Item tool, ingredient, output;
     public final int count;

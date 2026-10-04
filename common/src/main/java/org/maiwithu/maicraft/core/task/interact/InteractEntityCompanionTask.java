@@ -69,7 +69,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
     private boolean settlingShearing;
     private List<String> changes = List.of();
     private long holdUntil = -1;
-    private boolean acted = false;     // 至少有一次按键命中；之后目标死亡应算成功，而非失败。
+    private boolean acted = false;     // 已开始推进交互对象，尚不证明原生操作已提交或确认；目标消失分支目前只检查此标记。
     private String successMsg = "done";
     private int aimTicks;
 
@@ -128,7 +128,8 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
             fail("requested_sheep_traits_changed: target no longer matches the requested sheep", FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
-        // 目标消失时，若此前左键已命中则视为成功；否则说明目标在角色接触前逃离。
+        // 当前实现以 acted 决定目标消失后的成功；它不区分左／右键，也不验证消失是否由本次交互造成。
+        // 排查假成功时应同时查看 Interaction 的提交与确认状态，不能把 done with 当作喂食或交易的效果证明。
         if (entity == null || !entity.isAlive()) {
             if (acted) {
                 successMsg = r.button == MouseButton.LEFT
@@ -334,6 +335,7 @@ public final class InteractEntityCompanionTask extends GoToThenDoTask<InteractEn
 
     @Override
     protected Map<String, Object> resultData() {
+        // 这里保留实体、羊属性和可见变化；当前没有透传 Interaction.useEvidence 的原生状态，缺字段不代表没有副作用。
         Map<String, Object> data = new HashMap<>();
         data.put("button", r.button == MouseButton.LEFT ? "left" : "right");
         data.put("entity_id", r.entityId);
