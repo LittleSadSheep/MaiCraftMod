@@ -1520,6 +1520,8 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
     }
     /** 面板行动行的一句话汇报；产物名取配方产物的本地化名称，计数是已确认完成批次的产物量。 */
     @Override public String describeCurrentAction() {
+        // 接单到首个 tick 之间 stage 尚为 null；HUD 每刻轮询本方法，缺空判定会直接崩客户端。
+        if (stage == null) return "合成任务待启动";
         String product = plannedOutput.isEmpty() ? "物品" : plannedOutput.getHoverName().getString();
         return switch (stage) {
             case CLOSE_WRONG_MENU -> "正在关闭无关界面";
