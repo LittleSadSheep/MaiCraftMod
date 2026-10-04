@@ -60,6 +60,7 @@ public final class IntentRuntime {
             PhysicsAbilityAdapter.ABILITY,
             PhysicalAssemblyAbilityAdapter.ABILITY,
             PhysicalControlAbilityAdapter.ABILITY,
+            AircraftFlightAbilityAdapter.ABILITY,
             QuestAbilityAdapter.ABILITY,
             ChatAbilityAdapter.ABILITY,
             SuicideAbilityAdapter.ABILITY, // 让模型通过正式能力发现与执行入口提交主动寻死。

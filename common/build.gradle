@@ -68,7 +68,7 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 def regressionSuites = [
     // 飞控先回放姿态、起飞和落地反馈，再由原生会话单独验收操纵与真实飞行。
     flightControlRegression: [
-        entry: 'org.maiwithu.maicraft.core.integration.physics.flight.FlightFeedbackControllerTest',
+        entry: 'org.maiwithu.maicraft.core.integration.physics.flight.AircraftFlightRegressionSuite',
         heap: '512m', directory: 'flight-control-regression', timeoutSeconds: 60,
         purpose: '验证飞控按真实接地证据切换起降阶段和姿态反馈'
     ],

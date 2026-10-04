@@ -83,6 +83,7 @@ final class SemanticGoalContract {
         if (PhysicsAbilityAdapter.ABILITY.equals(ability)) PhysicsAbilityAdapter.validate(goal);
         if (PhysicalAssemblyAbilityAdapter.ABILITY.equals(ability)) PhysicalAssemblyAbilityAdapter.validate(goal);
         if (PhysicalControlAbilityAdapter.ABILITY.equals(ability)) PhysicalControlAbilityAdapter.validate(goal);
+        if (AircraftFlightAbilityAdapter.ABILITY.equals(ability)) AircraftFlightAbilityAdapter.validate(goal);
         // 在角色接管前确认 FTB 对象编号与动作种类，不接受混用任务、奖励或自行编写点击序列。
         if (QuestAbilityAdapter.ABILITY.equals(ability)) QuestAbilityAdapter.validate(goal);
         if (ChatAbilityAdapter.ABILITY.equals(ability)) {

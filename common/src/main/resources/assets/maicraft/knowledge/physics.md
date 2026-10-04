@@ -62,6 +62,20 @@ Simulated 的一条原生舵机传动链是：动力源 → `simulated:direction
 
 按键试验可附带 `observe_positions:[{x:0,y:1,z:2},...]`，坐标仍相对同一世界锚点或结构 `origin_storage`，最多明确指定 16 个部件。执行器保持按键时每五刻只读这些部件，把变化后的完整原生配置和真正未知项保存在 `observed_feedback`，用于检查接收端、弹簧角度与转速；观察不会另开任务而中断按键。释放后再检查回中和停机状态。
 
+## Mod 内飞控
+
+`maicraft:fly_vehicle` 把持续驾驶交给 Mod。先用 `operation:"configure"`、观察到的 `structure_id` 和完整 `profile` 保存本机操纵声明；`operation:"inspect"` 只读声明和实际支撑状态，没有登记声明也能观察。保存按世界、维度和结构 UUID 隔离，重新组装得到新 UUID 后须重新登记。
+
+`profile` 包括 `kind:"fixed_wing"` 或 `"airship"`、相对 `origin_storage` 的整数 `seat_position` 与 `typewriter_position`、本地机头方向 `forward`，以及 `keys`。键位角色为 `power`、`brake`、`pitch_up/down`、`bank_left/right`、`yaw_left/right`、`lift`；值是实际已配频的按键名称。`power` 约定按住运行、释放断开，`lift` 为气球升力启用通道。角色名称是设计者的声明，不能只给控制器贴标签而没有对应的真实电路、舵面或推进器。
+
+可声明 `takeoff_speed`、`cruise_speed`（格/秒）、`max_bank_degrees`、`climb_pitch_degrees`、`approach_pitch_degrees`、`climb_rate` 与 `descent_rate`。这些是操纵范围，不是已经验证的性能。起飞前先完成正反舵、释放回中、动力断开和无线频率隔离试验；固定翼副翼铰链通常沿翼展方向，左右差动改变升力，不能把机械转动本身当成已产生正确滚转力矩。
+
+登记后，`operation:"fly"` 只需同一 `structure_id` 与坐标或地标 `target`；也可省略 `target`，给 `direction:"north"` 等方位或相对机头的 `forward/backward/left/right`，再给 `distance`（默认 256 格）。相对方向在实际入座后冻结，不随摄像机乱转。`cruise_altitude` 是可选的巡航世界高度，默认比出发和目的地高度高 32 格；局部避障、复飞及着陆按已观察的航路处理。
+
+执行顺序为原生入座、打字机控制权确认、滑跑或垂直爬升、巡航、进近、拉平与着陆停稳。固定翼航路检查覆盖机翼尺寸和有限转弯半径；未加载、碰撞读取超限与不完整动态结构观察均不能当作畅通。服务器须提供只读 `physics.flight_state`；它区分原生轮胎接地与无轮船壳的支撑几何，并报告打字机实际使用者和按键状态。客户端按实际姿态每刻闭环调节，LLM 不需逐次发送舵机按键。
+
+起飞输入发出、持续离地、实际着陆和释放控制后停稳分别记录。一直在地上行驶不能算飞行，巡航撞地不能算成功着陆。取消会请求在当前位置附近寻找落点；人工接管或原生控制权丢失则释放自己的输入并报告实际状态。飞行任务在选定的附近起降场结束，普通旅行到精确终点还需要衔接下机与地面路段。静态配平、控制器回放测试和一次原生键盘响应均不能替代整机自动飞行验收。
+
 | operation | 行为 |
 | --- | --- |
 | analyze | 读取服务端原生质量、惯量、作用点力和力偶，并计算起飞前工况 |
