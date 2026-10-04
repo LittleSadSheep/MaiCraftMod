@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
+import org.maiwithu.maicraft.core.task.explore.FrontierLegBreaker;
 import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -94,6 +95,7 @@ public final class PhysicalStructureSearchCompanionTask
     private final Set<Long> rejectedEvidence = new HashSet<>();
     private final Set<Long> attemptedFrontiers = new HashSet<>();
     private final List<String> routeFailureKinds = new ArrayList<>();
+    private final FrontierLegBreaker frontierBreaker = new FrontierLegBreaker();
     private StructureEvidenceProfiles.ResolvedProfile profile;
     private ClientLevel indexedLevel;
     private Set<Block> indexedBlocks = Set.of();
@@ -547,6 +549,7 @@ public final class PhysicalStructureSearchCompanionTask
                 stage = Stage.OBSERVE;
             } else {
                 frontierReached++;
+                frontierBreaker.onLegSuccess();
                 stage = Stage.OBSERVE;
             }
             return TaskState.RUNNING;
@@ -576,7 +579,21 @@ public final class PhysicalStructureSearchCompanionTask
                     FailureType.NO_PATH);
             return TaskState.FAILED;
         }
+        // 前沿腿连续走不到时先轮换候选扇区再重选；八个方位都试过仍失败就宣布方向受阻并终止，
+        // 让调用方决定换出发点或扩大挖掘授权，而不是在同一条不可行地形带上无限重付寻路成本。
         frontierFailed++;
+        switch (frontierBreaker.onLegFailure(sector)) {
+            case ROTATED -> sector = frontierBreaker.rotated(sector);
+            case EXHAUSTED -> {
+                failIssue(
+                        "frontier_legs_circuit_broken",
+                        FrontierLegBreaker.blockedMessage(
+                                "frontier leg", frontierFailed, frontierBreaker, sector),
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            case KEEP_GOING -> { }
+        }
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
     }
@@ -924,6 +941,8 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
+        data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
+        data.put("frontier_sector_rotations", frontierBreaker.rotations());
         if (moveChild != null && moveRecord != null && moveRecord.x != null && moveRecord.z != null) {
             double dx = player.getX() - moveRecord.x;
             double dz = player.getZ() - moveRecord.z;
@@ -949,9 +968,14 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
+        data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
+        data.put("frontier_sector_rotations", frontierBreaker.rotations());
         data.put("evidence_approaches", evidenceApproaches);
         if (!routeFailureKinds.isEmpty()) {
             data.put("route_failure_kinds", List.copyOf(routeFailureKinds));
+        }
+        if (frontierBreaker.rotations() > 0) {
+            data.put("frontier_rotation_bearings", frontierBreaker.rotatedBearings());
         }
         if (stronghold) {
             data.put("consumed", Map.of(
@@ -1023,6 +1047,23 @@ public final class PhysicalStructureSearchCompanionTask
                     "choice", "stop",
                     "description",
                     "Stop; do not choose mobs, villagers or protected resources automatically."));
+            return List.copyOf(options);
+        }
+        if ("frontier_legs_circuit_broken".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "retry_other_direction",
+                    "description",
+                    "Resume the search from the final position toward another sector or origin; "
+                            + "the blocked band is an observed fact, not proof the structure is absent."));
+            if (!r.mayAlterTerrain) {
+                options.add(Map.of(
+                        "choice", "allow_route_changes",
+                        "description",
+                        "Retry with may_alter_terrain only after deciding that digging/bridging is acceptable."));
+            }
+            options.add(Map.of(
+                    "choice", "stop",
+                    "description", "Stop without widening the search goal."));
             return List.copyOf(options);
         }
         options.add(Map.of(

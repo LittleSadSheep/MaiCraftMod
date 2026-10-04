@@ -105,6 +105,7 @@ public final class SemanticExploreCompanionTask
     private final Set<Long> rejectedTargets = new HashSet<>();
     private final Set<Long> attemptedWaypoints = new HashSet<>();
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
+    private final FrontierLegBreaker waypointBreaker = new FrontierLegBreaker();
 
     private SpiralWalker spiral;
 
@@ -378,9 +379,22 @@ public final class SemanticExploreCompanionTask
 
         if (terminal == TaskState.SUCCESS) {
             waypointReached++;
+            waypointBreaker.onLegSuccess();
         } else {
             waypointFailed++;
             recordLegFailure("exploration_waypoint", activeWaypoint, result);
+            // 航点连续走不到时先轮换候选扇区再重选；八个方位都试过仍失败就宣布方向受阻并终止，
+            // 不在同一条不可行地形带上无限重付寻路成本。
+            switch (waypointBreaker.onLegFailure(sector)) {
+                case ROTATED -> sector = waypointBreaker.rotated(sector);
+                case EXHAUSTED -> {
+                    fail(FrontierLegBreaker.blockedMessage(
+                            "waypoint", waypointFailed, waypointBreaker, sector),
+                            FailureType.NO_PATH);
+                    return TaskState.FAILED;
+                }
+                case KEEP_GOING -> { }
+            }
         }
         activeWaypoint = null;
         beginObservation();
@@ -627,6 +641,18 @@ public final class SemanticExploreCompanionTask
         return List.copyOf(offsets);
     }
 
+    /** 停滞与进度对调用方可见：still working 事件要能看出连续失败的累积与扇区轮换。 */
+    @Override public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("stage", String.valueOf(stage));
+        data.put("waypoints_attempted", waypointAttempts);
+        data.put("waypoints_reached", waypointReached);
+        data.put("waypoints_failed", waypointFailed);
+        data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
+        data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        return data;
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("target", canonicalTarget == null ? r.target : canonicalTarget);
@@ -657,6 +683,11 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_attempted", waypointAttempts);
         data.put("waypoints_reached", waypointReached);
         data.put("waypoints_failed", waypointFailed);
+        data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
+        data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        if (waypointBreaker.rotations() > 0) {
+            data.put("waypoint_rotation_bearings", waypointBreaker.rotatedBearings());
+        }
         data.put("target_approaches_attempted", targetAttempts);
         // 路段失败完整保留在任务证据中；默认回执可按既有归档机制分页，不能按固定条数丢弃卡点。
         data.put("travel_failures", List.copyOf(legFailures));

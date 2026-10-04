@@ -319,7 +319,7 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint this movement must preserve.")));
             // 跑图和找地方共用原生探索；目录中的模组群系、标签及结构证据由 LLM 按用途选择。
             case ExplorationIntent.ABILITY -> contract(
-                    "Explore the map, discover a chosen biome/tag or structure, or survey with no target kind. Discover actual modded IDs with perceive(view=exploration,focus=biomes|biome_tags|structures,query=...). Direction restricts destination candidates to a sector, not a straight walking line. coast means minecraft:beach. Quality is chosen by the model from observed facts; no hidden seed/locate is used.",
+                    "Explore the map, discover a chosen biome/tag or structure, or survey with no target kind. Discover actual modded IDs with perceive(view=exploration,focus=biomes|biome_tags|structures,query=...). Direction restricts destination candidates to a sector, not a straight walking line; after repeated unreachable legs the search rotates to the next bearing, and exhausting all bearings fails with frontier_legs_circuit_broken instead of looping. coast means minecraft:beach. Quality is chosen by the model from observed facts; no hidden seed/locate is used.",
                     targets(), fields(
                             field("biome_id", "resource_id", "Exact registered biome; choose at most one target selector."),
                             field("biome_tag", "resource_id", "Registered biome tag, including mod tags."),

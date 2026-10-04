@@ -15,6 +15,7 @@ public final class ExplorationRegressionSuite {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         ExplorationSectorTest.main(args);
         ExplorationFrontiersTest.main(args);
+        FrontierLegBreakerTest.main(args);
         ExplorationIntentTest.main(args);
         TravelTransportContractTest.main(args);
         ExplorationCatalogTest.main(args);
