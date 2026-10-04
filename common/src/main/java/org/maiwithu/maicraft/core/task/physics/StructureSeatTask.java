@@ -18,9 +18,9 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 登入吊舱 -> 空手瞄准指定座位 -> 原生右键 -> 确认乘坐；入座本身不启动载具。 */
+/** 从可见侧面接近座位 -> 空手原生右键 -> 确认乘坐；低顶吊舱不要求先从上方飞落，入座本身不启动载具。 */
 public final class StructureSeatTask extends AbstractCompanionTask<BoardStructureTaskRecord> {
-    private final OnboardControlApproach approach=new OnboardControlApproach();
+    private final PhysicalStructureApproach approach=new PhysicalStructureApproach();
     private final PhysicalControlHand hand=new PhysicalControlHand();
     private DriverStation station;
     private NativeActionReceipt action;
@@ -40,8 +40,8 @@ public final class StructureSeatTask extends AbstractCompanionTask<BoardStructur
             return failed("声明位置不是当前可读的 Create 座位");
         if(station.seated(player)){seated=true;return TaskState.SUCCESS;}
         if(!DriverStation.unoccupied(player,pos))return failed("座位已有其他乘客");
-        // 登艇过程先保留导航对背包和身体的控制；到达后才腾空主手，避免关掉飞行准备界面。
-        if(!approach.ready(player,frame,r.seatOffset,eye->frame.aim(player,r.seatOffset,eye,false),r.getToolCallId(),r.getDeadlineGameTime()))
+        // 原生右键座位会让玩家上艇，先复用驾驶座侧面走位；不能强制飞到燃烧器上方被气囊封住的落点。
+        if(!approach.ready(player,r.structureId,pos,r.getToolCallId(),r.getDeadlineGameTime()))
             return approach.failure()==null?TaskState.RUNNING:failed(approach.failure());
         if(!hand.ready(player,"minecraft:air",r.getToolCallId(),r.getDeadlineGameTime()))
             return hand.failure()==null?TaskState.RUNNING:failed(hand.failure());
