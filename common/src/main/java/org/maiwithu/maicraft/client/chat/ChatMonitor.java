@@ -15,6 +15,8 @@ public final class ChatMonitor {
     private static final long DUPLICATE_NANOS = 5_000_000_000L;
     private static final ArrayDeque<Long> recentEvents = new ArrayDeque<>();
     private static final LinkedHashMap<String, Long> fingerprints = new LinkedHashMap<>();
+    private static String lastOverlayText;
+    private static long lastOverlayAtNanos;
     private static int suppressed;
 
     private ChatMonitor() { }
@@ -25,7 +27,22 @@ public final class ChatMonitor {
 
     public static void system(String message, boolean overlay) {
         // 动作栏提示不是聊天区消息，两种加载器都在进入去重和限流之前排除，避免占掉正常聊天额度。
-        if (!overlay) receive(null, null, message, true);
+        // 原版床太远/有怪/已占用等交互拒绝只走动作栏，这里另留一条最近提示备忘供任务失败时引用。
+        if (overlay) noteOverlay(message);
+        else receive(null, null, message, true);
+    }
+
+    /** 记下最近一条动作栏提示与收到时刻；只留一条，任务失败对账时按新鲜度取用。 */
+    private static synchronized void noteOverlay(String message) {
+        if (message == null || message.isBlank()) return;
+        lastOverlayText = clipped(message, MAX_TEXT);
+        lastOverlayAtNanos = System.nanoTime();
+    }
+
+    /** 窗口期内最近一条动作栏提示原文；过期或无记录返回 null，不虚构拒绝原因。 */
+    public static synchronized String latestOverlay(long maxAgeNanos) {
+        if (lastOverlayText == null) return null;
+        return System.nanoTime() - lastOverlayAtNanos <= maxAgeNanos ? lastOverlayText : null;
     }
 
     private static synchronized void receive(String senderName, UUID senderId, String message, boolean system) {
@@ -66,6 +83,8 @@ public final class ChatMonitor {
     public static synchronized void reset() {
         recentEvents.clear();
         fingerprints.clear();
+        lastOverlayText = null;
+        lastOverlayAtNanos = 0;
         suppressed = 0;
     }
 
