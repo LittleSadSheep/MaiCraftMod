@@ -38,7 +38,14 @@ public final class EquipmentReceipts {
      */
     public static void equipped(LocalPlayer player, ClientboundSetEquipmentPacket packet) {
         if (player == null || player.clientLevel == null || packet.getEntity() != player.getId()) return;
+        boolean newlyBound = owner != player || world != player.clientLevel;
         observeWorld(player);
+        if (newlyBound) {
+            // 057 实机复测曾"零事件"且无法区分 jar 缺修复与包路失效；绑定即在日志留痕，
+            // 下一轮实机看这行有没有，就能把两类原因分开。
+            org.maiwithu.maicraft.core.Constants.LOG.info(
+                    "[maicraft-equip] equipment observation bound for local player");
+        }
         List<Pair<EquipmentSlot, ItemStack>> slots = packet.getSlots();
         for (Pair<EquipmentSlot, ItemStack> entry : slots) {
             EquipmentSlot slot = entry.getFirst();
@@ -47,6 +54,8 @@ public final class EquipmentReceipts {
             Observed current = describe(next);
             boolean continued = previous != null && sameItem(previous, current);
             if (previous != null && previous.damageable() && current.itemId() == null) {
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "[maicraft-equip] item broken: {} in {}", previous.itemId(), slot.getName());
                 broken(player, slot, previous, damageObserved.getOrDefault(slot, 0));
             }
             int delta = continued ? Math.max(0, current.damage() - previous.damage()) : 0;
