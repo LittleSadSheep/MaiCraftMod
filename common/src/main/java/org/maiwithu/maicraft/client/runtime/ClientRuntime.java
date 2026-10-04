@@ -40,6 +40,8 @@ import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
  */
 public final class ClientRuntime {
     public static final int DEFAULT_MCP_PORT = 8766;
+    /** 配置端口被占时允许向后让行的端口数上限；同机多开客户端各自落在不同端口上。 */
+    static final int MCP_PORT_FALLBACK_ATTEMPTS = 16;
 
     private static final ClientActorBoundary ACTOR = new ClientActorBoundary();
     private static final StartupAutomation STARTUP_AUTOMATION = new StartupAutomation(Boolean.getBoolean("maicraft.automation.on_join"));
@@ -56,13 +58,19 @@ public final class ClientRuntime {
         if (mcp != null && mcp.isRunning()) return;
         EmbeddedMcpService candidate = null;
         try {
-            // 同机对战可为对手客户端分配独立端口；配置失败只关闭 MCP，游戏仍能报告启动原因。
-            candidate = new EmbeddedMcpService(McpConfig.localForProcess(DEFAULT_MCP_PORT), facade);
-            candidate.start();
+            // 端口被占时按端口递增让行，同机多开测试无需逐个进程配置；想固定本进程端口时仍用 -Dmaicraft.mcp.port。
+            McpConfig configured = McpConfig.localForProcess(DEFAULT_MCP_PORT);
+            candidate = EmbeddedMcpService.startWithFallback(configured, facade, MCP_PORT_FALLBACK_ATTEMPTS);
             mcp = candidate;
             lastMcpError = null;
-            Constants.LOG.info("MaiCraft embedded MCP listening on http://127.0.0.1:{}/mcp",
-                    candidate.port());
+            if (configured.port() != 0 && candidate.port() != configured.port()) {
+                Constants.LOG.warn("MaiCraft embedded MCP 端口 {} 被占用，已让行到 http://127.0.0.1:{}/mcp"
+                                + "（外部客户端需连接实际端口；要固定本进程端口时配置 -Dmaicraft.mcp.port）",
+                        configured.port(), candidate.port());
+            } else {
+                Constants.LOG.info("MaiCraft embedded MCP listening on http://127.0.0.1:{}/mcp",
+                        candidate.port());
+            }
         } catch (IOException | RuntimeException failure) {
             if (candidate != null) candidate.close();
             mcp = null;

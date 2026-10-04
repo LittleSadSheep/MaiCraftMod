@@ -38,7 +38,11 @@ public record McpConfig(
         }
     }
 
-    /** 多个真实客户端同时测试时，各进程显式选择自己的回环端口，避免连接到另一名玩家。 */
+    /**
+     * 读取本进程的 MCP 端口：未设置时用默认值，显式设置是固定端口身份的首选方式。
+     * 端口被占的自动让行在启动处处理（EmbeddedMcpService.startWithFallback）；
+     * 这里只负责非法配置在启动前失败，不猜测调用方意图。
+     */
     public static McpConfig localForProcess(int defaultPort) {
         String configured = System.getProperty("maicraft.mcp.port");
         int port = defaultPort;
@@ -49,7 +53,7 @@ public record McpConfig(
                 throw new IllegalArgumentException("maicraft.mcp.port must be an integer between 0 and 65535", invalid);
             }
         }
-        // 继续复用回环地址与端口校验；错误配置停止 MCP 启动，不自动抢占默认客户端的端口。
+        // 继续复用回环地址与端口校验；越界或非整数的错误配置停止 MCP 启动。
         return local(port);
     }
 

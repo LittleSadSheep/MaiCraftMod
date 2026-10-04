@@ -70,6 +70,8 @@ public final class AttentionRegressionSuite {
         // 收到的聊天保留作者与截断事实，不能冒充任务事件，也不接收动作栏洪泛。
         ChatMonitorTest.main(args);
         AttentionSnapshotTest.main(args);
+        // 端口被占时按端口递增让行，同机多开客户端各自拿到可用端点；全部被占须响亮失败。
+        McpPortFallbackHttpTest.main(args);
         AttentionHttpTest.main(args);
         // 未订阅注意流的宿主也从每次工具结果拿到风险提醒，失败与知识旁路均不能遗漏。
         ReminderHttpTest.main(args);
