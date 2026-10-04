@@ -52,7 +52,7 @@ public final class FlightFeedbackController {
         switch(phase) {
             case RUNUP -> {
                 heading=departureHeading;desiredPitch=0;power=1;
-                if(speed>=envelope.rotationSpeed())transition(Phase.ROTATE,sample,"达到声明的抬轮速度");
+                if(speed>=envelope.takeoffSpeed())transition(Phase.ROTATE,sample,"达到声明的抬轮速度");
                 else if(sample.tick()-phaseTick>600)transition(Phase.ROLLOUT,sample,"滑跑未达到抬轮速度");
             }
             case ROTATE -> {
@@ -81,7 +81,7 @@ public final class FlightFeedbackController {
                 double distance=horizontalDistance(sample.position(),course.touchdown());
                 altitude=Math.min(course.cruiseAltitude(),course.touchdown().y+distance*Math.tan(envelope.approachPitch()));
                 heading=course.landingHeading();desiredPitch=heightPitch(sample,altitude);
-                power=envelope.kind()==AIRSHIP?Math.clamp(distance/20,0,.5):speedPower(speed,envelope.rotationSpeed()*1.25);
+                power=envelope.kind()==AIRSHIP?Math.clamp(distance/20,0,.5):speedPower(speed,envelope.takeoffSpeed()*1.25);
                 lift=lift(sample,Math.max(course.touchdown().y,Math.min(altitude,sample.position().y-envelope.descentRate())));
                 if(sample.contact()==GROUNDED)transition(Phase.ROLLOUT,sample,"已观察到接地");
                 else if(envelope.kind()==FIXED_WING&&sample.position().y-course.touchdown().y<Math.max(2,speed*.15))
@@ -111,7 +111,7 @@ public final class FlightFeedbackController {
         }
         if(terminal())return command=FlightCommand.parked();
         // 能量不足时不继续大幅抬头；姿态率提供阻尼，避免舵面在目标两侧连续过冲。
-        if(envelope.kind()==FIXED_WING&&speed<envelope.rotationSpeed()*.9&&sample.contact()==AIRBORNE)
+        if(envelope.kind()==FIXED_WING&&speed<envelope.takeoffSpeed()*.9&&sample.contact()==AIRBORNE)
             desiredPitch=Math.min(desiredPitch,Math.toRadians(-3));
         double headingError=FlightSample.wrap(heading-sample.heading());
         desiredBank=envelope.kind()==AIRSHIP||sample.contact()==GROUNDED?0:Math.clamp(headingError*.65,-envelope.maximumBank(),envelope.maximumBank());
