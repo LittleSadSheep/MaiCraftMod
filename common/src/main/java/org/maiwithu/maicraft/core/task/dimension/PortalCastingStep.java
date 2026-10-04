@@ -90,11 +90,14 @@ record PortalCastingStep(Kind kind, BlockPos target) {
         return record;
     }
 
-    /** 清掉指定旧格时按真实工具效率选主手；只破坏这一格，不因水立刻流入就继续左键。 */
-    static InteractAtTaskRecord clear(LocalPlayer player, String id, long deadline, BlockPos target, BlockState actual) {
+    /** 清掉指定旧格时按真实工具效率选主手；只破坏这一格，不因水立刻流入就继续左键。
+     *  mayAlterTerrain 是接单 goal 的地形授权：false 时接近导航固定不改地形，池壁不临空地就永远走不到目标格。 */
+    static InteractAtTaskRecord clear(LocalPlayer player, String id, long deadline, BlockPos target, BlockState actual,
+                                      boolean mayAlterTerrain) {
         Item tool = player.getInventory().items.stream().filter(stack -> !stack.isEmpty())
                 .max(Comparator.comparingDouble(stack -> stack.getDestroySpeed(actual)))
                 .map(stack -> stack.getItem()).orElse(null);
-        return new InteractAtTaskRecord(id, deadline, MouseButton.LEFT, target, 0, tool, null, actual.getBlock()).withApproach(false);
+        return new InteractAtTaskRecord(id, deadline, MouseButton.LEFT, target, 0, tool, null, actual.getBlock())
+                .withApproach(mayAlterTerrain);
     }
 }
