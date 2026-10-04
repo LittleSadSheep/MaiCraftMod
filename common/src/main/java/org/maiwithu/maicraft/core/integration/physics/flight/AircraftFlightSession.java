@@ -40,8 +40,12 @@ public final class AircraftFlightSession implements TransportSession {
     private int parkedSamples;
     private boolean serverControlConfirmed;
     public AircraftFlightSession(UUID structureId,AircraftProfile profile,Vec3 destination,Double altitude) {
+        this(structureId,profile,destination,altitude,null);
+    }
+    AircraftFlightSession(UUID structureId,AircraftProfile profile,Vec3 destination,Double altitude,AirshipHoverTrim trim) {
         this.structureId=structureId;this.profile=profile;this.destination=destination;this.altitude=altitude;
         controller=new FlightFeedbackController(profile.envelope());mixer=new FlightKeyMixer(profile.keys());
+        if(trim!=null)controller.hoverLift(trim.fraction());
     }
     @Override public Result tick(LocalPlayerContext ctx) {
         if(terminal!=null)return terminal;
@@ -131,6 +135,7 @@ public final class AircraftFlightSession implements TransportSession {
         var result=new LinkedHashMap<String,Object>();result.put("phase",phase());result.put("structure_id",structureId.toString());
         result.put("destination",destination);result.put("detail",controller.detail());result.put("stopping",stopping);
         result.put("airborne_verified",controller.airborneVerified());result.put("unexpected_ground_contact",controller.unexpectedGround());
+        result.put("hover_lift_feedforward",controller.hoverLift());
         if(last!=null)result.put("actual_flight_state",last);
         if(reader!=null)result.put("native_contact_evidence",reader.evidence());
         // 这是实际航路观察，不是供 LLM 回放的低层 route 指令；保留阻挡事实供整机修正。

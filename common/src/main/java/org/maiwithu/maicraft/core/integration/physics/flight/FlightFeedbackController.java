@@ -19,6 +19,7 @@ public final class FlightFeedbackController {
     private double departureHeading,departureHeight;
     private boolean cancelled;
     private boolean airborneVerified,unexpectedGround;
+    private double hoverLift=.5;
     private String detail="等待实际姿态、接地和起飞通道";
     public FlightFeedbackController(FlightEnvelope envelope){this.envelope=envelope;}
 
@@ -47,8 +48,11 @@ public final class FlightFeedbackController {
         if(airborneVerified&&sample.contact()==GROUNDED&&phase!=Phase.DESCENT&&phase!=Phase.FLARE&&phase!=Phase.ROLLOUT) {
             unexpectedGround=true;transition(Phase.ROLLOUT,sample,"非着陆阶段提前接地，停止当前飞行");
         }
-        boolean verticalDeparture=envelope.kind()==AIRSHIP&&phase==Phase.CLIMB
-                &&(!airborneVerified||sample.position().y<departureHeight+8);
+        boolean gainingClearance=!airborneVerified||sample.position().y<departureHeight+8;
+        boolean attitudeReady=Math.abs(sample.pitch())<Math.toRadians(8)&&Math.abs(sample.bank())<Math.toRadians(8)
+                &&Math.abs(sample.pitchRate())<.15&&Math.abs(sample.bankRate())<.15;
+        // 倾斜地面离地后先等待实际扶正，再开推进；不能用“高度到了”代替船体已经稳定。
+        boolean verticalDeparture=envelope.kind()==AIRSHIP&&phase==Phase.CLIMB&&(gainingClearance||!attitudeReady);
         // 已进入停机收尾后，船壳短暂弹起仍继续刹停，不能因地面旁的航路阻挡再次开动力。
         if(sample.contact()==AIRBORNE&&!verticalDeparture&&(!course.corridorObserved()||!course.corridorClear())
                 &&phase!=Phase.GO_AROUND&&phase!=Phase.ROLLOUT)
@@ -76,10 +80,11 @@ public final class FlightFeedbackController {
                 if(envelope.kind()==AIRSHIP) {
                     desiredPitch=0;
                     // 飞艇先在已检查的垂直空间离地，再开推进和偏航，避免贴地旋转的桨叶将吊舱掀翻。
-                    if(verticalDeparture){power=0;lift=Math.clamp(.7+(envelope.climbRate()-sample.velocity().y)*.25,0,1);}
+                    if(verticalDeparture){power=0;lift=gainingClearance?Math.clamp(hoverLift+(envelope.climbRate()-sample.velocity().y)*.25,0,1)
+                            :lift(sample,Math.max(departureHeight+10,course.cruiseAltitude()));}
                 }
-                if(sample.contact()==AIRBORNE&&sample.position().y>=altitude-2)transition(Phase.CRUISE,sample,"已到巡航高度");
-                else if(airborneVerified&&sample.contact()==AIRBORNE&&course.landingSiteObserved()&&horizontalDistance(sample.position(),course.approachPoint())<24)
+                if(!verticalDeparture&&sample.contact()==AIRBORNE&&sample.position().y>=altitude-2)transition(Phase.CRUISE,sample,"已到巡航高度");
+                else if(!verticalDeparture&&airborneVerified&&sample.contact()==AIRBORNE&&course.landingSiteObserved()&&horizontalDistance(sample.position(),course.approachPoint())<24)
                     transition(Phase.APPROACH,sample,"避障高度下已到进近区域");
                 else if(!airborneVerified&&sample.tick()-phaseTick>600)transition(Phase.ROLLOUT,sample,"起飞输入后没有确认持续离地");
             }
@@ -159,7 +164,12 @@ public final class FlightFeedbackController {
                 -envelope.approachPitch(),envelope.climbPitch());
     }
     private static double speedPower(double speed,double desired){return Math.clamp(.55+(desired-speed)*.10,0,1);}
-    private double lift(FlightSample s,double altitude){return envelope.kind()==AIRSHIP?Math.clamp(.5+(altitude-s.position().y)*.12-s.velocity().y*.2,0,1):0;}
+    private double lift(FlightSample s,double altitude){return envelope.kind()==AIRSHIP?Math.clamp(hoverLift+(altitude-s.position().y)*.12-s.velocity().y*.2,0,1):0;}
+    void hoverLift(double fraction) {
+        if(phase!=Phase.PREFLIGHT||!Double.isFinite(fraction)||fraction<=0||fraction>1)throw new IllegalArgumentException("invalid preflight hover trim");
+        hoverLift=fraction;
+    }
+    double hoverLift(){return hoverLift;}
     private static double servo(double error,double rate,double p,double d){double value=error*p-rate*d;return Math.abs(value)<.025?0:Math.clamp(value,-1,1);}
     private static double horizontalDistance(Vec3 a,Vec3 b){return a.subtract(b).horizontalDistance();}
     private void transition(Phase next,FlightSample sample,String reason) {

@@ -17,6 +17,7 @@ public final class AircraftFlightRegressionSuite {
         FlightOutcomeReceiptTest.run();
         // 飞艇着陆只接受已核实的地面接触，零速悬停不能套用固定翼前进轨迹。
         AirshipLandingPathTest.run();
+        AirshipHoverTrimTest.run();
         System.out.println("AircraftFlightRegressionSuite: passed");
     }
 }
