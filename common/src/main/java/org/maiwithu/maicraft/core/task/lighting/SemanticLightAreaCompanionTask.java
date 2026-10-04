@@ -152,6 +152,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     @Override protected void onStart() {
+        // 先确认区域灯具样式与需保留的地点，再调查暗格、取料、分轮放置和复测；这一能力会占用主任务身体。
         if (r.style == SemanticLightAreaTaskRecord.Style.WALL
                 || r.style == SemanticLightAreaTaskRecord.Style.HANGING) {
             giveUp("unsupported_lighting_style",
@@ -221,6 +222,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private TaskState tickExplicitBoundaryObservation() {
+        // 玩家给定半径后逐列调查圆内地面；未加载列保留为范围缺口，当前分支不会自动走过去加载再重扫。
         ClientLevel level = ClientRuntime.requireContext(player).level();
         int budget = COLUMNS_PER_TICK;
         while (budget-- > 0 && !explicitScanComplete) {
@@ -284,7 +286,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     /**
-     * 发现一个完整语义连通区域。地标只用于启动搜索，其坐标和猜测半径都不会成为区域边界。
+     * 从地标附近发现匹配的连通区域；未指定半径时不猜边界，显式半径仍限制可扩展的水平范围。
      * 每个接纳的格子都必须在区块已加载时读取；未加载边界要么由第一人称移动实际加载，要么在冻结照明方案前报告不可达。
      */
     private TaskState tickConnectedObservation() {
@@ -765,6 +767,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private TaskState tickPlan() {
+        // 根据上一轮实际暗格选灯位；候选传播量只是估计，用于减少重复照亮，最终仍以放置后的方块光验收。
         ClientLevel level = ClientRuntime.requireContext(player).level();
         if (r.hasPlacementBudget() && requestedPlacements >= r.maxPlacements) {
             return placementBudgetReached();
@@ -855,6 +858,7 @@ public final class SemanticLightAreaCompanionTask
                     tick.failureType());
             return TaskState.FAILED;
         }
+        // 取料返场后场地可能已变化，先锁定刚补到的光源，再重扫范围和暗格，避免直接执行离开前的旧灯位。
         pinnedSuppliedSource = pendingSupplySource;
         pendingSupplySource = null;
         resetObservationForReplan();
@@ -874,7 +878,7 @@ public final class SemanticLightAreaCompanionTask
                 parent + "-lighting-pass-" + (passes + 1),
                 now + BuildTool.timeoutTicksFor(targets.size(), consume),
                 targets, false, consume, false);
-        // 火把走副手随行放置，其他灯具仍使用完整施工流程；两条路径最后都复核同一份实际光照样本。
+        // 生存消耗模式的火把走副手快速放置；其他灯具和免费材料模式沿用施工器，最后都复核同一份光照样本。
         if (fastTorches) {
             buildChild = new TorchLightingPass(player, buildRecord, targetCells.stream().map(Sample::pos).toList(),
                     r.minimumLight, protectedMutationCells, protectedNavigationCells);
@@ -912,6 +916,7 @@ public final class SemanticLightAreaCompanionTask
         childReceipts.add(receipt);
         buildChild = null;
         buildRecord = null;
+        // 子轮失败也先等待传播并量光；已确认插下的灯可能已经满足区域目标，不能只凭子轮终态丢掉实际效果。
         settledAt = SETTLE_TICKS;
         stage = Stage.SETTLE;
         return TaskState.RUNNING;
@@ -927,6 +932,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private TaskState tickVerify() {
+        // 在冻结的目标样本上逐格读方块光；卸载格不能从分母删除，只有完整复测达到所选比例才结束区域任务。
         ClientLevel level = ClientRuntime.requireContext(player).level();
         int budget = VERIFY_PER_TICK;
         while (budget-- > 0 && verifyIndex < targetCells.size()) {
@@ -992,6 +998,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private LightSource chooseSource() {
+        // 已补到的光源优先，其次比较显式偏好、随身灯具和默认备选；无法解析的偏好会被略过，而不是固定材质约束。
         boolean free = WorkProfile.of(player).freeMaterials();
         Map<Item, Integer> carried = new HashMap<>();
         for (int slot = 0; slot < Math.min(
@@ -1226,7 +1233,7 @@ public final class SemanticLightAreaCompanionTask
                 if (selected.contains(candidate)) continue;
                 int gain = 0;
                 for (long cell : candidate.covers()) if (!covered.contains(cell)) gain++;
-                // 始终优先选择实测覆盖增益；放置偏好只在多个候选都能增加相同覆盖量时用于打破平局。
+                // 先比较对实测暗格的预计覆盖增益，再以放置偏好打破平局；距离估算未计遮挡，不能当作已量得的照明效果。
                 if (gain > bestGain || gain == bestGain && gain > 0
                         && (best == null
                                 || candidate.preferenceScore() > best.preferenceScore())) {
@@ -1284,6 +1291,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private boolean protectedByLabel(BlockPos pos) {
+        // 本任务把每个同维度保护地标扩成各轴正负四格的范围；名称本身没有提供任意形状的完整基地边界。
         for (BlockPos anchor : protectedAnchors) {
             if (Math.abs(anchor.getX() - pos.getX()) <= PROTECTED_LABEL_RADIUS
                     && Math.abs(anchor.getY() - pos.getY()) <= PROTECTED_LABEL_RADIUS
@@ -1408,6 +1416,7 @@ public final class SemanticLightAreaCompanionTask
     }
 
     @Override protected void cleanup() {
+        // 结束时停掉勘测、放置和供料子任务，不拆回已放灯具；当前子轮在这里结算，但其结果尚未追加到父级 build_receipts。
         if (surveyMoveChild != null) {
             surveyMoveChild.stop(player, Task.StopReason.REPLACED);
             surveyMoveChild.result(TaskState.CANCELLED);

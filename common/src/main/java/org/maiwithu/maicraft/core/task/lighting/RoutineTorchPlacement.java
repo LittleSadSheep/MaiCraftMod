@@ -23,7 +23,7 @@ public final class RoutineTorchPlacement {
     private RoutineTorchPlacement() {}
 
     public static boolean needsLight(int feetLight, int eyeLight) {
-        // 以观众能看清角色周围为目标；脚边亮而视线仍黑时也补光，不仅检查怪物能否生成。
+        // 这是默认阈值的纯判断入口；随行服务在 advance 中使用实际配置，脚边亮而眼部仍暗时也会尝试补光。
         return Math.min(feetLight, eyeLight) < 8;
     }
 
@@ -60,6 +60,7 @@ public final class RoutineTorchPlacement {
 
     public static boolean usable(LocalPlayer player, BlockPos at, BlockState expected,
                                  BlockPos support, Direction face, Set<BlockPos> protectedCells) {
+        // 临出手再核对空格、支撑面、保护范围和真实射线；快速火把路径只接受空气，不会先清草或替换已有方块。
         var level = player.level();
         if (!level.isLoaded(at) || !level.isLoaded(support) || protectedCells.contains(at) || protectedCells.contains(support)
                 || NavigationSafetyContext.protectsMutation(at) || NavigationSafetyContext.protectsUse(support)

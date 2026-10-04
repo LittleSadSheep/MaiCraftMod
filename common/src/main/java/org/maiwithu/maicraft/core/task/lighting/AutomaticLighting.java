@@ -37,6 +37,7 @@ public final class AutomaticLighting {
     public static AutomaticLighting get() { return INSTANCE; }
 
     public void configure(LocalPlayer player, boolean enabled, int minimum, List<String> protectedLabels) {
+        // 配置只改本会话的开关、阈值和保护名称；停用保留已经插下的灯、当前副手以及可查询的路线证据。
         bind(player);
         this.enabled = enabled;
         this.minimum = minimum;
@@ -46,7 +47,7 @@ public final class AutomaticLighting {
 
     private void bind(LocalPlayer player) {
         if (owner == player) return;
-        // 不把旧身体的消耗、路线与候选带进重生或另一个世界；设置只在当前连接生命周期内有效。
+        // 换玩家实例时清掉旧身体的路线与动作对象；此处保留开关，只有连接清理调用 reset 才恢复默认关闭。
         owner = player;
         placer = new OffhandTorchPlacer();
         visited.clear(); placements.clear(); lastAttemptOrigin = null;
@@ -90,7 +91,7 @@ public final class AutomaticLighting {
         if (!allowed || !OffhandTorchPlacer.idle(context)) { state = "yielding_to_primary"; return; }
         int light = Math.min(context.level().getBrightness(LightLayer.BLOCK, feet), context.level().getBrightness(LightLayer.BLOCK, eye));
         if (light >= minimum) { state = "bright_enough"; return; }
-        // 同一站位只尝试一支，避免高阈值、遮挡或服务端拒绝造成连续撒灯；继续移动后重新实测。
+        // 距上次提交站位不足两格时不再出手；原生拒绝也保留这个限制，避免遮挡或高阈值造成原地撒灯。
         if (lastAttemptOrigin != null && feet.distSqr(lastAttemptOrigin) < 4) { state = "waiting_for_route_progress"; return; }
         var protection = protection(context.player());
         if (!protection.problems().isEmpty()) { state = "unresolved_protection"; return; }
@@ -102,6 +103,7 @@ public final class AutomaticLighting {
     }
 
     private LandmarkProtection protection(LocalPlayer player) {
+        // 配置名称与当前主任务名称一起解析；LandmarkProtection 只标记地标锚点，不在这里读取整片区域的历史足迹。
         Set<String> labels = new LinkedHashSet<>(protectedLabels);
         if (CompanionTickDispatcher.current() instanceof IntentTaskRecord intent && intent.stepIndex() < intent.steps().size()) {
             var step = intent.steps().get(intent.stepIndex()); labels.addAll(step.inheritedProtectionLabels());
@@ -135,6 +137,7 @@ public final class AutomaticLighting {
         result.put("scope", "visited_feet_and_eyes_only"); result.put("dimension", player.level().dimension().location().toString());
         result.put("observed_cells", observed); result.put("minimum_observed_block_light", observed == 0 ? null : lowest);
         result.put("below_target", dark); result.put("unloaded_cells", unknown); result.put("placements", List.copyOf(placements));
+        // 这里只验收本身体采样过且此刻仍可读取的脚部、眼部格；即使全部达标，也不代表通道侧面或整座基地已补齐。
         result.put("coverage_verified", observed > 0 && dark.isEmpty() && unknown.isEmpty() && !placer.pending());
         result.put("protected_labels", protectedLabels);
         if (observationProblem != null) result.put("observation_problem", observationProblem);

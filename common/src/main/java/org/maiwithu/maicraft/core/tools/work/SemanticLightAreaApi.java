@@ -28,6 +28,7 @@ public final class SemanticLightAreaApi {
 
     public static SemanticLightAreaTaskRecord newRecord(
             ToolContext context, JsonObject arguments) {
+        // 公开 Goal 先由适配器解析地点；这里接收内部种子坐标，再建立区域、光照和供料要求，不接受逐灯位点击脚本。
         JsonObject args = arguments == null ? new JsonObject() : arguments;
         int x = requiredInteger(args, "center_x");
         int y = requiredInteger(args, "center_y");
@@ -49,6 +50,7 @@ public final class SemanticLightAreaApi {
                 SemanticLightAreaTaskRecord.PlacementPreference.parse(
                         string(args, "placement_preference"));
 
+        // block_id 排在光源偏好首位；它不是唯一许可材质，执行器仍可能考虑随身灯具与默认备选。
         List<String> preferences = new ArrayList<>();
         String preferred = string(args, "block_id");
         if (preferred != null) preferences.add(preferred);
@@ -60,6 +62,7 @@ public final class SemanticLightAreaApi {
         var allowedSources = SemanticMaterialSupplyCoordinator.parseSources(
                 strings(args.get("allowed_sources"), "allowed_sources"));
         boolean allowHarm = bool(args, "allow_harm", false);
+        // 未设预算交给实际覆盖和无进展判断收场；只有内部记录使用零表示未设，公开显式零会被参数检查拒绝。
         int maxPlacements = args.has("max_placements")
                         && !args.get("max_placements").isJsonNull()
                 ? integer(args, "max_placements", 0, 1,

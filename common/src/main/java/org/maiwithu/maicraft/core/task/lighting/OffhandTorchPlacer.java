@@ -51,6 +51,7 @@ public final class OffhandTorchPlacer {
     }
 
     public boolean prepare(LocalPlayerContext context) {
+        // 先等上次副手交换回执，再考虑取下一叠；交换整叠火把时，原副手物品由原生菜单放回该背包槽。
         if (swap != null) {
             swap = context.menus().poll(context, swap);
             if (!swap.terminal()) return false;
@@ -102,6 +103,7 @@ public final class OffhandTorchPlacer {
     }
 
     public static boolean idle(LocalPlayerContext context) {
+        // 角色在地面、空手势且主动作已经让出准星和本刻修改额度时才借用；游泳、骑乘、吃东西或开菜单时等待。
         var player = context.player();
         return context.permitsNativeActions() && context.mutationAvailable() && ClientRuntime.actor().settledForRoutinePause()
                 && context.body().auxiliaryLookAvailable(context.tickRevision())

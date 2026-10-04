@@ -121,6 +121,7 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
     }
 
     private boolean couldImprove(BuildTaskRecord.Target candidate) {
+        // 只有候选理论上可照到的样本仍实测偏暗才保留；未加载样本保留未知，不能为了省火把假设它已被照亮。
         for (BlockPos sample : samples) {
             if (!player.level().isLoaded(sample)) return true;
             if (candidate.desiredState().getLightEmission() - candidate.pos().distManhattan(sample) >= minimum
@@ -136,6 +137,7 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
     }
 
     @Override protected void cleanup() {
+        // 退出轮次时撤销未提交点击，再结算已发出的那支火把；原生结果不明就保留未知，不能重新发一次来猜成功。
         AfterNavigationAction.cancel(this);
         ClientRuntime.actor().activeContext().filter(context -> context.player() == player && context.isCurrent()).ifPresent(context -> {
             var settled = placer.retire(context);

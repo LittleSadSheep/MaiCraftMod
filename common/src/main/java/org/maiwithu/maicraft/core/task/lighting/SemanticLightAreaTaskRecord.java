@@ -10,14 +10,14 @@ import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** 语义照明任务结果；有意不包含放置方块的坐标格。 */
+/** 区域补光的任务输入：保存区域种子与验收要求，具体灯位由实时观察生成，结果另由执行器收集。 */
 public final class SemanticLightAreaTaskRecord extends TaskRecord
         implements InternalAreaProtectionReceipt {
     public static final String TOOL_NAME = "light_area";
     public static final int MIN_RADIUS = 1;
     /** Minecraft 实际世界边界，不代表施工或探索预算。 */
     public static final int MAX_EXPLICIT_RADIUS = 29_999_984;
-    /** 用户明确指定的放置预算可覆盖全部已观察样本。 */
+    /** 显式预算的输入上限；只限制本任务的放置尝试，不承诺这些尝试一定点亮全部样本。 */
     public static final int MAX_EXPLICIT_PLACEMENTS = 24_000;
 
     static {
@@ -26,6 +26,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
     }
 
     public enum Coverage {
+        // all 与作物模式都要求全部所选样本达标；most 和 player_visibility 允许留下少量暗格。
         ALL(1.0D),
         MOST(0.90D),
         CROP_GROWTH(1.0D),
@@ -56,6 +57,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
     }
 
     public enum Style {
+        // wall/hanging 仅保留内部词表兼容；区域执行器会拒绝它们，不能据此宣称公开能力支持壁灯或吊灯布局。
         AUTO,
         GROUND,
         WALL,
@@ -98,7 +100,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
     public final String semanticTarget;
     /** 以 {@link #center} 附近为起点，解析并闭合匹配的连通区域。 */
     public final boolean resolveLoadedComponent;
-    /** 玩家可选指定的几何边界；为零表示由语义探索发现区域边界。 */
+    /** 玩家可选指定的水平圆形边界；零只是内部“未指定”标记，公开半径要求至少一格。 */
     public final int radius;
     public final int minimumLight;
     public final Coverage coverage;
@@ -109,7 +111,7 @@ public final class SemanticLightAreaTaskRecord extends TaskRecord
     public final SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy;
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final boolean allowHarm;
-    /** 为零表示用户没有指定总放置预算。 */
+    /** 零表示内部未设预算；火把快速轮按已提交灯位计数，普通施工轮按派发灯位计数，并非确认消耗数量。 */
     public final int maxPlacements;
     /** 保留实时世界中的精确保护条件，仅供语义父任务使用。 */
     private List<Footprint> internalAreaProtections = List.of();
