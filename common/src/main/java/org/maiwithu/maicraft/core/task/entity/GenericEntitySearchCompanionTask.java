@@ -211,6 +211,7 @@ public final class GenericEntitySearchCompanionTask
             currentlySafe.putIfAbsent(
                     entity.getUUID(), BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
         }
+        // 数量目标要求这一轮仍能看见且符合关系的不同实体；离开视野的旧羊不能与另一处新羊累计凑足数量。
         observedSafe.clear();
         observedSafe.putAll(currentlySafe);
         lastLoadedMatching = loadedMatching;

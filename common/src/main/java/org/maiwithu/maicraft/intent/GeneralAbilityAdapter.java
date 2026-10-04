@@ -397,6 +397,7 @@ public final class GeneralAbilityAdapter {
         // 探索新区域时保留羊筛选条件，不能在发现任意羊后就提前报完成。
         SheepTraits.read(p).writeTo(args);
         args.addProperty("relation", relation);
+        // 搜索数量要求同一轮观察达标；这里仍沿用默认回退和越界夹取，0 不表示关闭搜索。
         args.addProperty("count", integer(p, "count", 1, 1, 32));
         args.addProperty("max_distance", integer(p, "max_distance", 512, 16, 2_048));
         if (bool(p, "may_alter_terrain", false)
@@ -491,6 +492,7 @@ public final class GeneralAbilityAdapter {
         EntitySelector selector = selector(goal, p);
         if (("defend".equals(mode) || "defence".equals(mode)) && selector.empty()) {
             // 没点名敌人的防御交给 attack 自己找眼前威胁；点了名则继续按下面的目标选择规则处理。
+            // 动态自卫不传固定名单、数量或初选半径；不能把此分支解释成受 count/radius 限制的点名战斗。
             return new IntentAction.Tool("attack", "{}");
         }
         String selectorError = validateSelector(selector);
@@ -554,6 +556,7 @@ public final class GeneralAbilityAdapter {
         Entity selected = candidates.getFirst();
         JsonObject args = new JsonObject();
         args.addProperty("entity_id", selected.getId());
+        // 到距离内只是暂停脚步，跟随任务仍常驻；实际开路许可另外传递，不因目标走远自动放宽。
         args.addProperty("distance", integer(p, "distance", 3, 2, 16));
         args.addProperty("may_alter_terrain", bool(p, "may_alter_terrain", false));
         return new IntentAction.Tool("follow", args.toString());

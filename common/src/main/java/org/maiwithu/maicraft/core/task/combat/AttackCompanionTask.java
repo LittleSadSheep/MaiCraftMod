@@ -1281,6 +1281,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
         // 属性变化不是击杀或目标失踪；把原条件和实际羊状态与已确认战果同时交付。
         if (r.sheepTraits().constrained()) data.put("requested_sheep_traits", r.sheepTraits().requirements());
         if (!changedSheepTargets.isEmpty()) data.put("changed_sheep_targets", List.copyOf(changedSheepTargets));
+        // 打完目标后取消下一轮蓄力也会成为最后一条射击记录；它不能覆盖此前已确认的发射和击败账本。
         if (!lastRangedShot.isEmpty()) data.put("last_ranged_shot", lastRangedShot);
         data.put("strikes_scope", "confirmed_melee_receipts_and_ranged_releases"); // 与耐久消耗、尝试次数及完整命中数分开。
         data.put("loot_gained", lootGained());

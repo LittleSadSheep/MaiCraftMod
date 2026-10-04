@@ -142,6 +142,7 @@ public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskR
     }
 
     private boolean closeEnough() {
+        // 到飞行目标脚下只表示地面导航到位；是否停止跟随仍按实体本体三维距离判断，两者可能不一致。
         Entity target = target(player);
         return target != null && player.position().distanceTo(target.position()) <= r.keepWithin;
     }
