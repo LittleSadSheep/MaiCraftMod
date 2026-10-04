@@ -7,6 +7,7 @@ import baritone.pathing.calc.HeightPolicyTest;
 import baritone.pathing.calc.GroundJourneyContinuationTest;
 import baritone.pathing.calc.PathSearchRegressionTest;
 import baritone.pathing.movement.CollisionGeometryTest;
+import baritone.pathing.movement.PlacementHandoffTest;
 import baritone.pathing.movement.DiagonalHazardTest;
 import baritone.pathing.movement.DoorPassageTest;
 import baritone.pathing.path.AssistedFallOwnershipTest;
@@ -171,6 +172,7 @@ public final class NavigationRegressionSuite {
         DoorPassageTest.main(args);
         DiagonalHazardTest.main(args);
         CollisionGeometryTest.main(args);
+        PlacementHandoffTest.main(args);
         NearbyCollisionPerceptionTest.main(args);
         NavigationProgressTest.main(args);
         // 复算证明无需改地形后，原移动任务应自行恢复，并限制原地反复计算。

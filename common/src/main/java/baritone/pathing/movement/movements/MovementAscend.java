@@ -25,10 +25,12 @@ import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
+import baritone.pathing.movement.PlacementHandoff;
 import baritone.utils.BlockStateInterface;
 import com.google.common.collect.ImmutableSet;
 import java.util.Set;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -239,7 +241,13 @@ public class MovementAscend extends Movement {
 
     @Override
     public boolean safeToCancel(MovementState state) {
-        // if we had to place, don't allow pause
-        return state.getStatus() != MovementStatus.RUNNING || ticksWithoutPlacement == 0;
+        if (state.getStatus() != MovementStatus.RUNNING || ticksWithoutPlacement == 0) return true;
+        // 轮座旁放垫块可能遇到遮挡；角色仍在平地停稳时允许换路线，不能把曾尝试放置永久锁成空中动作。
+        var player = ctx.player();
+        if (!player.onGround() || player.isPassenger() || player.getDeltaMovement().horizontalDistanceSqr() > .0025
+                || player.getDeltaMovement().y > .01 || player.getDeltaMovement().y < -.1) return false;
+        // 低顶下仍需潜行或脚底悬边时继续保持输入；仅完整落地且可起身时放行交接。
+        return PlacementHandoff.supported(ctx.world(), player.getBoundingBox(), ctx.world()::isLoaded)
+                && ctx.world().noCollision(player, player.getDimensions(Pose.STANDING).makeBoundingBox(player.position()));
     }
 }
