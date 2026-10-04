@@ -548,6 +548,8 @@ public final class GameplayAttentionMonitor {
             GameplayReminders.damaged(player, notice.attacker());
             damaged(player, before, after, notice.attacker(), true, notice.damageType());
         }
+        // 包为空也要结清稳定的提醒变化；只限制提醒通知，真实受伤、死亡与任务决策仍沿原通道立即发布。
+        GameplayReminders.finishObservation(player);
         return !notices.isEmpty();
     }
 

@@ -78,6 +78,11 @@ public final class GameplayReminders {
         if (bind(player)) REST_STATS.received(player, packet);
     }
 
+    /** 本刻受击与生活状态均观察完再发合并通知，避免同刻先报解除、后又被新伤害证据激活。 */
+    public static void finishObservation(LocalPlayer player) {
+        if (player != null && player == body && player.clientLevel == level) BOARD.flush();
+    }
+
     /** 不访问世界、不推进规则，也不消费证据，供所有工具出口读取同一份最新观察。 */
     public static JsonArray snapshot() { return BOARD.snapshot(); }
 
