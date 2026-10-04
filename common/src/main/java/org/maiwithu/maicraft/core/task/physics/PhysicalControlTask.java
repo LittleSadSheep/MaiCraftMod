@@ -77,6 +77,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         frame=PhysicalAssemblyFrame.read(player,r.parameters.structureId(),r.anchor);
         BlockEntity entity=entity();NativePhysicalControl.require(entity,r.parameters);
         after=NativePhysicalControl.state(entity);
+        // 查看部件不启动登艇或设置；require_onboard 约束实际输入，不能把只读检查说成已经登机。
         if(r.parameters.operation()==INSPECT){done=true;return TaskState.RUNNING;}
         // 打字机的频率保存与按住/松开有独立会话，复用同一真实站位、座位约束和整机声明复查。
         if(NativePhysicalControl.typewriter(r.parameters.operation())) {
@@ -192,6 +193,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     }
     private TaskState failed(String why,FailureType type){fail(why,type);return TaskState.FAILED;}
     @Override public void stop(LocalPlayer player,Task.StopReason why){
+        // 暂停也先松开这次打字机输入；恢复后旧保持时段不重放，已经改变的配置则保留供下一次检查。
         if(typewriter!=null)typewriter.interrupt();
         approach.stop(player,why);onboard.stop(player,why);hand.stop(player,why);super.stop(player,why);
     }

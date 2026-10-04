@@ -60,7 +60,9 @@ final class AbilityAdapter {
             case PhysicsAbilityAdapter.ABILITY -> PhysicsAbilityAdapter.adapt(goal,player);
             // 物理创建先走原生粘接/组装流程，结果保留真实结构身份与整机差异。
             case PhysicalAssemblyAbilityAdapter.ABILITY -> PhysicalAssemblyAbilityAdapter.adapt(goal,player,runtime);
+            // 部件设置与有限试车先走原生命中和效果回执；同艇要求由明确参数约束，不能把查看误当成登机。
             case PhysicalControlAbilityAdapter.ABILITY -> PhysicalControlAbilityAdapter.adapt(goal,player,runtime);
+            // 持续飞行交给原生入座后的 Mod 控制会话，LLM 只给目的地，不在这里展开逐刻按键。
             case AircraftFlightAbilityAdapter.ABILITY -> AircraftFlightAbilityAdapter.adapt(goal,player,runtime);
             // 任务书动作只操作模型指定的任务或奖励，提交与领奖均走持久化的单次原生执行。
             case QuestAbilityAdapter.ABILITY -> QuestAbilityAdapter.adapt(goal);

@@ -37,6 +37,7 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
     private long observeAfter;
     public PhysicalBalanceTask(LocalPlayer player,PhysicalBalanceTaskRecord record) { super(player,record); }
     @Override protected TaskState onTick() {
+        // 明确施工请求先交给身体真实挖放；推荐和模拟不能在读算阶段偷偷启动同一条施工链。
         if(r.parameters.operation().equals("apply")&&!applied) {
             if(edit==null) edit=new StructureEditTask(player,new StructureEditTaskRecord(r.getToolCallId(),r.getDeadlineGameTime(),
                     r.parameters.structureId(),r.parameters.request().getAsJsonArray("edits")));
@@ -103,6 +104,7 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
             out.add("suggested_edits",patch);
             out.addProperty("recommendation_search","最多 64 个附着候选格，比较启停工况的最差偏差；没有找到不等于不存在其他方案");
         } else out.add("prediction",gson.toJsonTree(PhysicsSimulation.assess(model,r.parameters.limits(),r.parameters.controls())));
+        // 预算或取消只说明本次试算没算完；保留已读受力，不能将正常返回误读成已找到或排除了平衡方案。
         } catch(PhysicsComputation.Limit exhausted) { out.addProperty("analysis_incomplete",exhausted.getMessage()); }
         return out;
     }

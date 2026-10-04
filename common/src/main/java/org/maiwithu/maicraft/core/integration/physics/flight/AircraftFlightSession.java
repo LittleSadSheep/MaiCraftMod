@@ -112,6 +112,7 @@ public final class AircraftFlightSession implements TransportSession {
         }
     }
     private Result finish(boolean success,String code,String detail) {
+        // 失去座位或控制器也会走到这里；尽力关闭本会话输入后保留空中状态与未知，不能宣称故障已安全落地。
         boolean effects=keyboard!=null&&keyboard.effectsStarted();
         if(keyboard!=null)keyboard.close();if(reader!=null)reader.close();
         exploration.close();

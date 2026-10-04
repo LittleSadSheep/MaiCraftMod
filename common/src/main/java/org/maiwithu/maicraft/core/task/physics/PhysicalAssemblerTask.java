@@ -112,6 +112,7 @@ public final class PhysicalAssemblerTask extends AbstractCompanionTask<PhysicalA
         // 服务器可能一刻内完成搬移；先结清原生输入的稳定确认，避免任务收尾把已执行拉杆记为未知。
         if(action!=null&&!action.terminal())return TaskState.RUNNING;
         String outcome=observation.has("outcome")?observation.get("outcome").getAsString():"unknown";
+        // 原生处理完却未转换也可结清请求；只有真实 assembled/disassembled 才迁移设计并报告结构改变。
         boolean changed=outcome.equals("assembled")||outcome.equals("disassembled");
         if(!changed&&observation.has("observation_error"))return failure(observation.get("observation_error").getAsString(),FailureType.UNKNOWN);
         if(!changed&&observation.has("native_handler_interrupted"))return failure("原生组装入口被异常中断，结果未完整确认",FailureType.UNKNOWN);

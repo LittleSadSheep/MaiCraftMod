@@ -77,6 +77,7 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
         region=r.parameters.region(frame.origin());
         if(!frame.regionLoaded(region))return stopWith("胶水选区包含未加载区块，不能把未读到的胶层当作不存在",FailureType.TARGET_LOST);
         after=NativeAssemblyApi.bonds(player.clientLevel,region);
+        // 现场已经有同种胶完整覆盖时只交付观察；无需再登上停稳位置或取第二份胶来制造重复效果。
         if(after.stream().anyMatch(b->NativeAssemblyApi.covers(b,r.parameters.adhesive(),region))) {
             alreadyBonded=true;return TaskState.SUCCESS;
         }

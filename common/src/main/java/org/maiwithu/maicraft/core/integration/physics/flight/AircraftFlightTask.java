@@ -56,6 +56,7 @@ public final class AircraftFlightTask extends AbstractCompanionTask<AircraftFlig
             if(profile==null&&!r.operation.equals("inspect"))return failed("没有这架载具的飞控声明；先提供座位、打字机与 keys 映射");
         }
         if(r.operation.equals("inspect"))return inspect();
+        // configure 在完整档案落盘后结束；此时尚未靠近座位、核验按键或发动，不能算作飞行成功。
         if(!r.operation.equals("fly"))return TaskState.SUCCESS;
         if(outcome!=null) {
             if(outcome.state()==TransportSession.State.SUCCEEDED)return TaskState.SUCCESS;

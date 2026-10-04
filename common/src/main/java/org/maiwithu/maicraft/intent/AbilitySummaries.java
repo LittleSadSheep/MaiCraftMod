@@ -59,6 +59,12 @@ final class AbilitySummaries {
             case "maicraft:defeat_ender_dragon" -> "Fight the currently loaded Ender Dragon encounter and corroborate actual death or removal.";
             case "maicraft:obtain_elytra" -> "Bring a real elytra into the main inventory through observed gateway, End City, ship and pickup steps.";
             case "maicraft:quest_action" -> "Submit, confirm or claim one selected native FTB Quests action; request delivery, quest state and inventory effects are distinct.";
+            // 起飞前受力、真实组装、部件输入和持续飞控各有独立证据；模型先选用途，再读完整用法。
+            case "maicraft:physical_balance" -> "起飞前比较受力、启停和扰动并推荐配重；只有明确 apply 才原生施工，预测与实机验证分开。";
+            case "maicraft:physical_assembly" -> "用强力胶或蜂蜜胶粘接，并通过物理组装器创建或拆回结构，保留原生转换和整机声明差异。";
+            case "maicraft:physical_control" -> "配置物理部件与无线打字机，执行有限输入并观察反馈；原生输入、实际设置和载具运动分别确认。";
+            case "maicraft:fly_vehicle" -> "登记操纵映射，或原生登机执行持续飞控；起飞、巡航、局部避障、着陆与松键停稳分别确认。";
+
             // 本轮未复盘的能力沿用其维护会话的原摘要，不替仍在运行的功能工作改写契约。
             default -> null;
         };
