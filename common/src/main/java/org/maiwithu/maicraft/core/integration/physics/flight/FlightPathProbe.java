@@ -13,6 +13,11 @@ public final class FlightPathProbe {
         public Result {path=List.copyOf(path);}
     }
     private FlightPathProbe() {}
+    /** 运行中的桨叶离开主地块后仍占机体空间；巡航避障和选落点都须包含这些实际世界碰撞。 */
+    static AABB includeMovingParts(AABB hull,List<AABB> movingParts) {
+        for(AABB part:movingParts)hull=hull.minmax(part);
+        return hull;
+    }
     /** 已接地飞艇向上离地时容忍底面数值误差；仍检查完整宽度、顶部和上方十二格。 */
     public static Space verticalDeparture(World world,AABB bounds,boolean grounded) {
         double floorTolerance=grounded?.03:0;

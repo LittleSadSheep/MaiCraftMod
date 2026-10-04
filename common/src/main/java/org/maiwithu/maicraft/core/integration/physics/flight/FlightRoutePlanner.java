@@ -27,6 +27,8 @@ public final class FlightRoutePlanner {
         if(guidance!=null&&sample.tick()-planned<5)return guidance;
         planned=sample.tick();AABB bounds=ship.worldBounds();
         if(bounds==null)throw new IllegalStateException("aircraft bounds are unavailable");
+        var probe=FlightWorldProbe.capture(world,ship);
+        bounds=FlightPathProbe.includeMovingParts(bounds,probe.ownMovingParts());
         if(Double.isNaN(clearance))clearance=Math.max(1,sample.position().y-bounds.minY+1);
         if(sample.contact()==FlightSample.Contact.GROUNDED) {
             BlockPos at=BlockPos.containing(sample.position());
@@ -38,7 +40,6 @@ public final class FlightRoutePlanner {
         // 飞艇停机后还会有少量漂移，选址时为垂直下降保留两侧余量。
         double width=Math.max(bounds.getXsize(),bounds.getZsize())+(envelope.kind()==FlightEnvelope.Kind.AIRSHIP?4:2);
         double length=envelope.kind()==FlightEnvelope.Kind.FIXED_WING?Math.max(48,envelope.cruiseSpeed()*4):width+4;
-        var probe=FlightWorldProbe.capture(world,ship);
         if(landing==null&&(landingSearched==Long.MIN_VALUE||sample.tick()-landingSearched>=40)) {
             landingSearched=sample.tick();
             landing=FlightLandingSite.find(world,probe,destination,clearance,width,length,sample.heading(),sample.tick());

@@ -59,6 +59,13 @@ public final class FlightPathProbeTest {
         check(FlightHullDeparture.inspectParts(box->box.intersects(overRotor)?BLOCKED:CLEAR,hull,true,78)==BLOCKED,
                 "桨叶上方的树枝必须阻止垂直起飞");
         check(FlightHullDeparture.inspectParts(box->UNKNOWN,hull,true,78)==UNKNOWN,"缺少任一部件的通道观察不能当畅通");
+        // 成型桨叶可能伸出主地块，不能只检查主船体而擦过前方树干。
+        var narrow=new AABB(-1,79,-1,1,82,1);
+        var extended=FlightPathProbe.includeMovingParts(narrow,List.of(new AABB(-4,79,-1,-1,82,1)));
+        var rotorTree=new AABB(-3,79,10,-2,84,11);
+        check(FlightPathProbe.trace(box->box.intersects(rotorTree)?BLOCKED:CLEAR,sample,narrow,0,0,2,envelope).state()==CLEAR
+                &&FlightPathProbe.trace(box->box.intersects(rotorTree)?BLOCKED:CLEAR,sample,extended,0,0,2,envelope).state()==BLOCKED,
+                "机外转子的宽度必须参与整段巡航碰撞检查");
         System.out.println("FlightPathProbeTest: passed");
     }
     private static final class Scene implements BlockGetter {
