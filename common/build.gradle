@@ -198,6 +198,12 @@ def regressionSuites = [
         heap: '512m', directory: 'settle-reflex-regression', timeoutSeconds: 60,
         purpose: '验证贴边安定反射的触发、潜行退避与控制交还'
     ],
+    // 释放窗口反射的选人规则单独回放：在岗任务持有身体时贴边退避不抢占，身体释放后恢复顺位。
+    releaseWindowReflexRegression: [
+        entry: 'org.maiwithu.maicraft.task.ReleaseWindowReflexSelectionTest',
+        heap: '512m', directory: 'release-window-reflex-regression', timeoutSeconds: 45,
+        purpose: '验证释放窗口反射只在身体未被任务槽持有时参与抢占'
+    ],
     // 接近寻路准入闸门的拒绝记录单独核对：样本、去重与轮次清空是回执对账的事实源。
     descentAdmissionRegression: [
         entry: 'org.maiwithu.maicraft.core.pathing.baritone.landing.DescentAdmissionLogTest',
