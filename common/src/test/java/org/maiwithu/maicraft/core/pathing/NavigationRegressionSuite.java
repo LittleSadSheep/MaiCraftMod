@@ -83,6 +83,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.MissedLandingHandoffT
 import org.maiwithu.maicraft.core.pathing.baritone.landing.NativeBucketLandingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.PlannedWaterReflexTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.SharedLandingExecutionTest;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.MlgWaterSuppressionTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingReplayTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterSurfaceExecutionTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportIntentTest;
@@ -201,6 +202,7 @@ public final class NavigationRegressionSuite {
         AirRescueChoiceTest.main(args);
         WaterLandingReplayTest.main(args);
         SharedLandingExecutionTest.main(args);
+        MlgWaterSuppressionTest.main(args);
         LandingSupplyCleanupTest.main(args);
         AutomaticFallAdmissionTest.main(args);
         FallDeparturePreparationTest.main(args);

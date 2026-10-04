@@ -31,7 +31,8 @@ public final class LandingAssistDisplacementTest {
         position(player, true, support);
         LocalPlayerContext context = withPlayer(f, player);
         var reflex = new MLGChain(); field(MLGChain.class, "session").set(reflex, f.session);
-        check(reflex.canRun(player), "an active displaced fall still owns its reflex before settlement");
+        // 落入其他水体时反射立即让位；非水中的偏离仍由原会话观察落稳。
+        check(reflex.canRun(player) == !support.equals("water"), "water disables the reflex while other displacement still settles");
         for (int tick = 0; tick < 9; tick++) { f.time++; f.session.tick(context); }
         check(!f.session.complete(), "one safe sample cannot terminate the displaced fall");
         f.time++; f.session.tick(context);
@@ -103,6 +104,8 @@ public final class LandingAssistDisplacementTest {
         public float getHealth() { return 20; }
         public float getAbsorptionAmount() { return 0; }
         public boolean isInWater() { return false; }
+        // 攀附场景明确处于干燥状态，不借用未经过玩家构造器初始化的游泳字段。
+        public boolean isSwimming() { return false; }
         public boolean onClimbable() { return true; }
     }
 

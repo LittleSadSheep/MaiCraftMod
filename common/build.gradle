@@ -174,6 +174,12 @@ def regressionSuites = [
         heap: '512m', directory: 'navigation-regression', timeoutSeconds: 45,
         purpose: '验证导航取消、路径推进、开门与落地'
     ],
+    // 单独回放入水后的 MLG 让位，覆盖旧会话和已经排队的执行入口，避免水中换桶抢占主任务。
+    mlgWaterRegression: [
+        entry: 'org.maiwithu.maicraft.core.pathing.baritone.landing.MlgWaterSuppressionTest',
+        heap: '512m', directory: 'mlg-water-regression', timeoutSeconds: 45,
+        purpose: '验证 MLG 入水停用、已提交效果保留与新坠落重新触发'
+    ],
     // 多次启动独立 JVM，覆盖首条平地路线与物品准备的先后关系，防止预热后的单进程测试漏掉会话故障。
     navigationStartupRegression: [
         entry: 'org.maiwithu.maicraft.core.pathing.baritone.NavigationStartupRegressionSuite',

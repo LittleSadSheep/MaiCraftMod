@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import org.maiwithu.maicraft.task.reflex.Reflex;
 
 /**
@@ -25,6 +26,7 @@ public final class MLGChain implements Task, Reflex {
 
     @Override
     public boolean canRun(LocalPlayer companion) {
+        if (waterBlocksStart(companion)) return false;
         if (EmbeddedBaritoneRuntime.ownsActiveLandingAssist(companion)) return false;
         if (session != null) return !session.complete();
         return EmergencyLanding.triggered(companion);
@@ -37,12 +39,24 @@ public final class MLGChain implements Task, Reflex {
      * 原来的跳跃已经错过落点时，先找到还能继续的自救办法，再让调度器结束原来的跳跃。
      */
     public boolean prepareMissedLandingTakeover(LocalPlayer player) {
+        if (waterBlocksStart(player)) return false;
         if (session == null) session = EmergencyLanding.find(ClientRuntime.requireContext(player));
         return session != null && !session.failed() && !session.complete();
     }
 
     public TaskState tick(LocalPlayerContext context) {
         var player = context.player();
+        // 调度之后才入水，或旧 tick 仍被调用时，也只能结束原会话，不能继续换桶、瞄准、倒水或收水。
+        if (inWater(player)) {
+            if (session != null) {
+                try { stopSession(context, "entered water; emergency landing disabled"); }
+                finally {
+                    finishAttention(player, "entered water; emergency landing disabled");
+                    session = null;
+                }
+            }
+            return TaskState.RUNNING;
+        }
         if (session == null) {
             session = EmergencyLanding.find(context);
             if (session == null) {
@@ -83,16 +97,40 @@ public final class MLGChain implements Task, Reflex {
     public void stop(LocalPlayer companion, StopReason why) {
         try {
             ClientRuntime.actor().activeContext().filter(c -> c.player() == companion && c.isCurrent()).ifPresent(context -> {
-                if (session != null && !session.complete()) session.stop(context, "emergency landing owner ended: " + why);
-                context.body().releaseAll();
+                stopSession(context, inWater(companion) ? "entered water; emergency landing disabled"
+                        : "emergency landing owner ended: " + why);
             });
         } finally {
-            finishAttention(companion, why == StopReason.BODY_GONE ? "body unavailable; result unconfirmed" : "fall episode ended");
+            finishAttention(companion, why == StopReason.BODY_GONE ? "body unavailable; result unconfirmed"
+                    : inWater(companion) ? "entered water; emergency landing disabled" : "fall episode ended");
             session = null;
         }
     }
 
+    private static boolean inWater(LocalPlayer player) { return player.isInWater() || player.isSwimming(); }
+
+    private boolean waterBlocksStart(LocalPlayer player) {
+        if (!inWater(player)) return false;
+        // 尚未接管的候选没有原生效果，入水时直接作废，避免上岸后复活旧落点；活动会话由停用路径结算。
+        if (!attentionActive) session = null;
+        return true;
+    }
+
+    private void stopSession(LocalPlayerContext context, String reason) {
+        // 只收尾自己的原生操作；保留已确认的放置及未回收事实，入水不能被写成又一次成功放水。
+        if (session != null) {
+            if (!session.complete()) session.stop(context, reason);
+            attentionActions += session.drainChanges().size();
+            var facts = new LinkedHashMap<>(session.diagnostics());
+            facts.put("reflex_active", false);
+            facts.put("disabled_in_water", inWater(context.player()));
+            facts.put("stop_reason", reason);
+            LandingAssistPolicy.report(facts);
+        }
+        context.body().releaseAll();
+    }
+
     @Override public String name() { return "mlg"; }
     @Override public String id() { return name(); }
-    @Override public String describe() { return "高处坠落时会用水桶或落地辅助自救；仅回收已确认自放的辅助，干草减伤会如实记录受伤"; }
+    @Override public String describe() { return "高处坠落时用水桶或落地辅助自救；在水中或游泳时停用，入水后交还身体并保留已放辅助的实际回执；干草减伤如实记录受伤"; }
 }

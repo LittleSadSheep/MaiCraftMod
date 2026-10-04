@@ -213,7 +213,7 @@ public final class WaterLandingReplayTest {
         final DefaultNativeActionPort receipts = new DefaultNativeActionPort();
         final LocalPlayerContext context;
         final LandingAssistSession session;
-        long time; int uses, selections, bodyWrites; boolean blockEvidence = true, inventoryEvidence = true;
+        long time; int uses, selections, bodyWrites, releases; boolean blockEvidence = true, inventoryEvidence = true;
         BodyControlPort.Movement steering;
         Fixture(boolean existing) throws Exception {
             world.scene = new Scene(); world.water = existing;
@@ -247,6 +247,10 @@ public final class WaterLandingReplayTest {
                                     (Integer) args[2]);
                         }
                         case "poll" -> receipts.poll((LocalPlayerContext) args[0], (NativeActionReceipt) args[1]);
+                        // 反射入水后只允许结束旧使用；松手不会被记成第二次倒水或回收水源。
+                        case "releaseUsingItem" -> {
+                            releases++; yield receipt(NativeActionReceipt.Kind.RELEASE_ITEM, c -> NativeConfirmation.Verdict.APPLIED, 10);
+                        }
                         default -> throw new AssertionError("unexpected native mutation: " + method.getName());
                     });
             context = (LocalPlayerContext) Proxy.newProxyInstance(LocalPlayerContext.class.getClassLoader(),
@@ -297,11 +301,11 @@ public final class WaterLandingReplayTest {
         public void awardStat(Stat<?> stat, int amount) { }
         public void playSound(SoundEvent sound, float volume, float pitch) { }
         public boolean mayUseItemAt(BlockPos pos, Direction face, ItemStack stack) { return true; }
-        Inventory inventory; boolean wet; float health, hayMultiplier;
+        Inventory inventory; boolean wet, swimming; float health, hayMultiplier;
         DamageSources sources;
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         public float getHealth() { return health; } public float getAbsorptionAmount() { return 0; }
-        public boolean isSwimming() { return false; } public boolean onClimbable() { return false; }
+        public boolean isSwimming() { return swimming; } public boolean onClimbable() { return false; }
         public boolean causeFallDamage(float distance, float multiplier, DamageSource source) {
             hayMultiplier = multiplier; health -= (float) Math.max(0, Math.ceil((distance - 3) * multiplier)); return true;
         }

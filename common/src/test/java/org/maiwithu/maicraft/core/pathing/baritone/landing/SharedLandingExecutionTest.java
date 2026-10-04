@@ -173,20 +173,27 @@ public final class SharedLandingExecutionTest {
         }
         check(f.uses == 1 && f.world.water, "both triggers submitted one reachable native placement");
         f.position(0, 0, true); f.player.wet = true; f.player.fallDistance = 0;
-        for (int i = 0; i < 60 && !session.complete(); i++) {
-            if (emergency) { check(reflex.canRun(f.player), "recovery retains the emergency owner"); f.time++; reflex.tick(f.context); }
-            else f.tick();
+        if (emergency) {
+            // 反射在入水时交还身体；普通导航自己持有的落地会话仍由下方验证完整的回收流程。
+            check(!reflex.canRun(f.player), "water contact disables the emergency reflex before recovery");
+            f.time++; reflex.tick(f.context);
+            check(field(MLGChain.class, "session").get(reflex) == null && f.uses == 1 && f.world.water,
+                    "the emergency reflex leaves its water without another use or pickup");
+            check(Boolean.TRUE.equals(session.diagnostics().get("confirmed_own_placement")) == inventoryEvidence,
+                    "water shutdown preserves confirmed placement and missing inventory evidence separately");
+            check(f.selections == 1, "entering water cannot select another bucket");
+            return;
         }
+        for (int i = 0; i < 60 && !session.complete(); i++) f.tick();
         check(session.complete(), "shared session must terminate after its bounded evidence windows");
         if (inventoryEvidence) {
             check(!session.failed() && f.uses == 2 && !f.world.water && f.player.getMainHandItem().is(Items.WATER_BUCKET),
-                    "both triggers require source, bucket, native water contact, pickup and fresh support");
+                    "planned recovery requires source, bucket, native water contact, pickup and fresh support");
             check(Boolean.TRUE.equals(session.diagnostics().get("native_water_contact"))
                     && Boolean.TRUE.equals(session.diagnostics().get("removed_own_aid")), "shared authoritative evidence recorded");
         } else check(session.failed() && f.uses == 1 && f.world.water,
-                "the emergency trigger cannot bypass missing inventory evidence or recover unowned water");
-        check(f.selections == (emergency ? 1 : 0), "only emergency hotbar preparation selected an item");
-        if (emergency) check(!reflex.canRun(f.player), "confirmed or failed terminal session yields the reflex owner");
+                "planned recovery cannot bypass missing inventory evidence or recover unowned water");
+        check(f.selections == 0, "planned landing retains its prepared hand");
     }
 
     // 用原版干草落地方法确认它减少伤害但不免伤；成功记录必须保留实际生命损失。
