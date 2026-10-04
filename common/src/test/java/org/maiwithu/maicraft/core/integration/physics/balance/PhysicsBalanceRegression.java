@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.core.task.physics.NativeBurnerDialTest;
 import org.maiwithu.maicraft.core.task.physics.NativePropellerStateTest;
 import org.maiwithu.maicraft.server.physics.FloatingDragAttributionTest;
 import org.maiwithu.maicraft.server.physics.PreflightAerodynamicAttributionTest;
+import org.maiwithu.maicraft.server.physics.PreflightPropellerEditsTest;
 import org.maiwithu.maicraft.core.task.physics.PhysicalBalanceReceiptTest;
 import org.maiwithu.maicraft.core.task.physics.StructureSlabPlacementTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureLookDirectionTest;
@@ -78,6 +79,8 @@ public final class PhysicsBalanceRegression {
         PhysicsFloatingDragTest.run();
         FloatingDragAttributionTest.run();
         PreflightAerodynamicAttributionTest.run();
+        // 改造布局后仍须比较新轴承作用点，不能仅验证铁块的质量变化。
+        PreflightPropellerEditsTest.run();
         PhysicalBalanceReceiptTest.run();
         StructureSlabPlacementTest.run();
         StructureLookDirectionTest.run();

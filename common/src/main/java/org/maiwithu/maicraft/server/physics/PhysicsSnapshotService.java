@@ -78,6 +78,8 @@ public final class PhysicsSnapshotService {
             // 试算补丁只写入隔离视图，质量与气球拓扑都按同一份候选方块重新计算。
             if (request.has("edits")) {
                 model = overlay.apply(model);
+                // 新增、移位或改向的轴承不能因没有真实方块实体而从运行预测中静默消失。
+                model = PreflightPropellerEdits.model(ship,model,overlay,rpm);
             }
             // 质量及候选方块确定后，再按同一份隔离布局计算新增、移除或转向的机翼载荷。
             model=PreflightAerodynamics.model(ship,measured,model,overlay);
