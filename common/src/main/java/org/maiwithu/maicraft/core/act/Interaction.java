@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.act;
 
 import java.util.Map;
+import java.util.LinkedHashMap;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
@@ -8,6 +9,7 @@ import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
+import org.maiwithu.maicraft.core.integration.create.WheelMountUse;
 import org.maiwithu.maicraft.core.integration.create.transmission.ChainConveyorUse;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
@@ -96,6 +98,7 @@ public final class Interaction {
     private final Timing timing;
 
     private final BlockDigger digger; // 仅左键破坏方块时使用。
+    private WheelMountUse wheelMountUse;
     private BlockHitResult presetHit; // 右键方块时可携带调用方已解析的精确命中，供放置使用。
     private BlockHitResult submittedBlockHit;
     private BlockPos requiredBlockPos;
@@ -621,11 +624,14 @@ public final class Interaction {
             if (manual != null) return manual;
         }
         int beforeMenu = player.containerMenu.containerId;
+        // 安装轮胎只改变轮座内部槽位；把这份原生同步与已有的手持、方块、菜单观察一起结算。
+        wheelMountUse = WheelMountUse.prepare(player.level(), clicked);
         NativeConfirmation adjacentChanged = player.level().isLoaded(adjacent)
                 ? NativeConfirmation.blockChanged(
                         adjacent, player.level().getBlockState(adjacent))
                 : NativeConfirmation.pending();
         return NativeConfirmation.anyOf(
+                wheelMountUse == null ? NativeConfirmation.pending() : wheelMountUse,
                 NativeConfirmation.blockChanged(clicked, clickedBefore),
                 adjacentChanged,
                 NativeConfirmation.heldItemChanged(usedHand, heldBefore),
@@ -659,9 +665,12 @@ public final class Interaction {
         if (last == null) return Map.of();
         boolean uncertain = last.status() != NativeActionReceipt.Status.CONFIRMED_APPLIED
                 && last.status() != NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED;
-        return Map.of("submission_attempted", true, "native_action_status", last.status().name(),
+        var evidence = new LinkedHashMap<String, Object>(Map.of("submission_attempted", true, "native_action_status", last.status().name(),
                 "native_action_kind", last.kind().name(), "outcome_uncertain", uncertain,
-                "mechanical_retry_allowed", last.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED);
+                "mechanical_retry_allowed", last.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED));
+        // 完成回执保留轮座自己的前后观察，规划者据此跳过已安装轮胎，避免再次点击把它取下。
+        if (wheelMountUse != null) evidence.put("wheel_mount_observation", wheelMountUse.evidence());
+        return evidence;
     }
 
     // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。

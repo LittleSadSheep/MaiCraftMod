@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import org.maiwithu.maicraft.core.integration.create.WheelMountUseTest;
+
 import org.maiwithu.maicraft.task.TaskSlotFailureTest;
 import org.maiwithu.maicraft.client.chat.ChatTypingTest;
 import org.maiwithu.maicraft.core.task.build.ScaffoldCleanupStallWatchdogTest;
@@ -288,6 +290,7 @@ public final class GuiRegressionSuite {
         FiniteBlockUseTest.main(args);
         EmptyHandInteractionTest.main(args);
         MachineInteractionSurfaceTest.main(args);
+        WheelMountUseTest.main(args);
         // 原生取放使用已观察的工件组件，不能只因物品注册名相同就换错装配阶段。
         CarriedItemVariantsTest.main(args);
         BuildExcavationFrontierTest.main(args);
