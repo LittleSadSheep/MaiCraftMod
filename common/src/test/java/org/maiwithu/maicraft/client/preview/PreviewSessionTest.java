@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.preview;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,6 +28,22 @@ public final class PreviewSessionTest {
             else System.setProperty("maicraft.preview.enabled", prior);
         }
         check(PreviewConfig.enabled() == before, "启动覆盖不改写原来的预览开关");
+        // F9+P 的路线开关与 Dev 分离：默认关闭，翻转会记住，也不受审图启动覆盖影响。
+        boolean pathBefore = PreviewConfig.pathLines();
+        check(!pathBefore, "导航路线默认不显示");
+        try {
+            PreviewConfig.pathLines(!pathBefore);
+            check(PreviewConfig.pathLines() != pathBefore, "路线开关可以翻转");
+            System.setProperty("maicraft.preview.enabled", "false");
+            check(PreviewConfig.pathLines() != pathBefore, "路线开关独立于审图启动覆盖");
+            PreviewConfig.pathLines(pathBefore);
+        } catch (IOException impossible) {
+            throw new AssertionError("配置文件未初始化时 persist 不产生 IO", impossible);
+        } finally {
+            if (prior == null) System.clearProperty("maicraft.preview.enabled");
+            else System.setProperty("maicraft.preview.enabled", prior);
+        }
+        check(PreviewConfig.pathLines() == pathBefore, "路线开关翻回原状");
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos(1, 64, 2);

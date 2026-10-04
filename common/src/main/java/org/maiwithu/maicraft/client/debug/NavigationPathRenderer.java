@@ -21,7 +21,8 @@ import org.maiwithu.maicraft.core.pathing.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 
 /**
- * Dev 开启且界面没有隐藏时，画出现有地面与飞行路线、最终目标和当前转向点；只读取路线，不请求移动。
+ * Dev 或路线开关（F9+P）开启且界面没有隐藏时，画出现有地面与飞行路线、最终目标和当前转向点；
+ * 只读取路线，不请求移动。
  */
 public final class NavigationPathRenderer {
     private static final int GROUND = 0xCC35D9FF, FLIGHT = 0xCCBA77FF;
@@ -30,8 +31,10 @@ public final class NavigationPathRenderer {
 
     public static void render(Camera camera, Matrix4f view, Matrix4f projection) {
         Minecraft minecraft = Minecraft.getInstance();
+        boolean linesWanted = PreviewConfig.enabled(minecraft.gameDirectory.toPath())
+                || PreviewConfig.pathLines(minecraft.gameDirectory.toPath());
         if (minecraft.level == null || minecraft.player == null || minecraft.options.hideGui
-                || !PreviewConfig.enabled(minecraft.gameDirectory.toPath())) return;
+                || !linesWanted) return;
         NavigationPathSnapshot ground = EmbeddedBaritoneRuntime.debugPath();
         NavigationPathSnapshot flight = TransportRuntime.debugPath();
         if (ground == null && flight == null) return;
