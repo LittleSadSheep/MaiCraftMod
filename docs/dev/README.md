@@ -36,6 +36,8 @@ MaiCraft 操作的是当前玩家。玩家只有一双手、一套按键和一�
 
 此外还有知识文档、任务通知和聊天流等 MCP 资源。读文档不会自动取得施工权限，看到机器里有物品也不等于证明这台机器刚刚生产了它们。
 
+实机排查需要绕过宿主 MCP 会话直连端点时，可用 [tools/maicraft_cli.py](../../tools/maicraft_cli.py)（用法见 [tools/README.md](../../tools/README.md)）。
+
 ## 一次请求怎样变成角色动作
 
 ```text
