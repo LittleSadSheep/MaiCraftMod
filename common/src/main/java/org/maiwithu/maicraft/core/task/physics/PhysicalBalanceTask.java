@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -109,9 +110,21 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
         cancelled.set(true);
         if(reader!=null) reader.close();
         if(computation!=null&&!computation.isDone()) computation.cancel(true);
-        if(edit!=null) { edit.result(TaskState.CANCELLED); edit=null; }
+        if(edit!=null) {
+            construction=edit.result(TaskState.CANCELLED);edit=null;
+            report.add("construction",new Gson().toJsonTree(construction.data()));
+        }
         super.cleanup();
     }
     @Override protected String successMessage() { return applied?"配平补丁施工已完成，实际差异与预测分别返回":"起飞前受力分析与配平预测已完成"; }
-    @Override protected Map<String,Object> resultData() { return Map.of("physics_balance",report,"construction_started",applied||edit!=null); }
+    @Override protected Map<String,Object> resultData() {
+        return receipt(report,applied||edit!=null||construction!=null,construction==null?Map.of():construction.data());
+    }
+    static Map<String,Object> receipt(JsonObject report,boolean started,Map<String,Object> construction) {
+        var result=new LinkedHashMap<String,Object>();result.put("physics_balance",report);result.put("construction_started",started);
+        // 补丁中途停止或取消时，已确认的拆放、整机差异和未确认项仍直接交付，不能被外层空效果列表遮住。
+        for(String key:List.of("completed_effects","declared_structure_diff","design_declaration","processed_targets","total_targets","placement_diagnostics"))
+            if(construction.containsKey(key))result.put(key,construction.get(key));
+        return result;
+    }
 }

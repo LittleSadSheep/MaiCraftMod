@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.player.LocalPlayer;
@@ -15,9 +16,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
@@ -60,6 +63,8 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
     private int rotations;
     private BlockState rotationState;
     private Set<Direction> rotationFaces=Set.of();
+    private Map<String,Object> placementDiagnostics=Map.of();
+    private Item placementItem;
     public StructureEditTask(LocalPlayer player,StructureEditTaskRecord record) { super(player,record); }
     @Override protected void onStart() {
         declarationWorld=player.level();declarationEvidence.addProperty("persistence_status","pending");
@@ -172,6 +177,7 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         else {
             if(wrenching)rotations++;
             BlockState before=actual;
+            if(placing&&!wrenching)observePlacement(ctx,pos,hit,desired);
             action=ctx.actions().useBlock(ctx,InteractionHand.MAIN_HAND,hit,new NativeConfirmation() {
                 public boolean requiresBlockAcknowledgement() { return true; }
                 public Verdict observe(LocalPlayerContext c) {
@@ -180,6 +186,24 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             },80);
         }
         return TaskState.RUNNING;
+    }
+    private void observePlacement(LocalPlayerContext ctx,BlockPos target,BlockHitResult hit,BlockState desired) {
+        var facts=new LinkedHashMap<String,Object>();placementItem=player.getMainHandItem().getItem();
+        facts.put("target_index",index);facts.put("requested_block",BuiltInRegistries.BLOCK.getKey(desired.getBlock()).toString());
+        facts.put("inventory_before",PlayerInv.count(player.getInventory(),placementItem));
+        facts.put("source","client native placement-context observation; diagnostic only, never an execution gate");
+        try {
+            // 保留原生放置上下文的落点、生存条件和实体碰撞检查；即使检查不通过，下面仍尝试已授权的真实点击。
+            var context=new BlockPlaceContext(player,InteractionHand.MAIN_HAND,player.getMainHandItem(),hit);
+            var at=context.getClickedPos();var state=desired.getBlock().getStateForPlacement(context);
+            facts.put("native_position",List.of(at.getX(),at.getY(),at.getZ()));facts.put("target_matches",at.equals(target));
+            facts.put("context_can_place",context.canPlace());facts.put("native_state",state==null?"unavailable":state.toString());
+            if(state!=null) {
+                facts.put("native_can_survive",state.canSurvive(ctx.level(),at));
+                facts.put("native_entity_clearance",ctx.level().isUnobstructed(state,at,CollisionContext.of(player)));
+            }
+        } catch(RuntimeException unavailable){facts.put("observation_error",unavailable.toString());}
+        placementDiagnostics=Map.copyOf(facts);
     }
     private Set<Direction> wrenchFaces(BlockState actual,JsonObject edit) {
         if(actual!=rotationState) {
@@ -269,9 +293,12 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             diff.add(Map.of("expected",edit,"actual",actual==null?"unknown_unloaded":actual.toString(),"matches",
                     actual!=null&&expectedBlock.isPresent()&&actual.is(expectedBlock.get())&&matchesProperties(actual,edit)));
         }
+        var placement=new LinkedHashMap<>(placementDiagnostics);
+        if(placementItem!=null)placement.put("inventory_after",PlayerInv.count(player.getInventory(),placementItem));
         return Map.of("structure_id",r.structureId.toString(),"completed_effects",List.copyOf(effects),"declared_structure_diff",diff,
                 "design_scope","persistent_world_dimension_structure","design_declaration",declarationEvidence,
                 "processed_targets",index,"total_targets",r.edits.size(),"balance_verified",false,
+                "placement_diagnostics",placement,
                 "construction_approach",Map.of("history",List.copyOf(approachHistory),"current_search",worksites==null?Map.of():worksites.diagnostics(),"last_gaze",lastGaze));
     }
 }
