@@ -23,7 +23,7 @@
 | `wait_for_condition` | 等一段时间、天亮或身体条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | 完成重构；[实现与回归](waiting.md) |
 | `chat` | 在真实聊天框输入并提交 | `ChatAbilityAdapter` → `ChatTask` | 完成重构；[发送与恢复规则](chat.md) |
 | `suicide` | 死亡不掉落时通过原生危险动作主动寻死 | `SuicideAbilityAdapter` → `SuicideTask` | 已覆盖参数、危险观察、取消、保护恢复及死亡步骤结算的夹具回归；尚未实机验收 |
-| `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对 |
+| `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对；[参数、到达判定与已知边界](travel.md) |
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
 | `prepare_portal` | 单独准备并点燃传送门，完成后停在门外 | `AbilityAdapter.preparePortal` | 入口核对 |
 | `explore` | 跑图勘察，按群系、标签或结构定向发现 | `ExplorationIntent.adapt` | 入口核对 |

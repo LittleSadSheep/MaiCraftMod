@@ -98,6 +98,8 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 所有平台搜索都使用 `semantic_target="platform"`，通过 `direction` 选择方向（`up`、`down`、`forward`、`backward`、`left`、`right` 或四个英文方位，默认 `forward`）。相对方向在任务开始时固定；区域搜索半径 `max_distance` 默认 64，范围 8–128 格。普通坐标移动仍支持省略 Y 和到达容差，`exact=true` 用于需要准确站位的动作。
 
+已知高度且要求同层时，将 `vertical_tolerance:0` 放在 `goal.parameters` 中，与 `destination` 同级；水平仍可用 `horizontal_radius` 保留接近范围。完整调用示例、交通条件与到达回执见 [旅行能力开发文档](docs/dev/travel.md)。
+
 定点用物品可给 `maicraft:use_item` 提供 `target.kind="coordinates"`。例如把熔岩倒进一个空格：
 
 ```json
