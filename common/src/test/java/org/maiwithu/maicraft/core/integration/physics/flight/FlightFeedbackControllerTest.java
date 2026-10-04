@@ -82,6 +82,12 @@ public final class FlightFeedbackControllerTest {
         var reverse=m.tick(81,new FlightCommand(0,-1,0,0,0,false));
         check(reverse.contains(83)&&!reverse.contains(87),"改向释放旧轴方向");
         check(m.tick(82,FlightCommand.parked()).equals(Set.of(66)),"停车只保留刹车，不补发旧累计脉冲");
+        // 实机爬升在 100% 与约 98% 间反馈摆动，不能因跨越满输出分支而反复发出短暂松键。
+        var lift=new FlightKeyMixer(Map.of(FlightKeyMixer.Role.POWER,87,FlightKeyMixer.Role.LIFT,32));
+        int held=0;
+        for(int t=1;t<=160;t++)if(lift.tick(t,new FlightCommand(0,0,0,0,t%2==0?.98:1,false)).contains(32))held++;
+        check(held>=152,"接近满量的升力需求必须保持接近满量的实际按键占空比");
+        check(!lift.tick(161,FlightCommand.parked()).contains(32),"明确停机仍立即释放升力键");
     }
     private static void groundDrivingIsNotFlight() {
         var c=new FlightFeedbackController(FlightEnvelope.airship());

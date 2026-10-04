@@ -35,7 +35,10 @@ public final class FlightKeyMixer {
     private void add(Set<Integer> output,Role role,double demand) {
         if(!keys.containsKey(role))return;
         if(demand<=0){remaining.remove(role);quantum.remove(role);active.remove(role);return;}
-        if(demand>=1){remaining.remove(role);output.add(keys.get(role));active.put(role,true);quantum.remove(role);return;}
+        if(demand>=1){
+            // 满输出与略低于满输出来回切换时保留调制余量；不能每次都从零重算，反复误松升力键。
+            remaining.putIfAbsent(role,.5);output.add(keys.get(role));active.put(role,true);quantum.put(role,previousTick/4);return;
+        }
         // 换向器和弹簧需要原生更新时间，部分输出按四刻成组保持；满量与松键仍立即响应。
         long group=previousTick/4;
         if(quantum.getOrDefault(role,Long.MIN_VALUE)==group){if(active.getOrDefault(role,false))output.add(keys.get(role));return;}
