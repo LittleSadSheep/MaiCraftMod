@@ -111,7 +111,8 @@ final class AbilityAdapter {
     }
 
     private static IntentAction remember(Goal goal, LocalPlayer player, IntentRuntime runtime) {
-        // 地点必须有一个以后能引用的短名字；普通地点与需要保护的聚居地由 area_role 明确区分。
+        // 用户要登记一个以后能引用的地点时，按“名字 -> 区域类型 -> 位置”解析；这里只创建记忆动作，实际写入由 IntentTask 推进。
+        // parameters.label 缺省才回退到来源标签；区域类型按本次声明决定，复制或覆盖旧地标都不自动继承旧类型。
         JsonObject parameters = goal.parameters();
         String label = string(parameters, "label");
         if (label == null && goal.target() != null) label = goal.target().label();
@@ -975,13 +976,15 @@ final class AbilityAdapter {
 
     private static Goal.WorldPosition rememberPosition(
         Goal goal, LocalPlayer player, IntentRuntime runtime) {
-        // 记忆位置不要求玩家现在就在那个维度；和“马上前往／施工”的位置检查不同。
+        // 记忆只登记一个点，不要求玩家到达或加载目标处；跨维度位置也可保存，后续动作再检查自己的交互条件。
         Goal.SemanticTarget target = goal.target();
-        // "记住当前所在的地方"是该能力的自然默认：漏写 target 时直接按当前位置执行，不为省略多一轮决策。
+        // 省略目标与 current_place 都在本步骤执行时读取脚下方块格，不冻结 plan 创建时的位置。
         if (target == null) return currentPosition(player);
         if ("current_place".equals(target.kind())) return currentPosition(player);
+        // 显式坐标原样带入，缺失的 dimension 在这里不会补成当前维度；契约必须如实说明这一恢复边界。
         if ("coordinates".equals(target.kind())) return target.position();
         if ("landmark".equals(target.kind()) || "area".equals(target.kind())) {
+            // 别名只复制已解析的位置，不复制来源区域类型；找不到来源就交给调用方处理，不能拿当前位置顶替。
             IntentRuntime.Landmark landmark = runtime.landmark(target.label());
             return landmark == null ? null : landmark.position();
         }

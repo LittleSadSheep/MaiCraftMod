@@ -268,14 +268,18 @@ public final class IntentRuntime {
             String label, Goal.WorldPosition position, LandmarkAreaRole areaRole) {
         // 地标同样属于世界检查点，恢复受阻时拒绝新增，避免让玩家误以为位置已经被记住。
         requireRecoveredState();
+        // 去掉首尾空白并忽略大小写后，同名直接替换位置和区域类型；这是登记效果，不涉及角色走路或世界方块修改。
         String key = normalizeLabel(label);
         landmarks.put(key, new Landmark(label, position, areaRole));
+        // 现有上限按插入顺序淘汰，覆盖同名不会刷新顺序；本次成功结果没有另列被淘汰的旧名字。
         trimOldest(landmarks, MAX_LANDMARKS);
+        // 先标记待保存，再由持久化周期提交完整世界检查点；不能把这里的返回当成 SQLite 已完成提交。
         markDirty();
     }
 
     public Landmark landmark(String label) {
         if (label == null) return null;
+        // 用户命名的手工地标先命中；没有时再查询下方跑图或机器来源，解析出位置不等于已把来源复制进手工列表。
         Landmark remembered = landmarks.get(normalizeLabel(label));
         if (remembered != null) return remembered;
         // 跑图查询返回的稳定标签按需从独立记忆分区解析，不挤占手工地标容量。

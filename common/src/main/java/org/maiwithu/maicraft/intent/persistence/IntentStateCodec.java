@@ -132,6 +132,7 @@ public final class IntentStateCodec {
         }
         root.add("request_keys", keys);
 
+        // 名字、坐标与区域类型随同一世界的任务快照保存，恢复后才能继续引用原地点；这里编码不等于后台已落盘。
         JsonArray landmarkArray = new JsonArray();
         int landmarkCount = 0;
         for (IntentRuntime.Landmark landmark : landmarks) {
@@ -313,6 +314,7 @@ public final class IntentStateCodec {
             keys.put(entry.getKey(), UUID.fromString(entry.getValue().getAsString()));
         }
 
+        // 旧地标缺少区域类型时按普通地点恢复，不能因名字像基地或村庄就补出管理聚居地身份。
         List<IntentRuntime.Landmark> landmarks = new ArrayList<>();
         for (JsonElement element : array(root, "landmarks", MAX_LANDMARKS)) {
             JsonObject value = element.getAsJsonObject();

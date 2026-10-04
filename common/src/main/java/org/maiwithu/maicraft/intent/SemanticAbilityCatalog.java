@@ -331,12 +331,67 @@ public final class SemanticAbilityCatalog {
                     targets("current_place"),
                     fields());
             case "maicraft:remember_place" -> contract(
-                    "Remember a meaningful place under a human label.",
+                    // 先说明地点来源和同名覆盖，再区分运行时登记与后台落盘，避免把记忆成功理解成已到达、已围护或已持久化确认。
+                    """
+                    Register one named block position in the current world's local memory for later semantic references.
+                    The step does not move the player, load target chunks, inspect terrain, open containers or change blocks.
+                    It still runs as an ordinary semantic task: execute requests control and may replace the current task;
+                    it is not an independent background configuration request. plan alone does not register the place.
+
+                    Put ability arguments in goal.parameters and the location selector in sibling goal.target.
+                    Omitted or null target, or target.kind=current_place, records player.blockPosition() when this step executes,
+                    not when the plan was created. coordinates requires target.position with all of x,y,z as absolute block
+                    coordinates, exact 32-bit integers from -2147483648 through 2147483647; zero is a real coordinate.
+                    Missing/null/fractional/boolean coordinates are not defaults. target.position.dimension is an optional
+                    resource ID, but omission/null currently remains unspecified rather than capturing the current dimension.
+                    Supply the actual known dimension for stable coordinate memory. No reachability, loaded-state, height
+                    or world-border check is performed by this registration.
+
+                    landmark and area require a source target.label (string length 1..160); parameters.label names the new
+                    entry and does not replace the source selector. Source resolution checks manual landmarks, then applicable
+                    exploration or machine labels. Copy an actually known label; missing sources enter a decision.
+                    area copies one point, not a radius or boundary. Only coordinates may carry a non-null target.position.
+                    Optional target.relation is not read by this ability and creates no relative-location behavior.
+                    This ability has no own preferences or hard constraints. Leave preferences={}, constraints=[] and children=[]
+                    or omit them; explicit null is not a valid object/array. Shared death-recovery authorization is separate.
+
+                    Resolve the output name, area role and position, then update the runtime landmark map, retain the internal
+                    step position and complete the step. Its result contains label and area_role; coordinates remain internal.
+                    Name matching for manual landmarks strips outer whitespace and ignores case. The same normalized name
+                    overwrites its position and role without another confirmation. A copied or overwritten entry does not inherit
+                    the old area_role: omission defaults to ordinary. Names such as base or village do not infer managed_settlement.
+                    A managed role supplies context to downstream protection checks; it does not declare a protected volume,
+                    prove physical enclosure or authorize access to nearby containers.
+
+                    accepted means task registration only. Follow task/get or next_attention for the actual step result.
+                    Step success confirms the runtime memory update, not a completed SQLite commit; the world checkpoint is saved
+                    asynchronously. perceive(view=landmarks) lists manual labels, area_role, optional dimension and available_here,
+                    without coordinates. available_here compares dimensions only; an unspecified dimension currently matches any
+                    dimension. The catalog does not prove current terrain or durable storage.
+
+                    If the name is missing or the role is invalid, use a listed replace_goal or cancel choice; unresolved sources
+                    also offer skip. Answer the actual decision_id with a complete replacement in answer.details.goal.
+                    Pause before execution postpones location capture; cancel/skip before the step records no place.
+                    Cancel after registration does not undo the entry. Recovered unfinished tasks start paused; resume only in the
+                    appropriate world. Reuse request_key only for the same execute request, not for a desired new overwrite.
+
+                    Current implementation limits: at most 256 manual landmarks are retained; adding a new name evicts the oldest
+                    insertion and overwriting does not refresh that order. parameters.label lacks a dedicated length check;
+                    target.label is limited to 160 and checkpoint encoding silently truncates stored labels above 4096 UTF-16
+                    code units. Use short non-blank string labels. Null-dimension coordinate entries can fail later construction
+                    anchor reuse; explicitly provide known dimensions instead of assuming this is repaired.
+
+                    Complete plan arguments for the place where the player will be when the step executes:
+                    {"goal":{"ability":"maicraft:remember_place","outcome":"把当前位置记为营地","parameters":{"label":"营地","area_role":"ordinary"}}}
+                    Only after that goal has actually executed and the label exists, this plan gives the same point another name:
+                    {"goal":{"ability":"maicraft:remember_place","outcome":"把已登记营地的位置另记为补给点","target":{"kind":"landmark","label":"营地"},"parameters":{"label":"补给点","area_role":"ordinary"}}}
+                    """,
                     targets("current_place", "coordinates", "landmark", "area"),
                     fields(
-                            field("label", "string", "The durable human name for the place."),
+                            field("label", "string",
+                                    "goal.parameters.label is the output name. Omission/null falls back to target.label; a blank string enters a decision without fallback. Use 1..160 UTF-16 code units for later target references; this is caller guidance, not an implemented parameter length check. Current adapter behavior coerces numeric 0 and boolean false to names 0 and false; objects/arrays are treated as missing. Send a string, not those coercions. outcome is never used as the name."),
                             field("area_role", "ordinary|managed_settlement",
-                                    "Optional typed policy, default ordinary. Use managed_settlement only when the player explicitly identifies this area as a managed base, city or settlement; labels themselves never imply this role.")));
+                                    "goal.parameters.area_role is an exact enum string; omitted/null defaults to ordinary, including overwrites and aliases. Only choose managed_settlement when the player explicitly identifies a managed base, city or settlement. It does not inherit the source role. Numeric 0 or boolean false becomes an invalid enum and enters a decision; objects/arrays currently fall back to ordinary. These permissive type paths are not validation guarantees.")));
             case "maicraft:travel" -> contract(
                     // 同层接近和精确落地分别说明，避免模型把可设为零的高度容差误读成不可收紧的提示。
                     "Reach a destination using caller-selected arrival precision. All ability fields belong in goal.parameters. "

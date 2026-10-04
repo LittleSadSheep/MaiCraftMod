@@ -21,6 +21,7 @@ public record LandmarkProtection(LongSet markedCells, List<String> problems) {
     public static LandmarkProtection resolve(List<String> labels,
                                          Collection<IntentRuntime.Landmark> landmarks,
                                          String dimension) {
+        // 取料或施工明确要求保护某个名字时，先按本次传入的地标表解析位置；记住名字本身不自动扩大保护范围。
         var remembered = new HashMap<String, IntentRuntime.Landmark>();
         for (var landmark : landmarks) remembered.put(normalize(landmark.label()), landmark);
         LongSet marked = new LongOpenHashSet();
@@ -28,10 +29,12 @@ public record LandmarkProtection(LongSet markedCells, List<String> problems) {
         for (String label : labels) {
             var landmark = remembered.get(normalize(label));
             if (landmark == null || landmark.position() == null) {
+                // 缺少位置就保留具体问题，由 run 阻止带着不完整保护范围开工，不能把未知地标当作可随意修改的地点。
                 problems.add("unknown protected label: " + label);
                 continue;
             }
             var position = landmark.position();
+            // 另一个维度的同坐标不是本次要保护的方块；旧记忆没有维度时沿用当前调用维度，仍只标记这一格。
             if (position.dimension() == null || position.dimension().equals(dimension)) {
                 marked.add(BlockPos.asLong(position.x(), position.y(), position.z()));
             }

@@ -238,8 +238,10 @@ final class IntentTask implements Task {
             }
             case IntentAction.Decision decision -> requestDecision(decision.snapshot());
             case IntentAction.Remember remember -> {
+                // 先登记地点，再保留供后续步骤引用的内部位置，最后完成本步；本分支没有原生点击，也不验证目标处的地形。
                 runtime.remember(remember.label(), remember.position(), remember.areaRole());
                 record.retainInternalStepPosition(record.stepIndex(), remember.position());
+                // 公开结果只确认运行时记忆已更新；坐标留在内部，后台 SQLite 保存完成不是此处等待的成功条件。
                 completeStep(TaskResult.ok("remembered " + remember.label(),
                         Map.of("label", remember.label(),
                                 "area_role", remember.areaRole().id())));

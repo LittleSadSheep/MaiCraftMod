@@ -602,7 +602,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     }
 
     private JsonObject landmarks(LocalPlayer player) {
-        // 列出已记住的地点名及是否在当前维度；精确坐标留在 Mod 里，调用者用地点名引用。
+        // 查询只列手工登记的名字和区域类型；精确坐标留在 Mod，跑图与机器的补充标签由各自视图提供。
+        // available_here 仅比较维度，空维度也会匹配；它不证明区块已加载、角色已到达或这次登记已完成落盘。
         JsonArray entries = new JsonArray();
         String currentDimension = player.level().dimension().location().toString();
         for (IntentRuntime.Landmark landmark : intents.landmarks()) {
