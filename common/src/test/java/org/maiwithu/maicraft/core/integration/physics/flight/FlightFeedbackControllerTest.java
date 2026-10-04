@@ -13,7 +13,7 @@ public final class FlightFeedbackControllerTest {
     private static final FlightGuidance COURSE=new FlightGuidance(new Vec3(0,100,200),new Vec3(0,100,180),
             new Vec3(0,80,300),0,100,true,true,true,true);
     public static void main(String[] args) throws Exception {
-        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();verticalAirshipDeparture();abortedTakeoffStaysStopped();
+        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();verticalAirshipDeparture();abortedTakeoffStaysStopped();airshipApproachBeforeDescent();
         PhysicsFlightStateServiceTest.run();
         FlightPathProbeTest.run();
         System.out.println("FlightFeedbackControllerTest: passed");
@@ -109,6 +109,21 @@ public final class FlightFeedbackControllerTest {
         var blocked=new FlightGuidance(COURSE.waypoint(),COURSE.approachPoint(),COURSE.touchdown(),0,100,true,true,false,true);
         var command=c.tick(sample(610,80.3,0,0,AIRBORNE),blocked,true);
         check(c.phase()==ROLLOUT&&command.power()==0&&command.lift()==0,"停机后的短暂离地不能重新启动推进或升力");
+    }
+    private static void airshipApproachBeforeDescent() {
+        // 实测曾在落点外二十格开始下降；飞艇要先飞到场地上方，不能套用固定翼跑道的朝向和下滑顺序。
+        var c=new FlightFeedbackController(FlightEnvelope.airship());
+        var course=new FlightGuidance(new Vec3(0,100,300),new Vec3(0,100,300),new Vec3(0,80,300),
+                Math.PI/2,100,true,true,true,true);
+        for(int t=1;t<=3;t++)c.tick(sample(t,100,4,280,AIRBORNE),course,true);
+        c.tick(sample(4,100,4,282,AIRBORNE),course,true);
+        check(c.phase()==APPROACH,"尚距落点十八格时继续水平进近");
+        var command=c.tick(sample(5,100,2,299,AIRBORNE),course,true);
+        check(c.phase()==APPROACH&&command.power()==0,"飞到附近但尚未减速时先收推进");
+        c.tick(sample(6,100,.2,299.5,AIRBORNE),course,true);
+        check(c.phase()==DESCENT,"落点上方且水平速度低后才下降");
+        command=c.tick(sample(7,99,.2,299.5,AIRBORNE),course,true);
+        check(command.power()==0&&command.yaw()==0,"垂直下降不为了矩形场地朝向再转九十度");
     }
     private static FlightSample sample(long tick,double y,double speed,double z,FlightSample.Contact contact) {
         return new FlightSample(tick,new Vec3(0,y,z),new Vec3(0,0,speed),0,0,0,0,0,0,contact);

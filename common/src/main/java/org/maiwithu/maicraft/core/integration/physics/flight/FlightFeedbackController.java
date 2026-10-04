@@ -90,7 +90,18 @@ public final class FlightFeedbackController {
             case APPROACH -> {
                 heading=FlightSample.heading(course.approachPoint().subtract(sample.position()));
                 if(!course.landingSiteObserved())transition(Phase.GO_AROUND,sample,"落点尚无完整观察，继续寻找进近航路");
-                else if(envelope.kind()==AIRSHIP||horizontalDistance(sample.position(),course.approachPoint())<12
+                else if(envelope.kind()==AIRSHIP) {
+                    // 飞艇先保持高度移到实际落点上方并减速，不能一进入二十四格进近区就沿跑道朝向盲目下降。
+                    double distance=horizontalDistance(sample.position(),course.touchdown());
+                    heading=FlightSample.heading(course.touchdown().subtract(sample.position()));
+                    lift=lift(sample,course.cruiseAltitude());desiredPitch=0;
+                    power=distance>Math.max(1.5,sample.horizontalSpeed()*2)
+                            &&Math.abs(FlightSample.wrap(heading-sample.heading()))<Math.toRadians(30)
+                            ?Math.clamp((distance-1.5)*.08,0,.6):0;
+                    if(distance<=2&&sample.horizontalSpeed()<.4)
+                        transition(Phase.DESCENT,sample,"飞艇已在实际落点上方减速，开始垂直下降");
+                }
+                else if(horizontalDistance(sample.position(),course.approachPoint())<12
                         &&Math.abs(FlightSample.wrap(course.landingHeading()-sample.heading()))<Math.toRadians(15))
                     transition(Phase.DESCENT,sample,"进近航向与着陆场地已对齐");
             }
