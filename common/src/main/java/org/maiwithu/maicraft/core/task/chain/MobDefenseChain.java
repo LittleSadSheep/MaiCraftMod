@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.task.chain;
 
+import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.combat.CombatThreats;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
@@ -26,6 +27,8 @@ import org.maiwithu.maicraft.core.Constants;
  * 收到生物造成的伤害，或观察到近处苦力怕及明确的攻击目标时，暂时接管当前工作自卫。
  * 危险短暂消失后保留一小段观察时间，避免刚拉开一点距离就把工作还回去，再马上被同一只怪打断。
  * 它没有另一套攻击动作，实际打斗、撤退和拾取都交给 AttackCompanionTask。
+ * 从第一场开打到交还身体记为一段插曲（{@link DefenseExcursion}）：开始与结束通知、被打断任务的回执
+ * 都报告接管地点、离工位多远和场次，模型不会在角色被带走后还以为她站在原地。
  */
 public final class MobDefenseChain implements Task, Reflex {
 
@@ -49,9 +52,8 @@ public final class MobDefenseChain implements Task, Reflex {
     private AttackCompanionTask fight;
     /** 最后一刻还看得见危险的游戏时间。 */
     private long dangerLastSeenTick = NEVER;
-    private boolean attentionActive;
-    private int initialDangerCount;
-    private float attentionStartHealth;
+    /** 这段自卫插曲：第一场开打时建立，把身体交还工作时收尾；null = 没在自卫。 */
+    private DefenseExcursion excursion;
 
     public MobDefenseChain() {
     }
@@ -68,13 +70,17 @@ public final class MobDefenseChain implements Task, Reflex {
     // 健康尚可且已有明确战斗任务时先让它处理；自己一旦创建了自卫任务，就持续获得执行机会直到该任务结束。
     public boolean canRun(LocalPlayer companion) {
         long now = companion.level().getGameTime();
-        // 有人正在替这条本能干活(模型派的 attack),就别抢 —— 除非她已经扛不住,
-        // 那一档只有本能看得见。按住的是本能不是目标,所以会分裂的怪不会让它失效。
-        if (fight == null && explicitCombatTaskActive() && !Menace.outmatched(companion)) {
-            return false;
-        }
         if (fight != null) {
             return true;   // 打着呢,打完再说
+        }
+        // 插曲还没收尾时继续拿身体一刻，由 tick 交结束通知和任务账，不让工作在无人报告的情况下悄悄续上。
+        if (excursion != null) {
+            return true;
+        }
+        // 有人正在替这条本能干活(模型派的 attack),就别抢 —— 除非她已经扛不住,
+        // 那一档只有本能看得见。按住的是本能不是目标,所以会分裂的怪不会让它失效。
+        if (explicitCombatTaskActive() && !Menace.outmatched(companion)) {
+            return false;
         }
         if (SurvivalDecisions.mobDefenseTriggered(!dangersNear(companion).isEmpty())) {
             return true;
@@ -97,22 +103,33 @@ public final class MobDefenseChain implements Task, Reflex {
     }
 
     @Override
-    // 有近处危险就刷新最后危险时刻；还没开打则创建自卫战斗，已经开打就继续同一个 fight。
+    // 有近处危险就刷新最后危险时刻并量一次离工位多远；已开打就继续同一个 fight，
+    // 没开打而危险仍在就开下一场，危险与宽限都过去后收尾这段插曲。
     public TaskState tick(LocalPlayer companion) {
-        if (!dangersNear(companion).isEmpty()) {
+        boolean danger = !dangersNear(companion).isEmpty();
+        if (danger) {
             dangerLastSeenTick = companion.level().getGameTime();
         }
-        if (fight == null) {
-            if (dangersNear(companion).isEmpty()) {
-                return TaskState.RUNNING;   // 宽限期里的空转,别开新的一场
+        if (excursion != null) {
+            excursion.observe(companion);
+        }
+        if (fight != null) {
+            TaskState state = fight.tick(companion);
+            if (state != TaskState.RUNNING) {
+                end(companion, state);
             }
+            return TaskState.RUNNING;
+        }
+        // 模型已经亲自派了战斗、且她还扛得住时不再另开一场，只把这段插曲如实收尾。
+        if (danger && !(explicitCombatTaskActive() && !Menace.outmatched(companion))) {
             begin(companion);
             return TaskState.RUNNING;
         }
-        TaskState state = fight.tick(companion);
-        if (state != TaskState.RUNNING) {
-            end(companion, state);
+        if (!danger && dangerLastSeenTick != NEVER
+                && companion.level().getGameTime() - dangerLastSeenTick < CALM_GRACE_TICKS) {
+            return TaskState.RUNNING;   // 宽限期里的空转,别开新的一场
         }
+        settle(companion);
         return TaskState.RUNNING;
     }
 
@@ -122,16 +139,17 @@ public final class MobDefenseChain implements Task, Reflex {
      * <p>不设截止时间——它的终点是"没人再追我",由 {@code attack} 自己判;
      * 给一个闹钟只会在打到一半时把她扔在原地。
      */
-    // 记下开始时的危险数量和红心生命，报告自动接管原因，然后创建使用普通战斗逻辑的自卫任务。
+    // 第一场开打时建立插曲并报告接管地点和被打断的任务；同一插曲里的后续场次只累计，然后创建使用普通战斗逻辑的自卫任务。
     private void begin(LocalPlayer companion) {
         long now = companion.level().getGameTime();
-        initialDangerCount = dangersNear(companion).size();
-        attentionStartHealth = companion.getHealth();
-        attentionActive = true;
-        GameplayAttentionMonitor.reflexStarted(
-                id(), "hostile damage or an immediate nearby threat was observed", "emergency self-defense",
-                "weapons, ammunition, food, shields, or durability may be consumed",
-                "combat can cause damage or death");
+        if (excursion == null) {
+            excursion = new DefenseExcursion(companion, dangersNear(companion).size());
+            GameplayAttentionMonitor.reflexStarted(
+                    id(), "hostile damage or an immediate nearby threat was observed", "emergency self-defense",
+                    "weapons, ammunition, food, shields, or durability may be consumed",
+                    "combat can cause damage or death", excursion.startedFacts());
+        }
+        excursion.fightStarted();
         AttackTaskRecord record = new AttackTaskRecord(
                 "reflex-" + now, now + NO_DEADLINE, List.of(), true);
         fight = new AttackCompanionTask(companion, record);
@@ -143,12 +161,11 @@ public final class MobDefenseChain implements Task, Reflex {
     /** 长到等同于没有截止时间;终点由"没人再追我"说了算。 */
     private static final long NO_DEADLINE = 20L * 60L * 60L * 24L;
 
-    // 取出战斗结果并让它执行清理，再清掉自卫状态、松开输入和报告剩余威胁。
+    // 取出战斗结果并让它执行清理，松开输入后记下战果；附近已无危险就收尾插曲，仍有危险则下一刻接着开下一场。
     private void end(LocalPlayer companion, TaskState state) {
         String line = fight.result(state).message();
         fight = null;
-        finishAttention(companion, state == TaskState.SUCCESS
-                ? "immediate danger handled" : "self-defense ended without confirmed success");
+        lastFightConfirmed = state == TaskState.SUCCESS;
         dangerLastSeenTick = NEVER;
         InputDriver.halt(companion);
         ClientRuntime.requireContext(companion).body().releaseAll();
@@ -157,19 +174,32 @@ public final class MobDefenseChain implements Task, Reflex {
         // 看得懂她刚才为什么打了一架、或者挪了二十格。攒着搭下一轮的车就够。
         Constants.LOG.info(
                 "[maicraft-defense] hit danger and handled it on instinct — {}", line);
+        if (dangersNear(companion).isEmpty()) settle(companion);
     }
 
-    // 只报告开始和结束时看到的威胁数与红心差，不把它冒充精确的攻击伤害或资源消耗账单。
-    private void finishAttention(LocalPlayer companion, String outcome) {
-        if (!attentionActive) return;
-        int remaining = dangersNear(companion).size();
-        float healthLost = Math.max(0.0F, attentionStartHealth - companion.getHealth());
+    /** 最后一场是否确认脱险；插曲结束通知以它说明战果。 */
+    private boolean lastFightConfirmed;
+
+    // 危险都过去后收尾：发结束通知并给被打断的任务记账，再把身体交还工作。
+    private void settle(LocalPlayer companion) {
+        close(companion, lastFightConfirmed
+                ? "immediate danger handled" : "self-defense ended without confirmed success");
+    }
+
+    // 只报告开始和结束时看到的威胁数、红心差与位移事实，不把它冒充精确的攻击伤害或资源消耗账单。
+    private void close(LocalPlayer companion, String outcome) {
+        DefenseExcursion ended = excursion;
+        excursion = null;
+        if (ended == null) return;
+        String summary = outcome + "; threats " + ended.initialThreats() + " -> " + dangersNear(companion).size();
+        JsonObject facts = ended.finishedFacts(companion);
+        // 先记任务账再发通知：模型被通知唤醒后去查任务，已经能看到这段插曲。
+        ended.recordOnTask(facts, summary, companion.level().getGameTime());
+        float healthLost = ended.healthLost(companion);
         GameplayAttentionMonitor.reflexFinished(
-                id(), outcome + "; threats " + initialDangerCount + " -> " + remaining, 0,
+                id(), summary, 0,
                 "resource consumption is possible; exact combat accounting is not claimed",
-                healthLost > 0.0F ? "health lost during reflex: " + healthLost : "no health loss observed");
-        attentionActive = false;
-        initialDangerCount = 0;
+                healthLost > 0.0F ? "health lost during reflex: " + healthLost : "no health loss observed", facts);
     }
 
     @Override
@@ -180,7 +210,7 @@ public final class MobDefenseChain implements Task, Reflex {
             fight.stop(companion, why);
         }
         if (why != StopReason.PREEMPTED) {
-            finishAttention(companion, "body or reflex unavailable; combat result unconfirmed");
+            close(companion, "body or reflex unavailable; combat result unconfirmed");
         }
         InputDriver.halt(companion);
         ClientRuntime.requireContext(companion).body().releaseAll();

@@ -62,6 +62,9 @@ final class TaskView {
             }
             if (record.pauseSnapshot() != null && record.decisionSnapshot() == null)
                 result.addProperty("pause_reason", record.pauseSnapshot().reason());
+            // 执行中被自卫带离工位的经历默认可见：在哪接管、最远多远、是否已走回，模型据此判断后续产出发生在哪里。
+            JsonArray excursions = record.selfDefenseExcursions();
+            if (!excursions.isEmpty()) result.add("self_defense_excursions", excursions);
             if (record.decisionSnapshot() != null) {
                 result.add("decision", decision(record)); paths.add("/decision");
             }
@@ -132,6 +135,8 @@ final class TaskView {
         if (data.has("food_preparation")) result.add("food_preparation", data.remove("food_preparation"));
         // 机器大蓝图被折叠时仍直接携带施工恢复事实，读取失败位置不必逐层穿过蓝图和批次归档。
         if (data.has("construction_progress")) result.add("construction_progress", data.remove("construction_progress"));
+        // 自卫插曲直接放在结果顶层，不被施工或机器的大段证据埋住；它说明产出可能发生在离开原工位之后。
+        if (data.has("self_defense_excursions")) result.add("self_defense_excursions", data.remove("self_defense_excursions"));
         // 大蓝图不能遮掉缺料的加工前置；超长交接仍给直接分页入口，不需要重做一次取材来找回原因。
         if (data.has("planning_handoff")) {
             result.addProperty("material_planning_required", true);

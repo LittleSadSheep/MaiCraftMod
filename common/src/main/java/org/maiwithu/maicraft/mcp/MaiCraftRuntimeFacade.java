@@ -678,6 +678,10 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             pause.addProperty("game_time", record.pauseSnapshot().gameTime());
             result.add("pause", pause);
         }
+        // 执行中途的自卫插曲按路径同样可读；结束后的完整账已在终态回执里，不再重复一份。
+        if (!terminalState && !record.selfDefenseExcursions().isEmpty()) {
+            result.add("self_defense_excursions", record.selfDefenseExcursions());
+        }
         if (!terminalState && record.decisionSnapshot() != null) {
             JsonObject decision = decision(record.decisionSnapshot());
             result.add("decision", decision);

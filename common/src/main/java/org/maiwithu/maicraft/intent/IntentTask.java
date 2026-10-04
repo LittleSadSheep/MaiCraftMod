@@ -761,6 +761,9 @@ final class IntentTask implements Task {
         }
         Map<String, Object> projectData = new LinkedHashMap<>(result.data());
         addBuildProjects(projectData);
+        // 执行期间被自卫带离工位的每一段经历都并入最终回执，避免模型把换了地点的产出误当成原地完成。
+        JsonArray excursions = record.selfDefenseExcursions();
+        if (!excursions.isEmpty()) projectData.put("self_defense_excursions", excursions);
         result = result.withData(projectData);
         if (!terminalPublished) {
             terminalPublished = true;

@@ -156,6 +156,13 @@ public final class GameplayAttentionMonitor {
     public static synchronized void reflexStarted(
             String reflex, String reason, String actionCategory,
             String consumptionRisk, String damageRisk) {
+        reflexStarted(reflex, reason, actionCategory, consumptionRisk, damageRisk, null);
+    }
+
+    // 会挪动身体的反应（例如自卫）另附接管地点与被打断的任务；模型据此知道角色从哪里离开、原来在做什么。
+    public static synchronized void reflexStarted(
+            String reflex, String reason, String actionCategory,
+            String consumptionRisk, String damageRisk, JsonObject facts) {
         String key = safeText(reflex, 48);
         if (key.isEmpty() || activeReflexes.containsKey(key)) return;
         activeReflexes.put(key, new ReflexEpisode(System.nanoTime()));
@@ -166,6 +173,7 @@ public final class GameplayAttentionMonitor {
         data.addProperty("damage_risk", safeText(damageRisk, 128));
         data.addProperty("emergency_override", true);
         data.addProperty("requires_prior_approval", false);
+        addFacts(data, facts);
         publish("agent.reflex", "An emergency reflex took control.", data);
     }
 
@@ -186,6 +194,13 @@ public final class GameplayAttentionMonitor {
     public static synchronized void reflexFinished(
             String reflex, String outcome, int actionCount,
             String resourceEffect, String damageEffect) {
+        reflexFinished(reflex, outcome, actionCount, resourceEffect, damageEffect, null);
+    }
+
+    // 结束通知同样可附带结构化事实，例如离工位多远、是否已走回、被打断的任务是否继续，模型不用再去猜现场。
+    public static synchronized void reflexFinished(
+            String reflex, String outcome, int actionCount,
+            String resourceEffect, String damageEffect, JsonObject facts) {
         String key = safeText(reflex, 48);
         ReflexEpisode episode = activeReflexes.remove(key);
         if (episode == null) return;
@@ -196,7 +211,16 @@ public final class GameplayAttentionMonitor {
         data.addProperty("damage_effect", safeText(damageEffect, 128));
         data.addProperty("elapsed_ms", Math.max(0L,
                 (System.nanoTime() - episode.startedNanos) / 1_000_000L));
+        addFacts(data, facts);
         publish("agent.reflex", "An emergency reflex finished.", data);
+    }
+
+    // 附加事实只补充新字段，不覆盖反应名、阶段和风险说明等通用信封字段。
+    private static void addFacts(JsonObject data, JsonObject facts) {
+        if (facts == null) return;
+        for (var entry : facts.entrySet()) {
+            if (!data.has(entry.getKey())) data.add(entry.getKey(), entry.getValue().deepCopy());
+        }
     }
 
     /** 死亡或刚重新绑定的玩家仍可被观察，但语义任务须等待恢复流程完成。 */
