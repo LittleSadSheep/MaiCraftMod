@@ -63,7 +63,8 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
     @Override protected void onStart() {
         waitingSince = world.getGameTime();
         if (!world.isLoaded(r.target)) { failure("fluid_target_unloaded"); return; }
-        if (targetSatisfied()) { alreadyPresent = true; return; }
+        // 模板填源可以复用现状；腾空已有满桶则必须真的使用桶，不能拿“池里已有岩浆”代替空桶返还。
+        if (!r.requireBucketUse && targetSatisfied()) { alreadyPresent = true; return; }
         // 进入倒桶阶段只核对实际落桶格；相邻通道允许流水，不要求整片机器围成封闭水池。
         String issue = placementProblem();
         if (issue != null) failure(issue);
@@ -73,7 +74,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         if (player.level() != world) return failure("fluid_world_changed");
         if (alreadyPresent) { waiting("already_present"); return TaskState.SUCCESS; }
         if (submitted) return confirm();
-        if (!selection.pending() && world.isLoaded(r.target) && targetSatisfied()) {
+        if (!r.requireBucketUse && !selection.pending() && world.isLoaded(r.target) && targetSatisfied()) {
             alreadyPresent = true; return TaskState.SUCCESS;
         }
         // 拿桶与走近期间复查真实加载和目标权限；流动后果只观察，不据预测拒绝已经授权的倒桶。
@@ -268,6 +269,7 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         var data = new LinkedHashMap<String,Object>(); data.put("task", name()); data.put("phase", stage);
         data.put("waiting_ticks", Math.max(0,world.getGameTime()-waitingSince)); data.put("bucket_selected",selected);
         data.put("selection_pending",selection.pending()); data.put("bucket_submitted",submitted);
+        data.put("bucket_use_required", r.requireBucketUse);
         data.put("actual_bucket_ray_available",actualRayAvailable); data.put("body_over_target",bodyOverTarget);
         data.put("body_in_possible_lava_flow", bodyInLavaFlow);
         data.put("native_action_available",actionAvailable); data.put("aim_wait_ticks",aimTicks);

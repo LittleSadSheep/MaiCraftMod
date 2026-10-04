@@ -12,6 +12,7 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -64,8 +65,11 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         if (!waterPrepared) {
             if (PlayerInv.count(player.getInventory(), Items.WATER_BUCKET) > 0) waterPrepared = true;
             else {
-                if (PlayerInv.count(player.getInventory(), Items.BUCKET) == 0)
+                if (PlayerInv.count(player.getInventory(), Items.BUCKET) == 0) {
+                    // 现有桶装着岩浆时先原生倒回已观察的池子；不因为桶被占用就另挖三块铁制作第二只桶。
+                    if (PlayerInv.count(player.getInventory(), Items.LAVA_BUCKET) > 0) return emptyLavaBucket();
                     return supply(new PortalPreparationSupplies.Need(List.of(Items.BUCKET), 1, "single casting bucket"));
+                }
                 return fill(Blocks.WATER);
             }
         }
@@ -158,6 +162,21 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         supplyNeed = need;
         return start(need.acquire(id(), deadline(), r.policy, true), null, false, "supply");
     }
+    private TaskState emptyLavaBucket() {
+        operation = "find_pool_for_bucket_reuse";
+        if (layout == null) {
+            layout = survey.tick();
+            if (layout == null) return survey.complete() ? failure("casting_lava_bucket_pool_not_observed") : TaskState.RUNNING;
+            steps = PortalCastingStep.plan(layout);
+        }
+        // 只选这片已核实池子的起手源格，不临时往脚下或池外倒岩浆腾桶。
+        BlockPos at = layout.placeholder();
+        var actual = PortalPreparationSite.read(world, at);
+        if (actual == null || !actual.is(Blocks.LAVA) || !actual.getFluidState().isSource())
+            return failure("casting_bucket_return_source_changed");
+        return start(FluidPlacementTaskRecord.emptyIntoSource(id(), deadline(), at, actual, layout.footprint()),
+                at, false, "empty_lava_bucket");
+    }
     private FluidPlacementTaskRecord place(BlockPos at, BlockState expected) {
         return new FluidPlacementTaskRecord(id(), deadline(), at, expected, layout.footprint());
     }
@@ -227,6 +246,9 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             if (!supplyNeed.satisfied(player)) return failure("casting_supply_unverified");
             supplyNeed = null;
         }
+        // 特殊模式或其他原生规则可能保留满桶；未实际返空桶就停下报告，不能反复倒桶或伪造已能装水。
+        if ("empty_lava_bucket".equals(operation) && PlayerInv.count(player.getInventory(), Items.BUCKET) == 0)
+            return failure("casting_empty_bucket_return_unverified");
         sourceAttempts = 0;
         return nextAfterChild ? next() : TaskState.RUNNING;
     }
@@ -237,6 +259,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         String detail = switch (code) {
             case "casting_lava_pool_not_observed" -> "No usable lava-pool bank was observed in the loaded search area. Water preparation completed; no casting construction started. Explore another area or travel to a known pool before retrying.";
             case "find_water_source_not_observed" -> "No carried water bucket or collectable water source was observed in the loaded search area. No casting construction started. Locate water in newly explored terrain or obtain a water bucket before retrying.";
+            case "casting_lava_bucket_pool_not_observed" -> "The carried bucket contains lava, but no casting pool was observed for returning it. The filled bucket is retained; water preparation and construction have not started.";
             case "casting_no_reachable_candidate" -> "All compliant lava-pool candidates within the loaded search area were reachable on paper but no real stance could be worked from. Each candidate's distance and rejection reason is reported; this is not evidence that the surrounding terrain lacks a pool, only that no surveyed site was buildable.";
             default -> code;
         };
@@ -259,9 +282,12 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         data.put("resource_preparation", Map.of("initial_water_prepared", waterPrepared,
                 "empty_buckets", PlayerInv.count(player.getInventory(), Items.BUCKET),
                 "water_buckets", PlayerInv.count(player.getInventory(), Items.WATER_BUCKET),
+                "lava_buckets", PlayerInv.count(player.getInventory(), Items.LAVA_BUCKET),
                 "lava_pool_selected", layout != null,
                 "search", survey == null ? Map.of() : survey.observations()));
-        if (supplyNeed != null) data.put("pending_supply", Map.of("purpose", supplyNeed.purpose(), "count", supplyNeed.count()));
+        // 缺的是空桶、点火用品还是模具材料直接列明，不能迫使模型从深层采铁失败反推本次补给目标。
+        if (supplyNeed != null) data.put("pending_supply", Map.of("purpose", supplyNeed.purpose(), "count", supplyNeed.count(),
+                "item_ids", supplyNeed.alternatives().stream().map(BuiltInRegistries.ITEM::getKey).map(Object::toString).toList()));
         if (layout != null) data.put("portal_observation", layout.observation(p -> PortalPreparationSite.read(world, p)));
         if (!issue.isEmpty()) {
             data.put("issue_code", issue);

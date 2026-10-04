@@ -24,6 +24,8 @@ public final class PortalCastingPreparationTest {
         missingWaterStopsBeforeConstruction();
         waterBeforePool(false);
         waterBeforePool(true);
+        reuseCarriedLavaBucket(true);
+        reuseCarriedLavaBucket(false);
         System.out.println("PortalCastingPreparationTest: missing water/pool and preparation evidence passed");
     }
 
@@ -100,6 +102,51 @@ public final class PortalCastingPreparationTest {
             var resources = (Map<?, ?>) data.get("resource_preparation");
             check(Boolean.TRUE.equals(resources.get("initial_water_prepared")) && Boolean.FALSE.equals(resources.get("lava_pool_selected")),
                     "prepared water and absent pool are separate facts");
+        }
+    }
+
+    private static void reuseCarriedLavaBucket(boolean returned) throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            world.position(new Vec3(7.5, 2, 5.5));
+            for (int x = 4; x <= 11; x++) for (int z = 6; z <= 12; z++)
+                world.set(new BlockPos(x, 1, z), z == 6 ? Blocks.STONE.defaultBlockState() : Blocks.LAVA.defaultBlockState());
+            BlockPos water = new BlockPos(2, 1, 3); world.set(water, Blocks.WATER.defaultBlockState());
+            world.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
+            world.inventory.setItem(1, new ItemStack(Items.IRON_INGOT, 2));
+            int[] operations = {0};
+            var task = new NetherPortalCastingTask(world.player, record("occupied-bucket"), (player, child) -> new Task() {
+                public String name() { return "occupied_bucket_receipt_fixture"; }
+                public void stop(LocalPlayer player, StopReason why) {}
+                public TaskState tick(LocalPlayer player) {
+                    // 复现只有一只岩浆桶和两块铁：只能倒回旧池、返空桶、再装水，不能另开采铁造桶任务。
+                    check(child instanceof FluidPlacementTaskRecord, "occupied bucket reuse cannot request new bucket supplies");
+                    var bucket = (FluidPlacementTaskRecord) child;
+                    if (operations[0]++ == 0) {
+                        check(bucket.requireBucketUse && world.level.getBlockState(bucket.target).is(Blocks.LAVA),
+                                "first operation really empties the carried bucket into the observed pool");
+                        if (returned) world.inventory.setItem(0, new ItemStack(Items.BUCKET));
+                    } else {
+                        check(bucket.removedSource.is(Blocks.WATER) && bucket.target.equals(water), "water follows confirmed empty-bucket return");
+                        world.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET)); world.set(water, Blocks.AIR.defaultBlockState());
+                    }
+                    return TaskState.SUCCESS;
+                }
+                public TaskResult result(TaskState state) { return TaskResult.ok("fixture bucket receipt", Map.of("native_effect_verified", true)); }
+            });
+            task.start(world.player); var state = TaskState.RUNNING;
+            for (int tick = 0; tick < 1000 && state == TaskState.RUNNING && operations[0] < 2; tick++) {
+                world.nextTick(); TargetIndex.clientTick(world.level); state = task.tick(world.player);
+            }
+            check(world.inventory.getItem(1).getCount() == 2, "reusing the existing bucket leaves iron untouched");
+            if (returned) {
+                check(operations[0] == 2 && world.inventory.getItem(0).is(Items.WATER_BUCKET), "one occupied bucket is reused for water");
+                task.stop(world.player, Task.StopReason.REPLACED); task.result(TaskState.CANCELLED);
+            } else {
+                var result = task.result(state);
+                check(state == TaskState.FAILED && operations[0] == 1
+                        && "casting_empty_bucket_return_unverified".equals(result.data().get("issue_code")),
+                        "a claimed action without an empty bucket cannot loop or enter water collection");
+            }
         }
     }
 }

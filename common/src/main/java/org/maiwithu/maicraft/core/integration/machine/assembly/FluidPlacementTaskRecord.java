@@ -21,9 +21,10 @@ public final class FluidPlacementTaskRecord extends TaskRecord {
     public final BucketItem bucket;
     public final Set<BlockPos> installation;
     public final BlockState removedSource;
+    public final boolean requireBucketUse;
     public FluidPlacementTaskRecord(String callId, long deadline, BlockPos target, BlockState expected,
                                     Set<BlockPos> installation) {
-        this(callId,deadline,target,expected,installation,null);
+        this(callId,deadline,target,expected,installation,null,false);
     }
     // 修改机器明确要求该格为空气时，用同一套原生桶流程收回真实源格；流水不能冒充可取的一桶。
     public static FluidPlacementTaskRecord removeSource(String callId, long deadline, BlockPos target,
@@ -31,12 +32,20 @@ public final class FluidPlacementTaskRecord extends TaskRecord {
         if (!(source.getBlock() instanceof LiquidBlock) || !source.getFluidState().isSource()
                 || !(source.getFluidState().getType().getBucket() instanceof BucketItem))
             throw new IllegalArgumentException("fluid_removal_requires_bucket_source");
-        return new FluidPlacementTaskRecord(callId,deadline,target,Blocks.AIR.defaultBlockState(),installation,source);
+        return new FluidPlacementTaskRecord(callId,deadline,target,Blocks.AIR.defaultBlockState(),installation,source,false);
+    }
+    /** 复用占用中的桶时，必须真的倒一次并核对返桶；已有同种源格不能让这个动作提前成功。 */
+    public static FluidPlacementTaskRecord emptyIntoSource(String callId, long deadline, BlockPos target,
+            BlockState source, Set<BlockPos> installation) {
+        if (!(source.getBlock() instanceof LiquidBlock) || !source.getFluidState().isSource())
+            throw new IllegalArgumentException("bucket_return_requires_observed_fluid_source");
+        return new FluidPlacementTaskRecord(callId,deadline,target,source,installation,null,true);
     }
     private FluidPlacementTaskRecord(String callId, long deadline, BlockPos target, BlockState expected,
-            Set<BlockPos> installation, BlockState removedSource) {
+            Set<BlockPos> installation, BlockState removedSource, boolean requireBucketUse) {
         super("machine_place_source_fluid", callId, deadline);
         this.target = target.immutable(); this.expected = expected; this.removedSource = removedSource;
+        this.requireBucketUse = requireBucketUse;
         bucket = removedSource == null ? MachinePlacementItems.fluidBucket(expected) : (BucketItem) Items.BUCKET;
         this.installation = installation.stream().map(BlockPos::immutable).collect(Collectors.toUnmodifiableSet());
         // 桶仍只能放到本次机器蓝图指定的格子，周围水流不必逐格声明成水源。

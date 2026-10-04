@@ -46,6 +46,7 @@ public final class FluidPlacementTaskTest {
         nativeReactionRemainsConfirmed();
         castingNeverEncasesThePlayer();
         sourceCanBeCollectedFromHighBank();
+        occupiedBucketMustActuallyBeEmptied();
         System.out.println("FluidPlacementTaskTest: passed");
     }
 
@@ -76,6 +77,25 @@ public final class FluidPlacementTaskTest {
                             && Boolean.FALSE.equals(result.data().get("source_fluid_verified"))
                             && "minecraft:obsidian".equals(result.data().get("observed_block_id")),
                     "动作成功、源格未达成和实际黑曜石必须分别反馈");
+        }
+    }
+
+    private static void occupiedBucketMustActuallyBeEmptied() throws Exception {
+        try (var f = fixture()) {
+            // 池子原本就有岩浆：世界可以完全不变，只有满桶减少、空桶返回及服务器确认才能结清腾桶动作。
+            f.set(AT, Blocks.LAVA.defaultBlockState()); f.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
+            f.mode.itemUse = player -> {
+                f.level.blockSequence++; f.inventory.setItem(0, new ItemStack(Items.BUCKET));
+            };
+            var record = FluidPlacementTaskRecord.emptyIntoSource("reuse-lava-bucket", 1000, AT,
+                    Blocks.LAVA.defaultBlockState(), task().installation);
+            var running = new FluidPlacementTask(f.player, record); running.start(f.player); submit(f, running);
+            f.nextTick(); check(running.tick(f.player) == TaskState.RUNNING, "existing source cannot bypass native acknowledgement");
+            f.level.acknowledgedSequence = f.level.blockSequence; f.nextTick();
+            check(running.tick(f.player) == TaskState.SUCCESS && f.itemUses() == 1, "exactly one native use empties the occupied bucket");
+            var result = running.result(TaskState.SUCCESS);
+            check(Boolean.FALSE.equals(result.data().get("already_present")) && Boolean.TRUE.equals(result.data().get("native_effect_verified")),
+                    "an unchanged source is not mistaken for skipping the bucket operation");
         }
     }
 
