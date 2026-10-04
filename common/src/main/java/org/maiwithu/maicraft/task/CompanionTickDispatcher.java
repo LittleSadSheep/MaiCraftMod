@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.agent.tool.LocalToolDispatcher;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.api.Internal;
@@ -88,8 +89,16 @@ public final class CompanionTickDispatcher {
         return brain == null ? "none" : brain.controllingTask();
     }
 
-    /** 此刻占用身体的任务的阶段与描述：阶段名优先展示，描述作阶段缺失时的退回。 */
-    public record BodyAction(String phase, String describe) {}
+    /**
+     * 此刻占用身体的任务的阶段与描述：阶段名优先展示，描述作阶段缺失时的退回。
+     * {@code primitives} 是身体原语层的已确认事实键（目标坐标、计数等），由调度层从
+     * 执行器 progress 里筛出；空 Map = 该任务没有可展示的原语信息。
+     */
+    public record BodyAction(String phase, String describe, Map<String, Object> primitives) {
+        public BodyAction(String phase, String describe) {
+            this(phase, describe, Map.of());
+        }
+    }
 
     /** 调试面板用：此刻占用身体的任务；身体空闲返回 {@code null}。 */
     public static BodyAction bodyAction() {
