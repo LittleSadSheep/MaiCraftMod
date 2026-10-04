@@ -151,7 +151,7 @@ public final class MobDefenseDamageTest {
     }
 
     // 本组验证原生手部与死亡记账，在移交寻路前停止；真实路径搜索与运行器交接有独立回归，不能靠随机找不到落点来绕过它们。
-    private static TaskState tickCombatOnly(AttackCompanionTask task, CombatThreatsTest.Fixture f) throws Exception {
+    static TaskState tickCombatOnly(AttackCompanionTask task, CombatThreatsTest.Fixture f) throws Exception {
         var saved = new LinkedHashMap<Field, Object>();
         for (String name : List.of("backend", "owner", "world", "pendingStart")) {
             var field = ActorControlTestHarness.field(EmbeddedBaritoneRuntime.class, name); saved.put(field, field.get(null));

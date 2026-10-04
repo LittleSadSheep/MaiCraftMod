@@ -31,6 +31,7 @@ public record Battlefield(double effectiveHealth,
      * @param authorized 允许打它；点名模式遵守名单，自卫模式覆盖已确认攻击者和近处苦力怕。
      * @param priorityThreat 应先处理的近处苦力怕，不单凭此字段扩大伤害许可。
      * @param blastDanger 引信尚未归零且处在撤离范围内，先暂停攻击并避险。
+     * @param threatening 敌对类别、爆炸物或当前实际攻击者；获准猎杀的羊等友好目标不会仅因点名而成为威胁。
      */
     public record Foe(int id,
                       double distance,
@@ -40,7 +41,8 @@ public record Battlefield(double effectiveHealth,
                       boolean reachable,
                       boolean authorized,
                       boolean priorityThreat,
-                      boolean blastDanger) {
+                      boolean blastDanger,
+                      boolean threatening) {
         // 近处苦力怕的处理优先级与伤害许可分开；未获准攻击的引信仍要求角色先躲开。
     }
 

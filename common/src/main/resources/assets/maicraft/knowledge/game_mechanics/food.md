@@ -14,6 +14,8 @@
 
 **打猎**：`maicraft:combat` 可以指定被动生物（牛/猪/羊/鸡）为目标，没有"只打敌对"的限制；但被动生物属风险目标，须带 `confirm_risky_target=true` 才放行。攻击任务自带战后清扫：击杀后会走近掉落物并拾取入包，不必另发 `collect_items`。生肉用 `maicraft:cook` 烧熟再吃。
 
+低血量不会阻止已授权的友好生物猎食，直接攻击和取料任务中的狩猎都适用；敌对交战仍受低血撤离限制。猎食途中若遭到实际袭击或遇到近处苦力怕危险，仍先避险，不能因为原目标是羊就忽略来袭者。
+
 **挑选绵羊**：附近观察会给出 `sheep_color`、`sheep_baby` 和 `sheep_sheared`。`maicraft:find_entity`、`maicraft:combat` 与 `maicraft:interact` 可携带同名筛选参数；例如 `entity_type_id="minecraft:sheep", sheep_color="white", sheep_baby=false, selection="nearest"` 只选择最近的成年白羊。颜色使用原版 16 色名称（如 `white`、`black`、`light_gray`），不要把“白羊”当作实体名字。未指定的属性不限；无匹配时不替换成其他颜色。攻击或交互前会复核属性；已发出的动作仍按原生回执结算。获取指定颜色羊毛的狩猎还会排除幼羊和已剪毛的羊，最终以羊毛实际入包为准。
 
 **耕种**：对耕地手持锄右键用 `maicraft:interact`（`purpose="till"`，会自动准备锄，没有时会经 `acquire_items` 取工具链）；播种用 `maicraft:interact`（block_id 指向耕地、item_id 指向种子）。成熟作物不必逐格收：`maicraft:acquire_items` 要小麦/胡萝卜/土豆/甜菜时，会走内置的农田采收——只收成熟株，收完用同种作物留一份补种回原格，补种失败会如实报失败而不是被达标库存掩盖。

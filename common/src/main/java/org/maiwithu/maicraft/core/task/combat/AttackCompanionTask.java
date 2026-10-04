@@ -346,7 +346,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                     Menace.armed(mob),
                     engaging,
                     reachable(mob.getId()),
-                    authorized, Menace.creeperThreat(mob, player), Menace.blastDanger(mob, player)));
+                    authorized, Menace.creeperThreat(mob, player), Menace.blastDanger(mob, player),
+                    Menace.threatens(mob, player)));
         }
         // 点名模式还可能被要求打不敌对的东西(一只鸡、一个末影水晶),它们不在敌对扫描里。
         if (!r.indiscriminate) {
@@ -356,10 +357,11 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 }
                 Entity e = liveEntity(id);
                 if (e != null) {
+                    // 点名只代表允许攻击；羊、牛等仍按友好目标处理，中立生物实际还击后再按威胁处理。
                     foes.add(new Battlefield.Foe(id, player.distanceTo(e),
                             Menace.explodes(e), Menace.armed(e),
-                            false, reachable(id), !defensiveInterruption,
-                            Menace.creeperThreat(e, player), Menace.blastDanger(e, player)));
+                            e instanceof LivingEntity living && engaging(living), reachable(id), !defensiveInterruption,
+                            Menace.creeperThreat(e, player), Menace.blastDanger(e, player), Menace.threatens(e, player)));
                 }
             }
         }
@@ -1043,8 +1045,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             InputDriver.halt(player);
             Constants.LOG.info("[maicraft-attack] 脱离成功 —— 追击者已拉开距离，近期攻击与近处可见危险已解除");
             fail(Menace.outmatched(player)
-                            ? "broke off — too hurt to keep fighting; active pursuit and nearby visible threats are clear"
-                                    + "; when starving and blocked from fighting, consider the maicraft:suicide death reset (keepInventory confirmed) or travel to a known food point"
+                            ? "broke off — too hurt to keep fighting hostile threats; active pursuit and nearby visible threats are clear"
+                                    + "; authorized hunting of friendly food animals is still allowed at low health, or travel to a known food point"
                             : "broke off — nothing here can be fought with what you carry "
                                     + "(explosive, or out of reach with no bow); you are clear now",
                     FailureType.TARGET_LOST);

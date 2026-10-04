@@ -50,6 +50,8 @@ public final class CombatThreatsTest {
         expiresWithoutRenewingOnReads();
         forgetsRetiredEntitiesAndBodies();
         armorCannotHideCriticalHealth();
+        // 低血猎食必须真的走到原生出手；敌对与中途反击仍保留撤离约束。
+        LowHealthHuntTest.main(args);
         MobDefenseDamageTest.main(args);
         BreathDefenseTest.main(args); // 低氧抢占后仍能打退近处溺尸，游泳路线和原生攻击门控保持有效。
         CreeperDefenseTest.main(args);
@@ -96,8 +98,9 @@ public final class CombatThreatsTest {
         }
     }
     private static void armorCannotHideCriticalHealth() {
-        // 同样穿着高护甲，真实生命低于四心就进入撤退；有效承伤估算高不能拖到下一箭已致命。
-        var low = new Battlefield(40, 6, 3, true, false, false, List.of());
+        // 同样穿着高护甲，与敌对目标交战时真实生命低于四心仍须撤退，不能让护甲掩盖下一箭的致命风险。
+        var hostile = new Battlefield.Foe(11, 3, false, false, false, true, true, false, false, true);
+        var low = new Battlefield(40, 6, 3, true, false, false, List.of(hostile));
         check(AttackPlan.decide(low, null).action() == AttackPlan.Action.DISENGAGE, "armored low-health body retreats before near-death");
         check(!AttackPlan.outmatched(40, 12), "sufficient real health retains ordinary combat selection");
         check(AttackPlan.outmatched(6, 12), "low effective durability remains an independent retreat signal");

@@ -189,7 +189,7 @@ public final class CombatOutcomeTest {
 
     // 实机曾在生命八点撤离、回到九点就重新追击；还没走出威胁圈时，回血和爆炸避险都不能丢失撤离承诺。
     private static void minorRecoveryDoesNotReverseWithdrawal() {
-        var foe = new Battlefield.Foe(11, 10.4, false, false, true, true, true, false, false);
+        var foe = new Battlefield.Foe(11, 10.4, false, false, true, true, true, false, false, true);
         var progress = new RetreatProgress(); progress.commit(); progress.observe(Vec3.ZERO);
         var recovering = new Battlefield(33, 9, 3.3, true, false, false, List.of(foe));
         var flee = new AttackPlan.Move(AttackPlan.Action.DISENGAGE, AttackPlan.NO_FOE);
@@ -197,7 +197,7 @@ public final class CombatOutcomeTest {
                 "minor natural healing must not turn a withdrawing body back toward its pursuer");
         progress.observe(new Vec3(12, 0, 0));
         check(progress.committed(), "real forward movement resets failures but preserves withdrawal");
-        var creeper = new Battlefield.Foe(12, 3, true, true, true, true, true, true, true);
+        var creeper = new Battlefield.Foe(12, 3, true, true, true, true, true, true, true, true);
         var blast = AttackPlan.decide(new Battlefield(33, 9, 3.3, true, false, false, List.of(creeper)), flee, progress.committed());
         check(blast.action() == AttackPlan.Action.EVADE_BLAST
                 && AttackPlan.decide(recovering, blast, progress.committed()).action() == AttackPlan.Action.DISENGAGE,
@@ -230,6 +230,8 @@ public final class CombatOutcomeTest {
             var phase = ActorControlTestHarness.field(AttackCompanionTask.class, "phase");
             phase.set(task, Arrays.stream(phase.getType().getEnumConstants()).filter(v -> v.toString().equals("LOOT")).findFirst().orElseThrow());
             ActorControlTestHarness.field(AttackCompanionTask.class, "lastMove").set(task, new AttackPlan.Move(AttackPlan.Action.DISENGAGE, AttackPlan.NO_FOE));
+            // 明确重放已经承诺撤离的状态；仅有低血和空战场不应再凭空发起一次撤退。
+            ((RetreatProgress) ActorControlTestHarness.field(AttackCompanionTask.class, "retreat").get(task)).commit();
             TaskState state = task.tick(f.h.player);
             check(state == TaskState.FAILED && task.result(state).message().contains("too hurt"),
                     "retreat settles through the wide-area safety check before any loot-only completion or failure");

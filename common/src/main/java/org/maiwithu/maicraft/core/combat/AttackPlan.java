@@ -71,7 +71,7 @@ public final class AttackPlan {
     /**
      * @param last 上一刻的决定;第一次传 {@code null}
      */
-    // 依次判断是否要逃、选谁打、用近战还是弓。低血量或没武器会先考虑撤退，除非已被判定无路可退。
+    // 先处理真实威胁，再选目标与武器；低血限制敌对交战，不阻止角色猎杀友好动物补充食物。
     public static Move decide(Battlefield b, Move last) {
         return decide(b, last, false);
     }
@@ -81,8 +81,11 @@ public final class AttackPlan {
         // 已开始的引信优先于旧目标、武器准备和普通撤退选点；严格攻击名单也不能阻止避险。
         if (b.foes().stream().anyMatch(Foe::blastDanger)) return new Move(Action.EVADE_BLAST, NO_FOE);
         if (withdrawalCommitted && !b.cornered()) return new Move(Action.DISENGAGE, NO_FOE);
-        // ① 扛不住 —— 一切"怎么打"的讨论都以她还站得住为前提。
-        if (outmatched(b.effectiveHealth(), b.availableHealth()) && !b.cornered()) {
+        // 友好猎食不触发低血撤离；获准攻击的敌对目标、实际来袭者与近处苦力怕仍受原血线约束。
+        // 没有参与交战的旁观怪物不把杀羊变成敌对战斗，已经开始的撤离仍由上一分支保持到安全。
+        boolean facingThreat = b.foes().stream().anyMatch(f -> f.engaging() || f.priorityThreat()
+                || f.authorized() && f.threatening());
+        if (facingThreat && outmatched(b.effectiveHealth(), b.availableHealth()) && !b.cornered()) {
             return new Move(Action.DISENGAGE, NO_FOE);
         }
         // ③ 手上没有能打的东西:赤手对上会还手的东西不是一条出路,退开。
