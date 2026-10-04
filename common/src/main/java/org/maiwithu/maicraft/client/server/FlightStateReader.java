@@ -5,18 +5,20 @@ import java.util.UUID;
 import java.util.Locale;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.Level;
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.physics.flight.FlightSample;
 
 /** 以有界频率更新服务器接地证据；飞控姿态仍每刻采样，旧接地不能跨世界或失联后继续沿用。 */
 public final class FlightStateReader implements AutoCloseable {
     private final UUID structureId;
     private final Level world;
+    private final BlockPos typewriter;
     private ClientRequestReceipt pending;
     private long nextRequest,lastTick=Long.MIN_VALUE;
     private long requestTick,receivedTick=Long.MIN_VALUE,responseAge;
     private FlightSample.Contact contact=FlightSample.Contact.UNKNOWN;
     private JsonObject evidence=new JsonObject();
-    public FlightStateReader(LocalPlayer player,UUID structureId){world=player.level();this.structureId=structureId;}
+    public FlightStateReader(LocalPlayer player,UUID structureId,BlockPos typewriter){world=player.level();this.structureId=structureId;this.typewriter=typewriter==null?null:typewriter.immutable();}
     public FlightSample.Contact tick(LocalPlayer player) {
         if(player.level()!=world)throw new IllegalStateException("flight observation changed world");
         if(!ServerAssistClient.serverSupported("physics.flight_state"))throw new IllegalStateException("server physics.flight_state unavailable");
@@ -42,6 +44,9 @@ public final class FlightStateReader implements AutoCloseable {
         }
         if(pending==null&&world.getGameTime()>=nextRequest) {
             var request=new JsonObject();request.addProperty("structure_id",structureId.toString());
+            if(typewriter!=null) {
+                var at=new JsonObject();at.addProperty("x",typewriter.getX());at.addProperty("y",typewriter.getY());at.addProperty("z",typewriter.getZ());request.add("typewriter_position",at);
+            }
             requestTick=world.getGameTime();
             pending=ServerAssistClient.submit("physics.flight_state",request,false);
         }
@@ -49,5 +54,10 @@ public final class FlightStateReader implements AutoCloseable {
         return receivedTick==Long.MIN_VALUE||world.getGameTime()-receivedTick+responseAge>10?FlightSample.Contact.UNKNOWN:contact;
     }
     public JsonObject evidence(){return evidence.deepCopy();}
+    public boolean controllerOwned(){return evidence.has("typewriter")&&evidence.getAsJsonObject("typewriter").has("owned_by_player")
+            &&evidence.getAsJsonObject("typewriter").get("owned_by_player").getAsBoolean();}
+    public boolean controllerReleased(){return evidence.has("typewriter")&&evidence.getAsJsonObject("typewriter").has("in_use")
+            &&!evidence.getAsJsonObject("typewriter").get("in_use").getAsBoolean()
+            &&evidence.getAsJsonObject("typewriter").getAsJsonArray("pressed_keys").isEmpty();}
     @Override public void close(){if(pending!=null){ServerAssistClient.cancel(pending.id());pending=null;}}
 }

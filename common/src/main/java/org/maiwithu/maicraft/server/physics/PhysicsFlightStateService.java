@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.server.machine.ServerAccess;
 /** 飞控的持续只读遥测只取当前原生采样，不重跑配重搜索、候选编辑或整机气动建模。 */
 public final class PhysicsFlightStateService {
     private static final Gson GSON=new Gson();
+    private static final String TYPEWRITER="dev.simulated_team.simulated.content.blocks.redstone.linked_typewriter.LinkedTypewriterBlockEntity";
     private PhysicsFlightStateService() {}
     public static JsonObject inspect(ServerPlayer player,JsonObject request) {
         UUID id=UUID.fromString(ServerAccess.text(request,"structure_id"));
@@ -27,7 +28,28 @@ public final class PhysicsFlightStateService {
         out.addProperty("state","ready");out.addProperty("tick",body.tick());
         out.add("origin_storage",GSON.toJsonTree(new int[]{origin.getX(),origin.getY(),origin.getZ()}));
         out.add("position",GSON.toJsonTree(body.position()));out.add("rotation",GSON.toJsonTree(body.rotation()));
-        out.add("native_contact",wheelContact(body));
+        if(request.has("typewriter_position")) {
+            BlockPos position=origin.offset(PhysicsBlockEdits.local(request.getAsJsonObject("typewriter_position")));
+            var controller=new JsonObject();var entity=player.serverLevel().hasChunkAt(position)?player.serverLevel().getBlockEntity(position):null;
+            boolean available=NativeApi.is(entity,TYPEWRITER);controller.addProperty("available",available);
+            if(available) {
+                // 服务器当前使用者才是控制权事实，客户端右键预测和键包派发不能代替这项确认。
+                controller.addProperty("owned_by_player",NativeApi.truth(NativeApi.call(entity,null,"checkUser",player.getUUID())));
+                controller.addProperty("in_use",NativeApi.truth(NativeApi.call(entity,null,"isInUse")));
+                controller.add("pressed_keys",GSON.toJsonTree(NativeApi.call(entity,null,"getPressedKeys")));
+            }
+            out.add("typewriter",controller);
+        }
+        var contact=wheelContact(body);
+        // 轮胎真实接地优先；无轮飞艇或轮胎均未支撑时再核对船壳，保留两个来源各自的事实。
+        if(!contact.get("state").getAsString().equals("grounded")) {
+            JsonObject hull=FlightHullSupport.read(player.serverLevel(),ship);contact.add("hull_support",hull);
+            if(hull.get("state").getAsString().equals("grounded")||contact.get("wheel_count").getAsInt()==0
+                    &&!contact.get("missing_wheel_observation").getAsBoolean()) {
+                contact.addProperty("state",hull.get("state").getAsString());contact.addProperty("source","observed_hull_collision_geometry");
+            }
+        }
+        out.add("native_contact",contact);
         out.addProperty("read_only",true);
         return out;
     }
