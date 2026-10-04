@@ -26,7 +26,7 @@ public final class MLGChain implements Task, Reflex {
 
     @Override
     public boolean canRun(LocalPlayer companion) {
-        if (waterBlocksStart(companion)) return false;
+        if (bodyBlocksStart(companion)) return false;
         if (EmbeddedBaritoneRuntime.ownsActiveLandingAssist(companion)) return false;
         if (session != null) return !session.complete();
         return EmergencyLanding.triggered(companion);
@@ -39,19 +39,20 @@ public final class MLGChain implements Task, Reflex {
      * 原来的跳跃已经错过落点时，先找到还能继续的自救办法，再让调度器结束原来的跳跃。
      */
     public boolean prepareMissedLandingTakeover(LocalPlayer player) {
-        if (waterBlocksStart(player)) return false;
+        if (bodyBlocksStart(player)) return false;
         if (session == null) session = EmergencyLanding.find(ClientRuntime.requireContext(player));
         return session != null && !session.failed() && !session.complete();
     }
 
     public TaskState tick(LocalPlayerContext context) {
         var player = context.player();
-        // 调度之后才入水，或旧 tick 仍被调用时，也只能结束原会话，不能继续换桶、瞄准、倒水或收水。
-        if (inWater(player)) {
+        // 调度后才入水或上座椅时也立即收尾，不能让旧自救继续换桶、瞄地或抢占驾驶控制。
+        String disabled = disabledReason(player);
+        if (disabled != null) {
             if (session != null) {
-                try { stopSession(context, "entered water; emergency landing disabled"); }
+                try { stopSession(context, disabled); }
                 finally {
-                    finishAttention(player, "entered water; emergency landing disabled");
+                    finishAttention(player, disabled);
                     session = null;
                 }
             }
@@ -97,21 +98,29 @@ public final class MLGChain implements Task, Reflex {
     public void stop(LocalPlayer companion, StopReason why) {
         try {
             ClientRuntime.actor().activeContext().filter(c -> c.player() == companion && c.isCurrent()).ifPresent(context -> {
-                stopSession(context, inWater(companion) ? "entered water; emergency landing disabled"
-                        : "emergency landing owner ended: " + why);
+                String disabled = disabledReason(companion);
+                stopSession(context, disabled != null ? disabled : "emergency landing owner ended: " + why);
             });
         } finally {
+            String disabled = disabledReason(companion);
             finishAttention(companion, why == StopReason.BODY_GONE ? "body unavailable; result unconfirmed"
-                    : inWater(companion) ? "entered water; emergency landing disabled" : "fall episode ended");
+                    : disabled != null ? disabled : "fall episode ended");
             session = null;
         }
     }
 
     private static boolean inWater(LocalPlayer player) { return player.isInWater() || player.isSwimming(); }
 
-    private boolean waterBlocksStart(LocalPlayer player) {
-        if (!inWater(player)) return false;
-        // 尚未接管的候选没有原生效果，入水时直接作废，避免上岸后复活旧落点；活动会话由停用路径结算。
+    private String disabledReason(LocalPlayer player) {
+        if (inWater(player)) return "entered water; emergency landing disabled";
+        if (player.isPassenger() && (session == null || !session.retainsPassenger(player)))
+            return "riding a vehicle; emergency landing disabled";
+        return null;
+    }
+
+    private boolean bodyBlocksStart(LocalPlayer player) {
+        if (disabledReason(player) == null) return false;
+        // 尚未接管的候选没有原生效果，入水或上车时直接作废，活动会话则走停用结算。
         if (!attentionActive) session = null;
         return true;
     }
@@ -124,6 +133,7 @@ public final class MLGChain implements Task, Reflex {
             var facts = new LinkedHashMap<>(session.diagnostics());
             facts.put("reflex_active", false);
             facts.put("disabled_in_water", inWater(context.player()));
+            facts.put("disabled_while_riding", context.player().isPassenger() && !session.retainsPassenger(context.player()));
             facts.put("stop_reason", reason);
             LandingAssistPolicy.report(facts);
         }
@@ -132,5 +142,5 @@ public final class MLGChain implements Task, Reflex {
 
     @Override public String name() { return "mlg"; }
     @Override public String id() { return name(); }
-    @Override public String describe() { return "高处坠落时用水桶或落地辅助自救；在水中或游泳时停用，入水后交还身体并保留已放辅助的实际回执；干草减伤如实记录受伤"; }
+    @Override public String describe() { return "高处坠落时用水桶或落地辅助自救；入水或乘坐其他载具后交还身体并保留原生回执，本次自救接住的船继续落稳；干草减伤如实记录受伤"; }
 }

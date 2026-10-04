@@ -25,6 +25,8 @@ import org.maiwithu.maicraft.core.task.survival.SurvivalDecisions;
 public final class EmergencyLanding {
     private EmergencyLanding() {}
     public static boolean triggered(LocalPlayer player) {
+        // 乘坐中的下降由载具结算，玩家残留的重力速度不能抢走驾驶员的油门、刹车与准星。
+        if (player.isPassenger()) return false;
         boolean grounded = player.onGround() || player.isInWater() || player.isSwimming() || player.onClimbable();
         if (grounded || WorkProfile.of(player).fearless()
                 || player.getDeltaMovement().y >= 0) return false;
@@ -82,6 +84,8 @@ public final class EmergencyLanding {
     /** 持续下落时接管自救，但保留已选支撑点和转向。 */
     // 紧急救援使用落地辅助许可，并允许检查是否能补到材料；候选还要通过身体空间和干草减伤后能否生存的检查。
     public static LandingAssistSession find(LocalPlayerContext context, BlockPos feet) {
+        // 接管前再次确认乘坐状态，避免候选生成与上座椅同步之间插入新的落地自救。
+        if (context.player().isPassenger()) return null;
         if (!context.level().isLoaded(feet) || !context.level().isLoaded(feet.below())) return null;
         var inventory = LandingAssistPlan.InventorySnapshot.capture(context.player(), TerrainPermit.LANDING_ONLY,
                 context.level().dimensionType().ultraWarm());

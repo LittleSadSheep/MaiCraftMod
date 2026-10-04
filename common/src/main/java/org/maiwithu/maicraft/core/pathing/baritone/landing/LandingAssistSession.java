@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -475,6 +476,8 @@ public final class LandingAssistSession {
 
     public Vec3 aimPoint() { return boat!=null ? boat.aimPoint() : placed == null ? plan.aimPoint() : Vec3.atCenterOf(plan.cell()); }
     public BodyControlPort.Movement movementOverride() { return boat==null ? null : boat.movementOverride(); }
+    // 空中抓船是自救流程的一部分；新坐上的飞机座椅不属于旧落点会话。
+    public boolean retainsPassenger(LocalPlayer player) { return boat != null && boat.retainsPassenger(player); }
     /** 回收水源期间固定着陆格，防止通用水中浮动逻辑改变站位。 */
     public boolean holdingForRecovery(LocalPlayerContext context) {
         if(boat!=null) return context.player().isPassenger() || boat.movementOverride()!=null;

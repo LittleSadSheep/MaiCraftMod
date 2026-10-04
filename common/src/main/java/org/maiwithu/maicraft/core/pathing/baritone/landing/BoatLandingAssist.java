@@ -273,6 +273,9 @@ public final class BoatLandingAssist {
         return count;
     }
     private static UUID vehicleId(LocalPlayer player) { return player.getVehicle() == null ? null : player.getVehicle().getUUID(); }
+
+    // 自救自己接住的那条船仍须完成原生落稳与下船，不能把任意其他座椅也归给这次救援。
+    boolean retainsPassenger(LocalPlayer player) { return boatId != null && boatId.equals(vehicleId(player)); }
     private static void look(LocalPlayerContext ctx, Vec3 point) {
         look(ctx,point,false);
     }

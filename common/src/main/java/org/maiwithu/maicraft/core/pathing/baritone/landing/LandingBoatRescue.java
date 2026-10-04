@@ -176,6 +176,8 @@ final class LandingBoatRescue {
             || preparation!=null&&preparation.cleanupPending() || boat!=null&&boat.cleanupPending(); }
     Vec3 aimPoint() { return boat==null ? landing.aimPoint() : boat.aimPoint(); }
     boolean wantsSneak() { return boat!=null && boat.wantsSneak(); }
+    // 只有本次救援实际追踪的船能保留乘坐阶段，其他载具应交还驾驶任务。
+    boolean retainsPassenger(LocalPlayer player) { return boat != null && boat.retainsPassenger(player); }
     BodyControlPort.Movement movementOverride() { return boat==null ? null : boat.movementOverride(); }
     Map<String,Object> diagnostics() { return Map.of("detail",detail,"material_supply",supply.result().detail(),
             "craft_attempted",craftTried,"boat",boat==null ? Map.of() : boat.diagnostics()); }

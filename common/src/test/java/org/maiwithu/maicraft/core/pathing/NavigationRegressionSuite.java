@@ -84,6 +84,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.NativeBucketLandingTe
 import org.maiwithu.maicraft.core.pathing.baritone.landing.PlannedWaterReflexTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.SharedLandingExecutionTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.MlgWaterSuppressionTest;
+import org.maiwithu.maicraft.core.pathing.baritone.landing.MlgPassengerSuppressionTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingReplayTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.WaterSurfaceExecutionTest;
 import org.maiwithu.maicraft.core.pathing.transport.TransportIntentTest;
@@ -203,6 +204,8 @@ public final class NavigationRegressionSuite {
         WaterLandingReplayTest.main(args);
         SharedLandingExecutionTest.main(args);
         MlgWaterSuppressionTest.main(args);
+        // 坐上驾驶座后交还油门控制，仅保留本次自救抓船的原生落稳流程。
+        MlgPassengerSuppressionTest.main(args);
         LandingSupplyCleanupTest.main(args);
         AutomaticFallAdmissionTest.main(args);
         FallDeparturePreparationTest.main(args);
