@@ -685,6 +685,7 @@ public final class SemanticExploreCompanionTask
             List<String> suggestions = new ArrayList<>();
             suggestions.add("increase max_distance or choose another semantic landmark");
             suggestions.add("continue from the final position to search a different loaded frontier");
+            suggestions.add("sparse generation is normal; no match over the observed area is not proof of absence beyond it");
             if (!r.mayAlterTerrain && waypointFailed > 0) {
                 suggestions.add("review travel_failures; enable may_alter_terrain only if those route changes are acceptable");
             }

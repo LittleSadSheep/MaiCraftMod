@@ -8,6 +8,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.BreathChain;
@@ -122,15 +123,25 @@ final class CompanionBrain {
     /** 面板与排错用：此刻占用身体的任务的可读描述；身体空闲返回 {@code null}。反射自救时返回反射短名。 */
     String bodyAction() {
         if (holder == null) return null;
-        if (holder == currentProxy) {
-            TaskRecord record = current.record();
-            return record == null ? null : record.describe();
-        }
-        if (holder == syncProxy) {
-            TaskRecord record = sync.record();
-            return record == null ? null : record.describe();
-        }
+        if (holder == currentProxy) return slotAction(current);
+        if (holder == syncProxy) return slotAction(sync);
         return holder.name();
+    }
+
+    // 任务单 describe 回答"在做什么"，执行器 progress 里的阶段名回答"做到哪一步"。
+    private String slotAction(TaskSlot slot) {
+        TaskRecord record = slot.record();
+        if (record == null) return null;
+        String phase = deepestPhase(slot.progress());
+        return phase == null ? record.describe() : record.describe() + " · " + phase;
+    }
+
+    // 父任务用 child 嵌套真实干活的任务，阶段名取最深一层的自述。
+    private static String deepestPhase(Map<?, ?> progress) {
+        Object phase = progress.get("phase");
+        if (phase instanceof String text && !text.isBlank()) return text;
+        Object child = progress.get("child");
+        return child instanceof Map<?, ?> nested ? deepestPhase(nested) : null;
     }
 
 

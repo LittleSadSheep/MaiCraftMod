@@ -39,6 +39,8 @@ public final class KnowledgeLibrary {
             {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 wrong_tool 黑曜石 obsidian diamond_pickaxe 镐 挖不动 不掉落 挖掘资格"},
             {"mine-source-scope", "mine 源查询的范围语义", "mine 源查询 半径 深度 query_complete known_sources 保留意见 暴露源 埋藏矿 扫描范围"},
             {"food", "食物与饥饿", "food eat 食物 饥饿 进食 consume 饱食度 saturation 营养 打猎 狩猎 耕种 种植 农田 补种 小麦 胡萝卜 土豆 甜菜 面包 cook 烹饪 熔炉 allow_effects confirm_risky_target"},
+            {"sleep-night", "睡眠与夜晚", "sleep bed 睡觉 床 幻翼 phantom 夜晚 night 刷怪 spawn 羊毛 wool sheep_color 染料 dye 同色 重生点 respawn insomnia 跳夜 maicraft:sleep"},
+            {"tunneling", "下降掘进与寻路死角", "descent digging staircase tunnel 斜向阶梯 竖井 planning_stall no_path 寻路死角 树冠 下掘 水平掘进 矿带 travel may_alter_terrain"},
     };
     public interface Source {
         List<KnowledgeDocument.Entry> entries();

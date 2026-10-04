@@ -27,7 +27,7 @@ public enum FailureType {
     /** 本次寻路没有找到到达目标的路线；不代表允许任意放宽原目标。 */
     NO_PATH("travel + may_alter_terrain digs/bridges/pillars a route, or pick a nearer destination", List.of("maicraft://knowledge/game_mechanics/gravity-blocks")),
     /** 搜索未能按预算产出结论且有界恢复已耗尽，不能当作地形确实无路。 */
-    PLANNING_STALL("the search hit its budget rather than proving a dead end; re-submitting or approaching from another direction can still succeed", List.of()),
+    PLANNING_STALL("the search hit its budget rather than proving a dead end; re-submitting or approaching from another direction can still succeed, e.g. retry as a slanted staircase descent (horizontal offset plus target y) or tunnel horizontally at the target band", List.of("maicraft://knowledge/game_mechanics/tunneling")),
     /** 当前不允许改地形的条件挡住了路线；是否放宽要由上层按任务要求决定。 */
     TERRAIN_BLOCKED("may_alter_terrain grants dig/bridge/pillar when the player authorized terrain changes", List.of()),
     /** 没走到手能碰到目标的距离。 */
@@ -41,7 +41,7 @@ public enum FailureType {
     /** 空桶点名的液态格已是流水而非源格，尚未提交取水动作。 */
     NOT_A_SOURCE_BLOCK("aim the bucket at a still source block; flowing water or lava cannot be picked up", List.of("maicraft://knowledge/game_mechanics/fluid-flow")),
     /** 本次允许查询的范围内没有更多匹配来源。 */
-    MINED_OUT("widen the search radius, move closer, or locate sources with find_block", List.of("maicraft://knowledge/game_mechanics/mine-source-scope")),
+    MINED_OUT("widen the search radius, move closer, or locate sources with find_block; or descend to the generation band first (travel with a y hint + exact + may_alter_terrain) or authorize allow_prospecting", List.of("maicraft://knowledge/game_mechanics/mine-source-scope")),
     /** 当前做法会遇到岩浆、虚空等已识别危险。 */
     HAZARD("retreat and re-plan around the hazard; the fluid card explains what water and lava do to dig sites", List.of("maicraft://knowledge/game_mechanics/fluid-flow")),
     /** 操作被停止或打断，例如玩家要求停止或身体失效。 */

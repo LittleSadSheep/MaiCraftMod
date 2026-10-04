@@ -122,13 +122,13 @@ public final class DebugHudController {
         if (listMode) {
             appendTaskListPage(rows);
         } else {
-            appendTaskStatusRows(rows);
+            appendTaskStatusRows(rows, minecraft);
         }
         return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows));
     }
 
     // 状态页的任务区：当前任务详情加身体动作，只看"此刻"。
-    private static void appendTaskStatusRows(List<Row> rows) {
+    private static void appendTaskStatusRows(List<Row> rows, Minecraft minecraft) {
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
         List<IntentTaskRecord> open = IntentRuntime.get().tasks(50).stream()
                 .filter(record -> !record.getState().isTerminal())
@@ -153,16 +153,18 @@ public final class DebugHudController {
                             + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
                     ChatFormatting.AQUA));
             rows.add(new Row("动作", actionText(), ChatFormatting.AQUA));
+            // 等了多久和等什么同样重要：等 5 秒是在等模型，等 5 分钟大概率是卡死。
+            long nowGameTime = minecraft.level == null ? 0 : minecraft.level.getGameTime();
             if (active.decisionSnapshot() != null) {
-                rows.add(new Row("等待决策", decisionText(active.decisionSnapshot()),
+                rows.add(new Row("等待决策", decisionText(active, nowGameTime),
                         ChatFormatting.YELLOW));
             } else if (active.pauseSnapshot() != null) {
-                rows.add(new Row("已暂停", clamp(active.pauseSnapshot().reason()),
+                rows.add(new Row("已暂停", clamp(active.pauseSnapshot().reason())
+                                + " · 已暂停 " + formatDuration(nowGameTime - active.pauseSnapshot().gameTime()),
                         ChatFormatting.YELLOW));
             }
             if (!active.attempts().isEmpty()) {
-                rows.add(new Row("最近问题", clamp(active.attempts().getLast().message()),
-                        ChatFormatting.RED));
+                rows.add(new Row("最近问题", repeatSummary(active.attempts()), ChatFormatting.RED));
             }
         }
     }
@@ -336,14 +338,38 @@ public final class DebugHudController {
         return fallback.name().toLowerCase(Locale.ROOT);
     }
 
-    // 决策行要说出在等什么：问题摘要加可选项；只重复"在等决策"没有信息量。
-    private static String decisionText(IntentTaskRecord.DecisionSnapshot decision) {
+    // 决策行要说出在等什么、等了多久：问题摘要加可选项；等待起点取伴随的暂停快照。
+    private static String decisionText(IntentTaskRecord record, long nowGameTime) {
+        IntentTaskRecord.DecisionSnapshot decision = record.decisionSnapshot();
         String choices = decision.options().stream()
                 .map(IntentTaskRecord.DecisionOption::choice)
                 .collect(Collectors.joining("/"));
         String text = clamp(decision.question(), 40)
                 + (choices.isBlank() ? "" : " · 选项 " + clamp(choices, 24));
-        return clamp(text);
+        IntentTaskRecord.PauseSnapshot pause = record.pauseSnapshot();
+        // 时长拼在内容截断之外：行超宽时宁可丢问题尾巴，不能丢掉"等了多久"。
+        return pause == null ? clamp(text)
+                : clamp(text, 50) + " · 已等 " + formatDuration(nowGameTime - pause.gameTime());
+    }
+
+    // 游戏刻换算时长（20 刻/秒）；秒与分级够定位卡死，超过一小时不再显示秒。
+    private static String formatDuration(long ticks) {
+        long seconds = Math.max(0, ticks / 20);
+        if (seconds < 60) return seconds + "s";
+        if (seconds < 3600) return (seconds / 60) + "m" + (seconds % 60) + "s";
+        return (seconds / 3600) + "h" + (seconds % 3600 / 60) + "m";
+    }
+
+    // 连续相同的失败只报一次附次数：重试循环里"×N"比同一句话重复出现更能说明卡死。
+    private static String repeatSummary(List<IntentTaskRecord.AttemptSnapshot> attempts) {
+        String last = attempts.getLast().message();
+        if (last == null || last.isBlank()) return "未知";
+        int repeats = 1;
+        for (int i = attempts.size() - 2; i >= 0 && last.equals(attempts.get(i).message()); i--) {
+            repeats++;
+        }
+        String message = clamp(last);
+        return repeats > 1 ? message + " ×" + repeats : message;
     }
 
     // 蓝图行回答三件事：这是什么预览、它多大、施工卡在哪个决定上；隐藏与切片也值得看见。

@@ -1044,6 +1044,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             Constants.LOG.info("[maicraft-attack] 脱离成功 —— 追击者已拉开距离，近期攻击与近处可见危险已解除");
             fail(Menace.outmatched(player)
                             ? "broke off — too hurt to keep fighting; active pursuit and nearby visible threats are clear"
+                                    + "; when starving and blocked from fighting, consider the maicraft:suicide death reset (keepInventory confirmed) or travel to a known food point"
                             : "broke off — nothing here can be fought with what you carry "
                                     + "(explosive, or out of reach with no bow); you are clear now",
                     FailureType.TARGET_LOST);
