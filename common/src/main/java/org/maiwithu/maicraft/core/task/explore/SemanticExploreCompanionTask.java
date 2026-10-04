@@ -72,6 +72,7 @@ public final class SemanticExploreCompanionTask
     private boolean survey;
     private String surveyStopReason;
     private ClientExplorationMemory memory;
+    private WaterCrossingProbe waterProbe;
     private ClientLevel startingLevel;
     private Stage stage;
 
@@ -105,6 +106,7 @@ public final class SemanticExploreCompanionTask
     private final Set<Long> rejectedTargets = new HashSet<>();
     private final Set<Long> attemptedWaypoints = new HashSet<>();
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
+    private final FrontierLegBreaker waypointBreaker = new FrontierLegBreaker();
 
     private SpiralWalker spiral;
 
@@ -128,6 +130,7 @@ public final class SemanticExploreCompanionTask
             return;
         }
         memory = new ClientExplorationMemory(player);
+        waterProbe = new WaterCrossingProbe(level);
         beginObservation();
     }
 
@@ -378,9 +381,22 @@ public final class SemanticExploreCompanionTask
 
         if (terminal == TaskState.SUCCESS) {
             waypointReached++;
+            waypointBreaker.onLegSuccess();
         } else {
             waypointFailed++;
             recordLegFailure("exploration_waypoint", activeWaypoint, result);
+            // 航点连续走不到时先轮换候选扇区再重选；八个方位都试过仍失败就宣布方向受阻并终止，
+            // 不在同一条不可行地形带上无限重付寻路成本。
+            switch (waypointBreaker.onLegFailure(sector)) {
+                case ROTATED -> sector = waypointBreaker.rotated(sector);
+                case EXHAUSTED -> {
+                    fail(FrontierLegBreaker.blockedMessage(
+                            "waypoint", waypointFailed, waypointBreaker, sector),
+                            FailureType.NO_PATH);
+                    return TaskState.FAILED;
+                }
+                case KEEP_GOING -> { }
+            }
         }
         activeWaypoint = null;
         beginObservation();
@@ -509,7 +525,8 @@ public final class SemanticExploreCompanionTask
     private BlockPos nextWaypoint(ClientLevel level) {
         if (r.sector.direction() != null) {
             return ExplorationFrontiers.next(player.blockPosition(), sector, r.maxDistance,
-                    attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()));
+                    attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()),
+                    pos -> waterProbe.crossesWater(player.blockPosition(), pos));
         }
         return nextTerrainNeutralWaypoint(level);
     }
@@ -518,27 +535,34 @@ public final class SemanticExploreCompanionTask
         for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
             BlockPos desired = spiral.next(player.blockPosition().getY());
             if (!insideScope(desired.getX(), desired.getZ())) continue;
-            BlockPos frontier = loadedFrontierToward(level, desired);
+            BlockPos frontier = loadedFrontierToward(level, desired,
+                    pos -> waterProbe.crossesWater(player.blockPosition(), pos));
             if (frontier != null && attemptedWaypoints.add(
                     BlockPos.asLong(frontier.getX(), 0, frontier.getZ()))) return frontier;
         }
         return null;
     }
 
-    private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {
+    // 优先返回不穿水的最远已加载路段；全线皆水回退最远已加载路段，岛屿环境不卡死。
+    private BlockPos loadedFrontierToward(
+            ClientLevel level, BlockPos desired, Predicate<BlockPos> avoidWater) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
         double dz = desired.getZ() - current.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance < 1.0) return null;
         double farthest = Math.min(MAX_LEG_DISTANCE, distance);
+        BlockPos fallback = null;
         for (double leg = farthest; leg >= Math.min(16.0, farthest); leg -= 16.0) {
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
-            return new BlockPos(x, current.getY(), z);
+            BlockPos candidate = new BlockPos(x, current.getY(), z);
+            if (avoidWater == null) return candidate;
+            if (fallback == null) fallback = candidate;
+            if (!avoidWater.test(candidate)) return candidate;
         }
-        return null;
+        return avoidWater == null ? null : fallback;
     }
 
     private TaskState exhausted() {
@@ -627,6 +651,18 @@ public final class SemanticExploreCompanionTask
         return List.copyOf(offsets);
     }
 
+    /** 停滞与进度对调用方可见：still working 事件要能看出连续失败的累积与扇区轮换。 */
+    @Override public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("stage", String.valueOf(stage));
+        data.put("waypoints_attempted", waypointAttempts);
+        data.put("waypoints_reached", waypointReached);
+        data.put("waypoints_failed", waypointFailed);
+        data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
+        data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        return data;
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("target", canonicalTarget == null ? r.target : canonicalTarget);
@@ -657,6 +693,11 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_attempted", waypointAttempts);
         data.put("waypoints_reached", waypointReached);
         data.put("waypoints_failed", waypointFailed);
+        data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
+        data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        if (waypointBreaker.rotations() > 0) {
+            data.put("waypoint_rotation_bearings", waypointBreaker.rotatedBearings());
+        }
         data.put("target_approaches_attempted", targetAttempts);
         // 路段失败完整保留在任务证据中；默认回执可按既有归档机制分页，不能按固定条数丢弃卡点。
         data.put("travel_failures", List.copyOf(legFailures));

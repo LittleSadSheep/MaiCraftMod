@@ -713,6 +713,21 @@ public final class GenericEntitySearchCompanionTask
         super.cleanup();
     }
 
+    /** 搜索进度对调用方可见：离起点最远距离与前沿腿计数让长途搜索可中途决策，不必等伤害发生后取消。 */
+    @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("stage", String.valueOf(stage));
+        data.put("max_distance", r.maxDistance);
+        data.put("farthest_body_distance", farthestBodyDistance);
+        data.put("frontier_legs_attempted", frontierAttempts);
+        data.put("frontier_legs_reached", frontierReached);
+        data.put("frontier_legs_failed", frontierFailed);
+        data.put("acceptable_observed", observedSafe.size());
+        data.put("requested_count", r.count);
+        return data;
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Integer> observedByType = new LinkedHashMap<>();

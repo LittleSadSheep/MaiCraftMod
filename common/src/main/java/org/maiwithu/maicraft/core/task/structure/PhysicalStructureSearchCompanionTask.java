@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
+import org.maiwithu.maicraft.core.task.explore.FrontierLegBreaker;
+import org.maiwithu.maicraft.core.task.explore.WaterCrossingProbe;
 import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -67,7 +69,11 @@ public final class PhysicalStructureSearchCompanionTask
 
     private static final String STRONGHOLD = "minecraft:stronghold";
     private static final String OVERWORLD = "minecraft:overworld";
-    private static final int INDEX_BUILD_BUDGET_PER_GROUP = 4;
+    // 192 格半径的一轮全高扫描上万段；每次调用只建少量段会把观察等待拖到数千刻。
+    // 单刻实际速率由所有查询共享的 2ms 墙钟封顶，这个数只是墙钟内允许的段数上限。
+    private static final int INDEX_BUILD_BUDGET_PER_GROUP = 128;
+    /** 观察等待上限：超时按本视角未见证据转入下一腿，检测由行进中的移动扫描继续。 */
+    private static final int OBSERVE_MAX_TICKS = 100;
     private static final int MAX_GROUP_HITS = 384;
     private static final int EVIDENCE_SCAN_RADIUS = 192;
     private static final int FRONTIER_GRID = 64;
@@ -94,6 +100,7 @@ public final class PhysicalStructureSearchCompanionTask
     private final Set<Long> rejectedEvidence = new HashSet<>();
     private final Set<Long> attemptedFrontiers = new HashSet<>();
     private final List<String> routeFailureKinds = new ArrayList<>();
+    private final FrontierLegBreaker frontierBreaker = new FrontierLegBreaker();
     private StructureEvidenceProfiles.ResolvedProfile profile;
     private ClientLevel indexedLevel;
     private Set<Block> indexedBlocks = Set.of();
@@ -111,6 +118,7 @@ public final class PhysicalStructureSearchCompanionTask
     private SpiralWalker spiral;
     private ExplorationSector.Area sector;
     private ClientExplorationMemory memory;
+    private WaterCrossingProbe waterProbe;
     private EvidenceMatch activeEvidence;
     private EvidenceMatch verifiedEvidence;
     private String issueCode;
@@ -133,6 +141,9 @@ public final class PhysicalStructureSearchCompanionTask
     private int directionLoadWaitTicks;
     private int directionSegments;
     private long nextMovingEvidenceScan;
+    private int observeTicks;
+    private boolean scanComplete;
+    private int scanHitsObserved;
 
     public PhysicalStructureSearchCompanionTask(
             LocalPlayer player, PhysicalStructureSearchTaskRecord record) {
@@ -185,6 +196,7 @@ public final class PhysicalStructureSearchCompanionTask
         indexedBlocks = profile.targetBlocks();
         TargetIndex.register(indexedLevel, indexedBlocks);
         memory = new ClientExplorationMemory(player);
+        waterProbe = new WaterCrossingProbe(player.clientLevel);
     }
 
     @Override
@@ -215,6 +227,8 @@ public final class PhysicalStructureSearchCompanionTask
         EvidenceScan scan = scanNow
                 ? scanEvidence()
                 : new EvidenceScan(null, false, 0);
+        scanComplete = scan.complete();
+        scanHitsObserved = scan.observedBlocks();
         if (scanNow) nextMovingEvidenceScan = now + MOVING_EVIDENCE_SCAN_INTERVAL;
         if (scan.match() != null
                 && stage != Stage.WAIT_EYE_RECEIPT
@@ -239,10 +253,14 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     // 先等本轮已加载方块查完；有剩余投眼方向就继续走，否则要塞进入投眼准备，其他结构换一个探索方向。
+    // 观察等待有时长上限：超时按本视角未见证据转入下一腿，不在原地停滞到入夜；
+    // 未完成的扫描随行进中的移动扫描继续，命中线索仍会改道，等待不会漏掉证据。
     private TaskState tickObserve(EvidenceScan scan) {
         if (!scan.complete()) {
             keepFiniteEvidenceScanAlive();
-            return TaskState.RUNNING;
+            if (++observeTicks < OBSERVE_MAX_TICKS) return TaskState.RUNNING;
+        } else {
+            observeTicks = 0;
         }
         if (stronghold) {
             if (pendingDirection != null
@@ -482,6 +500,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     private TaskState beginFrontierTravel() {
+        observeTicks = 0;
         BlockPos frontier = nextFrontier();
         if (frontier == null) {
             failIssue(
@@ -547,6 +566,7 @@ public final class PhysicalStructureSearchCompanionTask
                 stage = Stage.OBSERVE;
             } else {
                 frontierReached++;
+                frontierBreaker.onLegSuccess();
                 stage = Stage.OBSERVE;
             }
             return TaskState.RUNNING;
@@ -576,7 +596,21 @@ public final class PhysicalStructureSearchCompanionTask
                     FailureType.NO_PATH);
             return TaskState.FAILED;
         }
+        // 前沿腿连续走不到时先轮换候选扇区再重选；八个方位都试过仍失败就宣布方向受阻并终止，
+        // 让调用方决定换出发点或扩大挖掘授权，而不是在同一条不可行地形带上无限重付寻路成本。
         frontierFailed++;
+        switch (frontierBreaker.onLegFailure(sector)) {
+            case ROTATED -> sector = frontierBreaker.rotated(sector);
+            case EXHAUSTED -> {
+                failIssue(
+                        "frontier_legs_circuit_broken",
+                        FrontierLegBreaker.blockedMessage(
+                                "frontier leg", frontierFailed, frontierBreaker, sector),
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            case KEEP_GOING -> { }
+        }
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
     }
@@ -729,38 +763,53 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     // 按向外绕圈的顺序选新方向，再截成当前地形已经加载的一小段。已经尝试过的横向落点不重复选。
+    // 落点路线优先干地：存在不穿水的候选时穿水候选让位，全线皆水（岛屿环境）仍选出最优者继续推进。
     private BlockPos nextFrontier() {
         if (r.sector.direction() != null) return ExplorationFrontiers.next(player.blockPosition(), sector,
-                r.maxDistance, attemptedFrontiers, pos -> columnLoaded(pos.getX(), pos.getZ()));
+                r.maxDistance, attemptedFrontiers, pos -> columnLoaded(pos.getX(), pos.getZ()),
+                this::routeCrossesWater);
         int finalRing = (int) Math.ceil(
                 (r.maxDistance + SCOPE_TOLERANCE) / (double) FRONTIER_GRID) + 1;
         while (true) {
             BlockPos desired = spiral.next(player.blockPosition().getY());
             if (Math.max(Math.abs(spiral.offsetX()), Math.abs(spiral.offsetZ())) > finalRing) return null;
             if (!insideScope(desired)) continue;
-            BlockPos frontier = loadedFrontierToward(desired);
+            BlockPos frontier = loadedFrontierToward(desired, true);
             if (frontier == null) continue;
             long key = BlockPos.asLong(frontier.getX(), 0, frontier.getZ());
             if (attemptedFrontiers.add(key)) return frontier;
         }
     }
 
+    private boolean routeCrossesWater(BlockPos candidate) {
+        return waterProbe.crossesWater(player.blockPosition(), candidate);
+    }
+
     private BlockPos loadedFrontierToward(BlockPos desired) {
+        return loadedFrontierToward(desired, false);
+    }
+
+    // avoidWater 时优先返回不穿水的最远已加载路段；全线皆水回退最远已加载路段，不在水域环境卡死。
+    private BlockPos loadedFrontierToward(BlockPos desired, boolean avoidWater) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
         double dz = desired.getZ() - current.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance < MIN_FRONTIER_LEG) return null;
         double farthest = Math.min(MAX_FRONTIER_LEG, distance);
+        BlockPos fallback = null;
         for (double leg = farthest;
                 leg >= Math.min(MIN_FRONTIER_LEG, farthest);
                 leg -= 8.0) {
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             BlockPos candidate = new BlockPos(x, current.getY(), z);
-            if (insideScope(candidate) && sector.contains(x, z) && columnLoaded(x, z)) return candidate;
+            if (!insideScope(candidate) || !sector.contains(x, z) || !columnLoaded(x, z)) continue;
+            if (!avoidWater) return candidate;
+            if (fallback == null) fallback = candidate;
+            if (!routeCrossesWater(candidate)) return candidate;
         }
-        return null;
+        return avoidWater ? fallback : null;
     }
 
     private boolean columnLoaded(int x, int z) {
@@ -924,6 +973,14 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
+        data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
+        data.put("frontier_sector_rotations", frontierBreaker.rotations());
+        if (stage == Stage.OBSERVE) {
+            data.put("observe_ticks", observeTicks);
+            data.put("observe_wait_limit", OBSERVE_MAX_TICKS);
+            data.put("evidence_scan_complete", scanComplete);
+            data.put("evidence_blocks_observed", scanHitsObserved);
+        }
         if (moveChild != null && moveRecord != null && moveRecord.x != null && moveRecord.z != null) {
             double dx = player.getX() - moveRecord.x;
             double dz = player.getZ() - moveRecord.z;
@@ -949,9 +1006,14 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_attempted", frontierAttempts);
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
+        data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
+        data.put("frontier_sector_rotations", frontierBreaker.rotations());
         data.put("evidence_approaches", evidenceApproaches);
         if (!routeFailureKinds.isEmpty()) {
             data.put("route_failure_kinds", List.copyOf(routeFailureKinds));
+        }
+        if (frontierBreaker.rotations() > 0) {
+            data.put("frontier_rotation_bearings", frontierBreaker.rotatedBearings());
         }
         if (stronghold) {
             data.put("consumed", Map.of(
@@ -1023,6 +1085,23 @@ public final class PhysicalStructureSearchCompanionTask
                     "choice", "stop",
                     "description",
                     "Stop; do not choose mobs, villagers or protected resources automatically."));
+            return List.copyOf(options);
+        }
+        if ("frontier_legs_circuit_broken".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "retry_other_direction",
+                    "description",
+                    "Resume the search from the final position toward another sector or origin; "
+                            + "the blocked band is an observed fact, not proof the structure is absent."));
+            if (!r.mayAlterTerrain) {
+                options.add(Map.of(
+                        "choice", "allow_route_changes",
+                        "description",
+                        "Retry with may_alter_terrain only after deciding that digging/bridging is acceptable."));
+            }
+            options.add(Map.of(
+                    "choice", "stop",
+                    "description", "Stop without widening the search goal."));
             return List.copyOf(options);
         }
         options.add(Map.of(

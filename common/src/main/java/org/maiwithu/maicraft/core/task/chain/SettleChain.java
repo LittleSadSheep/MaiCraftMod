@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.task.reflex.Reflex;
  * 任务释放身体后仍站在深落差边缘时，潜行退到离边安全的位置再交还控制。
  * 失败、取消都可能把身体留在中途位置；零输入挡不住残余动量，紧贴边缘的身体
  * 会在无人接管窗口滑落。这里不用任何物品，坠落中的保护仍归 MLGChain。
+ * 在岗任务持有身体时不参与抢占：贴边站位可以是任务的正当姿态（建筑贴墙、
+ * 钓鱼池边、寻路贴崖），抢占会把锚点对齐和寻路按秒打断。
  */
 public final class SettleChain implements Task, Reflex {
     /** 邻格向下扫满这个深度仍无支撑，才算深落差；更浅的台阶不值得抢占身体。 */
@@ -38,6 +40,12 @@ public final class SettleChain implements Task, Reflex {
         if (!companion.onGround() || WorkProfile.of(companion).fearless()) return false;
         Direction edge = edgeBeside(companion);
         return edge != null && nearEdgeOrDrifting(companion, edge);
+    }
+
+    /** 只服务释放窗口：在岗任务的贴边站位由任务自己负责，见类注释。 */
+    @Override
+    public boolean onlyWhenBodyReleased() {
+        return true;
     }
 
     @Override

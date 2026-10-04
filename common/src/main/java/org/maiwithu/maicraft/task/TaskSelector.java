@@ -23,13 +23,27 @@ public final class TaskSelector {
      */
     public static Task select(List<Task> reflexes, Task sync, Task current,
                               List<Task> idle, LocalPlayer companion) {
+        // 没有持有信息即视为身体已释放：释放窗口反射照常参与。
+        return select(reflexes, sync, current, idle, companion, false);
+    }
+
+    /**
+     * 带持有信息的选择入口：{@code taskHoldsBody} 表示身体此刻被任务槽记录持有。
+     * 释放窗口反射（{@link Task#onlyWhenBodyReleased}）在该状态下不参与抢占，
+     * 普通自救反射不受影响。
+     */
+    public static Task select(List<Task> reflexes, Task sync, Task current,
+                              List<Task> idle, LocalPlayer companion, boolean taskHoldsBody) {
         // 寻死是显式身体任务：仅在它仍可运行时跳过保护和临时动作，结束或暂停后自然恢复原优先顺序。
         if (current != null && current.suppressesSurvivalReflexes() && current.canRun(companion)) {
             return current;
         }
         if (reflexes != null) {
             for (Task reflex : reflexes) {
-                if (reflex != null && reflex.canRun(companion)) {
+                if (reflex == null) continue;
+                // 在岗任务把身体留在边缘是它的正当姿态，释放窗口反射不得按秒抢回。
+                if (taskHoldsBody && reflex.onlyWhenBodyReleased()) continue;
+                if (reflex.canRun(companion)) {
                     return reflex;
                 }
             }

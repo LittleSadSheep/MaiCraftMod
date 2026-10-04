@@ -29,9 +29,10 @@ import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.JsonObject;
 
 /**
- * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换。每刻构建一次只读快照，渲染只画快照；
- * 本类不提交任何操作。布局分两段：上方固定状态行（标签行文与 /maicraft status 各自独立），
- * 下方聊天框式事件区，长消息按面板宽度自动换行，新事件把旧事件挤出预算，固定行布局不受事件多少影响。
+ * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换，F9+P 切换导航路线显示。
+ * 每刻构建一次只读快照，渲染只画快照；本类不提交任何操作。布局分两段：上方固定状态行
+ * （标签行文与 /maicraft status 各自独立），下方聊天框式事件区，长消息按面板宽度自动换行，
+ * 新事件把旧事件挤出预算，固定行布局不受事件多少影响。
  */
 public final class DebugHudController {
     /** 固定区一行：短标签、当前值和取值颜色；值必须是已经压平的短文本。 */
@@ -63,6 +64,7 @@ public final class DebugHudController {
     private static volatile Snapshot snapshot = new Snapshot(List.of(), List.of());
     private static boolean toggleWasDown;
     private static boolean comboWasDown;
+    private static boolean pathComboWasDown;
     /** 面板当前页：false 为状态页（任务/动作等固定行），true 为任务列表页；面板隐藏期间保留。 */
     private static boolean listMode;
     private DebugHudController() {}
@@ -72,16 +74,25 @@ public final class DebugHudController {
         long window = minecraft.getWindow().getWindow();
         boolean f9Down = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
         boolean hDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
-        boolean combo = f9Down && hDown;
-        if (combo && !comboWasDown) {
+        boolean pDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_P) == GLFW.GLFW_PRESS;
+        boolean listCombo = f9Down && hDown;
+        boolean pathCombo = f9Down && pDown;
+        if (listCombo && !comboWasDown) {
             // F9+H 是无条件手势：面板没开就先打开，保证任何时候一步就能看到任务列表。
             listMode = !listMode;
             if (!PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())) toggle(minecraft);
-        } else if (f9Down && !toggleWasDown) {
+        }
+        if (pathCombo && !pathComboWasDown) {
+            togglePathLines(minecraft);
+        }
+        // 和弦按住的每一刻都记下 F9 已按下：字母键后松开不会误触发单独 F9 的显隐，
+        // 单独 F9 也只在没有任何和弦时生效，避免 F9+P 第一刻同时翻转面板和路线。
+        if (f9Down && !toggleWasDown && !listCombo && !pathCombo) {
             toggle(minecraft);
         }
         toggleWasDown = f9Down;
-        comboWasDown = combo;
+        comboWasDown = listCombo;
+        pathComboWasDown = pathCombo;
         snapshot = minecraft.player == null
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())
                 ? new Snapshot(List.of(), List.of()) : buildSnapshot(minecraft);
@@ -462,7 +473,21 @@ public final class DebugHudController {
                     + "，但配置保存失败：" + failure.getMessage(), ChatFormatting.YELLOW);
             return;
         }
-        message(minecraft, show ? "调试面板已显示，再按 F9 隐藏。" : "调试面板已隐藏。",
+        message(minecraft, show ? "调试面板已显示，再按 F9 隐藏；F9+H 切任务列表页，F9+P 切导航路线。"
+                : "调试面板已隐藏。", ChatFormatting.GREEN);
+    }
+
+    // F9+P 只切导航路线的独立开关：与 Dev 分离，看路线不牵动施工预览。
+    private static void togglePathLines(Minecraft minecraft) {
+        boolean show = !PreviewConfig.pathLines(minecraft.gameDirectory.toPath());
+        try {
+            PreviewConfig.pathLines(show);
+        } catch (IOException failure) {
+            message(minecraft, "导航路线 " + (show ? "已显示" : "已隐藏")
+                    + "，但配置保存失败：" + failure.getMessage(), ChatFormatting.YELLOW);
+            return;
+        }
+        message(minecraft, show ? "导航路线已显示，再按 F9+P 隐藏。" : "导航路线已隐藏。",
                 ChatFormatting.GREEN);
     }
 

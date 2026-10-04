@@ -18,6 +18,17 @@ public final class ExplorationFrontiersTest {
         var narrow = ExplorationSector.of("forward", 1, 0, 256).at(0, 0, -163);
         BlockPos narrowPoint = ExplorationFrontiers.next(BlockPos.ZERO, narrow, 256, new HashSet<>(), p -> true);
         check(narrowPoint != null && narrow.contains(narrowPoint.getX(), narrowPoint.getZ()), "non-cardinal narrow sector can advance");
+        // 穿水候选即便得分更高（离搜索原点更远）也让位给干地候选；全线皆水仍选出最优者，岛屿环境不卡死。
+        var lakeside = ExplorationSector.of("north", 90, null, 256).at(0, 200, 0);
+        BlockPos dryPick = ExplorationFrontiers.next(BlockPos.ZERO, lakeside, 256, new HashSet<>(),
+                p -> true, p -> p.getZ() > -48);
+        check(dryPick != null && dryPick.getZ() <= -48,
+                "dry candidate preferred even when water candidates score higher");
+        var island = ExplorationSector.of("north", 90, null, 256).at(0, 0, 0);
+        BlockPos wetPick = ExplorationFrontiers.next(BlockPos.ZERO, island, 256, new HashSet<>(),
+                p -> true, p -> true);
+        check(wetPick != null && island.contains(wetPick.getX(), wetPick.getZ()),
+                "all-water environment still selects the best candidate");
         System.out.println("ExplorationFrontiersTest: passed");
     }
     private static void check(boolean condition, String message) {

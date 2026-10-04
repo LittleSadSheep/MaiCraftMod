@@ -39,12 +39,14 @@ final class CompanionBrain {
             TaskSessionHooks.fireSessionEnd(player);
         }
 
+        // 在岗任务持有身体时，释放窗口反射（贴边退避等）不参与抢占；反射自救照常优先。
         Task winner = TaskSelector.select(
                 reflexes,
                 sync.isEmpty() ? null : syncProxy,
                 current.isEmpty() ? null : currentProxy,
                 idlePoses,
-                player);
+                player,
+                slotHoldsBody());
 
         // 正在跳跃、下落或乘交通工具时，突然换人控制可能摔下去；通常先让当前动作走到能安全停下的位置。
         // 但如果原来的落地方案已经失败，而且自救任务准备好了，就允许它马上接手。
@@ -108,6 +110,11 @@ final class CompanionBrain {
         // 自救与明确独占身体的动作不借出资源；普通工作仍由原槽执行，辅助动作只用剩余的准星和操作机会。
         return (holder == null || holder == currentProxy || holder == syncProxy)
                 && (holder == null || !holder.suppressesSurvivalReflexes());
+    }
+
+    /** 身体此刻是否被任务槽记录持有（反射自救不算持有）：释放窗口反射据此让位给在岗任务。 */
+    boolean slotHoldsBody() {
+        return holder == syncProxy || holder == currentProxy;
     }
 
     // 先结清寻死目标再保存重生检查点；普通任务返回 false，仍按原有死亡恢复流程处理。

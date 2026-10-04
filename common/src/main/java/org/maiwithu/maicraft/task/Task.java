@@ -45,6 +45,14 @@ public interface Task {
     /** 显式寻死期间由当前任务独占身体，避免吃饭、逃生或防摔把已授权的动作反向撤回；暂停后由调度器恢复反射。 */
     default boolean suppressesSurvivalReflexes() { return false; }
 
+    /**
+     * 释放窗口类反射只在身体未被任务槽持有时参与抢占。这类反射做的是释放后的
+     * 收尾安定（如贴边退避），不紧急到可以打断在岗任务——在岗任务把身体留在边缘
+     * 是正当姿态（建筑贴墙站位、钓鱼池边站位、寻路贴崖行进），被它按秒反复抢占
+     * 会把锚点对齐和寻路饿死。必须随时能打断任务的自救（防摔、换气、自卫）不声明本位。
+     */
+    default boolean onlyWhenBodyReleased() { return false; }
+
     /** 死亡观察先于普通任务 tick；只有以死亡为目标且已有执行证据的任务可以在这里结清目标。 */
     default boolean observeDeath(LocalPlayer companion) { return false; }
 

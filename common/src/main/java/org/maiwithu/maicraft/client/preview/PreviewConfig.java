@@ -9,24 +9,28 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 /**
- * 读取并保存客户端的 Dev 预览开关与 F9 调试面板可见性，文件是 config/maicraft-preview.properties；不修改服务器设置。
+ * 读取并保存客户端的 Dev 预览开关、F9 调试面板可见性与导航路线显示，文件是 config/maicraft-preview.properties；不修改服务器设置。
  */
 public final class PreviewConfig {
     private static Path file;
     private static boolean enabled;
     private static boolean hudVisible;
+    private static boolean pathLines;
     private PreviewConfig() {}
 
-    // 没有配置、读坏或 devMode 不是 true 时默认关闭。状态保存在内存里，不会每次查询都重读文件。
+    // 没有配置、读坏或键不是 true 时默认关闭。状态保存在内存里，不会每次查询都重读文件。
     static void load(Path gameDirectory) {
         file = gameDirectory.resolve("config/maicraft-preview.properties");
         Properties values = new Properties();
         if (Files.isRegularFile(file)) {
             try (Reader reader = Files.newBufferedReader(file)) { values.load(reader); }
-            catch (IOException | IllegalArgumentException ignored) { enabled = false; hudVisible = false; return; }
+            catch (IOException | IllegalArgumentException ignored) {
+                enabled = false; hudVisible = false; pathLines = false; return;
+            }
         }
         enabled = Boolean.parseBoolean(values.getProperty("devMode", "false"));
         hudVisible = Boolean.parseBoolean(values.getProperty("debugHud", "false"));
+        pathLines = Boolean.parseBoolean(values.getProperty("pathLines", "false"));
     }
 
     static boolean enabled() {
@@ -56,6 +60,20 @@ public final class PreviewConfig {
         hudVisible = value;
         persist();
     }
+
+    /** 导航路线显示是 F9+P 的独立开关，与 Dev 分离；Dev 开启时始终画线，不读此键。 */
+    public static boolean pathLines(Path gameDirectory) {
+        if (file == null) load(gameDirectory);
+        return pathLines;
+    }
+
+    static boolean pathLines() { return pathLines; }
+
+    public static void pathLines(boolean value) throws IOException {
+        pathLines = value;
+        persist();
+    }
+
     // 两个开关共用同一份文件，每次都整体重写，避免互相覆盖对方刚保存的值。
     private static void persist() throws IOException {
         if (file == null) return;
@@ -63,8 +81,10 @@ public final class PreviewConfig {
         Properties values = new Properties();
         values.setProperty("devMode", Boolean.toString(enabled));
         values.setProperty("debugHud", Boolean.toString(hudVisible));
+        values.setProperty("pathLines", Boolean.toString(pathLines));
         try (Writer writer = Files.newBufferedWriter(file)) {
-            values.store(writer, "MaiCraft client debug; /maicraft dev on|off; F9 toggles the panel");
+            values.store(writer,
+                    "MaiCraft client debug; /maicraft dev on|off; F9 panel; F9+H task list; F9+P path lines");
         }
     }
 }
