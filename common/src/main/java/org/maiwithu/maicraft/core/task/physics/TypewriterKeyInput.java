@@ -11,8 +11,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 模型给出按键及有限保持时间；按键不是玩家走路输入，不把 Shift 键转换成离开驾驶座。 */
-record TypewriterKeyInput(List<Integer> keys,int holdTicks,List<BlockPos> feedbackPositions) {
-    TypewriterKeyInput { keys=List.copyOf(keys);feedbackPositions=List.copyOf(feedbackPositions); }
+public record TypewriterKeyInput(List<Integer> keys,int holdTicks,List<BlockPos> feedbackPositions) {
+    public TypewriterKeyInput { keys=List.copyOf(keys);feedbackPositions=List.copyOf(feedbackPositions); }
     static TypewriterKeyInput parse(JsonObject input,boolean bind) {
         var keys=new LinkedHashSet<Integer>();
         if(bind) {
@@ -44,7 +44,7 @@ record TypewriterKeyInput(List<Integer> keys,int holdTicks,List<BlockPos> feedba
         if(!value.isJsonPrimitive()||!value.getAsJsonPrimitive().isString())throw new IllegalArgumentException("按键必须是名称字符串");
         return value.getAsString();
     }
-    static int code(String name) {
+    public static int code(String name) {
         String key=name.toLowerCase(Locale.ROOT);
         if(!key.startsWith("key.keyboard."))key="key.keyboard."+key;
         InputConstants.Key parsed=InputConstants.getKey(key);
@@ -54,5 +54,5 @@ record TypewriterKeyInput(List<Integer> keys,int holdTicks,List<BlockPos> feedba
             throw new IllegalArgumentException("不支持的打字机按键: "+name);
         return parsed.getValue();
     }
-    static String name(int code) { return InputConstants.Type.KEYSYM.getOrCreate(code).getName(); }
+    public static String name(int code) { return InputConstants.Type.KEYSYM.getOrCreate(code).getName(); }
 }

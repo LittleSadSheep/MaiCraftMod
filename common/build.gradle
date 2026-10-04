@@ -66,6 +66,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 飞控先回放姿态、起飞和落地反馈，再由原生会话单独验收操纵与真实飞行。
+    flightControlRegression: [
+        entry: 'org.maiwithu.maicraft.core.integration.physics.flight.FlightFeedbackControllerTest',
+        heap: '512m', directory: 'flight-control-regression', timeoutSeconds: 60,
+        purpose: '验证飞控按真实接地证据切换起降阶段和姿态反馈'
+    ],
     // 生活提醒独立核实原生证据与多条回执，新增规则不能覆盖旧规则或自行改变角色行为。
     reminderRegression: [
         entry: 'org.maiwithu.maicraft.mcp.ReminderRegressionSuite',
