@@ -43,6 +43,11 @@ public final class PhysicalControlContractTest {
                     "{\"operation\":\"inspect\",\"nbt\":{}}"))rejects(goal(worldTarget,json(invalid)));
             var ship=json("{\"structure_id\":\"00000000-0000-4000-8000-000000000001\",\"position\":{\"x\":1,\"y\":0,\"z\":-1}}");
             rejects(goal(worldTarget,ship));SemanticGoalContract.validate(goal(null,ship),IntentRuntime.KNOWN_ABILITIES);
+            // 艇上操作必须绑定同一结构，字符串真假值不能悄悄取消起飞时的人船约束。
+            ship.addProperty("require_onboard",true);SemanticGoalContract.validate(goal(null,ship),IntentRuntime.KNOWN_ABILITIES);
+            check(PhysicalControlParameters.parse(ship).requireOnboard(),"艇上操作要求在解析中丢失");
+            ship.addProperty("require_onboard","true");rejects(goal(null,ship));
+            rejects(goal(worldTarget,json("{\"require_onboard\":true}")));
             rejects(goal(null,new JsonObject()));
         }
     }

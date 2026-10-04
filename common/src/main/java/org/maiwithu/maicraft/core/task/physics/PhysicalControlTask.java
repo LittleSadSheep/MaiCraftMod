@@ -32,6 +32,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     private final Level world;
     private final PhysicalControlHand hand=new PhysicalControlHand();
     private AssemblyApproach approach=new AssemblyApproach();
+    private OnboardControlApproach onboard=new OnboardControlApproach();
     private final List<Map<String,Object>> effects=new ArrayList<>(),approaches=new ArrayList<>();
     private PhysicalAssemblyFrame frame;
     private NativeActionReceipt action;
@@ -89,7 +90,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         movingSince=-1;
         if(!player.mayBuild()||player.isSpectator())return failed("当前玩家没有原生修改权限",FailureType.UNKNOWN);
         // 导航可能正在准备飞行装备或自己的菜单；先让已开始的走位结算，不能每刻用取工具流程抢关它的界面。
-        if(approach.moving()&&!approachReady(entity))return approach.failure()==null?TaskState.RUNNING:failed(approach.failure(),FailureType.NO_PATH);
+        if(approachMoving()&&!approachReady(entity))return approachFailure()==null?TaskState.RUNNING:failed(approachFailure(),FailureType.NO_PATH);
         if(!hand.ready(player,NativePhysicalControl.requiredItem(entity,r.parameters,index),r.getToolCallId(),r.getDeadlineGameTime())) {
             if(hand.failure()!=null)return failed(hand.failure(),FailureType.NO_MATERIAL);return TaskState.RUNNING;
         }
@@ -100,7 +101,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         if(NativePhysicalControl.valueBox(r.parameters.operation())&&!NativePhysicalControl.settingAccessible(entity,player))
             return failed("当前原生旋钮不接受此玩家或主手物品的操作",FailureType.UNKNOWN);
         if(!approachReady(entity)) {
-            if(approach.failure()!=null)return failed(approach.failure(),FailureType.NO_PATH);return TaskState.RUNNING;
+            if(approachFailure()!=null)return failed(approachFailure(),FailureType.NO_PATH);return TaskState.RUNNING;
         }
         if(!ctx.menus().ensureWorldVisible(ctx))return TaskState.RUNNING;
         InputDriver.halt(player);InputDriver.sneak(player,false);
@@ -138,16 +139,22 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         return TaskState.RUNNING;
     }
     private boolean approachReady(BlockEntity entity) {
+        // 有艇上操作要求时不调用地面寻路；已入座者够不到控制器则保留座位并如实返回。
+        if(r.parameters.requireOnboard())return onboard.ready(player,frame,r.parameters.position(),
+                eye->PhysicalControlAim.aim(player,frame,r.parameters.position(),entity,r.parameters,index,eye),r.getToolCallId(),r.getDeadlineGameTime());
         return approach.ready(player,frame,r.parameters.position(),eye->PhysicalControlAim.aim(player,frame,r.parameters.position(),entity,r.parameters,index,eye),
                 r.getToolCallId(),r.getDeadlineGameTime());
     }
+    private boolean approachMoving(){return r.parameters.requireOnboard()?onboard.moving():approach.moving();}
+    private String approachFailure(){return r.parameters.requireOnboard()?onboard.failure():approach.failure();}
+    private Map<String,Object> approachEvidence(){return r.parameters.requireOnboard()?onboard.evidence():approach.evidence();}
     private BlockEntity entity() {
         var pos=frame.storage(r.parameters.position());
         if(!frame.loaded(pos))throw new IllegalStateException("部件所在区块未加载");
         var entity=world.getBlockEntity(pos);if(entity==null)throw new IllegalStateException("原生部件已移除或未同步");return entity;
     }
     private void advance() {
-        approaches.add(approach.evidence());approach.close();approach=new AssemblyApproach();
+        approaches.add(approachEvidence());approach.close();onboard.close();approach=new AssemblyApproach();onboard=new OnboardControlApproach();
         if(++index>=(r.parameters.operation()==SET_FREQUENCY?2:1))done=true;
     }
     private TaskState finishDesign() {
@@ -168,9 +175,9 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         return TaskState.SUCCESS;
     }
     private TaskState failed(String why,FailureType type){fail(why,type);return TaskState.FAILED;}
-    @Override public void stop(LocalPlayer player,Task.StopReason why){approach.stop(player,why);hand.stop(player,why);super.stop(player,why);}
+    @Override public void stop(LocalPlayer player,Task.StopReason why){approach.stop(player,why);onboard.stop(player,why);hand.stop(player,why);super.stop(player,why);}
     @Override protected void cleanup() {
-        approach.close();hand.close();if(watch!=null){watch.close();watch=null;}
+        approach.close();onboard.close();hand.close();if(watch!=null){watch.close();watch=null;}
         var ctx=ClientRuntime.actor().activeContext().orElse(null);
         if(ctx!=null&&action!=null&&!action.terminal())ctx.actions().retireOneShotForTaskBoundary(ctx,action,"物理控制任务结束");
         super.cleanup();
@@ -179,8 +186,8 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     @Override public Map<String,Object> progress() {
         // 操作者应能分清正在拿材料、换站位还是等服务器确认，不能只看到一个持续不变的任务类名。
         return Map.of("task",name(),"operation",r.parameters.operation().name().toLowerCase(Locale.ROOT),"configuration_step",index+1,
-                "phase",done?"checking_full_design":configurationObservedSince>=0?"observing_propeller_state":action!=null?"confirming_native_input":approach.moving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
-                "hand",hand.progress(),"approach",approach.evidence());
+                "phase",done?"checking_full_design":configurationObservedSince>=0?"observing_propeller_state":action!=null?"confirming_native_input":approachMoving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
+                "hand",hand.progress(),"approach",approachEvidence());
     }
     @Override protected Map<String,Object> resultData() {
         var out=new LinkedHashMap<String,Object>();out.put("operation",r.parameters.operation().name().toLowerCase(Locale.ROOT));
@@ -198,7 +205,9 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         out.put("structure_id",r.parameters.structureId()==null?"world":r.parameters.structureId().toString());
         out.put("component_offset",List.of(r.parameters.position().getX(),r.parameters.position().getY(),r.parameters.position().getZ()));
         out.put("design_declaration",designEvidence);out.put("declared_structure_diff",AssemblyDeclarationView.diff(frame,declarations));
-        out.put("approach",Map.of("completed",List.copyOf(approaches),"current",approach.evidence()));out.put("supply",hand.evidence());
+        out.put("approach",Map.of("completed",List.copyOf(approaches),"current",approachEvidence()));out.put("supply",hand.evidence());
+        out.put("required_onboard",r.parameters.requireOnboard());
+        out.put("onboard_observed",frame!=null&&OnboardControlApproach.supported(player,frame));
         out.put("vehicle_operation_verified",false);if(action!=null)out.put("input_receipt",Map.of("status",action.status().name(),"detail",action.detail()));
         if(afterUnknown!=null)out.put("after_observation_unknown",afterUnknown);return out;
     }

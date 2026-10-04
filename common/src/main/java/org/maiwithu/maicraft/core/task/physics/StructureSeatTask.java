@@ -33,7 +33,7 @@ public final class StructureSeatTask extends AbstractCompanionTask<BoardStructur
         var ctx=ClientRuntime.requireContext(player);
         if(action!=null) {
             action=ctx.actions().poll(ctx,action);if(!action.terminal())return TaskState.RUNNING;
-            if(action.status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED)return failed("座位右键未确认，不重放输入: "+action.detail());
+            if(action.status()!=NativeActionReceipt.Status.CONFIRMED_APPLIED){fail("座位右键未确认，不重放输入: "+action.detail(),FailureType.UNKNOWN);return TaskState.FAILED;}
             seated=station.seated(player);return seated?TaskState.SUCCESS:failed("右键确认后乘坐关系已经结束");
         }
         if(!frame.loaded(pos)||!ControlReflection.is(frame.level().getBlockState(pos).getBlock(),"com.simibubi.create.content.contraptions.actors.seat.SeatBlock"))
@@ -60,7 +60,13 @@ public final class StructureSeatTask extends AbstractCompanionTask<BoardStructur
     }
     private TaskState failed(String reason){fail(reason,FailureType.NO_PATH);return TaskState.FAILED;}
     @Override public void stop(LocalPlayer player,Task.StopReason why){approach.stop(player,why);hand.stop(player,why);super.stop(player,why);}
-    @Override protected void cleanup(){approach.close();hand.close();super.cleanup();}
+    @Override protected void cleanup(){
+        approach.close();hand.close();
+        // 入座请求已发出时取消只退役本次观察，不能重发右键或直接改掉玩家的乘坐关系。
+        var ctx=ClientRuntime.actor().activeContext().orElse(null);
+        if(ctx!=null&&action!=null&&!action.terminal())ctx.actions().retireOneShotForTaskBoundary(ctx,action,"指定座位任务结束");
+        super.cleanup();
+    }
     @Override protected String successMessage(){return "原生乘坐关系确认，已坐入指定飞艇座位，未启动载具";}
     @Override public Map<String,Object> progress(){return Map.of("phase",action!=null?"confirming_seat":"boarding_seat","approach",approach.evidence());}
     @Override protected Map<String,Object> resultData(){

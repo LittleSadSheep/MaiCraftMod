@@ -12,18 +12,26 @@ import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 控制意图只指定部件与原生设置，不接收点击脚本、任意 NBT 或直接施力。 */
 public record PhysicalControlParameters(Operation operation,UUID structureId,UUID designId,BlockPos position,Integer value,
-                                        Boolean receiver,List<String> frequencyItems,int crankTicks) {
+                                        Boolean receiver,List<String> frequencyItems,int crankTicks,boolean requireOnboard) {
     public enum Operation { INSPECT, SET_SPEED, SET_THROTTLE, SET_LINK_MODE, SET_FREQUENCY, SET_BURNER_VOLUME,
         ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER, TURN_CRANK }
     public PhysicalControlParameters {position=position.immutable();frequencyItems=List.copyOf(frequencyItems);}
     public static PhysicalControlParameters parse(JsonObject input) {
-        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds").contains(key))
+        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds","require_onboard").contains(key))
             throw new IllegalArgumentException("未知物理控制参数: "+key);
         Operation op=Operation.valueOf(PhysicalAssemblyParameters.text(input,"operation","inspect").toUpperCase(Locale.ROOT));
         // 只有手摇明确允许有界重复；旋钮、组装和频率设置不能通过附带持续时间变成反复点击。
         if(input.has("duration_seconds")&&op!=Operation.TURN_CRANK)throw new IllegalArgumentException("duration_seconds 仅用于 turn_crank");
         int crankTicks=op==Operation.TURN_CRANK?CreateManualInput.durationTicks(input):0;
         UUID id=input.has("structure_id")?UUID.fromString(PhysicalAssemblyParameters.text(input,"structure_id",null)):null;
+        // 起飞试验可明确要求身体留在同一艘艇上；这里只核对原生接触或乘坐，不判断设计是否能飞。
+        boolean onboard=false;
+        if(input.has("require_onboard")) {
+            if(!input.get("require_onboard").isJsonPrimitive()||!input.getAsJsonPrimitive("require_onboard").isBoolean())
+                throw new IllegalArgumentException("require_onboard 必须为布尔值");
+            onboard=input.get("require_onboard").getAsBoolean();
+            if(onboard&&id==null)throw new IllegalArgumentException("require_onboard 需要 structure_id");
+        }
         UUID design=input.has("design_id")?UUID.fromString(PhysicalAssemblyParameters.text(input,"design_id",null)):null;
         if(id!=null&&design!=null)throw new IllegalArgumentException("结构沿用自身声明，不能同时指定世界 design_id");
         boolean scalar=op==Operation.SET_SPEED||op==Operation.SET_THROTTLE||op==Operation.SET_BURNER_VOLUME;
@@ -58,6 +66,6 @@ public record PhysicalControlParameters(Operation operation,UUID structureId,UUI
             }
             frequency=items;
         }
-        return new PhysicalControlParameters(op,id,design,PhysicalAssemblyParameters.position(input,"position"),value,receiver,frequency,crankTicks);
+        return new PhysicalControlParameters(op,id,design,PhysicalAssemblyParameters.position(input,"position"),value,receiver,frequency,crankTicks,onboard);
     }
 }

@@ -31,6 +31,8 @@ final class PhysicalControlAbilityAdapter {
         // 手摇是移动结构上的普通原生操作；每次重算世界瞄准点，持续时长不开放给其他设置的机械重放。
         field(fields,"duration_seconds","number","Optional only for turn_crank, finite 0..30. Zero or omitted means one native activation. Positive duration maintains empty-hand uses with fresh structure pose and actual ray checks. Confirmed uses and observed kinetic stress are retained; supply does not prove vehicle motion or production.");
         field(fields,"structure_id","string","Observed structure UUID; omit target. position is relative to origin_storage. Otherwise target is the world anchor.");
+        // 飞艇供气和推进前选择同艇操作，避免麦麦站在地面启动后追不上载具。
+        field(fields,"require_onboard","boolean","Default false; true requires structure_id. Before native control, board near the component and verify support or Create-seat riding on that same vessel. Never navigate off the vessel for a better control ray; if seated controls are unreachable, retain the seat and report the obstruction.");
         field(fields,"position","object","Integer {x,y,z} component offset, default zero. Execution re-resolves the current pose and native hit region.");
         field(fields,"design_id","string","Optional saved world design for full post-configuration diff; omit with structure_id, which retains its own declarations.");
         // 起飞前先设置供气容量，再通过实际红石控制启停；面板容量本身不证明气球已有升力。
