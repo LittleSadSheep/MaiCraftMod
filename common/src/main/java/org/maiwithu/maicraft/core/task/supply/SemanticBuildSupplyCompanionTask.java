@@ -610,6 +610,12 @@ final class SemanticBuildSupplyCompanionTask
                 || !(demand.get("support_blocks") instanceof Number count)) return false;
         int required = count.intValue();
         if (required < 1 || required > 32) return false;
+        // 上一批在去工位途中真实消耗了垫块，下一批就把这份通行量与现场仍缺的量一起备齐；不靠改清单或凭空放块解困。
+        if(result.data().get("navigation_placed_blocks") instanceof Number placed)
+            supportAccessReserve=Math.max(supportAccessReserve,Math.max(0,placed.intValue()));
+        long withAccess=(long)required+supportAccessReserve;
+        if(withAccess>SemanticAcquireTaskRecord.MAX_FINAL_COUNT)return false;
+        required=(int)withAccess;
         var reserved = BuildTemporarySupportMaterials.remaining(activePlan.targets, this::constructionMatches);
         var options = BuildTemporarySupportMaterials.supplyOptions(ScaffoldMaterials.of(player), reserved, this::inventoryCount, required);
         if (options.isEmpty() || options.stream().anyMatch(need -> inventoryCount(need.item()) >= need.requiredFinalCount())) return false;
@@ -617,6 +623,8 @@ final class SemanticBuildSupplyCompanionTask
         r.extendDeadlineTo(supportSupply.deadline());
         return true;
     }
+
+    private int supportAccessReserve;
 
     private TaskState tickSupportSupply() {
         // 原地查所有现货 -> 附近定点采收 -> 原施工；整个过程保留图纸保护，不为临时垫块派出坑或仓库远行。
@@ -914,6 +922,7 @@ final class SemanticBuildSupplyCompanionTask
                 : traversabilityScan != null ? "verifying" : !prepared ? "preparing_materials"
                 : "awaiting_preview_or_batch");
         data.put("construction_batches_started", buildRounds);
+        if(supportAccessReserve>0)data.put("support_access_reserve",supportAccessReserve);
         if (supportSupply != null) data.put("child", supportSupply.receipt());
         else if (spoilSupply.active()) data.put("child", spoilSupply.receipt());
         else if (supply.active()) data.put("child", supply.progress());

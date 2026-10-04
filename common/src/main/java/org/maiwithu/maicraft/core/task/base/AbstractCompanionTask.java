@@ -138,6 +138,11 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         // 路上真动过的地形跟着每一种收场走:成功也好失败也罢,拆了什么就说什么
         String enRoute = journey.isEmpty() ? "" : " En route I had to " + journey.describe() + ".";
         Map<String, Object> data = new LinkedHashMap<>(resultData(finalState));
+        // 导航实际用掉的支撑不能只写成人类摘要；父施工据此补齐去工位的材料，避免每次到场又缺同一块。
+        if(!journey.isEmpty()) {
+            data.put("navigation_terrain_changes",journey.snapshot());
+            data.put("navigation_placed_blocks",journey.placeCount());
+        }
         if (guiFailure != null) {
             data.put("gui_preparation", guiFailure.evidence());
             data.put("outcome_uncertain", Boolean.TRUE.equals(data.get("outcome_uncertain")) || guiFailure.uncertain());

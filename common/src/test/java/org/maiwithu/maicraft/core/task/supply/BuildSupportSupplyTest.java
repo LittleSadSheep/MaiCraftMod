@@ -93,6 +93,7 @@ public final class BuildSupportSupplyTest {
                     && !harvest.inSearchScope(dirt.below()), "fallback cannot expand to a quarry or underground source");
             available.cancel(h.player);
             parentResumesWithTheActualAlternative(h);
+            reserveTheObservedApproachCost(h);
         } finally { if (before == null) runners.remove(SemanticAcquireTaskRecord.class); else runners.put(SemanticAcquireTaskRecord.class, before); }
         System.out.println("BuildSupportSupplyTest: passed");
     }
@@ -122,6 +123,19 @@ public final class BuildSupportSupplyTest {
                 Items.STONE, new BlockPos(12, 1, 12), "permanent", null, null, null)), false, true);
         return new SemanticBuildSupplyTaskRecord("support-owner", 2000, plan,
                 SemanticMaterialSupplyCoordinator.MaterialPolicy.ORDINARY, sources, false, List.of(), false);
+    }
+
+    private static void reserveTheObservedApproachCost(InteractionWorldTestHarness h) throws Exception {
+        // 复现补一块、导航又消耗一块的实机循环；已经带着一块仍应补到两块，抵达工位后才能兑现放置需求。
+        h.inventory.clearContent();h.inventory.setItem(0,new ItemStack(Items.COBBLESTONE));
+        var parent=new SemanticBuildSupplyCompanionTask(h.player,owner(List.of()),(r,plan)->Decision.DISABLED);
+        var request=SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("requestSupportSupply",TaskResult.class);request.setAccessible(true);
+        var result=TaskResult.fail("one support still missing after access",Map.of("temporary_support_demand",Map.of("support_blocks",1),"navigation_placed_blocks",1));
+        check(Boolean.TRUE.equals(request.invoke(parent,result)),"不能把仅有的一块同时当作通行和放置材料");
+        check(parent.progress().get("support_access_reserve").equals(1),"实际通行消耗必须进入可读预算");
+        h.inventory.setItem(0,new ItemStack(Items.COBBLESTONE,2));
+        var tick=SemanticBuildSupplyCompanionTask.class.getDeclaredMethod("tickSupportSupply");tick.setAccessible(true);
+        check(tick.invoke(parent)==TaskState.RUNNING&&h.inventory.countItem(Items.COBBLESTONE)==2,"补齐两块后交回原施工，筹料本身不消耗它们");
     }
     private static Task stub(TaskResult result) {
         return new Task() {
