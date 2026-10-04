@@ -15,6 +15,42 @@ sequence 的 children
 
 `sequence` 必须有子目标，不能另设一个总目的地。每项具体目标保留自己的地点与参数。组合层可以声明 `protected_labels`，其余具体偏好和限制放在相关子目标中。
 
+## 怎样提交
+
+下面是传给 MCP `plan` 的完整参数。`plan` 只建计划；拿到真实的 `plan_id` 后再交给 `execute`。网络重试沿用同一个 `request_key`，接单后跟随返回的 `next_attention`。
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:sequence",
+    "outcome": "先等两秒，再等到白天",
+    "children": [
+      {
+        "ability": "maicraft:wait_for_condition",
+        "outcome": "等待两秒",
+        "parameters": { "condition": "elapsed", "after_s": 2 }
+      },
+      {
+        "ability": "maicraft:wait_for_condition",
+        "outcome": "确认已经进入白天",
+        "parameters": { "condition": "day", "after_s": 0 }
+      }
+    ]
+  }
+}
+```
+
+| 字段位置 | 格式和含义 |
+| --- | --- |
+| `goal.ability`、`goal.outcome` | 必填字符串；能力为 `maicraft:sequence`，目标文字为 1～500 字符。文字不代替子目标参数 |
+| `goal.children` | 必填非空目标数组，每层至多 32 项；按数组顺序执行。子项也必须有 `ability` 和 `outcome` |
+| `goal.parameters.protected_labels` | 可选字符串数组；省略或 `[]` 不新增保护，`null`、非字符串、空白名字拒绝。名字必须来自已记住的地点，不能把坐标放进名字 |
+| `goal.children[i].on_failure` | 与 `ability` 同层，不能放进 `parameters`。正式取值为 `stop`、`continue`，省略为 `stop`；`continue` 只允许声明在某个 sequence 的直接叶子子项上。Schema 声明字符串，但当前运行入口将 `null` 按缺省处理；布尔值和其他名称拒绝 |
+| `goal.target` | 省略或 `null`；组合层没有目的地 |
+| `goal.preferences`、`goal.constraints` | 省略或分别用 `{}`、`[]`；组合层不能声明自己的非空偏好或约束 |
+
+嵌套 sequence 可以分组，但不会并行。根目标深度为 0，超过 32 的嵌套深度拒绝；当前不另计展开后的总步骤上限。每层都受公开目标格式校验；空数组不能表示“什么都不做”。
+
 实现：[Goal.executableSteps](../../common/src/main/java/org/maiwithu/maicraft/intent/Goal.java)、[SemanticGoalContract](../../common/src/main/java/org/maiwithu/maicraft/intent/SemanticGoalContract.java)。
 
 ## 保护范围怎样跟着步骤走
@@ -30,7 +66,9 @@ sequence 的 children
 
 ## 做不下去时怎样继续
 
-当前步骤失败后，总任务保留原目标、失败尝试和已发生的效果，再提出问题。常见回答有：
+先区分**待决定**与**执行失败**。适配器遇到需要选择的情况，可以交回 `Decision`，父任务此时等待答复；已经执行的子任务交回失败时，`IntentTask.failStep` 记录尝试和现场，默认直接结束总任务，不再自动转成问题。
+
+只有回执确实带有当前 `decision_id` 时，才通过 `task(action="answer")` 回答，并且只选本次列出的选项。常见选项的含义如下：
 
 | 回答 | 清单怎样变化 |
 | --- | --- |
@@ -44,12 +82,36 @@ sequence 的 children
 
 ## 声明可容忍的失败（on_failure）
 
-默认一损俱损：任一步失败，整个总任务立即终态。如果编排者知道某步只是顺路目标（例如"顺手合成火把"后面的"回地表"并不依赖它），可以在该子目标上声明 `on_failure: "continue"`：这一步确认失败后记入账本，接着执行兄弟步骤，不必拆单重发。
+默认执行失败会终止总任务。如果编排者知道后续步骤不依赖当前结果，可以在当前叶子目标上声明 `on_failure: "continue"`。例如钓鱼失败也要继续做下一项等待：
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:sequence",
+    "outcome": "尝试钓一竿，失败也继续最后的等待",
+    "children": [
+      {
+        "ability": "maicraft:fish",
+        "outcome": "收回一竿钓获物",
+        "on_failure": "continue",
+        "parameters": { "count": 1 }
+      },
+      {
+        "ability": "maicraft:wait_for_condition",
+        "outcome": "等待一秒",
+        "parameters": { "after_s": 1 }
+      }
+    ]
+  }
+}
+```
+
+这个声明只处理失败终态。缺鱼竿时适配器可能先提出补料决定，清单仍会等待答复，不能把 `continue` 当作自动回答所有问题。
 
 边界与语义：
 
-- `on_failure` 只允许出现在 sequence 的**直接子级**；顶层目标、嵌套 sequence、其他位置都会被计划期校验拒绝。嵌套分组想要同等效果，把内层步骤平铺后在首个内层步骤上声明。
-- 词表只有 `stop`（缺省）与 `continue`。continue 只对**确认失败**放行；超时和取消效果不确定或属于调用方主动停，一律照旧全停。
+- `on_failure=continue` 只允许出现在 sequence 的**直接叶子子项**；不能给顶层目标或 sequence 分组本身声明继续策略。嵌套分组里的叶子仍可逐项声明；分组被展开后，没有“跳过整个失败分组”的语义。显式 `stop` 与省略相同。
+- 当前 `toleratesStepFailure` 只检查终态是 `FAILED`、本项声明继续且仍有后项，**没有另查 `outcome_uncertain`**。因此未知效果也可能随失败留在账本、后项继续；不能把继续执行解释为前项已经结清。`TIMEOUT` 和 `CANCELLED` 不走此分支，最后一项失败也直接结束。
 - **部分失败算完全失败**：只要存在事实失败（含被容忍的），整体终态仍是 FAILED；只有显式跳过而没有任何事实失败时才是 SUCCESS。跳过是"决定不做"，容忍失败是"做了没成"，两者终态不同是刻意的区分。
 - 被容忍的失败记为 `success=false`、`skipped=false` 的真实失败，不混入跳过。终态回执带 `tolerated_failure_count` 与完整失败账本（`completed_effects` 逐步列出失败与成功、`remaining_effects` 为空）。
 - 失败步骤的位置不再作为后续 `prior_result` 的依据；引用它的兄弟步骤会得到明确的解析失败，而不是拿到 stale 坐标。
@@ -75,7 +137,24 @@ Attention 使用独立的 `step_skipped` 事件。后续失败的效果账本也
 
 跳过标记也保存。旧版没有专门字段的记录，只按原执行器的固定跳过说明识别，不把普通失败推断为跳过。即使旧记录还残留位置，被跳过或失败的步骤也不能成为后续 `prior_result` 的坐标依据。
 
+## 被打断时保留到哪里
+
+普通暂停保留当前执行器与清单，先释放身体输出；继续时由同一个子能力核对现场。取消结束整份清单，后面的步骤不会再开始，之前吃掉的食物、换到的物品或放下的炉子不会撤销。
+
+死亡走运行时的死亡恢复流程：是否可以自动复活取决于已有授权，没有授权就交付死亡决定。复活不代表原来的材料、地点和菜单还有效。普通断线或换世界先保存原世界进度，再清理旧身体；仅已授权的传送门交接可以保留父任务。磁盘恢复保留实际清单和已完成结果，未完成记录先暂停；恢复的是当前语义步骤，具体能力的内存动作不保证恢复。例如等待重新计时，聊天和切石还要检查各自的持久提交记录。
+
+| 要看哪一步 | 代码入口 |
+| --- | --- |
+| 目标字段、顺序和保护继承 | [Goal.fromJson / executableSteps](../../common/src/main/java/org/maiwithu/maicraft/intent/Goal.java) |
+| 拒绝错放的参数与继续策略 | [SemanticGoalContract.validate / validateOnFailure](../../common/src/main/java/org/maiwithu/maicraft/intent/SemanticGoalContract.java) |
+| 推进当前一步、等待、失败、终局结算 | [IntentTask.tickSemanticParent / failStep / completionResult](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentTask.java) |
+| 修改实际清单、保存每次尝试 | [IntentTaskRecord](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentTaskRecord.java) |
+| 解析前序地点 | [PriorResultResolver](../../common/src/main/java/org/maiwithu/maicraft/intent/PriorResultResolver.java) |
+| 世界归属、死亡记录和恢复 | [IntentRuntime.tickPersistence / restoreBound](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentRuntime.java) |
+
 ## 已有验证
+
+以下为现有验证入口，本轮只核对源码和文档，未运行这些回归。
 
 - [SequenceSkipTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SequenceSkipTest.java)：真实询问和跳过、继续后续目标、查询和通知、旧检查点恢复、残留位置不被复用。
 - [SequenceToleratedFailureTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SequenceToleratedFailureTest.java)：on_failure 的挂载位置与词表校验、容忍失败后兄弟步骤接续、整体仍报 FAILED 与账本披露、缺省 stop 对照。
