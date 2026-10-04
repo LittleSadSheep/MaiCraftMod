@@ -205,10 +205,13 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         }
         if (terminal != TaskState.SUCCESS || !result.success()) {
             Map<String, Object> evidence = new LinkedHashMap<>();
-            // 带上施工预检的逐格拒绝证据（blocked_cells/clearance_report），否则"哪些格、被哪条
-            // 规则拒绝"在包装层丢失，调用方只能看到一句 portal_build_failed 无法自证或绕开。
+            // 逐格/缺料证据一并透传，否则细节在包装层丢失、调用方只能看到一句合成失败码：
+            // 供应类失败看 blocked_need/planning_handoff（差什么物品与相近替代），
+            // 施工类失败看 blocked_cells/clearance_report（哪些格被哪条规则拒绝）。
             for (String key : List.of("issue_code", "allowed_dimensions", "recovery_options", "failure_type",
-                    "requires_narration", "target_item_family", "blocked_cells", "clearance_report", "failure_code"))
+                    "requires_narration", "target_item_family", "blocked_cells", "clearance_report",
+                    "failure_code", "blocked_need", "planning_handoff", "pending_supply",
+                    "resource_preparation"))
                 if (result.data() != null && result.data().containsKey(key)) evidence.put(key, result.data().get(key));
             childEvidence = Map.copyOf(evidence);
             String fallback = "requires_dimension".equals(evidence.get("failure_type")) ? "requires_dimension"

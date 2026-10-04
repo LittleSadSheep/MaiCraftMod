@@ -537,7 +537,7 @@ public final class SemanticAbilityCatalog {
                             + "Acceptance is not proof of resource readiness or started construction: read resource_preparation and construction_phase_started. Action completion, whole-frame differences and portal activation are reported separately.",
                     targets("current_place"), fields(
                             field("destination_dimension", "resource_id", "Portal destination; default minecraft:the_nether."),
-                            field("portal_method", "obsidian|lava_cast", "Default obsidian. Choose lava_cast for the single-bucket lava-pool technique; no diamond pickaxe or carried obsidian required."),
+                            field("portal_method", "obsidian|lava_cast", "Default obsidian. Choose lava_cast for the single-bucket lava-pool technique; no diamond pickaxe or carried obsidian required. lava_cast also needs one EMPTY bucket for water: a carried lava_bucket does not satisfy it, and the supply stage will fail asking for a bucket unless iron for a second bucket or a pour-back conversion is available."),
                             field("max_resource_search_distance", "integer", "Water/pool exploration radius per missing resource; default 768, or 0 for loaded-only preparation; positive values 64..2048. Route changes retain may_alter_terrain and protected_labels."),
                             field("max_search_radius", "integer", "Loaded-world search radius, 16..512; default 128. Explore first if no pool is observed."),
                             field("may_alter_terrain", "boolean", "Required for construction: permits the declared mold, bottom excavation and frame replacement."),
@@ -553,7 +553,7 @@ public final class SemanticAbilityCatalog {
                             field("destination_dimension", "resource_id", "Required destination dimension, such as minecraft:the_nether or minecraft:the_end."),
                             field("max_search_radius", "integer", "Bounded loaded-world portal evidence radius; default 128."),
                             field("prepare_portal", "boolean", "If no active portal is observed, obtain materials and prepare one; default false. Nether construction/repair also needs may_alter_terrain; End eyes need allow_rare_consumables."),
-                            field("portal_method", "obsidian|lava_cast", "Preparation method; default obsidian. lava_cast prepares a reusable bucket, collected water and ignition items before casting, with bounded exploration for missing water/pools."),
+                            field("portal_method", "obsidian|lava_cast", "Preparation method; default obsidian. lava_cast prepares a reusable bucket, collected water and ignition items before casting, with bounded exploration for missing water/pools. lava_cast needs one EMPTY bucket for water: a carried lava_bucket does not satisfy it."),
                             field("max_resource_search_distance", "integer", "Missing water/pool exploration radius; default 768, 0 for loaded-only, otherwise 64..2048."),
                             field("allow_rare_consumables", "boolean", "Permit stronghold eye throws and End frame eye insertion; default false."),
                             field("allow_combat", "boolean", "Permit hostile hunting for portal supplies; default false."),
