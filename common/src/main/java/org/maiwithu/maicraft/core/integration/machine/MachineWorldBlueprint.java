@@ -9,6 +9,7 @@ import net.minecraft.world.level.Level;
 /** 把选定机器范围内的实际地图导出成蓝图式布局；绝不拿存档设计中的方块或状态补齐现状。 */
 public final class MachineWorldBlueprint {
     private MachineWorldBlueprint() {}
+    /** 按 X、Z、Y 顺序读取包含空气的格子区间；offset 是格子序号，不是返回的非空气方块行号。 */
     public static JsonObject page(Level world, String dimension, BlockPos anchor, BlockPos minimum, BlockPos maximum, int offset, int limit) {
         long width = (long) maximum.getX() - minimum.getX() + 1, height = (long) maximum.getY() - minimum.getY() + 1;
         long length = (long) maximum.getZ() - minimum.getZ() + 1;
@@ -26,12 +27,14 @@ public final class MachineWorldBlueprint {
                 row.addProperty("reason",sameDimension ? "chunk_not_loaded" : "different_dimension"); unknown.add(row); continue;
             }
             var actual = world.getBlockState(at);
+            // 空气只计数以免平台周围出现大量空行；只有完整覆盖且没有未知格时，遗漏位置才可推导为空气。
             if (actual.isAir()) { air++; continue; }
             var row = MachineBlueprintDiff.state(actual); row.add("offset",vector(at.subtract(anchor))); blocks.add(row);
         }
         var result = new JsonObject(); result.addProperty("schema","maicraft.observed_blueprint.v1");
         result.addProperty("data_source","current_client_world"); result.addProperty("dimension",dimension);
         result.add("anchor",vector(anchor)); result.add("min_offset",vector(minimum.subtract(anchor))); result.add("max_offset",vector(maximum.subtract(anchor)));
+        // 记录的是客户端这一轮读图时间；库存与之后的服务端分页各有自己的时刻，不能合称原子快照。
         result.addProperty("observed_at_tick",world.getGameTime()); result.addProperty("total_cells",total);
         result.addProperty("offset",start); result.addProperty("examined",end - start); result.addProperty("air_cells",air);
         result.add("blocks",blocks); result.add("unknown_cells",unknown); result.addProperty("has_more",end < total);

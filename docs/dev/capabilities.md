@@ -55,7 +55,7 @@
 | `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | 入口核对 |
 | `light_area` | 给实际识别出的区域补光 | `AbilityAdapter.lightArea` | 入口核对 |
 | `auto_light` | 启停或查询随行副手补光，不替换当前任务 | `AutomaticLightingAdapter` → `AutomaticLighting` | 随行与区域覆盖通过 `lightingRegression` 回放 |
-| `inspect_machine` | 观察机器及其接口和结构 | `MachineAbilityAdapter.inspect` | 入口核对 |
+| `inspect_machine` | 读取机器地图现状、整机差异与原生组件证据 | `MachineAbilityAdapter.inspect` | [机器检查契约与已知边界](machine-inspection.md)；源码静态复核，未运行本轮回归 |
 | `design_machine` | 检查机器布局及需求 | `MachineAbilityAdapter.design` | 入口核对 |
 | `build_machine` | 供料、搭建并核对机器结构 | `MachineAbilityAdapter.build` | 入口核对 |
 | `operate_machine` | 使用机器、转移物品或观察生产 | `MachineAbilityAdapter.operate` | 入口核对 |

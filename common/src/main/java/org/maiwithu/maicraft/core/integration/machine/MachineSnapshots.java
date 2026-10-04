@@ -111,7 +111,7 @@ public final class MachineSnapshots {
         }
         aeEvidence.addProperty("detail", aeAccess.detail());
         report.add("ae2_access_evidence", aeEvidence);
-        // 只为实际匹配的标记位置附机制契约与原生配方观察，不在观察时开菜单、投料或生成设备。
+        // 只为锚点本格匹配的机制附契约与配方观察；扩大扫描半径不会遍历每个部件，也不在观察时开菜单或投料。
         report.add("native_processes", NativeProcessRegistry.inspect(player, center));
         report.addProperty("native_processes_scope", NativeProcessRegistry.OBSERVATION_SCOPE);
         report.addProperty("native_processes_knowledge_uri", NativeProcessRegistry.KNOWLEDGE_URI);
@@ -139,7 +139,7 @@ public final class MachineSnapshots {
         return snapshot;
     }
 
-    /** 附加原生观察分页，仍沿用原结构指纹；补读运行信息不能证明场地未变。 */
+    /** 原生补读结束后把已收集的分页附回同一快照；保留原结构时刻与指纹，不将较晚库存冒充同时刻布局。 */
     public static Snapshot enrich(LocalPlayer player, Snapshot anchor, JsonObject serverEvidence) {
         bind(player);
         Snapshot current = SNAPSHOTS.get(anchor.id());
@@ -155,7 +155,7 @@ public final class MachineSnapshots {
         return enriched;
     }
 
-    /** 操作前核对编号和当前方块；现场未变时保留原观察，不按游戏时间或摘要容量失效。 */
+    /** 操作前核对仍在本会话缓存中的编号和当前方块；观察年龄本身不使它失效，但最旧编号仍可能被十六份缓存淘汰。 */
     public static Snapshot requireFresh(LocalPlayer player, String id) {
         return require(player, id, false);
     }

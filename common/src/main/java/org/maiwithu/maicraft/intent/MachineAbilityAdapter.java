@@ -91,6 +91,8 @@ final class MachineAbilityAdapter {
         JsonObject p = goal.parameters();
         switch (goal.ability()) {
             case INSPECT -> {
+                // 固定机器与移动结构共用只读入口；先校验字段形状，结构编号出现时再拒绝固定机器范围与分页参数。
+                // 某些兼容参数在 full/diff 中不参与读取，具体有效范围由公开契约说明，不能把接受字段说成一定生效。
                 only(p, "label", "radius", "structure_id", "component_offset", "resource_offset", "machine_id", "mode", "offset", "limit");
                 optionalString(p, "label", 160);
                 String mode = optionalString(p,"mode",16);
@@ -234,6 +236,8 @@ final class MachineAbilityAdapter {
     }
 
     private static IntentAction inspect(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 移动结构先读真实控制回路；固定机器按选址读取现状和整机差异，只有已加载 full 才继续补原生组件页。
+        // 观察不派角色走近或开菜单，成功只表示取得可用事实，不能推断机器可工作。
         if (goal.parameters().has("structure_id")) {
             var inspection=MachineControlInspection.structure(player,
                     UUID.fromString(goal.parameters().get("structure_id").getAsString()));
@@ -241,6 +245,7 @@ final class MachineAbilityAdapter {
                     Map.of("machine",inspection.report())),null);
         }
         JsonObject p = goal.parameters();
+        // 显式机器编号优先确定档案和位置；当前即使同时给了 target 也不会用它选址，调用方应只用一种入口。
         MachineBlueprint saved = p.has("machine_id") ? ClientMachineCatalog.blueprint(player,p.get("machine_id").getAsString(),null)
                 .orElseThrow(() -> bad("machine_record_not_found")) : null;
         Goal.WorldPosition position = saved == null ? resolve(goal.target(), player, runtime)
@@ -253,9 +258,9 @@ final class MachineAbilityAdapter {
         if (label == null || label.isBlank()) throw bad("Give the machine a short label so subsequent analysis and operation refer to the same place");
         int radius = integer(p, "radius", 4, 0, 8);
         String mode = optionalString(p,"mode",16); if (mode == null) mode = "full";
-        // 未指定局部半径时，组件、工艺与地图导出都覆盖登记机器的足迹，避免默认四格漏掉远端部件。
+        // 未指定半径时按登记足迹扩展局部组件扫描，最多八格；地图可读完整档案范围，工艺契约仍只匹配锚点。
         if (mode.equals("full")) radius = MachineInspectionBlueprintView.componentRadius(saved, center, radius, p.has("radius"));
-        // 默认导出当前地图，只有显式 diff 才拿存档设计比较；未知区块返回未知，不用旧设计填充现场。
+        // full 从地图导出现状并附登记整机的差异，diff 只交付目标观察；两种模式都把未加载格保留为未知。
         var blueprintView = MachineInspectionBlueprintView.read(player,saved,center,radius,p.has("radius"),mode,
                 integer(p,"offset",0,0,Integer.MAX_VALUE),integer(p,"limit",256,1,512));
         if (mode.equals("diff")) {

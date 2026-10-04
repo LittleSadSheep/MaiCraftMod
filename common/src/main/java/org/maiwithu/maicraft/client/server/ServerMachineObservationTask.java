@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 每次请求读取一页有界原生观察，不移动玩家、打开菜单或阻塞游戏线程。 */
+/** 在同一检查任务中连续补读组件及其资源分页；角色不走近、不打开菜单，每个原生请求异步等待确认。 */
 final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMachineObservationTaskRecord> {
     private record Target(int componentIndex, BlockPos position) {}
     private final MachineObservationPages pages = new MachineObservationPages();
@@ -44,6 +44,7 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
             fail("Machine snapshot belongs to a different world.", FailureType.TARGET_LOST);
             return;
         }
+        // 服务端未协商观察能力时直接交付已有客户端现场；没有 server_evidence 不等于库存为空或生产正常。
         if (!ServerAssistClient.serverSupported("machine.snapshot")) { r.observed(); finished = true; return; }
         Set<Integer> declared = new HashSet<>();
         if (report.has("component_evidence")) for (var raw : report.getAsJsonArray("component_evidence")) {
@@ -55,7 +56,8 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
         Map<BlockPos, Integer> indices = new LinkedHashMap<>();
         if (rows != null) for (int index = 0; index < rows.size(); index++) indices.put(at(rows.get(index).getAsJsonArray()), index);
         boolean registered = report.has("native_component_offsets");
-        // 已登记机器直接遍历整份目标足迹；周围房屋和结构展示截断都不应抢占机器部件的观察额度。
+        // 已登记机器直接遍历整份目标足迹，此分支不按 componentOffset 跳过目标；未登记机器才按勘测索引起读。
+        // 周围房屋和结构展示截断都不应抢占已登记机器部件的观察额度，十六格原生观察距离仍逐项核对。
         if (registered) for (var raw : report.getAsJsonArray("native_component_offsets")) {
             BlockPos position = at(raw.getAsJsonArray());
             candidates.put(position, indices.getOrDefault(position, -1));
@@ -114,6 +116,7 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
     private TaskState poll() {
         var receipt = pending.snapshot();
         if (!receipt.settled() && world.getGameTime() - requestTick <= 120) return TaskState.RUNNING;
+        // 某个部件被原生拒绝或超过等待时间时保留回执并继续后续部件，不将缺失库存编成零，也不代替玩家走近。
         if (!receipt.settled() || receipt.retired() || receipt.status() != ClientRequestReceipt.Status.SUCCEEDED
                 || receipt.backend() != ClientRequestReceipt.Backend.SERVER) {
             ServerAssistClient.cancel(pending.id());
@@ -194,6 +197,7 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
     }
 
     @Override protected void cleanup() {
+        // 终止时撤回仍待决的只读请求；当前只有 finish 才把 pages 写入 report，中途取消尚不会交付这些已读页。
         if (pending != null) { ServerAssistClient.cancel(pending.id()); pending = null; }
         super.cleanup();
     }
