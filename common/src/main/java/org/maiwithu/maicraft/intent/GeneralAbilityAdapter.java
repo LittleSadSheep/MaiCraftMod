@@ -1002,6 +1002,7 @@ public final class GeneralAbilityAdapter {
                             option("cancel", "Cancel the task.")), facts);
         }
         JsonObject args = new JsonObject();
+        // 公开钓鱼默认一竿；这里只传数量，不把 area 或 landmark 变成目的地，异地钓鱼应先旅行。
         args.addProperty("count", integer(goal.parameters(), "count", 1, 1, 64));
         return new IntentAction.Tool("fish", args.toString());
     }

@@ -70,10 +70,17 @@ public final class SemanticAbilityCatalog {
                             field("search_radius", "integer", "goal.parameters.search_radius: JSON integer-valued number in blocks, 4..64 inclusive, omitted=24. Terrain candidate standing cells are within this three-dimensional distance from the first survey position and also within +/-12 vertical blocks; mob candidates are radius-filtered when selected. This is not a hard bound on routes, hazard entries, downward checks or subsequent mob movement. Terrain scan is finite and not restarted after completion. Zero, null, numeric strings, fractions and out-of-range values are rejected. Large auto/lava/fall surveys consume the execution budget before approach."),
                             field("timeout_seconds", "integer", "goal.parameters.timeout_seconds: JSON integer-valued number 10..600 inclusive, omitted=120. Converted to 20 task-execution ticks per second; the body is stopped when that accumulated budget is exceeded. Includes rule waiting, GUI preparation, surveying and approach; time not given to this executor while paused/preempted does not increment it. Zero is not unlimited; null, strings, fractions and out-of-range values are rejected. Each candidate additionally has a 400-execution-tick health-loss window that includes approach, resets on entering exposure and refreshes on any observed health decrease.")));
             case ChatAbilityAdapter.ABILITY -> contract(
-                    "Open the real game chat box, visibly type one complete message or slash-prefixed command, then submit it once through native chat handling. Uses the current player's permissions and loader command hooks. No foreground window or keyboard simulation is required. Existing human chat, containers and manual pause menus are preserved; an invisible background focus-loss pause may be replaced. Human input/Esc cancels automation, and task pause retains the draft. Success means submitted_to_client, not confirmed server delivery or command execution. Follow Attention for task status and maicraft://chatflow for received replies. Reuse one execute request_key for transport retries. Restarted operations with a prior reservation or untracked legacy history are not resent automatically; inspect history before starting a new send.",
-                    targets(), fields(
-                            field("text", "string", "Required single line, 1-256 UTF-16 characters. A leading / submits a command; otherwise sends public player chat. Uses vanilla whitespace normalization. No control characters or section-sign formatting; Chinese and complete Unicode graphemes are supported."),
-                            field("typing_interval_ms", "integer", "Time between displayed characters, 50-1000 ms, default 100. A slow client may take longer; it never bursts to catch up. The completed draft remains visible for 250 ms before automatic submission.")));
+                    // 先结清挡路界面，再展示完整草稿并保存提交身份；客户端接收与服务器执行分开报告。
+                    "打开真实游戏聊天框，逐个显示完整可见字符，整份草稿再停留250毫秒后提交一次。goal.parameters 放文字与速度；target 省略或为 null，没有收件人参数；preferences、constraints、children 留空。"
+                            + "普通文字交给公开聊天，前缀 / 交给原生命令处理，沿用玩家权限与加载器钩子，不需要前台窗口或键盘模拟。获准执行后先等待旧菜单事务结清，再通过原生退出流程关闭挡路容器、旧聊天或暂停页面，之后继续同一条消息。自动草稿开始后，玩家输入或 Esc 取消自动提交；普通暂停保留草稿。"
+                            + "完整草稿和父任务检查点、单次提交标记都就绪才发送。成功的 delivery_status=submitted_to_client 只证明交给客户端，不证明服务器收信或命令执行成功；回复另读 maicraft://chatflow。未提交、已提交、未知分别看 delivery_status、outcome_uncertain 和 gui_preparation。"
+                            + "同次 execute 网络重试复用 request_key。重启不恢复半份草稿；未完成记录先暂停，恢复同操作若已有预约或旧历史未跟踪则不重发，先核对历史。另一次明确新操作才可再次发送同文。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:chat\",\"outcome\":\"说明正在整理背包\",\"parameters\":{\"text\":\"我先整理一下背包。\",\"typing_interval_ms\":100}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:chat\",\"outcome\":\"查看当前命令帮助\",\"parameters\":{\"text\":\"/help\"}}}。",
+                    targets(),
+                    fields(
+                            field("text", "string", "goal.parameters.text 必填。原始输入1～256个UTF-16单位，一行；规范化后非空且不能只有 /。拒绝控制字符、§格式符和残缺代理字符；空白按原版规则整理。null、数字、布尔值无效。组合表情按完整可见字符显示，长度上限仍按UTF-16计算。"),
+                            field("typing_interval_ms", "integer", "goal.parameters.typing_interval_ms 是每个可见字符间的最短现实毫秒数，整数50～1000，省略默认100。0、小数、字符串、null、布尔值和越界数拒绝。客户端卡顿会更慢，不突发补字；整份草稿额外停留250毫秒。")));
             case MachineAbilityAdapter.INSPECT -> contract(
                     // 按当前读图、整机比较和原生补读的实际分工说明；接受但未生效的兼容参数必须写明，不能诱导重复勘测。
                     "Read the present state of an existing fixed machine or an observed physical structure. This is an observation task: it does not travel, open menus, place/break blocks, supply materials, repair differences or prove production. Formal game requests require a confirmed MaiCraft server session. Put inspection options in goal.parameters, target beside parameters, and leave preferences empty. plan registers the goal; execute with its returned plan_id starts the observation. "
@@ -257,23 +264,40 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Integer blocks, default 64, clamped 4..128 (0 becomes 4), for initial loaded bounding-box scan only. Not a maximum later follow distance; no visibility ray is checked at selection."),
                             field("may_alter_terrain", "boolean", "Boolean default false (omitted/null/false). True enables permitted route terraforming to keep up; does not guarantee reachability. Cancellation preserves blocks already changed.")));
             case GeneralAbilityAdapter.CONSUME -> contract(
-                    // 已授权的自主游戏任务中，规划器可权衡饥饿与食物效果；该参数表达游戏策略选择，不新增人工审批步骤。
-                    "Eat a suitable carried food through native timed use. The planner may choose food effects as an ordinary survival decision within the authorized game task; respect any explicit user restrictions. Inspect the food and current hunger before choosing.",
+                    // 点名食物的效果许可属于游戏策略；吃完后的库存事实与满血、吃饱目标分别判断。
+                    "通过真实持续使用吃一份随身食物；参数放goal.parameters，target省略/null/current_place，preferences和constraints无专属选项。先查饥饿值，达到20就提出跳过或取消决定，当前连可满饥饿食用的食物也在这一步被挡住。"
+                            + "未点名时只选无状态效果食物，先比营养与饥饿缺口，再比饱和度。点名有状态效果的食物需allow_effects=true，LLM可在已授权游戏任务内作此策略选择，遵守用户已有约束而不另设人工审批。角色选主手、等待原生吃完、观察同类数量减少；不直接加血，不保证一口吃饱或立刻满血。药水牛奶等无FOOD组件物品不属于此能力。"
+                            + "结果看food_count_before/after、consumed_count、hp、hunger和使用时长。当前净数量确认会受同期拾取或丢失同类物品干扰；创造模式拒绝，真实食物组件与默认组件的检查可能不一致。暂停停止持用；取消保留已吃事实。死亡/换世界/重启后重建步骤需重看饥饿和库存，没有持久逐口消费预约。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:consume\",\"outcome\":\"吃一份面包\",\"parameters\":{\"item_id\":\"minecraft:bread\",\"allow_effects\":false}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:consume\",\"outcome\":\"选择一种随身无效果食物\",\"parameters\":{}}}。",
                     targets("current_place"),
                     fields(
-                            field("item_id", "resource_id", "Optional exact carried food; omit to choose safe effect-free food."),
-                            field("allow_effects", "boolean", "The planner explicitly accepts the named food's native status effects; default false. It may set true within an authorized autonomous game task without requesting another human confirmation.")));
+                            field("item_id", "resource_id", "goal.parameters.item_id 可选随身食物ID字符串；省略、null、空白时自动选择无效果食物。指定时必须存在、带着且有FOOD组件。当前读取器对错误形状也可能按未提供处理；应使用正式字符串类型。"),
+                            field("allow_effects", "boolean", "goal.parameters.allow_effects 默认false，null也回到默认；true仅接受点名食物的状态效果，不使自动选择挑有副作用食物。无count参数，不接受false或0作为物品ID。布尔读取器当前也可能接受字符串布尔值，不应依赖这种宽松转换。")));
             case GeneralAbilityAdapter.EQUIP -> contract(
-                    "Equip or unequip semantic gear; MaiCraft resolves the concrete inventory entry.",
+                    // 拿在手上和使用物品分开；卸下结果同时披露收回与仍留在身上的装备。
+                    "把随身某类物品拿到主手、副手或穿到对应部位，也可卸下指定部位。业务参数放goal.parameters；target省略/null/current_place，preferences和constraints无专属选项。主手持物不会使用它；护甲按原生使用穿戴，副手用可见背包交换。"
+                            + "未点名且指定部位时，只在兼容候选按物品ID去重后仅一种时自动选。没有附魔/耐久最优选择，也不能指定某个组件版本。真正穿戴来源只看主背包和快捷栏；已经戴好但背包没有另一件时仍可能报缺料。"
+                            + "卸甲按头胸腿脚逐件处理；放不下的留身上，不主动丢物品。当前卸下仍可能success但still_worn非空，全部留下时消息甚至写已为空，必须看removed和still_worn。副手原有完全相同物品堆时交换确认可能失败。"
+                            + "暂停保留内存阶段并释放输入，原生已提交交换可能继续；取消收尾不回滚已穿装备。死亡/换世界/重启清理旧界面，未完成父任务先暂停，继续按当前库存重建，不能假定原来的来源槽仍有效。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:equip\",\"outcome\":\"把铁镐拿到主手\",\"parameters\":{\"action\":\"equip\",\"item_id\":\"minecraft:iron_pickaxe\",\"equipment_location\":\"mainhand\"}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:equip\",\"outcome\":\"卸下四件护甲\",\"parameters\":{\"action\":\"unequip\",\"equipment_location\":\"armor\"}}}。",
                     targets("current_place"),
                     fields(
-                            field("action", "string", "Equip or unequip."),
-                            field("item_id", "resource_id", "Optional exact carried item; omit only when one compatible choice exists."),
-                            field("equipment_location", "string", "Semantic body location: mainhand, offhand, head, chest, legs, feet or armor; never a GUI inventory index.")));
+                            field("action", "string", "goal.parameters.action 为equip或unequip，省略/null/空白默认equip，名称转小写。其他动作提出决定；当前并非严格类型读取，错误原始值可能转字符串，错误形状可能按省略处理。"),
+                            field("item_id", "resource_id", "goal.parameters.item_id 为随身物品ID字符串；equip时通常必填，省略/null/空白只可在指定equipment_location且恰有一种兼容物品ID时自动选。unequip时忽略，不是互斥报错。"),
+                            field("equipment_location", "string", "goal.parameters.equipment_location 取mainhand、offhand、head、chest、legs、feet、armor。equip省略/null/空白按物品自然部位，显式护甲部位须匹配；unequip必须提供，armor仅表示按头胸腿脚卸四件，不能用来自动穿全套。这里是语义部位，不是GUI格号；0和false不是有效部位。")));
             case GeneralAbilityAdapter.FISH -> contract(
-                    "Fish with a carried rod using normal first-person casting and retrieval.",
+                    // 咬钩、收线和战利品入包按顺序确认；公开目标数量与旧内部常驻钓鱼模式分开说明。
+                    "用随身原版鱼竿从附近水面钓取并收回战利品。goal.parameters只提供count，公开能力省略也是一竿，内部旧fish工具的不定次模式不从这里开放。target省略/null/current_place即可；目录虽接受area或landmark，当前适配器没有传递地点，去别处先旅行。"
+                            + "干燥站位只搜索原地水平4～10格、上下4格的可抛水源表面；原地没落点就失败。非干燥站位才在水平12格、上下4格内找干地，最多检查256个候选，最多三次站位导航失败。找竿、转好视角、原生抛竿、读取同步咬钩、收线后等掉落飞回，必要时走近原生拾取再记一竿。鱼、垃圾、宝藏均计数，不保证鱼种或物品件数。"
+                            + "一竿5秒未入水或60秒没咬钩可重试，连续五次失败停。读requested、caught、casts与positioning_observation；选址失败不等于角色在水里，也不证明整个区域没水。没见掉落时目前用任意库存正增长兜底，失败重抛还可能混用旧收竿回执；次数不是无条件的产物归属证明。"
+                            + "竿只在副手时可能通过找竿但失败于主手选择；模组自定义竿未接通。暂停尝试收竿，拾取阶段保留该竿跟踪，其余重新准备；取消留下实际掉落。死亡/换世界/重启不恢复鱼钩与逐竿跟踪，未完成父任务先暂停，重建会重做本步请求次数。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:fish\",\"outcome\":\"收回一竿钓获物\",\"parameters\":{\"count\":1}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:fish\",\"outcome\":\"默认钓一竿\",\"parameters\":{}}}。",
                     targets("current_place", "area", "landmark"),
-                    fields(field("count", "integer", "Number of catches requested, not casts or clicks.")));
+                    fields(
+                            field("count", "integer", "goal.parameters.count 为确认收获的竿数，正式整数1～64，省略/null默认1，不是抛竿次数或最后库存数量。当前先宽松转整数再夹取，0变1、超限变64、小数可能截断、数字字符串可能接受；读不出则用1。false不表示关闭，0不表示无限。")));
             // 模型选择类型或真实掉落引用；执行器负责接触、等待和核验，范围扫空不能冒充点名物品已入包。
             case GeneralAbilityAdapter.COLLECT -> contract(
                     "Collect loaded loose item entities through native contact pickup; this is not a final inventory-count request or a backpack/container withdrawal. "
@@ -345,7 +369,12 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Bounded loaded-container search radius; default 32."),
                             field("may_alter_terrain", "boolean", "Explicit native route preparation permission; default false.")));
             case "maicraft:sleep" -> contract(
-                    "Sleep safely. MaiCraft finds or places a usable bed, travels to it and lies down.",
+                    // 公开睡眠确认上床；自然醒属于内部另一选项，取消也不强制把玩家叫起来。
+                    "找可用床，必要时放下随身床，走近并原生右键，确认躺下即完成。goal.parameters为空对象，没有wait_until_awake、指定床坐标或补料参数；target省略/null/current_place，preferences与constraints无专属选项。"
+                            + "先检查床在当前维度不会爆炸，再分刻查询已加载的床；找到后走到该床类型附近，内部工具找伸手可及的床。没有现成床而带了床时，水平五格内按地表高度找两格有支撑的位置放床；没有床或位置时提出恢复前置、跳过或取消决定，不偷偷取料。"
+                            + "白天且无雷暴时提出等待夜晚决定，不反复点击。点击前复查维度、加载、距离与实际视线；原生占用、危险或服务器拒绝如实失败。entered_sleep证明躺下；公开入口wait_until_awake=false，不保证天亮、自然醒或其他玩家已睡。内部自动夜间休息另用等待自然醒模式。"
+                            + "任务成功后原生睡眠和床上界面可以继续。取消只结清自己的床点击，不强行叫醒；死亡/换世界由公共生命周期处理，重启未完成父任务先暂停，继续重新检查床和身体，不沿用旧点击。同次网络重试复用request_key。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:sleep\",\"outcome\":\"找床并躺下\",\"parameters\":{}}}。",
                     targets("current_place"),
                     fields());
             case "maicraft:remember_place" -> contract(
@@ -556,18 +585,22 @@ public final class SemanticAbilityCatalog {
                             field("preferred_materials", "array<resource_id>", "goal.parameters.preferred_materials：可选软偏好，必须是带命名空间的真实物品 ID，去重后最多256种；省略/null/[] 为无偏好，数组中的空白/null 不合法。可影响中间配方；现货覆盖优先，偏好不可用时保留其他路线，不扩大获取来源。"),
                             field("count", "integer", "goal.parameters.count：推荐整数1..256，默认1，单位为最终主背包数量，不是新增数量或点击次数。当前适配器对省略/null/对象/数组采用默认1，对原始标量先 getAsInt 再夹到1..256；因此0变1，小数可能截断、数字字符串可能被接收，非法转换可能到执行时才失败。不要依赖这些宽松行为；acquire_items 的数量检查更严格。")));
             case "maicraft:cook" -> contract(
-                    "Cook an item through an ordinary furnace-family workstation from the current location. "
-                            + "Use a sequence with travel first to cook elsewhere; nearest accepts no qualifiers. "
-                            + "Recipe, input, fuel quantity, workstation, path and synchronized GUI transactions belong to MaiCraft.",
+                    // 目标总数、单炉投入与已收产物分别记账，取消或未知同步不能抹掉已经发生的加工。
+                    "从当前位置用普通熔炉、高炉或烟熏炉补足主背包最终成品数量，快捷栏计入，副手和穿戴栏不计。目标已有足量直接收尾；count 不是新增量。参数放 goal.parameters；target 省略、null 或无附加限定的 nearest，去其他地方先用 sequence 旅行。"
+                            + "读取真实配方，比较原料、燃料和设备准备成本，再按 allowed_sources 备料或取得并放置设备，靠近炉子，原生开菜单并装料，观察点火与加工进度，关界面等待，回原炉核对本批投入、退回与产出，确认入包后收尾，缺额仍在才开下一炉。首次使用要求炉内物品及活动进度为空；忙炉可有限换站，已投料不换炉认领别人的产物。"
+                            + "数量够、原生搬运完成和未结炉次分开判断。读 goal_satisfied、observed_final_count、batch_outstanding、owned_input_loaded/returned、owned_output_taken、outcome_uncertain 与前置失败事实。正常剩余燃料留炉；取消不停止服务端燃烧。内部 decision 是恢复建议，实际失败默认终态，有真实 decision_id 才回答。"
+                            + "普通暂停保留内存炉次并复查菜单。死亡、断线、换世界、重启后未完成父任务先暂停，但当前炉位和投入账未完整持久化，重建步骤不能承诺无损续原炉；先核对原回执与现场，未知投料不盲目重做。同次网络重试复用 request_key。营火配方可识别，需要加工时 campfire 返回执行不支持或没有对应配方。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:cook\",\"outcome\":\"用随身材料补足八个铁锭\",\"parameters\":{\"item_id\":\"minecraft:iron_ingot\",\"count\":8,\"recipe_preference\":\"smelting\",\"allowed_fuels\":[\"minecraft:coal\"],\"allowed_sources\":[\"inventory\"],\"allow_harm\":false}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:cook\",\"outcome\":\"尝试营火加工一份熟牛肉\",\"parameters\":{\"item_id\":\"minecraft:cooked_beef\",\"recipe_preference\":\"campfire\",\"allowed_sources\":[\"inventory\"]}}}。",
                     targets("nearest"),
                     fields(
-                            field("item_id", "resource_id", "Requested cooked output."),
-                            field("count", "integer", "Required final main-inventory count from 1 to 2304, not operations; default 1."),
-                            field("recipe_preference", "string", "Auto, fastest, preserve_rare, smelting, blasting, smoking or campfire; campfire currently returns a structured unsupported decision."),
-                            field("allowed_fuels", "array<resource_id>", "Optional fuel policy; omit for a conservative ordinary-fuel set."),
-                            field("allowed_sources", "array<string>", "Where MaiCraft may obtain input, fuel and a workstation. The cook source permits finite prerequisite cooking; output ancestors prevent production cycles and nesting is capped at eight levels. Fuel and protection policies are inherited."),
-                            field("allow_harm", "boolean", "Whether recursively acquiring inputs may harm living entities; default false."),
-                            field("protected_labels", "array<string>", "Remembered places or possessions recursive acquisition must not touch.")));
+                            field("item_id", "resource_id", "goal.parameters.item_id 必填成品ID字符串；执行时须为已安装非空气物品。省略、null、空白与非字符串拒绝；配方、输入和设备由Mod解析。"),
+                            field("count", "integer", "goal.parameters.count 为最终主背包数量，整数1～2304，省略或null为1。0、小数、数字字符串、布尔值与越界数拒绝。实际容量仍受堆叠规则限制，一份配方可多件产出并按整份配方补足。"),
+                            field("recipe_preference", "string", "goal.parameters.recipe_preference 省略为auto，null/空白/非字符串拒绝。auto、fastest、preserve_rare、smelting、blasting、smoking、campfire；大小写和首尾空白会整理。fastest先比单份加工时间，非全程最短耗时；preserve_rare改用固定燃料优先表，非读取稀有度。兼容furnace、blast_furnace、blast-furnace、smoker、preserve-rare、campfire_cooking。"),
+                            field("allowed_fuels", "array<resource_id>", "goal.parameters.allowed_fuels 为燃料ID字符串数组，去重后最多64种。省略、null、[]使用原生燃料表中的煤、木炭、木棍、竹子、干海带块及木板/原木标签，不表示禁止燃料；显式非空列表仅选所列原生燃料。空白或非字符串成员拒绝，执行时检查物品存在且能作燃料。"),
+                            field("allowed_sources", "array<string>", "goal.parameters.allowed_sources 约束原料、燃料及设备的获取。取值inventory、nearby、wireless、storage、harvest、craft、cook、mine、trade、hunt；省略/null/[]默认除trade外全部，显式清单仍加入inventory，不按列表顺序执行。仅现货写[\"inventory\"]。cook允许有界前置烧炼，祖先成品防环且最多八层；所有来源、燃料、伤害和保护限制继续继承。成员须非空字符串，大小写会整理。"),
+                            field("allow_harm", "boolean", "goal.parameters.allow_harm 为递归取材的伤害许可；省略/null/false均关闭，true不自动增加hunt来源。字符串、数字等非布尔值拒绝。"),
+                            field("protected_labels", "array<string>", "goal.parameters.protected_labels 为已记住地点名数组，去重后最多64个；省略/[]不新增保护。公开请求拒绝null、空白或非字符串成员；未知名字失败。同维度地标锚点并入外层已有保护，其他维度锚点不变成当前格子。")));
             // 向模型公开的是单件附魔意图、真实报价档位和成本；具体槽位与按钮由可见的原生界面执行器决定。
             case EnchantAbilityAdapter.ABILITY -> contract(
                     "Enchant exactly one carried compatible unenchanted item at an existing loaded vanilla enchanting table. "
@@ -581,23 +614,36 @@ public final class SemanticAbilityCatalog {
                             field("max_lapis","integer","Required maximum lapis lazuli items consumed, 0..3. Insufficient material or budget stops before submission."),
                             field("search_radius","integer","Nearest-table search radius in loaded terrain, 1..64 blocks, default 32; exact targets retain their given position.")));
             case StonecutAbilityAdapter.ABILITY -> contract(
-                    "Cut a carried input into the requested output at an existing loaded vanilla stonecutter. "
-                            + "Uses a visible native GUI: loads the exact input count, resolves the real recipe list for that input, selects the requested output once, then quick-moves and verifies every crafted piece before returning leftovers and closing. "
-                            + "No station construction, material acquisition or output substitution. A durable reservation blocks automatic repeats once crafting has begun; inspect before requesting a new operation.",
-                    targets("coordinates","landmark","nearest"), fields(
-                            field("item_id","resource_id","Required carried input type, one item per craft, for example minecraft:stone."),
-                            field("output_item_id","resource_id","Required requested product; the input must have a real stonecutter recipe producing it, for example minecraft:stone_bricks."),
-                            field("count","integer","Crafts to perform, 1..64, default 1; each craft consumes one input and is verified separately.")));
+                    // 装入精确份数后整批切制；原生消耗、库存差异和是否允许再次执行分别披露。
+                    "用已有、已加载的原版切石机，把主背包原料切成指定产物；不取材、不建站、不替换产物。参数放goal.parameters；count是投入原料份数/配方次数，不是最终库存量，已有成品仍会再加工。preferences无切石选项。"
+                            + "target省略/null/nearest从当前位置索引附近切石机，命中须在16格内；nearest附加标签不参与选站。coordinates需要position的整数x/y/z，dimension省略/null为当前维度；landmark需要真实已记住label，锚点格必须就是切石机。不能跨维度，不给猜测坐标。"
+                            + "先原生退出挡路页面，盘点原料和空间，不改地形走近，开可见空菜单，精确装count份输入，读真实配方列表按产物匹配；请求保存操作身份后选配方，一次快速移动切完整批，归还余料，核对库存并确认关闭。选择明确未应用或零提交搬运可有限刷新，已发取件不盲目补点。"
+                            + "当前最终账本固定要求输入减少count、输出增加count；一份原料产多件的合法配方可能已完成原生加工却被记为未核实，空间也未按真实配方产量放大。读crafted_count、transfer_results、item_return_verified、gui_closed、cleanup_status、outcome_uncertain和mechanical_retry_allowed，不能把失败解读为没有消耗。"
+                            + "当前持久等待有缺陷：prepareSubmission在保存未完成时已把内存submissionReserved置真，切石下一刻可能因此不再等待或检查旧预约。native_consumption_reserved仅表示进入预约流程，不证明落盘、取件或重启防重可靠。暂停保留同一菜单流；取消只请求明确归属的原生返还，已取件或来源未知时保留现场。死亡/换世界/重启不恢复菜单基线，未完成父任务先暂停，继续前核对历史和库存，不能盲目重切。同次网络重试复用request_key。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:stonecut\",\"outcome\":\"将四份石头切成石砖\",\"parameters\":{\"item_id\":\"minecraft:stone\",\"output_item_id\":\"minecraft:stone_bricks\",\"count\":4},\"target\":{\"kind\":\"nearest\"}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:stonecut\",\"outcome\":\"切制一份石砖\",\"parameters\":{\"item_id\":\"minecraft:stone\",\"output_item_id\":\"minecraft:stone_bricks\"}}}。",
+                    targets("coordinates", "landmark", "nearest"),
+                    fields(
+                            field("item_id", "resource_id", "goal.parameters.item_id 必填输入物品ID字符串，已安装且非空气；材料来自主背包与快捷栏，每次配方消耗一份。不是目标成品字段。"),
+                            field("output_item_id", "resource_id", "goal.parameters.output_item_id 必填已安装非空气产物ID字符串；装入输入后按真实菜单列表匹配。没有配方明确失败，不接受recipe索引或输出槽号。"),
+                            field("count", "integer", "goal.parameters.count 为配方次数，整数1～64，省略默认1。0、负数、分数和越界值拒绝，null/布尔值无效；当前转换也接受可精确转整数的数字字符串。每次一份原料，最终一比一成品核对仍是已知实现限制。")));
             case "maicraft:trade" -> contract(
-                    "Obtain an item from a real loaded merchant. MaiCraft selects the merchant and offer, approaches in first person, performs synchronized payment/result transfers and verifies the final inventory.",
+                    // 真实报价决定付款和原生产物，最终库存数量与每笔效果、未知收尾分开呈现。
+                    "从真实已加载村民或流浪商人的报价中购买，让主背包含快捷栏的目标物品达到最终数量，副手与装备不计；已有数量足够直接收尾。参数放goal.parameters，不提供实体ID、报价下标、槽号或点击脚本。"
+                            + "目录接受nearest、area、landmark、prior_result，但适配器未将地点传给执行器，始终从当前位置搜索；命名目标要label、前序目标要relation，仍不能据此承诺定点交易。要去别处先旅行，并显式给item_id，旧target.label回退为物品名不要当地点用。"
+                            + "先退出挡路界面，找成年、有交易职业、非自定义命名且不在保护地标水平12格内的商人，按距离走近空手开菜单，读取真实报价，原生搬付款、取结果，观察主背包目标物品增加，够数后退余款关界面。默认没有绿宝石时不开商人菜单；不自动补钱、升级商人或等补货。"
+                            + "当前每条报价必须单独供应并支付全部缺额，不能拼单；只按付款组合默认匹配而未主动选择报价；成品空间按付款前计算。商人菜单仍只按类型识别，收尾可能关闭别的当前页面。completed_trades仅计确认的取货轮数，selected_payment是最后报价而非累计消费明细；精确付款消耗和产量未完整逐笔核对。"
+                            + "读goal_satisfied、observed_final_count、observed_offer_outcomes、observed_payment_item_candidates、outcome_uncertain。取消不退款，已提交但未知的付款/取货不要盲目重复；当前取消子任务的回执传递仍不完整。普通暂停保留内存阶段，死亡/换世界/重启不恢复商人菜单与付款账，未完成父任务先暂停，再执行前核对库存。实际失败默认终态，内部decision只是恢复建议；有真实decision_id才回答，同次网络重试复用request_key。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:trade\",\"outcome\":\"用绿宝石补足八个面包\",\"parameters\":{\"item_id\":\"minecraft:bread\",\"count\":8,\"merchant_kind\":\"villager\",\"allowed_payment_items\":[\"minecraft:emerald\"],\"radius\":32}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:trade\",\"outcome\":\"按默认绿宝石政策买一个面包\",\"parameters\":{\"item_id\":\"minecraft:bread\"}}}。",
                     targets("nearest", "area", "landmark", "prior_result"),
                     fields(
-                            field("item_id", "resource_id", "Requested trade output."),
-                            field("count", "integer", "Required final inventory count, not number of trades."),
-                            field("merchant_kind", "string", "Auto, villager or wandering_trader."),
-                            field("allowed_payment_items", "array<resource_id>", "Hard policy for what may be spent; when omitted, only emerald payments are automatic and other observed candidates require a decision."),
-                            field("protected_labels", "array<string>", "Remembered places whose merchants must not be selected."),
-                            field("radius", "integer", "Bounded loaded-merchant search radius; default 32.")));
+                            field("item_id", "resource_id", "goal.parameters.item_id 为想换到的已安装非空气物品ID字符串，正式请求显式必填。缺少时可能提出决定，旧实现还会取target.label作物品名；它不指定商人地点。"),
+                            field("count", "integer", "goal.parameters.count 约定为最终主背包整数1～256，默认1，不是交易次数或新增量。当前适配器对省略/null/非原始值用1，数字先转整数再夹取，0变1、超限变256、小数可能截断、数字字符串可能接受；布尔或不可转换字符串可能失败，不用作开关。"),
+                            field("merchant_kind", "string", "goal.parameters.merchant_kind 为auto、villager、wandering_trader。省略/null/空白/非字符串目前为auto；大小写与首尾空白整理。兼容any、trader、wandering-trader；不自动变更职业或解锁报价。"),
+                            field("allowed_payment_items", "array<resource_id>", "goal.parameters.allowed_payment_items 为允许花费的已安装物品ID字符串数组；省略/null/[]都只允许绿宝石，不是任意付款或禁止交易。非空名单要求报价两种成本都被允许；数组成员须非空字符串，未知物品拒绝。选择付款政策是已授权任务内策略，不自动增加人工审批。"),
+                            field("protected_labels", "array<string>", "goal.parameters.protected_labels 为已记住地点名数组；省略/[]不新增保护，公开请求拒绝null及空白/非字符串成员。未知名字失败；同维度锚点水平12格内商人排除，不看高度。自定义命名商人始终排除。"),
+                            field("radius", "integer", "goal.parameters.radius 为当前位置包围盒向外扩张的已加载实体范围，单位格，整数1～64；省略/null为32。不是严格球形半径；0、小数、数字字符串、布尔值和越界数拒绝。")));
             case "maicraft:acquire_items" -> contract(
                     // 调用者声明最终库存与来源许可；角色先查现货再递归准备，实际入包、未知事务和恢复选择分别说明。
                     "用途：让主背包和快捷栏内可接受物品的合计数最终达到 count；装备、副手、鼠标、合成格、随身包内部及远端存储数量都不是已到手。item_id/item_ids/item_tag/item_tags 至少提供一种，可同时提供并求并集；它们是互换候选，不是要逐项采购的清单，多种各要若干请拆成独立目标。"
@@ -691,16 +737,27 @@ public final class SemanticAbilityCatalog {
                             field("allow_harm", "boolean", "Explicit harmful acquisition permission; never inferred."),
                             field("protected_labels", "array<string>", "Remembered resources or areas that material acquisition must preserve.")));
             case WaitAbilityAdapter.ABILITY -> contract(
-                    "Wait without inventing body work until an observable condition is true.",
+                    // 先等游戏时间，再检查当刻身体或日时钟；等待本身不替角色达成条件。
+                    "等待某个可观察条件成立，不主动进食、治疗或修改时间。参数放 goal.parameters；target 省略、null 或 current_place，不安排移动；preferences、constraints、children 留空。"
+                            + "从该步骤实际开始时记录 gameTime，加上 after_s×20刻，先过最短延时再逐刻检查条件。不是现实秒超时；世界暂停时计时也停，条件永不满足会一直等，调用方可取消。"
+                            + "普通暂停保留最早检查时刻，继续后承认已过去的游戏时间；死亡、换世界走公共生命周期，磁盘恢复未完成记录先暂停，继续重建本步时重新计最短延时。成功只证明检查当刻条件成立，每步留下独立结果。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:wait_for_condition\",\"outcome\":\"至少等两秒后等到白天\",\"parameters\":{\"after_s\":2,\"condition\":\"day\"}}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:wait_for_condition\",\"outcome\":\"立即开始等待满血\",\"parameters\":{\"after_s\":0,\"condition\":\"health_full\"}}}。",
                     targets("current_place"),
                     fields(
-                            field("condition", "string", "elapsed (default), day, night, health_full or not_hungry. Observe only; does not eat, heal or change time."),
-                            field("after_s", "integer", "Minimum game-time seconds before checking the condition, 0-3600, default 1. Not a timeout; fractions and out-of-range values are rejected.")));
+                            field("condition", "string", "goal.parameters.condition 省略为 elapsed；仅接受准确小写 elapsed、day、night、health_full、not_hungry。elapsed 只等延时；night 为日时钟模24000后的13000～22999刻，day 为其余时段，含凌晨和傍晚；health_full 为当前生命值>=最大值；not_hungry 为饥饿值>=18。null、空串、非字符串和未知值拒绝。"),
+                            field("after_s", "integer", "goal.parameters.after_s 是检查条件前的最短游戏秒数，整数0～3600，省略默认1；每秒20游戏刻，0立即允许检查而不跳过条件。不是最大等待时长；null、字符串、布尔值、小数和越界值拒绝。")));
             case "maicraft:sequence" -> contract(
-                    "Run semantic child goals in order; each child remains independently observable and recoverable, while explicit area protection can span later children. A direct child may declare on_failure=continue: if that step fails with a confirmed failure, the next sibling still runs, yet the whole sequence still ends failed — declare it only when later steps truly do not depend on this one; timeouts and cancels always stop. Explicitly skipped steps are marked skipped rather than successful. Finishing the remaining work may report all_steps_succeeded=false; inspect skipped_step_count, tolerated_failure_count and prior attempts for unresolved or partial effects.",
+                    // 组合层只排顺序并继承保护，具体动作、失败事实和恢复边界仍归各子能力。
+                    "按 goal.children 的顺序执行语义子目标，每层1～32项，每个子项有自己的 ability、outcome、parameters 和可选 target。根深度为0，超过32的嵌套深度拒绝，未另设展开后总步骤上限。组合层 target 省略或 null，preferences={}、constraints=[]；protected_labels 放 goal.parameters，具体能力参数放各子项。嵌套分组会展开，不并行执行；已经完成的步骤不重做。"
+                            + "叶子子项可在与 ability 同层声明 on_failure=\"continue\"，缺省为 stop。Schema声明字符串，当前运行入口也把null按stop处理；布尔值及未知名称拒绝。continue不能写进parameters，也不能挂在顶层目标或sequence分组上。只有实际失败终态才处理继续策略，适配器的Decision仍等待对应decision_id答复。"
+                            + "当前继续条件检查 FAILED 且还有后项，没有单独排除 outcome_uncertain；因此后续执行不证明前项效果已结清。超时、取消停止；有事实失败则整体 FAILED，显式 skip 单独标记 skipped 而非成功。读 completed_effects、remaining_effects、tolerated_failure_count、skipped_step_count、all_steps_succeeded 和尝试历史，不从清单走完推断全部目标达成。"
+                            + "失败或跳过的前序步骤不能为 prior_result 提供地点。真实待答决定才允许按本次选项 retry、recover、replace_goal、skip 或 cancel；recover 的前置工作继承本步保护范围。取消不撤销实际效果。普通暂停保留执行器；死亡与换世界走公共交接，重启先恢复暂停的实际清单，子能力按自己的恢复与消费规则重建当前步。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:sequence\",\"outcome\":\"等待后检查白天\",\"children\":[{\"ability\":\"maicraft:wait_for_condition\",\"outcome\":\"等两秒\",\"parameters\":{\"after_s\":2}},{\"ability\":\"maicraft:wait_for_condition\",\"outcome\":\"等到白天\",\"parameters\":{\"condition\":\"day\",\"after_s\":0}}]}}。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:sequence\",\"outcome\":\"钓鱼失败也继续最后的等待\",\"children\":[{\"ability\":\"maicraft:fish\",\"outcome\":\"收回一竿战利品\",\"parameters\":{\"count\":1},\"on_failure\":\"continue\"},{\"ability\":\"maicraft:wait_for_condition\",\"outcome\":\"等一秒\",\"parameters\":{\"after_s\":1}}]}}。",
                     targets(),
-                    fields(field("protected_labels", "array<string>",
-                            "Remembered areas whose internally measured footprint every later child must preserve; never provide cells or coordinates.")));
+                    fields(
+                            field("protected_labels", "array<string>", "goal.parameters.protected_labels 为已记住地点的非空字符串数组；省略或[]不新增保护，null、空白或非字符串成员拒绝，不提供坐标。组合范围向其叶子步骤与插入的恢复步骤继承，内层新增范围不会泄漏给外层兄弟项；使用已观察且维度匹配的保护证据。")));
             default -> contract(
                     "Unknown semantic ability.",
                     targets(),

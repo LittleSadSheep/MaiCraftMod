@@ -39,7 +39,7 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
 
     public EquipCompanionTask(LocalPlayer player, EquipTaskRecord record) { super(player, record); }
 
-    // 先要求前 36 格里有物品；当前没有先检查目标装备栏是否已经满足，因此已戴好头盔也可能报缺物品（A48）。
+    // 来源只查主背包和快捷栏；当前不先承认已经穿在身上的同类装备，因此已戴好头盔也可能报缺料。
     @Override protected List<Precondition> preconditions() {
         return List.of(() -> findItem(player.getInventory()) >= 0 ? null
                 : new Precondition.Failure("no " + r.label + " in inventory to equip",

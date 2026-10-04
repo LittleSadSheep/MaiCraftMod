@@ -10,7 +10,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord.Move;
 
-/** 冻结输入与产物的来源和数量；所有搬运使用真实菜单槽号，投入与取出的数量精确等于本次请求的切制次数。 */
+/** 装料前记录主背包数量，供切制后核对；当前账本按每份原料产一件成品计算，多件产出的配方会留下核对差异。 */
 final class StonecuttingStock {
     private static final int INPUT_SLOT = 0, RESULT_SLOT = 1;
     private final LocalPlayer player;
@@ -70,6 +70,7 @@ final class StonecuttingStock {
                 && menu.getSlot(RESULT_SLOT).getItem().isEmpty();
     }
 
+    // 当前完成条件固定要求投入数与成品增量一比一；实际多产或少产都不在这里改写为请求数量。
     boolean verifiedAfterCrafts(AbstractContainerMenu menu) {
         return workEmpty(menu) && countOf(input) == inputBefore - count && countOf(output) == outputBefore + count;
     }

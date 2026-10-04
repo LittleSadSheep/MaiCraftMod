@@ -25,6 +25,7 @@ public final class StonecuttingCompanionTask extends BlockMenuCompanionTask<Ston
 
     @Override protected String additionalStartBlocker() { return null; }
 
+    // 先盘点主背包里的原料和现有空位；缺料直接交回事实，不在切石流程里挖石头或建另一台设备。
     @Override protected boolean prepareInputs() {
         try { stock = StonecuttingStock.prepare(player, r.input, r.output, r.count); return true; }
         catch (IllegalArgumentException unavailable) {

@@ -109,7 +109,7 @@ final class IntentTask implements Task {
         try {
             return tickSemanticParent();
         } catch (RuntimeException failure) {
-            // 适配器结果异常或内部能力出错时，仍记录失败并进入语义恢复流程。
+            // 适配器或内部能力异常时保留失败与现场；由 failStep 按本步继续策略结算，不自动改成待答问题。
             // 这里只处理运行异常；虚拟机级错误不被包装成普通任务失败。
             abandonChildAfterUnexpectedFailure();
             wait = null;

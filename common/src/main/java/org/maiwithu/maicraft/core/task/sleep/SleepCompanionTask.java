@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.core.act.Interaction;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 已经走到床边后，在这里对准床、右键，并等游戏确认玩家真的躺下。 */
+/** 到床边后瞄准并原生右键；公开 sleep 确认躺下即结束，自动夜间休息另设 waitUntilAwake 等自然醒。 */
 public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRecord> {
     private NativeActionReceipt receipt;
     private boolean enteredSleep;

@@ -671,7 +671,7 @@ final class AbilityAdapter {
     }
 
     private static IntentAction trade(Goal goal) {
-        // 只指定想换到的物品和愿意支付的物品等条件；具体商人、交易项和点击顺序由交易任务选择。
+        // 传递成品、最终数量与付款政策；当前不把目标地点传给交易任务，商人仍从角色当前位置选择。
         JsonObject parameters = goal.parameters();
         String item = itemId(goal, parameters);
         if (item == null) {

@@ -15,7 +15,7 @@ import java.util.UUID;
 import org.maiwithu.maicraft.core.integration.machine.process.MinecraftStonecuttingProcessAdapter;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 
-/** 切石机目标只来自当前维度的已加载事实；准备材料、选择配方与逐件核验交给同一项切石任务。 */
+/** 从当前维度的已加载事实选切石机；随身原料按请求装入，配方选择、整批加工和库存核对交给同一任务。 */
 final class StonecutAbilityAdapter {
     static final String ABILITY = "maicraft:stonecut";
     /** 切石机常在基地范围内；已加载世界内的小半径即可，不提供跨区块搜索。 */

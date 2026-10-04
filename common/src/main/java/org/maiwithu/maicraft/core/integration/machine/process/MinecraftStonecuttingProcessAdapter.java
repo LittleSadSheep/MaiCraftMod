@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.core.task.stonecutter.StonecuttingParameters;
 import org.maiwithu.maicraft.core.task.stonecutter.StonecuttingTaskRecord;
 import org.maiwithu.maicraft.task.TaskRecord;
 
-/** 把切石作为已有切石机上的原生加工机制；共用真实配方列表、逐件产出核验与取回关闭执行器。 */
+/** 把切石作为已有设备上的有限原生加工：读真实配方，整批快速取出，再用库存差异核对并关闭。 */
 public final class MinecraftStonecuttingProcessAdapter implements NativeProcessAdapter {
     public static final String ID = "minecraft:stonecutting";
     @Override public String id() { return ID; }
@@ -23,12 +23,12 @@ public final class MinecraftStonecuttingProcessAdapter implements NativeProcessA
     @Override public JsonObject contract() {
         // 完整配方契约只随匹配切石机的观察或按需知识返回，不把每个机制的参数加入默认能力描述。
         return JsonParser.parseString("""
-                {"process":"minecraft:stonecutting","description":"在已加载原版切石机按真实配方把输入物品切制为指定产物，逐件核验产出、归位余料并取回。",
+                {"process":"minecraft:stonecutting","description":"在已加载原版切石机按真实配方整批加工；count是原料份数。当前库存核对固定按每份原料产一件，多件产出可能已生效却报未核实，需读实际增量后决定后续。",
                  "parameters":{"item_id":{"type":"resource_id","required":true},"output_item_id":{"type":"resource_id","required":true},
                   "count":{"type":"integer","default":1,"minimum":1,"maximum":64}},
                  "recipe_observation":"输入装入后菜单列出该输入的真实可用产物；按产物匹配配方，输入无配方或产物不匹配时明确失败。",
                  "completion":"确认一次配方选择、整批产物取回、输入余料归位及关闭菜单。",
-                 "retry":"消费预约开始后不自动重发；未知结果保留人工核验。","background_watch_supported":false}
+                 "retry":"当前切石存在预约等待缺陷：内存预约标记可能先于持久保存而放行后续动作，重启防重尚不可靠。取件未知或恢复旧操作先核对实际库存与现场，不盲目重切。","background_watch_supported":false}
                 """).getAsJsonObject();
     }
     @Override public void validate(JsonObject parameters) {

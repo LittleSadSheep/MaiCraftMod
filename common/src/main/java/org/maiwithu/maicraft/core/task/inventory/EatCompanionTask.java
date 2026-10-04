@@ -20,7 +20,7 @@ import java.util.Map;
 
 /**
  * 把指定食物拿到主手，按住使用，让游戏处理动画、消耗和饥饿值变化。
- * 任务自己不改生命或饥饿值。它当前用物品前后总量来判断是否吃完，这种判断有 A47 所列的局限。
+ * 任务自己不改生命或饥饿值；当前以同类食物总量减少确认进食，期间拾到同类食物会干扰这份证据。
  */
 public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRecord> {
 

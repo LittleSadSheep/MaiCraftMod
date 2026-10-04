@@ -41,7 +41,7 @@ import org.maiwithu.maicraft.task.TaskState;
 /**
  * 为了让背包达到指定物品数量，寻找商人、打开交易界面、挑报价、放付款物品、取结果，最后退还余款并关闭。
  * 已经有的物品会计入目标；只要求最终数量，不保证每一份都来自本轮交易。
- * 当前有单报价库存、默认报价选择和付款前空间等额外限制，具体例子见 A53～A56。
+ * 当前要求单条报价独自满足缺额、支付组合能按默认顺序匹配该报价，并在付款前留足成品空间。
  */
 public final class SemanticTradeCompanionTask
         extends AbstractCompanionTask<SemanticTradeTaskRecord> {
@@ -128,7 +128,7 @@ public final class SemanticTradeCompanionTask
 
     @Override
     // 目标是背包最终至少有这么多物品，已经够了就请求收尾；正在执行的付款／收货子任务先结束。
-    // 目前这个提前满足分支会绕过开头的菜单占用检查，再去关闭原本打开的界面，见 A56。
+    // 已有物品够数时也会进入关界面流程；当前没有先核对该界面是否由本次交易打开。
     protected TaskState onTick() {
         if (outputCount() >= r.count && !finishRequested) {
             finishRequested = true;
@@ -291,7 +291,7 @@ public final class SemanticTradeCompanionTask
     }
 
     // 从卖出目标物品的报价中筛选库存、付款许可、可支付数量、报价选择和背包空间。
-    // 当前每个报价都必须独自满足全部缺额，不能把两项各十份的报价合起来凑二十份，见 A53。
+    // 每个报价都必须独自满足全部缺额；两项各能买十份的报价，目前不会合起来补二十份。
     private TaskState selectOffer() {
         MerchantMenu menu = merchantMenu();
         if (menu == null) {
@@ -348,12 +348,12 @@ public final class SemanticTradeCompanionTask
             PaymentPlan nextPayment = paymentPlan(menu, offer);
             if (nextPayment == null || !affordableForTrades(menu, offer, trades)) continue;
             enoughCurrency = true;
-            // 这里用默认选择去匹配支付组合，没有向原版选择具体报价；同价商品在后面时可能一直被前面商品盖住（A54）。
+            // 当前只用支付组合按默认顺序匹配报价；同价商品排在前面时，后面的目标商品不会被主动选中。
             MerchantOffer resolved = menu.getOffers().getRecipeFor(
                     nextPayment.paymentA, nextPayment.paymentB, 0);
             if (resolved != offer) continue;
             unambiguous = true;
-            // 空间按付款前的背包计算，没有把即将移出的支付物品腾出的格算进去（A55）。
+            // 空间按付款前的背包计算；即将花掉的货币能腾出的格子，当前不计入可收货空间。
             if (outputCapacity(result) < missing) continue;
             enoughSpace = true;
             plans.add(new OfferPlan(
@@ -630,7 +630,7 @@ public final class SemanticTradeCompanionTask
     }
 
     // 已认领的商人菜单先把两格剩余付款物品收回，再关闭。
-    // 其他当前界面也会落到关闭分支，没有检查 openedMenu／openRequested，因此已有目标物品也可能触发无关关闭（A56）。
+    // 当前关闭分支没有核对界面归属；即使开工前物品已够，也可能退出原本打开的其他界面。
     private TaskState cleanupMenu() {
         if (player.containerMenu == player.inventoryMenu && ClientRuntime.requireContext(player).minecraft().screen == null) {
             openedMenu = false;

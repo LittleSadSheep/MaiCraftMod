@@ -37,6 +37,7 @@ final class WaitAbilityAdapter {
 
     static IntentAction.Wait adapt(Goal goal, LocalPlayer player) {
         JsonObject parameters = goal.parameters();
+        // 从这一步真正开始时计游戏时间；普通暂停后承认已经过去的时间，重建执行器则重新开始计时。
         // after_s 是最短等待时间，不是超时；到点后仍需观察所选条件是否成立。
         return new IntentAction.Wait(condition(parameters),
                 player.level().getGameTime() + delaySeconds(parameters) * 20L);

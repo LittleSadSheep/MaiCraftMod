@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /**
  * 逐个清空请求的装备栏，把物品收回背包；不会为了腾空间主动丢物品。
- * 主手可以通过切到空快捷栏来腾空。放不下的装备会记入 kept，当前完成状态与提示存在 A44／A45 的问题。
+ * 主手可以通过切到空快捷栏来腾空；没有空格时装备留在身上，并记入 still_worn，当前仍可能返回成功。
  */
 public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTaskRecord> {
     private final FirstPersonActionGate selection = new FirstPersonActionGate();
@@ -51,7 +51,7 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
             index++; pendingSlot = null; pendingPiece = ItemStack.EMPTY;
         }
         while (index < r.slots.size() && player.getItemBySlot(r.slots.get(index)).isEmpty()) index++;
-        // 当前处理完列表就返回成功；全部因为空间不足而留下时，removed 仍为空，文字却会说本来就空（A45）。
+        // 当前遍历完部位就返回成功；若全部因空间不足而留下，文字仍会说已经为空，调用方必须核对 still_worn。
         if (index >= r.slots.size()) {
             if (removed.isEmpty()) message = "nothing to take off — " + r.label + " already empty";
             else message = "took off " + String.join(", ", removed)
@@ -61,7 +61,7 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
         pendingSlot = r.slots.get(index);
         pendingPiece = player.getItemBySlot(pendingSlot).copy();
         if (pendingSlot == EquipmentSlot.MAINHAND) return freeMainHand();
-        // 当前一定要有空格才尝试卸下；副手物品本可并入已有堆叠时也会被挡住，见 A44。
+        // 当前一定要有空格才尝试卸下；副手物品即使能并入已有堆叠，也会先留在身上。
         if (player.getInventory().getFreeSlot() < 0) {
             kept.add(itemName(pendingPiece) + " (" + pendingSlot.getName() + ")");
             index++;

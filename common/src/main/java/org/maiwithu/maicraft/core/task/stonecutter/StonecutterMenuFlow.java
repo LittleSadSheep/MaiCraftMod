@@ -137,7 +137,7 @@ final class StonecutterMenuFlow implements BlockMenuFlow {
                 yield TaskState.RUNNING;
             }
             case SELECT -> {
-                // 第一次取件就是真实消耗；持久屏障确认落盘前不按配方按钮，之后也不能隐式再来一次。
+                // 配方选择前请求保存消费身份；当前预约标记在等待落盘时就置位，后续可能跳过等待，不能据它断言已持久化。
                 if (!record.submissionReserved() && !beforeFirstCraft.getAsBoolean()) yield TaskState.RUNNING;
                 if (!stock.inputLoaded(menu)) throw new IllegalStateException("stonecutter_input_changed_before_selection");
                 selectionReceipt = context.menus().pressButton(context, recipeIndex, MenuConfirmation.stateChanged(), 100);

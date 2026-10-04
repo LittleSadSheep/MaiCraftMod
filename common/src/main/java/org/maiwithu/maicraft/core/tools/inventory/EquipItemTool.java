@@ -29,13 +29,12 @@ public final class EquipItemTool implements MaiCraftTool {
     }
 
     @Override
-    // 这里的接口文字说空间不足会失败，但当前卸下执行器可能跳过后报成功；实际差异见 A45。
+    // 穿戴要看目标部位的实际物品；卸下还要看仍穿着的清单，当前成功外壳不保证所有部位已清空。
     public String description() {
-        return "Equip an item from your OWN inventory: native armor to its equipment slot, "
-                + "other items to the main hand; holding an item does not use it. The previous item is "
-                + "stowed back. Or take gear OFF: action=unequip with a slot stows it into the "
-                + "inventory ('armor' strips all four pieces, 'mainhand' frees your hand); fails if "
-                + "there is no room.";
+        return "穿戴或手持主背包中的指定物品：省略 slot 按物品自然部位，主手只拿着不使用，副手走原生交换。"
+                + "action=unequip 需要 slot，armor 按头胸腿脚卸下四件，mainhand 优先切到空快捷栏。"
+                + "不丢弃物品腾空间；当前没有空格会保留装备，仍可能返回 success，必须同时读 removed 与 still_worn。"
+                + "按物品 ID 判断，不选择最优附魔或耐久；已经穿戴但主背包没有另一件时，当前仍可能报缺料。";
     }
 
     @Override

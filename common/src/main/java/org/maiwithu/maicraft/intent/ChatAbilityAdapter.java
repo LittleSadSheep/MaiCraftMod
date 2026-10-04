@@ -10,6 +10,7 @@ final class ChatAbilityAdapter {
     static final String ABILITY = "maicraft:chat";
     private ChatAbilityAdapter() {}
 
+    // 接单只建立打字任务；真正发送前还要等完整草稿展示和持久提交记录，两者由聊天会话逐刻确认。
     static IntentAction adapt(Goal goal) {
         return new IntentAction.Native(new ChatTaskRecord("chat-" + UUID.randomUUID(),
                 ChatMessage.parse(goal.parameters())));

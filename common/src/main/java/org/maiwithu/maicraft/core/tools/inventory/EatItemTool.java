@@ -29,14 +29,12 @@ public final class EatItemTool implements MaiCraftTool {
     }
 
     @Override
-    // 运行时文字仍笼统写 eat or drink；当前执行任务只支持有 FOOD 组件的食物，不覆盖全部可饮用物品。
+    // 这里只执行已选定食物的持续使用；食物效果许可由外层语义选择负责，原生消耗仍看实际数量变化。
     public String description() {
-        return "Eat or drink a consumable from your inventory. It's a real timed action — chewing "
-                + "animation, particles and sound play over the eat duration, and only when it finishes "
-                + "does it restore your hunger + saturation and apply the item's effects (e.g. a golden "
-                + "apple's regeneration/absorption). Your HP then regenerates naturally from saturation, "
-                + "the same as a real player — so eat to refill hunger and let health recover. Fails if "
-                + "you don't carry it, it isn't a consumable, or your hunger is already full (the food is kept).";
+        return "把指定随身食物拿到主手，原生持续使用至动画结束，再以同类物品总量减少确认进食。"
+                + "当前执行器要求有饥饿机制且物品默认带 FOOD 组件，不覆盖药水、牛奶等所有饮用品。"
+                + "生命、饥饿、饱和度和效果由游戏处理，不保证一口吃饱或立即满血。"
+                + "食物前后数量、消耗净值和身体状态随回执交付；同期拾取或丢失同类物品会干扰数量证据，取消不代表没有吃掉。";
     }
 
     @Override

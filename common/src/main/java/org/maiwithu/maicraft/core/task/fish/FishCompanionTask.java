@@ -47,7 +47,7 @@ import org.maiwithu.maicraft.core.task.base.DropTracker;
 /**
  * 按阶段钓鱼：确定站位和水面、拿竿瞄准、抛出、等咬钩、收回并捡战利品，然后再来一竿。
  * 请求次数按成功收获的竿数计算，不保证每竿都是鱼；原版也可能给垃圾和宝藏。
- * 咬钩依据客户端同步状态；失败重抛时的动作记录混用仍见审计 A63。
+ * 咬钩依据客户端同步状态；收竿与抛竿共用一份动作回执，失败重抛时仍有旧回执被下一阶段读到的限制。
  */
 public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecord> {
 
@@ -210,7 +210,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     // 已经站在干燥地面时，只看从原地能否抛到水面，找不到就失败；
-    // 只有当前不是干燥站位时，才搜索附近其他站位。这是 D21 记录的状态依赖限制。
+    // 当前不是干燥站位时才搜索附近其他站位；原地无落点不能解读为整片区域没有水。
     private FishingSetup findFishingSetup() {
         BlockPos current = feet();
         boolean currentDry = isDryStance(current);
@@ -304,7 +304,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     // 实际视角转好后才提交抛竿，看到玩家关联了新的鱼钩才记一次抛竿。
-    // 但 rodReceipt 也被收竿使用；失败重抛时若留着旧收竿结果，这里会把它误当新抛竿完成（A63）。
+    // 收竿也使用 rodReceipt；失败重抛若遗留已确认的收竿回执，这里仍可能把它计为一次新抛竿。
     private TaskState aimAndCast() {
         if (!isCastableSurface(target) || !trajectoryClear(player.getEyePosition(), target)) {
             return failedCast("the selected water surface became obstructed", true);
@@ -581,7 +581,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     // 先尝试收竿，再按原因决定是否排除这个水面；连续五次失败就结束。
-    // 这里回到 PREPARE，却没有单独等待并清空收竿记录，导致 A63 的阶段混用。
+    // 当前回到准备阶段前没有单独结清收竿回执；后续瞄准仍可能读到这份旧结果。
     private TaskState failedCast(String reason, boolean rejectTarget) {
         BlockPos failedTarget = target;
         discardHook();
@@ -626,7 +626,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 30);
     }
 
-    // 当前只认原版鱼竿，且会扫描副手；后面的主手选择器不接受副手槽号，同 A34 的范围不一致。
+    // 当前只认原版鱼竿；扫描包含副手，但后续主手选择器不接受副手来源，竿只在副手时仍可能失败。
     private int findRodSlot() {
         var inventory = player.getInventory();
         for (int i = 0; i < inventory.getContainerSize(); i++) {

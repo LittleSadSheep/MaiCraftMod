@@ -45,6 +45,7 @@ public final class ChatTask implements Task {
     }
 
     @Override public void stop(LocalPlayer companion, StopReason reason) {
+        // 临时让出身体只保留当前草稿；永久结束停止发送，已经提交或未知的事实仍由会话保留。
         if (reason == StopReason.PREEMPTED) session.suspend();
         else session.cancel("The chat task was cancelled before submission.");
     }

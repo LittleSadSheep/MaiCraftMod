@@ -1192,7 +1192,7 @@ public final class SemanticCookCompanionTask
     }
 
     /** 数量归属无法继续确认时只安排关闭已绑定菜单，不再移动炉内任何槽位。 */
-    // 停止认领和回收当前槽里的东西，仅尝试关闭相符类型的菜单，避免在来源已不明时继续拿取。
+    // 数量来源已经说不清时不再拿炉内物品；仅关闭本次绑定且仍在眼前的菜单，不能碰同类型的新界面。
     private TaskState closeWithoutClaimingContents(
             String code, String message, FailureType type) {
         rememberFailure(code, message, type);
@@ -1513,6 +1513,7 @@ public final class SemanticCookCompanionTask
             data.put("preparation_plan_failures", List.copyOf(planningAttempts));
         }
         if (!stationAttempts.isEmpty()) data.put("workstation_attempts", List.copyOf(stationAttempts));
+        // 这里保存的是恢复建议；语义父任务收到实际失败会结算终态，不因这张建议表自动进入待回答状态。
         if (failureCode != null) {
             data.put("decision", Map.of(
                     "required", true,

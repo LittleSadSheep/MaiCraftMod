@@ -35,7 +35,7 @@ public final class SemanticTradeTool implements MaiCraftTool {
     }
 
     @Override
-    // 这是参数格式说明；allowed_payment_items 的文字目前说省略可用任意付款，执行器实际默认只允许绿宝石。
+    // 默认只花绿宝石；其他付款需要名单同时覆盖报价的两种成本，不能把省略解释为任意付款。
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .string("item_id", "Requested namespaced trade output.")
@@ -44,7 +44,7 @@ public final class SemanticTradeTool implements MaiCraftTool {
                 .optionalEnum("merchant_kind", "Allowed merchant family.",
                         "auto", "villager", "wandering_trader")
                 .optionalStringArray("allowed_payment_items",
-                        "Optional namespaced payment-item policy; omit to use any affordable offer.")
+                        "Allowed payment item IDs; omit, null or an empty list permits emerald payments only. Both costs of an offer must be allowed.")
                 .optionalStringArray("protected_labels",
                         "Remembered places whose merchants must not be selected.")
                 .integer("radius", "Loaded-entity search radius.", 1,

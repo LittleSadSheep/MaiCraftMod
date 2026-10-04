@@ -11,6 +11,7 @@ final class CookAbilityAdapter {
     static final String ABILITY = "maicraft:cook";
     private CookAbilityAdapter() {}
 
+    // 烹饪以角色当前位置找炉和备料；去别处开炉要先旅行，不能把地点标签当成产物或设备名称。
     static void validate(Goal goal) {
         var target = goal.target();
         if (target != null && (!"nearest".equals(target.kind()) || target.label() != null
