@@ -11,8 +11,10 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
+import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTask;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
@@ -65,7 +67,13 @@ final class AssemblyApproach {
             return new StructureWorksiteSearch.Probe(new StructureWorksiteSearch.Site(landing.destination(),
                     new StructureEditTarget.Click(frame.storage(offset),Direction.UP,aim)),false,false);
         });
-        if(candidate!=null) movement=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(call,deadline,candidate.landing().feet(),false).withoutTerrainProbe());
+        if(candidate!=null) {
+            // 气囊顶部与吊舱侧面高度相差较大时，先核验背包、燃料和落点；可飞行就受控换位，减少施工中的跌落。
+            var mode=Math.abs(player.getY()-candidate.landing().landingPoint().y)>3
+                    &&JetpackFlightSession.probe(ctx,candidate.landing().landingPoint(),NavigationSafetyContext.forbiddenBodyCells()).available()
+                    ?TransportMode.JETPACK:TransportMode.AUTO;
+            movement=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(call,deadline,candidate.landing().feet(),false,mode).withoutTerrainProbe());
+        }
         else if(search.exhausted()) {
             if(frame.structure()!=null&&!boarded) {
                 boarded=true;movement=new BoardStructureTask(player,new BoardStructureTaskRecord(call,deadline,frame.structure().id(),Vec3.atCenterOf(frame.storage(offset))));
