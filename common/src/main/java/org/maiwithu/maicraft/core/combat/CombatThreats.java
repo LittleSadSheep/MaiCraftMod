@@ -101,6 +101,14 @@ public final class CombatThreats {
         return hit != null && hit.attacker() == mob;
     }
 
+    // 这只是否在最近 ticks 刻内真的打中过她；追击绳用它区分“正在压着她打”和“早先打过一下后跑远了”。
+    public static boolean hitWithin(LocalPlayer player, LivingEntity mob, long ticks) {
+        if (mob instanceof Player other) return PvpEngagement.recentlyAttackedBy(player, other);
+        observe(player);
+        Hit hit = hits.get(mob.getId());
+        return hit != null && hit.attacker() == mob && level != null && level.getGameTime() - hit.tick() < ticks;
+    }
+
     /** 战场与退路保留附近障碍，同时补入伤害已证实、仍在加载范围内的远程攻击者。 */
     public static List<Mob> around(LocalPlayer player, double radius) {
         Map<Integer, Mob> found = new LinkedHashMap<>();

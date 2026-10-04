@@ -16,6 +16,8 @@ import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
+import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
+import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
@@ -33,7 +35,8 @@ public final class DefenseExcursionTest {
         stopsAfterRepeatedAttacksOnTheWayBack();
         hurtBodyStopsInsteadOfWalkingBack();
         movingTaskIsNotWalkedBack();
-        System.out.println("DefenseExcursionTest: self-defense excursions report displacement, walk back and pause when stranded");
+        leashStopsChasingRunawayTargets();
+        System.out.println("DefenseExcursionTest: self-defense excursions report displacement, walk back, pause when stranded and leash pursuit");
     }
 
     // 盖房途中挨打 -> 自卫接管 -> 被挤开四格后打完 -> 不到回位距离，直接交还身体；结束通知与任务账都写明工位、现位置和距离。
@@ -193,6 +196,36 @@ public final class DefenseExcursionTest {
                         "the finish notice explains why the body did not walk back");
             }
         }
+    }
+
+    // 自卫拴在工位上：绳外且三秒内没再打中她的怪只避开不追；仍在压着她打的照追；绳内的照常接战。
+    private static void leashStopsChasingRunawayTargets() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var record = new AttackTaskRecord("leash", 1000, List.of(), true).leash(new Vec3(0.5, 1, 3.5), 16.0);
+            check(!record.beyondLeash(new Vec3(16.0, 40, 3.5)) && record.beyondLeash(new Vec3(17.0, 1, 3.5)),
+                    "the leash measures horizontal distance from the work site");
+            check(!new AttackTaskRecord("free", 1000, List.of(), true).beyondLeash(new Vec3(500, 1, 3.5)),
+                    "fights without a leash keep their old pursuit range");
+            var far = f.mob(31, 20); f.hit(far, far);
+            var fight = new AttackCompanionTask(f.h.player, record);
+            set(fight, "target", far); set(fight, "hostiles", List.of(far));
+            check(stance(fight) instanceof NavGoal.ApproachAvoiding, "a target still hitting her is chased past the leash");
+            f.h.level.time += 60;
+            check(stance(fight) instanceof NavGoal.Avoid, "a target that ran outside the leash is only avoided, not chased");
+            var near = f.mob(32, 6);
+            set(fight, "target", near); set(fight, "hostiles", List.of(near, far));
+            check(stance(fight) instanceof NavGoal.ApproachAvoiding, "targets inside the leash are fought as before");
+        }
+    }
+
+    private static void set(AttackCompanionTask fight, String name, Object value) throws Exception {
+        ActorControlTestHarness.field(AttackCompanionTask.class, name).set(fight, value);
+    }
+
+    private static NavGoal stance(AttackCompanionTask fight) throws Exception {
+        var method = AttackCompanionTask.class.getDeclaredMethod("standoffGoal");
+        method.setAccessible(true);
+        return (NavGoal) method.invoke(fight);
     }
 
     // 僵尸在两格外打她 -> 自卫开打 -> 她被带到 x 处、僵尸消失 -> 下一刻这场仗结束，进入回位判断。

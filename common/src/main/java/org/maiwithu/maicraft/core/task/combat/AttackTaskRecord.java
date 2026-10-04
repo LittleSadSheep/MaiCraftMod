@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.task.combat;
 
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 
@@ -39,6 +40,9 @@ public final class AttackTaskRecord extends TaskRecord {
     private final Set<Integer> unreachable = new LinkedHashSet<>();
     private final Map<Integer, Integer> strikesByEntity = new LinkedHashMap<>();
     private int strikes;
+    /** 追击绳：自卫只追离这个锚点水平半径内的目标；null 表示不限追击范围（模型亲自派的战斗）。 */
+    private Vec3 leashAnchor;
+    private double leashRadius;
 
     public AttackTaskRecord(String toolCallId, long deadlineGameTime,
                             List<Integer> entityIds, boolean indiscriminate) {
@@ -61,6 +65,21 @@ public final class AttackTaskRecord extends TaskRecord {
         this.strictAuthorized = strictAuthorized;
         if (indiscriminate && this.sheepTraits.constrained())
             throw new IllegalArgumentException("Sheep traits require specific attack targets");
+    }
+
+    // 自卫开打时拴在工位上：目标跑出这个水平半径就不再追过去，免得为一只怪把角色越带越远；撤退和躲爆炸不受限制。
+    public AttackTaskRecord leash(Vec3 anchor, double radius) {
+        leashAnchor = anchor;
+        leashRadius = radius;
+        return this;
+    }
+
+    // 只比水平距离：高处平台或坑底的怪离工位的上下差不算“跑远”。
+    public boolean beyondLeash(Vec3 position) {
+        if (leashAnchor == null) return false;
+        double dx = position.x - leashAnchor.x;
+        double dz = position.z - leashAnchor.z;
+        return dx * dx + dz * dz > leashRadius * leashRadius;
     }
 
     // 旧任务没有羊筛选字段，恢复时继续沿用原先的攻击范围。

@@ -114,6 +114,10 @@ final class DefenseExcursion {
         return workSite;
     }
 
+    Vec3 workSiteExact() {
+        return workSiteExact;
+    }
+
     // 每刻量一次离工位多远并记下最远距离，回执据此说明角色曾被带出多远；换维度后无法比较就不记。
     void observe(LocalPlayer player) {
         double distance = distance(player);

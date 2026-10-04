@@ -61,6 +61,9 @@ public final class MobDefenseChain implements Task, Reflex {
     /** 打完后走回工位用的路线；同一时刻只有一段插曲在用它。 */
     private final ReturnRoute route;
 
+    /** 自卫只追离工位这么远（水平）以内的目标；正在压着她打的不受此限，撤退也不受此限。 */
+    static final double LEASH_RADIUS = 16.0;
+
     /** 回工位不赶时间，与夜间休息返回工位一样只走不跑，省下饥饿值。 */
     private static final double RETURN_SPEED = 0.8;
 
@@ -168,8 +171,9 @@ public final class MobDefenseChain implements Task, Reflex {
                     "combat can cause damage or death", excursion.startedFacts());
         }
         excursion.fightStarted();
+        // 每一场都拴在这段插曲的工位上：跑远的怪不再追，免得越打越远，回位路程也因此有限。
         AttackTaskRecord record = new AttackTaskRecord(
-                "reflex-" + now, now + NO_DEADLINE, List.of(), true);
+                "reflex-" + now, now + NO_DEADLINE, List.of(), true).leash(excursion.workSiteExact(), LEASH_RADIUS);
         fight = new AttackCompanionTask(companion, record);
         fight.start(companion);
         Constants.LOG.info("[maicraft-defense] 自动接管 —— 身边 {} 个危险",
