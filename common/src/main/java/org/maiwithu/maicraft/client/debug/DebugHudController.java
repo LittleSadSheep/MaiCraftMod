@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.mcp.McpActivityTrace;
+import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.JsonObject;
 
@@ -111,18 +112,22 @@ public final class DebugHudController {
         if (active == null) {
             rows.add(new Row("任务", "空闲", ChatFormatting.GRAY));
             appendLatestTerminalIssue(rows);
+            // 没有语义任务时反射（进食、休息、自救）仍可能占用身体；这种错位值得单独看见。
+            String action = CompanionTickDispatcher.bodyAction();
+            if (action != null) {
+                rows.add(new Row("动作", clamp(action), ChatFormatting.AQUA));
+            }
         } else {
-            int total = Math.max(1, active.steps().size());
-            int current = Math.min(active.stepIndex() + 1, total);
+            // 单步目标的"步骤 1/1"没有信息量，只在清单有多步时报进度；"步骤"一词留给语义清单专用。
+            int total = active.steps().size();
+            String progress = total > 1
+                    ? " · 步骤 " + Math.min(active.stepIndex() + 1, total) + "/" + total : "";
             // 尝试次数与排队数并入任务行，不单列；重试循环和积压都该在这行一眼看到。
-            rows.add(new Row("任务", taskTitle(active) + " · 步骤 " + current + "/" + total
+            rows.add(new Row("任务", taskTitle(active) + progress
                             + (active.attempts().isEmpty() ? "" : " · 尝试 " + active.attempts().size())
                             + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
                     ChatFormatting.AQUA));
-            if (active.stepIndex() >= 0 && active.stepIndex() < active.steps().size()) {
-                rows.add(new Row("步骤", stepTitle(active.steps().get(active.stepIndex())),
-                        ChatFormatting.AQUA));
-            }
+            rows.add(new Row("动作", actionText(), ChatFormatting.AQUA));
             if (active.decisionSnapshot() != null) {
                 rows.add(new Row("等待决策", decisionText(active.decisionSnapshot()),
                         ChatFormatting.YELLOW));
@@ -203,9 +208,11 @@ public final class DebugHudController {
         return statePrefix(record) + " · " + abilityTitle(record.goal());
     }
 
-    // 步骤行是当前正在执行的子任务，随执行切换；形状与任务行一致，便于上下对照。
-    private static String stepTitle(Goal step) {
-        return "执行中 · " + abilityTitle(step);
+    // 动作行回答"身体此刻在干什么"：调度层当前持有者的描述，反射自救与临时动作都在这里显形。
+    // 语义任务在跑而这里显示"无"，说明身体空转（等预览确认、等决策），本身就是要看见的状态。
+    private static String actionText() {
+        String action = CompanionTickDispatcher.bodyAction();
+        return action == null ? "无" : clamp(action);
     }
 
     private static String abilityTitle(Goal goal) {
