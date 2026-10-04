@@ -15,6 +15,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.state.BlockState;
@@ -32,6 +33,7 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.act.ToolSelect;
 import org.maiwithu.maicraft.core.integration.machine.control.DriverStation;
+import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
 import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireCompanionTask;
@@ -138,7 +140,8 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         }
         var allowed=actual.is(desired.getBlock())?wrenchFaces(actual,edit):Set.<Direction>of();
         wrenching=!allowed.isEmpty();placing=!wrenching&&actual.canBeReplaced()&&!desired.isAir();
-        Item item=wrenching?BuiltInRegistries.ITEM.get(ResourceLocation.parse("create:wrench")):placing?desired.getBlock().asItem():null;
+        // 船体和固定工位共用原生安装物：横向齿轮箱取竖直齿轮箱物品，墙挂形态取它注册的对应物品。
+        Item item=wrenching?BuiltInRegistries.ITEM.get(ResourceLocation.parse("create:wrench")):placing?MachinePlacementItems.itemFor(desired):null;
         int slot=item!=null?PlayerInv.findSlot(player.getInventory(),item):ToolSelect.bestSlot(player,actual);
         if(item!=null&&(slot<0||slot>=36)) {
             if(player.getAbilities().instabuild) {
@@ -206,7 +209,10 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         try {
             // 保留原生放置上下文的落点、生存条件和实体碰撞检查；即使检查不通过，下面仍尝试已授权的真实点击。
             var context=new BlockPlaceContext(player,InteractionHand.MAIN_HAND,player.getMainHandItem(),hit);
-            var at=context.getClickedPos();var state=desired.getBlock().getStateForPlacement(context);
+            var at=context.getClickedPos();
+            var state=player.getMainHandItem().getItem() instanceof BlockItem nativeItem
+                    ?MachinePlacementItems.placementState(nativeItem,context,false):desired.getBlock().getStateForPlacement(context);
+            state=MachinePlacementItems.projectedFinalState(player.getMainHandItem(),ctx.level(),at,context.getHorizontalDirection(),state);
             facts.put("native_position",List.of(at.getX(),at.getY(),at.getZ()));facts.put("target_matches",at.equals(target));
             facts.put("context_can_place",context.canPlace());facts.put("native_state",state==null?"unavailable":state.toString());
             if(state!=null) {

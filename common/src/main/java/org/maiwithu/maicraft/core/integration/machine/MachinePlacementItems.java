@@ -14,8 +14,11 @@ import net.minecraft.world.item.MobBucketItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.StandingAndWallBlockItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.WallTorchBlock;
+import net.minecraft.world.level.block.RedstoneWallTorchBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.server.machine.NativeApi;
@@ -32,6 +35,9 @@ public final class MachinePlacementItems {
 
     /** 先完成承载面，再装依附其上的运输部件；只调整施工顺序，不改作者的部件位置。 */
     public static List<BlockPos> supportDependencies(BlockState state) {
+        // 墙上火把先等背后的实心支座完成；它使用普通火把物品，不能因此遗漏真正的承载方向。
+        if(state.getBlock() instanceof WallTorchBlock || state.getBlock() instanceof RedstoneWallTorchBlock)
+            return List.of(BlockPos.ZERO.relative(state.getValue(WallTorchBlock.FACING).getOpposite()));
         return beltTunnel(state) ? List.of(BlockPos.ZERO.below()) : CreateFunnelPlacement.dependencies(state);
     }
 
@@ -54,7 +60,9 @@ public final class MachinePlacementItems {
                 ? Map.of("axis", state.getValue(BlockStateProperties.AXIS).getName()) : Map.of();
         String itemId = itemId(blockId, properties);
         Item selected = itemId.equals(blockId) ? state.getBlock().asItem() : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
-        if (!(selected instanceof BlockItem item) || item.getBlock() != state.getBlock())
+        // 站立与墙挂形态由同一个原生物品注册，asItem 已给出对应关系；不能只比较物品的主方块而拒绝墙火把。
+        boolean paired=selected instanceof StandingAndWallBlockItem && selected==state.getBlock().asItem();
+        if (!(selected instanceof BlockItem item) || item.getBlock() != state.getBlock() && !paired)
             throw new IllegalArgumentException("machine_native_placement_item_unavailable: " + blockId + " " + properties);
         return selected;
     }
@@ -70,8 +78,8 @@ public final class MachinePlacementItems {
         return bucket;
     }
     public static BlockState placementState(BlockItem item, BlockPlaceContext context, boolean projectedSupport) {
-        // 临时支承仍按方块预测；带上漏斗需在真实支承处调用物品原生转换，普通方块保持原有候选站位校验。
-        if (!projectedSupport && CreateFunnelPlacement.hasNativeItemTransition(item) && item instanceof BlockItemPlacementAccess access)
+        // 真实支承处统一调用物品原生分派，墙火把、带式漏斗等才能选择实际形态；虚拟支承仍保持方块预测。
+        if (!projectedSupport && item instanceof BlockItemPlacementAccess access)
             return access.maicraft$placementState(context);
         return item.getBlock().getStateForPlacement(context);
     }

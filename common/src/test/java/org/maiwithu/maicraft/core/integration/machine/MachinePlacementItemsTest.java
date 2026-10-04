@@ -4,9 +4,25 @@ package org.maiwithu.maicraft.core.integration.machine;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.StandingAndWallBlockItem;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.WallTorchBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.core.mixin.BlockItemPlacementAccess;
+import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
+import java.util.List;
+import sun.misc.Unsafe;
 
 public final class MachinePlacementItemsTest {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        SharedConstants.tryDetectVersion();Bootstrap.bootStrap();
         check(MachinePlacementItems.itemId("create:gearbox", Map.of()).equals("create:gearbox"), "default gearbox uses its normal native item");
         check(MachinePlacementItems.itemId("create:gearbox", Map.of("axis", "y")).equals("create:gearbox"), "Y-axis gearbox needs the normal item");
         for (String axis : new String[] {"x", "z"}) check(MachinePlacementItems.itemId("create:gearbox", Map.of("axis", axis)).equals("create:vertical_gearbox"),
@@ -26,7 +42,27 @@ public final class MachinePlacementItemsTest {
                 && MachinePlacementItems.verticalGearboxConflict(Set.of(),Direction.Axis.Z).isEmpty()
                 && MachinePlacementItems.verticalGearboxConflict(Set.of(Direction.Axis.X,Direction.Axis.Z),Direction.Axis.Z).isEmpty(),
                 "a valid or freely view-selectable native state is not reported as a forced conflict");
-        System.out.println("MachinePlacementItemsTest: native gearbox item identities and post-placement axis projection passed");
+        // 固定翼左轮反向传动使用墙上红石火把；材料、承载方向和持久化都必须保留同一原生形态。
+        for(var pair:List.of(Map.entry(Blocks.WALL_TORCH,Items.TORCH),Map.entry(Blocks.REDSTONE_WALL_TORCH,Items.REDSTONE_TORCH),
+                Map.entry(Blocks.SOUL_WALL_TORCH,Items.SOUL_TORCH)))
+            check(MachinePlacementItems.itemFor(pair.getKey().defaultBlockState())==pair.getValue(),"wall variant lost its native item");
+        for(var facing:Direction.Plane.HORIZONTAL) {
+            var state=Blocks.REDSTONE_WALL_TORCH.defaultBlockState().setValue(WallTorchBlock.FACING,facing);
+            check(MachinePlacementItems.supportDependencies(state).equals(List.of(BlockPos.ZERO.relative(facing.getOpposite()))),"wall support points away from the mount");
+            var target=new BuildTaskRecord.Target(state,Items.REDSTONE_TORCH,BlockPos.ZERO,"墙上红石火把",null,null,null);
+            var restored=BuildProjectTargets.decode(BuildProjectTargets.encode(List.of(target))).getFirst();
+            check(restored.item()==Items.REDSTONE_TORCH&&restored.desiredState().equals(state),"wall item and facing did not survive project persistence");
+        }
+        // 普通测试 JVM 没有 Mixin；此适配器只复现原生分派入口，证明预测不再绕过物品自己的形态选择。
+        var unsafeField=Unsafe.class.getDeclaredField("theUnsafe");unsafeField.setAccessible(true);
+        var paired=(PairedItem)((Unsafe)unsafeField.get(null)).allocateInstance(PairedItem.class);
+        check(MachinePlacementItems.placementState(paired,null,false).is(Blocks.WALL_TORCH)&&paired.called,"native item placement was bypassed");
+        System.out.println("MachinePlacementItemsTest: native gearbox and wall-item placement passed");
+    }
+    private static final class PairedItem extends StandingAndWallBlockItem implements BlockItemPlacementAccess {
+        boolean called;
+        private PairedItem(){super(Blocks.TORCH,Blocks.WALL_TORCH,new Item.Properties(),Direction.DOWN);}
+        public BlockState maicraft$placementState(BlockPlaceContext context){called=true;return Blocks.WALL_TORCH.defaultBlockState();}
     }
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
 }
