@@ -22,6 +22,8 @@ import org.maiwithu.maicraft.server.machine.NativeApi;
 
 /** 玩家请求分析后才短期旁听物理子步；复制冲量、作用点和质量，不向真实船体施加任何力。 */
 public final class NativePhysicsCapture {
+    static final String UNATTRIBUTED_WARNING="unmodeled:存在未归属到具体设备的直接冲量或力偶，实测总量已保留，未来工况来源仍需核验";
+    static boolean directObserved(Object ship) {var lease=WATCHES.get(ship);return lease!=null&&lease.directObserved;}
     private static final Logger LOG=LoggerFactory.getLogger("maicraft.physics");
     private static final Map<Object, Lease> WATCHES = new WeakHashMap<>();
     private static final String GROUPS = "dev.ryanhcode.sable.api.physics.force.ForceGroups";
@@ -172,7 +174,7 @@ public final class NativePhysicsCapture {
             PhysicsVector torque=lease.directTorque.scale(1/dt).add(queuedTorque).subtract(recordedTorque);
             if(force.length()+torque.length()>1e-7) {
                 loads.add(new PhysicsBody.Load("unattributed_impulse","sable:unattributed_impulse",center,force,torque,PhysicsBody.Frame.BODY,false,0));
-                unknowns.add("unmodeled:存在未归属到具体设备的直接冲量或力偶，实测总量已保留，未来工况来源仍需核验");
+                unknowns.add(UNATTRIBUTED_WARNING);
             }
         } else unknowns.add("直接刚体冲量总计未被本次采样钩子确认；只列出已确认的原生分组、执行器点力及重力");
         unknowns.add("外部直接修改速度或位置的操作不属于当前受力积分记录");

@@ -81,6 +81,8 @@ public final class PhysicsSnapshotService {
             }
             // 质量及候选方块确定后，再按同一份隔离布局计算新增、移除或转向的机翼载荷。
             model=PreflightAerodynamics.model(ship,measured,model,overlay);
+            // 蒙皮增减和航速变化会同时改变线性阻力与转动阻尼，必须在同一份候选布局上重建材料组。
+            model=PreflightFloatingDrag.model(ship,measured,model,overlay);
             model=PreflightWheels.model(model,overlay,rpm);
             model=PreflightGasVolumes.model(ship,model,overlay,filled);
             snapshot = new Snapshot(player.getUUID(), new WeakReference<>(player.serverLevel()), measured,
