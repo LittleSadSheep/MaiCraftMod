@@ -236,6 +236,9 @@ public final class SemanticAcquireCompanionTask
             return tickActiveChild();
         }
 
+        // 原生动作已结清后，先复查整条前置链的库存；工作台或中间件后来到包，就不再为旧缺口追原木。
+        if (completeCarriedPrerequisite()) return TaskState.RUNNING;
+
         // 主背包不足时先取随身背包现货，随后才开无线终端或找外部来源；mine/wireless等单一许可不被扩权。
         if (!needs.isEmpty()) {
             var need = needs.peek();
@@ -1962,6 +1965,36 @@ public final class SemanticAcquireCompanionTask
                         "required_final_count", need.requiredFinalCount,
                         "observed_final_count", count(need.itemIds)));
         return TaskState.RUNNING;
+    }
+
+    private boolean completeCarriedPrerequisite() {
+        // 从最接近最终成品的需求开始看，现货已覆盖该层时，下面尚未提交的补料都已没有必要。
+        AcquisitionNeed satisfied = null;
+        var ancestors = needs.descendingIterator();
+        while (ancestors.hasNext()) {
+            AcquisitionNeed candidate = ancestors.next();
+            if (candidate.depth > 0 && count(candidate.itemIds) >= candidate.requiredFinalCount) {
+                satisfied = candidate;
+                break;
+            }
+        }
+        if (satisfied == null) return false;
+        List<List<String>> retired = new ArrayList<>();
+        while (needs.peek() != satisfied) {
+            AcquisitionNeed obsolete = needs.pop();
+            // 收起需求不等于撤销已经发生的动作；既有材料消耗和世界效果仍沿完成的前置传给父层。
+            satisfied.effectsObserved |= obsolete.effectsObserved || obsolete.committedRecipeEffectsObserved;
+            retired.add(itemStrings(obsolete.itemIds));
+        }
+        needs.pop();
+        propagateSatisfiedNeed(satisfied);
+        if (!retired.isEmpty()) recipeTrace.add(Map.of(
+                "reason", "prerequisite_satisfied_from_live_inventory",
+                "satisfied_item_ids", itemStrings(satisfied.itemIds),
+                "observed_final_count", count(satisfied.itemIds),
+                "discarded_material_frontiers", List.copyOf(retired)));
+        renewProgressLease();
+        return true;
     }
 
     private void propagateSatisfiedNeed(AcquisitionNeed satisfied) {

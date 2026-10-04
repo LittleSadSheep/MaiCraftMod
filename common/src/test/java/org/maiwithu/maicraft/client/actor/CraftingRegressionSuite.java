@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 import org.maiwithu.maicraft.core.task.acquire.AcquisitionRecipePlanningTest;
 import org.maiwithu.maicraft.core.task.acquire.RecipeMaterialPlanTest;
 import org.maiwithu.maicraft.core.task.acquire.NearbyRecipePreferenceTest;
+import org.maiwithu.maicraft.core.task.acquire.AcquisitionPrerequisiteRefreshTest;
 import org.maiwithu.maicraft.core.task.craft.CraftSurfaceFailureTest;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationPlanningTest;
 import org.maiwithu.maicraft.intent.CraftAbilityWorkstationTest;
@@ -25,6 +26,8 @@ public final class CraftingRegressionSuite {
         // 两个公开入口在同一背包状态下必须派同一普通工具配方，不能要求调用者绕路换能力。
         CraftAbilityWorkstationTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
+        // 工作台或中间材料稍后到包时，立即收起更深的旧备料分支。
+        AcquisitionPrerequisiteRefreshTest.main(args);
         RecipeMaterialPlanTest.main(args);
         // 空背包优先利用真实野生材料；LLM 软偏好能引导路线并在失败后继续选择可用替代品。
         NearbyRecipePreferenceTest.main(args);
