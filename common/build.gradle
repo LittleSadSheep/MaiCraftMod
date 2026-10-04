@@ -66,6 +66,12 @@ sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 // 各组只声明场景入口和资源预算，类路径、工作目录创建与 check 接线在下方统一处理。
 // 大型建筑保持独立的两 GiB 进程；其余测试沿用各自原有堆大小和超时，不挤进同一个游戏进程。
 def regressionSuites = [
+    // 生活提醒独立核实原生证据与多条回执，新增规则不能覆盖旧规则或自行改变角色行为。
+    reminderRegression: [
+        entry: 'org.maiwithu.maicraft.mcp.ReminderRegressionSuite',
+        heap: '512m', directory: 'reminder-regression', timeoutSeconds: 60,
+        purpose: '验证生活提醒的原生观察、昼夜文案和多条交付'
+    ],
     // 混色羊群单独回放观察、挑选和属性变化，防止指定白羊时误伤黑羊。
     sheepTraitsRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.SheepTraitsTest',

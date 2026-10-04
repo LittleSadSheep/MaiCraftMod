@@ -18,6 +18,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.runtime.LowLightCombatReminder;
 import org.maiwithu.maicraft.client.runtime.FoodSupplyReminder;
 import org.maiwithu.maicraft.client.runtime.CombatEquipmentReminder;
+import org.maiwithu.maicraft.client.runtime.SleepReminder;
 import org.maiwithu.maicraft.intent.ReminderBoard;
 
 /** 不订阅 attention，通过真实 HTTP 验证每条公开工具通道都附当前提醒，且不改写业务成败。 */
@@ -38,6 +39,7 @@ public final class ReminderHttpTest {
             for (int tick = 0; tick <= 1200; tick += 20)
                 runtime.food.observe(new FoodSupplyReminder.Observation(tick, 12, 0, 0, 8));
             for (int tick = 0; tick < 3; tick++) runtime.hit(tick);
+            runtime.sleep.observe(new SleepReminder.Observation(1202, 80_000, 1202, 18_000, true, true));
             for (String name : List.of("perceive", "plan", "execute", "task")) {
                 JsonObject result = call(name, switch (name) {
                     case "plan", "execute" -> json("""
@@ -74,6 +76,11 @@ public final class ReminderHttpTest {
             check(knowledge.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString()
                     .equals("# 补光资料\n保持原文") && knowledge.has("structuredContent"), "知识正文格式不被提醒包装改变");
             checkReminders(knowledge, runtime);
+            // 睡眠这一条解除后，其他三个 ID 仍在同一数组中，不能用单条回执覆盖整个提醒字段。
+            runtime.sleep.observe(new SleepReminder.Observation(1204, 0, 1204, 6000, true, true));
+            var remaining = firstPayload(call("perceive", json("{\"view\":\"situation\"}"))).getAsJsonArray("reminders");
+            check(remaining.size() == 3 && !remaining.toString().contains(SleepReminder.ID)
+                    && remaining.equals(runtime.reminders()), "解除睡眠提醒后其余当前提醒完整返回");
             runtime.board.clear(); runtime.fail = false;
             check(!firstPayload(call("perceive", json("{\"view\":\"situation\"}"))).has("reminders"),
                     "现场提醒撤下后不再附旧提醒或空包装");
@@ -88,8 +95,9 @@ public final class ReminderHttpTest {
         check(content.size() == (document ? 2 : 1), "普通回执仅一份 JSON，文档保持原文并另附提醒");
         JsonArray reminders = json(content.get(document ? 1 : 0).getAsJsonObject().get("text").getAsString()).getAsJsonArray("reminders");
         check(reminders.equals(runtime.reminders()), "返回完整且最新的证据，多次读取不消费提醒");
-        check(reminders.size() == 3 && reminders.toString().contains(FoodSupplyReminder.ID)
-                && reminders.toString().contains(CombatEquipmentReminder.ID), "新规则与低光提醒在成功、错误和知识出口完整共存");
+        check(reminders.size() == 4 && reminders.toString().contains(FoodSupplyReminder.ID)
+                && reminders.toString().contains(CombatEquipmentReminder.ID) && reminders.toString().contains(SleepReminder.ID),
+                "四条提醒在成功、错误、知识和旧回执出口完整共存");
         var light = reminders.asList().stream().map(value -> value.getAsJsonObject())
                 .filter(value -> value.get("id").getAsString().equals(LowLightCombatReminder.ID)).findFirst().orElseThrow();
         check(light.get("message").getAsString().equals(
@@ -120,6 +128,7 @@ public final class ReminderHttpTest {
         final LowLightCombatReminder rule = new LowLightCombatReminder(board);
         final FoodSupplyReminder food = new FoodSupplyReminder(board);
         final CombatEquipmentReminder equipment = new CombatEquipmentReminder(board);
+        final SleepReminder sleep = new SleepReminder(board);
         int executions;
         boolean fail;
         void hit(long tick) {

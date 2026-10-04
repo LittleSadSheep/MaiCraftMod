@@ -186,6 +186,20 @@
 两条新规则与低光规则共享多提醒投递、节流和身体重置；创造与旁观状态清空生存提醒。
 新增规则需要接入事实采样与重置生命周期，工具出口无需为每条规则增加分支。
 
+### 多日未睡：夜晚提醒休息，白天提前备床
+
+`prolonged_sleep_deprivation` 使用服务器统计包中的个人 `time_since_rest`，达到 72000 刻
+（3 个游戏日）后触发。白天文案以“建议提前备床”开头，夜晚以“你已经长时间没有睡觉”
+开头，说明幻翼和夜间怪物风险，并建议在适合睡眠时使用 `maicraft:sleep`。
+不支持正常用床的维度提示先准备返回可睡眠维度；不把风险冒充怪物必然生成。
+
+客户端每 600 刻只读请求一次原生统计，超过 1200 刻未更新的休息计数不继续作为当前依据。
+只有实际统计包中的该字段才有效，世界日期、客户端默认零和其他统计更新都不能替代它。
+观察到原生入睡立即撤下，拒绝与已观察入睡矛盾的迟到高计数；断线、换身体和时钟回退重新取证。
+
+`reminders` 始终是数组，当前四条规则可同时交付。按 ID 更新或撤下只影响对应规则，
+不会用新的睡眠提示覆盖缺粮、装备或补光提示；成功、错误、知识和冻结回执读取都保留这一约定。
+
 ---
 
 ## 相关代码
@@ -194,4 +208,4 @@
 - 等待实现：`AttentionWait`
 - 读取与投影：`AttentionSnapshot`、`TaskView`、`JsonReadback`
 - 大结果：`ResponseArchive`
-- 生活提醒：`ReminderBoard`、`GameplayReminders`、`LowLightCombatReminder`、`FoodSupplyReminder`、`CombatEquipmentReminder`
+- 生活提醒：`ReminderBoard`、`GameplayReminders`、`LowLightCombatReminder`、`FoodSupplyReminder`、`CombatEquipmentReminder`、`SleepReminder`、`NativeRestStatistics`

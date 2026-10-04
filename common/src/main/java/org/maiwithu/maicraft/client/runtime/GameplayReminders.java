@@ -7,6 +7,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ClientboundAwardStatsPacket;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.LightLayer;
 import org.maiwithu.maicraft.core.combat.Menace;
@@ -21,6 +22,8 @@ public final class GameplayReminders {
     private static final LowLightCombatReminder LOW_LIGHT = new LowLightCombatReminder(BOARD);
     private static final FoodSupplyReminder FOOD = new FoodSupplyReminder(BOARD);
     private static final CombatEquipmentReminder EQUIPMENT = new CombatEquipmentReminder(BOARD);
+    private static final SleepReminder SLEEP = new SleepReminder(BOARD);
+    private static final NativeRestStatistics REST_STATS = new NativeRestStatistics(SLEEP);
     private static LocalPlayer body;
     private static ClientLevel level;
     private static long lastFoodTick = -1;
@@ -31,6 +34,8 @@ public final class GameplayReminders {
     public static void tick(LocalPlayer player) {
         if (!bind(player)) return;
         LOW_LIGHT.observe(sample(player), null);
+        // 个人原生统计决定是否长期未睡，当前昼夜决定提醒文案；睡眠变化只撤下自己的那条提醒。
+        REST_STATS.tick(player);
         long now = level.getGameTime();
         // 口粮按秒复核即可识别持续不足；伤害与血量仍逐刻观察，不因低频盘点背包错过重击。
         if (lastFoodTick < 0 || now < lastFoodTick || now - lastFoodTick >= 20) {
@@ -51,6 +56,11 @@ public final class GameplayReminders {
         int hostiles = 0;
         for (var notice : notices) if (Menace.hostile(notice.attacker())) hostiles++;
         EQUIPMENT.observe(ReminderInventoryFacts.equipment(player), hostiles, hostiles != notices.size());
+    }
+
+    /** 接住当前连接实际送达的个人统计，四条规则仍共用按 ID 保存的提醒板。 */
+    public static void receiveRestStatistics(LocalPlayer player, ClientboundAwardStatsPacket packet) {
+        if (bind(player)) REST_STATS.received(player, packet);
     }
 
     /** 不访问世界、不推进规则，也不消费证据，供所有工具出口读取同一份最新观察。 */
@@ -92,6 +102,7 @@ public final class GameplayReminders {
         LOW_LIGHT.clear();
         FOOD.clear();
         EQUIPMENT.clear();
+        REST_STATS.clear();
         lastFoodTick = -1;
         body = null;
         level = null;

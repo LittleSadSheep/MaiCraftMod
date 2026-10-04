@@ -10,6 +10,7 @@
   ],
   "client": [
     "ClientDamageEventMixin",
+    "ClientRestStatisticsMixin",
     "ItemEntityReceiptMixin",
     "EquipmentReceiptMixin",
     "ClientLevelBlockChangeMixin",

@@ -64,6 +64,8 @@ public final class CombatThreatsTest {
         GameplayRemindersTest.main(args);
         // 缺粮与战斗准备复用随身物品和原生受击事实，新增规则不能抢占身体或吞掉现有低光提醒。
         SurvivalRemindersTest.main(args);
+        // 原生休息统计按连接观察，不能让世界日期或入睡前的旧包制造“多日未睡”。
+        NativeRestStatisticsTest.main(args);
         CombatHandOwnershipTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }
