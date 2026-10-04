@@ -138,9 +138,9 @@ public final class DebugHudController {
             rows.add(new Row("任务", "空闲", ChatFormatting.GRAY));
             appendLatestTerminalIssue(rows);
             // 没有语义任务时反射（进食、休息、自救）仍可能占用身体；这种错位值得单独看见。
-            String action = CompanionTickDispatcher.bodyAction();
+            CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
             if (action != null) {
-                rows.add(new Row("动作", clamp(action), ChatFormatting.AQUA));
+                rows.add(new Row("动作", actionValue(action), ChatFormatting.AQUA));
             }
         } else {
             // 单步目标的"步骤 1/1"没有信息量，只在清单有多步时报进度；"步骤"一词留给语义清单专用。
@@ -156,8 +156,7 @@ public final class DebugHudController {
             // 等了多久和等什么同样重要：等 5 秒是在等模型，等 5 分钟大概率是卡死。
             long nowGameTime = minecraft.level == null ? 0 : minecraft.level.getGameTime();
             if (active.decisionSnapshot() != null) {
-                rows.add(new Row("等待决策", decisionText(active, nowGameTime),
-                        ChatFormatting.YELLOW));
+                appendDecisionRows(rows, active, nowGameTime);
             } else if (active.pauseSnapshot() != null) {
                 rows.add(new Row("已暂停", clamp(active.pauseSnapshot().reason())
                                 + " · 已暂停 " + formatDuration(nowGameTime - active.pauseSnapshot().gameTime()),
@@ -282,11 +281,14 @@ public final class DebugHudController {
         return statePrefix(record) + " · " + abilityTitle(record.goal());
     }
 
-    // 动作行回答"身体此刻在干什么"：调度层当前持有者的描述，反射自救与临时动作都在这里显形。
-    // 语义任务在跑而这里显示"无"，说明身体空转（等预览确认、等决策），本身就是要看见的状态。
+    // 动作行回答"此刻在做什么"：有阶段名只显示阶段，阶段缺失退回任务单短描述；不复读任务行的目标全文。
     private static String actionText() {
-        String action = CompanionTickDispatcher.bodyAction();
-        return action == null ? "无" : clamp(action);
+        CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
+        return action == null ? "无" : actionValue(action);
+    }
+
+    private static String actionValue(CompanionTickDispatcher.BodyAction action) {
+        return action.phase() != null ? action.phase() : clamp(action.describe());
     }
 
     private static String abilityTitle(Goal goal) {
@@ -338,18 +340,20 @@ public final class DebugHudController {
         return fallback.name().toLowerCase(Locale.ROOT);
     }
 
-    // 决策行要说出在等什么、等了多久：问题摘要加可选项；等待起点取伴随的暂停快照。
-    private static String decisionText(IntentTaskRecord record, long nowGameTime) {
-        IntentTaskRecord.DecisionSnapshot decision = record.decisionSnapshot();
+    // 决策是卡点：问题与选项是应答依据，完整显示并拆成两行，单行截断会把依据截掉。
+    private static void appendDecisionRows(List<Row> rows, IntentTaskRecord active, long nowGameTime) {
+        IntentTaskRecord.DecisionSnapshot decision = active.decisionSnapshot();
+        String question = decision.question() == null ? "未知"
+                : decision.question().replace('\r', ' ').replace('\n', ' ')
+                        .replaceAll("\\s+", " ").strip();
+        IntentTaskRecord.PauseSnapshot pause = active.pauseSnapshot();
+        String waiting = pause == null ? ""
+                : " · 已等 " + formatDuration(nowGameTime - pause.gameTime());
+        rows.add(new Row("等待决策", question + waiting, ChatFormatting.YELLOW));
         String choices = decision.options().stream()
                 .map(IntentTaskRecord.DecisionOption::choice)
-                .collect(Collectors.joining("/"));
-        String text = clamp(decision.question(), 40)
-                + (choices.isBlank() ? "" : " · 选项 " + clamp(choices, 24));
-        IntentTaskRecord.PauseSnapshot pause = record.pauseSnapshot();
-        // 时长拼在内容截断之外：行超宽时宁可丢问题尾巴，不能丢掉"等了多久"。
-        return pause == null ? clamp(text)
-                : clamp(text, 50) + " · 已等 " + formatDuration(nowGameTime - pause.gameTime());
+                .collect(Collectors.joining(" / "));
+        rows.add(new Row("选项", choices.isBlank() ? "未知" : choices, ChatFormatting.YELLOW));
     }
 
     // 游戏刻换算时长（20 刻/秒）；秒与分级够定位卡死，超过一小时不再显示秒。
