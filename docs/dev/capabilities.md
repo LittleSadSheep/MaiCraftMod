@@ -24,7 +24,7 @@
 | `remember_place` | 记住地点或区域 | `AbilityAdapter.remember` → `IntentRuntime.remember` | 入口核对 |
 | `wait_for_condition` | 等一段时间、天亮或身体条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | 完成重构；[实现与回归](waiting.md) |
 | `chat` | 在真实聊天框输入并提交 | `ChatAbilityAdapter` → `ChatTask` | 完成重构；[发送与恢复规则](chat.md) |
-| `suicide` | 死亡不掉落时通过原生危险动作主动寻死 | `SuicideAbilityAdapter` → `SuicideTask` | 已覆盖参数、危险观察、取消、保护恢复及死亡步骤结算的夹具回归；尚未实机验收 |
+| `suicide` | 死亡不掉落时通过原生危险动作主动寻死 | `SuicideAbilityAdapter` → `SuicideTask` | [用途、参数与生命周期](suicide.md)；已有夹具入口见正文，本轮仅静态复核，尚未实机验收 |
 | `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对；[参数、到达判定与已知边界](travel.md) |
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
 | `prepare_portal` | 单独准备并点燃传送门，完成后停在门外 | `AbilityAdapter.preparePortal` | 入口核对 |
@@ -72,7 +72,7 @@
 
 `enchant` 保留兼容已有调用。默认能力发现不展示它，指定该能力查询时仍能取得契约；新机器工序走统一机器入口。能力“已登记”、当前加载的模组“支持”、眼前条件“可以执行”是三件不同的事。
 
-`suicide` 由模型明确调用，低饱食度或路远不会自动触发。单人世界读取真实 `keepInventory`，多人服务器需要调用方依据已知设置传入 `keep_inventory_confirmed: true`；不修改游戏规则。`method` 可选 `auto`、`lava`、`hostile`、`fall`，默认在起点 24 格、上下 12 格的已加载区域找危险，执行预算为 120 秒。只移动、靠怪和踏出高处，不使用 `/kill`、直接扣血或拆改地形。寻死期间暂停自保，暂停、取消、超时和结束后恢复。死亡证据使该步骤成功；默认请求原生重生（`auto_respawn: false` 可关闭），`agent.respawned` 单独报告实际重生。序列中的后续工作在重生后保持暂停，等待重新判断现场。
+`suicide` 由模型明确调用，低饱食度或路远不会自动触发。单人世界读取真实 `keepInventory`，多人服需依据已知设置传入 `keep_inventory_confirmed: true`；不修改规则。默认 `method=auto` 从三类已观察机会中选取，候选搜索半径 24 格、地形站位上下 12 格，总预算为 120 个按执行 tick 折算的秒；搜索半径不是整个追逐路线的边界。角色只步行接近、进入岩浆、靠怪或踏出高处，不直接扣血或施工。寻死取得执行资格时自保让位，暂停或结束后恢复调度资格，原生伤害和已提交效果不会回滚。成功只确认本轮身体死亡；默认请求原生重生，`auto_respawn: false` 可关闭 Mod 自动请求，实际重生另看 `agent.respawned`。后继序列保持暂停，等待重新判断现场；完整参数、返回字段和已知差异见 [主动寻死](suicide.md)。
 
 适配代码位置：
 
