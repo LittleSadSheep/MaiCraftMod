@@ -44,6 +44,8 @@ public final class CraftingTaskTagTest {
             scenario(rods, true, true, false);
             scenario(rods, false, false, false);
             scenario(rods, false, true, true);
+            // 仅剩一个空格时，两批火把应共用同一堆；煤和木棍故意留富余，不能靠耗尽原料腾出额外槽位。
+            scenario(rods, false, true, false, true);
             bookTimeout(rods);
         } finally { registry.bindTags(previous); }
         System.out.println("CraftingTaskTagTest: passed");
@@ -62,8 +64,19 @@ public final class CraftingTaskTagTest {
     }
 
     private static void scenario(TagKey<Item> rods, boolean named, boolean deliver, boolean removeMaterial) throws Exception {
+        scenario(rods, named, deliver, removeMaterial, false);
+    }
+
+    private static void scenario(TagKey<Item> rods, boolean named, boolean deliver, boolean removeMaterial,
+                                 boolean oneFreeSlot) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             h.enableCraftingTransactions(); var recipe = recipe(rods); install(h, recipe);
+            if (oneFreeSlot) {
+                // 主背包三十五格已有物品，不带工作台；合成八支火把只能利用最后一格，不能提前清包。
+                h.inventory.setItem(0, new ItemStack(Items.COAL, 64));
+                h.inventory.setItem(1, new ItemStack(Items.STICK, 64));
+                for (int slot = 2; slot < 35; slot++) h.inventory.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+            }
             if (named) {
                 // 已解锁配方仍可能因为材料带名字而无法用配方簿；原生标签谓词继续接受这根实际木棍。
                 h.player.getRecipeBook().add(recipe);
@@ -91,9 +104,13 @@ public final class CraftingTaskTagTest {
             check(result.data().get("crafting_placement_method").equals("native_grid_clicks") && h.mode.recipePlacements == 0,
                     "the task selects native slot placement for unlearned or named-material recipes");
             if (deliver && !removeMaterial) {
-                check(h.inventory.countItem(Items.TORCH) == 8 && h.inventory.countItem(Items.STICK) == 0
-                        && h.inventory.countItem(Items.COAL) == 0 && result.data().get("completed_batches").equals(2),
+                int remainingInputs = oneFreeSlot ? 62 : 0;
+                check(h.inventory.countItem(Items.TORCH) == 8 && h.inventory.countItem(Items.STICK) == remainingInputs
+                        && h.inventory.countItem(Items.COAL) == remainingInputs && result.data().get("completed_batches").equals(2),
                         "two exact batches consume two sticks and two coal and actually store eight torches");
+                if (oneFreeSlot) check(h.inventory.getItem(35).is(Items.TORCH)
+                        && h.inventory.getItem(35).getCount() == 8 && h.inventory.countItem(Items.COBBLESTONE) == 33 * 64
+                        && h.blockUses() == 0, "一个空槽容纳两批火把，其他堆叠保留且不使用世界中的工作台");
             } else {
                 check(result.data().get("failure_type").equals(removeMaterial ? "no_material" : "unknown")
                         && result.data().containsKey("crafting_placement_evidence"), "only observed absent materials justify no_material");
