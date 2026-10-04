@@ -53,8 +53,8 @@
 | `stonecut` | 在切石机把输入切成指定产物 | `StonecutAbilityAdapter` | 入口核对 |
 | `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | 入口核对 |
 | `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | 入口核对 |
-| `light_area` | 给实际识别出的区域补光 | `AbilityAdapter.lightArea` | 入口核对 |
-| `auto_light` | 启停或查询随行副手补光，不替换当前任务 | `AutomaticLightingAdapter` → `AutomaticLighting` | 随行与区域覆盖通过 `lightingRegression` 回放 |
+| `light_area` | 调查指定区域、供料并按实测方块光补足所选覆盖率 | `AbilityAdapter.lightArea` → `SemanticLightAreaCompanionTask` | [参数、流程、回执与已知缺口](lighting.md)；本轮静态核对，未运行回归或实机 |
+| `auto_light` | 默认关闭；独立启停或查询沿当前路线的副手补光 | `AutomaticLightingAdapter` → `AutomaticLighting` | [参数、身体让位、采样范围与保护缺口](lighting.md)；现有入口 `lightingRegression`，本轮未运行 |
 | `inspect_machine` | 读取机器地图现状、整机差异与原生组件证据 | `MachineAbilityAdapter.inspect` | [机器检查契约与已知边界](machine-inspection.md)；源码静态复核，未运行本轮回归 |
 | `design_machine` | 检查机器布局及需求 | `MachineAbilityAdapter.design` | 入口核对 |
 | `build_machine` | 供料、搭建并核对机器结构 | `MachineAbilityAdapter.build` | 入口核对 |
