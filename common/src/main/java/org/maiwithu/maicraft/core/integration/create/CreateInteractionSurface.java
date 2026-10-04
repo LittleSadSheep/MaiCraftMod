@@ -15,14 +15,17 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 
-/** 置物台取放与机械手换物各有原生点击区域；选站位、瞄准和最终点击共用同一个判据。 */
+/** 置物台、机械手及 Offroad 轮座各有原生点击区域；选站位、瞄准和最终点击共用同一个判据。 */
 public final class CreateInteractionSurface {
     private CreateInteractionSurface() {}
 
-    public record Rule(Direction face, Direction handFacing) {
-        public boolean constrained() { return face != null || handFacing != null; }
+    public record Rule(Direction face, Direction handFacing, Direction wheelFacing) {
+        public Rule(Direction face,Direction handFacing){this(face,handFacing,null);}
+        public boolean constrained() { return face != null || handFacing != null || wheelFacing != null; }
         public boolean accepts(BlockHitResult hit) {
             if (face != null && hit.getDirection() != face) return false;
+            // WheelMountBlock.useItemOn 只在轮座外侧或底面交换轮胎；看到背板、顶面或侧面不能代表可以安装。
+            if(wheelFacing!=null&&hit.getDirection()!=wheelFacing&&hit.getDirection()!=Direction.DOWN)return false;
             if (handFacing == null) return true;
             // DeployerBlock.useItemOn 从背端沿朝向量出四分之三格；前端侧面也合法，不能强制只点端盖。
             Vec3 normal = Vec3.atLowerCornerOf(handFacing.getNormal());
@@ -35,7 +38,8 @@ public final class CreateInteractionSurface {
     }
 
     public static Rule forUse(BlockState state, Item item) {
-        Direction facing = state.hasProperty(BlockStateProperties.FACING) ? state.getValue(BlockStateProperties.FACING) : null;
+        Direction facing = state.hasProperty(BlockStateProperties.FACING) ? state.getValue(BlockStateProperties.FACING)
+                :state.hasProperty(BlockStateProperties.HORIZONTAL_FACING)?state.getValue(BlockStateProperties.HORIZONTAL_FACING):null;
         return forUse(BuiltInRegistries.BLOCK.getKey(state.getBlock()), facing,
                 BuiltInRegistries.ITEM.getKey(item == null ? Items.AIR : item));
     }
@@ -44,7 +48,9 @@ public final class CreateInteractionSurface {
         // 扳手在原生逻辑里负责调向或切模式，手持机械手会先触发相邻放置；这两种操作不套用装料入口。
         boolean swap = blockId.toString().equals("create:deployer")
                 && !itemId.toString().equals("create:wrench") && !itemId.toString().equals("create:deployer");
-        return new Rule(requiredFace(blockId), swap ? facing : null);
+        // 扳手有独立的原生调向入口；取放轮胎和空手拆轮才应用轮座的可点击面。
+        boolean wheel=blockId.toString().equals("offroad:wheel_mount")&&!itemId.toString().equals("create:wrench");
+        return new Rule(requiredFace(blockId), swap ? facing : null, wheel ? facing : null);
     }
     public static Direction requiredFace(BlockState state) {
         return requiredFace(BuiltInRegistries.BLOCK.getKey(state.getBlock()));

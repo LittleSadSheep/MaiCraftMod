@@ -23,6 +23,7 @@ public final class MachineInteractionSurfaceTest {
                 && CreateInteractionSurface.requiredFace(Blocks.CRAFTING_TABLE.defaultBlockState()) == null,
                 "only the native depot contract requires a top click; ordinary menus keep all visible faces");
         deployerRegions();
+        wheelMountFaces();
         visibleSurfaceGetsBoundedAimCorrection();
         try (var h = new InteractionWorldTestHarness()) {
             var at = new BlockPos(8, 1, 5); h.set(at, Blocks.STONE.defaultBlockState());
@@ -92,6 +93,22 @@ public final class MachineInteractionSurfaceTest {
             h.set(at.above(), Blocks.STONE.defaultBlockState());
             check(!(boolean) refine.invoke(blocked, top), "an actual covering block is not mistaken for a camera delay");
             check(h.blockUses() == 0 && h.itemUses() == 0, "aim correction never replays a native use");
+        }
+    }
+    private static void wheelMountFaces() throws Exception {
+        var block=ResourceLocation.parse("offroad:wheel_mount");var tire=ResourceLocation.parse("offroad:small_tire");var at=new BlockPos(8,1,5);
+        // 四种朝向都只接受外侧和底面；轮胎型号不改变轮座入口，空手取轮也沿用相同原生规则。
+        for(Direction facing:Direction.Plane.HORIZONTAL)for(Direction hit:Direction.values()) {
+            var rule=CreateInteractionSurface.forUse(block,facing,tire);
+            check(rule.constrained()&&rule.accepts(new BlockHitResult(Vec3.atCenterOf(at),hit,at,false))==(hit==facing||hit==Direction.DOWN),"wheel use must target the native outside or bottom face");
+        }
+        check(CreateInteractionSurface.forUse(block,Direction.WEST,ResourceLocation.parse("minecraft:air")).constrained(),"empty-hand tire removal needs the same face");
+        check(!CreateInteractionSurface.forUse(block,Direction.WEST,ResourceLocation.parse("create:wrench")).constrained(),"native wrench rotation keeps its own interaction");
+        try(var h=new InteractionWorldTestHarness()) {
+            h.set(at,Blocks.STONE.defaultBlockState());var rule=CreateInteractionSurface.forUse(block,Direction.WEST,tire);
+            check(rule.visibleHit(h.level,h.player,new Vec3(6.5,1.5,5.5),at,4.5)!=null,"outside stance must provide a real accepted ray");
+            check(rule.visibleHit(h.level,h.player,new Vec3(10.5,1.5,5.5),at,4.5)==null,"visible rear face cannot be used to install a tire");
+            check(h.blockUses()==0,"surface probing must not submit an installation");
         }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
