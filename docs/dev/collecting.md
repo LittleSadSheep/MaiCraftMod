@@ -12,7 +12,7 @@
 
 | 完整字段路径 | 类型、默认和合法输入 | 对游戏行为的影响 |
 | --- | --- | --- |
-| `goal.parameters.drop_ref` | 可选字符串；从 `perceive(view="surroundings", sections=["nearby_entities"])` 的实际掉落观察中原样复制。格式为维度资源 ID、`|` 和规范 UUID | 只追踪那一堆，接单时核对当前维度。省略表示不按身份限定；`null`、空串、格式错误都拒绝。引用不是数字实体 ID，也不是坐标 |
+| `goal.parameters.drop_ref` | 可选字符串；从 `perceive(view="surroundings", sections=["nearby_entities"])` 的实际掉落观察中原样复制。格式为维度资源 ID、`\|` 和规范 UUID | 只追踪那一堆，接单时核对当前维度。省略表示不按身份限定；`null`、空串、格式错误都拒绝。引用不是数字实体 ID，也不是坐标 |
 | `goal.parameters.item_ids` | 可选非空字符串数组；每项必须能解析为当前注册表中的非空气物品，推荐显式命名空间；重复项合并 | 仅筛注册物品类型，不筛附魔、损伤等组件。省略表示不限类型；`null`、`[]`、非字符串、未知物品或 `air` 拒绝。标签不支持 |
 | `goal.parameters.radius` | 可选 JSON 数值，必须为整数值且在 `1..48` 内，单位方块，省略为 `16` | 每轮扫描把角色当前身体盒向 x/y/z 各扩展这个距离。`0`、负数、超过 48、非整数值、数字字符串、`null` 和布尔值拒绝；数学上为整数的 `16.0` 可解析为 16 |
 | `goal.parameters.may_alter_terrain` | 可选 JSON 布尔值；省略与 `false` 都不授权开路，`true` 授权 | 允许正常导航按白名单和保护条件挖路、搭桥或垫高。`null`、`0`、`1`、`"true"` 均拒绝；许可不会把尚未挖开的站位当成已到达 |
