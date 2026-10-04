@@ -52,6 +52,13 @@ final class PhysicalStructurePerception {
         out.addProperty("engine", "sable"); out.addProperty("state", frame.state());
         if (frame.error() != null) out.addProperty("error", frame.error());
         out.addProperty("observed_game_tick", player.level().getGameTime());
+        // 身体站在船体、仍被跟踪或已经离艇是不同事实；直接公开原生支撑关系，供起飞与离艇决策使用。
+        var contact=SableStructureBridge.contact(player);var bodyContact=new JsonObject();
+        bodyContact.addProperty("known",contact.known());bodyContact.addProperty("collision_below",contact.below());
+        bodyContact.addProperty("on_ground",player.onGround());bodyContact.addProperty("passenger",player.isPassenger());
+        if(contact.trackingId()!=null)bodyContact.addProperty("tracking_structure_id",contact.trackingId().toString());
+        if(contact.collisionId()!=null)bodyContact.addProperty("collision_structure_id",contact.collisionId().toString());
+        out.add("body_contact",bodyContact);
         out.addProperty("dimension", player.level().dimension().location().toString());
         out.addProperty("range", RANGE); out.addProperty("read_only", true);
         out.addProperty("total_loaded_structures", frame.total());

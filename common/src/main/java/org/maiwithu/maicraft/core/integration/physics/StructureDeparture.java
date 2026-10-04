@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
@@ -19,6 +20,9 @@ import org.maiwithu.maicraft.core.integration.create.ContraptionObstacles;
 
 /** 原生下座后，从已观察的静止甲板走到近旁地面，再把总行程交还普通寻路。 */
 public final class StructureDeparture implements TransportSession {
+    private static Map<String,Object> observation=Map.of();
+    /** 只读保留最近一次出口搜索依据；不为诊断发出移动，也不把无候选误报为已离艇。 */
+    public static Map<String,Object> diagnosticState(){return observation;}
     private final UUID structureId;
     private final Vec3 destination;
     private final LongSet forbidden;
@@ -32,23 +36,41 @@ public final class StructureDeparture implements TransportSession {
 
     public static StructureDeparture find(LocalPlayerContext ctx, BlockPos goal, LongSet forbidden) {
         var player = ctx.player(); var contact = SableStructureBridge.contact(player);
+        var report=new LinkedHashMap<String,Object>();observation=report;
+        report.put("observed_tick",ctx.tickRevision());report.put("position",List.of(player.getX(),player.getY(),player.getZ()));
+        report.put("native_contact",contact);report.put("on_ground",player.onGround());report.put("passenger",player.isPassenger());
+        report.put("phase","checking_native_support");
         if (!player.onGround() || player.isPassenger() || contact.trackingId() == null
                 || !contact.supportedBy(contact.trackingId())) return null;
         var ship = SableStructureBridge.find(ctx.level(), contact.trackingId());
+        report.put("phase","checking_stationary_deck");
         if (!quiet(ship, player.position())) return null;
         Geometry boxes = geometry(ctx,forbidden);
+        report.put("phase","reading_collision_geometry");
         if (boxes == null) return null;
         var space = JetpackRoute.observed(ctx, forbidden);
         var candidates = new ArrayList<Vec3>();
+        int supportedLandings=0,clearLandings=0;
         BlockPos origin = player.blockPosition();
         for (int x=-4; x<=4; x++) for (int z=-4; z<=4; z++) for (int y=-3; y<=0; y++) {
             var landing = TransportLanding.inspect(ctx.level(), ctx.level()::isLoaded, origin.offset(x,y,z),
                     player.getBbWidth()+.08, player.getBbHeight()+.04, forbidden).destination();
-            if (landing == null || !space.clear(landing.landingPoint(), landing.landingPoint())) continue;
+            if (landing == null)continue;
+            supportedLandings++;
+            if(!space.clear(landing.landingPoint(), landing.landingPoint()))continue;
+            clearLandings++;
             Vec3 at = landing.landingPoint();
             if (at.subtract(player.position()).horizontalDistance() >= .4
                     && StructureExitPath.clear(boxes.boxes(),boxes.forbidden(),player.position(),at,player.getBbWidth()+.04,player.getBbHeight()+.04))
                 candidates.add(at);
+        }
+        // 低顶座舱无法离开时，直接交付实际搜索阶段、候选计数和完整碰撞快照，便于区分地面缺失与路径被挡。
+        report.put("phase",candidates.isEmpty()?"no_deck_exit":"exit_selected");
+        report.put("supported_landings",supportedLandings);report.put("clear_landings",clearLandings);report.put("exit_candidates",candidates.size());
+        if(candidates.isEmpty()) {
+            report.put("body_dimensions",List.of(player.getBbWidth()+.04,player.getBbHeight()+.04));
+            report.put("collision_boxes",boxes.boxes().stream().map(b->List.of(b.minX,b.minY,b.minZ,b.maxX,b.maxY,b.maxZ)).toList());
+            report.put("forbidden_boxes",boxes.forbidden().stream().map(b->List.of(b.minX,b.minY,b.minZ,b.maxX,b.maxY,b.maxZ)).toList());
         }
         return candidates.stream().min(Comparator.comparingDouble(at -> at.distanceTo(player.position())
                         + .1 * at.distanceTo(Vec3.atCenterOf(goal))))
