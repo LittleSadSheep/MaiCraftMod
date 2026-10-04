@@ -16,6 +16,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.client.runtime.LowLightCombatReminder;
+import org.maiwithu.maicraft.client.runtime.FoodSupplyReminder;
+import org.maiwithu.maicraft.client.runtime.CombatEquipmentReminder;
 import org.maiwithu.maicraft.intent.ReminderBoard;
 
 /** 不订阅 attention，通过真实 HTTP 验证每条公开工具通道都附当前提醒，且不改写业务成败。 */
@@ -32,6 +34,9 @@ public final class ReminderHttpTest {
         try (client; var service = new EmbeddedMcpService(McpConfig.local(0), runtime)) {
             service.start(); endpoint = URI.create("http://127.0.0.1:" + service.port() + "/mcp");
             send("initialize", new JsonObject());
+            // 同一提醒板增加农业和装备规则，四个工具仍须自动完整交付，无需为新规则改写传输分支。
+            for (int tick = 0; tick <= 1200; tick += 20)
+                runtime.food.observe(new FoodSupplyReminder.Observation(tick, 12, 0, 0, 8));
             for (int tick = 0; tick < 3; tick++) runtime.hit(tick);
             for (String name : List.of("perceive", "plan", "execute", "task")) {
                 JsonObject result = call(name, switch (name) {
@@ -83,7 +88,11 @@ public final class ReminderHttpTest {
         check(content.size() == (document ? 2 : 1), "普通回执仅一份 JSON，文档保持原文并另附提醒");
         JsonArray reminders = json(content.get(document ? 1 : 0).getAsJsonObject().get("text").getAsString()).getAsJsonArray("reminders");
         check(reminders.equals(runtime.reminders()), "返回完整且最新的证据，多次读取不消费提醒");
-        check(reminders.get(0).getAsJsonObject().get("message").getAsString().equals(
+        check(reminders.size() == 3 && reminders.toString().contains(FoodSupplyReminder.ID)
+                && reminders.toString().contains(CombatEquipmentReminder.ID), "新规则与低光提醒在成功、错误和知识出口完整共存");
+        var light = reminders.asList().stream().map(value -> value.getAsJsonObject())
+                .filter(value -> value.get("id").getAsString().equals(LowLightCombatReminder.ID)).findFirst().orElseThrow();
+        check(light.get("message").getAsString().equals(
                 "当前亮度较低，你可能正频繁遭遇怪物攻击。可使用补光功能（maicraft:light_area）减少怪物刷新。"),
                 "主提醒直接说明低光、频繁遭袭和可用的补光功能");
     }
@@ -109,10 +118,14 @@ public final class ReminderHttpTest {
     private static final class Runtime implements RuntimeFacade {
         final ReminderBoard board = new ReminderBoard(ignored -> {});
         final LowLightCombatReminder rule = new LowLightCombatReminder(board);
+        final FoodSupplyReminder food = new FoodSupplyReminder(board);
+        final CombatEquipmentReminder equipment = new CombatEquipmentReminder(board);
         int executions;
         boolean fail;
         void hit(long tick) {
-            rule.observe(new LowLightCombatReminder.Observation(tick, "minecraft:overworld", BlockPos.ZERO, 0, 15, 0), "minecraft:zombie");
+            rule.observe(new LowLightCombatReminder.Observation(1200 + tick, "minecraft:overworld", BlockPos.ZERO, 0, 15, 0), "minecraft:zombie");
+            equipment.observe(new CombatEquipmentReminder.Observation(1200 + tick, tick == 0 ? 20 : 12,
+                    20, 0, false, new JsonObject()), 1, false);
         }
         public JsonArray reminders() { return board.snapshot(); }
         public CompletionStage<JsonElement> perceive(JsonObject args) { return ready(new JsonObject()); }

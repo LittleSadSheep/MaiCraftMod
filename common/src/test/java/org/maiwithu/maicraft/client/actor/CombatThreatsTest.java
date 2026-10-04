@@ -62,6 +62,8 @@ public final class CombatThreatsTest {
         DamageEpisodeTest.main(args);
         // 低光遇袭提醒复用原生包，不改变自卫、玩家交互或伤害片段的既有结算。
         GameplayRemindersTest.main(args);
+        // 缺粮与战斗准备复用随身物品和原生受击事实，新增规则不能抢占身体或吞掉现有低光提醒。
+        SurvivalRemindersTest.main(args);
         CombatHandOwnershipTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }

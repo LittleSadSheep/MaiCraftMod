@@ -517,6 +517,8 @@ public final class GameplayAttentionMonitor {
     /** 在调度身体之前消费收到的伤害；玩家袭击不依赖血量包先后顺序，也不读取服务端 AI 字段。 */
     public static boolean observeDamagePackets(LocalPlayer player, float before, float after) {
         var notices = CombatThreats.consumeDamage(player);
+        // 即使这一刻没有新伤害包，也要接住晚到的红心同步；整批只采样一次，避免把掉血乘以包数量。
+        GameplayReminders.observeCombat(player, notices);
         for (var notice : notices) {
             // 在伤害片段合并之前逐包计数，让同一只怪物的连续命中也能触发低光生活提醒。
             GameplayReminders.damaged(player, notice.attacker());

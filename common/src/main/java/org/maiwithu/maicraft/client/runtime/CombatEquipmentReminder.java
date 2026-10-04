@@ -57,6 +57,11 @@ public final class CombatEquipmentReminder {
         evidence.addProperty("observed_health_loss_near_attacks", totalLoss);
         evidence.addProperty("low_health_observed_near_attacks", low);
         evidence.addProperty("large_health_drop_observed", heavy);
+        // 把触发阈值与证据一起交付，模型能区分一次重伤和多次轻伤累计，而不必猜测提醒原因。
+        evidence.addProperty("large_drop_threshold", Math.max(4, now.maxHealth() * .3F));
+        evidence.addProperty("repeated_hits_threshold", 3);
+        evidence.addProperty("cumulative_loss_threshold", Math.max(6, now.maxHealth() * .4F));
+        evidence.addProperty("low_health_ratio_threshold", .5F);
         evidence.addProperty("health_sync_window_ticks", HEALTH_SYNC_TICKS);
         evidence.addProperty("exact_attack_damage_known", false);
         evidence.addProperty("current_health", now.health());
