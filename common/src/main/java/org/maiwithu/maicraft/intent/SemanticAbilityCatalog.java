@@ -50,6 +50,7 @@ public final class SemanticAbilityCatalog {
             case PhysicalAssemblyAbilityAdapter.ABILITY -> PhysicalAssemblyAbilityAdapter.contract();
             case PhysicalControlAbilityAdapter.ABILITY -> PhysicalControlAbilityAdapter.contract();
             case AircraftFlightAbilityAdapter.ABILITY -> AircraftFlightAbilityAdapter.contract();
+            // 任务书契约说明单次按钮动作和回执边界；发现到能力不代表当前 FTB 已同步或奖励已经可领。
             case QuestAbilityAdapter.ABILITY -> QuestAbilityAdapter.contract();
             // 用途交给模型判断；执行器只确认死亡不掉落、执行原生危险动作并如实回报死亡证据。
             case SuicideAbilityAdapter.ABILITY -> contract(

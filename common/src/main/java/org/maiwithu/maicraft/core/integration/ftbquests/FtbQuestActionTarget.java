@@ -12,6 +12,7 @@ import static org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestApi.*;
 record FtbQuestActionTarget(FtbQuestActionRequest request, Object quest, Object subject, String packet, int choiceIndex,
                             boolean satisfied) {
     static FtbQuestActionTarget resolve(Object file, Object team, UUID player, FtbQuestActionRequest request) {
+        // 先核对当前玩家可看的任务，再在该任务自己的子项里找编号，避免把别处的奖励当成此次目标。
         if (flag(file, "isDisableGui") || flag(team, "isLocked")) throw new IllegalStateException("FTB quest book is disabled or locked");
         Object quest = call(file, "getQuest", FtbQuestActionRequest.number(request.questId()));
         if (quest == null || !visible(file, team, quest)) throw new IllegalStateException("FTB quest is not currently visible");
@@ -36,10 +37,12 @@ record FtbQuestActionTarget(FtbQuestActionRequest request, Object quest, Object 
                 default -> throw new IllegalArgumentException("This task requires its actual game mechanic, not manual submission");
             }
             boolean done = flag(team, "isCompleted", subject);
+            // 类型、可见性和按钮机制已经检查过；“已完成”仅省掉再次提交，不会给自动判定任务增加手动按钮。
             if (!done && !flag(team, "canStartTasks", quest)) throw new IllegalStateException("FTB does not allow starting this quest yet");
             return new FtbQuestActionTarget(request, quest, subject, "SubmitTaskMessage", -1, done);
         }
         if (!FtbQuestRewards.visible(quest, team).contains(subject)) throw new IllegalStateException("FTB reward is blocked or invisible");
+        // 个人或队伍的领取记录由 FTB 选择；只凭整个任务完成还不能断言这位玩家能够领取该奖励。
         Object claimType = call(team, "getClaimType", player, subject); boolean done = flag(claimType, "isClaimed");
         if (!done && !flag(claimType, "canClaim")) throw new IllegalStateException("FTB has not made this reward claimable");
         int index = -1; String packet = "ClaimRewardMessage";

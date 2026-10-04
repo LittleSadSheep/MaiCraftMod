@@ -76,7 +76,8 @@ final class NativeSubmissionBinding {
 
     private static JsonObject identityGoal(Goal source) {
         if (QuestAbilityAdapter.ABILITY.equals(source.ability())) {
-            // 刷新选择项引用、大小写或目标说明都不等于再领一次；同一父步骤按原生对象固定消费身份。
+            // 同一父步骤按动作和原生对象固定消费身份；目标说明、编号大小写以及整个 choice_uri 都不参与区分。
+            // 因此更新版本甚至改选另一项，也不能解锁一笔可能已发出的领奖；明确的下一步骤或新任务才是另一笔意图。
             JsonObject identity = new JsonObject(), parameters = FtbQuestActionRequest.parse(source.parameters()).json();
             parameters.remove("choice_uri"); identity.addProperty("ability", source.ability()); identity.add("parameters", parameters);
             return identity;

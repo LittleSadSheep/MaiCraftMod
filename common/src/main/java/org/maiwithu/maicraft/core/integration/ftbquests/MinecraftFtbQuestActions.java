@@ -24,6 +24,7 @@ public final class MinecraftFtbQuestActions implements FtbQuestActionAccess {
     public MinecraftFtbQuestActions(LocalPlayer player) { owner = player == null ? null : player.getUUID(); }
 
     @Override public Prepared prepare(FtbQuestActionRequest request) {
+        // 当前连接、身体、队伍和任务书先对齐，再确认普通玩家按钮；解析出动作仍不代表服务器已经接受。
         Context context = context();
         FtbQuestSubmission.requireAuthority(ClientRuntime.requireContext(context.player()));
         if (!context.player().isAlive()) throw new IllegalStateException("Player is not alive");
@@ -48,6 +49,7 @@ public final class MinecraftFtbQuestActions implements FtbQuestActionAccess {
             } catch (ReflectiveOperationException unavailable) { throw new IllegalStateException("FTB native message API unavailable", unavailable); }
         }
         JsonObject before = snapshot(context, target);
+        // 操作依据随回执保留；辅助说明编码失败只标为未知，不因此重写已经选定的原生目标或发放规则。
         if (!request.operation().equals("claim")) {
             JsonObject selected = identity(target.subject()); String type = call(call(target.subject(), "getType"), "getTypeId").toString();
             selected.addProperty("type", type); selected.addProperty("consumes_resources", flag(target.subject(), "consumesResources"));
@@ -76,6 +78,7 @@ public final class MinecraftFtbQuestActions implements FtbQuestActionAccess {
         FtbQuestSubmission.send(ClientRuntime.requireContext(current.player()), nativeRequest.payload());
     }
     @Override public JsonObject observe(Prepared prepared) {
+        // 发包后的观察只读原来绑定的对象；不重新要求按钮可点，否则已完成/已领取本身会挡住确认。
         Context current = context(); requireScope(prepared, current);
         return snapshot(current, ((NativeRequest) prepared.nativeRequest()).target());
     }

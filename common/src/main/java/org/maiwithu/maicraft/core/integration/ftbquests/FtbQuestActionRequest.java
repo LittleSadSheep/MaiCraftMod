@@ -10,6 +10,7 @@ public record FtbQuestActionRequest(String operation, String questId, String sub
     public static final String RESOURCE = "maicraft://knowledge/ftbquests/quest/";
 
     public static FtbQuestActionRequest parse(JsonObject args) {
+        // 每次只处理一个明确按钮；省略另一种对象编号，不能用 null、false 或零代替“本次不领奖/不提交”。
         for (String key : args.keySet()) if (!Set.of("operation", "quest_id", "task_id", "reward_id", "choice_uri").contains(key))
             throw new IllegalArgumentException("Unknown quest action parameter: " + key);
         String operation = string(args, "operation", true);
@@ -33,10 +34,12 @@ public record FtbQuestActionRequest(String operation, String questId, String sub
     }
     static long number(String id) { return Long.parseUnsignedLong(id, 16); }
     private static String id(String value) {
+        // FTB 的对象编号可能占满 64 位；只统一十六进制字母大小写，不裁剪空格或接受 JSON 数字近似值。
         if (!value.matches("[0-9a-fA-F]{16}") || value.equals("0000000000000000")) throw new IllegalArgumentException("FTB ID must be a nonzero 16-digit hexadecimal string");
         return value.toUpperCase(Locale.ROOT);
     }
     private static String string(JsonObject args, String key, boolean required) {
+        // choice_uri 可以完全不出现；显式 null 仍是错误类型，不能悄悄变成默认选项或普通领奖。
         if (!args.has(key)) { if (!required) return null; throw new IllegalArgumentException(key + " is required"); }
         if (!args.get(key).isJsonPrimitive() || !args.getAsJsonPrimitive(key).isString()) throw new IllegalArgumentException(key + " must be a string");
         return args.get(key).getAsString();

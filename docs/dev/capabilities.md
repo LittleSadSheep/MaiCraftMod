@@ -64,7 +64,7 @@
 | `reach_milestone` | 完成阶段性生存目标 | `AbilityAdapter.reachMilestone` | 入口核对 |
 | `defeat_ender_dragon` | 完成末影龙战斗流程 | `AbilityAdapter.defeatEnderDragon` | 契约与贡献者文档核对；[死亡确认](endgame.md) |
 | `obtain_elytra` | 搜寻并取得鞘翅 | `AbilityAdapter.obtainElytra` | 契约与贡献者文档核对；[折跃与入包](endgame.md) |
-| `quest_action` | 对 FTB 任务书执行一次原生提交、勾选或领奖 | `QuestAbilityAdapter` | 入口核对；能力发现不按 FTB 门控，未安装时在执行期报 `not_installed` |
+| `quest_action` | 对 FTB 任务书执行一次原生提交、勾选或领奖 | `QuestAbilityAdapter` | 契约、执行源码与贡献者文档核对；[动作、回执和恢复](quests.md)。本轮仅静态检查，已列明结果确定性与观察收尾边界；只读索引状态和动作失败标签分开说明 |
 | `physical_balance` | 起飞前受力分析、启停模拟与配平推荐 | `PhysicsAbilityAdapter` | 入口核对；读原生受力需要服务端 `physics.snapshot` |
 | `physical_assembly` | 蜂蜜胶选区粘接、物理组装器创建与拆回结构 | `PhysicalAssemblyAbilityAdapter` | 入口核对；需安装 Create，粘接布局由模型决定、Mod 只执行原生操作 |
 | `physical_control` | 对已观察物理结构执行原生控制 | `PhysicalControlAbilityAdapter` | 入口核对；按声明动作核对控制器及实际效果 |

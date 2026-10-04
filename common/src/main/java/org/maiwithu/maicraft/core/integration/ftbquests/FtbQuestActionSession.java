@@ -36,7 +36,9 @@ public final class FtbQuestActionSession {
         try {
             if (!attempted) {
                 if (prepared == null) prepared = access.prepare(request);
+                // 已满足的原生状态直接结算，不预约、不发包；此分支也无法倒推出过去具体给过哪些物品。
                 if (prepared.alreadySatisfied()) return finish("already_satisfied", "FTB 已记录任务完成或奖励领取，本次未再次提交；历史物品到账不据此推断");
+                // reserved 表示已进入持久屏障，不代表预约已经落盘；屏障返回 false 时继续等待原来的操作。
                 reserved = true;
                 if (!barrier.getAsBoolean()) return state;
                 // 保存期间背包或进度可能变化；提交前重新观察，已经被玩家或队友完成的目标不再消费。
@@ -44,6 +46,7 @@ public final class FtbQuestActionSession {
                 if (!prepared.scope().equals(current.scope())) throw new IllegalStateException("FTB action context changed before submission");
                 prepared = current;
                 if (prepared.alreadySatisfied()) return finish("already_satisfied", "提交前 FTB 状态已满足，本次没有再次消费");
+                // 调用前先记“尝试过”，正常返回后才记“交给客户端”；中途异常不能因此获得第二次发包机会。
                 attempted = true; sentAt = clock.getAsLong(); access.submit(prepared); sent = true;
                 status = "submitted_to_client"; detail = "已发出一次 FTB 原生请求，等待同步事实";
             }
@@ -54,10 +57,12 @@ public final class FtbQuestActionSession {
                 return finish(status, "请求已发出，后续观察不可用；保留已有事实，不自动重发");
             }
             long now = clock.getAsLong();
+            // 时间来自单调时钟而非游戏刻；当前 FTB 仍偏离提交前状态且观察有变化时，再留 250 毫秒等同步。
             boolean ftbChanged = ftbChanged(prepared.before(), observed);
             if (ftbChanged && (after == null || !stable(after, observed))) settleAt = now + 250;
             retain(observed); ftbUpdateObserved |= ftbChanged;
             if (now >= settleAt || now - sentAt >= 3000) {
+                // 3 秒是发送后的观察收尾点，不是服务端拒绝或任务超时；没有信号也如实返回已经提交与未知项。
                 uncertain = !ftbUpdateObserved;
                 return finish(status, ftbUpdateObserved ? "原生请求已提交，已取得 FTB 状态与背包的后续观察"
                         : "原生请求已提交，观察期内 FTB 状态未变；这不能证明服务器接受或拒绝了请求");
@@ -74,6 +79,7 @@ public final class FtbQuestActionSession {
         return previous.get("ftb").equals(current.get("ftb")) && previous.get("inventory").equals(current.get("inventory"));
     }
     private static boolean ftbChanged(JsonObject before, JsonObject after) {
+        // 这里只识别共享 FTB 状态的变化信号，没有请求专属 ACK，不能凭此把队友进度归因到这次操作。
         JsonObject a = before.getAsJsonObject("ftb"), b = after.getAsJsonObject("ftb");
         if (b.has("subject_available") && !b.get("subject_available").getAsBoolean()) return false;
         if (!Objects.equals(a.get("quest_completion_count"), b.get("quest_completion_count"))) return true;
@@ -92,6 +98,7 @@ public final class FtbQuestActionSession {
         after = observed;
     }
     private State finish(String status, String detail) { this.status = status; this.detail = detail; state = State.SUCCESS; return state; }
+    // 给外层调度器判断是否转入只读结算；即使发送调用抛错，attempted 也仍为真。
     public boolean submitted() { return attempted; }
     public void fail(String reason) {
         if (state != State.RUNNING) return;
