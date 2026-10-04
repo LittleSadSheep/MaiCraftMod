@@ -54,9 +54,11 @@ Simulated 的一条原生舵机传动链是：动力源 → `simulated:direction
 
 使用 `physical_control` 的 `bind_typewriter_key`，指定 `key:"a"` 与 `frequency_items:["minecraft:iron_ingot","minecraft:redstone"]`。也接受完整键名 `key.keyboard.a`、方向键 `left/right/up/down` 和 `space`。频率来自角色实际持有或原生取得的物品，保留染色身份；按键保存请求合并完整旧键表，只改指定键。两个频率物品都是 `minecraft:air` 时删除该键；`inspect` 返回完整 `bindings`，不要用未核对的旧键表覆盖整机。
 
-`press_typewriter_keys` 以 `keys:["w","a"]` 同时按下已配频的键，`duration_seconds` 为大于零且不超过 30 秒，默认 1 秒。执行器原生连接、保持一次按下、到时松键并退出；取消也释放自己的按键。`require_onboard:true` 要求身体始终留在该结构，按键名称不会变成走路或下座位输入。已有使用者的控制会话不会被抢占。
+`press_typewriter_keys` 以 `keys:["w","a"]` 同时按下已配频的键，`duration_seconds` 为大于零且不超过 30 秒，默认 1 秒。执行器原生连接、保持一次按下、到时松键并退出；取消、暂停或让位也释放自己的按键。中断后的旧任务不自动补发按下，根据已完成效果另选控制意图。`require_onboard:true` 要求身体始终留在该结构，按键名称不会变成走路或下座位输入。已有使用者的控制会话不会被抢占。
 
 这是一条有界原生输入能力，不是让 LLM 逐刻手动开飞机。高速姿态、航向、起降和避障需要 Mod 内闭环飞控，LLM 只选择目的地、方向和飞行任务。按键协议不向客户端同步每键状态，因此回执明确区分 `packet_dispatch_only` 与配键服务器确认；必须另看接收端信号、实际舵角和载具运动。按键释放后的停机取决于实际电路：松手应回中或停机的通道，要先验证其释放状态，不能假定所有离合都是同一种信号逻辑。
+
+按键试验可附带 `observe_positions:[{x:0,y:1,z:2},...]`，坐标仍相对同一世界锚点或结构 `origin_storage`，最多明确指定 16 个部件。执行器保持按键时每五刻只读这些部件，把变化后的完整原生配置和真正未知项保存在 `observed_feedback`，用于检查接收端、弹簧角度与转速；观察不会另开任务而中断按键。释放后再检查回中和停机状态。
 
 | operation | 行为 |
 | --- | --- |

@@ -23,6 +23,9 @@ import static org.maiwithu.maicraft.core.task.physics.PhysicalControlParameters.
 final class TypewriterControlSession {
     private final PhysicalControlParameters p;
     private final List<Map<String,Object>> effects=new ArrayList<>();
+    private final List<Map<String,Object>> feedback=new ArrayList<>();
+    private List<Map<String,Object>> previousFeedback=List.of();
+    private long feedbackTick=Long.MIN_VALUE;
     private final ItemStack[] frequency={ItemStack.EMPTY,ItemStack.EMPTY};
     private NativeActionReceipt action;
     private ServerBlockEntityReceipts.Watch watch;
@@ -31,12 +34,15 @@ final class TypewriterControlSession {
     private int frequencyIndex;
     private long holdUntil,movingSince=-1;
     private String phase="preparing",pending, failure;
-    private boolean connected,pressed,released,disconnected,done,submitted,configured;
+    private boolean connected,pressed,released,disconnected,done,submitted,configured,interrupted;
     private Object bindings;
     TypewriterControlSession(PhysicalControlParameters p) { this.p=p; }
     boolean tick(LocalPlayerContext ctx,PhysicalAssemblyFrame frame,BlockEntity entity,PhysicalControlHand hand,
                  BooleanSupplier approach,String call,long deadline) {
+        // 暂停后原按键已经释放，恢复任务不能把剩余保持时间当成新的按下偷偷重放。
+        if(interrupted)throw new IllegalStateException("打字机输入已被打断并收尾，请根据已完成效果重新选择控制意图");
         this.last=ctx;this.entity=entity;
+        if(pressed)observeFeedback(ctx,frame);
         if(action!=null) {
             action=ctx.actions().poll(ctx,action);
             if(!action.terminal())return false;
@@ -117,6 +123,27 @@ final class TypewriterControlSession {
         // 原模组不逐键同步 pressedKeys，派发证据和收端响应分开报告，不能虚构服务器已经收键。
         submit(ctx,label,packets,fresh->fresh.tickRevision()>tick?NativeConfirmation.Verdict.APPLIED:NativeConfirmation.Verdict.PENDING);
     }
+    private void observeFeedback(LocalPlayerContext ctx,PhysicalAssemblyFrame frame) {
+        if(p.typewriterInput().feedbackPositions().isEmpty()||ctx.level().getGameTime()-feedbackTick<5&&feedbackTick!=Long.MIN_VALUE)return;
+        feedbackTick=ctx.level().getGameTime();var sample=new ArrayList<Map<String,Object>>();
+        // 每五刻读取明确点名的部件，仅保留发生变化的完整状态；缺块与未加载也作为事实返回。
+        for(var offset:p.typewriterInput().feedbackPositions()) {
+            var pos=frame.storage(offset);var value=new LinkedHashMap<String,Object>();
+            value.put("position",List.of(offset.getX(),offset.getY(),offset.getZ()));
+            if(!frame.loaded(pos))value.put("observation_unknown","unloaded");
+            else {
+                var component=frame.level().getBlockEntity(pos);
+                if(component==null)value.put("observation_unknown","no native block entity");
+                else try {value.put("actual_configuration",NativePhysicalControl.state(component));}
+                catch(RuntimeException unavailable){value.put("observation_unknown",unavailable.toString());}
+            }
+            sample.add(Map.copyOf(value));
+        }
+        if(!sample.equals(previousFeedback)) {
+            previousFeedback=List.copyOf(sample);
+            feedback.add(Map.of("game_time",feedbackTick,"phase",phase,"components",previousFeedback));
+        }
+    }
     private void submit(LocalPlayerContext ctx,String label,List<CustomPacketPayload> packets,NativeConfirmation confirmation) {
         pending=label;phase=label;submitted=true;
         action=ctx.actions().submitControlProtocol(ctx,"linked typewriter "+label,
@@ -145,6 +172,8 @@ final class TypewriterControlSession {
             if(connected||disconnected)NativeTypewriterControl.detachClient(entity);
         } catch(RuntimeException unknown){failure="退出控制请求未确认: "+unknown.getMessage();}
     }
+    // 让位给其他任务或人工暂停时立即松开远程按键，不能只停止角色走路而留下仍通电的舵机。
+    void interrupt(){interrupted=true;close();}
     private static void send(LocalPlayerContext ctx,CustomPacketPayload packet){ctx.connection().send(new ServerboundCustomPayloadPacket(packet));}
     String phase(){return phase;}
     Map<String,Object> evidence() {
@@ -154,6 +183,8 @@ final class TypewriterControlSession {
         out.put("requested_keys",p.typewriterInput().keys().stream().map(TypewriterKeyInput::name).toList());
         out.put("requested_hold_ticks",p.typewriterInput().holdTicks());out.put("release_dispatched",released);
         out.put("disconnect_dispatched",disconnected);if(failure!=null)out.put("cleanup_unknown",failure);
+        out.put("input_interrupted",interrupted);
+        out.put("observed_feedback",List.copyOf(feedback));
         return out;
     }
 }

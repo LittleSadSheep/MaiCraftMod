@@ -35,6 +35,8 @@ public final class PhysicalControlContractTest {
             // 配键只改一个键，按键必须有限保持；越权字段、重复键和退出键在原生接管前明确拒绝。
             SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"bind_typewriter_key\",\"key\":\"a\",\"frequency_items\":[\"minecraft:iron_ingot\",\"minecraft:redstone\"]}")),IntentRuntime.KNOWN_ABILITIES);
             SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"press_typewriter_keys\",\"keys\":[\"w\",\"left\"],\"duration_seconds\":0.5}")),IntentRuntime.KNOWN_ABILITIES);
+            // 舵角观察与按键使用相同坐标系，观察不会升级成第二组操作指令。
+            SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"press_typewriter_keys\",\"keys\":[\"a\"],\"observe_positions\":[{\"x\":0,\"y\":1,\"z\":2}]}")),IntentRuntime.KNOWN_ABILITIES);
             for(String invalid:List.of("{\"operation\":\"inspect\",\"keys\":[\"a\"]}",
                     "{\"operation\":\"bind_typewriter_key\",\"key\":\"a\"}",
                     "{\"operation\":\"press_typewriter_keys\",\"keys\":[]}",

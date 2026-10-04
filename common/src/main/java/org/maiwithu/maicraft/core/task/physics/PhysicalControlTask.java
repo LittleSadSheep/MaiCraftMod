@@ -191,7 +191,10 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         return TaskState.SUCCESS;
     }
     private TaskState failed(String why,FailureType type){fail(why,type);return TaskState.FAILED;}
-    @Override public void stop(LocalPlayer player,Task.StopReason why){approach.stop(player,why);onboard.stop(player,why);hand.stop(player,why);super.stop(player,why);}
+    @Override public void stop(LocalPlayer player,Task.StopReason why){
+        if(typewriter!=null)typewriter.interrupt();
+        approach.stop(player,why);onboard.stop(player,why);hand.stop(player,why);super.stop(player,why);
+    }
     @Override protected void cleanup() {
         if(typewriter!=null)typewriter.close();
         approach.close();onboard.close();hand.close();if(watch!=null){watch.close();watch=null;}

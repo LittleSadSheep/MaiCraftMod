@@ -19,12 +19,12 @@ public record PhysicalControlParameters(Operation operation,UUID structureId,UUI
         BIND_TYPEWRITER_KEY, PRESS_TYPEWRITER_KEYS }
     public PhysicalControlParameters {position=position.immutable();frequencyItems=List.copyOf(frequencyItems);}
     public static PhysicalControlParameters parse(JsonObject input) {
-        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds","require_onboard","item_id","key","keys").contains(key))
+        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds","require_onboard","item_id","key","keys","observe_positions").contains(key))
             throw new IllegalArgumentException("未知物理控制参数: "+key);
         Operation op=Operation.valueOf(PhysicalAssemblyParameters.text(input,"operation","inspect").toUpperCase(Locale.ROOT));
         boolean typewriter=op==Operation.BIND_TYPEWRITER_KEY||op==Operation.PRESS_TYPEWRITER_KEYS;
         // 配键与按键是两种独立意图，其他部件设置不能夹带一次驾驶输入。
-        if(!typewriter&&(input.has("key")||input.has("keys")))throw new IllegalArgumentException("key/keys 仅供打字机操作");
+        if(!typewriter&&(input.has("key")||input.has("keys")||input.has("observe_positions")))throw new IllegalArgumentException("key/keys/observe_positions 仅供打字机操作");
         TypewriterKeyInput keyInput=typewriter?TypewriterKeyInput.parse(input,op==Operation.BIND_TYPEWRITER_KEY):null;
         // 轮胎取放必须点名最终轮胎种类；空手拆胎用 air，其他控制不能夹带一次额外物品交互。
         if(input.has("item_id")!=(op==Operation.SET_TIRE))throw new IllegalArgumentException("item_id 仅供 set_tire 且必须明确提供");
