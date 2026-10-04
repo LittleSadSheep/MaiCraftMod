@@ -72,6 +72,7 @@ public final class SemanticExploreCompanionTask
     private boolean survey;
     private String surveyStopReason;
     private ClientExplorationMemory memory;
+    private WaterCrossingProbe waterProbe;
     private ClientLevel startingLevel;
     private Stage stage;
 
@@ -129,6 +130,7 @@ public final class SemanticExploreCompanionTask
             return;
         }
         memory = new ClientExplorationMemory(player);
+        waterProbe = new WaterCrossingProbe(level);
         beginObservation();
     }
 
@@ -523,7 +525,8 @@ public final class SemanticExploreCompanionTask
     private BlockPos nextWaypoint(ClientLevel level) {
         if (r.sector.direction() != null) {
             return ExplorationFrontiers.next(player.blockPosition(), sector, r.maxDistance,
-                    attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()));
+                    attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()),
+                    pos -> waterProbe.crossesWater(player.blockPosition(), pos));
         }
         return nextTerrainNeutralWaypoint(level);
     }
@@ -532,27 +535,34 @@ public final class SemanticExploreCompanionTask
         for (int probe = 0; probe < MAX_SPIRAL_PROBES; probe++) {
             BlockPos desired = spiral.next(player.blockPosition().getY());
             if (!insideScope(desired.getX(), desired.getZ())) continue;
-            BlockPos frontier = loadedFrontierToward(level, desired);
+            BlockPos frontier = loadedFrontierToward(level, desired,
+                    pos -> waterProbe.crossesWater(player.blockPosition(), pos));
             if (frontier != null && attemptedWaypoints.add(
                     BlockPos.asLong(frontier.getX(), 0, frontier.getZ()))) return frontier;
         }
         return null;
     }
 
-    private BlockPos loadedFrontierToward(ClientLevel level, BlockPos desired) {
+    // 优先返回不穿水的最远已加载路段；全线皆水回退最远已加载路段，岛屿环境不卡死。
+    private BlockPos loadedFrontierToward(
+            ClientLevel level, BlockPos desired, Predicate<BlockPos> avoidWater) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
         double dz = desired.getZ() - current.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance < 1.0) return null;
         double farthest = Math.min(MAX_LEG_DISTANCE, distance);
+        BlockPos fallback = null;
         for (double leg = farthest; leg >= Math.min(16.0, farthest); leg -= 16.0) {
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
-            return new BlockPos(x, current.getY(), z);
+            BlockPos candidate = new BlockPos(x, current.getY(), z);
+            if (avoidWater == null) return candidate;
+            if (fallback == null) fallback = candidate;
+            if (!avoidWater.test(candidate)) return candidate;
         }
-        return null;
+        return avoidWater == null ? null : fallback;
     }
 
     private TaskState exhausted() {

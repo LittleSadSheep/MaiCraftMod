@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.explore;
 
 import java.util.Set;
@@ -10,8 +11,19 @@ public final class ExplorationFrontiers {
 
     public static BlockPos next(BlockPos current, ExplorationSector.Area sector, int radius,
             Set<Long> attempted, Predicate<BlockPos> loaded) {
+        return next(current, sector, radius, attempted, loaded, null);
+    }
+
+    /**
+     * {@code waterPenalty} 标记穿水路线的候选：存在干地候选时穿水候选一律让位，
+     * 全部候选都穿水（如身处岛屿）时仍选出得分最高者继续推进。只表达优先级，
+     * 不构成"某方向不可行"的结论。
+     */
+    public static BlockPos next(BlockPos current, ExplorationSector.Area sector, int radius,
+            Set<Long> attempted, Predicate<BlockPos> loaded, Predicate<BlockPos> waterPenalty) {
         BlockPos best = null;
         double bestScore = -Double.MAX_VALUE;
+        boolean bestCrossesWater = true;
         double half = sector.request().angleDegrees() / 2.0;
         for (int ray = 0; ray <= 16; ray++) {
             double angle = Math.toRadians(sector.bearing() - half + ray * half / 8);
@@ -23,8 +35,17 @@ public final class ExplorationFrontiers {
                 // 已走过或已证实走不通的十六格邻域不再反复选；真正可达性交给原生移动核实。
                 if (attempted.stream().map(BlockPos::of).anyMatch(previous ->
                         Math.hypot(previous.getX() - candidate.getX(), previous.getZ() - candidate.getZ()) < 16)) continue;
+                boolean crossesWater = waterPenalty != null && waterPenalty.test(candidate);
                 double score = fromOrigin + distance * 0.2 - Math.abs(ray - 8) * 0.1;
-                if (score > bestScore) { best = candidate; bestScore = score; }
+                boolean better;
+                if (best == null) better = true;
+                else if (crossesWater != bestCrossesWater) better = bestCrossesWater;
+                else better = score > bestScore;
+                if (better) {
+                    best = candidate;
+                    bestScore = score;
+                    bestCrossesWater = crossesWater;
+                }
             }
         }
         if (best != null) attempted.add(BlockPos.asLong(best.getX(), 0, best.getZ()));

@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
 import org.maiwithu.maicraft.core.task.explore.FrontierLegBreaker;
+import org.maiwithu.maicraft.core.task.explore.WaterCrossingProbe;
 import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -117,6 +118,7 @@ public final class PhysicalStructureSearchCompanionTask
     private SpiralWalker spiral;
     private ExplorationSector.Area sector;
     private ClientExplorationMemory memory;
+    private WaterCrossingProbe waterProbe;
     private EvidenceMatch activeEvidence;
     private EvidenceMatch verifiedEvidence;
     private String issueCode;
@@ -194,6 +196,7 @@ public final class PhysicalStructureSearchCompanionTask
         indexedBlocks = profile.targetBlocks();
         TargetIndex.register(indexedLevel, indexedBlocks);
         memory = new ClientExplorationMemory(player);
+        waterProbe = new WaterCrossingProbe(player.clientLevel);
     }
 
     @Override
@@ -760,38 +763,53 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     // 按向外绕圈的顺序选新方向，再截成当前地形已经加载的一小段。已经尝试过的横向落点不重复选。
+    // 落点路线优先干地：存在不穿水的候选时穿水候选让位，全线皆水（岛屿环境）仍选出最优者继续推进。
     private BlockPos nextFrontier() {
         if (r.sector.direction() != null) return ExplorationFrontiers.next(player.blockPosition(), sector,
-                r.maxDistance, attemptedFrontiers, pos -> columnLoaded(pos.getX(), pos.getZ()));
+                r.maxDistance, attemptedFrontiers, pos -> columnLoaded(pos.getX(), pos.getZ()),
+                this::routeCrossesWater);
         int finalRing = (int) Math.ceil(
                 (r.maxDistance + SCOPE_TOLERANCE) / (double) FRONTIER_GRID) + 1;
         while (true) {
             BlockPos desired = spiral.next(player.blockPosition().getY());
             if (Math.max(Math.abs(spiral.offsetX()), Math.abs(spiral.offsetZ())) > finalRing) return null;
             if (!insideScope(desired)) continue;
-            BlockPos frontier = loadedFrontierToward(desired);
+            BlockPos frontier = loadedFrontierToward(desired, true);
             if (frontier == null) continue;
             long key = BlockPos.asLong(frontier.getX(), 0, frontier.getZ());
             if (attemptedFrontiers.add(key)) return frontier;
         }
     }
 
+    private boolean routeCrossesWater(BlockPos candidate) {
+        return waterProbe.crossesWater(player.blockPosition(), candidate);
+    }
+
     private BlockPos loadedFrontierToward(BlockPos desired) {
+        return loadedFrontierToward(desired, false);
+    }
+
+    // avoidWater 时优先返回不穿水的最远已加载路段；全线皆水回退最远已加载路段，不在水域环境卡死。
+    private BlockPos loadedFrontierToward(BlockPos desired, boolean avoidWater) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
         double dz = desired.getZ() - current.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance < MIN_FRONTIER_LEG) return null;
         double farthest = Math.min(MAX_FRONTIER_LEG, distance);
+        BlockPos fallback = null;
         for (double leg = farthest;
                 leg >= Math.min(MIN_FRONTIER_LEG, farthest);
                 leg -= 8.0) {
             int x = (int) Math.round(current.getX() + dx / distance * leg);
             int z = (int) Math.round(current.getZ() + dz / distance * leg);
             BlockPos candidate = new BlockPos(x, current.getY(), z);
-            if (insideScope(candidate) && sector.contains(x, z) && columnLoaded(x, z)) return candidate;
+            if (!insideScope(candidate) || !sector.contains(x, z) || !columnLoaded(x, z)) continue;
+            if (!avoidWater) return candidate;
+            if (fallback == null) fallback = candidate;
+            if (!routeCrossesWater(candidate)) return candidate;
         }
-        return null;
+        return avoidWater ? fallback : null;
     }
 
     private boolean columnLoaded(int x, int z) {
