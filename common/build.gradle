@@ -239,6 +239,12 @@ def regressionSuites = [
         heap: '512m', directory: 'debug-hud-regression', timeoutSeconds: 30,
         purpose: '验证调试面板最新报错行的多行折行与截断兜底'
     ],
+    // 人工接管清理指令独立验证，清任务交还身体不影响空闲身体的判定。
+    clearTaskCommandRegression: [
+        entry: 'org.maiwithu.maicraft.client.command.ManualTakeoverClearTest',
+        heap: '512m', directory: 'clear-task-command-regression', timeoutSeconds: 30,
+        purpose: '验证 /maicraft cleartask 结束占用任务、交付取消回执并交还身体'
+    ],
     // 合成材料匹配与逐格点击独立验证，其他任务模块失败时也能给出准确的合成回归结论。
     craftingRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.CraftingRegressionSuite',

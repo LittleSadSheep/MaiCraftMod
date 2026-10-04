@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.chat.ChatMonitor;
+import org.maiwithu.maicraft.client.command.MaiCraftClearTaskCommand;
 import org.maiwithu.maicraft.client.command.MaiCraftPortCommand;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.debug.DebugHudController;
@@ -71,11 +72,12 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         });
         ClientReceiveMessageEvents.GAME.register((message, overlay) ->
                 ChatMonitor.system(message.getString(), overlay));
-        // 注册本地 maicraft 状态、端口搬移与预览命令，不向服务器登记同名管理员命令。
+        // 注册本地 maicraft 状态、端口搬移、清理任务与预览命令，不向服务器登记同名管理员命令。
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(PreviewCommands.attach(ClientCommandManager.literal("maicraft")
                         .then(ClientCommandManager.literal("status").executes(context ->
                                 MaiCraftStatus.showInChat()))
-                        .then(MaiCraftPortCommand.node()))));
+                        .then(MaiCraftPortCommand.node()))
+                        .then(MaiCraftClearTaskCommand.node())));
     }
 }
