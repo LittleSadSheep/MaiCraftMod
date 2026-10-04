@@ -9,13 +9,18 @@ import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 /** 飞行途中积累亲自经过与可见地表群系，复用跑图档案；记录失败不能抢占正在执行的飞控。 */
 final class FlightExplorationRecorder {
     private ClientExplorationMemory memory;
+    private FlightStructureRecorder structures;
     private String unknown;
     private long observed = Long.MIN_VALUE;
     private int column;
     private boolean attempted;
     void tick(LocalPlayer player) {
         try {
-            if (!attempted) { attempted = true; memory = new ClientExplorationMemory(player); }
+            if (!attempted) {
+                attempted = true; memory = new ClientExplorationMemory(player);
+                // 结构与群系进入同一个航程档案，后续可直接使用其稳定地点标签返回。
+                structures = new FlightStructureRecorder(player);
+            }
             if (memory == null) return;
             long now = player.level().getGameTime();
             if (now == observed) return;
@@ -23,6 +28,7 @@ final class FlightExplorationRecorder {
             // 身体所在群系按实际到访记录；远处地表只记看见，不能将高空经过算作落地到访。
             memory.tick();
             if (now % 5 != 0) return;
+            if (structures != null) structures.tick(player, memory);
             int index = column++ % 81;
             int x = player.blockPosition().getX() + (index % 9 - 4) * 16;
             int z = player.blockPosition().getZ() + (index / 9 - 4) * 16;
@@ -44,6 +50,10 @@ final class FlightExplorationRecorder {
     void close() {
         // 结束飞行时异步刷入最后一批地点；写盘失败保留未知原因，不改写飞机是否实际着陆的结论。
         if (memory == null) return;
-        try { memory.close(); } catch (RuntimeException unavailable) { unknown = unavailable.toString(); }
+        try { if (structures != null) structures.close(); }
+        catch (RuntimeException unavailable) { unknown = unavailable.toString(); }
+        finally {
+            try { memory.close(); } catch (RuntimeException unavailable) { unknown = unavailable.toString(); }
+        }
     }
 }

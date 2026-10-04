@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.intent.ExplorationIntentTest;
 import org.maiwithu.maicraft.intent.TravelTransportContractTest;
 import org.maiwithu.maicraft.mcp.ExplorationCatalogTest;
 import org.maiwithu.maicraft.core.task.structure.StructureProfileResourcesTest;
+import org.maiwithu.maicraft.core.task.structure.VisibleStructureEvidenceTest;
 import org.maiwithu.maicraft.intent.persistence.ExplorationMemoryStoreTest;
 import org.maiwithu.maicraft.mcp.McpProtocolBudgetTest;
 
@@ -20,6 +21,8 @@ public final class ExplorationRegressionSuite {
         TravelTransportContractTest.main(args);
         ExplorationCatalogTest.main(args);
         StructureProfileResourcesTest.main(args);
+        // 飞机远望与步行搜索必须使用相同的可见结构判据。
+        VisibleStructureEvidenceTest.run();
         ExplorationJournalTest.main(args);
         ExplorationMemoryStoreTest.main(args);
         McpProtocolBudgetTest.main(args);

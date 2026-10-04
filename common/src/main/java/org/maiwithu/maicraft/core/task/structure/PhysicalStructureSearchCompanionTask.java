@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.maiwithu.maicraft.core.scan.SpiralWalker;
-import org.maiwithu.maicraft.core.scan.ObservationVisibility;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
 import org.maiwithu.maicraft.core.task.explore.FrontierLegBreaker;
@@ -20,7 +19,6 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.projectile.EyeOfEnder;
 import net.minecraft.world.item.ItemStack;
@@ -69,12 +67,8 @@ public final class PhysicalStructureSearchCompanionTask
 
     private static final String STRONGHOLD = "minecraft:stronghold";
     private static final String OVERWORLD = "minecraft:overworld";
-    // 192 格半径的一轮全高扫描上万段；每次调用只建少量段会把观察等待拖到数千刻。
-    // 单刻实际速率由所有查询共享的 2ms 墙钟封顶，这个数只是墙钟内允许的段数上限。
-    private static final int INDEX_BUILD_BUDGET_PER_GROUP = 128;
     /** 观察等待上限：超时按本视角未见证据转入下一腿，检测由行进中的移动扫描继续。 */
     private static final int OBSERVE_MAX_TICKS = 100;
-    private static final int MAX_GROUP_HITS = 384;
     private static final int EVIDENCE_SCAN_RADIUS = 192;
     private static final int FRONTIER_GRID = 64;
     private static final int MAX_FRONTIER_LEG = 80;
@@ -635,31 +629,13 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
-    // 让共享方块索引分批收集各组候选，只保留范围内仍存在的目标方块，再按离玩家的距离试配。
-    // 只有角色能直接看见的方块参与识别，不能凭墙后或地下未见的材料组合确认结构。
+    // 步行与飞机远望共用同一份实时可见证据；本任务额外保留搜索扇区和已拒绝候选。
     private EvidenceScan scanEvidence() {
-        int chunkRadius = Math.max(
-                1, (Math.min(EVIDENCE_SCAN_RADIUS, r.maxDistance) + 15) / 16);
-        Map<Long, BlockPos> merged = new LinkedHashMap<>();
-        boolean complete = true;
-        for (StructureEvidenceProfiles.ResolvedGroup group : profile.groups()) {
-            TargetIndex.Result result = TargetIndex.query(
-                    player.clientLevel,
-                    player.blockPosition(),
-                    group.blocks(),
-                    MAX_GROUP_HITS,
-                    chunkRadius,
-                    INDEX_BUILD_BUDGET_PER_GROUP);
-            complete &= result.complete();
-            for (BlockPos hit : result.hits()) {
-                if (!insideScope(hit) || !liveTargetBlock(hit) || !ObservationVisibility.block(player, hit)) continue;
-                merged.putIfAbsent(hit.asLong(), hit.immutable());
-            }
-        }
-        List<BlockPos> hits = new ArrayList<>(merged.values());
-        hits.sort(Comparator.comparingDouble(
-                position -> position.distSqr(player.blockPosition())));
-        return new EvidenceScan(matchEvidence(hits), complete, hits.size());
+        var scan = VisibleStructureEvidence.scan(player, profile, Math.min(EVIDENCE_SCAN_RADIUS, r.maxDistance),
+                this::insideScope, at -> !evidenceRejected(at) && sector.accepts(at.getX(), at.getZ()));
+        var match = scan.match();
+        return new EvidenceScan(match == null ? null : new EvidenceMatch(match.position(), match.groupCounts(),
+                match.blockCounts(), match.totalBlocks()), scan.complete(), scan.observedBlocks());
     }
 
     /** 先记看到的组合，走到并复查后升级到访状态；证据不等同于服务器结构生成元数据。 */
@@ -674,52 +650,6 @@ public final class PhysicalStructureSearchCompanionTask
      */
     private void keepFiniteEvidenceScanAlive() {
         r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
-    }
-
-    // 拿每个候选当中心，数附近有多少符合各组要求的方块。每组最低数量和整团总数量都够才接受；同一块可以属于多个组。
-    private EvidenceMatch matchEvidence(List<BlockPos> hits) {
-        if (hits.isEmpty()) return null;
-        double radiusSqr = (double) profile.profile().clusterRadius()
-                * profile.profile().clusterRadius();
-        for (BlockPos anchor : hits) {
-            if (evidenceRejected(anchor) || !sector.accepts(anchor.getX(), anchor.getZ())) continue;
-            Map<String, Integer> groups = new LinkedHashMap<>();
-            Map<String, Integer> blocks = new LinkedHashMap<>();
-            int total = 0;
-            for (BlockPos hit : hits) {
-                if (hit.distSqr(anchor) > radiusSqr) continue;
-                total++;
-                Block live = player.clientLevel.getBlockState(hit).getBlock();
-                String id = BuiltInRegistries.BLOCK.getKey(live).toString();
-                blocks.merge(id, 1, Integer::sum);
-            }
-            boolean allGroups = true;
-            for (StructureEvidenceProfiles.ResolvedGroup group : profile.groups()) {
-                int count = 0;
-                for (BlockPos hit : hits) {
-                    if (hit.distSqr(anchor) <= radiusSqr
-                            && group.blocks().contains(
-                                    player.clientLevel.getBlockState(hit).getBlock())) {
-                        count++;
-                    }
-                }
-                groups.put(group.label(), count);
-                if (count < group.minimum()) allGroups = false;
-            }
-            if (allGroups && total >= profile.profile().minimumTotal()) {
-                return new EvidenceMatch(
-                        anchor.immutable(),
-                        Map.copyOf(groups),
-                        Map.copyOf(blocks),
-                        total);
-            }
-        }
-        return null;
-    }
-
-    private boolean liveTargetBlock(BlockPos position) {
-        return player.clientLevel.isLoaded(position)
-                && indexedBlocks.contains(player.clientLevel.getBlockState(position).getBlock());
     }
 
     // 排除父任务指定的旧地点，以及本轮已经尝试失败的线索周围，避免总是回到同一片区域。
