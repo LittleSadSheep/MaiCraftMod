@@ -35,6 +35,11 @@ public final class PhysicalControlContractTest {
             // 供气容量是明确的配置意图，不能误按油门十五档限制，也不接受低于原生最小值的零供气旋钮。
             SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":125}")),IntentRuntime.KNOWN_ABILITIES);
             rejects(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":0}")));
+            // 限角用角度范围，不能把正舵角当成油门信号，也不能通过零度伪造弹簧停机。
+            for(int angle:List.of(1,20,360)) SemanticGoalContract.validate(
+                    goal(worldTarget,json("{\"operation\":\"set_spring_angle\",\"value\":"+angle+"}")),IntentRuntime.KNOWN_ABILITIES);
+            for(int angle:List.of(0,-20,361)) rejects(goal(worldTarget,
+                    json("{\"operation\":\"set_spring_angle\",\"value\":"+angle+"}")));
             // 成型与拆回是明确的幂等目标，不接受含糊的开关值，也不要求模型发送点击脚本。
             for(String operation:List.of("assemble_propeller","disassemble_propeller")) {
                 SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\""+operation+"\"}")),IntentRuntime.KNOWN_ABILITIES);

@@ -27,7 +27,7 @@ final class PhysicalControlAbilityAdapter {
         var targets=new JsonArray();for(String kind:new String[]{"coordinates","landmark","area","current_place"})targets.add(kind);out.add("accepted_target_kinds",targets);
         out.add("accepted_preferences",new JsonObject());out.add("accepted_hard_constraints",new JsonArray());
         var fields=new JsonObject();
-        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, assemble_propeller, disassemble_propeller, turn_crank, set_tire. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
+        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, set_spring_angle, assemble_propeller, disassemble_propeller, turn_crank, set_tire. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
         // 物理组装后仍可在停稳的轮座上更换实际轮胎；目标种类已满足时不重复交换。
         field(fields,"item_id","string","Required only for set_tire: installed native tire item ID, or minecraft:air to remove. Uses a real carried/supplied item and the wheel mount's native outside/down face. An already matching tire is retained; actual slot state and full registered-block diff are returned.");
         // 手摇是移动结构上的普通原生操作；每次重算世界瞄准点，持续时长不开放给其他设置的机械重放。
@@ -38,7 +38,7 @@ final class PhysicalControlAbilityAdapter {
         field(fields,"position","object","Integer {x,y,z} component offset, default zero. Execution re-resolves the current pose and native hit region.");
         field(fields,"design_id","string","Optional saved world design for full post-configuration diff; omit with structure_id, which retains its own declarations.");
         // 起飞前先设置供气容量，再通过实际红石控制启停；面板容量本身不证明气球已有升力。
-        field(fields,"value","integer","Required for set_speed, set_throttle or set_burner_volume. Speed: native signed dial, nonzero -256..256; actual_rpm may differ with facing. Throttle: actual output signal 0..15. Burner: hot-air volume at full signal, at least 5 and within the observed native maximum; rounded down to the native volume_step with a minimum of 5. Actual volume_setting, signal and gas_output are returned; this does not power the burner.");
+        field(fields,"value","integer","Required for set_speed, set_throttle, set_burner_volume or set_spring_angle. Speed: nonzero -256..256; actual_rpm may differ with facing. Throttle: actual signal 0..15. Spring: maximum deflection 1..360 degrees; reports actual angle/input/output RPM separately. Burner: capacity at full signal, at least 5 within observed maximum, rounded to native volume_step; does not power the burner.");
         field(fields,"receiver","boolean","Required only for set_link_mode: true receives, false transmits. Native wrench toggles only if actual mode differs.");
         field(fields,"frequency_items","array<string>","Required only for set_frequency: two ordered item IDs. Each slot uses a real carried/supplied stack and native right click; minecraft:air clears a slot. Actual item/color frequency identity is returned. No inventory or NBT injection.");
         out.add("parameters",fields);

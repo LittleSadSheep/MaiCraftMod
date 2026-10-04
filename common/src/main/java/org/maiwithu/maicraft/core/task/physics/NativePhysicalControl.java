@@ -23,6 +23,7 @@ final class NativePhysicalControl {
     static final String SPEED="com.simibubi.create.content.kinetics.speedController.SpeedControllerBlockEntity";
     static final String LINK="com.simibubi.create.content.redstone.link.RedstoneLinkBlockEntity";
     static final String THROTTLE="dev.simulated_team.simulated.content.blocks.throttle_lever.ThrottleLeverBlockEntity";
+    static final String SPRING="dev.simulated_team.simulated.content.blocks.torsion_spring.TorsionSpringBlockEntity";
     static final String PROPELLER="dev.eriksonn.aeronautics.content.blocks.propeller.bearing.propeller_bearing.PropellerBearingBlockEntity";
     static final String VALUE="com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsBehaviour";
     static final String BOX="com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform";
@@ -35,6 +36,7 @@ final class NativePhysicalControl {
             case INSPECT -> entity!=null;
             case SET_SPEED -> NativeApi.is(entity,MOTOR)||NativeApi.is(entity,SPEED);
             case SET_THROTTLE -> NativeApi.is(entity,THROTTLE);
+            case SET_SPRING_ANGLE -> NativeApi.is(entity,SPRING);
             case SET_BURNER_VOLUME -> NativeApi.is(entity,NativeBurnerDial.BURNER);
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.is(entity,PROPELLER);
             case TURN_CRANK -> entity!=null&&CreateManualInput.supported(entity.getLevel(),entity.getBlockPos());
@@ -44,10 +46,11 @@ final class NativePhysicalControl {
         if(!valid)throw new IllegalArgumentException("当前部件不支持所选原生控制操作");
         if(p.operation()==SET_TIRE)NativeWheelControl.requireItem(p.itemId());
     }
-    static boolean valueBox(PhysicalControlParameters.Operation operation) { return operation==SET_SPEED||operation==SET_BURNER_VOLUME; }
+    static boolean valueBox(PhysicalControlParameters.Operation operation) { return operation==SET_SPEED||operation==SET_BURNER_VOLUME||operation==SET_SPRING_ANGLE; }
     static boolean propeller(PhysicalControlParameters.Operation operation) { return operation==ASSEMBLE_PROPELLER||operation==DISASSEMBLE_PROPELLER; }
     static Object setting(BlockEntity entity) {
         if(NativeApi.is(entity,NativeBurnerDial.BURNER))return NativeBurnerDial.setting(entity);
+        if(NativeApi.is(entity,SPRING))return NativeApi.field(entity,SPRING,"angleInput");
         return NativeApi.is(entity,MOTOR)?NativeApi.field(entity,MOTOR,"generatedSpeed"):NativeApi.field(entity,SPEED,"targetSpeed");
     }
     static Object link(BlockEntity entity) {
@@ -70,6 +73,7 @@ final class NativePhysicalControl {
             case INSPECT -> true;
             case SET_SPEED -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==p.value();
             case SET_BURNER_VOLUME -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==NativeBurnerDial.applied(p.value(),NativeBurnerDial.maximum());
+            case SET_SPRING_ANGLE -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==p.value();
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.truth(NativeApi.call(entity,null,"isRunning"))==(p.operation()==ASSEMBLE_PROPELLER);
             case TURN_CRANK -> false; // 每次手摇都有明确持续窗口，已有转速不能冒充本次已操作。
             case SET_THROTTLE -> ((Number)NativeApi.call(entity,THROTTLE,"getState")).intValue()==p.value();
@@ -102,7 +106,9 @@ final class NativePhysicalControl {
         Object setting=setting(entity),board=NativeApi.call(setting,VALUE,"createBoard",player,hit);
         // 燃烧器只有一行容量刻度，不能沿用电机的正负转速行；输出仍由原生设置包和红石信号共同决定。
         boolean burner=p.operation()==SET_BURNER_VOLUME;
-        int row=burner?0:p.value()<0?0:1,magnitude=burner?NativeBurnerDial.column(p.value(),NativeBurnerDial.maximum()):Math.abs(p.value());
+        // 舵面限角与供气容量都只有一行，不能套用电机的正负转速行号。
+        int row=burner||p.operation()==SET_SPRING_ANGLE?0:p.value()<0?0:1;
+        int magnitude=burner?NativeBurnerDial.column(p.value(),NativeBurnerDial.maximum()):Math.abs(p.value());
         if(row>=((List<?>)NativeApi.call(board,null,"rows")).size()||magnitude>((Number)NativeApi.call(board,null,"maxValue")).intValue())
             throw new IllegalArgumentException("请求超出此原生旋钮面板范围");
         // 使用原生面板的行号与行为网络编号，不能绕过该面板支持的范围，或用服务端字段写入伪造零转速。
@@ -142,6 +148,15 @@ final class NativePhysicalControl {
             out.put("received_signal",NativeApi.call(entity,null,"getSignalStrength"));
             out.put("gas_output",NativeApi.call(entity,null,"getGasOutput"));
             out.put("supported_operations",List.of("inspect","set_burner_volume"));
+        } else if(NativeApi.is(entity,SPRING)) {
+            // 同时报告限位与实际舵角，让模型区分“设置好了”与“舵面已偏转或回中”。
+            out.put("angle_limit_degrees",NativeApi.call(setting(entity),null,"getValue"));
+            out.put("angle_degrees",NativeApi.call(entity,null,"getAngle"));
+            out.put("input_rpm",NativeApi.call(entity,null,"getSpeed"));
+            out.put("output_rpm",NativeApi.call(NativeApi.call(entity,null,"getExtraKinetics"),null,"getSpeed"));
+            out.put("powered",property(entity,"powered"));
+            out.put("return_to_center_rule","input stopped and spring not redstone-powered");
+            out.put("supported_operations",List.of("inspect","set_spring_angle"));
         } else if(NativeApi.is(entity,NativeWheelControl.WHEEL)) {
             out.put("tire",NativeWheelControl.state(entity));out.put("actual_rpm",NativeApi.call(entity,null,"getSpeed"));
             out.put("supported_operations",List.of("inspect","set_tire"));

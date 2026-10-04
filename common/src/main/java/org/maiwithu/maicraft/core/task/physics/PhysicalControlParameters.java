@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 public record PhysicalControlParameters(Operation operation,UUID structureId,UUID designId,BlockPos position,Integer value,
                                         Boolean receiver,List<String> frequencyItems,int crankTicks,boolean requireOnboard,String itemId) {
     public enum Operation { INSPECT, SET_SPEED, SET_THROTTLE, SET_LINK_MODE, SET_FREQUENCY, SET_BURNER_VOLUME,
-        ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER, TURN_CRANK, SET_TIRE }
+        ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER, TURN_CRANK, SET_TIRE, SET_SPRING_ANGLE }
     public PhysicalControlParameters {position=position.immutable();frequencyItems=List.copyOf(frequencyItems);}
     public static PhysicalControlParameters parse(JsonObject input) {
         for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds","require_onboard","item_id").contains(key))
@@ -44,7 +44,7 @@ public record PhysicalControlParameters(Operation operation,UUID structureId,UUI
         }
         UUID design=input.has("design_id")?UUID.fromString(PhysicalAssemblyParameters.text(input,"design_id",null)):null;
         if(id!=null&&design!=null)throw new IllegalArgumentException("结构沿用自身声明，不能同时指定世界 design_id");
-        boolean scalar=op==Operation.SET_SPEED||op==Operation.SET_THROTTLE||op==Operation.SET_BURNER_VOLUME;
+        boolean scalar=op==Operation.SET_SPEED||op==Operation.SET_THROTTLE||op==Operation.SET_BURNER_VOLUME||op==Operation.SET_SPRING_ANGLE;
         if(input.has("value")!=scalar||input.has("receiver")!=(op==Operation.SET_LINK_MODE)
                 ||input.has("frequency_items")!=(op==Operation.SET_FREQUENCY))throw new IllegalArgumentException("配置字段必须与明确的 operation 对应");
         Integer value=null;Boolean receiver=null;List<String> frequency=List.of();
@@ -57,9 +57,11 @@ public record PhysicalControlParameters(Operation operation,UUID structureId,UUI
             boolean invalid=switch(op) {
                 case SET_SPEED -> value==0||value< -256||value>256;
                 case SET_BURNER_VOLUME -> value<5;
+                // 扭力弹簧旋钮定义正负两侧的最大舵角；回中由停转且未通电的原生弹簧执行。
+                case SET_SPRING_ANGLE -> value<1||value>360;
                 default -> value<0||value>15;
             };
-            if(invalid)throw new IllegalArgumentException("转速旋钮应为非零 -256..256，油门信号应为 0..15，燃烧器容积至少为 5");
+            if(invalid)throw new IllegalArgumentException("转速旋钮应为非零 -256..256，油门信号应为 0..15，燃烧器容积至少为 5，弹簧限角应为 1..360 度");
         }
         if(op==Operation.SET_LINK_MODE) {
             if(!input.get("receiver").isJsonPrimitive()||!input.getAsJsonPrimitive("receiver").isBoolean())throw new IllegalArgumentException("receiver 必须为布尔值");
