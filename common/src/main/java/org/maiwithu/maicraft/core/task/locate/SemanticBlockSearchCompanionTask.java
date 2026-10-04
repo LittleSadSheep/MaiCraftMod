@@ -65,7 +65,9 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         scannedLevel = player.clientLevel;
         scan = new LoadedBlockScan(scannedLevel, origin, r.blockTargets, r.maxDistance);
         // 查找岩浆时一并调查可见池面，不能把默认 count=1 命中的孤立源格当成足够浇筑的整池。
-        if (r.blockTargets.contains(Blocks.LAVA)) lavaPools = new PortalLavaPoolSurvey(scannedLevel, origin);
+        // 只为腾桶找一个静源时直接交付源格；真正查施工池才需要完成整池几何和余量分析。
+        if (r.blockTargets.contains(Blocks.LAVA) && (!r.sourceFluidsOnly || r.purpose == Purpose.PORTAL_CASTING))
+            lavaPools = new PortalLavaPoolSurvey(scannedLevel, origin);
     }
 
     @Override
@@ -104,9 +106,11 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private void observe(BlockPos pos) {
         // 候选位置先复核实际状态，再按视觉遮挡与外露部分判断能否看见；原生交互命中另行核对。
         BlockState state = player.clientLevel.getBlockState(pos);
-        if (!r.blockTargets.contains(state.getBlock())) {
+        if (!r.blockTargets.contains(state.getBlock()) || r.excludedPositions.contains(pos)) {
             return;
         }
+        // 取水前置必须找到真实静源，不能把看见流水当成已经找到可装桶的位置。
+        if (r.sourceFluidsOnly && !state.getFluidState().isSource()) return;
         double dx = pos.getX() - origin.getX();
         double dz = pos.getZ() - origin.getZ();
         if (dx * dx + dz * dz > (double) r.maxDistance * r.maxDistance) {
@@ -174,6 +178,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("requested_count", r.count);
         // 用途筛选的 count 单位是池子，同时保留原始可见方块总数，不能把一池三十格说成找到三十个池子。
         data.put("search_purpose", r.purpose.id());
+        if (r.sourceFluidsOnly) data.put("source_fluids_only", true);
         data.put("count_unit", r.purpose == Purpose.PORTAL_CASTING ? "casting_lava_pools" : "block_positions");
         data.put("observed_acceptable_count", matchedCount());
         data.put("observed_block_count", observed.size());

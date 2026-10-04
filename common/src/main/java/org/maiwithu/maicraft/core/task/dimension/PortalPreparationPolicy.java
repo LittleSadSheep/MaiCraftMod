@@ -11,7 +11,9 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator.
 /** 传送门操作授权与路线挖掘许可及稀有物品消耗许可相互独立。 */
 public record PortalPreparationPolicy(boolean enabled, boolean allowRareConsumables, boolean allowCombat,
                                       int maxStructureDistance, MaterialPolicy materialPolicy,
-                                      List<Source> allowedSources, List<String> protectedLabels, Method method) {
+                                      List<Source> allowedSources, List<String> protectedLabels, Method method,
+                                      int resourceSearchDistance) {
+    public static final int DEFAULT_RESOURCE_SEARCH_DISTANCE = 768;
     /** 模型明确选择浇筑手法；执行器不会因为缺钻石而擅自替换已选的建门方案。 */
     public enum Method {
         OBSIDIAN, LAVA_CAST;
@@ -28,11 +30,17 @@ public record PortalPreparationPolicy(boolean enabled, boolean allowRareConsumab
                                    List<Source> sources, List<String> labels) {
         this(enabled, rare, combat, distance, policy, sources, labels, Method.OBSIDIAN);
     }
+    public PortalPreparationPolicy(boolean enabled, boolean rare, boolean combat, int distance, MaterialPolicy policy,
+                                   List<Source> sources, List<String> labels, Method method) {
+        this(enabled, rare, combat, distance, policy, sources, labels, method, DEFAULT_RESOURCE_SEARCH_DISTANCE);
+    }
     public static final PortalPreparationPolicy DISABLED = new PortalPreparationPolicy(
             false, false, false, 4096, MaterialPolicy.ORDINARY, List.of(), List.of());
 
     public PortalPreparationPolicy {
         method = method == null ? Method.OBSIDIAN : method;
+        // 零表示仅使用已加载资源；正数授权缺水或缺池时的有界跑图，不改变矿物和稀有物品的消费许可。
+        resourceSearchDistance = checkResourceSearchDistance(resourceSearchDistance);
         maxStructureDistance = Math.clamp(maxStructureDistance, 128, 4096);
         materialPolicy = materialPolicy == null ? MaterialPolicy.ORDINARY : materialPolicy;
         allowedSources = allowedSources == null ? List.of() : List.copyOf(allowedSources);
@@ -46,7 +54,14 @@ public record PortalPreparationPolicy(boolean enabled, boolean allowRareConsumab
                 flag(input, "allow_combat"), input.has("max_search_distance") ? input.get("max_search_distance").getAsInt() : 4096,
                 MaterialPolicy.parse(input.has("material_policy") ? input.get("material_policy").getAsString() : null),
                 SemanticMaterialSupplyCoordinator.parseSources(strings(input, "allowed_sources")), strings(input, "protected_labels"),
-                Method.parse(input.has("portal_method") ? input.get("portal_method").getAsString() : null));
+                Method.parse(input.has("portal_method") ? input.get("portal_method").getAsString() : null),
+                input.has("max_resource_search_distance") ? input.get("max_resource_search_distance").getAsInt() : DEFAULT_RESOURCE_SEARCH_DISTANCE);
+    }
+    /** 单独备门、跨维度和里程碑共用这个物理跑图范围，避免包装层漏传后退回仅就近查找。 */
+    public static int checkResourceSearchDistance(int distance) {
+        if (distance != 0 && (distance < 64 || distance > 2048))
+            throw new IllegalArgumentException("max_resource_search_distance must be 0 or 64..2048");
+        return distance;
     }
     private static boolean flag(JsonObject input, String key) { return input.has(key) && input.get(key).getAsBoolean(); }
     private static List<String> strings(JsonObject input, String key) {

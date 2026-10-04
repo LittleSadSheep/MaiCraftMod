@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.core.task.locate;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.task.TaskFactory;
@@ -40,6 +42,12 @@ public final class SemanticBlockSearchTaskRecord extends TaskRecord {
     /** 公开查找使用水平圆半径覆盖各高度段；这是只读范围，不是角色行走距离、交互半径或开路授权。 */
     public final int maxDistance;
     public final Purpose purpose;
+    /** 内部取桶前置只接受能装桶的静源；普通 find_block 仍可观察流水。 */
+    public boolean sourceFluidsOnly;
+    public SemanticBlockSearchTaskRecord sourceFluidsOnly() { sourceFluidsOnly = true; return this; }
+    /** 已真实尝试但不能取桶的源格由父流程排除；换视点继续找其他真实源格。 */
+    public Set<BlockPos> excludedPositions = Set.of();
+    public SemanticBlockSearchTaskRecord excluding(Set<BlockPos> positions) { excludedPositions = Set.copyOf(positions); return this; }
 
     static {
         TaskFactory.register(SemanticBlockSearchTaskRecord.class, SemanticBlockSearchCompanionTask::new);
