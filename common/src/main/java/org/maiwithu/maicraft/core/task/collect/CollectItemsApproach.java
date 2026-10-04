@@ -47,6 +47,17 @@ public final class CollectItemsApproach {
             }
             cells.add(drop.blockPosition());
         }
+        // 接触站位全部被拒时导航只剩掉落格自己，"走到物件旁捡起"退化为"走进物件格"；
+        // 记下此刻的枚举结果供实地取证区分地形几何与闸口误伤。
+        if (cells.size() <= drops.size()) {
+            for (var drop : drops) {
+                var at = drop.position();
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "[maicraft-collect] no adjacent contact stance accepted for drop at ({}, {}, {}); candidates={}, may_alter_terrain={}",
+                        Math.round(at.x * 10) / 10.0, Math.round(at.y * 10) / 10.0,
+                        Math.round(at.z * 10) / 10.0, cells.size(), mayAlterTerrain);
+            }
+        }
         return cells.isEmpty() ? null : GoalCompiler.mineField(List.of(), List.copyOf(cells));
     }
 
