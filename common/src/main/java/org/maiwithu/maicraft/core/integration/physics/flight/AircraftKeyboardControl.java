@@ -127,6 +127,7 @@ public final class AircraftKeyboardControl {
     }
     private static void send(LocalPlayerContext ctx,CustomPacketPayload packet){ctx.connection().send(new ServerboundCustomPayloadPacket(packet));}
     public boolean connected(){return connected&&!closed;}
+    public boolean effectsStarted(){return connected||connecting||!effects.isEmpty();}
     public boolean uncertain(){return uncertain;}
     public Map<String,Object> evidence(){return Map.of("connected",connected(),"pressed_keys",pressed,"closed",closed,"uncertain",uncertain,"native_effects",List.copyOf(effects));}
 }
