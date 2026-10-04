@@ -5,9 +5,9 @@ import java.util.Comparator;
 import java.util.List;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 
 /** 在已经加载的目的地附近选择完整起降场；记录观察时刻，进近期间仍需重新检查真实碰撞。 */
 public record FlightLandingSite(Vec3 touchdown,double heading,AABB runway,long observedTick) {
@@ -37,7 +37,8 @@ public record FlightLandingSite(Vec3 touchdown,double heading,AABB runway,long o
             Vec3 at=center.add(forward.scale(along)).add(right.scale(across));
             int x=(int)Math.floor(at.x),z=(int)Math.floor(at.z);
             if(!world.getChunkSource().hasChunk(x>>4,z>>4))return null;
-            int y=world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
+            // 从客户端真实同步的高度上界复核地表；未同步的高度图不能伪造跑道或超高的离地间隙。
+            int y=ClientSurfaceHeight.motionBlockingNoLeaves(world,x,z);
             var ground=new BlockPos(x,y-1,z);var state=world.getBlockState(ground);
             if(!state.getFluidState().isEmpty()||state.getCollisionShape(world,ground).isEmpty())return null;
             minimum=Math.min(minimum,y);maximum=Math.max(maximum,y);

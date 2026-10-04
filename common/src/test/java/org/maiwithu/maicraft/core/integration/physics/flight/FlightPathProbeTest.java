@@ -44,6 +44,12 @@ public final class FlightPathProbeTest {
         var canopy=new AABB(0,90,0,4,91,4);
         check(FlightPathProbe.verticalDeparture(box->box.intersects(canopy)?BLOCKED:CLEAR,resting,true)==BLOCKED,
                 "垂直起飞仍必须避开气囊上方树冠");
+        var edgeBlock=new AABB(4,78,0,5,79,1);
+        var restingRoundoff=new AABB(0,78,0,4.00002,84,4);
+        check(FlightPathProbe.verticalDeparture(box->box.intersects(edgeBlock)?BLOCKED:CLEAR,restingRoundoff,true)==CLEAR,
+                "极小姿态噪声导致的侧面相贴不能阻止离地");
+        check(FlightPathProbe.verticalDeparture(box->box.intersects(edgeBlock)?BLOCKED:CLEAR,
+                new AABB(0,78,0,4.01,84,4),true)==BLOCKED,"真实侧向穿透仍须报告阻挡");
         System.out.println("FlightPathProbeTest: passed");
     }
     private static final class Scene implements BlockGetter {

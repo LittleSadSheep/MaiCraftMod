@@ -16,8 +16,10 @@ public final class FlightPathProbe {
     /** 已接地飞艇向上离地时容忍底面数值误差；仍检查完整宽度、顶部和上方十二格。 */
     public static Space verticalDeparture(World world,AABB bounds,boolean grounded) {
         double floorTolerance=grounded?.03:0;
-        return world.observe(new AABB(bounds.minX,Math.min(bounds.maxY,bounds.minY+floorTolerance),bounds.minZ,
-                bounds.maxX,bounds.maxY+12,bounds.maxZ));
+        // 近乎零的原生旋转会把八米船壳的包围盒扩出约十万分之一格；边界相贴不能变成水平穿透。
+        double edge=Math.min(.0001,Math.min(bounds.getXsize(),bounds.getZsize())/4);
+        return world.observe(new AABB(bounds.minX+edge,Math.min(bounds.maxY,bounds.minY+floorTolerance),bounds.minZ+edge,
+                bounds.maxX-edge,bounds.maxY+12,bounds.maxZ-edge));
     }
     public static Result trace(World world,FlightSample sample,AABB currentBounds,double wantedHeading,double verticalSpeed,
                                double seconds,FlightEnvelope envelope) {

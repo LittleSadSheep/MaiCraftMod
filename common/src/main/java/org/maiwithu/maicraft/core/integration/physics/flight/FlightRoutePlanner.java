@@ -5,10 +5,10 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 
 /** 远程目标边飞边观察；每次局部规划使用真实机体、有限转弯航迹和已加载地形，落点另做完整跑道检查。 */
 public final class FlightRoutePlanner {
@@ -31,7 +31,8 @@ public final class FlightRoutePlanner {
         if(sample.contact()==FlightSample.Contact.GROUNDED) {
             BlockPos at=BlockPos.containing(sample.position());
             if(world.getChunkSource().hasChunk(at.getX()>>4,at.getZ()>>4))
-                clearance=Math.max(.25,sample.position().y-world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,at.getX(),at.getZ()));
+                // 客户端未同步忽略树叶高度图；必须读已同步地形，不能拿世界底部当作飞机地面。
+                clearance=Math.max(.25,sample.position().y-ClientSurfaceHeight.motionBlockingNoLeaves(world,at.getX(),at.getZ()));
         }
         double cruise=Math.max(requestedAltitude,landing==null?requestedAltitude:landing.touchdown().y+16);
         double width=Math.max(bounds.getXsize(),bounds.getZsize())+2;
