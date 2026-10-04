@@ -76,7 +76,7 @@ public final class ProgressionChildFactory {
                 parent.portalSearchRadius, parent.mayAlterTerrain,
                 new PortalPreparationPolicy(parent.preparePortal,
                         parent.allowRareConsumables, parent.allowCombat, parent.maxSearchDistance,
-                        parent.materialPolicy, parent.allowedSources, parent.protectedLabels, parent.portalMethod));
+                        parent.materialPolicy, parent.allowedSources, parent.protectedLabels, parent.portalMethod, parent.portalResourceSearchDistance));
     }
 
     public DragonFightTaskRecord dragonFight() {

@@ -63,6 +63,7 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                 .optionalBool("allow_combat", "Permit hostile combat required by the milestone.")
                 .optionalBool("prepare_portal", "Prepare missing active portals; construction and eyes retain their separate permissions.")
                 .optionalEnum("portal_method", "Nether frame method; lava_cast uses the single-bucket Overworld lava-pool technique.", "obsidian", "lava_cast")
+                .optionalInteger("max_resource_search_distance", "Missing water/pool exploration radius; default 768, 0 for loaded-only, otherwise 64..2048.", 0, 2048)
                 .optionalBool(
                         "allow_rare_consumables",
                         "Permit typed rare progression consumption such as eyes or gateway pearls.")
@@ -112,7 +113,8 @@ public final class SemanticMilestoneTool implements MaiCraftTool {
                 Boolean.TRUE.equals(parsed.allow_rare_consumables()),
                 Boolean.TRUE.equals(parsed.may_alter_terrain()),
                 sources, policy, parsed.protected_labels(), Boolean.TRUE.equals(parsed.prepare_portal()),
-                PortalPreparationPolicy.parse(input).method());
+                PortalPreparationPolicy.parse(input).method())
+                .withPortalResourceSearchDistance(PortalPreparationPolicy.parse(input).resourceSearchDistance());
         setTask(player, record, input, reply);
     }
 }

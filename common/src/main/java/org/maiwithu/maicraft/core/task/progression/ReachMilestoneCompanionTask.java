@@ -81,6 +81,7 @@ public final class ReachMilestoneCompanionTask
 
     @Override
     protected TaskState onTick() {
+        // 每刻先重读库存、装备、维度和世界佐证；已满足的目标直接结束，未满足的才推进当前子任务或派下一阶段。
         ProgressionFacts facts = ProgressionFacts.observe(player, strongholdAnchor);
         if (facts.milestoneDone(r.milestone)) return complete(facts);
         if (activeChild != null) return tickChild(facts);

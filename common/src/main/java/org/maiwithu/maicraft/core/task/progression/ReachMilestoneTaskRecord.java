@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskRecord;
 import java.util.Objects;
 import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy.Method;
+import org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy;
 
 /**
  * 一个语义生存进度目标。具体前置条件、实体、结构、传送门格、路线和背包位置都刻意不包含在此边界中。
@@ -56,6 +57,11 @@ public final class ReachMilestoneTaskRecord extends TaskRecord {
     public final boolean preparePortal;
     /** 里程碑必须保留模型选择的建门手法，不能在材料子任务中退回采掘黑曜石。 */
     public final Method portalMethod;
+    /** 里程碑派出的备门子任务继承同一资源探索范围，不因入口不同改变取水策略。 */
+    public int portalResourceSearchDistance = PortalPreparationPolicy.DEFAULT_RESOURCE_SEARCH_DISTANCE;
+    public ReachMilestoneTaskRecord withPortalResourceSearchDistance(int distance) {
+        portalResourceSearchDistance = PortalPreparationPolicy.checkResourceSearchDistance(distance); return this;
+    }
     public final List<SemanticAcquireTaskRecord.Source> allowedSources;
     public final SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy;
     public final List<String> protectedLabels;

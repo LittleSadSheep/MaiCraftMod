@@ -24,6 +24,8 @@ final class PortalPreparationSupplies {
     }
     private PortalPreparationSupplies() {}
     static Need eyes(int count) { return new Need(List.of(Items.ENDER_EYE), count, "End portal eyes"); }
+    /** 火镰或火焰弹任选已有的一种；都没有时沿普通补给解析真实配方，施工前就落实点火用品。 */
+    static Need ignition() { return new Need(List.of(Items.FLINT_AND_STEEL, Items.FIRE_CHARGE), 1, "portal ignition"); }
 
     static Need next(LocalPlayer player, PortalPreparationSite site) {
         if (site.end() != null) {
@@ -38,8 +40,6 @@ final class PortalPreparationSupplies {
                     "temporary access for portal construction");
             if (!support.satisfied(player)) return support;
         }
-        if (PlayerInv.count(player.getInventory(), Items.FLINT_AND_STEEL) > 0
-                || PlayerInv.count(player.getInventory(), Items.FIRE_CHARGE) > 0) return null;
-        return new Need(List.of(Items.FLINT_AND_STEEL), 1, "portal ignition");
+        var ignition = ignition(); return ignition.satisfied(player) ? null : ignition;
     }
 }

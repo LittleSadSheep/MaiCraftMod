@@ -198,6 +198,12 @@ public final class DimensionTravelCompanionTask
         return TaskState.RUNNING;
     }
 
+    /** 一站式穿门同样显示备门前置阶段；包装层不能把底层的找水和补料进度吞成“无”。 */
+    @Override public String describeCurrentAction() {
+        if (preparationTask != null) return preparationTask.describeCurrentAction();
+        return "前往传送门并确认维度切换";
+    }
+
     private TaskState tickPreparation() {
         TaskState terminal;
         if (player.level().getGameTime() >= preparationRecord.getDeadlineGameTime()) {
@@ -330,7 +336,7 @@ public final class DimensionTravelCompanionTask
 
     private void failIssue(String code, String message) {
         issueCode = code;
-        fail(message, FailureType.TARGET_LOST);
+        fail(message, FailureType.fromCode(preparationData.get("failure_type"), FailureType.TARGET_LOST));
     }
 
     private void revokeHandoff() {

@@ -27,6 +27,7 @@ public final class DimensionTravelTaskRecord extends TaskRecord {
             String destinationDimension,
             int searchRadius,
             boolean mayAlterTerrain) {
+        // 旧的内部旅行调用只找已有门，不因新增了备门能力就默许取材、建框或插眼。
         this(toolCallId, deadlineGameTime, destinationDimension, searchRadius, mayAlterTerrain, PortalPreparationPolicy.DISABLED);
     }
 

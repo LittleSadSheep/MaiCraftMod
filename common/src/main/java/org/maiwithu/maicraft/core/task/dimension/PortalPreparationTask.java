@@ -240,7 +240,8 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         if (supplyNeed != null) facts.put("supply_purpose", supplyNeed.purpose());
         facts.put("survey_radius", r.radius);
         blockedFacts = Map.copyOf(facts);
-        fail(message == null ? code : message, FailureType.TARGET_LOST); return TaskState.FAILED;
+        fail(message == null ? code : message, FailureType.fromCode(childEvidence.get("failure_type"), FailureType.TARGET_LOST));
+        return TaskState.FAILED;
     }
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>(childEvidence);
@@ -255,6 +256,11 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     // CAST 是内部子任务类型；对外显示正在找水、取水或选池，不能从接单起就让模型误以为已经在浇筑。
     private String preparationPhase() {
         return phase == Phase.CAST && casting != null ? casting.stage() : phase.name().toLowerCase(Locale.ROOT);
+    }
+    /** 把取水、补料等实际子阶段传到 HUD，准备期间不能只留下空白的行动行。 */
+    @Override public String describeCurrentAction() {
+        if (child != null && child.describeCurrentAction() != null) return child.describeCurrentAction();
+        return activation != null ? "点燃并核实传送门" : "准备传送门";
     }
     @Override public Map<String, Object> progress() {
         var data = new LinkedHashMap<>(resultData());

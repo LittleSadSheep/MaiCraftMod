@@ -45,6 +45,7 @@ final class PortalActivation {
         InputDriver.halt(player);
         if (failure != null) return TaskState.FAILED;
         if (receipt != null) {
+            // 已经按过一次右键就只轮询原生回执；未确认时不能再补一次点击，避免多耗眼或重复点火。
             receipt = context.actions().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             return receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
@@ -67,6 +68,7 @@ final class PortalActivation {
                 || requiredFace != null && hit.getDirection() != requiredFace)
             return reject("the native crosshair does not hit the permitted portal face");
         if (!context.permitsNativeActions() || !context.mutationAvailable()) return TaskState.RUNNING;
+        // 准星与允许的方块面吻合后才提交；成功要同时等服务端使用确认及门面/眼状态变化，不能只听点火音效。
         receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit, new NativeConfirmation() {
             @Override public boolean requiresBlockAcknowledgement() { return true; }
             @Override public Verdict observe(LocalPlayerContext current) {
@@ -80,6 +82,7 @@ final class PortalActivation {
     String failure() { return failure; }
 
     void close(LocalPlayer player) {
+        // 收场只终止等待并保留未知结果，不能把已经发出的使用动作描述成已撤销。
         if (receipt != null && !receipt.terminal()) {
             ClientRuntime.actor().activeContext().filter(c -> c.player() == player).ifPresent(c ->
                     c.actions().retireOneShotForTaskBoundary(c, receipt, "portal preparation stopped"));

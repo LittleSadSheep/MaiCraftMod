@@ -51,6 +51,7 @@ public record ProgressionFacts(
             frame = nearestLive(level, player.blockPosition(), frames.hits(), Blocks.END_PORTAL_FRAME);
         }
         boolean frameLoaded = frame != null;
+        // “到要塞”目前用近距离门框证据判定；这里没有查询天然结构身份，也没有保证门环完整或已激活。
         boolean arrived = OVERWORLD.equals(dimension) && frameLoaded
                 && player.position().distanceToSqr(Vec3.atCenterOf(frame))
                         <= STRONGHOLD_ARRIVAL_DISTANCE_SQUARED;
@@ -105,6 +106,7 @@ public record ProgressionFacts(
     }
 
     public boolean milestoneDone(ReachMilestoneTaskRecord.Milestone milestone) {
+        // 以角色当前真正处于的世界与持有物结清目标，不用子任务成功、历史到访或暂时没看见龙替代这些事实。
         return switch (milestone) {
             case NETHER -> NETHER.equals(dimension);
             case STRONGHOLD -> strongholdApproachVerified;

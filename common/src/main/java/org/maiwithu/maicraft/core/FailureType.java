@@ -71,4 +71,10 @@ public enum FailureType {
 
     /** 失败成因相关的机制常识卡 URI；空列表表示没有对应卡片。 */
     public List<String> knowledgeRefs() { return knowledgeRefs; }
+    /** 包装层沿用原生子任务明确报出的失败类型，不能把背包满、缺料等实际卡点改称找不到目标。 */
+    public static FailureType fromCode(Object code, FailureType fallback) {
+        if (code instanceof String text)
+            for (FailureType type : values()) if (type.name().equalsIgnoreCase(text)) return type;
+        return fallback;
+    }
 }
