@@ -11,6 +11,8 @@ final class SuicideAbilityAdapter {
     private SuicideAbilityAdapter() { }
 
     static IntentAction adapt(Goal goal) {
+        // 参数经公开契约校验后只转换成当前身体的一张任务单；不在规划阶段靠怪或读取服务器规则。
+        // 低饱食度和返程距离只解释调用动机，是否寻死由模型决定；keepInventory 与游戏模式在执行时再核实。
         return new IntentAction.Native(new SuicideTaskRecord("suicide-" + UUID.randomUUID(),
                 SuicideRequest.parse(goal.parameters())));
     }

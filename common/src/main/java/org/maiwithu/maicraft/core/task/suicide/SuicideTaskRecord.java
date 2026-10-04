@@ -10,6 +10,7 @@ public final class SuicideTaskRecord extends TaskRecord {
     final SuicideRequest request;
 
     public SuicideTaskRecord(String callId, SuicideRequest request) {
+        // 总时间由执行器累计实际获调度的 tick，暂停时不扣预算；不再叠加一个按世界时间到期的截止点。
         super("suicide", callId, NO_DEADLINE);
         this.request = request;
     }

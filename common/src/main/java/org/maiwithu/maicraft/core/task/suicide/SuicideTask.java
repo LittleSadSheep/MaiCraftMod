@@ -55,6 +55,7 @@ public final class SuicideTask implements Task {
     }
 
     private TaskState advance(LocalPlayer body) {
+        // 先承认已观察到的本轮死亡，再检查总预算；规则等待、关界面、扫描和移动都计入实际执行刻。
         if (ended) return deathObserved ? TaskState.SUCCESS : TaskState.FAILED;
         if (body != player || player.isRemoved()) return finish("The original body is unavailable.", TaskState.CANCELLED);
         if (observeDeath(body)) return TaskState.SUCCESS;
@@ -63,6 +64,7 @@ public final class SuicideTask implements Task {
         if (player.isCreative() || player.isSpectator() || player.level().getLevelData().isHardcore())
             return finish("Suicide requires a non-hardcore survival or adventure body.", TaskState.FAILED);
         if (!checkRule()) return ended ? TaskState.FAILED : TaskState.RUNNING;
+        // 先等在途菜单操作并尝试原生关页返料，普通聊天框可保留；角色仍睡在床上时只等待自然醒来。
         if (!gui.ready(ClientRuntime.requireContext(player), true)) return TaskState.RUNNING;
         float health = player.getHealth();
         if (previousHealth > health) { healthLost += previousHealth - health; lastProgress = ticks; }
@@ -77,7 +79,8 @@ public final class SuicideTask implements Task {
         }
         Vec3 destination = candidate.destination(player);
         if (destination == null || NavigationSafetyContext.forbidsBody(BlockPos.containing(destination))) return abandon("The hazard disappeared or left the permitted area.");
-        // 防火、护甲和怪物不攻击等真实结果可能让寻死不奏效；保留受伤事实并在无进展后尝试其他位置。
+        // 选中危险后，接近阶段也受 400 个执行刻的掉血窗口约束；单纯走得更近不会续这个窗口。
+        // 开始直接接触危险时会重新计时，之后任何已观察到的生命值下降都可续期，并不证明选中的危险造成伤害。
         if (ticks - lastProgress >= 400) return abandon("No further health loss within the attempt window.");
         if (!acting) {
             if (!SuicideHazards.valid(player, candidate)) return abandon("The observed hazard changed before approach.");
@@ -90,6 +93,7 @@ public final class SuicideTask implements Task {
                                 : GoalCompiler.standOn(candidate.approach()), 0.8,
                         () -> player.distanceToSqr(hostile ? candidate.destination(player) : approach) <= (hostile ? 25 : 0.36))
                         .walkingOnly();
+                // 开始接近就登记这具身体已在尝试寻死；之后的成功证据是本人死亡，而不是推测某只怪必然会打死她。
                 armed = true;
                 if (nav.tick() == PlayerNav.Status.FAILED) return abandon("Native approach navigation failed: " + nav.failReason());
                 return TaskState.RUNNING;
@@ -99,6 +103,7 @@ public final class SuicideTask implements Task {
             stopNavigation(); acting = true; lastProgress = ticks;
         }
         armed = true; enteredTicks++;
+        // 踏出后重新落地且仍存活，只放弃这一入口并尝试下一处，不把“已经跳下去”记作完成。
         if (candidate.method().equals("fall") && enteredTicks > 10 && player.onGround()
                 && player.getY() < candidate.approach().getY() - 2) return abandon("The native fall ended with the body still alive.");
         // 站入岩浆后停留受伤；靠怪只接近不攻击、不举盾；坠落只踏出边缘，不放水或展开鞘翅。
@@ -124,6 +129,7 @@ public final class SuicideTask implements Task {
                 ruleRead = server.submit(() -> server.getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY));
             }
             if (ruleRead != null && ruleRead.isDone()) { keepInventory = ruleRead.join(); ruleRead = null; }
+            // 首次规则读取未返回前不走向危险；这段等待仍占用本任务预算，不能把未知规则当作已经开启。
             if (keepInventory == null) return false;
         }
         if (!keepInventory) finish("keepInventory is disabled or unconfirmed; no further suicide movement was submitted.", TaskState.FAILED);
@@ -132,12 +138,14 @@ public final class SuicideTask implements Task {
 
     private TaskState abandon(String reason) {
         // 一处危险不可达或未奏效，只放弃该处并记录事实；已发生的烧伤、坠伤与原生爆炸不回滚。
+        // 替换本次尝试的结论后记住入口或怪物 UUID，后续从原地形候选和新观察的活怪中另选，不全量重扫地形。
         attempts.set(attempts.size() - 1, Map.of("method", candidate.method(), "outcome", reason));
         attempted.add(candidate.key()); stopNavigation(); InputDriver.halt(player); candidate = null; acting = false;
         return TaskState.RUNNING;
     }
 
     @Override public boolean observeDeath(LocalPlayer body) {
+        // 必须是已开始尝试的同一具身体报告死亡；取消、失联或换成新身体都不能补造成功，也不在这里请求重生。
         if (body != player || !armed || ended || !player.isDeadOrDying()) return false;
         // 最后一击在普通 tick 之前结束身体，也要把最后这段已观察到的血量下降计入回执。
         healthLost += Math.max(0, previousHealth - player.getHealth());
@@ -167,6 +175,7 @@ public final class SuicideTask implements Task {
     }
 
     @Override public void stop(LocalPlayer body, StopReason reason) {
+        // 临时让出身体只撤移动，恢复后重查并重新接近；取消或旧身体消失则封存本次尝试，不能沿用到新玩家对象。
         cleanup();
         if (reason != StopReason.PREEMPTED) { ended = true; detail = "Suicide stopped before confirmed death: " + reason; }
         // 暂停后危险和怪物可能变化，恢复时先重新接近；总执行预算与已受伤事实保留。
@@ -176,12 +185,15 @@ public final class SuicideTask implements Task {
     @Override public boolean suppressesSurvivalReflexes() { return !ended; }
     @Override public String name() { return "suicide"; }
     @Override public TaskResult result(TaskState terminal) {
+        // 寻死的成功只确认死亡；重生请求和重生后背包观察由公共生命周期另发回执，不能在这里提前承诺。
         ended = true; cleanup();
         return new TaskResult(deathObserved && terminal == TaskState.SUCCESS, detail,
                 terminal == TaskState.TIMEOUT, terminal == TaskState.CANCELLED, progress());
     }
 
     @Override public Map<String, Object> progress() {
+        // 回执保留每次放弃的真实原因与累计观察到的掉血；不输出操作坐标，也不把尝试次数或存活坠落包装成死亡。
+        // 子任务的保护字段表达自身执行意图，父任务查询会按暂停、终态和步骤切换覆盖为实际调度资格。
         var facts = new LinkedHashMap<String, Object>();
         facts.put("task", name()); facts.put("method", candidate == null ? request.method() : candidate.method());
         facts.put("phase", ended ? "finished" : acting ? "exposing_to_hazard" : candidate == null ? "observing" : "approaching");

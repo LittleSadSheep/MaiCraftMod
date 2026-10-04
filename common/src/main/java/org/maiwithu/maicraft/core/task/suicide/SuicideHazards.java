@@ -19,9 +19,11 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 /** 分刻观察已加载地形，找到能先走近、再踏入危险的位置；不挖坑、不造高塔，也不修改服务器世界。 */
 public final class SuicideHazards {
     public record Candidate(String method, BlockPos approach, BlockPos entry, int entityId, UUID entityUuid) {
+        // 地形按进入危险的格子记尝试，生物按 UUID 记尝试；换一个接近站位不会自动重试同一入口。
         public String key() { return method + ":" + (entityUuid == null ? entry.asLong() : entityUuid); }
 
         public Vec3 destination(LocalPlayer player) {
+            // 追怪持续读取同一只活体的位置，不把旧编号复用成另一只怪；这里并未再用搜索半径限制其移动。
             if (entityUuid == null) return Vec3.atBottomCenterOf(entry);
             var entity = player.level().getEntity(entityId);
             return entity != null && entity.isAlive() && entityUuid.equals(entity.getUUID()) ? entity.position() : null;
@@ -35,11 +37,13 @@ public final class SuicideHazards {
     private int cursor;
 
     public SuicideHazards(LocalPlayer player, SuicideRequest request) {
+        // 在规则和界面准备结束后的首次勘查固定起点；之后角色移动不会把地形搜索范围一同推向远处。
         this.level = player.level(); this.origin = player.blockPosition(); this.request = request;
     }
 
     public boolean scan() {
-        // 每刻最多查看 1024 个脚位；只检查起点上下十二格和声明半径，避免一次大扫描卡住游戏。
+        // 每刻最多查看 1024 个脚位；候选站位同时受三维距离和上下十二格限制，避免一次大扫描卡住游戏。
+        // auto 也先走完这轮地形扫描再选怪；已完成的扫描不重新开始，因此后来的新岩浆或新高台不会自动补入。
         int width = request.radius() * 2 + 1, volume = width * width * 25;
         if (!request.permits("lava") && !request.permits("fall")) { cursor = volume; return true; }
         for (int budget = 0; cursor < volume && budget < 1024; budget++, cursor++) {
@@ -69,6 +73,7 @@ public final class SuicideHazards {
                     candidates.add(new Candidate("hostile", mob.blockPosition(), mob.blockPosition(), mob.getId(), mob.getUUID()));
             }
         }
+        // 这里只选当前最近且未放弃的候选，尚未证明它能走到；实际接近失败后才留下导航失败事实。
         return candidates.stream().filter(candidate -> !attempted.contains(candidate.key()))
                 .filter(candidate -> valid(player, candidate))
                 .min(Comparator.comparingDouble(candidate -> player.distanceToSqr(Vec3.atBottomCenterOf(candidate.approach()))))
@@ -100,7 +105,8 @@ public final class SuicideHazards {
     }
 
     static int fallHeight(Level level, BlockPos entry) {
-        // 沿实际下落柱寻找地面；水、未加载空间和禁止进入区域不作为已观察到的坠落伤害位置。
+        // 最多向下读 64 格，找到碰撞地面后才估计落差；任意流体、未加载格或禁止进入的格子都会排除该列。
+        // 六格落差只是选候选的条件，不能证明护甲、药效或模组结算之后角色一定会受伤或死亡。
         for (int depth = 1; depth <= 64; depth++) {
             BlockPos below = entry.below(depth);
             if (!level.isInWorldBounds(below) || !level.isLoaded(below)

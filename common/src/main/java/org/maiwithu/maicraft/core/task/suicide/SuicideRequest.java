@@ -10,6 +10,7 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
 
     public static SuicideRequest parse(JsonObject parameters) {
         // 先拒绝拼错或类型不符的危险动作参数，不能把不认识的方式悄悄当成自动寻死。
+        // 四个工序参数只有省略时才取默认值；显式 null 不算省略，重生开关另由死亡监视器读取。
         String method = "auto";
         if (parameters.has("method")) {
             var value = parameters.get("method");
@@ -19,6 +20,7 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
         }
         if (!METHODS.contains(method)) throw new IllegalArgumentException("unsupported suicide method: " + method);
         boolean confirmed = false;
+        // 这只是调用方对多人服规则的确认，不负责改游戏规则；单人世界执行时仍以服务端读到的值为准。
         if (parameters.has("keep_inventory_confirmed")) {
             var value = parameters.get("keep_inventory_confirmed");
             if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
@@ -30,6 +32,7 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
     }
 
     private static int integer(JsonObject parameters, String key, int fallback, int min, int max) {
+        // 搜索范围和执行时间都需要正的有界整数值；零不表示无限，数值字符串也不冒充有效预算。
         if (!parameters.has(key)) return fallback;
         var value = parameters.get(key);
         try {
@@ -42,5 +45,6 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
         throw new IllegalArgumentException(key + " must be an integer in " + min + ".." + max);
     }
 
+    // auto 允许从三类已观察危险中选取；指定方式时，没找到也不偷偷切到另一种寻死方式。
     public boolean permits(String candidate) { return method.equals("auto") || method.equals(candidate); }
 }
