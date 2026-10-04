@@ -16,10 +16,12 @@ import org.maiwithu.maicraft.core.task.physics.PhysicalAssemblyGeometryTest;
 import org.maiwithu.maicraft.core.task.physics.AssemblyWorldDesignStoreTest;
 import org.maiwithu.maicraft.intent.PhysicalAssemblyContractTest;
 import org.maiwithu.maicraft.intent.PhysicalControlContractTest;
+import org.maiwithu.maicraft.intent.ShipTravelContractTest;
 import org.maiwithu.maicraft.core.task.physics.NativeBurnerDialTest;
 import org.maiwithu.maicraft.core.task.physics.NativePropellerStateTest;
 import org.maiwithu.maicraft.server.physics.FloatingDragAttributionTest;
 import org.maiwithu.maicraft.core.task.physics.PhysicalBalanceReceiptTest;
+import org.maiwithu.maicraft.core.task.physics.StructureSlabPlacementTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureLookDirectionTest;
 import org.maiwithu.maicraft.core.task.physics.BondMaterialSettlementTest;
 import org.maiwithu.maicraft.core.task.physics.StructureWrenchPlanTest;
@@ -68,11 +70,14 @@ public final class PhysicsBalanceRegression {
         AssemblyWorldDesignStoreTest.run();
         PhysicalAssemblyContractTest.run();
         PhysicalControlContractTest.run();
+        // 起飞前的座位意图必须能保留到原生登艇任务，不能只测试配平公式。
+        ShipTravelContractTest.main(args);
         NativeBurnerDialTest.run();
         NativePropellerStateTest.run();
         PhysicsFloatingDragTest.run();
         FloatingDragAttributionTest.run();
         PhysicalBalanceReceiptTest.run();
+        StructureSlabPlacementTest.run();
         StructureLookDirectionTest.run();
         BondMaterialSettlementTest.run();
         StructureWrenchPlanTest.run();

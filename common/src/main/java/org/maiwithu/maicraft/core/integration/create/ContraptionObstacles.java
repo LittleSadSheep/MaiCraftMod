@@ -14,6 +14,8 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
+import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import org.maiwithu.maicraft.core.integration.physics.StructurePose;
 
 /**
  * 读取 Create 运动结构的各个方块碰撞，并转换到世界位置，避免把整座有门洞的结构当成实心盒子。读取失败或超预算时退回整体范围。
@@ -31,10 +33,15 @@ public final class ContraptionObstacles {
         if(cachedLevel.get()==level && cachedTick==level.getGameTime() && cachedOrigin.distanceToSqr(focus)<1) return cached;
         var boxes=new ArrayList<AABB>(); int reads=0, conservative=0;
         AABB interest=new AABB(focus,focus).inflate(16);
-        var entities=level.getEntities((Entity)null,interest,e->API.entity.isInstance(e) && e.isAlive());
-        for(Entity entity:entities) {
+        // 飞艇上的桨叶实体保存在地块存储区，先从已加载实体识别装置，再用真实世界范围筛选，不能先按原始坐标漏掉它。
+        for(Entity entity:level.entitiesForRendering()) {
+            if(!API.entity.isInstance(entity)||!entity.isAlive())continue;
             int first=boxes.size();
+            AABB fallback=interest;
             try {
+                StructurePose parent=SableStructureBridge.containingPose(level,entity.blockPosition());
+                fallback=parent==null?entity.getBoundingBox():PhysicalObstacleSnapshot.transformBox(parent,entity.getBoundingBox(),true);
+                if(!fallback.intersects(interest))continue;
                 if(reads>=4096 || boxes.size()>=4096) throw new IllegalStateException("voxel budget exhausted");
                 Object contraption=API.contraption.invoke(entity);
                 if(contraption==null) continue;
@@ -44,7 +51,7 @@ public final class ContraptionObstacles {
                 Vec3 x=((Vec3)API.global.invoke(entity,new Vec3(1,0,0),1F)).subtract(origin);
                 Vec3 y=((Vec3)API.global.invoke(entity,new Vec3(0,1,0),1F)).subtract(origin);
                 Vec3 z=((Vec3)API.global.invoke(entity,new Vec3(0,0,1),1F)).subtract(origin);
-                UnaryOperator<Vec3> transform=p->origin.add(x.scale(p.x)).add(y.scale(p.y)).add(z.scale(p.z));
+                UnaryOperator<Vec3> transform=worldTransform(p->origin.add(x.scale(p.x)).add(y.scale(p.y)).add(z.scale(p.z)),parent);
                 for(var entry:blocks.entrySet()) {
                     if(reads++>=4096) throw new IllegalStateException("voxel budget exhausted");
                     if(!worldBox(new AABB(entry.getKey()).inflate(1),transform).intersects(interest)) continue;
@@ -58,13 +65,17 @@ public final class ContraptionObstacles {
                     }
                 }
             } catch(ReflectiveOperationException | RuntimeException | LinkageError unknown) {
-                boxes.subList(first,boxes.size()).clear(); boxes.add(entity.getBoundingBox()); conservative++;
+                boxes.subList(first,boxes.size()).clear(); boxes.add(fallback); conservative++;
             }
             if(boxes.size()>4096) { boxes.clear(); boxes.add(interest); conservative++; break; }
         }
         cachedLevel=new WeakReference<>(level); cachedTick=level.getGameTime(); cachedOrigin=focus;
         return cached=new PhysicalObstacleSnapshot(boxes,Math.min(reads,4096),conservative,
                 conservative>0 ? "create_partial" : "create_observed");
+    }
+    // 先执行桨叶自身的转动和平移，再执行飞艇的转动、缩放和平移；普通世界装置只变换一次。
+    static UnaryOperator<Vec3> worldTransform(UnaryOperator<Vec3> localToPlot,StructurePose parent) {
+        return parent==null?localToPlot:p->parent.toWorld(localToPlot.apply(p));
     }
     static AABB worldBox(AABB box,UnaryOperator<Vec3> transform) {
         Vec3 first=transform.apply(new Vec3(box.minX,box.minY,box.minZ));

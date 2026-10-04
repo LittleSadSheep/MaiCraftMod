@@ -39,6 +39,7 @@ import java.util.Map;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
 import org.maiwithu.maicraft.core.integration.create.ContraptionObstacles;
+import org.maiwithu.maicraft.core.integration.physics.StructureDeparture;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.AirLandingControl;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan;
@@ -131,6 +132,8 @@ public final class EmbeddedBaritoneRuntime {
         result.put("scaffold_preparation", BUILD_SCAFFOLDS.diagnostics());
         result.put("dispatch", owner == null ? Map.of() : owner.dispatchEvidence());
         result.put("last_drive_tick", lastSwimDriveTick);
+        // 模型诊断登离艇失败时可追溯最近一次出口搜索，而不是把普通 Baritone 的无路当成全部原因。
+        result.put("structure_departure",StructureDeparture.diagnosticState());
         result.put("physical_obstacles", Map.of("state", physicalObstacles.state(),
                 "boxes", physicalObstacles.boxes().size(), "block_reads", physicalObstacles.blockReads(),
                 "conservative_structures", physicalObstacles.conservativeStructures(), "game_time", physicalObservationTick));
