@@ -85,16 +85,22 @@ public final class PortalCastingTestHarness {
             world.setBlockAndUpdate(at, block.defaultBlockState());
         }
         boolean curved = System.getProperty("maicraft.portalTest.world", "").contains("-Curved-");
+        boolean prerequisites = System.getProperty("maicraft.portalTest.world", "").contains("-Prerequisites-");
+        if (prerequisites) {
+            // 前置验收把唯一水源放到五十格外，给真实行走留出连续石路；不会直接补水桶或移动测试角色。
+            for (BlockPos at : BlockPos.betweenClosed(-55, 96, 1, -11, 104, 5))
+                world.setBlockAndUpdate(at, (at.getY() <= 99 ? Blocks.STONE : Blocks.AIR).defaultBlockState());
+        }
         for (BlockPos at : BlockPos.betweenClosed(-3, 99, -7, 5, 99, -1)) {
             // 圆弧池每个天然直岸都短于四格，必须由角色真正填出岸线；夹具不替执行器铺站台。
             int dx = at.getX() - 1, dz = at.getZ() + 4;
             if (!curved || dx * dx + dz * dz <= 12) world.setBlockAndUpdate(at, Blocks.LAVA.defaultBlockState());
         }
-        if (curved) {
+        if (curved && !prerequisites) {
             // 水面比岸边脚位低三格，旧的向上一格候选范围会漏掉全部岸台；保留原生可见的三格宽水坑。
             for (BlockPos at : BlockPos.betweenClosed(-7, 97, 2, -5, 99, 4)) world.setBlockAndUpdate(at, Blocks.AIR.defaultBlockState());
         }
-        world.setBlockAndUpdate(new BlockPos(-6, curved ? 97 : 99, 3), Blocks.WATER.defaultBlockState());
+        world.setBlockAndUpdate(new BlockPos(prerequisites ? -50 : -6, curved && !prerequisites ? 97 : 99, 3), Blocks.WATER.defaultBlockState());
         // 查池场景在出生点近处放一个孤立源，真实查询必须继续发现后面的圆弧池，不能只交付最近的一格。
         if (System.getProperty("maicraft.portalTest.world", "").contains("-Survey-"))
             world.setBlockAndUpdate(new BlockPos(3, 99, 5), Blocks.LAVA.defaultBlockState());
@@ -103,16 +109,24 @@ public final class PortalCastingTestHarness {
         player.setHealth(player.getMaxHealth()); player.getFoodData().setFoodLevel(20);
         player.getFoodData().setSaturation(10);
         player.getInventory().clearContent();
-        player.getInventory().setItem(0, new ItemStack(Items.BUCKET));
+        player.getInventory().setItem(0, new ItemStack(prerequisites ? Items.LAVA_BUCKET : Items.BUCKET));
         player.getInventory().setItem(1, new ItemStack(Items.STONE_PICKAXE));
         player.getInventory().setItem(2, new ItemStack(Items.COBBLESTONE, 32));
-        player.getInventory().setItem(3, new ItemStack(Items.FLINT_AND_STEEL));
+        player.getInventory().setItem(3, new ItemStack(prerequisites ? Items.FLINT : Items.FLINT_AND_STEEL));
         player.getInventory().setItem(4, new ItemStack(Items.COOKED_BEEF, 32));
+        if (prerequisites) {
+            // 只有两块铁，造不了第二只桶；需要原生复用岩浆桶，并消耗一块铁和燧石制作打火石。
+            player.getInventory().setItem(5, new ItemStack(Items.IRON_INGOT, 2));
+            // 满包场景单独保留容量失败；完整施工场景留四个空槽，避免把空间约束混成流体流程成败。
+            int filledSlots = System.getProperty("maicraft.portalTest.world", "").contains("-Room-") ? 32 : 36;
+            for (int slot = 6; slot < filledSlots; slot++) player.getInventory().setItem(slot, new ItemStack(Items.STONE, 64));
+        }
         player.inventoryMenu.broadcastChanges();
         world.setDayTime(6000);
         world.getGameRules().getRule(GameRules.RULE_DOMOBSPAWNING).set(false, world.getServer());
         var result = new LinkedHashMap<>(observe(player));
-        result.put("fixture", curved ? "curved_lava_pool_high_water_bank_empty_bucket_no_obsidian"
+        result.put("fixture", prerequisites ? "occupied_lava_bucket_two_iron_flint_distant_water_full_inventory"
+                : curved ? "curved_lava_pool_high_water_bank_empty_bucket_no_obsidian"
                 : "shallow_lava_pool_empty_bucket_no_obsidian_no_diamonds");
         result.put("fixture_only", true); return result;
     }
@@ -122,7 +136,8 @@ public final class PortalCastingTestHarness {
         var blocks = new ArrayList<Map<String, Object>>();
         var world = player.serverLevel();
         // 服务端只读记录真实流体、门框和门面，不根据客户端任务的成功字样推断验收通过。
-        for (BlockPos at : BlockPos.betweenClosed(-8, 97, -9, 10, 105, 8)) {
+        int minimumX = System.getProperty("maicraft.portalTest.world", "").contains("-Prerequisites-") ? -55 : -8;
+        for (BlockPos at : BlockPos.betweenClosed(minimumX, 97, -9, 10, 105, 8)) {
             var state = world.getBlockState(at);
             if (state.isAir()) continue;
             blocks.add(Map.of("position", List.of(at.getX(), at.getY(), at.getZ()),

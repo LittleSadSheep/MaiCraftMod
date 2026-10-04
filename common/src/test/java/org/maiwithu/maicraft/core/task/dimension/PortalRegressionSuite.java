@@ -14,6 +14,9 @@ public final class PortalRegressionSuite {
         PortalCastingWorkflowTest.main(args);
         // 有池无水、有水无池以及已有水桶都要分别回报，不能只验收资源齐全的场景。
         PortalCastingPreparationTest.main(args);
+        // 远处资源通过真实探索加载新视点，找到水时仍须等待后续原生装桶。
+        PortalResourceSearchTest.main(args);
+        PortalIgnitionPreparationTest.main(args);
         PortalCastingTerrainTest.main(args);
         // clear 接近导航继承接单授权：固定不改地形会让不临空地的池岸永远走不到目标格。
         PortalCastingClearPermissionTest.main(args);

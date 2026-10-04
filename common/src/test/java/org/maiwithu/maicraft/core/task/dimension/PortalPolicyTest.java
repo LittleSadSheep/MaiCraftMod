@@ -18,6 +18,10 @@ public final class PortalPolicyTest {
                 "{\"prepare_portal\":true,\"material_policy\":\"inventory_only\",\"allow_combat\":true}").getAsJsonObject());
         check(inventory.sources(true).equals(List.of(Source.INVENTORY)), "inventory-only preparation stays inventory-only");
         check(!PortalPreparationPolicy.parse(new JsonObject()).enabled(), "legacy travel cannot begin portal construction");
+        // 缺水缺池默认允许有界探索；显式零范围保留只查已加载现场的调用方式。
+        check(ordinary.resourceSearchDistance() == 768, "default prerequisite exploration is bounded");
+        check(PortalPreparationPolicy.parse(JsonParser.parseString("{\"max_resource_search_distance\":0}").getAsJsonObject())
+                .resourceSearchDistance() == 0, "loaded-only resource preparation can be requested explicitly");
         System.out.println("PortalPolicyTest: independent preparation, terrain, supply and rare-item permissions passed");
     }
 }

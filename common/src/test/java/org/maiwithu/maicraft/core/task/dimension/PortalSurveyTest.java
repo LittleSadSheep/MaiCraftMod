@@ -26,7 +26,8 @@ public final class PortalSurveyTest {
                 check(site != null && site.nether().equals(frame), "intact frames are reused without construction permission");
                 var stance = PortalApproach.find(world.player, site, frame.origin().below(), Vec3.atBottomCenterOf(frame.origin()), Set.of());
                 check(stance != null && !site.forbiddenBody().contains(stance), "ignition stance stays outside the portal");
-                check(PortalPreparationSupplies.next(world.player, site).alternatives().equals(List.of(Items.FLINT_AND_STEEL)),
+                // 两种原生点火用品都满足前置；没有时交由同一补给流程选取实际能获得的那一种。
+                check(PortalPreparationSupplies.next(world.player, site).alternatives().equals(List.of(Items.FLINT_AND_STEEL, Items.FIRE_CHARGE)),
                         "an intact frame only needs ignition supply");
                 world.inventory.setItem(0, new ItemStack(Items.FIRE_CHARGE));
                 check(PortalPreparationSupplies.next(world.player, site) == null, "an existing fire charge avoids acquiring another ignition item");

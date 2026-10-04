@@ -21,7 +21,7 @@ public final class PortalPreparationContractTest {
             var parameters = JsonParser.parseString("""
                     {"destination_dimension":"minecraft:the_end","milestone":"elytra",
                      "prepare_portal":true,"portal_method":"lava_cast","may_alter_terrain":true,"allow_rare_consumables":true,
-                     "allow_combat":true,"max_search_distance":512,"material_policy":"inventory_only",
+                     "allow_combat":true,"max_search_distance":512,"max_resource_search_distance":256,"material_policy":"inventory_only",
                      "allowed_sources":["inventory"],"protected_labels":["home"]}
                     """).getAsJsonObject();
             var goal = new Goal(ability, "visit the next dimension", null, parameters.toString(), "{}", List.of(), List.of());
@@ -29,6 +29,7 @@ public final class PortalPreparationContractTest {
             check(action.arguments().get("prepare_portal").getAsBoolean(), "semantic preparation permission reaches the executor");
             var policy = PortalPreparationPolicy.parse(action.arguments());
             check(policy.method() == PortalPreparationPolicy.Method.LAVA_CAST, "casting method survives both semantic entry points");
+            check(policy.resourceSearchDistance() == 256, "water/pool exploration bounds survive both semantic entry points");
             check(policy.allowRareConsumables() && policy.allowCombat() && policy.maxStructureDistance() == 512
                     && policy.materialPolicy() == MaterialPolicy.INVENTORY_ONLY && policy.protectedLabels().equals(List.of("home")),
                     "adaptation preserves every preparation constraint");
@@ -44,9 +45,11 @@ public final class PortalPreparationContractTest {
         check(normalizedAction.arguments().get("milestone").getAsString().equals("nether"),
                 "documented capitalization adapts directly instead of requesting a decision");
         var milestone = new ReachMilestoneTaskRecord("progress", 1200, ReachMilestoneTaskRecord.Milestone.ELYTRA,
-                512, 64, 10, true, true, true, List.of(), MaterialPolicy.INVENTORY_ONLY, List.of("home"), true);
+                512, 64, 10, true, true, true, List.of(), MaterialPolicy.INVENTORY_ONLY, List.of("home"), true)
+                .withPortalResourceSearchDistance(256);
         var travel = new ProgressionChildFactory(null, milestone).travel("minecraft:the_end");
         check(travel.preparation.enabled() && travel.mayAlterTerrain && travel.preparation.allowRareConsumables()
+                        && travel.preparation.resourceSearchDistance() == 256
                         && travel.preparation.materialPolicy() == MaterialPolicy.INVENTORY_ONLY
                         && travel.preparation.protectedLabels().equals(List.of("home")),
                 "progression children retain preparation, terrain, consumption, supply and protection permissions");

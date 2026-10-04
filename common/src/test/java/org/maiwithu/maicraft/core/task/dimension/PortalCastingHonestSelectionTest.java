@@ -34,7 +34,8 @@ public final class PortalCastingHonestSelectionTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         b1SurveyPrefersReachable();
         b1TaskFallsThroughOnPrepareSiteFailure();
-        b1AllUnreachableReportsTally();
+        b1AllUnreachableReportsTally(false);
+        b1AllUnreachableReportsTally(true);
         b2ShoreCheckReasons();
         b4ThreeFailureStates();
         antiBlindnessReachableStance();
@@ -75,6 +76,8 @@ public final class PortalCastingHonestSelectionTest {
             world.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
             world.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 64));
             world.inventory.setItem(2, new ItemStack(Items.STONE_PICKAXE));
+            // 选址回放只讨论站台可达性，先满足点火前置。
+            world.inventory.setItem(3, new ItemStack(Items.FLINT_AND_STEEL));
             int[] platformBuilds = {0};
             var task = new NetherPortalCastingTask(world.player,
                     new PortalPreparationTaskRecord("casting", 6000, "minecraft:the_nether", 32, true,
@@ -97,7 +100,7 @@ public final class PortalCastingHonestSelectionTest {
                         }
                         public TaskResult result(TaskState state) {
                             if (state == TaskState.FAILED)
-                                return TaskResult.fail("navigation did not reach stance", Map.of("native_effect_verified", false));
+                                return TaskResult.fail("navigation did not reach stance", Map.of("native_effect_verified", false, "failure_type", "no_path"));
                             return TaskResult.ok("fixture build", Map.of("native_effect_verified", true));
                         }
                     });
@@ -123,7 +126,7 @@ public final class PortalCastingHonestSelectionTest {
     }
 
     /** B1：全部候选站台不可达时，逐个尝试后以独立失败码收尾，并交付完整统计而不是宣称附近没有池岸。 */
-    private static void b1AllUnreachableReportsTally() throws Exception {
+    private static void b1AllUnreachableReportsTally(boolean noSpace) throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             seedPool(world, new BlockPos(2, 1, 4), false);
             seedPool(world, new BlockPos(7, 1, 4), false);
@@ -131,6 +134,8 @@ public final class PortalCastingHonestSelectionTest {
             world.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET));
             world.inventory.setItem(1, new ItemStack(Items.COBBLESTONE, 64));
             world.inventory.setItem(2, new ItemStack(Items.STONE_PICKAXE));
+            // 预检不可达的候选仍可尝试施工，但先备齐点火用品。
+            world.inventory.setItem(3, new ItemStack(Items.FLINT_AND_STEEL));
             var task = new NetherPortalCastingTask(world.player,
                     new PortalPreparationTaskRecord("casting", 6000, "minecraft:the_nether", 32, true,
                             new PortalPreparationPolicy(true, false, false, 128, MaterialPolicy.INVENTORY_ONLY,
@@ -146,7 +151,8 @@ public final class PortalCastingHonestSelectionTest {
                         }
                         public TaskResult result(TaskState state) {
                             if (state == TaskState.FAILED)
-                                return TaskResult.fail("stance not reachable", Map.of("native_effect_verified", false));
+                                return TaskResult.fail(noSpace ? "inventory has no room" : "stance not reachable",
+                                        Map.of("native_effect_verified", false, "failure_type", noSpace ? "no_space" : "no_path"));
                             return TaskResult.ok("fixture", Map.of("native_effect_verified", true));
                         }
                     });
@@ -158,6 +164,15 @@ public final class PortalCastingHonestSelectionTest {
             var data = task.result(state).data();
             check(state == TaskState.FAILED, "all unreachable candidates end as a reported failure; state=" + state
                     + " issue=" + data.get("issue_code"));
+            // 满包导致的失败没有证明岸线走不到，不能换池，也不能把容量问题交成路径问题。
+            if (noSpace) {
+                check("casting_prepare_bank_platform_failed".equals(data.get("issue_code"))
+                        && "no_space".equals(data.get("failure_type")), "storage failure retains its actual cause");
+                var resourceFacts = (Map<?, ?>) data.get("resource_preparation");
+                check(((Number) ((Map<?, ?>) resourceFacts.get("search")).get("candidates_tried")).intValue() == 0,
+                        "inventory pressure cannot consume geometric fallback candidates");
+                return;
+            }
             check("casting_no_reachable_candidate".equals(data.get("issue_code")),
                     "failure code distinguishes all-unreachable from zero-source-lava");
             var resources = (java.util.Map<?, ?>) data.get("resource_preparation");

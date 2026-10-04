@@ -31,7 +31,7 @@ public final class PortalCastingPreparationTest {
 
     private static PortalPreparationTaskRecord record(String id) {
         var policy = new PortalPreparationPolicy(true, false, false, 128, MaterialPolicy.INVENTORY_ONLY,
-                List.of(), List.of(), PortalPreparationPolicy.Method.LAVA_CAST);
+                List.of(), List.of(), PortalPreparationPolicy.Method.LAVA_CAST, 0);
         return new PortalPreparationTaskRecord(id, 3000, "minecraft:the_nether", 16, true, policy);
     }
 
@@ -61,15 +61,15 @@ public final class PortalCastingPreparationTest {
             var result = task.result(state); var data = result.data();
             check(state == TaskState.FAILED && "find_water_source_not_observed".equals(data.get("issue_code")),
                     "the missing water reason survives the public preparation parent");
-            check("find_water_source".equals(data.get("preparation_phase"))
-                    && "find_water_source".equals(((Map<?, ?>) data.get("blocked_facts")).get("phase")),
+            check("locate_water".equals(data.get("preparation_phase"))
+                    && "locate_water".equals(((Map<?, ?>) data.get("blocked_facts")).get("phase")),
                     "both status and failure facts name the actual preparation phase");
             check(world.itemUses() == 0 && world.blockUses() == 0 && Boolean.FALSE.equals(data.get("construction_phase_started")),
                     "no construction or bucket input was submitted without water");
             var resources = (Map<?, ?>) data.get("resource_preparation");
             var search = (Map<?, ?>) resources.get("search");
-            check(Boolean.FALSE.equals(resources.get("initial_water_prepared")) && "not_surveyed".equals(search.get("lava_pool_status")),
-                    "unobserved pool status remains unknown instead of inventing absence");
+            check(Boolean.FALSE.equals(resources.get("initial_water_prepared")) && "observed".equals(search.get("lava_pool_status")),
+                    "a known pool does not imply that water was prepared");
             check(data.get("recovery_options").toString().contains("locate_casting_resources"), "the model receives a resource discovery handoff");
         }
     }
@@ -78,10 +78,14 @@ public final class PortalCastingPreparationTest {
         try (var world = new InteractionWorldTestHarness()) {
             world.position(new Vec3(7.5, 2, 5.5));
             world.inventory.setItem(0, new ItemStack(carried ? Items.WATER_BUCKET : Items.BUCKET));
+            // 此用例只验证缺池时保留已准备的水，点火用品预先给齐以隔离补给路径。
+            world.inventory.setItem(1, new ItemStack(Items.FLINT_AND_STEEL));
             BlockPos water = new BlockPos(5, 1, 5);
             if (!carried) world.set(water, Blocks.WATER.defaultBlockState());
             int[] fills = {0};
-            var task = new NetherPortalCastingTask(world.player, record("no-pool"), (player, child) -> new Task() {
+            var task = new NetherPortalCastingTask(world.player, record("no-pool"), (player, child) -> {
+                if (child instanceof PortalResourceSearchTaskRecord search) return new PortalResourceSearchTask(player, search);
+                return new Task() {
                 public String name() { return "water_preparation_receipt"; }
                 public void stop(LocalPlayer player, StopReason why) {}
                 public TaskState tick(LocalPlayer player) {
@@ -93,6 +97,7 @@ public final class PortalCastingPreparationTest {
                     world.inventory.setItem(0, new ItemStack(Items.WATER_BUCKET)); return TaskState.SUCCESS;
                 }
                 public TaskResult result(TaskState state) { return TaskResult.ok("fixture water collection", Map.of("native_effect_verified", true)); }
+                };
             });
             var result = finish(world, task); var data = result.data();
             check(fills[0] == (carried ? 0 : 1), "carried water is reused; otherwise collection precedes the pool search");
@@ -114,7 +119,9 @@ public final class PortalCastingPreparationTest {
             world.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
             world.inventory.setItem(1, new ItemStack(Items.IRON_INGOT, 2));
             int[] operations = {0};
-            var task = new NetherPortalCastingTask(world.player, record("occupied-bucket"), (player, child) -> new Task() {
+            var task = new NetherPortalCastingTask(world.player, record("occupied-bucket"), (player, child) -> {
+                if (child instanceof PortalResourceSearchTaskRecord search) return new PortalResourceSearchTask(player, search);
+                return new Task() {
                 public String name() { return "occupied_bucket_receipt_fixture"; }
                 public void stop(LocalPlayer player, StopReason why) {}
                 public TaskState tick(LocalPlayer player) {
@@ -132,6 +139,7 @@ public final class PortalCastingPreparationTest {
                     return TaskState.SUCCESS;
                 }
                 public TaskResult result(TaskState state) { return TaskResult.ok("fixture bucket receipt", Map.of("native_effect_verified", true)); }
+                };
             });
             task.start(world.player); var state = TaskState.RUNNING;
             for (int tick = 0; tick < 1000 && state == TaskState.RUNNING && operations[0] < 2; tick++) {
