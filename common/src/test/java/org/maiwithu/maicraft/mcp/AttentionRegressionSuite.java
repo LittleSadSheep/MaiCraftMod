@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.intent.AttentionFeedTest;
 import org.maiwithu.maicraft.intent.ReminderBoardTest;
 import org.maiwithu.maicraft.client.runtime.LowLightCombatReminderTest;
 import org.maiwithu.maicraft.client.runtime.FoodSupplyReminderTest;
+import org.maiwithu.maicraft.client.runtime.CombatEquipmentReminderTest;
 import org.maiwithu.maicraft.intent.IntentAttentionEvidenceTest;
 import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
@@ -28,6 +29,8 @@ public final class AttentionRegressionSuite {
         LowLightCombatReminderTest.main(args);
         // 持续口粮不足提醒建立农业供给，短暂清包和已有充足食物不应触发。
         FoodSupplyReminderTest.main(args);
+        // 明显战斗伤势提示盔甲与远程装备准备，血量同步迟到和混合伤害不能重复或错误计数。
+        CombatEquipmentReminderTest.main(args);
         ChatFlowTest.main(args);
         AttentionWaitTest.main(args);
         // 大份任务证据按路径与分页找回，不能因宿主压缩上下文而只能重新执行动作。
