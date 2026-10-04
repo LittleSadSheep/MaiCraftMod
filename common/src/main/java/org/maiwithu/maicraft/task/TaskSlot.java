@@ -4,6 +4,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.entity.InputDriver;
 
+import java.util.Map;
 import java.util.function.Consumer;
 
 /** 保存一件正在做的事：记录“要做什么、做完没有”，并让对应的执行代码每次往前做一点。 */
@@ -29,6 +30,11 @@ final class TaskSlot {
 
     TaskRecord record() {
         return record;
+    }
+
+    /** 面板与排错用：当前执行器的只读工作证据；槽位空或执行器未建返回空 Map。 */
+    Map<String, Object> progress() {
+        return task == null ? Map.of() : task.progress();
     }
 
     boolean canRun(LocalPlayer player) {
