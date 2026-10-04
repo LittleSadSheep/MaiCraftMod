@@ -1418,7 +1418,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         nextProgressObservation = now + 100;
         var observation = new LinkedHashMap<String, Object>();
         observation.put("game_time", now);
-        observation.put("phase", activeTarget != null ? "digging" : navIsDrop ? "collecting_drops" : knownOres.isEmpty() ? "querying_sources" : "approaching_sources");
+        observation.put("phase", currentPhase());
         observation.put("feet", List.of(player.getX(), player.getY(), player.getZ()));
         observation.put("known_sources", knownOres.size()); observation.put("query_complete", lastQueryComplete);
         observation.put("gathered", gathered); observation.put("confirmed_source_breaks", brokenTargets);
@@ -1436,6 +1436,36 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         lastMiningObservation = Map.copyOf(observation);
         Constants.LOG.info("[maicraft-mine] task={} progress={}", r.getToolCallId(), lastMiningObservation);
+    }
+
+    /** 此刻挖掘流程所处阶段；观察快照与面板 progress 共用同一份判定，避免两处口径漂移。 */
+    private String currentPhase() {
+        if (activeTarget != null || chainBreak != null
+                || (tunnelDriver != null && tunnelDriver.breaking())) return "digging";
+        if (navIsDrop) return "collecting_drops";
+        return knownOres.isEmpty() ? "querying_sources" : "approaching_sources";
+    }
+
+    /**
+     * 面板与排错用的原语级工作证据。{@code target_pos}/{@code target_block} 是已确认事实：
+     * {@link #activeTarget} 只有经公平闸门（即时可见或观察记忆）或定点授权才进入可挖名单，
+     * 且此刻正被射线/连锁实际挖掘；坐标因此属于"正在交互的对象"，不是计划中的候选。
+     * {@code done}/{@code total} 沿仓库统一计数键，done 来自已同步背包增量或确认破坏数。
+     * 寻路目标名单、探矿隧道计划等未确认内容不在这里暴露。
+     */
+    @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("task", name());
+        data.put("phase", currentPhase());
+        data.put("done", r.getMined());
+        data.put("total", r.count);
+        if (activeTarget != null) {
+            data.put("target_pos", List.of(activeTarget.getX(), activeTarget.getY(), activeTarget.getZ()));
+            data.put("target_block", BuiltInRegistries.BLOCK
+                    .getKey(player.level().getBlockState(activeTarget).getBlock()).toString());
+        }
+        return data;
     }
 
     /** 最近矿物的日志描述使用 ASCII，避免编码问题，例如 "316,64,391 minecraft:oak_log dy=+0 dist=1.0" 或 "none"。

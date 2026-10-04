@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -282,13 +283,46 @@ public final class DebugHudController {
     }
 
     // 动作行回答"此刻在做什么"：有阶段名只显示阶段，阶段缺失退回任务单短描述；不复读任务行的目标全文。
+    // 原语层证据（操作对象坐标、计数）追加在阶段之后，格式化失败或键缺失时静默跳过。
     private static String actionText() {
         CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
         return action == null ? "无" : actionValue(action);
     }
 
     private static String actionValue(CompanionTickDispatcher.BodyAction action) {
-        return action.phase() != null ? action.phase() : clamp(action.describe());
+        String primitive = primitiveText(action.primitives());
+        String base = action.phase() != null ? action.phase() : clamp(action.describe());
+        if (primitive.isEmpty()) return base;
+        String joined = base + " · " + primitive;
+        if (joined.length() <= TEXT_LIMIT) return joined;
+        // 原语部分拼在截断之外优先保全：主体按剩余额度截断，坐标与计数始终完整可读。
+        int baseLimit = TEXT_LIMIT - primitive.length() - 4;   // " · " 分隔符加省略号
+        if (baseLimit < 1) return clamp(primitive);
+        return clamp(base, baseLimit) + " · " + primitive;
+    }
+
+    /** 原语键的中文短句：坐标与方块 id 是正在交互的对象，done/total 是仓库统一计数键。 */
+    private static String primitiveText(Map<String, Object> primitives) {
+        if (primitives == null || primitives.isEmpty()) return "";
+        StringBuilder text = new StringBuilder();
+        Object pos = primitives.get("target_pos");
+        if (pos instanceof List<?> xyz && xyz.size() == 3) {
+            text.append("目标 (").append(xyz.get(0)).append(",").append(xyz.get(1))
+                    .append(",").append(xyz.get(2)).append(")");
+            Object block = primitives.get("target_block");
+            if (block != null) text.append(" ").append(block);
+        } else {
+            Object block = primitives.get("target_block");
+            if (block != null) text.append("目标 ").append(block);
+        }
+        Object done = primitives.get("done");
+        Object total = primitives.get("total");
+        if (done instanceof Number doneCount && total instanceof Number totalCount
+                && totalCount.intValue() > 0) {
+            if (text.length() > 0) text.append(" · ");
+            text.append(doneCount.intValue()).append("/").append(totalCount.intValue());
+        }
+        return text.toString();
     }
 
     private static String abilityTitle(Goal goal) {

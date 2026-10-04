@@ -7,8 +7,10 @@ import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.BreathChain;
@@ -132,10 +134,12 @@ final class CompanionBrain {
     private CompanionTickDispatcher.BodyAction slotAction(TaskSlot slot) {
         TaskRecord record = slot.record();
         if (record == null) return null;
-        String phase = deepestPhase(slot.progress());
+        Map<String, Object> progress = slot.progress();
+        String phase = deepestPhase(progress);
+        Map<String, Object> primitives = deepestPrimitives(progress);
         return phase == null
-                ? new CompanionTickDispatcher.BodyAction(null, record.describe())
-                : new CompanionTickDispatcher.BodyAction(phase, null);
+                ? new CompanionTickDispatcher.BodyAction(null, record.describe(), primitives)
+                : new CompanionTickDispatcher.BodyAction(phase, null, primitives);
     }
 
     // 父任务用 child 嵌套真实干活的任务，阶段名取最深一层的自述。
@@ -144,6 +148,26 @@ final class CompanionBrain {
         if (phase instanceof String text && !text.isBlank()) return text;
         Object child = progress.get("child");
         return child instanceof Map<?, ?> nested ? deepestPhase(nested) : null;
+    }
+
+    /** 面板动作行放行的原语键白名单：计数沿仓库统一 done/total，对象坐标与方块 id 来自正在交互的事实。 */
+    private static final Set<String> PRIMITIVE_KEYS = Set.of("done", "total", "target_pos", "target_block");
+
+    /**
+     * 原语键只取 child 链上最深一层持有者的内容，不跨层合并——语义父任务的计数与
+     * 原语子任务的操作对象分属不同层，混取会把两份不同口径的进度拼到一行。
+     */
+    private static Map<String, Object> deepestPrimitives(Map<?, ?> progress) {
+        Object child = progress.get("child");
+        if (child instanceof Map<?, ?> nested) {
+            Map<String, Object> deeper = deepestPrimitives(nested);
+            if (!deeper.isEmpty()) return deeper;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (String key : PRIMITIVE_KEYS) {
+            if (progress.containsKey(key)) out.put(key, progress.get(key));
+        }
+        return out;
     }
 
 
