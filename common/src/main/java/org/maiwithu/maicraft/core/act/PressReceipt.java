@@ -9,11 +9,14 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.LinkedHashMap;
 
 /**
  * 记下点击前后看见的差别：双手物品、瞄准的方块、附近新看到的实体及实际打开的容器菜单。
@@ -45,6 +48,26 @@ public final class PressReceipt {
     /** 按键之前拍快照;{@code aim} 可空(朝空气挥没有目标格)。 */
     public static PressReceipt before(LocalPlayer player, BlockPos aim) {
         return new PressReceipt(player, aim);
+    }
+
+    /** 原生点击与设计结果分开呈现：返桶已确认时，目标格仍可能变成黑曜石、圆石或蒸发后的空气。 */
+    public Map<String, Object> targetObservation(LocalPlayer player) {
+        if (aim == null) return Map.of("loaded", false);
+        boolean loaded = player.level().isLoaded(aim);
+        return Map.of("position", List.of(aim.getX(), aim.getY(), aim.getZ()), "loaded", loaded,
+                "before", blockObservation(aimBefore),
+                "after", loaded ? blockObservation(player.level().getBlockState(aim)) : Map.of("unknown", true));
+    }
+
+    // 同名门框的 eye、流体的 level 等属性保留在现场事实中，调用者不用另查才能判断真实效果。
+    private static Map<String, Object> blockObservation(BlockState state) {
+        Map<String, String> properties = new LinkedHashMap<>();
+        for (Property<?> property : state.getProperties()) properties.put(property.getName(), propertyValue(state, property));
+        return Map.of("block_id", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), "properties", properties);
+    }
+
+    private static <T extends Comparable<T>> String propertyValue(BlockState state, Property<T> property) {
+        return property.getName(state.getValue(property));
     }
 
     /**

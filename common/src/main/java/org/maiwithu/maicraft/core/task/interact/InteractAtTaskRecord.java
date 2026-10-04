@@ -66,6 +66,12 @@ public final class InteractAtTaskRecord extends TaskRecord {
         heldItemUseOnly = true; expectedOutputItem = expectedOutput; return this;
     }
 
+    /** 定点倒桶或加工后等实际返还物入包；只增加观察要求，不重复已经提交的原生使用。 */
+    public InteractAtTaskRecord withExpectedOutput(Item output) {
+        if (button != MouseButton.RIGHT || output == null) throw new IllegalArgumentException("expected output requires right-click item use");
+        expectedOutputItem = output; return this;
+    }
+
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
                                 MouseButton button, BlockPos aim, int holdTicks, Item item) {
         this(toolCallId, deadlineGameTime, button, aim, holdTicks, item, null);

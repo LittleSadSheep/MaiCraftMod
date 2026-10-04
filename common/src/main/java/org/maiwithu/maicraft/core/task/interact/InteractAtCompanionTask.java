@@ -361,6 +361,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                         .getKey(player.level().getBlockState(activatedBlock).getBlock()).getPath();
             }
             receipt = PressReceipt.before(player, r.aim);
+            // 瞄准已完成后记下返还物总数，避免把走近途中拾到的空桶算成本次倒桶返还。
+            if (r.expectedOutputItem != null) expectedItemBefore = PlayerInv.count(player.getInventory(), r.expectedOutputItem);
             // 提交瞬间的目标格与射线事实先冻结；到期回执要和这份快照对照才能裁决分歧来源。
             if (r.aim != null) {
                 Map<String, Object> facts = new HashMap<>();
@@ -478,12 +480,18 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (state == Interaction.Status.FAILED) { fail(interaction.failReason(), interaction.failType()); return TaskState.FAILED; }
         if (state != Interaction.Status.DONE) return TaskState.RUNNING;
         heldUseCompleted = true;
+        TaskState outputState = verifyExpectedOutput();
+        if (outputState != TaskState.SUCCESS) return outputState;
+        successMsg = "native held item use completed" + settle(); return TaskState.SUCCESS;
+    }
+
+    private TaskState verifyExpectedOutput() {
         // 使用动画结束与服务端产物槽更新可能分包到达；只等一小段同步窗口，绝不再自动使用一次物品。
         if (r.expectedOutputItem != null && PlayerInv.count(player.getInventory(), r.expectedOutputItem) <= expectedItemBefore) {
             if (++outputWaitTicks <= 40) return TaskState.RUNNING;
             fail("native item use completed but the expected carried output did not increase", FailureType.TARGET_LOST); return TaskState.FAILED;
         }
-        successMsg = "native held item use completed" + settle(); return TaskState.SUCCESS;
+        return TaskState.SUCCESS;
     }
 
     // 如果调用方要求操作后出现某种方块，再检查一次；未提供这项要求时，这里直接接受执行结束。
@@ -493,7 +501,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     + BuiltInRegistries.BLOCK.getKey(r.expectedBlock), FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
-        return TaskState.SUCCESS;
+        // 定点倒桶也必须等到请求的返还物被真实观察到；等待期间不重新使用桶。
+        return verifyExpectedOutput();
     }
 
     /**
@@ -646,15 +655,18 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             data.put("held_item_use_started", heldUseStarted); data.put("native_use_completed", heldUseCompleted);
             data.put("used_hand", heldUseHand.name().toLowerCase());
             data.put("outcome_uncertain", heldUseStarted && !heldUseCompleted);
-            if (expectedItemBefore >= 0) {
-                int after = PlayerInv.count(player.getInventory(), r.expectedOutputItem);
-                data.put("expected_output", Map.of("item_id", BuiltInRegistries.ITEM.getKey(r.expectedOutputItem).toString(),
-                        "before", expectedItemBefore, "after", after, "observed_increase", after - expectedItemBefore));
-                if (after <= expectedItemBefore) data.put("mechanical_retry_allowed", false);
-            }
             if (heldUseStarted && !heldUseCompleted) data.put("mechanical_retry_allowed", false);
         }
+        // 持用加工与定点倒桶共用返还物观察，已完成动作不因同步等待而失去原生回执。
+        if (expectedItemBefore >= 0) {
+            int after = PlayerInv.count(player.getInventory(), r.expectedOutputItem);
+            data.put("expected_output", Map.of("item_id", BuiltInRegistries.ITEM.getKey(r.expectedOutputItem).toString(),
+                    "before", expectedItemBefore, "after", after, "observed_increase", after - expectedItemBefore));
+            if (after <= expectedItemBefore) data.put("mechanical_retry_allowed", false);
+        }
         if (r.aim != null) {
+            // 默认回执直接带落格前后状态，岩浆反应或门框嵌眼不能只剩同名方块的文字变化。
+            if (receipt != null) data.put("target_observation", receipt.targetObservation(player));
             data.put("x", r.aim.getX());
             data.put("y", r.aim.getY());
             data.put("z", r.aim.getZ());

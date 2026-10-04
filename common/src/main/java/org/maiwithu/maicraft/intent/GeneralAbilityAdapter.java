@@ -153,6 +153,18 @@ public final class GeneralAbilityAdapter {
             if (count < 1 || count > 64) throw new IllegalArgumentException("count must be an integer from 1 to 64");
         }
         String ingredientId = string(goal.parameters(), "ingredient_item_id");
+        // 定点用物品先交给同一套接近与瞄准流程：满桶以目标格为落点，末影之眼则对门框执行原生方块交互。
+        if (exactBlockTarget(goal)) {
+            if (count != 1 || ingredientId != null)
+                throw new IllegalArgumentException("coordinate item use performs one targeted action; batch processing needs current_place");
+            IntentAction action = interactExactBlock(goal, player, blockId(goal, goal.parameters()), itemId, false);
+            if (output != null && action instanceof IntentAction.Tool tool) {
+                JsonObject arguments = tool.arguments();
+                arguments.addProperty("expected_output_item_id", outputId);
+                return new IntentAction.Tool(tool.toolName(), arguments.toString());
+            }
+            return action;
+        }
         if (count > 1 || ingredientId != null) {
             if (output == null) throw new IllegalArgumentException("batch item use requires expected_output_item_id");
             Item ingredient = null;
@@ -751,7 +763,12 @@ public final class GeneralAbilityAdapter {
         var state = level.getBlockState(target);
         ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
         facts.addProperty("observed_block_id", actualId.toString());
-        if (state.isAir()) {
+        IntentAction missingItem = prepareTool ? null : requireInventoryItem(goal, player, itemId);
+        if (missingItem != null) return missingItem;
+        // 空气格可以是满桶的实际落点；普通方块操作与空桶取源仍必须有真实目标，不能对消失的方块空挥。
+        Item selectedItem = itemId == null ? Items.AIR : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
+        boolean bucketPlacement = selectedItem != Items.BUCKET && FirstPersonInteractionTargeting.usesBucketRay(selectedItem);
+        if (state.isAir() && !bucketPlacement) {
             return exactBlockUnavailable(goal, "The exact block target is now empty.", facts);
         }
         if (rawBlockId != null) {
@@ -764,8 +781,6 @@ public final class GeneralAbilityAdapter {
                 return exactBlockUnavailable(goal, "The exact block target does not match the requested block_id.", facts);
             }
         }
-        IntentAction missingItem = prepareTool ? null : requireInventoryItem(goal, player, itemId);
-        if (missingItem != null) return missingItem;
         return compileBlockInteraction(goal, player, target, actualId, itemId, prepareTool);
     }
 
@@ -799,7 +814,11 @@ public final class GeneralAbilityAdapter {
         use.addProperty("x", target.getX());
         use.addProperty("y", target.getY());
         use.addProperty("z", target.getZ());
-        use.addProperty("required_block_id", id.toString());
+        // 满桶的目标是落格而非旧快照；未明确限定原方块时，空气变流水也继续按现场射线尝试倒桶。
+        Item usedItem = itemId == null ? Items.AIR : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
+        if (!FirstPersonInteractionTargeting.usesBucketRay(usedItem) || usedItem == Items.BUCKET
+                || string(goal.parameters(), "block_id") != null)
+            use.addProperty("required_block_id", id.toString());
         int duration = CreateManualInput.durationTicks(goal.parameters());
         if (duration > 0) {
             if (itemId != null || !CreateManualInput.supported(level, target))

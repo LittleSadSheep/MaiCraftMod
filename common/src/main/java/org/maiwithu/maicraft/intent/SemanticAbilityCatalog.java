@@ -180,6 +180,8 @@ public final class SemanticAbilityCatalog {
                             field("confirm_risky_target", "boolean", "Second confirmation for players, tame/named or non-hostile targets."))));
             case GeneralAbilityAdapter.INTERACT -> contract(
                     "Use one semantic block or entity; MaiCraft resolves the loaded target, approaches it and performs the ordinary interaction. "
+                            // 满桶坐标描述期望落格，执行器自行选择支撑面；不让模型把点击面和倒桶目标混为一谈。
+                            + "For a filled bucket, a coordinate target is the destination cell and may be air; MaiCraft aims at a suitable support face. "
                             + "With a block_id and selection=nearest it self-locates the closest matching station within the radius — no coordinates needed. "
                             + "Stand level with the target block: submitting across a height difference has produced no real click with stale confirmations (UNCERTAIN).",
                     targets("coordinates", "entity", "player", "nearest", "landmark", "area"),
@@ -196,12 +198,14 @@ public final class SemanticAbilityCatalog {
                             field("radius", "integer", "Bounded loaded-world search radius."),
                             field("may_alter_terrain", "boolean", "Explicit route permission; default false."))));
             case GeneralAbilityAdapter.USE_ITEM -> contract(
-                    // 模型提交产物数量即可让原生持用批次自动准备双手、补料和换工具，失败时保留部分产物回执。
-                    "Perform finite native item use. For repeated processing, submit count plus expected_output_item_id and optionally ingredient_item_id once: the Mod prepares tool/material hands, repeats only after confirmed output, and replaces exhausted tools from carried stock. Stops with partial counts on missing supplies, interruption or unconfirmed output. No block/entity click is substituted.",
-                    targets("current_place"), fields(
+                    // 明确坐标时由执行器走近并定点用物品；不带目标的加工批次继续准备双手、补料和换工具。
+                    "Use a carried item. With target.kind=coordinates, approach and use it once at that exact cell: filled buckets place into the cell (air is allowed), empty buckets collect its source, and an ender eye is inserted into the targeted frame. MaiCraft chooses the native aim and item/block action. Without coordinates, use along the current view. Repeated processing at current_place accepts count plus expected_output_item_id and optional ingredient_item_id; the Mod prepares both hands and repeats only after confirmed output.",
+                    targets("current_place", "coordinates"), fields(
                             field("item_id", "resource_id", "Required carried item to select and use through its own native behavior."),
+                            field("block_id", "resource_id", "Optional current block identity at a coordinate target; omit when pouring into an empty cell."),
+                            field("may_alter_terrain", "boolean", "Permit route preparation for coordinate targets; default false. Does not change the requested use location."),
                             field("ingredient_item_id", "resource_id", "Optional carried ingredient to equip in offhand; the tool is prepared in main hand. Native item behavior must support this pairing."),
-                            field("count", "integer", "1..64 new output items to produce, default 1. Batch repeats are handled by the Mod, not a sequence of LLM requests."),
+                            field("count", "integer", "1..64 new output items to produce at current_place, default 1. Coordinate targets require one action and no ingredient_item_id."),
                             field("expected_output_item_id", "resource_id", "Required for batch/material preparation, optional for single use. Each completed native use must increase this carried output; reports completed and remaining counts.")));
             case GeneralAbilityAdapter.HARVEST_BLOCK -> contract(
                     "Harvest one exact observed resource block through native breaking and pickup. Stops after one source break even if it regenerates; reports source position and carried output increase. Approaches without altering surrounding terrain. The cell directly underfoot cannot be targeted — a zero-distance stance generates no approach route. No inventory-source substitution.",

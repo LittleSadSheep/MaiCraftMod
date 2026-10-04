@@ -69,6 +69,8 @@ public final class ExactInteractionTargetTest {
         foodEffectsAreAnExplicitPlannerChoice();
         bucketSourceSelection(false);
         bucketSourceSelection(true);
+        // 公开 use_item 的定点分支同时覆盖空格倒桶与门框嵌眼，避免退回只读契约测试。
+        TargetedItemUseTest.main(args);
         System.out.println("ExactInteractionTargetTest: passed");
     }
 
