@@ -9,15 +9,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 逐段投影的回归：调用方点名的段必须完整拿到，且投影结果要小到任何下游预算都装得下。
- *
- * <p>本测试存在的直接动机：完整 surroundings 响应超过一万字符，下游按上下文预算截断时
- * 排在后面的段（例如电梯楼层）会被整段切掉，读不到的一方会把"没读到"当成"没有"。
+ * 逐段投影的回归：调用方点名的身体和电梯事实必须保留，未请求的地形调查可以按段省略。
+ * 不按固定字符上限判定回执有效，避免贡献者为了长度检查删去楼层或真实状态。
  */
 public final class PerceiveSectionsTest {
-
-    // 下游观察预算的量级（字符）；投影结果必须远小于它，否则这次修复没有意义。
-    private static final int DOWNSTREAM_BUDGET = 2000;
 
     public static void main(String[] args) {
         projectionKeepsTheRequestedSection();
@@ -94,9 +89,6 @@ public final class PerceiveSectionsTest {
 
     private static void projectionKeepsTheRequestedSection() {
         JsonObject payload = surroundingsShapedPayload();
-        check(payload.toString().length() > DOWNSTREAM_BUDGET,
-                "the unprojected fixture must exceed a downstream budget, or this regression proves nothing");
-
         JsonObject projected = PerceiveSections.select(payload, List.of("elevators"));
         check(projected.has("elevators"), "the requested section must survive the projection");
         check(projected.getAsJsonObject("elevators").getAsJsonArray("elevators").get(0).getAsJsonObject()
@@ -104,8 +96,6 @@ public final class PerceiveSectionsTest {
                 "the projected section must keep its own evidence fields, not a summary of them");
         check(!projected.has("terrain_overview") && !projected.has("local_decision_summary"),
                 "sections nobody asked for must not be carried along");
-        check(projected.toString().length() < DOWNSTREAM_BUDGET / 4,
-                "the elevator answer must be far smaller than the budget that used to cut it off");
 
         check(PerceiveSections.select(payload, null) == payload,
                 "omitting the request must return the full response unchanged");

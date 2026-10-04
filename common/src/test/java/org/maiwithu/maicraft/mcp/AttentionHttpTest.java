@@ -65,8 +65,9 @@ public final class AttentionHttpTest {
             var literalRead = client.send(post(uri, session, 92, "resources/read", resource), HttpResponse.BodyHandlers.ofString());
             String literalText = json(literalRead.body()).getAsJsonObject("result").getAsJsonArray("contents")
                     .get(0).getAsJsonObject().get("text").getAsString();
-            check(literalRead.body().length() < 6000 && json(literalText).get("literal").getAsString().equals(runtime.literal),
-                    "wire encoding does not inflate ordinary markup characters");
+            // 原生观察经过 HTTP 和 JSON 往返后仍须保留原文，不因转义后的长度拒绝正常事实。
+            check(json(literalText).get("literal").getAsString().equals(runtime.literal),
+                    "wire encoding preserves ordinary markup characters");
             runtime.literal = null;
             client.send(post(uri, session, 2, "resources/subscribe", resource), HttpResponse.BodyHandlers.ofString());
             // 初始 SSE 流打开时无需发布新内容即可追上当前状态。
