@@ -68,6 +68,12 @@ public final class VehicleDriveTask extends AbstractCompanionTask<VehicleDriveTa
         if(outcome!=null) result.put("uncertain",outcome.uncertain());
         return result;
     }
+    /** 面板行动行的一句话汇报；阶段来自内部检查/就位/驾驶状态，载具细节见 progress 的会话诊断。 */
+    @Override public String describeCurrentAction() {
+        if (observation == null) return "正在检查载具操控电路";
+        if (session == null) return "正在走向驾驶座";
+        return "正在驾驶载具行驶";
+    }
     @Override protected String successMessage() { return "confirmed driver seating, native control and stopped arrival"; }
     @Override public Map<String,Object> progress() { return session==null ? super.progress():session.diagnostics(); }
 }

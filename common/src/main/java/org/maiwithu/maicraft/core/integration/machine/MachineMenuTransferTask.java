@@ -382,6 +382,13 @@ public final class MachineMenuTransferTask extends AbstractCompanionTask<Machine
         if (!kind.isEmpty()) actualPlayerDelta = matchingPlayerCount() - initialPlayerCount;
     }
 
+    /** 面板行动行的一句话汇报；方向与数量来自任务单，进度来自已确认放入计数 placed。 */
+    @Override public String describeCurrentAction() {
+        String verb = r.deposit ? "存入" : "取出";
+        if (phase == Phase.VERIFY) return "正在核对" + verb + "数量与背包差额 " + placed + "/" + r.count;
+        return "正在" + verb + "物品 " + placed + "/" + r.count;
+    }
+
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return effectsStarted && !verified; }
 
     @Override protected Map<String, Object> resultData() {

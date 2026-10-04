@@ -276,6 +276,19 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         return data;
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部接近/腾手/开门 Phase，坐标是正在交互的机器位置。 */
+    @Override public String describeCurrentAction() {
+        BlockPos position = r.request.machinePosition();
+        String at = " (" + position.getX() + "," + position.getY() + "," + position.getZ() + ")";
+        return switch (phase) {
+            case START -> "正在检查机器菜单目标" + at;
+            case APPROACH -> "正在走近机器" + at;
+            case HAND -> "正在腾空主手";
+            case AIM -> "正在右键打开机器菜单" + at;
+            case CONFIRM -> "正在确认机器菜单已打开" + at;
+        };
+    }
+
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return handParking.settling() || openAttempted && !verified && receipt != null && !receipt.terminal(); }
     @Override protected String successMessage() { return reusedMenu
             ? "Reused and inspected the already open native menu; no new block use was submitted."

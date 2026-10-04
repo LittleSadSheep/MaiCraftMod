@@ -174,6 +174,18 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
     }
     @Override public void stop(LocalPlayer companion, StopReason why) { if (child != null) child.stop(companion, why); super.stop(companion, why); }
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return submitted || child != null || ownedMenu != null && !closed; }
+    /** 面板行动行的一句话汇报；阶段来自内部开页/观察/关页 Phase，子任务运行时透传其自述。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) return child.describeCurrentAction();
+        if (submitted) return "正在确认分拣机过滤设置";
+        return switch (phase) {
+            case HAND -> "正在腾空主手";
+            case OPEN -> "正在打开分拣机菜单";
+            case OBSERVE -> "正在设置分拣机过滤";
+            case CLOSE -> "正在关闭分拣机菜单";
+            case DONE -> "正在收尾分拣机配置";
+        };
+    }
     @Override protected String successMessage() { return "Sorter confirmed to extract only " + r.itemId + " with unfiltered auto-eject disabled; menu closed."; }
     @Override protected Map<String, Object> resultData() {
         return Map.of("filter_verified", filterVerified, "filtered_item_id", r.itemId.toString(), "owned_menu_closed", closed,

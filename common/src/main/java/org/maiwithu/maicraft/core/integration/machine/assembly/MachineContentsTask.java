@@ -104,6 +104,19 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
         return TaskState.RUNNING;
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部开页/放入/关页 Phase，数量来自任务单与已放入计数。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) return child.describeCurrentAction();
+        return switch (phase) {
+            case HAND -> "正在腾空主手";
+            case OPEN -> "正在打开机器菜单";
+            case OBSERVE -> "正在观察机器菜单库存";
+            case DEPOSIT -> "正在放入物品 " + inserted + "/" + r.count;
+            case CLOSE -> "正在关闭机器菜单";
+            default -> "正在初始化机器内容物";
+        };
+    }
+
     private TaskState tickChild() {
         TaskState state = world.getGameTime() >= childRecord.getDeadlineGameTime() ? TaskState.TIMEOUT : runChild(child);
         r.extendDeadlineTo(childRecord.getDeadlineGameTime());

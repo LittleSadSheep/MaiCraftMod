@@ -99,6 +99,21 @@ final class UtilityConnectionTask extends AbstractCompanionTask<UtilityConnectio
             };
         } catch (IllegalArgumentException | IllegalStateException failure) { return failure(failure.getMessage()); }
     }
+    /** 面板行动行的一句话汇报；阶段来自内部读端/铺缆/核验 Phase，子任务运行时透传其自述。 */
+    @Override public String describeCurrentAction() {
+        if (supply.active() || phase == Phase.PREPARE) return "正在补齐公用线路建材";
+        if (child != null) return child.describeCurrentAction();
+        return switch (phase) {
+            case SOURCE -> "正在核验供能端状态";
+            case TARGET -> "正在核验受电端状态";
+            case TOOL -> "正在准备接线工具";
+            case CONFIGURE, BUILD -> "正在铺设公用线路";
+            case CONNECTIONS, EXISTING_CONNECTION -> "正在核对线路连接";
+            case SOURCE_AFTER, TARGET_AFTER -> "正在验收线路通电";
+            case DONE -> "正在收尾公用线路";
+            default -> "正在准备公用线路";
+        };
+    }
     private boolean current() {
         return player.level() == world && r.dimension.equals(world.dimension().location().toString()) && player.mayBuild()
                 && endpoints.stream().allMatch(at -> world.isLoaded(at) && !NavigationSafetyContext.protectsUse(at))

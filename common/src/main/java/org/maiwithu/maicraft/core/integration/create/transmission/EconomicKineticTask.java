@@ -401,5 +401,23 @@ final class EconomicKineticTask extends AbstractCompanionTask<EconomicKineticTas
         if(targetAfter!=null||targetBefore!=null)result.put("target_observation",targetAfter!=null?targetAfter:targetBefore);
         if(failureCode!=null)result.put("failure_code",failureCode);return result;
     }
+    /** 面板行动行的一句话汇报；阶段来自内部方案/施工 Phase，链接进度来自已选方案的链条边数。 */
+    @Override public String describeCurrentAction() {
+        if(returningToSite)return "正在返回施工现场重新核对";
+        if(supply.active()||phase==Phase.MATERIALS)return "正在补齐传动线路建材";
+        if(child!=null)return child.describeCurrentAction();
+        return switch(phase){
+            case DISCOVER->"正在搜索可见的动力来源";
+            case PLAN->"正在比较传动方案造价";
+            case SOURCE->"正在核验动力来源转速";
+            case TARGET->"正在核验目标端转速";
+            case EXISTING->"正在核对既有动力连接";
+            case BUILD->"正在铺设传动线路";
+            case LINKS->"正在连接链条传动 "+Math.min(linkIndex+1,Math.max(1,selected.chainLinks().size()))+"/"+selected.chainLinks().size();
+            case SOURCE_AFTER,TARGET_AFTER->"正在验收动力接入";
+            case DONE->"正在收尾传动接线";
+            case MATERIALS->"正在补齐传动线路建材";
+        };
+    }
     @Override protected String successMessage(){KineticRouteContinuations.completed(player,r.target);return "Compared complete transmission costs, built the selected route and observed native power; production remains separate.";}
 }

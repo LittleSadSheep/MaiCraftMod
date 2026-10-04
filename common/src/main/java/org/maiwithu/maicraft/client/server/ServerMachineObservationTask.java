@@ -197,6 +197,16 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
         if (pending != null) { ServerAssistClient.cancel(pending.id()); pending = null; }
         super.cleanup();
     }
+    /** 面板行动行的一句话汇报；进度与坐标来自本页观察队列 targets。 */
+    @Override public String describeCurrentAction() {
+        if (pending != null) {
+            BlockPos position = targets.get(targetIndex).position();
+            return "正在读取 (" + position.getX() + "," + position.getY() + "," + position.getZ() + ") 的原生观察页";
+        }
+        return targets.isEmpty() ? "正在扫描机器部件范围"
+                : "正在观察机器部件 " + Math.min(targetIndex + 1, targets.size()) + "/" + targets.size();
+    }
+
     @Override protected Map<String, Object> resultData() { return Map.of("machine", report == null ? r.snapshot.report() : report); }
     @Override protected String successMessage() { return "Machine structure and available native pages observed; missing state and production uncertainty remain explicit."; }
 }

@@ -35,6 +35,9 @@ public final class MachineMenuCloseTask extends AbstractCompanionTask<MachineMen
         failureCode = code; fail(message, FailureType.UNKNOWN); return TaskState.FAILED;
     }
 
+    /** 面板行动行的一句话汇报；只有关闭界面一件事，无更多动态信息。 */
+    @Override public String describeCurrentAction() { return "正在退出当前界面并归还鼠标物品"; }
+
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return !preparation.evidence().isEmpty() && !verified && !preparation.failed(); }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();

@@ -281,6 +281,24 @@ final class CreateMechanicalPowerTask
     }
 
     // 续接前逐段走近读回已完成的方块，确认仍是竖轴链传动；不能只相信旧凭据上的完成格数。
+    /** 面板行动行的一句话汇报；阶段来自内部施工 Phase，进度来自 plan.cells() 与已放置游标；省料方案子任务运行时透传其自述。 */
+    @Override
+    public String describeCurrentAction() {
+        if (economicTask != null) return economicTask.describeCurrentAction();
+        int total = plan == null ? 0 : plan.cells().size();
+        String count = total > 0 ? " " + Math.min(cursor, total) + "/" + total : "";
+        return switch (phase) {
+            case PROGRESSIVE -> "正在分段勘察动力线路";
+            case RESUME_AUDIT -> "正在复核已完成的线路段落";
+            case SUPPLY -> "正在补齐动力线路建材";
+            case RESTOCK_RESTORE, RESTORE -> "正在整理现场与余料";
+            case PREPARE -> "正在准备动力线路施工";
+            case NAVIGATE -> "正在前往下一格施工点" + count;
+            case ALIGN, WAIT_PLACEMENT -> "正在放置传动件" + count;
+            case VERIFY -> "正在确认动力网络转动";
+        };
+    }
+
     private TaskState auditProgressiveContinuation(LocalPlayerContext context) {
         if (resumeAuditIndex >= cursor) {
             constructionTravel.stop();

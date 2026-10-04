@@ -281,6 +281,19 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         return TaskState.FAILED;
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部选杆/接近/瞄准 Phase，拉杆坐标是已确认事实。 */
+    @Override public String describeCurrentAction() {
+        if (phase == Phase.SELECT) return "正在寻找机器拉杆";
+        String at = control == null ? "" : " (" + control.getX() + "," + control.getY() + "," + control.getZ() + ")";
+        return switch (phase) {
+            case APPROACH -> "正在走近拉杆" + at;
+            case PREPARE_HAND -> "正在腾空主手";
+            case AIM -> "正在拨动拉杆" + at;
+            case CONFIRM -> "正在确认拉杆状态" + at;
+            default -> "正在寻找机器拉杆";
+        };
+    }
+
     // 已经点过、确认还没结束时，父任务即使认为目标够了，也应先等这一笔点击结清。
     @Override public boolean mustSettleBeforeSatisfiedCancellation() {
         return controlAttempted && !controlStateVerified && receipt != null && !receipt.terminal();

@@ -233,4 +233,22 @@ final class CreateBeltInstallTask extends AbstractCompanionTask<CreateBeltInstal
         return result;
     }
     @Override protected String successMessage() { return supplement ? "原有传送带保留，中间带轮与传动杆消耗已确认。" : "传送带整段原生结构与连接器消耗已确认。"; }
+
+    /** 面板行动行的一句话汇报；阶段来自内部施工 Phase，端点坐标是正在点击的已确认事实。 */
+    @Override public String describeCurrentAction() {
+        BlockPos target = switch (phase) {
+            case FIRST -> r.span.first();
+            case SECOND -> r.span.second();
+            case PULLEY, PULLEY_CONFIRM -> pulleyIndex < missingPulleys.size() ? missingPulleys.get(pulleyIndex) : null;
+            default -> null;
+        };
+        String label = switch (phase) {
+            case EQUIP -> "正在准备皮带连接器";
+            case FIRST, FIRST_CONFIRM -> "正在点击皮带第一轴";
+            case SECOND, SECOND_CONFIRM -> "正在点击皮带第二轴";
+            case PULLEY, PULLEY_CONFIRM -> "正在补装中间带轮 " + (pulleyIndex + 1) + "/" + missingPulleys.size();
+            case DONE -> "正在收尾皮带安装";
+        };
+        return target == null ? label : label + " (" + target.getX() + "," + target.getY() + "," + target.getZ() + ")";
+    }
 }

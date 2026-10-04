@@ -126,6 +126,17 @@ final class Ae2SupplyTask implements Task {
         };
     }
 
+    /** 面板行动行的一句话汇报；操作类型来自任务单 request，阶段细节不在面板展开。 */
+    @Override
+    public String describeCurrentAction() {
+        if (session == null) return "正在启动 AE2 供料会话";
+        return switch (record.request.operation()) {
+            case DEPOSIT -> "正在经 AE2 终端存入物品";
+            case OBSERVE -> "正在经 AE2 终端观察库存";
+            default -> "正在经 AE2 终端供料";
+        };
+    }
+
     @Override
     public String name() {
         return "Ae2SupplyTask";
