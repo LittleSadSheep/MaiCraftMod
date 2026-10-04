@@ -22,8 +22,10 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.SpawnPlacementTypes;
 import net.minecraft.world.entity.SpawnPlacements;
+import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.core.FailureType;
@@ -105,6 +107,8 @@ public final class GenericEntitySearchCompanionTask
     private final Map<UUID, ResourceLocation> observedSafe = new LinkedHashMap<>();
     private final Set<UUID> observedProtected = new LinkedHashSet<>();
     private final Map<String, Integer> protectedReasonCounts = new LinkedHashMap<>();
+    /** boss 类主体的生命值事实；部件折叠后仍按主体一条记录，生死判定不必靠条目数推断。 */
+    private final Map<UUID, Map<String, Object>> observedBossLife = new LinkedHashMap<>();
     private int protectedOrAmbiguousSeen;
     private int lastLoadedMatching;
 
@@ -173,32 +177,38 @@ public final class GenericEntitySearchCompanionTask
         int loadedMatching = 0;
         Set<UUID> acceptedBefore = Set.copyOf(observedSafe.keySet());
         List<Entity> currentlySafeEntities = new ArrayList<>();
+        Set<UUID> seenLogical = new LinkedHashSet<>();
         observedSheep.clear();
+        observedBossLife.clear();
         for (Entity entity : level.getEntities(player, box, candidate ->
                 candidate != player && !candidate.isRemoved() && candidate.isAlive())) {
-            ResourceLocation type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+            // 多部件实体（末影龙等）每个碰撞部件都是一条独立观察；折叠到逻辑主体并按主体去重，
+            // 否则一条龙会被读成九条，调用方按条目数判断生死必然误读。
+            Entity logical = logicalEntity(entity);
+            if (logical == null || !seenLogical.add(logical.getUUID())) continue;
+            ResourceLocation type = BuiltInRegistries.ENTITY_TYPE.getKey(logical.getType());
             if (!r.entityTypeIds.contains(type) || !insideScope(entity.getX(), entity.getZ())) {
                 continue;
             }
-            if (r.excludes(entity.getUUID())) continue;
-            // 探索移动只为获得新的真实视野，不能把关门屋内或墙后的生物当成已找到。
+            if (r.excludes(logical.getUUID())) continue;
+            // 探索移动只为获得新的真实视野，不能把关门屋内或墙后的生物当成已找到；部件可见即主体可见。
             if (!ObservationVisibility.entity(player, entity)) continue;
-            if (!EntitySemanticSafety.matchesRelation(entity, r.relation)) continue;
+            if (!EntitySemanticSafety.matchesRelation(logical, r.relation)) continue;
             // 视野中有羊并不等于找到指定颜色；不合条件的羊不能抵搜索数量。
-            if (!r.sheepTraits().matches(entity)) continue;
+            if (!r.sheepTraits().matches(logical)) continue;
             loadedMatching++;
-            if (r.harmIntent && !entity.isAttackable()) {
-                if (observedProtected.add(entity.getUUID())) {
+            if (r.harmIntent && !logical.isAttackable()) {
+                if (observedProtected.add(logical.getUUID())) {
                     protectedOrAmbiguousSeen++;
                     protectedReasonCounts.merge("not_attackable", 1, Integer::sum);
                 }
                 continue;
             }
             List<String> reasons = EntitySemanticSafety.protectionReasons(
-                    player, entity, r.relation, r.protectedLabels, r.harmIntent);
+                    player, logical, r.relation, r.protectedLabels, r.harmIntent);
             if (reasons.isEmpty()) {
-                currentlySafeEntities.add(entity);
-            } else if (observedProtected.add(entity.getUUID())) {
+                currentlySafeEntities.add(logical);
+            } else if (observedProtected.add(logical.getUUID())) {
                 protectedOrAmbiguousSeen++;
                 for (String reason : reasons) protectedReasonCounts.merge(reason, 1, Integer::sum);
             }
@@ -208,6 +218,8 @@ public final class GenericEntitySearchCompanionTask
         for (Entity entity : currentlySafeEntities) {
             Map<String, Object> traits = SheepTraits.facts(entity);
             if (!traits.isEmpty()) observedSheep.add(traits);
+            Map<String, Object> boss = bossLifeFacts(entity);
+            if (boss != null) observedBossLife.put(entity.getUUID(), boss);
             currentlySafe.putIfAbsent(
                     entity.getUUID(), BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
         }
@@ -222,6 +234,27 @@ public final class GenericEntitySearchCompanionTask
                     "[maicraft-task] entity search absorbed {} new acceptable loaded observation(s); {}/{} verified",
                     newlyAccepted, observedSafe.size(), r.count);
         }
+    }
+
+    /** 多部件实体的观察条目折叠到逻辑主体；普通实体原样返回。 */
+    private static Entity logicalEntity(Entity entity) {
+        return entity instanceof EnderDragonPart part ? part.parentMob : entity;
+    }
+
+    /** boss 类主体的生命值快照；阶段数据仅服务端战斗模块持有，客户端不可得，不虚构字段。 */
+    private static final Set<ResourceLocation> BOSS_TYPE_IDS = Set.of(
+            ResourceLocation.withDefaultNamespace("ender_dragon"),
+            ResourceLocation.withDefaultNamespace("wither"));
+
+    private static Map<String, Object> bossLifeFacts(Entity entity) {
+        ResourceLocation type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        if (!BOSS_TYPE_IDS.contains(type) || !(entity instanceof LivingEntity living)) return null;
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("entity_uuid", entity.getUUID().toString());
+        facts.put("type", type.toString());
+        facts.put("health", living.getHealth());
+        facts.put("max_health", living.getMaxHealth());
+        return facts;
     }
 
     private void startMove(BlockPos target) {
@@ -742,6 +775,7 @@ public final class GenericEntitySearchCompanionTask
         data.put("observed_acceptable_by_type", Map.copyOf(observedByType));
         // 默认搜索回执直接给出羊的实际属性，后续攻击无需为了辨色重复观察。
         if (!observedSheep.isEmpty()) data.put("observed_sheep", List.copyOf(observedSheep));
+        if (!observedBossLife.isEmpty()) data.put("observed_boss_life", List.copyOf(observedBossLife.values()));
         if (r.sheepTraits().constrained()) data.put("requested_sheep_traits", r.sheepTraits().requirements());
         data.put("verified", observedSafe.size() >= r.count);
         data.put("scope", "loaded_client_entities_and_first_person_loaded_frontiers");

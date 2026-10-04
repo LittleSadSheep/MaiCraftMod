@@ -369,6 +369,12 @@ def regressionSuites = [
         heap: '512m', directory: 'runtime-error-describe-regression', timeoutSeconds: 60,
         purpose: '验证 runtime_error 回执携带异常类型、缺失类名与原因链'
     ],
+    // 多部件实体观察聚合：部件折叠到逻辑主体，boss 生命值进回执。
+    entityPartAggregationRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.entity.EntityPartAggregationTest',
+        heap: '512m', directory: 'entity-part-aggregation-regression', timeoutSeconds: 60,
+        purpose: '验证实体搜索把多部件实体折叠为主体一条观察并附 boss 生命值事实'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。
