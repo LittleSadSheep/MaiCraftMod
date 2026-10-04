@@ -12,9 +12,10 @@ import static org.maiwithu.maicraft.core.integration.physics.flight.FlightFeedba
 public final class FlightFeedbackControllerTest {
     private static final FlightGuidance COURSE=new FlightGuidance(new Vec3(0,100,200),new Vec3(0,100,180),
             new Vec3(0,80,300),0,100,true,true,true,true);
-    public static void main(String[] args) {
-        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();
+    public static void main(String[] args) throws Exception {
+        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();
         PhysicsFlightStateServiceTest.run();
+        FlightPathProbeTest.run();
         System.out.println("FlightFeedbackControllerTest: passed");
     }
     private static void nativePoseSampling() {
@@ -64,23 +65,32 @@ public final class FlightFeedbackControllerTest {
         for(int t=1;t<=3;t++)c.tick(sample(t,95,16,70,AIRBORNE),COURSE,true);
         var unknown=new FlightGuidance(new Vec3(-20,110,100),COURSE.approachPoint(),COURSE.touchdown(),0,110,true,false,false,false);
         FlightCommand cmd=c.tick(sample(4,95,16,75,AIRBORNE),unknown,true);
-        check(c.phase()==GO_AROUND&&cmd.power()>0&&!c.terminal(),"未观测通道不能被当成巡航成功");
+        check(c.phase()==GO_AROUND&&cmd.power()<1&&!cmd.brake()&&!c.terminal(),"未观测通道不能被当成巡航成功或继续盲目满动力");
         check(Math.abs(cmd.bank())<=1&&Math.abs(cmd.pitch())<=1,"姿态校正只能给原生输入范围内的指令");
     }
     private static void keyMixer() {
         var m=new FlightKeyMixer(Map.of(FlightKeyMixer.Role.POWER,32,FlightKeyMixer.Role.PITCH_UP,87,
                 FlightKeyMixer.Role.PITCH_DOWN,83,FlightKeyMixer.Role.BRAKE,66));
         int powerTicks=0;
-        for(int t=1;t<=20;t++) {
+        for(int t=1;t<=80;t++) {
             var keys=m.tick(t,new FlightCommand(.25,1,0,0,0,false));
             if(keys.contains(32))powerTicks++;
             check(keys.contains(87)&&!keys.contains(83),"正舵不能同时按住反舵");
             check(keys.equals(m.tick(t,FlightCommand.parked())),"重复采样刻不能二次调制按键");
         }
-        check(powerTicks==5,"四分之一动力只占对应游戏刻，不能放大成持续满动力");
-        var reverse=m.tick(21,new FlightCommand(0,-1,0,0,0,false));
+        check(powerTicks==20,"四分之一动力按可被原生部件处理的保持窗口输出，不能放大成满动力");
+        var reverse=m.tick(81,new FlightCommand(0,-1,0,0,0,false));
         check(reverse.contains(83)&&!reverse.contains(87),"改向释放旧轴方向");
-        check(m.tick(22,FlightCommand.parked()).equals(Set.of(66)),"停车只保留刹车，不补发旧累计脉冲");
+        check(m.tick(82,FlightCommand.parked()).equals(Set.of(66)),"停车只保留刹车，不补发旧累计脉冲");
+    }
+    private static void groundDrivingIsNotFlight() {
+        var c=new FlightFeedbackController(FlightEnvelope.airship());
+        for(int t=1;t<=640;t++)c.tick(sample(t,80,0,300,GROUNDED),COURSE,true);
+        check(!c.succeeded()&&!c.airborneVerified(),"在目标旁边始终接地的车不能冒充完成飞艇起降");
+        c=new FlightFeedbackController(FlightEnvelope.fixedWing());
+        for(int t=1;t<=3;t++)c.tick(sample(t,100,16,50,AIRBORNE),COURSE,true);
+        for(int t=4;t<=20;t++)c.tick(sample(t,80,0,300,GROUNDED),COURSE,true);
+        check(c.unexpectedGround()&&!c.succeeded(),"巡航撞地即使碰巧在目的地旁也不能冒充成功着陆");
     }
     private static FlightSample sample(long tick,double y,double speed,double z,FlightSample.Contact contact) {
         return new FlightSample(tick,new Vec3(0,y,z),new Vec3(0,0,speed),0,0,0,0,0,0,contact);

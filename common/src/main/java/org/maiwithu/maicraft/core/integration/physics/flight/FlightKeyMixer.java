@@ -10,6 +10,8 @@ public final class FlightKeyMixer {
     public enum Role { POWER, BRAKE, PITCH_UP, PITCH_DOWN, BANK_LEFT, BANK_RIGHT, YAW_LEFT, YAW_RIGHT, LIFT }
     private final Map<Role,Integer> keys;
     private final Map<Role,Double> remaining=new EnumMap<>(Role.class);
+    private final Map<Role,Long> quantum=new EnumMap<>(Role.class);
+    private final Map<Role,Boolean> active=new EnumMap<>(Role.class);
     private long previousTick=Long.MIN_VALUE;
     private Set<Integer> previous=Set.of();
     public FlightKeyMixer(Map<Role,Integer> keys) {
@@ -32,9 +34,15 @@ public final class FlightKeyMixer {
     }
     private void add(Set<Integer> output,Role role,double demand) {
         if(!keys.containsKey(role))return;
-        if(demand<=0){remaining.remove(role);return;}
+        if(demand<=0){remaining.remove(role);quantum.remove(role);active.remove(role);return;}
+        if(demand>=1){remaining.remove(role);output.add(keys.get(role));active.put(role,true);quantum.remove(role);return;}
+        // 换向器和弹簧需要原生更新时间，部分输出按四刻成组保持；满量与松键仍立即响应。
+        long group=previousTick/4;
+        if(quantum.getOrDefault(role,Long.MIN_VALUE)==group){if(active.getOrDefault(role,false))output.add(keys.get(role));return;}
+        quantum.put(role,group);
         double accumulated=remaining.getOrDefault(role,0.0)+demand;
-        if(accumulated>=1-1e-9){output.add(keys.get(role));accumulated-=1;}
+        boolean down=accumulated>=1-1e-9;active.put(role,down);
+        if(down){output.add(keys.get(role));accumulated-=1;}
         remaining.put(role,accumulated);
     }
     public Set<Integer> configuredKeys(){return Set.copyOf(keys.values());}

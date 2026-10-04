@@ -18,6 +18,7 @@ public final class FlightFeedbackController {
     private int stableGround,airborneSamples;
     private double departureHeading,departureHeight;
     private boolean cancelled;
+    private boolean airborneVerified,unexpectedGround;
     private String detail="等待实际姿态、接地和起飞通道";
     public FlightFeedbackController(FlightEnvelope envelope){this.envelope=envelope;}
 
@@ -26,6 +27,7 @@ public final class FlightFeedbackController {
         previousTick=sample.tick();if(phaseTick<0)phaseTick=sample.tick();
         stableGround=sample.contact()==GROUNDED&&sample.speed()<.35?stableGround+1:0;
         airborneSamples=sample.contact()==AIRBORNE?airborneSamples+1:0;
+        if(airborneSamples>=3&&phase!=Phase.PREFLIGHT&&sample.position().y>departureHeight+1.5)airborneVerified=true;
         if(!controlsReady) {detail="等待原生驾驶控制接管";return command=FlightCommand.parked();}
         if(cancelled&&sample.contact()==GROUNDED&&phase!=Phase.ROLLOUT)transition(Phase.ROLLOUT,sample,"取消后在地面刹停");
         else if(cancelled&&phase.ordinal()<Phase.APPROACH.ordinal()&&sample.contact()==AIRBORNE)
@@ -34,19 +36,23 @@ public final class FlightFeedbackController {
         // 已在空中接管时直接稳定航向；地面出发必须等接地与实际通道成立，不能因位移就宣称起飞。
         if(phase==Phase.PREFLIGHT) {
             departureHeading=sample.heading();departureHeight=sample.position().y;
-            if(airborneSamples>=3)transition(Phase.CRUISE,sample,"接管已在空中的载具");
+            if(airborneSamples>=3){airborneVerified=true;transition(Phase.CRUISE,sample,"接管已在空中的载具");}
             else if(stableGround>=8&&course.departureClear()&&course.corridorObserved())
                 transition(envelope.kind()==FIXED_WING?Phase.RUNUP:Phase.CLIMB,sample,"驾驶与起飞通道已就绪");
             else return command=FlightCommand.parked();
         }
         if((phase==Phase.RUNUP||phase==Phase.ROTATE)&&sample.contact()==GROUNDED
                 &&(!course.departureClear()||!course.corridorObserved()))transition(Phase.ROLLOUT,sample,"起飞通道改变，终止滑跑");
+        // 巡航时撞上地形与按进近流程落地不是同一件事；先停机刹车，最终回执保留异常接地。
+        if(airborneVerified&&sample.contact()==GROUNDED&&phase!=Phase.DESCENT&&phase!=Phase.FLARE&&phase!=Phase.ROLLOUT) {
+            unexpectedGround=true;transition(Phase.ROLLOUT,sample,"非着陆阶段提前接地，停止当前飞行");
+        }
         if(sample.contact()==AIRBORNE&&(!course.corridorObserved()||!course.corridorClear())&&phase!=Phase.GO_AROUND)
             transition(Phase.GO_AROUND,sample,"航路阻挡或未观测，交由已观测的避让航点引导复飞");
 
         double speed=sample.forwardSpeed(),altitude=course.cruiseAltitude();
         double heading=FlightSample.heading(course.waypoint().subtract(sample.position()));
-        double desiredPitch=heightPitch(sample,altitude),power=speedPower(speed,envelope.cruiseSpeed());
+        double desiredPitch=heightPitch(sample,course.commandAltitude()),power=speedPower(speed,envelope.cruiseSpeed());
         double lift=lift(sample,altitude),desiredBank;
         boolean brake=false;
         switch(phase) {
@@ -62,9 +68,12 @@ public final class FlightFeedbackController {
                         sample,"抬轮后未获得足够高度，按实际接地状态复飞或刹停");
             }
             case CLIMB -> {
-                power=1;
+                power=Math.clamp(speedPower(speed,envelope.cruiseSpeed())+.2,0,1);
                 if(envelope.kind()==AIRSHIP)desiredPitch=0;
                 if(sample.contact()==AIRBORNE&&sample.position().y>=altitude-2)transition(Phase.CRUISE,sample,"已到巡航高度");
+                else if(airborneVerified&&sample.contact()==AIRBORNE&&course.landingSiteObserved()&&horizontalDistance(sample.position(),course.approachPoint())<24)
+                    transition(Phase.APPROACH,sample,"避障高度下已到进近区域");
+                else if(!airborneVerified&&sample.tick()-phaseTick>600)transition(Phase.ROLLOUT,sample,"起飞输入后没有确认持续离地");
             }
             case CRUISE -> {
                 if(horizontalDistance(sample.position(),course.approachPoint())<Math.max(24,sample.horizontalSpeed()*3))
@@ -98,11 +107,13 @@ public final class FlightFeedbackController {
             }
             case ROLLOUT -> {
                 desiredPitch=0;heading=sample.heading();power=0;lift=0;brake=true;
-                if(stableGround>=12)transition(cancelled||horizontalDistance(sample.position(),course.touchdown())>16?Phase.FAILED:Phase.DONE,
+                if(stableGround>=12)transition(cancelled||!airborneVerified||unexpectedGround||horizontalDistance(sample.position(),course.touchdown())>16?Phase.FAILED:Phase.DONE,
                         sample,cancelled?"已在地面停止取消的飞行":"实际接地并停止，按与选定落点距离结算");
             }
             case GO_AROUND -> {
-                power=1;desiredPitch=envelope.climbPitch();lift=1;
+                // 使用航路层真正检查过的爬升或平飞空间，不能在顶棚下仍盲目拉满抬头。
+                power=course.corridorClear()?Math.clamp(speedPower(speed,envelope.cruiseSpeed())+.2,0,1):speedPower(speed,envelope.takeoffSpeed()*1.3);
+                desiredPitch=heightPitch(sample,course.commandAltitude());lift=lift(sample,course.commandAltitude());
                 if(sample.contact()==GROUNDED)transition(Phase.ROLLOUT,sample,"避让期间已接地，先刹停");
                 else if(course.corridorObserved()&&course.corridorClear()&&sample.position().y>=altitude-1)
                     transition(Phase.CRUISE,sample,"避让通道和高度恢复");
@@ -138,6 +149,8 @@ public final class FlightFeedbackController {
     public Phase phase(){return phase;}
     public boolean terminal(){return phase==Phase.DONE||phase==Phase.FAILED;}
     public boolean succeeded(){return phase==Phase.DONE;}
+    public boolean airborneVerified(){return airborneVerified;}
+    public boolean unexpectedGround(){return unexpectedGround;}
     public String detail(){return detail;}
     public List<Map<String,Object>> transitions(){return List.copyOf(transitions);}
 }
