@@ -46,6 +46,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     private String afterUnknown;
     private final CreateManualInput.UsageEvidence crankUsage=new CreateManualInput.UsageEvidence();
     private long crankStarted=-1,nextCrankAt;private int crankUses;
+    private TypewriterControlSession typewriter;
     public PhysicalControlTask(LocalPlayer player,PhysicalControlTaskRecord record){super(player,record);world=player.level();}
     @Override protected TaskState onTick() {
         if(done)return finishDesign();
@@ -77,6 +78,17 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         BlockEntity entity=entity();NativePhysicalControl.require(entity,r.parameters);
         after=NativePhysicalControl.state(entity);
         if(r.parameters.operation()==INSPECT){done=true;return TaskState.RUNNING;}
+        // 打字机的频率保存与按住/松开有独立会话，复用同一真实站位、座位约束和整机声明复查。
+        if(NativePhysicalControl.typewriter(r.parameters.operation())) {
+            if(!player.mayBuild()||player.isSpectator())return failed("当前玩家没有原生控制权限",FailureType.UNKNOWN);
+            if(typewriter==null)typewriter=new TypewriterControlSession(r.parameters);
+            try {
+                if(typewriter.tick(ctx,frame,entity,hand,()->approachReady(entity),r.getToolCallId(),r.getDeadlineGameTime()))done=true;
+            } catch(IllegalStateException unavailable) { return failed(unavailable.getMessage(),FailureType.UNKNOWN); }
+            if(hand.failure()!=null)return failed(hand.failure(),FailureType.NO_MATERIAL);
+            if(approachFailure()!=null)return failed(approachFailure(),FailureType.NO_PATH);
+            after=NativePhysicalControl.state(entity);return TaskState.RUNNING;
+        }
         // 装好的轮胎在取备料之前就可确认，避免缺少第二只同款轮胎时反复补料或把现有轮胎交换掉。
         if(r.parameters.operation()==SET_TIRE&&NativePhysicalControl.matches(entity,r.parameters,index,ItemStack.EMPTY)) {
             effects.add(Map.of("step",index,"already_matched",true,"after",after));advance();return TaskState.RUNNING;
@@ -181,6 +193,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     private TaskState failed(String why,FailureType type){fail(why,type);return TaskState.FAILED;}
     @Override public void stop(LocalPlayer player,Task.StopReason why){approach.stop(player,why);onboard.stop(player,why);hand.stop(player,why);super.stop(player,why);}
     @Override protected void cleanup() {
+        if(typewriter!=null)typewriter.close();
         approach.close();onboard.close();hand.close();if(watch!=null){watch.close();watch=null;}
         var ctx=ClientRuntime.actor().activeContext().orElse(null);
         if(ctx!=null&&action!=null&&!action.terminal())ctx.actions().retireOneShotForTaskBoundary(ctx,action,"物理控制任务结束");
@@ -190,7 +203,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
     @Override public Map<String,Object> progress() {
         // 操作者应能分清正在拿材料、换站位还是等服务器确认，不能只看到一个持续不变的任务类名。
         return Map.of("task",name(),"operation",r.parameters.operation().name().toLowerCase(Locale.ROOT),"configuration_step",index+1,
-                "phase",done?"checking_full_design":configurationObservedSince>=0?"observing_propeller_state":action!=null?"confirming_native_input":approachMoving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
+                "phase",done?"checking_full_design":typewriter!=null?typewriter.phase():configurationObservedSince>=0?"observing_propeller_state":action!=null?"confirming_native_input":approachMoving()?"approaching_control":movingSince>=0?"waiting_for_stop":"preparing_control",
                 "hand",hand.progress(),"approach",approachEvidence());
     }
     @Override protected Map<String,Object> resultData() {
@@ -213,6 +226,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         out.put("required_onboard",r.parameters.requireOnboard());
         out.put("onboard_observed",frame!=null&&OnboardControlApproach.supported(player,frame));
         out.put("vehicle_operation_verified",false);if(action!=null)out.put("input_receipt",Map.of("status",action.status().name(),"detail",action.detail()));
+        if(typewriter!=null)out.putAll(typewriter.evidence());
         if(afterUnknown!=null)out.put("after_observation_unknown",afterUnknown);return out;
     }
 }

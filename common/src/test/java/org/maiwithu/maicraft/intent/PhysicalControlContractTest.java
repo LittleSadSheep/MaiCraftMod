@@ -32,6 +32,17 @@ public final class PhysicalControlContractTest {
             check(PhysicalControlParameters.parse(json("{\"operation\":\"set_tire\",\"item_id\":\"air\"}")).itemId().equals("minecraft:air"),"省略默认命名空间的空手拆胎仍应幂等");
             rejects(goal(worldTarget,json("{\"operation\":\"inspect\",\"item_id\":\"minecraft:air\"}")));
             check(SemanticAbilityCatalog.parameterNames(PhysicalControlAbilityAdapter.ABILITY).contains("item_id"),"轮胎配置入口未公开");
+            // 配键只改一个键，按键必须有限保持；越权字段、重复键和退出键在原生接管前明确拒绝。
+            SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"bind_typewriter_key\",\"key\":\"a\",\"frequency_items\":[\"minecraft:iron_ingot\",\"minecraft:redstone\"]}")),IntentRuntime.KNOWN_ABILITIES);
+            SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"press_typewriter_keys\",\"keys\":[\"w\",\"left\"],\"duration_seconds\":0.5}")),IntentRuntime.KNOWN_ABILITIES);
+            for(String invalid:List.of("{\"operation\":\"inspect\",\"keys\":[\"a\"]}",
+                    "{\"operation\":\"bind_typewriter_key\",\"key\":\"a\"}",
+                    "{\"operation\":\"press_typewriter_keys\",\"keys\":[]}",
+                    "{\"operation\":\"press_typewriter_keys\",\"keys\":[\"a\",\"A\"]}",
+                    "{\"operation\":\"press_typewriter_keys\",\"keys\":[\"escape\"]}",
+                    "{\"operation\":\"press_typewriter_keys\",\"keys\":[\"w\"],\"duration_seconds\":0}",
+                    "{\"operation\":\"press_typewriter_keys\",\"keys\":[\"w\"],\"duration_seconds\":31}"))rejects(goal(worldTarget,json(invalid)));
+            check(SemanticAbilityCatalog.parameterNames(PhysicalControlAbilityAdapter.ABILITY).containsAll(List.of("key","keys")),"打字机配键和操作入口未公开");
             // 供气容量是明确的配置意图，不能误按油门十五档限制，也不接受低于原生最小值的零供气旋钮。
             SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":125}")),IntentRuntime.KNOWN_ABILITIES);
             rejects(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":0}")));

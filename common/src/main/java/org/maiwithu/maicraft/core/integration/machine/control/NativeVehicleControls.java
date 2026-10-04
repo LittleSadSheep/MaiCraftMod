@@ -70,7 +70,12 @@ public final class NativeVehicleControls {
                 },40);
                 typewriters.put(pos,true); changed=true; return false;
             }
-            if(!aim(ctx,structure,pos,input.kind()) || !ctx.mutationAvailable()) return false;
+            // 打字机认领后按原生键盘规则只检查距离；保持飞行视线时无需逐键重新瞄准外壳。
+            if(input.kind()==KEY) {
+                if(!Boolean.TRUE.equals(call(type(ControlComponents.SIM+"redstone.linked_typewriter.LinkedTypewriterBlockEntity"),
+                        "playerInRange",ctx.player(),ctx.level(),pos)))throw new IllegalStateException("typewriter out of native range");
+            } else if(!aim(ctx,structure,pos,input.kind()))return false;
+            if(!ctx.mutationAvailable())return false;
             if(input.kind()==STEERING_WHEEL && Boolean.TRUE.equals(field(be,"held")) && !applied.containsKey(input.id()))
                 throw new IllegalStateException("steering wheel is already being held");
             final double target=value; final long tick=ctx.tickRevision();
@@ -117,7 +122,8 @@ public final class NativeVehicleControls {
         if(pendingId!=null) {
             // 停车会清理临时按键缓存，但每次已确认的油门或方向输入都保留，不能让最终回执丢失驾驶证据。
             effects.add(Map.of("control",pendingId,"value",pendingValue,"observed_tick",ctx.tickRevision(),
-                    "native_status",completed.status().name(),"confirmation_detail",completed.detail()));
+                    "native_status",completed.status().name(),"confirmation_detail",completed.detail(),
+                    "confirmation_scope",observation.circuit().node(pendingId).kind()==KEY?"packet_dispatch_only":"server_synced_configuration"));
             applied.put(pendingId,pendingValue); pendingId=null;
         }
         return true;

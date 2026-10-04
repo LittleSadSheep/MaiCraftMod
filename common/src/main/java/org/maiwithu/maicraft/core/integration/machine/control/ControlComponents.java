@@ -64,8 +64,8 @@ public final class ControlComponents {
                 facts.put("in_use",call(be,"isInUse"));
                 Object entries=call(be,"getTypewriterEntries");
                 List<?> keys=(List<?>)call(entries,"getEntries");
-                if(keys.size()>256) circuit.unknown(cell.id()+": typewriter binding observation truncated");
-                for (Object key : keys.subList(0,Math.min(256,keys.size()))) {
+                // 全部原生绑定都参与控制回路，不能隐藏后面的键而让飞控漏掉真实执行器。
+                for (Object key : keys) {
                     int code=((Number)call(key,"getGLFWKeyCode")).intValue();
                     Object frequency=call(key,"getNetworkKey");
                     var keyFacts=new LinkedHashMap<>(facts); keyFacts.put("key",code); keyFacts.put("frequency",frequency(frequency));

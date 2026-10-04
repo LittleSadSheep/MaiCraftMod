@@ -37,6 +37,7 @@ final class NativePhysicalControl {
             case SET_SPEED -> NativeApi.is(entity,MOTOR)||NativeApi.is(entity,SPEED);
             case SET_THROTTLE -> NativeApi.is(entity,THROTTLE);
             case SET_SPRING_ANGLE -> NativeApi.is(entity,SPRING);
+            case BIND_TYPEWRITER_KEY,PRESS_TYPEWRITER_KEYS -> NativeApi.is(entity,NativeTypewriterControl.TYPE);
             case SET_BURNER_VOLUME -> NativeApi.is(entity,NativeBurnerDial.BURNER);
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.is(entity,PROPELLER);
             case TURN_CRANK -> entity!=null&&CreateManualInput.supported(entity.getLevel(),entity.getBlockPos());
@@ -48,6 +49,7 @@ final class NativePhysicalControl {
     }
     static boolean valueBox(PhysicalControlParameters.Operation operation) { return operation==SET_SPEED||operation==SET_BURNER_VOLUME||operation==SET_SPRING_ANGLE; }
     static boolean propeller(PhysicalControlParameters.Operation operation) { return operation==ASSEMBLE_PROPELLER||operation==DISASSEMBLE_PROPELLER; }
+    static boolean typewriter(PhysicalControlParameters.Operation operation) { return operation==BIND_TYPEWRITER_KEY||operation==PRESS_TYPEWRITER_KEYS; }
     static Object setting(BlockEntity entity) {
         if(NativeApi.is(entity,NativeBurnerDial.BURNER))return NativeBurnerDial.setting(entity);
         if(NativeApi.is(entity,SPRING))return NativeApi.field(entity,SPRING,"angleInput");
@@ -74,6 +76,7 @@ final class NativePhysicalControl {
             case SET_SPEED -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==p.value();
             case SET_BURNER_VOLUME -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==NativeBurnerDial.applied(p.value(),NativeBurnerDial.maximum());
             case SET_SPRING_ANGLE -> ((Number)NativeApi.call(setting(entity),null,"getValue")).intValue()==p.value();
+            case BIND_TYPEWRITER_KEY,PRESS_TYPEWRITER_KEYS -> throw new IllegalStateException("打字机由独立会话结算完整配键或有界按键");
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.truth(NativeApi.call(entity,null,"isRunning"))==(p.operation()==ASSEMBLE_PROPELLER);
             case TURN_CRANK -> false; // 每次手摇都有明确持续窗口，已有转速不能冒充本次已操作。
             case SET_THROTTLE -> ((Number)NativeApi.call(entity,THROTTLE,"getState")).intValue()==p.value();
@@ -162,6 +165,8 @@ final class NativePhysicalControl {
             out.put("supported_operations",List.of("inspect","set_tire"));
         } else if(NativeApi.is(entity,THROTTLE)) {
             out.put("signal",NativeApi.call(entity,THROTTLE,"getState"));out.put("supported_operations",List.of("inspect","set_throttle"));
+        } else if(NativeApi.is(entity,NativeTypewriterControl.TYPE)) {
+            out.putAll(NativeTypewriterControl.state(entity));
         } else if(NativeApi.is(entity,LINK)) {
             out.put("receiver",property(entity,"receiver"));out.put("frequencies",List.of(frequencyState(entity,0),frequencyState(entity,1)));
             out.put("received_signal",NativeApi.call(entity,LINK,"getReceivedSignal"));
