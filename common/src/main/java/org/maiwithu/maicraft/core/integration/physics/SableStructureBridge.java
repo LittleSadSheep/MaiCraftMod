@@ -75,6 +75,22 @@ public final class SableStructureBridge {
         public boolean supportedBy(UUID id) { return known && below && id.equals(trackingId) && id.equals(collisionId); }
     }
 
+    /** Create 装置的全局坐标仍可能位于船体存储区；按原生地块身份读取外层姿态，不靠大坐标阈值猜测。 */
+    public static StructurePose containingPose(ClientLevel level,BlockPos storagePosition) {
+        try {
+            Class<?> type=Class.forName(CONTAINER,false,SableStructureBridge.class.getClassLoader());
+            Object container=method(type,"getContainer",Level.class).invoke(null,level);
+            Object ship=containing(container,storagePosition);
+            if(ship==null)return null;
+            if(required((Boolean)call(ship,"isRemoved")))throw new IllegalStateException("parent structure removed");
+            return pose(call(ship,"logicalPose"));
+        } catch(ClassNotFoundException absent){return null;}
+        catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable) {
+            // 已安装却读不到姿态时保留未知；调用者必须保守处理，不能把船内坐标当作世界里的空路。
+            throw new IllegalStateException("contraption parent pose unavailable",unavailable);
+        }
+    }
+
     /** 查询当前原生碰撞结果，而非历史上次跟踪的 UUID 或附近船体碰撞箱。 */
     public static Contact contact(Object entity) {
         try {

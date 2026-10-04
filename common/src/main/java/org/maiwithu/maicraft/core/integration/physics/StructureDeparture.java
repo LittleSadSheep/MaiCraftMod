@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.integration.jetpack.JetpackRoute;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 import org.maiwithu.maicraft.core.pathing.transport.TransportSession;
 import org.maiwithu.maicraft.entity.InputDriver;
+import org.maiwithu.maicraft.core.integration.create.ContraptionObstacles;
 
 /** 原生下座后，从已观察的静止甲板走到近旁地面，再把总行程交还普通寻路。 */
 public final class StructureDeparture implements TransportSession {
@@ -62,7 +63,9 @@ public final class StructureDeparture implements TransportSession {
     }
     private record Geometry(List<AABB> boxes,List<AABB> forbidden) {}
     private static Geometry geometry(LocalPlayerContext ctx,LongSet forbidden) {
-        var physical = PhysicalObstacleSnapshot.capture(ctx.level(), ctx.player().position());
+        // 离开低甲板时也合入成型桨叶，不能在切换到普通地面寻路之前先穿过运动装置。
+        var physical = PhysicalObstacleSnapshot.capture(ctx.level(), ctx.player().position())
+                .plus(ContraptionObstacles.capture(ctx.level(),ctx.player().position()));
         if (physical.conservativeStructures() > 0) return null;
         var boxes = new ArrayList<>(physical.boxes());
         var excluded = new ArrayList<AABB>();
