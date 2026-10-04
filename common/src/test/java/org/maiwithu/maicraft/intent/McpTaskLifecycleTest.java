@@ -15,12 +15,17 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import io.netty.channel.embedded.EmbeddedChannel;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.server.ClientRequestRouter;
+import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
@@ -281,6 +286,11 @@ public final class McpTaskLifecycleTest {
         final MaiCraftRuntimeFacade facade;
         final StateIdentity identity;
         final Map<Field, Object> dispatcher = new LinkedHashMap<>();
+        final Field routerSlot = field(ServerSessionRuntime.class, "router"),
+                installedSlot = field(ServerSessionRuntime.class, "installed"),
+                sessionConnectionSlot = field(ServerSessionRuntime.class, "connection"),
+                listenerConnectionSlot = field(world.player.connection.getClass(), "connection");
+        final Object priorRouter, priorInstalled, priorSessionConnection, priorListenerConnection;
 
         Fixture() throws Exception {
             // 只构造协议入口所需的多人身份，不连接服务器，也不读取玩家真实存档。
@@ -288,6 +298,32 @@ public final class McpTaskLifecycleTest {
             field(client.getClass(), "gameDirectory").set(client, Files.createTempDirectory("mcp-task-lifecycle-").toFile());
             field(world.player.connection.getClass(), "serverData").set(world.player.connection,
                     new ServerData("test", "lifecycle.invalid", ServerData.Type.OTHER));
+            // 正式入口在服务端握手确认前拒绝一切游戏调用；夹具与真实入服等价地补齐确认状态，
+            // 请求由内存路由器承接，收尾恢复全局会话字段，不把测试状态带给后面的场景。
+            priorRouter = routerSlot.get(null);
+            priorInstalled = installedSlot.get(null);
+            priorSessionConnection = sessionConnectionSlot.get(null);
+            priorListenerConnection = listenerConnectionSlot.get(world.player.connection);
+            var link = new Connection(PacketFlow.CLIENTBOUND);
+            field(Connection.class, "channel").set(link, new EmbeddedChannel());
+            listenerConnectionSlot.set(world.player.connection, link);
+            // Minecraft.getConnection() 即 player.connection，无需另设客户端字段。
+            sessionConnectionSlot.set(null, world.player.connection);
+            installedSlot.setBoolean(null, true);
+            List<JsonObject> sent = new ArrayList<>();
+            var router = new ClientRequestRouter(() -> true,
+                    envelope -> { sent.add(envelope.deepCopy()); return true; },
+                    () -> {}, Runnable::run, (receipt, send) -> { send.run(); return true; });
+            router.bind(1, 1, "minecraft:overworld", 1, true, 0);
+            JsonObject welcome = new JsonObject();
+            welcome.addProperty("kind", "welcome"); welcome.addProperty("bootstrap", 1);
+            welcome.addProperty("status", "succeeded"); welcome.add("clientNonce", sent.getFirst().get("clientNonce"));
+            welcome.addProperty("sessionId", "mcp-task-lifecycle"); welcome.addProperty("dimension", "minecraft:overworld");
+            welcome.add("features", new JsonObject());
+            router.receive(welcome, 1);
+            JsonObject control = sent.getLast().deepCopy(); control.addProperty("status", "succeeded");
+            router.receive(control, 1);
+            routerSlot.set(null, router);
             identity = StateIdentity.resolve(client).orElseThrow();
             var constructor = IntentRuntime.class.getDeclaredConstructor();
             constructor.setAccessible(true);
@@ -318,8 +354,12 @@ public final class McpTaskLifecycleTest {
             return (Map<String, UUID>) field(IntentRuntime.class, "requestKeys").get(runtime);
         }
         @Override public void close() throws Exception {
-            // 恢复此前的调度器与身体，避免这组测试的暂停记录影响后面的游戏场景。
+            // 恢复此前的调度器、会话与连接字段，避免这组测试的握手状态影响后面的游戏场景。
             for (var saved : dispatcher.entrySet()) saved.getKey().set(null, saved.getValue());
+            routerSlot.set(null, priorRouter);
+            installedSlot.set(null, priorInstalled);
+            sessionConnectionSlot.set(null, priorSessionConnection);
+            listenerConnectionSlot.set(world.player.connection, priorListenerConnection);
             world.close();
         }
     }
