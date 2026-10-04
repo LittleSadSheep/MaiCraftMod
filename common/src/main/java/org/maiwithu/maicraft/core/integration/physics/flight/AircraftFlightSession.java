@@ -133,7 +133,8 @@ public final class AircraftFlightSession implements TransportSession {
         result.put("airborne_verified",controller.airborneVerified());result.put("unexpected_ground_contact",controller.unexpectedGround());
         if(last!=null)result.put("actual_flight_state",last);
         if(reader!=null)result.put("native_contact_evidence",reader.evidence());
-        if(route!=null)result.put("route",route.evidence());
+        // 这是实际航路观察，不是供 LLM 回放的低层 route 指令；保留阻挡事实供整机修正。
+        if(route!=null)result.put("flight_guidance",route.evidence());
         if(keyboard!=null)result.put("keyboard",keyboard.evidence());
         result.put("phase_transitions",controller.transitions());return result;
     }

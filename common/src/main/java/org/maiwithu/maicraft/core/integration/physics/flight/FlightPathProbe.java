@@ -13,6 +13,12 @@ public final class FlightPathProbe {
         public Result {path=List.copyOf(path);}
     }
     private FlightPathProbe() {}
+    /** 已接地飞艇向上离地时容忍底面数值误差；仍检查完整宽度、顶部和上方十二格。 */
+    public static Space verticalDeparture(World world,AABB bounds,boolean grounded) {
+        double floorTolerance=grounded?.03:0;
+        return world.observe(new AABB(bounds.minX,Math.min(bounds.maxY,bounds.minY+floorTolerance),bounds.minZ,
+                bounds.maxX,bounds.maxY+12,bounds.maxZ));
+    }
     public static Result trace(World world,FlightSample sample,AABB currentBounds,double wantedHeading,double verticalSpeed,
                                double seconds,FlightEnvelope envelope) {
         if(!Double.isFinite(seconds)||seconds<=0||seconds>12||!Double.isFinite(wantedHeading)||!Double.isFinite(verticalSpeed))

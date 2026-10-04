@@ -54,8 +54,10 @@ public final class FlightRoutePlanner {
         double seconds=Math.max(3,Math.min(6,envelope.cruiseSpeed()/4));
         var departure=FlightPathProbe.trace(probe,sample,bounds,sample.heading(),0,Math.min(5,seconds),envelope);
         // 固定翼检查前方滑跑空间，飞艇检查垂直离地与减速余量，不要求先有一条水平跑道。
-        boolean departureClear=envelope.kind()==FlightEnvelope.Kind.AIRSHIP
-                ?probe.observe(bounds.expandTowards(0,12,0))==FlightPathProbe.Space.CLEAR:departure.state()==FlightPathProbe.Space.CLEAR;
+        var departureState=envelope.kind()==FlightEnvelope.Kind.AIRSHIP
+                ?FlightPathProbe.verticalDeparture(probe,bounds,sample.contact()==FlightSample.Contact.GROUNDED):departure.state();
+        boolean departureClear=departureState==FlightPathProbe.Space.CLEAR;
+        var departureEvidence=probe.lastObservation();
         FlightPathProbe.Result best=null;double bestCost=Double.POSITIVE_INFINITY;
         var trials=new ArrayList<Map<String,Object>>();
         double[] headings={0,.26,-.26,.52,-.52,1.05,-1.05,Math.PI};
@@ -77,7 +79,8 @@ public final class FlightRoutePlanner {
                 landing!=null,best==null?sample.position().y:waypoint.y);
         evidence=Map.of("block_reads",probe.blockReads(),"candidate_routes",List.copyOf(trials),"selected_path",best==null?List.of():best.path(),
                 "landing_site",landing==null?Map.of():Map.of("touchdown",landing.touchdown(),"heading",landing.heading(),"observed_tick",landing.observedTick()),
-                "ground_clearance",clearance,"cruise_altitude",cruise);
+                "ground_clearance",clearance,"cruise_altitude",cruise,"departure_state",departureState.name(),
+                "departure_observation",departureEvidence,"aircraft_bounds",bounds);
         return guidance;
     }
     public Map<String,Object> evidence(){return evidence;}

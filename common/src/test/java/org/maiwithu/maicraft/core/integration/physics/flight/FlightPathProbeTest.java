@@ -34,6 +34,16 @@ public final class FlightPathProbeTest {
         check(probe.observe(new AABB(0,80,0,3,81,3))==UNKNOWN,"碰撞读取预算耗尽要保留未知");
         world.solid=new BlockPos(2,80,2);probe=new FlightWorldProbe(world,pos->true,List.of(),true,100);
         check(probe.observe(new AABB(1,80,1,4,81,4))==BLOCKED,"查询原生碰撞形状，实体方块会阻挡");
+        // 原生刚体静止时底面可能略低于地面；只允许真实接地后的微小误差，树冠和台阶仍阻挡上升。
+        var resting=new AABB(0,78-.00002,0,4,84,4);
+        var floor=new AABB(-10,77,-10,10,78,10);
+        check(FlightPathProbe.verticalDeparture(box->box.intersects(floor)?BLOCKED:CLEAR,resting,true)==CLEAR,
+                "接地数值误差不能永久阻止飞艇垂直离地");
+        check(FlightPathProbe.verticalDeparture(box->box.intersects(floor)?BLOCKED:CLEAR,resting,false)==BLOCKED,
+                "未确认接地时不能忽略底面碰撞");
+        var canopy=new AABB(0,90,0,4,91,4);
+        check(FlightPathProbe.verticalDeparture(box->box.intersects(canopy)?BLOCKED:CLEAR,resting,true)==BLOCKED,
+                "垂直起飞仍必须避开气囊上方树冠");
         System.out.println("FlightPathProbeTest: passed");
     }
     private static final class Scene implements BlockGetter {

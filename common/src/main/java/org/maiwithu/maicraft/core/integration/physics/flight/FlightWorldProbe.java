@@ -24,6 +24,7 @@ public final class FlightWorldProbe implements FlightPathProbe.World {
     private final Map<BlockPos,List<AABB>> shapes=new HashMap<>();
     private final int readBudget;
     private int reads;
+    private Map<String,Object> lastObservation=Map.of();
     public FlightWorldProbe(BlockGetter world,Predicate<BlockPos> loaded,List<AABB> dynamic,boolean dynamicKnown,int readBudget) {
         this.world=world;this.loaded=loaded;this.dynamic=List.copyOf(dynamic);this.dynamicKnown=dynamicKnown;this.readBudget=readBudget;
     }
@@ -49,26 +50,32 @@ public final class FlightWorldProbe implements FlightPathProbe.World {
         return new FlightWorldProbe(level,pos->level.getChunkSource().hasChunk(pos.getX()>>4,pos.getZ()>>4),obstacles,complete,100_000);
     }
     @Override public FlightPathProbe.Space observe(AABB swept) {
-        if(!dynamicKnown)return UNKNOWN;
-        for(AABB obstacle:dynamic)if(obstacle.intersects(swept))return BLOCKED;
+        // 只保存本次查询的阻挡或未知原因，让起飞回执指出究竟是地面、树木、运动结构还是读取范围。
+        lastObservation=Map.of();
+        if(!dynamicKnown){lastObservation=Map.of("reason","dynamic_obstacles_incomplete");return UNKNOWN;}
+        for(AABB obstacle:dynamic)if(obstacle.intersects(swept)){lastObservation=Map.of("reason","dynamic_obstacle","bounds",obstacle);return BLOCKED;}
         BlockPos min=BlockPos.containing(swept.minX,swept.minY,swept.minZ);
         BlockPos max=BlockPos.containing(Math.nextDown(swept.maxX),Math.nextDown(swept.maxY),Math.nextDown(swept.maxZ));
         for(BlockPos mutable:BlockPos.betweenClosed(min,max)) {
             BlockPos pos=mutable.immutable();
             if(pos.getY()<world.getMinBuildHeight()||pos.getY()>=world.getMaxBuildHeight())continue;
-            if(!loaded.test(pos))return UNKNOWN;
+            if(!loaded.test(pos)){lastObservation=Map.of("reason","unloaded_cell","position",pos.toShortString());return UNKNOWN;}
             List<AABB> boxes=shapes.get(pos);
             if(boxes==null) {
-                if(reads>=readBudget)return UNKNOWN;
+                if(reads>=readBudget){lastObservation=Map.of("reason","block_read_budget_exhausted");return UNKNOWN;}
                 reads++;
                 try {
                     boxes=world.getBlockState(pos).getCollisionShape(world,pos).toAabbs().stream().map(box->box.move(pos)).toList();
                     shapes.put(pos,boxes);
-                } catch(RuntimeException|LinkageError unknown){return UNKNOWN;}
+                } catch(RuntimeException|LinkageError unknown){lastObservation=Map.of("reason","collision_shape_unavailable","position",pos.toShortString());return UNKNOWN;}
             }
-            for(AABB box:boxes)if(box.intersects(swept))return BLOCKED;
+            for(AABB box:boxes)if(box.intersects(swept)) {
+                lastObservation=Map.of("reason","native_block_collision","position",pos.toShortString(),
+                        "block_state",world.getBlockState(pos).toString(),"bounds",box);return BLOCKED;
+            }
         }
         return CLEAR;
     }
     public int blockReads(){return reads;}
+    public Map<String,Object> lastObservation(){return lastObservation;}
 }
