@@ -102,7 +102,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     }
 
     private void observe(BlockPos pos) {
-        // 候选位置使用前复核实际状态；视线仍由现有原生碰撞射线判断。
+        // 候选位置先复核实际状态，再按视觉遮挡与外露部分判断能否看见；原生交互命中另行核对。
         BlockState state = player.clientLevel.getBlockState(pos);
         if (!r.blockTargets.contains(state.getBlock())) {
             return;
