@@ -2,11 +2,20 @@ package org.maiwithu.maicraft.client.actor;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.common.collect.ImmutableList;
+import com.mojang.serialization.Lifecycle;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.MappedRegistry;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.damagesource.DamageSources;
+import net.minecraft.world.damagesource.DamageType;
+import net.minecraft.world.damagesource.DamageTypes;
+import net.minecraft.world.level.Level;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
@@ -20,6 +29,7 @@ import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import org.maiwithu.maicraft.core.tools.QueryExtraOps;
 import org.maiwithu.maicraft.intent.SheepCombatTest;
 import org.maiwithu.maicraft.intent.SheepSelectionTest;
+import org.maiwithu.maicraft.core.task.acquire.SheepWoolAcquisitionTest;
 
 /** 用原生同步属性模拟混色羊群，不运行生物 AI，也不在测试中给角色实际掉落。 */
 public final class SheepTraitsTest {
@@ -63,7 +73,18 @@ public final class SheepTraitsTest {
         // 基础观察通过后再验证语义选羊与攻击复核，确保能力入口也实际接通。
         SheepCombatTest.main(args);
         SheepSelectionTest.main(args);
+        SheepInteractionTest.main(args);
+        SheepWoolAcquisitionTest.main(args);
         System.out.println("SheepTraitsTest: passed");
+    }
+
+    /** 比较剑斧伤害时提供原版玩家攻击类型；不向世界发送任何伤害。 */
+    public static void prepareWeaponScoring(InteractionWorldTestHarness world) throws Exception {
+        var types = new MappedRegistry<DamageType>(Registries.DAMAGE_TYPE, Lifecycle.stable());
+        Registry.registerForHolder(types, DamageTypes.PLAYER_ATTACK, new DamageType("player", .1F)); types.freeze();
+        var sources = world.h.allocate(DamageSources.class);
+        ActorControlTestHarness.field(DamageSources.class, "damageTypes").set(sources, types);
+        ActorControlTestHarness.field(Level.class, "damageSources").set(world.level, sources);
     }
 
     public static ObservedSheep sheep(InteractionWorldTestHarness world, int id, DyeColor color, double x) throws Exception {
@@ -73,6 +94,8 @@ public final class SheepTraitsTest {
         ActorControlTestHarness.field(Entity.class, "position").set(sheep, position);
         ActorControlTestHarness.field(Entity.class, "blockPosition").set(sheep, BlockPos.containing(position));
         ActorControlTestHarness.field(Entity.class, "level").set(sheep, world.level);
+        // 狩猎前会核实载客和牵引关系；夹具显式表示无乘客，不用未初始化字段冒充事实。
+        ActorControlTestHarness.field(Entity.class, "passengers").set(sheep, ImmutableList.of());
         ActorControlTestHarness.field(Sheep.class, "attributes").set(sheep, new AttributeMap(Sheep.createAttributes().build()));
         sheep.setBoundingBox(new AABB(x - .45, 1, 3.05, x + .45, 2.3, 3.95));
         world.level.entities.put(id, sheep);

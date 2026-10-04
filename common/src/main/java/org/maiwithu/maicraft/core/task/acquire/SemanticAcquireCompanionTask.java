@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.acquire;
 
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2SupplyTaskRecord;
@@ -966,7 +968,7 @@ public final class SemanticAcquireCompanionTask
                 ? GenericEntitySearchCompanionTask.LOADED_EVIDENCE_RADIUS
                 : r.searchRadius;
         List<Entity> safe = safeLoadedHuntCandidates(
-                hint, relation, loadedRadius, protectedCandidates);
+                need, hint, relation, loadedRadius, protectedCandidates);
         Map<String, Object> facts = new LinkedHashMap<>();
         facts.put("safe_candidate_count", safe.size());
         facts.put("protected_or_ambiguous_candidate_count", protectedCandidates.size());
@@ -1006,7 +1008,8 @@ public final class SemanticAcquireCompanionTask
                     childId("hunt-search"),
                     now + 10L * 60L * 20L,
                     hint.entityTypeIds(), relation, 1, HUNT_SEARCH_DISTANCE,
-                    false, r.protectedLabels, true, rejectedHuntTargets);
+                    false, r.protectedLabels, true, rejectedHuntTargets)
+                    .withSheepTraits(SheepTraits.forWool(need.itemIds));
             return startHuntChild(need, search, HuntChildStage.SEARCH, null,
                     "find an unprotected semantic hunt source through first-person exploration");
         }
@@ -1017,7 +1020,7 @@ public final class SemanticAcquireCompanionTask
         long now = player.level().getGameTime();
         AttackTaskRecord attack = new AttackTaskRecord(
                 childId("hunt-attack"), now + HUNT_TICKS,
-                List.of(target.getId()), false, true);
+                List.of(target.getId()), false, true, SheepTraits.forWool(need.itemIds));
         return startHuntChild(need, attack, HuntChildStage.ATTACK, target.getUUID(),
                 "hunt one loaded unprotected "
                         + BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()));
@@ -1025,12 +1028,14 @@ public final class SemanticAcquireCompanionTask
 
     /** 首次狩猎与首次出手前的换目标共用同一筛选，按已加载、可攻击且不受保护的近处目标排序。 */
     private List<Entity> safeLoadedHuntCandidates(
+            AcquisitionNeed need,
             SemanticAcquireTaskRecord.SourceHint hint,
             GenericEntitySearchTaskRecord.Relation relation,
             int loadedRadius,
             List<Map<String, Object>> protectedCandidates) {
         // 先筛活着、可攻击、类型匹配的对象，再检查名字、驯服、牵引和区域保护等条件，最后按距离排序。
         List<Entity> safe = new ArrayList<>();
+        SheepTraits woolTraits = SheepTraits.forWool(need.itemIds);
         AABB box = player.getBoundingBox().inflate(loadedRadius);
         for (Entity entity : player.clientLevel.getEntities(player, box, candidate ->
                 candidate != player && !candidate.isRemoved() && candidate.isAlive()
@@ -1039,6 +1044,8 @@ public final class SemanticAcquireCompanionTask
                         && hint.entityTypeIds().contains(
                                 BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType())))) {
             if (!EntitySemanticSafety.matchesRelation(entity, relation)) continue;
+            // 需要指定羊毛时先辨色；幼羊和已剪毛的羊不能作为这次羊毛来源。
+            if (!woolTraits.matches(entity)) continue;
             List<String> reasons = EntitySemanticSafety.protectionReasons(
                     player, entity, relation, r.protectedLabels, true);
             if (reasons.isEmpty()) {
@@ -1474,6 +1481,7 @@ public final class SemanticAcquireCompanionTask
                 SemanticSourceKnowledge.huntRelation(hint.entityTypeIds());
         ResourceLocation currentType = BuiltInRegistries.ENTITY_TYPE.getKey(current.getType());
         Entity replacement = safeLoadedHuntCandidates(
+                        activeNeed,
                         hint,
                         relation,
                         GenericEntitySearchCompanionTask.LOADED_EVIDENCE_RADIUS,
@@ -1509,7 +1517,7 @@ public final class SemanticAcquireCompanionTask
         long now = player.level().getGameTime();
         AttackTaskRecord redirected = new AttackTaskRecord(
                 childId("hunt-attack"), now + HUNT_TICKS,
-                List.of(replacement.getId()), false, true);
+                List.of(replacement.getId()), false, true, SheepTraits.forWool(retargetedNeed.itemIds));
         return startHuntChild(
                 retargetedNeed,
                 redirected,
@@ -1589,7 +1597,7 @@ public final class SemanticAcquireCompanionTask
                         long now = player.level().getGameTime();
                         AttackTaskRecord attack = new AttackTaskRecord(
                                 childId("hunt-attack"), now + HUNT_TICKS,
-                                List.of(retained.getId()), false, true);
+                                List.of(retained.getId()), false, true, SheepTraits.forWool(need.itemIds));
                         return startHuntChild(
                                 need, attack, HuntChildStage.ATTACK, retained.getUUID(),
                                 "hunt the still-live entity verified by the internal search receipt");
@@ -1647,8 +1655,12 @@ public final class SemanticAcquireCompanionTask
                 return TaskState.RUNNING;
             }
             if (targetUuid != null) rejectedHuntTargets.add(targetUuid);
-            addIssue("hunt", "hunt_target_lost_or_unreachable",
-                    "the selected loaded target disappeared or could not be reached; "
+            // 变色／剪毛是已观察到的变化，不能在上层又改写成目标消失或无法到达。
+            boolean traitsChanged = result != null && result.data() != null
+                    && result.data().containsKey("changed_sheep_targets");
+            addIssue("hunt", traitsChanged ? "hunt_target_sheep_traits_changed" : "hunt_target_lost_or_unreachable",
+                    traitsChanged ? "the selected sheep no longer matches the requested wool; further attacks stopped"
+                            : "the selected loaded target disappeared or could not be reached; "
                             + "a later authorized attempt would re-observe loaded entities",
                     Map.of("terminal_state", terminal.name().toLowerCase(),
                             "child_message", result == null || result.message() == null
@@ -1689,6 +1701,8 @@ public final class SemanticAcquireCompanionTask
                                         BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType())))
                 .stream()
                 .filter(entity -> EntitySemanticSafety.matchesRelation(entity, relation))
+                // 搜索确认后的羊可能已被染色或剪毛，交接到狩猎前必须重新核对实际状态。
+                .filter(entity -> SheepTraits.forWool(need.itemIds).matches(entity))
                 .filter(entity -> EntitySemanticSafety.protectionReasons(
                                 player, entity, relation, r.protectedLabels, true)
                         .isEmpty())
@@ -2444,6 +2458,9 @@ public final class SemanticAcquireCompanionTask
         copyIfPresent(data, safe, "strikes");
         copyIfPresent(data, safe, "loot_gained");
         copyIfPresent(data, safe, "unreachable_drop_count");
+        // 羊变色导致的中断必须穿过取料回执，让模型同时看到原条件和当前颜色。
+        copyIfPresent(data, safe, "requested_sheep_traits");
+        copyIfPresent(data, safe, "changed_sheep_targets");
         return Map.copyOf(safe);
     }
 

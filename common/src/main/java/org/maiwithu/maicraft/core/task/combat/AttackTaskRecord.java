@@ -51,20 +51,23 @@ public final class AttackTaskRecord extends TaskRecord {
         this(toolCallId, deadlineGameTime, entityIds, indiscriminate, strictAuthorized, SheepTraits.ANY);
     }
 
-    /** 点名颜色后保持精确目标名单，剑的横扫也不能顺带伤害其他颜色的羊。 */
+    /** 点名颜色后保留羊属性；防御权限沿用原请求，横扫误伤单独约束。 */
     public AttackTaskRecord(String toolCallId, long deadlineGameTime, List<Integer> entityIds,
                             boolean indiscriminate, boolean strictAuthorized, SheepTraits sheepTraits) {
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.entityIds = List.copyOf(entityIds);
         this.indiscriminate = indiscriminate;
         this.sheepTraits = sheepTraits == null ? SheepTraits.ANY : sheepTraits;
-        this.strictAuthorized = strictAuthorized || this.sheepTraits.constrained();
+        this.strictAuthorized = strictAuthorized;
         if (indiscriminate && this.sheepTraits.constrained())
             throw new IllegalArgumentException("Sheep traits require specific attack targets");
     }
 
     // 旧任务没有羊筛选字段，恢复时继续沿用原先的攻击范围。
     public SheepTraits sheepTraits() { return sheepTraits == null ? SheepTraits.ANY : sheepTraits; }
+
+    // 颜色限制不关闭原有自卫，但挥剑前必须保护名单外的羊与其他旁观生物。
+    public boolean guardsMeleeBystanders() { return strictAuthorized || sheepTraits().constrained(); }
 
     public Set<Integer> defeated() { return Set.copyOf(defeated); }
     public Set<Integer> lost() { return Set.copyOf(lost); }

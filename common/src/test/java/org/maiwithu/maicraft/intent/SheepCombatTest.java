@@ -5,6 +5,10 @@ import com.google.gson.Gson;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.world.item.DyeColor;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.Entity;
+import org.maiwithu.maicraft.core.combat.Loadout;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.combat.AttackCompanionTask;
 import org.maiwithu.maicraft.core.task.combat.AttackTaskRecord;
@@ -32,8 +36,20 @@ public final class SheepCombatTest {
             check(action.arguments().getAsJsonArray("entity_ids").get(0).getAsInt() == 51,
                     "semantic combat filters color before nearest selection");
             var record = (AttackTaskRecord) new CombatOps().attack(List.of(51), new ToolContext("white-sheep", 0), SheepTraits.read(action.arguments()));
-            check(record.strictAuthorized && record.sheepTraits().matches(white), "native attack retains the color and protects non-target sheep from sweeps");
+            check(record.guardsMeleeBystanders() && !record.strictAuthorized && record.sheepTraits().matches(white),
+                    "color targeting protects bystanders without disabling ordinary self-defense");
             var attack = new AttackCompanionTask(world.player, record);
+            // 旁边黑羊贴着白羊时，剑不能横扫；换成原生不横扫的斧或空手后仍可完成点名攻击。
+            SheepTraitsTest.prepareWeaponScoring(world);
+            world.inventory.setItem(0, new ItemStack(Items.DIAMOND_SWORD));
+            world.inventory.setItem(1, new ItemStack(Items.IRON_AXE));
+            check(Loadout.forTarget(world.player, white, true).melee().slot() == 1, "crowded sheep prefer a non-sweeping melee tool");
+            var meleeClear = AttackCompanionTask.class.getDeclaredMethod("strictMeleeClear", Entity.class); meleeClear.setAccessible(true);
+            check(!(boolean) meleeClear.invoke(attack, white), "sword sweep cannot hit the neighboring black sheep");
+            world.inventory.selected = 1;
+            check((boolean) meleeClear.invoke(attack, white), "an axe can still strike the selected white sheep");
+            world.inventory.setItem(1, ItemStack.EMPTY);
+            check(Loadout.forTarget(world.player, white, true).melee().stack().isEmpty(), "empty-hand fallback avoids waiting forever beside a black sheep");
             var guard = AttackCompanionTask.class.getDeclaredMethod("stopChangedSheepTargets"); guard.setAccessible(true);
             check(guard.invoke(attack) == null, "unchanged sheep remains eligible");
             white.color = DyeColor.BLACK;

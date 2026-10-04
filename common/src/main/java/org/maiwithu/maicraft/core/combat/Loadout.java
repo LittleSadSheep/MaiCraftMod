@@ -8,6 +8,7 @@ import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.entity.player.Player;
 
 /**
@@ -58,6 +59,11 @@ public final class Loadout {
      * 而弓的蓄力比给弩上弦快。
      */
     public static Loadout forTarget(LocalPlayer player, Entity target) {
+        return forTarget(player, target, false);
+    }
+
+    /** 混色羊挤在一起时避开原版剑横扫，优先选可用工具，缺工具则选择快捷栏空手出拳。 */
+    public static Loadout forTarget(LocalPlayer player, Entity target, boolean avoidSweep) {
         Inventory inventory = player.getInventory();
         Pick bestMelee = null;
         Pick chargedCrossbow = null;
@@ -69,6 +75,7 @@ public final class Loadout {
         for (int slot = 0; slot < Math.min(36, inventory.getContainerSize()); slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
+                if (avoidSweep && slot < 9 && bestMelee == null) bestMelee = new Pick(slot, stack, 1.0);
                 continue;
             }
             if (stack.getItem() instanceof CrossbowItem) {
@@ -87,6 +94,7 @@ public final class Loadout {
                 }
                 continue;
             }
+            if (avoidSweep && stack.getItem() instanceof SwordItem) continue;
             double score = WeaponDamage.against(player, target, stack);
             // 对手正在举盾时，优先拿可用的斧尝试原版破盾；盾放下后恢复原有伤害评分，切换由动作门控执行。
             boolean axe = stack.getItem() instanceof AxeItem;

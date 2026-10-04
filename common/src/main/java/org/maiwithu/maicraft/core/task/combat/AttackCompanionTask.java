@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.combat;
 
 import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+import net.minecraft.world.item.SwordItem;
 
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.FailureType;
@@ -634,8 +635,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 stopMelee(); return;
             }
             // 选中后才开始膨胀也必须取消待发刀，不能沿用上一刻的安全判断继续贴脸挥击。
-            if (plannedFoe == null || plannedFoe.armed() || !plannedFoe.authorized() || r.strictAuthorized && (planned == null
-                    || !r.entityIds.contains(planned.getId())
+            if (plannedFoe == null || plannedFoe.armed() || !plannedFoe.authorized() || r.guardsMeleeBystanders() && (planned == null
+                    || r.strictAuthorized && !r.entityIds.contains(planned.getId())
                     || !strictMeleeClear(planned))) {
                 meleeAction.stop();
                 meleeAction = null;
@@ -680,7 +681,9 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return;
         }
         // 已确定实际对手后再选武器；玩家举盾时可优先使用背包中的斧，避免按自己作为目标来评分。
-        Loadout loadout = Loadout.forTarget(player, victim);
+        // 混色羊群有旁观者时先换斧、工具或空手，再按原生冷却出手；不反复拿起会横扫的剑。
+        Loadout loadout = Loadout.forTarget(player, victim,
+                r.sheepTraits().constrained() && hasMeleeBystanders(victim));
         // 武器选择没完成就等；候选已经限定在执行器支持的背包与快捷栏内。
         if (loadout.hasMelee()) {
             FirstPersonActionGate.Status selected = meleeSelection.select(player, loadout.melee().slot());
@@ -694,7 +697,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return;
         }
         if (victim instanceof Player other && !PvpTactics.attackReady(player, other)) return;
-        if (r.strictAuthorized && !strictMeleeClear(victim)) return;
+        if (r.guardsMeleeBystanders() && !strictMeleeClear(victim)) return;
         // 疾跑会让原版取消暴击判定(Player.attack 里 flag1 带 !isSprinting)。
         meleeVictimId = victim.getId();
         meleeAction = Interaction.attackEntity(player, victim);
@@ -720,7 +723,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     /** 原版横扫剑击不能波及未列入目标的生物。 */
     // 严格授权时，目标周围若有其他未授权的活生物就暂不挥击，防止横扫伤到旁边的实体。
     private boolean strictMeleeClear(Entity victim) {
-        return player.level().getEntities(player, victim.getBoundingBox().inflate(1.5D),
+        // 原版横扫只由剑触发；羊群中已换成斧或空手时，允许对准指定实体正常挥击。
+        if (r.sheepTraits().constrained() && !(player.getMainHandItem().getItem() instanceof SwordItem)) return true;
+        return !hasMeleeBystanders(victim);
+    }
+
+    private boolean hasMeleeBystanders(Entity victim) {
+        return !player.level().getEntities(player, victim.getBoundingBox().inflate(1.5D),
                 candidate -> candidate instanceof LivingEntity living
                         && living.isAlive()
                         && candidate != victim

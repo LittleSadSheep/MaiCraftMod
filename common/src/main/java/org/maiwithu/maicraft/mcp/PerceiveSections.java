@@ -66,7 +66,7 @@ final class PerceiveSections {
         result.addProperty("maxItems", 32);
         result.add("items", items);
         // 模型先按视图选事实，再显式点名昂贵扫描；保留全部段名和缺段回执，减少围绕同一规则的重复解释。
-        result.addProperty("description", "Select sections. "
+        result.addProperty("description", "Sections: "
                 + "situation: " + sectionNames("situation") + ". "
                 + "surroundings: " + sectionNames("surroundings") + ". "
                 // 模型判断是否需要离水时优先读取原生身体状态；附近有水、可站地面或抛竿失败均不能替代它。
@@ -76,8 +76,8 @@ final class PerceiveSections {
                 + "nearby_entities drops: drop_ref, item_id, name, count, position, components. "
                 // 羊的颜色与毛量状态随常规附近观察一起展示，模型可以直接据此挑选目标。
                 + "Sheep: sheep_color, sheep_baby, sheep_sheared. "
-                + "Collect via maicraft:collect_items(parameters.drop_ref). "
-                + "terrain_overview: opt-in flight landing-site scan, not walking routes; nearby_facilities: opt-in. "
+                + "Use maicraft:collect_items(drop_ref). "
+                + "Opt-in: terrain_overview (flight landing sites), nearby_facilities. "
                 + "focus: diagnostics. "
                 + "Missing: " + UNAVAILABLE + ".");
         return result;
