@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** 先保住通道两端的连通，再选择丢弃侧袋；没有现成空地时只在身侧开四格深、两格高的小空间。 */
+/** 有打火石先检查当前位置的投掷通道；其余候选限于同层已加载平面，优先空地，再考虑四格深、两格高的侧袋。 */
 public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation, boolean requiresBurn) {
     private static final int RADIUS = 12;
     public DiscardSitePlan { stance = stance.immutable(); excavation = List.copyOf(excavation); }
@@ -80,7 +80,7 @@ public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPo
     }
 
     private LongSet pickupEnvelope(LocalPlayer player) {
-        // 平抛散布及撞到袋底后的落点都留在侧袋后段；使用与实际掉落物一致的原生拾取包围盒扩张。
+        // 选点时以侧袋后段估计落点范围，再按拾取包围盒扩张；这是局部通行规划，真实碰撞、漂移仍由后续实体观察确认。
         Vec3 origin = Vec3.atBottomCenterOf(stance), along = Vec3.atLowerCornerOf(direction.getNormal());
         Vec3 near = origin.add(along.scale(2.5)), far = origin.add(along.scale(4));
         AABB items = new AABB(near, far).inflate(.3, .25, .3);

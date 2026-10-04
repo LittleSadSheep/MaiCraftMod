@@ -50,7 +50,8 @@ public final class DiscardedItems {
         public boolean pending() { return pending.contains(this); }
         public boolean observed() { return !observed.isEmpty(); }
         public Map<String, Object> result() {
-            // 库存扣减与地上实体证据分别报告；未观察到落点时明确保留未知，不能编一个预计位置当作真实落点。
+            // amount 是这次计划投出的数量，entity_observed 只表示见过候选；位置可能仍在空中，不能把它们当作整批到货或烧毁证明。
+            // 仍跟踪时取当前坐标，否则保留最后观察；回执生成后是快照，后续漂移继续更新导航，不会实时改写旧任务结果。
             return Map.of("amount", amount, "entity_observed", !observed.isEmpty(), "observation_pending", pending.contains(this),
                     "entities", observed.values().stream().map(drop -> {
                         var live = tracked.get(drop.uuid()); var position = live == null ? drop.position() : live.drop.position();

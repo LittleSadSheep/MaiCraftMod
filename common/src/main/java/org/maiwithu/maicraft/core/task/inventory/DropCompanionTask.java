@@ -20,7 +20,8 @@ import java.util.ArrayList;
 
 /**
  * 停步朝远处看 → 原生分堆 → 整份丢弃 → 确认扣数并保留实际掉落物避让。
- * 每次菜单点击单独核实，未知投掷绝不重发；数量不足时最多丢现有数量。
+ * 每次菜单点击单独核实，同一执行对象不会重发未知投掷；数量不足时最多丢现有数量。
+ * 这些批次计数保存在当前执行对象中，不是跨重启的消费日志；结果还要分别查看落点、点火与回收证据。
  */
 public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTaskRecord> {
     private static final long DROP_PROGRESS_LEASE_TICKS = 10L * 20L;
@@ -56,6 +57,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         var context = ClientRuntime.requireContext(player);
         if (!initialized) {
             if (!menuSession.worldReady(context)) return TaskState.RUNNING;
+            // 旧界面返料后再固定执行目标；即使公开入口曾核对足量，接单到此刻之间减少的库存仍会缩小本轮数量。
             target = Math.min(r.count, PlayerInv.count(player.getInventory(), r.item)); initialized = true;
             if (target == 0) { fail("no " + r.label + " in inventory to drop", FailureType.NO_MATERIAL); return TaskState.FAILED; }
         }
@@ -95,6 +97,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
             if (fire == null) fire = new DiscardFire(watches, allowBurn);
             r.extendDeadlineTo(player.level().getGameTime() + DROP_PROGRESS_LEASE_TICKS);
             TaskState state = fire.tick(context);
+            // 这里只对选点时标记为“需烧毁才能让路”的位置启动回收；不会按漂移后的全部落点重做通道连通性判断。
             if (state == TaskState.SUCCESS && site.plan().requiresBurn()) {
                 if (watches.stream().anyMatch(DiscardedItems.Watch::pending)) return TaskState.RUNNING;
                 if (!fire.remaining().isEmpty()) {
@@ -163,6 +166,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
 
     @Override
     protected Map<String, Object> resultData() {
+        // dropped 按每次确认增加、每次回收扣减并下限归零；累计投出和回收另列，不能把它直接当作背包净减少或烧毁量。
         Map<String, Object> data = new HashMap<>();
         data.put("item", r.label);
         data.put("dropped", dropped);

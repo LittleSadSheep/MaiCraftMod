@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 真实落点 → 点火 → 等待实体消失 → 左键扑灭；耐火物和无法确认的销毁保留在通道外，不重复点火。 */
+/** 观察到的实体落地后尝试点火，等待余物变化再左键扑火；剩余物交回父任务决定是否回收，不保证全部烧毁。 */
 final class DiscardFire {
     private enum Phase { OBSERVE, IGNITE, WAIT, EXTINGUISH, DONE }
     private final List<DiscardedItems.Watch> watches;
@@ -87,6 +87,7 @@ final class DiscardFire {
         if (waitingForGround) issues.add("no_settled_drop_observed_for_ignition");
         return done();
     }
+    // 本阶段结束只表示不再安排新的点火；可能仍有耐火余物、点火失败或未结扑火，父任务必须连同这些事实返回。
     private TaskState done() { phase = Phase.DONE; return TaskState.SUCCESS; }
     List<ObservedDrop> remaining() {
         return watches.stream().flatMap(watch -> watch.remaining().stream()).collect(Collectors.toMap(
@@ -108,6 +109,7 @@ final class DiscardFire {
         return cell != null && context.level().isLoaded(cell) && context.level().getBlockState(cell).getBlock() instanceof BaseFireBlock;
     }
     Map<String, Object> result() {
+        // all_landings_observed 实际只检查每个 Watch 曾见到候选实体，不证明每件都落地；实体不再跟踪也不等于已有原生烧毁事件。
         return Map.of("ignitions_observed", ignitions, "fires_extinguished", extinguished,
                 "remaining_discarded_entities", remaining().size(), "all_landings_observed", watches.stream().allMatch(DiscardedItems.Watch::observed),
                 "remaining_fire_cells", fires.stream().map(pos -> List.of(pos.getX(), pos.getY(), pos.getZ())).toList(),

@@ -13,8 +13,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 内部丢弃入口：请求把一定数量的指定物品丢到地上，拥有量不够时最多丢现有数量。
- * 工具层只解析参数和安排任务，不直接扣除物品或生成地上实体。
+ * 内部丢弃入口：公开目标先由 GeneralAbilityAdapter 核对物品与数量，这里只转交原生执行任务。
+ * 任务可能走到空地、挖侧袋或使用已有打火石；内部执行时缺料会缩小本轮目标，不能等同于公开入口允许超量请求。
  */
 public final class DropItemsTool implements MaiCraftTool {
 
@@ -30,29 +30,40 @@ public final class DropItemsTool implements MaiCraftTool {
 
     @Override
     public String description() {
-        // 先保住必经通道，再整份丢弃；已有打火石可原生销毁，点火和未烧掉的余物都必须如实回报并扑火。
-        return "Discard an exact quantity in whole batches while keeping passages usable. Partial stacks "
-                + "are split in the inventory and thrown together, including when the inventory is full. "
-                + "Observed discarded entities are avoided by later navigation while they remain in this world. "
-                + "If flint and steel is carried, ignite the actual landing cell when surrounding items and blocks can be preserved, "
-                + "observe whether the items disappear, then extinguish the fire with a native left click. "
-                + "Without usable ignition, prefer an open area or a small excavated side pocket. "
-                + "If an attempted burn leaves items blocking the only passage, recover those exact entities before relocating them. "
-                + "Prefer depositing in a nearby chest when items should be kept. count above what you carry "
-                + "drops everything you have of it. Returns confirmed dropped count, remaining inventory, "
-                + "batch count and observed discard avoidance; an unobserved landing remains unknown.";
+        // 先说明实际副作用和确认边界，避免把清理垃圾当成原地赠物，或把投掷完成误读为全部烧毁。
+        return "Internal executor for maicraft:drop_items. Use the public semantic ability for unwanted items, "
+                + "not delivery to a player or an exact receiving cell. Public item_id and count belong in goal.parameters; "
+                + "this internal tool takes them directly. Public adaptation requires both and requests a decision if "
+                + "the normalized count exceeds readable inventory. InventoryOps clamps internal count to 1..999, "
+                + "and the executor targets at most the inventory available after closing the previous GUI. "
+                + "Matching uses the registered item type, including readable armor and offhand slots; it does not "
+                + "select a particular name, enchantment or component variant, or unpack nested containers. "
+                + "The actor may walk to a loaded open area, excavate a four-block-deep, two-block-high side pocket, "
+                + "or use carried flint and steel to attempt disposal by fire. These choices have no per-call switches. "
+                + "After settling and looking along the chosen direction, whole stacks are thrown together; a partial "
+                + "quantity is split through visible native menu clicks and then thrown once, including with a full inventory. "
+                + "Exact menu postconditions are confirmed by synchronization or the existing stable round-trip window; "
+                + "ground entities are observed separately. Fire handling checks observed entities and fire blocks, "
+                + "attempts native extinguishing, and records surviving items or uncertain ignition. Only a site selected "
+                + "as requiring burning to clear its passage triggers recovery of surviving tracked UUIDs and a new non-burning site. "
+                + "Tracked discard pickup areas remain excluded from later navigation in this body/world session. "
+                + "Returns dropped, confirmed_thrown_units, recovered_after_burn, remaining_in_inventory, batch and attempt counts, "
+                + "discard_site, discarded_item_avoidance, disposal_attempts, and discard_fire when reached. Success is not "
+                + "proof that every item burned or every fire was extinguished. outcome_uncertain concerns unsettled tosses "
+                + "and any added GUI uncertainty; also inspect entity observation flags and discard_fire.issues/cleanup_queued. "
+                + "Do not blindly replay the original quantity after interruption or restart; reconcile actual inventory and effects first.";
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("item_id", "Namespaced id of the item to drop, e.g. minecraft:cobblestone.")
-                .integer("count", "How many to drop (1-999).", 1, 999)
+                .string("item_id", "Required registered item ID, e.g. minecraft:cobblestone; one item type, not a tag, slot, UUID or component filter.")
+                .integer("count", "Required integer number of individual items, 1..999; not stacks or a final inventory target. Neither 0 nor null means all.", 1, 999)
                 .build();
     }
 
     @Override
-    // 把物品种类和数量交给任务处理，等待结果后回复；具体槽位选择与菜单点击在 DropCompanionTask。
+    // 这里只登记任务单，runSync 并不当场完成投掷；语义父任务捕获后持续推进，数量和点火事实由后续回执结算。
     public void onGameCall(String toolCallId, JsonObject args, LocalPlayer companion, Consumer<String> reply) {
         Args a = GSON.fromJson(args, Args.class);
         runSync(companion, impl.dropItems(a.item_id(), a.count(), ctx(toolCallId, companion)), reply);

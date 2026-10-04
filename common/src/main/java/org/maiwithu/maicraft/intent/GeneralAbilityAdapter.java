@@ -1005,7 +1005,8 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction drop(Goal goal, LocalPlayer player) {
-        // 丢弃必须点名物品并给数量；数量超过当前物品栏总数时先询问，不默默改成“全部丢掉”。
+        // 公开丢弃目标先核对物品和当时库存，再只转交 item_id/count；current_place 不是固定站位，后续任务仍可选点、开挖和点火。
+        // 下面的 item 目标取名分支不属于当前公开目标契约；LLM 必须把物品 ID 放在 goal.parameters。
         JsonObject p = goal.parameters();
         String itemId = itemId(p);
         if (itemId == null && goal.target() != null && "item".equals(goal.target().kind())) {
@@ -1018,6 +1019,7 @@ public final class GeneralAbilityAdapter {
         }
         ResourceLocation id = ResourceLocation.tryParse(itemId);
         if (id == null || !BuiltInRegistries.ITEM.containsKey(id)) return invalidItem(goal, itemId);
+        // 此处仍沿用宽松转换和边界夹取，不能在契约里称为严格拒绝小数或超量；缺失/不可读/非正数最后进入待决策。
         int count = integer(p, "count", 0, 0, 999);
         if (count < 1) {
             return decision(goal, "Drop count must be between 1 and 999.",

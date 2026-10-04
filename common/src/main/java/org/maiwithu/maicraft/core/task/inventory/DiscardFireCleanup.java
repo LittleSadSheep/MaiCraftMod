@@ -32,6 +32,7 @@ public final class DiscardFireCleanup {
         int available = pending.size();
         while (!pending.isEmpty() && available-- > 0) {
             var request = pending.getFirst();
+            // 旧身体或旧世界已经离开时只撤下请求；无法通过当前角色去证明旧现场的火已灭，也不把这份队列持久化到下次连接。
             if (request.player != context.player() || request.world != context.level()) {
                 pending.removeFirst(); action = null; continue;
             }
@@ -41,6 +42,7 @@ public final class DiscardFireCleanup {
             }
             if (action == null) action = new DiscardBlockAction(request.cell, DiscardBlockAction.Kind.EXTINGUISH);
             TaskState state = action.tick(context);
+            // 失败也结束这笔后台尝试，不在原生结果未知时循环点击；队列完成情况不会回写此前已经保存的丢弃回执。
             if (state != TaskState.RUNNING) { action.close(context); pending.removeFirst(); action = null; }
             return true;
         }
