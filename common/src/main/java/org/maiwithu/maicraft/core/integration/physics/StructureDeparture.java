@@ -80,10 +80,14 @@ public final class StructureDeparture implements TransportSession {
     }
 
     private static boolean quiet(SableStructureBridge.Structure ship, Vec3 feet) {
-        if (ship == null || ship.pose() == null || ship.lastPose() == null) return false;
-        Vec3 local = ship.pose().toStorage(feet);
-        return ship.pose().normalToWorld(new Vec3(0,1,0)).y > .98
-                && ship.pose().toWorld(local).distanceTo(ship.lastPose().toWorld(local)) < .02;
+        return ship != null && quiet(ship.pose(), ship.lastPose(), feet);
+    }
+    static boolean quiet(StructurePose current, StructurePose previous, Vec3 feet) {
+        if (current == null || previous == null) return false;
+        // 拆轮维修时机身可能倾斜但脚下已稳定；倾角不能阻止搜索出口，实际台阶、落差和低顶仍由完整碰撞路径核验。
+        // 保留脚位在两次姿态间的位移检查，旋转中的长翼尖也不能仅因质心未移动就被当成静止甲板。
+        Vec3 local = current.toStorage(feet);
+        return current.toWorld(local).distanceTo(previous.toWorld(local)) < .02;
     }
     private record Geometry(List<AABB> boxes,List<AABB> forbidden) {}
     // 潜行途中仍使用固定的站立尺寸检查是否已可起身，不能把当前较矮的身体误当成站立净空。

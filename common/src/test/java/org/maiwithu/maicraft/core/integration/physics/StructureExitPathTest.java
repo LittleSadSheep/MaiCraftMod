@@ -28,6 +28,15 @@ public final class StructureExitPathTest {
         check(StructureExitPath.posture(cabin,List.of(),new Vec3(1.2,0,0),outside,.64,1.84,1.54)==StructureExitPath.Posture.STANDING,"走出低顶后必须恢复站立以离开边缘");
         check(StructureExitPath.posture(List.of(ground,lowSeat,new AABB(-1,2.7,-1,1,4,1)),List.of(),seatedFeet,outside,.64,1.84,1.54)==StructureExitPath.Posture.BLOCKED,"蹲姿仍撞头时保留原生阻挡");
         check(StructureDeparture.toward(new Vec3(1,0,0),90,true).sneaking(),"规划的蹲姿必须进入实际移动按键");
+        // 临时拆轮后的固定翼侧倾约十三度；已接触稳定甲板的角色仍应进入真实出口搜索。
+        double roll = Math.toRadians(15) / 2;
+        var tilted = new StructurePose(Vec3.ZERO,0,0,Math.sin(roll),Math.cos(roll),Vec3.ZERO,new Vec3(1,1,1));
+        check(StructureDeparture.quiet(tilted,tilted,new Vec3(2,1,0)),"静止倾斜不等于甲板在移动");
+        var translating = new StructurePose(new Vec3(.05,0,0),0,0,Math.sin(roll),Math.cos(roll),Vec3.ZERO,new Vec3(1,1,1));
+        check(!StructureDeparture.quiet(translating,tilted,new Vec3(2,1,0)),"快速平移不能进入步行离艇");
+        var rotating = new StructurePose(Vec3.ZERO,0,0,Math.sin(roll+.02),Math.cos(roll+.02),Vec3.ZERO,new Vec3(1,1,1));
+        check(!StructureDeparture.quiet(rotating,tilted,new Vec3(6,1,0)),"翼尖转动也要按实际脚位位移判断");
+        check(!StructureDeparture.quiet(tilted,null,start),"缺少前一姿态仍不能声称甲板静止");
         // 角色还在看向控制台时，移动仍沿出口方向，镜头旋转不能把第一步带到车头另一侧。
         for (float yaw : new float[]{0,45,90,180,-135}) {
             var command = StructureDeparture.toward(new Vec3(-1,0,-1),yaw);
