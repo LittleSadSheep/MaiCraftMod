@@ -268,7 +268,8 @@ final class SemanticBuildSupplyCompanionTask
             latest.put("timed_out", result.timedOut() || terminal == TaskState.TIMEOUT);
             latest.put("interrupted", result.interrupted()); finalBuildData = Map.copyOf(latest);
         }
-        // 原生放置偏移已由子任务确认；终结本轮动作并交还设计差异，不能再按“原格缺料”自动开新一批。
+        // 原生放置偏移已由子任务确认；本轮可以动作完成而 goal_satisfied=false，交还整图差异后由 LLM 决定修改。
+        // 不能再把已经消费物品的这次放置当作“原格缺料”自动开新一批，其他尚未确认的失败仍走后面的恢复分支。
         if(nativePlacementDeviation(terminal,result)) {nativePlacementDeviation=true;return TaskState.SUCCESS;}
         batchVerified = batchCompleted(terminal, result) && !buildOutcomeUncertain;
         if (batchVerified && allMatched() && !activePlan.hasTrackedScaffolds()) return TaskState.RUNNING;

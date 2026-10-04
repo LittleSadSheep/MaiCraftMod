@@ -495,6 +495,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState finishPreflight() {
         // 全场加载后先检查明确保护和原生破坏条件，再执行声明范围内的拆换；旧部件类型不另设清障准入。
+        // 普通建筑仍携带 replaceMode 和方块实体策略，清障调查会据此阻塞；不能把“不查白名单”解释成所有旧开关已移除。
         if (clearanceSurvey == null) clearanceSurvey = BuildClearanceSurvey.forPlan(player, r, inheritedProtectedMutationCells);
         if (!clearanceSurvey.advance(512)) return TaskState.RUNNING;
         if (clearanceSurvey.blocked()) {
@@ -1974,6 +1975,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState verifyTick() {
         // 分刻重读每一格。发现变化会尝试有限修补；同一批错误状态重复出现时失败，而不是永远拆建循环。
+        // 这是当前通用建造器的目标核验分支，失败前已有的放置和破坏仍保留；原生动作是否确认需看各自回执。
         int budget = PREFLIGHT_BUDGET;
         while (verifyAt < r.targets.size() && budget-- > 0) {
             BuildTaskRecord.Target target = r.targets.get(verifyAt);
@@ -2696,6 +2698,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     }
 
     @Override public void stop(LocalPlayer companion, StopReason why) {
+        // 抢占保留可续作的内存阶段，换任务或失去身体则停止原生操作；任何一种停止都不会撤销已建方块。
         if (departure != null) { departure.cancel(player); departure = null; }
         if (wrenchRemoval != null) { if (why == StopReason.PREEMPTED) wrenchRemoval.pause(); else wrenchRemoval.stop(); }
         if (scaffoldAccess != null) { scaffoldAccess.stop(); BuildPlacementRegistry.unregister(player, scaffoldAccess.provider()); }

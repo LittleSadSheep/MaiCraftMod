@@ -37,7 +37,8 @@ final class BuildDesignAdapter {
                 ? BuildProjectTargets.decode(args.getAsJsonArray("project_targets"))
                 : BuildTool.resolvedTargets(args.getAsJsonArray("ops")))
                 .forEach(target -> cells.put(target.pos(), target.desiredState()));
-        // 展开到最终每一格的状态，用于显示蓝图；这里没有把这些格子提交给施工任务。
+        // 冻结项目只展开到预览状态，不创建施工子任务；此分支没有场景预览的逐格已加载/高度检查。
+        // 发布成功只表示预览会话已建立，不能据此推断远处目标已加载、可达或已经建好。
         var session = PreviewSession.design("design-" + UUID.randomUUID(),
                 player.level().dimension().location().toString(), goal.outcome(), cells);
         if (!publish.test(session)) return new IntentAction.Report(TaskResult.fail(

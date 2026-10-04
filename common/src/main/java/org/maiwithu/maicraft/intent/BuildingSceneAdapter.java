@@ -32,7 +32,8 @@ import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * 把创建、编辑、查看、导出、预览和施工这些模型操作接到各自实现。只有 operation=build 会返回真正的建筑任务。
+ * 把创建、编辑、查看、导出、预览和施工接到同一份作者模型。保存和导出会写资料，只有 build 返回身体施工任务。
+ * 模型保存成功、预览显示成功和世界里建造完成是三份不同事实，不能拿 scene_id 或蓝图画面当施工回执。
  */
 final class BuildingSceneAdapter {
     private static final Gson GSON = new Gson();
@@ -114,6 +115,7 @@ final class BuildingSceneAdapter {
                             "retained_scaffolds", revision.retainedScaffolds())), null);
         }
         if (op.equals("update_scene")) entry = store.updatePrepared(entry.sceneId(), dimension, prepared);
+        // 带 scene 的预览也先保存已编译版本；之后若现场未加载导致显示失败，已经保存的设计不会回滚。
         if (entry == null && prepared != null) entry = store.savePrepared(prepared, anchor);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("construction_started", false);
@@ -179,7 +181,8 @@ final class BuildingSceneAdapter {
                     + BuildingBudgets.current().maxTargets()
                     + " in config/maicraft-building.properties");
         JsonObject args = new JsonObject(); args.add("ops", ops);
-        // 模型保持明确材料与精确状态；允许分批备料，默认不替换已有方块。specified 只固定材质，实际取材按 ordinary 策略执行。
+        // 普通建筑保留作者材料并交给供料父任务分批施工；specified 在这里转为 ordinary，不允许换成近似材质。
+        // 当前普通入口仍把省略的 replace_existing 写成 false；声明范围授权并未在此自动打开旧替换开关。
         args.addProperty("exact_states", true);
         args.addProperty("replace_existing", parameters.has("replace_existing") && parameters.get("replace_existing").getAsBoolean());
         args.addProperty("allow_partial", true);

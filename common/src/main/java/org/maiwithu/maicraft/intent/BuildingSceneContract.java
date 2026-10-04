@@ -11,7 +11,8 @@ import java.util.UUID;
 import org.maiwithu.maicraft.core.blueprint.BuildingSceneStore;
 
 /**
- * 定义建模操作的输入规则，它们仍属于 build 或 design_build 的模式。design_build 只能查看和准备，不能启动施工。
+ * 定义 build 与 design_build 的作者输入；设计能力可保存、编辑和修订施工单，但不能接管角色施工。
+ * 这里只检查请求形状和模型规则；真实方块注册名、现场加载、库存与原生动作仍在执行阶段核对。
  */
 final class BuildingSceneContract {
     static final Set<String> OPERATIONS = BuildingModelContract.OPERATIONS;
@@ -39,6 +40,7 @@ final class BuildingSceneContract {
     }
 
     static void validate(Goal goal) {
+        // 来源按字段是否出现计数：写 null 不等于省略，也不能同时带原文和旧编号让执行器猜用哪份设计。
         var p = goal.parameters();
         for (String key : p.keySet()) if (!FIELDS.contains(key))
             throw new IllegalArgumentException("Explicit building models do not accept " + key

@@ -311,6 +311,7 @@ public final class BuildTool implements MaiCraftTool {
             throw new IllegalArgumentException("this call resolves to " + targets.size()
                     + " cells, exceeding " + BuildShapes.maxTotalCells() + "; configure maxTargets in config/maicraft-building.properties");
         }
+        // 这是内部工具的兼容默认值；公开模型入口会明确传入 false 或 true，不能把内部省略语义写成公开契约。
         boolean replaceExisting = parsed.replace_existing() == null || parsed.replace_existing();
         boolean allowPartial = parsed.allow_partial() != null && parsed.allow_partial();
         SemanticMaterialSupplyCoordinator.MaterialPolicy materialPolicy =
@@ -338,6 +339,7 @@ public final class BuildTool implements MaiCraftTool {
             store.bindScaffolds(plan, companion.level());
         });
         if (consume && allowPartial) {
+            // 生存批次交给父任务先查缺口、出坑取料再续建；创造直接进入原生施工，不能靠免耗材跳过点击确认。
             SemanticBuildSupplyTaskRecord
                     .ensureRegistered();
             long supplyTimeout = Math.max(timeout, 45L * 60L * 20L);

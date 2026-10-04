@@ -15,7 +15,8 @@ final class BuildProjectAdapter {
     static IntentAction plan(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         String id = goal.parameters().get("project_id").getAsString();
         try {
-            // 当前直接使用磁盘中保存的参数；新目标里的地点和 protected_labels 在此没有合并或核对。
+            // 续建沿用本世界保存的绝对目标、材料和策略；角色此刻站在哪里都不会平移旧工程。
+            // 当前上层虽可接受 target/protected_labels，本分支并不把它们合并进冻结参数；不要据此声称已更新项目。
             var arguments = BuildProjectStore.current().load(id, player.level().dimension().location().toString());
             // 机器阶段档只保存本阶段支撑身份，不能绕开整机的原生皮带、配置和验收流程当普通房屋续建。
             if (arguments.has("machine_native_stage")) throw new IllegalArgumentException(

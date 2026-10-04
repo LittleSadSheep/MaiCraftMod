@@ -691,7 +691,8 @@ final class AbilityAdapter {
     }
 
     private static IntentAction build(Goal goal, LocalPlayer player, IntentRuntime runtime) {
-        // 续建复用冻结施工单；新建筑必须由作者提供模型或蓝图，缺少设计时在模型契约处报错。
+        // 只有单独的工程引用走续建；带 operation=revise_project 的请求交给模型适配器更新冻结要求，不在这里开工。
+        // 普通续建读取原地点与材料，新地点或设计参数不能被当成对旧工程的隐式修改。
         if (goal.parameters().has("project_id") && !BuildingSceneContract.supports(goal))
             return BuildProjectAdapter.plan(goal, player, runtime);
         return BuildingSceneAdapter.adapt(goal, player, runtime);

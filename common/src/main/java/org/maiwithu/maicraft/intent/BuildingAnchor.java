@@ -8,6 +8,7 @@ final class BuildingAnchor {
     private BuildingAnchor() {}
 
     static Goal.WorldPosition resolve(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 顺序任务的 prior_result 先由 IntentTask 绑定成已确认坐标；独立设计请求不能在这里凭文字猜前一步的位置。
         Goal.SemanticTarget target = goal.target();
         if (target == null) return null;
         // 新模型以角色当前脚下、明确坐标或已记住的地标为原点；缺失地标不能退回角色身边施工。
