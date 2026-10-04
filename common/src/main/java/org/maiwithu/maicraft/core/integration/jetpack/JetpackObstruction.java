@@ -59,7 +59,10 @@ public final class JetpackObstruction {
                     if (type != null) { block(result, pos, state); return found(result, type); }
                 }
                 if (level.noCollision(player, box)) {
-                    if (!SableStructureBridge.clearBody(level, box)) {
+                    var physicalBody=JetpackRoute.physicalBody(feet,player.getBbWidth(),player.getBbHeight());
+                    if (!SableStructureBridge.clearBody(level, physicalBody)) {
+                        // 诊断使用与实际寻路相同的身体，避免修正了通行判据后仍拿旧的扩张盒解释失败。
+                        result.put("physical_body",bounds(physicalBody));
                         result.put("reason", "sable_body_collision_or_native_query_unavailable");
                         return found(result, "physical_structure_check");
                     }

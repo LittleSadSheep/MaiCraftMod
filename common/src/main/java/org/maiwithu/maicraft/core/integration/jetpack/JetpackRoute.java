@@ -269,8 +269,9 @@ public final class JetpackRoute {
                     if (!state.getFluidState().isEmpty() || hazard(state)
                             || forbidden.contains(p.asLong())) return false;
                 }
+                // 倾斜甲板会伸进额外扩张的脚边余量；物理船体按角色真实尺寸查询，不能把正常站立误判为穿模。
                 return ctx.level().noCollision(ctx.player(), box)
-                        && SableStructureBridge.clearBody(ctx.level(), box);
+                        && SableStructureBridge.clearBody(ctx.level(),physicalBody(feet,ctx.player().getBbWidth(),ctx.player().getBbHeight()));
             }
             public boolean clear(Vec3 from, Vec3 to) {
                 if(!contraptions.clearSegment(from,to,ctx.player().getBbWidth()+.16,ctx.player().getBbHeight()+.08)) return false;
@@ -298,6 +299,10 @@ public final class JetpackRoute {
                 return JetpackObstruction.inspect(ctx, forbidden, from, to);
             }
         };
+    }
+    static AABB physicalBody(Vec3 feet,double width,double height) {
+        // 与真实角色保留相同宽高，只略抬脚底避开已支撑的接触面；头顶和身体侧面仍完整参与原生碰撞。
+        return new AABB(feet.x-width/2,feet.y+.001,feet.z-width/2,feet.x+width/2,feet.y+height,feet.z+width/2);
     }
     private static boolean hazard(BlockState state) {
         return state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.CACTUS) || state.is(Blocks.SWEET_BERRY_BUSH)

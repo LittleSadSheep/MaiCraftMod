@@ -21,7 +21,18 @@ public final class JetpackSearchTest {
         closedRoom();
         templateNeedsNoGridBudget();
         incrementalGeometry();
+        slopedStructureFootprint();
         System.out.println("JetpackSearchTest: passed");
+    }
+    private static void slopedStructureFootprint() {
+        // 在约十七度的船顶上站稳时，原生脚底高度由真实身体边缘决定，扩大的规划边缘会反插入甲板。
+        Vec3 feet=new Vec3(0,10+.3*.3,0);
+        var actual=JetpackRoute.physicalBody(feet,.6,1.8);
+        var padded=new AABB(-.38,feet.y+.001,-.38,.38,feet.y+1.88,.38);
+        check(actual.minY>10+.3*actual.maxX&&padded.minY<10+.3*padded.maxX,
+                "斜面上的真实身体可离地，不能因额外八厘米边缘而认定被甲板卡住");
+        var lowRoof=new AABB(-1,feet.y+1.79,-1,1,feet.y+2,1);
+        check(actual.intersects(lowRoof),"改正脚边余量不能削掉真实头部碰撞");
     }
 
     private static void lowRoofAllowsSafeLateralDeparture() {
