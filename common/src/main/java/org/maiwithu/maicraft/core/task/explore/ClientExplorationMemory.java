@@ -88,6 +88,22 @@ public final class ClientExplorationMemory {
                 at.getX(), at.getY(), at.getZ(), reached, System.currentTimeMillis(), GSON.toJson(evidence)));
     }
 
+    /**
+     * 远望地形要素（熔岩湖等）：visited 固定为 false，远望事实不冒充到访。
+     * 返回是否为本轮真正新记录的发现，供任务进度计数；同一空间格的重复观察由确定性 id 自动合并。
+     */
+    public boolean observeTerrainFeature(String targetId, BlockPos at, Map<String, Object> evidence) {
+        if (at == null || !dimension.equals(player.level().dimension().location().toString())) return false;
+        var finding = ExplorationFinding.observed("terrain_feature", targetId, "surface lava pool", dimension,
+                at.getX(), at.getY(), at.getZ(), false, System.currentTimeMillis(), "{}");
+        if (!journal.needs(finding.id(), false) || !ObservationVisibility.block(player, at)) return false;
+        JsonObject payload = GSON.toJsonTree(evidence).getAsJsonObject();
+        payload.addProperty("authority", "visible_loaded_surface_sample");
+        journal.observe(new ExplorationFinding(finding.id(), finding.kind(), targetId, finding.name(), dimension,
+                at.getX(), at.getY(), at.getZ(), false, finding.firstSeen(), finding.lastSeen(), payload.toString()));
+        return true;
+    }
+
     public Map<String, Object> receipt() {
         journal.flush();
         Map<String, Object> result = new LinkedHashMap<>(journal.receipt());

@@ -21,8 +21,11 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
@@ -43,9 +46,12 @@ public final class SemanticExploreCompanionTask
         extends AbstractCompanionTask<SemanticExploreTaskRecord> {
 
     private enum Stage { OBSERVE, TRAVEL_TARGET, VERIFY_TARGET, TRAVEL_WAYPOINT }
-    private enum SurfaceKind { LAND, WATER, UNKNOWN }
+    // 包内可见：地表列分类的判定需要静态直测，LAVA 只进地形要素记忆，移动消费仍只有 LAND/WATER。
+    enum SurfaceKind { LAND, WATER, LAVA, UNKNOWN }
 
     private record ColumnOffset(int dx, int dz, int distanceSquared) {}
+    // 包内可见：顶块流体分类与列内深度数法由回归直接断言。
+    record FluidColumn(SurfaceKind kind, int depth) {}
     private record SurfaceInfo(
             SurfaceKind kind, BlockPos approach, BlockPos evidence, int waterDepth) {}
     private record TargetCandidate(
@@ -93,6 +99,8 @@ public final class SemanticExploreCompanionTask
     private final List<BlockPos> exploredCenters = new ArrayList<>();
     private final List<BlockPos> unloadedFrontiers = new ArrayList<>();
     private final Map<Long, SurfaceInfo> surfaceCache = new HashMap<>();
+    /** 只统计去重后真正新记录的发现；同一空间格重复扫到不会重复计数。 */
+    private final Map<String, Integer> notableFindings = new LinkedHashMap<>();
 
     private MoveToCompanionTask moveChild;
     private MoveToTaskRecord moveRecord;
@@ -230,6 +238,7 @@ public final class SemanticExploreCompanionTask
             if (biomeYIndex == 0) {
                 // 沿途可见的群系都属于跑图成果，即使它不是本次指定目标也保留到长期记忆。
                 memory.observeBiome(surfaceTravelCell(level, x, z), false);
+                noteTerrainFeature(level, x, z);
                 loadedSampleCount++;
                 observedLoadedColumns.add(BlockPos.asLong(x, 0, z));
                 observedMinX = Math.min(observedMinX, x);
@@ -254,6 +263,18 @@ public final class SemanticExploreCompanionTask
             return TaskState.RUNNING;
         }
         return startNextWaypoint(level);
+    }
+
+    /** 熔岩湖是远望地形要素：记入探索记忆但不给移动决策，只有真正新记录的发现才计入进度。 */
+    private void noteTerrainFeature(ClientLevel level, int x, int z) {
+        SurfaceInfo surface = surfaceInfo(level, x, z);
+        if (surface.kind() != SurfaceKind.LAVA) return;
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("surface_y", surface.evidence().getY());
+        evidence.put("depth", surface.waterDepth());
+        if (memory.observeTerrainFeature("lava_pool", surface.evidence(), evidence)) {
+            notableFindings.merge("lava_pool", 1, Integer::sum);
+        }
     }
 
     private TargetCandidate observeBiomeSample(
@@ -443,14 +464,10 @@ public final class SemanticExploreCompanionTask
                     level.getMaxBuildHeight() - 1);
             BlockPos top = new BlockPos(x, height - 1, z);
             BlockState topState = level.getBlockState(top);
-            if (topState.getFluidState().is(FluidTags.WATER)) {
-                int depth = 0;
-                for (int y = top.getY(); y >= level.getMinBuildHeight() && depth < 8; y--) {
-                    BlockPos water = new BlockPos(x, y, z);
-                    if (!level.getBlockState(water).getFluidState().is(FluidTags.WATER)) break;
-                    depth++;
-                }
-                result = new SurfaceInfo(SurfaceKind.WATER, null, top, depth);
+            FluidColumn fluid = fluidColumn(topState.getFluidState(),
+                    level, x, z, top, level.getMinBuildHeight());
+            if (fluid != null) {
+                result = new SurfaceInfo(fluid.kind(), null, top, fluid.depth());
             } else {
                 BlockPos approach = dryTravelCellNear(level, x, height, z, 3);
                 result = approach == null
@@ -460,6 +477,24 @@ public final class SemanticExploreCompanionTask
         }
         surfaceCache.put(key, result);
         return result;
+    }
+
+    /**
+     * 顶块带水或熔岩时按列向下数同种流体的深度（封顶 8）；MOTION_BLOCKING 高度图含流体，熔岩面与水面取到的顶面同理。
+     * 非流体顶面返回 null，由调用方走干立足点判定。
+     */
+    static FluidColumn fluidColumn(
+            FluidState topFluid, BlockGetter level, int x, int z, BlockPos top, int minY) {
+        SurfaceKind kind = topFluid.is(FluidTags.WATER) ? SurfaceKind.WATER
+                : topFluid.is(FluidTags.LAVA) ? SurfaceKind.LAVA : SurfaceKind.UNKNOWN;
+        if (kind == SurfaceKind.UNKNOWN) return null;
+        TagKey<Fluid> tag = kind == SurfaceKind.WATER ? FluidTags.WATER : FluidTags.LAVA;
+        int depth = 0;
+        for (int y = top.getY(); y >= minY && depth < 8; y--) {
+            if (!level.getBlockState(new BlockPos(x, y, z)).getFluidState().is(tag)) break;
+            depth++;
+        }
+        return new FluidColumn(kind, depth);
     }
 
     private BlockPos surfaceTravelCell(ClientLevel level, int x, int z) {
@@ -660,6 +695,7 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_failed", waypointFailed);
         data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
         data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        data.put("notable_findings", Map.copyOf(notableFindings));
         return data;
     }
 

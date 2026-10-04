@@ -24,6 +24,8 @@ public final class ExplorationRegressionSuite {
         // 飞机远望与步行搜索必须使用相同的可见结构判据。
         VisibleStructureEvidenceTest.run();
         ExplorationJournalTest.main(args);
+        TerrainFeatureMemoryTest.main(args);
+        SurfaceColumnClassificationTest.main(args);
         ExplorationMemoryStoreTest.main(args);
         McpProtocolBudgetTest.main(args);
         System.out.println("ExplorationRegressionSuite: passed");
