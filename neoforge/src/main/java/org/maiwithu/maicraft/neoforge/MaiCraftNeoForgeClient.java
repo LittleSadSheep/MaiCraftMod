@@ -15,6 +15,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.chat.ChatMonitor;
+import org.maiwithu.maicraft.client.command.MaiCraftPortCommand;
 import org.maiwithu.maicraft.client.command.MaiCraftStatus;
 import org.maiwithu.maicraft.client.debug.DebugHudController;
 import org.maiwithu.maicraft.client.debug.DebugHudRenderer;
@@ -106,11 +107,12 @@ public final class MaiCraftNeoForgeClient {
         ChatMonitor.player(senderName, senderId, event.getMessage().getString());
     }
 
-    // 本地命令只显示状态、处理预览，执行逻辑仍由公共 PreviewCommands 提供。
+    // 本地命令显示状态、搬移端口、处理预览，执行逻辑仍由公共 PreviewCommands 与命令类提供。
     private void onRegisterClientCommands(RegisterClientCommandsEvent event) {
         event.getDispatcher().register(PreviewCommands.attach(Commands.literal("maicraft")
                 .then(Commands.literal("status").executes(context ->
-                        MaiCraftStatus.showInChat()))));
+                        MaiCraftStatus.showInChat()))
+                .then(MaiCraftPortCommand.node())));
     }
 
     // 退出时停止运行时与相关服务，避免继续保留玩家控制和监听。
