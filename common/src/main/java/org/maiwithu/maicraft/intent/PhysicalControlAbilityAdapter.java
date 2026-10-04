@@ -23,7 +23,7 @@ final class PhysicalControlAbilityAdapter {
     }
     static JsonObject contract() {
         // 能力列表也公开航空配置入口，模型无需先猜操作名才能发现供气旋钮和螺旋桨成型流程。
-        var out=new JsonObject();out.addProperty("summary","配置并操作物理部件：电机转速、油门信号、无线收发频率、热气容量、轮胎取放、螺旋桨组装/拆回，以及按结构实时位置手摇供能。使用真实走位、命中、物品与原生协议，配置结果和载具运行验证分别返回。");
+        var out=new JsonObject();out.addProperty("summary","配置并操作物理部件：电机转速、油门信号、无线频率、打字机配键与有限保持/松键、弹簧舵角、热气容量、轮胎取放、螺旋桨组装/拆回与手摇供能。可采样按键期间的收端和舵角；配置、原生输入和实际载具运动分别返回。");
         var targets=new JsonArray();for(String kind:new String[]{"coordinates","landmark","area","current_place"})targets.add(kind);out.add("accepted_target_kinds",targets);
         out.add("accepted_preferences",new JsonObject());out.add("accepted_hard_constraints",new JsonArray());
         var fields=new JsonObject();
@@ -46,7 +46,7 @@ final class PhysicalControlAbilityAdapter {
         field(fields,"receiver","boolean","Required only for set_link_mode: true receives, false transmits. Native wrench toggles only if actual mode differs.");
         field(fields,"frequency_items","array<string>","Required for set_frequency or bind_typewriter_key: two ordered real carried/supplied item IDs, preserving actual color identity. Links use native frequency-slot right clicks; typewriter uses the native save request with all prior keys retained. minecraft:air clears a link slot; two air items remove the specified typewriter key. No inventory or NBT injection.");
         out.add("parameters",fields);
-        out.addProperty("execution_boundary","inspect is read-only. Settings are configured before departure; explicit throttle and crank operation may control a moving structure. Missing confirmation never causes input replay. Native operation facts, current configuration and full registered-block diff are separate.");
+        out.addProperty("execution_boundary","inspect is read-only. Settings and key bindings are configured before departure; explicit throttle, crank and bounded typewriter-key operation may control a moving structure. Missing confirmation never causes input replay. Native operation facts, current configuration and full registered-block diff are separate.");
         return out;
     }
     private static void field(JsonObject fields,String name,String type,String description) {

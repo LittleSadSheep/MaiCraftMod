@@ -111,6 +111,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // 移动威胁由追踪目标持续重检；每秒只检查是否真的失去进展，不能周期性拆掉正在执行的逃生路径。
     private static final int FLEE_REPLAN_TICKS = 20;
+    /** 拴着的自卫里，目标在这么多刻内打中过她就仍算压着她打，越过追击绳也要还手追过去。 */
+    private static final long LEASH_PRESSING_TICKS = 60;
 
     private Phase phase = Phase.COMBAT;
     private boolean defendingDuringLoot;
@@ -815,6 +817,8 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     private boolean correctArrivedStance(PlayerNav.Status status) {
         if (pvpTarget() && !PvpTactics.attackReady(player, (Player) target)) return false;
+        // 拴住时不往绳外的目标身上挪，站位修正同样受追击绳约束。
+        if (leashHolds()) return false;
         // Baritone 的到达只证明脚格合格；真实身体站在远侧格边时，先安全挪向该格中心再交给原生攻击检查。
         if (status != PlayerNav.Status.ARRIVED || bowFighting || target == null || !player.onGround()
                 || player.distanceTo(target) <= reachToTarget()) return false;
@@ -892,6 +896,11 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             return null;
         }
         logStandoff(field);
+        // 目标已跑出追击绳、最近三秒又没再打中她：不追过去，只像没有目标时那样避开危险半径原地等，
+        // 它回到绳内或再动手时照常接战，没人再追她时这场仗自然结束，自卫随后带她回工位。
+        if (haveTarget && leashHolds()) {
+            return field.isEmpty() ? null : NavGoal.avoid(Menace.AVOID_PENALTY, Menace.field(player, field));
+        }
         if (!haveTarget) {
             // <b>没有目标也照样走位</b>:环退化成"离每一只都出了它的危险半径"。
             // 场上只剩一只点着的爬行者(她没弓打不了)时走的就是这一支 —— 退开等引信熄,
@@ -922,6 +931,13 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                         : Menace.field(player, field));
         return bowFighting ? stance : stanceRecovery.filter(stance);
         // 弓那一套的内沿对<b>每一只</b>都成立:她要跟所有怪保持五格,不只是当前目标。
+    }
+
+    // 只拴自卫：目标在绳外、且最近没再打中她时才拴住；撤退与躲爆炸走各自的分支，从不受绳子限制。
+    private boolean leashHolds() {
+        return r.indiscriminate && target instanceof LivingEntity living && !living.isRemoved()
+                && r.beyondLeash(living.position())
+                && !CombatThreats.hitWithin(player, living, LEASH_PRESSING_TICKS);
     }
 
     /** 站位日志只在数字真的变了时打一行——每 tick 一行会把别的全冲掉。 */

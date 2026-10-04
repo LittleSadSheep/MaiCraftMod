@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.server.machine.ae2.TransformProductionCapture;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 import org.maiwithu.maicraft.server.physics.PhysicsSnapshotService;
 import org.maiwithu.maicraft.server.physics.PhysicsAssemblyService;
+import org.maiwithu.maicraft.server.physics.PhysicsFlightStateService;
 
 /** 公共加载器引导入口；每个已公布操作都有可调用的权威实现。 */
 public final class ServerMachineOperations {
@@ -27,8 +28,11 @@ public final class ServerMachineOperations {
     public static synchronized void register() {
         if (registered) return;
         // 起飞前分析通过只读物理快照读取原生质量和受力，不借观察请求启动推进器。
-        if (NativeApi.present("dev.ryanhcode.sable.sublevel.ServerSubLevel"))
+        if (NativeApi.present("dev.ryanhcode.sable.sublevel.ServerSubLevel")) {
             ServerOperationRegistry.register("physics.snapshot", 1, false, PhysicsSnapshotService::inspect);
+            // 持续驾驶只读取实测姿态和接地，避免每刻为飞控重新计算一套起飞前候选模型。
+            ServerOperationRegistry.register("physics.flight_state",1,false,PhysicsFlightStateService::inspect);
+        }
         // 请求只登记/读取原生组装观察；改变世界仍须由玩家操作发送 Simulated 自己的请求。
         if(NativeApi.present("dev.simulated_team.simulated.content.blocks.physics_assembler.PhysicsAssemblerBlockEntity"))
             ServerOperationRegistry.register("physics.assembly",1,false,PhysicsAssemblyService::inspect);

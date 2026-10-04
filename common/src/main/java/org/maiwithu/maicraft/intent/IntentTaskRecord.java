@@ -52,6 +52,8 @@ public final class IntentTaskRecord extends TaskRecord {
     private Runnable dirty = () -> {};
     /** 只保存最近一次观察的诊断副本；不持有世界对象，也不把旧进度当成重启后的现场事实。 */
     private JsonObject activeExecution;
+    /** 自卫插曲账：每次自卫接管期间的工位、实际位移和回位结果；只在本进程内保留，重启恢复的任务从空账开始。 */
+    private final List<JsonObject> selfDefenseExcursions = new ArrayList<>();
 
     public IntentTaskRecord(UUID externalId, UUID planId, Goal goal) {
         this(externalId, planId, goal, null);
@@ -192,6 +194,19 @@ public final class IntentTaskRecord extends TaskRecord {
             current.addProperty("survival_reflexes_suppressed", false);
         PROGRESS_JSON.toJsonTree(review).getAsJsonObject().entrySet().forEach(entry -> current.add(entry.getKey(), entry.getValue()));
         return current;
+    }
+
+    // 自卫结束（打完、走回工位或回位失败）时由自卫链记一笔；任务已结束就不再改写它的终态回执。
+    public void recordSelfDefenseExcursion(JsonObject excursion) {
+        if (excursion == null || getState().isTerminal()) return;
+        selfDefenseExcursions.add(excursion.deepCopy());
+    }
+
+    // 任务查询和最终回执原样交付全部插曲，模型不翻事件流也能知道角色曾被带离工位多远、有没有走回。
+    public JsonArray selfDefenseExcursions() {
+        JsonArray copy = new JsonArray();
+        selfDefenseExcursions.forEach(excursion -> copy.add(excursion.deepCopy()));
+        return copy;
     }
 
     void observeExecution(Map<String, Object> progress, long gameTime) {

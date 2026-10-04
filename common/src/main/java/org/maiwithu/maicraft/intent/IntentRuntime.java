@@ -747,6 +747,24 @@ public final class IntentRuntime {
         if (record.resume()) resumed(record);
     }
 
+    /**
+     * 自卫把角色带离工位又没能走回去时，只暂停仍在当前槽执行的那份被打断任务，附上工位、现位置与回位经过；
+     * 模型已暂停、替换或结束的任务不动。这里不替模型决定下一步，继续后从当前位置接着做。
+     */
+    public boolean selfDefenseDisplaced(IntentTaskRecord record, long gameTime, JsonObject facts) {
+        if (record == null || CompanionTickDispatcher.current() != record
+                || record.getState().isTerminal() || record.pauseSnapshot() != null) {
+            return false;
+        }
+        if (!record.pause(gameTime, "self_defense_displaced")) return false;
+        markDirty();
+        publish("paused", record,
+                "Task paused: self-defense moved the agent away from the work site and it did not walk back; "
+                        + "resuming continues from the current position.",
+                facts == null ? new JsonObject() : facts);
+        return true;
+    }
+
     void validateGoal(Goal goal) {
         SemanticGoalContract.validate(goal, KNOWN_ABILITIES);
         IntentStateCodec.requirePersistableGoal(goal);

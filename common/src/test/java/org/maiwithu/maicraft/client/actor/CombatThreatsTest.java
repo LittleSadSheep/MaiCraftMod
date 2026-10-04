@@ -53,6 +53,8 @@ public final class CombatThreatsTest {
         // 低血猎食必须真的走到原生出手；敌对与中途反击仍保留撤离约束。
         LowHealthHuntTest.main(args);
         MobDefenseDamageTest.main(args);
+        // 自卫接管与收尾的通知、任务账必须带上工位与位移，模型才知道角色被带离了原工作。
+        DefenseExcursionTest.main(args);
         BreathDefenseTest.main(args); // 低氧抢占后仍能打退近处溺尸，游泳路线和原生攻击门控保持有效。
         CreeperDefenseTest.main(args);
         CombatOutcomeTest.main(args);
