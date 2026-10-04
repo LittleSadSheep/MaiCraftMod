@@ -874,7 +874,7 @@ public final class GeneralAbilityAdapter {
             return decision(goal, choices.isEmpty()
                             ? "There is no food in the inventory."
                             : "Only foods with effects are available; the safe-food policy will not choose one silently.",
-                    List.of(option("recover", "Acquire ordinary effect-free food, then retry."),
+                    List.of(option("recover", "Acquire ordinary effect-free food, then retry. When starving and blocked from acquiring, consider the maicraft:suicide death reset (keepInventory confirmed) or travel to a known food point."),
                             option("retry", "Name a specific food and set allow_effects=true if its effects are intended."),
                             option("cancel", "Cancel consumption.")), facts);
         }
