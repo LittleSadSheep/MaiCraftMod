@@ -21,6 +21,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -155,6 +157,26 @@ public final class EmbeddedBaritoneRuntime {
             result.put("to", movement.getDest().toShortString());
         }
         result.put("input", backend.getInputOverrideHandler().isInputForcedDown(Input.MOVE_FORWARD));
+        // 施工导航原地等待时交付实际手持、按键和准星，区分身体碰撞、选料等待与放块被拒。
+        var inputs = new LinkedHashMap<String, Boolean>();
+        for (Input input : Input.values())
+            inputs.put(input.name(), backend.getInputOverrideHandler().isInputForcedDown(input));
+        result.put("inputs", inputs);
+        var context = backend.getPlayerContext();
+        var player = context.player();
+        if (player != null) {
+            result.put("main_hand", BuiltInRegistries.ITEM.getKey(player.getMainHandItem().getItem()).toString());
+            result.put("selected_slot", player.getInventory().selected);
+            var hit = context.objectMouseOver();
+            if (hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK) {
+                var clicked = blockHit.getBlockPos();
+                result.put("block_aim", Map.of("position", clicked.toShortString(),
+                        "face", blockHit.getDirection().getSerializedName(),
+                        "state", context.world().getBlockState(clicked).toString(),
+                        "protected", EmbeddedBaritonePolicy.protects(clicked)));
+            }
+        }
+        result.put("native_action_bridge", ACTIONS.diagnostics());
         return result;
     }
 

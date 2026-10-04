@@ -8,6 +8,7 @@ import baritone.utils.InputOverrideHandler;
 import baritone.utils.accessor.IPlayerControllerMP;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
@@ -53,7 +54,15 @@ final class EmbeddedBaritoneActionBridge {
     private int rightClickCooldown;
     private boolean stopBreakingRequested;
     private final BreakProgress breakProgress = new BreakProgress();
+    private String actionPhase = "idle";
     boolean pending() { return receipt != null; }
+
+    // 保留本刻最后一个原生动作关口，让上层能看清导航为何还没有提交点击。
+    Map<String, Object> diagnostics() {
+        return Map.of("phase", actionPhase, "pending", receipt != null,
+                "kind", pendingKind == null ? "none" : pendingKind.name(),
+                "right_click_cooldown", rightClickCooldown);
+    }
 
     void tick(
             LocalPlayerContext context,
@@ -94,6 +103,8 @@ final class EmbeddedBaritoneActionBridge {
 
         boolean left = input.isInputForcedDown(Input.CLICK_LEFT);
         boolean right = input.isInputForcedDown(Input.CLICK_RIGHT) && !left;
+        actionPhase = receipt != null ? "awaiting_receipt" : !context.mutationAvailable()
+                ? "awaiting_mutation_slot" : left ? "break_requested" : right ? "use_requested" : "no_click_requested";
         if (receipt != null) {
             if (pendingKind == PendingKind.BREAK) {
                 continueOrCancelBreak(context, left);
@@ -260,10 +271,11 @@ final class EmbeddedBaritoneActionBridge {
             LocalPlayerContext context,
             EmbeddedBaritoneNavigator navigator,
             boolean sneakRequested) {
-        if (context.player().isHandsBusy()) return;
+        if (context.player().isHandsBusy()) { actionPhase = "hands_busy"; return; }
         HitResult trace = navigator.objectMouseOver();
         if (!(trace instanceof BlockHitResult hit)
                 || trace.getType() != HitResult.Type.BLOCK) {
+            actionPhase = "no_block_hit";
             return;
         }
         BlockPos clicked = hit.getBlockPos().immutable();
@@ -293,19 +305,22 @@ final class EmbeddedBaritoneActionBridge {
         if (!terrainItem
                 || navigator.permit() != TerrainPermit.TERRAFORM
                 || !BaritoneAPI.getSettings().allowPlace.value) {
+            actionPhase = !terrainItem ? "held_item_not_block" : "terrain_placement_disabled";
             return;
         }
-        if (!BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) return;
+        if (!BuildPlacementRegistry.scaffoldUseAllowed(context.player(), held)) { actionPhase = "scaffold_material_reserved"; return; }
         BlockPos actual = placementCell(clicked, clickedState, hit);
         // 放支撑会覆盖草、雪等软方块，原生点击前对实际落块格重查名单，名单外格直接交回绕行。
-        if (!ClearanceWhitelist.allows(context.level().getBlockState(actual))) { navigator.rejectedClearance(actual); return; }
-        if (!navigator.permitsTemporaryScaffold(actual)) { navigator.rejectedTemporaryScaffold(actual); return; }
+        if (!ClearanceWhitelist.allows(context.level().getBlockState(actual))) { actionPhase = "placement_clearance_rejected"; navigator.rejectedClearance(actual); return; }
+        if (!navigator.permitsTemporaryScaffold(actual)) { actionPhase = "scaffold_cell_rejected"; navigator.rejectedTemporaryScaffold(actual); return; }
         boolean protectedSupport = EmbeddedBaritonePolicy.protects(clicked);
         if (EmbeddedBaritonePolicy.protects(actual) || protectedSupport
                 && (!context.player().isSecondaryUseActive() || actual.equals(clicked)
                 || !navigator.permitsScaffoldSupport(clicked, actual, clickedState))) {
+            actionPhase = "protected_placement_or_support";
             return;
         }
+        actionPhase = "submitting_scaffold";
         BlockState actualBefore = context.level().getBlockState(actual);
         submitBlockUse(context, navigator, hand, hit, clicked, clickedState,
                 actual, actualBefore, true, protectedSupport);
