@@ -255,6 +255,11 @@ public final class MobDefenseChain implements Task, Reflex {
         return ID;
     }
 
+    @Override
+    public String describeCurrentAction() {
+        return "受到威胁，正在自卫战斗或撤离";
+    }
+
     // ---- 自卫链登记信息：供本能任务表稳定识别此链并向调度器提供说明 ----
 
     @Override

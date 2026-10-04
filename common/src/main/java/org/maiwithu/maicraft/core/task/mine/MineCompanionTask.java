@@ -1468,6 +1468,20 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return data;
     }
 
+    /** 面板行动行的一句话汇报；方块名用客户端本地化名称，坐标是正在交互的已确认事实。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (currentPhase()) {
+            case "digging" -> activeTarget != null
+                    ? "正在挖掘 " + player.level().getBlockState(activeTarget).getBlock().getName().getString()
+                            + " (" + activeTarget.getX() + "," + activeTarget.getY() + "," + activeTarget.getZ() + ")"
+                    : "正在连锁挖掘矿脉";
+            case "collecting_drops" -> "正在收集掉落物";
+            case "querying_sources" -> "正在查找矿源";
+            default -> "正在前往矿源";
+        };
+    }
+
     /** 最近矿物的日志描述使用 ASCII，避免编码问题，例如 "316,64,391 minecraft:oak_log dy=+0 dist=1.0" 或 "none"。
      *  dy 是矿物高度减脚位高度，可区分“高四格，需要垫高”和“同高”；方块 ID 用于发现误处理的藤蔓、树叶等类型。 */
     private String nearestOreInfo() {

@@ -995,6 +995,12 @@ final class IntentTask implements Task {
     }
 
     @Override
+    public String describeCurrentAction() {
+        // 语义任务不自己说话：此刻在干什么由一线子任务汇报。
+        return child == null ? null : child.describeCurrentAction();
+    }
+
+    @Override
     public Map<String, Object> progress() {
         Map<String, Object> progress = new LinkedHashMap<>(child != null ? SemanticResultView.data(child.progress())
                 : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"

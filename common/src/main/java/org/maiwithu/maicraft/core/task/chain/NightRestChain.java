@@ -158,5 +158,6 @@ public final class NightRestChain implements Task, Reflex {
     }
     @Override public String name() { return "NightRestChain"; }
     @Override public String id() { return ID; }
+    @Override public String describeCurrentAction() { return "夜间休息中，醒后返回原工位"; }
     @Override public String describe() { return "普通工作夜间有安全床可用时自动休息，醒后返回原工位；紧急自救优先。"; }
 }

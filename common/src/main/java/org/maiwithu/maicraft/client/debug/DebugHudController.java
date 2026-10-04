@@ -151,22 +151,20 @@ public final class DebugHudController {
             appendLatestTerminalIssue(rows);
             // 没有语义任务时反射（进食、休息、自救）仍可能占用身体；这种错位值得单独看见。
             CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
-            if (action != null) {
-                rows.add(new Row("动作", actionValue(action), ChatFormatting.AQUA));
+            if (action != null && action.currentAction() != null) {
+                rows.add(new Row("行动", clamp(action.currentAction()), actionColor(action)));
             }
         } else {
-            // 单步目标的"步骤 1/1"没有信息量，只在清单有多步时报进度；"步骤"一词留给语义清单专用。
-            int total = active.steps().size();
-            String progress = total > 1
-                    ? " · 步骤 " + Math.min(active.stepIndex() + 1, total) + "/" + total : "";
             // 尝试次数与排队数并入任务行，不单列；重试循环和积压都该在这行一眼看到。
-            rows.add(new Row("任务", taskTitle(active) + progress
+            rows.add(new Row("任务", taskTitle(active)
                             + (active.attempts().isEmpty() ? "" : " · 尝试 " + active.attempts().size())
                             + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
                     ChatFormatting.AQUA));
-            rows.add(new Row("动作", actionText(), ChatFormatting.AQUA));
             // 等了多久和等什么同样重要：等 5 秒是在等模型，等 5 分钟大概率是卡死。
             long nowGameTime = minecraft.level == null ? 0 : minecraft.level.getGameTime();
+            CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
+            appendMilestoneRow(rows, active, action);
+            appendActionRow(rows, action);
             if (active.decisionSnapshot() != null) {
                 appendDecisionRows(rows, active, nowGameTime);
             } else if (active.pauseSnapshot() != null) {
@@ -178,6 +176,31 @@ public final class DebugHudController {
                 rows.add(new Row("最近问题", repeatSummary(active.attempts()), ChatFormatting.RED));
             }
         }
+    }
+
+    // 进度行汇报任务单上的持久里程碑：目标计数来自当前干活者的任务单，步骤进度来自总任务单。
+    // 都缺失显示"无"——缺口可见，催促对应执行器补齐汇报，不在这里编造退路。
+    private static void appendMilestoneRow(List<Row> rows, IntentTaskRecord active,
+                                           CompanionTickDispatcher.BodyAction action) {
+        Map<String, Object> milestones = action == null ? Map.of() : action.milestones();
+        List<String> parts = new ArrayList<>();
+        if (milestones.get("done") instanceof Number done && milestones.get("total") instanceof Number total) {
+            parts.add(done.intValue() + "/" + total.intValue());
+        }
+        int steps = active.steps().size();
+        if (steps > 1) parts.add("步骤 " + Math.min(active.stepIndex() + 1, steps) + "/" + steps);
+        rows.add(new Row("进度", parts.isEmpty() ? "无" : String.join(" · ", parts), ChatFormatting.AQUA));
+    }
+
+    // 行动行回答"这一刻身体在干什么"：执行器或反射自答的一句话，缺则"无"。
+    // 反射自救时整行黄色——身体换了主人，行动内容与任务无关。
+    private static void appendActionRow(List<Row> rows, CompanionTickDispatcher.BodyAction action) {
+        String sentence = action == null || action.currentAction() == null ? "无" : clamp(action.currentAction());
+        rows.add(new Row("行动", sentence, actionColor(action)));
+    }
+
+    private static ChatFormatting actionColor(CompanionTickDispatcher.BodyAction action) {
+        return action != null && action.reflex() ? ChatFormatting.YELLOW : ChatFormatting.AQUA;
     }
 
     // 任务列表页回答"这段时间它都干了什么"：与 MCP task list 同源，含最近的终态记录。
@@ -291,49 +314,6 @@ public final class DebugHudController {
     // 任务行以标题为主体：能力短名加目标陈述，状态前缀只标注它此刻在等什么。
     private static String taskTitle(IntentTaskRecord record) {
         return statePrefix(record) + " · " + abilityTitle(record.goal());
-    }
-
-    // 动作行回答"此刻在做什么"：有阶段名只显示阶段，阶段缺失退回任务单短描述；不复读任务行的目标全文。
-    // 原语层证据（操作对象坐标、计数）追加在阶段之后，格式化失败或键缺失时静默跳过。
-    private static String actionText() {
-        CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
-        return action == null ? "无" : actionValue(action);
-    }
-
-    private static String actionValue(CompanionTickDispatcher.BodyAction action) {
-        String primitive = primitiveText(action.primitives());
-        String base = action.phase() != null ? action.phase() : clamp(action.describe());
-        if (primitive.isEmpty()) return base;
-        String joined = base + " · " + primitive;
-        if (joined.length() <= TEXT_LIMIT) return joined;
-        // 原语部分拼在截断之外优先保全：主体按剩余额度截断，坐标与计数始终完整可读。
-        int baseLimit = TEXT_LIMIT - primitive.length() - 4;   // " · " 分隔符加省略号
-        if (baseLimit < 1) return clamp(primitive);
-        return clamp(base, baseLimit) + " · " + primitive;
-    }
-
-    /** 原语键的中文短句：坐标与方块 id 是正在交互的对象，done/total 是仓库统一计数键。 */
-    private static String primitiveText(Map<String, Object> primitives) {
-        if (primitives == null || primitives.isEmpty()) return "";
-        StringBuilder text = new StringBuilder();
-        Object pos = primitives.get("target_pos");
-        if (pos instanceof List<?> xyz && xyz.size() == 3) {
-            text.append("目标 (").append(xyz.get(0)).append(",").append(xyz.get(1))
-                    .append(",").append(xyz.get(2)).append(")");
-            Object block = primitives.get("target_block");
-            if (block != null) text.append(" ").append(block);
-        } else {
-            Object block = primitives.get("target_block");
-            if (block != null) text.append("目标 ").append(block);
-        }
-        Object done = primitives.get("done");
-        Object total = primitives.get("total");
-        if (done instanceof Number doneCount && total instanceof Number totalCount
-                && totalCount.intValue() > 0) {
-            if (text.length() > 0) text.append(" · ");
-            text.append(doneCount.intValue()).append("/").append(totalCount.intValue());
-        }
-        return text.toString();
     }
 
     private static String abilityTitle(Goal goal) {

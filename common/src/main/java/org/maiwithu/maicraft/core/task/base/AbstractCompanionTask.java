@@ -310,4 +310,10 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         return child == null ? Map.of("task", name())
                 : Map.of("task", name(), "child", child.progress());
     }
+
+    /** 面板行动行默认透传一线子任务的自述；自己有话说的执行器覆盖本方法。 */
+    @Override
+    public String describeCurrentAction() {
+        return child == null ? null : child.describeCurrentAction();
+    }
 }

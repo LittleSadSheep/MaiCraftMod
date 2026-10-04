@@ -217,6 +217,11 @@ public final class BreathChain implements Task, Reflex {
         return "breath";
     }
 
+    @Override
+    public String describeCurrentAction() {
+        return "氧气不足，正在上浮换气";
+    }
+
     // ---- 反射链登记信息（章程 §6）----
 
     @Override
