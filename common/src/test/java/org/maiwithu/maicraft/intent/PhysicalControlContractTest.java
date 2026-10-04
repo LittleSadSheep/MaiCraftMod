@@ -21,6 +21,17 @@ public final class PhysicalControlContractTest {
             var frequency=json("{\"operation\":\"set_frequency\",\"frequency_items\":[\"minecraft:iron_ingot\",\"minecraft:redstone\"]}");
             SemanticGoalContract.validate(goal(worldTarget,frequency),IntentRuntime.KNOWN_ABILITIES);
             check(PhysicalControlParameters.parse(frequency).frequencyItems().equals(List.of("minecraft:iron_ingot","minecraft:redstone")),"无线频率顺序被改写");
+            // 轮胎配置必须明确安装种类或空手拆除；不能把物品字段附到普通旋钮操作上。
+            for(String item:List.of("offroad:small_tire","minecraft:air")) {
+                var tire=json("{\"operation\":\"set_tire\",\"item_id\":\""+item+"\"}");
+                SemanticGoalContract.validate(goal(worldTarget,tire),IntentRuntime.KNOWN_ABILITIES);
+                check(PhysicalControlParameters.parse(tire).itemId().equals(item),"明确轮胎种类在解析中丢失");
+            }
+            rejects(goal(worldTarget,json("{\"operation\":\"set_tire\"}")));
+            rejects(goal(worldTarget,json("{\"operation\":\"set_tire\",\"item_id\":false}")));
+            check(PhysicalControlParameters.parse(json("{\"operation\":\"set_tire\",\"item_id\":\"air\"}")).itemId().equals("minecraft:air"),"省略默认命名空间的空手拆胎仍应幂等");
+            rejects(goal(worldTarget,json("{\"operation\":\"inspect\",\"item_id\":\"minecraft:air\"}")));
+            check(SemanticAbilityCatalog.parameterNames(PhysicalControlAbilityAdapter.ABILITY).contains("item_id"),"轮胎配置入口未公开");
             // 供气容量是明确的配置意图，不能误按油门十五档限制，也不接受低于原生最小值的零供气旋钮。
             SemanticGoalContract.validate(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":125}")),IntentRuntime.KNOWN_ABILITIES);
             rejects(goal(worldTarget,json("{\"operation\":\"set_burner_volume\",\"value\":0}")));

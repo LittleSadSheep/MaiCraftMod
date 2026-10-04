@@ -39,8 +39,10 @@ final class NativePhysicalControl {
             case ASSEMBLE_PROPELLER,DISASSEMBLE_PROPELLER -> NativeApi.is(entity,PROPELLER);
             case TURN_CRANK -> entity!=null&&CreateManualInput.supported(entity.getLevel(),entity.getBlockPos());
             case SET_LINK_MODE,SET_FREQUENCY -> NativeApi.is(entity,LINK);
+            case SET_TIRE -> NativeApi.is(entity,NativeWheelControl.WHEEL);
         };
         if(!valid)throw new IllegalArgumentException("当前部件不支持所选原生控制操作");
+        if(p.operation()==SET_TIRE)NativeWheelControl.requireItem(p.itemId());
     }
     static boolean valueBox(PhysicalControlParameters.Operation operation) { return operation==SET_SPEED||operation==SET_BURNER_VOLUME; }
     static boolean propeller(PhysicalControlParameters.Operation operation) { return operation==ASSEMBLE_PROPELLER||operation==DISASSEMBLE_PROPELLER; }
@@ -73,12 +75,14 @@ final class NativePhysicalControl {
             case SET_THROTTLE -> ((Number)NativeApi.call(entity,THROTTLE,"getState")).intValue()==p.value();
             case SET_LINK_MODE -> property(entity,"receiver")==p.receiver();
             case SET_FREQUENCY -> frequencyMatches(entity,index,selected);
+            case SET_TIRE -> NativeWheelControl.matches(NativeWheelControl.held(entity),p.itemId());
         };
     }
     static String requiredItem(BlockEntity entity,PhysicalControlParameters p,int index) {
         // 桨叶轴承只有空手右键才执行原生组装或减速拆回，不能带着扳手把它旋转成另一朝向。
         if(propeller(p.operation())||p.operation()==TURN_CRANK)return "minecraft:air";
         if(p.operation()==SET_FREQUENCY)return p.frequencyItems().get(index);
+        if(p.operation()==SET_TIRE)return p.itemId();
         if(p.operation()==SET_LINK_MODE||valueBox(p.operation())&&NativeApi.truth(NativeApi.call(setting(entity),VALUE,"onlyVisibleWithWrench")))return "create:wrench";
         return null;
     }
@@ -138,6 +142,9 @@ final class NativePhysicalControl {
             out.put("received_signal",NativeApi.call(entity,null,"getSignalStrength"));
             out.put("gas_output",NativeApi.call(entity,null,"getGasOutput"));
             out.put("supported_operations",List.of("inspect","set_burner_volume"));
+        } else if(NativeApi.is(entity,NativeWheelControl.WHEEL)) {
+            out.put("tire",NativeWheelControl.state(entity));out.put("actual_rpm",NativeApi.call(entity,null,"getSpeed"));
+            out.put("supported_operations",List.of("inspect","set_tire"));
         } else if(NativeApi.is(entity,THROTTLE)) {
             out.put("signal",NativeApi.call(entity,THROTTLE,"getState"));out.put("supported_operations",List.of("inspect","set_throttle"));
         } else if(NativeApi.is(entity,LINK)) {

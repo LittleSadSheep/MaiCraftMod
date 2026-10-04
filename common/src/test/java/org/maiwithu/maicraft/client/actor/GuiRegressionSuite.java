@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.client.actor;
 
 import org.maiwithu.maicraft.core.integration.create.WheelMountUseTest;
+import org.maiwithu.maicraft.core.task.physics.NativeWheelControlTest;
 
 import org.maiwithu.maicraft.task.TaskSlotFailureTest;
 import org.maiwithu.maicraft.client.chat.ChatTypingTest;
@@ -291,6 +292,7 @@ public final class GuiRegressionSuite {
         EmptyHandInteractionTest.main(args);
         MachineInteractionSurfaceTest.main(args);
         WheelMountUseTest.main(args);
+        NativeWheelControlTest.run();
         // 原生取放使用已观察的工件组件，不能只因物品注册名相同就换错装配阶段。
         CarriedItemVariantsTest.main(args);
         BuildExcavationFrontierTest.main(args);

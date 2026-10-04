@@ -4,11 +4,13 @@ import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.machine.control.ControlReflection;
 import org.maiwithu.maicraft.server.machine.NativeApi;
+import org.maiwithu.maicraft.core.integration.create.CreateInteractionSurface;
 import static org.maiwithu.maicraft.core.task.physics.PhysicalControlParameters.Operation.*;
 
 /** 频率面板和旋钮需要命中原生小区域；先检查可見射线，再按当前姿态确认，不能点击整个方块来冒充设置。 */
@@ -16,6 +18,15 @@ final class PhysicalControlAim {
     private PhysicalControlAim() {}
     static Vec3 aim(LocalPlayer player,PhysicalAssemblyFrame frame,BlockPos offset,BlockEntity entity,
                     PhysicalControlParameters p,int index,Vec3 eye) {
+        if(p.operation()==SET_TIRE) {
+            // 已组装轮座仍只接受外侧或底面；先把本地候选面转到实时世界坐标，再用原生射线逐个验证。
+            for(var face:StructureEditTarget.targets(frame.level(),frame::loaded,frame.pose(),frame.storage(offset),false)) {
+                if(face.world().distanceToSqr(eye)>Math.pow(player.blockInteractionRange()-.1,2))continue;
+                var hit=frame.hitFrom(player,offset,eye,face.world().subtract(eye));
+                if(valid(entity,p,index,hit))return face.world();
+            }
+            return null;
+        }
         if(!NativePhysicalControl.valueBox(p.operation())&&p.operation()!=SET_FREQUENCY)return frame.aim(player,offset,eye,false);
         if(p.operation()==SET_FREQUENCY) {
             Object slot=ControlReflection.construct("com.simibubi.create.content.redstone.link.RedstoneLinkFrequencySlot",index==0);
@@ -41,6 +52,7 @@ final class PhysicalControlAim {
     }
     static boolean valid(BlockEntity entity,PhysicalControlParameters p,int index,BlockHitResult hit) {
         if(hit==null)return false;
+        if(p.operation()==SET_TIRE)return CreateInteractionSurface.forUse(entity.getBlockState(),Items.AIR).accepts(hit);
         if(p.operation()==SET_FREQUENCY)
             return NativeApi.truth(NativeApi.call(NativePhysicalControl.link(entity),null,"testHit",index==0,hit.getLocation()));
         if(NativePhysicalControl.valueBox(p.operation())) {

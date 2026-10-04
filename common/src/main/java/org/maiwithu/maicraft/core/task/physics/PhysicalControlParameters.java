@@ -12,14 +12,24 @@ import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
 
 /** 控制意图只指定部件与原生设置，不接收点击脚本、任意 NBT 或直接施力。 */
 public record PhysicalControlParameters(Operation operation,UUID structureId,UUID designId,BlockPos position,Integer value,
-                                        Boolean receiver,List<String> frequencyItems,int crankTicks,boolean requireOnboard) {
+                                        Boolean receiver,List<String> frequencyItems,int crankTicks,boolean requireOnboard,String itemId) {
     public enum Operation { INSPECT, SET_SPEED, SET_THROTTLE, SET_LINK_MODE, SET_FREQUENCY, SET_BURNER_VOLUME,
-        ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER, TURN_CRANK }
+        ASSEMBLE_PROPELLER, DISASSEMBLE_PROPELLER, TURN_CRANK, SET_TIRE }
     public PhysicalControlParameters {position=position.immutable();frequencyItems=List.copyOf(frequencyItems);}
     public static PhysicalControlParameters parse(JsonObject input) {
-        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds","require_onboard").contains(key))
+        for(String key:input.keySet())if(!Set.of("operation","structure_id","design_id","position","value","receiver","frequency_items","duration_seconds","require_onboard","item_id").contains(key))
             throw new IllegalArgumentException("未知物理控制参数: "+key);
         Operation op=Operation.valueOf(PhysicalAssemblyParameters.text(input,"operation","inspect").toUpperCase(Locale.ROOT));
+        // 轮胎取放必须点名最终轮胎种类；空手拆胎用 air，其他控制不能夹带一次额外物品交互。
+        if(input.has("item_id")!=(op==Operation.SET_TIRE))throw new IllegalArgumentException("item_id 仅供 set_tire 且必须明确提供");
+        if(input.has("item_id")&&(!input.get("item_id").isJsonPrimitive()||!input.getAsJsonPrimitive("item_id").isString()))
+            throw new IllegalArgumentException("item_id 必须是物品编号字符串");
+        String itemId=op==Operation.SET_TIRE?PhysicalAssemblyParameters.text(input,"item_id",null):null;
+        if(itemId!=null) {
+            var parsed=ResourceLocation.tryParse(itemId);
+            if(parsed==null)throw new IllegalArgumentException("item_id 必须是有效物品编号");
+            itemId=parsed.toString();
+        }
         // 只有手摇明确允许有界重复；旋钮、组装和频率设置不能通过附带持续时间变成反复点击。
         if(input.has("duration_seconds")&&op!=Operation.TURN_CRANK)throw new IllegalArgumentException("duration_seconds 仅用于 turn_crank");
         int crankTicks=op==Operation.TURN_CRANK?CreateManualInput.durationTicks(input):0;
@@ -66,6 +76,6 @@ public record PhysicalControlParameters(Operation operation,UUID structureId,UUI
             }
             frequency=items;
         }
-        return new PhysicalControlParameters(op,id,design,PhysicalAssemblyParameters.position(input,"position"),value,receiver,frequency,crankTicks,onboard);
+        return new PhysicalControlParameters(op,id,design,PhysicalAssemblyParameters.position(input,"position"),value,receiver,frequency,crankTicks,onboard,itemId);
     }
 }

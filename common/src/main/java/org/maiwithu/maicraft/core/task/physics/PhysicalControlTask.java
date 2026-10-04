@@ -77,6 +77,10 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         BlockEntity entity=entity();NativePhysicalControl.require(entity,r.parameters);
         after=NativePhysicalControl.state(entity);
         if(r.parameters.operation()==INSPECT){done=true;return TaskState.RUNNING;}
+        // 装好的轮胎在取备料之前就可确认，避免缺少第二只同款轮胎时反复补料或把现有轮胎交换掉。
+        if(r.parameters.operation()==SET_TIRE&&NativePhysicalControl.matches(entity,r.parameters,index,ItemStack.EMPTY)) {
+            effects.add(Map.of("step",index,"already_matched",true,"after",after));advance();return TaskState.RUNNING;
+        }
         if(r.parameters.operation()==TURN_CRANK&&crankStarted>=0) {
             if(world.getGameTime()-crankStarted>=r.parameters.crankTicks()){done=true;return TaskState.RUNNING;}
             if(world.getGameTime()<nextCrankAt)return TaskState.RUNNING;
@@ -113,7 +117,7 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         int step=index;ItemStack expected=selected.copy();
         boolean propeller=NativePhysicalControl.propeller(r.parameters.operation());
         boolean crank=r.parameters.operation()==TURN_CRANK;
-        boolean blockMode=r.parameters.operation()==SET_LINK_MODE||propeller||crank;
+        boolean blockMode=r.parameters.operation()==SET_LINK_MODE||r.parameters.operation()==SET_TIRE||propeller||crank;
         if(!blockMode)watch=ServerBlockEntityReceipts.watch(world,entity.getBlockPos());
         var expectedWatch=watch;
         NativeConfirmation confirm=crank?CreateManualInput.confirmation(world,entity.getBlockPos()):new NativeConfirmation() {

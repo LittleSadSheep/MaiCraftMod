@@ -23,11 +23,13 @@ final class PhysicalControlAbilityAdapter {
     }
     static JsonObject contract() {
         // 能力列表也公开航空配置入口，模型无需先猜操作名才能发现供气旋钮和螺旋桨成型流程。
-        var out=new JsonObject();out.addProperty("summary","配置并操作物理部件：电机转速、油门信号、无线收发频率、热气容量、螺旋桨组装/拆回，以及按结构实时位置手摇供能。使用真实走位、命中、物品与原生协议，配置结果和载具运行验证分别返回。");
+        var out=new JsonObject();out.addProperty("summary","配置并操作物理部件：电机转速、油门信号、无线收发频率、热气容量、轮胎取放、螺旋桨组装/拆回，以及按结构实时位置手摇供能。使用真实走位、命中、物品与原生协议，配置结果和载具运行验证分别返回。");
         var targets=new JsonArray();for(String kind:new String[]{"coordinates","landmark","area","current_place"})targets.add(kind);out.add("accepted_target_kinds",targets);
         out.add("accepted_preferences",new JsonObject());out.add("accepted_hard_constraints",new JsonArray());
         var fields=new JsonObject();
-        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, assemble_propeller, disassemble_propeller, turn_crank. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
+        field(fields,"operation","string","inspect (default), set_speed, set_throttle, set_link_mode, set_frequency, set_burner_volume, assemble_propeller, disassemble_propeller, turn_crank, set_tire. Propeller actions use an empty-hand native click only when the requested state differs; input confirmation is separate from actual assembly/slowdown/disassembly and errors.");
+        // 物理组装后仍可在停稳的轮座上更换实际轮胎；目标种类已满足时不重复交换。
+        field(fields,"item_id","string","Required only for set_tire: installed native tire item ID, or minecraft:air to remove. Uses a real carried/supplied item and the wheel mount's native outside/down face. An already matching tire is retained; actual slot state and full registered-block diff are returned.");
         // 手摇是移动结构上的普通原生操作；每次重算世界瞄准点，持续时长不开放给其他设置的机械重放。
         field(fields,"duration_seconds","number","Optional only for turn_crank, finite 0..30. Zero or omitted means one native activation. Positive duration maintains empty-hand uses with fresh structure pose and actual ray checks. Confirmed uses and observed kinetic stress are retained; supply does not prove vehicle motion or production.");
         field(fields,"structure_id","string","Observed structure UUID; omit target. position is relative to origin_storage. Otherwise target is the world anchor.");
