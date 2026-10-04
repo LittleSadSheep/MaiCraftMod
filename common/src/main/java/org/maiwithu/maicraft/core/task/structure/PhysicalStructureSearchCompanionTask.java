@@ -68,7 +68,11 @@ public final class PhysicalStructureSearchCompanionTask
 
     private static final String STRONGHOLD = "minecraft:stronghold";
     private static final String OVERWORLD = "minecraft:overworld";
-    private static final int INDEX_BUILD_BUDGET_PER_GROUP = 4;
+    // 192 格半径的一轮全高扫描上万段；每次调用只建少量段会把观察等待拖到数千刻。
+    // 单刻实际速率由所有查询共享的 2ms 墙钟封顶，这个数只是墙钟内允许的段数上限。
+    private static final int INDEX_BUILD_BUDGET_PER_GROUP = 128;
+    /** 观察等待上限：超时按本视角未见证据转入下一腿，检测由行进中的移动扫描继续。 */
+    private static final int OBSERVE_MAX_TICKS = 100;
     private static final int MAX_GROUP_HITS = 384;
     private static final int EVIDENCE_SCAN_RADIUS = 192;
     private static final int FRONTIER_GRID = 64;
@@ -135,6 +139,9 @@ public final class PhysicalStructureSearchCompanionTask
     private int directionLoadWaitTicks;
     private int directionSegments;
     private long nextMovingEvidenceScan;
+    private int observeTicks;
+    private boolean scanComplete;
+    private int scanHitsObserved;
 
     public PhysicalStructureSearchCompanionTask(
             LocalPlayer player, PhysicalStructureSearchTaskRecord record) {
@@ -217,6 +224,8 @@ public final class PhysicalStructureSearchCompanionTask
         EvidenceScan scan = scanNow
                 ? scanEvidence()
                 : new EvidenceScan(null, false, 0);
+        scanComplete = scan.complete();
+        scanHitsObserved = scan.observedBlocks();
         if (scanNow) nextMovingEvidenceScan = now + MOVING_EVIDENCE_SCAN_INTERVAL;
         if (scan.match() != null
                 && stage != Stage.WAIT_EYE_RECEIPT
@@ -241,10 +250,14 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     // 先等本轮已加载方块查完；有剩余投眼方向就继续走，否则要塞进入投眼准备，其他结构换一个探索方向。
+    // 观察等待有时长上限：超时按本视角未见证据转入下一腿，不在原地停滞到入夜；
+    // 未完成的扫描随行进中的移动扫描继续，命中线索仍会改道，等待不会漏掉证据。
     private TaskState tickObserve(EvidenceScan scan) {
         if (!scan.complete()) {
             keepFiniteEvidenceScanAlive();
-            return TaskState.RUNNING;
+            if (++observeTicks < OBSERVE_MAX_TICKS) return TaskState.RUNNING;
+        } else {
+            observeTicks = 0;
         }
         if (stronghold) {
             if (pendingDirection != null
@@ -484,6 +497,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     private TaskState beginFrontierTravel() {
+        observeTicks = 0;
         BlockPos frontier = nextFrontier();
         if (frontier == null) {
             failIssue(
@@ -943,6 +957,12 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_failed", frontierFailed);
         data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
         data.put("frontier_sector_rotations", frontierBreaker.rotations());
+        if (stage == Stage.OBSERVE) {
+            data.put("observe_ticks", observeTicks);
+            data.put("observe_wait_limit", OBSERVE_MAX_TICKS);
+            data.put("evidence_scan_complete", scanComplete);
+            data.put("evidence_blocks_observed", scanHitsObserved);
+        }
         if (moveChild != null && moveRecord != null && moveRecord.x != null && moveRecord.z != null) {
             double dx = player.getX() - moveRecord.x;
             double dz = player.getZ() - moveRecord.z;
