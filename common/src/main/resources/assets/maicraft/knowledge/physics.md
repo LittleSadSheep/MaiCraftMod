@@ -52,6 +52,8 @@ Simulated 的一条原生舵机传动链是：动力源 → `simulated:direction
 
 `simulated:linked_typewriter` 可将不同按键绑定到独立的有序物品频率，驱动同频接收端。起飞前把它放在驾驶座原生触及范围内，空手操作，副手不要拿 Create 无线遥控器，否则会触发原生频率复制功能。给各个舵向、推进、刹车分配明确通道，逐一核对真实接收端与机械动作。
 
+同频发射器共享无线网络；不同载具不要随意复用示例中的频率。另一个发射器仍输出时，松开本机按键不保证接收端归零。先检查没有按键时的接收信号，再检查按下和释放的变化；若一直有信号，核对其他发射源并重新选择频率，不要把串扰误当成舵面方向相反而盲目加反向输入。
+
 使用 `physical_control` 的 `bind_typewriter_key`，指定 `key:"a"` 与 `frequency_items:["minecraft:iron_ingot","minecraft:redstone"]`。也接受完整键名 `key.keyboard.a`、方向键 `left/right/up/down` 和 `space`。频率来自角色实际持有或原生取得的物品，保留染色身份；按键保存请求合并完整旧键表，只改指定键。两个频率物品都是 `minecraft:air` 时删除该键；`inspect` 返回完整 `bindings`，不要用未核对的旧键表覆盖整机。
 
 `press_typewriter_keys` 以 `keys:["w","a"]` 同时按下已配频的键，`duration_seconds` 为大于零且不超过 30 秒，默认 1 秒。执行器原生连接、保持一次按下、到时松键并退出；取消、暂停或让位也释放自己的按键。中断后的旧任务不自动补发按下，根据已完成效果另选控制意图。`require_onboard:true` 要求身体始终留在该结构，按键名称不会变成走路或下座位输入。已有使用者的控制会话不会被抢占。
