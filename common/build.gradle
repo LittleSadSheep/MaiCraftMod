@@ -375,6 +375,12 @@ def regressionSuites = [
         heap: '512m', directory: 'entity-part-aggregation-regression', timeoutSeconds: 60,
         purpose: '验证实体搜索把多部件实体折叠为主体一条观察并附 boss 生命值事实'
     ],
+    // 公平闸消费 find_block 已验证观察：视线命中写入共享观察记忆，mine 据记忆放行。
+    fairnessMemoryFeedsMineRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.FairnessMemoryFeedsMineTest',
+        heap: '512m', directory: 'fairness-memory-feeds-mine-regression', timeoutSeconds: 60,
+        purpose: '验证 find_block 验证命中进入观察记忆且公平闸凭记忆放行被遮挡的目标'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。

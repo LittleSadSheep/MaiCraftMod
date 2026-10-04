@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.dimension.PortalLavaPoolSurvey;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord.Purpose;
@@ -114,6 +115,11 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         // 已加载只说明客户端有地形数据；必须能从眼睛看见，才向模型报告找到。
         if (!ObservationVisibility.block(player, pos)) return;
         if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
+            // 视线验证过的位置是公平可知事实：写入共享观察记忆，公平闸的"已观察"半边
+            // 从此覆盖 find_block → travel → acquire 链路，不再出现"看得见却挖不了"。
+            IntentRuntime.get().observedSourceMemory().observe(
+                    player.level().dimension().location().toString(),
+                    pos, BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
             if (lavaPools != null) lavaPools.observeVisible(pos, state);
             // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
             double distance = Math.sqrt(pos.distSqr(origin));
