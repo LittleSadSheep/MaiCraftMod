@@ -23,6 +23,8 @@ public final class AircraftFlightSession implements TransportSession {
     private final FlightFeedbackController controller;
     private final FlightKeyMixer mixer;
     private final FlightSample.Sampler sampler=new FlightSample.Sampler();
+    // 所有真实飞行共用探索记录，普通长途旅行也能留下可供下一次 travel 使用的群系地点。
+    private final FlightExplorationRecorder exploration=new FlightExplorationRecorder();
     private final List<Map<String,Object>> samples=new ArrayList<>();
     private AircraftKeyboardControl keyboard;
     private FlightStateReader reader;
@@ -55,6 +57,7 @@ public final class AircraftFlightSession implements TransportSession {
             FlightSample sample=sampler.observe(ctx.level().getGameTime(),ship.pose(),profile.forwardVector(),contact);
             if(sample==null)return Result.running("sampling_aircraft_pose");
             last=sample;
+            exploration.tick(ctx.player());
             if(parkingSince>=0) {
                 // 松开所有原生按键后还要停稳，防止把依赖一直按刹车的瞬时停车冒充已结束驾驶。
                 boolean parked=sample.contact()==FlightSample.Contact.GROUNDED&&sample.speed()<.35
@@ -107,6 +110,7 @@ public final class AircraftFlightSession implements TransportSession {
     private Result finish(boolean success,String code,String detail) {
         boolean effects=keyboard!=null&&keyboard.effectsStarted();
         if(keyboard!=null)keyboard.close();if(reader!=null)reader.close();
+        exploration.close();
         boolean uncertain=keyboard!=null&&keyboard.uncertain();
         return terminal=success&&!uncertain?Result.success("确认同艇驾驶、实际接地和停稳；后续步行仍需检查原旅行终点")
                 :Result.failed(code,detail,effects,uncertain||last==null||last.contact()!=FlightSample.Contact.GROUNDED);
@@ -131,5 +135,9 @@ public final class AircraftFlightSession implements TransportSession {
         if(keyboard!=null)result.put("keyboard",keyboard.evidence());
         result.put("phase_transitions",controller.transitions());return result;
     }
-    public Map<String,Object> evidence(){var result=new LinkedHashMap<>(diagnostics());result.put("flight_samples",List.copyOf(samples));return result;}
+    public Map<String,Object> evidence(){
+        var result=new LinkedHashMap<>(diagnostics());result.put("flight_samples",List.copyOf(samples));
+        // 返回同一次飞行的跑图查询入口；观察记录与到达／着陆证据保持各自的事实范围。
+        result.put("exploration_memory",exploration.evidence());return result;
+    }
 }
