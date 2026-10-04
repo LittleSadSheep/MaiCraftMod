@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
+import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
@@ -140,6 +141,15 @@ final class IntentTask implements Task {
         IntentTaskRecord.DecisionAnswer answer = record.takeAnswer();
         // 先处理调用者刚给的答复：取消、跳过、先补一个条件，或者修改目标后继续。
         if (answer != null) {
+            if (childRecord instanceof SemanticExploreTaskRecord explore
+                    && explore.isInterestDecision(answer.decisionId())) {
+                // 兴趣发现的答复只流回伴随任务单；不能落进语义改参数或换目标的通用答复分支。
+                // 暂停期间伴随任务不被 tick、租期冻结在暂停时刻，答复时刻补期一次，
+                // 恢复后第一刻的截止检查不得用模型思考时长否决继续选择。
+                explore.renewAfterInterestAnswer(player.level().getGameTime());
+                explore.applyInterestAnswer(answer.choice());
+                return TaskState.RUNNING;
+            }
             if ("cancel".equals(answer.choice()) || "cancel_task".equals(answer.choice())) {
                 mechanicalContinuations.clear();
                 record.setCancelSource("answer_cancel");
@@ -339,6 +349,11 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickChild() {
+        // 语义层在这里观察跑图任务单上的待询问发现并转成正式决策；动作任务不得直接调 runtime.decision。
+        if (childRecord instanceof SemanticExploreTaskRecord explore) {
+            TaskState relayed = relayExploreInterestDecision(explore);
+            if (relayed != null) return relayed;
+        }
         // 先检查小任务自己的截止时间。总任务暂停时，这个时间目前不会一起往后推。
         if (player.level().getGameTime() >= childRecord.getDeadlineGameTime()) {
             childRecord.setState(TaskState.TIMEOUT);
@@ -640,6 +655,47 @@ final class IntentTask implements Task {
         record.requestDecision(decision, player.level().getGameTime());
         runtime.decision(record, decision);
         return TaskState.RUNNING;
+    }
+
+    /** 语义层观察动作任务单上的待询问发现并拉起决策；决策期间任务记录会暂停，等待 task action=answer。 */
+    private TaskState relayExploreInterestDecision(SemanticExploreTaskRecord explore) {
+        var finding = explore.pendingInterestFinding();
+        if (finding == null || record.decisionSnapshot() != null) return null;
+        // 已登记编号说明决策已发出；恢复后同一发现不会重复询问（探索记忆的去重会挡住重新置位）。
+        if (explore.interestDecisionId() != null) return TaskState.RUNNING;
+        UUID decisionId = UUID.randomUUID();
+        explore.beginInterestDecision(decisionId);
+        return requestDecision(exploreInterestDecision(currentGoal(), decisionId, finding));
+    }
+
+    /** 兴趣决策快照：finding 细节进 context 供回执核对，question 与选项面向模型陈述两种走向。 */
+    static IntentTaskRecord.DecisionSnapshot exploreInterestDecision(
+            Goal goal, UUID decisionId, SemanticExploreTaskRecord.InterestFinding finding) {
+        JsonObject context = new JsonObject();
+        context.addProperty("decision_kind", "explore_interest");
+        context.addProperty("ability", goal.ability());
+        context.add("goal", goal.toJson());
+        JsonObject detail = new JsonObject();
+        detail.addProperty("finding_id", finding.findingId());
+        detail.addProperty("target_id", finding.targetId());
+        detail.addProperty("x", finding.x());
+        detail.addProperty("y", finding.y());
+        detail.addProperty("z", finding.z());
+        detail.addProperty("direction", finding.direction());
+        detail.addProperty("distance_blocks", finding.distanceBlocks());
+        context.add("finding", detail);
+        String question = "A newly recorded terrain feature matches the declared exploration interests: "
+                + finding.targetId() + " about " + finding.distanceBlocks() + " blocks to the "
+                + finding.direction() + " at " + finding.x() + "," + finding.y() + "," + finding.z()
+                + ". Its observation is already saved in exploration memory with an exploration: label. "
+                + "continue keeps exploring and will not ask about this finding again; stop finishes the task "
+                + "now, keeping every discovery in exploration memory without claiming the main target was verified.";
+        return new IntentTaskRecord.DecisionSnapshot(decisionId, question, List.of(
+                new IntentTaskRecord.DecisionOption("continue",
+                        "Keep exploring; this finding will not trigger another question."),
+                new IntentTaskRecord.DecisionOption("stop",
+                        "Finish the task now; discoveries stay in exploration memory and the main target remains unverified.")),
+                context.toString());
     }
 
     private TaskState tickWait() {

@@ -62,8 +62,6 @@ public final class SemanticExploreCompanionTask
     private static final int BIOME_SAMPLES_PER_TICK = 192;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    /** 初始路段期限；只要路线持续取得已核实进展，MoveTo 就会续期自己的任务记录。 */
-    private static final int INITIAL_LEG_LEASE_TICKS = 90 * 20;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
 
@@ -121,6 +119,8 @@ public final class SemanticExploreCompanionTask
     private BlockPos verifiedPosition;
     private String verifiedDescription;
     private double farthestBodyDistance;
+    /** 模型在兴趣决策中选了 stop；收尾回执保留发现与标签，不声称主目标已核实。 */
+    private boolean stoppedByInterestDecision;
 
     public SemanticExploreCompanionTask(
             LocalPlayer player, SemanticExploreTaskRecord record) {
@@ -156,6 +156,18 @@ public final class SemanticExploreCompanionTask
             fail("exploration movement left the bounded radius of " + r.maxDistance
                     + " blocks and was stopped", FailureType.NO_PATH);
             return TaskState.FAILED;
+        }
+        // 兴趣答复由伴随任务消费一次；stop 是模型选择的收尾，发现与标签保留，不声称主目标已核实。
+        String interestAnswer = r.consumeInterestAnswer();
+        if ("stop".equals(interestAnswer)) {
+            stoppedByInterestDecision = true;
+            succeed();
+            return TaskState.SUCCESS;
+        }
+        if (r.hasPendingInterestFinding()) {
+            // 发现待询问期间冻结推进：不发起新的航点或目标路段，等语义层把发现转成正式决策。
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+            return TaskState.RUNNING;
         }
         return switch (stage) {
             case OBSERVE -> tickObservation();
@@ -272,9 +284,22 @@ public final class SemanticExploreCompanionTask
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("surface_y", surface.evidence().getY());
         evidence.put("depth", surface.waterDepth());
-        if (memory.observeTerrainFeature("lava_pool", surface.evidence(), evidence)) {
-            notableFindings.merge("lava_pool", 1, Integer::sum);
-        }
+        ExplorationFinding finding =
+                memory.observeTerrainFeature("lava_pool", surface.evidence(), evidence);
+        if (finding == null) return;
+        notableFindings.merge("lava_pool", 1, Integer::sum);
+        noteInterestFinding(finding, surface.evidence());
+    }
+
+    /** 声明了兴趣时把新发现挂上任务单等语义层询问；未声明兴趣时完全不置位，行为与从前一致。 */
+    private void noteInterestFinding(ExplorationFinding finding, BlockPos evidence) {
+        if (!r.declaredInterest(finding.targetId())) return;
+        BlockPos from = player.blockPosition();
+        r.noteInterestFinding(new SemanticExploreTaskRecord.InterestFinding(
+                finding.id(), finding.targetId(),
+                evidence.getX(), evidence.getY(), evidence.getZ(),
+                CompassUtil.compass(evidence.getX() - from.getX(), evidence.getZ() - from.getZ()),
+                (int) horizontalDistance(from, evidence)));
     }
 
     private TargetCandidate observeBiomeSample(
@@ -364,7 +389,7 @@ public final class SemanticExploreCompanionTask
         String childCall = parentCall + "-internal-leg-" + (++legSerial);
         // 群系目的地允许站立或游泳；到达后依据脚下真实群系复核。
         moveRecord = new MoveToTaskRecord(
-                        childCall, now + INITIAL_LEG_LEASE_TICKS,
+                        childCall, now + SemanticExploreTaskRecord.LEG_LEASE_TICKS,
                         (double) target.getX(), exact ? (double) target.getY() : null,
                         (double) target.getZ(), null,
                         r.mayAlterTerrain, false, r.transportMode);
@@ -696,6 +721,7 @@ public final class SemanticExploreCompanionTask
         data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
         data.put("waypoint_sector_rotations", waypointBreaker.rotations());
         data.put("notable_findings", Map.copyOf(notableFindings));
+        if (r.hasPendingInterestFinding()) data.put("paused_for_interest_decision", true);
         return data;
     }
 
@@ -716,6 +742,18 @@ public final class SemanticExploreCompanionTask
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("target", canonicalTarget == null ? r.target : canonicalTarget);
         if (memory != null) data.put("exploration_memory", memory.receipt());
+        if (stoppedByInterestDecision) {
+            data.put("stopped_by_interest_decision", true);
+            var finding = r.pendingInterestFinding();
+            if (finding != null) {
+                data.put("interest_stop_finding", Map.of(
+                        "finding_id", finding.findingId(),
+                        "target_id", finding.targetId(),
+                        "x", finding.x(), "y", finding.y(), "z", finding.z(),
+                        "direction", finding.direction(),
+                        "distance_blocks", finding.distanceBlocks()));
+            }
+        }
         if (!survey) data.put("verified", verifiedPosition != null);
         if (survey) {
             data.put("survey_stop_reason", surveyStopReason == null ? "interrupted_or_blocked" : surveyStopReason);
@@ -785,6 +823,14 @@ public final class SemanticExploreCompanionTask
     }
 
     @Override protected String successMessage() {
+        if (stoppedByInterestDecision) {
+            var finding = r.pendingInterestFinding();
+            String place = finding == null ? "" : " at "
+                    + finding.x() + "," + finding.y() + "," + finding.z();
+            return "exploration stopped by decision after a new "
+                    + (finding == null ? "interest" : finding.targetId()) + " finding" + place
+                    + "; all observations remain in exploration memory and the main target was not verified";
+        }
         if (survey) return "map survey finished: " + surveyStopReason + "; only actually observed terrain is recorded";
         return "verified " + canonicalTarget + " at " + shortPos(verifiedPosition)
                 + " after real first-person exploration";

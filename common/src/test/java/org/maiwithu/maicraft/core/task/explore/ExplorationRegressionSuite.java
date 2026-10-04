@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.task.explore;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.intent.ExplorationIntentTest;
+import org.maiwithu.maicraft.intent.ExploreInterestDecisionTest;
 import org.maiwithu.maicraft.intent.TravelTransportContractTest;
 import org.maiwithu.maicraft.mcp.ExplorationCatalogTest;
 import org.maiwithu.maicraft.core.task.structure.StructureProfileResourcesTest;
@@ -18,6 +19,7 @@ public final class ExplorationRegressionSuite {
         ExplorationFrontiersTest.main(args);
         FrontierLegBreakerTest.main(args);
         ExplorationIntentTest.main(args);
+        ExploreInterestDecisionTest.main(args);
         TravelTransportContractTest.main(args);
         ExplorationCatalogTest.main(args);
         StructureProfileResourcesTest.main(args);

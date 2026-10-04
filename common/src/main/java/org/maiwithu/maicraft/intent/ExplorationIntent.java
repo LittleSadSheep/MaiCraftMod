@@ -1,14 +1,20 @@
 package org.maiwithu.maicraft.intent;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
+import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 
 /** LLM 选择想找的群系或结构；没有指定种类时，角色按给定扇区跑图并积累现场观察。 */
 public final class ExplorationIntent {
     public static final String ABILITY = "maicraft:explore";
+    /** 顺带兴趣白名单由探索任务单持有，语义契约与直接工具入口共用同一份判定。 */
+    public static final List<String> LEGAL_INTERESTS = SemanticExploreTaskRecord.LEGAL_INTERESTS;
     private ExplorationIntent() {}
 
     public static IntentAction adapt(Goal goal) {
@@ -37,8 +43,39 @@ public final class ExplorationIntent {
         if (radius < 64 || radius > 2048) throw new IllegalArgumentException("biome/survey max_distance must be 64..2048");
         args.addProperty("max_distance", radius);
         if (p.has("may_alter_terrain")) args.add("may_alter_terrain", p.get("may_alter_terrain"));
+        if (p.has("interests")) {
+            JsonArray interests = new JsonArray();
+            parseInterests(p).forEach(interests::add);
+            args.add("interests", interests);
+        }
         copySector(p, args, radius);
         return new IntentAction.Tool("explore", args.toString());
+    }
+
+    /**
+     * 解析顺带兴趣声明：值必须在白名单内，非法值拒绝并携带全部合法值供模型改写；
+     * 与任何目标选择器可并存。空数组视为漏写，要求省略字段或给出合法值。
+     */
+    public static List<String> parseInterests(JsonObject parameters) {
+        if (!parameters.has("interests") || parameters.get("interests").isJsonNull()) return List.of();
+        JsonElement raw = parameters.get("interests");
+        if (!raw.isJsonArray())
+            throw new IllegalArgumentException("interests must be an array of strings; legal values: " + LEGAL_INTERESTS);
+        List<String> values = new ArrayList<>();
+        for (JsonElement element : raw.getAsJsonArray()) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString())
+                throw new IllegalArgumentException(
+                        "interests must be an array of strings; legal values: " + LEGAL_INTERESTS);
+            String value = element.getAsString().trim().toLowerCase(Locale.ROOT);
+            if (!LEGAL_INTERESTS.contains(value))
+                throw new IllegalArgumentException(
+                        "unknown interest '" + value + "'; legal values: " + LEGAL_INTERESTS);
+            if (!values.contains(value)) values.add(value);
+        }
+        if (values.isEmpty())
+            throw new IllegalArgumentException(
+                    "interests must not be empty; omit the field or use legal values: " + LEGAL_INTERESTS);
+        return List.copyOf(values);
     }
 
     /** 旅行与找结构共用同一份方向契约，避免外层接收了方向却在内部任务中丢失。 */

@@ -79,6 +79,14 @@ final class SemanticGoalContract {
                 throw violation("invalid_collection_contract", path + ".parameters", ability, invalid.getMessage());
             }
         }
+        // explore 的顺带兴趣白名单在计划期核验；非法值不能等到接单后才被拒绝，报错需携带合法值清单。
+        if (ExplorationIntent.ABILITY.equals(ability)) {
+            try { ExplorationIntent.parseInterests(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_exploration_interests", path + ".parameters.interests", ability,
+                        invalid.getMessage());
+            }
+        }
         validateTarget(goal, path, ability, restoredHistory);
         validateConstraints(goal, path, ability);
         // 起飞前就检查局部补丁和工况，防止执行中把观察请求误当成开桨或建造。
