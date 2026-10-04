@@ -28,8 +28,8 @@
 | `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对；[参数、到达判定与已知边界](travel.md) |
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
 | `prepare_portal` | 单独准备并点燃传送门，完成后停在门外 | `AbilityAdapter.preparePortal` | 入口核对 |
-| `explore` | 跑图勘察，按群系、标签或结构定向发现 | `ExplorationIntent.adapt` | 入口核对 |
-| `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 入口核对 |
+| `explore` | 跑图勘察，按群系、标签或结构定向发现 | `ExplorationIntent.adapt` | 契约与贡献者文档核对；[地图探索](exploration.md) |
+| `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 契约与贡献者文档核对；[结构证据和到访](exploration.md) |
 | `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | 入口核对 |
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | 入口核对 |
 | `use_item` | 有限次持用背包中的物品 | `GeneralAbilityAdapter.useItem` | 入口核对 |
@@ -62,8 +62,8 @@
 | `modify_machine` | 修改已观察机器或接入外部设施 | `MachineAbilityAdapter.modify` | 入口核对 |
 | `connect_mechanical_power` | 连接 Create 动力来源与目标 | `AbilityAdapter` → `CreateMechanicalPower` | 入口核对 |
 | `reach_milestone` | 完成阶段性生存目标 | `AbilityAdapter.reachMilestone` | 入口核对 |
-| `defeat_ender_dragon` | 完成末影龙战斗流程 | `AbilityAdapter.defeatEnderDragon` | 入口核对 |
-| `obtain_elytra` | 搜寻并取得鞘翅 | `AbilityAdapter.obtainElytra` | 入口核对 |
+| `defeat_ender_dragon` | 完成末影龙战斗流程 | `AbilityAdapter.defeatEnderDragon` | 契约与贡献者文档核对；[死亡确认](endgame.md) |
+| `obtain_elytra` | 搜寻并取得鞘翅 | `AbilityAdapter.obtainElytra` | 契约与贡献者文档核对；[折跃与入包](endgame.md) |
 | `quest_action` | 对 FTB 任务书执行一次原生提交、勾选或领奖 | `QuestAbilityAdapter` | 入口核对；能力发现不按 FTB 门控，未安装时在执行期报 `not_installed` |
 | `physical_balance` | 起飞前受力分析、启停模拟与配平推荐 | `PhysicsAbilityAdapter` | 入口核对；读原生受力需要服务端 `physics.snapshot` |
 | `physical_assembly` | 蜂蜜胶选区粘接、物理组装器创建与拆回结构 | `PhysicalAssemblyAbilityAdapter` | 入口核对；需安装 Create，粘接布局由模型决定、Mod 只执行原生操作 |

@@ -330,15 +330,15 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Remembered areas whose previously measured footprint this movement must preserve.")));
             // 跑图和找地方共用原生探索；目录中的模组群系、标签及结构证据由 LLM 按用途选择。
             case ExplorationIntent.ABILITY -> contract(
-                    "Explore the map, discover a chosen biome/tag or structure, or survey with no target kind. Discover actual modded IDs with perceive(view=exploration,focus=biomes|biome_tags|structures,query=...). Direction restricts destination candidates to a sector, not a straight walking line; after repeated unreachable legs the search rotates to the next bearing, and exhausting all bearings fails with frontier_legs_circuit_broken instead of looping. coast means minecraft:beach. Quality is chosen by the model from observed facts; no hidden seed/locate is used.",
+                    "Physically explore from the current body position. Put fields in goal.parameters and omit goal.target. Choose at most one biome_id, biome_tag, structure_id or semantic_target; no selector means survey. Discover actual modded IDs with perceive(view=exploration,focus=biomes|biome_tags|structures,query=...). Direction restricts candidate places to a sector while routes may detour. coast means minecraft:beach. Survey records sampled observations, not exhaustive coverage; a failed search does not prove global absence. Read exploration_memory for saved/pending discoveries and query details on demand. Quality is judged by the model from observed facts; no hidden seed/locate is used. Repeated unreachable frontier legs can end with frontier_legs_circuit_broken.",
                     targets(), fields(
                             field("biome_id", "resource_id", "Exact registered biome; choose at most one target selector."),
                             field("biome_tag", "resource_id", "Registered biome tag, including mod tags."),
                             field("structure_id", "resource_id", "Structure evidence profile discovered through the exploration catalog."),
                             field("semantic_target", "string", "coast, biome id/#tag, or survey; no selector defaults to survey."),
-                            field("direction", "string", "Cardinal/diagonal or forward/backward/left/right; fixed at departure. Omit to search all directions."),
-                            field("angle_degrees", "integer", "Full sector width 1..360, default 90 with direction."),
-                            field("min_distance", "integer", "Minimum target distance, default 16 with direction or 0 otherwise."),
+                            field("direction", "string", "north, northeast, east, southeast, south, southwest, west, northwest, forward, backward, left or right. Relative heading is fixed at departure. Omit for all directions; up/down are not exploration sectors."),
+                            field("angle_degrees", "integer", "Full sector width 1..360 degrees; default 90 with direction or 360 without. A 90-degree sector includes 45 degrees on either side. Without direction only 360 is accepted."),
+                            field("min_distance", "integer", "Minimum candidate distance from the starting body position, in blocks; default 16 with direction or 0 otherwise. Zero permits nearby matches; must be nonnegative and no larger than max_distance."),
                             field("max_distance", "integer", "Radius: biome/survey 64..2048 (default 768); structures 64..4096 (default 4096)."),
                             field("transport_mode", "auto|ground", "Native movement preference; default auto."),
                             field("may_alter_terrain", "boolean", "Explicit permission to dig, bridge or pillar; default false."),
@@ -377,7 +377,8 @@ public final class SemanticAbilityCatalog {
                             field("protected_labels", "array<string>", "Remembered places and inherited areas to preserve throughout preparation."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false.")));
             case "maicraft:find_structure" -> contract(
-                    "Discover and optionally reach a structure through physical first-person evidence. Strongholds use real ender-eye throws; other registered structures use bounded loaded-world evidence profiles.",
+                    // 结构搜索从真实起点查线索；说明观察命中与到场复核的区别，避免把线索当作已抵达。
+                    "Discover a world structure from the current body position through physical evidence. Put selectors and limits in goal.parameters. Strongholds require real ender-eye throws with allow_rare_consumables=true; other structures require a loaded-world evidence profile. Check the exploration structures catalog for observed mod support. reach_structure=true walks to and rechecks the evidence; false only discovers it. No match within the bound is not proof of global absence. target does not relocate the search origin; travel first to search from another region.",
                     targets("current_place", "area", "landmark", "prior_result"),
                     fields(
                             field("structure_id", "resource_id", "Required structure identity, such as minecraft:stronghold or minecraft:fortress."),
@@ -385,7 +386,7 @@ public final class SemanticAbilityCatalog {
                             field("angle_degrees", "integer", "Full sector width 1..360, default 90 with direction."),
                             field("min_distance", "integer", "Minimum target distance, default 16 with direction or 0 without."),
                             field("transport_mode", "auto|ground", "Native route preference, default auto."),
-                            field("max_distance", "integer", "Maximum physical search distance from the starting region; default and maximum 4096."),
+                            field("max_distance", "integer", "Physical search bound in blocks from the starting region; supported range 64..4096, default 4096. This bounds observed search, not world-wide structure existence."),
                             field("reach_structure", "boolean", "Whether to physically reach and re-verify the observed structure; default true."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false."),
                             field("allow_rare_consumables", "boolean", "Explicitly permits real ender-eye throws when structure_id is minecraft:stronghold; default false.")));
@@ -406,20 +407,22 @@ public final class SemanticAbilityCatalog {
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only prerequisite supply."),
                             field("protected_labels", "array<string>", "Remembered areas, entities or possessions all child work must preserve.")));
             case "maicraft:defeat_ender_dragon" -> contract(
-                    "Resolve the currently observed vanilla Ender Dragon encounter. MaiCraft handles crystal order, cages, hazard evasion, recovery and death verification.",
+                    // 杀龙必须从当前已加载的活龙开始，晶体处理与最终死亡证据分别说明。
+                    "Fight one currently loaded live vanilla Ender Dragon in minecraft:the_end. Put options in goal.parameters and explicitly set allow_combat=true; otherwise a decision is returned before combat. Observe towers, handle crystals/cages, attack, evade and recover, then confirm stable death/removal with death-phase or exit-portal evidence. A missing or unloaded dragon is not a victory. This ability does not enter the End, respawn a dragon, or guarantee modded boss mechanics; inspect phase, crystal counts, dragon_state and decision facts when it stops.",
                     targets("current_place", "area", "prior_result"),
                     fields(
                             field("allow_combat", "boolean", "Required explicit consent to destroy crystals and kill the dragon."),
                             field("may_alter_terrain", "boolean", "May open a freshly verified iron-bar crystal cage; default false."),
-                            field("minimum_health", "number", "Health floor below which MaiCraft disengages and recovers; default 10."),
+                            field("minimum_health", "number", "Finite health points, default 10 (=5 vanilla hearts), accepted 1..1024 and no greater than the body's current maximum health. Below this floor the encounter disengages and recovers; it is not a guaranteed remaining-health outcome."),
                             field("protected_labels", "array<string>", "Remembered places or possessions that must not be altered.")));
             case "maicraft:obtain_elytra" -> contract(
-                    "Bring one real elytra into the main inventory after the dragon fight. MaiCraft resolves the gateway, pearl use, End City and ship search, item frame and collection.",
+                    // 鞘翅以真实入包结算；折跃投珠、传送与末地船展示框各自保留确认事实。
+                    "Obtain at least one real elytra in the main inventory, using goal.parameters. Already carrying one completes the goal; otherwise the body must be in minecraft:the_end. From the main island, acquire a pearl, approach an observed gateway, throw only with allow_rare_consumables=true, and verify same-dimension teleport; from an outer island search directly. Then find End City/ship evidence, release the elytra from its frame and collect it. Seeing a ship or breaking a frame is not inventory success. Inspect gateway_verified, ship_frame_verified, elytra_count, consumed, search_budget and recovery_options; an unconfirmed pearl throw is not blindly repeated.",
                     targets("current_place", "area", "prior_result"),
                     fields(
-                            field("max_search_distance", "integer", "Bounded physical End City search distance; default 2048, maximum 4096."),
+                            field("max_search_distance", "integer", "Physical outer-island End City search bound in blocks; supported range 128..4096, default 2048. Exhausting this bound reports remaining uncertainty rather than global absence."),
                             field("may_alter_terrain", "boolean", "Hard consent for route bridging, pillaring or clearing; default false."),
-                            field("allow_combat", "boolean", "May handle only loaded hostiles actively targeting the player and blocking progress; default false."),
+                            field("allow_combat", "boolean", "Default false. Enables handling loaded hostiles actively targeting the player and blocking progress; also enables the hunting source when acquiring a missing gateway pearl. It does not guarantee a safe fight or available supplies."),
                             field("allow_rare_consumables", "boolean", "Explicitly permits the real ender-pearl use required for End Gateway traversal; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that must not be touched.")));
             case "maicraft:craft" -> contract(

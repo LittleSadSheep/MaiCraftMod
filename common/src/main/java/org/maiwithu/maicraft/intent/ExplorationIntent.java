@@ -12,11 +12,13 @@ public final class ExplorationIntent {
     private ExplorationIntent() {}
 
     public static IntentAction adapt(Goal goal) {
+        // 先确定跑图、群系或世界结构三种目的，再把范围和方向交给对应执行器；不替模型评价地点是否适合用途。
         if (goal.target() != null) throw new IllegalArgumentException("explore uses discovery parameters, not a located target");
         JsonObject p = goal.parameters();
         long kinds = List.of("biome_id", "biome_tag", "structure_id", "semantic_target").stream().filter(p::has).count();
         if (kinds > 1) throw new IllegalArgumentException("choose one biome_id, biome_tag, structure_id or semantic_target");
         if (p.has("structure_id")) {
+            // 世界结构需要自己的线索与投眼确认，沿用结构搜索入口，不能把结构编号当成群系筛选。
             return AbilityAdapter.adapt(new Goal("maicraft:find_structure", goal.outcome(), null,
                     p.toString(), goal.preferencesJson(), goal.constraints(), goal.children()), null, null);
         }

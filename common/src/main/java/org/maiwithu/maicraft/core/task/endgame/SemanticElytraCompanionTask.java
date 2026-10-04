@@ -54,6 +54,7 @@ import org.maiwithu.maicraft.task.TaskState;
 /** 由动作回执与实时观察驱动，依次穿过末地折跃门、探索末地城并取得鞘翅。 */
 public final class SemanticElytraCompanionTask
         extends AbstractCompanionTask<SemanticElytraTaskRecord> {
+    // 主岛先取珠并确认折跃，外岛直接找城；找到船上展示框后还要确认掉落进入主背包才结束。
     private enum Phase {
         ACQUIRE_PEARL, FIND_GATEWAY, MOVE_GATEWAY, THROW_GATEWAY, WAIT_TELEPORT,
         SEARCH_END_CITY, FIND_SHIP_FRAME, ATTACK_SHIP_FRAME,
@@ -396,6 +397,7 @@ public final class SemanticElytraCompanionTask
     }
 
     private TaskState waitForTeleport() {
+        // 投珠消耗与折跃是两份证据；消耗已发生而传送未确认时保留现场并收场，避免再投一颗重复付费。
         observePearlConsumption();
         if (teleportVerified()) {
             gatewayVerified = true;

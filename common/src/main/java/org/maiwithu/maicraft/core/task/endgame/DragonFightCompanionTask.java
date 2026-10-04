@@ -59,6 +59,7 @@ import net.minecraft.core.component.DataComponents;
 /** 通过动作回执，以第一人称操作协调一次正在进行的末影龙战斗。 */
 public final class DragonFightCompanionTask
         extends AbstractCompanionTask<DragonFightTaskRecord> {
+    // 确认活龙 -> 补齐塔区观察 -> 处理水晶 -> 攻击龙；危险时插入恢复，最后独立确认死亡而非仅看目标消失。
     private enum Phase { OBSERVE, SURVEY, CRYSTALS, DRAGON, RECOVER, CONFIRM }
     private enum Purpose {
         SURVEY_MOVE, POSITION_CRYSTAL, ATTACK_CRYSTAL, POSITION_CAGE, OPEN_CAGE,
@@ -914,6 +915,7 @@ public final class DragonFightCompanionTask
     }
 
     private TaskState tickConfirm() {
+        // 战斗结束后继续观察真实死亡/移除与死亡阶段或出口变化；短暂卸载不能让这次杀龙被记为胜利。
         long now = player.level().getGameTime();
         if (confirmStartedAt < 0L) confirmStartedAt = now;
         observeExitPortal();
