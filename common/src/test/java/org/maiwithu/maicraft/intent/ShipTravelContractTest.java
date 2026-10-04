@@ -5,6 +5,7 @@ import java.util.Set;
 import java.util.UUID;
 import com.google.gson.JsonObject;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
@@ -34,6 +35,16 @@ public final class ShipTravelContractTest {
             }
             parameters.addProperty("transport_mode","ground"); reject(parameters,f);
             parameters.addProperty("transport_mode","jetpack");
+            // 飞艇座位坐标必须贯穿语义、工具与持久任务；小数或脱离船体身份的座位不能被忽略。
+            parameters.add("seat_position",JsonParser.parseString("{\"x\":-1,\"y\":-5,\"z\":-3}"));
+            SemanticGoalContract.validate(goal(parameters),Set.of("maicraft:travel"));
+            var seated=(IntentAction.Tool)AbilityAdapter.adapt(goal(parameters),f.player,null);
+            var seatRecord=new AtomicReference<BoardStructureTaskRecord>();
+            TaskDispatch.captureNext(value->seatRecord.set((BoardStructureTaskRecord)value),
+                    ()->new BoardStructureTool().onGameCall("seat-test",seated.arguments(),f.player,ignored->{}));
+            check(seatRecord.get().seatOffset.equals(new BlockPos(-1,-5,-3)),"seat offset was lost before native execution");
+            parameters.getAsJsonObject("seat_position").addProperty("y",-5.5);reject(parameters,f);
+            parameters.remove("seat_position");
             parameters.add("destination",JsonParser.parseString("{\"x\":1,\"y\":2,\"z\":3}")); reject(parameters,f);
             parameters.remove("destination"); parameters.addProperty("structure_id","not-an-observed-uuid"); reject(parameters,f);
         }

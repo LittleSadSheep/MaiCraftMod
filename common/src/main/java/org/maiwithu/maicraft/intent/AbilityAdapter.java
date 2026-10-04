@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.core.task.move.BoardStructureTaskRecord;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -302,6 +303,8 @@ final class AbilityAdapter {
         // 先分清用户想去哪：指定电梯楼层、某艘船、一个方向的平台、方块、坐标，或还没找到的地区。
         if(ElevatorTravelIntent.applies(goal)) return ElevatorTravelIntent.adapt(goal,player);
         JsonObject parameters = new JsonObject();
+        // 指定艇内座位时先验证相对坐标，不把座位请求悄悄降级成普通世界移动。
+        BoardStructureTaskRecord.seatPosition(goal.parameters());
         if (goal.parameters().has("structure_id")) {
             // 这里的 structure_id 是已观察到的船体编号；当前登船入口只走喷气背包方案。
             if (goal.target() != null || goal.parameters().has("destination") || goal.parameters().has("semantic_target")
@@ -311,6 +314,7 @@ final class AbilityAdapter {
             if (transport != TransportMode.AUTO && transport != TransportMode.JETPACK)
                 throw new IllegalArgumentException("physical boarding uses transport_mode=auto or jetpack");
             parameters.addProperty("structure_id", UUID.fromString(string(goal.parameters(), "structure_id")).toString());
+            if(goal.parameters().has("seat_position"))parameters.add("seat_position",goal.parameters().get("seat_position").deepCopy());
             return new IntentAction.Tool("board_structure",parameters.toString());
         }
         TravelDestination.validatePrecision(goal.parameters());
