@@ -19,10 +19,32 @@ import org.maiwithu.maicraft.core.integration.physics.StructurePose;
 
 /** 按原生轮廓选择可见的支撑面；半砖和楼梯不能按整格中心猜测点击位置。 */
 final class StructureEditTarget {
-    record Click(BlockPos support, Direction face, Vec3 world,int preference) {
-        Click(BlockPos support,Direction face,Vec3 world){this(support,face,world,0);}
+    record Click(BlockPos support, Direction face, Vec3 world,int preference,Vec3 preciseStorage) {
+        Click(BlockPos support,Direction face,Vec3 world){this(support,face,world,0,null);}
+        Click(BlockPos support,Direction face,Vec3 world,int preference){this(support,face,world,preference,null);}
     }
     private StructureEditTarget() {}
+    /** 扳手使用面角点避开常见的居中旋钮；保留本地精确点，转头尚未到位时不能误点同一面的设置区。 */
+    static List<Click> wrenchTargets(BlockGetter level,Predicate<BlockPos> loaded,StructurePose pose,BlockPos target) {
+        if(!loaded.test(target))return List.of();
+        var result=new ArrayList<Click>();
+        for(AABB box:level.getBlockState(target).getShape(level,target).toAabbs())for(Direction face:Direction.values()) {
+            Vec3 middle=face(box,face);
+            for(double a:new double[]{.06,.94})for(double b:new double[]{.06,.94}) {
+                Vec3 local=switch(face.getAxis()) {
+                    case X -> new Vec3(middle.x,box.minY+a*box.getYsize(),box.minZ+b*box.getZsize());
+                    case Y -> new Vec3(box.minX+a*box.getXsize(),middle.y,box.minZ+b*box.getZsize());
+                    case Z -> new Vec3(box.minX+a*box.getXsize(),box.minY+b*box.getYsize(),middle.z);
+                };
+                Vec3 storage=local.add(Vec3.atLowerCornerOf(target));
+                result.add(new Click(target,face,pose.toWorld(storage),0,storage));
+            }
+        }
+        return List.copyOf(result);
+    }
+    static boolean precise(Click click,BlockHitResult hit) {
+        return hit!=null&&(click.preciseStorage()==null||hit.getLocation().distanceToSqr(click.preciseStorage())<=.08*.08);
+    }
     // 候选面只描述可点击几何；不能把最近但被甲板顶面挡住的外侧面冒充可见施工面。
     static List<Click> targets(BlockGetter level,Predicate<BlockPos> loaded,StructurePose pose,BlockPos target,boolean placing) {
         return targets(level,loaded,pose,target,placing,null);
@@ -57,7 +79,7 @@ final class StructureEditTarget {
         return targets.stream().filter(c->c.world().distanceToSqr(eye)<=reach*reach)
                 .sorted(Comparator.comparingInt(Click::preference).thenComparingDouble(c->c.world().distanceToSqr(eye))).filter(c->{
                     var hit=ray.apply(eye,c.world());
-                    return hit.getType()==HitResult.Type.BLOCK&&hit.getBlockPos().equals(c.support())&&hit.getDirection()==c.face();
+                    return hit.getType()==HitResult.Type.BLOCK&&hit.getBlockPos().equals(c.support())&&hit.getDirection()==c.face()&&precise(c,hit);
                 }).findFirst().orElse(null);
     }
     // 放置时先避开将要占据的格子，免得导航把麦麦送进目标格后被原生实体碰撞拒绝。

@@ -162,14 +162,17 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         }
         ctx.body().applyMovement(new BodyControlPort.Movement(0,0,false,placing,false),ctx.tickRevision());
         SlabType half=slabHalf(desired,edit);
-        var faces=StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing,half);
+        var faces=wrenching?StructureEditTarget.wrenchTargets(player.level(),ship::isLoaded,ship.pose(),pos)
+                :StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing,half);
         if(placing&&half!=null) {
             // 能形成声明半部的面存在时，走到能看见它的位置；不能因当前更容易看见相反顶底面就提前放错。
             var preferred=faces.stream().filter(candidate->candidate.preference()==0).toList();
             if(!preferred.isEmpty())faces=preferred;
         }
         // 普通右键扳手旋转、潜行右键却会拆走方块，因此只选择可达设计方向的真实命中面并保持站立。
-        if(wrenching)faces=faces.stream().filter(candidate->allowed.contains(candidate.face())).toList();
+        if(wrenching)faces=faces.stream().filter(candidate->allowed.contains(candidate.face()))
+                .filter(candidate->!PhysicalControlAim.interceptsWrench(player.level().getBlockEntity(pos),player,
+                        new BlockHitResult(candidate.preciseStorage(),candidate.face(),pos,false))).toList();
         lastGaze=StructureEditApproach.gaze(ctx,faces);
         if(faces.isEmpty()) { fail("目标格没有已加载的原生施工面",FailureType.NO_PATH);return TaskState.FAILED; }
         var click=StructureEditApproach.current(ctx,ship,pos,placing,faces);
@@ -178,6 +181,7 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         BlockPos support=click.support();Vec3 aim=click.world();Direction face=click.face();
         InputDriver.lookAt(player,aim); BlockHitResult hit=DriverStation.hit(player,ship,support);
         if(hit==null||(placing||wrenching)&&hit.getDirection()!=face||placing&&!player.isShiftKeyDown()||wrenching&&player.isShiftKeyDown()
+                ||wrenching&&(!StructureEditTarget.precise(click,hit)||PhysicalControlAim.interceptsWrench(player.level().getBlockEntity(pos),player,hit))
                 ||placing&&half!=null&&click.preference()==0&&!slabHitMatches(player,desired,hit,half)) {
             if(++aimTicks>100) {
                 ensureSearch(ctx,pos);worksites.record(Map.of("aim_failed",lastGaze));

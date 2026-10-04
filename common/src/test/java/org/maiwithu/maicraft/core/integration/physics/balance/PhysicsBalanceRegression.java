@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.core.task.physics.StructureSlabPlacementTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureLookDirectionTest;
 import org.maiwithu.maicraft.core.task.physics.BondMaterialSettlementTest;
 import org.maiwithu.maicraft.core.task.physics.StructureWrenchPlanTest;
+import org.maiwithu.maicraft.core.task.physics.StructureWrenchTargetTest;
 import org.maiwithu.maicraft.server.physics.PhysicsSnapshotServiceTest;
 import org.maiwithu.maicraft.server.physics.NativeWheelCaptureTest;
 import org.maiwithu.maicraft.core.integration.create.CreateRollerPlacementTest;
@@ -86,6 +87,7 @@ public final class PhysicsBalanceRegression {
         StructureLookDirectionTest.run();
         BondMaterialSettlementTest.run();
         StructureWrenchPlanTest.run();
+        StructureWrenchTargetTest.run();
         PhysicsSnapshotServiceTest.run();
         NativeWheelCaptureTest.run();
         CreateRollerPlacementTest.run();

@@ -16,6 +16,17 @@ import static org.maiwithu.maicraft.core.task.physics.PhysicalControlParameters.
 /** 频率面板和旋钮需要命中原生小区域；先检查可見射线，再按当前姿态确认，不能点击整个方块来冒充设置。 */
 final class PhysicalControlAim {
     private PhysicalControlAim() {}
+    /** Create 的设置区会先取消原生右键；旋转必须避开正在接受此玩家输入的旋钮。 */
+    static boolean interceptsWrench(BlockEntity entity,LocalPlayer player,BlockHitResult hit) {
+        if(hit==null||!(NativeApi.is(entity,NativePhysicalControl.MOTOR)||NativeApi.is(entity,NativePhysicalControl.SPEED)
+                ||NativeApi.is(entity,NativePhysicalControl.SPRING)||NativeApi.is(entity,NativeBurnerDial.BURNER)))return false;
+        Object setting=NativePhysicalControl.setting(entity);
+        if(!NativeApi.truth(NativeApi.call(setting,NativePhysicalControl.VALUE,"isActive"))
+                ||!NativeApi.truth(NativeApi.call(setting,NativePhysicalControl.VALUE,"mayInteract",player))
+                ||NativeApi.truth(NativeApi.call(setting,NativePhysicalControl.VALUE,"bypassesInput",player.getMainHandItem())))return false;
+        Object slot=NativeApi.call(setting,NativePhysicalControl.VALUE,"getSlotPositioning");
+        return withSide(slot,hit.getDirection(),()->NativeApi.truth(NativeApi.call(setting,NativePhysicalControl.VALUE,"testHit",hit.getLocation())));
+    }
     static Vec3 aim(LocalPlayer player,PhysicalAssemblyFrame frame,BlockPos offset,BlockEntity entity,
                     PhysicalControlParameters p,int index,Vec3 eye) {
         if(p.operation()==SET_TIRE) {
