@@ -66,6 +66,7 @@ public final class ContainerTransferCompanionTask
             fail("active container changed before transfer completed; no rollback targeted the replacement menu", FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
+        // 编号和菜单对象共同绑定这一轮点击；另一只箱子即使复用了同一编号，也不能替旧点击提供完成证据。
         if (menu == null) menu = player.containerMenu;
         if (receipt != null) {
             receipt = context.menus().poll(context, receipt);
@@ -413,6 +414,7 @@ public final class ContainerTransferCompanionTask
         super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
+        // 逐笔已确认量、已提交点击和仍未知的结果分开交付；preserve_menu 表示交回菜单，不表示整笔目标已完成。
         var data = new LinkedHashMap<String, Object>();
         data.put("completed_moves", moveIndex); data.put("moved_counts", List.copyOf(moved));
         data.put("effects_started", submittedClicks > 0 || splitEffectsStarted);

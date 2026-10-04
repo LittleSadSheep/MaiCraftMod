@@ -17,6 +17,7 @@ public final class ContainerTransferTaskRecord extends TaskRecord {
         MAY_MUTATE_AFTER_DEPOSIT
     }
     // from 和 to 都是菜单槽号；to=-1 表示让原版快速移动，count=0 表示整堆。
+    // 这是已打开菜单后的内部约定；公开 manage_container 的 count=0 不合法，模型不能把本层槽位协议当作目标参数。
     // EXACT 要求看到目标格准确增加；MAY_MUTATE_AFTER_DEPOSIT 用于放进去就可能被机器消耗的物品。
     public record Move(int from, int to, int count, DestinationMode destinationMode) {
         public Move(int from, int to, int count) {

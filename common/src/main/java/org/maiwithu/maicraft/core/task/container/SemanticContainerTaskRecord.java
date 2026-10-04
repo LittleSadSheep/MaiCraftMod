@@ -55,16 +55,16 @@ public final class SemanticContainerTaskRecord extends TaskRecord {
     public final Operation operation;
     public final List<ResourceLocation> itemIds;
     public final ResourceLocation tagId;
-    /** 要转移的精确数量；为 null 时转移来源中所有匹配物品。 */
+    /** 本次额外搬运的合计数量；未给 count 时先看 targetCount，两者都未给才搬来源侧全部匹配物品。 */
     public final Integer count;
-    /** 操作目标一侧所要求的最终语义数量。 */
+    /** 存入要求箱内至少达到此数，取出要求主背包至少达到此数；balance 要主背包恰好为此数。 */
     public final Integer targetCount;
     public final ResourceLocation blockId;
     public final String landmarkLabel;
     public final Selection selection;
     public final List<String> protectedLabels;
     public final int radius;
-    /** 内部多箱供料绑定的确切木桶／箱子坐标；公开存取请求仍按原有地标和选择方式找容器。 */
+    /** 内部多箱供料绑定的确切箱体；公开存取通过精确目标或类型、地标和选择方式选箱，不填写此字段。 */
     public final BlockPos supplyPosition;
     public BlockPos exactTarget;
     public String exactDimension;

@@ -210,7 +210,8 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction manageContainer(Goal goal, LocalPlayer player) {
-        // 先分清要存入、取出还是让背包保留指定数量，再确定物品和容器，最后交给整理容器任务执行。
+        // 先区分额外搬运 count 与最终库存 target_count：存入看箱内，取出与 balance 看主背包，再绑定一只容器。
+        // 这里编译公开位置与数量，不枚举箱内存货；内部供料的记忆排序和固定原点不会自动带入这次定向请求。
         JsonObject p = goal.parameters();
         String operation = lower(string(p, "operation"));
         if (operation == null || !Set.of("deposit", "withdraw", "balance").contains(operation)) {
@@ -568,7 +569,8 @@ public final class GeneralAbilityAdapter {
 
     private static IntentAction interact(
             Goal goal, LocalPlayer player, IntentRuntime runtime, boolean containerOnly) {
-        // “使用容器”在这里仅表示打开／使用；存取物品另走 manage_container，不在本方法里点击槽位。
+        // 点名容器时编译一次原生方块右键；inspect 也实际使用方块，不会变成只读库存查询。
+        // 真正有没有开出菜单由交互回执另行说明；物品搬运交给 manage_container，这里不生成槽位点击。
         JsonObject p = goal.parameters();
         if (containerOnly && (p.has("transfer") || p.has("deposit") || p.has("withdraw"))) {
             return decision(goal,
@@ -843,7 +845,8 @@ public final class GeneralAbilityAdapter {
         String itemResourceId = string(goal.parameters(), "item_resource_id");
         if (itemResourceId != null) use.addProperty("item_resource_id", itemResourceId);
         use.addProperty("approach", true);
-        // 容器请求要报告界面是否真正出现，不能仅凭右键已提交就让模型再猜一次是否已经开箱。
+        // 容器请求在右键确认后另等新菜单；到观察上限也不重放点击，调用方须读 menu_open_verified。
+        // 这份观察不代表库存同步或物品转移已完成，不能只用动作 success 宣称已经拿到物品。
         if (CONTAINER.equals(goal.ability())) use.addProperty("observe_menu", true);
         use.addProperty("may_alter_terrain", bool(goal.parameters(), "may_alter_terrain", false));
         return new IntentAction.Tool("interact_at", use.toString());

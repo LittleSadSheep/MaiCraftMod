@@ -139,6 +139,7 @@ public final class SemanticContainerCompanionTask
         if (r.tagId != null) itemTag = TagKey.create(Registries.ITEM, r.tagId);
     }
 
+    // 调查补料子任务继承取物父任务的活动范围；公开定向存取没有这份内部范围，仍按自己的目标选箱。
     @Override protected TaskState onTick() {
         return r.investigationScope == null ? tickContainer() : r.investigationScope.boundMovement(this::tickContainer);
     }
@@ -196,7 +197,7 @@ public final class SemanticContainerCompanionTask
                 .thenComparingLong(c -> c.position().asLong()));
         List<Candidate> namedMatches = candidates.stream().filter(Candidate::nameMatches).toList();
         if (!namedMatches.isEmpty()) candidates = new ArrayList<>(namedMatches);
-        // 默认要求只剩一个候选。当前按方块实体计数，双箱两个半边会被算作两个候选，见 A50。
+        // 未允许就近选择时要求候选唯一；此处按方块实体计数，大箱两半可能造成歧义，不能称为整箱去重。
         if (r.selection == SemanticContainerTaskRecord.Selection.UNIQUE && candidates.size() != 1) {
             return failFinal("ambiguous_container", "Several loaded containers match. Choose "
                     + "selection=nearest or narrow the block type or landmark.", FailureType.UNKNOWN);
@@ -235,6 +236,7 @@ public final class SemanticContainerCompanionTask
         return TaskState.RUNNING;
     }
 
+    // 精确点名只认该格；地标以记忆位置为调查中心，名字失效或维度不同就返回原因，不改去脚边找箱子。
     private BlockPos selectionCenter() {
         if (r.storageSupply()) return r.supplyPosition;
         if (r.exactTarget != null) {
@@ -366,7 +368,8 @@ public final class SemanticContainerCompanionTask
                 .withEmptyHand().withApproach(r.mayAlterTerrain).withMenuObservation(), Purpose.OPEN);
     }
 
-    // 等右键带来的菜单真正出现并显示，要求鼠标上没有残留物品，再记录玩家侧、容器侧和整份菜单状态。
+    // 等菜单出现、可见且鼠标为空，再分清双方库存；完整服务器内容同步的显式等待目前仅用于内部供料。
+    // 公开存取走可见性等待后读取当前菜单，不能把这个分支解释为也执行了下方的完整同步检查。
     private TaskState waitMenu() {
         if (player.containerMenu != player.inventoryMenu) {
             if (ownedMenu != null && ownedMenu != player.containerMenu) return menuLost("A different menu replaced the container opened by this task.");
@@ -530,8 +533,8 @@ public final class SemanticContainerCompanionTask
         };
     }
 
-    // balance 把背包调到 target_count；普通存取若给 target_count，则只补足目的侧的差额。
-    // 给 count 就搬指定数量；两者都省略时搬源侧全部匹配物品。
+    // balance 多了存、少了取；target_count 存入看箱内、取出看主背包，已经达到时只关页，不反向取回超额。
+    // count 始终是本次额外搬运量；两者都省略才取来源侧全量，来源为空则如实报缺货。
     private int requestedAmount(int playerCount, int containerCount, Direction selectedDirection) {
         if (r.storageSupply()) return r.operation == SemanticContainerTaskRecord.Operation.DEPOSIT
                 ? Math.min(playerCount, r.count) : Math.min(containerCount, Math.max(0, r.targetCount - playerCount));
@@ -692,7 +695,8 @@ public final class SemanticContainerCompanionTask
                 List.of(pendingMove.move()), false), Purpose.TRANSFER);
     }
 
-    // 原生点击结算后核对玩家侧的精确变化；存入箱内的物品可能已经被溜槽抽走，不能要求它继续留在箱内。
+    // 每笔原生点击先核对玩家侧精确增减；普通箱子还要双边一致，允许即时消耗的机器存入另按原生证据结算。
+    // 确认后才增加 movedCount；箱内留存量和累计已搬运量分别记录，不能把投料成功当成机器已经加工出货。
     private TaskState verifyTransfer() {
         if (!menuValid() || pendingMove == null) {
             outcomeUncertain = true;
@@ -783,6 +787,7 @@ public final class SemanticContainerCompanionTask
             confirmedSplitClicks += Math.max(0, clicks.intValue());
         if (purpose == Purpose.TRANSFER) {
             // 失败也带回底层点击原因和当时实际库存，避免沿用开箱时的旧计数误导模型重复投料。
+            // 失败子任务不会进入 verifyTransfer；它已确认的部分量仍在 lastNativeTransfer，本层 movedCount 可能尚未增加。
             Map<String, Object> evidence = result == null || result.data() == null ? Map.of() : result.data();
             lastNativeTransfer = Map.of("message", result == null ? "missing native transfer result" : String.valueOf(result.message()),
                     "data", evidence);
@@ -945,6 +950,7 @@ public final class SemanticContainerCompanionTask
         return result;
     }
 
+    // 选择器只按物品类型或标签累计，附魔、名称等组件不会在这里排除；逐笔落槽时仍须保持原堆组件身份。
     private boolean matches(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         if (itemTag != null) return stack.is(itemTag);
@@ -1004,7 +1010,8 @@ public final class SemanticContainerCompanionTask
         return lease;
     }
 
-    // 任务被取消等情况会停止子任务并尝试关菜单；当前只 stop 子任务，没有调用它的 result 来完成全部清理。
+    // 取消、死亡等终止路径停止子任务并尝试结清自有菜单；鼠标仍有物品时保留界面和未知状态供核查。
+    // 当前这里只调用子任务 stop，没有取得其 result；途中取消的完整搬运证据不能保证都已汇入本层计数。
     @Override protected void cleanup() {
         stopNav();
         if (activeChild != null) {
