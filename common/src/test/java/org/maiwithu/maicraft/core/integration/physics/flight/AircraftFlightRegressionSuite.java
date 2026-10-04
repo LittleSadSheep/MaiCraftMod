@@ -13,6 +13,8 @@ public final class AircraftFlightRegressionSuite {
         AircraftTravelContractTest.run();
         AircraftProfileStoreTest.run();
         FlightOperationRegistrationTest.run();
+        // 中止飞行也必须把未确认效果交还决策层，不能暗示可以直接重放起飞。
+        FlightOutcomeReceiptTest.run();
         System.out.println("AircraftFlightRegressionSuite: passed");
     }
 }

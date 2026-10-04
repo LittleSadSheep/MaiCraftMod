@@ -123,6 +123,8 @@ public final class AircraftFlightSession implements TransportSession {
                 &&(keyboard==null||!keyboard.effectsStarted());
     }
     @Override public boolean livenessActive(){return terminal==null;}
+    /** 取消回执仍需区分尚未接管与已发出输入，不能因着陆收尾尚未结束就丢掉实际效果。 */
+    public boolean effectsStarted(){return keyboard!=null&&keyboard.effectsStarted();}
     @Override public long lastVerifiedProgressTick(){return lastProgress;}
     @Override public String phase(){return parkingSince>=0?"verifying_released_parking":controller.phase().name().toLowerCase(Locale.ROOT);}
     @Override public Map<String,Object> diagnostics() {

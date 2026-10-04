@@ -103,8 +103,18 @@ public final class AircraftFlightTask extends AbstractCompanionTask<AircraftFlig
         if(profile!=null)data.put("flight_profile",profile.json());data.put("boarding",boardingEvidence);
         if(session!=null)data.put("flight",session.evidence());data.put("flight_verified",outcome!=null&&outcome.state()==TransportSession.State.SUCCEEDED);
         data.put("profile_registered",profile!=null);
+        // 取消时交通租约可能仍在附近着陆；公开回执必须保留尚未结算的飞行效果，不能诱导立即重飞。
+        data.putAll(outcomeFacts(outcome,session!=null&&session.effectsStarted()));
         if(inspected.size()>0)data.put("native_flight_state",inspected);if(inspectionUnknown!=null)data.put("native_observation_unknown",inspectionUnknown);
         data.put("configuration_is_flight_proof",false);return data;
+    }
+    static Map<String,Object> outcomeFacts(TransportSession.Result outcome,boolean inputsStarted) {
+        var facts=new LinkedHashMap<String,Object>();
+        facts.put("effects_started",inputsStarted||outcome!=null&&outcome.effectsStarted());
+        facts.put("outcome_uncertain",outcome==null?inputsStarted:outcome.uncertain());
+        facts.put("mechanical_retry_allowed",false);
+        if(outcome!=null)facts.put("flight_outcome",Map.of("state",outcome.state().name(),"code",outcome.code(),"detail",outcome.detail()));
+        return facts;
     }
     @Override protected String successMessage(){return r.operation.equals("fly")?"已在指定载具内完成飞控流程并观察到着陆停稳":"飞控操纵声明已读取或保存，实际飞行尚需独立验证";}
 }

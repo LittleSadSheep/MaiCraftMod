@@ -70,6 +70,12 @@ public final class AircraftTravelTask extends AbstractCompanionTask<AircraftTrav
         data.put("aircraft_id", r.aircraftId.toString()); data.put("flight", flightEvidence);
         data.put("aircraft_landed", landed); data.put("dismounted", dismounted);
         data.put("ground_leg", groundEvidence); data.put("destination_reached", arrived);
+        // 飞行和最后步行任一段未确认时都显式上送，不把部分抵达包装成可直接重放的旅行失败。
+        data.put("outcome_uncertain", Boolean.TRUE.equals(flightEvidence.get("outcome_uncertain"))
+                || Boolean.TRUE.equals(groundEvidence.get("outcome_uncertain")));
+        data.put("effects_started", landed || Boolean.TRUE.equals(flightEvidence.get("effects_started"))
+                || Boolean.TRUE.equals(groundEvidence.get("effects_started")));
+        data.put("mechanical_retry_allowed", false);
         return data;
     }
     @Override protected String successMessage() { return "已乘飞机着陆停稳、原生下车，并按原旅行坐标完成地面到达"; }
