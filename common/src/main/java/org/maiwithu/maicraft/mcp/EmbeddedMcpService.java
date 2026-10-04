@@ -137,6 +137,33 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
     }
 
+    /**
+     * 按配置端口启动服务；端口已被占用时依次让行到后续端口，最多再试 {@code extraAttempts} 个。
+     * 让行只针对绑定失败（端口不可用），服务自身的其他失败原样抛出；全部端口都不可用时抛出
+     * 最后一次绑定异常。配置端口为 0 时由系统分配，不会触发让行。
+     */
+    public static EmbeddedMcpService startWithFallback(McpConfig config, RuntimeFacade runtime, int extraAttempts)
+            throws IOException {
+        IOException lastBindFailure = null;
+        for (int attempt = 0; attempt <= extraAttempts; attempt++) {
+            int port = config.port() + attempt;
+            if (port > 65_535) break;
+            EmbeddedMcpService candidate = new EmbeddedMcpService(
+                    new McpConfig(config.host(), port, config.bearerToken(),
+                            config.maxRequestBytes(), config.requestTimeout()),
+                    runtime);
+            try {
+                candidate.start();
+                return candidate;
+            } catch (IOException bindFailure) {
+                closeQuietly(candidate);
+                lastBindFailure = bindFailure;
+            }
+        }
+        throw lastBindFailure != null ? lastBindFailure
+                : new IOException("no port to bind in range " + config.port() + "+");
+    }
+
     public synchronized boolean isRunning() {
         return server != null;
     }
