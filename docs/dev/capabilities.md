@@ -20,10 +20,10 @@
 
 | 能力 | 玩家要做什么 | 从哪个适配入口继续读 | 当前进度 |
 | --- | --- | --- | --- |
-| `sequence` | 依次做一组目标 | `Goal.executableSteps` → `IntentTask` | 完成重构；[编排与恢复规则](sequences.md) |
+| `sequence` | 依次做一组目标 | `Goal.executableSteps` → `IntentTask` | [顺序、待答与失败继续边界](sequences.md)；本轮静态复盘 |
 | `remember_place` | 记住地点或区域 | `AbilityAdapter.remember` → `IntentRuntime.remember` | 入口核对 |
-| `wait_for_condition` | 等一段时间、天亮或身体条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | 完成重构；[实现与回归](waiting.md) |
-| `chat` | 在真实聊天框输入并提交 | `ChatAbilityAdapter` → `ChatTask` | 完成重构；[发送与恢复规则](chat.md) |
+| `wait_for_condition` | 先等最短游戏时间，再观察条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | [参数、时钟与恢复](waiting.md)；本轮静态复盘 |
+| `chat` | 可见打字并提交一次聊天或命令 | `ChatAbilityAdapter` → `ChatTask` | [输入框、客户端提交与持久防重](chat.md)；本轮静态复盘 |
 | `suicide` | 死亡不掉落时通过原生危险动作主动寻死 | `SuicideAbilityAdapter` → `SuicideTask` | [用途、参数与生命周期](suicide.md)；已有夹具入口见正文，本轮仅静态复核，尚未实机验收 |
 | `travel` | 去指定地点或已观察到的位置 | `AbilityAdapter.travel` | 入口核对；[参数、到达判定与已知边界](travel.md) |
 | `travel_dimension` | 准备并通过传送门换维度 | `AbilityAdapter.travelDimension` | 入口核对 |
@@ -40,17 +40,17 @@
 | `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md) |
 | `use_container` | 靠近并打开容器 | `GeneralAbilityAdapter.interact` 的容器分支 | 入口核对 |
 | `manage_container` | 存入、取出或平衡背包数量 | `GeneralAbilityAdapter.manageContainer` | 入口核对 |
-| `consume` | 吃或使用指定物品 | `GeneralAbilityAdapter.consume` | 入口核对 |
-| `equip` | 穿戴或手持合适物品 | `GeneralAbilityAdapter.equip` | 入口核对 |
+| `consume` | 吃一份随身食物并观察消耗 | `GeneralAbilityAdapter.consume` → `EatCompanionTask` | [参数、消耗证据与已知边界](daily-actions.md)；本轮静态复盘 |
+| `equip` | 手持、穿戴或卸下指定部位 | `GeneralAbilityAdapter.equip` → `EquipCompanionTask / UnequipCompanionTask` | [装备路由与未卸下事实](daily-actions.md)；本轮静态复盘 |
 | `drop_items` | 按件数分堆丢弃，可移动、开挖侧袋并尝试点火；特定走廊余物回收后换点 | `GeneralAbilityAdapter.drop` | [丢弃物品](dropping-items.md)：参数、主流程、结果边界与已有回归入口 |
-| `fish` | 钓鱼并确认收获 | `GeneralAbilityAdapter.fish` | 入口核对 |
-| `sleep` | 找到床并睡觉 | `AbilityAdapter.sleep` | 入口核对 |
+| `fish` | 钓取并收回指定竿数的战利品 | `GeneralAbilityAdapter.fish` → `FishCompanionTask` | [附近选址、收获证据与边界](daily-actions.md)；本轮静态复盘 |
+| `sleep` | 找床或放随身床，确认躺下 | `AbilityAdapter.sleep` → `SleepCompanionTask` | [上床与自然醒的区别](daily-actions.md)；本轮静态复盘 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
 | `craft` | 根据配方制作物品 | `AbilityAdapter.craft` | 入口核对 |
-| `cook` | 烹饪或烧炼所需物品 | `CookAbilityAdapter` | 主执行器已通读，数量、估价和菜单收尾已重构；[已验证与待审范围](cooking.md) |
-| `trade` | 与村民完成指定交易 | `AbilityAdapter.trade` | 入口核对 |
+| `cook` | 用炉子补足主背包成品数量 | `CookAbilityAdapter` → `SemanticCookCompanionTask` | [配方、备料、炉次收尾与恢复限制](cooking.md)；本轮静态复盘 |
+| `trade` | 按真实报价补足主背包目标数量 | `AbilityAdapter.trade` → `SemanticTradeCompanionTask` | [付款政策、结果与未接通边界](trading.md)；本轮静态复盘 |
 | `enchant` | 使用附魔台完成一次有预算的附魔 | `EnchantAbilityAdapter` | 入口核对；兼容入口 |
-| `stonecut` | 在切石机把输入切成指定产物 | `StonecutAbilityAdapter` | 入口核对 |
+| `stonecut` | 将随身输入按次数整批切制 | `StonecutAbilityAdapter` → `StonecutterMenuFlow` | [实际产量、回执与持久防重](stonecutting.md)；本轮静态复盘 |
 | `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | 入口核对 |
 | `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | 入口核对 |
 | `light_area` | 调查指定区域、供料并按实测方块光补足所选覆盖率 | `AbilityAdapter.lightArea` → `SemanticLightAreaCompanionTask` | [参数、流程、回执与已知缺口](lighting.md)；本轮静态核对，未运行回归或实机 |
