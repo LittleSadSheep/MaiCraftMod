@@ -53,6 +53,9 @@ public final class FlightRoutePlanner {
         double wanted=FlightSample.heading(target.subtract(sample.position()));
         double seconds=Math.max(3,Math.min(6,envelope.cruiseSpeed()/4));
         var departure=FlightPathProbe.trace(probe,sample,bounds,sample.heading(),0,Math.min(5,seconds),envelope);
+        // 固定翼检查前方滑跑空间，飞艇检查垂直离地与减速余量，不要求先有一条水平跑道。
+        boolean departureClear=envelope.kind()==FlightEnvelope.Kind.AIRSHIP
+                ?probe.observe(bounds.expandTowards(0,12,0))==FlightPathProbe.Space.CLEAR:departure.state()==FlightPathProbe.Space.CLEAR;
         FlightPathProbe.Result best=null;double bestCost=Double.POSITIVE_INFINITY;
         var trials=new ArrayList<Map<String,Object>>();
         double[] headings={0,.26,-.26,.52,-.52,1.05,-1.05,Math.PI};
@@ -70,7 +73,7 @@ public final class FlightRoutePlanner {
         Vec3 waypoint=best==null?sample.position().add(FlightSample.forward(sample.heading(),0).scale(32)):best.path().getLast();
         boolean known=best!=null||trials.stream().noneMatch(t->t.get("state").equals("UNKNOWN"));
         guidance=new FlightGuidance(waypoint,approach,touchdown,landing==null?sample.heading():landing.heading(),cruise,
-                departure.state()==FlightPathProbe.Space.CLEAR,known,best!=null&&(!finalApproach||direct.state()==FlightPathProbe.Space.CLEAR),
+                departureClear,known,best!=null&&(!finalApproach||direct.state()==FlightPathProbe.Space.CLEAR),
                 landing!=null,best==null?sample.position().y:waypoint.y);
         evidence=Map.of("block_reads",probe.blockReads(),"candidate_routes",List.copyOf(trials),"selected_path",best==null?List.of():best.path(),
                 "landing_site",landing==null?Map.of():Map.of("touchdown",landing.touchdown(),"heading",landing.heading(),"observed_tick",landing.observedTick()),

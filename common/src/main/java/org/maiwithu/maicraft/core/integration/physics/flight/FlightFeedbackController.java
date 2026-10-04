@@ -37,7 +37,7 @@ public final class FlightFeedbackController {
         if(phase==Phase.PREFLIGHT) {
             departureHeading=sample.heading();departureHeight=sample.position().y;
             if(airborneSamples>=3){airborneVerified=true;transition(Phase.CRUISE,sample,"接管已在空中的载具");}
-            else if(stableGround>=8&&course.departureClear()&&course.corridorObserved())
+            else if(stableGround>=8&&course.departureClear())
                 transition(envelope.kind()==FIXED_WING?Phase.RUNUP:Phase.CLIMB,sample,"驾驶与起飞通道已就绪");
             else return command=FlightCommand.parked();
         }
@@ -47,13 +47,15 @@ public final class FlightFeedbackController {
         if(airborneVerified&&sample.contact()==GROUNDED&&phase!=Phase.DESCENT&&phase!=Phase.FLARE&&phase!=Phase.ROLLOUT) {
             unexpectedGround=true;transition(Phase.ROLLOUT,sample,"非着陆阶段提前接地，停止当前飞行");
         }
-        if(sample.contact()==AIRBORNE&&(!course.corridorObserved()||!course.corridorClear())&&phase!=Phase.GO_AROUND)
+        boolean verticalDeparture=envelope.kind()==AIRSHIP&&phase==Phase.CLIMB
+                &&(!airborneVerified||sample.position().y<departureHeight+8);
+        if(sample.contact()==AIRBORNE&&!verticalDeparture&&(!course.corridorObserved()||!course.corridorClear())&&phase!=Phase.GO_AROUND)
             transition(Phase.GO_AROUND,sample,"航路阻挡或未观测，交由已观测的避让航点引导复飞");
 
         double speed=sample.forwardSpeed(),altitude=course.cruiseAltitude();
         double heading=FlightSample.heading(course.waypoint().subtract(sample.position()));
         double desiredPitch=heightPitch(sample,course.commandAltitude()),power=speedPower(speed,envelope.cruiseSpeed());
-        double lift=lift(sample,altitude),desiredBank;
+        double lift=lift(sample,course.commandAltitude()),desiredBank;
         boolean brake=false;
         switch(phase) {
             case RUNUP -> {
@@ -69,7 +71,11 @@ public final class FlightFeedbackController {
             }
             case CLIMB -> {
                 power=Math.clamp(speedPower(speed,envelope.cruiseSpeed())+.2,0,1);
-                if(envelope.kind()==AIRSHIP)desiredPitch=0;
+                if(envelope.kind()==AIRSHIP) {
+                    desiredPitch=0;
+                    // 飞艇先在已检查的垂直空间离地，再开推进和偏航，避免贴地旋转的桨叶将吊舱掀翻。
+                    if(verticalDeparture){power=0;lift=Math.clamp(.7+(envelope.climbRate()-sample.velocity().y)*.25,0,1);}
+                }
                 if(sample.contact()==AIRBORNE&&sample.position().y>=altitude-2)transition(Phase.CRUISE,sample,"已到巡航高度");
                 else if(airborneVerified&&sample.contact()==AIRBORNE&&course.landingSiteObserved()&&horizontalDistance(sample.position(),course.approachPoint())<24)
                     transition(Phase.APPROACH,sample,"避障高度下已到进近区域");
@@ -92,6 +98,7 @@ public final class FlightFeedbackController {
                 heading=course.landingHeading();desiredPitch=heightPitch(sample,altitude);
                 power=envelope.kind()==AIRSHIP?Math.clamp(distance/20,0,.5):speedPower(speed,envelope.takeoffSpeed()*1.25);
                 lift=lift(sample,Math.max(course.touchdown().y,Math.min(altitude,sample.position().y-envelope.descentRate())));
+                if(envelope.kind()==AIRSHIP&&distance<8){power=0;heading=sample.heading();}
                 if(sample.contact()==GROUNDED)transition(Phase.ROLLOUT,sample,"已观察到接地");
                 else if(envelope.kind()==FIXED_WING&&sample.position().y-course.touchdown().y<Math.max(2,speed*.15))
                     transition(Phase.FLARE,sample,"近地拉平");
@@ -126,9 +133,11 @@ public final class FlightFeedbackController {
             desiredPitch=Math.min(desiredPitch,Math.toRadians(-3));
         double headingError=FlightSample.wrap(heading-sample.heading());
         desiredBank=envelope.kind()==AIRSHIP||sample.contact()==GROUNDED?0:Math.clamp(headingError*.65,-envelope.maximumBank(),envelope.maximumBank());
+        boolean verticalLanding=envelope.kind()==AIRSHIP&&phase==Phase.DESCENT
+                &&horizontalDistance(sample.position(),course.touchdown())<8&&sample.position().y-course.touchdown().y<2;
         command=new FlightCommand(power,servo(desiredPitch-sample.pitch(),sample.pitchRate(),3,.8),
                 servo(FlightSample.wrap(desiredBank-sample.bank()),sample.bankRate(),3,1),
-                servo(headingError,sample.headingRate(),envelope.kind()==AIRSHIP?1.5:.7,.5),lift,brake);
+                verticalDeparture||verticalLanding?0:servo(headingError,sample.headingRate(),envelope.kind()==AIRSHIP?1.5:.7,.5),lift,brake);
         return command;
     }
     private double heightPitch(FlightSample s,double altitude) {

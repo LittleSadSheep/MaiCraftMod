@@ -13,7 +13,7 @@ public final class FlightFeedbackControllerTest {
     private static final FlightGuidance COURSE=new FlightGuidance(new Vec3(0,100,200),new Vec3(0,100,180),
             new Vec3(0,80,300),0,100,true,true,true,true);
     public static void main(String[] args) throws Exception {
-        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();
+        nativePoseSampling();takeoffAndLanding();unknownGroundCannotFinish();cancelInAirKeepsControl();obstacleRequiresGoAround();keyMixer();groundDrivingIsNotFlight();verticalAirshipDeparture();
         PhysicsFlightStateServiceTest.run();
         FlightPathProbeTest.run();
         System.out.println("FlightFeedbackControllerTest: passed");
@@ -91,6 +91,15 @@ public final class FlightFeedbackControllerTest {
         for(int t=1;t<=3;t++)c.tick(sample(t,100,16,50,AIRBORNE),COURSE,true);
         for(int t=4;t<=20;t++)c.tick(sample(t,80,0,300,GROUNDED),COURSE,true);
         check(c.unexpectedGround()&&!c.succeeded(),"巡航撞地即使碰巧在目的地旁也不能冒充成功着陆");
+    }
+    private static void verticalAirshipDeparture() {
+        var c=new FlightFeedbackController(FlightEnvelope.airship());
+        var course=new FlightGuidance(new Vec3(-100,100,200),COURSE.approachPoint(),COURSE.touchdown(),0,100,true,false,false,true);
+        FlightCommand command=FlightCommand.parked();
+        for(int t=1;t<=8;t++)command=c.tick(sample(t,80,0,0,GROUNDED),course,true);
+        check(c.phase()==CLIMB&&command.lift()>0&&command.power()==0&&command.yaw()==0,"飞艇应先升空，不在地面同时开桨或差动倒车");
+        command=c.tick(sample(9,83,0,0,AIRBORNE),course,true);
+        check(c.phase()==CLIMB&&command.power()==0&&command.yaw()==0,"水平航路暂时未通不能抢走已核对的垂直离地流程");
     }
     private static FlightSample sample(long tick,double y,double speed,double z,FlightSample.Contact contact) {
         return new FlightSample(tick,new Vec3(0,y,z),new Vec3(0,0,speed),0,0,0,0,0,0,contact);
