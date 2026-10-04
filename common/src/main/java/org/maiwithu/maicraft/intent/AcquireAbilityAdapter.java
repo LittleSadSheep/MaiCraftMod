@@ -10,6 +10,8 @@ final class AcquireAbilityAdapter {
     private AcquireAbilityAdapter() {}
 
     static void validate(Goal goal) {
+        // 取物从角色当前地点开始；计划阶段就拒绝异地或带限定的 nearest，避免角色在错误地点开箱或采集。
+        // 数量和来源在这里校验，标签成员与实际库存留到进入游戏后的取物 API 读取。
         var target = goal.target();
         if (target != null && (!"nearest".equals(target.kind()) || target.label() != null
                 || target.position() != null || target.relation() != null)) {

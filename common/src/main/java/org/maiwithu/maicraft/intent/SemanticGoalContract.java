@@ -57,7 +57,8 @@ final class SemanticGoalContract {
         validateObjectKeys(goal.preferences(), withRuntimeAuthorizationKeys(
                         SemanticAbilityCatalog.preferenceNames(ability)),
                 path + ".preferences", ability, "unknown_preference");
-        // 取物数量、来源与地点要求在接单前说明白，不能接管角色后再忽略或改写请求。
+        // acquire_items 在接单前严格检查数量、来源与地点，旧历史仅供恢复查询；真正重新执行仍由适配器再查。
+        // craft 没有复用这项专属校验，当前只过通用字段检查，数量值仍在它的执行适配器里宽松转换。
         if (!restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability)) {
             try { AcquireAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {

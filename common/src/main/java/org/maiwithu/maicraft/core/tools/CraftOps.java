@@ -186,6 +186,8 @@ public final class CraftOps {
     public Plan plan(String itemId, Integer count, LocalPlayer self, ToolContext toolContext,
             CraftingWorkstationCoordinator.PlanningSnapshot workstation, Set<String> excludedRecipeIds,
             Collection<ResourceLocation> preferredMaterials) {
+        // 上层传最终库存目标，计划只把缺口换算为整批产量；例如已有四支火把、目标八支，只安排再做一批。
+        // 此处只读配方和库存，真正扣料、摆工作台与收取结果由创建出的合成任务执行。
         Item target = ToolArgs.parseItem(itemId);
         Set<String> excluded = excludedRecipeIds == null ? Set.of() : excludedRecipeIds;
         int wantedInventoryCount = count == null ? 1 : Math.clamp(count, 1, MAX_COUNT);
@@ -263,7 +265,8 @@ public final class CraftOps {
         }
 
         Candidate chosen = candidates.get(0);
-        // 缺料恢复使用完整候选，公开报告仍单独限长；展示字段缺失不会再改变内部配方选择。
+        // 缺料恢复使用完整候选；当前诊断仍只展示八条配方、每格六十四种材料，并另报总数和截断标志。
+        // 这份短展示不参与内部选料，不能把没展示出的木种当成已经排除或不存在。
         List<CraftRecoveryCandidate> recoveryCandidates = candidates.stream()
                 .map(candidate -> new CraftRecoveryCandidate(BuiltInRegistries.ITEM.getKey(target),
                         candidate.id().toString(), candidate.allocation().ingredients().stream()

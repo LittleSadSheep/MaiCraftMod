@@ -129,6 +129,7 @@ public final class SemanticAcquireApi {
         List<ResourceLocation> professions = resourceIds(
                 hintObject.get("trade_profession_ids"),
                 "source_hint.trade_profession_ids", false);
+        // 职业编号目前只随来源提示保存；交易派发尚未读取它，不能据此声称已限定角色要找的村民职业。
         String description = primitiveString(hintObject, "description");
         SemanticAcquireTaskRecord.SourceHint hint = new SemanticAcquireTaskRecord.SourceHint(
                 blockRefs, entityTypes, expectedItems, professions, description);
@@ -152,6 +153,8 @@ public final class SemanticAcquireApi {
             // 狩猎可能先走到新的观察位置找生物，初始期限需覆盖这段寻找，不能还没找到目标就提前超时。
             ticks = Math.max(ticks, 12L * 60L * 20L);
         }
+        // 冻结请求地点与范围后才交给逐刻执行器；显式 radius:null 虽取默认数值 16，仍进入“字段存在”的仓库分支。
+        // 采矿单独把 null 当作未指定半径，狩猎距离则只传给之后创建的实体搜索，不替代仓库冻结范围。
         return new SemanticAcquireTaskRecord(
                 context.toolCallId(), context.deadline(ticks), itemIds, count,
                 sources, allowHarm, hint, protectedLabels, radius, args.has("radius") ? radius : ContainerSearchScope.MAX_RADIUS)

@@ -667,6 +667,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                         FailureType.NO_SUPPORT);
             }
             if (!player.containerMenu.getCarried().isEmpty()) {
+                // 鼠标已拿着别人的物品时不抢占它；这里的 NO_SPACE 也包含界面占用，需保留具体原因供父任务解释。
                 surfaceFailureCode = "crafting_cursor_not_empty";
                 surfaceFailureDetail = "recipe placement requires an empty cursor";
                 return failBeforeOrAfterGridReturn(surfaceFailureDetail, FailureType.NO_SPACE);
@@ -795,6 +796,7 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
                         "the exact crafting result changed before it could be taken",
                         FailureType.NO_MATERIAL);
             }
+            // 只核对这一批产物能否真实入包；两批火把可以叠进同一格，不额外要求第二个空槽。
             if (inventoryCapacity(plannedOutput) < outputPerBatch) {
                 return beginGridReturnFailure(
                         "the main inventory cannot safely accept one exact recipe batch",

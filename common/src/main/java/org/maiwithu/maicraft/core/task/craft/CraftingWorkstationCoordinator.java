@@ -169,6 +169,7 @@ public final class CraftingWorkstationCoordinator {
     /** 供配方排序共用的只读可行性快照。 */
     public static PlanningSnapshot inspect(LocalPlayer player) {
         // 给合成规划一个只读结论：工作台已就绪、可走近／摆放、需要先取得物品，或还在搜索。
+        // 已有随身台但找不到摆放点属于工作面条件受阻；不能因此把“再造一张台”展开成新的原木采集链。
         List<Block> tables = craftingTableBlocks();
         TargetIndex.register(player.clientLevel, tables);
         TableSearch search;

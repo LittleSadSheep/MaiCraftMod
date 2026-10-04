@@ -92,7 +92,11 @@ public final class RecipeMaterialPlan {
         return estimate(needs, stock, recipes, sources, blocked, unavailable, Set.of());
     }
 
-    /** LLM 的材料倾向沿整条依赖链传递；偏好路线不可展开时仍保留其他完整候选。 */
+    /**
+     * LLM 的材料倾向沿依赖链传递，偏好路线不可展开时仍保留其他候选。
+     * feasible 只说明材料账找到了一条可展开链，未知来源仍可能列在待补清单；不能用它提前宣布角色已取得材料。
+     * searchComplete 另记深度、候选裁剪和预算是否影响搜索，避免把一次有界推演当作穷尽所有模组配方。
+     */
     public static Result estimate(List<Need> needs, Map<ResourceLocation, Long> stock,
                                   Function<ResourceLocation, List<Recipe>> recipes,
                                   Function<ResourceLocation, Source> sources, Set<ResourceLocation> blocked,

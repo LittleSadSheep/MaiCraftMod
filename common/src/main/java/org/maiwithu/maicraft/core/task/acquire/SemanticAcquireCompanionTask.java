@@ -454,6 +454,8 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState attemptCraft(AcquisitionNeed need) {
+        // 先比较眼前可做的整批配方，再准备缺失的工作台，最后才把真正缺的原料压入需求栈。
+        // 这些准备沿用父需求的来源许可；选中路线并不等于物品已到包，仍要等待原生子任务结算。
         if (need.itemIds.stream().allMatch(r.productionLineage::blocks)) {
             addIssue("craft", "production_dependency_cycle", "grid crafting would revisit an active production ancestor", needFacts(need));
             advanceSource(need); return TaskState.RUNNING;
@@ -1399,6 +1401,8 @@ public final class SemanticAcquireCompanionTask
     }
 
     private TaskState startInventoryTidy(AcquisitionNeed need, TaskRecord blockedRecord) {
+        // 容量受阻时保留本次目标和配方原料，尝试把其他物品原生存入随身存储；存入结果另记维护回执。
+        // 当前分支按实际随身存储入口选择后端，没有用 allowed_sources 筛选，因此获取限制不等于禁止整理存入。
         if (need == null) return null;
         var keep = needs.stream().flatMap(value -> Stream.concat(value.itemIds.stream(), value.lineageItems.stream()))
                 .map(BuiltInRegistries.ITEM::get).collect(Collectors.toSet());
@@ -1981,6 +1985,7 @@ public final class SemanticAcquireCompanionTask
     }
 
     private boolean completeCarriedPrerequisite() {
+        // 只有活动子任务已经结清才走到这里；保留已发生的效果，再用新同步的中间件结束不再必要的取材链。
         // 从最接近最终成品的需求开始看，现货已覆盖该层时，下面尚未提交的补料都已没有必要。
         AcquisitionNeed satisfied = null;
         var ancestors = needs.descendingIterator();
