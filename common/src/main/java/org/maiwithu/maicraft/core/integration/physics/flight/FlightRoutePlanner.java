@@ -56,7 +56,7 @@ public final class FlightRoutePlanner {
         var departure=FlightPathProbe.trace(probe,sample,bounds,sample.heading(),0,Math.min(5,seconds),envelope);
         // 固定翼检查前方滑跑空间，飞艇检查垂直离地与减速余量，不要求先有一条水平跑道。
         var departureState=envelope.kind()==FlightEnvelope.Kind.AIRSHIP
-                ?FlightPathProbe.verticalDeparture(probe,bounds,sample.contact()==FlightSample.Contact.GROUNDED):departure.state();
+                ?FlightHullDeparture.inspect(world,ship,probe,sample.contact()==FlightSample.Contact.GROUNDED):departure.state();
         boolean departureClear=departureState==FlightPathProbe.Space.CLEAR;
         var departureEvidence=probe.lastObservation();
         FlightPathProbe.Result best=null;double bestCost=Double.POSITIVE_INFINITY;

@@ -25,11 +25,12 @@ public final class FlightWorldProbe implements FlightPathProbe.World {
     private final int readBudget;
     private int reads;
     private Map<String,Object> lastObservation=Map.of();
+    private List<AABB> ownMovingParts=List.of();
     public FlightWorldProbe(BlockGetter world,Predicate<BlockPos> loaded,List<AABB> dynamic,boolean dynamicKnown,int readBudget) {
         this.world=world;this.loaded=loaded;this.dynamic=List.copyOf(dynamic);this.dynamicKnown=dynamicKnown;this.readBudget=readBudget;
     }
     public static FlightWorldProbe capture(ClientLevel level,SableStructureBridge.Structure own) {
-        var obstacles=new ArrayList<AABB>();var frame=SableStructureBridge.open(level,own.pose().position(),null);
+        var obstacles=new ArrayList<AABB>();var ownParts=new ArrayList<AABB>();var frame=SableStructureBridge.open(level,own.pose().position(),null);
         boolean complete=!frame.truncated()&&frame.error()==null;
         for(var other:frame.structures()) {
             if(own.id().equals(other.id()))continue;
@@ -42,12 +43,14 @@ public final class FlightWorldProbe implements FlightPathProbe.World {
         for(var entity:level.entitiesForRendering()) {
             if(!entity.isAlive()||!ControlReflection.is(entity,"com.simibubi.create.content.contraptions.AbstractContraptionEntity"))continue;
             try {
-                if(own.id().equals(SableStructureBridge.containingId(level,entity.blockPosition())))continue;
                 var parent=SableStructureBridge.containingPose(level,entity.blockPosition());
-                obstacles.add(parent==null?entity.getBoundingBox():PhysicalObstacleSnapshot.transformBox(parent,entity.getBoundingBox(),true));
+                var bounds=parent==null?entity.getBoundingBox():PhysicalObstacleSnapshot.transformBox(parent,entity.getBoundingBox(),true);
+                if(own.id().equals(SableStructureBridge.containingId(level,entity.blockPosition())))ownParts.add(bounds);
+                else obstacles.add(bounds);
             } catch(RuntimeException unknown){complete=false;}
         }
-        return new FlightWorldProbe(level,pos->level.getChunkSource().hasChunk(pos.getX()>>4,pos.getZ()>>4),obstacles,complete,100_000);
+        var probe=new FlightWorldProbe(level,pos->level.getChunkSource().hasChunk(pos.getX()>>4,pos.getZ()>>4),obstacles,complete,100_000);
+        probe.ownMovingParts=List.copyOf(ownParts);return probe;
     }
     @Override public FlightPathProbe.Space observe(AABB swept) {
         // 只保存本次查询的阻挡或未知原因，让起飞回执指出究竟是地面、树木、运动结构还是读取范围。
@@ -78,4 +81,6 @@ public final class FlightWorldProbe implements FlightPathProbe.World {
     }
     public int blockReads(){return reads;}
     public Map<String,Object> lastObservation(){return lastObservation;}
+    List<AABB> ownMovingParts(){return ownMovingParts;}
+    FlightPathProbe.Space unknownObservation(String reason){lastObservation=Map.of("reason",reason);return UNKNOWN;}
 }

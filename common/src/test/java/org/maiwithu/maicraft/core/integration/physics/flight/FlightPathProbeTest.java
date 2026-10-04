@@ -50,6 +50,15 @@ public final class FlightPathProbeTest {
                 "极小姿态噪声导致的侧面相贴不能阻止离地");
         check(FlightPathProbe.verticalDeparture(box->box.intersects(edgeBlock)?BLOCKED:CLEAR,
                 new AABB(0,78,0,4.01,84,4),true)==BLOCKED,"真实侧向穿透仍须报告阻挡");
+        // 外置推进器下方本来是空气；只要实体部件向上不会扫到地形，就不能用整机空包围盒拦截。
+        var hull=List.of(new AABB(0,78,1,1,79,2),new AABB(2,81,0,3,82,1));
+        var underRotor=new AABB(2,78,0,3,79,1);
+        check(FlightHullDeparture.inspectParts(box->box.intersects(underRotor)?BLOCKED:CLEAR,hull,true,78)==CLEAR,
+                "推进器下方的地形不在真实垂直扫掠体内");
+        var overRotor=new AABB(2,84,0,3,85,1);
+        check(FlightHullDeparture.inspectParts(box->box.intersects(overRotor)?BLOCKED:CLEAR,hull,true,78)==BLOCKED,
+                "桨叶上方的树枝必须阻止垂直起飞");
+        check(FlightHullDeparture.inspectParts(box->UNKNOWN,hull,true,78)==UNKNOWN,"缺少任一部件的通道观察不能当畅通");
         System.out.println("FlightPathProbeTest: passed");
     }
     private static final class Scene implements BlockGetter {
