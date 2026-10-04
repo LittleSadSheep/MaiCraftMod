@@ -1,4 +1,6 @@
 package org.maiwithu.maicraft.mcp;
+
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import org.maiwithu.maicraft.core.task.explore.ClientExplorationMemory;
 
 import org.maiwithu.maicraft.core.inventory.InventoryComponentFacts;
@@ -524,6 +526,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             JsonObject item = new JsonObject();
             item.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
             item.addProperty("distance", Math.round(player.distanceTo(entity) * 10.0) / 10.0);
+            // 附近有多只羊时直接交付各自颜色、年龄和剪毛状态，不要求为辨色另开动作任务。
+            SheepTraits.observe(entity, item);
             if (entity instanceof ItemEntity drop) {
                 DroppedItemObservation.describe(player, drop).entrySet()
                         .forEach(entry -> item.add(entry.getKey(), entry.getValue()));

@@ -74,6 +74,8 @@ final class PerceiveSections {
                 + "inventory: offhand/armor included (location_counts). "
                 // 掉落引用来自当前观察，LLM 可直接选择物品堆，由拾取任务追踪其移动后的位置。
                 + "nearby_entities drops: drop_ref, item_id, name, count, position, components. "
+                // 羊的颜色与毛量状态随常规附近观察一起展示，模型可以直接据此挑选目标。
+                + "Sheep: sheep_color, sheep_baby, sheep_sheared. "
                 + "Collect via maicraft:collect_items(parameters.drop_ref). "
                 + "terrain_overview: opt-in flight landing-site scan, not walking routes; nearby_facilities: opt-in. "
                 + "focus: diagnostics. "

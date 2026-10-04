@@ -35,7 +35,8 @@ public final class ScanNearbyEntitiesTool implements MaiCraftTool {
         return "List entities within a radius around you, sorted by distance. Use type_filter to "
                 + "narrow: 'hostile' for monsters, 'passive' for animals/items, 'player' for players, "
                 + "'all' for everything. Returns all matching loaded entities in range. "
-                + "Each entry has id, type, position, distance, hp, and category. Pass "
+                + "Each entry has id, type, position, distance, hp, and category. "
+                + "Sheep also report sheep_color, sheep_baby and sheep_sheared. Pass "
                 + "the returned runtime ids to attack; it cannot attack anything outside that set. "
                 + "Dropped items also include drop_ref, item_id, name, count and components; "
                 + "pass one selected drop_ref to collect_items to approach that exact stack.";

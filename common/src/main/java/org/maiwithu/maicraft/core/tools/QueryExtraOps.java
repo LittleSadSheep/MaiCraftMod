@@ -12,6 +12,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import org.maiwithu.maicraft.core.scan.DroppedItemObservation;
+import org.maiwithu.maicraft.core.task.entity.SheepTraits;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -83,6 +84,8 @@ String type_filter,
             pos.addProperty("z", s.entity.getZ());
             o.add("position", pos);
             o.addProperty("distance", s.distance);
+            // 先让模型知道这只羊的颜色和毛量状态，再由模型决定攻击、剪毛或保留。
+            SheepTraits.observe(s.entity, o);
             if (s.entity instanceof ItemEntity drop) {
                 DroppedItemObservation.describe(self, drop).entrySet()
                         .forEach(entry -> o.add(entry.getKey(), entry.getValue()));
