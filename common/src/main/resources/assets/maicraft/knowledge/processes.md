@@ -21,7 +21,7 @@
 
 `process` 选择原生机制，不为每种产物增加一种能力。`parameters` 必须严格遵守本页末尾或现场观察返回的机制契约。`offset` 可以省略；坐标、数量与预算必须是精确整数。运行请求继续使用外层 `allow_use=true`。v2 加工只使用现有主背包原料，直接运行的外层 `material_policy` 仅接受 `inventory_only`；缺料时组合已有 `acquire_items` 再运行。`build_machine` 的外层材料策略仍负责施工补给，不会自动补齐加工原料。
 
-附魔使用 `minecraft:enchanting`，参数为 `item_id`、可选 `offer_tier`、必需的 `max_levels_spent` 和 `max_lapis`。例如 `{"item_id":"minecraft:iron_pickaxe","offer_tier":1,"max_levels_spent":1,"max_lapis":1}`。位置来自机器锚点，不再传 `search_radius`。过程保留可见 GUI、真实报价、一次提交、费用与成品核验、返还及关闭；等级门槛不等于实际扣除等级，报价提示不保证隐藏随机附魔。旧 `maicraft:enchant` 请求与显式能力查询继续兼容，默认能力列表不再展示该别名，其持久目标与消费标识不作迁移。
+附魔使用 `minecraft:enchanting`，参数为 `item_id`、可选 `offer_tier`、必需的 `max_levels_spent` 和 `max_lapis`。例如 `{"item_id":"minecraft:iron_pickaxe","offer_tier":1,"max_levels_spent":1,"max_lapis":1}`。位置来自机器锚点，不再传 `search_radius`。过程保留可见 GUI、真实报价、费用与成品核验、返还及关闭。提交前报价变化会重读，仍遵守原档位和预算；原生确认按钮未执行时可沿同一消费身份最多重试两次，未知或已消费结果不重发。等级门槛不等于实际扣除等级，报价提示不保证隐藏随机附魔。旧 `maicraft:enchant` 请求与显式能力查询继续兼容，默认能力列表不再展示该别名，其持久目标与消费标识不作迁移。
 
 AE2 世界流体加工使用 `ae2:transform`，例如 `{"recipe_id":"<现场返回的配方 ID>","batches":1}`。从实际安装的原生配方及机制契约选择，不根据产物名称猜测配方、投入数量或环境条件。过程逐批投料并回收，不能把附近既有成品当成本次产物。`native_recipe_verified=true` 才表示原生配方事件已验证；客户端仅确认产物与拾取时返回 `evidence_scope="client_observed_output_and_inventory"`，不把这种观察当成原生配方事件或持续产线证明。
 
@@ -56,3 +56,5 @@ v1 保留至少两次原生产出事件、指定时间跨度和实际交付到 s
 `run_production` 可以执行 v1 或 v2。`watch_production` 本轮只接受 v1，注册前先于未来批次开始；注册成功仅表示开始只读观察。它释放身体，不巡逻、不自动补料、不强制加载区块，完成或需要处理时通过 Attention 报告。重连或换维度后需要重新注册。
 
 `cancel_watch` 仅停止观察，不关闭机器。v2 附魔、投料和回收属于前台有限过程，不能用后台观察隐式再次消费。
+
+当前后台观察只处理物品产出，每个 process 需要一个原生产物位置。它使用外层 `minimum_process_events`（1..100，默认1）、`idle_ticks`（20..总时长，默认较小的6000或总时长）、`max_duration_ticks`（20..72000，默认72000）及清单的 `observation.minimum_output`。清单的 `window_ticks`、`minimum_events`、`max_idle_ticks` 仍参与 v1 格式检查，但没有转交后台服务；不能把后台注册说明成已按前台完整时间窗口验收。
