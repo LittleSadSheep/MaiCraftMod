@@ -14,6 +14,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.WallTorchBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.core.mixin.BlockItemPlacementAccess;
 import org.maiwithu.maicraft.core.blueprint.BuildProjectTargets;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
@@ -53,6 +54,17 @@ public final class MachinePlacementItemsTest {
             var restored=BuildProjectTargets.decode(BuildProjectTargets.encode(List.of(target))).getFirst();
             check(restored.item()==Items.REDSTONE_TORCH&&restored.desiredState().equals(state),"wall item and facing did not survive project persistence");
         }
+        // 测试 JVM 无需加载 Create 注册器；用原版六向状态承载同名原生 FACING，核对链路的施工依赖。
+        for(Direction facing:Direction.values()) {
+            var state=Blocks.END_ROD.defaultBlockState().setValue(BlockStateProperties.FACING,facing);
+            var required=MachinePlacementItems.supportDependencies("create:redstone_link",state);
+            check(required.equals(List.of(BlockPos.ZERO.relative(facing.getOpposite()))),"redstone link support must precede its native mounting face");
+        }
+        var downLink=Blocks.END_ROD.defaultBlockState().setValue(BlockStateProperties.FACING,Direction.DOWN);
+        var receiver=new BlockPos(0,1,0);var shaft=new BlockPos(0,2,0);
+        var dependencies=MachinePlacementItems.supportDependencies("create:redstone_link",downLink).stream().map(receiver::offset).toList();
+        check(dependencies.equals(List.of(shaft))&&MachinePlacementDependencies.layers(Map.of(receiver,dependencies)).equals(List.of(List.of(receiver))),
+                "a receiver below its shaft must be scheduled as an attachment after the shaft, not as the first lower construction layer");
         // 普通测试 JVM 没有 Mixin；此适配器只复现原生分派入口，证明预测不再绕过物品自己的形态选择。
         var unsafeField=Unsafe.class.getDeclaredField("theUnsafe");unsafeField.setAccessible(true);
         var paired=(PairedItem)((Unsafe)unsafeField.get(null)).allocateInstance(PairedItem.class);

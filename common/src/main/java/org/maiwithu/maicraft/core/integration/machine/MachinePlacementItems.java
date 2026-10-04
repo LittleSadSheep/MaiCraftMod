@@ -35,6 +35,12 @@ public final class MachinePlacementItems {
 
     /** 先完成承载面，再装依附其上的运输部件；只调整施工顺序，不改作者的部件位置。 */
     public static List<BlockPos> supportDependencies(BlockState state) {
+        return supportDependencies(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),state);
+    }
+    static List<BlockPos> supportDependencies(String blockId,BlockState state) {
+        // 红石链路先等其背后的部件完成；朝下安装时承载格在上方，不能被逐层建造提前放到空气里。
+        if(blockId.equals("create:redstone_link")&&state.hasProperty(BlockStateProperties.FACING))
+            return List.of(BlockPos.ZERO.relative(state.getValue(BlockStateProperties.FACING).getOpposite()));
         // 墙上火把先等背后的实心支座完成；它使用普通火把物品，不能因此遗漏真正的承载方向。
         if(state.getBlock() instanceof WallTorchBlock || state.getBlock() instanceof RedstoneWallTorchBlock)
             return List.of(BlockPos.ZERO.relative(state.getValue(WallTorchBlock.FACING).getOpposite()));
