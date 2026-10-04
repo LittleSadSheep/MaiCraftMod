@@ -23,11 +23,12 @@ public final class SleepReminderTest {
         check(value(board).get("message").getAsString().startsWith("你已经长时间没有睡觉")
                 && value(board).get("message").getAsString().contains("幻翼")
                 && value(board).getAsJsonObject("evidence").get("night").getAsBoolean(), "夜晚强调长期未睡及幻翼威胁");
-        check(events.size() == 1, "文案随现场更新，注意事件仍遵守节流");
+        check(events.size() == 2, "入夜是状态实质变化，立即再唤醒；同文案的逐刻复核不重发");
         rule.observe(at(4, 72_002, 18_000, false));
         check(value(board).get("message").getAsString().contains("当前维度不支持正常用床")
-                && !value(board).getAsJsonObject("evidence").get("phantom_spawn_guaranteed").getAsBoolean(),
-                "危险维度不建议直接上床，风险也不冒充已生成幻翼");
+                && !value(board).getAsJsonObject("evidence").get("phantom_spawn_guaranteed").getAsBoolean()
+                && events.size() == 3,
+                "危险维度不建议直接上床，文案变化立即再唤醒，风险也不冒充已生成幻翼");
         // 同一字段允许多条规则；撤下睡眠只动自己的 ID，不能清空整个提醒板。
         for (String id : new String[]{LowLightCombatReminder.ID, FoodSupplyReminder.ID, CombatEquipmentReminder.ID})
             board.update(id, "另一条仍有效的提醒", new JsonObject(), new JsonArray(), 4);

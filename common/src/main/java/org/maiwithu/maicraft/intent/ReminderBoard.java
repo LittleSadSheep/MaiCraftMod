@@ -7,21 +7,26 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** 保存仍适用的游戏提醒；事件负责唤醒，快照负责让未订阅事件的模型在下一次工具调用时看到。 */
+/** 保存仍适用的游戏提醒；事件只负责唤醒，状态事实由快照在每次工具调用时完整交付。 */
 public final class ReminderBoard {
-    private static final long ATTENTION_INTERVAL_TICKS = 30 * 20;
+    private static final long PERIODIC_INTERVAL_TICKS = 10 * 60 * 20;
     private record Entry(JsonObject value, long announcedAt) {}
     private final Map<String, Entry> active = new LinkedHashMap<>();
     private final Consumer<JsonObject> announce;
 
     public ReminderBoard(Consumer<JsonObject> announce) { this.announce = announce; }
 
-    /** 规则每次重新核实现场后更新证据；连续受击只按间隔唤醒，工具读取始终拿到最新事实。 */
+    /**
+     * 规则每次重新核实现场后更新证据；同一状态的复核不进事件流，否则持续状态会按观察频率刷屏，
+     * 淹没受损、决策等关键事件。只有首次出现、文案变化（规则用文案表达状态实质变化，如入夜、
+     * 腐肉耗尽）、游戏时间回退或满十分钟定期窗口才再次唤醒；工具读取始终拿到最新事实。
+     */
     public synchronized void update(String id, String message, JsonObject evidence,
                                     JsonArray suggestions, long tick) {
         Entry previous = active.get(id);
         boolean publish = previous == null || tick < previous.announcedAt()
-                || tick - previous.announcedAt() >= ATTENTION_INTERVAL_TICKS;
+                || !message.equals(previous.value().get("message").getAsString())
+                || tick - previous.announcedAt() >= PERIODIC_INTERVAL_TICKS;
         JsonObject value = new JsonObject();
         value.addProperty("id", id);
         value.addProperty("status", "active");
