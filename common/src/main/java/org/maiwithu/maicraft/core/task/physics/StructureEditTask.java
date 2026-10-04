@@ -18,6 +18,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -154,7 +156,8 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
             return TaskState.RUNNING;
         }
         ctx.body().applyMovement(new BodyControlPort.Movement(0,0,false,placing,false),ctx.tickRevision());
-        var faces=StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing);
+        SlabType half=slabHalf(desired,edit);
+        var faces=StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing,half);
         // 普通右键扳手旋转、潜行右键却会拆走方块，因此只选择可达设计方向的真实命中面并保持站立。
         if(wrenching)faces=faces.stream().filter(candidate->allowed.contains(candidate.face())).toList();
         lastGaze=StructureEditApproach.gaze(ctx,faces);
@@ -164,7 +167,8 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         if(click==null||mustReposition) return approach(ctx,pos,faces);
         BlockPos support=click.support();Vec3 aim=click.world();Direction face=click.face();
         InputDriver.lookAt(player,aim); BlockHitResult hit=DriverStation.hit(player,ship,support);
-        if(hit==null||(placing||wrenching)&&hit.getDirection()!=face||placing&&!player.isShiftKeyDown()||wrenching&&player.isShiftKeyDown()) {
+        if(hit==null||(placing||wrenching)&&hit.getDirection()!=face||placing&&!player.isShiftKeyDown()||wrenching&&player.isShiftKeyDown()
+                ||placing&&half!=null&&click.preference()==0&&!slabHitMatches(player,desired,hit,half)) {
             if(++aimTicks>100) {
                 ensureSearch(ctx,pos);worksites.record(Map.of("aim_failed",lastGaze));
                 mustReposition=true;aimTicks=0;
@@ -205,6 +209,18 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         } catch(RuntimeException unavailable){facts.put("observation_error",unavailable.toString());}
         placementDiagnostics=Map.copyOf(facts);
     }
+    private static SlabType slabHalf(BlockState wanted,JsonObject edit) {
+        if(!(wanted.getBlock() instanceof SlabBlock)||!edit.has("properties"))return null;
+        var properties=edit.getAsJsonObject("properties");if(!properties.has("type"))return null;
+        return switch(properties.get("type").getAsString()){case "bottom"->SlabType.BOTTOM;case "top"->SlabType.TOP;default->null;};
+    }
+    static boolean slabHitMatches(LocalPlayer player,BlockState wanted,BlockHitResult hit,SlabType half) {
+        // 同一个面上的高低位置决定原生半砖类型；实际射线尚未落到所选半部时继续瞄准，不抢先点击。
+        if(hit==null)return false;
+        var context=new BlockPlaceContext(player,InteractionHand.MAIN_HAND,player.getMainHandItem(),hit);
+        var state=wanted.getBlock().getStateForPlacement(context);
+        return state!=null&&state.hasProperty(SlabBlock.TYPE)&&state.getValue(SlabBlock.TYPE)==half;
+    }
     private Set<Direction> wrenchFaces(BlockState actual,JsonObject edit) {
         if(actual!=rotationState) {
             rotationState=actual;
@@ -227,7 +243,8 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         ensureSearch(ctx,pos);var space=JetpackRoute.observed(ctx);
         var site=worksites.advance(feet->StructureEditApproach.probe(ctx,ship,pos,placing,faces,space,feet));
         if(site!=null) {
-            preparation=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(r.getToolCallId(),r.getDeadlineGameTime(),site.landing().feet(),false));
+            // 单个施工站位失败就尝试下一面，不为这一个候选长时间复算“假如允许改地形”的路线。
+            preparation=new MoveToCompanionTask(player,MoveToTaskRecord.strictStance(r.getToolCallId(),r.getDeadlineGameTime(),site.landing().feet(),false).withoutTerrainProbe());
             route=Map.of("kind","ground_worksite","feet_world",StructureEditApproach.vector(site.landing().landingPoint()));
         } else if(!worksites.exhausted()) return TaskState.RUNNING;
         else if(approached!=index) {
@@ -283,6 +300,14 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         super.cleanup();
     }
     @Override protected String successMessage() { return "结构补丁的原生施工已完成，配平结果需独立核验"; }
+    @Override public Map<String,Object> progress() {
+        // 改造可能跨多个拆放、补料和走位阶段；公开当前目标及真实子任务，便于模型判断是否在前进。
+        return Map.of("task",name(),"processed_targets",index,"total_targets",r.edits.size(),
+                "phase",declared==null?"saving_design":action!=null?"confirming_native_action":preparation!=null
+                        ?relocating?"approaching_target":"preparing_item":blockedSince>=0?"waiting_for_structure_stop":"choosing_gesture",
+                "recorded_native_events",effects.size(),"preparation",preparation==null?Map.of():preparation.progress(),
+                "placement_diagnostics",placementDiagnostics);
+    }
     @Override protected Map<String,Object> resultData() {
         var diff=new ArrayList<Map<String,Object>>();
         for(var raw:declared==null?r.edits:declared) {

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.core.task.physics.NativeBurnerDialTest;
 import org.maiwithu.maicraft.core.task.physics.NativePropellerStateTest;
 import org.maiwithu.maicraft.server.physics.FloatingDragAttributionTest;
 import org.maiwithu.maicraft.core.task.physics.PhysicalBalanceReceiptTest;
+import org.maiwithu.maicraft.core.task.physics.StructureSlabPlacementTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureLookDirectionTest;
 import org.maiwithu.maicraft.core.task.physics.BondMaterialSettlementTest;
 import org.maiwithu.maicraft.core.task.physics.StructureWrenchPlanTest;
@@ -73,6 +74,7 @@ public final class PhysicsBalanceRegression {
         PhysicsFloatingDragTest.run();
         FloatingDragAttributionTest.run();
         PhysicalBalanceReceiptTest.run();
+        StructureSlabPlacementTest.run();
         StructureLookDirectionTest.run();
         BondMaterialSettlementTest.run();
         StructureWrenchPlanTest.run();
