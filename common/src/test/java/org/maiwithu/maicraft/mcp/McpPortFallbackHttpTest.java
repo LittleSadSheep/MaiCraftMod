@@ -54,6 +54,22 @@ public final class McpPortFallbackHttpTest {
                 check(expected.getLocalizedMessage() != null, "exhausted fallback carries the bind failure");
             }
         }
+        // 传输整体搬移：旧服务关停后配置端口可被新服务重取，initialize 往返证明新端点真实可服务。
+        int first;
+        try (EmbeddedMcpService original = EmbeddedMcpService.startWithFallback(
+                McpConfig.local(0), new StubRuntime(), 0)) {
+            first = original.port();
+            original.stop();
+            check(!original.isRunning(), "stopped transport reports not running");
+        }
+        try (EmbeddedMcpService rebound = EmbeddedMcpService.startWithFallback(
+                McpConfig.local(first), new StubRuntime(), 0)) {
+            check(rebound.port() == first, "rebind reuses the freed configured port");
+            HttpResponse<String> init = HttpClient.newHttpClient().send(initialize(rebound.port()),
+                    HttpResponse.BodyHandlers.ofString());
+            check(init.statusCode() == 200 && init.headers().firstValue("MCP-Session-Id").isPresent(),
+                    "rebound endpoint serves a fresh initialize");
+        }
         System.out.println("McpPortFallbackHttpTest: passed");
     }
 

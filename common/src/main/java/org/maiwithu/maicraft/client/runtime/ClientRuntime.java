@@ -46,6 +46,7 @@ public final class ClientRuntime {
     private static final ClientActorBoundary ACTOR = new ClientActorBoundary();
     private static final StartupAutomation STARTUP_AUTOMATION = new StartupAutomation(Boolean.getBoolean("maicraft.automation.on_join"));
     private static EmbeddedMcpService mcp;
+    private static RuntimeFacade runtime;
     private static String lastMcpError;
     private static boolean bodyPresent;
     private static String tickStage = "not_started";
@@ -55,6 +56,7 @@ public final class ClientRuntime {
     /** 围绕当前游戏运行时启动本机 MCP 服务，供外部客户端提交和观察任务。 */
     public static synchronized void start(RuntimeFacade facade) {
         Objects.requireNonNull(facade, "facade");
+        runtime = facade;
         if (mcp != null && mcp.isRunning()) return;
         EmbeddedMcpService candidate = null;
         try {
@@ -63,14 +65,7 @@ public final class ClientRuntime {
             candidate = EmbeddedMcpService.startWithFallback(configured, facade, MCP_PORT_FALLBACK_ATTEMPTS);
             mcp = candidate;
             lastMcpError = null;
-            if (configured.port() != 0 && candidate.port() != configured.port()) {
-                Constants.LOG.warn("MaiCraft embedded MCP 端口 {} 被占用，已让行到 http://127.0.0.1:{}/mcp"
-                                + "（外部客户端需连接实际端口；要固定本进程端口时配置 -Dmaicraft.mcp.port）",
-                        configured.port(), candidate.port());
-            } else {
-                Constants.LOG.info("MaiCraft embedded MCP listening on http://127.0.0.1:{}/mcp",
-                        candidate.port());
-            }
+            logListening(configured.port(), candidate.port());
         } catch (IOException | RuntimeException failure) {
             if (candidate != null) candidate.close();
             mcp = null;
@@ -79,6 +74,44 @@ public final class ClientRuntime {
                     ? failure.getClass().getSimpleName() : failure.getMessage());
             Constants.LOG.error("MaiCraft embedded MCP failed to start; /maicraft status remains available",
                     failure);
+        }
+    }
+
+    /**
+     * 只把 MCP 传输搬到新端口：正在执行的语义任务与身体边界不受影响，旧连接全部断开。
+     * 返回实际端口（配置端口被占时经既有让行，可能不是配置端口）；非法端口在动现服务之前拒绝。
+     */
+    public static synchronized int restartMcp(int configuredPort) throws IOException {
+        // 先构造配置：非法端口在这里抛出，正在监听的服务不动。
+        McpConfig configured = McpConfig.local(configuredPort);
+        EmbeddedMcpService current = mcp;
+        mcp = null;
+        if (current != null) current.stop();
+        try {
+            EmbeddedMcpService started = EmbeddedMcpService.startWithFallback(
+                    configured, runtime, MCP_PORT_FALLBACK_ATTEMPTS);
+            mcp = started;
+            lastMcpError = null;
+            logListening(configuredPort, started.port());
+            return started.port();
+        } catch (IOException | RuntimeException failure) {
+            lastMcpError = "could not restart local MCP service: "
+                    + (failure.getMessage() == null
+                    ? failure.getClass().getSimpleName() : failure.getMessage());
+            Constants.LOG.error("MaiCraft embedded MCP restart failed; /maicraft status remains available",
+                    failure);
+            throw failure;
+        }
+    }
+
+    // 让行发生时大声写明配置端口与实际端口，外部客户端必须连接实际端口。
+    private static void logListening(int configuredPort, int actualPort) {
+        if (configuredPort != 0 && actualPort != configuredPort) {
+            Constants.LOG.warn("MaiCraft embedded MCP 端口 {} 被占用，已让行到 http://127.0.0.1:{}/mcp"
+                            + "（外部客户端需连接实际端口；要固定本进程端口时配置 -Dmaicraft.mcp.port）",
+                    configuredPort, actualPort);
+        } else {
+            Constants.LOG.info("MaiCraft embedded MCP listening on http://127.0.0.1:{}/mcp", actualPort);
         }
     }
 

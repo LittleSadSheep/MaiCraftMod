@@ -51,6 +51,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private static final int MAX_SETTLE_TICKS = 60;
     /** 规划预算仅消耗无进展的活动时间；真实计算、位移或原生确认都会通过公共预算补满。 */
     private static final long PLANNING_IDLE_TICKS = 30 * 20;
+    /** 规划收敛熔断的累计搜索工作量：地下封闭环境的挖洞寻路会持续展开节点却永不接近目标，
+     *  无进展预算因此永远不满；累计超过此量且距离无收敛时按病态搜索收场，不再无限消耗。 */
+    private static final long PLANNING_WORK_FUSE_UNITS = 60_000;
+    /** 距离最后一次接近目标超过这么长的活动 tick（且工作量已越熔断线），判定这次规划无收敛。 */
+    private static final long PLANNING_CONVERGENCE_WINDOW_TICKS = 30 * 20;
 
     private final int bx;
     private final int by;
@@ -60,6 +65,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private double bestDist = Double.MAX_VALUE;   // 到目标曾达到的最近距离。
     private int settleTicks = 0;                  // 规划器放弃后无进展的 tick 数。
     private final ProgressBudget planningBudget;
+    /** 历次规划累计的搜索工作单位高水位；只有超过熔断线且距离无收敛才生效，正常分段规划永远到不了。 */
+    private long planningWorkHighWater;
+    /** 上一次到目标距离有意义的缩短（>0.1 格）发生的活动 tick；首个观察刻由距离更新自动初始化。 */
+    private long lastApproachTick = Long.MIN_VALUE;
     /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 docs/architecture/07-attention.md）。 */
     private static final int DISTANCE_QUANTUM_BLOCKS = 16;
     /** 出发时（或路线重估后）的分母；剩余变大说明在绕路或新路线更长，分母跟着刷新。 */
@@ -291,9 +300,27 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         double d = repDistance();
         if (d < bestDist - 0.1) {
             bestDist = d;
+            lastApproachTick = now;
             settleTicks = 0;
         } else {
             settleTicks++;
+        }
+        // 无进展预算管不住“持续有产出的搜索”：地下挖洞寻路能一直展开节点却永不接近目标。
+        // 累计工作量越过熔断线且最近距离长时间无收敛时，把这次规划判成病态并给出明确失败口径，
+        // 已探索的搜索事实随任务回执一并交付，让调用方决定换路线还是放弃。
+        planningWorkHighWater = Math.max(planningWorkHighWater, nav.planningProgressUnits());
+        if (planning
+                && planningWorkHighWater > PLANNING_WORK_FUSE_UNITS
+                && lastApproachTick != Long.MIN_VALUE
+                && now - lastApproachTick >= PLANNING_CONVERGENCE_WINDOW_TICKS) {
+            fail("planning did not converge: the dig-route search has banked " + planningWorkHighWater
+                    + " work units while the closest approach stayed " + String.format("%.1f", bestDist)
+                    + " blocks from the target for about " + (PLANNING_CONVERGENCE_WINDOW_TICKS / 20)
+                    + " seconds with no improvement; " + nav.outcomeSummary()
+                    + " Pick a nearer waypoint, approach the target from another direction,"
+                    + " or abandon this destination.",
+                    FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
@@ -522,6 +549,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         data.put("planning_idle_budget", planningBudget.diagnostics(player.level().getGameTime()));
         data.put("planning_budget_unit", "active_game_ticks");
+        // 搜索预算消耗与收敛趋势：调用方据此判断这条路线是“还在接近”还是“规划已病态”。
+        data.put("planning_work_units", planningWorkHighWater);
+        data.put("planning_work_fuse_units", PLANNING_WORK_FUSE_UNITS);
+        if (bestDist != Double.MAX_VALUE) {
+            data.put("best_distance_blocks", Math.round(bestDist * 10) / 10.0);
+        }
         data.put("ground_flight_mode",groundFlight.diagnostics());
         // 任务终局直接交付导航证据，避免模型为一次无路结果另开多轮观察。
         if (!finalNavigationEvidence.isEmpty()) data.put("navigation", finalNavigationEvidence);
@@ -613,7 +646,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 "remaining", remaining, "initial", initialRemaining));
         result.put("planning_idle_budget", planningBudget.diagnostics(player.level().getGameTime()));
         result.put("planning_budget_unit", "active_game_ticks");
-        if (planning) { result.put("done", nav.planningProgressUnits()); result.put("progress_unit", "verified_planning_work_units"); }
+        if (planning) {
+            result.put("done", nav.planningProgressUnits());
+            result.put("progress_unit", "verified_planning_work_units");
+            // 收敛趋势：曾达到的最近距离按同一量化档交付；它不再缩小说明搜索在空转，可以提前取消。
+            result.put("best_remaining", bestDist == Double.MAX_VALUE
+                    ? Integer.MAX_VALUE
+                    : (int) Math.min(Integer.MAX_VALUE,
+                        Math.round(bestDist / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS));
+        }
         return Map.copyOf(result);
     }
 

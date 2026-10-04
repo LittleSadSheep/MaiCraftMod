@@ -21,7 +21,8 @@ public final class FoodSupplyReminderTest {
                 && !warning.getAsJsonObject("evidence").get("external_food_stocks_checked").getAsBoolean(),
                 "提示种地且不冒称仓库或周围都没有食物");
         observeUntil(rule, 1220, 1500, 12, 5, 0);
-        check(board.snapshot().size() == 1 && events.size() == 1, "只有一份临时口粮仍保留供给建议并节流事件");
+        check(board.snapshot().size() == 1 && events.size() == 2,
+                "腐肉耗尽属状态实质变化立即再唤醒，同状态的逐秒复核不再重发");
         observeUntil(rule, 1520, 1520, 12, 20, 0);
         check(board.snapshot().isEmpty(), "普通食物储备足够后撤下提醒，即使角色尚未实际进食");
         // 刚清空背包但始终吃饱的角色，不应仅因没有食物就被推断成持续觅食失败。
