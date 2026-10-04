@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.integration.machine.MachineBlueprintDocument;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
+import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 已授权机器蓝图在声明格内拆换当前部件，不以旧观察或重复许可门控；明确保留规则与原生限制仍生效。 */
@@ -20,6 +21,7 @@ public final class MachineModificationClearanceTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         declaredModificationSurvivesBatching(); blockEntitiesAndObservationScopeRemainExplicit(); automaticModificationOwnsItsDeclaredScope();
+        attachmentReplacementKeepsDistinctSupplyProtection();
         System.out.println("MachineModificationClearanceTest: passed");
     }
     private static void declaredModificationSurvivesBatching() throws Exception {
@@ -82,6 +84,25 @@ public final class MachineModificationClearanceTest {
     private static MachineConstructionPlan plan(boolean entities) {
         var document = JsonParser.parseString("{\"schema_version\":1,\"blocks\":[{\"offset\":[0,0,0],\"block_id\":\"minecraft:air\"}]}").getAsJsonObject();
         return MachineConstructionPlan.compile(AT, MachineBlueprintDocument.compile(document, MachineConstructionPlan.registry()), true, entities);
+    }
+    private static void attachmentReplacementKeepsDistinctSupplyProtection() throws Exception {
+        try(var h=new InteractionWorldTestHarness()) {
+            // 固定翼反向传动把已有木板换为墙上红石火把；支承和其他机体格仍受保护，不能把火把自身的格子也锁死。
+            h.set(AT,Blocks.OAK_PLANKS.defaultBlockState());h.set(AT.east(),Blocks.STONE.defaultBlockState());
+            var document=JsonParser.parseString("""
+                    {"schema_version":1,"blocks":[
+                      {"offset":[0,0,0],"block_id":"minecraft:redstone_wall_torch","properties":{"facing":"west"}},
+                      {"offset":[1,0,0],"block_id":"minecraft:stone"}]}
+                    """).getAsJsonObject();
+            var plan=MachineConstructionPlan.compile(AT,MachineBlueprintDocument.compile(document,MachineConstructionPlan.registry()),true,true);
+            plan.bindAutomaticModification(h.level);
+            var attachment=plan.attachmentTask(0,"wall-attachment",1000,true);
+            check(!attachment.materialSupplyProtection().contains(AT)&&attachment.materialSupplyProtection().contains(AT.east()),"本层拆换格与其他机体保护未分开");
+            check(!survey(h,attachment).blocked(),"已声明的墙火把替换被供料保护误挡");
+            var protectedSurvey=NavigationSafetyContext.withProtectedArea(List.of(AT),List.of(),()->survey(h,attachment));
+            check(protectedSurvey.blocked(),"明确保留规则仍应阻止替换，不能随附件拆换范围一起豁免");
+            check(h.blockUses()==0,"前置权限检查不能伪造原生放置");
+        }
     }
     private static void automaticModificationOwnsItsDeclaredScope() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {

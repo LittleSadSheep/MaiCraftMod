@@ -369,7 +369,9 @@ public final class MachineConstructionPlan {
         var placement = attachmentLayers.get(index).stream().map(MachineConstructionPlan::placementTarget).toList();
         var task = new BuildTaskRecord(callId, deadline, placement, replace ? ReplaceMode.REPLACE_EMPTY : ReplaceMode.DONT_REPLACE,
                 replace, consume, consume, Map.of(), List.of(), replaceBlockEntities);
-        task.previewManaged(true); task.materialSupplyProtection(positions());
+        // 本层附件格必须允许执行作者声明的拆换；补料器还会把 task.targets 加回禁挖范围，不会借取料拆掉待改部件。
+        var activeCells=placement.stream().map(BuildTaskRecord.Target::pos).collect(Collectors.toSet());
+        task.previewManaged(true); task.materialSupplyProtection(positions().stream().filter(at->!activeCells.contains(at)).toList());
         if (fixedModification) task.machineModification(observedEdits);
         else if (!ownedReplacements.isEmpty()) task.machineModification(ownedReplacements);
         // 后置附件使用同一份声明范围，不能因进入另一个阶段又回到旧快照的逐格准入门控。
