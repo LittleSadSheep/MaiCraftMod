@@ -21,7 +21,7 @@
 | 能力 | 玩家要做什么 | 从哪个适配入口继续读 | 当前进度 |
 | --- | --- | --- | --- |
 | `sequence` | 依次做一组目标 | `Goal.executableSteps` → `IntentTask` | [顺序、待答与失败继续边界](sequences.md)；本轮静态复盘 |
-| `remember_place` | 记住地点或区域 | `AbilityAdapter.remember` → `IntentRuntime.remember` | 入口核对 |
+| `remember_place` | 登记或覆盖具名地点 | `AbilityAdapter.remember` → `IntentRuntime.remember` | [地点来源、覆盖与持久化边界](memory.md)；本轮静态复盘 |
 | `wait_for_condition` | 先等最短游戏时间，再观察条件 | `WaitAbilityAdapter` → `IntentTask.tickWait` | [参数、时钟与恢复](waiting.md)；本轮静态复盘 |
 | `chat` | 可见打字并提交一次聊天或命令 | `ChatAbilityAdapter` → `ChatTask` | [输入框、客户端提交与持久防重](chat.md)；本轮静态复盘 |
 | `suicide` | 死亡不掉落时通过原生危险动作主动寻死 | `SuicideAbilityAdapter` → `SuicideTask` | [用途、参数与生命周期](suicide.md)；已有夹具入口见正文，本轮仅静态复核，尚未实机验收 |
@@ -30,13 +30,13 @@
 | `prepare_portal` | 单独准备并点燃传送门，完成后停在门外 | `AbilityAdapter.preparePortal` | 入口核对 |
 | `explore` | 跑图勘察，按群系、标签或结构定向发现 | `ExplorationIntent.adapt` | 契约与贡献者文档核对；[地图探索](exploration.md) |
 | `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 契约与贡献者文档核对；[结构证据和到访](exploration.md) |
-| `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | 入口核对 |
-| `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | 入口核对 |
+| `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | [实际可见数量与搜索范围](combat.md)；本轮静态复盘 |
+| `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | [只读扫描、池面用途和已知边界](mining.md)；本轮静态复盘 |
 | `use_item` | 定点使用或按新增产物有限次持用随身物品 | `GeneralAbilityAdapter.useItem` | [交互与定点使用](interaction.md) |
-| `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | 入口核对 |
-| `collect_items` | 走到掉落物旁靠原生接触拾取 | `GeneralAbilityAdapter.adapt` 的 `COLLECT` 分支 | 入口核对 |
-| `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | 入口核对 |
-| `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | 入口核对 |
+| `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | [源格破坏与产物入包](mining.md)；本轮静态复盘 |
+| `collect_items` | 走到掉落物旁靠原生接触拾取 | `GeneralAbilityAdapter.adapt` 的 `COLLECT` 分支 | [点名、范围拾取及实际数量](collecting.md)；本轮静态复盘 |
+| `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | [常驻跟随与失去目标](combat.md)；本轮静态复盘 |
+| `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | [目标选择、攻击与战果回执](combat.md)；本轮静态复盘 |
 | `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md) |
 | `use_container` | 原生右键使用容器，并分别报告菜单是否出现 | `GeneralAbilityAdapter.interact` 的容器分支 | [容器能力](containers.md)：参数、原生确认与当前边界；静态核对 |
 | `manage_container` | 在单个容器存取物品或调平主背包数量 | `GeneralAbilityAdapter.manageContainer` | [容器能力](containers.md)、[菜单搬运](menu-transfers.md)：数量、部分效果与恢复；静态核对 |
@@ -46,21 +46,21 @@
 | `fish` | 钓取并收回指定竿数的战利品 | `GeneralAbilityAdapter.fish` → `FishCompanionTask` | [附近选址、收获证据与边界](daily-actions.md)；本轮静态复盘 |
 | `sleep` | 找床或放随身床，确认躺下 | `AbilityAdapter.sleep` → `SleepCompanionTask` | [上床与自然醒的区别](daily-actions.md)；本轮静态复盘 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
-| `craft` | 根据配方制作物品 | `AbilityAdapter.craft` | 入口核对 |
+| `craft` | 根据格子配方补足主背包目标数量 | `AbilityAdapter.craft` | [工作台、配方和收尾](crafting.md)；本轮静态复盘 |
 | `cook` | 用炉子补足主背包成品数量 | `CookAbilityAdapter` → `SemanticCookCompanionTask` | [配方、备料、炉次收尾与恢复限制](cooking.md)；本轮静态复盘 |
 | `trade` | 按真实报价补足主背包目标数量 | `AbilityAdapter.trade` → `SemanticTradeCompanionTask` | [付款政策、结果与未接通边界](trading.md)；本轮静态复盘 |
-| `enchant` | 使用附魔台完成一次有预算的附魔 | `EnchantAbilityAdapter` | 入口核对；兼容入口 |
+| `enchant` | 使用附魔台完成一次有预算的附魔 | `EnchantAbilityAdapter` | [原生附魔及消费确认](machine-production.md)；兼容入口，本轮静态复盘 |
 | `stonecut` | 将随身输入按次数整批切制 | `StonecutAbilityAdapter` → `StonecutterMenuFlow` | [实际产量、回执与持久防重](stonecutting.md)；本轮静态复盘 |
-| `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | 入口核对 |
-| `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | 入口核对 |
+| `design_build` | 保存、检查、修改或预览建筑设计 | `BuildDesignAdapter`、`BuildingSceneAdapter` | [设计操作与预览边界](building.md)；本轮静态复盘 |
+| `build` | 供料并按冻结的设计实际施工 | `AbilityAdapter.build`、`BuildProjectAdapter` | [冻结蓝图、施工和恢复](building.md)；本轮静态复盘 |
 | `light_area` | 调查指定区域、供料并按实测方块光补足所选覆盖率 | `AbilityAdapter.lightArea` → `SemanticLightAreaCompanionTask` | [参数、流程、回执与已知缺口](lighting.md)；本轮静态核对，未运行回归或实机 |
 | `auto_light` | 默认关闭；独立启停或查询沿当前路线的副手补光 | `AutomaticLightingAdapter` → `AutomaticLighting` | [参数、身体让位、采样范围与保护缺口](lighting.md)；现有入口 `lightingRegression`，本轮未运行 |
 | `inspect_machine` | 读取机器地图现状、整机差异与原生组件证据 | `MachineAbilityAdapter.inspect` | [机器检查契约与已知边界](machine-inspection.md)；源码静态复核，未运行本轮回归 |
-| `design_machine` | 检查机器布局及需求 | `MachineAbilityAdapter.design` | 入口核对 |
-| `build_machine` | 供料、搭建并核对机器结构 | `MachineAbilityAdapter.build` | 入口核对 |
-| `operate_machine` | 使用机器、转移物品或观察生产 | `MachineAbilityAdapter.operate` | 入口核对 |
-| `modify_machine` | 修改已观察机器或接入外部设施 | `MachineAbilityAdapter.modify` | 入口核对 |
-| `connect_mechanical_power` | 连接 Create 动力来源与目标 | `AbilityAdapter` → `CreateMechanicalPower` | 入口核对 |
+| `design_machine` | 检查机器布局及需求 | `MachineAbilityAdapter.design` | [作者声明与审阅](machines.md)；本轮静态复盘 |
+| `build_machine` | 供料、搭建并核对机器结构 | `MachineAbilityAdapter.build` | [原生装配与整机差异](machines.md)；本轮静态复盘 |
+| `operate_machine` | 使用机器、转移物品或观察生产 | `MachineAbilityAdapter.operate` | [操作分支、原生工序与后台观察](machine-production.md)；本轮静态复盘 |
+| `modify_machine` | 修改已观察机器或接入外部设施 | `MachineAbilityAdapter.modify` | [整机修改和声明合并](machines.md)；本轮静态复盘 |
+| `connect_mechanical_power` | 连接 Create 动力来源与目标 | `AbilityAdapter` → `CreateMechanicalPower` | [动力接线与真实连接证据](machines.md)；本轮静态复盘 |
 | `reach_milestone` | 完成阶段性生存目标 | `AbilityAdapter.reachMilestone` | 入口核对 |
 | `defeat_ender_dragon` | 完成末影龙战斗流程 | `AbilityAdapter.defeatEnderDragon` | 契约与贡献者文档核对；[死亡确认](endgame.md) |
 | `obtain_elytra` | 搜寻并取得鞘翅 | `AbilityAdapter.obtainElytra` | 契约与贡献者文档核对；[折跃与入包](endgame.md) |
