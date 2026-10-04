@@ -381,6 +381,12 @@ def regressionSuites = [
         heap: '512m', directory: 'fairness-memory-feeds-mine-regression', timeoutSeconds: 60,
         purpose: '验证 find_block 验证命中进入观察记忆且公平闸凭记忆放行被遮挡的目标'
     ],
+    // 施工预检不因自家保护集拒绝目标格：门框类"目标在保护区内的施工"不再全站点误拒。
+    buildClearanceOwnTargetsRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.BuildClearanceOwnTargetsTest',
+        heap: '512m', directory: 'build-clearance-own-targets-regression', timeoutSeconds: 60,
+        purpose: '验证材料/导航保护区中的施工目标格仍按授权变更集合放行'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。

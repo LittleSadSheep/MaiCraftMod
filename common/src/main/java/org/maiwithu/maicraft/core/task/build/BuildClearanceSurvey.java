@@ -46,6 +46,10 @@ public final class BuildClearanceSurvey {
         protectedArea.addAll(NavigationSafetyContext.protectedMutationCells());
         plan.protectedNavigationCells().forEach(at -> protectedArea.add(at.asLong()));
         plan.materialSupplyProtection().forEach(at -> protectedArea.add(at.asLong()));
+        // 施工目标本身是本次授权的变更集合；材料/导航保护区不能把自家目标格判成不可变更，
+        // 否则门框等"目标格落在自己保护区内的施工"（PortalPreparationSite 把整个 footprint
+        // 注册为材料保护）会被自己的保护集系统性拒绝，任何场地都报 protected or unbreakable。
+        for (var target : plan.targets) protectedArea.remove(target.pos().asLong());
         var forbidden = NavigationSafetyContext.forbiddenBodyCells();
         return new BuildClearanceSurvey(plan.targets, plan.replaceMode, plan.replaceBlockEntities,
                 level.dimension().location().toString(), at -> {
