@@ -420,6 +420,16 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         }
     }
 
+    /** 面板行动行的一句话汇报；说法来自拾取阶段，正在追的物品名是现场已确认的实体。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (phase) {
+            case SCAN -> "正在寻找地上的物品";
+            case APPROACH -> pickupItemId == null ? "正在走近待拾取物品"
+                    : "正在拾取物品 (" + r.getCollected() + " 件已入包)";
+        };
+    }
+
     @Override
     protected String successMessage() {
         return "collected " + r.getCollected() + " " + r.label;

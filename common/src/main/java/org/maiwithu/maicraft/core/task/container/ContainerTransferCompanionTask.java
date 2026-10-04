@@ -427,6 +427,13 @@ public final class ContainerTransferCompanionTask
         if (!splitEvidence.isEmpty()) data.put("split_transfer", splitEvidence);
         return Map.copyOf(data);
     }
+    /** 面板行动行的一句话汇报；物品名取当前搬运源的实物，计数是已确认完成的搬运笔数。 */
+    @Override public String describeCurrentAction() {
+        String item = sourceKind.isEmpty() ? "物品" : sourceKind.getHoverName().getString();
+        if (phase == Phase.CLOSE) return "正在关闭容器界面";
+        if (phase == Phase.FAILING) return "正在收尾容器搬运现场";
+        return "正在搬运 " + item + " (" + moveIndex + "/" + r.moves.size() + " 笔)";
+    }
     @Override protected String successMessage() { return "confirmed " + moveIndex + " container transfer(s)"; }
     @Override protected String cancelledMessage() { return "container transfer interrupted"; }
 }

@@ -295,5 +295,28 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         if (survey != null) survey.close();
         super.cleanup();
     }
+    /** 面板行动行的一句话汇报；说法来自当前浇筑工序（{@code operation}），子任务在跑时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) {
+            String deeper = child.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        return switch (operation) {
+            case "prepare_water" -> "正在准备一桶水";
+            case "survey_lava_pool" -> "正在寻找岩浆池";
+            case "find_water_source", "fill_water" -> "正在取水";
+            case "find_lava_source", "fill_lava" -> "正在取岩浆";
+            case "supply" -> "正在补齐浇筑材料";
+            case "prepare_bank_platform" -> "正在搭池岸平台";
+            case "clear", "excavate_cast_cell" -> "正在清理门框施工空间";
+            case "build_mold" -> "正在砌门框模具";
+            case "place_water" -> "正在倒水成型";
+            case "recover_water" -> "正在回收水源";
+            case "cast_lava" -> "正在浇筑岩浆";
+            case "draining" -> "正在等待岩浆凝固排水";
+            default -> "正在浇筑下界传送门";
+        };
+    }
+
     @Override protected String successMessage() { return "Native casting actions completed; frame outcome is reported separately."; }
 }

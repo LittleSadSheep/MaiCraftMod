@@ -517,6 +517,21 @@ public final class DimensionTravelCompanionTask
         return List.copyOf(options);
     }
 
+    /** 面板行动行的一句话汇报；目标维度来自任务单，赶路段落由移动子任务先说话。 */
+    @Override
+    public String describeCurrentAction() {
+        String destination = r.destinationDimension.replace("minecraft:", "");
+        return switch (phase) {
+            case FIND -> "正在寻找前往 " + destination + " 的传送门";
+            case MOVE -> {
+                String deeper = moveChild == null ? null : moveChild.describeCurrentAction();
+                yield deeper != null ? deeper : "正在前往传送门";
+            }
+            case ENTER -> "正在走进传送门";
+            case WAIT_FOR_REPLACEMENT -> "正在等待传送门生效";
+        };
+    }
+
     @Override
     protected String successMessage() {
         return "arrived in " + r.destinationDimension + " through an observed physical portal";

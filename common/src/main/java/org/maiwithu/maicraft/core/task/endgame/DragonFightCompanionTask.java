@@ -1953,6 +1953,22 @@ public final class DragonFightCompanionTask
                 ? "alive_perched" : "alive_airborne";
     }
 
+    /** 面板行动行的一句话汇报；说法来自战斗阶段，具体动作交由在跑的子任务自述。 */
+    @Override public String describeCurrentAction() {
+        if (activeChild != null) {
+            String deeper = activeChild.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        return switch (phase) {
+            case OBSERVE -> "正在观察末影龙战况";
+            case SURVEY -> "正在勘察末地岛地形";
+            case CRYSTALS -> "正在处理末影水晶";
+            case DRAGON -> "正在与末影龙战斗";
+            case RECOVER -> "正在恢复状态规避危险";
+            case CONFIRM -> "正在确认龙已败北";
+        };
+    }
+
     @Override protected String successMessage() {
         return "completed the observed Ender Dragon encounter: crystals were handled one at a "
                 + "time, and real dragon death/removal was corroborated by death-phase or "

@@ -1518,6 +1518,22 @@ public final class CraftCompanionTask extends AbstractCompanionTask<CraftTaskRec
         }
         return data;
     }
+    /** 面板行动行的一句话汇报；产物名取配方产物的本地化名称，计数是已确认完成批次的产物量。 */
+    @Override public String describeCurrentAction() {
+        String product = plannedOutput.isEmpty() ? "物品" : plannedOutput.getHoverName().getString();
+        return switch (stage) {
+            case CLOSE_WRONG_MENU -> "正在关闭无关界面";
+            case PREPARE_SURFACE -> "正在清理合成台操作空间";
+            case OPEN -> "正在打开合成界面";
+            case PLACE -> "正在摆放 " + product + " 的合成材料 ("
+                    + crafted + "/" + r.count + ")";
+            case TAKE, STOW_RESULT -> "正在取出并收纳合成产物 ("
+                    + crafted + "/" + r.count + ")";
+            case RETURN_GRID -> "正在归还合成格余料";
+            case CLOSE -> "正在关闭合成界面";
+            case RECLAIM_STATION, COLLECT_STATION -> "正在回收临时合成台";
+        };
+    }
     @Override protected String successMessage() { return "crafted " + crafted + " item(s) via " + r.recipeId; }
     @Override protected String cancelledMessage() { return "craft interrupted"; }
     // 首次点击前被外来内容占用的界面交还原持有者，公共任务收尾同样不得替它搬运或关闭。

@@ -1312,6 +1312,18 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
                 + ", collected " + lootGained();
     }
 
+    /** 面板行动行的一句话汇报；战斗对象名取当前攻击目标的实时名称，清掃与撤离各有独立说法。 */
+    @Override
+    public String describeCurrentAction() {
+        if (phase == Phase.LOOT) return "正在清扫战利品";
+        if (retreating) return "正在撤离危险";
+        if (target != null) {
+            String name = target.getName().getString();
+            return name.isEmpty() || name.isBlank() ? "正在与目标战斗" : "正在与 " + name + " 战斗";
+        }
+        return "正在索敌";
+    }
+
     @Override
     protected String successMessage() {
         if (r.indiscriminate) {

@@ -2904,6 +2904,26 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         return out;
     }
 
+    /** 面板行动行的一句话汇报；说法来自施工阶段，进度取已核验格数，正放的方块名取目标格的设计状态。 */
+    @Override
+    public String describeCurrentAction() {
+        String progress = " (" + r.completed() + "/" + r.targets.size() + ")";
+        String placing = cell == null ? null
+                : cell.target().desiredState().getBlock().getName().getString();
+        return switch (phase) {
+            case PREFLIGHT, CLEARANCE_REPORT -> "正在做施工前检查";
+            case EXCAVATE, EXCAVATE_EXIT -> "正在挖掘施工空间" + progress;
+            case SELECT, SELECT_ITEM, SCAFFOLD_SELECT -> "正在拿出建筑材料";
+            case CLEAR_NAV, CLEAR, CLEAR_RELEASE, CLEAR_CREATIVE -> "正在清理施工格子";
+            case PLACE_NAV, WORKSITE -> "正在走向施工位";
+            case AIM -> placing == null ? "正在瞄准放置方块" : "正在瞄准放置 " + placing;
+            case WAIT_USE -> placing == null ? "正在放置方块" + progress : "正在放置 " + placing + progress;
+            case EDGE_RETURN -> "正在回到安全站位";
+            case VERIFY, FINAL_STATE, ROUTE_VERIFY -> "正在复查施工结果" + progress;
+            case SCAFFOLD_NAV, SCAFFOLD_BREAK, SCAFFOLD_DESCENT, SCAFFOLD_ACCESS -> "正在拆除临时支撑";
+        };
+    }
+
     @Override
     protected String successMessage() {
         if(!nativePlacementDeviation.isEmpty())return "原生放置已确认，实际落点偏离声明；已返回耗材、实际效果及完整设计差异";

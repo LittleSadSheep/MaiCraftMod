@@ -278,6 +278,26 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             super.cleanup();
         }
     }
+    /** 面板行动行的一句话汇报；说法来自准备阶段（{@code Phase}），子任务在跑时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) {
+            String deeper = child.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        if (activation != null) return end ? "正在放置末影之眼" : "正在点燃传送门";
+        return switch (phase) {
+            case SURVEY -> "正在勘察传送门场址";
+            case SUPPLY -> "正在补齐传送门材料";
+            case RETURN -> "正在回到传送门场址";
+            case BUILD -> "正在建造传送门门框";
+            case CAST -> "正在浇筑下界传送门";
+            case LOCATE -> "正在定位要塞";
+            case MOVE -> "正在走到激活站位";
+            case ACTIVATE -> end ? "正在放置末影之眼" : "正在点燃传送门";
+            case VERIFY -> "正在核实传送门已激活";
+        };
+    }
+
     @Override protected String successMessage() {
         return complete ? "portal preparation verified from the active portal surface"
                 : "Native casting actions completed; the observed frame needs a model decision before further work.";

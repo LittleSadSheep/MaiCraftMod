@@ -104,6 +104,16 @@ final class MachineSealingTask extends AbstractCompanionTask<MachineSealingTaskR
         if (child != null) { child.stop(player, StopReason.REPLACED); child.result(TaskState.CANCELLED); child = null; }
         super.cleanup();
     }
+    /** 面板行动行的一句话汇报；封口进度 n/m 来自已核验洞口数，供料或建筑子任务仍在时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) {
+            String deeper = child.describeCurrentAction();
+            return deeper != null ? deeper : "正在封堵机器洞口";
+        }
+        if (sealed < r.seals.size()) return "正在封堵机器洞口 (" + sealed + "/" + r.seals.size() + ")";
+        return "正在收尾机器封口";
+    }
+
     @Override protected String successMessage() { return "All machine closure cells verified; newly placed seals were constructed from outside."; }
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();

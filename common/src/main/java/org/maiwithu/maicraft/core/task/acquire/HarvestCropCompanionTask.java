@@ -170,6 +170,16 @@ public final class HarvestCropCompanionTask extends AbstractCompanionTask<Harves
         if (registered) { TargetIndex.unregister(player.clientLevel, blocks); registered = false; }
         selection.reset(); aiming.reset(); super.cleanup();
     }
+    /** 面板行动行的一句话汇报；作物名来自采收目标方块，挖矿子任务仍在时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        if (harvest != null) {
+            String deeper = harvest.describeCurrentAction();
+            return deeper != null ? deeper : "正在采收作物";
+        }
+        if (at != null) return "正在补种 " + (crop == null ? "作物" : crop.block().getName().getString());
+        return "正在寻找成熟作物";
+    }
+
     @Override protected Map<String, Object> resultData() {
         return Map.of("harvested_crops", harvested, "replanted_crops", replanted,
                 "replant_pending", at != null && harvested > replanted, "outcome_uncertain", uncertain, "search_radius", r.radius);

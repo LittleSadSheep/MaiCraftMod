@@ -94,6 +94,12 @@ public final class CreativeTakeItemsCompanionTask
         pendingInventorySlot = -1;
         expected = ItemStack.EMPTY;
     }
+    /** 面板行动行的一句话汇报；物品名取模板物品的本地化名称，计数是已确认入包的增量。 */
+    @Override public String describeCurrentAction() {
+        return "正在创造模式生成 " + r.template.getHoverName().getString()
+                + " (" + added + "/" + r.count + ")";
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         data.put("requested", r.count); data.put("added", added);

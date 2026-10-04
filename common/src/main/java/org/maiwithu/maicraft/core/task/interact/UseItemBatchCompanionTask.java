@@ -7,6 +7,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.MouseButton;
@@ -89,6 +90,21 @@ public final class UseItemBatchCompanionTask extends AbstractCompanionTask<UseIt
         super.cleanup();
     }
     @Override public Map<String, Object> progress() { return resultData(); }
+    /** 面板行动行的一句话汇报；工具与原料名取物品的本地化名称，子任务在跑时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        if (active != null) {
+            String deeper = active.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        return switch (phase) {
+            case "prepare_tool" -> "正在装备 " + r.tool.getName(ItemStack.EMPTY).getString();
+            case "prepare_ingredient" -> "正在装备 " + r.ingredient.getName(ItemStack.EMPTY).getString();
+            case "native_use" -> "正在用 " + r.tool.getName(ItemStack.EMPTY).getString() + " 加工 ("
+                    + completedOutput + "/" + r.count + ")";
+            default -> "正在准备双手";
+        };
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("phase", phase); data.put("item_id", id(r.tool)); data.put("expected_output_item_id", id(r.output));

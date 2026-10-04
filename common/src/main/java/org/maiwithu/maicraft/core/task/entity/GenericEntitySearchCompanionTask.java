@@ -786,6 +786,18 @@ public final class GenericEntitySearchCompanionTask
         return data;
     }
 
+    /** 面板行动行的一句话汇报；观察计数是已核实的合格实体观察数，赶路段落由导航子任务先说话。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (stage) {
+            case OBSERVE -> "正在观察附近的目标实体 (" + observedSafe.size() + "/" + r.count + ")";
+            case TRAVEL_FRONTIER -> {
+                String deeper = moveChild == null ? null : moveChild.describeCurrentAction();
+                yield deeper != null ? deeper : "正在前往新的观察点";
+            }
+        };
+    }
+
     @Override
     protected String successMessage() {
         return "verified " + observedSafe.size() + "/" + r.count + " acceptable "
