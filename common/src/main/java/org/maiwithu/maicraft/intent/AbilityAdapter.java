@@ -301,6 +301,8 @@ final class AbilityAdapter {
     private record BedSite(BlockPos foot, Direction facing) {}
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
+        // 已登记飞机承担长途路段，落地后仍由同一旅行任务核实原来的地面终点。
+        if (AircraftTravelIntent.applies(goal)) return AircraftTravelIntent.adapt(goal, player, runtime);
         // 先分清用户想去哪：指定电梯楼层、某艘船、一个方向的平台、方块、坐标，或还没找到的地区。
         if(ElevatorTravelIntent.applies(goal)) return ElevatorTravelIntent.adapt(goal,player);
         JsonObject parameters = new JsonObject();

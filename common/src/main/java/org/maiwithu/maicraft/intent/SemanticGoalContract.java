@@ -137,6 +137,10 @@ final class SemanticGoalContract {
             try {
                 TravelDestination.validatePrecision(goal.parameters());
                 TravelDestination.fromGoal(goal);
+                // 飞机编号、当前维度和地面到达契约不能被普通登船分支吞掉。
+                if (AircraftTravelIntent.applies(goal)) AircraftTravelIntent.validate(goal);
+                else if (goal.parameters().has("cruise_altitude"))
+                    throw new IllegalArgumentException("cruise_altitude requires transport_mode=aircraft");
             } catch (IllegalArgumentException invalid) {
                 throw violation("invalid_travel_contract", path + ".parameters", ability, invalid.getMessage());
             }
