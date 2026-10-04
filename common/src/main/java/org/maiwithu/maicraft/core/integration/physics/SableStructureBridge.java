@@ -91,6 +91,19 @@ public final class SableStructureBridge {
         }
     }
 
+    /** 飞控按原生归属排除本机的桨叶和舵面；不能仅凭大坐标或邻近位置猜测两个结构属于同一艘船。 */
+    public static UUID containingId(ClientLevel level,BlockPos storagePosition) {
+        try {
+            Class<?> type=Class.forName(CONTAINER,false,SableStructureBridge.class.getClassLoader());
+            Object container=method(type,"getContainer",Level.class).invoke(null,level);
+            Object ship=containing(container,storagePosition);
+            return ship==null?null:(UUID)call(ship,"getUniqueId");
+        } catch(ClassNotFoundException absent){return null;}
+        catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable) {
+            throw new IllegalStateException("contraption parent identity unavailable",unavailable);
+        }
+    }
+
     /** 查询当前原生碰撞结果，而非历史上次跟踪的 UUID 或附近船体碰撞箱。 */
     public static Contact contact(Object entity) {
         try {
