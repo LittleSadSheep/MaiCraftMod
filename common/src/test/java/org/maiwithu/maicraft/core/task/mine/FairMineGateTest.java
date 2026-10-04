@@ -9,10 +9,15 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
@@ -77,7 +82,39 @@ public final class FairMineGateTest {
             check(((List<?>) knownOres.get(recalled)).contains(remembered),
                     "观察记忆命中让重新被遮挡的目标仍可入可挖目标集");
         }
+        transparentCoverIsObservationEvidence();
         System.out.println("FairMineGateTest: passed");
+    }
+
+    private static void transparentCoverIsObservationEvidence() throws Exception {
+        // 独立回放没有服务器标签同步，先补真实的镐采掘标签，结束后恢复其他场景的注册表视图。
+        Map<TagKey<Block>, List<Holder<Block>>> previous = new HashMap<>();
+        BuiltInRegistries.BLOCK.getTags().forEach(pair -> previous.put(pair.getFirst(), pair.getSecond().stream().toList()));
+        var tags = new HashMap<>(previous);
+        tags.put(BlockTags.MINEABLE_WITH_PICKAXE, List.of(Blocks.IRON_ORE.builtInRegistryHolder()));
+        BuiltInRegistries.BLOCK.bindTags(tags);
+        try (var h = new InteractionWorldTestHarness()) {
+            var effects = LivingEntity.class.getDeclaredField("activeEffects"); effects.setAccessible(true);
+            effects.set(h.player, new HashMap<>());
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
+            var memory = IntentRuntime.get().observedSourceMemory(); memory.clear();
+            BlockPos ore = new BlockPos(4, 2, 3);
+            h.set(ore, Blocks.IRON_ORE.defaultBlockState());
+            // 角色隔着完整玻璃墙能认出矿石，采矿观察闸门也必须接收同一份视觉证据。
+            for (int z = 0; z < 8; z++) for (int y = 1; y < 5; y++)
+                h.set(new BlockPos(2, y, z), Blocks.GLASS.defaultBlockState());
+            var task = new MineCompanionTask(h.player, new MineBlockTaskRecord("glass-covered-ore", 1000,
+                    Set.of(Blocks.IRON_ORE), 1, "iron ore").withinRadius(new BlockPos(0, 1, 3), 8));
+            task.start(h.player); finishQuery(h, task);
+            var drain = MineCompanionTask.class.getDeclaredMethod("drainGate"); drain.setAccessible(true);
+            h.nextTick(); drain.invoke(task);
+            check(((List<?>) field("knownOres").get(task)).contains(ore), "玻璃后可见的矿石应进入已观察候选");
+            check(memory.seen("minecraft:overworld", ore), "隔玻璃观察到矿石后应写入观察记忆");
+            // 观察成立不授权穿墙挖矿；原生准星尚被玻璃截住，直接挖掘候选仍为空。
+            var reachable = MineCompanionTask.class.getDeclaredMethod("reachableTarget"); reachable.setAccessible(true);
+            check(reachable.invoke(task) == null, "视觉证据不能绕过原生挖掘命中");
+            memory.clear();
+        } finally { BuiltInRegistries.BLOCK.bindTags(previous); }
     }
 
     /** 放置目标并用石头完整包住六个面（地面已默认是石头），得到一个索引可见但角色不可见的候选。 */
