@@ -89,6 +89,13 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
         if(!player.mayBuild())return stopWith("当前玩家没有原生建造权限",FailureType.UNKNOWN);
         adhesive=BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(r.parameters.adhesive().item))
                 .orElseThrow(()->new IllegalStateException("当前安装没有所选胶水物品"));
+        BlockPos point=firstSelected?r.parameters.second():r.parameters.first();
+        boolean honey=r.parameters.adhesive()==PhysicalAssemblyParameters.Adhesive.HONEY;
+        // 高处换位可能正在取落地水桶或准备飞行；先完成已开始的走位，胶水选择不能每刻抢回它的快捷栏。
+        if(approach.moving()&&!approach.ready(player,frame,point,honey,r.getToolCallId(),r.getDeadlineGameTime())) {
+            if(approach.failure()!=null)return stopWith(approach.failure(),FailureType.NO_PATH);
+            return TaskState.RUNNING;
+        }
         // 已经提交的换槽先结清，不能因物品暂在搬运中就另开补料或抹掉未确认交易。
         if(selection.pending()) {
             var state=selection.select(player,selection.requestedSlot());
@@ -114,8 +121,6 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
         if(equipped!=FirstPersonActionGate.Status.READY)return TaskState.RUNNING;
         if(!player.getMainHandItem().is(adhesive)) {selection.reset();return TaskState.RUNNING;}
         selectionRetries=0;
-        BlockPos point=firstSelected?r.parameters.second():r.parameters.first();
-        boolean honey=r.parameters.adhesive()==PhysicalAssemblyParameters.Adhesive.HONEY;
         if(!approach.ready(player,frame,point,honey,r.getToolCallId(),r.getDeadlineGameTime())) {
             if(approach.failure()!=null)return stopWith(approach.failure(),FailureType.NO_PATH);
             return TaskState.RUNNING;
@@ -158,6 +163,15 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
         super.cleanup();
     }
     @Override protected String successMessage() {return alreadyBonded?"选区已有观察到的同类胶层，未重复消耗胶水":"原生粘接已确认，机械连接及组装结果需独立核验";}
+    @Override public Map<String,Object> progress() {
+        // 模型能看到正在选择哪一个端点及真实导航阶段，避免把长时间备降或等待结算误认为没有进展。
+        BlockPos point=firstSelected?r.parameters.second():r.parameters.first();
+        return Map.of("task",name(),"selection_endpoint",firstSelected?"second":"first",
+                "point_offset",List.of(point.getX(),point.getY(),point.getZ()),"native_submitted",submitted,
+                "phase",design!=null?"saving_design":confirmed?"settling_glue_material":action!=null?"confirming_native_glue"
+                        :approach.moving()?"approaching_endpoint":selection.pending()?"preparing_glue_hand":"aiming_endpoint",
+                "approach",approach.evidence(),"supply",supply==null?Map.of():supply.progress());
+    }
     @Override protected Map<String,Object> resultData() {
         var result=new LinkedHashMap<String,Object>(Map.of("operation","bond","native_submitted",submitted,"native_confirmed",confirmed,"already_bonded_observed",alreadyBonded,
                 "glue_before",before.stream().map(NativeAssemblyApi.Bond::evidence).toList(),"glue_after",after.stream().map(NativeAssemblyApi.Bond::evidence).toList(),
