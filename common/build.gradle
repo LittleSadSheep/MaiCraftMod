@@ -233,6 +233,12 @@ def regressionSuites = [
         heap: '512m', directory: 'gui-regression', timeoutSeconds: 45,
         purpose: '验证可见菜单、身体动作与任务收尾'
     ],
+    // 调试面板的最新报错行用假宽度函数独立核对折行、行数上限与空值兜底，不依赖真实字体。
+    debugHudRegression: [
+        entry: 'org.maiwithu.maicraft.client.debug.DebugHudErrorRowsTest',
+        heap: '512m', directory: 'debug-hud-regression', timeoutSeconds: 30,
+        purpose: '验证调试面板最新报错行的多行折行与截断兜底'
+    ],
     // 合成材料匹配与逐格点击独立验证，其他任务模块失败时也能给出准确的合成回归结论。
     craftingRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.CraftingRegressionSuite',
