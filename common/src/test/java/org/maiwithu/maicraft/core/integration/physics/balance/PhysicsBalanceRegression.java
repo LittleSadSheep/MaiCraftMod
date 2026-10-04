@@ -68,6 +68,7 @@ public final class PhysicsBalanceRegression {
         PhysicalControlContractTest.run();
         NativeBurnerDialTest.run();
         NativePropellerStateTest.run();
+        PhysicsFloatingDragTest.run();
         StructureLookDirectionTest.run();
         BondMaterialSettlementTest.run();
         StructureWrenchPlanTest.run();
