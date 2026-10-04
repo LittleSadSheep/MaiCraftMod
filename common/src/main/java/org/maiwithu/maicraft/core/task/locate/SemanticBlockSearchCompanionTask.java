@@ -72,7 +72,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     protected TaskState onTick() {
         if (player.clientLevel != scannedLevel)
             return failSearch("find_block_world_changed", "the observed world changed before the scan completed", FailureType.INTERRUPTED);
-        // 一次只沿同一个游标推进；隐藏目标继续逐个按原生视线判断，不再换排除集合重扫全范围。
+        // 沿原游标检查当前高度附近到其他高度的已加载区块柱；直接眼位射线通过后才算观察到，隐藏候选不触发重新全扫。
+        // 普通查块达到数量就可以收场，最近位置只代表已经检查过的命中；含岩浆时继续扫完整个范围供池面分析。
         scan.advance(SCAN_WORK_PER_TICK, SCAN_NANOS_PER_TICK, pos -> {
             observe(pos);
             return lavaPools == null && observed.size() >= r.count;
@@ -222,7 +223,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         return data;
     }
 
-    /** done/total 表示扫描游标处理的体积；未加载与调色板跳过另列，不能当成逐格观察数量。 */
+    /** 扫描进度包含跳过区块段的体积；是否完整、实际读过多少状态和看见多少目标分开交付，不能把进度满格当成全世界无矿。 */
     @Override
     public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();

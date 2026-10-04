@@ -186,7 +186,8 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction harvestBlock(Goal goal, LocalPlayer player) {
-        // 精确采收把观察到的方块状态冻结到原生采矿任务；不能改走AE取材或顺手挖相邻格。
+        // 用户点名的一格先核对维度、类型及单格动土许可，再冻结执行时读到的完整状态交给原生采矿任务。
+        // 期望物品用于后续入包确认，不替角色选配方或扩大拆除范围；源格挖成但没捡到时仍保留两种事实。
         if (!exactBlockTarget(goal) || !sameDimension(goal.target().position(), player))
             return exactBlockUnavailable(goal, "Harvest needs exact coordinates in the current dimension.", null);
         var p = goal.parameters();
@@ -413,7 +414,8 @@ public final class GeneralAbilityAdapter {
     }
 
     private static IntentAction findBlock(Goal goal) {
-        // 先把可接受的方块种类整理成去重名单；没注册的名字集中记录，稍后一次告诉调用者。
+        // 查块从 goal.parameters 合并单个与数组选择器；current_place/nearest 不安排移动，目标上的名字也不更换扫描区域。
+        // 未注册的名称集中交回修正，浇筑用途的缺省岩浆及计数单位继续传给同一个只读执行器。
         JsonObject p = goal.parameters();
         Purpose purpose = Purpose.parse(string(p, "purpose"));
         LinkedHashSet<String> requested = new LinkedHashSet<>();

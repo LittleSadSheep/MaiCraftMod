@@ -68,8 +68,9 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
  * 持续找材料：查附近已加载的目标方块，走近并挖掉，再靠近地上物品让游戏自然拾取。
  * 例如要 8 个粗铁，通常看背包比开始时多了多少粗铁，而不是只数挖了几块铁矿。
  * 附近有目标但走不到、工具不合适、背包装不下，会分别报告；显式授权探矿后才主动开通道暴露来源。
- * 挖掘目标遵守公平闸门：索引命中的候选只有「即时可见 ∨ 观察记忆里见过」（{@link ObservedSourceMemory}）
+ * 普通挖掘目标遵守公平闸门：索引命中的候选只有「即时可见 ∨ 观察记忆里见过」（{@link ObservedSourceMemory}）
  * 才进入可挖名单，不允许按上帝视角索引直接瞄准埋藏矿；挖隧道穿石头的路径掘进不受此约束。
+ * 定点采收直接复核调用方指定的源格，不查询附近索引；确认一次破坏后仅收尾该次产物，不追挖再生格。
  * 这个任务自己管理找矿、挖矿和捡物品的切换，公共父类负责开始、停止和返回结果。
  */
 public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTaskRecord> {
@@ -273,7 +274,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     @Override
-    // 记下开始时的背包数量和地上已有的物品，后面只计算本轮增加量；再向方块索引登记要找的种类。
+    // 先记下主背包与旧掉落，再开始寻找来源；定点采收只复核冻结的单格，不向索引申请附近替代矿物。
     protected void onStart() {
         // 语义采集已经知道允许的最终物品族，整项任务都使用这份集合与启动时基线，统一统计原生拾取及寻路过程中破坏的目标。
         // 普通挖矿没有预先的物品信息：从空集合开始，只在 BlockDigger 直接挖掉目标并观察到实际产物后学习类型。
@@ -340,7 +341,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (!driveProspecting()) return prospectFailure();
             return TaskState.RUNNING;
         }
-        // 接单之后被换成别的方块或卸载时，停止原生挖掘；不能按坐标误拆新放入的机器。
+        // 已提交的破坏先由上面的 chainBreak 结算；尚未提交时源格换状态或卸载，停止这次授权而不误拆后来放入的方块。
         if (r.exactHarvest() && brokenTargets == 0 && (!level.isLoaded(r.searchCenter())
                 || level.getBlockState(r.searchCenter()) != r.exactState())) {
             fail("exact harvest source changed or unloaded before confirmed break", FailureType.TARGET_LOST);
@@ -1053,7 +1054,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      *  {@link #MAX_NO_SHOT_TICKS} 就把<b>那一格</b>记进 {@link #unworkable} 继续往下走,
      *  而不是永远等一个不会来的射线。<b>记的是这一格,不是猜一格</b> —— 这是唯一一处
      *  按格记账的地方,因为它是唯一一件关于那一格的可复现事实。 */
-    // 普通采矿从已知触发块展开原生矿脉，定点采收仍只处理授权的一格；真实选区在开挖前快照。
+    // 普通采矿可沿原生预览采整脉；定点采收强制 SINGLE，即使装了 FTB 也只挖指定格，再按真实回执结算产物。
     private void mineProgress(BlockPos pos) {
         activeTarget = pos.immutable();
         if (chainBreak == null) chainBreak = new UltimineBreak(player, pos, null,
@@ -1201,7 +1202,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     }
 
     private boolean expectedOutputBudgetExhausted(int gathered) {
-        // 先等本批已归属掉落与服务端背包同步；概率掉落保留32格尝试，定点采收仍只允许它声明的一格。
+        // 已挖源格却未收到期望物品时，先等现有掉落及背包同步；定点采收只试这一格，不借缺产物继续挖再生块。
+        // 普通采矿保留概率掉落的有限试采批次，数量完成仍由实际背包增量判断。
         return expectedOutputAttemptLimitReached(gathered)
                 && drops.isEmpty() && anticipatedDrops.isEmpty() && pendingPathBreaks.isEmpty();
     }
@@ -1653,7 +1655,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (!r.exactHarvest()) TargetIndex.unregister(player.clientLevel, r.targets);
     }
 
-    // 身体维护或用户取消时先松开本任务的连锁键；已有但未确认的破坏保留不确定性，不借重启掩盖。
+    // 身体维护、玩家接管或取消时先结算当前可确认的原生破坏，再松键；保留已发生的源格效果和未决项，不靠恢复后重挖覆盖历史。
     private void closeChain() {
         if (chainBreak == null) return;
         var result = chainBreak.interruptedResult(); ultimineActions.add(result.evidence());
@@ -1688,6 +1690,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             data.put("confirmed_source_breaks_without_output", brokenTargets - breaksAtLastOutput);
             data.put("expected_output_items", r.progressItems.stream().map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).sorted().toList());
             var gains = new LinkedHashMap<String, Integer>();
+            // 这里附带的是失败时观察到的库存增量；现有输出仅列前十六种，不能据未列出的种类推断它没有增加。
             inventoryCounts().entrySet().stream().filter(entry -> entry.getValue() > rawInventoryBaseline.getOrDefault(entry.getKey(), 0))
                     .sorted(Comparator.comparing(entry -> BuiltInRegistries.ITEM.getKey(entry.getKey()).toString())).limit(16)
                     .forEach(entry -> gains.put(BuiltInRegistries.ITEM.getKey(entry.getKey()).toString(), entry.getValue() - rawInventoryBaseline.getOrDefault(entry.getKey(), 0)));

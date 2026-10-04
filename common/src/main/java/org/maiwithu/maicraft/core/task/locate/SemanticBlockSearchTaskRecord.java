@@ -37,6 +37,7 @@ public final class SemanticBlockSearchTaskRecord extends TaskRecord {
 
     public final List<Block> blockTargets;
     public final int count;
+    /** 公开查找使用水平圆半径覆盖各高度段；这是只读范围，不是角色行走距离、交互半径或开路授权。 */
     public final int maxDistance;
     public final Purpose purpose;
 

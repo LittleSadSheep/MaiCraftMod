@@ -80,7 +80,10 @@ public final class MineBlockTaskRecord extends TaskRecord {
     }
     public BlockPos searchCenter() { return searchCenter; }
     public int searchRadius() { return searchRadius; }
-    /** 定点采收只处理接单时这一格的状态；即使机器随后再生相同方块，也不自动开始第二次破坏。 */
+    /**
+     * 定点采收冻结执行适配时实际读到的一格状态，并把目标物品增量与这次源格破坏绑定。
+     * 即使机器随后在同坐标再生，也只收尾第一次的掉落；零半径不会变成附近同类来源搜索。
+     */
     public MineBlockTaskRecord onlyAt(BlockPos target, BlockState observed) {
         if (target == null || observed == null || !targets.contains(observed.getBlock()) || count != 1 || progressItems.isEmpty())
             throw new IllegalArgumentException("exact harvest needs one observed source and an expected output");
@@ -94,7 +97,10 @@ public final class MineBlockTaskRecord extends TaskRecord {
         approachTerrainAlter = enabled;
         return this;
     }
-    /** 接近阶段是否允许为够到源而动土；单格采收始终返回 false，其授权从不覆盖通道和周围机架。 */
+    /**
+     * 接近源与拾取掉落共用这项通行许可；单格采收始终保留周围地形，不能借 may_alter_terrain 扩拆机架。
+     * 这里限制的是通道改动；已授权源格若位于脚下，仍由执行器按下一层真实支撑判断能否原地挖除。
+     */
     public boolean approachTerrainAlter() {
         return !exactHarvest() && approachTerrainAlter;
     }
