@@ -505,6 +505,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
         IntentTaskRecord current = currentIntent();
         if (current != null) result.add("task", taskSummary(current));
+        // 死亡屏幕上血量为零不是唯一信号：待答的重生问题与持有者编号一并给出，观察完即可直接答复。
+        IntentTaskRecord death = intents.deathDecisionHolder();
+        if (death != null) result.add("death_decision", TaskView.deathDecision(death));
         return result;
     }
 
@@ -684,7 +687,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         if (!terminalState && !record.selfDefenseExcursions().isEmpty()) {
             result.add("self_defense_excursions", record.selfDefenseExcursions());
         }
-        if (!terminalState && record.decisionSnapshot() != null) {
+        // 终态任务只保留死亡恢复问题；它在承接任务被取消后仍须可读、可按 /decision 路径找回。
+        if (record.decisionSnapshot() != null && (!terminalState || record.deathDecisionPending())) {
             JsonObject decision = decision(record.decisionSnapshot());
             result.add("decision", decision);
             copyEffectLedger(result, decision.getAsJsonObject("context"));

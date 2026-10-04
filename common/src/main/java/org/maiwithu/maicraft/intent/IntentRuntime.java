@@ -420,6 +420,9 @@ public final class IntentRuntime {
         Minecraft minecraft = Minecraft.getInstance();
         long gameTime = minecraft == null || minecraft.level == null
                 ? 0L : minecraft.level.getGameTime();
+        // 一次死亡只留一份可答问题：问题改挂到这份记录时，先撤下其他记录上的旧死亡问题，
+        // 否则答完一份后另一份残留下来，重生后再答会对活着的身体再发一次重生请求。
+        retireOtherDeathDecisions(record, gameTime);
         record.requestDecision(snapshot, gameTime);
         decision(record, snapshot);
         captureCheckpoint(true);
@@ -450,6 +453,43 @@ public final class IntentRuntime {
         return record != null && deathRecovery == record;
     }
 
+    /** 此刻挂着待答死亡恢复问题的记录：承载记录或任务单（含死亡后被取消的终态任务）；没有时返回 null。 */
+    public IntentTaskRecord deathDecisionHolder() {
+        if (deathRecovery != null && deathRecovery.deathDecisionPending()) return deathRecovery;
+        for (IntentTaskRecord record : tasks.values()) {
+            if (record.deathDecisionPending()) return record;
+        }
+        return null;
+    }
+
+    /**
+     * 角色停在死亡屏幕等待答复时每刻复核：仍有一份可答的死亡恢复问题，返回此刻的持有者。
+     *
+     * <p>任务槽里有未结束的任务时，问题挂在它上面，与刚死时有任务承接的情形一致——例如死亡后
+     * 又提交的新任务替换了原任务，问题随新任务走，调用者盯着新任务就能看到。槽位空着时沿用已有持有者
+     * （含被取消后仍挂着问题的终态任务）；问题随取消、世界记忆重载等途径整个消失时，改挂独立承载记录。
+     */
+    public IntentTaskRecord ensureDeathDecision(
+            IntentTaskRecord active, boolean hardcore, boolean spectator, JsonObject context) {
+        IntentTaskRecord holder = deathDecisionHolder();
+        if (active != null && !active.getState().isTerminal()) {
+            if (holder != active) requestDeathDecision(active, hardcore, spectator, context);
+            return active;
+        }
+        return holder != null ? holder : openDeathRecoveryDecision(hardcore, spectator, context);
+    }
+
+    // 撤下除 keep 以外的死亡问题：任务单只清问题、保留暂停等待继续；承载记录按"问题已改挂"取消结算。
+    private void retireOtherDeathDecisions(IntentTaskRecord keep, long gameTime) {
+        for (IntentTaskRecord record : tasks.values()) {
+            if (record != keep && record.deathDecisionPending()) record.clearPendingDecision();
+        }
+        if (deathRecovery != null && deathRecovery != keep && deathRecovery.deathDecisionPending()) {
+            finishDeathRecovery(deathRecovery, TaskState.CANCELLED, TaskResult.cancelled(
+                    "the death decision moved to the active task", "death_decision_moved"), gameTime);
+        }
+    }
+
     /** 死亡恢复承载记录收尾：终态化并发布结算事件；引用保留供 task get 查阅，换世界或下一次死亡时清除。 */
     public void finishDeathRecovery(
             IntentTaskRecord record, TaskState state, TaskResult result, long gameTime) {
@@ -462,6 +502,10 @@ public final class IntentRuntime {
 
     /** 死亡已由任务外的途径解决（人工点击重生）：作废遗留恢复问题并结算承载记录；没有待答记录时静默。 */
     public void finishSupersededDeathRecovery(long gameTime) {
+        // 重生后重载的任务单可能还带着死前的问题：一并撤下，任务保持暂停等继续，活着时不再被"重生还是取消"挡住。
+        for (IntentTaskRecord record : tasks.values()) {
+            if (record.deathDecisionPending()) record.clearPendingDecision();
+        }
         if (deathRecovery == null || deathRecovery.decisionSnapshot() == null) return;
         TaskResult result = TaskResult.cancelled(
                 "respawn completed without answering the death decision", "respawned_by_player");

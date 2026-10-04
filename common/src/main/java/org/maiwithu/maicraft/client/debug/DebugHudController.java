@@ -146,8 +146,9 @@ public final class DebugHudController {
     // 状态页的任务区：当前任务详情加身体动作，只看"此刻"。
     private static void appendTaskStatusRows(List<Row> rows, Minecraft minecraft) {
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
+        // 死后被取消的任务若仍挂着重生问题，也算待处理，面板不能在角色停在死亡屏幕时显示空闲。
         List<IntentTaskRecord> open = IntentRuntime.get().tasks(50).stream()
-                .filter(record -> !record.getState().isTerminal())
+                .filter(record -> !record.getState().isTerminal() || record.decisionSnapshot() != null)
                 .toList();
         IntentTaskRecord active = open.isEmpty() ? null : open.getFirst();
         if (active == null) {

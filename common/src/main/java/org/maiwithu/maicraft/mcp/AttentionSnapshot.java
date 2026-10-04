@@ -33,8 +33,9 @@ final class AttentionSnapshot {
                 result.add("task", task);
                 result.addProperty("task_status_source", "runtime_task_record");
                 if (record.pauseSnapshot() != null) reason = "task_paused";
-                if (record.decisionSnapshot() != null) reason = "decision_required";
                 if (record.getState().isTerminal() || record.terminalSnapshot() != null) reason = "task_terminal";
+                // 终态任务只可能留着死亡恢复问题；它比"已结束"更要紧，否则身体一直停在死亡屏幕。
+                if (record.decisionSnapshot() != null) reason = "decision_required";
             }
         } else if (available) {
             // 没指定任务时附上最近几项任务，方便刚连上的调用者重新了解当前进度。
@@ -46,6 +47,13 @@ final class AttentionSnapshot {
             result.add("tasks", tasks);
             result.addProperty("tasks_truncated", retained.size() > limit);
             result.addProperty("task_status_source", "runtime_task_record");
+        }
+        IntentTaskRecord death = available ? runtime.deathDecisionHolder() : null;
+        if (death != null && (taskId == null || !taskId.equals(death.externalId()))) {
+            // 死亡问题挂在别的记录上（被替换的旧任务、独立承载记录）：按任务过滤的通知看不到它，
+            // 这里直接附上问题和持有者编号并立即唤醒，调用者不必先翻任务列表才发现角色还停在死亡屏幕。
+            result.add("death_decision", TaskView.deathDecision(death));
+            if (!"resync_required".equals(reason)) reason = "decision_required";
         }
         if (!available) {
             // 玩家不在可用世界时，不把上一世界的消息当成当前情况交出去。

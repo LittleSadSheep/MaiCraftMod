@@ -51,8 +51,9 @@ public final class MaiCraftStatus {
                 inWorld ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
 
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
+        // 死后被取消却仍挂着重生问题的任务同样算待处理，避免死亡屏幕上显示 idle。
         IntentTaskRecord active = IntentRuntime.get().tasks(50).stream()
-                .filter(record -> !record.getState().isTerminal())
+                .filter(record -> !record.getState().isTerminal() || record.decisionSnapshot() != null)
                 .findFirst()
                 .orElse(null);
         if (active == null) {

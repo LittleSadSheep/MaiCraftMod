@@ -65,11 +65,20 @@ final class TaskView {
             // 执行中被自卫带离工位的经历默认可见：在哪接管、最远多远、是否已走回，模型据此判断后续产出发生在哪里。
             JsonArray excursions = record.selfDefenseExcursions();
             if (!excursions.isEmpty()) result.add("self_defense_excursions", excursions);
-            if (record.decisionSnapshot() != null) {
-                result.add("decision", decision(record)); paths.add("/decision");
-            }
+        }
+        // 终态任务只可能留下死亡恢复问题：承接任务在死亡屏幕上被取消后，问题仍在默认回执里可答。
+        if (record.decisionSnapshot() != null) {
+            result.add("decision", decision(record)); paths.add("/decision");
         }
         result.add("detail_paths", paths);
+        return result;
+    }
+
+    /** 挂在别的记录上的死亡恢复问题：附持有者编号与应答样板，盯着其他任务或未指定任务的调用者也能直接答复。 */
+    static JsonObject deathDecision(IntentTaskRecord holder) {
+        JsonObject result = decision(holder);
+        result.addProperty("task_id", holder.externalId().toString());
+        result.addProperty("task_state", MaiCraftRuntimeFacade.taskSummary(holder).get("state").getAsString());
         return result;
     }
 

@@ -70,6 +70,8 @@ public final class AttentionRegressionSuite {
         // 收到的聊天保留作者与截断事实，不能冒充任务事件，也不接收动作栏洪泛。
         ChatMonitorTest.main(args);
         AttentionSnapshotTest.main(args);
+        // 任一维度死亡后，承接任务被取消、替换或丢失都不能让重生问题从回执与等待中消失。
+        DeathDecisionVisibilityTest.main(args);
         // 端口被占时按端口递增让行，同机多开客户端各自拿到可用端点；全部被占须响亮失败。
         McpPortFallbackHttpTest.main(args);
         AttentionHttpTest.main(args);

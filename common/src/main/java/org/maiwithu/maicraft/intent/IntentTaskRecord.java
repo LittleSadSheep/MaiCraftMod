@@ -111,7 +111,8 @@ public final class IntentTaskRecord extends TaskRecord {
         record.attempts.addAll(attempts.stream().skip(
                 Math.max(0, attempts.size() - MAX_ATTEMPTS)).toList());
         // 旧检查点可能同时留下终态和待答问题；已经结束的任务不能再被旧问题恢复。
-        record.decision = terminal == null ? decision : null;
+        // 死亡问题属于存盘那一刻的那条命：重载后仍在死亡屏幕时由死亡复核重新挂出，活着时它已失效，不随记录恢复。
+        record.decision = terminal == null && !deathRecovery(decision) ? decision : null;
         record.pendingAnswer = terminal == null ? pendingAnswer : null;
         record.terminal = terminal;
         if (terminal == null) {
@@ -120,7 +121,7 @@ public final class IntentTaskRecord extends TaskRecord {
                 record.containerSearchScopes.put(stepIndex, Optional.empty());
             record.pause = new PauseSnapshot(
                     "paused_restored", restoredGameTime,
-                    decision == null ? null : decision.id());
+                    record.decision == null ? null : record.decision.id());
             record.restoredDetached = true;
             record.setState(TaskState.PENDING);
         } else {
@@ -426,9 +427,14 @@ public final class IntentTaskRecord extends TaskRecord {
         changed();
     }
 
-    static boolean deathRecovery(DecisionSnapshot snapshot) {
+    public static boolean deathRecovery(DecisionSnapshot snapshot) {
         return snapshot != null && snapshot.contextJson() != null
                 && snapshot.contextJson().contains("death_recovery");
+    }
+
+    /** 这份记录此刻是否挂着待答的死亡恢复问题；终态记录也可能挂着（承接任务在死亡屏幕上被取消或替换）。 */
+    public boolean deathDecisionPending() {
+        return deathRecovery(decision);
     }
 
     /** 死亡已由其他途径解决（如人工点击重生）；遗留的恢复问题作废，终态记录不再接受迟到答复。 */

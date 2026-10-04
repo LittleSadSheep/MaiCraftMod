@@ -32,7 +32,22 @@ public final class DeathDecisionSurvivesCancelTest {
         record2.terminal(TaskState.CANCELLED, TaskResult.fail("body_gone", java.util.Map.of()), 150);
         check(!record2.answer(plain.id(), "retry", new JsonObject()),
                 "普通决策随任务终态作废，迟到答复依旧拒绝");
+
+        // 检查点重载：死亡问题属于存盘时那条命，不随记录恢复（仍在死亡屏幕时由死亡复核重挂）；普通问题照旧恢复。
+        var reloadedDeath = restored(deathDecision());
+        check(reloadedDeath.decisionSnapshot() == null && reloadedDeath.pauseSnapshot() != null
+                        && reloadedDeath.resume(),
+                "重载后的死亡问题必须撤下，任务保持暂停且可以继续，活着时不能再被重生问题挡住");
+        var reloadedPlain = restored(plain);
+        check(reloadedPlain.decisionSnapshot() != null && reloadedPlain.decisionSnapshot().id().equals(plain.id()),
+                "普通待答问题仍随检查点恢复");
         System.out.println("DeathDecisionSurvivesCancelTest: passed");
+    }
+
+    private static IntentTaskRecord restored(IntentTaskRecord.DecisionSnapshot decision) {
+        Goal goal = travel();
+        return IntentTaskRecord.restored(UUID.randomUUID(), null, goal, "death-test", List.of(goal), 0,
+                List.of(), java.util.Map.of(), java.util.Map.of(), List.of(), decision, null, null, 200);
     }
 
     private static IntentTaskRecord.DecisionSnapshot deathDecision() {

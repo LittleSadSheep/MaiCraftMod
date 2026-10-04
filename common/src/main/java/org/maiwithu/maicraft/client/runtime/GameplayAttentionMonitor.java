@@ -52,6 +52,8 @@ public final class GameplayAttentionMonitor {
     private static float previousEffectiveHealth = Float.NaN;
     private static LifeState lifeState = LifeState.ALIVE;
     private static DeathSnapshot lastDeath;
+    // 本次死亡已明确答复 cancel_task：重生交还玩家决定，死亡屏幕复核不再重新挂问题。
+    private static boolean deathDecisionSettled;
     /** 重生报告在物品栏内容包同步后发布；窗口到期则按当时读数如实发布（真掉落场景本就是空包）。 */
     private static final int RESPAWN_INVENTORY_SYNC_TICKS = 30;
     private static JsonObject pendingRespawnFacts;
@@ -78,6 +80,10 @@ public final class GameplayAttentionMonitor {
         if (dead) {
             if (lifeState == LifeState.ALIVE || lifeState == LifeState.RESPAWN_OBSERVED) {
                 deathDetected(player);
+            } else if (lifeState == LifeState.DEAD_REPORTED && !deathDecisionSettled) {
+                // 停在死亡屏幕等答复期间，承接问题的任务可能被取消、被新任务替换或随世界记忆重载消失；
+                // 每刻复核仍有一份可答问题，缺了就按死亡当刻的规则重新挂出，重生入口不随任务一起消失。
+                keepDeathDecisionAnswerable(player);
             }
             remember(level, dimension, phase, weather, effectiveHealth);
             return;
@@ -156,6 +162,7 @@ public final class GameplayAttentionMonitor {
         if (!preserveDeathRecovery || lifeState == LifeState.ALIVE) {
             lifeState = LifeState.ALIVE;
             lastDeath = null;
+            deathDecisionSettled = false;
         }
     }
 
@@ -241,7 +248,7 @@ public final class GameplayAttentionMonitor {
     // 重生后的任务绑定完成才报告库存对比，并解除死亡阶段的自动行为锁；没有自动开始捡回遗物。
     public static synchronized void afterSemanticBind(LocalPlayer player) {
         if (player == null || lifeState != LifeState.RESPAWN_OBSERVED || lastDeath == null) return;
-        // 人工点击重生也解决了死亡：作废还挂着答复的无宿主恢复态，避免迟到答复在新身体上再触发一次重生。
+        // 人工点击重生也解决了死亡：作废还挂着答复的恢复态与任务单上的死前问题，避免迟到答复在新身体上再触发一次重生。
         IntentRuntime.get().finishSupersededDeathRecovery(player.level().getGameTime());
         IntentTaskRecord restored = lastDeath.taskId() == null
                 ? null : IntentRuntime.get().task(lastDeath.taskId());
@@ -268,7 +275,7 @@ public final class GameplayAttentionMonitor {
         // （背包总数非零）或同步窗口到期，再计算 missing_count 并发布。
         pendingRespawnFacts = data;
         pendingRespawnDeadline = player.level().getGameTime() + RESPAWN_INVENTORY_SYNC_TICKS;
-        // 这里只解除死亡阶段锁，没有清除原任务里的 death_recovery 决定；手动重生后仍可能被旧决定挡住 resume。
+        // 死前问题已在上方撤下，这里解除死亡阶段锁；重载的任务仍保持暂停，等调用者核对现场后继续。
         lifeState = LifeState.ALIVE;
     }
 
@@ -323,6 +330,8 @@ public final class GameplayAttentionMonitor {
             DeathDecisionEffect effect, LocalPlayer player, IntentTaskRecord record) {
         if (effect == null || effect == DeathDecisionEffect.NONE) return false;
         if (effect == DeathDecisionEffect.CANCEL_TASK) {
+            // 明确选了取消：本次死亡的问题已答，死亡屏幕复核不再重挂，重生留给玩家。
+            deathDecisionSettled = true;
             boolean cancelled = record != null
                     && CompanionTickDispatcher.cancel(record.publicId());
             JsonObject data = new JsonObject();
@@ -354,6 +363,7 @@ public final class GameplayAttentionMonitor {
                 player.position(), player.level().getGameTime(), inventory,
                 totalItems(inventory), recoverRequested);
         lifeState = LifeState.DEAD_REPORTED;
+        deathDecisionSettled = false;
         activeReflexes.clear();
         // 死亡时未收尾的伤害片段直接丢弃：死亡本身另发 agent.died，补一条"刚才挨了几下"只会重复。
         activeDamage.clear();
@@ -387,11 +397,7 @@ public final class GameplayAttentionMonitor {
             if (!autoAllowed) {
                 // 没有任务承接决策（快任务完成后的死亡、被接管清场后的死亡）也必须挂出恢复态：
                 // 否则死亡屏幕上四个 MCP 入口无一能触达重生按钮，只能靠人点（重生决策死锁的变体）。
-                IntentTaskRecord host =
-                        runtime.openDeathRecoveryDecision(hardcore, spectator, deathDecisionContext());
-                lastDeath = new DeathSnapshot(host.externalId(), lastDeath.dimension(),
-                        lastDeath.position(), lastDeath.gameTime(), lastDeath.inventory(),
-                        lastDeath.inventoryTotal(), lastDeath.recoverAfterDeath());
+                rememberDeathTask(runtime.openDeathRecoveryDecision(hardcore, spectator, deathDecisionContext()));
             }
             else runtime.openDeathRecoveryDecision(hardcore, spectator, deathDecisionContext());
             return;
@@ -457,6 +463,26 @@ public final class GameplayAttentionMonitor {
                     "The native respawn request had an unknown outcome; recheck before retrying.", data);
             return false;
         }
+    }
+
+    /**
+     * 死亡屏幕复核：与维度无关，主世界、下界、末地同一规则。承接任务被取消（死后身体清扫或调用者取消）
+     * 时问题留在原任务上照样可答；被新任务替换时问题改挂新任务；整份记忆重载丢了问题时改挂独立承载记录。
+     */
+    private static void keepDeathDecisionAnswerable(LocalPlayer player) {
+        IntentRuntime runtime = IntentRuntime.get();
+        IntentTaskRecord before = runtime.deathDecisionHolder();
+        IntentTaskRecord holder = runtime.ensureDeathDecision(currentIntent(),
+                player.level().getLevelData().isHardcore(), player.isSpectator(), deathDecisionContext());
+        // 问题改挂到接替的新任务时，重生回执改为核对它的检查点；改挂承载记录时仍核对死时那件任务。
+        if (holder != before && !runtime.isDeathRecoveryHost(holder)) rememberDeathTask(holder);
+    }
+
+    private static void rememberDeathTask(IntentTaskRecord holder) {
+        if (lastDeath == null || holder == null) return;
+        lastDeath = new DeathSnapshot(holder.externalId(), lastDeath.dimension(),
+                lastDeath.position(), lastDeath.gameTime(), lastDeath.inventory(),
+                lastDeath.inventoryTotal(), lastDeath.recoverAfterDeath());
     }
 
     private static JsonObject deathDecisionContext() {
