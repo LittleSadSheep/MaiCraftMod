@@ -15,6 +15,8 @@ public final class AircraftFlightRegressionSuite {
         FlightOperationRegistrationTest.run();
         // 中止飞行也必须把未确认效果交还决策层，不能暗示可以直接重放起飞。
         FlightOutcomeReceiptTest.run();
+        // 飞艇着陆只接受已核实的地面接触，零速悬停不能套用固定翼前进轨迹。
+        AirshipLandingPathTest.run();
         System.out.println("AircraftFlightRegressionSuite: passed");
     }
 }

@@ -98,7 +98,7 @@ public final class FlightFeedbackController {
                     power=distance>Math.max(1.5,sample.horizontalSpeed()*2)
                             &&Math.abs(FlightSample.wrap(heading-sample.heading()))<Math.toRadians(30)
                             ?Math.clamp((distance-1.5)*.08,0,.6):0;
-                    if(distance<=2&&sample.horizontalSpeed()<.4)
+                    if(distance<=1&&sample.horizontalSpeed()<.3)
                         transition(Phase.DESCENT,sample,"飞艇已在实际落点上方减速，开始垂直下降");
                 }
                 else if(horizontalDistance(sample.position(),course.approachPoint())<12

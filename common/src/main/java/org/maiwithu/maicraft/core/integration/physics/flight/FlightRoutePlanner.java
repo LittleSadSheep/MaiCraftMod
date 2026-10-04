@@ -35,7 +35,8 @@ public final class FlightRoutePlanner {
                 clearance=Math.max(.25,sample.position().y-ClientSurfaceHeight.motionBlockingNoLeaves(world,at.getX(),at.getZ()));
         }
         double cruise=Math.max(requestedAltitude,landing==null?requestedAltitude:landing.touchdown().y+16);
-        double width=Math.max(bounds.getXsize(),bounds.getZsize())+2;
+        // 飞艇停机后还会有少量漂移，选址时为垂直下降保留两侧余量。
+        double width=Math.max(bounds.getXsize(),bounds.getZsize())+(envelope.kind()==FlightEnvelope.Kind.AIRSHIP?4:2);
         double length=envelope.kind()==FlightEnvelope.Kind.FIXED_WING?Math.max(48,envelope.cruiseSpeed()*4):width+4;
         var probe=FlightWorldProbe.capture(world,ship);
         if(landing==null&&(landingSearched==Long.MIN_VALUE||sample.tick()-landingSearched>=40)) {
@@ -64,8 +65,15 @@ public final class FlightRoutePlanner {
         double[] headings={0,.26,-.26,.52,-.52,1.05,-1.05,Math.PI};
         double glide=Math.min(cruise,touchdown.y+touchdown.subtract(sample.position()).horizontalDistance()*Math.tan(envelope.approachPitch()));
         double wantedVertical=Math.clamp(((finalApproach?glide:cruise)-sample.position().y)*.25,-envelope.descentRate(),envelope.climbRate());
-        var direct=FlightPathProbe.trace(probe,sample,bounds,finalApproach&&landing!=null?landing.heading():wanted,wantedVertical,seconds,envelope);
-        for(double offset:headings)for(double vertical:new double[]{wantedVertical,0,envelope.climbRate(),-envelope.descentRate()}) {
+        boolean verticalLanding=finalApproach&&landing!=null&&envelope.kind()==FlightEnvelope.Kind.AIRSHIP;
+        var direct=verticalLanding?AirshipLandingPath.trace(probe,sample,bounds,landing,seconds,envelope.descentRate())
+                :FlightPathProbe.trace(probe,sample,bounds,finalApproach&&landing!=null?landing.heading():wanted,wantedVertical,seconds,envelope);
+        var landingObservation=probe.lastObservation();
+        if(verticalLanding) {
+            // 已到着陆点上方不再生成至少一格每秒的前进假轨迹，也不为矩形场地朝向横向转弯。
+            trials.add(Map.of("state",direct.state().name(),"mode","observed_vertical_landing"));
+            if(direct.state()==FlightPathProbe.Space.CLEAR)best=direct;
+        } else for(double offset:headings)for(double vertical:new double[]{wantedVertical,0,envelope.climbRate(),-envelope.descentRate()}) {
             double heading=FlightSample.wrap(wanted+offset);
             var result=FlightPathProbe.trace(probe,sample,bounds,heading,vertical,seconds,envelope);
             trials.add(Map.of("heading",heading,"vertical_speed",vertical,"state",result.state().name()));
@@ -81,7 +89,8 @@ public final class FlightRoutePlanner {
         evidence=Map.of("block_reads",probe.blockReads(),"candidate_routes",List.copyOf(trials),"selected_path",best==null?List.of():best.path(),
                 "landing_site",landing==null?Map.of():Map.of("touchdown",landing.touchdown(),"heading",landing.heading(),"observed_tick",landing.observedTick()),
                 "ground_clearance",clearance,"cruise_altitude",cruise,"departure_state",departureState.name(),
-                "departure_observation",departureEvidence,"aircraft_bounds",bounds);
+                "departure_observation",departureEvidence,"aircraft_bounds",bounds,
+                "landing_path",verticalLanding?Map.of("state",direct.state().name(),"observation",landingObservation):Map.of());
         return guidance;
     }
     public Map<String,Object> evidence(){return evidence;}
