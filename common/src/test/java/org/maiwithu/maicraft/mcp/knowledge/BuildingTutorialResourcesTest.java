@@ -39,7 +39,8 @@ public final class BuildingTutorialResourcesTest {
             String text = library.read(uri).text();
             String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
             check(uri.endsWith("/" + hash) && entry.get("revision").getAsString().equals("sha256:" + hash), "地址与版本须对应完整正文");
-            check(!text.isBlank() && text.length() < 24000, "单份教材应保留完整正文并适合按需注入");
+            // 模型按教程设计建筑时需要完整步骤；正文与案例按内容核验，不限制教材字数。
+            check(!text.isBlank(), "单份教材应保留完整非空正文");
             if (entry.get("load_policy").getAsString().equals("task_start")) startup++;
             else check(entry.get("load_policy").getAsString().equals("on_demand"), "未知教材读取策略");
             for (var capability : entry.getAsJsonArray("requires"))

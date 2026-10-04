@@ -136,7 +136,8 @@ public final class NativeProcessIntentTest {
     private static void onDemandKnowledge() {
         check(SemanticAbilityCatalog.compatibilityAlias("maicraft:enchant") && !SemanticAbilityCatalog.compatibilityAlias("maicraft:operate_machine"), "默认隐藏兼容别名但保留统一入口");
         String field = SemanticAbilityCatalog.describe("maicraft:operate_machine").getAsJsonObject("parameters").getAsJsonObject("production").get("description").getAsString();
-        check(field.length() < 500 && field.contains(KnowledgeLibrary.PROCESSES), "默认生产描述保持简短并指向按需契约");
+        // 生产前应能找到完整工序契约；说明可按真实调用需要展开，不以字数限制压缩决策事实。
+        check(field.contains(KnowledgeLibrary.PROCESSES), "生产描述指向完整的按需工序契约");
         String page = KnowledgeLibrary.offline().read(KnowledgeLibrary.PROCESSES).text();
         check(page.contains("schema_version") && page.contains("minimum_events") && page.contains("max_levels_spent"), "按需知识保留完整v1与原生机制参数");
     }
