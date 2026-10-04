@@ -94,7 +94,6 @@ public final class SemanticAcquireCompanionTask
     private static final long PROSPECT_MINE_TICKS = 13L * 60L * 20L;
     private static final long STORAGE_TICKS = 10L * 60L * 20L;
     private static final long HUNT_TICKS = 120L * 20L;
-    private static final int HUNT_SEARCH_DISTANCE = 512;
 
     private enum HuntChildStage { NONE, SEARCH, ATTACK }
 
@@ -991,7 +990,7 @@ public final class SemanticAcquireCompanionTask
                 addIssue("hunt", "hunt_entity_search_state_repeated",
                         "the same dimension, position and semantic entity search state produced no new evidence",
                         Map.of("search_attempts", need.huntSearchAttempts,
-                                "max_search_distance", HUNT_SEARCH_DISTANCE,
+                                "max_search_distance", r.huntSearchDistance,
                                 "entity_type_ids", stringIds(hint.entityTypeIds()),
                                 "relation", relation.name().toLowerCase(Locale.ROOT)));
                 advanceSource(need);
@@ -1007,7 +1006,7 @@ public final class SemanticAcquireCompanionTask
             GenericEntitySearchTaskRecord search = new GenericEntitySearchTaskRecord(
                     childId("hunt-search"),
                     now + 10L * 60L * 20L,
-                    hint.entityTypeIds(), relation, 1, HUNT_SEARCH_DISTANCE,
+                    hint.entityTypeIds(), relation, 1, r.huntSearchDistance,
                     false, r.protectedLabels, true, rejectedHuntTargets)
                     .withSheepTraits(SheepTraits.forWool(need.itemIds));
             return startHuntChild(need, search, HuntChildStage.SEARCH, null,

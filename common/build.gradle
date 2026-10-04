@@ -321,6 +321,12 @@ def regressionSuites = [
         heap: '512m', directory: 'acquisition-prospecting-regression', timeoutSeconds: 90,
         purpose: '验证探矿编排交接：下降目标 Y 取生成带推荐值，掘进授权显式携带'
     ],
+    // hunt 搜索距离上限独立回放：参数默认值、显式传参与越界拒绝，防止限距参数悄悄失效。
+    huntSearchDistanceRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.acquire.HuntSearchDistanceTest',
+        heap: '512m', directory: 'hunt-search-distance-regression', timeoutSeconds: 60,
+        purpose: '验证 hunt 搜索距离上限的参数解析、默认值与越界拒绝'
+    ],
     // 能力指针防漂移：契约与回执文本点名的能力必须仍在能力表里，改名漏改文本在此失败。
     abilityPointerDriftRegression: [
         entry: 'org.maiwithu.maicraft.intent.AbilityPointerDriftTest',

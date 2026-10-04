@@ -11,6 +11,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
+import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -108,6 +109,19 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
      * 只有调用方显式传 may_alter_terrain=false 才收窄。目标筛选（天然树闸门、保护名单）不受影响。
      */
     public boolean approachTerrainAlter = true;
+
+    /**
+     * hunt 前沿搜索离请求起点的距离上限，语义对齐 find_entity 的 max_distance；
+     * 默认值与未暴露参数时的历史行为一致。低血/夜间由调用方收小，避免搜索把身体带进危险区。
+     */
+    public int huntSearchDistance = GenericEntitySearchTaskRecord.DEFAULT_DISTANCE;
+
+    public SemanticAcquireTaskRecord withHuntSearchDistance(int distance) {
+        huntSearchDistance = Math.clamp(distance,
+                GenericEntitySearchTaskRecord.MIN_DISTANCE,
+                GenericEntitySearchTaskRecord.MAX_DISTANCE);
+        return this;
+    }
 
     public SemanticAcquireTaskRecord withLoadedMiningView(boolean enabled) {
         miningUsesLoadedView = enabled;

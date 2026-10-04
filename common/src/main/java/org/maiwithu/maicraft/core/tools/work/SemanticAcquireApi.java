@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.agent.tool.api.ToolContext;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
+import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 
 /** 检查取物参数，再结合当前物品标签生成最终背包需求；这里不移动角色，也不打开容器。 */
 public final class SemanticAcquireApi {
@@ -32,7 +33,7 @@ public final class SemanticAcquireApi {
     private static final long MAX_INITIAL_LEASE_TICKS = 20L * 60L * 20L;
     private static final Set<String> PARAMETERS = Set.of("item_id", "item_ids", "item_tag", "item_tags",
             "count", "allowed_sources", "allow_harm", "allow_prospecting", "may_alter_terrain",
-            "source_hint", "protected_labels", "radius", "preferred_materials");
+            "source_hint", "protected_labels", "radius", "preferred_materials", "max_distance");
     private static final Set<String> HINT_FIELDS = Set.of("block_ids", "block_tags", "entity_type_ids",
             "expected_item_ids", "trade_profession_ids", "description");
 
@@ -55,6 +56,8 @@ public final class SemanticAcquireApi {
             throw new IllegalArgumentException("acquire_items needs item_id, item_ids, item_tag or item_tags");
         integer(args, "count", 1, 1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT);
         integer(args, "radius", SemanticAcquireTaskRecord.DEFAULT_RADIUS, 1, SemanticAcquireTaskRecord.MAX_RADIUS);
+        integer(args, "max_distance", GenericEntitySearchTaskRecord.DEFAULT_DISTANCE,
+                GenericEntitySearchTaskRecord.MIN_DISTANCE, GenericEntitySearchTaskRecord.MAX_DISTANCE);
         bool(args, "allow_harm", false);
         bool(args, "allow_prospecting", false);
         // mine 家族的接近性动土默认随采矿授权开启；显式 false 才收窄回普通行走。
@@ -156,6 +159,10 @@ public final class SemanticAcquireApi {
                 .withLoadedMiningView(!args.has("radius") || args.get("radius").isJsonNull())
                 .withProspecting(allowProspecting)
                 .withApproachTerrainAlter(bool(args, "may_alter_terrain", true))
+                .withHuntSearchDistance(integer(args, "max_distance",
+                        GenericEntitySearchTaskRecord.DEFAULT_DISTANCE,
+                        GenericEntitySearchTaskRecord.MIN_DISTANCE,
+                        GenericEntitySearchTaskRecord.MAX_DISTANCE))
                 .withPreferredMaterials(resourceIds(args.get("preferred_materials"), "preferred_materials", true));
     }
 
