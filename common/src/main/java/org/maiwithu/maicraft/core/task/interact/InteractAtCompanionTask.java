@@ -96,6 +96,13 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean terrainApproach;
     private int approachAttempts, approachCandidates;
     private Map<String, Object> approachFailureEvidence = Map.of();
+    /** 接近导航收尾前的健康快照；其中 rejected_descents 说明路线为安全避开了哪些会摔的深落。 */
+    private Map<String, Object> approachNavHealth = Map.of();
+    /** 瞄准遮挡后已用过的一次自动换站位重试；只试一次，避免在不可见目标附近往返踱步。 */
+    private boolean stanceRetryUsed;
+    private int stanceRetries;
+    /** 换站位重试期间由 act 自己驱动新导航：距离判据此刻仍满足，靠 onTick 的导航推进永远轮不到新站位。 */
+    private boolean forcingNewStance;
     /** 提交原生使用那一刻的目标格快照；与到期快照对照，用于裁决服务端分歧与确认缺口。 */
     private Map<String, Object> submissionFacts = Map.of();
 
@@ -149,6 +156,29 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         return super.handleNavFailure(type, reason);
     }
 
+    /**
+     * 从当前站位瞄准目标被遮挡时，自动换一个已知可见站位重新接近一次，代替把"换到开阔侧"留给
+     * 拿不到内部坐标的调用方。只重试一次：真正的开阔侧未必在已观察站位里，反复换点只会原地徘徊。
+     */
+    private boolean retryFromDifferentStance(String blockedDetail) {
+        if (!r.approachTarget || r.aim == null || interaction != null || stanceRetryUsed) return false;
+        stanceRetryUsed = true;
+        stanceRetries++;
+        rejectedStances.add(player.blockPosition().asLong());
+        forcingNewStance = true;
+        stopNav();
+        nav = buildNav();
+        if (nav == null) {
+            forcingNewStance = false;
+            return false;
+        }
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-task] OCCLUDED stance retry {} feet={} aim={} — {}",
+                getClass().getSimpleName(), player.blockPosition().toShortString(),
+                r.aim.toShortString(), blockedDetail);
+        return true;
+    }
+
     private boolean visibleFrom(Vec3 eyes) {
         var item = r.emptyHand ? Items.AIR : r.item == null ? player.getMainHandItem().getItem() : r.item;
         if (FirstPersonInteractionTargeting.usesBucketRay(item))
@@ -181,8 +211,36 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             fail("not_a_source_block: the target became flowing fluid; no bucket use was submitted", FailureType.NOT_A_SOURCE_BLOCK);
             return TaskState.FAILED;
         }
+        // 换站位重试的行进阶段：新站位的到达条件是"真实看见目标"，由这里驱动，走完再回到正常瞄准。
+        if (forcingNewStance) {
+            if (nav == null) {
+                forcingNewStance = false;
+            } else {
+                return switch (nav.tick()) {
+                    case RUNNING -> TaskState.RUNNING;
+                    case ARRIVED -> {
+                        forcingNewStance = false;
+                        aimPoint = null;
+                        aimConvergence.reset();
+                        yield TaskState.RUNNING;
+                    }
+                    case FAILED -> {
+                        forcingNewStance = false;
+                        fail("aim " + aimLabel() + " stayed blocked: the retry stance also failed ("
+                                + nav.failReason() + "). Reposition manually or re-observe the target.",
+                                FailureType.OCCLUDED);
+                        yield TaskState.FAILED;
+                    }
+                };
+            }
+        }
         // 已到点击距离也要先让交通完成落地与装备恢复；同刻打开腾手背包会反过来挡住交通收尾，造成互相等待。
-        if (r.approachTarget && nav != null) { stopNav(); return TaskState.RUNNING; }
+        // 停导航前留一份健康诊断：接近路线避开了哪些会摔的深落，只有导航还活着时读得到。
+        if (r.approachTarget && nav != null) {
+            approachNavHealth = nav.transportDiagnostics();
+            stopNav();
+            return TaskState.RUNNING;
+        }
         if (r.heldItemUseOnly) return useHeldItem();
         manualCrank = r.item == null && button() == Interaction.Button.USE && CreateManualInput.supported(player.level(), r.aim);
         // 从第一笔已确认原生使用开始记录实际转速和应力，持续操作结束后仍能说明驱动期间是否卡在超载。
@@ -260,6 +318,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     || !useSurface.accepts(surface))) {
                 // 一度以内只说明镜头接近目标，机械手前端或置物台边缘仍可能尚未命中；未出手时先继续精确瞄准。
                 if (refineSurfaceAim(useSurface)) return TaskState.RUNNING;
+                if (retryFromDifferentStance("the machine interaction surface is not reachable from this stance")) {
+                    return TaskState.RUNNING;
+                }
                 fail(surfaceStillVisible
                         ? "the machine surface remains visible, but the actual view did not reach it after bounded aiming"
                         : "the required machine interaction surface is no longer visible", FailureType.OCCLUDED);
@@ -286,6 +347,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 } else {
                     landing = "empty space before reaching the target";
                 }
+                if (retryFromDifferentStance("crosshair lands on " + landing)) return TaskState.RUNNING;
                 fail("aim " + aimLabel() + " is blocked from here — the crosshair lands on "
                         + landing + " instead. Reposition to the target's open side, then retry.",
                         FailureType.OCCLUDED);
@@ -513,6 +575,17 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         super.cleanup();
     }
 
+    /**
+     * 接近导航最近一轮寻路因坠落风险被拒的下降；导航已收尾时取停用前缓存的健康快照。
+     */
+    private Object rejectedDescentsFromNav() {
+        if (approachNavHealth.get("ground_health") instanceof Map<?, ?> health
+                && health.get("rejected_descents") != null) {
+            return health.get("rejected_descents");
+        }
+        return Map.of();
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
@@ -531,7 +604,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         }
         if (r.approachTarget) data.put("interaction_approach", Map.of("route_attempts", approachAttempts,
                 "stance_candidates", approachCandidates, "rejected_stances", rejectedStances.size(),
-                "terrain_preparation_attempted", terrainApproach, "player_feet", player.blockPosition().toShortString()));
+                "stance_retries", stanceRetries,
+                "terrain_preparation_attempted", terrainApproach, "player_feet", player.blockPosition().toShortString(),
+                "rejected_descents", rejectedDescentsFromNav()));
         if (surfaceCheckAttempted) {
             // 只读回执分别说明几何可见性与已尝试的镜头修正，便于区分机壳遮挡和真实射线仍未对准。
             data.put("surface_aim_corrections", surfaceAimCorrections);

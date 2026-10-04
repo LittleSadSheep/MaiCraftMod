@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
 import org.maiwithu.maicraft.core.task.chain.BreathChain;
 import org.maiwithu.maicraft.core.task.chain.NightRestChain;
+import org.maiwithu.maicraft.core.task.chain.SettleChain;
 import org.maiwithu.maicraft.core.task.chain.TorchLightingChain;
 
 /**
@@ -21,6 +22,7 @@ public final class CoreReflexes {
     public static void registerAll() {
         ReflexRegistry.register(new MLGChain());
         ReflexRegistry.register(new BreathChain());
+        ReflexRegistry.register(new SettleChain());
         ReflexRegistry.register(new MobDefenseChain());
         ReflexRegistry.register(new NightRestChain());
         // 保留补光说明名；实际随行行为由帧末辅助通道执行，不进入反射抢占队列。

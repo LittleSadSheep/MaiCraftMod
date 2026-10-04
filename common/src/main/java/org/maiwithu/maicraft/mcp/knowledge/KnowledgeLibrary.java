@@ -38,6 +38,7 @@ public final class KnowledgeLibrary {
             {"drop-rates", "关键掉率与方差", "flint 燧石 10% 掉率 方差 fortune 时运 loot 战利品表 掉落概率 苹果 树苗"},
             {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 wrong_tool 黑曜石 obsidian diamond_pickaxe 镐 挖不动 不掉落 挖掘资格"},
             {"mine-source-scope", "mine 源查询的范围语义", "mine 源查询 半径 深度 query_complete known_sources 保留意见 暴露源 埋藏矿 扫描范围"},
+            {"food", "食物与饥饿", "food eat 食物 饥饿 进食 consume 饱食度 saturation 营养 打猎 狩猎 耕种 种植 农田 补种 小麦 胡萝卜 土豆 甜菜 面包 cook 烹饪 熔炉 allow_effects confirm_risky_target"},
     };
     public interface Source {
         List<KnowledgeDocument.Entry> entries();
