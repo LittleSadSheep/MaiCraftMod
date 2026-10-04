@@ -29,6 +29,7 @@ import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.item.crafting.ShapedRecipePattern;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import org.maiwithu.maicraft.core.task.craft.CraftingPlacementPlan;
+import org.maiwithu.maicraft.core.task.craft.CraftIngredientReservations;
 
 /** 回放火把竖向摆料、标签替代品、重叠输入和命名材料，保证一批选料与真实菜单对应。 */
 public final class CraftingPlacementPlanTest {
@@ -78,6 +79,20 @@ public final class CraftingPlacementPlanTest {
             var repeated = new ShapelessRecipe("", CraftingBookCategory.MISC, new ItemStack(Items.STICK),
                     NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.OAK_PLANKS), Ingredient.of(Items.OAK_PLANKS)));
             check(CraftingPlacementPlan.create(h.player, repeated, grid).isEmpty(), "one item cannot satisfy two input slots");
+            // 多堆同种建材只扣一次预留；实际菜单选料必须用余量，配方簿不能绕过整机材料份额。
+            h.inventory.setItem(1,new ItemStack(Items.OAK_PLANKS,2));
+            var oak=BuiltInRegistries.ITEM.getKey(Items.OAK_PLANKS);
+            var reservedRecipe=new RecipeHolder<CraftingRecipe>(ResourceLocation.parse("test:reserved_planks"),repeated);book.add(reservedRecipe);
+            CraftIngredientReservations.withReserved(Map.of(oak,1),()->{
+                var allocation=CraftingPlacementPlan.create(h.player,repeated,grid);
+                check(allocation.size()==2&&allocation.stream().allMatch(e->menu.getSlot(e.sourceSlot()).getContainerSlot()==1),"合成只能使用另一堆的两件余量");
+                check(!CraftingPlacementPlan.recipeBookUsable(h.player,reservedRecipe),"含预留材料时不能让配方簿自由选料");
+                CraftIngredientReservations.withReserved(Map.of(oak,2),()->{
+                    check(CraftingPlacementPlan.create(h.player,repeated,grid).isEmpty(),"不能将预留的第二件重复分配给配方");return null;
+                });
+                check(CraftIngredientReservations.reserved(oak)==1,"嵌套预留结束后应恢复父任务份额");return null;
+            });
+            check(CraftIngredientReservations.reserved(oak)==0&&h.inventory.countItem(Items.OAK_PLANKS)==3,"选料只读且不保留跨任务约束");
             h.inventory.setItem(0, new ItemStack(Items.COAL)); h.inventory.setItem(1, new ItemStack(Items.STICK));
             var table = new CraftingMenu(4, h.inventory, ContainerLevelAccess.NULL); h.player.containerMenu = table;
             var tableGrid = (CraftingContainer) table.getSlot(1).container;

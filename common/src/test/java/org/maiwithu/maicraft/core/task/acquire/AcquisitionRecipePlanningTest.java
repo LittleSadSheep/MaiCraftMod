@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.core.tools.CraftOps;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
+import org.maiwithu.maicraft.core.task.craft.CraftIngredientReservations;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 用真实背包分配与原生配方验证：展示可以截短，内部补料必须保留完整候选。 */
@@ -50,6 +51,7 @@ public final class AcquisitionRecipePlanningTest {
             carriedJungleLogsPrepareToolsWithoutPreference(world);
             carriedWorkstationDoesNotCreateExtraDemand(world);
             reserveExistingGoalOutputs(world);
+            reserveOtherBuildTargets(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
             check(!alreadyCarried.executable() && alreadyCarried.immediate().success(),
@@ -77,6 +79,33 @@ public final class AcquisitionRecipePlanningTest {
         // 真正新增的转换原料可以继续做成第三件，不能因存在反向配方而禁止合法现货加工。
         world.inventory.setItem(1,new ItemStack(Items.COAL));world.nextTick();
         check(planner.materialPlan(recipe,need).feasible()&&planner.materialPlan(recipe,need).supplies().isEmpty(),"已有独立原料应允许完成原需求");
+    }
+
+    private static void reserveOtherBuildTargets(InteractionWorldTestHarness world) throws Exception {
+        // 用两种可逆材料复现主翼/尾翼互相消耗：另一部件已备好的六件只允许使用超出预留的余量。
+        world.inventory.clearContent();world.inventory.setItem(0,new ItemStack(Items.STICK,48));
+        world.inventory.setItem(1,new ItemStack(Items.COAL,7));world.inventory.setItem(2,new ItemStack(Items.OAK_LOG,3));
+        var stick=BuiltInRegistries.ITEM.getKey(Items.STICK);var coal=BuiltInRegistries.ITEM.getKey(Items.COAL);
+        var forward=new RecipeHolder<>(ResourceLocation.parse("test:reserved_stick"),new ShapelessRecipe("",CraftingBookCategory.MISC,
+                new ItemStack(Items.STICK,2),NonNullList.of(Ingredient.EMPTY,Ingredient.of(Items.COAL),Ingredient.of(Items.COAL))));
+        var reverse=new RecipeHolder<>(ResourceLocation.parse("test:reserved_coal"),new ShapelessRecipe("",CraftingBookCategory.MISC,
+                new ItemStack(Items.COAL,2),NonNullList.of(Ingredient.EMPTY,Ingredient.of(Items.STICK),Ingredient.of(Items.STICK))));
+        var raw=new RecipeHolder<>(ResourceLocation.parse("test:raw_stick"),new ShapelessRecipe("",CraftingBookCategory.MISC,
+                new ItemStack(Items.STICK,2),NonNullList.of(Ingredient.EMPTY,Ingredient.of(Items.OAK_LOG))));
+        install(world,List.of(forward,reverse,raw));
+        var plan=CraftIngredientReservations.withReserved(Map.of(coal,6),()->new CraftOps().plan(stick.toString(),50,world.player,new ToolContext("reserved-craft",0)));
+        check(plan.executable()&&plan.task().recipeId.equals(raw.id()),"补一类材料必须保留另一类六件库存，选择独立原料配方");
+        // 预留四十八根后，制作另一部件需要再合成六根；不能把现有四十八根视为免费投入。
+        var need=new AcquisitionNeed(List.of(coal),13,0,Set.of(coal),Set.of(),Set.of(),List.of(SemanticAcquireTaskRecord.Source.INVENTORY,SemanticAcquireTaskRecord.Source.CRAFT));
+        var recipe=candidate(coal,reverse.id().toString(),List.of(new CraftRecoveryCandidate.IngredientDemand(List.of(stick),6,6)));
+        CraftIngredientReservations.withReserved(Map.of(stick,48),()->{
+            var planner=new AcquisitionRecipePlanner(world.player,false,16,List.of());var material=planner.materialPlan(recipe,need);
+            check(material.feasible()&&material.supplies().isEmpty()&&!material.crafts().isEmpty(),"原料树应递归准备额外材料，不能消耗主翼份额");
+            var frontier=planner.chooseFrontier(recipe,List.of(recipe),need);
+            check(frontier!=null&&frontier.ingredient().itemIds().contains(stick)&&frontier.ingredient().missing()==6,"递归需求应在现有库存之外补六件");
+            return null;
+        });
+        check(CraftIngredientReservations.reserved(stick)==0&&world.inventory.countItem(Items.STICK)==48,"预留上下文不能泄露到下一任务或修改背包");
     }
 
     private static void carriedWorkstationDoesNotCreateExtraDemand(InteractionWorldTestHarness world) throws Exception {

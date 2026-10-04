@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.craft.CraftPlanCost;
+import org.maiwithu.maicraft.core.task.craft.CraftIngredientReservations;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
 import org.maiwithu.maicraft.core.task.craft.CraftTaskRecord;
 import org.maiwithu.maicraft.core.task.craft.CraftingWorkstationCoordinator;
@@ -415,6 +416,8 @@ public final class CraftOps {
             List<IndexedIngredient> ingredients, LocalPlayer player, int batches) {
         int usableSlots = Math.min(PlayerInv.BUILDABLE_SLOTS,
                 player.getInventory().getContainerSize());
+        // 规划与实际摆料使用同一份可消耗容量，不能把已备好的另一种建筑材料算进便宜配方。
+        int[] available=CraftIngredientReservations.availableSlots(player.getInventory(),usableSlots);
         int source = 0;
         int ingredientBase = 1;
         int slotBase = ingredientBase + ingredients.size();
@@ -434,7 +437,7 @@ public final class CraftOps {
             }
         }
         for (int slot = 0; slot < usableSlots; slot++) {
-            flow.add(slotBase + slot, sink, player.getInventory().getItem(slot).getCount());
+            flow.add(slotBase + slot, sink, available[slot]);
         }
         int satisfiedTotal = flow.max(source, sink);
 

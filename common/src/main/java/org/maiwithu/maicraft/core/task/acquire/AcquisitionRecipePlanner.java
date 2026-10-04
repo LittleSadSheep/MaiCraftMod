@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.container.ContainerSupplySources;
 import org.maiwithu.maicraft.core.task.craft.CraftRecoveryCandidate;
+import org.maiwithu.maicraft.core.task.craft.CraftIngredientReservations;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 import org.maiwithu.maicraft.core.tools.ToolParse;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
@@ -194,7 +195,7 @@ final class AcquisitionRecipePlanner {
             return UNREACHABLE_STRUCTURE_COST;
         }
         Item item = BuiltInRegistries.ITEM.get(itemId);
-        if (PlayerInv.buildableCount(player.getInventory(), item) > 0) return 0;
+        if (CraftIngredientReservations.available(itemId,PlayerInv.buildableCount(player.getInventory(), item)) > 0) return 0;
         List<CraftingRecipe> recipes = recipes().getOrDefault(
                 itemId, List.of());
         if (recipes.isEmpty()) return 0;
@@ -365,6 +366,8 @@ final class AcquisitionRecipePlanner {
                     carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()), (long) stack.getCount(), Long::sum);
                 }
             }
+            // 递归材料树也只使用余量；例如尾翼需要六张帆时，会在已预留的主翼帆面之外另做六张再转换。
+            carried.replaceAll(CraftIngredientReservations::available);
             recipeCarriedStock = Map.copyOf(carried);
         }
     }

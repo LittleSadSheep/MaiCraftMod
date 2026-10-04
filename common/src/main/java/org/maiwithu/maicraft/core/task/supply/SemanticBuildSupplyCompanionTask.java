@@ -348,10 +348,17 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private void beginSupply(SemanticMaterialSupplyCoordinator.Demand demand) {
+        // 主翼和尾翼等材料可互相合成：冻结其他未完成目标已携带的份额，只让本轮合成消耗其余量。
+        var reserved=new LinkedHashMap<ResourceLocation,Integer>();
+        ledger(true).forEach((item,count)->{
+            if(!demand.acceptableItemIds().contains(itemId(item))) {
+                int held=Math.min(count,inventoryCount(item));if(held>0)reserved.put(itemId(item),held);
+            }
+        });
         // 在仓库连续取齐下一批建材，之后由施工任务按已有支撑选择站位，不要求普通导航爬回旧墙顶。
         supply.begin(player, r.getToolCallId(), r.getDeadlineGameTime(), demand,
                 r.materialPolicy, r.allowedSources, r.allowHarm, r.protectedLabels, List.of(),
-                SemanticMaterialSupplyCoordinator.ReturnPolicy.CALLER_HANDOFF);
+                SemanticMaterialSupplyCoordinator.ReturnPolicy.CALLER_HANDOFF,reserved);
         r.extendDeadlineTo(supply.childDeadline());
     }
 

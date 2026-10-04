@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -25,6 +26,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.Minecraft;
+import org.maiwithu.maicraft.core.task.craft.CraftIngredientReservations;
 
 /**
  * 按总任务的缺料需求取物，默认返回出发工位；建筑可明确接管后续站位，让角色在仓库继续取齐材料。
@@ -115,6 +117,7 @@ public final class SemanticMaterialSupplyCoordinator {
     private Map<String, Object> pendingReceipt;
     private String pendingMessage;
     private List<BlockPos> forbiddenNavigationCells = List.of();
+    private Map<ResourceLocation,Integer> craftReservations=Map.of();
 
     public boolean active() {
         return child != null || pendingReceipt != null || returnNavigation != null;
@@ -132,6 +135,8 @@ public final class SemanticMaterialSupplyCoordinator {
                 data.put("item_id", demand.acceptableItemIds().getFirst().toString());
         }
         if (child != null) data.put("child", child.progress());
+        if(!craftReservations.isEmpty())data.put("craft_reserved_counts",craftReservations.entrySet().stream()
+                .collect(Collectors.toMap(e->e.getKey().toString(),Map.Entry::getValue)));
         return Map.copyOf(data);
     }
 
@@ -177,9 +182,17 @@ public final class SemanticMaterialSupplyCoordinator {
     public void begin(LocalPlayer player, String parentCallId, long parentDeadline, Demand demand,
             MaterialPolicy policy, List<SemanticAcquireTaskRecord.Source> requestedSources, boolean allowHarm,
             List<String> protectedLabels, Iterable<BlockPos> forbiddenNavigationCells, ReturnPolicy returnPolicy) {
+        begin(player,parentCallId,parentDeadline,demand,policy,requestedSources,allowHarm,protectedLabels,forbiddenNavigationCells,returnPolicy,Map.of());
+    }
+
+    /** 建筑一次取一种缺料，但其他已分配部件不能被可逆合成当作免费原料反复拆回。 */
+    public void begin(LocalPlayer player,String parentCallId,long parentDeadline,Demand demand,MaterialPolicy policy,
+            List<SemanticAcquireTaskRecord.Source> requestedSources,boolean allowHarm,List<String> protectedLabels,
+            Iterable<BlockPos> forbiddenNavigationCells,ReturnPolicy returnPolicy,Map<ResourceLocation,Integer> craftReservations) {
         // 同时只做一趟供料，记住出发维度和位置；取料期间仍要遵守总任务不许进入的区域。
         if (active()) throw new IllegalStateException("material supply child is already active");
         this.demand = Objects.requireNonNull(demand, "demand");
+        this.craftReservations=Map.copyOf(craftReservations);
         this.materialPolicy = policy == null ? MaterialPolicy.ORDINARY : policy;
         this.returnPolicy = Objects.requireNonNull(returnPolicy, "return policy");
         this.sources = resolveSources(this.materialPolicy, requestedSources);
@@ -224,8 +237,8 @@ public final class SemanticMaterialSupplyCoordinator {
         }
         if (pendingReceipt != null) return tickReturn(player);
         if (child == null) throw new IllegalStateException("material supply child is missing");
-        TaskState terminal = NavigationSafetyContext.withForbiddenBodyCells(
-                forbiddenNavigationCells, () -> childRunner.apply(child));
+        TaskState terminal = CraftIngredientReservations.withReserved(craftReservations,()->NavigationSafetyContext.withForbiddenBodyCells(
+                forbiddenNavigationCells, () -> childRunner.apply(child)));
         childDeadline = Math.max(childDeadline, childRecord.getDeadlineGameTime());
         if (terminal == null) {
             return new Tick(Status.RUNNING, Map.of(), FailureType.UNKNOWN, "material supply running");

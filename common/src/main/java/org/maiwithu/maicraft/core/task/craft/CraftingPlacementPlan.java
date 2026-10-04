@@ -45,12 +45,13 @@ public final class CraftingPlacementPlan {
         int size = Math.min(PlayerInv.BUILDABLE_SLOTS, player.getInventory().items.size());
         int[] sources = new int[size], remaining = new int[size], stock = new int[size], assigned = new int[demands.size()];
         Arrays.fill(sources, -1); Arrays.fill(assigned, -1);
-        for (int index = 0; index < size; index++) stock[index] = player.getInventory().getItem(index).getCount();
+        // 一批实际摆料同样扣除已分配建材；不能只在配方排序时保留，执行时又从受保护的堆叠取走。
+        stock=CraftIngredientReservations.availableSlots(player.getInventory(),size);
         // 背包、工作台及模组合成菜单的槽号可能不同，只依据容器身份与实际背包索引寻找材料槽。
         for (int slot = 0; slot < menu.slots.size(); slot++) {
             Slot candidate = menu.getSlot(slot); int index = candidate.getContainerSlot();
             if (candidate.container == player.getInventory() && index >= 0 && index < size && candidate.mayPickup(player)) {
-                sources[index] = slot; remaining[index] = candidate.getItem().getCount();
+                sources[index] = slot; remaining[index] = Math.min(stock[index],candidate.getItem().getCount());
             }
         }
         boolean[][] accepts = new boolean[demands.size()][size];
@@ -99,6 +100,9 @@ public final class CraftingPlacementPlan {
     /** 配方簿仅适用于已解锁且能够从普通材料堆中摆出的配方；其余合法输入用真实槽位点击处理。 */
     public static boolean recipeBookUsable(LocalPlayer player, RecipeHolder<?> holder) {
         if (player.getRecipeBook() == null || !player.getRecipeBook().contains(holder)) return false;
+        // 原生配方簿不能表达库存预留；涉及预留类型时改用逐格选料，其他普通配方仍保留快捷操作。
+        for(var stack:player.getInventory().items)if(CraftIngredientReservations.protects(stack)
+                &&holder.value().getIngredients().stream().anyMatch(ingredient->ingredient.test(stack)))return false;
         var contents = new StackedContents(); player.getInventory().fillStackedContents(contents);
         var ids = new IntArrayList();
         if (!contents.canCraft(holder.value(), ids)) return false;
