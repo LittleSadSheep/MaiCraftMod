@@ -6,7 +6,14 @@ import net.minecraft.world.phys.Vec3;
 
 /** 离开低矮甲板时逐段核对真实碰撞顶面；只允许不需跳跃的台阶和三格内落差。 */
 public final class StructureExitPath {
+    public enum Posture { STANDING, CROUCHING, BLOCKED }
     private StructureExitPath() {}
+
+    /** 低顶吊舱先按站立检查，再尝试原生潜行身高；两种姿态都过不去时仍保留碰撞阻挡。 */
+    public static Posture posture(List<AABB> boxes,List<AABB> forbidden,Vec3 from,Vec3 to,double width,double standingHeight,double crouchingHeight) {
+        if(clear(boxes,forbidden,from,to,width,standingHeight))return Posture.STANDING;
+        return clear(boxes,forbidden,from,to,width,crouchingHeight)?Posture.CROUCHING:Posture.BLOCKED;
+    }
 
     public static boolean clear(List<AABB> boxes, Vec3 from, Vec3 to, double width, double height) {
         return clear(boxes, List.of(), from, to, width, height);

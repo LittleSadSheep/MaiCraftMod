@@ -20,6 +20,14 @@ public final class StructureExitPathTest {
         check(!StructureExitPath.clear(List.of(ground,seat),List.of(new AABB(-2.5,0,-.5,-1.5,2,.5)),start,end,.64,1.84),"禁入格不能被地面支撑掩盖");
         var step = new AABB(-1.5,0,-.5,-.5,1.5,.5);
         check(StructureExitPath.clear(List.of(ground,seat,step),start,end,.64,1.84),"允许先踩低一级车沿再落地");
+        // 从真实低顶吊舱提取座面与气囊边缘的相对碰撞：直立出不去，潜行能离开座面，净空恢复后再起身。
+        var lowSeat=new AABB(-.7,1,-.7,.7,1.4245,.7);
+        var roof=new AABB(-1.48,3.049,-1.31,-.066,4.062,.104);
+        var cabin=List.of(ground,lowSeat,roof);var seatedFeet=new Vec3(0,1.4245,0);var outside=new Vec3(2,0,0);
+        check(StructureExitPath.posture(cabin,List.of(),seatedFeet,outside,.64,1.84,1.54)==StructureExitPath.Posture.CROUCHING,"低顶座面应选择原生潜行，不能忽略墙体");
+        check(StructureExitPath.posture(cabin,List.of(),new Vec3(1.2,0,0),outside,.64,1.84,1.54)==StructureExitPath.Posture.STANDING,"走出低顶后必须恢复站立以离开边缘");
+        check(StructureExitPath.posture(List.of(ground,lowSeat,new AABB(-1,2.7,-1,1,4,1)),List.of(),seatedFeet,outside,.64,1.84,1.54)==StructureExitPath.Posture.BLOCKED,"蹲姿仍撞头时保留原生阻挡");
+        check(StructureDeparture.toward(new Vec3(1,0,0),90,true).sneaking(),"规划的蹲姿必须进入实际移动按键");
         // 角色还在看向控制台时，移动仍沿出口方向，镜头旋转不能把第一步带到车头另一侧。
         for (float yaw : new float[]{0,45,90,180,-135}) {
             var command = StructureDeparture.toward(new Vec3(-1,0,-1),yaw);
