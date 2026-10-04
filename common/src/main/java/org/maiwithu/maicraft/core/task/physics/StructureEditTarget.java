@@ -37,8 +37,10 @@ final class StructureEditTarget {
                 Vec3 point=face(box,face);int preference=0;
                 if(placing&&half!=null&&half!=SlabType.DOUBLE) {
                     // 半砖侧面点击离开中线，避免镜头误差把下半砖放成上半砖；相反的顶底面仍保留为后备原生操作。
-                    if(face.getAxis()!=Direction.Axis.Y)point=new Vec3(point.x,
-                            Math.clamp(half==SlabType.BOTTOM?.25:.75,box.minY+.00001,box.maxY-.00001),point.z);
+                    if(face.getAxis()!=Direction.Axis.Y) {
+                        point=new Vec3(point.x,Math.clamp(half==SlabType.BOTTOM?.25:.75,box.minY+.00001,box.maxY-.00001),point.z);
+                        if((half==SlabType.BOTTOM)!=(point.y<=.5))preference=1;
+                    }
                     else if(face!=(half==SlabType.BOTTOM?Direction.UP:Direction.DOWN))preference=1;
                 }
                 result.add(new Click(support,face,pose.toWorld(point.add(Vec3.atLowerCornerOf(support))),preference));

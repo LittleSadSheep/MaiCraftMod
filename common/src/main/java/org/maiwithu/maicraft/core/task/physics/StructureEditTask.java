@@ -113,8 +113,10 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
                 fail("原生结构操作未确认: "+completed.detail(),FailureType.UNKNOWN); return TaskState.FAILED;
             }
             if(completed.kind()==NativeActionReceipt.Kind.CREATIVE_SET_SLOT) return TaskState.RUNNING;
-            effects.add(Map.of("index",index,"action",wrenching?"rotate":placing?"place":"remove","native_confirmed",true,
+            var effect=new LinkedHashMap<String,Object>(Map.of("index",index,"action",wrenching?"rotate":placing?"place":"remove","native_confirmed",true,
                     "actual",player.level().getBlockState(pos).toString()));
+            if(placing&&!wrenching)effect.put("placement_observation",placementDiagnostics);
+            effects.add(effect);
             resetApproach();
             // 放下机翼后再核对明确朝向；可以原生扳手调向时继续同一格，不能仅因物品已落地就漏掉方向要求。
             BlockState live=player.level().getBlockState(pos);
@@ -158,6 +160,11 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
         ctx.body().applyMovement(new BodyControlPort.Movement(0,0,false,placing,false),ctx.tickRevision());
         SlabType half=slabHalf(desired,edit);
         var faces=StructureEditTarget.targets(player.level(),ship::isLoaded,ship.pose(),pos,placing,half);
+        if(placing&&half!=null) {
+            // 能形成声明半部的面存在时，走到能看见它的位置；不能因当前更容易看见相反顶底面就提前放错。
+            var preferred=faces.stream().filter(candidate->candidate.preference()==0).toList();
+            if(!preferred.isEmpty())faces=preferred;
+        }
         // 普通右键扳手旋转、潜行右键却会拆走方块，因此只选择可达设计方向的真实命中面并保持站立。
         if(wrenching)faces=faces.stream().filter(candidate->allowed.contains(candidate.face())).toList();
         lastGaze=StructureEditApproach.gaze(ctx,faces);

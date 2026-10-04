@@ -36,6 +36,11 @@ public final class StructureSlabPlacementTest {
             var tooHigh=new BlockHitResult(new Vec3(1.99999,1.75,1.5),Direction.EAST,support,false);
             if(StructureEditTask.slabHitMatches(h.player,Blocks.OAK_SLAB.defaultBlockState(),tooHigh,SlabType.BOTTOM))
                 throw new AssertionError("镜头仍在同面高处时不能提前放下半砖");
+            // 相邻下半砖只有下半侧面，不能把钳制后的低点误标为可放上半砖的优先候选。
+            h.set(support,Blocks.OAK_SLAB.defaultBlockState());
+            var lowSupport=StructureEditTarget.targets(h.level,p->true,pose,target,true,SlabType.TOP).stream()
+                    .filter(c->c.support().equals(support)&&c.face()==Direction.EAST).findFirst().orElseThrow();
+            if(lowSupport.preference()==0)throw new AssertionError("不满足原生半部规则的面应保留为后备候选");
             if(h.blockUses()!=0||h.inventory.getItem(0).getCount()!=4)throw new AssertionError("选点与检查不能提交操作或耗材");
         }
         System.out.println("StructureSlabPlacementTest: rotated target geometry and native slab state passed");
