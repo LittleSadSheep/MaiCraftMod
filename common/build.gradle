@@ -357,6 +357,12 @@ def regressionSuites = [
         heap: '512m', directory: 'reach-milestone-milestone-text-regression', timeoutSeconds: 90,
         purpose: '验证 reach_milestone 对缺席或大小写变体的 milestone 文本的规范化与决策回合兜底'
     ],
+    // sequence 挂运行时级死亡自恢复授权键：入口白名单必须与契约"any ability"文字一致。
+    sequenceRuntimeAuthKeysRegression: [
+        entry: 'org.maiwithu.maicraft.mcp.SequenceRuntimeAuthKeysTest',
+        heap: '512m', directory: 'sequence-runtime-auth-keys-regression', timeoutSeconds: 60,
+        purpose: '验证 sequence 参数入口放行 auto_respawn/recover_after_death 且白名单外字段仍被拒绝'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。
