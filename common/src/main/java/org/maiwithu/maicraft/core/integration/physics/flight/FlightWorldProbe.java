@@ -13,6 +13,7 @@ import java.util.function.Predicate;
 import org.maiwithu.maicraft.core.integration.machine.control.ControlReflection;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.integration.physics.SableStructureBridge;
+import org.maiwithu.maicraft.core.integration.create.ContraptionObstacles;
 import static org.maiwithu.maicraft.core.integration.physics.flight.FlightPathProbe.Space.*;
 
 /** 一次航路更新共用只读碰撞缓存；地形、其他物理船与原生运动装置均参与，自己船上的桨叶不算外部障碍。 */
@@ -45,8 +46,12 @@ public final class FlightWorldProbe implements FlightPathProbe.World {
             try {
                 var parent=SableStructureBridge.containingPose(level,entity.blockPosition());
                 var bounds=parent==null?entity.getBoundingBox():PhysicalObstacleSnapshot.transformBox(parent,entity.getBoundingBox(),true);
-                if(own.id().equals(SableStructureBridge.containingId(level,entity.blockPosition())))ownParts.add(bounds);
-                else obstacles.add(bounds);
+                if(own.id().equals(SableStructureBridge.containingId(level,entity.blockPosition()))) {
+                    // 自己的转子使用真实桨叶碰撞，避免实体外围的空包围盒把下方地面误认成起飞障碍。
+                    var parts=ContraptionObstacles.captureEntity(level,entity);
+                    if(parts.conservativeStructures()>0)complete=false;
+                    ownParts.addAll(parts.boxes());
+                } else obstacles.add(bounds);
             } catch(RuntimeException unknown){complete=false;}
         }
         var probe=new FlightWorldProbe(level,pos->level.getChunkSource().hasChunk(pos.getX()>>4,pos.getZ()>>4),obstacles,complete,100_000);

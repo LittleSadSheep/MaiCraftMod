@@ -27,6 +27,36 @@ public final class ContraptionObstacles {
     private static long cachedTick=Long.MIN_VALUE;
     private static PhysicalObstacleSnapshot cached=PhysicalObstacleSnapshot.EMPTY;
     private ContraptionObstacles() {}
+    /** 飞控检查本机桨叶时读取指定装置的实际形状；原生实体的宽松总包围盒不等于每处都有桨叶。 */
+    public static PhysicalObstacleSnapshot captureEntity(ClientLevel level,Entity entity) {
+        if(API==null||!API.entity.isInstance(entity)||!entity.isAlive())return PhysicalObstacleSnapshot.EMPTY;
+        AABB fallback=entity.getBoundingBox();int reads=0;
+        try {
+            StructurePose parent=SableStructureBridge.containingPose(level,entity.blockPosition());
+            if(parent!=null)fallback=PhysicalObstacleSnapshot.transformBox(parent,fallback,true);
+            Object contraption=API.contraption.invoke(entity);
+            if(contraption==null)throw new IllegalStateException("native contraption unavailable");
+            @SuppressWarnings("unchecked") var blocks=(Map<BlockPos,StructureBlockInfo>)API.blocks.invoke(contraption);
+            var view=(BlockGetter)API.world.invoke(contraption);
+            Vec3 origin=(Vec3)API.global.invoke(entity,Vec3.ZERO,1F);
+            Vec3 x=((Vec3)API.global.invoke(entity,new Vec3(1,0,0),1F)).subtract(origin);
+            Vec3 y=((Vec3)API.global.invoke(entity,new Vec3(0,1,0),1F)).subtract(origin);
+            Vec3 z=((Vec3)API.global.invoke(entity,new Vec3(0,0,1),1F)).subtract(origin);
+            var transform=worldTransform(p->origin.add(x.scale(p.x)).add(y.scale(p.y)).add(z.scale(p.z)),parent);
+            var boxes=new ArrayList<AABB>();
+            for(var entry:blocks.entrySet()) {
+                if(reads++>=4096)throw new IllegalStateException("voxel budget exhausted");
+                if(Boolean.TRUE.equals(API.hidden.invoke(contraption,entry.getKey())))continue;
+                var shapes=entry.getValue().state().getCollisionShape(view,entry.getKey()).toAabbs();
+                if(shapes.size()>64||boxes.size()+shapes.size()>4096)throw new IllegalStateException("shape budget exhausted");
+                for(AABB shape:shapes)boxes.add(worldBox(shape.move(entry.getKey()),transform));
+            }
+            return new PhysicalObstacleSnapshot(boxes,reads,0,"create_observed");
+        } catch(ReflectiveOperationException|RuntimeException|LinkageError unknown) {
+            // 没读全不能返回空列表伪装成无障碍，调用者须保留整体范围和明确的未知状态。
+            return new PhysicalObstacleSnapshot(List.of(fallback),Math.min(reads,4096),1,"create_partial");
+        }
+    }
     // 同世界、同一游戏刻且关注位置移动不足一格时复用结果；下一刻重新看结构与门的位置。
     public static PhysicalObstacleSnapshot capture(ClientLevel level,Vec3 focus) {
         if(API==null) return PhysicalObstacleSnapshot.EMPTY;
