@@ -23,13 +23,14 @@ import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.mcp.McpActivityTrace;
+import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.JsonObject;
 
 /**
- * F9 切换的常驻调试面板。每刻构建一次只读快照，渲染只画快照；本类不提交任何操作。
- * 布局分两段：上方固定状态行（标签行文与 /maicraft status 各自独立），下方聊天框式事件区，
- * 长消息按面板宽度自动换行，新事件把旧事件挤出预算，固定行布局不受事件多少影响。
+ * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换。每刻构建一次只读快照，渲染只画快照；
+ * 本类不提交任何操作。布局分两段：上方固定状态行（标签行文与 /maicraft status 各自独立），
+ * 下方聊天框式事件区，长消息按面板宽度自动换行，新事件把旧事件挤出预算，固定行布局不受事件多少影响。
  */
 public final class DebugHudController {
     /** 固定区一行：短标签、当前值和取值颜色；值必须是已经压平的短文本。 */
@@ -50,21 +51,36 @@ public final class DebugHudController {
     private static final int EVENT_LINE_BUDGET = 12;
     /** 单条事件换行后最多 4 行，仍然超长在行尾补 …。 */
     private static final int EVENT_MAX_LINES = 4;
+    /** 列表页最多展示的任务条数；更旧的仍在内存与检查点里，可从 MCP task list 完整读取。 */
+    private static final int TASK_LIST_ROWS = 10;
+    /** 列表页统计总数时读取的任务条数上限，与检查点容量一致。 */
+    private static final int TASK_LIST_TOTAL_LIMIT = 256;
 
     private static final DateTimeFormatter EVENT_TIME =
             DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private static volatile Snapshot snapshot = new Snapshot(List.of(), List.of());
     private static boolean toggleWasDown;
+    private static boolean comboWasDown;
+    /** 面板当前页：false 为状态页（任务/动作等固定行），true 为任务列表页；面板隐藏期间保留。 */
+    private static boolean listMode;
     private DebugHudController() {}
 
     public static void tick(Minecraft minecraft) {
         // F9 与 F8 一样直接轮询窗口按键：界面打开时键盘事件进不了 KeyMapping，而菜单流调试恰恰需要此刻可用。
         long window = minecraft.getWindow().getWindow();
-        boolean down = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
-        boolean toggled = down && !toggleWasDown;
-        toggleWasDown = down;
-        if (toggled) toggle(minecraft);
+        boolean f9Down = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
+        boolean hDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
+        boolean combo = f9Down && hDown;
+        if (combo && !comboWasDown) {
+            // F9+H 是无条件手势：面板没开就先打开，保证任何时候一步就能看到任务列表。
+            listMode = !listMode;
+            if (!PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())) toggle(minecraft);
+        } else if (f9Down && !toggleWasDown) {
+            toggle(minecraft);
+        }
+        toggleWasDown = f9Down;
+        comboWasDown = combo;
         snapshot = minecraft.player == null
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())
                 ? new Snapshot(List.of(), List.of()) : buildSnapshot(minecraft);
@@ -103,6 +119,16 @@ public final class DebugHudController {
             rows.add(new Row("蓝图", blueprintText(preview), blueprintColor(preview)));
         }
 
+        if (listMode) {
+            appendTaskListPage(rows);
+        } else {
+            appendTaskStatusRows(rows);
+        }
+        return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows));
+    }
+
+    // 状态页的任务区：当前任务详情加身体动作，只看"此刻"。
+    private static void appendTaskStatusRows(List<Row> rows) {
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
         List<IntentTaskRecord> open = IntentRuntime.get().tasks(50).stream()
                 .filter(record -> !record.getState().isTerminal())
@@ -111,18 +137,22 @@ public final class DebugHudController {
         if (active == null) {
             rows.add(new Row("任务", "空闲", ChatFormatting.GRAY));
             appendLatestTerminalIssue(rows);
+            // 没有语义任务时反射（进食、休息、自救）仍可能占用身体；这种错位值得单独看见。
+            String action = CompanionTickDispatcher.bodyAction();
+            if (action != null) {
+                rows.add(new Row("动作", clamp(action), ChatFormatting.AQUA));
+            }
         } else {
-            int total = Math.max(1, active.steps().size());
-            int current = Math.min(active.stepIndex() + 1, total);
+            // 单步目标的"步骤 1/1"没有信息量，只在清单有多步时报进度；"步骤"一词留给语义清单专用。
+            int total = active.steps().size();
+            String progress = total > 1
+                    ? " · 步骤 " + Math.min(active.stepIndex() + 1, total) + "/" + total : "";
             // 尝试次数与排队数并入任务行，不单列；重试循环和积压都该在这行一眼看到。
-            rows.add(new Row("任务", taskTitle(active) + " · 步骤 " + current + "/" + total
+            rows.add(new Row("任务", taskTitle(active) + progress
                             + (active.attempts().isEmpty() ? "" : " · 尝试 " + active.attempts().size())
                             + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
                     ChatFormatting.AQUA));
-            if (active.stepIndex() >= 0 && active.stepIndex() < active.steps().size()) {
-                rows.add(new Row("步骤", stepTitle(active.steps().get(active.stepIndex())),
-                        ChatFormatting.AQUA));
-            }
+            rows.add(new Row("动作", actionText(), ChatFormatting.AQUA));
             if (active.decisionSnapshot() != null) {
                 rows.add(new Row("等待决策", decisionText(active.decisionSnapshot()),
                         ChatFormatting.YELLOW));
@@ -135,7 +165,54 @@ public final class DebugHudController {
                         ChatFormatting.RED));
             }
         }
-        return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows));
+    }
+
+    // 任务列表页回答"这段时间它都干了什么"：与 MCP task list 同源，含最近的终态记录。
+    // 标题行标注页面身份与返回手势——列表页长得不像状态页，没有这行会被当成面板残缺。
+    private static void appendTaskListPage(List<Row> rows) {
+        List<IntentTaskRecord> all = IntentRuntime.get().tasks(TASK_LIST_TOTAL_LIMIT);
+        int shown = Math.min(all.size(), TASK_LIST_ROWS);
+        rows.add(new Row("任务列表", (all.size() > TASK_LIST_ROWS
+                        ? "共 " + all.size() + " 条 · 最近 " + shown + " 条" : "共 " + all.size() + " 条")
+                        + " · F9+H 返回",
+                ChatFormatting.GREEN));
+        if (all.isEmpty()) {
+            rows.add(new Row("", "暂无任务记录", ChatFormatting.GRAY));
+            return;
+        }
+        for (IntentTaskRecord record : all.subList(0, shown)) {
+            rows.add(new Row("", listEntry(record), entryColor(record)));
+        }
+    }
+
+    // 列表行复用状态页的状态前缀与标题；终态附结果消息，进行中附步骤进度。
+    private static String listEntry(IntentTaskRecord record) {
+        String entry = statePrefix(record) + " · " + abilityTitle(record.goal());
+        if (record.getState().isTerminal()) {
+            entry += " · " + terminalMessage(record);
+        } else {
+            int total = record.steps().size();
+            if (total > 1) entry += " · 步骤 " + Math.min(record.stepIndex() + 1, total) + "/" + total;
+        }
+        return clamp(entry);
+    }
+
+    // 终态消息与"最近问题"行同源：终态快照 result.message 优先，缺失退回终态名。
+    private static String terminalMessage(IntentTaskRecord record) {
+        return record.terminalSnapshot() == null
+                ? record.getState().name().toLowerCase(Locale.ROOT)
+                : jsonMessage(record.terminalSnapshot().result(), record.getState());
+    }
+
+    // 配色沿用面板既有语义：青=进行，黄=等输入，红=问题，绿=成功，灰=取消等中性终态。
+    private static ChatFormatting entryColor(IntentTaskRecord record) {
+        if (record.decisionSnapshot() != null || record.paused()) return ChatFormatting.YELLOW;
+        return switch (record.getState()) {
+            case RUNNING, PENDING -> ChatFormatting.AQUA;
+            case FAILED, TIMEOUT -> ChatFormatting.RED;
+            case SUCCESS -> ChatFormatting.GREEN;
+            case CANCELLED -> ChatFormatting.GRAY;
+        };
     }
 
     // 事件区换行宽度随固定行的宽度走，整块面板保持一个矩形；事件少时固定行布局纹丝不动。
@@ -203,9 +280,11 @@ public final class DebugHudController {
         return statePrefix(record) + " · " + abilityTitle(record.goal());
     }
 
-    // 步骤行是当前正在执行的子任务，随执行切换；形状与任务行一致，便于上下对照。
-    private static String stepTitle(Goal step) {
-        return "执行中 · " + abilityTitle(step);
+    // 动作行回答"身体此刻在干什么"：调度层当前持有者的描述，反射自救与临时动作都在这里显形。
+    // 语义任务在跑而这里显示"无"，说明身体空转（等预览确认、等决策），本身就是要看见的状态。
+    private static String actionText() {
+        String action = CompanionTickDispatcher.bodyAction();
+        return action == null ? "无" : clamp(action);
     }
 
     private static String abilityTitle(Goal goal) {

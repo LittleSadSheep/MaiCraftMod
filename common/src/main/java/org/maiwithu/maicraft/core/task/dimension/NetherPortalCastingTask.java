@@ -109,7 +109,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
             case CLEAR -> {
                 if (actual.isAir() || !actual.getFluidState().isEmpty()
                         || actual.is(Blocks.OBSIDIAN) && layout.frame().frame().contains(at)) yield next();
-                yield start(PortalCastingStep.clear(player, id(), deadline(), at, actual), at, true, "clear");
+                yield start(PortalCastingStep.clear(player, id(), deadline(), at, actual, r.mayAlterTerrain), at, true, "clear");
             }
             case BUILD -> {
                 var need = PortalCastingStep.supplies(player, false);
@@ -126,7 +126,7 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
                 if (actual.is(Blocks.OBSIDIAN)) yield next();
                 if (!cleared && !actual.isAir() && actual.getFluidState().isEmpty()) {
                     cleared = true;
-                    yield start(PortalCastingStep.clear(player, id(), deadline(), at, actual), at, false, "excavate_cast_cell");
+                    yield start(PortalCastingStep.clear(player, id(), deadline(), at, actual, r.mayAlterTerrain), at, false, "excavate_cast_cell");
                 }
                 if (PlayerInv.count(player.getInventory(), Items.LAVA_BUCKET) == 0) yield fill(Blocks.LAVA);
                 // 一桶已被服务器结清就推进，即使产物错误也不再向原格倒第二桶或自动拆掉产物。

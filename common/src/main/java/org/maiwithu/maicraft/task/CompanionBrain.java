@@ -119,6 +119,20 @@ final class CompanionBrain {
                 : holder == syncProxy ? "synchronous_task" : holder.getClass().getName();
     }
 
+    /** 面板与排错用：此刻占用身体的任务的可读描述；身体空闲返回 {@code null}。反射自救时返回反射短名。 */
+    String bodyAction() {
+        if (holder == null) return null;
+        if (holder == currentProxy) {
+            TaskRecord record = current.record();
+            return record == null ? null : record.describe();
+        }
+        if (holder == syncProxy) {
+            TaskRecord record = sync.record();
+            return record == null ? null : record.describe();
+        }
+        return holder.name();
+    }
+
 
 
     List<TaskRecord> list() {

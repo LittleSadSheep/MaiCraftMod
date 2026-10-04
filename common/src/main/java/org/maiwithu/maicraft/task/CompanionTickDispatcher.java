@@ -88,6 +88,12 @@ public final class CompanionTickDispatcher {
         return brain == null ? "none" : brain.controllingTask();
     }
 
+    /** 调试面板用：此刻占用身体的任务的可读描述；身体空闲返回 {@code null}。 */
+    public static String bodyAction() {
+        requireClientThread();
+        return brain == null ? null : brain.bodyAction();
+    }
+
     /** 只向当前绑定的旧身体交付死亡观察，不能把新身体或断线当成寻死完成。 */
     public static boolean observeExpectedDeath(LocalPlayer player) {
         requireClientThread();
