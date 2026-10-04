@@ -88,8 +88,11 @@ public final class CompanionTickDispatcher {
         return brain == null ? "none" : brain.controllingTask();
     }
 
-    /** 调试面板用：此刻占用身体的任务的可读描述；身体空闲返回 {@code null}。 */
-    public static String bodyAction() {
+    /** 此刻占用身体的任务的阶段与描述：阶段名优先展示，描述作阶段缺失时的退回。 */
+    public record BodyAction(String phase, String describe) {}
+
+    /** 调试面板用：此刻占用身体的任务；身体空闲返回 {@code null}。 */
+    public static BodyAction bodyAction() {
         requireClientThread();
         return brain == null ? null : brain.bodyAction();
     }
