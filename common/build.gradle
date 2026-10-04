@@ -387,6 +387,12 @@ def regressionSuites = [
         heap: '512m', directory: 'build-clearance-own-targets-regression', timeoutSeconds: 60,
         purpose: '验证材料/导航保护区中的施工目标格仍按授权变更集合放行'
     ],
+    // 重生回执的库存对比等内容包同步后再算：keepInventory 不再误报全部丢失。
+    respawnInventorySyncRegression: [
+        entry: 'org.maiwithu.maicraft.client.runtime.RespawnInventorySyncTest',
+        heap: '512m', directory: 'respawn-inventory-sync-regression', timeoutSeconds: 60,
+        purpose: '验证重生回执延后到物品栏内容包同步或窗口到期，缺失数量不再误报'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。
