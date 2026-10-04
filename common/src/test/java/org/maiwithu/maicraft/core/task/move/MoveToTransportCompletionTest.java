@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.task.move;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.pathing.transport.TransportNavigator;
@@ -42,6 +44,8 @@ import java.util.UUID;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.integration.create.elevator.ElevatorFloorTaskRecord;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
+import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgress;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
@@ -61,6 +65,8 @@ public final class MoveToTransportCompletionTest {
         transportFailure(memory, true, .5);
         transportFailure(memory, false, 8.5);
         planningStallFailsAfterCeiling(memory);
+        planningWorkFuseTripsWithoutApproach(memory);
+        planningWorkFuseSparedWhileApproaching(memory);
         longPlanningRenewsOnlyOnProgress(memory);
         discoveryFailure(memory);
         ordinaryNearArrival(memory);
@@ -174,6 +180,103 @@ public final class MoveToTransportCompletionTest {
             check(result.message().contains("route planning made no verified progress"),
                     "失败说明要指出无进展预算耗尽，而不是任务总耗时过长");
         }
+    }
+
+    /** 规划持续产出工作单位却永不接近目标（地下挖洞寻路的病态形态）时，按收敛熔断收场。 */
+    private static void planningWorkFuseTripsWithoutApproach(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            var record = new MoveToTaskRecord("planning-fuse", 6000, 0D, 0D, 0D, null, false);
+            var task = f.task(record, true); task.onStart();
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 1300 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    // 搜索持续有产出：verified progress 按期刷新（无进展预算永不满足），工作单位单调累积。
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+            }
+            check(state == TaskState.FAILED,
+                    "搜索工作单位越熔断线且最近距离长时间无改善必须按无收敛失败，不能无限 planning");
+            var result = task.result(TaskState.FAILED);
+            check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("planning_stall"),
+                    "收敛熔断同样是撞预算而非证明死路，失败类型沿用 planning_stall");
+            check(String.valueOf(result.message()).contains("planning did not converge"),
+                    "失败说明要携带工作量、最近距离与无改善时长证据");
+            check(((Number) result.data().get("planning_work_units")).longValue() > 60_000,
+                    "回执要暴露搜索预算的实际消耗");
+            check(result.data().get("best_distance_blocks") instanceof Number,
+                    "回执要暴露收敛趋势（曾达到的最近距离）");
+        }
+    }
+
+    /** 距离在持续缩短的规划无论消耗多少工作单位都不熔断：收敛本身就是进展。 */
+    private static void planningWorkFuseSparedWhileApproaching(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, 30.5)) {
+            var record = new MoveToTaskRecord("planning-converging", 6000, 0D, 0D, 0D, null, false,
+                    false, TransportMode.ELEVATOR);
+            var task = f.task(record, true); task.onStart();
+            // onStart 走过 startWalkingNav 后任务用的是重建的导航，桩要打在它身上而不是夹具预建的实例。
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            // 任务单留在 ELEVATOR 以跳过地面起飞准备，导航层留在 GROUND 以走普通目标通道。
+            field(TransportNavigator.class, "mode").set(f.navigator, TransportMode.GROUND);
+            long highWater = 0;
+            // 七百刻内走完六十格且工作单位在第 550 刻就已越过熔断线：全程距离单调缩短，不得熔断。
+            for (int tick = 0; tick < 700; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 50 == 0) {
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                // 身体每刻向目标挪 0.05 格：60 格全程单调改善，工作单位越过熔断线时距离刚刚还在缩短。
+                field(LocalPlayer.class, "position").set(f.player, new Vec3(30.5 - tick * 0.05, 0, .5));
+                TaskState state = task.onTick();
+                if (state != TaskState.RUNNING) {
+                    var ended = task.result(state);
+                    throw new AssertionError("converging planning ended early at tick " + tick
+                            + " (" + ended.message() + ")");
+                }
+            }
+        }
+    }
+
+    /** 惰性地面导航：只提供工作单位计数与进度通道，不启动真实 Baritone 搜索。 */
+    private static PlanningWorkProgress bareGround(Unsafe memory, Fixture f) throws Exception {
+        var ground = (EmbeddedBaritoneNavigator) memory.allocateInstance(EmbeddedBaritoneNavigator.class);
+        field(EmbeddedBaritoneNavigator.class, "player").set(ground, f.player);
+        field(EmbeddedBaritoneNavigator.class, "playerWorld").set(ground, f.world);
+        field(EmbeddedBaritoneNavigator.class, "progress").set(ground, memory.allocateInstance(
+                Class.forName("org.maiwithu.maicraft.core.pathing.baritone.NavigationProgress")));
+        field(EmbeddedBaritoneNavigator.class, "events").set(ground,
+                new EnumMap<>(baritone.api.event.events.PathEvent.class));
+        field(EmbeddedBaritoneNavigator.class, "ledger").set(ground, new TerrainBill());
+        // Unsafe 裸实例绕过字段初始化器；诊断链路默认这些 Map 非空，逐一补上。
+        for (String diagnostics : List.of("dispatchEvidence", "healthEvidence", "dispatchRecovery",
+                "probeRecovery", "failureEvidence")) {
+            field(EmbeddedBaritoneNavigator.class, diagnostics).set(ground, Map.of());
+        }
+        var probe = new PlanningWorkProgress();
+        field(EmbeddedBaritoneNavigator.class, "probeProgress").set(ground, probe);
+        field(TransportNavigator.class, "ground").set(f.navigator, ground);
+        return probe;
+    }
+
+    /** 注入常驻 planning 阶段的交通会话：导航每刻停在会话等待，不驱动真实地面寻路。 */
+    private static Session planningSession(Fixture f) throws Exception {
+        var session = new Session(TransportSession.Result.running("planning"), false);
+        field(TransportNavigator.class, "session").set(f.navigator, session);
+        field(TransportNavigator.class, "activeDestination").set(f.navigator, BlockPos.ZERO);
+        field(TransportNavigator.class, "targetFingerprint").set(f.navigator, f.compiled.semanticFingerprint());
+        return session;
     }
 
     private static void longPlanningRenewsOnlyOnProgress(Unsafe memory) throws Exception {
