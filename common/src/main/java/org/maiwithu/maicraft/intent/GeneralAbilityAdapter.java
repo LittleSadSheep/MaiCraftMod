@@ -115,7 +115,8 @@ public final class GeneralAbilityAdapter {
             case EQUIP -> equip(goal, player);
             case FISH -> fish(goal, player);
             case DROP -> drop(goal, player);
-            // 模型复用刚观察到的物品堆引用，直接进入靠近与原生拾取，无需先另发移动任务。
+            // 公开入口只把 parameters 交给拾取解析器：先核对类型、引用和维度，再建立靠近、冷却等待与入包确认任务。
+            // current_place 不提供另一个移动目的地；范围模式可扫空，点名 UUID 则必须交付该堆的确认或未完成事实。
             case COLLECT -> new IntentAction.Native(CollectItemsRequest.parse(parameters).task(player,
                     new ToolContext("semantic-collect-" + UUID.randomUUID(), player.level().getGameTime())));
             case CONTAINER -> interact(goal, player, runtime, true);

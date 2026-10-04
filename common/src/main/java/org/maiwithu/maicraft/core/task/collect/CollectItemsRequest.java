@@ -18,6 +18,7 @@ public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation
     }
 
     public static CollectItemsRequest parse(JsonObject args) {
+        // 未填类型才表示全捡；显式 null、空数组或拼错物品都要拒绝，不能把一次有筛选的收取变成扫地。
         var filter = new LinkedHashSet<Item>();
         if (args.has("item_ids")) {
             var values = args.get("item_ids");
@@ -29,6 +30,7 @@ public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation
                 filter.add(ToolArgs.parseItem(value.getAsString()));
             }
         }
+        // 半径只规定扫描候选的范围；收到数字字符串、非整数数值或越界值时不截断、不钳制成另一处拾取范围。
         int radius = 16;
         if (args.has("radius")) {
             var value = args.get("radius");
@@ -71,6 +73,7 @@ public record CollectItemsRequest(Set<Item> filter, int radius, ResourceLocation
     }
 
     public CollectItemsTaskRecord task(LocalPlayer player, ToolContext context) {
+        // 接单时先核对引用维度，再建立一分钟的初始执行期限；此时没有移动，也没有证明物品仍在范围内。
         if (dimension != null && !dimension.equals(player.level().dimension().location()))
             throw new IllegalArgumentException("drop_ref belongs to another dimension; observe nearby_entities in the current world");
         String label = target != null ? "selected drop" : filter.isEmpty() ? "all items" : "selected item types";

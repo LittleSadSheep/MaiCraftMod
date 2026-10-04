@@ -33,7 +33,8 @@ import java.util.Set;
 
 /**
  * 反复寻找匹配的地面物品并走近，让服务器按正常拾取规则把物品放进背包。
- * 分为“找下一堆”和“走到这一堆”两步；物品消失还不够，必须看到对应背包增加才记为拾取成功。
+ * 扫描候选 -> 跟随掉落 -> 靠近接触 -> 等待冷却和入包同步 -> 再扫描；走到目标格不等于拿到了物品。
+ * 公开 drop_ref 还核对服务器发给本人的同 UUID 拾取包；范围模式沿用实体消失与同组件背包增量的组合证据。
  */
 public final class CollectItemsCompanionTask extends AbstractCompanionTask<CollectItemsTaskRecord> {
 
@@ -70,6 +71,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     public CollectItemsCompanionTask(LocalPlayer player, CollectItemsTaskRecord record) {
         super(player, record);
+        // 连续扫地时只有确认入包才补充二十秒执行余量；导航自己的真实进展另由公共任务外壳续时。
         pickupProgress = record.progressBudget(20L * 20);
     }
 
@@ -98,6 +100,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     @Override
     protected TaskState onTick() {
+        // 身体死亡便结束当前拾取；复活和死亡现场回收由外层运行时处理，不能把旧掉落引用当成恢复完成。
         if (player.isDeadOrDying()) {
             return TaskState.CANCELLED;
         }
@@ -251,7 +254,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         }
 
         switch (nav.tick()) {
-            case RUNNING -> { /* walking to it */ }
+            case RUNNING -> { /* 沿当前路线靠近，下一刻仍先读取掉落物位置和入包事实。 */ }
             case ARRIVED -> {
                 stopNav();
                 nudge(live);
@@ -271,6 +274,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private GoalCompiler.Compiled targetGoal() {
+        // 半径只在找候选时使用；已经认出的实体随水漂出原扫描框后，仍按其当前坐标更新接触站位。
         ItemEntity live = pickup == null ? null : pickup.liveEntity(player);
         return live == null || !r.targetUuids.isEmpty() && (!live.getUUID().equals(pickupUuid) || !r.permits(live.getUUID()))
                 ? null : CollectItemsApproach.goal(player, List.of(live), r.mayAlterTerrain);
@@ -300,7 +304,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         InputDriver.stepToward(player, point, false);
     }
 
-    /** 两堆物品合并时，旧实体消失不等于被捡走；若已观察到的另一堆数量增加足够，就改为追踪合并后的那堆。 */
+    /** 旧堆消失而已观察的同组件堆增长足够时才尝试合堆追踪；幸存 UUID 仍须获准，公开单堆引用不能换堆。 */
     private boolean retargetProvenMerge() {
         if (pickup == null) return false;
         AABB box = player.getBoundingBox().inflate(r.radius);
@@ -356,14 +360,14 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
 
     @Override
     protected void cleanup() {
-        // 结束后停止走路；没有直接改背包或删除地面实体，拾取本身由游戏完成。
+        // 收尾先松开移动，再汇总开路账本；原生已捡入的物品和已挖放的通道保留，不因失败或取消回滚。
         InputDriver.halt(player);
         super.cleanup();
     }
 
     @Override
     protected Map<String, Object> resultData() {
-        // 背包满、超时或中断可能发生在整堆收完之前；报告已同步的本人收取，重复查询不重复累加。
+        // 公开点名模式在收尾时补记本人的已同步部分收取，重复查询不重复累加；范围模式这里只报告此前已结算数量。
         if (pickup != null && r.targetDimension != null) {
             refreshTargetObservation(pickup.liveEntity(player));
             recordCollected(pickup.confirmedUnits(player));
@@ -408,7 +412,7 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     }
 
     private void recordCollected(int count) {
-        // 只把已有原生拾取流程确认的数量记到对应物品，部分入包也在失败回执中保留。
+        // 点名模式取同组件背包增量与本人 UUID 拾取包数量的较小值；只追加本堆未记过的部分，不能重复结算。
         if (r.targetDimension != null) count = Math.min(count, ItemEntityReceipts.pickedUp(player, pickupUuid, pickupCursor));
         int additional = Math.max(0, count - pickupAccountedUnits);
         pickupAccountedUnits += additional;

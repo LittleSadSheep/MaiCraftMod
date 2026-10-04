@@ -70,7 +70,8 @@ final class SemanticGoalContract {
                 throw violation("invalid_cooking_contract", path, ability, invalid.getMessage());
             }
         }
-        // 接单前检查物品堆引用及类型筛选，拒绝空数组和错字，不能把指定拾取放宽成全捡。
+        // 新拾取请求先共用专属解析器核对引用、非空类型数组、整值半径及布尔开路许可；字段显式 null 不按省略处理。
+        // 这里仅完成格式和注册表检查，物品是否仍在当前维度与扫描范围，留到创建任务及实际扫描时如实确认。
         if (!restoredHistory && GeneralAbilityAdapter.COLLECT.equals(ability)) {
             try { CollectItemsRequest.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {

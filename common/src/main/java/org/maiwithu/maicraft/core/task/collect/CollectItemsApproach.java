@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 import org.maiwithu.maicraft.core.pathing.transport.TransportLanding;
 
-/** 采掘和补拾取共用原版接触范围选择落脚点；短靠近仍核对实底、碰撞和保护格，不修改池子或玩家。 */
+/** 采掘和补拾取共用接触站位查询；开路候选交给导航执行，最后短靠近仍须已有实底、净空及保护范围许可。 */
 public final class CollectItemsApproach {
     private CollectItemsApproach() {}
 
@@ -31,7 +31,7 @@ public final class CollectItemsApproach {
         return goal(player, drops, false);
     }
 
-    /** 已授权开路时也提交需要补齐身体空间的接触站位，让真实导航计算挖路代价并执行原生清障。 */
+    /** 开路获准时加入可补挖的脚位和头顶候选；候选存在只表示可以交给寻路，不能替代实际到达与入包确认。 */
     public static GoalCompiler.Compiled goal(LocalPlayer player, Collection<ItemEntity> drops, boolean mayAlterTerrain) {
         var cells = new LinkedHashSet<BlockPos>();
         for (var drop : drops) {
@@ -92,6 +92,7 @@ public final class CollectItemsApproach {
     }
 
     public static boolean safeNudge(LocalPlayer player, Vec3 item) {
+        // 最后一步只作不超过一点五格的同高度短走；即使获准开路，也不能靠直接按前进绕过尚未修好的地形。
         if (player.isPassenger() || player.isSwimming() || !player.onGround() && !player.isInWater()) return false;
         Vec3 from = player.position(), target = new Vec3(item.x, from.y, item.z);
         if (from.distanceToSqr(target) > 2.25) return false;

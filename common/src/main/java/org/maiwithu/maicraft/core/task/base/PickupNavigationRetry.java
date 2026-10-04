@@ -15,6 +15,8 @@ public final class PickupNavigationRetry {
     public boolean afterFailure(UUID drop, long now, FailureType failure) {
         // 只重试位置可能变化的无路结果；权限、界面和动作效果未知不能借等待窗口静默重发。
         if (failure != FailureType.NO_PATH && failure != FailureType.TERRAIN_BLOCKED) return false;
+        // 同一 UUID 从首次无路起最多留四十游戏刻，每十刻才再试；重试不刷新总窗口，也不重新提交拾取目标。
+        // now 直接来自世界时钟，暂停后沿用原截止刻；这不是会自动扣除暂停时间的 ProgressBudget。
         var previous = windows.get(drop);
         long deadline = previous == null ? now + SETTLE_TICKS : previous.deadline();
         if (now >= deadline) return false;

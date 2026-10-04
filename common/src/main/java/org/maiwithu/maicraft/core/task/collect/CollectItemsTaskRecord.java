@@ -17,7 +17,7 @@ public final class CollectItemsTaskRecord extends TaskRecord {
 
     /** 要收集的物品类型；为空时收集所有掉落物。 */
     public final Set<Item> filter;
-    /** 搜索半径，单位为方块。 */
+    /** 每轮按角色当前身体盒向三轴扩展的扫描距离，单位为方块；选中实体后不是追踪距离上限。 */
     public final int radius;
     /** 用于消息的可读标签，例如“所有物品”或“钻石”。 */
     public final String label;
@@ -51,6 +51,7 @@ public final class CollectItemsTaskRecord extends TaskRecord {
     public CollectItemsTaskRecord(String toolCallId, long deadlineGameTime, Set<Item> filter, int radius,
                                   String label, Set<UUID> targetUuids, ResourceLocation targetDimension,
                                   boolean mayAlterTerrain) {
+        // 公开 drop_ref 同时携带维度和 UUID；内部产物名单可只给 UUID，因此收尾采用的归因证据并不完全相同。
         super(TOOL_NAME, toolCallId, deadlineGameTime);
         this.filter = Set.copyOf(filter);
         this.radius = radius;
