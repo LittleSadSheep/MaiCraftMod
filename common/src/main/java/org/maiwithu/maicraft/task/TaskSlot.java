@@ -37,6 +37,11 @@ final class TaskSlot {
         return task == null ? Map.of() : task.progress();
     }
 
+    /** 面板行动行用：当前执行器的一句话汇报；槽位空或执行器未建返回 null。 */
+    String describeCurrentAction() {
+        return task == null ? null : task.describeCurrentAction();
+    }
+
     boolean canRun(LocalPlayer player) {
         // 只有已经开始、还没结束的任务才能继续；任务也可以说“现在做不了”，暂时让别人执行。
         return record != null && record.getState() == TaskState.RUNNING && task.canRun(player);

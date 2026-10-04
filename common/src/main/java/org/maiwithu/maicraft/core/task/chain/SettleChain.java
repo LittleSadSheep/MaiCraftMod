@@ -127,6 +127,7 @@ public final class SettleChain implements Task, Reflex {
 
     @Override public String name() { return "settle"; }
     @Override public String id() { return name(); }
+    @Override public String describeCurrentAction() { return "贴着深落差边缘，正在潜行退到安全位置"; }
     @Override public String describe() {
         return "任务释放身体后仍贴着深落差边缘时，潜行退到离边安全的位置再交还控制，不使用任何物品；坠落中的保护归防摔链";
     }

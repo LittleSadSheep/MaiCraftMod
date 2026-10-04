@@ -663,6 +663,19 @@ public final class SemanticExploreCompanionTask
         return data;
     }
 
+    /** 面板行动行的一句话汇报；方向来自模型下单的探索扇区，未指定方向即四周漫游。 */
+    @Override public String describeCurrentAction() {
+        if (sector == null || sector.request().direction() == null) return "正在四周探索附近区域";
+        String direction = switch (sector.request().direction()) {
+            case "north" -> "北";
+            case "south" -> "南";
+            case "east" -> "东";
+            case "west" -> "西";
+            default -> "";
+        };
+        return direction.isEmpty() ? "正在四周探索附近区域" : "正在向" + direction + "方向探索附近区域";
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("target", canonicalTarget == null ? r.target : canonicalTarget);

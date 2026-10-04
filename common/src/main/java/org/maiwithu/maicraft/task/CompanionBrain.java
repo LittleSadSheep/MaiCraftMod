@@ -129,49 +129,39 @@ final class CompanionBrain {
                 : holder == syncProxy ? "synchronous_task" : holder.getClass().getName();
     }
 
-    /** 面板与排错用：此刻占用身体的任务；身体空闲返回 {@code null}。反射自救时描述为反射短名。 */
+    /** 面板任务区用：此刻占用身体的持有者的行动与里程碑；身体空闲返回 {@code null}。 */
     CompanionTickDispatcher.BodyAction bodyAction() {
         if (holder == null) return null;
         if (holder == currentProxy) return slotAction(current);
         if (holder == syncProxy) return slotAction(sync);
-        return new CompanionTickDispatcher.BodyAction(null, holder.name());
+        // 反射自救队占用身体：行动句子来自反射自己，任务里程碑与身体无关，保持为空。
+        return new CompanionTickDispatcher.BodyAction(holder.describeCurrentAction(), Map.of(), true);
     }
 
-    // 语义任务占槽时 describe 就是目标全文，与任务行重复；阶段名才是"做到哪一步"的增量，两者不并排。
+    // 行动句子由一线执行器自答（describeCurrentAction 沿 child 链下钻），里程碑取任务单上的持久计数；
+    // 两个来源都可能为空，面板按"缺则无"显示，不在此处编造退路。
     private CompanionTickDispatcher.BodyAction slotAction(TaskSlot slot) {
-        TaskRecord record = slot.record();
-        if (record == null) return null;
+        if (slot.record() == null) return null;
         Map<String, Object> progress = slot.progress();
-        String phase = deepestPhase(progress);
-        Map<String, Object> primitives = deepestPrimitives(progress);
-        return phase == null
-                ? new CompanionTickDispatcher.BodyAction(null, record.describe(), primitives)
-                : new CompanionTickDispatcher.BodyAction(phase, null, primitives);
+        return new CompanionTickDispatcher.BodyAction(
+                slot.describeCurrentAction(), deepestMilestones(progress), false);
     }
 
-    // 父任务用 child 嵌套真实干活的任务，阶段名取最深一层的自述。
-    private static String deepestPhase(Map<?, ?> progress) {
-        Object phase = progress.get("phase");
-        if (phase instanceof String text && !text.isBlank()) return text;
-        Object child = progress.get("child");
-        return child instanceof Map<?, ?> nested ? deepestPhase(nested) : null;
-    }
-
-    /** 面板动作行放行的原语键白名单：计数沿仓库统一 done/total，对象坐标与方块 id 来自正在交互的事实。 */
-    private static final Set<String> PRIMITIVE_KEYS = Set.of("done", "total", "target_pos", "target_block");
+    /** 进度行放行的里程碑键：done/total 沿仓库统一计数约定，来自当前干活者的任务单字段。 */
+    private static final Set<String> MILESTONE_KEYS = Set.of("done", "total");
 
     /**
-     * 原语键只取 child 链上最深一层持有者的内容，不跨层合并——语义父任务的计数与
-     * 原语子任务的操作对象分属不同层，混取会把两份不同口径的进度拼到一行。
+     * 里程碑只取 child 链上最深一层持有者的内容，不跨层合并——语义父任务的计数与
+     * 子任务的操作对象分属不同层，混取会把两份不同口径的进度拼到一行。
      */
-    private static Map<String, Object> deepestPrimitives(Map<?, ?> progress) {
+    private static Map<String, Object> deepestMilestones(Map<?, ?> progress) {
         Object child = progress.get("child");
         if (child instanceof Map<?, ?> nested) {
-            Map<String, Object> deeper = deepestPrimitives(nested);
+            Map<String, Object> deeper = deepestMilestones(nested);
             if (!deeper.isEmpty()) return deeper;
         }
         Map<String, Object> out = new LinkedHashMap<>();
-        for (String key : PRIMITIVE_KEYS) {
+        for (String key : MILESTONE_KEYS) {
             if (progress.containsKey(key)) out.put(key, progress.get(key));
         }
         return out;

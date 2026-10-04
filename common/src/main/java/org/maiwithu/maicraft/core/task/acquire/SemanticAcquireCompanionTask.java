@@ -2762,6 +2762,18 @@ public final class SemanticAcquireCompanionTask
         return Map.copyOf(data);
     }
 
+    /** 面板行动行的一句话汇报；有活跃子任务时由一线先说话，子任务没实现汇报再用自己的。 */
+    @Override
+    public String describeCurrentAction() {
+        if (inventoryTidy.owns(activeRecord)) return "正在整理背包";
+        if (activeChild != null) {
+            String deeper = activeChild.describeCurrentAction();
+            if (deeper != null) return deeper;
+            return "正在获取目标物品";
+        }
+        return "正在规划获取路线";
+    }
+
     @Override
     protected void cleanup() {
         // 总取物任务结束前，先停止仍在做的小任务，并留下已经得到的物品和可能发生的副作用证据。

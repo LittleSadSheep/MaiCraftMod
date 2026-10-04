@@ -658,6 +658,27 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return Map.copyOf(result);
     }
 
+    /** 面板行动行的一句话汇报；目的地来自任务单，剩余距离按导航现场的量化档。 */
+    @Override
+    public String describeCurrentAction() {
+        String destination;
+        if (blockTarget != null) {
+            destination = "(" + blockTarget.getX() + "," + blockTarget.getY() + "," + blockTarget.getZ() + ")";
+        } else if (r.block != null) {
+            destination = "最近的 " + r.block;
+        } else if (r.kind == MoveToTaskRecord.Kind.YLEVEL) {
+            destination = "y=" + (r.y == null ? "?" : r.y.intValue()) + " 层";
+        } else if (r.x != null && r.z != null) {
+            destination = "(" + r.x.intValue() + "," + r.z.intValue() + ")";
+        } else {
+            destination = "目标地点";
+        }
+        boolean planning = nav != null && nav.planningInFlight();
+        return (planning ? "正在规划路线，之后前往 " : "正在前往 ") + destination
+                + "，剩余约 " + (int) Math.round(repDistance() / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS
+                + " 格";
+    }
+
     private String blockedMessage(String failReason) {
         int gy = player.blockPosition().getY();
         double remaining = repDistance();

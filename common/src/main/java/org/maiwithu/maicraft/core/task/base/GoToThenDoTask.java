@@ -23,6 +23,14 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
      *  工作距离内({@link #reached()}),否则直接教学失败让调用方先 goto。 */
     protected abstract PlayerNav buildNav();
 
+    /** 面板行动行的一句话汇报；目的地来自子类声明的第一导航目标，无固定目标则无汇报。 */
+    @Override
+    public String describeCurrentAction() {
+        BlockPos target = gotoFirstTarget();
+        return target == null ? null
+                : "正在前往 (" + target.getX() + "," + target.getY() + "," + target.getZ() + ")";
+    }
+
     /**
      * 教学失败要点名的目标格(算距离、给 goto 坐标用)。返回 null = 无固定
      * 格目标(实体目标、原地动作),失败话术退化为通用文案。默认 null。

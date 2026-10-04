@@ -90,13 +90,14 @@ public final class CompanionTickDispatcher {
     }
 
     /**
-     * 此刻占用身体的任务的阶段与描述：阶段名优先展示，描述作阶段缺失时的退回。
-     * {@code primitives} 是身体原语层的已确认事实键（目标坐标、计数等），由调度层从
-     * 执行器 progress 里筛出；空 Map = 该任务没有可展示的原语信息。
+     * 此刻占用身体的持有者的行动与里程碑。{@code currentAction} 是执行器或反射经
+     * {@code describeCurrentAction()} 自答的一句话（"正在挖掘铁矿石 (120,64,-35)"），
+     * 缺则 null；{@code milestones} 是任务单上的持久计数（done/total），反射占用身体时
+     * 为空；{@code reflex} 标记身体被自救队接管。
      */
-    public record BodyAction(String phase, String describe, Map<String, Object> primitives) {
-        public BodyAction(String phase, String describe) {
-            this(phase, describe, Map.of());
+    public record BodyAction(String currentAction, Map<String, Object> milestones, boolean reflex) {
+        public BodyAction(String currentAction, Map<String, Object> milestones) {
+            this(currentAction, milestones, false);
         }
     }
 

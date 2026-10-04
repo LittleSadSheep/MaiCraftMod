@@ -142,5 +142,6 @@ public final class MLGChain implements Task, Reflex {
 
     @Override public String name() { return "mlg"; }
     @Override public String id() { return name(); }
+    @Override public String describeCurrentAction() { return "正在坠落，执行落地缓冲自救"; }
     @Override public String describe() { return "高处坠落时用水桶或落地辅助自救；入水或乘坐其他载具后交还身体并保留原生回执，本次自救接住的船继续落稳；干草减伤如实记录受伤"; }
 }

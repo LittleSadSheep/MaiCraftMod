@@ -106,6 +106,16 @@ public interface Task {
         return Map.of("task", name());
     }
 
+    /**
+     * 调试面板行动行的一句话汇报：此刻在做什么。默认无汇报（面板显示"无"）；
+     * 长时执行器覆盖它写一句中文，短步骤任务不必覆盖。与 {@link #progress()} 的分工：
+     * progress 是给状态查询和日志的结构化数据，describeCurrentAction 是给面板的人话句子，
+     * 由最了解当前情况的执行器自己措辞，面板不做拼接。
+     */
+    default String describeCurrentAction() {
+        return null;
+    }
+
     /** 丢掉身体的原因。 */
     enum StopReason {
         /** 被更高层抢占(反射插进来 / 同步动作插进来)——任务状态留着,之后接着跑。 */
