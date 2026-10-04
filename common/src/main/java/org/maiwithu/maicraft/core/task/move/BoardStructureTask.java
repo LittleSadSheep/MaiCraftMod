@@ -88,6 +88,15 @@ public final class BoardStructureTask extends AbstractCompanionTask<BoardStructu
         TransportRuntime.cancel(this); super.cleanup();
     }
     @Override protected String successMessage() { return "native collision confirms stable boarding of structure " + r.structureId; }
+
+    /** 面板行动行的一句话汇报；阶段来自在飞的子任务（移位/飞行）与结构 ID。 */
+    @Override
+    public String describeCurrentAction() {
+        if (departure != null) return "正在前往登上结构的起飞站位";
+        if (flight != null) return "正在乘喷气背包飞向结构 " + r.structureId;
+        return "正在寻找登上结构 " + r.structureId + " 的路径";
+    }
+
     @Override protected Map<String,Object> resultData() {
         var data = new LinkedHashMap<String,Object>(target.diagnostics());
         if (flight != null) data.put("flight",flight.diagnostics());

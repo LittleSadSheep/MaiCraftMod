@@ -151,4 +151,13 @@ public final class FollowCompanionTask extends AbstractCompanionTask<FollowTaskR
         // 常驻任务走不到 SUCCESS;真被换掉时走的是 cancelledMessage。
         return "跟随结束";
     }
+
+    /** 面板行动行的一句话汇报；跟随对象与距离来自当前找到的实体。 */
+    @Override
+    public String describeCurrentAction() {
+        Entity target = target(player);
+        if (target == null) return "正在寻找要跟随的对象";
+        return "正在跟随 " + target.getName().getString()
+                + "，距离约 " + (int) player.position().distanceTo(target.position()) + " 格";
+    }
 }

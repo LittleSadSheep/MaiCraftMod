@@ -163,6 +163,17 @@ public final class PhysicalBondTask extends AbstractCompanionTask<PhysicalBondTa
         super.cleanup();
     }
     @Override protected String successMessage() {return alreadyBonded?"选区已有观察到的同类胶层，未重复消耗胶水":"原生粘接已确认，机械连接及组装结果需独立核验";}
+
+    /** 面板行动行的一句话汇报；阶段与 progress() 的 phase 字段同源，端点顺序来自已选中的首点标记。 */
+    @Override
+    public String describeCurrentAction() {
+        if (materialSettlement != null) return "正在等待胶水材料结算";
+        if (action != null) return "正在确认原生粘接效果";
+        if (supply != null) return "正在补充胶水材料";
+        if (design != null) return "正在保存粘接设计";
+        if (approach.moving()) return "正在走向粘接端点";
+        return firstSelected ? "正在瞄准粘接末点准备提交" : "正在瞄准粘接首点";
+    }
     @Override public Map<String,Object> progress() {
         // 模型能看到正在选择哪一个端点及真实导航阶段，避免把长时间备降或等待结算误认为没有进展。
         BlockPos point=firstSelected?r.parameters.second():r.parameters.first();

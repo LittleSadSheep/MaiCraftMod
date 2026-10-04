@@ -175,6 +175,20 @@ public final class SuicideTask implements Task {
 
     @Override public boolean suppressesSurvivalReflexes() { return !ended; }
     @Override public String name() { return "suicide"; }
+
+    /** 面板行动行的一句话汇报；阶段与 progress() 的 phase 字段同源，方式来自已选定的危险候选。 */
+    @Override
+    public String describeCurrentAction() {
+        if (ended) return "寻死流程已结束";
+        if (candidate == null) return "正在观察附近寻找危险";
+        return switch (candidate.method()) {
+            case "lava" -> acting ? "正在站在岩浆中" : "正在走向岩浆";
+            case "hostile" -> acting ? "正在让怪物攻击" : "正在接近怪物";
+            case "fall" -> acting ? "正在踏入高处边缘" : "正在走向高处边缘";
+            default -> acting ? "正在暴露在危险中" : "正在走向危险处";
+        };
+    }
+
     @Override public TaskResult result(TaskState terminal) {
         ended = true; cleanup();
         return new TaskResult(deathObserved && terminal == TaskState.SUCCESS, detail,

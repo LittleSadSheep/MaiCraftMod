@@ -161,6 +161,21 @@ public final class PhysicalAssemblerTask extends AbstractCompanionTask<PhysicalA
         super.cleanup();
     }
     @Override protected String successMessage() {return r.parameters.operation()==Operation.INSPECT?"原生胶层与声明目标已观察":"原生组装器请求已结算，实际结构结果与设计差异分别返回";}
+
+    /** 面板行动行的一句话汇报；阶段来自原生请求提交状态与结构停稳观察。 */
+    @Override
+    public String describeCurrentAction() {
+        if (submitted || followingExisting) return "正在等待原生组装器结果";
+        if (registration != null || !prepared) return "正在读取整机设计";
+        if (frame != null && !frame.stationary()) return "正在等待物理结构停稳";
+        return switch (r.parameters.operation()) {
+            case INSPECT -> "正在观察整机胶层与声明目标";
+            case ASSEMBLE -> "正在走近组装器准备组装结构";
+            case DISASSEMBLE -> "正在走近组装器准备拆回结构";
+            default -> "正在操作物理组装器";
+        };
+    }
+
     @Override protected Map<String,Object> resultData() {
         var out=new LinkedHashMap<String,Object>();out.put("operation",r.parameters.operation().name().toLowerCase(Locale.ROOT));
         out.put("native_submitted",submitted);out.put("continued_native_observation",followingExisting);

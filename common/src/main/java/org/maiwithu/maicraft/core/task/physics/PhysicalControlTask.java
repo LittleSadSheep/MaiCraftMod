@@ -203,6 +203,20 @@ public final class PhysicalControlTask extends AbstractCompanionTask<PhysicalCon
         super.cleanup();
     }
     @Override protected String successMessage(){return r.parameters.operation()==INSPECT?"原生物理部件设置已读取":"原生部件配置已结算，实际转速、信号与结构差异分别返回";}
+
+    /** 面板行动行的一句话汇报；阶段与 progress() 的 phase 字段同源，操作名来自任务单。 */
+    @Override
+    public String describeCurrentAction() {
+        if (done) return "正在复查整机声明";
+        if (action != null) return "正在确认原生部件输入";
+        if (typewriter != null) return "正在操作打字机部件";
+        if (r.parameters.operation() == INSPECT) return "正在读取部件配置";
+        if (approachMoving()) return "正在走向部件控制位";
+        if (movingSince >= 0) return "正在等待物理结构停稳";
+        return r.parameters.operation() == TURN_CRANK
+                ? "正在手摇曲柄驱动部件"
+                : "正在配置物理部件 " + (index + 1) + "/" + (r.parameters.operation() == SET_FREQUENCY ? 2 : 1);
+    }
     @Override public Map<String,Object> progress() {
         // 操作者应能分清正在拿材料、换站位还是等服务器确认，不能只看到一个持续不变的任务类名。
         return Map.of("task",name(),"operation",r.parameters.operation().name().toLowerCase(Locale.ROOT),"configuration_step",index+1,

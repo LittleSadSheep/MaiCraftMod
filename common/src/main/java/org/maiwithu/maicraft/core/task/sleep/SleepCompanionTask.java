@@ -106,6 +106,15 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
         receipt = null; aimConvergence.reset(); super.cleanup();
     }
     @Override protected String successMessage() { return r.waitUntilAwake ? "slept and observed a natural morning wake-up" : "sleeping in bed"; }
+
+    /** 面板行动行的一句话汇报；阶段来自真实睡眠状态与右键确认进度。 */
+    @Override
+    public String describeCurrentAction() {
+        if (player.isSleeping()) return "正在睡觉";
+        if (enteredSleep && r.waitUntilAwake) return "正在等待天亮";
+        if (receipt != null) return "正在等待入睡确认";
+        return "正在对准床准备入睡";
+    }
     @Override protected Map<String, Object> resultData() {
         return Map.of("entered_sleep", enteredSleep, "wait_until_awake", r.waitUntilAwake,
                 "wake_observed", wakeObservedAt >= 0, "morning_observed", morningObserved);

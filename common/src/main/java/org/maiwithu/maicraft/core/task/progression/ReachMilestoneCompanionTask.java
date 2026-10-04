@@ -460,6 +460,26 @@ public final class ReachMilestoneCompanionTask
         return "Verified progression milestone " + r.milestone.id() + ".";
     }
 
+    /** 面板行动行的一句话汇报；阶段来自当前 {@link Phase}，在飞子任务时透传子任务的自述。 */
+    @Override
+    public String describeCurrentAction() {
+        if (activeChild != null) {
+            String childAction = activeChild.describeCurrentAction();
+            if (childAction != null) return childAction;
+        }
+        return switch (phase) {
+            case RECONCILE -> "正在核对里程碑进度";
+            case PREPARE_NAVIGATION -> "正在准备跨维度导航";
+            case TRAVEL_DIMENSION -> "正在前往目标维度";
+            case LOCATE_STRONGHOLD -> "正在定位要塞";
+            case PREPARE_COMBAT -> "正在准备末影龙战斗";
+            case FIGHT_DRAGON -> "正在与末影龙战斗";
+            case SEARCH_ELYTRA -> "正在搜索鞘翅";
+            case BLOCKED -> "里程碑推进受阻，正在等待恢复";
+            case COMPLETE -> "里程碑已完成";
+        };
+    }
+
     @Override
     protected String timeoutMessage() {
         return "Progression toward " + r.milestone.id()

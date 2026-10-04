@@ -103,6 +103,15 @@ public final class MenuSequenceCompanionTask
     private static boolean same(ItemStack a, ItemStack b) {
         return a.getCount() == b.getCount() && ItemStack.isSameItemSameComponents(a, b);
     }
+
+    /** 面板行动行的一句话汇报；进度来自已确认的点击序号与回退状态。 */
+    @Override
+    public String describeCurrentAction() {
+        if (rollingBack) return "正在把鼠标上的物品放回格子";
+        if (receipt != null) return "正在等待菜单点击确认";
+        return "正在点击菜单格子 " + Math.min(index + 1, r.clicks.size()) + "/" + r.clicks.size();
+    }
+
     // 关闭这个会话使用过的界面并清掉记录；会话只有 used 标志，没有保存原菜单身份，替换菜单的归属仍需调用方处理。
     @Override protected void cleanup() {
         menuSession.cleanup(player);

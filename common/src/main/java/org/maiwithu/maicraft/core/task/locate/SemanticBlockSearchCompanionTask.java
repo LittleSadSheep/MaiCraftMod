@@ -222,6 +222,15 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         return data;
     }
 
+    /** 面板行动行的一句话汇报；方块名是本地化名称，已见数量是过视线闸的已确认事实。 */
+    @Override
+    public String describeCurrentAction() {
+        String names = r.blockTargets.stream()
+                .map(block -> block.getName().getString())
+                .reduce((a, b) -> a + "、" + b).orElse("目标方块");
+        return "正在搜索附近的 " + names + "，已见 " + matchedCount() + "/" + r.count;
+    }
+
     /** done/total 表示扫描游标处理的体积；未加载与调色板跳过另列，不能当成逐格观察数量。 */
     @Override
     public Map<String, Object> progress() {

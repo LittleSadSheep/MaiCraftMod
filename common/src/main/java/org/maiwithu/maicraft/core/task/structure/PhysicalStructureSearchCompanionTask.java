@@ -1127,6 +1127,21 @@ public final class PhysicalStructureSearchCompanionTask
                 : "verified loaded physical evidence for " + r.structureId;
     }
 
+    /** 面板行动行的一句话汇报；阶段来自当前 {@link Stage}，结构名来自任务单原文。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (stage) {
+            case OBSERVE -> "正在观察四周寻找 " + r.structureId + " 的证据";
+            case SELECT_EYE -> "正在取出末影之眼";
+            case WAIT_EYE_RECEIPT -> "正在确认末影之眼投掷";
+            case TRACK_EYE -> "正在追踪末影之眼";
+            case MOVE_DIRECTION -> "正在朝 " + r.structureId + " 的方向前进";
+            case MOVE_FRONTIER -> "正在走向未探索的前沿区域";
+            case MOVE_EVIDENCE -> "正在走近观察到的结构证据";
+            case VERIFY_EVIDENCE -> "正在核实结构证据";
+        };
+    }
+
     @Override
     protected String timeoutMessage() {
         return "physical structure search stopped making verifiable progress before "

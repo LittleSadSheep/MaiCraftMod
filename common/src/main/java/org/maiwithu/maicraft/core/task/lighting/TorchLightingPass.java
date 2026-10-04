@@ -151,4 +151,12 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
                 "outcome_uncertain", uncertain || placer.pending(), "placement_hand", "offhand");
     }
     @Override protected String successMessage() { return "torch placement pass completed; actual area coverage still requires verification"; }
+
+    /** 面板行动行的一句话汇报；灯位是已选定的下一处目标，剩余数量来自暗格清单。 */
+    @Override
+    public String describeCurrentAction() {
+        if (target == null) return "正在挑选下一处火把灯位";
+        return "正在前往灯位 (" + target.pos().getX() + "," + target.pos().getY() + "," + target.pos().getZ()
+                + ") 放置火把，剩 " + remaining.size() + " 处";
+    }
 }

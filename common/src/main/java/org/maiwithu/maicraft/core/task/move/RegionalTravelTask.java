@@ -123,6 +123,15 @@ public final class RegionalTravelTask extends AbstractCompanionTask<RegionalTrav
         TransportRuntime.cancel(this); super.cleanup();
     }
     protected String successMessage() { return "arrived on an observed platform in the requested direction"; }
+
+    /** 面板行动行的一句话汇报；方向来自任务单原文，阶段来自在飞的交通方式。 */
+    @Override
+    public String describeCurrentAction() {
+        if (flight != null) return "正在向" + r.direction + "方向飞行寻找可站立区域";
+        if (walk != null) return "正在向" + r.direction + "方向的候选点走";
+        return "正在向" + r.direction + "方向寻找可站立区域";
+    }
+
     protected Map<String,Object> resultData() {
         return Map.of("direction",r.direction,"ground_legs",legs,"terrain",terrain==null ? Map.of() : terrain.summary(),
                 "flight",flight==null ? Map.of() : flight.diagnostics());

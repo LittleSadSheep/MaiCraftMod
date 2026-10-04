@@ -1403,6 +1403,21 @@ public final class SemanticLightAreaCompanionTask
         return "semantic lighting timed out before actual block-light verification completed";
     }
 
+    /** 面板行动行的一句话汇报；阶段来自当前 {@link Stage}，灯具名是正在出手的本地化物品名。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (stage == null ? Stage.OBSERVE : stage) {
+            case OBSERVE -> "正在观察照明区域的光照样本";
+            case TRAVEL_SURVEY -> "正在前往暗区边缘查看光照";
+            case PLAN -> "正在规划灯位布局";
+            case SUPPLY -> "正在补充照明材料";
+            case BUILD -> source == null ? "正在放置灯具"
+                    : "正在放置 " + new ItemStack(source.item()).getHoverName().getString();
+            case SETTLE -> "正在等待光照变化稳定";
+            case VERIFY -> "正在复核实际光照覆盖";
+        };
+    }
+
     @Override protected String cancelledMessage() {
         return "semantic lighting was interrupted; already confirmed placements remain";
     }

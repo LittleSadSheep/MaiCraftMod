@@ -117,6 +117,15 @@ public final class PhysicalBalanceTask extends AbstractCompanionTask<PhysicalBal
         super.cleanup();
     }
     @Override protected String successMessage() { return applied?"配平补丁施工已完成，实际差异与预测分别返回":"起飞前受力分析与配平预测已完成"; }
+
+    /** 面板行动行的一句话汇报；阶段来自施工子任务、状态读取与后台试算。 */
+    @Override
+    public String describeCurrentAction() {
+        if (edit != null) return "正在施工配平补丁";
+        if (computation != null) return "正在后台试算受力与配平";
+        if (reader != null) return "正在观察物理结构状态";
+        return "正在准备受力分析";
+    }
     @Override protected Map<String,Object> resultData() {
         return receipt(report,applied||edit!=null||construction!=null,construction==null?Map.of():construction.data());
     }

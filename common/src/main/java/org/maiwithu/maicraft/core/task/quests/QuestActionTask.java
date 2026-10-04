@@ -46,4 +46,10 @@ public final class QuestActionTask implements Task {
     @Override public String name() { return "quest_action"; }
     @Override public boolean keepsGuiOnCompletion() { return true; }
     @Override public Map<String, Object> progress() { return session.evidence(); }
+
+    /** 面板行动行的一句话汇报；阶段来自任务书会话是否已发出原生请求。 */
+    @Override
+    public String describeCurrentAction() {
+        return session.submitted() ? "正在等待任务书操作结果" : "正在提交任务书操作";
+    }
 }

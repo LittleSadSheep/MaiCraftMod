@@ -80,4 +80,12 @@ public final class NightRestTask extends AbstractCompanionTask<NightRestTask.Rec
     }
     @Override protected Map<String, Object> resultData() { return Map.of("slept_until_morning", rested, "returned_to_work_site", returning && player.blockPosition().distSqr(r.origin) <= 4); }
     @Override protected String successMessage() { return "night rest settled and the original work position was reached"; }
+
+    /** 面板行动行的一句话汇报；阶段来自在飞的睡眠子任务与往返状态，床的坐标是任务单已确认事实。 */
+    @Override
+    public String describeCurrentAction() {
+        if (sleep != null) return "正在入睡";
+        if (returning) return "正在返回工作点";
+        return "正在前往床 (" + r.bed.getX() + "," + r.bed.getY() + "," + r.bed.getZ() + ")";
+    }
 }
