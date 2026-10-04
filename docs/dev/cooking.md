@@ -2,7 +2,61 @@
 
 `cook` 要完成的是主背包最终数量。例如已经有 256 个铁锭，再要求 300 个，还需要烧 44 个。目标数量、一次装多少原料、一次消耗多少燃料，是三件不同的事。
 
-当前支持普通熔炉、高炉和烟熏炉。能识别营火配方，但营火偏好会明确返回尚不支持，不会偷偷改用熔炉。这一页记录已贯通的主执行器、数量、估价和菜单收尾；整个烹饪能力仍有待继续审阅的分支，见文末。
+公开能力是 `maicraft:cook`。当前执行普通熔炉、高炉和烟熏炉；配方来自客户端实际收到的配方表。能识别营火配方，但需要加工时指定营火会明确失败，不会偷偷改用熔炉。模组物品只有能通过这些配方、燃料和菜单路径时才适用，不能据此承诺支持任意模组机器。
+
+## 怎样提交一份加工要求
+
+下面是 MCP `plan` 的完整参数。例子把目标设为主背包至少有 8 个铁锭，原料、煤和设备只允许使用随身现货；附近已有的可用炉子仍可使用。计划不会烧东西，执行实际返回的 `plan_id` 后才开始。
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:cook",
+    "outcome": "用随身原料和煤补足八个铁锭",
+    "target": { "kind": "nearest" },
+    "parameters": {
+      "item_id": "minecraft:iron_ingot",
+      "count": 8,
+      "recipe_preference": "smelting",
+      "allowed_fuels": ["minecraft:coal"],
+      "allowed_sources": ["inventory"],
+      "allow_harm": false,
+      "protected_labels": []
+    }
+  }
+}
+```
+
+| 字段位置 | 类型、默认和含义 |
+| --- | --- |
+| `goal.parameters.item_id` | 必填非空物品 ID 字符串，表示成品；执行时须为已安装的非空气物品。省略、`null`、数字和空白拒绝 |
+| `goal.parameters.count` | 主背包最终总数，整数 1～2304；省略或 `null` 为 1。0、负数、小数、数字字符串、布尔值和超限数拒绝 |
+| `goal.parameters.recipe_preference` | 字符串，省略为 `auto`；`null`、空白和非字符串拒绝。正式取值为 `auto`、`fastest`、`preserve_rare`、`smelting`、`blasting`、`smoking`、`campfire`，大小写与首尾空白会整理 |
+| `goal.parameters.allowed_fuels` | 物品 ID 字符串数组，去重后最多 64 种；省略、`null`、`[]` 都使用默认普通燃料集合，不表示禁止燃烧。非空清单只允许列出的燃料，执行时检查已安装且原生炉子认作燃料 |
+| `goal.parameters.allowed_sources` | 来源字符串数组，省略、`null`、`[]` 使用下述默认集合；显式清单也总会加入 `inventory`。不是执行顺序 |
+| `goal.parameters.allow_harm` | 布尔值，省略、`null`、`false` 都不授权伤害生物；`true` 允许获准来源中的伤害行为，不会自动增加 `hunt` 来源 |
+| `goal.parameters.protected_labels` | 已记住的地点名数组，最多 64 个不同名字；省略或 `[]` 不新增保护。公开目标拒绝 `null`、空白名字和非字符串；执行时未知名字会失败，其他维度的地标不转换成当前世界的保护格 |
+| `goal.target` | 省略、`null` 或只含 `kind: nearest` 的对象；不能夹带 `label`、`position`、`relation`。去另一处开炉先执行旅行 |
+
+来源名称为 `inventory`、`nearby`、`wireless`、`storage`、`harvest`、`craft`、`cook`、`mine`、`trade`、`hunt`。默认包含除 `trade` 外的这些来源，但 `hunt` 仍须 `allow_harm=true` 才能伤害生物。只准使用随身物品时写 `["inventory"]`，不能写空数组。数组成员必须是非空字符串，成员为 `null` 无效。取材细节见[取物文档](acquiring.md)。
+
+默认燃料为原生燃料表中的煤、木炭、木棍、竹子、干海带块，以及木板和原木标签中的物品。`preserve_rare` 只改变固定燃料优先表，没有读取附魔、名字或稀有度来替玩家判断价值。兼容别名包括 `furnace`、`blast_furnace`、`blast-furnace`、`smoker`、`preserve-rare`、`campfire_cooking`；新请求使用正式取值。
+
+下面这份完整计划展示营火边界：参数合法不等于设备已经可执行。库存尚未满足时，将返回营火执行不支持或没有对应配方；不会转去其他设备。
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:cook",
+    "outcome": "尝试用营火加工一份熟牛肉",
+    "parameters": {
+      "item_id": "minecraft:cooked_beef",
+      "recipe_preference": "campfire",
+      "allowed_sources": ["inventory"]
+    }
+  }
+}
+```
 
 ## 代码现在怎样分工
 
@@ -21,9 +75,9 @@
 
 ## 开始之前检查什么
 
-必须给 `item_id`。`count` 默认 1，接受 1～2304 的整数；小数、数字字符串、超限数字和显式 `null` 不会被改成另一个数量。这个上限与取物一致，实际能装多少还取决于背包容量和物品堆叠规则。
+必须给 `item_id`。数量上限与取物一致，实际能装多少还取决于背包容量和物品堆叠规则；主背包含快捷栏，不包含副手和穿戴栏。已有数量够了会直接收尾，不要求额外烧制一炉。
 
-`allowed_fuels` 限定能烧哪些燃料；省略或空列表使用普通燃料集合。`allowed_sources` 决定原料、燃料和工作站从哪里取得，不能填写 `cook` 再递归开炉。默认伤害许可仍为关闭。
+`allowed_sources` 同时约束原料、燃料和工作站的获取。允许 `cook` 时可以先烧中间材料再烧成品；[ProductionLineage](../../common/src/main/java/org/maiwithu/maicraft/core/task/acquire/ProductionLineage.java) 携带祖先成品并限制最多八层，防止为了做原料又递归回同一成品。燃料清单、保护要求和伤害许可继续传给子任务。
 
 从当前位置开工，不填 `target` 或只填 `{"kind":"nearest"}` 即可。要在另一处加工，用顺序目标先移动，再烹饪；设备选择用 `recipe_preference`。以前会被忽略的地点信息、被当成物品名的目标标签，现在会明确拒绝。
 
@@ -53,7 +107,7 @@
 
 每个候选方案有一份临时库存账：设备准备、原料、燃料共用它。只有一根原木时，这根木头不能既算作烧木炭的原料，又被当成免费燃料。同组可替代材料可以合计；一根木板合成四根木棍后，没用完的木棍可以继续分配。
 
-递归估价最多看四层普通合成，并阻止同一路线绕回自身。附近掉落、普通仓库和交易被允许时，会保留实际查找它们的机会；“没有 AE2”不能直接等于“没有仓库来源”。这些是排序估计，物品是否存在、可否取用仍由真正的取物子任务确认。
+递归估价最多看四层获准的合成或烧炼路线，并阻止同一路线绕回自身。附近掉落、普通仓库和交易被允许时，会保留实际查找它们的机会；“没有 AE2”不能直接等于“没有仓库来源”。这些是排序估计，物品是否存在、可否取用仍由真正的取物子任务确认。
 
 准备失败且没有实际效果时，可以排除失败候选再试另一份有限方案。已经采过材料、消耗过物品或放过设备后，失败会保留效果信息并停止当前加工方案。子任务即使报告了库存已到达，只要还带有不确定效果，也不能继续装炉。
 
@@ -85,9 +139,30 @@
 
 取消不会让服务器里的炉子停止燃烧。结果用 `batch_outstanding`、`outcome_uncertain` 和已确认装入、取回的数量说明未结事项；无法确认时不会硬填 `effects_started=false`。
 
+## 结果、暂停和恢复怎么读
+
+`execute` 接单后先跟随 `next_attention`；需要读完整旧证据时沿 `task(get)` 返回的路径读取。同一次提交丢回复时沿用 `request_key`，不要另起一炉来试探是否成功。
+
+| 回执 | 含义 |
+| --- | --- |
+| `required_final_count`、`initial_count`、`observed_final_count`、`goal_satisfied` | 请求总数、开工时数量、结算时数量、是否够数；够数不自动消除别的未结效果 |
+| `recipe_id`、`device`、`input_item_id`、`recipe_output_count`、`fuel_item_id` | 本次实际选用的路线；只在已经选定时出现 |
+| `station_placed`、`effects_started` | 是否放了设备、是否已有确认效果；后者缺失表示不能断言“没有发生”，不是 `false` |
+| `batch_outstanding` | 炉次还未结清；此时再读 `owned_input_loaded`、`owned_input_returned`、`owned_output_taken` |
+| `outcome_uncertain` | 子操作或炉内归属有未知事项；先核对同一现场，不能据此直接再投一批 |
+| `stopped_because_parent_satisfied` | 取物父目标已经由别的来源满足，本炉只做收尾；不代表原烹饪数量也达到 |
+| `prerequisite_failure`、`preparation_plan_failures`、`workstation_attempts` | 备料失败事实与已尝试方案，用于解释为什么没有继续 |
+| `decision.reason_code`、`decision.recovery_options` | 执行器保存的原因和建议。当前失败由语义父任务直接结算；即使内部 `decision.required=true`，也不能在没有实际 `decision_id` 时调用回答入口 |
+
+普通暂停保留同一执行器中的炉位、账本和子任务，释放身体输出；服务端炉子可以继续燃烧。恢复后重新检查菜单对象和炉内守恒。永久取消会停子任务并尝试结束自己打开的菜单，保留放下的设备与实际产物，不能把取消解释为没有消耗。
+
+死亡先走公共运行时的复活授权或待答决定；复活、断线、换世界和进程重启都不能沿用旧玩家上的菜单对象。检查点保留父目标与已完成步骤，但**当前炉次的炉位、投入账和菜单身份没有完整持久化**。未完成记录恢复后先暂停，继续会重建当前烹饪步骤；不能宣称能无损接着收原炉，更不能仅凭新背包数量判断旧炉里没有东西。先核对已知炉位和未结回执，再决定后续加工。
+
+找某一段实现时，打开 `SemanticCookCompanionTask`：备料看 `prepare / acquire`，选站和开门看 `approachStation / waitMenu`，投料点火看 `loadInput / loadFuel / confirmStart`，收货看 `reconcileBatch / verifyOutputTake`，取消与回执看 `cleanup / resultData`。
+
 ## 已覆盖与继续审阅的范围
 
-当前离线回归覆盖：
+以下是已有离线回归入口及覆盖范围；本轮未运行回归，也未启动游戏：
 
 - `CookGoalTest`、`GoalCheckpointCompatibilityTest`：公开参数到真实任务单、旧目标的保存恢复和取消。
 - `CookingFuelTest`、`CookingBatchTest`：三种炉子的燃料时长、真实堆叠上限和多件产量。
@@ -101,3 +176,7 @@
 其中数量和收尾测试会在明确注明的控制器边界提供已确认的库存变化；它们不冒充真实服务端的炉子加工与鼠标点击验收。
 
 后续仍要继续处理并验证：开炉原生回执与来源的首次绑定、暂停时的子任务时限、燃料余量和容器剩余物、特殊组件与贵重输入，以及断线重启后未结炉次的定位与持久证据。导航算法的全链路和整合包实机场景也不能由这些离线测试替代。
+
+可以从 [CookGoalTest](../../common/src/test/java/org/maiwithu/maicraft/intent/CookGoalTest.java)、[CookingPrerequisiteChainTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/cook/CookingPrerequisiteChainTest.java)、[CookingSettlementTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/cook/CookingSettlementTest.java)、[CookingOutputReceiptTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/cook/CookingOutputReceiptTest.java) 开始定位现有验证。它们分别对应公开请求、前置烧炼、未结收尾和实际收货量。
+
+还有两项呈现限制需要继续处理：备料失败历史目前最多记 32 条；失败取材的嵌套数据只转发固定字段，可能省掉更细的实际材料或未完成效果。这里说明现状，不把它们当作完整交付事实的保证。
