@@ -6,6 +6,8 @@
 
 从 `perceive(view="abilities",focus=...)` 能读到的契约开始，沿请求校验、适配器、任务与结果逐层核对。
 
+发现列表的 `summary` 用一句清楚的业务用途帮助选择能力，完整契约的 `usage` 保留操作说明，`parameters` 解释逐项参数。`usage` 不是请求参数。复盘过的能力由 [AbilitySummaries](../../common/src/main/java/org/maiwithu/maicraft/intent/AbilitySummaries.java) 提供发现摘要，[SemanticAbilityCatalog.describe](../../common/src/main/java/org/maiwithu/maicraft/intent/SemanticAbilityCatalog.java) 将原完整说明原样放入 `usage`；没有按字符数删节。未复盘的能力继续沿用原契约。
+
 1. **用途和边界**：何时使用，角色会做什么，什么情况应选择另一能力；同名操作或子模式逐项说明。
 2. **参数位置**：说明完整层级，例如 `goal.parameters`，明确它与 `target`、`preferences`、嵌套对象的关系。
 3. **每个字段的语义**：类型、单位、默认值、范围、枚举、必填条件、互斥项；省略、零、空值和 `false` 有不同含义时分别解释。

@@ -17,6 +17,12 @@ public final class SemanticAbilityCatalog {
 
     public static JsonObject describe(String ability) {
         JsonObject description = describeContract(ability);
+        // 发现列表只展示人工编写的用途；完整操作说明原样移到 usage，选定能力后仍与参数和边界一起交付。
+        String summary = AbilitySummaries.describe(ability);
+        if (summary != null) {
+            description.add("usage", description.get("summary"));
+            description.addProperty("summary", summary);
+        }
         // 模型已经选定能力后，相关资料随完整契约出现；入口只供具体知识缺口使用，不增加执行前置步骤。
         JsonArray references = KnowledgeReferences.forAbility(ability);
         if (!references.isEmpty()) description.add("related_knowledge", references);
