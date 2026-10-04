@@ -24,6 +24,10 @@ public final class GameplayReminders {
     private static final CombatEquipmentReminder EQUIPMENT = new CombatEquipmentReminder(BOARD);
     private static final SleepReminder SLEEP = new SleepReminder(BOARD);
     private static final NativeRestStatistics REST_STATS = new NativeRestStatistics(SLEEP);
+    private static final GearDurabilityReminder DURABILITY = new GearDurabilityReminder(BOARD);
+    private static final InventorySpaceReminder SPACE = new InventorySpaceReminder(BOARD);
+    private static final DrowningReminder DROWNING = new DrowningReminder(BOARD);
+    private static final BurningExposureReminder BURNING = new BurningExposureReminder(BOARD);
     private static LocalPlayer body;
     private static ClientLevel level;
     private static long lastFoodTick = -1;
@@ -36,12 +40,23 @@ public final class GameplayReminders {
         LOW_LIGHT.observe(sample(player), null);
         // 个人原生统计决定是否长期未睡，当前昼夜决定提醒文案；睡眠变化只撤下自己的那条提醒。
         REST_STATS.tick(player);
+        // 溺水与着火是逐刻身体状态，标量读取便宜，不等秒级盘点；氧气耗尽等不了 20 刻。
+        observeAcuteState(player);
         long now = level.getGameTime();
-        // 口粮按秒复核即可识别持续不足；伤害与血量仍逐刻观察，不因低频盘点背包错过重击。
+        // 口粮、耐久与背包按秒复核即可识别持续不足；伤害与血量仍逐刻观察，不因低频盘点背包错过重击。
         if (lastFoodTick < 0 || now < lastFoodTick || now - lastFoodTick >= 20) {
             FOOD.observe(ReminderInventoryFacts.food(player));
+            DURABILITY.observe(ReminderInventoryFacts.durability(player));
+            SPACE.observe(ReminderInventoryFacts.space(player));
             lastFoodTick = now;
         }
+    }
+
+    private static void observeAcuteState(LocalPlayer player) {
+        long now = level.getGameTime();
+        DROWNING.observe(new DrowningReminder.Observation(now, player.isUnderWater(),
+                player.getAirSupply(), player.getMaxAirSupply()));
+        BURNING.observe(new BurningExposureReminder.Observation(now, player.isOnFire(), player.isInLava()));
     }
 
     /** 只在原生伤害包消费处调用；玩家、中立动物和无法确认来源的掉血不据此建议防刷怪补光。 */
@@ -103,6 +118,10 @@ public final class GameplayReminders {
         FOOD.clear();
         EQUIPMENT.clear();
         REST_STATS.clear();
+        DURABILITY.clear();
+        SPACE.clear();
+        DROWNING.clear();
+        BURNING.clear();
         lastFoodTick = -1;
         body = null;
         level = null;

@@ -197,8 +197,33 @@
 只有实际统计包中的该字段才有效，世界日期、客户端默认零和其他统计更新都不能替代它。
 观察到原生入睡立即撤下，拒绝与已观察入睡矛盾的迟到高计数；断线、换身体和时钟回退重新取证。
 
-`reminders` 始终是数组，当前四条规则可同时交付。按 ID 更新或撤下只影响对应规则，
-不会用新的睡眠提示覆盖缺粮、装备或补光提示；成功、错误、知识和冻结回执读取都保留这一约定。
+`reminders` 始终是数组，当前八条规则可同时交付。按 ID 更新或撤下只影响对应规则，
+不会用新的提示覆盖缺粮、装备或补光提示；成功、错误、知识和冻结回执读取都保留这一约定。
+
+### 持续憋气与火焰岩浆暴露
+
+`drowning_imminent` 逐刻读取原生氧气余量，水下且氧气不足一半时提醒立即上浮或挖掘临时气穴，
+长时间水下作业可提前准备水肺药水。潮涌核心或水肺效果让水下氧气回到充足线以上时同样撤下，
+出水即解除憋气风险，氧气未回满也不保留旧警报。证据只报告氧气余量与阈值，不折算剩余秒数，
+也不冒认溺水伤害已经开始；原版氧气用尽后才扣血，此处不替服务端预支这一结论。
+
+`exposed_to_fire_or_lava` 逐刻观察着火状态与岩浆接触，持续满 20 刻（1 秒）才提醒，
+火焰掠过不催促；建议立即撤离火源或跳入水中灭火，下界作业前可备防火药水与防火装备。
+着火可能来自自身点火、环境火格或岩浆，证据不冒认火源，也不断言每刻实际伤害（防火效果会改变它）；
+火灭或脱离岩浆即撤下。观察中断重新累计暴露时长，断开的窗口不算持续暴露。
+
+### 装备耐久将尽与背包装满
+
+`equipped_gear_near_breakage` 随秒级盘点读取主手与实穿盔甲的剩余耐久，任一观察槽位低于
+`max(10, 15%)` 时提醒准备替换或修理；更换或修理让全部槽位回到安全区后撤下。证据保留各槽位
+物品与剩余耐久；耐久附魔让确切断裂时刻不可预测，背包备件也未盘点，回执明确声明两者未知。
+
+`carried_inventory_nearly_full` 随秒级盘点统计主背包三十六格空槽，持续 60 刻不足 3 格才提醒，
+腾出 6 格以上才撤下，一两个空槽的抖动不反复打扰；战斗或采矿的瞬时满仓不催促清理。证据只报告
+空槽计数，不折算可堆叠余量，也不替模型挑选该丢的物品；盔甲与副手槽位不混入计数。
+
+逐刻观察的两条来自身体标量状态，秒级盘点的两条复用随身物品采样；四条与低光、缺粮、装备、睡眠
+共享按 ID 保存的提醒板与统一工具出口，死亡、重生、换维度及断线同样清空，不写入任务检查点。
 
 ---
 
@@ -208,4 +233,4 @@
 - 等待实现：`AttentionWait`
 - 读取与投影：`AttentionSnapshot`、`TaskView`、`JsonReadback`
 - 大结果：`ResponseArchive`
-- 生活提醒：`ReminderBoard`、`GameplayReminders`、`LowLightCombatReminder`、`FoodSupplyReminder`、`CombatEquipmentReminder`、`SleepReminder`、`NativeRestStatistics`
+- 生活提醒：`ReminderBoard`、`GameplayReminders`、`LowLightCombatReminder`、`FoodSupplyReminder`、`CombatEquipmentReminder`、`SleepReminder`、`NativeRestStatistics`、`GearDurabilityReminder`、`InventorySpaceReminder`、`DrowningReminder`、`BurningExposureReminder`

@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.actor;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import it.unimi.dsi.fastutil.objects.Object2DoubleArrayMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -155,6 +157,10 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
     }
 
     private void initializeVitals() throws Exception {
+        // 原生流体高度与实体类型在真实构造器里初始化；夹具角色绕过构造器创建，
+        // 提醒观察读取 isInLava 与 isOnFire（经 fireImmune）前必须补齐这两项。
+        ActorControlTestHarness.field(Entity.class, "fluidHeight").set(player, new Object2DoubleArrayMap<>(2));
+        ActorControlTestHarness.field(Entity.class, "type").set(player, EntityType.PLAYER);
         // 正常施工会持续观察生命和饥饿；夹具默认健康吃饱，具体饥饿测试再显式改成低值，不能依赖未初始化字段。
         ActorControlTestHarness.field(Player.class, "foodData").set(player, new FoodData());
         var builder = new SynchedEntityData.Builder(player);

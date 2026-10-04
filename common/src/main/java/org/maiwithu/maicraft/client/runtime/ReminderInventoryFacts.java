@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.client.runtime;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.player.LocalPlayer;
@@ -10,6 +11,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ArrowItem;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ProjectileWeaponItem;
 import org.maiwithu.maicraft.core.inventory.OrdinaryFood;
@@ -33,6 +35,30 @@ final class ReminderInventoryFacts {
         }
         return new FoodSupplyReminder.Observation(player.level().getGameTime(),
                 player.getFoodData().getFoodLevel(), count, nutrition, flesh);
+    }
+
+    /** 耐久观察只看主手与实穿盔甲四个槽位；背包备件是否充足不在本采样范围内。 */
+    static GearDurabilityReminder.Observation durability(LocalPlayer player) {
+        List<GearDurabilityReminder.SlotFact> slots = new ArrayList<>();
+        addWorn(slots, "mainhand", player.getMainHandItem());
+        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET))
+            addWorn(slots, slot.name().toLowerCase(Locale.ROOT), player.getItemBySlot(slot));
+        return new GearDurabilityReminder.Observation(player.level().getGameTime(), List.copyOf(slots));
+    }
+
+    private static void addWorn(List<GearDurabilityReminder.SlotFact> slots, String slot, ItemStack stack) {
+        if (stack.isEmpty() || !stack.isDamageableItem()) return;
+        slots.add(new GearDurabilityReminder.SlotFact(slot,
+                BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                stack.getMaxDamage() - stack.getDamageValue(), stack.getMaxDamage()));
+    }
+
+    /** 空槽计数只算主背包三十六格；盔甲与副手槽位装不进普通战利品，混入会掩盖真实的装满程度。 */
+    static InventorySpaceReminder.Observation space(LocalPlayer player) {
+        var items = player.getInventory().items;
+        int free = 0;
+        for (ItemStack stack : items) if (stack.isEmpty()) free++;
+        return new InventorySpaceReminder.Observation(player.level().getGameTime(), free, items.size());
     }
 
     static CombatEquipmentReminder.Observation equipment(LocalPlayer player) {

@@ -66,6 +66,8 @@ public final class CombatThreatsTest {
         SurvivalRemindersTest.main(args);
         // 原生休息统计按连接观察，不能让世界日期或入睡前的旧包制造“多日未睡”。
         NativeRestStatisticsTest.main(args);
+        // 溺水、着火、耐久与背包复用真实身体同步与随身物品观察，新增规则不能抢占身体或覆盖旧提醒。
+        AcuteSurvivalRemindersTest.main(args);
         CombatHandOwnershipTest.main(args);
         System.out.println("CombatThreatsTest: client damage attribution and lifetime passed");
     }
