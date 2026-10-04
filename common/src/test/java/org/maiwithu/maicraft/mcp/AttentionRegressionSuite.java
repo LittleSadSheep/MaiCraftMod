@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.intent.ReminderBoardTest;
 import org.maiwithu.maicraft.client.runtime.LowLightCombatReminderTest;
 import org.maiwithu.maicraft.client.runtime.FoodSupplyReminderTest;
 import org.maiwithu.maicraft.client.runtime.CombatEquipmentReminderTest;
+import org.maiwithu.maicraft.client.runtime.SleepReminderTest;
 import org.maiwithu.maicraft.intent.IntentAttentionEvidenceTest;
 import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
@@ -31,6 +32,8 @@ public final class AttentionRegressionSuite {
         FoodSupplyReminderTest.main(args);
         // 明显战斗伤势提示盔甲与远程装备准备，血量同步迟到和混合伤害不能重复或错误计数。
         CombatEquipmentReminderTest.main(args);
+        // 睡眠提示按昼夜换文案，个人休息统计不能被世界日期替代，四条提醒须能共同返回。
+        SleepReminderTest.main(args);
         ChatFlowTest.main(args);
         AttentionWaitTest.main(args);
         // 大份任务证据按路径与分页找回，不能因宿主压缩上下文而只能重新执行动作。
