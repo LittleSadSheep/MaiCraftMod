@@ -7,23 +7,31 @@ import static org.maiwithu.maicraft.client.server.ServerRouterTestHarness.check;
 
 public final class ClientServerFallbackTest {
     public static void main(String[] args) {
-        noServerUsesNativeClient();
+        noServerCannotUseNativeClient();
         partialSupportSelectsPerOperation();
         registrationAndConditionsDiffer();
         policyRejectionNeverFallsBack();
         explicitUnsupportedMayFallBackOnce();
         lostHandshakeDoesNotSendMutations();
+        delayedChannelCanConfirmServer();
+        confirmedServerDoesNotAuthorizeAnotherConnection();
+        malformedWelcomeCannotConfirmServer();
         System.out.println("ClientServerFallbackTest: passed");
     }
 
-    private static void noServerUsesNativeClient() {
+    private static void noServerCannotUseNativeClient() {
+        // 未装服务端时，读世界和写玩家的本地实现都保持排队；十秒后交给运行时断线。
         var h = new ServerRouterTestHarness(false);
         var receipt = h.submit("test.write");
-        h.advance(1);
-        check(h.sent.isEmpty(), "a server without the optional channel receives no custom payloads");
-        check(receipt.snapshot().backend() == Backend.CLIENT && receipt.snapshot().status() == Status.SUCCEEDED,
-                "a supported equivalent native backend works without server installation");
-        check(h.local.submissions == 1, "native operation submitted exactly once");
+        var read = h.submit("test.read");
+        h.advance(199);
+        check(!h.router.serverConfirmationExpired(), "allow channel registration and handshake to arrive");
+        h.advance(200);
+        check(h.sent.isEmpty() && h.local.submissions == 0, "missing server cannot execute either backend");
+        check(receipt.snapshot().status() == Status.QUEUED && read.snapshot().status() == Status.QUEUED,
+                "world reads and player mutations remain unsubmitted");
+        check(h.router.serverConfirmationExpired() && !h.router.nativeFallbackAllowed("test.write"),
+                "missing server expires and cannot use legacy native fallback");
     }
 
     private static void partialSupportSelectsPerOperation() {
@@ -40,7 +48,9 @@ public final class ClientServerFallbackTest {
     }
 
     private static void registrationAndConditionsDiffer() {
-        var h = new ServerRouterTestHarness(false);
+        // 服务器确认已安装但没提供此项操作时，仍可使用符合原生条件的客户端实现。
+        var h = new ServerRouterTestHarness(true);
+        h.welcome();
         h.local.supported = false;
         check(!h.router.supported("test.write"), "registered but absent native APIs are unsupported");
         h.local.supported = true;
@@ -93,16 +103,60 @@ public final class ClientServerFallbackTest {
     }
 
     private static void lostHandshakeDoesNotSendMutations() {
+        // 只声明通道却不完成握手，不能在协商超时后借客户端降级开始施工。
         var h = new ServerRouterTestHarness(true);
         var receipt = h.submit("test.write");
         h.advance(1);
         check(receipt.snapshot().status() == Status.QUEUED && h.count("request") == 0,
                 "no mutation precedes version and capability negotiation");
         h.advance(101);
-        check(h.count("hello") == 1 && h.count("request") == 0 && h.local.submissions == 1,
-                "a lost welcome permits only a never-submitted equivalent native operation");
+        check(h.count("hello") == 1 && h.count("request") == 0 && h.local.submissions == 0,
+                "a lost welcome cannot fall back to native client operations");
         h.router.receive(h.welcomeEnvelope("test.write"), 1);
-        check(receipt.snapshot().backend() == Backend.CLIENT && h.count("request") == 0,
-                "a late welcome cannot reselect a backend for an already executed operation");
+        h.advance(200);
+        check(receipt.snapshot().backend() == Backend.UNSELECTED && h.router.serverConfirmationExpired(),
+                "a welcome after negotiation timeout cannot revive the unconfirmed connection");
+    }
+
+    private static void delayedChannelCanConfirmServer() {
+        // Fabric 入服后才收到通道声明时继续握手；服务端无需实现每一项客户端能力。
+        var h = new ServerRouterTestHarness(false);
+        h.advance(20);
+        h.available = true;
+        h.advance(21);
+        h.welcome();
+        check(h.router.serverConfirmed(), "valid delayed handshake confirms server installation");
+        var local = h.submit("test.write");
+        h.advance(22);
+        check(local.snapshot().status() == Status.SUCCEEDED && h.local.submissions == 1,
+                "confirmed server permits supported local operations");
+    }
+
+    private static void confirmedServerDoesNotAuthorizeAnotherConnection() {
+        // 同服换维度继续认安装证明；换服和断线必须清掉旧证明，旧欢迎包不能授权新服务器。
+        var h = new ServerRouterTestHarness(true);
+        var old = h.welcomeEnvelope();
+        h.welcome();
+        h.router.bind(1, 2, "minecraft:the_nether", 2, false, 1);
+        check(h.router.serverConfirmed(), "dimension changes keep the current server confirmation");
+        h.router.bind(2, 3, "minecraft:overworld", 3, true, 2);
+        h.router.receive(old, 1);
+        h.router.receive(old, 2);
+        check(!h.router.serverConfirmed(), "neither old connection nor old nonce authorizes another server");
+        h.router.receive(h.welcomeEnvelope(), 2);
+        check(h.router.serverConfirmed(), "new connection needs its own valid welcome");
+        h.router.disconnect();
+        check(!h.router.serverConfirmed(), "disconnect revokes the installation proof");
+    }
+
+    private static void malformedWelcomeCannotConfirmServer() {
+        // 缺少会话身份的伪欢迎包不能开放本地动作，验证失败后也不保留部分确认。
+        var h = new ServerRouterTestHarness(true);
+        var malformed = h.welcomeEnvelope();
+        malformed.remove("sessionId");
+        h.router.receive(malformed, 1);
+        h.advance(200);
+        check(!h.router.serverConfirmed() && h.router.serverConfirmationExpired(),
+                "malformed server response never confirms installation");
     }
 }

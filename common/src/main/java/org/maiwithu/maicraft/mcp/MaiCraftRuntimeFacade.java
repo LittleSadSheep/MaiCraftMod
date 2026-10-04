@@ -27,6 +27,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.client.server.ServerSessionRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.client.runtime.GameplayReminders;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
@@ -842,6 +843,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         if (minecraft.player == null || minecraft.level == null || minecraft.gameMode == null) {
             throw new IllegalStateException("no active local player world");
         }
+        // 网络请求可能早于首个游戏刻到达；世界已加载也必须等服务端确认，才能感知或提交任务。
+        ServerSessionRuntime.requireConfirmed(minecraft);
         return minecraft;
     }
 
@@ -854,7 +857,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
     private JsonObject attentionOnClient(JsonObject arguments) {
         Minecraft minecraft = Minecraft.getInstance();
         boolean available = minecraft.player != null && minecraft.level != null && minecraft.gameMode != null
-                && intents.attentionAvailable();
+                && ServerSessionRuntime.serverConfirmed(minecraft) && intents.attentionAvailable();
         return AttentionSnapshot.read(intents, arguments, available);
     }
 
@@ -864,6 +867,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         Runnable work = () -> {
             if (!future.begin()) return;
             try {
+                // 聊天、知识等不经过 requireWorld 的入口也不能在未获服主支持的世界中提前使用。
+                Minecraft minecraft = Minecraft.getInstance();
+                if (minecraft.level != null) ServerSessionRuntime.requireConfirmed(minecraft);
                 future.completeCall(operation.get());
             } catch (Throwable throwable) {
                 future.failCall(throwable);

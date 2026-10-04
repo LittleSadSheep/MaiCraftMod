@@ -120,6 +120,17 @@ public final class ClientRuntime {
         // 总流程：观察世界 → 取得本 tick 的身体上下文 → 检查控制权 → 调度任务 → 推进导航 → 归还上下文。
         // 中途因预览或人工接管而返回时，仍需通过 finally 收尾，不能遗留上一轮的按键或原生动作。
         requireClientThread(minecraft);
+        // 入服先确认服主安装了 MaiCraft，再观察世界、轮询 F8、接管身体和推进任务。
+        // 等待期间只推进无操作授权的握手，避免自动自卫、启动接管或本地回退提前动作。
+        if (!ServerSessionRuntime.serverConfirmed(minecraft)) {
+            ServerSessionRuntime.observe(minecraft, null);
+            tickStage = minecraft.player == null ? "no_body" : "awaiting_required_server";
+            if (bodyPresent) {
+                ACTOR.shutdown();
+                bodyGone();
+            }
+            return;
+        }
         CombatThreats.observe(minecraft.player);
         PonderReplayRuntime.tick();
         // 即使玩家正在自己操作，也继续观察世界和更新预览，让 MCP 能看到当前发生了什么。
@@ -248,6 +259,8 @@ public final class ClientRuntime {
     /** 按渲染帧推进已获准的第一人称镜头转动。 */
     public static void renderFrame(Minecraft minecraft) {
         requireClientThread(minecraft);
+        // 换服后尚未确认新服务器时，不把上一连接留下的镜头动作投射到新玩家。
+        if (!ServerSessionRuntime.serverConfirmed(minecraft)) return;
         ACTOR.renderFrame();
     }
 

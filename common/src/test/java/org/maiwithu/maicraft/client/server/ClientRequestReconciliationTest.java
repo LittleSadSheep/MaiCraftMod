@@ -46,6 +46,13 @@ public final class ClientRequestReconciliationTest {
         h.advance(3);
         check(next.snapshot().status() == Status.QUEUED && receipt.snapshot().retired(),
                 "unknown old mutation fences new client mutations across reconnects");
+        // 重连后先重新确认服务器，历史未决动作不能成为绕过入服检查的理由。
+        check(read.snapshot().status() == Status.QUEUED && h.local.submissions == 0,
+                "unconfirmed reconnected server cannot expose local observations");
+        h.available = true;
+        h.advance(4);
+        h.router.receive(h.welcomeEnvelope(), 2);
+        h.advance(5);
         check(read.snapshot().status() == Status.SUCCEEDED && h.local.submissions == 1,
                 "read-only observations remain available while mutation outcome is unresolved");
         h.router.receive(late, 2);
@@ -53,7 +60,7 @@ public final class ClientRequestReconciliationTest {
         h.router.receive(late, 1);
         check(receipt.snapshot().effect() == Effect.APPLIED && receipt.snapshot().retired(),
                 "an already-received old authoritative result remains historical and resolves its fence");
-        h.advance(4);
+        h.advance(6);
         check(next.snapshot().status() == Status.SUCCEEDED && h.count("request") == 1,
                 "fresh separately requested operations may proceed only after the old effect is known");
     }

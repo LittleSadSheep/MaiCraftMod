@@ -188,6 +188,8 @@ public final class ClientRequestRouter {
 
     void dispatch(boolean allowMutations, Predicate<ClientRequestReceipt> selectedOwner, Predicate<ClientRequestReceipt> included) {
         requireThread.run();
+        // 服主尚未通过服务端握手时，连等价的客户端操作也不能下发，避免超时降级绕过安装要求。
+        if (!session.serverConfirmed()) return;
         if (dispatchedTick != tick) { dispatchedTick = tick; dispatchedThisTick = 0; }
         int budget = session.capabilities.limit("maxRequestsPerTick", 8, 8) - dispatchedThisTick;
         for (ClientRequestReceipt receipt : List.copyOf(ledger.requests.values())) {
@@ -260,6 +262,10 @@ public final class ClientRequestRouter {
         return operation != null && choose(operation, new JsonObject(), false).supported();
     }
 
+    /** 连接准入只看本次服务器的有效握手，不把单项机器能力缺失误判为没安装 Mod。 */
+    public boolean serverConfirmed() { requireThread.run(); return session.serverConfirmed(); }
+    public boolean serverConfirmationExpired() { requireThread.run(); return session.serverConfirmationExpired(); }
+
     /** 同一世界绑定续订回执保留期时，继续识别此前已协商的操作支持。 */
     public boolean renegotiating(String operationId) {
         requireThread.run();
@@ -318,13 +324,16 @@ public final class ClientRequestRouter {
     public boolean nativeFallbackAllowed(String operationId) {
         requireThread.run();
         ClientOperation operation = operations.get(operationId);
-        return operation != null && !session.capabilities.policyDenied(operation)
+        // 历史原生入口也必须通过本次入服确认，不能避开正常路由直接使用客户端后端。
+        return session.serverConfirmed() && operation != null && !session.capabilities.policyDenied(operation)
                 && (!operation.mutating() || !ledger.unresolvedMutation());
     }
 
     public JsonObject capabilityReport() {
         requireThread.run();
         JsonObject report = session.capabilities.report();
+        report.addProperty("server_required", true);
+        report.addProperty("server_confirmed", session.serverConfirmed());
         JsonObject entries = new JsonObject();
         operations.forEach((id, operation) -> entries.add(id, choose(operation, new JsonObject(), false).report(operation)));
         report.add("operations", entries);

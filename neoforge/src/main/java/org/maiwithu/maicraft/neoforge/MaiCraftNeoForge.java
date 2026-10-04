@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.server.machine.ServerMachineOperations;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
 
-/** 可选的权威服务器入口；此引导程序不引用任何仅客户端类。 */
+/** 必装的权威服务器入口；普通玩家可不装客户端，此引导程序不引用任何仅客户端类。 */
 @Mod(Constants.MOD_ID)
 public final class MaiCraftNeoForge {
     public MaiCraftNeoForge(IEventBus modBus) {
@@ -32,6 +32,7 @@ public final class MaiCraftNeoForge {
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
         // 此处不要填入模组或功能版本；版本不匹配应由 JSON 协商处理。
+        // 保留 optional 让未装 Mod 的普通玩家进服；AI 客户端在有效服务端握手前封锁游戏能力。
         event.registrar("1").optional().playBidirectional(OptionalServerPayload.TYPE, OptionalServerPayload.CODEC,
                 (payload, context) -> {
                     if (context.flow() == PacketFlow.SERVERBOUND) {

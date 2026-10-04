@@ -24,6 +24,9 @@ final class ServerSessionConnection {
     long controlRetryTick;
     int controlAttempts;
     long observedTick, lastScopeActivityTick;
+    // 新连接最多等待十秒确认服主已安装 MaiCraft；换维度和会话续期沿用同一连接的确认。
+    private long serverConfirmationDeadline;
+    private boolean serverConfirmed;
 
     ServerSessionConnection(BooleanSupplier available, Predicate<JsonObject> sender) {
         this.available = available;
@@ -34,6 +37,10 @@ final class ServerSessionConnection {
               long tick, Collection<ClientOperation> operations) {
         observedTick = lastScopeActivityTick = tick;
         if (this.connection == connection) close();
+        else {
+            serverConfirmed = false;
+            serverConfirmationDeadline = tick + 200;
+        }
         this.connection = connection;
         this.binding = binding;
         this.dimension = dimension;
@@ -101,6 +108,8 @@ final class ServerSessionConnection {
                 if (!envelope.has("bootstrap") || envelope.get("bootstrap").getAsInt() != 1)
                     throw new IllegalArgumentException("unsupported bootstrap version");
                 capabilities.welcome(envelope, connection, dimension);
+                // 只有当前随机握手与维度均匹配的有效欢迎包，才能开放客户端感知和玩家自动化。
+                serverConfirmed = true;
                 sendControl();
             } catch (RuntimeException malformed) {
                 capabilities.reset(ServerCapabilityState.State.DENIED, "invalid_welcome");
@@ -149,6 +158,12 @@ final class ServerSessionConnection {
         return allowed && acknowledged && capabilities.state == ServerCapabilityState.State.READY;
     }
 
+    boolean serverConfirmed() { return connection >= 0 && serverConfirmed; }
+
+    boolean serverConfirmationExpired() {
+        return connection >= 0 && !serverConfirmed && observedTick >= serverConfirmationDeadline;
+    }
+
     boolean send(JsonObject envelope) {
         if (!available.getAsBoolean()) return false;
         boolean sent = sender.test(envelope.deepCopy());
@@ -166,6 +181,8 @@ final class ServerSessionConnection {
     }
 
     void disconnect() {
+        // 断线后清掉服主支持的证据，下一台服务器必须重新完成握手。
+        serverConfirmed = false;
         connection = -1;
         binding = -1;
         allowed = false;

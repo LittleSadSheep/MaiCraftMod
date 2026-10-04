@@ -36,6 +36,8 @@ final class ClientBackendSelection {
         boolean client = clientSupported(operation);
         if (!server && !client) return unavailable("operation_unsupported");
         Backend backend = server ? Backend.SERVER : Backend.CLIENT;
+        // 后端实现仍可被识别，但未完成本次服务端确认时不能报告为可执行的绕行方案。
+        if (!session.serverConfirmed()) return new Choice(backend, true, false, "server_confirmation_required");
         if (operation.mutating() && unresolvedMutation)
             return new Choice(backend, true, false, "unresolved_mutation");
         if (operation.mutating() && !session.allowed)

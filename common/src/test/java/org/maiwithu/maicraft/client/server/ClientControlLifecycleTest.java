@@ -81,7 +81,9 @@ public final class ClientControlLifecycleTest {
     }
 
     private static void callbacksRunOnTheClientThread() throws Exception {
-        var h = new ServerRouterTestHarness(false);
+        // 先确认服务器允许使用 MaiCraft，再验证本地原生操作的异步回执归属。
+        var h = new ServerRouterTestHarness(true);
+        h.welcome();
         h.local.async = true;
         var receipt = h.submit("test.write");
         int[] updates = {0};

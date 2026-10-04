@@ -54,7 +54,9 @@ public final class ServerRequestOwnersTest {
     }
 
     private static void selectedOwnerRunsAfterReflexSelection() {
-        var h = new ServerRouterTestHarness(false);
+        // 服务端确认完成后，本地回退操作仍须等待本刻真正获得身体的任务。
+        var h = new ServerRouterTestHarness(true);
+        h.welcome();
         var owners = new ServerRequestOwners();
         var background = h.submit("test.write");
         var synchronous = h.submit("test.other");

@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.network.OptionalWheelHookTest;
 
 import org.maiwithu.maicraft.client.server.MachineSnapshotEnrichmentTest;
 import org.maiwithu.maicraft.client.server.ServerActorMutationGateTest;
+import org.maiwithu.maicraft.client.server.RequiredServerRuntimeTest;
 import org.maiwithu.maicraft.client.server.ServerAssistanceRegressionSuite;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ServerCraftJobTest;
 import org.maiwithu.maicraft.core.integration.ae2.Ae2ServerSupplyTest;
@@ -94,6 +95,8 @@ public final class OptionalServerRegressionSuite {
         ProductionSessionIdleExpiryTest.main(args);
         MachineSnapshotEnrichmentTest.main(args);
         ServerActorMutationGateTest.main(args);
+        // 通过正式客户端入口确认：未装服务端时，世界已加载也不能开启 AI 感知和操作。
+        RequiredServerRuntimeTest.main(args);
         SemanticAbilityAvailabilityTest.main(args);
         Ae2ServerSupplyTest.main(args);
         Ae2ServerCraftJobTest.main(args);

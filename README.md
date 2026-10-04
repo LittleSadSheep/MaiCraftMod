@@ -9,10 +9,10 @@
 
 > 让支持 MCP 的 AI 代理在 Minecraft 中感知环境、规划目标，并通过真实的第一人称操作完成任务。
 
-MaiCraft 是一个客户端必装、服务端可选的 Minecraft Mod。客户端在游戏进程内提供本地
+MaiCraft 是一个服务端必装、普通玩家客户端可选的 Minecraft Mod；由 AI 控制的玩家仍需安装客户端。客户端在游戏进程内提供本地
 [Model Context Protocol（MCP）](https://modelcontextprotocol.io/) 服务，把大模型给出的语义目标转换为寻路、采集、合成、交互、建造等具体游戏行为。
 
-MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需准备一个支持 Streamable HTTP MCP 的 AI 客户端和可用模型。服务端未安装 MaiCraft 时使用客户端模式；服务端安装后，按协商到的能力启用原生机器观察、配置、供料和生产验证。
+MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需准备一个支持 Streamable HTTP MCP 的 AI 客户端和可用模型。官方客户端必须收到当前服务器的有效 MaiCraft 握手确认，才开放游戏感知和自动化；未确认时不降级到纯客户端模式，等待超时后自动断开。服务端按协商到的能力提供原生机器观察、配置、供料和生产验证。
 
 > [!WARNING]
 > MaiCraft 目前处于预览阶段，尚未发布稳定构建，也没有完成覆盖模组整合包的实机验收。请只在备份过的测试世界中使用，不要把它当作无人值守的生产级代理。
@@ -26,7 +26,7 @@ MaiCraft 不内置大模型，也不要求额外运行 Python 服务；你仍需
 - **战斗与里程碑**：处理防御或明确授权的战斗任务，并支持末影龙、鞘翅等长流程目标。
 - **模组机器**：从组件关系与工艺模块生成 Create、AE2、Mekanism 和混合设备布局，规划输送网络，分批供料施工，安装 AE2 部件与存储盘，配置已支持的 Mek 接口，并核验机器几何及同步运行证据。
 - **统一机器工序**：附魔台、切石机和 AE2 世界流体加工复用机器建造与使用入口，按需读取真实菜单报价或原生配方，再完成有限次数的操作与成品回收。
-- **可选服务端生产增强**：读取真实库存、配方和连接，配置受支持的过滤器、接口与 AE2 样板，按实际加工事件分批投料，再验证真实交付与持续产出窗口。
+- **服务端生产支持**：读取真实库存、配方和连接，配置受支持的过滤器、接口与 AE2 样板，按实际加工事件分批投料，再验证真实交付与持续产出窗口。
 - **Dev 蓝图预览**：在世界中显示半透明待建结构和差异轮廓，支持逐层查看；确认前归还玩家操控，确认后执行冻结的方案。
 - **只读房屋设计**：`maicraft:design_build` 直接显示蓝图，不移动或施工；普通建造在 Dev 确认之后才开始供料。
 - **客户端调试键**：F9 调试面板（MCP 端口、任务、动作行），F9+H 切任务列表页，F9+P 切导航路线显示；`/maicraft dev` 开关 Dev 模式（含施工预览）。
@@ -136,7 +136,7 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 | Java | `21` |
 | Fabric | Fabric Loader `0.18.1+`，并安装 Fabric API |
 | NeoForge | `21.1.233+` |
-| 安装位置 | 客户端必装，服务端可选 |
+| 安装位置 | 服务端必装；AI 玩家客户端必装，普通玩家客户端可选 |
 
 ### 从源码构建
 
@@ -159,13 +159,13 @@ Linux 或 macOS 使用：
 - Fabric：`fabric/build/libs/maicraft-fabric-1.21.1-<version>.jar`
 - NeoForge：`neoforge/build/libs/maicraft-neoforge-1.21.1-<version>.jar`
 
-将与你的加载器匹配、文件名不含 `sources` 的 JAR 放入客户端 `mods` 目录。Fabric 版本还需要 Fabric API。
+将与你的加载器匹配、文件名不含 `sources` 的 JAR 放入服务器及 AI 所在客户端的 `mods` 目录。普通玩家可以不安装 MaiCraft。Fabric 版本还需要 Fabric API。
 
 CI 构建通过后，也可以从 [GitHub Actions](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml) 对应运行的 Artifacts 下载双加载器测试包；产物保留 14 天，不会自动发布 Release。自动检查与日志说明见[开发指南](docs/dev/contributing.md#github-自动检查)。
 
-要启用服务端增强，在服务器 `mods` 目录中安装对应加载器的 MaiCraft JAR；建议客户端与服务端使用相同版本。单人世界由同一个客户端安装提供集成服务端支持。连接未安装 MaiCraft 的服务器时，普通客户端感知、建造及已有原生操作继续可用。
+建议 AI 客户端与服务端使用相同版本。单人世界由同一个客户端安装提供集成服务端支持，无需另装一份。AI 客户端入服后最多等待 200 个客户端游戏刻（通常 10 秒）完成服务端确认；等待期间禁止世界感知、F8 接管及自动化操作，超时后显示安装提示并断开连接。换服必须重新确认，普通玩家不受此客户端检查影响。
 
-选定能力的契约附带 `server_assistance` 概要：`ready` 表示已协商，`client_only` 表示客户端模式。完整后端诊断使用 `perceive(view="abilities", focus="maicraft:server_assistance")`。具体操作仍需满足模组、权限、距离、材料和原生状态条件；超时或结果未知不会触发重复操作或擅自切换后端重做。
+选定能力的契约附带 `server_assistance` 概要：`ready` 表示已协商。完整后端诊断使用 `perceive(view="abilities", focus="maicraft:server_assistance")`，其中 `server_required` 和 `server_confirmed` 说明安装要求及当前连接的确认状态；诊断中的 `client_only` 仅表示操作协商未就绪，不能绕过连接确认。具体操作仍需满足模组、权限、距离、材料和原生状态条件；超时或结果未知不会触发重复操作或擅自切换后端重做。
 
 ### 建筑规模与资源配置
 
@@ -187,7 +187,7 @@ CI 构建通过后，也可以从 [GitHub Actions](https://github.com/LittleSadS
 
 ### 清障白名单
 
-客户端首次启动生成 `config/maicraft-clearance.json`，寻路挖路与建造清场共用。它是方块 ID／`#方块标签` 的 JSON 数组，修改后重启生效；空数组或无效配置禁止自动清障。默认明确列出原版自然地形、矿石、原木、树叶与植被，不依赖服务端安装 MaiCraft；模组地形可自行加入注册 ID 或同步的标签，例如 `"#c:ores"`。按方块类型判断，因此玩家放置的同种泥土、石头、原木也会命中名单。
+客户端首次启动生成 `config/maicraft-clearance.json`，寻路挖路与建造清场共用。它是方块 ID／`#方块标签` 的 JSON 数组，修改后重启生效；空数组或无效配置禁止自动清障。默认明确列出原版自然地形、矿石、原木、树叶与植被；模组地形可自行加入注册 ID 或同步的标签，例如 `"#c:ores"`。按方块类型判断，因此玩家放置的同种泥土、石头、原木也会命中名单。
 
 寻路遇到名单外方块会绕行；没有可行路线就失败。施工遇到名单外障碍会停止，并通过 `clearance_report` 向 LLM 返回维度、方块 ID、坐标、冲突数量和最近的水平选址偏移。偏移建议在已加载地形中核对整份蓝图，搜索半径 16 格；未知区块或预算不足会注明。建议仅证明目标格的清障条件，仍须重新检查地基、通路和新场地；不会自动搬迁已有工程。替换许可、保护区域、流体与不可破坏限制继续生效，自有临时支撑仍按原清理流程回收。
 
@@ -249,7 +249,7 @@ v2 加工只消费现有主背包原料；直接运行的材料策略仅接受 `
 
 同一请求的网络重试复用 `request_key`。过程支持暂停、取消和手动接管；开始持久化消费预约后禁止普通自动重试，刷新快照也不会重置同一消费身份。出现 `outcome_uncertain` 时先检查现场、物品与经验，再决定后续恢复目标。
 
-v1 网络配方、配置、供料与生产证明仍依赖协商到的服务端能力；精确格式见能力契约、[加工知识](common/src/main/resources/assets/maicraft/knowledge/processes.md)与[蓝图说明](common/src/main/resources/assets/maicraft/knowledge/blueprint.md)。未安装服务端时，普通建造与原版附魔等客户端原生过程仍可用；需要服务端证据的目标会明确说明缺少的能力。
+v1 网络配方、配置、供料与生产证明仍依赖协商到的服务端能力；精确格式见能力契约、[加工知识](common/src/main/resources/assets/maicraft/knowledge/processes.md)与[蓝图说明](common/src/main/resources/assets/maicraft/knowledge/blueprint.md)。服务器确认安装后，普通建造与原版附魔等过程仍由客户端执行；需要特定服务端证据的目标会明确说明缺少的能力。
 
 v1 成功要求真实加工事件、声明的时间跨度和目标物品的原生交付。世界流体加工的 `native_recipe_verified` 表示原生配方事件已验证；仅观察到产物拾取与背包变化时，`evidence_scope="client_observed_output_and_inventory"`，不宣称原生配方事件已确认。这些有限过程也不证明持续产线；库存增加、机器旋转或一次接口调用成功都不能单独证明持续生产。
 

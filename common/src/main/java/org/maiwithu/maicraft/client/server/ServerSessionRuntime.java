@@ -7,6 +7,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.preview.PreviewController;
@@ -35,6 +36,17 @@ public final class ServerSessionRuntime {
 
     private ServerSessionRuntime() {}
     public static boolean installed() { return installed; }
+
+    /** 当前连接完成服务端确认后才开放游戏能力；旧连接的确认不能带到另一台服务器。 */
+    public static boolean serverConfirmed(Minecraft minecraft) {
+        return installed && connection != null && connection == minecraft.getConnection()
+                && connection.getConnection().isConnected() && router.serverConfirmed();
+    }
+
+    public static void requireConfirmed(Minecraft minecraft) {
+        if (!serverConfirmed(minecraft)) throw new IllegalStateException(
+                "MaiCraft 尚未确认服务端支持；服务器必须安装 MaiCraft，握手完成前不能使用游戏能力。");
+    }
 
     public static void install() {
         requireThread();
@@ -94,7 +106,8 @@ public final class ServerSessionRuntime {
         requireThread();
         if (!installed) return;
         tick++;
-        if (context == null || minecraft.getConnection() == null
+        // 入服先以零操作授权完成握手，再允许创建身体上下文；确认过程不依赖 AI 已取得控制权。
+        if (minecraft.player == null || minecraft.level == null || minecraft.gameMode == null || minecraft.getConnection() == null
                 || !minecraft.getConnection().getConnection().isConnected()) {
             if (connection != null) router.disconnect();
             connection = null;
@@ -112,10 +125,10 @@ public final class ServerSessionRuntime {
             String serverIdentity = server != null ? "remote:" + server.ip : "local:" + (local == null
                     ? minecraft.gameDirectory.toPath() : local.getWorldPath(LevelResource.ROOT));
             journal.bind(serverIdentity, player.getUUID().toString(), level.dimension().location().toString());
-            boolean allowed = context.body().automationOwnsControls() && !PreviewController.waitingReview()
+            boolean allowed = context != null && context.body().automationOwnsControls() && !PreviewController.waitingReview()
                     && !GameplayAttentionMonitor.blocksAutomation(context.player());
             router.bind(connectionRevision, bindingRevision, level.dimension().location().toString(),
-                    context.controlRevision(), allowed, tick);
+                    context == null ? 0 : context.controlRevision(), allowed, tick);
         }
         // 先绑定当前身体和控制权，再处理回调，避免新入队或结算的请求沿用旧玩家授权。
         for (int i = 0; i < 256; i++) {
@@ -126,6 +139,11 @@ public final class ServerSessionRuntime {
         }
         retireOwners();
         router.observe(tick);
+        // Fabric 的通道声明可能晚于入服事件，因此等待真实欢迎包；未确认时始终关闭玩法入口。
+        if (connection != null && router.serverConfirmationExpired()) {
+            connection.getConnection().disconnect(Component.literal(
+                    "未能确认服务器的 MaiCraft 支持，已断开连接。\n请让服主安装兼容的 MaiCraft；普通玩家客户端无需安装。"));
+        }
         if (context != null) {
             router.dispatch(false);
         }

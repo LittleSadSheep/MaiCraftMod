@@ -339,9 +339,9 @@ Ponder 结构资源与模型自编蓝图使用同一格式。先读相关方块�
 
 `operate_machine` 负责现有的菜单、存取物品和控制操作。启动成功与持续产出需要相应观察证据，不能由构建完成推出。缺少某种使用操作时先读取 abilities，按具体缺口反馈，避免假定任意 NBT 或点击动作都可执行。
 
-## 可选服务端生产清单
+## 服务端生产清单
 
-客户端必装，服务端可选。先查看 `perceive(view="abilities")` 中的 `server_assistance` 与具体操作支持情况。没有服务端增强时，普通构建继续使用客户端模式；生产证明不会自动降级为只看方块或库存。
+服务端必装，AI 所在客户端必装，普通玩家客户端可选。当前连接完成服务端确认后，先查看 `perceive(view="abilities")` 中的 `server_assistance` 与具体操作支持情况。普通构建仍由客户端执行；缺少某项服务端生产能力时，生产证明不会自动降级为只看方块或库存。
 
 - `build_machine` 可额外提供 `production` 和 `allow_use: true`，在同一任务中执行建造、配置、供料和观察。
 - 已建机器使用 `operate_machine`、`operation: "run_production"`、`production`、`snapshot_id` 与 `allow_use: true`。
