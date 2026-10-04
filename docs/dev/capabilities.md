@@ -32,12 +32,12 @@
 | `find_structure` | 找到游戏中的结构 | `AbilityAdapter.findStructure` | 契约与贡献者文档核对；[结构证据和到访](exploration.md) |
 | `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | 入口核对 |
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | 入口核对 |
-| `use_item` | 有限次持用背包中的物品 | `GeneralAbilityAdapter.useItem` | 入口核对 |
+| `use_item` | 定点使用或按新增产物有限次持用随身物品 | `GeneralAbilityAdapter.useItem` | [交互与定点使用](interaction.md) |
 | `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | 入口核对 |
 | `collect_items` | 走到掉落物旁靠原生接触拾取 | `GeneralAbilityAdapter.adapt` 的 `COLLECT` 分支 | 入口核对 |
 | `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | 入口核对 |
 | `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | 入口核对 |
-| `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | 入口核对 |
+| `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md) |
 | `use_container` | 靠近并打开容器 | `GeneralAbilityAdapter.interact` 的容器分支 | 入口核对 |
 | `manage_container` | 存入、取出或平衡背包数量 | `GeneralAbilityAdapter.manageContainer` | 入口核对 |
 | `consume` | 吃或使用指定物品 | `GeneralAbilityAdapter.consume` | 入口核对 |
