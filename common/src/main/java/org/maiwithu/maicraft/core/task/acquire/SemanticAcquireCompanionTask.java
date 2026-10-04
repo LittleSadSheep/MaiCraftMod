@@ -584,14 +584,18 @@ public final class SemanticAcquireCompanionTask
             boolean surfaceMissing = candidates.stream().anyMatch(candidate ->
                     candidate.cost().missingMaterials() == 0
                             && candidate.surfaceSupported() && !candidate.surfaceReady());
+            // 原料已齐却不能开工时，交付本次台面观察；已有工作台但无放置点不能只剩一句“缺工作面”。
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("candidate_count", candidates.size());
+            facts.put("rejected_recipes", List.copyOf(need.rejectedRecipes));
+            facts.put("lineage_recipes", List.copyOf(need.lineageRecipes));
+            if (workstation != null) facts.put("crafting_surface", workstation.facts(player));
             addIssue("craft", surfaceMissing
                             ? "crafting_surface_missing" : "no_finite_recipe_path",
                     surfaceMissing
                             ? "materials exist, but no compatible crafting surface can be prepared from live facts"
                             : "no cycle-free client-known ordinary recipe path remained",
-                    Map.of("candidate_count", candidates.size(),
-                            "rejected_recipes", List.copyOf(need.rejectedRecipes),
-                            "lineage_recipes", List.copyOf(need.lineageRecipes)));
+                    facts);
             advanceSource(need);
             return TaskState.RUNNING;
         }
@@ -2013,6 +2017,8 @@ public final class SemanticAcquireCompanionTask
                 .filter(id -> !parent.lineageItems.contains(id))
                 .toList();
         if (itemIds.isEmpty() || blockedRecipeId == null || blockedRecipeId.isBlank()) return false;
+        // 补台只保证手上有一张；库存已到位时应重新准备摆放，不能把旧缺台结论变成“再造一张”的材料树。
+        if (count(itemIds) > 0) return false;
 
         Set<ResourceLocation> lineageItems = new LinkedHashSet<>(parent.lineageItems);
         lineageItems.addAll(itemIds);
@@ -2027,7 +2033,7 @@ public final class SemanticAcquireCompanionTask
         if (!parent.surfaceRecoveryRecipes.add(blockedRecipeId)) return false;
         commitRecipe(parent, Set.of(blockedRecipeId));
         AcquisitionNeed prerequisite = new AcquisitionNeed(
-                itemIds, count(itemIds) + 1, parent.depth + 1,
+                itemIds, 1, parent.depth + 1,
                 lineageItems, lineageRecipes, Set.of(blockedRecipeId),
                 prerequisiteSources);
         prerequisite.lastObservedCount = count(prerequisite.itemIds);

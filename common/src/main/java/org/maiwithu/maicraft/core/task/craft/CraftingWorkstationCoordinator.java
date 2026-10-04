@@ -5,6 +5,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 import java.util.WeakHashMap;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -22,15 +23,18 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CraftingTableBlock;
+import net.minecraft.world.level.block.FletchingTableBlock;
+import net.minecraft.world.level.block.SmithingTableBlock;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.build.FirstPersonPlacementProbe;
+import org.maiwithu.maicraft.core.PlayerInv;
 
 /**
  * 为需要 3×3 的合成找工作台：能用身边的就用，远处已有的可以走过去，也可以摆出背包里的工作台。
  * 这里只决定下一步，不自己移动或摆方块；缺工作台物品时把需求交回取物流程。
- * 当前通过 CraftingTableBlock 及其子类识别可自动寻找的工作台，不是识别全部能提供合成界面的模组方块。
+ * 识别普通工作台及其兼容子类，但排除不提供普通合成的制箭台、锻造台；模组自定义工作面仍由原生菜单确认。
  */
 public final class CraftingWorkstationCoordinator {
     private static final double REACH = 4.5D;
@@ -80,6 +84,26 @@ public final class CraftingWorkstationCoordinator {
                 CraftPlanCost.Surface surface, BlockPos station, String detail) {
             this(surface, station, List.of(), detail);
         }
+
+        /** 失败时保留现场工作面判断，区分没带台、找不到放置点与已经发现世界中的台。 */
+        public Map<String, Object> facts(LocalPlayer player) {
+            Map<String, Integer> carried = new LinkedHashMap<>();
+            Inventory inventory = player.getInventory();
+            for (int slot = 0; slot < Math.min(PlayerInv.BUILDABLE_SLOTS, inventory.items.size()); slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (!stack.isEmpty() && stack.getItem() instanceof BlockItem item
+                        && ordinaryCraftingTable(item.getBlock())) {
+                    carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+                }
+            }
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("state", surface.name().toLowerCase(Locale.ROOT));
+            facts.put("detail", detail);
+            facts.put("main_inventory_workstations", carried);
+            facts.put("prerequisite_item_ids", prerequisiteItemIds.stream().map(ResourceLocation::toString).toList());
+            if (station != null) facts.put("station", List.of(station.getX(), station.getY(), station.getZ()));
+            return Map.copyOf(facts);
+        }
     }
 
     private final Set<Long> rejectedStations = new LinkedHashSet<>();
@@ -126,7 +150,7 @@ public final class CraftingWorkstationCoordinator {
         if (expected == null) return null;
         if (!player.level().isLoaded(pos)) return expected;
         Block live = player.level().getBlockState(pos).getBlock();
-        if (live == expected && live instanceof CraftingTableBlock) return live;
+        if (live == expected && ordinaryCraftingTable(live)) return live;
         entries.remove(pos.asLong());
         if (entries.isEmpty()) TEMPORARY_TABLES.remove(player.clientLevel);
         return null;
@@ -278,8 +302,16 @@ public final class CraftingWorkstationCoordinator {
     }
 
     public static boolean usableTable(LocalPlayer player, BlockPos pos) {
+        // 世界中的桌子与背包中的桌子使用相同分类，不能走向制箭台后才发现没有合成界面。
         return pos != null && player.level().isLoaded(pos)
-                && player.level().getBlockState(pos).getBlock() instanceof CraftingTableBlock;
+                && ordinaryCraftingTable(player.level().getBlockState(pos).getBlock());
+    }
+
+    private static boolean ordinaryCraftingTable(Block block) {
+        // 制箭台和锻造台复用了原版工作台父类，实际交互却不是三乘三合成，不能为工具配方补造它们。
+        return block instanceof CraftingTableBlock
+                && !(block instanceof FletchingTableBlock)
+                && !(block instanceof SmithingTableBlock);
     }
 
     private static Block carriedTable(LocalPlayer player) {
@@ -288,7 +320,7 @@ public final class CraftingWorkstationCoordinator {
         for (int slot = 0; slot < limit; slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (!stack.isEmpty() && stack.getItem() instanceof BlockItem blockItem
-                    && blockItem.getBlock() instanceof CraftingTableBlock) {
+                    && ordinaryCraftingTable(blockItem.getBlock())) {
                 return blockItem.getBlock();
             }
         }
@@ -322,8 +354,9 @@ public final class CraftingWorkstationCoordinator {
     }
 
     private static List<Block> craftingTableBlocks() {
+        // 扫描、随身取台与补台材料树保持同一候选集，避免一个入口排除的错误工作面又从另一入口回来。
         List<Block> result = BuiltInRegistries.BLOCK.stream()
-                .filter(block -> block instanceof CraftingTableBlock)
+                .filter(CraftingWorkstationCoordinator::ordinaryCraftingTable)
                 .toList();
         return result.isEmpty() ? List.of(Blocks.CRAFTING_TABLE) : result;
     }

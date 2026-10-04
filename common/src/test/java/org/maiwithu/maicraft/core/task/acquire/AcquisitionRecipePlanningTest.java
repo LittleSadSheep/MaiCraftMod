@@ -48,6 +48,7 @@ public final class AcquisitionRecipePlanningTest {
             includeCookingInputsWithoutConversionLoops(world);
             batchAlternativesShareOneNearestSourceQuery(world);
             carriedJungleLogsPrepareToolsWithoutPreference(world);
+            carriedWorkstationDoesNotCreateExtraDemand(world);
             reserveExistingGoalOutputs(world);
             world.inventory.setItem(0, new ItemStack(Items.STICK, 4));
             var alreadyCarried = plan(world);
@@ -76,6 +77,28 @@ public final class AcquisitionRecipePlanningTest {
         // 真正新增的转换原料可以继续做成第三件，不能因存在反向配方而禁止合法现货加工。
         world.inventory.setItem(1,new ItemStack(Items.COAL));world.nextTick();
         check(planner.materialPlan(recipe,need).feasible()&&planner.materialPlan(recipe,need).supplies().isEmpty(),"已有独立原料应允许完成原需求");
+    }
+
+    private static void carriedWorkstationDoesNotCreateExtraDemand(InteractionWorldTestHarness world) throws Exception {
+        // 补工作面前库存可能已经同步到位；原木需求只能用来取得第一张台，不能把已有一张改成目标两张。
+        world.inventory.clearContent();
+        var table = BuiltInRegistries.ITEM.getKey(Items.CRAFTING_TABLE);
+        var hoe = BuiltInRegistries.ITEM.getKey(Items.WOODEN_HOE);
+        var record = new SemanticAcquireTaskRecord("surface-stock", 1000, List.of(hoe), 1,
+                List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.CRAFT), false,
+                SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
+        var task = new SemanticAcquireCompanionTask(world.player, record); task.onStart();
+        var root = SemanticAcquireCompanionTask.class.getDeclaredField("rootNeed"); root.setAccessible(true);
+        var need = (AcquisitionNeed) root.get(task);
+        var push = SemanticAcquireCompanionTask.class.getDeclaredMethod("pushCraftingSurfacePrerequisite",
+                AcquisitionNeed.class, String.class, String.class, List.class); push.setAccessible(true);
+        world.inventory.setItem(12, new ItemStack(Items.CRAFTING_TABLE));
+        check(!((boolean) push.invoke(task, need, "minecraft:wooden_hoe", hoe.toString(), List.of(table)))
+                && need.surfaceRecoveryRecipes.isEmpty(), "已有工作台时不建立额外材料树，也不消耗恢复机会");
+        world.inventory.clearContent();
+        check((boolean) push.invoke(task, need, "minecraft:wooden_hoe", hoe.toString(), List.of(table)),
+                "真正缺工作台时仍允许按原来源准备一张");
+        task.result(TaskState.CANCELLED);
     }
 
     private static void carriedJungleLogsPrepareToolsWithoutPreference(InteractionWorldTestHarness world) throws Exception {
