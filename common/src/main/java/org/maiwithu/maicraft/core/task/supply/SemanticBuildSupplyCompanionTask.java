@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItems;
@@ -611,8 +612,7 @@ final class SemanticBuildSupplyCompanionTask
         int required = count.intValue();
         if (required < 1 || required > 32) return false;
         // 上一批在去工位途中真实消耗了垫块，下一批就把这份通行量与现场仍缺的量一起备齐；不靠改清单或凭空放块解困。
-        if(result.data().get("navigation_placed_blocks") instanceof Number placed)
-            supportAccessReserve=Math.max(supportAccessReserve,Math.max(0,placed.intValue()));
+        supportAccessReserve=Math.max(supportAccessReserve,navigationSupportConsumption(result.data(),ScaffoldMaterials.of(player)));
         long withAccess=(long)required+supportAccessReserve;
         if(withAccess>SemanticAcquireTaskRecord.MAX_FINAL_COUNT)return false;
         required=(int)withAccess;
@@ -625,6 +625,18 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private int supportAccessReserve;
+
+    static int navigationSupportConsumption(Map<String,Object> data,List<Item> allowed) {
+        // 落水辅助也会记为原生放置，但水桶可回收；只统计当前支撑清单中的实际方块，不把倒水算成圆石消耗。
+        if(data.get("navigation_terrain_changes") instanceof Map<?,?> terrain&&terrain.get("placed") instanceof Map<?,?> placed) {
+            var blocks=new LinkedHashSet<String>();
+            for(Item item:allowed)if(item instanceof BlockItem block)blocks.add(BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString());
+            long count=0;
+            for(var entry:placed.entrySet())if(blocks.contains(String.valueOf(entry.getKey()))&&entry.getValue() instanceof Collection<?> positions)count+=positions.size();
+            return (int)Math.min(Integer.MAX_VALUE,count);
+        }
+        return data.get("navigation_placed_blocks") instanceof Number count?Math.max(0,count.intValue()):0;
+    }
 
     private TaskState tickSupportSupply() {
         // 原地查所有现货 -> 附近定点采收 -> 原施工；整个过程保留图纸保护，不为临时垫块派出坑或仓库远行。

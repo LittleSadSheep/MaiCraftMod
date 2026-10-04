@@ -126,6 +126,10 @@ public final class BuildSupportSupplyTest {
     }
 
     private static void reserveTheObservedApproachCost(InteractionWorldTestHarness h) throws Exception {
+        // 实机通行账同时包含圆石和落地水：补料只追认被消耗的支撑方块，不能把可回收水桶也当作石料。
+        var terrain=Map.<String,Object>of("navigation_terrain_changes",Map.of("placed",Map.of(
+                "minecraft:cobblestone",List.of(List.of(1,2,3)),"minecraft:water",List.of(List.of(2,2,3)))),"navigation_placed_blocks",2);
+        check(SemanticBuildSupplyCompanionTask.navigationSupportConsumption(terrain,List.of(Items.COBBLESTONE))==1,"落地水不能扩大圆石补料目标");
         // 复现补一块、导航又消耗一块的实机循环；已经带着一块仍应补到两块，抵达工位后才能兑现放置需求。
         h.inventory.clearContent();h.inventory.setItem(0,new ItemStack(Items.COBBLESTONE));
         var parent=new SemanticBuildSupplyCompanionTask(h.player,owner(List.of()),(r,plan)->Decision.DISABLED);
