@@ -65,6 +65,12 @@ public final class StonecuttingCompanionTask extends BlockMenuCompanionTask<Ston
     @Override protected String successMessage() {
         return "cut " + r.count + " " + r.input + " into " + r.output + ", verified returns and closed the native menu";
     }
+
+    /** 面板行动行的一句话汇报；输入输出与数量来自任务单，切石机坐标是已确认的站点事实。 */
+    @Override
+    public String describeCurrentAction() {
+        return "正在用切石机把 " + r.input + " 切成 " + r.output + " (" + r.count + " 件)";
+    }
     @Override protected String timeoutMessage() {
         return "stonecutting timed out; inspect the recorded crafts, consumption boundary and cleanup status before continuing";
     }

@@ -988,6 +988,22 @@ public final class SemanticTradeCompanionTask
                 + " of " + r.itemId;
     }
 
+    /** 面板行动行的一句话汇报；阶段来自当前 {@link Phase}，交易对象是已锁定的村民本地化名称。 */
+    @Override
+    public String describeCurrentAction() {
+        String merchantName = merchant == null ? "村民" : merchant.getName().getString();
+        return switch (phase) {
+            case SURVEY -> "正在观察附近的交易对象";
+            case OPEN -> "正在走向 " + merchantName + " 准备交易";
+            case WAIT_MENU -> "正在等待交易界面打开";
+            case SELECT -> "正在查看 " + merchantName + " 的交易选项";
+            case PAY -> "正在支付交易材料";
+            case TAKE -> "正在取回交易产物";
+            case CLEANUP -> "正在关闭交易界面";
+            case COMPLETE -> "交易已完成";
+        };
+    }
+
     @Override
     protected String timeoutMessage() {
         return "trading stopped making verifiable first-person progress; the real main inventory holds "

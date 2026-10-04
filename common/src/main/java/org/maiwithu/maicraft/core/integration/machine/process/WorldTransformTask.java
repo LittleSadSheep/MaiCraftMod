@@ -87,6 +87,20 @@ final class WorldTransformTask extends AbstractCompanionTask<WorldTransformTaskR
         catch (RuntimeException invalid) { return failed(invalid.getMessage(), FailureType.UNKNOWN); }
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部投料/等待/收集 Phase，批次进度来自 batchIndex 与计划批数。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) return child.describeCurrentAction();
+        String batch = plan != null && plan.size() > 1 ? " " + (batchIndex + 1) + "/" + plan.size() : "";
+        return switch (phase) {
+            case PREPARE, APPROACH -> "正在前往加工站位";
+            case BASELINE -> "正在记录加工前现场基线";
+            case FEED -> "正在投入加工原料" + batch;
+            case WAIT_OUTPUT -> "正在等待加工产出";
+            case COLLECT, VERIFY_PICKUP -> "正在收集加工产出" + batch;
+            case COMPLETE -> "正在收尾原生工序";
+        };
+    }
+
     private TaskState advance() {
         var context = ClientRuntime.requireContext(player);
         if (!context.permitsNativeActions()) return failed("world_process_control_handed_over", FailureType.INTERRUPTED);

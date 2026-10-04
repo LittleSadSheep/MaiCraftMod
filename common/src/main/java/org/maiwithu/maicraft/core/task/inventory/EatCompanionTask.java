@@ -137,6 +137,11 @@ public final class EatCompanionTask extends AbstractCompanionTask<EatItemTaskRec
         super.stop(companion, reason);
     }
 
+    /** 面板行动行的一句话汇报；食物名来自任务单标签，进食中与取物中分两句话。 */
+    @Override public String describeCurrentAction() {
+        return eat == null ? "正在拿出 " + r.label : "正在吃 " + r.label;
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         // 无论成功还是失败，附上此刻的血量和饥饿值，方便调用者看当前身体状态。

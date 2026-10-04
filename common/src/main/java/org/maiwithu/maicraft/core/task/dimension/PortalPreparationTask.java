@@ -205,7 +205,10 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         }
         if (terminal != TaskState.SUCCESS || !result.success()) {
             Map<String, Object> evidence = new LinkedHashMap<>();
-            for (String key : List.of("issue_code", "allowed_dimensions", "recovery_options", "failure_type", "requires_narration", "target_item_family"))
+            // 带上施工预检的逐格拒绝证据（blocked_cells/clearance_report），否则"哪些格、被哪条
+            // 规则拒绝"在包装层丢失，调用方只能看到一句 portal_build_failed 无法自证或绕开。
+            for (String key : List.of("issue_code", "allowed_dimensions", "recovery_options", "failure_type",
+                    "requires_narration", "target_item_family", "blocked_cells", "clearance_report", "failure_code"))
                 if (result.data() != null && result.data().containsKey(key)) evidence.put(key, result.data().get(key));
             childEvidence = Map.copyOf(evidence);
             String fallback = "requires_dimension".equals(evidence.get("failure_type")) ? "requires_dimension"
@@ -257,11 +260,6 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     private String preparationPhase() {
         return phase == Phase.CAST && casting != null ? casting.stage() : phase.name().toLowerCase(Locale.ROOT);
     }
-    /** 把取水、补料等实际子阶段传到 HUD，准备期间不能只留下空白的行动行。 */
-    @Override public String describeCurrentAction() {
-        if (child != null && child.describeCurrentAction() != null) return child.describeCurrentAction();
-        return activation != null ? "点燃并核实传送门" : "准备传送门";
-    }
     @Override public Map<String, Object> progress() {
         var data = new LinkedHashMap<>(resultData());
         if (child != null) data.put("child", child.progress()); return data;
@@ -284,6 +282,26 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             super.cleanup();
         }
     }
+    /** 面板行动行的一句话汇报；说法来自准备阶段（{@code Phase}），子任务在跑时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) {
+            String deeper = child.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        if (activation != null) return end ? "正在放置末影之眼" : "正在点燃传送门";
+        return switch (phase) {
+            case SURVEY -> "正在勘察传送门场址";
+            case SUPPLY -> "正在补齐传送门材料";
+            case RETURN -> "正在回到传送门场址";
+            case BUILD -> "正在建造传送门门框";
+            case CAST -> "正在浇筑下界传送门";
+            case LOCATE -> "正在定位要塞";
+            case MOVE -> "正在走到激活站位";
+            case ACTIVATE -> end ? "正在放置末影之眼" : "正在点燃传送门";
+            case VERIFY -> "正在核实传送门已激活";
+        };
+    }
+
     @Override protected String successMessage() {
         return complete ? "portal preparation verified from the active portal surface"
                 : "Native casting actions completed; the observed frame needs a model decision before further work.";

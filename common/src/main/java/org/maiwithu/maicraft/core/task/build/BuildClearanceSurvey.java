@@ -44,8 +44,14 @@ public final class BuildClearanceSurvey {
         // 候选新址也避开任务继承的保护区和机器其他层，不能因跨刻离开原作用域就丢失这些限制。
         var protectedArea = new LongOpenHashSet(inheritedProtection);
         protectedArea.addAll(NavigationSafetyContext.protectedMutationCells());
-        plan.protectedNavigationCells().forEach(at -> protectedArea.add(at.asLong()));
-        plan.materialSupplyProtection().forEach(at -> protectedArea.add(at.asLong()));
+        // 计划自注册的材料/导航保护不得覆盖自家目标格：门框等"目标格落在自己保护区内的施工"
+        // 曾被自己的保护集系统性拒绝（PortalPreparationSite 把整个 footprint 注册为材料保护）。
+        // 继承的显式保护与运行时保护区不受此限，照常否决目标格。
+        var selfProtected = new LongOpenHashSet();
+        plan.protectedNavigationCells().forEach(at -> selfProtected.add(at.asLong()));
+        plan.materialSupplyProtection().forEach(at -> selfProtected.add(at.asLong()));
+        for (var target : plan.targets) selfProtected.remove(target.pos().asLong());
+        protectedArea.addAll(selfProtected);
         var forbidden = NavigationSafetyContext.forbiddenBodyCells();
         return new BuildClearanceSurvey(plan.targets, plan.replaceMode, plan.replaceBlockEntities,
                 level.dimension().location().toString(), at -> {

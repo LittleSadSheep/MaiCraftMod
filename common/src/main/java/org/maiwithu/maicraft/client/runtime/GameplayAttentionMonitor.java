@@ -52,6 +52,10 @@ public final class GameplayAttentionMonitor {
     private static float previousEffectiveHealth = Float.NaN;
     private static LifeState lifeState = LifeState.ALIVE;
     private static DeathSnapshot lastDeath;
+    /** 重生报告在物品栏内容包同步后发布；窗口到期则按当时读数如实发布（真掉落场景本就是空包）。 */
+    private static final int RESPAWN_INVENTORY_SYNC_TICKS = 30;
+    private static JsonObject pendingRespawnFacts;
+    private static long pendingRespawnDeadline;
 
     private GameplayAttentionMonitor() {}
 
@@ -61,6 +65,8 @@ public final class GameplayAttentionMonitor {
     public static void tick(LocalPlayer player) {
         // 先复核常驻提醒：死亡或换身体立即清空，活着时更新补光后和离开现场后的真实状态。
         GameplayReminders.tick(player);
+        // 重生报告等内容包同步或窗口到期后再发布；世界切换等边界会在 reset 里作废。
+        if (pendingRespawnFacts != null) resolveRespawnReport(player);
         ClientLevel level = player.clientLevel;
         String dimension = level.dimension().location().toString();
         String phase = WorldTimeSemantics.phase(level).id();
@@ -145,6 +151,8 @@ public final class GameplayAttentionMonitor {
         activeReflexes.clear();
         // 换世界/断线时丢掉未收尾的伤害片段：那些命中属于上一个身体与上一个世界。
         activeDamage.clear();
+        // 未发布的重生报告属于旧世界：新世界不能收到旧身体的库存对比。
+        pendingRespawnFacts = null;
         if (!preserveDeathRecovery || lifeState == LifeState.ALIVE) {
             lifeState = LifeState.ALIVE;
             lastDeath = null;
@@ -235,7 +243,6 @@ public final class GameplayAttentionMonitor {
         if (player == null || lifeState != LifeState.RESPAWN_OBSERVED || lastDeath == null) return;
         // 人工点击重生也解决了死亡：作废还挂着答复的无宿主恢复态，避免迟到答复在新身体上再触发一次重生。
         IntentRuntime.get().finishSupersededDeathRecovery(player.level().getGameTime());
-        Map<String, Integer> currentInventory = inventoryCounts(player);
         IntentTaskRecord restored = lastDeath.taskId() == null
                 ? null : IntentRuntime.get().task(lastDeath.taskId());
         JsonObject data = new JsonObject();
@@ -249,9 +256,6 @@ public final class GameplayAttentionMonitor {
             data.addProperty("task_outcome", safeText(restored.goal().outcome(), 160));
         }
         data.addProperty("inventory_before_death_total", lastDeath.inventoryTotal());
-        data.addProperty("inventory_after_respawn_total", totalItems(currentInventory));
-        data.addProperty("inventory_missing_count",
-                missingCount(lastDeath.inventory(), currentInventory));
         data.addProperty("recover_after_death_requested", lastDeath.recoverAfterDeath());
         data.addProperty("item_recovery_started", false);
         data.addProperty("item_recovery_claimed", false);
@@ -259,9 +263,29 @@ public final class GameplayAttentionMonitor {
                 restored != null && restored.getState().isTerminal()
                         ? "choose the next goal from the observed respawn state"
                         : "reassess safety and prove fresh owned drops before any recovery attempt");
-        publish("agent.respawned", "Native respawn completed; inspect the recorded task state before continuing.", data);
+        // 物品栏对比延后：重生后的物品栏内容包常晚于语义绑定到达，绑定瞬间读取会把
+        // keepInventory 场景误报成"全部丢失"并引导不必要的资产对账。等内容包先到
+        // （背包总数非零）或同步窗口到期，再计算 missing_count 并发布。
+        pendingRespawnFacts = data;
+        pendingRespawnDeadline = player.level().getGameTime() + RESPAWN_INVENTORY_SYNC_TICKS;
         // 这里只解除死亡阶段锁，没有清除原任务里的 death_recovery 决定；手动重生后仍可能被旧决定挡住 resume。
         lifeState = LifeState.ALIVE;
+    }
+
+    private static synchronized void resolveRespawnReport(LocalPlayer player) {
+        if (pendingRespawnFacts == null) return;
+        var current = inventoryCounts(player);
+        int total = totalItems(current);
+        // 死亡时背包非空而重生读数为零，先当作内容包未到继续等；真掉落场景本就是空包，到期即如实报告。
+        boolean inventoryArrived = total > 0 || lastDeath == null || lastDeath.inventoryTotal() == 0
+                || player.level().getGameTime() >= pendingRespawnDeadline;
+        if (!inventoryArrived) return;
+        pendingRespawnFacts.addProperty("inventory_after_respawn_total", total);
+        pendingRespawnFacts.addProperty("inventory_missing_count",
+                missingCount(lastDeath.inventory(), current));
+        publish("agent.respawned", "Native respawn completed; inspect the recorded task state before continuing.",
+                pendingRespawnFacts);
+        pendingRespawnFacts = null;
     }
 
     public enum DeathDecisionEffect {

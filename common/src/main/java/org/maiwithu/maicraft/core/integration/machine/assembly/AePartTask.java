@@ -228,6 +228,13 @@ public final class AePartTask extends AbstractCompanionTask<AePartTaskRecord> {
         InputDriver.halt(player);
         super.cleanup();
     }
+    /** 面板行动行的一句话汇报；阶段来自内部取材/瞄准/确认状态，坐标是正在安装的部件位置。 */
+    @Override public String describeCurrentAction() {
+        if (equip != null) return equip.describeCurrentAction();
+        String at = " (" + r.target.getX() + "," + r.target.getY() + "," + r.target.getZ() + ")";
+        return submitted ? "正在确认 AE2 部件安装" + at : "正在安装 AE2 部件" + at;
+    }
+
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return submitted && !verified; }
     @Override public void stop(LocalPlayer companion, StopReason why) {
         if (equip != null) equip.stop(companion, why);

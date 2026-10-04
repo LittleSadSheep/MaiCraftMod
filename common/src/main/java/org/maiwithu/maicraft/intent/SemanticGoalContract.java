@@ -225,6 +225,10 @@ final class SemanticGoalContract {
     private static final Set<String> RUNTIME_AUTHORIZATION_KEYS =
             Set.of("auto_respawn", "recover_after_death");
 
+    static Set<String> runtimeAuthorizationKeys() {
+        return RUNTIME_AUTHORIZATION_KEYS;
+    }
+
     private static Set<String> withRuntimeAuthorizationKeys(Set<String> declared) {
         Set<String> merged = new HashSet<>(declared);
         merged.addAll(RUNTIME_AUTHORIZATION_KEYS);

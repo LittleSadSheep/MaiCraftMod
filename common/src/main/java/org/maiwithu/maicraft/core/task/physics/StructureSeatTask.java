@@ -69,6 +69,12 @@ public final class StructureSeatTask extends AbstractCompanionTask<BoardStructur
     }
     @Override protected String successMessage(){return "原生乘坐关系确认，已坐入指定飞艇座位，未启动载具";}
     @Override public Map<String,Object> progress(){return Map.of("phase",action!=null?"confirming_seat":"boarding_seat","approach",approach.evidence());}
+
+    /** 面板行动行的一句话汇报；阶段与 progress() 的 phase 字段同源。 */
+    @Override
+    public String describeCurrentAction() {
+        return action != null ? "正在确认座位乘坐关系" : "正在走向座位准备入座";
+    }
     @Override protected Map<String,Object> resultData(){
         var out=new LinkedHashMap<String,Object>();out.put("structure_id",r.structureId.toString());
         out.put("seat_offset",List.of(r.seatOffset.getX(),r.seatOffset.getY(),r.seatOffset.getZ()));

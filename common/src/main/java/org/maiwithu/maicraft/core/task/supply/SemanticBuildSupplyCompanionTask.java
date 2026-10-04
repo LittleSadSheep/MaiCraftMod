@@ -928,6 +928,19 @@ final class SemanticBuildSupplyCompanionTask
         return "semantic build supply timed out; review the remaining ledger before retrying";
     }
 
+    /** 面板行动行的一句话汇报；阶段与 progress() 的 phase 字段同源，批次号来自已开始的施工批次。 */
+    @Override
+    public String describeCurrentAction() {
+        if (supportSupply != null) return "正在补充临时支撑材料";
+        if (spoilSupply.active()) return "正在存放挖出的余料";
+        if (supply.active()) return "正在补充建材";
+        if (activeKind == ChildKind.BUILD_ACCESS) return "正在打通取料通道";
+        if (activeChild != null) return "正在按设计施工（第 " + buildRounds + " 批）";
+        if (traversabilityScan != null) return "正在复核建造区可达性";
+        if (!prepared) return "正在准备建材";
+        return "正在等待施工批次确认";
+    }
+
     @Override public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());

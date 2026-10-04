@@ -183,6 +183,13 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         return data;
     }
 
+    /** 面板行动行的一句话汇报；物品名来自任务单标签，计数是已确认丢出的数量；销毁与回收阶段各有独立说法。 */
+    @Override public String describeCurrentAction() {
+        if (recovery != null) return "正在回收丢弃物";
+        if (!siteReady) return "正在准备丢弃位置";
+        return "正在丢弃 " + r.label + " (" + dropped + "/" + target + ")";
+    }
+
     @Override
     protected String successMessage() {
         return doneMessage;

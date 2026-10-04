@@ -23,6 +23,7 @@
   - [食物与饥饿](maicraft://knowledge/game_mechanics/food)：进食规则与自动选食、打猎/耕种/加工获取链；被动生物需 confirm_risky_target，农田采收自带留种补种。
   - [睡眠与夜晚](maicraft://knowledge/game_mechanics/sleep-night)：黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼；夜里用 maicraft:sleep 而不是硬熬。
   - [下降掘进与寻路死角](maicraft://knowledge/game_mechanics/tunneling)：垂直直挖易 planning_stall，斜向阶梯与水平掘进是可靠形状；探矿末段停滞时就地扫描暴露源。
+  - [挖掘工作面照明](maicraft://knowledge/game_mechanics/lighting)：黑暗即刷怪（方块光照 0），火把=煤+木棍×4；深掘作业面默认无照明环节，需主动 auto_light/light_area 布光。
 - 方块说明：使用 `maicraft://knowledge/block/{namespace}/{path}`，例如 `maicraft://knowledge/block/create/deployer`。页面给出状态属性、普通物品说明、可用的 Create Shift/Ctrl 说明，以及该组件的 Ponder 场景链接。
 
 LLM 可调用 `perceive(view="knowledge", query="物品名称或关键词", limit=5)`，先取得少量候选，再按返回的 URI 读取正文。搜索只比较名称、注册 ID 和已有目录描述；名称与 ID 支持有限错字、漏字和相邻字母颠倒，输入不是正则表达式或 shell 命令。精确命中排在近似命中前，`match` 说明匹配依据；`ranking_score` 是排序值，不是概率。注册对象还提供 `subject_id`，后续按真实身份读取，不能因为近似匹配自动更改玩家目标。`total_matches` 与 `truncated` 说明候选是否读完，结果有歧义时继续缩小关键词。

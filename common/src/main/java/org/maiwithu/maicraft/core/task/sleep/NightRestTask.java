@@ -65,11 +65,30 @@ public final class NightRestTask extends AbstractCompanionTask<NightRestTask.Rec
     }
     private boolean canReachBed() {
         // 房屋外距床几格并不代表能用；墙挡住视线时继续沿门口寻路，不能隔墙尝试一次后放弃整张床。
-        if (!player.onGround() || player.getEyePosition().distanceTo(Vec3.atCenterOf(r.bed)) > 4.25) return false;
+        if (!player.onGround()) return false;
+        // 入睡距离按原版服务器判定走：床头或床尾方块底面中心满足 |dx|<=3、|dy|<=2、|dz|<=3。
+        // 只看视线距离会放行 3.5-4 格外的一步式尝试，被服务器以"床离得太远"拒绝后整段休息失败。
+        if (!vanillaReachable(r.bed)) {
+            var state = player.level().getBlockState(r.bed);
+            BlockPos foot = state.getBlock() instanceof BedBlock
+                    ? r.bed.relative(state.getValue(BedBlock.FACING).getOpposite()) : r.bed;
+            if (!vanillaReachable(foot)) return false;
+        }
         var hit = player.level().clip(new ClipContext(player.getEyePosition(), Vec3.atCenterOf(r.bed),
                 ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().distManhattan(r.bed) <= 1
                 && player.level().getBlockState(hit.getBlockPos()).getBlock() instanceof BedBlock;
+    }
+
+    /** 原版 ServerPlayer.isReachableBedBlock 的客户端镜像：床底面中心按轴差判定，任一半床够到即可。 */
+    static boolean vanillaReachable(double x, double y, double z, BlockPos part) {
+        return Math.abs(x - (part.getX() + 0.5)) <= 3.0
+                && Math.abs(y - part.getY()) <= 2.0
+                && Math.abs(z - (part.getZ() + 0.5)) <= 3.0;
+    }
+
+    private boolean vanillaReachable(BlockPos part) {
+        return vanillaReachable(player.getX(), player.getY(), player.getZ(), part);
     }
     @Override public void stop(LocalPlayer player, Task.StopReason reason) {
         if (sleep != null) sleep.stop(player, reason); super.stop(player, reason);
@@ -80,4 +99,12 @@ public final class NightRestTask extends AbstractCompanionTask<NightRestTask.Rec
     }
     @Override protected Map<String, Object> resultData() { return Map.of("slept_until_morning", rested, "returned_to_work_site", returning && player.blockPosition().distSqr(r.origin) <= 4); }
     @Override protected String successMessage() { return "night rest settled and the original work position was reached"; }
+
+    /** 面板行动行的一句话汇报；阶段来自在飞的睡眠子任务与往返状态，床的坐标是任务单已确认事实。 */
+    @Override
+    public String describeCurrentAction() {
+        if (sleep != null) return "正在入睡";
+        if (returning) return "正在返回工作点";
+        return "正在前往床 (" + r.bed.getX() + "," + r.bed.getY() + "," + r.bed.getZ() + ")";
+    }
 }

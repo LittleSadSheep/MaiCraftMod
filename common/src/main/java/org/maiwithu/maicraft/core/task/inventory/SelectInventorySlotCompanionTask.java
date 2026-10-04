@@ -21,6 +21,11 @@ public final class SelectInventorySlotCompanionTask
             case FAILED -> { fail(gate.failure(), FailureType.UNKNOWN); yield TaskState.FAILED; }
         };
     }
+    /** 面板行动行的一句话汇报；槽号来自任务单的背包格序号。 */
+    @Override public String describeCurrentAction() {
+        return "正在选中背包第 " + r.slot + " 格";
+    }
+
     @Override protected void cleanup() { gate.reset(); }
     @Override protected String successMessage() { return "selected inventory slot " + r.slot; }
     @Override protected String cancelledMessage() { return "inventory selection interrupted"; }

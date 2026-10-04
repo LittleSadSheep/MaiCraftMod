@@ -108,6 +108,12 @@ public final class LocateBiomeCompanionTask
 
     @Override protected void cleanup() {}
 
+    /** 面板行动行的一句话汇报；群系名来自任务单原文，扫描范围只覆盖已加载的客户端地形。 */
+    @Override
+    public String describeCurrentAction() {
+        return "正在扫描已加载地形查找群系 " + r.biome;
+    }
+
     @Override
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();

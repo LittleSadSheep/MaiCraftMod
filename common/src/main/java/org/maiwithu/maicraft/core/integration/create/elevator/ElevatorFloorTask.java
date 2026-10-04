@@ -85,6 +85,13 @@ final class ElevatorFloorTask extends AbstractCompanionTask<ElevatorFloorTaskRec
         if(approach!=null) { approach.result(TaskState.CANCELLED); approach=null; }
         TransportRuntime.cancel(this); super.cleanup();
     }
+    /** 面板行动行的一句话汇报；阶段来自内部接近/同步/乘梯状态，目标楼层来自任务单。 */
+    @Override public String describeCurrentAction() {
+        if (approach != null) return approach.describeCurrentAction();
+        if (travel != null) return "正在乘梯前往 " + r.floor + " 层";
+        return r.floor == null ? "正在同步电梯楼层列表" : "正在靠近电梯井";
+    }
+
     protected String successMessage() { return r.floor==null ? "elevator floors synchronized; choose the destination" : "arrived and disembarked at the selected elevator floor"; }
     protected Map<String,Object> resultData() {
         return Map.of("elevator_id",r.elevatorId.toString(),"floors",ElevatorFloors.overview(player),

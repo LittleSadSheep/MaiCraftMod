@@ -12,7 +12,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.MachineDesignBindings;
+
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
@@ -439,7 +441,11 @@ final class PublicToolCatalog {
         if (!sequence && !children.isEmpty()) throw bad("only maicraft:sequence may contain children");
         if (sequence) {
             JsonObject parameters = goal.getAsJsonObject("parameters");
-            only(parameters, "protected_labels");
+            // 运行时级死亡自恢复授权键不是工序参数，sequence 同样接受；语义契约层已放行同一份名单，
+            // 这里不放行会让契约文字"any ability"与入口校验自相矛盾。生效范围是整个序列执行期。
+            Set<String> allowedParameters = new HashSet<>(List.of("protected_labels"));
+            allowedParameters.addAll(IntentRuntime.runtimeAuthorizationKeys());
+            only(parameters, allowedParameters.toArray(new String[0]));
             if (present(parameters, "protected_labels")) {
                 JsonArray labels = array(parameters, "protected_labels", 64);
                 for (JsonElement label : labels) {

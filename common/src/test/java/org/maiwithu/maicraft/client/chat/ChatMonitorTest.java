@@ -40,7 +40,15 @@ public final class ChatMonitorTest {
                 .get("untrusted_external_text").getAsBoolean(), "外部聊天始终保留不可信文字标记");
         check(runtime.attentionCheckpoint().get("cursor").getAsLong() == attention,
                 "收到聊天不应混入任务通知流");
+        // 动作栏提示不进聊天流，但留有最近一条原文备忘；原版床太远/有怪等交互拒绝只走动作栏，
+        // 任务失败对账靠它引用服务器原文而不是三选一猜测。
+        ChatMonitor.system("你现在不能休息，床离得太远", true);
+        check("你现在不能休息，床离得太远".equals(ChatMonitor.latestOverlay(1_000_000_000L)),
+                "动作栏备忘保留最近一条原文");
+        ChatMonitor.system("有怪物在附近，你现在不能休息", true);
+        check(ChatMonitor.latestOverlay(1_000_000_000L).contains("怪物"), "新动作栏提示覆盖旧备忘");
         ChatMonitor.reset();
+        check(ChatMonitor.latestOverlay(1_000_000_000L) == null, "世界或身体重绑清空动作栏备忘");
         System.out.println("ChatMonitorTest: passed");
     }
 

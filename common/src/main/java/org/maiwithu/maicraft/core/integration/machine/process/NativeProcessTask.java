@@ -122,6 +122,11 @@ final class NativeProcessTask implements Task {
         data.put("process_stage", terminal != null ? "complete" : !constructionDone ? "construction" : processStarted ? "processing" : "preparing_process");
         data.put("native_consumption_reserved", record.submissionReserved()); return data;
     }
+    /** 面板行动行的一句话汇报；阶段来自内部施工/工序两段状态，子任务运行时透传其自述。 */
+    @Override public String describeCurrentAction() {
+        if (child != null && child.describeCurrentAction() != null) return child.describeCurrentAction();
+        return !constructionDone ? "正在准备工序场地" : "正在执行原生工序";
+    }
     @Override public boolean mustSettleBeforeSatisfiedCancellation() { return child != null && child.mustSettleBeforeSatisfiedCancellation(); }
     @Override public void requestSatisfiedSettlement() { if (child != null) child.requestSatisfiedSettlement(); }
 }

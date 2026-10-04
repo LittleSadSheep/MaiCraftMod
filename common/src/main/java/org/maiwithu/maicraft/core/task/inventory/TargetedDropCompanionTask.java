@@ -126,6 +126,15 @@ public final class TargetedDropCompanionTask extends AbstractCompanionTask<Targe
         receipt = null; evidence = null;
     }
 
+    /** 面板行动行的一句话汇报；物品名来自任务单的精确物品，计数是回执已确认的移出量。 */
+    @Override public String describeCurrentAction() {
+        String item = kind == null ? "投料" : kind.getHoverName().getString();
+        if (!initialized) return "正在准备投料";
+        if (receipt != null) return "正在投掷 " + item;
+        if (!selected) return "正在拿出 " + item;
+        return "正在瞄准投掷 " + item + " (" + removed + "/" + r.count + ")";
+    }
+
     @Override protected Map<String, Object> resultData() {
         var data = new LinkedHashMap<String, Object>();
         data.put("item_id", BuiltInRegistries.ITEM.getKey(r.exactItem().getItem()).toString()); data.put("requested_count", r.count);

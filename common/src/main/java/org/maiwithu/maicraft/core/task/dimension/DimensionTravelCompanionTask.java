@@ -198,12 +198,6 @@ public final class DimensionTravelCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 一站式穿门同样显示备门前置阶段；包装层不能把底层的找水和补料进度吞成“无”。 */
-    @Override public String describeCurrentAction() {
-        if (preparationTask != null) return preparationTask.describeCurrentAction();
-        return "前往传送门并确认维度切换";
-    }
-
     private TaskState tickPreparation() {
         TaskState terminal;
         if (player.level().getGameTime() >= preparationRecord.getDeadlineGameTime()) {
@@ -521,6 +515,23 @@ public final class DimensionTravelCompanionTask
                     "description", "Discover a stronghold from physical evidence and activate its portal before retrying."));
         }
         return List.copyOf(options);
+    }
+
+    /** 面板行动行的一句话汇报；目标维度来自任务单，赶路段落由移动子任务先说话。 */
+    @Override
+    public String describeCurrentAction() {
+        // 一站式穿门先把备门子任务的找水、补料和施工阶段交给面板，避免包装层吞掉真实进度。
+        if (preparationTask != null) return preparationTask.describeCurrentAction();
+        String destination = r.destinationDimension.replace("minecraft:", "");
+        return switch (phase) {
+            case FIND -> "正在寻找前往 " + destination + " 的传送门";
+            case MOVE -> {
+                String deeper = moveChild == null ? null : moveChild.describeCurrentAction();
+                yield deeper != null ? deeper : "正在前往传送门";
+            }
+            case ENTER -> "正在走进传送门";
+            case WAIT_FOR_REPLACEMENT -> "正在等待传送门生效";
+        };
     }
 
     @Override

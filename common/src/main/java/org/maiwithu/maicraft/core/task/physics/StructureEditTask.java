@@ -325,6 +325,18 @@ public final class StructureEditTask extends AbstractCompanionTask<StructureEdit
                 "recorded_native_events",effects.size(),"preparation",preparation==null?Map.of():preparation.progress(),
                 "placement_diagnostics",placementDiagnostics);
     }
+
+    /** 面板行动行的一句话汇报；阶段与 progress() 的 phase 字段同源，进度是已确认的原生动作数。 */
+    @Override
+    public String describeCurrentAction() {
+        if (declared == null) return "正在登记整机设计";
+        if (action != null) return wrenching ? "正在等待部件旋转确认"
+                : placing ? "正在等待部件放置确认" : "正在等待部件拆除确认";
+        if (preparation != null) return relocating ? "正在换到施工目标附近的站位" : "正在准备施工材料";
+        if (blockedSince >= 0) return "正在等待物理结构停稳";
+        return "正在施工结构补丁 " + (index + 1) + "/" + r.edits.size();
+    }
+
     @Override protected Map<String,Object> resultData() {
         var diff=new ArrayList<Map<String,Object>>();
         for(var raw:declared==null?r.edits:declared) {

@@ -123,6 +123,14 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
         receipt = null;
         selection.reset();
     }
+    /** 面板行动行的一句话汇报；物品名取当前正处理的装备实物的本地化名称。 */
+    @Override public String describeCurrentAction() {
+        if (pendingPiece != null && !pendingPiece.isEmpty()) {
+            return "正在卸下 " + pendingPiece.getHoverName().getString() + "（" + pendingSlot.getName() + "）";
+        }
+        return "正在检查装备栏";
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>();
         if (!removed.isEmpty()) data.put("removed", List.copyOf(removed));

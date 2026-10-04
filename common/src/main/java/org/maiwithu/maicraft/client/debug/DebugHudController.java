@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.Font;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.Style;
@@ -148,7 +149,7 @@ public final class DebugHudController {
         IntentTaskRecord active = open.isEmpty() ? null : open.getFirst();
         if (active == null) {
             rows.add(new Row("任务", "空闲", ChatFormatting.GRAY));
-            appendLatestTerminalIssue(rows);
+            appendLatestTerminalIssue(rows, minecraft.font);
             // 没有语义任务时反射（进食、休息、自救）仍可能占用身体；这种错位值得单独看见。
             CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
             if (action != null && action.currentAction() != null) {
@@ -173,7 +174,7 @@ public final class DebugHudController {
                         ChatFormatting.YELLOW));
             }
             if (!active.attempts().isEmpty()) {
-                rows.add(new Row("最近问题", repeatSummary(active.attempts()), ChatFormatting.RED));
+                appendErrorRows(rows, minecraft.font, repeatSummary(active.attempts()));
             }
         }
     }
@@ -255,16 +256,11 @@ public final class DebugHudController {
     private static List<EventLine> eventLines(Font font, List<Row> rows) {
         List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
         if (events.isEmpty()) return List.of();
-        int contentWidth = 0;
-        for (Row row : rows) {
-            contentWidth = Math.max(contentWidth,
-                    font.width(row.label().isBlank() ? "" : row.label() + ": ")
-                            + font.width(row.value()));
-        }
+        int contentWidth = panelWidth(rows, font.getSplitter());
         List<EventLine> newestFirst = new ArrayList<>();
         int used = 0;
         for (int i = events.size() - 1; i >= 0; i--) {
-            EventLine[] lines = wrapEvent(font, events.get(i), Math.max(160, contentWidth));
+            EventLine[] lines = wrapEvent(font, events.get(i), contentWidth);
             if (used + lines.length > EVENT_LINE_BUDGET) break;
             for (int j = lines.length - 1; j >= 0; j--) newestFirst.addFirst(lines[j]);
             used += lines.length;
@@ -297,10 +293,14 @@ public final class DebugHudController {
 
     /** 按字形宽度把内容折行：超过上限在最后一行行尾补 …；由字体分词器断行，中英文都不断在词中间。 */
     private static List<String> wrap(Font font, String text, int width) {
+        return wrap(font.getSplitter(), text, width);
+    }
+
+    private static List<String> wrap(StringSplitter splitter, String text, int width) {
         String singleLine = text.replace('\r', ' ').replace('\n', ' ')
                 .replaceAll("\\s+", " ").strip();
         List<String> lines = new ArrayList<>();
-        for (FormattedText line : font.getSplitter().splitLines(singleLine, width, Style.EMPTY)) {
+        for (FormattedText line : splitter.splitLines(singleLine, width, Style.EMPTY)) {
             lines.add(line.getString());
         }
         if (lines.size() > EVENT_MAX_LINES) {
@@ -345,7 +345,7 @@ public final class DebugHudController {
         }
     }
 
-    private static void appendLatestTerminalIssue(List<Row> rows) {
+    private static void appendLatestTerminalIssue(List<Row> rows, Font font) {
         IntentTaskRecord failed = IntentRuntime.get().tasks(20).stream()
                 .filter(record -> record.getState() == TaskState.FAILED
                         || record.getState() == TaskState.TIMEOUT)
@@ -355,7 +355,38 @@ public final class DebugHudController {
         String message = failed.terminalSnapshot() == null
                 ? failed.getState().name().toLowerCase(Locale.ROOT)
                 : jsonMessage(failed.terminalSnapshot().result(), failed.getState());
-        rows.add(new Row("最近问题", clamp(message), ChatFormatting.RED));
+        appendErrorRows(rows, font, message);
+    }
+
+    // 最新报错不再截成一行：宽度跟随其余固定行撑起的面板宽度（首行扣除标签），与事件区
+    // 相同的 4 行上限，放不下的尾部以 … 收尾；空白报错没有可显示内容，落"未知"保持行可见。
+    private static void appendErrorRows(List<Row> rows, Font font, String message) {
+        StringSplitter splitter = font.getSplitter();
+        rows.addAll(errorRows(message, panelWidth(rows, splitter), splitter));
+    }
+
+    /** 折行与行拆分单独成纯函数：StringSplitter 可脱离游戏实例构造，回归用假宽度函数即可覆盖。 */
+    static List<Row> errorRows(String message, int panelWidth, StringSplitter splitter) {
+        String safe = message == null || message.isBlank() ? "未知" : message;
+        String label = "最新报错: ";
+        int lineWidth = Math.max(80, panelWidth - (int) splitter.stringWidth(label));
+        List<Row> rows = new ArrayList<>();
+        List<String> lines = wrap(splitter, safe, lineWidth);
+        for (int i = 0; i < lines.size(); i++) {
+            rows.add(new Row(i == 0 ? "最新报错" : "", lines.get(i), ChatFormatting.RED));
+        }
+        return rows;
+    }
+
+    // 面板宽度由已确定的固定行撑起；最新报错行与事件区共用这个宽度，不各自把面板加宽。
+    static int panelWidth(List<Row> rows, StringSplitter splitter) {
+        int width = 0;
+        for (Row row : rows) {
+            width = Math.max(width, (row.label().isBlank() ? 0
+                    : (int) splitter.stringWidth(row.label() + ": "))
+                    + (int) splitter.stringWidth(row.value()));
+        }
+        return Math.max(160, width);
     }
 
     private static String jsonMessage(JsonObject result, TaskState fallback) {
@@ -390,6 +421,7 @@ public final class DebugHudController {
     }
 
     // 连续相同的失败只报一次附次数：重试循环里"×N"比同一句话重复出现更能说明卡死。
+    // 完整报文交给最新报错行折行展示，这里不再按单行截断。
     private static String repeatSummary(List<IntentTaskRecord.AttemptSnapshot> attempts) {
         String last = attempts.getLast().message();
         if (last == null || last.isBlank()) return "未知";
@@ -397,8 +429,7 @@ public final class DebugHudController {
         for (int i = attempts.size() - 2; i >= 0 && last.equals(attempts.get(i).message()); i--) {
             repeats++;
         }
-        String message = clamp(last);
-        return repeats > 1 ? message + " ×" + repeats : message;
+        return repeats > 1 ? last + " ×" + repeats : last;
     }
 
     // 蓝图行回答三件事：这是什么预览、它多大、施工卡在哪个决定上；隐藏与切片也值得看见。

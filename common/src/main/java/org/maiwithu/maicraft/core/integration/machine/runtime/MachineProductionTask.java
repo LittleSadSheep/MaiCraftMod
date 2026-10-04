@@ -99,6 +99,24 @@ final class MachineProductionTask extends AbstractCompanionTask<MachineProductio
         }
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部施工/供料/观察 Phase，施工子任务运行时透传其自述。 */
+    @Override public String describeCurrentAction() {
+        if (construction != null) return construction.describeCurrentAction();
+        return switch (phase) {
+            case CHECK -> "正在检查生产前置条件";
+            case BUILD -> "正在确认机器结构完整";
+            case CONFIGURE -> "正在配置机器接口";
+            case PREPARE -> "正在准备生产投入";
+            case BASELINE -> "正在记录生产前基线";
+            case SUPPLY -> "正在补充生产原料";
+            case ADMIT_START -> "正在准入生产启动";
+            case START -> "正在启动机器生产";
+            case REFRESH, OBSERVE -> "正在观察生产进展";
+            case FINAL_VERIFY -> "正在核对生产产出";
+            case DONE -> "正在收尾生产任务";
+        };
+    }
+
     private TaskState advance() {
         switch (phase) {
             case CHECK -> {

@@ -84,6 +84,13 @@ public final class NightRestBehaviorTest {
             var task = new NightRestTask(h.player, new NightRestTask.Record("wall", 1000, h.player.blockPosition(), head));
             Method reachable = NightRestTask.class.getDeclaredMethod("canReachBed"); reachable.setAccessible(true);
             check((boolean) reachable.invoke(task), "a close visible bed is genuinely in reach");
+            // 入睡距离闸与原版服务器同判：床头或床尾半块按 |dx|<=3、|dy|<=2、|dz|<=3（底面中心）；
+            // 范围外先走近再点击，不能放行一步式尝试后被服务器以“床离得太远”拒绝整段休息。
+            h.position(new Vec3(.5, 1, 4.5));
+            check((boolean) reachable.invoke(task), "three blocks from the head half is exactly vanilla sleep range");
+            h.position(new Vec3(.5, 1, 6.0));
+            check(!(boolean) reachable.invoke(task), "both halves beyond vanilla range require approach navigation first");
+            h.position(new Vec3(.5, 1, 3.5));
             h.set(new BlockPos(0, 2, 2), Blocks.STONE.defaultBlockState());
             check(!(boolean) reachable.invoke(task), "the same distance behind a wall still requires navigation");
         }

@@ -153,6 +153,14 @@ public final class TravelSurfaceTask extends AbstractCompanionTask<TravelSurface
         return "arrived under open sky: the highest solid or liquid cover of this column ignoring foliage is the ground at y="
                 +verifiedColumnY+", with nothing above the standing cell (tree foliage is not treated as cover)";
     }
+
+    /** 面板行动行的一句话汇报；阶段来自在飞的交通方式（步行分段/飞行抬升）。 */
+    @Override
+    public String describeCurrentAction() {
+        if (flight != null) return "正在向上飞行寻找露天地表";
+        if (walk != null) return "正在走向附近的露天地表候选点";
+        return "正在观察附近寻找露天地表";
+    }
     protected Map<String,Object> resultData() {
         var data=new LinkedHashMap<String,Object>();
         data.put("search_radius_cap",r.radius);

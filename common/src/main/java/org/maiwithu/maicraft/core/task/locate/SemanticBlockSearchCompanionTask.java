@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.dimension.PortalLavaPoolSurvey;
 import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord.Purpose;
@@ -119,6 +120,11 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         // 已加载只说明客户端有地形数据；必须能从眼睛看见，才向模型报告找到。
         if (!ObservationVisibility.block(player, pos)) return;
         if (observed.putIfAbsent(pos.immutable(), state.getBlock()) == null) {
+            // 视线验证过的位置是公平可知事实：写入共享观察记忆，公平闸的"已观察"半边
+            // 从此覆盖 find_block → travel → acquire 链路，不再出现"看得见却挖不了"。
+            IntentRuntime.get().observedSourceMemory().observe(
+                    player.level().dimension().location().toString(),
+                    pos, BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
             if (lavaPools != null) lavaPools.observeVisible(pos, state);
             // 搜索仍覆盖水平区块柱；报告最近距离时必须算高度，不能把深处的矿说成脚边几格。
             double distance = Math.sqrt(pos.distSqr(origin));
@@ -228,7 +234,16 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         return data;
     }
 
-    /** 扫描进度包含跳过区块段的体积；是否完整、实际读过多少状态和看见多少目标分开交付，不能把进度满格当成全世界无矿。 */
+    /** 面板行动行的一句话汇报；方块名是本地化名称，已见数量是过视线闸的已确认事实。 */
+    @Override
+    public String describeCurrentAction() {
+        String names = r.blockTargets.stream()
+                .map(block -> block.getName().getString())
+                .reduce((a, b) -> a + "、" + b).orElse("目标方块");
+        return "正在搜索附近的 " + names + "，已见 " + matchedCount() + "/" + r.count;
+    }
+
+    /** 扫描进度包含跳过区块段的体积；done/total、未加载段和调色板跳过另列，不能把进度满格当成逐格观察完毕或全世界无矿。 */
     @Override
     public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();

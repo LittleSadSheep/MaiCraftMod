@@ -164,6 +164,29 @@ final class MachineBuildTask extends AbstractCompanionTask<MachineBuildTaskRecor
         };
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部施工 Phase，零件进度来自 previewParts 与已装游标。 */
+    @Override public String describeCurrentAction() {
+        if (supply.active()) return "正在补齐机器建材";
+        if (child != null) return child.describeCurrentAction();
+        return switch (phase) {
+            case SURVEY -> "正在勘察机器工地";
+            case REMOVE_FLUIDS -> "正在清除工地流体";
+            case BLOCKS -> "正在建造机器方块 " + preview.size() + " 格";
+            case INSTALLATIONS -> "正在安装原生部件";
+            case ATTACHMENTS -> "正在安装附件";
+            case PARTS -> "正在安装机器零件 " + Math.min(partIndex + 1, previewParts.size()) + "/" + previewParts.size();
+            case SEAL -> "正在封合机器结构";
+            case FLUIDS -> "正在灌注机器流体";
+            case CONTENTS -> "正在放入机器初始内容物";
+            case FILTERS -> "正在配置机器过滤";
+            case CONFIGURE -> "正在调整机器配置";
+            case VERIFY -> "正在核验机器装配";
+            case COMMISSION -> "正在试运行机器";
+            case BLUEPRINT_DIFF -> "正在对比蓝图与成品";
+            case DONE -> "正在收尾机器建造";
+        };
+    }
+
     private TaskState surveyParts() {
         var progress = survey.tick(world);
         if (progress.failure() != null) {

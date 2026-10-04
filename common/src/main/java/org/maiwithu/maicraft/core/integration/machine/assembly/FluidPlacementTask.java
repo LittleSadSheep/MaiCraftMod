@@ -134,6 +134,14 @@ public final class FluidPlacementTask extends AbstractCompanionTask<FluidPlaceme
         return TaskState.RUNNING;
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部选桶/瞄准/确认状态，坐标是落桶目标格。 */
+    @Override public String describeCurrentAction() {
+        String at = " (" + r.target.getX() + "," + r.target.getY() + "," + r.target.getZ() + ")";
+        if (submitted) return "正在确认流体放置" + at;
+        if (!selected) return "正在取出流体桶";
+        return "正在放置流体" + at;
+    }
+
     private boolean targetSatisfied() { return r.removedSource == null ? FluidPlacementRules.matches(world.getBlockState(r.target),r.expected)
             : world.getBlockState(r.target).isAir(); }
     private boolean occupiesPlacementCell() {

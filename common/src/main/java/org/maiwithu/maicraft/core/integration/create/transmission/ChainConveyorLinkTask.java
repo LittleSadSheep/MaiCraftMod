@@ -371,5 +371,25 @@ final class ChainConveyorLinkTask extends AbstractCompanionTask<ChainConveyorLin
         if (failure != null) result.put("failure_code", failure);
         return result;
     }
+    /** 面板行动行的一句话汇报；阶段来自内部施工 Phase，端点坐标是正在交互的已确认事实。 */
+    @Override public String describeCurrentAction() {
+        BlockPos target = switch (phase) {
+            case FIRST_READ, FIRST_CLICK, FIRST_CONFIRM, VERIFY_FIRST -> r.first;
+            case SECOND_READ, SECOND_CLICK, SECOND_CONFIRM, VERIFY_SECOND -> r.second;
+            default -> null;
+        };
+        String label = switch (phase) {
+            case MATERIALS -> "正在补齐链条材料";
+            case EQUIP -> "正在手持链条";
+            case FIRST_READ -> "正在读回首端传动轮状态";
+            case SECOND_READ -> "正在读回末端传动轮状态";
+            case FIRST_CLICK, FIRST_CONFIRM -> "正在点击首端传动轮";
+            case SECOND_CLICK, SECOND_CONFIRM -> "正在点击末端传动轮";
+            case VERIFY_SECOND, VERIFY_FIRST -> "正在核对链条连接";
+            case RESTORE -> "正在收尾链条连接";
+            case CANCEL_SELECTION -> "正在撤销本任务的首端选点";
+        };
+        return target == null ? label : label + " (" + target.getX() + "," + target.getY() + "," + target.getZ() + ")";
+    }
     @Override protected String successMessage() { return "Chain-conveyor link and material effects observed; inventory keeps its post-use layout. Power and production remain separate outcomes."; }
 }

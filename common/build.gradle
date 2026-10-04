@@ -233,6 +233,18 @@ def regressionSuites = [
         heap: '512m', directory: 'gui-regression', timeoutSeconds: 45,
         purpose: '验证可见菜单、身体动作与任务收尾'
     ],
+    // 调试面板的最新报错行用假宽度函数独立核对折行、行数上限与空值兜底，不依赖真实字体。
+    debugHudRegression: [
+        entry: 'org.maiwithu.maicraft.client.debug.DebugHudErrorRowsTest',
+        heap: '512m', directory: 'debug-hud-regression', timeoutSeconds: 30,
+        purpose: '验证调试面板最新报错行的多行折行与截断兜底'
+    ],
+    // 人工接管清理指令独立验证，清任务交还身体不影响空闲身体的判定。
+    clearTaskCommandRegression: [
+        entry: 'org.maiwithu.maicraft.client.command.ManualTakeoverClearTest',
+        heap: '512m', directory: 'clear-task-command-regression', timeoutSeconds: 30,
+        purpose: '验证 /maicraft cleartask 结束占用任务、交付取消回执并交还身体'
+    ],
     // 合成材料匹配与逐格点击独立验证，其他任务模块失败时也能给出准确的合成回归结论。
     craftingRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.CraftingRegressionSuite',
@@ -344,6 +356,48 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.intent.AbilityPointerDriftTest',
         heap: '512m', directory: 'ability-pointer-drift-regression', timeoutSeconds: 90,
         purpose: '验证契约与 find_block 指路文本点名的能力均在 KNOWN_ABILITIES 中'
+    ],
+    // 里程碑文本兜底：milestone 缺席或不可识别必须落进枚举决策回合而非 NPE。
+    reachMilestoneMilestoneTextRegression: [
+        entry: 'org.maiwithu.maicraft.intent.ReachMilestoneMilestoneTextTest',
+        heap: '512m', directory: 'reach-milestone-milestone-text-regression', timeoutSeconds: 90,
+        purpose: '验证 reach_milestone 对缺席或大小写变体的 milestone 文本的规范化与决策回合兜底'
+    ],
+    // sequence 挂运行时级死亡自恢复授权键：入口白名单必须与契约"any ability"文字一致。
+    sequenceRuntimeAuthKeysRegression: [
+        entry: 'org.maiwithu.maicraft.mcp.SequenceRuntimeAuthKeysTest',
+        heap: '512m', directory: 'sequence-runtime-auth-keys-regression', timeoutSeconds: 60,
+        purpose: '验证 sequence 参数入口放行 auto_respawn/recover_after_death 且白名单外字段仍被拒绝'
+    ],
+    // runtime_error 回执可诊断性：异常类型与原因链必须进回执，不能只剩一个类名。
+    runtimeErrorDescribeRegression: [
+        entry: 'org.maiwithu.maicraft.mcp.RuntimeErrorDescribeTest',
+        heap: '512m', directory: 'runtime-error-describe-regression', timeoutSeconds: 60,
+        purpose: '验证 runtime_error 回执携带异常类型、缺失类名与原因链'
+    ],
+    // 多部件实体观察聚合：部件折叠到逻辑主体，boss 生命值进回执。
+    entityPartAggregationRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.entity.EntityPartAggregationTest',
+        heap: '512m', directory: 'entity-part-aggregation-regression', timeoutSeconds: 60,
+        purpose: '验证实体搜索把多部件实体折叠为主体一条观察并附 boss 生命值事实'
+    ],
+    // 公平闸消费 find_block 已验证观察：视线命中写入共享观察记忆，mine 据记忆放行。
+    fairnessMemoryFeedsMineRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.FairnessMemoryFeedsMineTest',
+        heap: '512m', directory: 'fairness-memory-feeds-mine-regression', timeoutSeconds: 60,
+        purpose: '验证 find_block 验证命中进入观察记忆且公平闸凭记忆放行被遮挡的目标'
+    ],
+    // 施工预检不因自家保护集拒绝目标格：门框类"目标在保护区内的施工"不再全站点误拒。
+    buildClearanceOwnTargetsRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.BuildClearanceOwnTargetsTest',
+        heap: '512m', directory: 'build-clearance-own-targets-regression', timeoutSeconds: 60,
+        purpose: '验证材料/导航保护区中的施工目标格仍按授权变更集合放行'
+    ],
+    // 重生回执的库存对比等内容包同步后再算：keepInventory 不再误报全部丢失。
+    respawnInventorySyncRegression: [
+        entry: 'org.maiwithu.maicraft.client.runtime.RespawnInventorySyncTest',
+        heap: '512m', directory: 'respawn-inventory-sync-regression', timeoutSeconds: 60,
+        purpose: '验证重生回执延后到物品栏内容包同步或窗口到期，缺失数量不再误报'
     ],
 ]
 

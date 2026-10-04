@@ -206,5 +206,13 @@ public final class BlueprintPreparation implements Task {
         return child != null && child.mustSettleBeforeSatisfiedCancellation();
     }
 
+    /** 面板行动行的一句话汇报；阶段来自内部读取/展开状态，子任务启动后透传子任务自述。 */
+    @Override public String describeCurrentAction() {
+        if (child != null) return child.describeCurrentAction();
+        if (listing != null) return "正在列出蓝图文件";
+        if (loader != null || prepared != null) return "正在展开蓝图施工目标";
+        return "正在读取蓝图文件";
+    }
+
     @Override public String name() { return child == null ? "prepare blueprint" : child.name(); }
 }

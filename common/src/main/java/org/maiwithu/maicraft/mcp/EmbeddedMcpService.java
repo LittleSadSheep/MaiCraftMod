@@ -492,7 +492,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             // 只读分页的参数错误不要求重新勘察世界；变更请求已经进入运行时则仍保留结果未知，不能据此安全重放。
             if (outcomeKnown && failure instanceof IllegalArgumentException)
                 return toolError("invalid_arguments", message(failure), true, true, requestKey);
-            return toolError("runtime_error", message(failure), true,
+            return toolError("runtime_error", describe(failure), true,
                     outcomeKnown, requestKey);
         } finally {
             if (pending != null) session.attentionCalls.remove(callId, pending);
@@ -1005,6 +1005,26 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private static String message(Throwable throwable) {
         String value = throwable == null ? null : throwable.getMessage();
         return value == null || value.isBlank() ? "Game runtime call failed" : value;
+    }
+
+    /**
+     * runtime_error 的消息必须能定位异常种类：getMessage() 常为空（NPE）或只剩类名
+     * （NoClassDefFoundError 等 LinkageError），只透传会让调用方把能力内部崩溃误读成
+     * 参数问题。补上异常类型与原因链，与错误日志的堆栈互为索引。
+     */
+    static String describe(Throwable throwable) {
+        if (throwable == null) return "Game runtime call failed";
+        String detail = message(throwable);
+        StringBuilder text = new StringBuilder(throwable.getClass().getSimpleName());
+        if (!detail.equals("Game runtime call failed")) text.append(": ").append(detail);
+        Throwable cause = throwable.getCause();
+        while (cause != null && cause != cause.getCause()) {
+            text.append("; caused by ").append(cause.getClass().getSimpleName());
+            if (cause.getMessage() != null && !cause.getMessage().isBlank())
+                text.append(": ").append(cause.getMessage());
+            cause = cause.getCause();
+        }
+        return text.toString();
     }
 
     private static JsonElement nonNull(JsonElement element) {

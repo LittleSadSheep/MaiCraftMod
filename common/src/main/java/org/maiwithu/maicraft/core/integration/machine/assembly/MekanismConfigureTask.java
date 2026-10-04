@@ -193,6 +193,14 @@ public final class MekanismConfigureTask extends AbstractCompanionTask<MekanismC
         if (equip != null) equip.stop(companion, why);
         super.stop(companion, why);
     }
+    /** 面板行动行的一句话汇报；阶段来自内部装备/换模式/点击状态，坐标是正在配置的接口位置。 */
+    @Override public String describeCurrentAction() {
+        if (equip != null) return equip.describeCurrentAction();
+        String at = " (" + r.target.getX() + "," + r.target.getY() + "," + r.target.getZ() + ")";
+        if (switchingTool) return "正在切换配置器模式";
+        if (submitted) return "正在确认接口模式切换" + at;
+        return "正在配置机器接口模式" + at;
+    }
     @Override protected String successMessage() { return "Mekanism mode observed as " + r.desiredMode + "."; }
     @Override protected Map<String, Object> resultData() {
         return Map.of("configuration_verified", verified, "medium", r.medium, "desired_mode", r.desiredMode,

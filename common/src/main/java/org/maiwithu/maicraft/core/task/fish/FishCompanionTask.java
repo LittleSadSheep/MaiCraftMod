@@ -852,6 +852,19 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return data;
     }
 
+    /** 面板行动行的一句话汇报；说法来自钓鱼阶段，收获数是回执确认的成功竿数。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (phase) {
+            case POSITION -> "正在寻找钓点";
+            case PREPARE -> "正在拿出鱼竿";
+            case AIM -> "正在瞄准水面抛竿";
+            case WAIT -> "正在等鱼上钩";
+            case COLLECT -> "正在收回鱼竿捡战利品";
+            case COOLDOWN -> "正在准备下一竿";
+        };
+    }
+
     @Override
     protected String successMessage() {
         return "completed " + r.caught() + " successful fishing catch(es)";

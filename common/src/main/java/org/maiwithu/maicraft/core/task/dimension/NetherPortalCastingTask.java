@@ -385,27 +385,6 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         var data = new LinkedHashMap<>(resultData());
         if (child != null) data.put("child", child.progress()); return data;
     }
-    @Override public String describeCurrentAction() {
-        if (child != null && child.describeCurrentAction() != null) return child.describeCurrentAction();
-        return switch (operation) {
-            case "prepare_bucket" -> "准备浇筑用的桶";
-            case "find_pool_for_bucket_reuse", "empty_lava_bucket" -> "把现有岩浆桶倒回池中，确认空桶返还";
-            case "prepare_water", "find_water_source", "fill_water", "locate_water" -> "寻找水源并装水";
-            case "prepare_ignition" -> "准备打火石或火焰弹";
-            case "survey_lava_pool", "locate_lava_pool" -> "确认适合浇筑的岩浆池";
-            case "return_to_pool" -> "取水完成，返回已知岩浆池";
-            case "supply" -> "补齐浇筑工具和临时方块";
-            case "clear", "excavate_cast_cell" -> "清理浇筑操作空间";
-            case "prepare_bank_platform" -> "补齐池岸和倒桶站台";
-            case "build_mold" -> "搭建导流模具";
-            case "place_water" -> "放置导流水";
-            case "fill_lava" -> "到池中装取岩浆";
-            case "cast_lava" -> "逐格浇筑门框";
-            case "recover_water" -> "收回导流水";
-            case "draining" -> "等待水流退去";
-            default -> "准备浇筑地狱门";
-        };
-    }
     @Override public void stop(LocalPlayer player, StopReason why) {
         if (child != null) guarded(() -> { child.stop(player, why); return null; });
         super.stop(player, why);
@@ -419,5 +398,33 @@ final class NetherPortalCastingTask extends AbstractCompanionTask<PortalPreparat
         if (survey != null) survey.close();
         super.cleanup();
     }
+    /** 面板行动行的一句话汇报；说法来自当前浇筑工序（{@code operation}），子任务在跑时由一线先说话。 */
+    @Override public String describeCurrentAction() {
+        // 子任务正在执行时先显示其原生阶段；父任务只在没有子任务时解释当前浇筑工序。
+        if (child != null) {
+            String deeper = child.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        return switch (operation) {
+            case "prepare_bucket" -> "正在准备浇筑用的桶";
+            case "find_pool_for_bucket_reuse", "empty_lava_bucket" -> "正在把现有岩浆桶倒回池中并确认空桶返还";
+            case "prepare_water" -> "正在准备一桶水";
+            case "find_water_source", "fill_water", "locate_water" -> "正在寻找水源并取水";
+            case "prepare_ignition" -> "正在准备打火石或火焰弹";
+            case "survey_lava_pool", "locate_lava_pool" -> "正在寻找适合浇筑的岩浆池";
+            case "return_to_pool" -> "正在回到已知岩浆池";
+            case "find_lava_source", "fill_lava" -> "正在取岩浆";
+            case "supply" -> "正在补齐浇筑材料";
+            case "prepare_bank_platform" -> "正在搭池岸平台";
+            case "clear", "excavate_cast_cell" -> "正在清理门框施工空间";
+            case "build_mold" -> "正在砌门框模具";
+            case "place_water" -> "正在倒水成型";
+            case "recover_water" -> "正在回收水源";
+            case "cast_lava" -> "正在浇筑岩浆";
+            case "draining" -> "正在等待岩浆凝固排水";
+            default -> "正在浇筑下界传送门";
+        };
+    }
+
     @Override protected String successMessage() { return "Native casting actions completed; frame outcome is reported separately."; }
 }

@@ -8,6 +8,7 @@ import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
@@ -162,6 +163,16 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
         return data;
     }
     @Override protected String successMessage() { return "native backpack " + r.operation.name().toLowerCase(Locale.ROOT) + " settled and its menu was closed"; }
+
+    /** 面板行动行的一句话汇报；阶段来自内部开包/搬运/关包状态，物品名用本地化名称。 */
+    @Override public String describeCurrentAction() {
+        if (phase == 0 && !started) return "正在打开随身包";
+        if (transfer != null && planned != null)
+            return "正在搬运 " + new ItemStack(BuiltInRegistries.ITEM.get(planned.item())).getHoverName().getString()
+                    + " ×" + planned.move().count();
+        if (phase == 3) return "正在关闭随身包";
+        return "正在核对随身包库存";
+    }
     private static Map<String, Object> strings(Map<ResourceLocation, ?> values) {
         var result = new LinkedHashMap<String, Object>(); values.forEach((id, value) -> result.put(id.toString(), value)); return result;
     }

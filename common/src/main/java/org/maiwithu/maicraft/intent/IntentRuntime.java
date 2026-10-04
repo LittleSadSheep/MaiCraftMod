@@ -776,6 +776,11 @@ public final class IntentRuntime {
         rejectMicroInstructions(goal);
     }
 
+    /** 运行时级死亡自恢复授权键名单；工具层入口放行同一份，两处共用一个事实源不允许漂移。 */
+    public static java.util.Set<String> runtimeAuthorizationKeys() {
+        return SemanticGoalContract.runtimeAuthorizationKeys();
+    }
+
     /** 恢复历史不等于重新批准执行；仍保留结构、容量与内部动作边界，避免旧记录锁住整个世界的任务。 */
     private void validateRestoredGoal(Goal goal) {
         validateRestoredGoal(goal,false);

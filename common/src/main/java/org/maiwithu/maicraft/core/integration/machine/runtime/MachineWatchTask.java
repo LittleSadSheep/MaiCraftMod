@@ -127,6 +127,11 @@ final class MachineWatchTask extends AbstractCompanionTask<MachineWatchTaskRecor
         }
         super.cleanup();
     }
+    /** 面板行动行的一句话汇报；进度来自已授权的端点组与总组数。 */
+    @Override public String describeCurrentAction() {
+        if (groups.isEmpty()) return "正在读取目标产线配方";
+        return "正在登记产线观察点 " + Math.min(group + 1, groups.size()) + "/" + groups.size();
+    }
     @Override public Map<String,Object> progress() { return Map.of("task",name(),"authorized_groups",group,"total_groups",groups.size(),"body_needed",!completed); }
     @Override protected Map<String,Object> resultData() {
         return Map.of("job_id",job.toString(),"monitor_registered",completed,"machine_production_verified",false,

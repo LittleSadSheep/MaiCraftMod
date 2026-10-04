@@ -148,6 +148,11 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
         menuSession.cleanup(player);
         menuReceipt = null;
     }
+    /** 面板行动行的一句话汇报；物品名来自任务单标签，全程动作都是把它放到目标栏位。 */
+    @Override public String describeCurrentAction() {
+        return "正在装备 " + r.label;
+    }
+
     @Override protected Map<String, Object> resultData() {
         Map<String, Object> data = new HashMap<>(); data.put("item", r.label);
         if (!slotName.isEmpty()) data.put("slot", slotName); return data;

@@ -8,6 +8,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.client.chat.ChatMonitor;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
@@ -95,8 +96,12 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
             enteredSleep = true;
             return r.waitUntilAwake ? TaskState.RUNNING : TaskState.SUCCESS;
         }
-        fail("sleep interaction was rejected or not confirmed (daytime, danger, or occupied bed): "
-                + receipt.detail(), FailureType.UNKNOWN);
+        // 原版的拒绝原因（床太远/有怪/已占用）只走动作栏提示；最近 5 秒内出现过就引用原文，
+        // 不再把真实原因笼统归入三选一猜测。
+        String overlay = ChatMonitor.latestOverlay(5_000_000_000L);
+        fail("sleep interaction was rejected or not confirmed (daytime, danger, or occupied bed)"
+                + (overlay == null ? "" : "; server said: " + overlay)
+                + ": " + receipt.detail(), FailureType.UNKNOWN);
         return TaskState.FAILED;
     }
     /** 睡眠结束或取消时结清自己的床点击；不会用新的点击或移动强行叫醒玩家。 */
@@ -106,6 +111,15 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
         receipt = null; aimConvergence.reset(); super.cleanup();
     }
     @Override protected String successMessage() { return r.waitUntilAwake ? "slept and observed a natural morning wake-up" : "sleeping in bed"; }
+
+    /** 面板行动行的一句话汇报；阶段来自真实睡眠状态与右键确认进度。 */
+    @Override
+    public String describeCurrentAction() {
+        if (player.isSleeping()) return "正在睡觉";
+        if (enteredSleep && r.waitUntilAwake) return "正在等待天亮";
+        if (receipt != null) return "正在等待入睡确认";
+        return "正在对准床准备入睡";
+    }
     @Override protected Map<String, Object> resultData() {
         return Map.of("entered_sleep", enteredSleep, "wait_until_awake", r.waitUntilAwake,
                 "wake_observed", wakeObservedAt >= 0, "morning_observed", morningObserved);

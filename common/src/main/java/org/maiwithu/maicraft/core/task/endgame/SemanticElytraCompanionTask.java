@@ -1317,6 +1317,27 @@ public final class SemanticElytraCompanionTask
         return List.copyOf(options);
     }
 
+    /** 面板行动行的一句话汇报；说法来自取鞘翼的执行阶段，具体动作交由在跑的子任务自述。 */
+    @Override
+    public String describeCurrentAction() {
+        if (activeChild != null) {
+            String deeper = activeChild.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        return switch (phase) {
+            case ACQUIRE_PEARL -> "正在准备末影珍珠";
+            case FIND_GATEWAY -> "正在寻找折跃门";
+            case MOVE_GATEWAY -> "正在前往折跃门";
+            case THROW_GATEWAY -> "正在向折跃门投掷珍珠";
+            case WAIT_TELEPORT -> "正在等待折跃传送";
+            case SEARCH_END_CITY -> "正在搜索末地城";
+            case FIND_SHIP_FRAME -> "正在确认末地船位置";
+            case ATTACK_SHIP_FRAME -> "正在打掉末地船的展示框";
+            case COLLECT_ELYTRA -> "正在拾取鞘翼";
+            case COMPLETE -> "正在收尾取鞘翼任务";
+        };
+    }
+
     @Override
     protected String successMessage() {
         return "A real elytra is now present in the main inventory.";

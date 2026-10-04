@@ -1116,6 +1116,26 @@ public final class SemanticContainerCompanionTask
         };
     }
 
+    /** 面板行动行的一句话汇报；容器名取任务单的目标容器，方向按存取方向分句，搬运计数是已确认的数量。 */
+    @Override public String describeCurrentAction() {
+        if (activeChild != null) {
+            String deeper = activeChild.describeCurrentAction();
+            if (deeper != null) return deeper;
+        }
+        String verb = direction == Direction.DEPOSIT ? "存入" : "取出";
+        String where = target == null ? "容器" : containerKind == null
+                ? "(" + target.position().getX() + "," + target.position().getY() + "," + target.position().getZ() + ")"
+                : containerKind + " (" + target.position().getX() + "," + target.position().getZ() + ")";
+        return switch (phase) {
+            case SURVEY -> "正在寻找可用的" + where;
+            case OPEN, WAIT_MENU -> "正在打开" + where;
+            case PLAN -> "正在规划存取数量";
+            case TRANSFER -> "正在把物品" + verb + where + " (已" + verb + movedCount + " 件)";
+            case CLEANUP -> "正在关闭容器界面";
+            case COMPLETE -> "正在收尾容器存取";
+        };
+    }
+
     @Override protected String successMessage() {
         // 成功摘要也直接给出留箱量，避免模型把自动抽料后的数量变化误认为本次投料失效。
         if (direction == Direction.DEPOSIT) return "Confirmed native deposit of " + movedCount

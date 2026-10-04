@@ -67,6 +67,11 @@ public final class EnchantCompanionTask extends BlockMenuCompanionTask<EnchantTa
         return data;
     }
 
+    /** 面板行动行的一句话汇报；物品取任务单的注册 ID（取物前后全程都是同一件待附魔物品）。 */
+    @Override public String describeCurrentAction() {
+        return "正在附魔 " + r.itemId;
+    }
+
     @Override protected String successMessage() { return "enchanted one " + r.itemId + ", verified its return and costs, and closed the native menu"; }
     @Override protected String timeoutMessage() { return "enchantment timed out; inspect the recorded quote, consumption boundary and cleanup status before continuing"; }
     @Override protected String cancelledMessage() { return "enchantment interrupted; any submitted consumption is not repeated, and cleanup is reported only as observed"; }

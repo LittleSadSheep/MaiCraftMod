@@ -1527,6 +1527,25 @@ public final class SemanticCookCompanionTask
         return data;
     }
 
+    /** 面板行动行的一句话汇报；说法来自烹饪阶段，目标产物名取任务单物品 ID 对应物品的本地化名称。 */
+    @Override
+    public String describeCurrentAction() {
+        return switch (phase) {
+            case RESOLVE -> "正在确定烹饪配方";
+            case PREPARE -> "正在准备烹饪材料";
+            case APPROACH -> "正在前往熔炉";
+            case OPEN, WAIT_MENU -> "正在打开熔炉界面";
+            case VALIDATE -> "正在核对熔炉状态";
+            case LOAD_INPUT -> "正在放入待烧物品";
+            case LOAD_FUEL -> "正在添加燃料";
+            case CONFIRM_START -> "正在确认熔炉点火";
+            case CLOSE_WAIT, WAIT_CLOSED, CLEANUP -> "正在关闭熔炉界面";
+            case RECONCILE, VERIFY_OUTPUT -> "正在核对熔炉产出 (" + outputCount() + "/" + r.count + ")";
+            case VERIFY_CLEAN_INPUT -> "正在清理熔炉残留";
+            case COMPLETE -> "正在收尾烹饪任务";
+        };
+    }
+
     @Override
     protected String successMessage() {
         if (parentSatisfied && outputCount() < r.count)
