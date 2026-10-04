@@ -65,10 +65,10 @@
 | `defeat_ender_dragon` | 完成末影龙战斗流程 | `AbilityAdapter.defeatEnderDragon` | 契约与贡献者文档核对；[死亡确认](endgame.md) |
 | `obtain_elytra` | 搜寻并取得鞘翅 | `AbilityAdapter.obtainElytra` | 契约与贡献者文档核对；[折跃与入包](endgame.md) |
 | `quest_action` | 对 FTB 任务书执行一次原生提交、勾选或领奖 | `QuestAbilityAdapter` | 契约、执行源码与贡献者文档核对；[动作、回执和恢复](quests.md)。本轮仅静态检查，已列明结果确定性与观察收尾边界；只读索引状态和动作失败标签分开说明 |
-| `physical_balance` | 起飞前受力分析、启停模拟与配平推荐 | `PhysicsAbilityAdapter` | 入口核对；读原生受力需要服务端 `physics.snapshot` |
-| `physical_assembly` | 蜂蜜胶选区粘接、物理组装器创建与拆回结构 | `PhysicalAssemblyAbilityAdapter` | 入口核对；需安装 Create，粘接布局由模型决定、Mod 只执行原生操作 |
-| `physical_control` | 对已观察物理结构执行原生控制 | `PhysicalControlAbilityAdapter` | 入口核对；按声明动作核对控制器及实际效果 |
-| `fly_vehicle` | 配置或驾驶已登记的物理飞机 | `AircraftFlightAbilityAdapter` | 入口核对；飞控、巡航与终点落地分别确认 |
+| `physical_balance` | 起飞前受力分析、启停模拟与配平推荐 | `PhysicsAbilityAdapter` | 契约、主流程和回执静态核对；[参数、预测与施工边界](physics.md#physical_balance受力与推荐)；未新增实机验收 |
+| `physical_assembly` | 强力胶/蜂蜜胶粘接、物理组装器创建与拆回 | `PhysicalAssemblyAbilityAdapter` | 契约、主流程和回执静态核对；[声明继承、原生转换与材料结算](physics.md#physical_assembly胶层结构转换和声明继承) |
+| `physical_control` | 配置部件、无线打字机配键和有限输入 | `PhysicalControlAbilityAdapter` | 契约、主流程和回执静态核对；[字段互斥、反馈与松键边界](physics.md#physical_control配置有限输入与反馈) |
+| `fly_vehicle` | 登记飞机映射并原生登机执行持续飞控 | `AircraftFlightAbilityAdapter` | 契约、主流程和回执静态核对；[真实起降、停稳与旅行衔接](flight.md)；完整飞艇/固定翼自动起降仍待实机验收 |
 
 `enchant` 保留兼容已有调用。默认能力发现不展示它，指定该能力查询时仍能取得契约；新机器工序走统一机器入口。能力“已登记”、当前加载的模组“支持”、眼前条件“可以执行”是三件不同的事。
 

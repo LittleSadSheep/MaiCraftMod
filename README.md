@@ -100,6 +100,8 @@ MaiCraft 在 MCP 的 `tools/list` 中注册四个通用入口：
 
 已知高度且要求同层时，将 `vertical_tolerance:0` 放在 `goal.parameters` 中，与 `destination` 同级；水平仍可用 `horizontal_radius` 保留接近范围。完整调用示例、交通条件与到达回执见 [旅行能力开发文档](docs/dev/travel.md)。
 
+物理载具可先用受力试算与配重推荐检查设计，再通过强力胶/蜂蜜胶、物理组装器和部件控制执行真实修改。无线打字机支持配键、有限按键与反馈；`fly_vehicle` 在原生入座后由 Mod 持续起降、巡航和局部避障，已定位目的地还可衔接飞机旅行及末段步行。预测、配置、真实起降和停稳分别确认；完整自动飞行仍需实机验收，定向群系/结构航空搜索尚未接通。参数与实现见 [物理结构](docs/dev/physics.md) 和 [飞机飞控](docs/dev/flight.md)。
+
 定点用物品可给 `maicraft:use_item` 提供 `target.kind="coordinates"`。例如把熔岩倒进一个空格：
 
 ```json
