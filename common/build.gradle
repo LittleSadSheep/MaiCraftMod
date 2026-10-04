@@ -204,6 +204,12 @@ def regressionSuites = [
         heap: '512m', directory: 'settle-reflex-regression', timeoutSeconds: 60,
         purpose: '验证贴边安定反射的触发、潜行退避与控制交还'
     ],
+    // 投眼引导三卡点：站姿换位重试、不可证消耗声明继续、方向记忆免掷续走。
+    enderEyeGuidanceRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.EnderEyeGuidanceTest',
+        heap: '512m', directory: 'ender-eye-guidance-regression', timeoutSeconds: 60,
+        purpose: '验证投眼站姿换位重试、不可证消耗声明继续与方向记忆免掷续走'
+    ],
     // 释放窗口反射的选人规则单独回放：在岗任务持有身体时贴边退避不抢占，身体释放后恢复顺位。
     releaseWindowReflexRegression: [
         entry: 'org.maiwithu.maicraft.task.ReleaseWindowReflexSelectionTest',

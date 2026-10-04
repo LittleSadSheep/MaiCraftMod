@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.scan.SpiralWalker;
 import org.maiwithu.maicraft.core.task.explore.ExplorationSector;
 import org.maiwithu.maicraft.core.task.explore.ExplorationFrontiers;
@@ -54,7 +55,8 @@ public final class PhysicalStructureSearchCompanionTask
         MOVE_DIRECTION,
         MOVE_FRONTIER,
         MOVE_EVIDENCE,
-        VERIFY_EVIDENCE
+        VERIFY_EVIDENCE,
+        RELOCATE_STANCE
     }
 
     private record EvidenceMatch(
@@ -138,6 +140,24 @@ public final class PhysicalStructureSearchCompanionTask
     private int observeTicks;
     private boolean scanComplete;
     private int scanHitsObserved;
+    private int stanceEscapes;
+    private BlockPos relocateTarget;
+    private boolean eyeConsumptionUnverified;
+
+    /**
+     * 同一游戏会话内共享的投眼方向记忆（按维度+结构键控）：死亡或任务重启后沿上次
+     * 掷出的方向续走一段，不再立刻重掷眼睛。跨游戏会话不保留——旧朝向对新会话没有
+     * 立据价值，超龄条目按时间淘汰。
+     */
+    private record StoredEyeDirection(Vec3 direction, long gameTime) {}
+    private static final java.util.concurrent.ConcurrentHashMap<String, StoredEyeDirection>
+            EYE_DIRECTION_MEMORY = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 方向记忆的保鲜期：三个游戏日内的朝向才值得免掷续走。 */
+    private static final long DIRECTION_MEMORY_TICKS = 3 * 24000;
+
+    private String eyeDirectionKey() {
+        return dimension() + "|" + r.structureId;
+    }
 
     public PhysicalStructureSearchCompanionTask(
             LocalPlayer player, PhysicalStructureSearchTaskRecord record) {
@@ -191,6 +211,29 @@ public final class PhysicalStructureSearchCompanionTask
         TargetIndex.register(indexedLevel, indexedBlocks);
         memory = new ClientExplorationMemory(player);
         waterProbe = new WaterCrossingProbe(player.clientLevel);
+        resumeRememberedEyeDirection();
+    }
+
+    /** 有保鲜期内的投眼方向记忆时沿旧方向先续走一段，省一次重掷；走完仍未到再回到正常投眼循环。 */
+    private void resumeRememberedEyeDirection() {
+        if (!stronghold) return;
+        var stored = EYE_DIRECTION_MEMORY.get(eyeDirectionKey());
+        if (stored == null
+                || player.level().getGameTime() - stored.gameTime() > DIRECTION_MEMORY_TICKS) {
+            EYE_DIRECTION_MEMORY.remove(eyeDirectionKey());
+            return;
+        }
+        double travelled = horizontalDistance(origin, player.blockPosition());
+        double remaining = r.maxDistance - travelled;
+        if (remaining < MIN_FRONTIER_LEG) return;
+        previousDirection = stored.direction();
+        pendingDirection = stored.direction();
+        pendingDirectionDistance = Math.min(INITIAL_DIRECTION_STEP, remaining);
+        directionSegments++;
+        Constants.LOG.info(
+                "[maicraft-task] stronghold search resumed along remembered eye direction {} (age {} ticks)",
+                stored.direction(), player.level().getGameTime() - stored.gameTime());
+        stage = Stage.MOVE_DIRECTION;
     }
 
     @Override
@@ -243,6 +286,7 @@ public final class PhysicalStructureSearchCompanionTask
             case MOVE_FRONTIER -> tickMove(false, false);
             case MOVE_EVIDENCE -> tickMove(true, false);
             case VERIFY_EVIDENCE -> tickEvidenceVerification(scan);
+            case RELOCATE_STANCE -> tickRelocateStance();
         };
     }
 
@@ -287,10 +331,17 @@ public final class PhysicalStructureSearchCompanionTask
             return TaskState.FAILED;
         }
         if (!safeEyeThrowStance()) {
+            // 沼泽/水网地形几乎无合法站位：先在近旁找一个可站立的换位点走过去再试，
+            // 有界两次；找不到或次数用尽才按原话术失败，不在同一条河边反复空转。
+            if (stanceEscapes < 2 && relocateToSafeThrowStance()) {
+                stanceEscapes++;
+                return TaskState.RUNNING;
+            }
             failIssue(
                     "unsafe_ender_eye_throw_stance",
                     "The task stopped before throwing an ender eye because loaded solid footing and "
-                            + "clear, fluid-free body space could not be proven.",
+                            + "clear, fluid-free body space could not be proven, including after "
+                            + stanceEscapes + " bounded stance relocations.",
                     FailureType.HAZARD);
             return TaskState.FAILED;
         }
@@ -371,16 +422,13 @@ public final class PhysicalStructureSearchCompanionTask
             return TaskState.FAILED;
         }
         if (eyeCountBeforeThrow <= 0 || eyeCount() >= eyeCountBeforeThrow) {
-            clearEyeTracking();
-            failIssue(
-                    "eye_consumption_unconfirmed",
-                    "The task's native use receipt and EyeOfEnder evidence were confirmed, but no "
-                            + "corresponding main-inventory decrease was observed. It will not count "
-                            + "or repeat the use blindly.",
-                    FailureType.UNKNOWN);
-            return TaskState.FAILED;
+            // 眼实体与原生回执都已确认，数量未减只是消耗不可证：创造模式不扣物品，或
+            // 10% 自返的眼被瞬间拾回。显式声明不可证后继续跟踪本眼方向——不计数、
+            // 也不重复投掷，重复投掷才会真的浪费眼睛。
+            eyeConsumptionUnverified = true;
+        } else {
+            eyesConsumed++;
         }
-        eyesConsumed++;
         r.extendDeadlineTo(player.level().getGameTime() + EYE_PROGRESS_LEASE_TICKS);
         trackStart = trackedEye.position();
         trackLast = trackStart;
@@ -430,6 +478,8 @@ public final class PhysicalStructureSearchCompanionTask
             }
         }
         previousDirection = direction;
+        EYE_DIRECTION_MEMORY.put(eyeDirectionKey(),
+                new StoredEyeDirection(direction, player.level().getGameTime()));
         clearEyeTracking();
         return beginDirectionTravel(direction);
     }
@@ -772,10 +822,16 @@ public final class PhysicalStructureSearchCompanionTask
     private boolean safeEyeThrowStance() {
         ClientLevel level = player.clientLevel;
         BlockPos feet = player.blockPosition();
-        BlockPos head = feet.above();
-        BlockPos floor = feet.below();
         if (!player.onGround() || player.fallDistance > 0.5F
                 || feet.getY() <= level.getMinBuildHeight() + 2) return false;
+        return safeStanceAt(feet);
+    }
+
+    /** 静态站姿检查：脚/头无碰撞、无流体，脚下有坚实支撑且已加载。 */
+    private boolean safeStanceAt(BlockPos feet) {
+        ClientLevel level = player.clientLevel;
+        BlockPos head = feet.above();
+        BlockPos floor = feet.below();
         if (!level.isLoaded(feet) || !level.isLoaded(head) || !level.isLoaded(floor)) return false;
         if (!level.getFluidState(feet).isEmpty()
                 || !level.getFluidState(head).isEmpty()
@@ -783,6 +839,64 @@ public final class PhysicalStructureSearchCompanionTask
         if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
                 || !level.getBlockState(head).getCollisionShape(level, head).isEmpty()) return false;
         return level.getBlockState(floor).isFaceSturdy(level, floor, Direction.UP);
+    }
+
+    /** 在近旁找一个通过同款站姿检查的换位点并发起移动；找不到返回 false，由调用方按原话术失败。 */
+    private boolean relocateToSafeThrowStance() {
+        BlockPos feet = player.blockPosition();
+        BlockPos best = null;
+        for (int radius = 2; radius <= 8 && best == null; radius++) {
+            for (int dx = -radius; dx <= radius && best == null; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    BlockPos candidate = feet.offset(dx, 0, dz);
+                    if (safeStanceAt(candidate)) { best = candidate.immutable(); break; }
+                }
+            }
+        }
+        if (best == null) return false;
+        relocateTarget = best;
+        startMove(best, false);
+        stage = Stage.RELOCATE_STANCE;
+        Constants.LOG.info(
+                "[maicraft-task] ender-eye stance unsafe; relocating to {} before retrying the throw",
+                best.toShortString());
+        return true;
+    }
+
+    /** 换位移动结束：到达即回到投眼选择；失败或超时按原站姿话术失败，不无限换位。 */
+    private TaskState tickRelocateStance() {
+        if (moveChild == null) {
+            failIssue("internal_route_lost", "The active first-person route disappeared.",
+                    FailureType.INTERNAL);
+            return TaskState.FAILED;
+        }
+        TaskState terminal;
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
+            moveChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = runChild(moveChild);
+            if (terminal == null) {
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
+        }
+        TaskResult result = moveChild.result(terminal);
+        moveChild = null;
+        moveRecord = null;
+        boolean arrived = terminal == TaskState.SUCCESS && result != null && result.success();
+        stage = Stage.SELECT_EYE;
+        if (!arrived || !safeEyeThrowStance()) {
+            failIssue(
+                    "unsafe_ender_eye_throw_stance",
+                    "A bounded stance relocation to " + (relocateTarget == null ? "a nearby cell" : relocateTarget.toShortString())
+                            + " did not produce a provably safe throw stance.",
+                    FailureType.HAZARD);
+            return TaskState.FAILED;
+        }
+        relocateTarget = null;
+        return TaskState.RUNNING;
     }
 
     private Set<UUID> loadedEyeUuids(ClientLevel level) {
@@ -951,6 +1065,8 @@ public final class PhysicalStructureSearchCompanionTask
                     "count", eyesConsumed));
             data.put("eye_direction_legs", directionLegs);
             data.put("eye_direction_segments", directionSegments);
+            data.put("eye_consumption_unverified", eyeConsumptionUnverified);
+            data.put("stance_relocations", stanceEscapes);
             data.put("eye_direction_reversals", directionReversals);
         }
         if (verifiedEvidence != null) {
@@ -1069,6 +1185,7 @@ public final class PhysicalStructureSearchCompanionTask
             case MOVE_FRONTIER -> "正在走向未探索的前沿区域";
             case MOVE_EVIDENCE -> "正在走近观察到的结构证据";
             case VERIFY_EVIDENCE -> "正在核实结构证据";
+            case RELOCATE_STANCE -> "掷眼站姿不合格，正在换到安全站位";
         };
     }
 
