@@ -38,8 +38,8 @@
 | `follow` | 跟随已识别的目标 | `GeneralAbilityAdapter.follow` | 入口核对 |
 | `combat` | 与明确指定的目标战斗 | `GeneralAbilityAdapter.combat` | 入口核对 |
 | `interact` | 与方块或实体交互 | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md) |
-| `use_container` | 靠近并打开容器 | `GeneralAbilityAdapter.interact` 的容器分支 | 入口核对 |
-| `manage_container` | 存入、取出或平衡背包数量 | `GeneralAbilityAdapter.manageContainer` | 入口核对 |
+| `use_container` | 原生右键使用容器，并分别报告菜单是否出现 | `GeneralAbilityAdapter.interact` 的容器分支 | [容器能力](containers.md)：参数、原生确认与当前边界；静态核对 |
+| `manage_container` | 在单个容器存取物品或调平主背包数量 | `GeneralAbilityAdapter.manageContainer` | [容器能力](containers.md)、[菜单搬运](menu-transfers.md)：数量、部分效果与恢复；静态核对 |
 | `consume` | 吃一份随身食物并观察消耗 | `GeneralAbilityAdapter.consume` → `EatCompanionTask` | [参数、消耗证据与已知边界](daily-actions.md)；本轮静态复盘 |
 | `equip` | 手持、穿戴或卸下指定部位 | `GeneralAbilityAdapter.equip` → `EquipCompanionTask / UnequipCompanionTask` | [装备路由与未卸下事实](daily-actions.md)；本轮静态复盘 |
 | `drop_items` | 按件数分堆丢弃，可移动、开挖侧袋并尝试点火；特定走廊余物回收后换点 | `GeneralAbilityAdapter.drop` | [丢弃物品](dropping-items.md)：参数、主流程、结果边界与已有回归入口 |
