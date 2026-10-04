@@ -580,8 +580,9 @@ final class AbilityAdapter {
         if (milestone == null && target != null) milestone = target.label();
         // 契约文档写的是 "Nether, stronghold..."；大小写在此规范化，不因首字母大写多烧一轮决策。
         var normalized = milestone == null ? null : milestone.strip().toLowerCase(Locale.ROOT);
-        if (!List.of("nether", "stronghold", "defeat_dragon", "elytra")
-                .contains(normalized)) {
+        // 不可变 List 的 contains(null) 会抛 NPE，必须先判空再查表，让下面的决策回合兜住未识别文本。
+        if (normalized == null
+                || !List.of("nether", "stronghold", "defeat_dragon", "elytra").contains(normalized)) {
             return decision(goal,
                     "reach_milestone needs milestone=nether, stronghold, defeat_dragon or elytra. MaiCraft derives the private prerequisite chain.",
                     List.of(

@@ -351,6 +351,12 @@ def regressionSuites = [
         heap: '512m', directory: 'ability-pointer-drift-regression', timeoutSeconds: 90,
         purpose: '验证契约与 find_block 指路文本点名的能力均在 KNOWN_ABILITIES 中'
     ],
+    // 里程碑文本兜底：milestone 缺席或不可识别必须落进枚举决策回合而非 NPE。
+    reachMilestoneMilestoneTextRegression: [
+        entry: 'org.maiwithu.maicraft.intent.ReachMilestoneMilestoneTextTest',
+        heap: '512m', directory: 'reach-milestone-milestone-text-regression', timeoutSeconds: 90,
+        purpose: '验证 reach_milestone 对缺席或大小写变体的 milestone 文本的规范化与决策回合兜底'
+    ],
 ]
 
 // 无论单独运行一组还是执行 check，都使用同一套游戏资源与测试源码。
