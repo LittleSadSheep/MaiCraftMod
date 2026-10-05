@@ -88,6 +88,25 @@ public final class ClientExplorationMemory {
                 at.getX(), at.getY(), at.getZ(), reached, System.currentTimeMillis(), GSON.toJson(evidence)));
     }
 
+    /**
+     * 远望地形要素（熔岩湖等）：visited 固定为 false，远望事实不冒充到访。
+     * 返回真正新记录的发现（同一空间格的重复观察由确定性 id 自动合并），非新记录返回 null；
+     * 返回完整发现供兴趣询问携带 finding id 与坐标。
+     */
+    public ExplorationFinding observeTerrainFeature(String targetId, BlockPos at, Map<String, Object> evidence) {
+        if (at == null || !dimension.equals(player.level().dimension().location().toString())) return null;
+        var finding = ExplorationFinding.observed("terrain_feature", targetId, "surface lava pool", dimension,
+                at.getX(), at.getY(), at.getZ(), false, System.currentTimeMillis(), "{}");
+        if (!journal.needs(finding.id(), false) || !ObservationVisibility.block(player, at)) return null;
+        JsonObject payload = GSON.toJsonTree(evidence).getAsJsonObject();
+        payload.addProperty("authority", "visible_loaded_surface_sample");
+        ExplorationFinding recorded = new ExplorationFinding(finding.id(), finding.kind(), targetId,
+                finding.name(), dimension, at.getX(), at.getY(), at.getZ(), false,
+                finding.firstSeen(), finding.lastSeen(), payload.toString());
+        journal.observe(recorded);
+        return recorded;
+    }
+
     public Map<String, Object> receipt() {
         journal.flush();
         Map<String, Object> result = new LinkedHashMap<>(journal.receipt());

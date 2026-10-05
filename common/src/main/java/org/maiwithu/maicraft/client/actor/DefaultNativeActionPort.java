@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
@@ -531,13 +532,34 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         }
         if (!receipt.terminal() && context.tickRevision() >= receipt.deadlineTick()) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
-                    "the bounded read-only confirmation window expired");
+                    "the bounded read-only confirmation window expired" + expiryContext(context));
         }
         if (receipt.terminal() && (receipt.kind() == NativeActionReceipt.Kind.CREATIVE_SET_SLOT
                 || (receipt.kind() == NativeActionReceipt.Kind.MOD_PROTOCOL && activeProtocolUsesMenu))) {
             context.menus().interactionSubmitted(context);
         }
         return receipt;
+    }
+
+    /**
+     * 确认窗过期的现场分层（085）：窗口内打开了界面是"菜单已开但盯的事实没变"，
+     * 没开界面更可能是点击无效果或被模式拦截；当前游戏模式一句话点破创造拦截。
+     */
+    private static String expiryContext(LocalPlayerContext context) {
+        StringBuilder text = new StringBuilder();
+        Minecraft minecraft = context.minecraft();
+        if (minecraft != null && minecraft.screen != null) {
+            text.append("; a menu or screen opened during the window (")
+                    .append(minecraft.screen.getClass().getSimpleName())
+                    .append(") but the watched fact never turned true");
+        } else {
+            text.append("; no menu or screen opened, so the click likely had no effect or was blocked");
+        }
+        if (minecraft != null && minecraft.gameMode != null
+                && minecraft.gameMode.getPlayerMode() != null) {
+            text.append("; game_mode=").append(minecraft.gameMode.getPlayerMode().getName());
+        }
+        return text.toString();
     }
 
     void revokeForBoundary(String reason) {

@@ -20,10 +20,21 @@ public final class ExplorationIntentTest {
         var record = SemanticExploreApi.newRecord(new ToolContext("coast", 0), "coast", 128, false, "ground", "north", 60, 32);
         check(record.target.equals("minecraft:beach") && record.sector.angleDegrees() == 60 && record.sector.minDistance() == 32,
                 "coast alias and sector survive task creation");
+        var interestRecord = SemanticExploreApi.newRecord(
+                new ToolContext("survey", 0), "survey", 128, false, "auto", null, null, null, List.of("lava_pool"));
+        check(interestRecord.interests().equals(List.of("lava_pool")), "interests survive task creation");
+        // 与目标选择器可并存：声明兴趣的探索目标照常适配并透传。
+        var withInterests = tool("maicraft:explore", "{\"biome_id\":\"modded:autumn_forest\",\"interests\":[\"lava_pool\"]}");
+        check(withInterests.arguments().getAsJsonArray("interests").size() == 1
+                && withInterests.arguments().getAsJsonArray("interests").get(0).getAsString().equals("lava_pool"),
+                "declared interests pass the contract and reach the tool arguments");
         rejects("{\"biome_id\":\"minecraft:beach\",\"structure_id\":\"minecraft:village\"}");
         rejects("{\"angle_degrees\":90}");
         rejects("{\"direction\":\"north\",\"angle_degrees\":15.5}");
         rejects("{\"direction\":\"north\",\"max_distance\":64,\"min_distance\":128}");
+        rejectsWithWhitelistMessage("{\"interests\":[\"diamond_ore\"]}");
+        rejectsWithWhitelistMessage("{\"interests\":[]}");
+        rejectsWithWhitelistMessage("{\"interests\":\"lava_pool\"}");
         System.out.println("ExplorationIntentTest: passed");
     }
     private static IntentAction.Tool tool(String ability, String parameters) {
@@ -34,6 +45,17 @@ public final class ExplorationIntentTest {
     private static void rejects(String parameters) {
         try { tool("maicraft:explore", parameters); } catch (IllegalArgumentException expected) { return; }
         throw new AssertionError("invalid exploration accepted: " + JsonParser.parseString(parameters));
+    }
+    /** 兴趣白名单的报错必须列出合法值，模型改写时不需要再查一次目录。 */
+    private static void rejectsWithWhitelistMessage(String parameters) {
+        try {
+            tool("maicraft:explore", parameters);
+        } catch (IllegalArgumentException expected) {
+            check(expected.getMessage() != null && expected.getMessage().contains("lava_pool"),
+                    "interest rejection lists the legal values: " + expected.getMessage());
+            return;
+        }
+        throw new AssertionError("invalid interests accepted: " + JsonParser.parseString(parameters));
     }
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);

@@ -6,19 +6,25 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.client.runtime.GameplayAttentionMonitor;
 import org.maiwithu.maicraft.core.WorkProfile;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.reflex.Reflex;
 
 /**
- * 任务释放身体后仍站在深落差边缘时，潜行退到离边安全的位置再交还控制。
+ * 任务释放身体后的两类险境姿势处置：贴着深落差边缘时潜行退到安全位置；
+ * 身体被围困在实心方块里持续窒息时，原生挖开窒息方块恢复呼吸（005 局
+ * interact 地形准备把身体围在 stone 里的实机形态）。
  * 失败、取消都可能把身体留在中途位置；零输入挡不住残余动量，紧贴边缘的身体
- * 会在无人接管窗口滑落。这里不用任何物品，坠落中的保护仍归 MLGChain。
+ * 会在无人接管窗口滑落。窒息逃逸只挖致窒的那一格，不替调用方规划脱困路线。
  * 在岗任务持有身体时不参与抢占：贴边站位可以是任务的正当姿态（建筑贴墙、
  * 钓鱼池边、寻路贴崖），抢占会把锚点对齐和寻路按秒打断。
  */
@@ -30,14 +36,21 @@ public final class SettleChain implements Task, Reflex {
     private static final double DRIFT_SPEED = 0.1;
     private static final double DRIFT_ALIGNMENT = 0.5;
     private static final int MAX_TICKS = 40;
+    /** 窒息方块按空手挖石头约数十刻；预算给足整次逃逸，超时如实报告未清。 */
+    private static final int SUFFOCATION_MAX_TICKS = 600;
 
     private boolean active;
     private int ticks;
+    private NativeActionReceipt breakReceipt;
+    private BlockPos suffocating;
 
     @Override
     public boolean canRun(LocalPlayer companion) {
+        if (WorkProfile.of(companion).fearless()) return false;
+        // 窒息优先：头在窒息方块里每刻掉血，不要求落地或贴边（005 局围困形态）。
+        if (companion.isInWall()) return true;
         // 空中、水中、攀爬与乘坐都有各自的稳定机制；这里只处理"站在地上但贴着深渊"的姿势。
-        if (!companion.onGround() || WorkProfile.of(companion).fearless()) return false;
+        if (!companion.onGround()) return false;
         Direction edge = edgeBeside(companion);
         return edge != null && nearEdgeOrDrifting(companion, edge);
     }
@@ -50,6 +63,7 @@ public final class SettleChain implements Task, Reflex {
 
     @Override
     public TaskState tick(LocalPlayer companion) {
+        if (companion.isInWall()) return escapeSuffocation(companion);
         if (!active) {
             active = true;
             ticks = 0;
@@ -70,7 +84,70 @@ public final class SettleChain implements Task, Reflex {
         return TaskState.RUNNING;
     }
 
+    /** 挖开致窒方块的原生逃逸：只动眼位那一格，窒息解除即收尾，脱困路线仍归调用方。 */
+    private TaskState escapeSuffocation(LocalPlayer companion) {
+        if (!active) {
+            active = true;
+            ticks = 0;
+            GameplayAttentionMonitor.reflexStarted(id(),
+                    "the body was released inside a solid block and is suffocating",
+                    "natively break the suffocating block and re-check",
+                    "native digging limited to the suffocating block", "suffocation damage until the block clears");
+        }
+        if (++ticks > SUFFOCATION_MAX_TICKS) {
+            return finish(companion, "could not clear the suffocating block within the bounded attempt; position stays unverified");
+        }
+        if (!companion.isInWall()) {
+            return finish(companion, "suffocating block cleared; the body can breathe again, escape route is still up to the caller");
+        }
+        LocalPlayerContext context = ClientRuntime.requireContext(companion);
+        BlockPos eye = BlockPos.containing(companion.getEyePosition());
+        if (suffocating == null || !suffocating.equals(eye)) {
+            settleBreak(companion);
+            if (EmbeddedBaritonePolicy.protects(eye)) {
+                return finish(companion, "the suffocating block is protected; clearing it is not authorized for this reflex");
+            }
+            BlockState state = companion.level().getBlockState(eye);
+            float progress = state.getDestroyProgress(companion, companion.level(), eye);
+            if (!(progress > 0) || !Float.isFinite(progress)) {
+                return finish(companion, "the suffocating block cannot be mined natively");
+            }
+            if (!context.mutationAvailable()) return TaskState.RUNNING;
+            suffocating = eye.immutable();
+            BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(suffocating), Direction.UP, suffocating, false);
+            breakReceipt = context.actions().startBreaking(context, hit,
+                    (int) Math.clamp(Math.ceil(1D / progress) + 40, 20, 1200));
+            return TaskState.RUNNING;
+        }
+        if (breakReceipt != null && !breakReceipt.terminal()) {
+            breakReceipt = context.actions().poll(context, breakReceipt);
+            if (!breakReceipt.terminal() && context.mutationAvailable()) {
+                breakReceipt = context.actions().continueBreaking(context, breakReceipt);
+            }
+            return TaskState.RUNNING;
+        }
+        // 回执已终态但窒息仍在：放弃本次挖掘判定，下一刻重新选块再试。
+        breakReceipt = null;
+        suffocating = null;
+        return TaskState.RUNNING;
+    }
+
+    /** 结清未完结的原生挖掘，避免逃逸收尾时把悬着的破坏动作带进下一段任务。 */
+    private void settleBreak(LocalPlayer companion) {
+        if (breakReceipt == null) return;
+        ClientRuntime.actor().activeContext().filter(c -> c.player() == companion && c.isCurrent())
+                .ifPresent(context -> {
+                    if (!breakReceipt.terminal()) {
+                        breakReceipt = context.actions().cancelBreaking(context, breakReceipt);
+                    }
+                });
+        breakReceipt = null;
+        suffocating = null;
+    }
+
     private TaskState finish(LocalPlayer companion, String outcome) {
+        // 两个分支共用收尾：窒息解除可能让同一刻落回边缘分支，未结清的挖掘回执在这里统一收掉。
+        settleBreak(companion);
         InputDriver.halt(companion);
         GameplayAttentionMonitor.reflexFinished(id(), outcome, ticks,
                 "no placement or recovery", "no health change attributable to this reflex");
@@ -83,8 +160,15 @@ public final class SettleChain implements Task, Reflex {
     public void stop(LocalPlayer companion, StopReason why) {
         try {
             ClientRuntime.actor().activeContext().filter(c -> c.player() == companion && c.isCurrent())
-                    .ifPresent(context -> context.body().releaseAll());
+                    .ifPresent(context -> {
+                        if (breakReceipt != null && !breakReceipt.terminal()) {
+                            breakReceipt = context.actions().cancelBreaking(context, breakReceipt);
+                        }
+                        context.body().releaseAll();
+                    });
         } finally {
+            breakReceipt = null;
+            suffocating = null;
             if (active) {
                 GameplayAttentionMonitor.reflexFinished(id(),
                         why == StopReason.BODY_GONE ? "body unavailable" : "interrupted before settling",
@@ -127,8 +211,11 @@ public final class SettleChain implements Task, Reflex {
 
     @Override public String name() { return "settle"; }
     @Override public String id() { return name(); }
-    @Override public String describeCurrentAction() { return "贴着深落差边缘，正在潜行退到安全位置"; }
+    @Override public String describeCurrentAction() {
+        return active && suffocating != null ? "身体被围困窒息，正在挖开致窒方块" : "贴着深落差边缘，正在潜行退到安全位置";
+    }
     @Override public String describe() {
-        return "任务释放身体后仍贴着深落差边缘时，潜行退到离边安全的位置再交还控制，不使用任何物品；坠落中的保护归防摔链";
+        return "任务释放身体后的险境处置：贴着深落差边缘时潜行退到离边安全位置（不用物品）；"
+                + "身体被围困窒息时原生挖开致窒的那一格恢复呼吸，脱困路线仍归调用方；坠落中的保护归防摔链";
     }
 }

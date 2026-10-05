@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 public final class SemanticExploreTool implements MaiCraftTool {
     private static final Gson GSON = new Gson();
     private record Args(String target, Integer max_distance, Boolean may_alter_terrain, String transport_mode,
-            String direction, Integer angle_degrees, Integer min_distance) {}
+            String direction, Integer angle_degrees, Integer min_distance, java.util.List<String> interests) {}
 
     @Override public String name() { return "explore"; }
 
@@ -42,6 +42,8 @@ public final class SemanticExploreTool implements MaiCraftTool {
                         SemanticExploreTaskRecord.MAX_DISTANCE)
                 .optionalBool("may_alter_terrain", "Explicit consent for route pathing to dig, bridge or "
                         + "pillar. Default false; target detection itself never changes blocks.")
+                .optionalEnumStringArray("interests", "Side interests: the task pauses with a continue/stop decision "
+                        + "the first time a NEW matching terrain feature is recorded. Legal value: lava_pool.", "lava_pool")
                 .optionalEnum("transport_mode", "Default auto may choose available native transport to observed internal destinations. Ground disables jetpack/elevator use. A forced jetpack/elevator journey needs a located destination through goto.",
                         "auto", "ground")
                 .build();
@@ -57,7 +59,8 @@ public final class SemanticExploreTool implements MaiCraftTool {
                 parsed == null ? null : parsed.may_alter_terrain(),
                 parsed == null ? null : parsed.transport_mode(),
                 parsed == null ? null : parsed.direction(), parsed == null ? null : parsed.angle_degrees(),
-                parsed == null ? null : parsed.min_distance());
+                parsed == null ? null : parsed.min_distance(),
+                parsed == null ? null : parsed.interests());
         setTask(player, record, args, reply);
     }
 }

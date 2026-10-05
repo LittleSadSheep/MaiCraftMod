@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.intent.MachinePlanPreflight;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackStock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -877,6 +878,12 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 if (minecraft.level != null) ServerSessionRuntime.requireConfirmed(minecraft);
                 future.completeCall(operation.get());
             } catch (Throwable throwable) {
+                // Error 系（LinkageError 等）不进 EmbeddedMcpService 对 Exception 的日志分支，
+                // 曾把 cook 缺类事故在服务端日志里藏得零痕迹（084）；参数类拒绝无需 error 噪音。
+                if (!(throwable instanceof IllegalArgumentException
+                        || throwable instanceof IllegalStateException)) {
+                    Constants.LOG.error("[maicraft-mcp] Client-thread runtime call failed", throwable);
+                }
                 future.failCall(throwable);
             }
         };
