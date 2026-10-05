@@ -34,11 +34,15 @@ final class DefenseExcursion {
     /** 回位途中最多被新的袭击打断这么多次；工位附近一直有怪时不再往回送，免得自卫无限占着身体。 */
     private static final int MAX_RETURN_FIGHTS = 2;
     private static final String WALK_BACK = "walk_back_if_displaced";
-    /** 本身就在赶路、跟随或追着目标走的能力：接管处只是路过的点，走回去只会白走一趟或打乱原路线。 */
+    /** 本身就在赶路、跟随或追着目标走的能力：接管处只是路过的点，走回去只会白走一趟或打乱原路线。
+     *  find_entity 与 explore/find_structure 同族：长程搜索沿前沿推进，拦截点随时移动，回位没有意义；
+     *  find_block 是原地只读扫描不在此列，acquire_items 的 hunt 段虽会走动但同能力还有驻点的
+     *  craft/cook 段，能力粒度区分不了两种阶段，不整体纳入。 */
     private static final Set<String> MOVING_ABILITIES = Set.of(
             "maicraft:travel", "maicraft:travel_dimension", "maicraft:follow", "maicraft:explore",
-            "maicraft:find_structure", "maicraft:reach_milestone", "maicraft:obtain_elytra",
-            "maicraft:defeat_ender_dragon", "maicraft:physical_control", "maicraft:combat", "maicraft:sleep");
+            "maicraft:find_structure", "maicraft:find_entity", "maicraft:reach_milestone",
+            "maicraft:obtain_elytra", "maicraft:defeat_ender_dragon", "maicraft:physical_control",
+            "maicraft:combat", "maicraft:sleep");
     /** 这些回位结论表示角色仍被留在别处而原任务还在执行，必须暂停任务交给模型，不能让它在新地点悄悄续上。 */
     private static final Set<String> STRANDED = Set.of("too_hurt", "path_failed", "repeated_attacks", "dimension_changed");
 

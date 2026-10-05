@@ -168,6 +168,8 @@ public final class GuiRegressionSuite {
         ScaffoldCleanupStallWatchdogTest.main(args);
         // 接管或长期无驱动遗留的待确认原生动作必须在下次提交前回收，不能楔死动作队列。
         NativeActionStaleReclaimTest.main(args);
+        // 刻外任务取消登记的挖掘停手必须下一刻结算，一次性动作就地终结，不留 PENDING 占位。
+        NativeActionBoundaryDeferralTest.main(args);
         // 水下低顶逃生先检查实际换气链的输入，避免单独路径测试掩盖持续顶墙上浮。
         BreathChainControlTest.main(args);
         // 接单失败后必须归还任务槽位，后继操作才能正常取得玩家身体。

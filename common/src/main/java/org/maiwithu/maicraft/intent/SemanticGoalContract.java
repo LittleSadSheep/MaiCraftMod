@@ -20,6 +20,10 @@ final class SemanticGoalContract {
 
     private static final String SEQUENCE = "maicraft:sequence";
 
+    /** 携带 lava_cast 浇筑流程、可声明 spoil_policy 的能力。 */
+    private static final Set<String> PORTAL_SPOIL_ABILITIES =
+            Set.of("maicraft:prepare_portal", "maicraft:travel_dimension");
+
     private SemanticGoalContract() {}
 
     static void validate(Goal goal, Set<String> knownAbilities) {
@@ -121,6 +125,11 @@ final class SemanticGoalContract {
             }
         }
         // 等待的时长和条件在接单前确定，不能等到角色已经暂停干活才发现参数被误读。
+        // 余土处置授权只接受 deposit/drop；丢弃会真实销毁物品，错误拼写不能等角色到池边才被拒绝。
+        if (PORTAL_SPOIL_ABILITIES.contains(ability) && goal.parameters().has("spoil_policy")) {
+            try { org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy.checkSpoilPolicy(goal.parameters()); }
+            catch (IllegalArgumentException invalid) { throw violation("invalid_spoil_policy", path + ".parameters.spoil_policy", ability, invalid.getMessage()); }
+        }
         if (!restoredHistory && WaitAbilityAdapter.ABILITY.equals(ability)) {
             try { WaitAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {
@@ -189,6 +198,13 @@ final class SemanticGoalContract {
             try { CreateManualInput.durationTicks(goal.parameters()); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_interaction_duration", path + ".parameters", ability, invalid.getMessage());
+            }
+            // purpose=write 的告示牌文字在计划期定形：缺 text、行数或行长越界都不能接管身体后再被编辑屏丢弃。
+            if (!restoredHistory) {
+                try { GeneralAbilityAdapter.signWriteLines(goal.parameters()); }
+                catch (IllegalArgumentException invalid) {
+                    throw violation("invalid_sign_write_contract", path + ".parameters", ability, invalid.getMessage());
+                }
             }
         }
 

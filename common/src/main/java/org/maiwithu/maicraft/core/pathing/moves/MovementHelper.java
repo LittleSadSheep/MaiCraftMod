@@ -437,17 +437,21 @@ public final class MovementHelper {
      */
     // 判断挖掉这格是否会破坏冰、惊动蠹虫、放出液体或引发落沙；它不是接近这格的导航限制。
     public static boolean avoidBreaking(CalculationContext context, int x, int y, int z, BlockState state) {
+        // 脱困豁免只在「破坏点净远离岩浆危险源」时成立；上方邻格永远走常规规则。
+        boolean escapeWaivesLava = context.hazardEscape.active()
+                && context.escapeBodyOrigin() != null
+                && context.hazardEscape.permitsBreakingBesideLava(context.escapeBodyOrigin(), x, y, z);
         if (!placeableWithinBorder(context.worldBorder, x, z)) {
             return true;
         }
         Block b = state.getBlock();
         return b == Blocks.ICE
                 || b instanceof InfestedBlock
-                || avoidAdjacentBreaking(context, x, y + 1, z, true)
-                || avoidAdjacentBreaking(context, x + 1, y, z, false)
-                || avoidAdjacentBreaking(context, x - 1, y, z, false)
-                || avoidAdjacentBreaking(context, x, y, z + 1, false)
-                || avoidAdjacentBreaking(context, x, y, z - 1, false);
+                || avoidAdjacentBreaking(context, x, y + 1, z, true, false)
+                || avoidAdjacentBreaking(context, x + 1, y, z, false, escapeWaivesLava)
+                || avoidAdjacentBreaking(context, x - 1, y, z, false, escapeWaivesLava)
+                || avoidAdjacentBreaking(context, x, y, z + 1, false, escapeWaivesLava)
+                || avoidAdjacentBreaking(context, x, y, z - 1, false, escapeWaivesLava);
     }
 
     /**
@@ -458,6 +462,15 @@ public final class MovementHelper {
      * (会向水平流)→ 禁。
      */
     public static boolean avoidAdjacentBreaking(CalculationContext context, int x, int y, int z, boolean directlyAbove) {
+        return avoidAdjacentBreaking(context, x, y, z, directlyAbove, false);
+    }
+
+    /**
+     * {@code escapeWaivesLava} 是脱困模式的放行旗标(由 {@link #avoidBreaking}
+     * 统一判定)，只对水平邻格的岩浆生效；水与落沙的邻格禁挖不参与豁免。
+     */
+    public static boolean avoidAdjacentBreaking(CalculationContext context, int x, int y, int z,
+                                                boolean directlyAbove, boolean escapeWaivesLava) {
         BlockState state = context.get(x, y, z);
         Block block = state.getBlock();
         if (!directlyAbove
@@ -468,6 +481,10 @@ public final class MovementHelper {
         }
         // 只按纯液体方块判(含水方块可能有封闭底面,不算)
         if (block instanceof LiquidBlock) {
+            // 脱困豁免:起点已在岩浆致死邻域内且破坏点净远离危险源时,放行贴岩浆挖掘。
+            if (escapeWaivesLava && !directlyAbove && isLava(state)) {
+                return false;
+            }
             if (directlyAbove || context.strictLiquidCheck) {
                 return true;
             }

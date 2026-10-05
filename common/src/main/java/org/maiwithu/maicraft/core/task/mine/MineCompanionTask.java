@@ -834,17 +834,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 if (unreachable != null && unreachableDropIds.add(unreachable.getId())) {
                     unreachableDropCount++;
                     // 导航马上会被释放，先留下掉落所在格、身体位置和失败原因，便于区分水槽收取与产物缺失。
-                    uncollectedDropEvidence = Map.of(
-                            "failure_position", List.of(unreachable.getX(), unreachable.getY(), unreachable.getZ()),
-                            "player_feet", List.of(player.getX(), player.getY(), player.getZ()),
-                            "observed_at_tick", player.level().getGameTime(),
-                            "item_id", BuiltInRegistries.ITEM.getKey(unreachable.getItem().getItem()).toString(),
-                            "count", unreachable.getItem().getCount(),
-                            "block_state", player.level().getBlockState(unreachable.blockPosition()).toString(),
-                            "pickup_delay_pending", unreachable.hasPickUpDelay(),
-                            "envelope_wait_ticks", dropCloseTicks,
-                            "navigation_failure", String.valueOf(nav.failReason()),
-                            "navigation_outcome", String.valueOf(nav.outcomeSummary()));
+                    var evidence = uncollectedDropEvidenceBase(unreachable, dropCloseTicks);
+                    // 分支差异键即语义：寻路无路带目标格状态、拾取延迟与导航失败原因，供水槽、悬空等原因判读。
+                    evidence.put("block_state", player.level().getBlockState(unreachable.blockPosition()).toString());
+                    evidence.put("pickup_delay_pending", unreachable.hasPickUpDelay());
+                    evidence.put("navigation_failure", String.valueOf(nav.failReason()));
+                    evidence.put("navigation_outcome", String.valueOf(nav.outcomeSummary()));
+                    uncollectedDropEvidence = evidence;
                     progressNote = "left " + unreachableDropCount
                             + " mined drop(s) unreachable and continued with another source";
                 }
@@ -864,21 +860,32 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
         InputDriver.halt(player);
         if (!pickupNavigationRetry.afterFailure(drop.getUUID(), player.level().getGameTime(), FailureType.NO_PATH)) {
-            // 与寻路无路失败共用同一份证据口径：这个失败只证明最后一步走近不成立，
-            // 回执带足掉落与站位事实，调用方才能区分地形、悬空等原因，而不是把
-            // 工具状态或来源缺失误判成卡点。
-            uncollectedDropEvidence = Map.of(
-                    "failure_position", List.of(drop.getX(), drop.getY(), drop.getZ()),
-                    "player_feet", List.of(player.getX(), player.getY(), player.getZ()),
-                    "observed_at_tick", player.level().getGameTime(),
-                    "item_id", BuiltInRegistries.ITEM.getKey(drop.getItem().getItem()).toString(),
-                    "count", drop.getItem().getCount(),
-                    "player_on_ground", player.onGround(),
-                    "player_in_water", player.isInWater(),
-                    "nudge_target", List.of(point.x, point.y, point.z),
-                    "envelope_wait_ticks", dropCloseTicks);
+            // 这个失败只证明最后一步走近不成立，回执带足掉落与站位事实，调用方才能区分
+            // 地形、悬空等原因，而不是把工具状态或来源缺失误判成卡点。
+            var evidence = uncollectedDropEvidenceBase(drop, dropCloseTicks);
+            // 分支差异键即语义：走近失败带身体姿态与尝试走近的目标点，与寻路无路分支的导航事实互补。
+            evidence.put("player_on_ground", player.onGround());
+            evidence.put("player_in_water", player.isInWater());
+            evidence.put("nudge_target", List.of(point.x, point.y, point.z));
+            uncollectedDropEvidence = evidence;
             fail("the final mined-drop approach has no supported path", FailureType.NO_PATH);
         }
+    }
+
+    /**
+     * 不可达掉落回执的公共证据键：掉落所在格、身体站位、观察刻、物品与数量、掉落同步窗口。
+     * 寻路无路与走近失败两个分支在此之上各补自己的差异键，公共口径改动只落这一处，避免两份
+     * 手工维护的字面量静默分叉。
+     */
+    private Map<String, Object> uncollectedDropEvidenceBase(ItemEntity drop, int envelopeWaitTicks) {
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("failure_position", List.of(drop.getX(), drop.getY(), drop.getZ()));
+        evidence.put("player_feet", List.of(player.getX(), player.getY(), player.getZ()));
+        evidence.put("observed_at_tick", player.level().getGameTime());
+        evidence.put("item_id", BuiltInRegistries.ITEM.getKey(drop.getItem().getItem()).toString());
+        evidence.put("count", drop.getItem().getCount());
+        evidence.put("envelope_wait_ticks", envelopeWaitTicks);
+        return evidence;
     }
 
     private ItemEntity nearestLiveDrop() {

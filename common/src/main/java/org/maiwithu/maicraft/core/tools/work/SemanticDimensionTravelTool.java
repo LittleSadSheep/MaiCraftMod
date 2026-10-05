@@ -56,6 +56,7 @@ public final class SemanticDimensionTravelTool implements MaiCraftTool {
                 .optionalInteger("max_search_distance", "Physical stronghold search limit when preparation is enabled.", 128, 4096)
                 .optionalStringArray("allowed_sources", "Permitted material acquisition sources.")
                 .optionalEnum("material_policy", "Material supply policy.", "ordinary", "storage_available", "inventory_only")
+                .optionalEnum("spoil_policy", "Excavation surplus disposal during lava_cast: deposit (default) stores surplus in nearby containers; drop discards verified surplus at the site.", "deposit", "drop")
                 .optionalStringArray("protected_labels", "Remembered places that preparation must preserve.")
                 .build();
     }

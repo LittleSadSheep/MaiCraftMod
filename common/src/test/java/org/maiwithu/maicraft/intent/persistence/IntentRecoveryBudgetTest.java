@@ -154,7 +154,7 @@ public final class IntentRecoveryBudgetTest {
     private static void restore(IntentRuntime runtime) throws Exception {
         // 模拟 tick 的换世界顺序：清空旧身体记录、恢复任务，再开放本世界的只读观察通道。
         var clear = IntentRuntime.class.getDeclaredMethod("clearSemanticState"); clear.setAccessible(true); clear.invoke(runtime);
-        var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class); restore.setAccessible(true); restore.invoke(runtime, 30L);
+        var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class, String.class); restore.setAccessible(true); restore.invoke(runtime, 30L, "world_changed");
         field(IntentRuntime.class, "bodyAttached").set(runtime, true);
     }
     private static Field field(Class<?> type, String name) throws Exception {

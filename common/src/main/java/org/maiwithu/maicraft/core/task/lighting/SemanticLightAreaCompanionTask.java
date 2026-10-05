@@ -134,6 +134,8 @@ public final class SemanticLightAreaCompanionTask
     private String activeCandidateFingerprint;
     private String lastUnproductiveCandidateFingerprint;
     private TaskResult lastBuildResult;
+    /** 跨轮累计的逐灯位拒绝明细（坐标+拒绝闸名），失败回执直接交付，实机零放置时可读因。 */
+    private final List<Map<String, Object>> siteRejections = new ArrayList<>();
     private final List<Map<String, Object>> childReceipts = new ArrayList<>();
     private final SemanticMaterialSupplyCoordinator supply =
             new SemanticMaterialSupplyCoordinator();
@@ -904,6 +906,14 @@ public final class SemanticLightAreaCompanionTask
         if (buildChild instanceof TorchLightingPass torches) {
             requestedPlacements += torches.attemptedPositions().size();
             torches.attemptedPositions().forEach(pos -> attemptedPositions.add(pos.asLong()));
+            // 闸内拒绝的灯位不再进入后续候选；明细跨轮累计进回执，整批零出手时可直接读因。
+            for (TorchLightingPass.SiteRejection rejection : torches.rejections()) {
+                attemptedPositions.add(rejection.pos().asLong());
+                siteRejections.add(Map.of(
+                        "pass", passes,
+                        "position", List.of(rejection.pos().getX(), rejection.pos().getY(), rejection.pos().getZ()),
+                        "gate", rejection.gate(), "detail", rejection.detail()));
+            }
         }
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("pass", passes);
@@ -911,7 +921,7 @@ public final class SemanticLightAreaCompanionTask
         receipt.put("message", lastBuildResult.message());
         if (lastBuildResult.data() != null) {
             copyReceiptField(lastBuildResult.data(), receipt, "failure_type", "failure_code",
-                    "placed", "remaining", "outcome_uncertain");
+                    "placed", "remaining", "outcome_uncertain", "rejected_sites");
         }
         childReceipts.add(receipt);
         buildChild = null;
@@ -1323,6 +1333,10 @@ public final class SemanticLightAreaCompanionTask
                 ? "no placement attempt was ever submitted; the placement gate rejected every planned site "
                         + "before a native action was sent"
                 : "requested_placements=" + requestedPlacements + " across " + passes + " build pass(es)";
+        if (!siteRejections.isEmpty()) {
+            attempts += "; per-site rejections: " + siteRejections.size()
+                    + " (see placement_rejections for each site's gate and reason)";
+        }
         List<String> options = new ArrayList<>(List.of("supply a different light source or style",
                 "use a smaller area or lower required coverage",
                 "inspect the aggregate dark-area evidence and choose a semantic prerequisite"));
@@ -1393,6 +1407,7 @@ public final class SemanticLightAreaCompanionTask
         data.put("survey_leg_failures", surveyLegFailures);
         data.put("passes", passes);
         data.put("requested_placements", requestedPlacements);
+        data.put("placement_rejections", List.copyOf(siteRejections));
         data.put("placement_budget_explicit", r.hasPlacementBudget());
         if (r.hasPlacementBudget()) data.put("max_placements", r.maxPlacements);
         data.put("protected_footprint_facts", Map.copyOf(protectedFacts));

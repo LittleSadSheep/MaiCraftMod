@@ -70,6 +70,7 @@ record PortalCastingStep(Kind kind, BlockPos target) {
         record.materialSupplyProtection(List.copyOf(layout.footprint()));
         record.toolSupply(new BuildTaskRecord.ToolSupply(policy.materialPolicy(), policy.sources(true),
                 policy.allowCombat(), policy.protectedLabels()));
+        record.spoilPolicy(policy.spoilPolicy());
         return record;
     }
 
@@ -87,6 +88,7 @@ record PortalCastingStep(Kind kind, BlockPos target) {
         var record = new BuildTaskRecord(id, deadline, targets, true);
         record.automaticMachineModification(Set.copyOf(cells)); record.materialSupplyProtection(List.copyOf(layout.footprint()));
         record.toolSupply(new BuildTaskRecord.ToolSupply(policy.materialPolicy(), policy.sources(true), policy.allowCombat(), policy.protectedLabels()));
+        record.spoilPolicy(policy.spoilPolicy());
         return record;
     }
 

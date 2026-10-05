@@ -75,6 +75,7 @@ public final class ExactInteractionTargetTest {
         flintIgnitionTargetsAndHonestFire();
         bucketSourceSelection(false);
         bucketSourceSelection(true);
+        signWritePlanContractAndCompile();
         // 公开 use_item 的定点分支同时覆盖空格倒桶与门框嵌眼，避免退回只读契约测试。
         TargetedItemUseTest.main(args);
         System.out.println("ExactInteractionTargetTest: passed");
@@ -165,6 +166,48 @@ public final class ExactInteractionTargetTest {
         var target = kind == null ? null : new Goal.SemanticTarget(kind, null, at == null ? null
                 : new Goal.WorldPosition(at.getX(), at.getY(), at.getZ(), "minecraft:overworld"), null);
         return new Goal(GeneralAbilityAdapter.INTERACT, "use this button", target, parameters.toString(), "{}", List.of(), List.of());
+    }
+
+    /**
+     * 告示牌写字的计划期校验与编译：text 必填、行数与行长越界在计划期拒绝，
+     * 非告示牌目标直接回决策；合法请求经内部 sign_text 桥编译成空手右键。
+     */
+    private static void signWritePlanContractAndCompile() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            BlockPos at = new BlockPos(9, 2, 9);
+            f.set(at, Blocks.OAK_SIGN.defaultBlockState());
+            var record = compile(adapt(signWriteGoal(at, "仓库 A\n只放铁锭"), f), f);
+            check(record.aim.equals(at) && record.signLines.equals(List.of("仓库 A", "只放铁锭")),
+                    "purpose=write carries the caller-provided lines through the internal sign_text bridge");
+            check(record.emptyHand && record.item == null,
+                    "sign writing compiles an empty-hand right-click so the native edit screen opens");
+            for (String bad : new String[]{null, "a\nb\nc\nd\ne"}) {
+                try { adapt(signWriteGoal(at, bad), f); throw new AssertionError("invalid sign write accepted: " + bad); }
+                catch (SemanticContractException expected) {
+                    check("invalid_sign_write_contract".equals(expected.violationCode()),
+                            "the contract names the sign write violation");
+                }
+            }
+            try { adapt(signWriteGoal(at, "x".repeat(InteractAtTaskRecord.SIGN_LINE_CHAR_LIMIT + 1)), f);
+                throw new AssertionError("an over-long sign line was accepted"); }
+            catch (SemanticContractException expected) {
+                check("invalid_sign_write_contract".equals(expected.violationCode()),
+                        "the over-long sign line is refused at plan time");
+            }
+            f.set(at, Blocks.STONE.defaultBlockState());
+            var refused = adapt(signWriteGoal(at, "still valid text"), f);
+            check(refused instanceof IntentAction.Decision decision && decision.snapshot().question().contains("sign"),
+                    "a non-sign target refuses sign writing before any native click");
+        }
+    }
+
+    private static Goal signWriteGoal(BlockPos at, String text) {
+        JsonObject parameters = new JsonObject();
+        parameters.addProperty("purpose", "write");
+        if (text != null) parameters.addProperty("text", text);
+        var target = new Goal.SemanticTarget("coordinates", null,
+                new Goal.WorldPosition(at.getX(), at.getY(), at.getZ(), "minecraft:overworld"), null);
+        return new Goal(GeneralAbilityAdapter.INTERACT, "write the sign", target, parameters.toString(), "{}", List.of(), List.of());
     }
 
     private static IntentAction adapt(Goal goal, InteractionWorldTestHarness f) throws Exception {

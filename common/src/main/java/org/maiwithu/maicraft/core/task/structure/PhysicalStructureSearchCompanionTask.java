@@ -1217,14 +1217,18 @@ public final class PhysicalStructureSearchCompanionTask
                     "block_counts", verifiedEvidence.blockCounts(),
                     "authority", "observed_loaded_world"));
         }
+        // 与语义探索路径同口径：结构自然生成稀疏，观察范围内无命中不构成范围外不存在的证据。
+        // 未命中出口不止一个（前沿耗尽、方向不可走等都会置 issueCode），建议必须挂在 verifiedEvidence==null 上，
+        // 不能只挂在无 issueCode 的分支——否则前沿耗尽这条真实 miss 出口拿不到稀疏预期。
+        if (verifiedEvidence == null) {
+            data.put("suggestions", List.of(
+                    "sparse generation is normal; no match over the observed area is not proof of absence beyond it"));
+        }
         if (issueCode != null) {
             data.put("issue_code", issueCode);
             data.put("requires_decision", true);
             data.put("recovery_options", recoveryOptions());
         } else if (verifiedEvidence == null) {
-            // 与语义探索路径同口径：结构自然生成稀疏，观察范围内无命中不构成范围外不存在的证据。
-            data.put("suggestions", List.of(
-                    "sparse generation is normal; no match over the observed area is not proof of absence beyond it"));
             data.put("recovery_options", recoveryOptions());
         }
         return data;

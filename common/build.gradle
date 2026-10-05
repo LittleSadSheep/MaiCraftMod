@@ -387,7 +387,7 @@ def regressionSuites = [
     acquisitionProspectingRegression: [
         entry: 'org.maiwithu.maicraft.core.task.acquire.AcquisitionProspectingHandoffTest',
         heap: '512m', directory: 'acquisition-prospecting-regression', timeoutSeconds: 90,
-        purpose: '验证探矿编排交接：下降目标 Y 取生成带推荐值，掘进授权显式携带'
+        purpose: '验证探矿编排交接：目标层按生成带就近选取，掘进授权显式携带'
     ],
     // hunt 搜索距离上限独立回放：参数默认值、显式传参与越界拒绝，防止限距参数悄悄失效。
     huntSearchDistanceRegression: [
@@ -400,6 +400,12 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.intent.AbilityPointerDriftTest',
         heap: '512m', directory: 'ability-pointer-drift-regression', timeoutSeconds: 90,
         purpose: '验证契约与 find_block 指路文本点名的能力均在 KNOWN_ABILITIES 中'
+    ],
+    // 契约行为事实防丢失：mine 收敛窗口、重力塌落、hunt 远行与 interact 站位等反直觉事实，契约重写时不得静默删除。
+    contractBehaviorFactsRegression: [
+        entry: 'org.maiwithu.maicraft.intent.ContractBehaviorFactsTest',
+        heap: '512m', directory: 'contract-behavior-facts-regression', timeoutSeconds: 90,
+        purpose: '验证能力契约文本保留 mine 收敛窗口、塌落警示、hunt 远行与 interact 站位事实'
     ],
     // 里程碑文本兜底：milestone 缺席或不可识别必须落进枚举决策回合而非 NPE。
     reachMilestoneMilestoneTextRegression: [
@@ -442,6 +448,12 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.core.task.build.BuildClearanceOwnTargetsTest',
         heap: '512m', directory: 'build-clearance-own-targets-regression', timeoutSeconds: 60,
         purpose: '验证材料/导航保护区中的施工目标格仍按授权变更集合放行'
+    ],
+    // 浇筑余土丢弃通道独立回放：spoil_policy=drop 只丢核实的普通余土并按背包净减量对账，默认仍存入容器。
+    spoilDropPolicyRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.SpoilDropCoordinatorTest',
+        heap: '512m', directory: 'spoil-drop-policy-regression', timeoutSeconds: 60,
+        purpose: '验证 spoil_policy=drop 的丢弃通道作用域、净减量对账与默认存入行为'
     ],
     // 重生回执的库存对比等内容包同步后再算：keepInventory 不再误报全部丢失。
     respawnInventorySyncRegression: [

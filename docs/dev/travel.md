@@ -134,7 +134,7 @@
 | 已定位地点 | `destination`，或 `target` 的 `coordinates`、`landmark`、`area`；使用本节前述到达精度 |
 | 前步结果 | `target.kind:"prior_result"`，用 `relation` 指明此前能力或结果；总任务绑定成功步骤的权威位置后再移动，无法绑定则等待决策 |
 | 平台 | `semantic_target:"platform"`；默认 `direction:"forward"`，可用 `up/down/forward/backward/left/right/north/south/east/west` |
-| 露天地表 | `semantic_target:"surface"`；向上寻找脚下列露天的支撑处，不接受方向；树叶不作为天空遮挡，固体和液体遮挡仍计入 |
+| 露天地表 | `semantic_target:"surface"`；向上寻找脚下列露天的支撑处，不接受方向；树叶不作为天空遮挡，固体和液体遮挡仍计入。地下出发须配 `may_alter_terrain:true`：先沿所在列竖直上掘到顶盖再破出（顶盖为液体时不掘，如实带位置回退地面流程）；未授权则范围失败，回执指路「坐标目标 + `exact:true` 上掘，或补授权」 |
 | 群系／标签／海岸 | 在 `semantic_target`、`biome_id`、`biome_tag` 中选择一种；`nearest` 目标的 `label/relation` 也可表达探索目标，推荐显式参数 |
 | 电梯楼层 | `elevator_floor` 可选 `ask`、`top`、`bottom`、`next_up`、`next_down` 或已同步的楼层 ID／名称；可用 `elevator_id` 指定已观察的电梯 UUID |
 | 登上物理船体 | `structure_id` 是已观察的船体 UUID；仅 `auto/jetpack`，需装备可用背包。可带 `seat_position:{x,y,z}`，为相对 `origin_storage` 的整数座位偏移；确认支撑或原生乘坐后完成，不负责开船 |
@@ -181,10 +181,20 @@
 | `best_distance_blocks` | 已观察的最近目标距离；存在有效采样时提供 |
 | `navigation`、`landing_assist` | 路线与实际落地辅助证据；按是否产生相应记录提供 |
 | `landing_assist_observed` | 是否记录过自动落地辅助事实；不单独代表辅助成功 |
+| `arrival_grade` | `arrived_exact`（身体站在目的地格、带 Y 提示时脚位同层）或 `arrived_within_tolerance`（到达范围内但不在目的地格）；仅成功回执提供 |
+| `remaining_horizontal_blocks`、`remaining_vertical_blocks` | 身体到目的地格中心的水平直线距离、脚位与目标层的差；无 Y 提示时不含垂直项 |
+| `arrival_direction` | 目的地相对身体的八向水平罗盘与目标在上/在下/同层，如 `north-east, target below` |
+| `landing_protection_unverified` | 到达成立但本次自动落地保护收场未验证或失败时的注记；终态仍按到达交付，调用方自行决定是否复检脚下支撑 |
 
-`y_hint_delta` 使用原始身体格层，到达判断使用半砖修正后的脚位节点，不能把两者当作浮点高度完全一致的证明。当前没有 `arrived_exact/arrived_within_tolerance` 到达等级字段，也没有统一的水平偏差字段；精度来自请求与完成判定，容差内成功只说明本次旅行条件满足。
+`y_hint_delta` 使用原始身体格层，到达判断使用半砖修正后的脚位节点，不能把两者当作浮点高度完全一致的证明。`arrival_grade` 让调用方程序化分辨精确落位与容差内到达：容差内成功只说明本次旅行条件满足，要身体与目标同层（贴水舀取、贴站台等）应显式传 `vertical_tolerance:0` 或 `exact:true`。
 
 `PLANNING_STALL` 说明规划停滞或没有收敛，不证明地形无路。连续无进展预算当前为 600 个活动游戏刻；另有累计工作量超过 60,000 且约 600 刻没有继续接近目标的收敛熔断。后者可以终止仍在展开节点的病态搜索。暂停计时与子任务共享规则见 [任务预算](tasks.md#新能力的无进展预算)。
+
+## 危险邻域起点的脱困放行
+
+起点已处在岩浆致死邻域内（脚部周围水平 3 格、垂直 ±1 格内存在岩浆）时，常规「邻格有岩浆就禁挖」的保护会拒绝一切出逃路线。此时寻路只放行一类例外：破坏开口位于比当前身体位置离最近岩浆格更远的一侧，路线因此净远离危险；身体与岩浆之间的开口及同距侧仍拒绝，头顶岩浆的邻格任何情况下都禁挖。岩浆伤害仍按原版结算，放行是脱离手段而非穿越许可。身体脱出检测半径后策略失效，常规危险回避原样恢复。
+
+从危险邻域出发的 no path 失败回执附带 `hazard_escape` 证据（最近岩浆格、距离、八向脱困方向、沿该方向 6 格的建议撤退点），失败详情文本也带同一行提示；调用方可据此把目的地改到远离岩浆的一侧再提交。
 
 暂停、取消经总任务与身体控制层处理，导航在能安全交接时释放动作。重启恢复保留语义目标和已确认结果，未完成任务以暂停状态等待继续；旧的内存路线不会直接恢复执行。
 
@@ -194,6 +204,7 @@
 - 内部单独 Y 的移动失败后仍接受一层偏差；它不是公开 `travel` 的“同层模式”。公开同层需求使用完整目的地和 `vertical_tolerance:0`。
 - 目录虽列出 `player/entity` 目标，当前 `AbilityAdapter.position` 没有将它们解析成旅行坐标；持续跟随应使用 `maicraft:follow`，不能仅凭目录枚举认定已接通移动实体追踪。
 - 回执中的飞机或船体某一段成功不代替原终点成功；已发生的原生效果与未完成的后续路段分开记录。
+- 寻路对耕地方块加行走代价：有替代路线时绕开农田；跳跃与跌落的落点一律禁止选在耕地上，避免踩坏耕地退回泥土。因此穿过农田区的路线可能更长，这是有意行为而非绕路故障。
 
 ## 修改时沿哪条链检查
 

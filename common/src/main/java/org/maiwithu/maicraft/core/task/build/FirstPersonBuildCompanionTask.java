@@ -109,6 +109,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private boolean supplyAccessReady;
     private Phase afterExcavationExit;
     private final InventoryDepositCoordinator spoilSupply = new InventoryDepositCoordinator();
+    /** spoil_policy=drop 时的余土丢弃通道；与存入通道互斥，同一时刻最多一个在处理余土。 */
+    private final SpoilDropCoordinator spoilDrop = new SpoilDropCoordinator();
     private final List<Map<String, Object>> spoilReceipts = new ArrayList<>();
     private final BuildFoodPreparation foodPreparation = new BuildFoodPreparation();
     private final BiFunction<LocalPlayer, Double, HitResult> placementRay;
@@ -320,7 +322,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     || phase == Phase.EXCAVATE_EXIT && nav == null; // 仅出坑补料也先保养，但不抢走已经启动的出口导航。
             boolean settled = useReceipt == null && !selection.pending() && digger.current() == null
                     && !digger.hasPendingBreak() && ultimine == null && !ultimineArmed
-                    && !excavationTools.active() && !spoilSupply.active() && player.onGround()
+                    && !excavationTools.active() && !spoilSupply.active() && !spoilDrop.active() && player.onGround()
                     && (nav == null || nav.isSafeToCancel());
             // 已经交出的取食流程持续持有身体；采田往返途中跳跃或开菜单不能让旧施工阶段抢回来。
             if (foodPreparation.active() || boundary && settled && !player.isUsingItem()
@@ -561,6 +563,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private TaskState excavationTick() {
         // 先处理需要存回仓库的土石，再从当前最高的阻挡层继续开挖，不能直接奔向还埋在地下的地板。
         resetCell();
+        if (spoilDrop.active()) {
+            var dropped = NavigationSafetyContext.withProtectedArea(
+                    r.targets.stream().map(BuildTaskRecord.Target::pos).toList(), List.of(),
+                    () -> spoilDrop.tick(player, this::runChild));
+            r.extendDeadlineTo(spoilDrop.childDeadline());
+            if (dropped.status() == SpoilDropCoordinator.Status.RUNNING) return TaskState.RUNNING;
+            spoilReceipts.add(dropped.receipt());
+            if (dropped.status() == SpoilDropCoordinator.Status.FAILED) {
+                failAt(player.blockPosition(), "Excavation surplus drop did not complete: " + dropped.receipt(),
+                        FailureType.NO_SPACE, "excavation_spoil_drop_failed", false);
+                return TaskState.FAILED;
+            }
+        }
         if (spoilSupply.active()) {
             var deposited = NavigationSafetyContext.withProtectedArea(
                     r.targets.stream().map(BuildTaskRecord.Target::pos).toList(), List.of(),
@@ -580,8 +595,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     != SemanticMaterialSupplyCoordinator.MaterialPolicy.INVENTORY_ONLY) {
                 TaskState access = leaveExcavationBefore(Phase.EXCAVATE);
                 if (access != null) return access;
-                spoilSupply.begin(player, r.getToolCallId() + "/excavation-spoil", r.getDeadlineGameTime(),
-                        excess, r.toolSupply().protectedLabels(), 48);
+                if (r.spoilPolicy() == BuildTaskRecord.SpoilPolicy.DROP)
+                    spoilDrop.begin(player, r.getToolCallId() + "/excavation-spoil", r.getDeadlineGameTime(), excess);
+                else
+                    spoilSupply.begin(player, r.getToolCallId() + "/excavation-spoil", r.getDeadlineGameTime(),
+                            excess, r.toolSupply().protectedLabels(), 48);
                 return TaskState.RUNNING;
             }
         }
@@ -2711,6 +2729,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (why == StopReason.PREEMPTED) foodPreparation.pause(player); else foodPreparation.stop(player);
         spoilSupply.cancel(player);
+        spoilDrop.cancel(player);
         if (ultimine != null) { ultimine.close(); ultimine = null; ultimineArmed = false; }
         excavationTools.stop(player);
         // 暂停时先停当前挖掘、撤掉导航的施工协助并松键；任务进度仍保留，恢复后可以重新登记协助。
@@ -2727,6 +2746,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (placementAccess != null) placementAccess.stop();
         foodPreparation.stop(player);
         spoilSupply.cancel(player);
+        spoilDrop.cancel(player);
         if (ultimine != null) { ultimine.close(); ultimine = null; ultimineArmed = false; }
         excavationTools.stop(player);
         // 结束时释放预览、挖掘和菜单；中断保留创造材料与已建方块，正常完成先经过材料清理阶段。

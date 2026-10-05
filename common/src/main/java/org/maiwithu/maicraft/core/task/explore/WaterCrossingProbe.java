@@ -19,7 +19,7 @@ public final class WaterCrossingProbe {
     private static final int SAMPLE_STEP = 8;
     /** 单列深水门槛：两格起无法涉水，只能游泳，长距离游泳有溺水风险。 */
     private static final int DEEP_WATER_MIN_DEPTH = 2;
-    /** 深水连段门槛：连续两段采样深水（约九格以上连续深水）即视为穿水路线。 */
+    /** 深水连段门槛：连续两个采样段判深水（每段步长 {@link #SAMPLE_STEP} 格）即视为穿水路线。 */
     private static final int DEEP_RUN_SAMPLES = 2;
 
     private final ClientLevel level;

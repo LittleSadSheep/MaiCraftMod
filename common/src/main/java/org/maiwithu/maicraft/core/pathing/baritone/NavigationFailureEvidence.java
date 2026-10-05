@@ -48,6 +48,12 @@ final class NavigationFailureEvidence {
         facts.put("selected_scaffold", selected == null ? Map.of("available", false)
                 : Map.of("available", true, "item_id", BuiltInRegistries.ITEM.getKey(selected.item()).toString(),
                         "inventory_slot", selected.inventorySlot()));
+        // 起点在岩浆致死邻域内时给出脱困建议(净远离方向与建议撤退点)，失败回执不再是单纯 no path。
+        var escape = org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.detect(
+                player.level(), feet, cell -> player.level().isLoaded(cell));
+        if (escape.active()) {
+            facts.put("hazard_escape", escape.evidence());
+        }
         return Map.copyOf(facts);
     }
 

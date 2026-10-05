@@ -154,9 +154,18 @@ public final class SemanticExploreTaskRecord extends TaskRecord
         interestDecisionId = decisionId;
     }
 
-    /** 决策已发出但答复未到的观察窗口；恢复场景下据此避免对同一发现重复生成决策。 */
+    /**
+     * 决策已发出但答复未到的观察窗口；恢复场景下据此避免对同一发现重复生成决策。
+     * 答复写回后此编号仍在，只有伴随任务消费答复时才清空——中继不能把「编号还在」
+     * 当成「仍在等答复」，否则答复后的恢复刻会被永远挡在伴随任务之外。
+     */
     public UUID interestDecisionId() {
         return interestDecisionId;
+    }
+
+    /** 答复已写回但伴随任务尚未消费；此窗口内中继必须放行伴随任务的 tick。 */
+    public boolean hasInterestAnswer() {
+        return interestAnswer != null;
     }
 
     public boolean isInterestDecision(UUID decisionId) {

@@ -36,8 +36,8 @@ public final class DebugHudRenderer {
         if (snapshot.rows().isEmpty()) return;
         Font font = minecraft.font;
 
-        // 背景框宽度以快照携带的面板宽度为准——它与事件区、最新报错的折行是同一个口径，
-        // 折行右缘因此贴住框的内容右缘；正文行实测宽度只作兜底，正常不超出该口径。
+        // 背景框宽度以快照携带的面板宽度为准：控制器已把固定行与未折行正文都算进这个宽度，
+        // 事件与报错也按同一宽度折行，正文实测通常不超过它；这里保留实测兜底只为吸收分词器的少量溢出。
         int contentWidth = 0;
         for (DebugHudController.Row row : snapshot.rows()) {
             contentWidth = Math.max(contentWidth, font.width(row.label().isBlank() ? "" : row.label() + ": ")

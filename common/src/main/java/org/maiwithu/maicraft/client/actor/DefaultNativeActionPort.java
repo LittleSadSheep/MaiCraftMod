@@ -562,6 +562,36 @@ public final class DefaultNativeActionPort implements NativeActionPort {
         return text.toString();
     }
 
+    /**
+     * 刻外任务收尾（MCP 取消等在两次游戏刻之间执行，没有当刻上下文）：发不了停止包，
+     * 只登记边界原因，下一刻 advance 先停挖再结算。没有这一步，PENDING 回执会一直占着
+     * 动作队列直到自身超期——挖掘窗口长达数千刻，期间所有原生提交都被拒绝。
+     */
+    public void deferBreakCancellationForTaskBoundary(NativeActionReceipt receipt, String boundaryReason) {
+        if (receipt == null || receipt.terminal() || receipt != active
+                || receipt.kind() != NativeActionReceipt.Kind.BREAK_BLOCK) return;
+        pendingBreakCancellationReason = boundaryReason == null || boundaryReason.isBlank()
+                ? "the owning task ended before native mining confirmation" : boundaryReason;
+    }
+
+    /**
+     * 刻外任务收尾的一次性动作版：不需要世界操作就能如实终结，标记效果未知
+     * （提交可能已经生效），不留 PENDING 占位。持续动作（挖掘、持用）须走各自的物理停手。
+     */
+    public void abandonOneShotForTaskBoundary(NativeActionReceipt receipt, String boundaryReason) {
+        if (receipt == null || receipt.terminal()) return;
+        if (receipt != active && receipt != auxiliary) return;
+        if (receipt.kind() == NativeActionReceipt.Kind.BREAK_BLOCK
+                || receipt.kind() == NativeActionReceipt.Kind.USE_ITEM) {
+            throw new IllegalArgumentException(
+                    "continuous native actions require their dedicated physical stop operation");
+        }
+        String reason = boundaryReason == null || boundaryReason.isBlank()
+                ? "the owning task ended before native confirmation" : boundaryReason;
+        receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
+                reason + "; the submitted one-shot effect may already have applied");
+    }
+
     void revokeForBoundary(String reason) {
         ItemUseInputLease.revoke(this);
         clearMainHandCancellation(); // 交还身体后，旧取消不得切换新操作者的槽位。

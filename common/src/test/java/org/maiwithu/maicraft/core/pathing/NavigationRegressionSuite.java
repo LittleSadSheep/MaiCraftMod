@@ -42,6 +42,7 @@ import org.maiwithu.maicraft.core.integration.physics.StructurePoseTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureExitPathTest;
 import org.maiwithu.maicraft.core.integration.physics.StructurePresentationTest;
 import org.maiwithu.maicraft.core.pathing.baritone.BaritonePlayerFeetTest;
+import org.maiwithu.maicraft.core.pathing.HazardEscapePolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudgetTest;
 import org.maiwithu.maicraft.core.pathing.baritone.FallLandingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundMovementReplayTest;
@@ -124,6 +125,8 @@ public final class NavigationRegressionSuite {
         ProgressBudgetTest.main(args);
         PlanningWorkProgressTest.main(args);
         PathPlannerProgressTest.main(args);
+        // 起点在岩浆致死邻域内时只放行净远离危险源的破坏开口，常规危险回避原样不变。
+        HazardEscapePolicyTest.main(args);
         InputDriverTest.main(args);
         // 清障权限先检查实际路线费用和客户端配置，确保名单外建筑始终留给绕行。
         ClearanceWhitelistTest.main(args);
@@ -164,6 +167,8 @@ public final class NavigationRegressionSuite {
         org.maiwithu.maicraft.core.task.move.MoveToProgressGuardTest.main(args);
         // 地表发现与坐标移动共享移动外壳；露天判定与误报防线在这里单独验证。
         org.maiwithu.maicraft.core.task.move.TravelSurfaceTaskTest.main(args);
+        // 到达回执分级：精确与容差内到达可分辨，落地保护未验证降级为注记而非失败。
+        org.maiwithu.maicraft.core.task.move.MoveToArrivalReceiptTest.main(args);
         PathSearchRegressionTest.main(args);
         // 传送或改目标后，异步旧失败不得终止角色从当前起点继续寻路。
         PathCalculationOriginTest.main(args);

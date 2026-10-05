@@ -12,6 +12,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.combat.Menace;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
@@ -47,13 +48,18 @@ public final class SuicideHazards {
         // 每刻最多查看 1024 个脚位；候选站位同时受三维距离和上下十二格限制，避免一次大扫描卡住游戏。
         // auto 也先走完这轮地形扫描再选怪；已完成的扫描不重新开始，因此后来的新岩浆或新高台不会自动补入。
         int width = request.radius() * 2 + 1, volume = width * width * 25;
-        if (!request.permits("lava") && !request.permits("fall")) { cursor = volume; return true; }
+        if (!request.permits("lava") && !request.permits("fall") && !request.permits("cactus")) { cursor = volume; return true; }
         for (int budget = 0; cursor < volume && budget < 1024; budget++, cursor++) {
             int x = cursor % width - request.radius(), z = cursor / width % width - request.radius();
             BlockPos stand = origin.offset(x, cursor / (width * width) - 12, z);
             if (stand.distSqr(origin) > request.radius() * request.radius() || !standing(level, stand)) continue;
             for (Direction direction : Direction.Plane.HORIZONTAL) {
                 BlockPos entry = stand.relative(direction);
+                // 仙人掌候选的入口就是仙人掌格本身（有碰撞、不算 clear），接近点才是可站立的邻格。
+                if (request.permits("cactus") && cactus(level, entry)) {
+                    terrain.add(new Candidate("cactus", stand, entry, -1, null));
+                    continue;
+                }
                 if (!clear(level, entry) || !clear(level, entry.above())) continue;
                 if (request.permits("lava") && lava(level, entry)) {
                     terrain.add(new Candidate("lava", stand, entry, -1, null));
@@ -113,8 +119,15 @@ public final class SuicideHazards {
         Kind kind = Kind.of(candidate.method());
         if (kind != null) return selfMadeCell(level, candidate.entry(), kind)
                 && (kind.present(level, candidate.entry()) || kind.slot(player.getInventory()) >= 0);
-        return standing(level, candidate.approach()) && clear(level, candidate.entry()) && clear(level, candidate.entry().above())
-                && (candidate.method().equals("lava") ? lava(level, candidate.entry()) : fallHeight(level, candidate.entry()) >= 6);
+        return standing(level, candidate.approach()) && (candidate.method().equals("cactus")
+                ? cactus(level, candidate.entry())
+                : clear(level, candidate.entry()) && clear(level, candidate.entry().above())
+                && (candidate.method().equals("lava") ? lava(level, candidate.entry()) : fallHeight(level, candidate.entry()) >= 6));
+    }
+
+    private static boolean cactus(Level level, BlockPos entry) {
+        // 只认已加载的真实仙人掌格；贴身接触由原生碰撞结算，扫描阶段不估算护甲或药效后的实际伤害。
+        return level.isLoaded(entry) && level.getBlockState(entry).is(Blocks.CACTUS);
     }
 
     private static boolean lava(Level level, BlockPos entry) {

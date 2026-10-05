@@ -218,13 +218,15 @@ public final class PortalCastingHonestSelectionTest {
         }
     }
 
-    /** B4：零源岩浆、有源无合规池、有合规池但全部不可达，各自落在独立字段里。 */
+    /** B4：零源岩浆、有源无合规池、有合规池但全部不可达，各自落在独立字段里。
+     *  扫描进度受每刻 2ms 墙钟预算影响，并发构建的高负载会压低单刻推进量，
+     *  tick 上限须给足余量，断言的是扫描终态而非用时。 */
     private static void b4ThreeFailureStates() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             var origin = world.player.blockPosition();
             try (var survey = new PortalCastingSurvey(world.level, origin, 32)) {
                 NetherPortalCastingLayout picked = null;
-                for (int i = 0; i < 50 && picked == null && !survey.complete(); i++) {
+                for (int i = 0; i < 400 && picked == null && !survey.complete(); i++) {
                     TargetIndex.clientTick(world.level); picked = survey.tick();
                 }
                 check(picked == null && survey.complete(), "no source lava finishes the scan");
@@ -242,7 +244,7 @@ public final class PortalCastingHonestSelectionTest {
             var origin = world.player.blockPosition();
             try (var survey = new PortalCastingSurvey(world.level, origin, 32)) {
                 NetherPortalCastingLayout picked = null;
-                for (int i = 0; i < 50 && picked == null && !survey.complete(); i++) {
+                for (int i = 0; i < 400 && picked == null && !survey.complete(); i++) {
                     TargetIndex.clientTick(world.level); picked = survey.tick();
                 }
                 check(picked == null && survey.complete(), "isolated sources finish the scan without a pool");
@@ -257,7 +259,7 @@ public final class PortalCastingHonestSelectionTest {
             var origin = world.player.blockPosition();
             try (var survey = new PortalCastingSurvey(world.level, origin, 32)) {
                 NetherPortalCastingLayout picked = null;
-                for (int i = 0; i < 50 && picked == null; i++) {
+                for (int i = 0; i < 400 && picked == null; i++) {
                     TargetIndex.clientTick(world.level); picked = survey.tick();
                 }
                 check(picked != null, "an all-unreachable pool is still handed to PREPARE_SITE for the real verdict");

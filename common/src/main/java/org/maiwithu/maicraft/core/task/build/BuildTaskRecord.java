@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.build;
 import org.maiwithu.maicraft.core.build.BuildValidity;
 
@@ -136,6 +137,22 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     public ToolSupply toolSupply() { return toolSupply; }
     public void toolSupply(ToolSupply value) { toolSupply = Objects.requireNonNull(value); }
 
+    /** 施工余土的处置授权。DEPOSIT（默认）只允许存入容器；DROP 额外允许把已核实的普通余土直接丢弃，只能来自调用方显式授权。 */
+    public enum SpoilPolicy {
+        DEPOSIT, DROP;
+        public static SpoilPolicy parse(String value) {
+            String normalized = value == null ? "deposit" : value.strip().toLowerCase(java.util.Locale.ROOT);
+            return switch (normalized) {
+                case "deposit" -> DEPOSIT;
+                case "drop" -> DROP;
+                default -> throw new IllegalArgumentException("spoil_policy must be deposit or drop");
+            };
+        }
+    }
+    private SpoilPolicy spoilPolicy = SpoilPolicy.DEPOSIT;
+    public SpoilPolicy spoilPolicy() { return spoilPolicy; }
+    public void spoilPolicy(SpoilPolicy value) { spoilPolicy = value == null ? SpoilPolicy.DEPOSIT : value; }
+
     public boolean previewManaged() { return previewManaged; }
     public boolean supplyAccessOnly() { return supplyAccessOnly; }
     public void supplyAccessOnly(boolean value) { supplyAccessOnly = value; }
@@ -157,6 +174,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.excavationCargo = excavationCargo;
         destination.materialSupplyProtection = materialSupplyProtection;
         destination.toolSupply = toolSupply;
+        destination.spoilPolicy = spoilPolicy;
         destination.futureWorkItems = futureWorkItems;
         destination.observedMachineEdits = observedMachineEdits;
         destination.fixedMachineModification = fixedMachineModification;

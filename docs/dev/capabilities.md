@@ -33,6 +33,7 @@
 | `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | [实际可见数量与搜索范围](combat.md)；本轮静态复盘 |
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | [只读扫描、池面用途和已知边界](mining.md)；本轮静态复盘 |
 | `use_item` | 定点使用或按新增产物有限次持用随身物品 | `GeneralAbilityAdapter.useItem` | [交互与定点使用](interaction.md) |
+| `interact` | 普通原生右键方块或实体，含通过原版编辑屏向已放置告示牌写字（`purpose=write`） | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md)；告示牌写字待实机验收 |
 | `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | [源格破坏与产物入包](mining.md)；本轮静态复盘 |
 | `place_block` | 在精确坐标用随身物品放置一个方块及其状态 | `GeneralAbilityAdapter.placeBlock` | [单格放置与施工分工](building.md)；实机验收待安排 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
@@ -62,7 +63,7 @@
 
 `enchant` 保留兼容已有调用。默认能力发现不展示它，指定该能力查询时仍能取得契约；新机器工序走统一机器入口。能力“已登记”、当前加载的模组“支持”、眼前条件“可以执行”是三件不同的事。
 
-`suicide` 由模型明确调用，低饱食度或路远不会自动触发。单人世界读取真实 `keepInventory`，多人服需依据已知设置传入 `keep_inventory_confirmed: true`；不修改规则。寻死前先把护甲和手上的不死图腾经原生背包收起，收不走的如实列出；寻死结束后由自动行为在重生后的新身体（或没死成的原身体）上按原件穿回护甲，图腾留在背包。默认 `method=auto` 先从三类已观察机会中选取，都用完或没有时，随身带打火石或火焰弹就在附近安全格原地点火，最后才倒岩浆桶（`method=fire`、`method=lava_bucket` 直接使用对应方式；倒出的岩浆源永久留在原地），候选搜索半径 24 格、地形站位上下 12 格，总预算为 120 个按执行 tick 折算的秒；搜索半径不是整个追逐路线的边界。角色只步行接近、进入岩浆、靠怪、踏出高处或对脚下地面原生倒岩浆、点火，不直接扣血或施工。寻死取得执行资格时自保让位，暂停或结束后恢复调度资格，原生伤害和已提交效果不会回滚。成功只确认本轮身体死亡；默认请求原生重生，`auto_respawn: false` 可关闭 Mod 自动请求，实际重生另看 `agent.respawned`。后继序列保持暂停，等待重新判断现场；完整参数、返回字段和已知差异见 [主动寻死](suicide.md)。
+`suicide` 由模型明确调用，低饱食度或路远不会自动触发。单人世界读取真实 `keepInventory`，多人服需依据已知设置传入 `keep_inventory_confirmed: true`；不修改规则。寻死前先把护甲和手上的不死图腾经原生背包收起，收不走的如实列出；寻死结束后由自动行为在重生后的新身体（或没死成的原身体）上按原件穿回护甲，图腾留在背包。默认 `method=auto` 先从四类已观察机会（岩浆、威胁生物、高处、仙人掌接触）中选取，都用完或没有时，随身带打火石或火焰弹就在附近安全格原地点火，最后才倒岩浆桶（`method=fire`、`method=lava_bucket`、`method=cactus` 直接使用对应方式；倒出的岩浆源永久留在原地），候选搜索半径 24 格、地形站位上下 12 格，总预算为 120 个按执行 tick 折算的秒；搜索半径不是整个追逐路线的边界。角色只步行接近、进入岩浆、靠怪、踏出高处、贴身接触仙人掌或对脚下地面原生倒岩浆、点火，不直接扣血或施工。寻死取得执行资格时自保让位，暂停或结束后恢复调度资格，原生伤害和已提交效果不会回滚。成功只确认本轮身体死亡；默认请求原生重生，`auto_respawn: false` 可关闭 Mod 自动请求，实际重生另看 `agent.respawned`。后继序列保持暂停，等待重新判断现场；完整参数、返回字段和已知差异见 [主动寻死](suicide.md)。
 
 适配代码位置：
 

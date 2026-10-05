@@ -102,6 +102,14 @@ public class CalculationContext {
     public final int worldBottom;
     public final int worldHeight;
 
+    /**
+     * 起点在岩浆致死邻域内时的脱困放行策略；无危险邻域或无实时玩家
+     * (线程快照)时为 INACTIVE，常规危险回避原样生效。
+     */
+    public final org.maiwithu.maicraft.core.pathing.HazardEscapePolicy hazardEscape;
+    /** 脱困放行距离比较的身体基准格(上下文构造时的脚位)。 */
+    private final BlockPos escapeBody;
+
     /** 构造时冻结的四个世界边界数值。 */
     public final BorderSnapshot worldBorder;
     public final SearchConfig searchConfig;
@@ -185,6 +193,11 @@ public class CalculationContext {
         this.allowPlaceInFluidsFlow = settings.allowPlaceInFluidsFlow;
         this.worldBottom = view.getMinBuildHeight();
         this.worldHeight = view.getMaxBuildHeight();
+        // 脱困检测只依赖已加载视图的小邻域扫描；无实时玩家(线程快照)时不进入脱困模式。
+        this.escapeBody = player == null ? null : player.blockPosition().immutable();
+        this.hazardEscape = escapeBody == null
+                ? org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.INACTIVE
+                : org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.detect(view, escapeBody);
         WorldBorder border = null;
         if (player != null && player.level() != null) {
             border = player.level().getWorldBorder();
@@ -355,6 +368,11 @@ public class CalculationContext {
 
     public boolean isForbiddenBodyCell(int x, int y, int z) {
         return forbiddenBodyCells.contains(BlockPos.asLong(x, y, z));
+    }
+
+    /** 脱困放行的身体基准格(上下文构造时的脚位)；线程快照无实时玩家时为 null。 */
+    public BlockPos escapeBodyOrigin() {
+        return escapeBody;
     }
 
     // ==================== 成本函数 ====================

@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.task.inventory;
 
+import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.TaskRecord;
 import net.minecraft.world.item.Item;
 
@@ -13,6 +14,10 @@ public final class DropItemsTaskRecord extends TaskRecord {
     public final Item item;
     public final int count;
     public final String label;
+
+    static { TaskFactory.register(DropItemsTaskRecord.class, DropCompanionTask::new); }
+
+    public static void ensureRegistered() {}
 
     public DropItemsTaskRecord(String toolCallId, long deadlineGameTime,
                                Item item, int count, String label) {

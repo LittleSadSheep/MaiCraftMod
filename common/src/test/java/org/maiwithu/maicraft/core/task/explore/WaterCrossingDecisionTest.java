@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.explore;
 
 import net.minecraft.SharedConstants;
@@ -14,7 +15,7 @@ public final class WaterCrossingDecisionTest {
         // 不再把路点设到河对岸让移动直接走进河心。
         check(WaterCrossingProbe.isCrossing(10, 2, 2),
                 "a narrow river of contiguous deep water counts as a crossing despite the minority");
-        // 浅滩与单段深水（约八格内）仍可短促渡过，不触发绕行。
+        // 浅滩与单个采样段深水（一段步长 8 格）仍可短促渡过，不触发绕行。
         check(!WaterCrossingProbe.isCrossing(10, 3, 0), "shallow water never triggers the deep rule");
         check(!WaterCrossingProbe.isCrossing(8, 1, 1), "a single deep sample stays a short wade or swim");
         // 深水连段被浅滩或未加载列打断后重新起算。

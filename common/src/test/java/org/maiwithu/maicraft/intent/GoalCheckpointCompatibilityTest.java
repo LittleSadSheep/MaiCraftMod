@@ -46,9 +46,12 @@ public final class GoalCheckpointCompatibilityTest {
         store.saveAsync(identity,IntentStateCodec.encode(identity.key(),List.of(plan),List.of(original),
                 Map.of("sequence-goal",original.externalId()),List.of())).join();
         // 真实恢复入口必须同时恢复摊平步骤和失败尝试，不能删掉 continue 声明或清空整个存档绕过异常。
-        var restore=IntentRuntime.class.getDeclaredMethod("restoreBound",long.class);restore.setAccessible(true);restore.invoke(runtime,100L);
+        var restore=IntentRuntime.class.getDeclaredMethod("restoreBound",long.class,String.class);restore.setAccessible(true);restore.invoke(runtime,100L,"body_reattached");
         runtime.requireRecoveredState();var restored=runtime.task(original.externalId());
         check(restored!=null&&restored.paused()&&restored.steps().getFirst().toleratesFailure(),"组合步骤的失败容忍声明未恢复");
+        check(restored.pauseSnapshot()!=null
+                &&restored.pauseSnapshot().reason().equals("paused_restored:body_reattached"),
+                "恢复暂停应携带重载来源，供调用方区分死亡重生与普通重启");
         check(restored.attempts().getFirst().goal().toleratesFailure(),"历史失败尝试丢失原步骤语义");
         check(restored.goal().equals(goal)&&runtime.taskForRequestKey("sequence-goal")==restored,"重启后丢失组合目标或请求身份");
         try {runtime.compile(step,101);throw new AssertionError("恢复兼容不能放宽新请求的顶层 on_failure 规则");}
@@ -70,9 +73,9 @@ public final class GoalCheckpointCompatibilityTest {
                 Map.of("old-goal", original.externalId()), List.of())).join();
 
         // 用真实恢复入口读回三类历史；不能为了通过新校验而改写当初的请求内容。
-        var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class);
+        var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class, String.class);
         restore.setAccessible(true);
-        restore.invoke(runtime, 100L);
+        restore.invoke(runtime, 100L, "session_start");
         runtime.requireRecoveredState();
         var restored = runtime.task(original.externalId());
         check(restored != null && restored.paused() && restored.restoredDetached(), "旧目标应以暂停状态恢复");

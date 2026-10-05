@@ -107,7 +107,7 @@ public final class SleepSafetyTest {
         }
     }
 
-    /** 125：coordinates 床区目标按准确坐标先走后睡，床的位置进入请求而不再只认 current_place。 */
+    /** coordinates 床区目标按准确坐标先走后睡，床的位置进入请求而不再只认 current_place。 */
     private static void bedAreaTargetTravelsThenSleeps() throws Exception {
         try (var f = new InteractionWorldTestHarness()) {
             bedWorks(f, true);

@@ -12,7 +12,6 @@ import java.util.stream.Collectors;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.StringSplitter;
-import net.minecraft.client.gui.Font;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.Component;
@@ -46,7 +45,7 @@ public final class DebugHudController {
     /** 事件区一行，由一个或多个着色片段组成；换行产生的续行只有内容片段。 */
     public record EventLine(List<Segment> segments) {}
 
-    /** 每刻快照：固定状态行、事件区换行结果和面板宽度（背景框与折行共用的同一口径）；面板不可见时两段皆空。 */
+    /** 每刻快照：固定状态行、事件区换行结果和面板宽度（背景框与折行共用的同一口径）；面板不可见时行与事件两段皆空、宽度为 0。 */
     public record Snapshot(List<Row> rows, List<EventLine> events, int panelWidth) {}
 
     /** 面板单行放不下的说明截断到 64 字符并以 … 结尾，让人看得出后面还有内容。 */
@@ -100,7 +99,7 @@ public final class DebugHudController {
                 ? new Snapshot(List.of(), List.of(), 0) : buildSnapshot(minecraft);
     }
 
-    /** 渲染层每帧读取的最近一次快照；不可见时两段皆空，渲染器据此不画。 */
+    /** 渲染层每帧读取的最近一次快照；不可见时行与事件两段皆空、宽度为 0，渲染器据此不画。 */
     public static Snapshot snapshot() { return snapshot; }
 
     private static Snapshot buildSnapshot(Minecraft minecraft) {
@@ -141,13 +140,17 @@ public final class DebugHudController {
             return new Snapshot(List.copyOf(rows), List.of(),
                     panelWidth(rows, splitter, maxPanelWidth(minecraft)));
         }
-        // 最新报错行按最终面板宽度折行后再入行集，折行口径与事件区、背景框保持同一个值。
+        // 最新报错行与事件区按最终面板宽度折行后再入行集：先由固定行与未折行正文共同定宽，
+        // 折行与背景框再共用这一个值，右缘因此对齐。
+        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
+        int maxWidth = maxPanelWidth(minecraft);
         String pendingError = appendTaskStatusRows(rows, minecraft);
-        int panel = panelWidth(rows, splitter, maxPanelWidth(minecraft));
+        int panel = panelWidthWithContent(splitter,
+                panelWidth(rows, splitter, maxWidth), events, pendingError, maxWidth);
         if (pendingError != null) {
             rows.addAll(errorRows(pendingError, panel, splitter));
         }
-        return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows, panel), panel);
+        return new Snapshot(List.copyOf(rows), eventLines(splitter, events, panel), panel);
     }
 
     // 面板宽度上限随屏宽走：取缩放后屏宽的九成，长内容撑到这个上限就折行，不会把面板推出屏幕。
@@ -268,13 +271,13 @@ public final class DebugHudController {
     }
 
     // 事件区换行宽度就是快照里的面板宽度，与背景框同一口径；事件少时固定行布局纹丝不动。
-    private static List<EventLine> eventLines(Font font, List<Row> rows, int contentWidth) {
-        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
+    private static List<EventLine> eventLines(StringSplitter splitter,
+            List<IntentRuntime.AttentionItem> events, int contentWidth) {
         if (events.isEmpty()) return List.of();
         List<EventLine> newestFirst = new ArrayList<>();
         int used = 0;
         for (int i = events.size() - 1; i >= 0; i--) {
-            EventLine[] lines = wrapEvent(font.getSplitter(), events.get(i), contentWidth);
+            EventLine[] lines = wrapEvent(splitter, events.get(i), contentWidth);
             if (used + lines.length > EVENT_LINE_BUDGET) break;
             for (int j = lines.length - 1; j >= 0; j--) newestFirst.addFirst(lines[j]);
             used += lines.length;
@@ -284,8 +287,9 @@ public final class DebugHudController {
 
     // 时间与类型着色后占首行行首，内容从剩余宽度换行；灰类型是 world.* 降权事件。
     // 纯函数：宽度全部经 StringSplitter 测量，回归用假宽度函数即可脱离游戏实例覆盖。
+    // 首行折行宽是面板宽扣掉时间与类型前缀后的余量；续行没有前缀，按整个面板宽折行。
     static EventLine[] wrapEvent(StringSplitter splitter, IntentRuntime.AttentionItem event, int contentWidth) {
-        String time = EVENT_TIME.format(event.timestamp().atZone(ZoneId.systemDefault())) + " ";
+        String time = eventTimeText(event);
         ChatFormatting priorityColor = switch (event.priority()) {
             case "important" -> ChatFormatting.YELLOW;
             case "task" -> ChatFormatting.AQUA;
@@ -294,8 +298,9 @@ public final class DebugHudController {
         String head = event.type() + ": ";
         Segment timeSegment = new Segment(time, ChatFormatting.GRAY);
         Segment typeSegment = new Segment(head, priorityColor);
-        int messageWidth = Math.max(80, contentWidth - (int) splitter.stringWidth(time) - (int) splitter.stringWidth(head));
-        List<String> messageLines = wrap(splitter, event.message(), messageWidth);
+        int headWidth = (int) splitter.stringWidth(time) + (int) splitter.stringWidth(head);
+        List<String> messageLines = wrapWithHead(splitter, event.message(),
+                Math.max(80, contentWidth - headWidth), Math.max(80, contentWidth));
         EventLine[] lines = new EventLine[messageLines.size()];
         for (int i = 0; i < messageLines.size(); i++) {
             lines[i] = i == 0
@@ -306,20 +311,44 @@ public final class DebugHudController {
         return lines;
     }
 
-    /** 按字形宽度把内容折行：超过上限在最后一行行尾补 …；由字体分词器断行，中英文都不断在词中间。 */
-    private static List<String> wrap(StringSplitter splitter, String text, int width) {
-        String singleLine = text.replace('\r', ' ').replace('\n', ' ')
-                .replaceAll("\\s+", " ").strip();
+    /** 首行按 headWidth 折出，其余行按 restWidth 折行：续行没有前缀，可用整个面板宽度。
+     *  按字形宽度断行（中英文都不断在词中间），超过 EVENT_MAX_LINES 行在末行尾补 …。 */
+    private static List<String> wrapWithHead(StringSplitter splitter, String text, int headWidth, int restWidth) {
+        String singleLine = normalize(text);
         List<String> lines = new ArrayList<>();
-        for (FormattedText line : splitter.splitLines(singleLine, width, Style.EMPTY)) {
-            lines.add(line.getString());
+        List<FormattedText> headLines = splitter.splitLines(singleLine, headWidth, Style.EMPTY);
+        String first = headLines.isEmpty() ? "" : headLines.getFirst().getString();
+        lines.add(first);
+        String rest = remainderAfter(singleLine, first);
+        if (!rest.isEmpty()) {
+            for (FormattedText line : splitter.splitLines(rest, restWidth, Style.EMPTY)) {
+                lines.add(line.getString());
+            }
         }
         if (lines.size() > EVENT_MAX_LINES) {
             lines = new ArrayList<>(lines.subList(0, EVENT_MAX_LINES));
             lines.set(EVENT_MAX_LINES - 1, lines.getLast() + "…");
         }
-        if (lines.isEmpty()) lines.add("");
         return lines;
+    }
+
+    // 分词器只在词边界或超长 token 处断行，首行内容因此是归一化原文的前缀；取其后剩余部分
+    // 并跳过断行处丢弃的分隔空格。极端情况下前缀不匹配时按首行长度硬推进，保证不出死循环。
+    private static String remainderAfter(String text, String firstLine) {
+        int index = text.startsWith(firstLine) ? firstLine.length() : Math.min(firstLine.length(), text.length());
+        while (index < text.length() && text.charAt(index) == ' ') index++;
+        return text.substring(index);
+    }
+
+    /** 折行与测宽共用的文本归一化：换行与连续空白压成单个空格，两端去空白。 */
+    private static String normalize(String text) {
+        return text.replace('\r', ' ').replace('\n', ' ')
+                .replaceAll("\\s+", " ").strip();
+    }
+
+    // 事件首行前缀：时间戳加尾随空格，与渲染时的片段文本严格一致，测宽与折行同源。
+    private static String eventTimeText(IntentRuntime.AttentionItem event) {
+        return EVENT_TIME.format(event.timestamp().atZone(ZoneId.systemDefault())) + " ";
     }
 
     // 任务行以标题为主体：能力短名加目标陈述，状态前缀只标注它此刻在等什么。
@@ -394,13 +423,13 @@ public final class DebugHudController {
                 : jsonMessage(failed.terminalSnapshot().result(), failed.getState());
     }
 
-    /** 折行与行拆分单独成纯函数：StringSplitter 可脱离游戏实例构造，回归用假宽度函数即可覆盖。 */
+    /** 折行与行拆分单独成纯函数：StringSplitter 可脱离游戏实例构造，回归用假宽度函数即可覆盖。
+     *  首行按面板宽扣除标签后的余量折行，续行没有标签，按整个面板宽折行。 */
     static List<Row> errorRows(String message, int panelWidth, StringSplitter splitter) {
         String safe = message == null || message.isBlank() ? "未知" : message;
-        String label = "最新报错: ";
-        int lineWidth = Math.max(80, panelWidth - (int) splitter.stringWidth(label));
+        int firstWidth = Math.max(80, panelWidth - (int) splitter.stringWidth("最新报错: "));
+        List<String> lines = wrapWithHead(splitter, safe, firstWidth, Math.max(80, panelWidth));
         List<Row> rows = new ArrayList<>();
-        List<String> lines = wrap(splitter, safe, lineWidth);
         for (int i = 0; i < lines.size(); i++) {
             rows.add(new Row(i == 0 ? "最新报错" : "", lines.get(i), ChatFormatting.RED));
         }
@@ -416,6 +445,24 @@ public final class DebugHudController {
             width = Math.max(width, (row.label().isBlank() ? 0
                     : (int) splitter.stringWidth(row.label() + ": "))
                     + (int) splitter.stringWidth(row.value()));
+        }
+        return Math.min(maxWidth, Math.max(160, width));
+    }
+
+    // 两遍布局的第二遍：固定行定宽后再用未折行正文的自然宽度撑宽面板——事件取
+    // 「时间+类型前缀+全文」、报错取「标签+全文」的实测宽，撑到屏宽预算即止。
+    // 这个值就是快照携带的最终面板宽，折行与背景框此后共用同一个源，续行右缘贴住框右缘。
+    static int panelWidthWithContent(StringSplitter splitter, int fixedRowsWidth,
+            List<IntentRuntime.AttentionItem> events, String pendingError, int maxWidth) {
+        int width = fixedRowsWidth;
+        for (IntentRuntime.AttentionItem event : events) {
+            width = Math.max(width, (int) splitter.stringWidth(eventTimeText(event))
+                    + (int) splitter.stringWidth(event.type() + ": ")
+                    + (int) splitter.stringWidth(normalize(event.message())));
+        }
+        if (pendingError != null && !pendingError.isBlank()) {
+            width = Math.max(width, (int) splitter.stringWidth("最新报错: ")
+                    + (int) splitter.stringWidth(normalize(pendingError)));
         }
         return Math.min(maxWidth, Math.max(160, width));
     }

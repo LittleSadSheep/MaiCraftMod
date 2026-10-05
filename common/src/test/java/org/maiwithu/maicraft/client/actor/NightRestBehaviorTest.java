@@ -21,6 +21,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.task.chain.NightRestChain;
+import org.maiwithu.maicraft.core.task.chain.SettleChain;
 import org.maiwithu.maicraft.core.task.sleep.NightRestTask;
 import org.maiwithu.maicraft.core.task.sleep.SleepCompanionTask;
 import org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord;
@@ -35,8 +36,25 @@ public final class NightRestBehaviorTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         waitsForWake(); ordinaryWorkOnly(); bedEligibilityAndWall(); unsettledAction();
-        defensePreservesReturnBudget();
+        defensePreservesReturnBudget(); refusesToSleepWhileTrapped();
         System.out.println("NightRestBehaviorTest: passed");
+    }
+    /** 被致窒方块围困的身体不睡：入睡传送会把围困带进床位，围困逃逸先走 SettleChain。 */
+    private static void refusesToSleepWhileTrapped() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            // 围困判定会读实体尺寸；夹具角色绕过构造器创建，先补齐再判定（与 SettleChainControlTest 同法）。
+            ActorControlTestHarness.field(net.minecraft.world.entity.Entity.class, "dimensions")
+                    .set(h.player, net.minecraft.world.entity.EntityDimensions.scalable(0.6F, 1.8F));
+            var chain = new NightRestChain();
+            BlockPos head = h.player.blockPosition().above();
+            h.set(head, Blocks.STONE.defaultBlockState());
+            h.nextTick();
+            check(SettleChain.trappedCell(h.player) != null, "fixture: the head cell of the body is sealed");
+            check(!chain.canRun(h.player), "night rest refuses a body wedged in a suffocating cell");
+            h.set(head, Blocks.AIR.defaultBlockState());
+            h.nextTick();
+            check(SettleChain.trappedCell(h.player) == null, "fixture: clearing the block frees the body");
+        }
     }
     private static void waitsForWake() throws Exception {
         for (boolean morning : List.of(false, true)) try (var h = new InteractionWorldTestHarness()) {

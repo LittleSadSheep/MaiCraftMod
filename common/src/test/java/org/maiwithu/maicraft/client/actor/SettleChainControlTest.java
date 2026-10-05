@@ -119,6 +119,29 @@ public final class SettleChainControlTest {
                     .setBoolean(player, false);
             check(!chain.urgentBodyRescue(player),
                     "the urgent-rescue exemption only covers the suffocation branch, not the edge retreat");
+
+            // 批四 A 实机形态（2026-10-05）：身体被滑移/睡眠传送挪出眼位格后，薄盒与眼位格
+            // 判定同时失明，而头部所在格仍是致窒实心格。按身体占据格判定必须继续触发，
+            // 且逃逸挖的是检出的围困格本身，不再以眼位点重新定位挖掘目标。
+            w.position(new Vec3(2.5, 5.5, 2.5)); // 脚位半格上移：眼位点落到 (2,7,2) 的空气格，头位格仍是 (2,6,2)
+            w.set(eyeBlock, Blocks.STONE.defaultBlockState());
+            w.nextTick();
+            BlockPos eyeCell = BlockPos.containing(player.getEyePosition());
+            check(!player.isInWall() && !player.level().getBlockState(eyeCell).isSuffocating(player.level(), eyeCell),
+                    "fixture: the eye point sits in a clear cell while the head cell holds the stone");
+            check(chain.canRun(player),
+                    "a body whose head cell is sealed still triggers the escape even with the eye point clear");
+            check(chain.urgentBodyRescue(player),
+                    "the head-cell seal also declares the urgent-rescue exemption");
+            chain.tick(player);
+            check(eyeBlock.equals(suffocating(chain)), "the escape digs the detected trapped cell, not the eye point");
+            w.set(eyeBlock, Blocks.AIR.defaultBlockState());
+            w.nextTick();
+            chain.tick(player);
+            check(suffocating(chain) == null, "clearing the head cell closes the escape episode");
+            w.position(new Vec3(2.5, 5, 2.5));
+            w.nextTick();
+            check(!chain.canRun(player), "a body with no suffocating cell in its occupied cells stays released");
         }
         System.out.println("SettleChainControlTest: passed");
     }

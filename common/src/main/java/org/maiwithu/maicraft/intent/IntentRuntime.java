@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.UUID;
@@ -318,12 +319,12 @@ public final class IntentRuntime {
         if (stateIdentity == null) {
             clearSemanticState();
             stateIdentity = next;
-            restoreBound(player.level().getGameTime());
+            restoreBound(player.level().getGameTime(), "session_start");
         } else if (!stateIdentity.key().equals(next.key())) {
             if (bodyAttached) captureCheckpoint(true);
             clearSemanticState();
             stateIdentity = next;
-            restoreBound(player.level().getGameTime());
+            restoreBound(player.level().getGameTime(), "world_changed");
         } else if (!bodyAttached) {
             boolean semanticHandoffSurvived =
                     CompanionTickDispatcher.current() instanceof IntentTaskRecord current
@@ -331,7 +332,7 @@ public final class IntentRuntime {
             stateIdentity = next;
             if (!semanticHandoffSurvived) {
                 clearSemanticState();
-                restoreBound(player.level().getGameTime());
+                restoreBound(player.level().getGameTime(), "body_reattached");
             }
         } else {
             stateIdentity = next;
@@ -348,7 +349,7 @@ public final class IntentRuntime {
         if (stateIdentity == null) {
             clearSemanticState();
             stateIdentity = next;
-            restoreBound(player.level().getGameTime());
+            restoreBound(player.level().getGameTime(), "session_start");
             bodyAttached = true;
             return;
         }
@@ -591,7 +592,14 @@ public final class IntentRuntime {
         terminal(record, TaskState.CANCELLED, result);
     }
 
-    private void restoreBound(long gameTime) {
+    /**
+     * 从世界检查点恢复任务记忆。reloadCause 说明这次恢复为什么发生：session_start（进程内首次绑定，
+     * 含客户端重启）、world_changed（世界身份变化）、body_reattached（同一世界内身体重新绑定，
+     * 即死亡重生或断线重连）。来源随 state_restored 事件与各未完成任务的暂停原因一起发布，
+     * 调用方才能区分死亡重生伴随的重载与普通重启加载——死亡重生必然走 body_reattached。
+     */
+    private void restoreBound(long gameTime, String reloadCause) {
+        Objects.requireNonNull(reloadCause, "reloadCause");
         IntentStateStore.LoadResult loaded = stateStore.load(stateIdentity);
         int restoredTasks = 0;
         int restoredLandmarks = 0;
@@ -621,7 +629,7 @@ public final class IntentRuntime {
                             snapshot.completed(), snapshot.internalPositions(),
                             snapshot.internalAreaProtections(),
                             snapshot.attempts(), snapshot.decision(),
-                            snapshot.pendingAnswer(), snapshot.terminal(), gameTime);
+                            snapshot.pendingAnswer(), snapshot.terminal(), gameTime, reloadCause);
                     record.restoreChatSubmissionTracking(snapshot.chatSubmissionTracked());
                     record.restoreContainerSearchScopes(snapshot.containerSearchScopes());
                     // 取物起始数随检查点恢复，重启后继续追同一个“再拿几件”的目标，不按恢复时的背包重新起算。
@@ -667,6 +675,7 @@ public final class IntentRuntime {
         data.addProperty("restored_tasks", restoredTasks);
         data.addProperty("restored_terminal_tasks", restoredTerminal);
         data.addProperty("restored_landmarks", restoredLandmarks);
+        data.addProperty("reload_cause", reloadCause);
         // 容量不足和内容无法恢复都明确提示旧文件已保留；查询方不能把零条已加载任务误认成一个新世界。
         String problem = stateStore.recoveryProblem(stateIdentity);
         if (problem != null) {
@@ -678,7 +687,8 @@ public final class IntentRuntime {
                 "state_restored",
                 null,
                 problem != null ? problem : "Restored " + restoredTasks + " semantic task(s) and "
-                        + restoredLandmarks + " landmark(s); non-terminal work is paused.",
+                        + restoredLandmarks + " landmark(s); non-terminal work is paused (reload cause: "
+                        + reloadCause + ").",
                 data);
     }
 

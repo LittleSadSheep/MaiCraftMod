@@ -77,6 +77,7 @@ public final class IntentTaskRecord extends TaskRecord {
         markAsync();
     }
 
+    /** 不关心重载来源的恢复入口（回归测试与旧检查点兼容场景）：按进程首次绑定标注。 */
     static IntentTaskRecord restored(
             UUID externalId,
             UUID planId,
@@ -92,6 +93,27 @@ public final class IntentTaskRecord extends TaskRecord {
             DecisionAnswer pendingAnswer,
             TerminalSnapshot terminal,
             long restoredGameTime) {
+        return restored(externalId, planId, goal, bindingKey, steps, stepIndex, stepResults,
+                internalStepPositions, internalAreaProtections, attempts, decision,
+                pendingAnswer, terminal, restoredGameTime, "session_start");
+    }
+
+    static IntentTaskRecord restored(
+            UUID externalId,
+            UUID planId,
+            Goal goal,
+            String bindingKey,
+            List<Goal> steps,
+            int stepIndex,
+            List<StepSnapshot> stepResults,
+            Map<Integer, Goal.WorldPosition> internalStepPositions,
+            Map<Integer, List<InternalAreaProtectionReceipt.Footprint>> internalAreaProtections,
+            List<AttemptSnapshot> attempts,
+            DecisionSnapshot decision,
+            DecisionAnswer pendingAnswer,
+            TerminalSnapshot terminal,
+            long restoredGameTime,
+            String reloadCause) {
         // 只恢复目标和已经确认的结果，不恢复旧路线或菜单操作；没做完的任务先暂停，等明确要求继续。
         IntentTaskRecord record = new IntentTaskRecord(
                 externalId, planId, goal, Objects.requireNonNull(bindingKey, "bindingKey"));
@@ -127,8 +149,11 @@ public final class IntentTaskRecord extends TaskRecord {
             // 老记录没有运行中子任务的范围证据；随后只有检查点明确保存的范围才能覆盖这个未知标记。
             if (stepIndex < steps.size() && AcquireAbilityAdapter.ABILITY.equals(steps.get(stepIndex).ability()))
                 record.containerSearchScopes.put(stepIndex, Optional.empty());
+            // 暂停原因带重载来源后缀（如 body_reattached）：调用方据此把死亡重生或重连触发的重载暂停
+            // 与运行中的普通暂停（waiting_for_decision、自定义原因）区分开。
             record.pause = new PauseSnapshot(
-                    "paused_restored", restoredGameTime,
+                    "paused_restored:" + Objects.requireNonNull(reloadCause, "reloadCause"),
+                    restoredGameTime,
                     record.decision == null ? null : record.decision.id());
             record.restoredDetached = true;
             record.setState(TaskState.PENDING);

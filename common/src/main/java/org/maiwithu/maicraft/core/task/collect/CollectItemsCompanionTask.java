@@ -297,8 +297,15 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
         if (!CollectItemsApproach.safeNudge(player, point)) {
             InputDriver.halt(player);
             // 目标刚滚离当前支撑时也沿用短暂重寻窗口，不能绕开路径重试直接要求模型补发任务。
-            if (!navigationRetry.afterFailure(target.getUUID(), player.level().getGameTime(), FailureType.NO_PATH))
+            if (!navigationRetry.afterFailure(target.getUUID(), player.level().getGameTime(), FailureType.NO_PATH)) {
+                // 永久拒绝时留下三组坐标，实机失败可直接分辨是层差、距离还是走行段被拒。
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "[maicraft-collect] final pickup nudge rejected on observed footing: player=({}, {}, {}), drop=({}, {}, {}), point=({}, {}, {})",
+                        round(player.getX()), round(player.getY()), round(player.getZ()),
+                        round(target.getX()), round(target.getY()), round(target.getZ()),
+                        round(point.x), round(point.y), round(point.z));
                 fail("the final pickup approach is not safe on the observed footing", FailureType.NO_PATH);
+            }
             return;
         }
         InputDriver.stepToward(player, point, false);
@@ -403,6 +410,8 @@ public final class CollectItemsCompanionTask extends AbstractCompanionTask<Colle
     private String reference(UUID uuid) {
         return (r.targetDimension == null ? player.level().dimension().location() : r.targetDimension) + "|" + uuid;
     }
+
+    private static double round(double value) { return Math.round(value * 10) / 10.0; }
 
     private void refreshTargetObservation(ItemEntity current) {
         // 收尾查询也保留最后看到的位置与余量；原实体被替换时沿用旧快照，不把另一堆混进回执。

@@ -101,6 +101,12 @@ public class CalculationContext {
     public final PrecomputedData precomputedData;
     public final CollisionGeometry collisionGeometry;
 
+    /**
+     * 起点在岩浆致死邻域内时的脱困放行策略；无危险邻域时为 INACTIVE，
+     * 常规危险回避原样生效。检测在上下文构造时冻结一次，搜索全程一致。
+     */
+    public final org.maiwithu.maicraft.core.pathing.HazardEscapePolicy hazardEscape;
+
     public CalculationContext(IBaritone baritone) {
         this(baritone, false);
     }
@@ -138,6 +144,9 @@ public class CalculationContext {
         this.world = baritone.getPlayerContext().world();
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
+        this.hazardEscape = org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.detect(
+                bsi.access, baritone.getPlayerContext().playerFeet().immutable(),
+                pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
         this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
                 player.position(), baritone.getPlayerContext().playerFeet(),
                 org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime::physicalObstacles,
@@ -314,6 +323,11 @@ public class CalculationContext {
 
     public BlockState get(int x, int y, int z) {
         return bsi.get0(x, y, z); // laughs maniacally
+    }
+
+    /** 脱困放行的身体基准格(上下文构造时的脚位)。 */
+    public BlockPos escapeBodyOrigin() {
+        return fallOrigin.immutable();
     }
 
     public boolean isLoaded(int x, int z) {

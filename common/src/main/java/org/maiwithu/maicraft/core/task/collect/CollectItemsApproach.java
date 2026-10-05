@@ -119,9 +119,23 @@ public final class CollectItemsApproach {
     }
 
     public static Vec3 nudgePoint(LocalPlayer player, ItemEntity drop) {
+        var corridor = corridor(player);
         // 寻路可能在岸边格的边缘停下；只向该格的接触点微调，不能到岸后又径直走进掉落所在的坑。
-        var point = contactPoint(player, drop, PlayerNav.playerFeet(player), corridor(player));
-        return point == null ? drop.position() : point;
+        var point = contactPoint(player, drop, PlayerNav.playerFeet(player), corridor);
+        if (point != null) return point;
+        // 掉落格是站立面下一格的可站立凹格时，最后一步就是普通地走下凹格；其余仍回落到掉落坐标。
+        var descent = descentLanding(player, drop, corridor);
+        return descent != null ? descent : drop.position();
+    }
+
+    /**
+     * 掉落格恰好比脚下一层且原版落点检查通过时，返回该格的落脚点；否则 null。
+     * 这里复用站位查询的完整落点核查（支撑、身体净空、禁入格与危险落点），水面与更深的坑自然不通过。
+     */
+    private static Vec3 descentLanding(LocalPlayer player, ItemEntity drop, GroundCorridor corridor) {
+        BlockPos cell = drop.blockPosition();
+        if (cell.getY() != PlayerNav.playerFeet(player).getY() - 1) return null;
+        return corridor.stance(cell);
     }
 
     private static Vec3 contactPoint(LocalPlayer player, ItemEntity drop, BlockPos cell, GroundCorridor corridor) {
@@ -133,14 +147,43 @@ public final class CollectItemsApproach {
     }
 
     public static boolean safeNudge(LocalPlayer player, Vec3 item) {
-        // 最后一步只作不超过一点五格的同高度短走；即使获准开路，也不能靠直接按前进绕过尚未修好的地形。
+        // 最后一步只作不超过一点五格的水平短走；即使获准开路，也不能靠直接按前进绕过尚未修好的地形。
         if (player.isPassenger() || player.isSwimming() || !player.onGround() && !player.isInWater()) return false;
         Vec3 from = player.position(), target = new Vec3(item.x, from.y, item.z);
         if (from.distanceToSqr(target) > 2.25) return false;
         var corridor = corridor(player);
+        // 走下 1 格凹格属普通行走：落点格经原版落点检查、到坑沿的走行段干净时放行；
+        // 两格深坑与水面掉落格在层差或落点检查上不过关，仍走同高度的拒绝路径。
+        if (descent(player, item, corridor)) return corridor.clear(from, lipPoint(from, item));
         // 除了目的地，还验证当前惯性会滑到的整段身体范围，不能到格后靠无约束前进穿入保护区。
         Vec3 drift = from.add(player.getDeltaMovement().multiply(4, 0, 4));
         return corridor.clear(from, target) && corridor.clear(from, drift);
+    }
+
+    /** 目标恰比脚下一层且所在格可站立时判定为下坑形态；坑沿走行段由调用方另行核查。 */
+    private static boolean descent(LocalPlayer player, Vec3 item, GroundCorridor corridor) {
+        double depth = player.position().y - item.y;
+        if (depth <= 0 || depth > 1 + 1e-4) return false;
+        return corridor.stance(BlockPos.containing(item)) != null;
+    }
+
+    /**
+     * 同高度走行段跨入落点柱列前的边界点；该点之前必须有连续支撑，跨出坑沿后的下落由落点检查接管。
+     * 惯性滑行段不再按原高度要求支撑——向凹格移动时滑行点本来就在坑上方，落点安全性由 stance 覆盖。
+     */
+    private static Vec3 lipPoint(Vec3 from, Vec3 item) {
+        var cell = BlockPos.containing(item);
+        double dx = item.x - from.x, dz = item.z - from.z;
+        double t = 1;
+        if (Math.abs(dx) > 1e-9) {
+            double edge = dx > 0 ? cell.getX() : cell.getX() + 1;
+            t = Math.min(t, Math.max(0, (edge - from.x) / dx));
+        }
+        if (Math.abs(dz) > 1e-9) {
+            double edge = dz > 0 ? cell.getZ() : cell.getZ() + 1;
+            t = Math.min(t, Math.max(0, (edge - from.z) / dz));
+        }
+        return new Vec3(from.x + dx * t, from.y, from.z + dz * t);
     }
 
     private static GroundCorridor corridor(LocalPlayer player) {

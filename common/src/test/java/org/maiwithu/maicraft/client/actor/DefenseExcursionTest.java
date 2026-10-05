@@ -35,6 +35,7 @@ public final class DefenseExcursionTest {
         stopsAfterRepeatedAttacksOnTheWayBack();
         hurtBodyStopsInsteadOfWalkingBack();
         movingTaskIsNotWalkedBack();
+        entitySearchTaskIsNotWalkedBack();
         leashStopsChasingRunawayTargets();
         System.out.println("DefenseExcursionTest: self-defense excursions report displacement, walk back, pause when stranded and leash pursuit");
     }
@@ -194,6 +195,27 @@ public final class DefenseExcursionTest {
                 check("none_moving_task".equals(ret.get("plan").getAsString())
                                 && "not_planned".equals(ret.get("status").getAsString()),
                         "the finish notice explains why the body did not walk back");
+            }
+        }
+    }
+
+    // find_entity 长程搜索途中挨打 -> 与 travel 同族按移动搜索处理：不回接管点，也绝不以 self_defense_displaced 暂停任务。
+    private static void entitySearchTaskIsNotWalkedBack() throws Exception {
+        var route = new ScriptedRoute(PlayerNav.Status.FAILED, PlayerNav.Status.FAILED);
+        try (var f = new CombatThreatsTest.Fixture(); var work = WorkSlot.install(f, "maicraft:find_entity")) {
+            var events = new ArrayList<JsonObject>();
+            try (var subscription = IntentRuntime.get().subscribeAttention(signal -> collect(signal, events))) {
+                var defense = new MobDefenseChain(route);
+                fightAndDisplace(f, defense, 12.5);
+                check(!defense.canRun(f.h.player) && route.steps == 0 && !work.record.paused(),
+                        "an entity search step continues from wherever the fight ended");
+                defense.tick(f.h.player);
+                check(!work.record.paused() || !"self_defense_displaced".equals(work.record.pauseSnapshot().reason()),
+                        "an entity search task is never paused as displaced by self defense");
+                JsonObject ret = reflex(events, "finished").getAsJsonObject("return");
+                check("none_moving_task".equals(ret.get("plan").getAsString())
+                                && "not_planned".equals(ret.get("status").getAsString()),
+                        "the finish notice explains why the body did not walk back to the search takeover point");
             }
         }
     }

@@ -7,6 +7,9 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 保存本次交互的目标、手持物和持续方式；公开定点请求额外开启自动接近，没有坐标时沿当前朝向操作。
  * expectedBlock 要求操作后出现某种方块；requiredBlock 要求操作前目标仍是指定方块，两者用途不同。
@@ -34,6 +37,39 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public boolean expectIgnition;
     public Item expectedOutputItem;
     public String itemResourceId;
+    /** 告示牌写字请求的四行以内目标文字；非 null 表示右键打开原版编辑屏后填入这些行。 */
+    public List<String> signLines;
+
+    /** 原版告示牌固定四行；提交不足四行时余下行按空串覆盖。 */
+    public static final int SIGN_LINE_COUNT = 4;
+    /**
+     * 计划期的行长度拒绝线。原版真正按 90 像素行宽校验（约 18 个半角字符），
+     * 装不下的字符由编辑屏自己丢弃，最终以告示牌真实文字与提交内容对账收场；
+     * 这里只拦下显然不可能装下的行，像素级结果不在此冒充可预知。
+     */
+    public static final int SIGN_LINE_CHAR_LIMIT = 64;
+
+    /**
+     * 解析告示牌写字的文字：按换行拆行，最多四行，每行有长度上限。
+     * 返回 null 表示本次目标不是写字；内容原样保留，不做任何语义审查。
+     */
+    public static List<String> parseSignText(String text) {
+        if (text == null) return null;
+        if (text.isBlank()) throw new IllegalArgumentException(
+                "sign write needs non-blank text; an all-empty write cannot be distinguished from a missing request");
+        String[] raw = text.split("\n", -1);
+        if (raw.length > SIGN_LINE_COUNT) throw new IllegalArgumentException(
+                "sign text supports at most " + SIGN_LINE_COUNT + " lines, got " + raw.length);
+        List<String> lines = new ArrayList<>();
+        for (String line : raw) {
+            if (line.length() > SIGN_LINE_CHAR_LIMIT) throw new IllegalArgumentException(
+                    "each sign line is limited to " + SIGN_LINE_CHAR_LIMIT + " characters at planning time; line "
+                            + (lines.size() + 1) + " has " + line.length()
+                            + ". The vanilla editor enforces a ~90px line width and silently drops overflow, so keep lines short.");
+            lines.add(line);
+        }
+        return List.copyOf(lines);
+    }
 
     /** 语义交互由 Mod 自行走到可点击位置；只在原请求允许时才为通行拆挖或垫块。 */
     public InteractAtTaskRecord withApproach(boolean alterTerrain) {
@@ -80,6 +116,21 @@ public final class InteractAtTaskRecord extends TaskRecord {
         if (button != MouseButton.RIGHT || aim == null || heldItemUseOnly)
             throw new IllegalArgumentException("ignition check requires a right-click block target");
         expectIgnition = true; return this;
+    }
+
+    /**
+     * 告示牌写字要求右键方块目标且不点名物品：右键由原版打开编辑屏，
+     * 带物品会被原版当成对手持物的操作请求，写字语义就不再成立。
+     */
+    public InteractAtTaskRecord withSignText(List<String> lines) {
+        if (button != MouseButton.RIGHT || aim == null || item != null || heldItemUseOnly)
+            throw new IllegalArgumentException("sign writing requires an item-free right-click block target");
+        if (lines == null || lines.isEmpty() || lines.size() > SIGN_LINE_COUNT)
+            throw new IllegalArgumentException("sign text must contain 1.." + SIGN_LINE_COUNT + " lines");
+        for (String line : lines) if (line == null || line.length() > SIGN_LINE_CHAR_LIMIT)
+            throw new IllegalArgumentException("each sign line is limited to " + SIGN_LINE_CHAR_LIMIT + " characters");
+        signLines = List.copyOf(lines);
+        return this;
     }
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,
