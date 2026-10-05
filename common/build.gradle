@@ -401,6 +401,12 @@ def regressionSuites = [
         heap: '512m', directory: 'ability-pointer-drift-regression', timeoutSeconds: 90,
         purpose: '验证契约与 find_block 指路文本点名的能力均在 KNOWN_ABILITIES 中'
     ],
+    // 契约行为事实防丢失：mine 收敛窗口、重力塌落、hunt 远行与 interact 站位等反直觉事实，契约重写时不得静默删除。
+    contractBehaviorFactsRegression: [
+        entry: 'org.maiwithu.maicraft.intent.ContractBehaviorFactsTest',
+        heap: '512m', directory: 'contract-behavior-facts-regression', timeoutSeconds: 90,
+        purpose: '验证能力契约文本保留 mine 收敛窗口、塌落警示、hunt 远行与 interact 站位事实'
+    ],
     // 里程碑文本兜底：milestone 缺席或不可识别必须落进枚举决策回合而非 NPE。
     reachMilestoneMilestoneTextRegression: [
         entry: 'org.maiwithu.maicraft.intent.ReachMilestoneMilestoneTextTest',
