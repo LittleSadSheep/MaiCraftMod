@@ -333,6 +333,12 @@ def regressionSuites = [
         heap: '512m', directory: 'sleep-gate-regression', timeoutSeconds: 60,
         purpose: '验证睡眠白天门控与原版可睡窗口同源，入睡跳刻后回执与世界实物一致'
     ],
+    // 自带床回退：现成床被遮挡、够不着或失效时改放背包里的床入睡，回执如实记录换床。
+    sleepBedFallbackRegression: [
+        entry: 'org.maiwithu.maicraft.intent.SleepBedFallbackRegression',
+        heap: '512m', directory: 'sleep-bed-fallback-regression', timeoutSeconds: 60,
+        purpose: '验证携带床时现成床不可用触发自带床回退腿，回执诚实披露换床与双重失败'
+    ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
         heap: '768m', directory: 'optional-server-regression', timeoutSeconds: 90,

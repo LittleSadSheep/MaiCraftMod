@@ -243,40 +243,9 @@ final class AbilityAdapter {
                     new IntentAction.Tool("sleep", "{}")));
         }
 
-        String carriedBed = inventoryBed(player);
         // 世界里没有找到床，再看背包有没有；有床则找位置放下，之后仍按“走过去、上床”执行。
-        if (carriedBed != null) {
-            if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
-                return waitForNightDecision(goal, player);
-            }
-            BedSite site = nearbyBedSite(player);
-            if (site != null) {
-                JsonObject op = new JsonObject();
-                op.addProperty("op", "set");
-                op.addProperty("block_id", carriedBed);
-                op.addProperty("x", site.foot().getX());
-                op.addProperty("y", site.foot().getY());
-                op.addProperty("z", site.foot().getZ());
-                op.addProperty("facing", site.facing().getName());
-                JsonArray ops = new JsonArray();
-                ops.add(op);
-                JsonObject build = new JsonObject();
-                build.add("ops", ops);
-                build.addProperty("replace_existing", false);
-                JsonObject travel = new JsonObject();
-                travel.addProperty("block", carriedBed);
-                return new IntentAction.Chain(List.of(
-                        new IntentAction.Tool("build", build.toString()),
-                        new IntentAction.Tool("goto", travel.toString()),
-                        new IntentAction.Tool("sleep", "{}")));
-            }
-            return decision(goal,
-                    "There is a bed in inventory, but no safe loaded two-block placement site nearby.",
-                    List.of(
-                            option("recover", "Provide a semantic travel prerequisite to reach a safe open area."),
-                            option("skip", "Do not sleep."),
-                            option("cancel", "Cancel the whole task.")));
-        }
+        IntentAction carried = carriedBedPlan(goal, player);
+        if (carried != null) return carried;
 
         return decision(goal,
                 "No bed is visible in loaded terrain and no bed is in inventory; the bed may exist outside "
@@ -305,6 +274,59 @@ final class AbilityAdapter {
                         option("recover", "Provide details.goal to wait for the observable night condition, then resume sleep."),
                         option("skip", "Continue without sleeping."),
                         option("cancel", "Cancel the whole task.")));
+    }
+
+    /**
+     * 自带床的行动方案：放下背包里的床，再走过去躺下。背包没有床时返回 null；
+     * 有床但没有安全落位、或当前不在可睡窗口时，返回交还调用方决定的动作。
+     */
+    private static IntentAction carriedBedPlan(Goal goal, LocalPlayer player) {
+        String carriedBed = inventoryBed(player);
+        if (carriedBed == null) return null;
+        if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
+            return waitForNightDecision(goal, player);
+        }
+        BedSite site = nearbyBedSite(player);
+        if (site == null) {
+            return decision(goal,
+                    "There is a bed in inventory, but no safe loaded two-block placement site nearby.",
+                    List.of(
+                            option("recover", "Provide a semantic travel prerequisite to reach a safe open area."),
+                            option("skip", "Do not sleep."),
+                            option("cancel", "Cancel the whole task.")));
+        }
+        JsonObject op = new JsonObject();
+        op.addProperty("op", "set");
+        op.addProperty("block_id", carriedBed);
+        op.addProperty("x", site.foot().getX());
+        op.addProperty("y", site.foot().getY());
+        op.addProperty("z", site.foot().getZ());
+        op.addProperty("facing", site.facing().getName());
+        JsonArray ops = new JsonArray();
+        ops.add(op);
+        JsonObject build = new JsonObject();
+        build.add("ops", ops);
+        build.addProperty("replace_existing", false);
+        JsonObject travel = new JsonObject();
+        travel.addProperty("block", carriedBed);
+        return new IntentAction.Chain(List.of(
+                new IntentAction.Tool("build", build.toString()),
+                new IntentAction.Tool("goto", travel.toString()),
+                new IntentAction.Tool("sleep", "{}")));
+    }
+
+    /** 睡眠目标可触发自带床回退的失败类型：目标床被遮挡、够不着或已失效，睡觉本身没有推进。 */
+    private static final Set<String> BED_FALLBACK_FAILURE_TYPES = Set.of("occluded", "out_of_reach", "target_lost");
+
+    /**
+     * 现成床不可用时的自带床回退：村庄床等现成床被遮挡或够不着时，改放背包里的床完成睡眠，
+     * 而不是让睡觉目标随现成床一起落空。goal 明确指定床区（coordinates/landmark）时不回退——
+     * 那是调用方点名的床，换床属于语义变更，应如实失败交回决定。
+     */
+    static IntentAction carriedBedFallback(Goal goal, LocalPlayer player, String failureType) {
+        if (failureType == null || !BED_FALLBACK_FAILURE_TYPES.contains(failureType)) return null;
+        if (goal.target() != null) return null;
+        return carriedBedPlan(goal, player);
     }
 
     private static String inventoryBed(LocalPlayer player) {

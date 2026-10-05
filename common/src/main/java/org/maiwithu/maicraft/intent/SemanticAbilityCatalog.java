@@ -418,6 +418,7 @@ public final class SemanticAbilityCatalog {
                     // 公开睡眠确认上床；自然醒属于内部另一选项，取消也不强制把玩家叫起来。
                     "找可用床，必要时放下随身床，走近并原生右键，确认躺下即完成；床不在已加载范围时可用 target 指定床区（coordinates 或已记住的 landmark），先按目标位置寻路到床区再入睡，地标检索与 travel 同源。goal.parameters为空对象，没有wait_until_awake、指定床坐标或补料参数；target省略/null/current_place在脚下找床，coordinates/landmark指定床区位置，preferences与constraints无专属选项。"
                             + "先检查床在当前维度不会爆炸，再以床区位置（有 target 时）或脚下为中心分刻查询已加载的床；查到后按该床的准确坐标走过去再上床，床区尚未加载则先走到床区、到场后由上床工具在伸手可及范围找床，到场仍没有床会如实失败。未指定 target 且周边与背包都没有床时提出决定，失败话术会说明床可能在自己未加载的区块外、应先 travel 到附近地标，不偷偷取料。"
+                            + "未指定 target 时若走到的现成床被遮挡、够不着或已失效，且背包里有床，会自动回退：就近放下自带床并躺下，回执用 used_carried_bed_fallback 与 village_bed_fallback_reason 说明换床原因，自带床在放置时正常消耗；target 指定床区时不换床、如实失败；背包没有床也维持原失败。"
                             + "当前不在原版可睡窗口（天空变暗不足，晴朗约 day_time 12542-23458；雷暴随时可睡）时提出等待决定，决定文本带当前时刻与最近可睡时点，不反复点击。点击前复查维度、加载、距离与实际视线；原生占用、危险或服务器拒绝如实失败。entered_sleep证明躺下；公开入口wait_until_awake=false，不保证天亮、自然醒或其他玩家已睡。内部自动夜间休息另用等待自然醒模式。"
                             + "任务成功后原生睡眠和床上界面可以继续。取消只结清自己的床点击，不强行叫醒；死亡/换世界由公共生命周期处理，重启未完成父任务先暂停，继续重新检查床和身体，不沿用旧点击。同次网络重试复用request_key。"
                             + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:sleep\",\"outcome\":\"找床并躺下\",\"parameters\":{}}，睡在已记住的床区可加 target.kind=landmark 与其 label}。",
