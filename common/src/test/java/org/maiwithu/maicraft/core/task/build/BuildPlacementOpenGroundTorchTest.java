@@ -28,6 +28,7 @@ public final class BuildPlacementOpenGroundTorchTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         openGroundAirCell(); grassCellSupport(); plannerCoversTorch(); floatingTargetNamesItsFace();
         heldHandsDoNotChangeGestureProof(); deniedGesturesStillNameTheirGate(); plantTargetKeepsSupportFacts();
+        wallNeighbourProvesAttachGesture(); leavesNeighbourShortCircuitsAsMissingFace(); torchTargetAcceptsWallVariant();
         System.out.println("BuildPlacementOpenGroundTorchTest: open-ground torch access, planner coverage and named rejection gates passed");
     }
 
@@ -138,6 +139,55 @@ public final class BuildPlacementOpenGroundTorchTest {
                     "a replaceable plant in the target cell is not an attachment-face failure while the ground below supports");
             check("replaceable:minecraft:short_grass".equals(search.attachmentNeighbors().get("target")),
                     "the receipt names what actually occupies the target cell");
+        }
+    }
+
+    private static void wallNeighbourProvesAttachGesture() throws Exception {
+        try (var h = fixture()) {
+            // 167 批六A 四点矩阵点位3：目标格悬空、唯一邻格是圆石。原版本可贴壁挂火把，
+            // 实机却 255 个站位全部 no_click_gesture——贴附目标的点击手势证明不得缺位。
+            BuildTaskRecord.Target target = torchTarget(new BlockPos(5, 1, 3));
+            h.set(target.pos().below(), Blocks.AIR.defaultBlockState());
+            h.set(target.pos().north(), Blocks.COBBLESTONE.defaultBlockState());
+            var search = search(h, target);
+            check(search.accepted(), "a torch cell whose only neighbour is cobblestone must prove a wall-attach gesture");
+            check(search.access().gesture().clicked().equals(target.pos().north())
+                            && search.access().gesture().face() == Direction.SOUTH,
+                    "the wall-attach gesture clicks the south face of the cobblestone neighbour");
+            check(search.gateCounts().getOrDefault("no_click_gesture", 0) == 0,
+                    "no stance may be rejected for a missing click gesture when a wall face exists");
+        }
+    }
+
+    private static void leavesNeighbourShortCircuitsAsMissingFace() throws Exception {
+        try (var h = fixture()) {
+            // 167 批六A 四点矩阵点位4：树叶不是火把的有效附着面，不能再被计入候选导致
+            // 快速归因闸失效、跑满数百站位；非实心邻格要在扫描前点名并入 face_missing。
+            BuildTaskRecord.Target target = torchTarget(new BlockPos(5, 1, 3));
+            h.set(target.pos().below(), Blocks.DARK_OAK_LEAVES.defaultBlockState());
+            h.set(target.pos().west(), Blocks.DARK_OAK_LEAVES.defaultBlockState());
+            var search = search(h, target);
+            check(!search.accepted() && "target_attachment_face_missing".equals(search.reason()),
+                    "leaves are not a valid torch attachment face and must trip the target-level gate");
+            check(search.checked() == 0,
+                    "an all-non-sturdy torch cell is rejected before visiting any stance");
+            check("non_sturdy:minecraft:dark_oak_leaves".equals(search.attachmentNeighbors().get("down"))
+                            && "non_sturdy:minecraft:dark_oak_leaves".equals(search.attachmentNeighbors().get("west")),
+                    "the receipt names each non-sturdy neighbour so the caller knows what to clear");
+        }
+    }
+
+    private static void torchTargetAcceptsWallVariant() throws Exception {
+        try (var h = fixture()) {
+            // 预测按立式、原生落成墙式是同一格完成；验收不识别双形态时，
+            // 贴墙火把会卡在「出手成功方块永不出现」（167 二轮实机签名）。
+            BuildTaskRecord.Target target = torchTarget(new BlockPos(5, 1, 3));
+            var wall = Blocks.WALL_TORCH.defaultBlockState()
+                    .setValue(net.minecraft.world.level.block.WallTorchBlock.FACING, Direction.SOUTH);
+            check(target.acceptsPlacedState(wall),
+                    "a torch target accepts the wall variant placed by the native item dispatch");
+            check(!target.acceptsPlacedState(Blocks.STONE.defaultBlockState()),
+                    "an unrelated block is still not accepted as the torch target result");
         }
     }
 

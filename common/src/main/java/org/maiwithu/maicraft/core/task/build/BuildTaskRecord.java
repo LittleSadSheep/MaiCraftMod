@@ -30,6 +30,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.StandingAndWallBlockItem;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.Rotation;
@@ -582,12 +583,31 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
         // 新规则下，一次放置先满足朝向等摆放属性；门是否打开等最终状态留给施工结束后处理。
         public boolean acceptsPlacedState(BlockState state) {
+            if (state == null) return false;
             if (finalProperties != null) {
                 var placement = finalProperties.stream().filter(name -> BuildValidity.isPlacementProperty(
                         desiredState.getBlock().getStateDefinition().getProperty(name))).collect(Collectors.toSet());
-                return matchesProperties(state, placement);
+                return matchesProperties(state, placement) || attachableVariantAccepts(state);
             }
-            return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
+            if (matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true)) return true;
+            return attachableVariantAccepts(state);
+        }
+
+        /**
+         * 立式/墙式共用的物品（火把、灯笼、旗、头颅等）由原生放置按点击面在两个方块之间分派，
+         * 图纸通常只以其中一个为锚。预测按立式、实际落成墙式（或反过来）落在同一格都是本格完成；
+         * 不作这层识别，贴墙放置会在点击前预检与放置核验两处被判失败——167 实机
+         * 「火把出手成功但方块永不出现」与站位全拒的定因之一。精确蓝图对普通格也标
+         * strictIdentity，但贴附双形态是原生物品的正确结果而不是类型漂移；只有作者真的
+         * 点名了属性（exact/final 非空）时才维持原口径，不替作者扩大验收范围。
+         */
+        private boolean attachableVariantAccepts(BlockState state) {
+            if (!(item instanceof StandingAndWallBlockItem)
+                    || !exactProperties.isEmpty()
+                    || (finalProperties != null && !finalProperties.isEmpty())) return false;
+            // 原版把立式与墙式两个方块都注册到同一物品（两者的 Block.asItem 相同）；
+            // 预测与真实落成只能是这两个方块之一，落入另一形态同样完成本格。
+            return state.getBlock().asItem() == item;
         }
 
         /**

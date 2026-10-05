@@ -188,12 +188,34 @@ final class BuildPlacementAccessSearch {
             BlockPos clicked = target.pos().relative(direction);
             net.minecraft.world.level.block.state.BlockState state = stage.state(clicked);
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-            facts.put(direction.getName(), state.isAir() ? "air"
-                    : state.canBeReplaced() ? "replaceable:" + id : id);
-            supported |= stage.support(clicked, direction.getOpposite());
+            if (state.isAir()) {
+                facts.put(direction.getName(), "air");
+            } else if (state.canBeReplaced()) {
+                facts.put(direction.getName(), "replaceable:" + id);
+            } else if (attachmentFace(state, stage, clicked, direction.getOpposite())) {
+                facts.put(direction.getName(), id);
+                supported = true;
+            } else {
+                // 有形状却撑不住贴附的面（树叶、玻璃板等）逐个点名，调用方才知道清掉哪格才有支撑。
+                facts.put(direction.getName(), "non_sturdy:" + id);
+            }
         }
         attachmentNeighbors = Map.copyOf(facts);
         return stage.state(target.pos()).isAir() && !supported;
+    }
+
+    /**
+     * 目标邻格算不算可用的附着支撑。贴附物品（火把、灯笼、旗、头颅等立墙双形态）按原版
+     * canSurvive 口径：附着面必须实心可依附（isFaceSturdy），树叶虽然挡住格位但撑不住火把，
+     * 计入候选会让快速归因闸失效（167 批六A 点位4）；其他方块对着任意可点击面即可放置，
+     * 不受自身 canSurvive 约束，仍沿用形状非空口径。
+     */
+    private boolean attachmentFace(net.minecraft.world.level.block.state.BlockState state,
+                                   BuildPlacementStage stage, BlockPos clicked, Direction face) {
+        if (state.isAir() || state.canBeReplaced()) return false;
+        if (target.item() instanceof net.minecraft.world.item.StandingAndWallBlockItem)
+            return state.isFaceSturdy(stage, clicked, face);
+        return !state.getShape(stage, clicked).isEmpty();
     }
 
     Map<String, String> attachmentNeighbors() { return attachmentNeighbors; }
