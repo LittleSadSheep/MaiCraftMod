@@ -22,7 +22,10 @@ public final class DropPitContactStanceTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         pitRimStanceAcceptedWithoutTerrainPermit();
+        rimToPitDescentFormsExecutableApproach();
+        pitBottomContactStillNudgesInPlace();
         deeperPitStillNeedsThePitCell();
+        deeperPitDescentStillRejected();
         System.out.println("DropPitContactStanceTest: pit-rim contact stances and task entry passed");
     }
 
@@ -48,6 +51,37 @@ public final class DropPitContactStanceTest {
         }
     }
 
+    /** 坑边站位到位后，最后一段接近目标应是坑底落脚点，踏面安全闸放行走下 1 格凹格。 */
+    private static void rimToPitDescentFormsExecutableApproach() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            for (int x = 5; x <= 10; x++) for (int z = 6; z <= 10; z++)
+                world.set(new BlockPos(x, 1, z), Blocks.STONE.defaultBlockState());
+            world.set(new BlockPos(8, 1, 8), Blocks.AIR.defaultBlockState());
+            world.position(new Vec3(7.5, 2, 8.5));
+            var drop = ItemEntityReceiptsTest.item(world, 573, new Vec3(8.5, 1, 8.5), new ItemStack(Items.RAW_IRON));
+            Vec3 point = CollectItemsApproach.nudgePoint(world.player, drop);
+            check(point.y == 1 && point.x == 8.5 && point.z == 8.5,
+                    "坑边站位接触不到下层掉落物时，接近目标构成坑底落脚点而非悬空的掉落坐标");
+            check(CollectItemsApproach.safeNudge(world.player, point),
+                    "踏面安全闸放行到站立面下一格可站立凹格的普通下坑");
+        }
+    }
+
+    /** 走下凹格后的坑底段沿用原语义：同格接触点就地微调，不额外移动。 */
+    private static void pitBottomContactStillNudgesInPlace() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            for (int x = 5; x <= 10; x++) for (int z = 6; z <= 10; z++)
+                world.set(new BlockPos(x, 1, z), Blocks.STONE.defaultBlockState());
+            world.set(new BlockPos(8, 1, 8), Blocks.AIR.defaultBlockState());
+            world.position(new Vec3(8.5, 1, 8.5));
+            var drop = ItemEntityReceiptsTest.item(world, 574, new Vec3(8.5, 1.1, 8.5), new ItemStack(Items.RAW_IRON));
+            Vec3 point = CollectItemsApproach.nudgePoint(world.player, drop);
+            check(point.x == 8.5 && point.y == 1 && point.z == 8.5,
+                    "坑底站位经原版接触核查取得同格接触点");
+            check(CollectItemsApproach.safeNudge(world.player, point), "坑底同格短走保持放行");
+        }
+    }
+
     private static void deeperPitStillNeedsThePitCell() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             // 两格深的坑底掉落物超出普通行走范围：坑边站位不得凭放宽后的接触范围混进候选。
@@ -62,6 +96,25 @@ public final class DropPitContactStanceTest {
             var drop = ItemEntityReceiptsTest.item(world, 572, new Vec3(8.5, 1, 8.5), new ItemStack(Items.RAW_IRON));
             check(!CollectItemsApproach.goal(world.player, List.of(drop)).goal().isAt(stance),
                     "低于站立面两格的掉落物不把坑边格当作接触站位");
+        }
+    }
+
+    /** 两格深坑的最后一段仍被踏面安全闸拒绝：层差超出普通行走范围时接近目标不构成可执行下坑。 */
+    private static void deeperPitDescentStillRejected() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            for (int x = 5; x <= 10; x++) for (int z = 6; z <= 10; z++) {
+                world.set(new BlockPos(x, 1, z), Blocks.STONE.defaultBlockState());
+                world.set(new BlockPos(x, 2, z), Blocks.STONE.defaultBlockState());
+            }
+            world.set(new BlockPos(8, 2, 8), Blocks.AIR.defaultBlockState());
+            world.set(new BlockPos(8, 1, 8), Blocks.AIR.defaultBlockState());
+            world.position(new Vec3(7.5, 3, 8.5));
+            var drop = ItemEntityReceiptsTest.item(world, 575, new Vec3(8.5, 1, 8.5), new ItemStack(Items.RAW_IRON));
+            check(CollectItemsApproach.nudgePoint(world.player, drop).y == 1
+                            && CollectItemsApproach.nudgePoint(world.player, drop).x == 8.5,
+                    "两格深坑无下坑落脚点，接近目标回落为坑底掉落坐标本身");
+            check(!CollectItemsApproach.safeNudge(world.player, drop.position()),
+                    "踏面安全闸拒绝走下两格深的坑");
         }
     }
 
