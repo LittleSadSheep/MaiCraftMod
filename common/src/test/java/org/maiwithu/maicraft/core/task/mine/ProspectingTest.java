@@ -90,7 +90,7 @@ public final class ProspectingTest {
                 "stone/dirt 等普通方块不在任何方块族，反查仍拒绝");
     }
 
-    // ---- 探矿决策：授权、表、维度与阶段共同决定下一步 ----
+    // ---- 探矿决策：授权、表、维度与阶段共同决定下一步；目标层按就近选取 ----
 
     private static void decision() {
         var overworld = OreGenerationBand.OVERWORLD;
@@ -103,27 +103,37 @@ public final class ProspectingTest {
         check(OreGenerationBand.plan(true, List.of(DIAMOND), OreGenerationBand.NETHER, false, false, 45).step()
                         == OreGenerationBand.Step.OTHER_DIMENSION,
                 "生成带在另一维度：不在当前维度下降");
+        // 带上方就近取带顶：钻石带顶 16 在地表之下，仍是「挖着找」的下降，不再多走带顶到峰值 -59 的一段。
         var descend = OreGenerationBand.plan(true, List.of(DIAMOND), overworld, false, false, 45);
-        check(descend.step() == OreGenerationBand.Step.DESCEND && descend.prospectY() == -59,
-                "带外且推荐层在下方：下降，目标 Y = 推荐探矿值");
+        check(descend.step() == OreGenerationBand.Step.DESCEND && descend.prospectY() == 16,
+                "y45 在钻石带 [-64,16] 上方：下降目标取带顶 16，而非峰值层 -59");
         check(OreGenerationBand.plan(true, List.of(DIAMOND), overworld, true, false, 45).step()
                         == OreGenerationBand.Step.ALREADY_PROSPECTED,
                 "下降已派出：不再重复决策");
-        // 就地带优先（109）：当前位置已在生成带内时探矿 Y 取当前位置，不为凑推荐层垫柱爬升。
+        // 就近选层：当前位置已在生成带内时探矿 Y 取当前层，就地水平掘进，不为凑峰值层移动高度。
         var inBand = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, 45);
         check(inBand.step() == OreGenerationBand.Step.DESCEND && inBand.prospectY() == 45,
-                "y45 在煤带 [0,320] 内：就地带探矿，prospectY = 45 而非推荐层 96");
-        // 推荐层低于脚位时即使在带内也按推荐层下降：地表起点就地水平掘进只挖表层，到不了矿物富集层。
+                "y45 在煤带 [0,320] 内：就地水平掘进，prospectY = 45 而非峰值层 96");
+        // 105 实测场景：y30 本来就有煤，不再先爬 66 格到峰值层 96（128 格预算连单程爬升都不够）。
+        var coalDeep = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, 30);
+        check(coalDeep.step() == OreGenerationBand.Step.DESCEND && coalDeep.prospectY() == 30,
+                "y30 在煤带内：目标层取 30 就地掘进，不再强制爬到峰值层 96");
+        // 推荐层低于脚位时也取当前层：铁带 [-64,320] 覆盖地表，y64 就地掘进即可，铁在该高度确有生成。
         var surfaceIron = OreGenerationBand.plan(true, List.of(RAW_IRON), overworld, false, false, 64);
-        check(surfaceIron.step() == OreGenerationBand.Step.DESCEND && surfaceIron.prospectY() == 16,
-                "y64 地表在铁带 [-64,320] 内但推荐层 16 在下方：按推荐层下降到 16，不在地表就地挖");
-        // 向上重定位拒绝（109）：当前位置在带外且推荐层在上方，露天空中垫柱不是授权的「挖着找」。
+        check(surfaceIron.step() == OreGenerationBand.Step.DESCEND && surfaceIron.prospectY() == 64,
+                "y64 地表在铁带 [-64,320] 内：就近取当前层，不再为峰值层 16 强制下降");
+        // 窄带矿就近仍在生成段内：钻石带内 y=-30 就地掘进，与峰值层 -59 同处 [-64,16] 这个窄段，
+        // 就近层到峰值层的偏移不超过带高本身，行为相对峰值层策略变化有限。
+        var inBandDiamond = OreGenerationBand.plan(true, List.of(DIAMOND), overworld, false, false, -30);
+        check(inBandDiamond.step() == OreGenerationBand.Step.DESCEND && inBandDiamond.prospectY() == -30,
+                "y=-30 在钻石带 [-64,16] 内：就近取当前层，与峰值层 -59 同处窄生成段");
+        // 向上重定位拒绝：就近目标层在上方且当前位置在带外（低于带底），露天空中垫柱不是授权的「挖着找」。
         var uphillUnderground = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, -10);
         check(uphillUnderground.step() == OreGenerationBand.Step.UPHILL_BAND,
-                "y-10 在煤带 [0,320] 外且推荐层 96 在上方：拒绝向上重定位");
+                "y-10 在煤带 [0,320] 外且带底 0 在上方：拒绝向上重定位");
         var uphillDeep = OreGenerationBand.plan(true, List.of(IRON_INGOT), overworld, false, false, -70);
         check(uphillDeep.step() == OreGenerationBand.Step.UPHILL_BAND,
-                "y-70 在铁带 [-64,320] 外且推荐层 16 在上方：同样拒绝向上重定位");
+                "y-70 在铁带 [-64,320] 外且带底 -64 在上方：同样拒绝向上重定位");
         // 矿方块 ID 走同一条决策链：iron_ore 授权探矿派下降，与 raw_iron 落在同一条带。
         var ironOreDescend = OreGenerationBand.plan(true, List.of(IRON_ORE), overworld, false, false, 45);
         var rawIronDescend = OreGenerationBand.plan(true, List.of(RAW_IRON), overworld, false, false, 45);

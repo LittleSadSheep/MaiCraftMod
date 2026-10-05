@@ -674,7 +674,7 @@ public final class SemanticAcquireCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 公平空手且已授权时派统一探矿任务，由实时通道断面驱动下降，到层后继续水平找矿。 */
+    /** 公平空手且已授权时派统一探矿任务：目标层按生成带就近选取，到层后水平找矿。 */
     private TaskState startProspectingIfAuthorized(AcquisitionNeed need) {
         var plan = OreGenerationBand.plan(r.allowProspecting, need.itemIds,
                 player.level().dimension().location().toString(),
@@ -691,20 +691,23 @@ public final class SemanticAcquireCompanionTask
                     Map.of("band_dimension", plan.band().dimension(),
                             "current_dimension", player.level().dimension().location().toString()));
             case UPHILL_BAND -> addIssue("mine", "prospecting_uphill_band_refused",
-                    "mining came back empty-handed; the known generation band for this item sits"
-                            + " above the current position and the current elevation is outside the band,"
-                            + " so reaching it would mean pillaring up through open air instead of digging"
-                            + " for the ore. Move along the surface to terrain at that elevation and submit"
-                            + " again, or travel to a spot already inside the band",
-                    Map.of("prospect_y", plan.band().prospectY(),
+                    "mining came back empty-handed; the nearest layer of the known generation band"
+                            + " for this item sits above the current position and the current elevation"
+                            + " is below the band floor, so reaching it would mean pillaring up through"
+                            + " open air instead of digging for the ore. Move along the surface to terrain"
+                            + " at that elevation and submit again, or travel to a spot already inside"
+                            + " the band",
+                    Map.of("nearest_band_y", plan.band().minY(),
                             "current_y", player.blockPosition().getY()));
             case DESCEND -> {
                 need.prospectingDescendStarted = true;
                 need.prospectingMineStarted = true;
                 need.prospectingY = plan.prospectY();
                 addIssue("mine", "prospecting_descend_started",
-                        "fair scan came back empty-handed; open a walkable descending passage to the"
-                                + " generation band, then a horizontal tunnel, using native Ultimine when available",
+                        "fair scan came back empty-handed; work the nearest layer of the generation"
+                                + " band (current layer when already inside it, band edge otherwise),"
+                                + " opening a walkable passage where the layer differs and a horizontal"
+                                + " tunnel, using native Ultimine when available",
                         Map.of("prospect_y", plan.prospectY()));
                 renewProgressLease();
                 return attemptMine(need);

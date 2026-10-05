@@ -122,12 +122,12 @@ public record OreGenerationBand(
         UNKNOWN_BAND,
         /** 生成带在另一维度：拒绝在本维度下降，如实报告维度壁垒。 */
         OTHER_DIMENSION,
-        /** 派出下降子任务，目标 = 当前 xz + 推荐探矿 Y；带内且推荐层不低于当前位置时取当前位置（就地带）。 */
+        /** 派出下降/掘进子任务，目标 = 就近选层（带内取当前层，带上方取带顶，带下方取带底）。 */
         DESCEND,
         /**
-         * 生成带推荐层高于当前位置且当前位置不在带内：到达它只能露天空中垫柱爬升——那是
-         * 改变地貌的重定位，不是授权的「挖着找」。如实拒绝，出路交给调用方（沿地表移动到
-         * 该海拔带再提交，或显式下降到带内某层）。
+         * 就近目标层高于当前位置且当前位置在带外（低于带底）：到达它只能露天空中垫柱爬升——
+         * 那是改变地貌的重定位，不是授权的「挖着找」。如实拒绝，出路交给调用方（沿地表移动
+         * 到该海拔带再提交，或显式下降到带内某层）。
          */
         UPHILL_BAND,
         /** 下降完成后派探矿采矿：矿道掘进，边暴露边采。 */
@@ -150,11 +150,14 @@ public record OreGenerationBand(
      * 探矿决策：公平扫描空手后是否、以及如何进入探矿。决策只读请求事实
      * （授权、表、当前维度、已推进到的阶段、当前脚位高度），不携带任何世界内部状态。
      *
-     * <p>就地带优先：推荐探矿层不低于当前位置时，探矿 Y 取当前位置——本地同为生成带
-     * 且常已在石头里，为凑推荐层先垫柱爬升会把探矿变成露天施工（{@link Step#UPHILL_BAND}
-     * 只拦带外爬升，带内爬升就地解决）。推荐层低于当前位置时仍按推荐层下降：
-     * 向下掘进就是「挖着找」本身，地表起点若就地水平掘进只会挖表层泥土，
-     * 永远到不了矿物富集层（铁 16、钻石 -59 等推荐层都在地表之下）。
+     * <p>目标层按就近选取：取分布范围 [minY, maxY] 内离当前位置最近的高度，边界直接用
+     * 表内字段，不引入额外容差。带内取当前层就地水平掘进——煤这类全域矿的所在高度本来
+     * 就有矿，强制移动到峰值层只会把探矿变成长途垂直施工（峰值层语义是「暴露率最高的
+     * 一层」，是效率参考，不是唯一可用层）；带上方取带顶、带下方取带底，向下掘进就是
+     * 「挖着找」本身。窄带矿（钻石 -64..16、红石 -64..15）整个生成段只覆盖峰值层附近的
+     * 窄区间，带内就近层与峰值层同处该段，相对峰值层策略变化有限；带上方就近取带顶仍是
+     * 进带的下降，只是不再走到峰值暴露层。就近层在当前位置上方且当前位置
+     * 在带外（低于带底）时仍拒绝：{@link Step#UPHILL_BAND} 只拦露天垫柱爬升。
      */
     public static Plan plan(boolean allowProspecting, Collection<ResourceLocation> itemIds,
                             String currentDimension, boolean descendStarted, boolean prospectMineStarted,
@@ -164,11 +167,9 @@ public record OreGenerationBand(
         OreGenerationBand band = forItems(itemIds);
         if (band == null) return Plan.UNKNOWN_BAND;
         if (!band.matchesDimension(currentDimension)) return new Plan(Step.OTHER_DIMENSION, band);
-        if (currentFeetY >= band.minY && currentFeetY <= band.maxY) {
-            if (band.prospectY() >= currentFeetY) return new Plan(Step.DESCEND, band, currentFeetY);
-            return new Plan(Step.DESCEND, band);
-        }
-        if (band.prospectY() > currentFeetY) return new Plan(Step.UPHILL_BAND, band);
-        return new Plan(Step.DESCEND, band);
+        int nearestY = Math.max(band.minY, Math.min(currentFeetY, band.maxY));
+        if (nearestY == currentFeetY) return new Plan(Step.DESCEND, band, currentFeetY);
+        if (nearestY > currentFeetY) return new Plan(Step.UPHILL_BAND, band);
+        return new Plan(Step.DESCEND, band, nearestY);
     }
 }
