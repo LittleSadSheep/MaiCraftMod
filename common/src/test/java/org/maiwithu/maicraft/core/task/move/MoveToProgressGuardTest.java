@@ -54,6 +54,8 @@ public final class MoveToProgressGuardTest {
         approachPlanningStallTerminatesBounded(memory);
         approachPlanningWithProgressKeepsRunning(memory);
         approachProgressEmitsScoreboardHeartbeat(memory);
+        approachSilentWindowHeartbeats(memory);
+        approachSilentWindowWideCapTerminates(memory);
         moveToPlanningHeartbeat(memory);
         moveToRemainingScaleTracksArrival(memory);
         System.out.println("MoveToProgressGuardTest: passed");
@@ -120,6 +122,51 @@ public final class MoveToProgressGuardTest {
             progress = task.progress();
             check(progress.get("calc") instanceof Number calc && calc.longValue() > 0 && !calc.equals(before),
                     "calc attempts must grow during planning so the gate keeps emitting heartbeat events");
+        }
+    }
+
+    /**
+     * 接近静默窗心跳（117 接近腿楔死形态）：导航既不报规划在飞、身体也不挪窝、又不给终态时，
+     * 记分牌靠单调增长的 planning_seconds 每过地板间隔仍有一条进度可读，不再零事件静默。
+     */
+    private static void approachSilentWindowHeartbeats(Unsafe memory) throws Exception {
+        try (Fixture f = new Fixture(memory)) {
+            f.runSessionWithoutPlanning();
+            GoToThenDoTask<MoveToTaskRecord> task = f.approachTask();
+            f.nextTick();
+            check(task.tick(f.player) == TaskState.RUNNING, "a wedged approach keeps running inside the wide bound");
+            Map<String, Object> first = task.progress();
+            check("moving".equals(first.get("phase")), "a non-planning wedged approach reports the moving phase");
+            check(first.get("planning_seconds") instanceof Number,
+                    "the silent window must carry the monotonic planning_seconds heartbeat, progress=" + first);
+            for (int i = 0; i < 100; i++) { f.nextTick(); task.tick(f.player); }
+            Map<String, Object> later = task.progress();
+            check(((Number) later.get("planning_seconds")).longValue()
+                            > ((Number) first.get("planning_seconds")).longValue(),
+                    "planning_seconds must grow so the gate republishes every floor interval, "
+                            + first + " -> " + later);
+        }
+    }
+
+    /** 接近静默窗宽上限：既不规划也不挪窝的接近腿在分钟级上限处 planning_stall 终态，不再无限 running。 */
+    private static void approachSilentWindowWideCapTerminates(Unsafe memory) throws Exception {
+        try (Fixture f = new Fixture(memory)) {
+            f.runSessionWithoutPlanning();
+            GoToThenDoTask<MoveToTaskRecord> task = f.approachTask();
+            TaskState state = TaskState.RUNNING;
+            int ticks = 0;
+            while (state == TaskState.RUNNING && ticks++ < 7000) {
+                f.nextTick();
+                state = task.tick(f.player);
+            }
+            check(state == TaskState.FAILED && ticks <= 6500,
+                    "a wedged approach must terminate at the minute-level wide cap, ticks=" + ticks);
+            TaskResult result = task.result(TaskState.FAILED);
+            check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("planning_stall"),
+                    "the wide-cap timeout must fail as planning_stall");
+            check(result.message().contains("approach phase 'approach'")
+                            && result.message().contains("seconds"),
+                    "failure message must name the approach phase and the waited duration");
         }
     }
 
@@ -249,6 +296,12 @@ public final class MoveToProgressGuardTest {
             field(EmbeddedBaritoneNavigator.class, "playerWorld").set(ground, world);
             field(EmbeddedBaritoneNavigator.class, "progress").set(ground, memory.allocateInstance(
                     Class.forName("org.maiwithu.maicraft.core.pathing.baritone.NavigationProgress")));
+            // Unsafe 实例的 0 默认值会冒充「0 刚有位移/确认」；写真实的从未哨兵。
+            var progressInstance = field(EmbeddedBaritoneNavigator.class, "progress").get(ground);
+            field(Class.forName("org.maiwithu.maicraft.core.pathing.baritone.NavigationProgress"),
+                    "confirmed").setLong(progressInstance, Long.MIN_VALUE);
+            field(Class.forName("org.maiwithu.maicraft.core.pathing.baritone.NavigationProgress"),
+                    "started").setLong(progressInstance, Long.MIN_VALUE);
             field(EmbeddedBaritoneNavigator.class, "events").set(ground, new EnumMap<>(PathEvent.class));
             field(EmbeddedBaritoneNavigator.class, "ledger").set(ground, new TerrainBill());
             for (String diagnostics : List.of("dispatchEvidence", "healthEvidence", "dispatchRecovery",
@@ -268,6 +321,15 @@ public final class MoveToProgressGuardTest {
                     field(ClientActorBoundary.class, "controlRevision").getLong(actor), tick, true);
             field(ClientActorBoundary.class, "activeContext").set(actor, context);
             invoke(body, "beginTick", long.class, tick);
+        }
+
+        /** 把导航会话换成非规划阶段并清掉在飞目标：接近腿既不规划在飞也不给终态的静默楔死形态。 */
+        void runSessionWithoutPlanning() throws Exception {
+            session = new Session(TransportSession.Result.running("moving"));
+            field(TransportNavigator.class, "session").set(navigator, session);
+            field(TransportNavigator.class, "targets").set(navigator, null);
+            // Unsafe 实例的原始 0 会被当成「0 刻刚有位移」；显式写从未进展的哨兵值。
+            field(TransportNavigator.class, "progressTick").setLong(navigator, Long.MIN_VALUE);
         }
 
         private void remember(Field f, Object owner) throws Exception { saved.put(f, f.get(owner)); }

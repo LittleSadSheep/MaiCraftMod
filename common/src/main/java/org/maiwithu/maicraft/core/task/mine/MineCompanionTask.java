@@ -125,6 +125,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      */
     private static final int STALL_TICKS = 400;
 
+    /** 接近腿规划在飞的宽上限（三分钟）：寻路器挂在单次搜索永不返回的病理里时，
+     *  stalledOut 的活动刻预算被冻结（规划在飞不算卡住），任务会零事件零终态地静默楔死
+     *  （harvest 接近腿 20 分钟样本）。健康接近的单次搜索用不满这张表。 */
+    private static final long APPROACH_PLANNING_LIMIT_TICKS = 3 * 60 * 20;
+
     /** 只有目标方块确认挖掉或角色确实移动后才续期，避免原地等待被误判为有进展。 */
     private static final int PROGRESS_LEASE_TICKS = STALL_TICKS + 40;
 
@@ -488,6 +493,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             TaskState stalled = stalledOut();
             if (stalled != null) {
                 return stalled;
+            }
+            // 接近腿规划在飞的宽上限：stalledOut 对规划在飞免检（活动刻预算被冻结），寻路器
+            // 挂在单次搜索永不返回的病理里时只有这张表能把接近腿收进有界终态；搜索正常返回
+            // 即停表，重复重启的停滞由 stalledOut 的活动刻预算兜底。
+            TaskState approachBound = approachingSourcesBound(
+                    nav != null && nav.planningInFlight(),
+                    nav == null ? 0 : nav.planningCalcAttempts(),
+                    nav == null ? "" : nav.outcomeSummary());
+            if (approachBound != null) {
+                return approachBound;
             }
             if (failedPath != null) {
                 switch (failedPath.next(player.position(), currentGoals, lastQueryComplete, player.level().getGameTime())) {
@@ -1378,7 +1393,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         mergeHits(res.hits());
         lastQueryComplete &= !naturalTrees.budgetDeferred && rejectedBefore == naturalTrees.rejected.size();
         // 扫描覆盖完成即停守卫表；之后新出现的等待窗（名单耗尽后的补查）会重新起表、预算不残留。
-        if (lastQueryComplete) planningPhaseEnd();
+        // 只关源扫描自己的表，不动接近腿可能正挂着的 approaching_sources 表。
+        if (lastQueryComplete && "querying_sources".equals(planningPhaseLabel())) planningPhaseEnd();
     }
 
     /**
@@ -1594,6 +1610,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             data.put("calc", scanPulses);
             data.put("planning_seconds", planningPhaseSeconds());
         }
+        // 接近腿规划在飞的心跳：calc 尝试数与已规划秒数随等待推进（后者恒增），让「还在算路」
+        // 的接近停滞每过地板间隔仍有一条进度可读，与源扫描等待窗同一纪律。
+        if (nav != null && nav.planningInFlight() && "approaching_sources".equals(currentPhase())) {
+            data.put("calc", nav.planningCalcAttempts());
+            data.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
+        }
         // 身体安全心跳：滞水是受胁状态，坐标进标准键让 ProgressGate 随浪况变化按地板间隔持续发布，
         // 观察者不用等终态才发现角色在溺水边缘。
         if (bodyWet()) {
@@ -1756,6 +1778,35 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (evacuationNav != null) evacuationNav.stop();
         evacuationNav = null;
         evacuationTicks = 0;
+    }
+
+    /**
+     * 接近腿规划在飞的宽上限守卫（approaching_sources 段）：规划在飞期间挂分钟级总表，
+     * 超限按 planning_stall 如实收场并携带阶段名、已等待秒数与 calc 尝试数；搜索一返回
+     * 就停表。参数化导航状态是为了回归可以直接驱动守卫，不必先起一次真实寻路。
+     *
+     * @return 该收场就给终态，否则 null 继续正常推进
+     */
+    TaskState approachingSourcesBound(boolean planningInFlight, long calcAttempts, String navOutcome) {
+        if (!planningInFlight) {
+            if ("approaching_sources".equals(planningPhaseLabel())) planningPhaseEnd();
+            return null;
+        }
+        if (!planningPhaseActive()) {
+            planningPhaseBegin("approaching_sources", APPROACH_PLANNING_LIMIT_TICKS);
+            return null;
+        }
+        if (!planningPhaseExceeded()) return null;
+        Constants.LOG.info(
+                "[maicraft-task] mine approach planning exceeded the wide bound: waited {}s calc={} feet={} targets={}",
+                planningPhaseSeconds(), calcAttempts, feet().toShortString(), knownOres.size());
+        fail("approach phase 'approaching_sources' did not complete within about "
+                + planningPhaseSeconds() + "s; the path search held the planner in flight the"
+                + " whole time (" + calcAttempts + " calc attempts, nearest: " + nearestOreInfo()
+                + "; " + navOutcome + "). Travel closer with goto and resubmit; this timeout is"
+                + " not evidence that the sources are unreachable from anywhere.",
+                FailureType.PLANNING_STALL);
+        return TaskState.FAILED;
     }
 
     /**

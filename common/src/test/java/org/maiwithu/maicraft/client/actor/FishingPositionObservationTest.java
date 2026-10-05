@@ -30,6 +30,7 @@ public final class FishingPositionObservationTest {
         shallowWaterIsNotDryGround();
         positioningFailure(false);
         positioningFailure(true);
+        positionApproachWideBoundFailsHonestly();
         System.out.println("FishingPositionObservationTest: passed");
     }
 
@@ -95,6 +96,36 @@ public final class FishingPositionObservationTest {
                     "the brief failure message must also distinguish a dry body from one in water");
             check(data.get("casts").getAsInt() == 0 && world.itemUses() == 0 && world.blockUses() == 0,
                     "adding failure evidence must not cast a rod or change the world");
+        }
+    }
+
+    /**
+     * 站位接近腿的宽上限（fish 静默楔死样本：十分钟零事件零终态）：接近段超限按
+     * planning_stall 如实失败并携带阶段名与已等待时长，宽上限内的合法慢接近不误杀；
+     * 记分牌带 phase 与 done，接近静默窗靠 planning_seconds 单调心跳可见。
+     */
+    private static void positionApproachWideBoundFailsHonestly() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            var task = new FishCompanionTask(world.player, new FishTaskRecord("fish-bound", 1_000_000, 3));
+            task.start(world.player);
+            var bound = FishCompanionTask.class.getDeclaredMethod("positionApproachBound",
+                    boolean.class, String.class);
+            bound.setAccessible(true);
+            var progress = task.progress();
+            check("position".equals(progress.get("phase")) && ((Number) progress.get("done")).intValue() == 0,
+                    "the fishing scoreboard must expose phase and catch count, actual=" + progress);
+            check(bound.invoke(task, true, "planning") == null, "接近在飞应起表继续运行");
+            for (int i = 0; i < 120; i++) world.nextTick();
+            check(bound.invoke(task, true, "planning") == null, "宽上限内的慢接近继续等待，不误杀");
+            for (int i = 0; i < 5000; i++) world.nextTick();
+            TaskState state = (TaskState) bound.invoke(task, true, "planning");
+            check(state == TaskState.FAILED, "接近超宽上限必须诚实失败，实际 " + state);
+            var result = SemanticResultView.result(task.result(TaskState.FAILED));
+            check(String.valueOf(result.toJson()).contains("planning_stall"),
+                    "接近超限是 planning_stall，实际: " + result.toJson());
+            check(result.message().contains("approach phase 'position'")
+                            && result.message().contains("seconds"),
+                    "失败正文应点名接近阶段与已等待时长，实际: " + result.message());
         }
     }
 

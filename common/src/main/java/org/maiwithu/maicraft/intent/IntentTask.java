@@ -1203,21 +1203,25 @@ final class IntentTask implements Task {
     }
 
     /**
-     * 包装类任务（施工、传送门准备等）把一线子任务嵌在 {@code child} 键下，而进度门卫只读
-     * 顶层标准键——子任务在规划期变化时包装任务顶层反而无话可说，规划心跳被整层埋没。
-     * 子任务报出 {@code phase}/{@code calc} 时把它们提到顶层，包装任务的静默窗与一线任务
-     * 遵守同一条心跳纪律；顶层已有 phase 时不覆盖。
+     * 包装类任务（施工、传送门准备、采集编排等）把一线子任务嵌在 {@code child} 键下，而进度
+     * 门卫只读顶层标准键——子任务在规划期变化时包装任务顶层反而无话可说，规划心跳被整层埋没。
+     * 子任务报出 {@code phase}/{@code calc}/{@code planning_seconds} 时把它们提到顶层（不覆盖
+     * 顶层已有值），包装任务的静默窗与一线任务遵守同一条心跳纪律；phase 只在顶层没有时上提，
+     * 心跳键即使顶层已有 phase 也照常上提——采集这类包装任务顶层 phase 恒定，卡住的一线子任务
+     * 的单调心跳是门卫唯一能看到的变化。
      */
     static Map<String, Object> hoistChildPlanning(Map<String, Object> progress) {
-        if (progress.get("phase") != null || !(progress.get("child") instanceof Map<?, ?> childProgress)) {
+        if (!(progress.get("child") instanceof Map<?, ?> childProgress)) {
             return progress;
         }
         Object phase = childProgress.get("phase");
         Object calc = childProgress.get("calc");
-        if (phase == null && calc == null) return progress;
+        Object planningSeconds = childProgress.get("planning_seconds");
+        if (phase == null && calc == null && planningSeconds == null) return progress;
         Map<String, Object> hoisted = new LinkedHashMap<>(progress);
-        if (phase != null) hoisted.put("phase", phase);
+        if (phase != null) hoisted.putIfAbsent("phase", phase);
         if (calc != null) hoisted.putIfAbsent("calc", calc);
+        if (planningSeconds != null) hoisted.putIfAbsent("planning_seconds", planningSeconds);
         return hoisted;
     }
 

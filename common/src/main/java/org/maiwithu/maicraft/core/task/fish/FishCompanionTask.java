@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -67,6 +68,9 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private static final int WATER_SCAN_VERTICAL_RANGE = 8;
     private static final int MAX_STANCE_CHECKS = 256;
     private static final int MAX_POSITION_FAILURES = 3;
+    /** 站位接近腿的宽上限（三分钟）：导航停在既不规划也不终态的假运行里时（fish 十分钟静默
+     *  楔死样本），只有这张分钟级总表能把 POSITION 收进有界终态；健康步行接近用不满。 */
+    private static final long POSITION_PHASE_LIMIT_TICKS = 3 * 60 * 20;
     private static final double NAV_SPEED = 1.0;
 
     private static final int CAST_SEARCH_RADIUS = 10;
@@ -168,6 +172,12 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     // 找到一组站位和水面后走到站位；找不到路会排除这一站位，最多换三次，而不是一直撞同一条路。
     private TaskState positionForFishing() {
+        // 接近站位腿的宽上限：无论导航规划在飞还是行走假运行，整段 POSITION 都有界，
+        // 超限按 planning_stall 如实收场并携带阶段名与已等待时长。
+        if (nav != null) {
+            TaskState bounded = positionApproachBound(nav.planningInFlight(), nav.outcomeSummary());
+            if (bounded != null) return bounded;
+        }
         if (stance == null || target == null) {
             FishingSetup setup = findFishingSetup();
             if (setup == null) {
@@ -185,6 +195,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
         if (atStance()) {
             stopNav();
+            planningPhaseEnd();
             phase = Phase.PREPARE;
             return TaskState.RUNNING;
         }
@@ -195,6 +206,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
                 stopNav();
+                planningPhaseEnd();
                 phase = Phase.PREPARE;
                 yield TaskState.RUNNING;
             }
@@ -212,6 +224,27 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
                 yield TaskState.RUNNING;
             }
         };
+    }
+
+    /**
+     * 站位接近腿（POSITION 段）的宽上限守卫：进入接近即起表，超限按 planning_stall
+     * 如实收场并携带阶段名与已等待秒数——导航停在既不规划也不终态的假运行里时
+     * （fish 十分钟静默楔死样本），只有这张表能把 POSITION 收进有界终态。参数化导航
+     * 状态是为了回归可以直接驱动守卫，不必先起一次真实寻路。
+     *
+     * @return 该收场就给终态，否则 null 继续正常推进
+     */
+    TaskState positionApproachBound(boolean planningInFlight, String navOutcome) {
+        if (!planningPhaseActive()) {
+            planningPhaseBegin("position", POSITION_PHASE_LIMIT_TICKS);
+            return null;
+        }
+        if (!planningPhaseExceeded()) return null;
+        fail("approach phase 'position' did not complete within about " + planningPhaseSeconds()
+                + " seconds; the body neither reached the fishing stance nor produced a path"
+                + " verdict (" + navOutcome + "). Move onto a clear shoreline and try fish again.",
+                FailureType.PLANNING_STALL);
+        return TaskState.FAILED;
     }
 
     // 已经站在干燥地面时，只看从原地能否抛到水面，找不到就失败；
@@ -903,6 +936,27 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         rodReceipt = null;
         clearLootTracking();
         super.cleanup();
+    }
+
+    /** 进度记分牌：phase 与 done/total 让钓获进度可读；站位接近静默窗（导航规划在飞或身体
+     *  近期无位移）报单调增长的 planning_seconds/calc，门卫按地板间隔持续发布——不再出现
+     *  十分钟零事件的静默楔死。健康行走与等咬钩不报，不加事件噪音。 */
+    @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("task", name());
+        data.put("phase", phase.name().toLowerCase(Locale.ROOT));
+        data.put("done", r.caught());
+        if (r.requested > 0) data.put("total", r.requested);
+        if (nav != null && phase == Phase.POSITION) {
+            if (nav.planningInFlight()) {
+                data.put("calc", nav.planningCalcAttempts());
+                data.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
+            } else if (!nav.hasRecentPhysicalProgress(40)) {
+                data.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
+            }
+        }
+        return Map.copyOf(data);
     }
 
     @Override

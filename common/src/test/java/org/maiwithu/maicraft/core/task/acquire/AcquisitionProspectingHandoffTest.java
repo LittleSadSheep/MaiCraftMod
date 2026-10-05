@@ -43,6 +43,7 @@ public final class AcquisitionProspectingHandoffTest {
         sourceScanHeartbeatMonotonic();
         sourceScanTimeoutFailsHonestly();
         slowScanSurvivesAndWindowResets();
+        approachPlanningWideBoundFailsHonestly();
         System.out.println("AcquisitionProspectingHandoffTest: passed");
     }
 
@@ -325,6 +326,55 @@ public final class AcquisitionProspectingHandoffTest {
         var method = org.maiwithu.maicraft.core.task.mine.MineCompanionTask.class.getDeclaredMethod(name);
         method.setAccessible(true);
         return method;
+    }
+
+    private static java.lang.reflect.Method mineMethod(
+            org.maiwithu.maicraft.core.task.mine.MineCompanionTask task, String name, Class<?>... parameters) throws Exception {
+        var method = org.maiwithu.maicraft.core.task.mine.MineCompanionTask.class.getDeclaredMethod(name, parameters);
+        method.setAccessible(true);
+        return method;
+    }
+
+    /**
+     * 接近腿规划在飞的宽上限（117 harvest 接近腿样本：calc_started:1 后二十分钟零事件）：
+     * 单次搜索永不返回时接近段如实收场（planning_stall，阶段名与不构成证据声明进回执），
+     * 宽上限内的合法慢搜索不误杀，搜索返回即停表。
+     */
+    private static void approachPlanningWideBoundFailsHonestly() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            var task = scanTask(h, "approach-bound", 1_000_000);
+            startTask(task);
+            var bound = mineMethod(task, "approachingSourcesBound",
+                    boolean.class, long.class, String.class);
+            // 搜索不在飞：守卫不收场，也不给任务残留的接近表计时。
+            check(bound.invoke(task, false, 1L, "") == null, "搜索不在飞时接近守卫必须放行");
+            // 第一次在飞：起表；宽上限内的慢搜索继续等待，不误杀。
+            check(bound.invoke(task, true, 1L, "") == null, "接近规划在飞应起表继续运行");
+            for (int i = 0; i < 120; i++) h.nextTick();
+            check(bound.invoke(task, true, 1L, "planning") == null, "宽上限内的慢搜索继续等待");
+            // 在飞越过宽上限：如实失败，阶段名与不构成证据声明进回执。
+            for (int i = 0; i < 5000; i++) h.nextTick();
+            TaskState state = (TaskState) bound.invoke(task, true, 1L, "planning");
+            check(state == TaskState.FAILED, "接近规划超宽上限必须诚实失败，实际 " + state);
+            var result = task.result(TaskState.FAILED);
+            check("planning_stall".equals(result.data().get("failure_type")),
+                    "接近超限是 planning_stall 而非目标丢失，实际: " + result.data().get("failure_type"));
+            check(result.message().contains("approaching_sources")
+                            && result.message().contains("not evidence"),
+                    "失败正文应点名接近阶段并声明不构成不可达证据，实际: " + result.message());
+            // 搜索返回后守卫停表：重新在飞要重新起表，旧等待不残留。
+            var revive = scanTask(h, "approach-bound-reset", 1_000_000);
+            startTask(revive);
+            var bound2 = mineMethod(revive, "approachingSourcesBound",
+                    boolean.class, long.class, String.class);
+            check(bound2.invoke(revive, true, 1L, "") == null, "第二次在飞正常起表");
+            for (int i = 0; i < 120; i++) h.nextTick();
+            check(bound2.invoke(revive, false, 1L, "") == null, "搜索返回后停表");
+            check(bound2.invoke(revive, true, 2L, "") == null, "停表后重新在飞重新起表，旧等待不残留");
+            for (int i = 0; i < 120; i++) h.nextTick();
+            check(bound2.invoke(revive, true, 2L, "") == null, "新表的等待从头计时，不继承旧窗");
+        }
     }
 
     /**

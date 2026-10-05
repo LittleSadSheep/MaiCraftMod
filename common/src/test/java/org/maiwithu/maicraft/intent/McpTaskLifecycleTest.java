@@ -58,7 +58,9 @@ public final class McpTaskLifecycleTest {
      * 不再因顶层无标准键而整段静默。
      */
     private static void wrapperPlanningHeartbeat() throws Exception {
-        // 上提规则本身：顶层无 phase 且 child 报出规划键时上提；顶层已有 phase 不覆盖。
+        // 上提规则本身：顶层无 phase 且 child 报出规划键时上提；顶层已有 phase 不覆盖，
+        // 但 child 的 calc/planning_seconds 心跳键即使顶层已有 phase 也照常上提——采集
+        // 这类包装任务顶层 phase 恒定，卡住的一线子任务的心跳是门卫唯一能看到的变化。
         var hoisted = IntentTask.hoistChildPlanning(Map.of(
                 "portal_prepared", false, "child", Map.of("phase", "planning", "calc", 7)));
         check("planning".equals(hoisted.get("phase")) && Integer.valueOf(7).equals(hoisted.get("calc")),
@@ -66,6 +68,13 @@ public final class McpTaskLifecycleTest {
         var untouched = IntentTask.hoistChildPlanning(Map.of(
                 "phase", "survey", "child", Map.of("phase", "moving")));
         check("survey".equals(untouched.get("phase")), "an existing top-level phase is never overridden");
+        var wrapperHeartbeat = IntentTask.hoistChildPlanning(Map.of(
+                "phase", "acquiring", "done", 0, "total", 2,
+                "child", Map.of("phase", "approaching_sources", "calc", 1, "planning_seconds", 95)));
+        check("acquiring".equals(wrapperHeartbeat.get("phase"))
+                        && Integer.valueOf(1).equals(wrapperHeartbeat.get("calc"))
+                        && Integer.valueOf(95).equals(wrapperHeartbeat.get("planning_seconds")),
+                "a constant wrapper phase still carries the stuck child's heartbeat keys");
         var keyless = IntentTask.hoistChildPlanning(Map.of("task", "wrapper"));
         check(!keyless.containsKey("phase"), "a child without planning keys stays buried");
 
@@ -80,14 +89,21 @@ public final class McpTaskLifecycleTest {
             f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 2), 2_041);
             events = f.runtime.attention(0, 256).getAsJsonArray("events");
             var second = lastProgressFor(events, record);
-            check(countProgressFor(events, record) == 2 && second.get("message").getAsString().equals("survey · calc 3"),
+            check(countProgressFor(events, record) == 2
+                            && second.get("message").getAsString().equals("survey · calc 3 · planning 2s"),
                     "a stalled planning phase keeps a heartbeat via the growing calc counter");
             check(second.getAsJsonObject("data").get("planning_seconds").getAsInt() == 2,
                     "heartbeat data carries the planned-for seconds");
-            // calc 停止增长且 phase 恒定：不发事件——心跳只属于还在推进记账的规划期。
+            // calc 停止增长后 planning_seconds 单调推进：静默窗心跳键让停滞期继续可见。
             f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 4), 2_100);
             events = f.runtime.attention(0, 256).getAsJsonArray("events");
-            check(countProgressFor(events, record) == 2, "a frozen scoreboard stays silent instead of inventing still-working talk");
+            var third = lastProgressFor(events, record);
+            check(countProgressFor(events, record) == 3 && third.get("message").getAsString().contains("planning 4s"),
+                    "a growing planning_seconds keeps the silent-window heartbeat alive");
+            // 记分牌彻底冻结：不发事件——心跳只属于还在推进记账的段。
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 4), 2_200);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 3, "a frozen scoreboard stays silent instead of inventing still-working talk");
         }
     }
 
