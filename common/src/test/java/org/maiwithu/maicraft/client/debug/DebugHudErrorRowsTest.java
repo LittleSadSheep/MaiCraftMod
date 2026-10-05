@@ -17,7 +17,8 @@ import static org.maiwithu.maicraft.client.debug.DebugHudController.perfText;
 import static org.maiwithu.maicraft.client.debug.DebugHudController.wrapEvent;
 
 /** 最新报错行必须按面板宽度折成多行并守住与事件区相同的 4 行上限；空报错落"未知"，不能回到单行截断。
- * 面板宽度与事件区折行共用同一口径：下限 160、上限为屏宽预算；事件消息里的长 token 不被词中硬切。
+ * 面板宽度是唯一口径：固定行与未折行正文共同定宽（下限 160、上限屏宽预算），事件与报错按这一宽度折行，
+ * 续行没有前缀、按整个面板宽折行，右缘因此与背景框一致；长 token 不被词中硬切。
  * 性能行在同一套件覆盖：TPS 按目标单刻预算折算（预算内满速、超出 1000÷MSPT 掉速），配色分满速/轻度/明显三档。 */
 public final class DebugHudErrorRowsTest {
     /** 假宽度函数：一个码点一像素，行数断言只取决于消息长度与给定宽度，不依赖真实字体。 */
@@ -32,9 +33,11 @@ public final class DebugHudErrorRowsTest {
         blankErrorFallsBackToUnknown();
         panelWidthClampsBetweenFloorAndScreenBudget();
         eventWrapKeepsLongTokenWholeAndWithinPanel();
+        continuationLinesFillPanelWidthAfterWidePrefix();
+        contentDemandWidensPanelToFinalWrapWidth();
         perfTextFollowsTickBudget();
         perfColorSeparatesThreeSpeedBands();
-        System.out.println("DebugHudErrorRowsTest: latest error rows wrap, truncate and stay visible; panel width clamps to screen budget; event wrap keeps long tokens whole; perf row follows tick budget");
+        System.out.println("DebugHudErrorRowsTest: latest error rows wrap, truncate and stay visible; panel width is the single wrap-and-box source widened by unwrapped content; continuation lines fill the panel width; perf row follows tick budget");
     }
 
     // 60 个 7 字符单词（约 480 像素）在 200 像素行宽下至少占三行：多行展示且未触及截断。
@@ -103,9 +106,38 @@ public final class DebugHudErrorRowsTest {
         for (DebugHudController.EventLine line : wrapped) {
             int width = line.segments().stream()
                     .mapToInt(segment -> segment.text().length()).sum();
-            // 分词器在词边界断行时允许少量超出（原版 splitLines 行为），背景框以正文实测宽度兜底。
+            // 分词器在词边界断行时允许少量超出（原版 splitLines 行为）。
             check(width <= 100 + 10, "every wrapped line stays within the panel width budget");
         }
+    }
+
+    // 长前缀事件（时间戳+长类型名）把面板撑宽后，续行没有前缀、必须按整个面板宽折行，
+    // 而不是再扣一次前缀后的残余宽度——这是续行右缘与背景框右缘对齐的断言。
+    private static void continuationLinesFillPanelWidthAfterWidePrefix() {
+        IntentRuntime.AttentionItem event = new IntentRuntime.AttentionItem(
+                Instant.now(), "a_very_long_event_type_name", "task", "word ".repeat(60).strip());
+        DebugHudController.EventLine[] lines = wrapEvent(SPLITTER, event, 200);
+        check(lines.length > 1, "a long-prefix event must wrap its message into continuation lines");
+        for (int i = 1; i < lines.length; i++) {
+            int width = lines[i].segments().stream()
+                    .mapToInt(segment -> segment.text().length()).sum();
+            check(width >= 100, "continuation lines must fill the panel width, not the prefix-deducted residue");
+        }
+    }
+
+    // 未折行正文的自然宽度参与定宽：长事件取前缀+全文、报错取标签+全文，撑到屏宽预算即止；
+    // 没有长内容时面板宽不因这一步改变。
+    private static void contentDemandWidensPanelToFinalWrapWidth() {
+        check(DebugHudController.panelWidthWithContent(SPLITTER, 160, List.of(), null, 1000) == 160,
+                "no pending content leaves the fixed-row panel width untouched");
+        IntentRuntime.AttentionItem event = new IntentRuntime.AttentionItem(
+                Instant.now(), "type", "task", "m".repeat(300));
+        check(DebugHudController.panelWidthWithContent(SPLITTER, 160, List.of(event), null, 1000) == 9 + 6 + 300,
+                "a long event widens the panel to prefix plus full unwrapped message width");
+        check(DebugHudController.panelWidthWithContent(SPLITTER, 160, List.of(event), null, 200) == 200,
+                "unwrapped content demand clamps to the screen budget");
+        check(DebugHudController.panelWidthWithContent(SPLITTER, 160, List.of(), "m".repeat(300), 1000) == 6 + 300,
+                "a pending error widens the panel to label plus full unwrapped message width");
     }
 
     // 预算内（含边界）给满速 1000÷目标，超出按 1000÷MSPT 等比掉速；目标随 tick rate 走，不写死 50/20。
