@@ -65,6 +65,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.tools.perception.LocalFloorSense;
 import org.maiwithu.maicraft.core.tools.perception.BodyEnvironmentObservation;
+import org.maiwithu.maicraft.core.tools.perception.TickRateObservation;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
@@ -496,6 +497,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("day_index", WorldTimeSemantics.dayIndex(player.level()));
         result.addProperty("weather", player.level().isThundering()
                 ? "thunder" : player.level().isRaining() ? "rain" : "clear");
+        // 近窗刻率：失焦限流把世界刻放慢时调用方一眼可辨，不用再靠双采样 game_time 差值排障。
+        result.add("tick_rate", TickRateObservation.observe(
+                System.currentTimeMillis(), player.level().getGameTime()));
         result.add("inventory", inventorySummary(player));
         // 随身储物与主背包分开显示：没观察过的包明确未知，不把未打开当成空包。
         result.add("carried_storage", new Gson().toJsonTree(BackpackStock.facts(player)));

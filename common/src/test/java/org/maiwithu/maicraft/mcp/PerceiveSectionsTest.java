@@ -8,6 +8,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.maiwithu.maicraft.core.tools.perception.TickRateObservation;
+
 /**
  * 逐段投影的回归：调用方点名的身体和电梯事实必须保留，未请求的地形调查可以按段省略。
  * 不按固定字符上限判定回执有效，避免贡献者为了长度检查删去楼层或真实状态。
@@ -25,7 +27,28 @@ public final class PerceiveSectionsTest {
         designAvailabilityDoesNotDemandExecutionResources();
         selectedResourceDefaultsToKnowledge();
         surroundingsRetainsCurrentBodyFacts();
+        tickRateSectionRegisteredAndDerived();
         System.out.println("PerceiveSectionsTest: passed");
+    }
+
+    /** 失焦限流的观察面：situation 声明 tick_rate 段，刻率由两次观察的时间差纯函数还原。 */
+    private static void tickRateSectionRegisteredAndDerived() {
+        check(PerceiveSections.known("situation").contains("tick_rate"),
+                "situation must advertise the tick-rate section");
+        PublicToolCatalog.validateAndNormalize("perceive",
+                request("situation", "{\"sections\":[\"tick_rate\"]}"));
+        var first = TickRateObservation.observe(1_000_000L, 5_000L);
+        check(!first.get("rate_available").getAsBoolean(),
+                "the first observation cannot yield a rate yet");
+        var second = TickRateObservation.observe(1_002_000L, 5_040L);
+        check(second.get("rate_available").getAsBoolean() && second.get("recent_tps").getAsDouble() == 20.0,
+                "two seconds with forty ticks must read as twenty tps");
+        var third = TickRateObservation.observe(1_002_500L, 5_050L);
+        check(!third.get("rate_available").getAsBoolean(),
+                "a too-short gap must refuse to report a noisy rate");
+        var fourth = TickRateObservation.observe(1_400_000L, 5_040L);
+        check(!fourth.get("rate_available").getAsBoolean(),
+                "world time moving backward must refuse to report a rate");
     }
 
     private static void surroundingsRetainsCurrentBodyFacts() {

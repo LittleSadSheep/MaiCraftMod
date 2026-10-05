@@ -23,6 +23,7 @@
   - [食物与饥饿](maicraft://knowledge/game_mechanics/food)：进食规则与自动选食、打猎/耕种/加工获取链；被动生物需 confirm_risky_target，农田采收自带留种补种。
   - [睡眠与夜晚](maicraft://knowledge/game_mechanics/sleep-night)：黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼；夜里用 maicraft:sleep 而不是硬熬。
   - [下降掘进与寻路死角](maicraft://knowledge/game_mechanics/tunneling)：垂直直挖易 planning_stall，斜向阶梯与水平掘进是可靠形状；探矿末段停滞时就地扫描暴露源。
+  - [世界刻速与失焦限流](maicraft://knowledge/game_mechanics/tick-rate)：失焦限流把世界降到 0.1~1tps；任务变慢先读 situation 的 tick_rate，不要把慢放当停滞取消重提。
   - [挖掘工作面照明](maicraft://knowledge/game_mechanics/lighting)：黑暗即刷怪（方块光照 0），火把=煤+木棍×4；深掘作业面默认无照明环节，需主动 auto_light/light_area 布光。
 - 方块说明：使用 `maicraft://knowledge/block/{namespace}/{path}`，例如 `maicraft://knowledge/block/create/deployer`。页面给出状态属性、普通物品说明、可用的 Create Shift/Ctrl 说明，以及该组件的 Ponder 场景链接。
 

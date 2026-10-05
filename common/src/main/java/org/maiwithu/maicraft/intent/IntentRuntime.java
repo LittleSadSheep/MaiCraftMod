@@ -948,6 +948,8 @@ public final class IntentRuntime {
         JsonObject data = new JsonObject();
         observation.forEach((key, value) ->
                 data.add(key, GSON.toJsonTree(value == null ? "" : value)));
+        // 进度事件带游戏时间戳：调用方对照真实时间即可区分世界慢放（失焦限流）与任务停滞。
+        data.addProperty("game_time", gameTime);
         publish("task_progress", record, decision.message(), data);
     }
 
