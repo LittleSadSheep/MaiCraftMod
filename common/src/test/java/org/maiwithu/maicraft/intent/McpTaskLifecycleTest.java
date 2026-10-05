@@ -142,6 +142,9 @@ public final class McpTaskLifecycleTest {
             args.addProperty("request_key", "same-request");
             var result = f.facade.execute(args).toCompletableFuture().join().getAsJsonObject();
             check(result.get("task_id").getAsString().equals(original.externalId().toString()), "重试应返回原任务编号");
+            check(result.get("deduplicated").getAsBoolean(), "去重命中应显式标注 deduplicated");
+            check(result.get("message").getAsString().contains("identical request_key"),
+                    "去重回执应注明返回的是既有任务");
             check(!ClientRuntime.actor().automationControlRequested(), "查询原请求不能重新接管玩家");
             check(result.get("control_status").getAsString().equals("not_requested"), "重试回复不能声称已请求接管");
             check(f.tasks().size() == 1, "重试不能登记第二件任务");

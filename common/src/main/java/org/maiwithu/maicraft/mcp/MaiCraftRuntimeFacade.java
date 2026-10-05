@@ -196,6 +196,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             result.addProperty("status", publicState(record));
             result.addProperty("accepted", true);
             result.addProperty("outcome", record.goal().outcome());
+            if (repeatedRequest) {
+                // 去重命中必须显式标注：调用方拿到的是旧任务终态，不是一次新执行的承诺；
+                // 静默复用会让"确认上次结果后重试"的正常路径被误判成新请求已成功。
+                result.addProperty("deduplicated", true);
+                result.addProperty("message",
+                        "identical request_key; returning the existing task instead of starting a new one");
+            }
             if (requestKey != null) result.addProperty("request_key", requestKey);
             result.addProperty("control_status", repeatedRequest ? "not_requested" : IntentRuntime.isIndependentRequest(goal)
                     ? "not_required" : "takeover_requested");
