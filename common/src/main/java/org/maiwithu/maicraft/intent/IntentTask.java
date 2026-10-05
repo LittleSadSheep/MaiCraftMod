@@ -1122,7 +1122,26 @@ final class IntentTask implements Task {
             progress.put("survival_reflexes_suppressed", suppressesSurvivalReflexes());
         // 内部机器任务等待人工蓝图确认时，总任务同步展示真实等待原因，供调用者结束无效轮询。
         progress.putAll(BuildPreviewGate.waitingProgress(record));
-        return Map.copyOf(progress);
+        return Map.copyOf(hoistChildPlanning(progress));
+    }
+
+    /**
+     * 包装类任务（施工、传送门准备等）把一线子任务嵌在 {@code child} 键下，而进度门卫只读
+     * 顶层标准键——子任务在规划期变化时包装任务顶层反而无话可说，规划心跳被整层埋没。
+     * 子任务报出 {@code phase}/{@code calc} 时把它们提到顶层，包装任务的静默窗与一线任务
+     * 遵守同一条心跳纪律；顶层已有 phase 时不覆盖。
+     */
+    static Map<String, Object> hoistChildPlanning(Map<String, Object> progress) {
+        if (progress.get("phase") != null || !(progress.get("child") instanceof Map<?, ?> childProgress)) {
+            return progress;
+        }
+        Object phase = childProgress.get("phase");
+        Object calc = childProgress.get("calc");
+        if (phase == null && calc == null) return progress;
+        Map<String, Object> hoisted = new LinkedHashMap<>(progress);
+        if (phase != null) hoisted.put("phase", phase);
+        if (calc != null) hoisted.putIfAbsent("calc", calc);
+        return hoisted;
     }
 
     private void addBuildProjects(Map<String, Object> data) {

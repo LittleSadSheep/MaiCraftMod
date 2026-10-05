@@ -29,6 +29,8 @@ public final class PortalRegressionSuite {
         PortalPolicyTest.main(args);
         PortalSurveyTest.main(args);
         PortalPreparationTaskTest.main(args);
+        // 编译型任务的规划期也要有界：勘察停滞期出心跳，超宽上限如实收场而非静默楔死。
+        PortalPlanningGuardTest.main(args);
         PortalPreparationContractTest.main(args);
         DimensionPreparationFallbackTest.main(args);
         // 高台旁先比较整扇门的底部入口，一列受阻后仍能尝试另一列。

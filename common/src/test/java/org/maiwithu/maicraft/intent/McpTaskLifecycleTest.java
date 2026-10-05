@@ -48,7 +48,47 @@ public final class McpTaskLifecycleTest {
         networkCancellationRespectsClientDispatch();
         progressEventsFollowScoreboard();
         bodyHazardHeartbeatFollowsPosition();
+        wrapperPlanningHeartbeat();
         System.out.println("McpTaskLifecycleTest: passed");
+    }
+
+    /**
+     * 编译型任务（包装任务）的规划期心跳：子任务嵌在 child 键下的 phase/calc 上提到顶层后
+     * 门卫照常认识它；phase 恒定、calc 单调增长时，停滞期每过地板间隔仍有一条事件可发，
+     * 不再因顶层无标准键而整段静默。
+     */
+    private static void wrapperPlanningHeartbeat() throws Exception {
+        // 上提规则本身：顶层无 phase 且 child 报出规划键时上提；顶层已有 phase 不覆盖。
+        var hoisted = IntentTask.hoistChildPlanning(Map.of(
+                "portal_prepared", false, "child", Map.of("phase", "planning", "calc", 7)));
+        check("planning".equals(hoisted.get("phase")) && Integer.valueOf(7).equals(hoisted.get("calc")),
+                "child planning keys are hoisted to the top level for the gate");
+        var untouched = IntentTask.hoistChildPlanning(Map.of(
+                "phase", "survey", "child", Map.of("phase", "moving")));
+        check("survey".equals(untouched.get("phase")), "an existing top-level phase is never overridden");
+        var keyless = IntentTask.hoistChildPlanning(Map.of("task", "wrapper"));
+        check(!keyless.containsKey("phase"), "a child without planning keys stays buried");
+
+        // 门卫节奏：phase 恒定的规划期靠 calc 增长维持心跳，每过地板间隔一条。
+        try (var f = new Fixture()) {
+            var record = f.record();
+            f.tasks().put(record.externalId(), record);
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 1, "planning_seconds", 0), 2_000);
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 2, "planning_seconds", 0), 2_010);
+            var events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "planning observation publishes once and merges inside the floor");
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 2), 2_041);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            var second = lastProgressFor(events, record);
+            check(countProgressFor(events, record) == 2 && second.get("message").getAsString().equals("survey · calc 3"),
+                    "a stalled planning phase keeps a heartbeat via the growing calc counter");
+            check(second.getAsJsonObject("data").get("planning_seconds").getAsInt() == 2,
+                    "heartbeat data carries the planned-for seconds");
+            // calc 停止增长且 phase 恒定：不发事件——心跳只属于还在推进记账的规划期。
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 4), 2_100);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 2, "a frozen scoreboard stays silent instead of inventing still-working talk");
+        }
     }
 
     private static void progressEventsFollowScoreboard() throws Exception {
