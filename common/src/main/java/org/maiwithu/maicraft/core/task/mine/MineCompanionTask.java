@@ -196,6 +196,8 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private static final int MAX_BREAKS_WITHOUT_EXPECTED_OUTPUT = 32;
     private int breaksAtLastOutput;
     private boolean expectedOutputMissing;
+    /** 定点采收源格已确认破坏但本次未收到期望产物：概率掉落未中是正常结果，按事实成功收场并如实入账。 */
+    private boolean probabilisticDropMissed;
     // 收尾可能发生在身体已交还之后；记住上次进度的计数口径，格式化回执时不再读取玩家能力。
     private boolean countedExpectedItems;
 
@@ -388,6 +390,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (expectedOutputBudgetExhausted(gathered)) {
             // 已经看见产物而只是走不过去时，报告收取路径问题；不能误导模型重查配方或更换采收工具。
             if (unreachableDropCount > 0) return unreachableDropFailure();
+            // 定点采收只授权一格：源格已确认破坏、产物没来时，若掉落本身是概率性的，"破坏成立、本次未中"
+            // 是真实世界的正常结果而非失败——世界状态已推进（源格变 air），回执如实区分概率未中与未破坏。
+            // 确定性产物（如工具不匹配导致的无掉落）也会走到这里，gathered=0 与概率提示让调用方自行对账。
+            if (r.exactHarvest() && brokenTargets > 0) {
+                probabilisticDropMissed = true;
+                recordSettledRemainingDrops();
+                return TaskState.SUCCESS;
+            }
             expectedOutputMissing = true;
             fail("confirmed source breaks did not yield the expected inventory items within the bounded mining batch; review actual inventory changes and the processing or tool requirements", FailureType.NO_MATERIAL);
             return TaskState.FAILED;
@@ -1705,6 +1715,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         if (!ultimineActions.isEmpty()) data.put("ultimine_actions", List.copyOf(ultimineActions));
         if (miningUncertain) data.put("outcome_uncertain", true);
         if (!lastMiningObservation.isEmpty()) data.put("mining_observation", lastMiningObservation);
+        if (probabilisticDropMissed) {
+            data.put("probabilistic_drop_missed", true);
+            data.put("probabilistic_drop_note",
+                    "the source cell broke but the expected output did not drop this attempt; "
+                            + "the outcome is probabilistic, and the block is gone — resubmitting harvest at a "
+                            + "new source repeats the attempt");
+        }
         if (expectedOutputMissing) {
             data.put("failure_code", "expected_mining_output_not_observed");
             data.put("confirmed_source_breaks_without_output", brokenTargets - breaksAtLastOutput);
@@ -1774,6 +1791,9 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
 
     @Override
     protected String successMessage() {
+        if (probabilisticDropMissed)
+            return "broke " + r.label + " but no expected output dropped this attempt; probabilistic drops can "
+                    + "miss, resubmitting harvest at another source repeats the attempt (gathered 0/" + r.count + ")";
         return "gathered " + r.getMined() + "/" + r.count + " " + gatheredLabel() + " (" + progressNote + ")";
     }
 

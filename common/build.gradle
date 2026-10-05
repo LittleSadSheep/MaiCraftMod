@@ -347,6 +347,12 @@ def regressionSuites = [
         heap: '512m', directory: 'fair-mine-gate-regression', timeoutSeconds: 90,
         purpose: '验证挖掘目标只认即时可见或观察记忆见过，空手回执无透视泄漏'
     ],
+    // 定点采收概率掉落独立回放：破坏成立即事实成功，回执区分概率未中与未破坏，范围采矿预算失败口径不变。
+    harvestProbabilisticReceiptRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.HarvestProbabilisticReceiptTest',
+        heap: '512m', directory: 'harvest-probabilistic-receipt-regression', timeoutSeconds: 60,
+        purpose: '验证定点采收对概率掉落方块破坏成功即成功且回执如实区分未中与未破坏'
+    ],
     // 授权探矿独立回放：生成带表只认公开数据、决策按授权与维度分步、掘进预算耗尽诚实收手。
     prospectingRegression: [
         entry: 'org.maiwithu.maicraft.core.task.mine.ProspectingTest',
