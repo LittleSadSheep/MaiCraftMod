@@ -56,6 +56,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private static final long PLANNING_WORK_FUSE_UNITS = 60_000;
     /** 距离最后一次接近目标超过这么长的活动 tick（且工作量已越熔断线），判定这次规划无收敛。 */
     private static final long PLANNING_CONVERGENCE_WINDOW_TICKS = 30 * 20;
+    /** 中转腿准入增量：候选已知格必须比当前站位距目标至少近这么多格，否则不值得花一条腿。 */
+    private static final double KNOWN_CELL_WAYPOINT_MARGIN = 4.0;
 
     private final int bx;
     private final int by;
@@ -80,6 +82,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 当前导航是否为降级腿；到达后恢复原目标并重开规划。 */
     private boolean degradedShaftLegActive;
     private boolean worldViewPrepared;
+    /** 已知格中转腿只试一次：熔断或无路失败后先走到对本目标最有增量的已知可站立格，再全新搜索恢复原目标。 */
+    private boolean knownCellLegTried;
+    /** 进行中的中转腿目标；到达后清空。非空且 tried=true 表示腿已用过但尚未走完。 */
+    private BlockPos knownCellLegTarget;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
     private final JetpackGroundMode groundFlight=
@@ -339,19 +345,33 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         WALK_SPEED, () -> false, terrain()));
                 return TaskState.RUNNING;
             }
+            // 规划从原站位不收敛时，先试一次已知格中转：例如本会话亲自挖出并站立过的井底格，
+            // 从那里恢复原目标比在远处扩展搜索有增量得多。
+            if (tryKnownCellWaypointLeg("planning did not converge")) return TaskState.RUNNING;
             fail("planning did not converge: the dig-route search has banked " + planningWorkHighWater
                     + " work units while the closest approach stayed " + String.format("%.1f", bestDist)
                     + " blocks from the target for about " + (PLANNING_CONVERGENCE_WINDOW_TICKS / 20)
                     + " seconds with no improvement; " + nav.outcomeSummary()
                     + belowTargetEgressAdvice()
                     + " Pick a nearer waypoint, approach the target from another direction,"
-                    + " or abandon this destination.",
+                    + " or abandon this destination." + knownCellLegSummary(),
                     FailureType.PLANNING_STALL);
             return TaskState.FAILED;
         }
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
+                // 中转腿走到已知格后不在此判到达：站稳即停掉腿导航，用全新搜索恢复原目标。
+                if (knownCellLegTarget != null) {
+                    if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
+                    Constants.LOG.info(
+                            "[maicraft-task] goto 已知格中转腿完成 waypoint={} 恢复原目标 {},{},{}",
+                            knownCellLegTarget.toShortString(), bx, by, bz);
+                    knownCellLegTarget = null;
+                    stopNav();
+                    startWalkingNav();
+                    yield TaskState.RUNNING;
+                }
                 if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
                 // 降级腿到头：站上楼梯头后用全新搜索恢复原目标；新腿的熔断工作量单独计量。
                 if (degradedShaftLegActive) {
@@ -429,6 +449,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     nav = navigationOptions(PlayerNav.toGoal(player, () -> retry, WALK_SPEED, this::closeEnoughToSucceed,terrain()));
                     yield TaskState.RUNNING;
                 }
+                // 精确站位确认无路时也试一次已知格中转：既有矿道入口旁的已知格会让恢复搜索
+                // 从通道内部继续，而不是再次从洞外整体规划被洞口准入拒绝。
+                if (r.requiresStrictStance() && nav.failType() == FailureType.NO_PATH
+                        && tryKnownCellWaypointLeg("no path to the exact target")) {
+                    yield TaskState.RUNNING;
+                }
                 String also = nearRetried
                         ? " (also retried accepting anywhere within "
                                 + (int) NEAR_SUCCESS_RADIUS + " blocks — no path either)"
@@ -437,7 +463,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         "[maicraft-task] goto end kind={} result=failed type={} feet={} reason={}",
                         r.kind, nav.failType(), player.blockPosition().toShortString(),
                         nav.failReason());
-                fail(blockedMessage(nav.failReason() + also), nav.failType());
+                fail(blockedMessage(nav.failReason() + also) + knownCellLegSummary(), nav.failType());
                 yield TaskState.FAILED;
             }
         };
@@ -499,6 +525,63 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 return column.center();
             }
         };
+    }
+
+    /**
+     * 已知格中转腿：从任务单交付的已知可站立位置里挑「离目标最近且比当前站位有明显增量」的一格，
+     * 先走到那里，再用全新搜索恢复原目标。井底是本会话亲自挖出并站立过的格子时，规划器不必把它
+     * 当陌生埋藏点从头搜。只试一次；腿打不通就诚实失败，不自动换格重试。
+     */
+    private boolean tryKnownCellWaypointLeg(String reason) {
+        if (knownCellLegTried || r.knownStandableCells().isEmpty()) return false;
+        BlockPos from = feet();
+        double fromDistance = cellDistanceToTarget(from);
+        BlockPos best = null;
+        double bestDistance = fromDistance;
+        for (BlockPos cell : r.knownStandableCells()) {
+            if (cell.equals(from) || inGoalCell(cell) || !player.level().isLoaded(cell)) continue;
+            double distance = cellDistanceToTarget(cell);
+            if (distance + KNOWN_CELL_WAYPOINT_MARGIN < bestDistance) {
+                best = cell;
+                bestDistance = distance;
+            }
+        }
+        if (best == null) return false;
+        knownCellLegTried = true;
+        knownCellLegTarget = best;
+        stopNav();
+        long extra = Math.min(MAX_EXTRA_TICKS, 600 + (long) (repDistance() * TICKS_PER_BLOCK));
+        r.extendDeadlineTo(player.level().getGameTime() + extra);
+        BlockPos waypoint = best;
+        nav = navigationOptions(PlayerNav.toGoal(player, () -> NavGoal.exact(waypoint), WALK_SPEED,
+                () -> waypointReached(waypoint), terrain()));
+        Constants.LOG.info(
+                "[maicraft-task] goto 已知格中转腿启动 reason={} waypoint={} from={}",
+                reason, waypoint.toShortString(), from.toShortString());
+        return true;
+    }
+
+    /** 中转腿的到达判定：脚确实落在已知格且有支撑，与任务目标无关。 */
+    private boolean waypointReached(BlockPos waypoint) {
+        return player.onGround() && waypoint.equals(feet());
+    }
+
+    /** 方块格到目标格的中心距离，供中转腿比较增量。 */
+    private double cellDistanceToTarget(BlockPos cell) {
+        double dx = bx - cell.getX();
+        double dy = by - cell.getY();
+        double dz = bz - cell.getZ();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /** 失败回执里对中转腿的交代：试过什么、走到了哪一步。 */
+    private String knownCellLegSummary() {
+        if (!knownCellLegTried) return "";
+        return " A known standable cell waypoint leg"
+                + (knownCellLegTarget == null
+                        ? " reached its cell, but the restored search still failed to converge."
+                        : " to " + knownCellLegTarget.toShortString() + " also failed to plan.")
+                + " Travel to a verified underground cell first (or pick a nearer waypoint) and retry from there.";
     }
 
     /** 找路失败后是否仍可接受当前落脚点；COLUMN 的零半径会在这里按三格算，高度目标也额外接受一格偏差。 */
@@ -601,6 +684,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("planning_work_units", planningWorkHighWater);
         data.put("planning_work_fuse_units", PLANNING_WORK_FUSE_UNITS);
         data.put("degraded_shaft_leg_tried", degradedShaftLegTried);
+        // 已知格中转的对账：任务单交付了多少已知格、腿是否启用、启用了哪一格。
+        data.put("known_standable_cells_supplied", r.knownStandableCells().size());
+        if (knownCellLegTried) data.put("known_cell_waypoint_tried", true);
+        if (knownCellLegTarget != null) {
+            data.put("known_cell_waypoint", knownCellLegTarget.toShortString());
+        }
         if (bestDist != Double.MAX_VALUE) {
             data.put("best_distance_blocks", Math.round(bestDist * 10) / 10.0);
         }

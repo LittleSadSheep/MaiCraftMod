@@ -67,6 +67,10 @@ public final class MoveToTransportCompletionTest {
         planningStallFailsAfterCeiling(memory);
         planningWorkFuseTripsWithoutApproach(memory);
         degradedShaftLegBeforeFuseFailure(memory);
+        knownCellWaypointLegRunsBeforeConcedeFuse(memory);
+        knownCellWaypointLegReachesCellAndRestoresTarget(memory);
+        knownCellWaypointLegSkippedWithoutIncrement(memory);
+        knownStandableCellHandoffKeepsDataOnly(memory);
         planningWorkFuseSparedWhileApproaching(memory);
         longPlanningRenewsOnlyOnProgress(memory);
         discoveryFailure(memory);
@@ -523,4 +527,185 @@ public final class MoveToTransportCompletionTest {
         throw new NoSuchFieldException(name);
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+    /** 自掘竖井场景（地表目标在邻近井底）：收敛熔断先派一次已知格中转腿，腿也熔断才诚实失败并在回执声明。 */
+    private static void knownCellWaypointLegRunsBeforeConcedeFuse(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            BlockPos waypoint = new BlockPos(58, 0, 60);
+            var record = new MoveToTaskRecord("fuse-waypoint", 600_000, 60D, 0D, 60D, null,
+                    true, false, TransportMode.GROUND, false, true, 0, 0)
+                    .withKnownStandableCells(List.of(new BlockPos(3, 0, 3), waypoint));
+            var task = f.task(record, true); task.onStart();
+            // 目标不在原地时 onStart 走过 startWalkingNav，任务用的是重建的导航，桩要打在它身上。
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            boolean legStarted = false;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 2600 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    // 搜索持续有产出：无进展预算永不满足，工作单位单调累积越熔断线。
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+                if (!legStarted && state == TaskState.RUNNING
+                        && field(MoveToCompanionTask.class, "knownCellLegTarget").get(task) != null) {
+                    legStarted = true;
+                    check(highWater > 60_000, "中转腿必须在收敛熔断之后才启用，不能替代正常规划");
+                    // 中转腿是全新的导航实例，桩要打在它身上再继续喂工作单位。
+                    f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                            .get(field(AbstractCompanionTask.class, "nav").get(task));
+                    session = planningSession(f);
+                    field(TransportNavigator.class, "activeDestination").set(f.navigator, waypoint);
+                    field(TransportNavigator.class, "targetFingerprint").set(f.navigator,
+                            GoalCompiler.block(f.world, waypoint).semanticFingerprint());
+                    probe = bareGround(memory, f);
+                }
+            }
+            check(legStarted, "规划收敛熔断必须先走一次已知格中转腿，而不是直接失败 state=" + state
+                    + " cells=" + record.knownStandableCells().size());
+            check(state == TaskState.FAILED, "中转腿与恢复搜索都熔断后必须诚实失败");
+            var result = task.result(TaskState.FAILED);
+            check(Boolean.TRUE.equals(result.data().get("known_cell_waypoint_tried")),
+                    "回执必须声明已知格中转腿已启用");
+            check(String.valueOf(result.data().get("known_cell_waypoint")).startsWith("58"),
+                    "回执要交付实际选中的中转格（两格候选中增量最大的那格）");
+            check(String.valueOf(result.message()).contains("known standable cell waypoint leg"),
+                    "失败说明要交代中转腿的结果与后续出路");
+        }
+    }
+
+    /** 中转腿走到已知格站稳后不判到达：停掉腿导航，用全新搜索恢复原目标；恢复腿仍熔断时如实收场。 */
+    private static void knownCellWaypointLegReachesCellAndRestoresTarget(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            BlockPos waypoint = new BlockPos(58, 0, 60);
+            var record = new MoveToTaskRecord("fuse-waypoint-arrive", 600_000, 60D, 0D, 60D, null,
+                    true, false, TransportMode.GROUND, false, true, 0, 0)
+                    .withKnownStandableCells(List.of(waypoint));
+            var task = f.task(record, true); task.onStart();
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            boolean legStarted = false;
+            boolean legArrived = false;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 4000 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+                if (state != TaskState.RUNNING) break;
+                if (!legStarted && field(MoveToCompanionTask.class, "knownCellLegTarget").get(task) != null) {
+                    legStarted = true;
+                    // 中转腿导航不给规划会话：身体到达中转格后由到达判定直接收腿。
+                    f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                            .get(field(AbstractCompanionTask.class, "nav").get(task));
+                    probe = bareGround(memory, f);
+                    // 裸地面实例绕过了构造器，没有到达谓词；补上真值让身体就位后立刻宣布到格。
+                    field(EmbeddedBaritoneNavigator.class, "reached").set(
+                            field(TransportNavigator.class, "ground").get(f.navigator),
+                            (java.util.function.BooleanSupplier) () -> true);
+                    field(LocalPlayer.class, "position").set(f.player, new Vec3(58.5, 0, 60.5));
+                    field(LocalPlayer.class, "blockPosition").set(f.player, waypoint);
+                    continue;
+                }
+                if (legStarted && !legArrived
+                        && field(MoveToCompanionTask.class, "knownCellLegTarget").get(task) == null) {
+                    legArrived = true;
+                    // 腿已被消费、原目标导航已重建：恢复搜索是另一个导航实例，桩打在它身上继续熔断。
+                    f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                            .get(field(AbstractCompanionTask.class, "nav").get(task));
+                    session = planningSession(f);
+                    probe = bareGround(memory, f);
+                }
+            }
+            check(legStarted && legArrived, "中转腿必须到达已知格并用全新搜索恢复原目标");
+            check(state == TaskState.FAILED, "恢复搜索仍不收敛时必须诚实失败");
+            var result = task.result(TaskState.FAILED);
+            check(Boolean.TRUE.equals(result.data().get("known_cell_waypoint_tried"))
+                            && result.data().get("known_cell_waypoint") == null,
+                    "腿已走完时回执不再携带进行中的中转格");
+            check(String.valueOf(result.message()).contains("reached its cell, but the restored search still failed"),
+                    "失败说明要区分「腿没走通」与「到格后恢复搜索仍不收敛」");
+        }
+    }
+
+    /** 已知格都没有准入增量（都比当前站位距目标更远）时不派腿：熔断直接失败，回执不伪造中转格。 */
+    private static void knownCellWaypointLegSkippedWithoutIncrement(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            var record = new MoveToTaskRecord("fuse-no-increment", 600_000, 2D, 0D, 2D, null,
+                    true, false, TransportMode.GROUND, false, true, 0, 0)
+                    .withKnownStandableCells(List.of(new BlockPos(40, 0, 40), new BlockPos(-40, 0, 40)));
+            var task = f.task(record, true); task.onStart();
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 2600 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+            }
+            check(state == TaskState.FAILED, "没有增量已知格时收敛熔断仍要按原口径失败");
+            var result = task.result(TaskState.FAILED);
+            check(!result.data().containsKey("known_cell_waypoint_tried")
+                            && !result.data().containsKey("known_cell_waypoint"),
+                    "没有真正派出中转腿时回执不得声明腿已启用");
+            check(!String.valueOf(result.message()).contains("known standable cell waypoint leg"),
+                    "没派腿的失败说明不掺中转腿叙述");
+        }
+    }
+
+    /** 语义层只传输入数据：已知可站立格按记录顺序去重、只留当前维度、异维度地标与空运行时不越界；任务单侧保存副本。 */
+    @SuppressWarnings("unchecked")
+    private static void knownStandableCellHandoffKeepsDataOnly(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            var goal = new Goal("maicraft:travel", "handoff", null, "{}", "{}", List.of(), List.of());
+            var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            var posCtor = Goal.WorldPosition.class.getDeclaredConstructor(
+                    int.class, int.class, int.class, String.class);
+            posCtor.setAccessible(true);
+            var map = (java.util.LinkedHashMap<Integer, Goal.WorldPosition>) field(
+                    IntentTaskRecord.class, "internalStepPositions").get(record);
+            map.put(0, new Goal.WorldPosition(1, 2, 3, "minecraft:overworld"));
+            map.put(1, (Goal.WorldPosition) posCtor.newInstance(4, 5, 6, "minecraft:the_nether"));
+            map.put(2, new Goal.WorldPosition(1, 2, 3, "minecraft:overworld"));
+            Class<?> intentTaskType = Class.forName("org.maiwithu.maicraft.intent.IntentTask");
+            var ctor = intentTaskType.getDeclaredConstructor(
+                    LocalPlayer.class, IntentTaskRecord.class, IntentRuntime.class);
+            ctor.setAccessible(true);
+            Object intentTask = ctor.newInstance(f.player, record, null);
+            var method = intentTaskType.getDeclaredMethod("knownStandableCells");
+            method.setAccessible(true);
+            List<BlockPos> cells = (List<BlockPos>) method.invoke(intentTask);
+            check(cells.equals(List.of(new BlockPos(1, 2, 3))),
+                    "已知格交接要按回执去重并滤掉异维度位置");
+            var source = new java.util.ArrayList<>(List.of(new BlockPos(7, 0, 7)));
+            var moveRecord = new MoveToTaskRecord("handoff", 600, 0D, 0D, 0D, null, false)
+                    .withKnownStandableCells(source);
+            source.clear();
+            check(moveRecord.knownStandableCells().equals(List.of(new BlockPos(7, 0, 7))),
+                    "任务单要保存已知格副本，交付后源列表变化不得渗入");
+            check(new MoveToTaskRecord("handoff-null", 600, 0D, 0D, 0D, null, false)
+                    .withKnownStandableCells(null).knownStandableCells().isEmpty(),
+                    "空交付必须是空清单，不能是 null");
+        }
+    }
+
+
 }
