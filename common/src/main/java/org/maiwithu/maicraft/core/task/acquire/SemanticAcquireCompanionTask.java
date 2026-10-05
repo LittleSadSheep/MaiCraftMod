@@ -1363,6 +1363,7 @@ public final class SemanticAcquireCompanionTask
                         ? null : String.valueOf(result.data().get("failure_type"));
                 if (structuredFailure && "mined_out".equals(failureType)) {
                     completedNeed.mineChildMinedOut = true;
+                    completedNeed.mineExhaustionEvidence = mineExhaustionEvidence(result);
                 }
                 // 探矿编排第二步：下降子任务（MINE 来源下的移动记录）结束后接掘进采矿。
                 if (completedRecord instanceof MoveToTaskRecord
@@ -1831,6 +1832,18 @@ public final class SemanticAcquireCompanionTask
                 && positiveNumber(result.data().get("defeated_targets"));
     }
 
+    /** 从 mine 子任务回执摘出采区耗尽的对账口径；只保留可核验事实，不推断未破坏区块里"应该有"什么。 */
+    private static Map<String, Object> mineExhaustionEvidence(TaskResult result) {
+        if (result == null || result.data() == null) return Map.of();
+        Map<String, Object> data = result.data();
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        if (data.get("target") != null) evidence.put("target", data.get("target"));
+        if (data.get("gathered") != null) evidence.put("gathered", data.get("gathered"));
+        if (data.get("requested") != null) evidence.put("requested", data.get("requested"));
+        if (data.get("search_scope") != null) evidence.put("search_scope", data.get("search_scope"));
+        return Map.copyOf(evidence);
+    }
+
     private static FailureType childFailureType(TaskState terminal, TaskResult result) {
         if (result != null && result.data() != null) {
             Object raw = result.data().get("failure_type");
@@ -1915,10 +1928,22 @@ public final class SemanticAcquireCompanionTask
             if (need.mineChildMinedOut) {
                 // mine 子任务真实扫完并报了采区耗尽：终态保真为 MINED_OUT，
                 // recoveryOptions 据此补"换区域重扫"，压回 NO_MATERIAL 会让调用方误判成许可缺口。
+                // 失败话术同时披露对账口径：已收集数量、扫描范围——概率掉落源（如野生草掉种子）
+                // 可能破坏了候选却没出目标物，与"范围内根本没有候选"是两种不同的失败事实。
+                Map<String, Object> evidence = need.mineExhaustionEvidence == null
+                        ? Map.of() : need.mineExhaustionEvidence;
+                addIssue("mine", "mined_out_range_disclosure",
+                        "the mine family scanned its range and reported exhaustion while the final "
+                                + "inventory fact is still false; probabilistic-drop sources can break "
+                                + "candidates without producing the requested item",
+                        evidence);
+                String gathered = evidence.containsKey("gathered")
+                        ? " gathered " + evidence.get("gathered") + " of the requested item" : "";
                 return failAcquisition(
                         "allowed_sources_exhausted",
                         "none of the allowed source families could make the final inventory fact true; "
-                                + "the mine family scanned its range and reported it exhausted",
+                                + "the mine family scanned its range and reported it exhausted" + gathered
+                                + " (sources with probabilistic drops may need repeated attempts)",
                         FailureType.MINED_OUT);
             }
             return failAcquisition(

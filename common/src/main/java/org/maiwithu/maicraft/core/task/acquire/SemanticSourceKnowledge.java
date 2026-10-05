@@ -354,6 +354,12 @@ public final class SemanticSourceKnowledge {
         block(result, "minecraft:cobblestone", List.of("minecraft:stone"), "stone that drops cobblestone");
         block(result, "minecraft:cobbled_deepslate", List.of("minecraft:deepslate"), "deepslate");
         block(result, "minecraft:flint", List.of("minecraft:gravel"), "gravel that can drop flint");
+        // 首份种子的自举通路：野生草族破坏后概率掉落小麦种子（原版 1/8），
+        // 成熟小麦作物的稳产来源仍由 HARVEST 家族负责，这里只补植被一族。
+        block(result, "minecraft:wheat_seeds",
+                List.of("minecraft:short_grass", "minecraft:tall_grass",
+                        "minecraft:fern", "minecraft:large_fern"),
+                "wild grass family that can drop seeds when broken");
 
         entity(result, "minecraft:white_wool", List.of("minecraft:sheep"), "sheep wool");
         for (String color : List.of("orange", "magenta", "light_blue", "yellow", "lime",

@@ -61,6 +61,18 @@ public final class AcquisitionMineExhaustionRecoveryTest {
             var ids = options.stream().map(option -> ((Map<?, ?>) option).get("id")).toList();
             check(ids.contains("continue_mining_from_another_semantic_area") == expectRelocate,
                     "换区域重扫选项出现与否必须跟随 mine 子任务的采区耗尽证据，实际: " + ids);
+            // 失败话术与问题清单必须披露对账口径：已收集数量与概率掉落语义，不能只说"扫描穷尽"。
+            var issues = (List<?>) data.get("issues");
+            boolean disclosed = issues != null && issues.stream().anyMatch(issue ->
+                    "mined_out_range_disclosure".equals(((Map<?, ?>) issue).get("code")));
+            check(disclosed == expectRelocate,
+                    "采区耗尽披露问题必须只在 mined_out 场景出现，实际: " + issues);
+            String message = String.valueOf(task.result(TaskState.FAILED).message());
+            check(message.contains("probabilistic") == expectRelocate,
+                    "失败话术的概率掉落提示必须只在 mined_out 场景出现: " + message);
+            if (expectRelocate) {
+                check(message.contains("gathered 19"), "失败话术必须携带已收集数量: " + message);
+            }
             check(h.blockUses() == 0 && h.itemUses() == 0, "恢复选项推演不产生任何世界副作用");
         }
     }
@@ -72,7 +84,8 @@ public final class AcquisitionMineExhaustionRecoveryTest {
         @Override public String name() { return "模拟 mine 采区耗尽"; }
         @Override public TaskResult result(TaskState state) {
             return TaskResult.fail("gathered 19/40, no more stone in range",
-                    Map.of("failure_type", failureType));
+                    Map.of("failure_type", failureType,
+                            "target", "stone", "gathered", 19, "requested", 40));
         }
     }
 
