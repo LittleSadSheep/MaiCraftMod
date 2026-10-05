@@ -34,6 +34,10 @@ final class ProspectTunnelDriver implements AutoCloseable {
     private BlockPos destination;
     private String failure;
     private boolean uncertain;
+    /** 连续扫不到可挖前沿的次数；原地重扫超过预算仍无果才认定真无路，单次空扫不构成永久结论。 */
+    private int fruitlessScans;
+    private BlockPos lastScanAnchor;
+    private static final int MAX_FRUITLESS_SCANS = 2;
     /** 历段导航的原生地形账汇总：探矿中途收手时，垫块消耗凭它对账，不再无声消失。 */
     private final TerrainBill terrainBill = new TerrainBill();
     private Map<String, Object> interrupted = Map.of();
@@ -73,7 +77,14 @@ final class ProspectTunnelDriver implements AutoCloseable {
             nav = PlayerNav.toGoal(player, () -> NavGoal.exact(destination), 1, () -> false, PlayerNav.ContextProvider.TERRAFORM);
             return true;
         }
-        if (plan == null) plan = new ProspectTunnelPlan(feet, heading, targetY, player.getBoundingBox().getYsize(), Math.max(1, blockBudget));
+        // 断面几何以锚定脚位为基准：走路到达、外放回收或被推移后脚位与锚点脱节时，
+        // 沿用旧计划会把射线对准角色已经不在的位置，实心地形里也会判出“无处可挖”。
+        if (plan != null && !plan.anchor().equals(feet)) plan = null;
+        if (plan == null) {
+            plan = new ProspectTunnelPlan(feet, heading, targetY, player.getBoundingBox().getYsize(), Math.max(1, blockBudget));
+            // 脚位变了才清空重扫计数；同锚点的原地重建不清零，否则空扫与重建互相喂活成死循环。
+            if (!feet.equals(lastScanAnchor)) fruitlessScans = 0;
+        }
         BlockPos walk = plan.walkableEnd(this::bodyClear, this::safeFloor);
         if (walk != null) {
             // 只有完整断面和实底连续成立才移动；走通道用保留地形导航，不能顺路把未补齐的地方当作已完成。
@@ -90,6 +101,15 @@ final class ProspectTunnelDriver implements AutoCloseable {
             var mode = plan.descending() ? UltimineSession.Mode.DESCENDING_TUNNEL : UltimineSession.Mode.SMALL_TUNNEL;
             action = new UltimineBreak(player, at, hit.getDirection(), mode, this::allowed,
                     cell -> cell.equals(PlayerNav.playerFeet(player).below())).maximumBlocks(blockBudget);
+            fruitlessScans = 0;
+            return true;
+        }
+        // “此刻扫不到可挖目标”与站位和世界瞬态相关，不是地形结论：原地以新锚点有限重扫，
+        // 期间世界同步（流体、掉落、区块更新）可能改变可达性；重扫预算用尽仍无果才如实失败。
+        lastScanAnchor = feet;
+        if (fruitlessScans < MAX_FRUITLESS_SCANS) {
+            fruitlessScans++;
+            plan = null;
             return true;
         }
         failure = "no_reachable_obstacle_or_supported_passage_in_tunnel_direction";
@@ -130,6 +150,7 @@ final class ProspectTunnelDriver implements AutoCloseable {
         facts.put("confirmed_excavation_blocks", removed);
         facts.put("phase", action != null ? "clearing_passage" : nav != null ? "walking_open_passage" : "checking_passage");
         facts.put("failure", failure == null ? "none" : failure);
+        facts.put("fruitless_frontier_scans", fruitlessScans);
         facts.put("interrupted_action", interrupted);
         // 中途收手的消耗对账：原生确认的垫块（与开挖）按方块种类与位置全量交付，供调用方清理与补给。
         if (!terrainBill.isEmpty()) facts.put("terrain_bill", terrainBill.snapshot());
