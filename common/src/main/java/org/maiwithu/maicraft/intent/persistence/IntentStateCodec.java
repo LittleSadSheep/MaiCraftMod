@@ -483,7 +483,7 @@ public final class IntentStateCodec {
             JsonObject value, List<Goal> steps, int stepIndex) {
         var result = new LinkedHashMap<Integer, IntentTaskRecord.AcquireBaseline>();
         if (!value.has("acquire_count_baselines")) {
-            // 升级前的检查点没有这份字段：当时的 count 是最终合计数，未完成的取物、合成、交易步骤继续按旧语义执行，不在恢复后再多拿一轮。
+            // 升级前的检查点没有这份字段：当时的 count 是最终合计数，未完成的取物、合成、烹饪、交易步骤继续按旧语义执行，不在恢复后再多拿一轮。
             for (int index = Math.max(0, stepIndex); index < steps.size(); index++)
                 if (IntentTaskRecord.countsAdditionally(steps.get(index).ability()))
                     result.put(index, new IntentTaskRecord.AcquireBaseline(true, Map.of()));
@@ -493,7 +493,7 @@ public final class IntentStateCodec {
             // 起始数是当初的背包事实，越界或负数直接拒绝，不能钳制后冒充原值。
             JsonObject row = element.getAsJsonObject(); int index = row.get("step_index").getAsBigDecimal().intValueExact();
             if (index < 0 || index >= steps.size() || !IntentTaskRecord.countsAdditionally(steps.get(index).ability()))
-                throw new IllegalArgumentException("acquire count baseline is outside an acquisition, craft or trade step");
+                throw new IllegalArgumentException("acquire count baseline is outside an acquisition, craft, cook or trade step");
             IntentTaskRecord.AcquireBaseline baseline = switch (text(row, "count_semantics")) {
                 case "legacy_final" -> new IntentTaskRecord.AcquireBaseline(true, Map.of());
                 case "additional" -> {

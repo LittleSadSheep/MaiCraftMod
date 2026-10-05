@@ -43,12 +43,12 @@ public final class IntentTaskRecord extends TaskRecord {
             internalAreaProtections = new LinkedHashMap<>();
     /** 每个取物步骤的首次翻箱范围；空值表示旧检查点未记录，不能在恢复地点重新捕获。 */
     private final Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes = new LinkedHashMap<>();
-    /** 每个公开取物、合成、交易步骤首次启动时的主背包已有数；count 是“再拿几件”，重试、暂停和重启都按这份基数算目标。 */
+    /** 每个公开取物、合成、烹饪、交易步骤首次启动时的主背包已有数；count 是“再拿几件”，重试、暂停和重启都按这份基数算目标。 */
     private final Map<Integer, AcquireBaseline> acquireBaselines = new LinkedHashMap<>();
 
-    /** count 按“再拿几件”理解的公开能力：取物、合成和交易都以本步起始已有数加 count 为目标。 */
+    /** count 按“再拿几件”理解的公开能力：取物、合成、烹饪和交易都以本步起始已有数加 count 为目标。 */
     private static final Set<String> ADDITIONAL_COUNT_ABILITIES = Set.of(
-            "maicraft:acquire_items", "maicraft:craft", "maicraft:trade");
+            "maicraft:acquire_items", "maicraft:craft", "maicraft:cook", "maicraft:trade");
 
     /** legacyFinalCount 表示升级前保存的步骤，count 仍按旧版“最终合计数”执行；否则 carried 是各候选物品的起始已有数。 */
     public record AcquireBaseline(boolean legacyFinalCount, Map<ResourceLocation, Integer> carried) {
@@ -214,7 +214,7 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     /**
-     * 取物、合成、交易步骤启动子任务时调用：首次启动记下此刻各候选物品数量；之后同一步重试、暂停或重启只沿用已记下的数。
+     * 取物、合成、烹饪、交易步骤启动子任务时调用：首次启动记下此刻各候选物品数量；之后同一步重试、暂停或重启只沿用已记下的数。
      * 重试改了物品范围时，旧物品保留原起始数，新加入的物品按此刻数量补记，已移出的物品不再计入。
      * 返回空值表示旧检查点留下的步骤，count 继续按旧版最终合计数执行，不能在恢复后再多拿一轮。
      */

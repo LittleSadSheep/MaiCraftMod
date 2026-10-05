@@ -31,7 +31,8 @@ public final class SemanticCookTool implements MaiCraftTool {
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .string("item_id", "Requested namespaced cooked output item.")
-                .integer("count", "Required final main-inventory count.", 1,
+                // 内部工具仍收最终合计数（取物里的烧炼来源直接给目标总数）；公开烹饪能力在语义步骤启动时把它绑定成“再烧几件”。
+                .integer("count", "Required final main-inventory count. The public maicraft:cook ability binds it as an additional count over the step's starting inventory.", 1,
                         SemanticCookTaskRecord.MAX_FINAL_COUNT)
                 .enumStr("recipe_preference", "Semantic recipe/device preference.",
                         "auto", "fastest", "preserve_rare", "smelting", "blasting", "smoking", "campfire")

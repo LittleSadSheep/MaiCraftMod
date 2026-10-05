@@ -1,18 +1,18 @@
 # 从“还缺铁锭”到“这一炉已经收好”
 
-`cook` 要完成的是主背包最终数量。例如已经有 256 个铁锭，再要求 300 个，还需要烧 44 个。目标数量、一次装多少原料、一次消耗多少燃料，是三件不同的事。
+`cook` 的 `count` 是“再烧几件”。例如本步开始时已经有 256 个铁锭，要求 `count: 300`，目标就是主背包至少 556 个；已带的只作起始数，不算新烧的。目标数量、一次装多少原料、一次消耗多少燃料，是三件不同的事。
 
 公开能力是 `maicraft:cook`。当前执行普通熔炉、高炉和烟熏炉；配方来自客户端实际收到的配方表。能识别营火配方，但需要加工时指定营火会明确失败，不会偷偷改用熔炉。模组物品只有能通过这些配方、燃料和菜单路径时才适用，不能据此承诺支持任意模组机器。
 
 ## 怎样提交一份加工要求
 
-下面是 MCP `plan` 的完整参数。例子把目标设为主背包至少有 8 个铁锭，原料、煤和设备只允许使用随身现货；附近已有的可用炉子仍可使用。计划不会烧东西，执行实际返回的 `plan_id` 后才开始。
+下面是 MCP `plan` 的完整参数。例子要求再烧 8 个铁锭，原料、煤和设备只允许使用随身现货；附近已有的可用炉子仍可使用。计划不会烧东西，执行实际返回的 `plan_id` 后才开始。
 
 ```json
 {
   "goal": {
     "ability": "maicraft:cook",
-    "outcome": "用随身原料和煤补足八个铁锭",
+    "outcome": "用随身原料和煤再烧八个铁锭",
     "target": { "kind": "nearest" },
     "parameters": {
       "item_id": "minecraft:iron_ingot",
@@ -30,7 +30,7 @@
 | 字段位置 | 类型、默认和含义 |
 | --- | --- |
 | `goal.parameters.item_id` | 必填非空物品 ID 字符串，表示成品；执行时须为已安装的非空气物品。省略、`null`、数字和空白拒绝 |
-| `goal.parameters.count` | 主背包最终总数，整数 1～2304；省略或 `null` 为 1。0、负数、小数、数字字符串、布尔值和超限数拒绝 |
+| `goal.parameters.count` | 要再烧出的件数，整数 1～2304；省略或 `null` 为 1。本步第一次启动时冻结主背包已有成品数作为起始数，目标为起始数 + `count`；同一步 `retry`、`recover`、暂停和重启都沿用该起始数，只有 `replace_goal` 才重新起算。0、负数、小数、数字字符串、布尔值和超限数拒绝 |
 | `goal.parameters.recipe_preference` | 字符串，省略为 `auto`；`null`、空白和非字符串拒绝。正式取值为 `auto`、`fastest`、`preserve_rare`、`smelting`、`blasting`、`smoking`、`campfire`，大小写与首尾空白会整理 |
 | `goal.parameters.allowed_fuels` | 物品 ID 字符串数组，去重后最多 64 种；省略、`null`、`[]` 都使用默认普通燃料集合，不表示禁止燃烧。非空清单只允许列出的燃料，执行时检查已安装且原生炉子认作燃料 |
 | `goal.parameters.allowed_sources` | 来源字符串数组，省略、`null`、`[]` 使用下述默认集合；显式清单也总会加入 `inventory`。不是执行顺序 |
@@ -75,7 +75,7 @@
 
 ## 开始之前检查什么
 
-必须给 `item_id`。数量上限与取物一致，实际能装多少还取决于背包容量和物品堆叠规则；主背包含快捷栏，不包含副手和穿戴栏。已有数量够了会直接收尾，不要求额外烧制一炉。
+必须给 `item_id`。数量上限与取物一致，实际能装多少还取决于背包容量和物品堆叠规则；主背包含快捷栏，不包含副手和穿戴栏。已带的成品只算起始数；只有取物内部为补料发起的烧炼仍按最终合计数理解，背包已够时直接收尾。
 
 `allowed_sources` 同时约束原料、燃料和工作站的获取。允许 `cook` 时可以先烧中间材料再烧成品；[ProductionLineage](../../common/src/main/java/org/maiwithu/maicraft/core/task/acquire/ProductionLineage.java) 携带祖先成品并限制最多八层，防止为了做原料又递归回同一成品。燃料清单、保护要求和伤害许可继续传给子任务。
 
@@ -117,7 +117,7 @@
 
 燃料时长来自相应原生设备的计算方法。普通炉一块煤通常燃烧 1600 刻，高炉和烟熏炉相应为 800 刻；加工速度也不同，所以处理十六份常规原料都需要两块煤。估算新燃料、计算本批数量、折算炉内已有燃料，使用同一设备规则。
 
-总目标超过 256 件也不改变它的含义。已有 100 件、目标 300 件时，普通一件产出的路线可以继续分成 64、64、64、8 四炉。
+请求超过 256 件也不改变它的含义。要再烧 200 件时，普通一件产出的路线可以继续分成 64、64、64、8 四炉。
 
 ## 怎样避免碰错菜单
 
@@ -145,7 +145,7 @@
 
 | 回执 | 含义 |
 | --- | --- |
-| `required_final_count`、`initial_count`、`observed_final_count`、`goal_satisfied` | 请求总数、开工时数量、结算时数量、是否够数；够数不自动消除别的未结效果 |
+| `requested_additional_count`、`baseline_count`、`net_gained_count`、`required_final_count`、`initial_count`、`observed_final_count`、`goal_satisfied` | 请求件数、本步起始数、净增数、起始数 + 件数的最终目标、本次子任务开工时数量、结算时数量、是否够数；够数不自动消除别的未结效果 |
 | `recipe_id`、`device`、`input_item_id`、`recipe_output_count`、`fuel_item_id` | 本次实际选用的路线；只在已经选定时出现 |
 | `station_placed`、`effects_started` | 是否放了设备、是否已有确认效果；后者缺失表示不能断言“没有发生”，不是 `false` |
 | `batch_outstanding` | 炉次还未结清；此时再读 `owned_input_loaded`、`owned_input_returned`、`owned_output_taken` |

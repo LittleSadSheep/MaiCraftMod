@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
+import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
@@ -343,14 +344,16 @@ final class IntentTask implements Task {
                         ? ContainerSearchScope.capture(player, acquire.storageSearchRadius) : acquire.storageScope);
                 acquire.bindStorageScope(scope.orElse(null), NativeSubmissionBinding.barrier(record, runtime, "container_search_scope", () -> true));
             }
-            // 公开取物、合成、交易的 count 都是“再拿几件”：本步首次启动时记下背包已有数，目标 = 已有数 + count；
+            // 公开取物、合成、烹饪、交易的 count 都是“再拿几件”：本步首次启动时记下背包已有数，目标 = 已有数 + count；
             // 之后重试、暂停和重启复用这份起始数，不会因重建子任务又多拿一轮。旧检查点留下的步骤仍按最终合计数执行。
-            // 合成走内部取物任务、交易走交易任务；交互前取工具、施工补料等其他能力里的内部取物不进这条分支，仍给最终合计数。
+            // 合成走内部取物任务、烹饪走烧炼任务、交易走交易任务；交互前取工具、施工补料等其他能力里的内部取物不进这条分支，仍给最终合计数。
             if (IntentTaskRecord.countsAdditionally(currentGoal().ability())) {
                 if (nextRecord instanceof SemanticAcquireTaskRecord acquire)
                     record.retainAcquireBaseline(acquire.carriedByItem(player)).ifPresent(acquire::withAdditionalCount);
                 else if (nextRecord instanceof SemanticTradeTaskRecord trade)
                     record.retainAcquireBaseline(trade.carriedByItem(player)).ifPresent(trade::withAdditionalCount);
+                else if (nextRecord instanceof SemanticCookTaskRecord cook)
+                    record.retainAcquireBaseline(cook.carriedByItem(player)).ifPresent(cook::withAdditionalCount);
             }
             // 单次提交先绑定父任务的持久身份，附魔、投料和聊天都不能因重启后新建子任务而重复执行。
             if (nextRecord instanceof NativeSubmissionTaskRecord submission)

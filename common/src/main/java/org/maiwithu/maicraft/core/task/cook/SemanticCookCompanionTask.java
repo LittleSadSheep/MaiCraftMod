@@ -1540,8 +1540,14 @@ public final class SemanticCookCompanionTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         int observed = outputCount();
-        data.put("goal", "final_main_inventory_count");
+        data.put("goal", r.additionalCount > 0 ? "additional_main_inventory_count" : "final_main_inventory_count");
         data.put("item_id", r.itemId.toString());
+        if (r.additionalCount > 0) {
+            // “再烧几件”的请求同时给出请求件数、本步起始已有数和净增量；initial_count 只是本次子任务开始时的数量。
+            data.put("requested_additional_count", r.additionalCount);
+            data.put("baseline_count", r.baselineCount);
+            data.put("net_gained_count", observed - r.baselineCount);
+        }
         data.put("required_final_count", r.count);
         data.put("initial_count", initialOutputCount);
         data.put("observed_final_count", observed);
@@ -1614,7 +1620,9 @@ public final class SemanticCookCompanionTask
             case LOAD_FUEL -> "正在添加燃料";
             case CONFIRM_START -> "正在确认熔炉点火";
             case CLOSE_WAIT, WAIT_CLOSED, CLEANUP -> "正在关闭熔炉界面";
-            case RECONCILE, VERIFY_OUTPUT -> "正在核对熔炉产出 (" + outputCount() + "/" + r.count + ")";
+            // 公开烹饪按“净增/请求件数”显示，取物内部的烧炼来源仍按“当前/最终合计”。
+            case RECONCILE, VERIFY_OUTPUT -> "正在核对熔炉产出 (" + (r.additionalCount > 0
+                    ? (outputCount() - r.baselineCount) + "/" + r.additionalCount : outputCount() + "/" + r.count) + ")";
             case VERIFY_CLEAN_INPUT -> "正在清理熔炉残留";
             case COMPLETE -> "正在收尾烹饪任务";
         };
@@ -1625,19 +1633,26 @@ public final class SemanticCookCompanionTask
         if (parentSatisfied && outputCount() < r.count)
             return "settled existing cooking work after the parent inventory goal was satisfied; carrying "
                     + outputCount() + " of the original " + r.count + " " + r.itemId;
+        if (r.additionalCount > 0) return "cooked " + countLabel() + " of " + r.itemId + ", confirmed by live inventory state";
         return "cooked " + r.itemId + " until the main inventory held at least "
                 + r.count + " item(s), confirmed by live inventory state";
     }
 
+    /** 回执里的进度口径：公开烹饪说“净增/请求件数，当前与起始各几件”，内部烧炼来源仍说“当前/最终合计”。 */
+    private String countLabel() {
+        int observed = outputCount();
+        if (r.additionalCount <= 0) return observed + " of required final " + r.count + " in the main inventory";
+        return (observed - r.baselineCount) + "/" + r.additionalCount + " additional (carrying " + observed
+                + ", started with " + r.baselineCount + ")";
+    }
+
     @Override
     protected String timeoutMessage() {
-        return "cooking timed out; observed " + outputCount() + " of required final "
-                + r.count + " in the main inventory";
+        return "cooking timed out; observed " + countLabel();
     }
 
     @Override
     protected String cancelledMessage() {
-        return "cooking interrupted; observed " + outputCount() + " of required final "
-                + r.count + " in the main inventory";
+        return "cooking interrupted; observed " + countLabel();
     }
 }

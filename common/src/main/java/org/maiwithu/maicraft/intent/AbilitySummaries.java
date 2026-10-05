@@ -28,7 +28,7 @@ final class AbilitySummaries {
             case "maicraft:craft" -> "Obtain count more of an item than the step started with, through inventory or crafting-table recipes and permitted grid-craftable intermediates.";
             case "maicraft:harvest_block" -> "Harvest one specified observed block and settle its native drops, keeping source destruction and received output separate.";
             case "maicraft:collect_items" -> "Collect one observed drop reference or sweep nearby loose items, confirming pickup through the evidence available to that mode.";
-            case "maicraft:cook" -> "Use a nearby furnace-type device to obtain the final inventory quantity, preparing ingredients and fuel and settling the current batch.";
+            case "maicraft:cook" -> "Use a nearby furnace-type device to obtain count more of an item than the step started with, preparing ingredients and fuel and settling the current batch.";
             case "maicraft:trade" -> "Use native merchant offers to obtain count more of an item in the main inventory than the step started with, under the selected payment policy.";
             case "maicraft:stonecut" -> "Process carried input through a loaded stonecutter for the requested recipe uses and report observed inventory changes.";
 

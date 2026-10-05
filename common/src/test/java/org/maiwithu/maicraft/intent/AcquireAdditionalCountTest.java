@@ -18,6 +18,7 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
 import org.maiwithu.maicraft.core.task.trade.SemanticTradeTool;
 import org.maiwithu.maicraft.core.tools.work.SemanticAcquireTool;
@@ -26,7 +27,7 @@ import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 公开取物、合成、交易的 count 是“再拿几件”：已带物品不算新获取，起始数随暂停、重试和重启沿用，其他内部组合仍给最终合计数。 */
+/** 公开取物、合成、烹饪、交易的 count 是“再拿几件”：已带物品不算新获取，起始数随暂停、重试和重启沿用，其他内部组合仍给最终合计数。 */
 public final class AcquireAdditionalCountTest {
     private static final ResourceLocation OAK = ResourceLocation.parse("minecraft:oak_planks");
     private static final ResourceLocation BIRCH = ResourceLocation.parse("minecraft:birch_planks");
@@ -44,6 +45,7 @@ public final class AcquireAdditionalCountTest {
             legacyCheckpointKeepsFinalCount();
             craftCountsAdditionally();
             tradeCountsAdditionally();
+            cookCountsAdditionally();
             legacyCraftAndTradeKeepFinalCount();
         } finally {
             ToolRegistry.remove("acquire_items"); if (previous != null) ToolRegistry.register(previous);
@@ -136,6 +138,11 @@ public final class AcquireAdditionalCountTest {
         return new Goal("maicraft:craft", "再做一块橡木板", null, "{\"item_id\":\"minecraft:oak_planks\",\"count\":1}", "{}", List.of(), List.of());
     }
 
+    private static Goal cook() {
+        return new Goal("maicraft:cook", "再烧一个铁锭", null,
+                "{\"item_id\":\"minecraft:iron_ingot\",\"count\":1,\"allowed_sources\":[\"inventory\"]}", "{}", List.of(), List.of());
+    }
+
     private static Goal trade() {
         return new Goal("maicraft:trade", "再换一个面包", null, "{\"item_id\":\"minecraft:bread\",\"count\":1}", "{}", List.of(), List.of());
     }
@@ -149,8 +156,8 @@ public final class AcquireAdditionalCountTest {
                     && f.parent.acquireBaselines().get(0).carried().equals(Map.of(OAK, 1)), "craft counts additionally from the step baseline");
         }
         // 其他能力（如交互前取工具）里的内部取物不进增量分支，仍按最终合计数执行。
-        check(!IntentTaskRecord.countsAdditionally("maicraft:interact") && !IntentTaskRecord.countsAdditionally("maicraft:cook"),
-                "only acquire, craft and trade use additional counts");
+        check(!IntentTaskRecord.countsAdditionally("maicraft:interact") && !IntentTaskRecord.countsAdditionally("maicraft:stonecut"),
+                "only acquire, craft, cook and trade use additional counts");
     }
 
     private static void tradeCountsAdditionally() throws Exception {
@@ -170,15 +177,28 @@ public final class AcquireAdditionalCountTest {
         }
     }
 
+    private static void cookCountsAdditionally() throws Exception {
+        // cook 直接建烧炼任务：已带两个铁锭再烧一个，目标是合计三个，不因已有铁锭直接收尾。
+        try (var f = new Fixture(cook())) {
+            f.world.inventory.setItem(0, new ItemStack(Items.IRON_INGOT, 2));
+            f.task = new IntentTask(f.world.player, f.parent, f.runtime);
+            check(f.task.tick(f.world.player) == TaskState.RUNNING, "cook step starts its child");
+            var child = (SemanticCookTaskRecord) field(IntentTask.class, "childRecord").get(f.task);
+            check(child.additionalCount == 1 && child.baselineCount == 2 && child.count == 3
+                    && f.parent.acquireBaselines().get(0).carried().equals(Map.of(ResourceLocation.parse("minecraft:iron_ingot"), 2)),
+                    "cook counts additionally from the step baseline");
+        }
+    }
+
     private static void legacyCraftAndTradeKeepFinalCount() {
-        // 升级前保存的合成、交易步骤同样按旧版最终合计数恢复。
+        // 升级前保存的合成、烹饪、交易步骤同样按旧版最终合计数恢复。
         var parent = new IntentTaskRecord(UUID.randomUUID(), null,
-                new Goal("maicraft:sequence", "合成后交易", null, "{}", "{}", List.of(), List.of(craft(), trade())));
+                new Goal("maicraft:sequence", "合成、烧炼后交易", null, "{}", "{}", List.of(), List.of(craft(), cook(), trade())));
         var root = IntentStateCodec.encode("a".repeat(64), List.of(), List.of(parent), Map.of(), List.of());
         root.getAsJsonArray("tasks").get(0).getAsJsonObject().remove("acquire_count_baselines");
         var decoded = IntentStateCodec.decode(root).tasks().getFirst().acquireBaselines();
-        check(decoded.size() == 2 && decoded.values().stream().allMatch(IntentTaskRecord.AcquireBaseline::legacyFinalCount),
-                "legacy craft and trade steps keep final-count semantics");
+        check(decoded.size() == 3 && decoded.values().stream().allMatch(IntentTaskRecord.AcquireBaseline::legacyFinalCount),
+                "legacy craft, cook and trade steps keep final-count semantics");
     }
 
     private static final class Fixture implements AutoCloseable {
