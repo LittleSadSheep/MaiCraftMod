@@ -117,6 +117,50 @@ public final class AreaLightingTest {
                     "草丛格上的原生确认结算为一支灯，不重复扣料");
             pass.result(state);
         }
+        // 005 局 141 实机回归：半径扩大后最近灯位贴着农田/水体，到达后被资格闸否决，旧形态里
+        // 放置轮在原地反复重试到停滞，其余候选从未尝试，整批零出手。现在单个灯位被闸淘汰后
+        // 换下一候选继续，拒绝明细（坐标+闸名）随回执交付；导航不可达走同一淘汰路径。
+        try (var h = new InteractionWorldTestHarness()) {
+            AutomaticLightingTest.prepareBody(h);
+            // 本用例的导航走真实寻路栈，测试桩需要给 baritone 一个可写目录才能完成运行时初始化。
+            var gameDirectory = net.minecraft.client.Minecraft.class.getDeclaredField("gameDirectory");
+            gameDirectory.setAccessible(true);
+            gameDirectory.set(net.minecraft.client.Minecraft.getInstance(),
+                    new java.io.File("area-lighting-gate-fixture"));
+            h.inventory.setItem(40, new ItemStack(Items.TORCH, 8));
+            var torchState = Blocks.TORCH.defaultBlockState();
+            // 最近灯位被实体方块占用，到位后 stillUsable 否决；次近灯位正常可放。
+            BlockPos occupied = new BlockPos(1, 1, 3);
+            BlockPos reachable = new BlockPos(5, 1, 4);
+            h.set(occupied, Blocks.STONE.defaultBlockState());
+            var targets = List.of(
+                    new BuildTaskRecord.Target(torchState, Items.TORCH, occupied, "torch", null, null, null),
+                    new BuildTaskRecord.Target(torchState, Items.TORCH, reachable, "torch", null, null, null));
+            var build = new BuildTaskRecord("lighting-gate-rejected", 1200, targets, false, true, false);
+            var pass = new TorchLightingPass(h.player, build, List.of(new BlockPos(2, 1, 2)), 8,
+                    Set.of(), Set.of());
+            pass.start(h.player);
+            TaskState state = TaskState.RUNNING;
+            for (int i = 0; i < 300 && !state.isTerminal(); i++) {
+                state = pass.tick(h.player);
+                AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+                if (h.blockUses() == 1) {
+                    h.set(reachable, torchState);
+                    h.player.getOffhandItem().shrink(1);
+                    h.level.acknowledgedSequence = h.level.blockSequence;
+                }
+                h.nextTick();
+            }
+            check(pass.rejections().size() == 1
+                    && pass.rejections().get(0).gate().equals("site_not_usable")
+                    && pass.rejections().get(0).pos().equals(occupied),
+                    "被资格闸否决的最近灯位记为单点闸拒绝，携带坐标与闸名");
+            check(state == TaskState.SUCCESS && build.placed() == 1 && h.blockUses() == 1,
+                    "被否决灯位淘汰后换下一候选真实出手，整轮不再零放置连坐");
+            @SuppressWarnings("unchecked") var data = (Map<String, Object>) pass.result(state).data();
+            check(((List<?>) data.get("rejected_sites")).size() == 1,
+                    "放置轮回执携带逐灯位拒绝明细");
+        }
         System.out.println("AreaLightingTest: passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

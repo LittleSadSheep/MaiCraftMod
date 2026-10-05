@@ -24,6 +24,9 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /** 按剩余暗格规划的灯位边走边放；只在最后由区域任务重新核实光照，不拿理论间距当验收。 */
 public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskRecord> {
+    /** 单个灯位被哪道闸以何理由淘汰；随区域回执交付，实机失败可直接读因。 */
+    public record SiteRejection(BlockPos pos, String gate, String detail) {}
+
     private final List<BuildTaskRecord.Target> remaining;
     private final List<BlockPos> samples;
     private final Set<BlockPos> protectedCells, forbiddenBody;
@@ -33,11 +36,15 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
     private BuildTaskRecord.Target target;
     private int skipped;
     private boolean uncertain;
+    private boolean siteAdvanced;
     private long lightSettlesAt;
     private RuntimeException deferredFailure;
     private final Set<BlockPos> attempted = new LinkedHashSet<>();
+    private final List<SiteRejection> rejections = new ArrayList<>();
 
     public Set<BlockPos> attemptedPositions() { return Set.copyOf(attempted); }
+
+    public List<SiteRejection> rejections() { return List.copyOf(rejections); }
 
     public TorchLightingPass(LocalPlayer player, BuildTaskRecord record, List<BlockPos> samples, int minimum,
                              Set<BlockPos> protectedCells, Set<BlockPos> forbiddenBody) {
@@ -53,6 +60,7 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
     }
 
     private TaskState advance() {
+        siteAdvanced = false;
         if (deferredFailure != null) {
             fail("native torch preparation failed: " + deferredFailure.getMessage(), FailureType.UNKNOWN);
             return TaskState.FAILED;
@@ -70,8 +78,8 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
                 return TaskState.FAILED;
             }
         }
-        // 已确认新火把或真实导航进展才补预算；静止等待不能无限延长一轮照明。
-        if (inactivity.observe(player.level().getGameTime(), settled != null
+        // 已确认新火把、淘汰灯位或真实导航进展才补预算；静止等待不能无限延长一轮照明。
+        if (inactivity.observe(player.level().getGameTime(), siteAdvanced || settled != null
                 && settled.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED)) {
             fail("torch pass made no further progress: " + placer.state(), FailureType.PLANNING_STALL);
             return TaskState.FAILED;
@@ -93,7 +101,14 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
                 try {
                     NavigationSafetyContext.withProtectedArea(protectedCells, forbiddenBody,
                             () -> {
-                                if (placer.place(context, candidate, protectedCells)) attempted.add(candidate.pos());
+                                // 到位后临出手先复核资格；不再成立的灯位记闸淘汰并换下一个，
+                                // 不在原地空转重试到停滞（141 实机：最近灯位被闸全拒后整轮零出手）。
+                                if (!RoutineTorchPlacement.stillUsable(context.player(), candidate, protectedCells)) {
+                                    rejectSite(candidate, "site_not_usable",
+                                            "support or cell state no longer qualified when reached");
+                                } else if (placer.place(context, candidate, protectedCells)) {
+                                    attempted.add(candidate.pos());
+                                }
                                 return true;
                             });
                 } catch (RuntimeException failure) { deferredFailure = failure; }
@@ -114,10 +129,22 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
         var navigation = nav.tick();
         if (navigation == PlayerNav.Status.FAILED && !placer.pending()) {
             AfterNavigationAction.cancel(this);
-            fail("torch site could not be reached: " + nav.failReason(), nav.failType());
-            return TaskState.FAILED;
+            // 单个灯位无路只淘汰该灯位，不整轮连坐；其余候选换目标继续，全部淘汰后
+            // 由区域复核按拒绝明细收口（141 实机：最近暗格贴农田被寻路禁行，整轮零出手）。
+            rejectSite(target, "navigation_unreachable", nav.failReason());
+            return TaskState.RUNNING;
         }
         return TaskState.RUNNING;
+    }
+
+    private void rejectSite(BuildTaskRecord.Target candidate, String gate, String detail) {
+        rejections.add(new SiteRejection(candidate.pos(), gate, detail));
+        remaining.remove(candidate);
+        r.completed(r.placed() + skipped + rejections.size());
+        siteAdvanced = true;
+        // 旧导航的到点目标是被淘汰的灯位，连同废弃；下一目标重新起导航，不能沿用已到点的旧目标。
+        if (target == candidate) target = null;
+        stopNav();
     }
 
     private boolean couldImprove(BuildTaskRecord.Target candidate) {
@@ -149,8 +176,15 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
         super.cleanup();
     }
     @Override protected Map<String, Object> resultData() {
+        List<Map<String, Object>> rejected = new ArrayList<>();
+        for (SiteRejection rejection : rejections) {
+            rejected.add(Map.of(
+                    "position", List.of(rejection.pos().getX(), rejection.pos().getY(), rejection.pos().getZ()),
+                    "gate", rejection.gate(), "detail", rejection.detail()));
+        }
         return Map.of("placed", r.placed(), "skipped_already_lit", skipped, "remaining", remaining.size(),
-                "outcome_uncertain", uncertain || placer.pending(), "placement_hand", "offhand");
+                "outcome_uncertain", uncertain || placer.pending(), "placement_hand", "offhand",
+                "rejected_sites", List.copyOf(rejected));
     }
     @Override protected String successMessage() { return "torch placement pass completed; actual area coverage still requires verification"; }
 
