@@ -42,6 +42,7 @@ public final class KnowledgeLibrary {
             {"sleep-night", "睡眠与夜晚", "sleep bed 睡觉 床 幻翼 phantom 夜晚 night 刷怪 spawn 羊毛 wool sheep_color 染料 dye 同色 重生点 respawn insomnia 跳夜 maicraft:sleep"},
             {"tunneling", "下降掘进与寻路死角", "descent digging staircase tunnel 斜向阶梯 竖井 planning_stall no_path 寻路死角 树冠 下掘 水平掘进 矿带 travel may_alter_terrain"},
             {"lighting", "挖掘工作面照明", "lighting torch 火把 照明 光照 刷怪 spawn 黑暗 洞穴 深掘 营地 auto_light light_area 布光 煤 木棍 合成"},
+            {"tick-rate", "世界刻速与失焦限流", "tps tick 刻速 刻率 失焦 focus 限流 throttle 慢放 停滞 冻结 game_time recent_tps tick_rate 任务变慢 卡死"},
     };
     public interface Source {
         List<KnowledgeDocument.Entry> entries();

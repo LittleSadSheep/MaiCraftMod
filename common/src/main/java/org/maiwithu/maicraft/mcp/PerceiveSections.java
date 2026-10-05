@@ -26,7 +26,7 @@ final class PerceiveSections {
     private static final Set<String> SITUATION = Set.of(
             "dimension", "position", "view", "health", "max_health", "food", "air",
             "on_ground", "in_water", "underwater", "swimming", "sprinting", "day", "is_daytime",
-            "time_phase", "time_of_day", "day_index", "weather", "game_time",
+            "time_phase", "time_of_day", "day_index", "weather", "game_time", "tick_rate",
             "inventory", "carried_storage", "equipment", "vehicle_type", "task",
             "elevators", "actor", "tick_stage", "controlling_task", "navigation",
             "collision_geometry", "transport", "landing_assist", "jetpack", "physical_structures");

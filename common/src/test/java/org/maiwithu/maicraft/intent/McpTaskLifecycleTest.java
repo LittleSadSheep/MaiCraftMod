@@ -42,6 +42,7 @@ public final class McpTaskLifecycleTest {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         repeatedExecutionLeavesHumanControlAlone();
+        resumedRestoredTaskRetakesBody();
         restoredCancellationPreservesCurrentWork();
         fullHistoryRejectsBeforeAcceptingMoreWork();
         networkCancellationRespectsClientDispatch();
@@ -141,6 +142,9 @@ public final class McpTaskLifecycleTest {
             args.addProperty("request_key", "same-request");
             var result = f.facade.execute(args).toCompletableFuture().join().getAsJsonObject();
             check(result.get("task_id").getAsString().equals(original.externalId().toString()), "重试应返回原任务编号");
+            check(result.get("deduplicated").getAsBoolean(), "去重命中应显式标注 deduplicated");
+            check(result.get("message").getAsString().contains("identical request_key"),
+                    "去重回执应注明返回的是既有任务");
             check(!ClientRuntime.actor().automationControlRequested(), "查询原请求不能重新接管玩家");
             check(result.get("control_status").getAsString().equals("not_requested"), "重试回复不能声称已请求接管");
             check(f.tasks().size() == 1, "重试不能登记第二件任务");
@@ -154,6 +158,32 @@ public final class McpTaskLifecycleTest {
                 check(expected.getCause() instanceof IllegalArgumentException, "应报告参数错误");
             }
             check(!ClientRuntime.actor().automationControlRequested(), "无效重试也不能接管玩家");
+        }
+    }
+
+    private static void resumedRestoredTaskRetakesBody() throws Exception {
+        try (var f = new Fixture()) {
+            // 重启后恢复出的暂停任务没有接管请求（它不随检查点存盘）；resume 即表达继续，
+            // 必须重新登记身体接管，否则任务每刻都会因无人持有身体再次暂停（114 修复点）。
+            var restored = IntentTaskRecord.restored(UUID.randomUUID(), null, f.goal, f.identity.key(),
+                    List.of(f.goal), 0, List.of(), Map.of(), Map.of(), List.of(), null, null, null, 2);
+            f.tasks().put(restored.externalId(), restored);
+            var args = new JsonObject();
+            args.addProperty("action", "resume");
+            args.addProperty("task_id", restored.externalId().toString());
+            var result = f.facade.task(args).toCompletableFuture().join().getAsJsonObject();
+            check(!restored.paused(), "resume 应解除恢复态任务的暂停");
+            check(ClientRuntime.actor().automationControlRequested(), "恢复态任务的 resume 必须重新登记接管请求");
+            check(result.get("control_status").getAsString().equals("takeover_requested"),
+                    "resume 回执应声明已请求接管");
+            check(CompanionTickDispatcher.find(restored.publicId()) == restored,
+                    "恢复态任务 resume 后应重新进入调度器");
+
+            // 接管请求已存在时 resume 幂等：不再新建请求，回执如实说明身体已由该请求覆盖。
+            result = f.facade.task(args).toCompletableFuture().join().getAsJsonObject();
+            check(ClientRuntime.actor().automationControlRequested()
+                    && result.get("control_status").getAsString().equals("already_held_or_requested"),
+                    "已持接管请求的 resume 不能重复申请，回执应如实说明");
         }
     }
 

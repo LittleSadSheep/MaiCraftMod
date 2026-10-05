@@ -12,7 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
-/** 用真实装备包驱动耐久打空观察；只认本玩家的同步，基准外首包不补发旧变化。 */
+/** 用真实装备包与打空实体事件驱动耐久打空观察；只认本玩家的事实，基准外首包不补发旧变化。 */
 public final class EquipmentReceiptsTest {
 
     public static void main(String[] args) throws Exception {
@@ -21,6 +21,8 @@ public final class EquipmentReceiptsTest {
         ignoresOtherEntities();
         swapResetsAccumulation();
         bodyChangeRebases();
+        entityEventPublishesWithScanBaseline();
+        entityEventIgnoresStrangersAndNonBreakEvents();
         System.out.println("EquipmentReceiptsTest: equipment sync observation and durability-break receipts passed");
     }
 
@@ -96,6 +98,77 @@ public final class EquipmentReceiptsTest {
                         "换身体后的首包只建立基准，不得把上一具身体的耐久账补发出来");
             }
         }
+    }
+
+    /**
+     * 实机复测（057，2026-10-05）证得装备增量包从不发给本人，打空事实走 onEquippedItemBroken
+     * 的 47 号实体事件；本场景按真实到达顺序驱动：逐刻扫描建账 → 打空 → 事件到达 → 发布。
+     */
+    private static void entityEventPublishesWithScanBaseline() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            // 打空事件按实体 ID 从世界里解析实体；夹具世界默认只有显式登记的实体。
+            world.level.entities.put(world.player.getId(), world.player);
+            var events = new ArrayList<String>();
+            try (var ignored = IntentRuntime.get().subscribeAttention(e -> events.add(e.toString()))) {
+                world.player.setItemSlot(EquipmentSlot.MAINHAND, pickaxe(60));
+                EquipmentReceipts.observe(world.player);
+                world.player.setItemSlot(EquipmentSlot.MAINHAND, pickaxe(100));
+                EquipmentReceipts.observe(world.player);
+                check(events.isEmpty(), "逐刻扫描只建账与累计，不打扰");
+                // 服务端打空后客户端背包同步为空栈：客户端侧的变化本身不是证据，不得发布。
+                world.player.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+                EquipmentReceipts.observe(world.player);
+                check(events.isEmpty(), "槽位变空但打空事件未到达时必须保持沉默");
+                EquipmentReceipts.entityEvent(world.player, event(world.player, (byte) 47));
+                var broken = events.stream().filter(EquipmentReceiptsTest::mentionsBroken).toList();
+                check(broken.size() == 1, "打空实体事件必须恰好发布一次 item_broken");
+                String text = broken.getFirst();
+                check(text.contains("\"item_id\":\"minecraft:stone_pickaxe\""), "事件必须按扫描基准点名打空的物品");
+                check(text.contains("\"equipment_slot\":\"mainhand\""), "事件必须写明槽位");
+                check(text.contains("\"durability_last_seen\":31"), "事件携带最后一次扫描到的剩余耐久");
+                check(text.contains("\"damage_observed_total\":40"), "事件累计扫描窗口内观察到的耐久消耗");
+                // 同一条消灭事实只报一次：事件已消费基准，重复到达不得再发布。
+                EquipmentReceipts.entityEvent(world.player, event(world.player, (byte) 47));
+                check(events.stream().filter(EquipmentReceiptsTest::mentionsBroken).count() == 1,
+                        "重复的打空事件不得重复发布");
+            }
+        }
+    }
+
+    private static void entityEventIgnoresStrangersAndNonBreakEvents() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            var events = new ArrayList<String>();
+            try (var ignored = IntentRuntime.get().subscribeAttention(e -> events.add(e.toString()))) {
+                world.level.entities.put(world.player.getId(), world.player);
+                world.player.setItemSlot(EquipmentSlot.MAINHAND, pickaxe(100));
+                EquipmentReceipts.observe(world.player);
+                var stranger = world.h.allocate(Stranger.class);
+                ActorControlTestHarness.field(net.minecraft.world.entity.Entity.class, "level").set(stranger, world.level);
+                stranger.setId(world.player.getId() + 7);
+                world.level.entities.put(stranger.getId(), stranger);
+                EquipmentReceipts.entityEvent(world.player, event(stranger, (byte) 47));
+                check(events.isEmpty(), "其他实体的打空事件不得发布，也不得清掉本地基准");
+                EquipmentReceipts.entityEvent(world.player, event(world.player, (byte) 60));
+                check(events.isEmpty(), "非打空编号的实体事件必须被忽略");
+                // 陌生事件消耗过后本地打空照常发布，基准不被旁路事实污染。
+                world.player.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+                EquipmentReceipts.observe(world.player);
+                EquipmentReceipts.entityEvent(world.player, event(world.player, (byte) 47));
+                var broken = events.stream().filter(EquipmentReceiptsTest::mentionsBroken).toList();
+                check(broken.size() == 1 && broken.getFirst().contains("\"durability_last_seen\":31"),
+                        "陌生与非打空事件后，本玩家的打空事实照常可归因");
+            }
+        }
+    }
+
+    /** 旁路构造器的陌生实体：只用于核实打空事件按实体身份过滤。 */
+    private static final class Stranger extends net.minecraft.world.entity.monster.Zombie {
+        private Stranger() { super(net.minecraft.world.entity.EntityType.ZOMBIE, null); }
+    }
+
+    private static net.minecraft.network.protocol.game.ClientboundEntityEventPacket event(
+            net.minecraft.world.entity.Entity entity, byte eventId) {
+        return new net.minecraft.network.protocol.game.ClientboundEntityEventPacket(entity, eventId);
     }
 
     private static ItemStack pickaxe(int damage) {

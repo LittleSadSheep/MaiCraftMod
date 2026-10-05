@@ -65,6 +65,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy;
 import org.maiwithu.maicraft.core.pathing.transport.TransportRuntime;
 import org.maiwithu.maicraft.core.tools.perception.LocalFloorSense;
 import org.maiwithu.maicraft.core.tools.perception.BodyEnvironmentObservation;
+import org.maiwithu.maicraft.core.tools.perception.TickRateObservation;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.MinecraftKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
@@ -195,6 +196,13 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             result.addProperty("status", publicState(record));
             result.addProperty("accepted", true);
             result.addProperty("outcome", record.goal().outcome());
+            if (repeatedRequest) {
+                // 去重命中必须显式标注：调用方拿到的是旧任务终态，不是一次新执行的承诺；
+                // 静默复用会让"确认上次结果后重试"的正常路径被误判成新请求已成功。
+                result.addProperty("deduplicated", true);
+                result.addProperty("message",
+                        "identical request_key; returning the existing task instead of starting a new one");
+            }
             if (requestKey != null) result.addProperty("request_key", requestKey);
             result.addProperty("control_status", repeatedRequest ? "not_requested" : IntentRuntime.isIndependentRequest(goal)
                     ? "not_required" : "takeover_requested");
@@ -214,6 +222,18 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         catch (RuntimeException failure) {
             ClientRuntime.rollbackAutomationControl(control);
             throw failure;
+        }
+    }
+
+    /** resume 与新提交同义：都要有身体才能继续，幂等登记接管请求；登记不了时把原因与出路写进同一份失败回执。 */
+    private static ClientActorBoundary.AutomationRequest requestResumeControl(LocalPlayer player) {
+        if (ClientRuntime.actor().automationControlRequested()) return null;
+        try {
+            return ClientRuntime.requestAutomationControl(player);
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException(
+                    "this task cannot retake body control (" + failure.getMessage()
+                    + "); cancel it and resubmit, or retry after the client body is ready");
         }
     }
 
@@ -384,6 +404,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         UUID id = UUID.fromString(arguments.get("task_id").getAsString());
         IntentTaskRecord record = requireTask(id);
         long now = Minecraft.getInstance().level.getGameTime();
+        String resumeControlStatus = null;
         switch (action) {
             case "get" -> {
             }
@@ -395,21 +416,35 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 intents.paused(record, "Paused by MCP request");
             }
             case "resume" -> {
-                // 从磁盘恢复的任务只存在于任务记录里，继续前要重新放入调度器；这可能替换当前任务。
-                intents.requireCurrentBinding(record);
-                boolean restoredDetached = record.restoredDetached();
-                if (!record.resume()) {
-                    throw new IllegalStateException(record.decisionSnapshot() != null
-                            ? "task needs task action=answer"
-                            : "task cannot be resumed");
-                }
-                if (restoredDetached) {
-                    if (CompanionTickDispatcher.find(record.publicId()) != record) {
-                        CompanionTickDispatcher.submitCurrent(player, record);
+                // resume 表达“要它继续跑”：先重新登记身体接管请求再解除暂停，否则恢复出的任务
+                // 每刻都会因无人持有身体再次暂停（接管请求不随检查点存盘，重启后只剩任务记录）。
+                // 只读设计与随行照明与新提交同口径，不申请身体。
+                boolean independentGoal = IntentRuntime.isIndependentRequest(record.goal());
+                ClientActorBoundary.AutomationRequest control = independentGoal
+                        ? null : requestResumeControl(player);
+                resumeControlStatus = independentGoal ? "not_required"
+                        : control == null ? "already_held_or_requested" : "takeover_requested";
+                try {
+                    // 从磁盘恢复的任务只存在于任务记录里，继续前要重新放入调度器；这可能替换当前任务。
+                    intents.requireCurrentBinding(record);
+                    boolean restoredDetached = record.restoredDetached();
+                    if (!record.resume()) {
+                        throw new IllegalStateException(record.decisionSnapshot() != null
+                                ? "task needs task action=answer"
+                                : "task cannot be resumed");
                     }
-                    intents.restoredTaskAttached(record);
+                    if (restoredDetached) {
+                        if (CompanionTickDispatcher.find(record.publicId()) != record) {
+                            CompanionTickDispatcher.submitCurrent(player, record);
+                        }
+                        intents.restoredTaskAttached(record);
+                    }
+                    intents.resumed(record);
+                } catch (RuntimeException failure) {
+                    // 任务没能继续就不留新请求；接管请求幂等，此前已生效的控制权不受影响。
+                    if (control != null) ClientRuntime.rollbackAutomationControl(control);
+                    throw failure;
                 }
-                intents.resumed(record);
             }
             case "cancel" -> {
                 // 恢复记录尚未占用身体，只结算它本身；已有身体任务则通过调度器停止实际动作。
@@ -475,6 +510,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             default -> throw new IllegalArgumentException("unknown task action: " + action);
         }
         JsonObject result = TaskView.read(record, arguments);
+        if (resumeControlStatus != null) result.addProperty("control_status", resumeControlStatus);
         result.add("next_attention", AttentionSnapshot.continuation(
                 intents.attentionCheckpoint(), record.externalId().toString()));
         return result;
@@ -496,6 +532,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         result.addProperty("day_index", WorldTimeSemantics.dayIndex(player.level()));
         result.addProperty("weather", player.level().isThundering()
                 ? "thunder" : player.level().isRaining() ? "rain" : "clear");
+        // 近窗刻率：失焦限流把世界刻放慢时调用方一眼可辨，不用再靠双采样 game_time 差值排障。
+        result.add("tick_rate", TickRateObservation.observe(
+                System.currentTimeMillis(), player.level().getGameTime()));
         result.add("inventory", inventorySummary(player));
         // 随身储物与主背包分开显示：没观察过的包明确未知，不把未打开当成空包。
         result.add("carried_storage", new Gson().toJsonTree(BackpackStock.facts(player)));

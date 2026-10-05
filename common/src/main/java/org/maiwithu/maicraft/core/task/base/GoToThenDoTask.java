@@ -1,7 +1,10 @@
 package org.maiwithu.maicraft.core.task.base;
 
+import java.util.HashMap;
+import java.util.Map;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.task.ProgressBudget;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import net.minecraft.client.player.LocalPlayer;
@@ -11,8 +14,23 @@ import org.maiwithu.maicraft.core.Constants;
 /**
  * 把“先走近，再执行”组织成公共流程。
  * 子类分别定义导航目标、实际能否操作和操作本身；导航到了与手真的够得着是两个检查。
+ * 接近阶段与移动任务共用同一套有界规划：算路停滞必须给出失败终态，不能让消费类任务无限 running。
  */
 public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompanionTask<R> {
+
+    /** 接近规划连续无确认进展的上限；与移动任务的同名预算同一口径（30 活动秒）。 */
+    private static final long PLANNING_IDLE_TICKS = 30 * 20;
+    /** 接近规划的搜索工作量熔断线：持续有产出却永不接近目标时按病态搜索收场。 */
+    private static final long PLANNING_WORK_FUSE_UNITS = 60_000;
+    /** 距离最后一次接近目标超过这么长的活动 tick（且工作量已越熔断线）判定规划无收敛。 */
+    private static final long CONVERGENCE_WINDOW_TICKS = 30 * 20;
+
+    private ProgressBudget planningBudget;
+    private long planningWorkHighWater;
+    private long lastApproachTick = Long.MIN_VALUE;
+    private double bestApproachDistance = Double.MAX_VALUE;
+    /** 出发时（或路线重估后）的量化剩余距离分母；口径见 {@link #progress()}。 */
+    private int initialRemaining = -1;
 
     protected GoToThenDoTask(LocalPlayer player, R record) {
         super(player, record);
@@ -85,6 +103,8 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
             }
             return TaskState.FAILED;
         }
+        TaskState bounded = boundedApproachPlanning();
+        if (bounded != null) return bounded;
         return switch (nav.tick()) {
             case RUNNING -> {
                 dudTicks = 0;
@@ -120,6 +140,77 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     protected TaskState handleNavFailure(FailureType type, String reason) {
         fail(reason, type);
         return TaskState.FAILED;
+    }
+
+    /**
+     * 接近阶段的有界规划守卫：算路连续无确认进展超预算、或搜索工作量越熔断线而最近距离
+     * 长时间无改善时，按 planning_stall 终态收场并交还身体——容器使用这类消费任务的接近
+     * 卡死不再把整条后勤链拖进无限 running。返回 null 表示继续正常推进。
+     */
+    private TaskState boundedApproachPlanning() {
+        if (planningBudget == null) planningBudget = r.progressBudget(PLANNING_IDLE_TICKS);
+        long now = player.level().getGameTime();
+        boolean stalled = planningBudget.observeCounter(now, nav.lastVerifiedProgressTick());
+        double distance = approachDistance();
+        if (distance < bestApproachDistance - 0.1) {
+            bestApproachDistance = distance;
+            lastApproachTick = now;
+        }
+        planningWorkHighWater = Math.max(planningWorkHighWater, nav.planningProgressUnits());
+        if (!nav.planningInFlight()) return null;
+        if (stalled) {
+            fail("approach planning made no verified progress for about "
+                    + PLANNING_IDLE_TICKS / 20 + " active seconds; no no-path conclusion was"
+                    + " established; " + nav.outcomeSummary()
+                    + " Travel closer with goto and resubmit, or inspect the approach first.",
+                    FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
+        }
+        if (planningWorkHighWater > PLANNING_WORK_FUSE_UNITS
+                && lastApproachTick != Long.MIN_VALUE
+                && now - lastApproachTick >= CONVERGENCE_WINDOW_TICKS) {
+            fail("approach planning did not converge: the search banked " + planningWorkHighWater
+                    + " work units while the closest approach stayed "
+                    + String.format("%.1f", bestApproachDistance) + " blocks from the target for about "
+                    + (CONVERGENCE_WINDOW_TICKS / 20) + " seconds with no improvement; "
+                    + nav.outcomeSummary()
+                    + " Travel closer with goto and resubmit, or inspect the approach first.",
+                    FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
+        }
+        return null;
+    }
+
+    /** 到第一个接近目标的直线距离；无固定格目标（实体目标）时记零，熔断的那一半随之不启用。 */
+    private double approachDistance() {
+        BlockPos target = gotoFirstTarget();
+        return target == null ? 0 : Math.sqrt(player.distanceToSqr(
+                target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5));
+    }
+
+    /**
+     * 接近阶段的记分牌：phase 区分 planning/moving/acting；接近中报 remaining/initial（16 格
+     * 量化档，向上取整——剩余 0 只出现在真实到达），规划期另报 calc 搜索尝试次数当心跳，
+     * 让「还在算」的停滞每过事件地板间隔仍有一条进度可读。进入动作阶段后距离失去意义，只报阶段名。
+     */
+    @Override
+    public Map<String, Object> progress() {
+        if (nav == null) return super.progress();
+        boolean planning = nav.planningInFlight();
+        Map<String, Object> result = new HashMap<>();
+        result.put("task", name());
+        result.put("phase", reached() ? "acting" : planning ? "planning" : "moving");
+        if (!reached() && gotoFirstTarget() != null) {
+            int remaining = AbstractCompanionTask.quantizedRemaining(approachDistance());
+            if (remaining > initialRemaining) initialRemaining = remaining;
+            result.put("remaining", remaining);
+            result.put("initial", initialRemaining);
+        }
+        if (planning) {
+            result.put("done", nav.planningProgressUnits());
+            result.put("calc", nav.planningCalcAttempts());
+        }
+        return Map.copyOf(result);
     }
 
     @Override

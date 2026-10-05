@@ -47,8 +47,8 @@ public final class SettleChain implements Task, Reflex {
     @Override
     public boolean canRun(LocalPlayer companion) {
         if (WorkProfile.of(companion).fearless()) return false;
-        // 窒息优先：头在窒息方块里每刻掉血，不要求落地或贴边（005 局围困形态）。
-        if (companion.isInWall()) return true;
+        // 窒息优先：眼位在窒息方块里每刻掉血，不要求落地或贴边（005 局围困形态）。
+        if (suffocating(companion)) return true;
         // 空中、水中、攀爬与乘坐都有各自的稳定机制；这里只处理"站在地上但贴着深渊"的姿势。
         if (!companion.onGround()) return false;
         Direction edge = edgeBeside(companion);
@@ -63,7 +63,7 @@ public final class SettleChain implements Task, Reflex {
 
     @Override
     public TaskState tick(LocalPlayer companion) {
-        if (companion.isInWall()) return escapeSuffocation(companion);
+        if (suffocating(companion)) return escapeSuffocation(companion);
         if (!active) {
             active = true;
             ticks = 0;
@@ -97,7 +97,7 @@ public final class SettleChain implements Task, Reflex {
         if (++ticks > SUFFOCATION_MAX_TICKS) {
             return finish(companion, "could not clear the suffocating block within the bounded attempt; position stays unverified");
         }
-        if (!companion.isInWall()) {
+        if (!suffocating(companion)) {
             return finish(companion, "suffocating block cleared; the body can breathe again, escape route is still up to the caller");
         }
         LocalPlayerContext context = ClientRuntime.requireContext(companion);
@@ -177,6 +177,19 @@ public final class SettleChain implements Task, Reflex {
                 ticks = 0;
             }
         }
+    }
+
+    /**
+     * 围困窒息的判定比原版 isInWall 宽一档：原版在眼位处取一个极薄的碰撞盒做相交，
+     * 身体被服务器击退或方块更新推得贴住格边时，原版判定可能已翻成"不在墙内"
+     * 而眼位方块仍是致窒的实心格——2026-10-05 场景 E 三轮实机中窒息恰打一击后
+     * 自停、反射全程未启动、fill 探测眼位格仍是 stone，正是这个口径差。这里补上
+     * "眼位方块本身致窒"的直接判定，围困不解除反射就一直可触发。
+     */
+    private static boolean suffocating(LocalPlayer player) {
+        if (player.isInWall()) return true;
+        BlockPos eye = BlockPos.containing(player.getEyePosition());
+        return player.level().getBlockState(eye).isSuffocating(player.level(), eye);
     }
 
     /** 找脚位四周的第一个深落差方向；四个水平方向按常量顺序扫描，结果稳定。 */

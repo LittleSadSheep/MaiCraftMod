@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -843,6 +844,18 @@ public final class GeneralAbilityAdapter {
         Item selectedItem = itemId == null ? Items.AIR : BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
         boolean bucketPlacement = selectedItem != Items.BUCKET && FirstPersonInteractionTargeting.usesBucketRay(selectedItem);
         if (state.isAir() && !bucketPlacement) {
+            // 打火石的火落在被点实心方块的相邻空气格；点名空气格即火的目标格，点击编译到相邻实心支撑。
+            if (selectedItem == Items.FLINT_AND_STEEL) {
+                BlockPos support = ignitionSupport(level, target);
+                if (support != null) {
+                    facts.addProperty("ignition_target_cell",
+                            target.getX() + "," + target.getY() + "," + target.getZ());
+                    return compileBlockInteraction(goal, player, support,
+                            BuiltInRegistries.BLOCK.getKey(level.getBlockState(support).getBlock()), itemId, prepareTool);
+                }
+                return exactBlockUnavailable(goal,
+                        "The exact air target has no adjacent solid block for a flint-and-steel fire.", facts);
+            }
             return exactBlockUnavailable(goal, "The exact block target is now empty.", facts);
         }
         if (rawBlockId != null) {
@@ -863,6 +876,22 @@ public final class GeneralAbilityAdapter {
                 List.of(option("recover", "Observe or load the exact target, then retry."),
                         option("replace_goal", "Choose an explicitly different target."),
                         option("cancel", "Cancel interaction.")), facts);
+    }
+
+    /**
+     * 点火目标空气格的支撑块：火要落进该空气格，实际右键的是相邻实心方块的对应面。
+     * 先下后水平再上，只认已加载且朝向空气格一面结实的方块；全空则无从点火。
+     */
+    private static BlockPos ignitionSupport(ClientLevel level, BlockPos airCell) {
+        for (Direction direction : List.of(Direction.DOWN, Direction.NORTH, Direction.SOUTH,
+                Direction.WEST, Direction.EAST, Direction.UP)) {
+            BlockPos support = airCell.relative(direction);
+            if (!level.isLoaded(support)) continue;
+            var supportState = level.getBlockState(support);
+            if (supportState.isAir()) continue;
+            if (supportState.isFaceSturdy(level, support, direction.getOpposite())) return support;
+        }
+        return null;
     }
 
     // 失配回执带上目标坐标当下的真实观察（与 interactExactBlock 的 facts 同构）；
@@ -902,9 +931,14 @@ public final class GeneralAbilityAdapter {
         }
         if ("till".equals(lower(string(goal.parameters(), "purpose"))))
             use.addProperty("expected_block_id", "minecraft:farmland");
-        if (itemId != null) use.addProperty("item_id", itemId);
-        // 未声明道具就是操作目标本身；先按空手计算站位，执行时再原生收好战斗或施工留下的主手物品。
-        else use.addProperty("empty_hand", true);
+        if (itemId != null) {
+            use.addProperty("item_id", itemId);
+            // 点火类使用的诚实结果在火方块；点击确认本身不保证目标面外真的落了火。
+            if (usedItem == Items.FLINT_AND_STEEL) use.addProperty("expected_effect", "ignite");
+        } else {
+            // 未声明道具就是操作目标本身；先按空手计算站位，执行时再原生收好战斗或施工留下的主手物品。
+            use.addProperty("empty_hand", true);
+        }
         String itemResourceId = string(goal.parameters(), "item_resource_id");
         if (itemResourceId != null) use.addProperty("item_resource_id", itemResourceId);
         use.addProperty("approach", true);

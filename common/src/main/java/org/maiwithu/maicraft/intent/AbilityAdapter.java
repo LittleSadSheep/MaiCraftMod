@@ -183,7 +183,7 @@ final class AbilityAdapter {
             if (!beds.complete()) return IntentAction.Pending.INSTANCE;
             if (!beds.hits().isEmpty()) {
                 if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
-                    return waitForNightDecision(goal);
+                    return waitForNightDecision(goal, player);
                 }
                 Block bed = player.clientLevel.getBlockState(beds.hits().getFirst()).getBlock();
                 String bedId = BuiltInRegistries.BLOCK.getKey(bed).toString();
@@ -200,7 +200,7 @@ final class AbilityAdapter {
         // 世界里没有找到床，再看背包有没有；有床则找位置放下，之后仍按“走过去、上床”执行。
         if (carriedBed != null) {
             if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
-                return waitForNightDecision(goal);
+                return waitForNightDecision(goal, player);
             }
             BedSite site = nearbyBedSite(player);
             if (site != null) {
@@ -240,10 +240,19 @@ final class AbilityAdapter {
                         option("cancel", "Cancel the whole task.")));
     }
 
-    private static IntentAction waitForNightDecision(Goal goal) {
-        // 目前的处理是询问要不要先等到夜里，并不会在睡觉任务里自动等，也不会反复点床。
+    private static IntentAction waitForNightDecision(Goal goal, LocalPlayer player) {
+        // 判定已与原版可睡窗口同源；走到这里说明此刻确实不可睡。决策文本带上当前时刻与
+        // 最近可睡时点，调用方据此在可睡窗口内应答，而不是拿着一个过期的白天断言盲等整夜。
+        long now = WorldTimeSemantics.timeOfDay(player.level());
+        long nextSleepable = now < WorldTimeSemantics.SLEEP_WINDOW_START
+                ? WorldTimeSemantics.SLEEP_WINDOW_START - now
+                : 24_000L - now + WorldTimeSemantics.SLEEP_WINDOW_START;
+        // 目前的处理是询问要不要先等到可睡时刻，并不会在睡觉任务里自动等，也不会反复点床。
         return decision(goal,
-                "A usable bed is available, but the observed world is currently daytime and not thundering. MaiCraft will not click it repeatedly or pretend sleep succeeded.",
+                "A usable bed is available, but the vanilla sleep window is closed now: time_of_day=" + now
+                        + ", sleepable again in about " + nextSleepable + " ticks. The gate follows the vanilla"
+                        + " sky-darkening rule (clear weather roughly 12542-23458; a thunderstorm opens it any time)."
+                        + " MaiCraft will not click it repeatedly or pretend sleep succeeded.",
                 List.of(
                         option("recover", "Provide details.goal to wait for the observable night condition, then resume sleep."),
                         option("skip", "Continue without sleeping."),

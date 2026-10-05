@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.GoToThenDoTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -88,6 +89,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean heldUseStarted, heldUseCompleted, heldUseHandResolved;
     private InteractionHand heldUseHand = InteractionHand.MAIN_HAND;
     private int expectedItemBefore = -1, outputWaitTicks;
+    private int fireWaitTicks;
+    private boolean ignitionVerified;
     private boolean manualCrank;
     private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
@@ -504,6 +507,21 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     + BuiltInRegistries.BLOCK.getKey(r.expectedBlock), FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
+        // 点火类使用（如打火石）的诚实结果在火方块：点击确认只代表原版接受了右键，
+        // 火必须真实出现在被点面的相邻空气格；短窗口内没见到火就如实失败，不以"无可见变化"冒充成功。
+        if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
+            var submitted = interaction.submittedBlockHit();
+            BlockPos cell = submitted.getBlockPos().relative(submitted.getDirection()).immutable();
+            if (player.level().getBlockState(cell).getBlock() instanceof BaseFireBlock) {
+                ignitionVerified = true;
+                return verifyExpectedOutput();
+            }
+            if (++fireWaitTicks <= 20) return TaskState.RUNNING;
+            fail("the ignition click was confirmed, but no fire appeared at " + cell.toShortString()
+                    + "; the clicked face may not open into air. Inspect the site or aim at a different face.",
+                    FailureType.TARGET_LOST);
+            return TaskState.FAILED;
+        }
         // 定点倒桶也必须等到请求的返还物被真实观察到；等待期间不重新使用桶。
         return verifyExpectedOutput();
     }
@@ -674,6 +692,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             data.put("x", r.aim.getX());
             data.put("y", r.aim.getY());
             data.put("z", r.aim.getZ());
+        }
+        // 点火类使用回执带落火格与核验结论；调用方对照确认状态与火观察，不再猜"点击是否生效"。
+        if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
+            var submitted = interaction.submittedBlockHit();
+            data.put("ignition_cell", submitted.getBlockPos().relative(submitted.getDirection()).toShortString());
+            data.put("fire_observed", ignitionVerified);
         }
         // 报告已激活的工作站和确切位置；位置以实际命中为准，不使用原始瞄准点，供智能体循环收录到 <known_blocks>。
         if (activatedBlock != null) {

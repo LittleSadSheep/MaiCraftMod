@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.core.task.chain.MLGChain;
 import org.maiwithu.maicraft.core.task.chain.MobDefenseChain;
 import org.maiwithu.maicraft.core.task.chain.NightRestChain;
 import org.maiwithu.maicraft.core.task.chain.SettleChain;
+import org.maiwithu.maicraft.core.task.suicide.SuicideArmorRestore;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferCompanionTask;
 import org.maiwithu.maicraft.core.task.container.ContainerTransferTaskRecord;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerCompanionTask;
@@ -163,6 +164,8 @@ public final class MaiCraftCore {
                 MobDefenseChain::new);
         // 日常休息放在紧急自救之后，只在原生操作结清且附近确有安全床时暂停普通工作。
         BrainChains.register(40, NightRestChain::new);
+        // 寻死前脱下的护甲在重生后或没死成时穿回；排在紧急自救和夜休之后，只在原生操作结清时短暂接管。
+        BrainChains.register(45, SuicideArmorRestore::new);
         // 采掘间隙的照明属于日常动作，所有紧急自救和安全夜休都先于插火把。
         // 随行补光由帧末辅助通道执行，不再以反射抢占挖矿或导航。
     }

@@ -1,8 +1,8 @@
 # 主动寻死：`maicraft:suicide`
 
-玩家已经知道死亡不掉落开启，长时间拿不到食物，或希望通过原生重生回去时，模型可以明确提交这个目标。角色会从附近已观察到的岩浆、威胁生物或高处入口中选择机会，先走近，再让原生伤害结算。低饱食度、缺粮时间和离重生点的距离都不是自动触发条件，也没有由执行器计算的阈值。
+玩家已经知道死亡不掉落开启，长时间拿不到食物，或希望通过原生重生回去时，模型可以明确提交这个目标。角色先把身上的护甲和手上的不死图腾原生收回背包，再从附近已观察到的岩浆、威胁生物或高处入口中选择机会，先走近，再让原生伤害结算；这些现成危险都没有或都用完时，随身带着打火石或火焰弹就在附近安全格子脚下点火，点火也用不上时最后才倒岩浆桶，站在里面受伤。寻死结束后，脱下的护甲会在重生后的新身体（或没死成的原身体）上自动按原件穿回。低饱食度、缺粮时间和离重生点的距离都不是自动触发条件，也没有由执行器计算的阈值。
 
-能力完成证明的是**开始尝试后的当前身体死亡**。它不证明某个特定危险致死，也不证明已经重生、回到指定床位、饱食度已经恢复或全部物品保留。默认会另行请求原生重生，随后由 `agent.respawned` 交付实际重生观察。只想正常回家时应使用旅行能力；本能力不指定目的地、不设置重生点、不调用 `/kill`，也不直接扣血、改背包、搭高塔或挖坑。
+能力完成证明的是**开始尝试后的当前身体死亡**。它不证明某个特定危险致死，也不证明已经重生、回到指定床位、饱食度已经恢复或全部物品保留。默认会另行请求原生重生，随后由 `agent.respawned` 交付实际重生观察。只想正常回家时应使用旅行能力；本能力不指定目的地、不设置重生点、不调用 `/kill`，也不直接扣血、改背包、搭高塔或挖坑；卸甲和收图腾只经原生背包界面或切换快捷栏，不丢弃物品；护甲之后由自动行为穿回，图腾留在背包里不放回手上。世界改动只有随身倒出的岩浆源（永久留在原地）和点火留下的原生火格（由原版自然熄灭）。
 
 ## 想看哪一步，就从哪里读
 
@@ -13,6 +13,9 @@
 | 哪一步把请求变成原生任务 | [SuicideAbilityAdapter.adapt](../../common/src/main/java/org/maiwithu/maicraft/intent/SuicideAbilityAdapter.java) → [SuicideRequest.parse](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideRequest.java) → [SuicideTaskRecord](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideTaskRecord.java) |
 | 怎样核对死亡不掉落、关闭挡路界面和计时 | [SuicideTask.advance / checkRule](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideTask.java)；界面与返料交给 [GuiPreparation.ready](../../common/src/main/java/org/maiwithu/maicraft/client/actor/GuiPreparation.java) |
 | 附近什么东西会被选成危险 | [SuicideHazards.scan / choose / valid / fallHeight](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideHazards.java)；威胁生物判断复用 [Menace.threatens](../../common/src/main/java/org/maiwithu/maicraft/core/combat/Menace.java) |
+| 寻死前怎样脱甲、收图腾，收不走时怎样记录 | [SuicideTask.undressed / stowable](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideTask.java) 逐件交给 [UnequipCompanionTask](../../common/src/main/java/org/maiwithu/maicraft/core/task/inventory/UnequipCompanionTask.java) 原生快速移动或切换快捷栏 |
+| 寻死结束后怎样穿回脱下的护甲 | [SuicideTask.handOver](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideTask.java) 登记原件；[SuicideArmorRestore.canRun / tick](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideArmorRestore.java) 在空闲时按原件交给 [EquipCompanionTask](../../common/src/main/java/org/maiwithu/maicraft/core/task/inventory/EquipCompanionTask.java) 穿回 |
+| 没有现成危险时在哪里倒岩浆或点火、怎么做 | [SuicideHazards.selfMade / selfMadeCell](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideHazards.java) 选格；[SuicideTask.expose](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideTask.java) 守在危险里并在消失后重做；[SuicideSelfHazard.tick](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideSelfHazard.java) 选物品、低头对准脚下顶面并等待原生回执 |
 | 为什么自卫、吃饭和防摔没有抢走身体 | [IntentTask.suppressesSurvivalReflexes](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentTask.java) → [TaskSelector.select](../../common/src/main/java/org/maiwithu/maicraft/task/TaskSelector.java)；实际交接仍经过 [CompanionBrain.tick](../../common/src/main/java/org/maiwithu/maicraft/task/CompanionBrain.java) |
 | 随行补光是否仍会插灯 | [CompanionBrain.allowsAuxiliaryWork](../../common/src/main/java/org/maiwithu/maicraft/task/CompanionBrain.java) 与 [ClientRuntime](../../common/src/main/java/org/maiwithu/maicraft/client/runtime/ClientRuntime.java) 的帧末调用；[AutomaticLighting.tick](../../common/src/main/java/org/maiwithu/maicraft/core/task/lighting/AutomaticLighting.java) 可继续读取先前动作回执，但不借用寻死独占中的身体提交新灯位 |
 | 靠近以后究竟怎么寻死 | [SuicideTask.advance](../../common/src/main/java/org/maiwithu/maicraft/core/task/suicide/SuicideTask.java) 先用 [PlayerNav](../../common/src/main/java/org/maiwithu/maicraft/core/pathing/execute/PlayerNav.java) 步行接近，再用 [InputDriver](../../common/src/main/java/org/maiwithu/maicraft/entity/InputDriver.java) 转头、前进、必要时跳过靠怪途中的小障碍 |
@@ -42,7 +45,7 @@
 | `goal.parameters` 字段 | 类型、默认和范围 | 省略、`false`、零与 `null` |
 | --- | --- | --- |
 | `keep_inventory_confirmed` | JSON 布尔，默认 `false`。无集成服务端时，必须依据已知设置给 `true` 才能执行危险移动 | 多人服省略或 `false` 表示未确认，执行期失败；不修改规则。单人世界不以这个值否决或覆盖真实服务端规则：即使省略或填 `false`，服务端读到 `true` 仍可继续。`0`、字符串和 `null` 被专属解析器拒绝 |
-| `method` | 字符串 `auto`、`lava`、`hostile`、`fall`；默认 `auto` | 省略才选 `auto`；空串、其他拼写、数字、布尔和 `null` 均无效。指定一种方式后不回退到其他类型 |
+| `method` | 字符串 `auto`、`lava`、`hostile`、`fall`、`lava_bucket`、`fire`；默认 `auto` | 省略才选 `auto`；空串、其他拼写、数字、布尔和 `null` 均无效。`auto` 先在三类已观察危险中选，都用完才随身点火，最后倒岩浆桶；`lava` 只指已观察到的岩浆。指定一种方式后不回退到其他类型 |
 | `search_radius` | JSON 数字的整数值，单位为方块，默认 `24`，范围 `4..64`，含边界 | 省略使用默认值；`0` 不表示不限距离，`null`、字符串、非整数值及越界值均无效 |
 | `timeout_seconds` | JSON 数字的整数值，默认 `120`，范围 `10..600`，含边界；按每秒 20 个执行 tick 换算 | 省略使用默认值；`0` 不表示无限。`null`、字符串、非整数值及越界值均无效。规则等待、界面准备和扫描也消耗预算 |
 
@@ -125,11 +128,14 @@
 
 1. **取得调度资格。** `IntentTask` 的当前步骤是寻死且没有暂停、待答决定或终态时，调度器让它先于反射和同步动作成为候选。这个豁免在首次适配前就生效，避免吃饭等反射一直挡住明确请求；它不是写入全局“永远关闭自保”的配置。已有跳跃或交通动作的安全交接仍由 `CompanionBrain` 处理。
 2. **检查身体、计时和规则。** 执行器只接收原来的身体；先检查已观察的死亡，再累计执行 tick 并检查总预算与模式。集成服务端规则在服务端线程异步读取，以后约每 20 个执行 tick 刷新；首次读取未完成时等待，后续读取在途时仍可能使用上一次已确认值。多人服只读取调用方确认，不把客户端默认 `GameRules` 当作服务器证据。等待规则期间已取得的反射豁免仍存在。
-3. **准备界面。** 等已有菜单事务，尝试原生关页并等待返料；不通过直接清空槽位解决界面阻挡。普通聊天框可以保留，睡眠中的角色等待自然醒来。界面拒绝、返料未确认或总预算耗尽都会结束本次尝试。
-4. **勘查并选候选。** 地形扫描每个执行 tick 最多遍历 1024 个脚位，完成后保留候选表。`auto` 即使附近已有怪，也先完成这轮地形扫描；`hostile` 跳过地形扫描。每次重新选择时刷新威胁生物，按角色与候选接近点的距离取最近者，尚未证明路径可达，更没有估算哪一种死得最快。
-5. **步行接近。** 使用 `PlayerNav.walkingOnly()` 和保留地形的默认许可。地形入口要走到接近点约 0.6 格以内并落地；怪物在约 5 格以内且角色落地后转入直接移动。进入直接移动前会重查危险，并等普通导航能够安全交回控制。开始接近就把本轮身体标为已尝试寻死。
-6. **接触危险。** 进入岩浆后停留；靠怪时只走近，距离小于约 1.5 格后停下，不攻击、不举盾、不自动换掉护甲；遇小障碍可跳跃。高处则踏出边缘，开始下落后停止水平输入，不主动放水或展开鞘翅。原生爆炸、燃烧、摔伤和装备消耗仍由游戏或模组结算。
-7. **继续、换候选或结算。** 选中候选时开始一个 400 个执行 tick 的窗口，接近阶段也在其中；转入直接移动时重置，之后任何观察到的生命值下降都会续期。走得更近不会续期。窗口耗尽、导航失败、目标消失等情况会留下原因并放弃该入口或 UUID。坠落后仍活着也会另选候选。没有剩余候选或超过总预算则失败或超时；只在同一身体真实报告死亡时完成寻死步骤。
+3. **准备界面。** 等已有菜单事务，尝试原生关页并等待返料；不通过直接清空槽位解决界面阻挡。普通聊天框可以保留，睡眠中的角色等待自然醒来。
+4. **脱下护甲、收起图腾。** 从头到脚逐件交给原生背包界面快速移回主背包，每件等界面回执确认后再处理下一件；之后副手上的不死图腾同样移回背包，主手上的图腾切到空的快捷栏格（没有空格时移回主背包），等切换回执确认后才算完成。其他手持物品不动。没有空位、绑定诅咒或界面未确认而收不走的写进 `armor_still_worn` 或 `totems_still_held`，寻死照常继续；不丢弃任何物品。这一步同样消耗执行预算。界面拒绝、返料未确认或总预算耗尽都会结束本次尝试。
+5. **勘查并选候选。** 地形扫描每个执行 tick 最多遍历 1024 个脚位，完成后保留候选表。`auto` 即使附近已有怪，也先完成这轮地形扫描；`hostile`、`lava_bucket` 和 `fire` 跳过地形扫描。每次重新选择时刷新威胁生物，按角色与候选接近点的距离取最近者，尚未证明路径可达，更没有估算哪一种死得最快。`auto` 只有在已观察的三类候选全部不存在或已放弃时，才改选随身点火格，点火也用不上时最后才选倒岩浆格；`lava_bucket` 和 `fire` 直接选对应的格子。
+6. **步行接近。** 使用 `PlayerNav.walkingOnly()` 和保留地形的默认许可。地形入口要走到接近点约 0.6 格以内并落地；怪物在约 5 格以内且角色落地后转入直接移动。进入直接移动前会重查危险，并等普通导航能够安全交回控制。开始接近就把本轮身体标为已尝试寻死。
+7. **接触危险。** 点火和倒岩浆都先站到格内，停步低头对准脚下支撑面顶部。岩浆桶走一次原生用桶，等服务端承认这次使用后看到格里出现岩浆或岩浆桶少了一只才算倒成，之后站在岩浆里；岩浆被冲走且还带着岩浆桶时才再倒。点火用打火石（优先）或火焰弹右键一次，等服务端确认且真实出现火格；火还烧着时站着受伤，自然熄灭后原地再点。物品可在主背包、快捷栏或副手。进入岩浆后停留；靠怪时只走近，距离小于约 1.5 格后停下，不攻击、不举盾；遇小障碍可跳跃。高处则踏出边缘，开始下落后停止水平输入，不主动放水或展开鞘翅。原生爆炸、燃烧、摔伤和装备消耗仍由游戏或模组结算。
+8. **继续、换候选或结算。** 选中候选时开始一个 400 个执行 tick 的窗口，接近阶段也在其中；转入直接移动时重置，之后任何观察到的生命值下降都会续期。走得更近不会续期。窗口耗尽、导航失败、目标消失等情况会留下原因并放弃该入口或 UUID。坠落后仍活着也会另选候选。没有剩余候选或超过总预算则失败或超时；只在同一身体真实报告死亡时完成寻死步骤。
+
+`lava_bucket` 和 `fire` 都以身体当前位置为中心，在水平 8 格（不超过 `search_radius`）、上下 2 格内找最近的未放弃空气格：脚下顶面坚固，支撑方块不在使用保护范围内，并且安全范围内全部已加载、没有可燃方块或禁止改动的格子，避免把房子一起点着或淹掉。点火的安全范围是原生火的蔓延范围（水平各 1 格、向下 1 格、向上 4 格）；倒岩浆的安全范围按岩浆流动再加点燃距离估算，普通维度水平各 6 格、超热维度各 10 格，上下同为向下 1 格、向上 4 格，流进坑洞后的更远去向不在估算之内。身上没有对应物品就没有这类候选。已经提交的倒桶或点火若没有出效果，按原生拒绝或结果未知处理，本执行器之后不再换格反复尝试同一种方式。岩浆源倒出后永久留在原地，死亡后也不会收回；火格留给原版自然熄灭，`doFireTick` 关闭时可能一直保留。
 
 `lava` 需要有可站立的邻接点、无碰撞的进入空间，以及入口或下方的岩浆标签流体；流动岩浆也可匹配。`fall` 要在 64 格下探内看到碰撞落地面、估计落差至少 6 格，遇任意流体、未加载格或禁止进入的格子就排除该列。它不包含虚空跳跃，也不保证经过附魔、药效或模组结算后一定受伤。`hostile` 只从 `Mob` 中按 `Menace.threatens` 筛选，玩家不在这份选择集合中；“被选中”不保证那只生物实际攻击。
 
@@ -148,6 +154,9 @@
 | `death_observed` | 本轮已经开始尝试、同一身体报告死亡且尚未结束时置真；取消后的死亡不会补记成旧任务成功 |
 | `respawn_observed` | 寻死子回执固定为 `false`；只有后续重生事件提供重生事实，不回写成子任务已经确认了重生 |
 | `health_lost` | 规则和界面准备后观察到的生命值下降累计值，含最后致死下降；不归因于某次危险，不统计吸收生命或护甲耐久 |
+| `ignitions_confirmed`、`lava_pours_confirmed` | 本执行器提交点火或倒桶后确认生效的次数；不含未确认的操作，也不证明火或岩浆造成了致死伤害 |
+| `armor_removed`、`armor_still_worn` | 经原生背包回执确认移回背包的护甲，以及因没空位、绑定诅咒或界面未确认仍穿在身上的护甲和原因 |
+| `totems_stowed`、`totems_still_held` | 已离开主手或副手的不死图腾，以及仍拿在手上的图腾和原因；以回执之后手上的实际物品为准 |
 | `execution_ticks` | 本执行器获得推进机会的计数，超过 `timeout_seconds × 20` 时超时；不是现实墙钟时长 |
 | `attempts` | 新候选记录 `method` 与 `attempt`；放弃时该项替换为 `method` 与 `outcome`。成功项未单独补致死结论，须看整体死亡字段 |
 | `mechanical_retry_allowed` | 固定 `false`，不授权机械地重放危险动作；审阅新事实后仍可明确计划一份新任务 |
@@ -155,6 +164,10 @@
 `GameplayAttentionMonitor` 在普通任务 tick 前处理死亡，先结清寻死步骤，再保存检查点、记录死亡时背包并处理重生。`agent.died` 可见 `expected_death_completed`、自动重生请求与允许状态、检查点是否保存及死亡时库存。`agent.respawn_requested` 表示尝试请求；仍需等待 `agent.respawned` 的 `respawn_observed=true`，失败事件也可能报告请求结果未知。
 
 `agent.respawned` 比较的是**死亡观察时**与重生后的物品计数，提供 `inventory_missing_count`，不等价于与寻死任务开始前的装备完整性逐项比较。模组改变掉落、复活、伤害或重生点时，要据实际事件判断；本能力不把 `keepInventory=true` 冒称为全部物品与耐久无损。
+
+### 护甲穿回
+
+寻死以死亡、失败、超时或取消结束时，执行器把**本次确认脱下的护甲原件**登记给 `SuicideArmorRestore`；暂停不登记，恢复后接着同一次寻死。这条日常自动行为排在紧急自救和夜间休息之后，只在身体活着、死亡与重生交接已结清、原生操作空闲、没有打开其他界面、当前步骤不是寻死时接管。它按附魔、耐久等组件完全相同的原件逐件交给原生装备任务穿回原部位；部位已被别的装备占用就不替换，背包里另一件同种护甲也不会顶替。重生后背包内容包可能晚到，从可以穿回起最多等 200 个游戏刻，仍找不到原件就如实列为没有穿回。开始与结束各发一条 `agent.reflex`（`id=suicide_armor_restore`），结束事件带 `armor_restored` 与 `armor_not_restored`。图腾不放回手上。登记只保存在内存里，跨重生保留，断线、换世界或重启后作废。
 
 ## 暂停、取消、死亡与恢复
 
@@ -180,11 +193,11 @@
 这些是从当前源码对照得到的边界。本页没有改变它们；涉及行为的修正需要另行审阅授权。
 
 - **运行时布尔没有严格校验。** 四个专属参数会拒绝错误类型，但 `auto_respawn`、`recover_after_death` 的零、空值及部分字符串目前进入宽松读取。不要把两套解析行为写成一致。
-- **有限候选不等于区域可达性证明。** `choose` 先选最近的候选，路径随后才尝试；已扫描地形不刷新，同一入口的其他接近点也共用放弃键。失败文字 `No remaining reachable native hazard...` 只说明这一轮没有剩余可选候选，不能推导为周围所有危险均不可达。
+- **有限候选不等于区域可达性证明。** `choose` 先选最近的候选，路径随后才尝试；已扫描地形不刷新，同一入口的其他接近点也共用放弃键。失败文字 `No remaining reachable native hazard...` 只说明这一轮没有剩余可选候选，不能推导为周围所有危险均不可达；允许倒岩浆桶或点火时，后面会按方式逐一补充说明是没带对应物品、已被原生拒绝，还是附近没有安全格。
 - **范围与准备期存在差别。** 搜索半径不约束整个追逐路径；反射豁免也早于规则读取完成。未确认规则时没有提交寻死移动，不等于身体在准备阶段仍受到原先反射保护。
 - **界面异常的未知项没有完整透传。** `GuiPreparation.Failure` 有结构化证据与 `uncertain()`，但 `SuicideTask.tick` 当前只把异常类型和文字放进失败说明，没有把这份界面证据及未知标记加入寻死数据。不能从缺少未知字段推断原生关页或返料结果已知。
 - **死亡不是特定方式的因果验收。** 开始接近即设置本轮尝试标记，放弃候选或暂时让出身体不会清除它。后来的本人死亡可以完成仍有效的目标，但不能据 `method` 宣称岩浆、怪物或坠落就是实际死因。
-- **不保证一定死得了。** 只支持上述三类已观察机会，不含自造陷阱、溺水、虚空或主动攻击玩家；防火、护甲、图腾、模组伤害机制以及原生拒绝都可能使尝试存活或结束。
+- **不保证一定死得了。** 只支持上述三类已观察机会和随身倒岩浆、点火，不含其他自造陷阱、溺水、虚空或主动攻击玩家；防火、脱不下的护甲、收不走的不死图腾、饱和回血、下雨灭火、模组伤害机制以及原生拒绝都可能使尝试存活或结束。
 
 ## 现有验证入口与本轮检查范围
 
@@ -192,11 +205,12 @@
 
 | 已有入口 | 贡献者可以核对什么 |
 | --- | --- |
-| [SuicideHazardsTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/suicide/SuicideHazardsTest.java) | 专属参数拒绝、岩浆凝固、落地列积水、未加载列、已放弃候选 |
+| [SuicideHazardsTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/suicide/SuicideHazardsTest.java) | 专属参数拒绝、岩浆凝固、落地列积水、未加载列、已放弃候选；有岩浆时 `auto` 不先点火、无点火物不造候选、副手火焰弹、可燃方块旁换格、点火被拒后不再选格；`auto` 先点火、点火被拒才倒岩浆、岩浆流经范围有木板时不倒 |
+| [SuicideSelfHazardTest](../../common/src/test/java/org/maiwithu/maicraft/client/actor/SuicideSelfHazardTest.java) | 无现成危险时原地点火、火未灭不重复点、熄灭后重点、原生拒绝只点一次、缺点火物的失败说明；只带岩浆桶时倒一次后站在里面死亡结算、点火被拒只点一次后最后倒桶；背包满时护甲留在身上并记录、有空位时头盔与副手图腾经原生背包移回、主手图腾切走后再点火并登记头盔待穿回；按原件穿回头盔不被同种另一件顶替、部位已占用不替换、缺原件等满窗口后放弃 |
 | [SuicideTaskTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/suicide/SuicideTaskTest.java) | 规则未确认、创造与旁观模式、原生移动请求、暂停松键、取消、执行超时、实际掉血与存活坠落 |
 | [SuicideHostileTest](../../common/src/test/java/org/maiwithu/maicraft/client/actor/SuicideHostileTest.java) | 靠怪不攻击、自卫让位与恢复、实体编号复用时的 UUID 核对 |
 | [SuicideAbilityTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SuicideAbilityTest.java) | 注册与契约参数名、宿主暂停、缓存保护状态、单步与序列死亡结算、自动重生偏好 |
 | [SuicideRespawnTest](../../common/src/test/java/org/maiwithu/maicraft/intent/SuicideRespawnTest.java) | 调度槽、死亡观察、完成事实入检查点、一次原生重生请求及后续生命观察；使用受控夹具，不是实机验收 |
 | [TaskSlotFailureTest](../../common/src/test/java/org/maiwithu/maicraft/task/TaskSlotFailureTest.java) | 通用任务槽的预期死亡、保护恢复与只结算一次 |
 
-本轮仅对照源码、核对文档 JSON 与本地链接、检查注释以外的代码未改变。不新增或运行测试，不启动游戏或 Luna；上述模组环境、实际危险可达性、服务器规则变化及真实重生效果仍不能据本轮文档工作宣称已验收。
+随身点火、倒岩浆桶、寻死前卸甲收图腾和结束后穿回护甲新增了上述夹具场景，并运行 `:common:suicideRegression` 全部通过；夹具里的火格、岩浆、扣桶、背包页面和服务端确认由测试注入，没有启动游戏实机验收。真实伤害节奏、岩浆实际流向、下雨或防火药水下的表现、模组环境、服务器规则变化及真实重生效果仍不能据此宣称已验收。

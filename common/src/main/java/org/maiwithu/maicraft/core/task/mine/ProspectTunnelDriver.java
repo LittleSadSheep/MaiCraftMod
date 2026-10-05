@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.integration.ultimine.UltimineSession;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
+import org.maiwithu.maicraft.core.pathing.execute.TerrainBill;
 import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
 import org.maiwithu.maicraft.core.pathing.moves.MovementHelper;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
@@ -33,8 +34,14 @@ final class ProspectTunnelDriver implements AutoCloseable {
     private BlockPos destination;
     private String failure;
     private boolean uncertain;
+    /** 历段导航的原生地形账汇总：探矿中途收手时，垫块消耗凭它对账，不再无声消失。 */
+    private final TerrainBill terrainBill = new TerrainBill();
     private Map<String, Object> interrupted = Map.of();
     private int removed;
+
+    private void absorbBill(PlayerNav finished) {
+        if (finished != null) terrainBill.addAll(finished.ledger());
+    }
 
     ProspectTunnelDriver(LocalPlayer player, int targetY) {
         this.player = player; this.targetY = targetY; heading = player.getDirection(); probe = new BlockDigger(player);
@@ -54,8 +61,8 @@ final class ProspectTunnelDriver implements AutoCloseable {
         if (nav != null) {
             return switch (nav.tick()) {
                 case RUNNING -> true;
-                case ARRIVED -> { nav.stop(); nav = null; plan = null; yield true; }
-                case FAILED -> { failure = "tunnel_walk: " + nav.failReason(); nav.stop(); nav = null; yield false; }
+                case ARRIVED -> { absorbBill(nav); nav.stop(); nav = null; plan = null; yield true; }
+                case FAILED -> { absorbBill(nav); failure = "tunnel_walk: " + nav.failReason(); nav.stop(); nav = null; yield false; }
             };
         }
         BlockPos feet = PlayerNav.playerFeet(player);
@@ -110,16 +117,23 @@ final class ProspectTunnelDriver implements AutoCloseable {
     boolean yieldForMining() {
         // 先交接走路中尚未结清的原生动作，再允许矿工接管镜头和镐；回到通道时按新的脚位重建前沿。
         if (action != null || nav != null && !nav.yieldForExternalAction()) return false;
-        if (nav != null) { nav.stop(); nav = null; }
+        if (nav != null) { absorbBill(nav); nav.stop(); nav = null; }
         plan = null; return true;
     }
     List<Effect> drainEffects() { var result = List.copyOf(effects); effects.clear(); return result; }
     String failure() { return failure; }
     boolean uncertain() { return uncertain; }
     Map<String, Object> evidence() {
-        return Map.of("heading", heading.getName(), "target_y", targetY, "confirmed_excavation_blocks", removed,
-                "phase", action != null ? "clearing_passage" : nav != null ? "walking_open_passage" : "checking_passage",
-                "failure", failure == null ? "none" : failure, "interrupted_action", interrupted);
+        Map<String, Object> facts = new java.util.LinkedHashMap<>();
+        facts.put("heading", heading.getName());
+        facts.put("target_y", targetY);
+        facts.put("confirmed_excavation_blocks", removed);
+        facts.put("phase", action != null ? "clearing_passage" : nav != null ? "walking_open_passage" : "checking_passage");
+        facts.put("failure", failure == null ? "none" : failure);
+        facts.put("interrupted_action", interrupted);
+        // 中途收手的消耗对账：原生确认的垫块（与开挖）按方块种类与位置全量交付，供调用方清理与补给。
+        if (!terrainBill.isEmpty()) facts.put("terrain_bill", terrainBill.snapshot());
+        return java.util.Collections.unmodifiableMap(facts);
     }
     @Override public void close() {
         if (action != null) {
@@ -128,7 +142,7 @@ final class ProspectTunnelDriver implements AutoCloseable {
             action.close(); action = null;
             if (uncertain) failure = "native_tunnel_interrupted_with_unresolved_effects";
         }
-        if (nav != null) { nav.stop(); nav = null; }
+        if (nav != null) { absorbBill(nav); nav.stop(); nav = null; }
         plan = null;
     }
 }

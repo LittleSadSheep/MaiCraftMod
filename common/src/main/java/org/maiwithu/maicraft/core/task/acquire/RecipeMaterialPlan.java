@@ -147,8 +147,10 @@ public final class RecipeMaterialPlan {
                     if (blocked.contains(item) || unavailable.contains(item)) continue;
                     List<Recipe> choices = recipes.apply(item); Source source = sources.apply(item);
                     // 已知获取方式可在中间层切入；无配方边界只列为高成本未知需求，不宣称它是免费原料。
+                    // 补料行保留整个替代组，成本只按本次选中的最便宜成员计；同一标签槽位的其他成员
+                    //（如 #minecraft:coals 里的木炭）留在清单里，便宜的矿道路线失败后仍能切到它们。
                     if (source.known() || choices.isEmpty()) {
-                        State direct = new State(base); direct.supplies.add(new Need(List.of(item), deficit));
+                        State direct = new State(base); direct.supplies.add(new Need(need.alternatives(), deficit));
                         if (preferred.contains(item)) direct.preferredUsed.add(item);
                         direct.cost = Math.min(UNREACHABLE, direct.cost + (long) deficit * source.unitCost());
                         candidates.add(direct);

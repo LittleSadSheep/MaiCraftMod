@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.pathing.util.NavProfiler;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.scan.BlockSearch;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
+import org.maiwithu.maicraft.core.task.suicide.SuicideArmorRestore;
 import org.maiwithu.maicraft.mcp.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.McpConfig;
 import org.maiwithu.maicraft.mcp.RuntimeFacade;
@@ -335,6 +336,8 @@ public final class ClientRuntime {
                 && Minecraft.getInstance().getConnection() != null
                 && Minecraft.getInstance().getConnection().getConnection().isConnected();
         GameplayAttentionMonitor.reset(preserveDeathRecovery);
+        // 重生换身体时保留寻死前脱下的护甲登记以便穿回；断线或换世界后作废，不在别的存档里自动穿装备。
+        if (!preserveDeathRecovery) SuicideArmorRestore.reset();
         bodyPresent = false;
     }
 

@@ -53,8 +53,15 @@ public final class ChatTask implements Task {
     @Override public TaskResult result(TaskState terminal) {
         session.cancel("The chat task ended before submission.");
         boolean success = terminal == TaskState.SUCCESS && session.status() == ChatSession.Status.SUBMITTED;
-        return new TaskResult(success, session.detail(), terminal == TaskState.TIMEOUT,
-                terminal == TaskState.CANCELLED, session.evidence());
+        // 命令尚未发出就被取消：回执必须显式区分这一形态，调用方不能把“没发出去”当成“已执行后被叫停”。
+        boolean cancelledBeforeSubmit = terminal == TaskState.CANCELLED
+                && session.status() == ChatSession.Status.CANCELLED && !session.submissionAttempted();
+        String message = cancelledBeforeSubmit
+                ? session.detail() + " The command was NOT submitted to the server."
+                : session.detail();
+        return new TaskResult(success, message, terminal == TaskState.TIMEOUT,
+                terminal == TaskState.CANCELLED, session.evidence(),
+                cancelledBeforeSubmit ? "cancelled_before_submit" : null);
     }
 
     @Override public String name() { return "chat"; }

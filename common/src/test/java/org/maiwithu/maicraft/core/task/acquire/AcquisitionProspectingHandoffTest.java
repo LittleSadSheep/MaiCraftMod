@@ -30,13 +30,16 @@ public final class AcquisitionProspectingHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         authorizedDescendsToBand();
+        blockIdItemDescendsToBand();
         declinedWithoutAuthorization();
         unknownBandDeclinesProspecting();
         descendSuccessStartsProspectMine();
+        outsideBandUsesRecommendedLayer();
+        uphillBandRefused();
         System.out.println("AcquisitionProspectingHandoffTest: passed");
     }
 
-    /** 授权开 + 表内物品：公平空手后下一张子任务单是下降，目标 Y = 生成带推荐值。 */
+    /** 授权开 + 表内物品：公平空手后下一张子任务单是探矿采矿；当前位置已在其生成带内时取就地带（夹具地面 y=1 在钻石带 [-64,16] 内）。 */
     private static void authorizedDescendsToBand() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
@@ -47,12 +50,12 @@ public final class AcquisitionProspectingHandoffTest {
             check(active instanceof MineBlockTaskRecord,
                     "公平空手 + 授权开 → 统一探矿任务负责下降与到层后的水平通道，实际: " + active);
             if (active instanceof MineBlockTaskRecord mine) {
-                check(mine.prospecting() && mine.prospectY() == -59,
-                        "通道目标层必须取生成带推荐值 -59");
-                check(mine.searchCenter() == null, "下降不能被旧地表扫描中心限制");
+                check(mine.prospecting() && mine.prospectY() == 1,
+                        "y=1 已在钻石带内：就地带探矿，prospectY 取当前位置而非推荐值 -59");
+                check(mine.searchCenter() == null, "探矿不能被旧地表扫描中心限制");
             }
             Object need = get(task, "rootNeed");
-            check(intField(need, "prospectingY") == -59, "需求侧记住探矿目标层");
+            check(intField(need, "prospectingY") == 1, "需求侧记住探矿目标层");
         }
     }
 
@@ -69,6 +72,26 @@ public final class AcquisitionProspectingHandoffTest {
             check(state == TaskState.FAILED, "唯一来源耗尽后任务终态失败");
             check("mined_out".equals(task.result(TaskState.FAILED).data().get("failure_type")),
                     "终态保真为 MINED_OUT，不因探矿缺席改变口径");
+        }
+    }
+
+    /**
+     * 矿方块 ID 同样表达探矿意图：item_ids=["minecraft:iron_ore"] 曾因只查产物表 key
+     * 被如实拒为 prospecting_band_unknown，现按目标方块族反查到铁带并照常派下降。
+     */
+    private static void blockIdItemDescendsToBand() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
+            var task = task(h, List.of("minecraft:iron_ore"), true);
+            startStubMine(task, "mined_out");
+            tickActiveChild(task);
+            var active = activeRecord(task);
+            check(active instanceof MineBlockTaskRecord,
+                    "矿方块 ID + 授权开 → 照常派出统一探矿任务，实际: " + active);
+            if (active instanceof MineBlockTaskRecord mine) {
+                check(mine.prospecting() && mine.prospectY() == 1,
+                        "y=1 在铁带内：探矿腿目标层取就地带，不得回退为 band_unknown 拒绝");
+            }
         }
     }
 
@@ -104,6 +127,36 @@ public final class AcquisitionProspectingHandoffTest {
     }
 
     // ---- 夹具：语义取物任务 + 手工派发 stub 子任务，驱动完成处理而不动真实世界 ----
+
+    /** 当前位置在带外且推荐层在下方：目标层取生成带推荐值（109 之前的既有语义保留）。 */
+    private static void outsideBandUsesRecommendedLayer() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
+            // 夹具方块只有 y0..15；y=40 在其上为空气，仅用于决策，不驱动真实挖掘。
+            h.position(new net.minecraft.world.phys.Vec3(.5, 40, 3.5));
+            var task = task(h, List.of("minecraft:diamond"), true);
+            startStubMine(task, "mined_out");
+            tickActiveChild(task);
+            var active = activeRecord(task);
+            check(active instanceof MineBlockTaskRecord mine
+                            && mine.prospecting() && mine.prospectY() == -59,
+                    "y=40 在钻石带 [-64,16] 外且推荐层在下方：prospectY 取推荐值 -59，实际: " + active);
+        }
+    }
+
+    /** 当前位置在带外且推荐层在上方：拒绝向上重定位（露天空中垫柱），不派探矿子任务。 */
+    private static void uphillBandRefused() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.IRON_PICKAXE));
+            h.position(new net.minecraft.world.phys.Vec3(.5, -10, 3.5));
+            var task = task(h, List.of("minecraft:coal"), true);
+            startStubMine(task, "mined_out");
+            tickActiveChild(task);
+            check(!(activeRecord(task) instanceof MineBlockTaskRecord),
+                    "y=-10 在煤带外且推荐层 96 在上方：拒绝向上重定位，不派探矿子任务，实际: "
+                            + activeRecord(task));
+        }
+    }
 
     private static SemanticAcquireCompanionTask task(InteractionWorldTestHarness h,
                                                      List<String> itemIds, boolean allowProspecting) {

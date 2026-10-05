@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.locate;
 
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.scan.LoadedBlockScan;
 import org.maiwithu.maicraft.core.scan.ObservationVisibility;
+import org.maiwithu.maicraft.core.scan.RecentBlockWrites;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import org.maiwithu.maicraft.core.task.dimension.PortalLavaPoolSurvey;
@@ -25,12 +27,15 @@ import org.maiwithu.maicraft.task.ProgressBudget;
 
 /**
  * 只读扫描已加载区块中的目标方块；不移动身体也不改变世界。
- * 段内游标跨刻续进；卸载的区块被跳过，因此"查过没有"不等于"世界里没有"。
+ * 开扫先核查最近同步的方块变化位置，再沿段游标推进；段内游标跨刻续进，
+ * 已检查格不复查，卸载的区块被跳过，因此"查过没有"不等于"世界里没有"。
  */
 public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTask<SemanticBlockSearchTaskRecord> {
     /** 视线核查也纳入每刻时间片；密集石层分刻查完，不用固定候选数量截掉未检查的事实。 */
     private static final int SCAN_WORK_PER_TICK = 4096;
     private static final long SCAN_NANOS_PER_TICK = 2_000_000L;
+    /** 每刻最多核查这么多个最近写入位置；常规扫描一格的成本远低于此，不触碰每刻预算。 */
+    private static final int FRESH_WRITES_PER_TICK = 8;
     /** 扫描仍在推进时按此时间片为任务续期。 */
     private static final int PROGRESS_LEASE_TICKS = 200;
     /**
@@ -50,6 +55,8 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     private String failureCode;
     private ClientLevel scannedLevel;
     private LoadedBlockScan scan;
+    /** 开扫瞬间的最近写入快照；常规游标按格序推进，刚落格的事实必须先于 count 收束被核查。 */
+    private Iterator<BlockPos> freshWrites;
     private PortalLavaPoolSurvey lavaPools;
     private final ProgressBudget scanBudget;
     /** 全部可见位置供连通池分析；默认回执只公开最近匹配位置及完整池面预算。 */
@@ -65,6 +72,7 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         origin = player.blockPosition().immutable();
         scannedLevel = player.clientLevel;
         scan = new LoadedBlockScan(scannedLevel, origin, r.blockTargets, r.maxDistance);
+        freshWrites = RecentBlockWrites.recent(scannedLevel).iterator();
         // 查找岩浆时一并调查可见池面，不能把默认 count=1 命中的孤立源格当成足够浇筑的整池。
         // 只为腾桶找一个静源时直接交付源格；真正查施工池才需要完成整池几何和余量分析。
         if (r.blockTargets.contains(Blocks.LAVA) && (!r.sourceFluidsOnly || r.purpose == Purpose.PORTAL_CASTING))
@@ -75,6 +83,12 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
     protected TaskState onTick() {
         if (player.clientLevel != scannedLevel)
             return failSearch("find_block_world_changed", "the observed world changed before the scan completed", FailureType.INTERRUPTED);
+        // 最近写入的位置先核查：常规游标单调推进且 count 满足即收束，刚落格的方块可能排在
+        // 已检查过的旧命中之后而整轮不被看到；每刻限额核查不触碰扫描预算。
+        for (int checked = 0; checked < FRESH_WRITES_PER_TICK && freshWrites.hasNext(); checked++) {
+            observe(freshWrites.next());
+            if (lavaPools == null && observed.size() >= r.count) break;
+        }
         // 沿原游标检查当前高度附近到其他高度的已加载区块柱；直接眼位射线通过后才算观察到，隐藏候选不触发重新全扫。
         // 普通查块达到数量就可以收场，最近位置只代表已经检查过的命中；含岩浆时继续扫完整个范围供池面分析。
         scan.advance(SCAN_WORK_PER_TICK, SCAN_NANOS_PER_TICK, pos -> {
@@ -192,6 +206,10 @@ public final class SemanticBlockSearchCompanionTask extends AbstractCompanionTas
         data.put("verified", matchesRequested());
         data.put("scope", "visible_loaded_client_blocks");
         data.put("visibility_required", true);
+        // 刚同步的方块变化可能不在本轮证据里；写后读的裁决只能靠格级状态，不能靠这里的缺席。
+        data.put("write_visibility_note", "block changes synced shortly before this query may still be absent from"
+                + " the observed evidence even with the recent-write pre-check; verify a just-placed or just-broken"
+                + " cell by its cell-level state, not by its absence here");
         data.put("max_distance", r.maxDistance);
         data.put("search_geometry", "horizontal_radius_across_loaded_sections");
         data.put("distance_metric", "euclidean_3d");

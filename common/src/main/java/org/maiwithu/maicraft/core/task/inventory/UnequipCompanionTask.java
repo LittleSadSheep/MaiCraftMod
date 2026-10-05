@@ -28,6 +28,8 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
     private final List<String> removed = new ArrayList<>();
     private final List<String> kept = new ArrayList<>();
     private int index;
+    // 主手正在切往的空快捷栏格；切换回执确认前保持这一项未完成。
+    private int selectingHotbar = -1;
     private MenuReceipt receipt;
     private EquipmentSlot pendingSlot;
     private ItemStack pendingPiece = ItemStack.EMPTY;
@@ -50,6 +52,9 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
             removed.add(itemName(pendingPiece) + " (" + pendingSlot.getName() + ")");
             index++; pendingSlot = null; pendingPiece = ItemStack.EMPTY;
         }
+        // 客户端切到空快捷栏后会立刻显示空手，但切换回执仍可能未确认；先等它结清，不能凭空手提前收尾，
+        // 否则下一项原生操作会撞上这次未确认的切换。
+        if (selectingHotbar >= 0) return finishHotbarSelection();
         while (index < r.slots.size() && player.getItemBySlot(r.slots.get(index)).isEmpty()) index++;
         // 当前遍历完部位就返回成功；若全部因空间不足而留下，文字仍会说已经为空，调用方必须核对 still_worn。
         if (index >= r.slots.size()) {
@@ -85,14 +90,8 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
         Inventory inv = player.getInventory();
         for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
             if (!inv.getItem(slot).isEmpty()) continue;
-            FirstPersonActionGate.Status status = selection.select(player, slot);
-            if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
-            if (status == FirstPersonActionGate.Status.FAILED) {
-                fail(selection.failure(), FailureType.UNKNOWN); return TaskState.FAILED;
-            }
-            removed.add("main hand freed (selected empty hotbar slot)");
-            index++; selection.reset(); pendingSlot = null; pendingPiece = ItemStack.EMPTY;
-            return TaskState.RUNNING;
+            selectingHotbar = slot;
+            return finishHotbarSelection();
         }
         if (inv.getFreeSlot() < 0) {
             kept.add(itemName(pendingPiece) + " (mainhand)"); index++; return TaskState.RUNNING;
@@ -104,6 +103,18 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
                 (c, ignored) -> c.player().getMainHandItem().isEmpty()
                         ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
                 20);
+        return TaskState.RUNNING;
+    }
+
+    // 推进同一次快捷栏切换直到原生回执确认，再把主手记为已腾空并处理下一项。
+    private TaskState finishHotbarSelection() {
+        FirstPersonActionGate.Status status = selection.select(player, selectingHotbar);
+        if (status == FirstPersonActionGate.Status.RUNNING) return TaskState.RUNNING;
+        if (status == FirstPersonActionGate.Status.FAILED) {
+            fail(selection.failure(), FailureType.UNKNOWN); return TaskState.FAILED;
+        }
+        removed.add("main hand freed (selected empty hotbar slot)");
+        index++; selection.reset(); selectingHotbar = -1; pendingSlot = null; pendingPiece = ItemStack.EMPTY;
         return TaskState.RUNNING;
     }
 
@@ -122,6 +133,7 @@ public final class UnequipCompanionTask extends AbstractCompanionTask<UnequipTas
         menuSession.cleanup(player);
         receipt = null;
         selection.reset();
+        selectingHotbar = -1;
     }
     /** 面板行动行的一句话汇报；物品名取当前正处理的装备实物的本地化名称。 */
     @Override public String describeCurrentAction() {

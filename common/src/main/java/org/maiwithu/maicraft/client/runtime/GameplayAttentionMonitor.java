@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.intent.Goal;
+import org.maiwithu.maicraft.client.actor.EquipmentReceipts;
 import org.maiwithu.maicraft.client.chat.ChatMonitor;
 
 /**
@@ -67,6 +68,8 @@ public final class GameplayAttentionMonitor {
     public static void tick(LocalPlayer player) {
         // 先复核常驻提醒：死亡或换身体立即清空，活着时更新补光后和离开现场后的真实状态。
         GameplayReminders.tick(player);
+        // 装备观察账目逐刻扫描：本玩家的装备同步包从不发给自己，打空事件的发布依据是这份基准（057）。
+        EquipmentReceipts.observe(player);
         // 重生报告等内容包同步或窗口到期后再发布；世界切换等边界会在 reset 里作废。
         if (pendingRespawnFacts != null) resolveRespawnReport(player);
         ClientLevel level = player.clientLevel;

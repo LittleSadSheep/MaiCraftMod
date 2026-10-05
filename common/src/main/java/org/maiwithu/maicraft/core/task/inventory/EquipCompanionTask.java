@@ -133,8 +133,10 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
     }
 
     private int findItem(Inventory inv) {
+        // 任务单指定原件时只认组件完全相同的那一件，避免把同种但不同附魔或耐久的另一件穿上去。
         for (int i = 0; i < Math.min(36, inv.getContainerSize()); i++) {
-            if (!inv.getItem(i).isEmpty() && inv.getItem(i).is(r.item)) return i;
+            var stack = inv.getItem(i);
+            if (!stack.isEmpty() && (r.exact == null ? stack.is(r.item) : ItemStack.isSameItemSameComponents(stack, r.exact))) return i;
         }
         return -1;
     }

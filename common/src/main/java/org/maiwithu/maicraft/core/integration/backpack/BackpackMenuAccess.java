@@ -10,9 +10,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.IntPredicate;
+import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
@@ -82,6 +84,21 @@ public final class BackpackMenuAccess {
                     && component.value() instanceof UUID uuid) return "sophisticated_backpack:" + uuid;
         }
         return null;
+    }
+    /** 本菜单由服务端开包时指定的随身地址；读不到或不是顶层随身包时返回 null，由调用方按无法核对处理。 */
+    public static BackpackCarriers.Carrier openedAddress(AbstractContainerMenu menu) {
+        try { return itemAddress(call(menu, "getBackpackContext")); }
+        catch (ReflectiveOperationException | RuntimeException unavailable) { return null; }
+    }
+    static BackpackCarriers.Carrier itemAddress(Object context) throws ReflectiveOperationException {
+        // 客户端正是按 handler、identifier、槽号、来源标记这一编码还原服务端开的是哪一格；
+        // 这里重新编码后按同序读回地址，不读模组私有字段，也不碰会被界面改写的物品组件。
+        if (!"ITEM_BACKPACK".equals(String.valueOf(call(context, "getType")))) return null;
+        var buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            context.getClass().getMethod("addToBuffer", FriendlyByteBuf.class).invoke(context, buffer);
+            return new BackpackCarriers.Carrier(buffer.readUtf(), buffer.readUtf(), buffer.readInt());
+        } finally { buffer.release(); }
     }
     private static String transientIdentity(AbstractContainerMenu menu) {
         return "backpack_menu:" + menu.containerId + ":" + Integer.toUnsignedString(System.identityHashCode(menu));

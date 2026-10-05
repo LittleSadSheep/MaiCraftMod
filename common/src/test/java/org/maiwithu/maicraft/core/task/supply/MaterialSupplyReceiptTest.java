@@ -6,8 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 import net.minecraft.SharedConstants;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.Gson;
@@ -24,66 +26,105 @@ import org.maiwithu.maicraft.client.preview.PreviewSession.Decision;
 public final class MaterialSupplyReceiptTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        var coordinator = new SemanticMaterialSupplyCoordinator();
-        set(coordinator, "demand", new SemanticMaterialSupplyCoordinator.Demand(
-                List.of(ResourceLocation.parse("minecraft:iron_ingot")), 4, "production input"));
-        set(coordinator, "materialPolicy", SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE);
-        var nativeReceipt = Map.of("request_id", "settled-native-request", "operation", "inventory.ae2_supply",
-                "amount", 1, "backend", "server", "confirmed", true, "resource_id", "items:iron#exact",
-                "server_tick", 10, "player_slot", 7);
-        var source = Map.of("terminal_access", "server_fixed_terminal", "server_supply_receipts", List.of(nativeReceipt),
-                "server_supply_receipt_count", 1, "server_supply_transferred", 1,
-                "server_supply_receipts_truncated", false, "unrelated_payload", "must not propagate");
-        var attempts = List.of(Map.of("source", "storage", "child_data", source),
-                Map.of("source", "wireless", "child_data", source),
-                Map.of("source", "inventory", "child_data", source));
-        var method = SemanticMaterialSupplyCoordinator.class.getDeclaredMethod(
-                "receipt", TaskResult.class, TaskState.class, int.class, boolean.class);
-        method.setAccessible(true);
-        var handoff = Map.of("missing_materials", List.of(Map.of("item_id", "create:polished_rose_quartz", "count", 15)),
-                "knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
-        // 无线查货失败也可能结束施工供料，不能只保留普通缺料数量而丢掉连接是否读到的事实。
-        var stockEvidence = Map.of("last_query", Map.of("status", "failed"), "need_checks", List.of());
-        var capacity = Map.of("empty_main_slots", 0, "missing", 3);
-        var failed = (Map<?, ?>) method.invoke(coordinator,
-                TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff,
-                        "wireless_stock_evidence", stockEvidence,
-                        "inventory_capacity", capacity,
-                        "body_preparation_required", true, "food_preparation", Map.of("food", 10, "health", 7))), TaskState.FAILED, 1, false);
-        check(stockEvidence.equals(failed.get("wireless_stock_evidence")), "supply keeps query failure distinct from empty stock");
-        check(capacity.equals(failed.get("inventory_capacity")), "supply keeps the carried inventory capacity prerequisite");
-        check(handoff.equals(failed.get("planning_handoff")), "supply keeps the material process handoff");
-        check(Boolean.TRUE.equals(failed.get("body_preparation_required")), "supply also preserves the body's independent prerequisite");
-        constructionKeepsMaterialHandoff(failed, handoff);
-        var preserved = (List<?>) failed.get("storage_attempts");
-        check(Boolean.FALSE.equals(failed.get("goal_satisfied")) && preserved.size() == 2,
-                "partial confirmed source effects survive failure without inventing goal success or inventory extraction");
-        // 同样的原生到货事实从随身无线终端取得时也要保留；背包清点不能冒充一次网络提取。
-        check("wireless".equals(((Map<?, ?>) preserved.get(1)).get("source")), "wireless source retains confirmed transfers");
-        var first = (Map<?, ?>) preserved.getFirst();
-        check(first.get("server_supply_transferred").equals(1) && !first.containsKey("unrelated_payload")
-                        && !first.containsKey("server_supply_receipts"),
-                "the parent exposes completed transfer facts rather than internal slot receipts");
-        publicEvidenceSurvives(failed);
-        acquisitionHistorySurvives(coordinator, method);
-        // 七十只箱子的完整观察必须越过协调器和公开序列化，不能只留下最后八条尝试摘要。
-        var visits = IntStream.range(0, 70).mapToObj(i -> Map.of("source", "storage", "child_tool", "manage_container",
-                "child_data", Map.of("container_observation", Map.of("coordinates", List.of(i, 64, 0)),
-                        "container_memory", Map.of("container_memory_id", "box-" + i, "last_observed_items", Map.of("minecraft:iron_ingot", i)),
-                        "outcome_uncertain", false, "moved_count", i))).toList();
-        var full = (Map<?, ?>) method.invoke(coordinator, TaskResult.ok("investigated", Map.of("attempts", visits)), TaskState.SUCCESS, 4, true);
-        var visibleVisits = publicReceipt(full).getAsJsonObject().getAsJsonArray("container_investigations");
-        check(visibleVisits.size() == 70 && visibleVisits.get(69).getAsJsonObject().getAsJsonObject("container_result")
-                .getAsJsonObject("container_memory").getAsJsonObject("last_observed_items").get("minecraft:iron_ingot").getAsInt() == 69,
-                "complete container observations survive the supply wrapper and public serialization");
-        var ordinary = (Map<?, ?>) method.invoke(coordinator,
-                TaskResult.ok("carried", Map.of()), TaskState.SUCCESS, 4, true);
-        check(!ordinary.containsKey("storage_attempts"), "carried materials cannot fabricate an AE server receipt");
-        System.out.println("MaterialSupplyReceiptTest: passed");
+        try (var h = new InteractionWorldTestHarness()) {
+            var coordinator = new SemanticMaterialSupplyCoordinator();
+            set(coordinator, "demand", new SemanticMaterialSupplyCoordinator.Demand(
+                    List.of(ResourceLocation.parse("minecraft:iron_ingot")), 4, "production input"));
+            set(coordinator, "materialPolicy", SemanticMaterialSupplyCoordinator.MaterialPolicy.STORAGE_AVAILABLE);
+            var nativeReceipt = Map.of("request_id", "settled-native-request", "operation", "inventory.ae2_supply",
+                    "amount", 1, "backend", "server", "confirmed", true, "resource_id", "items:iron#exact",
+                    "server_tick", 10, "player_slot", 7);
+            var source = Map.of("terminal_access", "server_fixed_terminal", "server_supply_receipts", List.of(nativeReceipt),
+                    "server_supply_receipt_count", 1, "server_supply_transferred", 1,
+                    "server_supply_receipts_truncated", false, "unrelated_payload", "must not propagate");
+            var attempts = List.of(Map.of("source", "storage", "child_data", source),
+                    Map.of("source", "wireless", "child_data", source),
+                    Map.of("source", "inventory", "child_data", source));
+            var method = SemanticMaterialSupplyCoordinator.class.getDeclaredMethod(
+                    "receipt", LocalPlayer.class, TaskResult.class, TaskState.class, int.class, boolean.class);
+            method.setAccessible(true);
+            var handoff = Map.of("missing_materials", List.of(Map.of("item_id", "create:polished_rose_quartz", "count", 15)),
+                    "knowledge_uris", List.of("maicraft://knowledge/recipes/create/polished_rose_quartz"));
+            // 无线查货失败也可能结束施工供料，不能只保留普通缺料数量而丢掉连接是否读到的事实。
+            var stockEvidence = Map.of("last_query", Map.of("status", "failed"), "need_checks", List.of());
+            var capacity = Map.of("empty_main_slots", 0, "missing", 3);
+            var failed = (Map<?, ?>) method.invoke(coordinator, h.player,
+                    TaskResult.fail("later shortage", Map.of("attempts", attempts, "planning_handoff", handoff,
+                            "wireless_stock_evidence", stockEvidence,
+                            "inventory_capacity", capacity,
+                            "body_preparation_required", true, "food_preparation", Map.of("food", 10, "health", 7))), TaskState.FAILED, 1, false);
+            check(stockEvidence.equals(failed.get("wireless_stock_evidence")), "supply keeps query failure distinct from empty stock");
+            check(capacity.equals(failed.get("inventory_capacity")), "supply keeps the carried inventory capacity prerequisite");
+            check(handoff.equals(failed.get("planning_handoff")), "supply keeps the material process handoff");
+            check(Boolean.TRUE.equals(failed.get("body_preparation_required")), "supply also preserves the body's independent prerequisite");
+            constructionKeepsMaterialHandoff(failed, handoff);
+            var preserved = (List<?>) failed.get("storage_attempts");
+            check(Boolean.FALSE.equals(failed.get("goal_satisfied")) && preserved.size() == 2,
+                    "partial confirmed source effects survive failure without inventing goal success or inventory extraction");
+            // 同样的原生到货事实从随身无线终端取得时也要保留；背包清点不能冒充一次网络提取。
+            check("wireless".equals(((Map<?, ?>) preserved.get(1)).get("source")), "wireless source retains confirmed transfers");
+            var first = (Map<?, ?>) preserved.getFirst();
+            check(first.get("server_supply_transferred").equals(1) && !first.containsKey("unrelated_payload")
+                            && !first.containsKey("server_supply_receipts"),
+                    "the parent exposes completed transfer facts rather than internal slot receipts");
+            publicEvidenceSurvives(failed);
+            offhandHoldingSurvives(coordinator, method, h.player);
+            acquisitionHistorySurvives(coordinator, method, h.player);
+            // 七十只箱子的完整观察必须越过协调器和公开序列化，不能只留下最后八条尝试摘要。
+            var visits = IntStream.range(0, 70).mapToObj(i -> Map.of("source", "storage", "child_tool", "manage_container",
+                    "child_data", Map.of("container_observation", Map.of("coordinates", List.of(i, 64, 0)),
+                            "container_memory", Map.of("container_memory_id", "box-" + i, "last_observed_items", Map.of("minecraft:iron_ingot", i)),
+                            "outcome_uncertain", false, "moved_count", i))).toList();
+            var full = (Map<?, ?>) method.invoke(coordinator, h.player, TaskResult.ok("investigated", Map.of("attempts", visits)), TaskState.SUCCESS, 4, true);
+            var visibleVisits = publicReceipt(full).getAsJsonObject().getAsJsonArray("container_investigations");
+            check(visibleVisits.size() == 70 && visibleVisits.get(69).getAsJsonObject().getAsJsonObject("container_result")
+                    .getAsJsonObject("container_memory").getAsJsonObject("last_observed_items").get("minecraft:iron_ingot").getAsInt() == 69,
+                    "complete container observations survive the supply wrapper and public serialization");
+            var ordinary = (Map<?, ?>) method.invoke(coordinator, h.player,
+                    TaskResult.ok("carried", Map.of()), TaskState.SUCCESS, 4, true);
+            check(!ordinary.containsKey("storage_attempts"), "carried materials cannot fabricate an AE server receipt");
+            System.out.println("MaterialSupplyReceiptTest: passed");
+        }
+    }
+
+    /** 材料不足而副手握着目标物品时，回执明示持有量并前置零成本换手建议；账面仍只数 36 主格。 */
+    private static void offhandHoldingSurvives(SemanticMaterialSupplyCoordinator coordinator,
+            Method method, LocalPlayer player) throws Exception {
+        var torchDemand = new SemanticMaterialSupplyCoordinator.Demand(
+                List.of(ResourceLocation.parse("minecraft:torch")), 4, "camp lighting");
+        player.getInventory().offhand.set(0, new ItemStack(Items.TORCH, 48));
+        set(coordinator, "demand", torchDemand);
+        try {
+            var shortage = (Map<?, ?>) method.invoke(coordinator, player,
+                    TaskResult.fail("no source", Map.of()), TaskState.FAILED, 0, false);
+            var holding = (List<?>) shortage.get("offhand_holding");
+            check(holding != null && holding.size() == 1, "a matching offhand stack must be declared in the failed receipt");
+            check("minecraft:torch".equals(((Map<?, ?>) holding.getFirst()).get("item_id"))
+                            && ((Map<?, ?>) holding.getFirst()).get("count").equals(48),
+                    "the offhand declaration carries the exact item id and count");
+            var options = (List<?>) shortage.get("recovery_options");
+            check(options != null && "swap_offhand_to_mainhand".equals(((Map<?, ?>) options.getFirst()).get("id")),
+                    "the zero-cost swap suggestion is offered before any acquisition route");
+            check(shortage.get("observed_final_count").equals(0),
+                    "the offhand stack stays out of the main-slot ledger so estimates and real draws share one scope");
+            // 副手物品不在需求清单内时不声明。
+            set(coordinator, "demand", new SemanticMaterialSupplyCoordinator.Demand(
+                    List.of(ResourceLocation.parse("minecraft:iron_ingot")), 4, "production input"));
+            var unrelated = (Map<?, ?>) method.invoke(coordinator, player,
+                    TaskResult.fail("no source", Map.of()), TaskState.FAILED, 2, false);
+            check(!unrelated.containsKey("offhand_holding"),
+                    "an offhand stack outside the demand list is not declared");
+        } finally {
+            player.getInventory().offhand.set(0, ItemStack.EMPTY);
+        }
+        var offhandEmpty = (Map<?, ?>) method.invoke(coordinator, player,
+                TaskResult.fail("no source", Map.of()), TaskState.FAILED, 0, false);
+        check(!offhandEmpty.containsKey("offhand_holding"),
+                "an empty offhand adds no holding declaration");
     }
 
     private static void acquisitionHistorySurvives(SemanticMaterialSupplyCoordinator coordinator,
-            Method method) throws Exception {
+            Method method, LocalPlayer player) throws Exception {
         // 重放宽木板配方失败：父任务要看到真实选择与未搜完的事实，不能只剩一个看似唯一的缺料名称。
         var alternatives = IntStream.range(0, 24).mapToObj(i -> "example:plank_" + i).toList();
         var attempts = IntStream.range(0, 12).mapToObj(i -> Map.of("source", "wireless", "detail", "attempt-" + i,
@@ -94,7 +135,7 @@ public final class MaterialSupplyReceiptTest {
                 "missing_item_ids", alternatives, "missing_count", 8,
                 "preparation_plan", Map.of("feasible", true, "search_complete", false, "estimated_cost", 17,
                         "craft_chain", List.of("internal full preparation")));
-        var receipt = (Map<?, ?>) method.invoke(coordinator, TaskResult.fail("later shortage",
+        var receipt = (Map<?, ?>) method.invoke(coordinator, player, TaskResult.fail("later shortage",
                 Map.of("attempts", attempts, "recipe_trace", List.of(trace))), TaskState.FAILED, 2, false);
         var reported = (List<?>) receipt.get("attempts");
         check(reported.size() == 8 && receipt.get("attempts_reported_count").equals(12)

@@ -68,6 +68,11 @@ public record TaskResult(boolean success,
         return new TaskResult(success, message, timedOut, interrupted, data, cancelSource);
     }
 
+    /** 替换取消来源；只在子任务带回更具体来源（如命令未发出即取消）时由结果组装方调用。 */
+    public TaskResult withCancelSource(String cancelSource) {
+        return new TaskResult(success, message, timedOut, interrupted, data, cancelSource);
+    }
+
     /** 转成工具回复使用的 JSON 文本；未发生超时或取消时省略对应字段，没有附加结果时省略 data。 */
     public String toJson() {
         JsonObject root = new JsonObject();

@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import org.maiwithu.maicraft.core.task.structure.StructureEvidenceProfiles;
 import org.maiwithu.maicraft.task.TaskFactory;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
@@ -17,8 +18,15 @@ public final class SemanticExploreTaskRecord extends TaskRecord
     public static final int MIN_DISTANCE = 64;
     public static final int MAX_DISTANCE = 2_048;
     private static final int WAYPOINT_GRID = 64;
-    /** 顺带兴趣白名单：新增值必须同步能力契约文本与伴随任务的匹配逻辑。 */
-    public static final List<String> LEGAL_INTERESTS = List.of("lava_pool");
+    /**
+     * 顺带兴趣白名单：lava_pool 之外接受任一有证据画像的结构 id；资源包扩画像后判定自动放宽，
+     * 契约文本因此只指向目录查询、不枚举全表。
+     */
+    public static boolean isLegalInterest(String value) {
+        if (value == null) return false;
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return "lava_pool".equals(normalized) || StructureEvidenceProfiles.hasProfile(normalized);
+    }
 
     /** 探索路段的存活租期；只要路段持续取得已核实进展，伴随任务会续期自己的任务记录。 */
     public static final int LEG_LEASE_TICKS = 90 * 20;
@@ -98,9 +106,10 @@ public final class SemanticExploreTaskRecord extends TaskRecord
                 .distinct()
                 .toList();
         for (String value : cleaned) {
-            if (!LEGAL_INTERESTS.contains(value))
-                throw new IllegalArgumentException(
-                        "unknown explore interest '" + value + "'; legal values: " + LEGAL_INTERESTS);
+            if (!isLegalInterest(value))
+                throw new IllegalArgumentException("unknown explore interest '" + value
+                        + "'; legal values: lava_pool or any structure id with an evidence profile"
+                        + " (query perceive(view=exploration, focus=structures))");
         }
         this.interests = List.copyOf(cleaned);
     }

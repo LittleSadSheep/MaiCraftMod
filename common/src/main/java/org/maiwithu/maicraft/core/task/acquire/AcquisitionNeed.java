@@ -59,6 +59,8 @@ final class AcquisitionNeed {
     int lastObservedCount = -1;
     /** mine 子任务如实报了采区耗尽（mined_out）；父层汇总终态时据此保真失败类型，不再压回 no_material。 */
     boolean mineChildMinedOut;
+    /** 采区耗尽时保留 mine 子任务的对账口径（目标标签、已收集数、扫描范围），最终回执据此披露缺口而不是只说"穷尽"。 */
+    Map<String, Object> mineExhaustionEvidence;
 
     /** 探矿编排阶段：公平空手 + 授权后先下降到生成带，再派掘进采矿；每个需求只走一轮。 */
     boolean prospectingDescendStarted;

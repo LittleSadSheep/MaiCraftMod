@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.core.task.suicide;
 
 import java.lang.reflect.Field;
+import java.util.List;
+import java.util.Map;
+import java.util.OptionalLong;
 import java.util.UUID;
 import com.mojang.authlib.GameProfile;
 import it.unimi.dsi.fastutil.objects.Object2DoubleOpenHashMap;
@@ -12,11 +15,19 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.util.valueproviders.ConstantInt;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.dimension.DimensionType;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
@@ -95,10 +106,25 @@ public final class SuicideTaskTest {
         set(ClientLevel.class, world.level, "clientLevelData", data);
         set(LocalPlayer.class, world.player, "minecraft", Minecraft.getInstance());
         set(Entity.class, world.player, "fluidHeight", new Object2DoubleOpenHashMap<>());
+        dimension(world); lavaTags();
         mode(GameType.SURVIVAL);
         world.position(new Vec3(8.5, 2, 8.5)); world.player.setOnGround(true);
         world.set(new BlockPos(8, 1, 8), Blocks.STONE.defaultBlockState());
         world.set(new BlockPos(9, 1, 8), Blocks.LAVA.defaultBlockState());
+    }
+
+    public static void dimension(InteractionWorldTestHarness world) throws Exception {
+        // 倒岩浆的安全范围按原版维度读取流动距离；夹具补一个普通主世界维度类型，不让未初始化字段冒充超热维度。
+        var overworld = new DimensionType(OptionalLong.empty(), true, false, false, true, 1.0, true, false, 0, 16, 16,
+                BlockTags.INFINIBURN_OVERWORLD, ResourceLocation.withDefaultNamespace("overworld"), 0,
+                new DimensionType.MonsterSettings(false, false, ConstantInt.of(0), 0));
+        set(Level.class, world.level, "dimensionTypeRegistration", Holder.direct(overworld));
+    }
+
+    public static void lavaTags() {
+        // 无窗口 JVM 没有数据包加载阶段，显式绑定原版流体标签，才能按游戏内同一证据识别岩浆。
+        BuiltInRegistries.FLUID.bindTags(Map.of(FluidTags.LAVA, List.of(
+                BuiltInRegistries.FLUID.wrapAsHolder(Fluids.LAVA), BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_LAVA))));
     }
 
     public static void begin(Task task, InteractionWorldTestHarness world) throws Exception {

@@ -6,7 +6,7 @@ import java.util.Set;
 
 /** 只表达本次主动寻死的方式与预算；饥饿或路远是否值得寻死由调用者决定，不由身体维护自行触发。 */
 public record SuicideRequest(String method, int radius, int timeoutSeconds, boolean keepInventoryConfirmed) {
-    private static final Set<String> METHODS = Set.of("auto", "lava", "hostile", "fall");
+    private static final Set<String> METHODS = Set.of("auto", "lava", "hostile", "fall", "lava_bucket", "fire");
 
     public static SuicideRequest parse(JsonObject parameters) {
         // 先拒绝拼错或类型不符的危险动作参数，不能把不认识的方式悄悄当成自动寻死。
@@ -15,7 +15,7 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
         if (parameters.has("method")) {
             var value = parameters.get("method");
             if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
-                throw new IllegalArgumentException("method must be auto, lava, hostile or fall");
+                throw new IllegalArgumentException("method must be auto, lava, hostile, fall, lava_bucket or fire");
             method = value.getAsString();
         }
         if (!METHODS.contains(method)) throw new IllegalArgumentException("unsupported suicide method: " + method);
@@ -45,6 +45,6 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
         throw new IllegalArgumentException(key + " must be an integer in " + min + ".." + max);
     }
 
-    // auto 允许从三类已观察危险中选取；指定方式时，没找到也不偷偷切到另一种寻死方式。
+    // auto 先从三类已观察危险中选取，都用完后才随身点火、最后倒岩浆桶；指定方式时，没找到也不偷偷切到另一种寻死方式。
     public boolean permits(String candidate) { return method.equals("auto") || method.equals(candidate); }
 }

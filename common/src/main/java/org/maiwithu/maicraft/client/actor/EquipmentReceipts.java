@@ -9,6 +9,7 @@ import java.util.Map;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
@@ -18,14 +19,23 @@ import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import org.maiwithu.maicraft.task.TaskRecord;
 
 /**
- * 只读观察服务器发给本玩家的装备同步包，报告耐久打空的物品消灭事实。
- * 耐久在服务端扣除，客户端没有事件可订阅；装备包是该事实到达客户端的唯一通道。
- * 只在物品打空消灭时发布事件，逐次耐久下降不打扰；不修改背包，也不预测耐久消耗。
+ * 报告本地玩家装备耐久打空的物品消灭事实。耐久在服务端扣除，客户端没有事件可订阅；
+ * 观察走两条通道：装备同步包（其他实体也会收到，只认本玩家），以及原版
+ * {@code onEquippedItemBroken} 的实体事件（47-52/65）——装备增量包走
+ * {@code ChunkSource.broadcast}，跟踪名单不含玩家自己，**本玩家的装备包永远不会到达**；
+ * 打空事件走 {@code broadcastAndSend}，必达本人（057 实机两轮零事件的根因）。
+ * 逐刻基准扫描维护耐久账与最后见到的物品读数；打空事件到达时据此发布，
+ * 只在打空消灭时发布事件，逐次耐久下降不打扰；不修改背包，也不预测耐久消耗。
  */
 public final class EquipmentReceipts {
+    private static final Map<EquipmentSlot, Integer> BREAK_EVENT_IDS =
+            Map.of(EquipmentSlot.MAINHAND, 47, EquipmentSlot.OFFHAND, 48, EquipmentSlot.HEAD, 49,
+                    EquipmentSlot.CHEST, 50, EquipmentSlot.LEGS, 51, EquipmentSlot.FEET, 52,
+                    EquipmentSlot.BODY, 65);
     private static LocalPlayer owner;
     private static ClientLevel world;
     private static final Map<EquipmentSlot, Observed> observed = new EnumMap<>(EquipmentSlot.class);
+    private static final Map<EquipmentSlot, Observed> lastDamageable = new EnumMap<>(EquipmentSlot.class);
     private static final Map<EquipmentSlot, Integer> damageObserved = new EnumMap<>(EquipmentSlot.class);
 
     /** 槽位最近一次同步到的物品读数；itemId 为 null 表示空栈。 */
@@ -54,20 +64,73 @@ public final class EquipmentReceipts {
             Observed current = describe(next);
             boolean continued = previous != null && sameItem(previous, current);
             if (previous != null && previous.damageable() && current.itemId() == null) {
+                lastDamageable.remove(slot);
                 org.maiwithu.maicraft.core.Constants.LOG.info(
                         "[maicraft-equip] item broken: {} in {}", previous.itemId(), slot.getName());
                 broken(player, slot, previous, damageObserved.getOrDefault(slot, 0));
             }
+            if (current.damageable()) lastDamageable.put(slot, current);
             int delta = continued ? Math.max(0, current.damage() - previous.damage()) : 0;
-            damageObserved.put(slot, (continued ? damageObserved.getOrDefault(slot, 0) : 0) + delta);
+            damageObserved.put(slot, accumulation(slot, continued, current, delta));
             observed.put(slot, current);
         }
     }
 
-    /** 换身体或换世界后清空旧基准：重生或重连后的首批装备包只建立基准，不补发旧变化。 */
+    /**
+     * 耐久账的清账时机：槽位变空（打空同步或玩家移走）保持旧账，直到打空事件消费或
+     * 换上别的物品再清零；打空事件与空槽同步不保证先后，账目不能在事件发布前被清掉。
+     */
+    private static int accumulation(EquipmentSlot slot, boolean continued, Observed current, int delta) {
+        if (current.itemId() == null) return damageObserved.getOrDefault(slot, 0);
+        return (continued ? damageObserved.getOrDefault(slot, 0) : 0) + delta;
+    }
+
+    /**
+     * 逐刻基准扫描：本玩家的装备增量包从不发给自己（见类注释），这里直接读身上装备
+     * 维护观察账目，供装备损坏实体事件发布时引用。每刻 6 个槽位的栈描述成本可忽略。
+     */
+    public static void observe(LocalPlayer player) {
+        if (player == null || player.clientLevel == null) return;
+        observeWorld(player);
+        for (EquipmentSlot slot : BREAK_EVENT_IDS.keySet()) {
+            Observed current = describe(player.getItemBySlot(slot));
+            Observed previous = observed.get(slot);
+            if (current.damageable()) lastDamageable.put(slot, current);
+            boolean continued = previous != null && sameItem(previous, current);
+            int delta = continued ? Math.max(0, current.damage() - previous.damage()) : 0;
+            damageObserved.put(slot, accumulation(slot, continued, current, delta));
+            observed.put(slot, current);
+        }
+    }
+
+    /**
+     * 实体事件通道：原版打空耐久时 {@code onEquippedItemBroken} 以 47-52/65 号实体事件
+     * 广播（含本人）。这是本玩家装备消灭的唯一必达信号，发布依据是扫描基准里最后
+     * 见到的物品读数；无基准（绑定后尚未扫描）不臆造物品身份，留待下一条。
+     */
+    public static void entityEvent(LocalPlayer player, ClientboundEntityEventPacket packet) {
+        EquipmentSlot slot = BREAK_EVENT_IDS.entrySet().stream()
+                .filter(entry -> entry.getValue() == packet.getEventId())
+                .map(Map.Entry::getKey).findFirst().orElse(null);
+        if (slot == null || player == null || player.clientLevel == null) return;
+        if (packet.getEntity(player.clientLevel) != player) return;
+        observeWorld(player);
+        Observed previous = lastDamageable.remove(slot);
+        if (previous == null) {
+            org.maiwithu.maicraft.core.Constants.LOG.warn(
+                    "[maicraft-equip] break event for {} without a scan baseline; item identity unknown", slot.getName());
+            return;
+        }
+        org.maiwithu.maicraft.core.Constants.LOG.info(
+                "[maicraft-equip] item broken: {} in {}", previous.itemId(), slot.getName());
+        broken(player, slot, previous, damageObserved.getOrDefault(slot, 0));
+    }
+
+    /** 换身体或换世界后清空旧基准：重生或重连后的首批观察只建立基准，不补发旧变化。 */
     private static void observeWorld(LocalPlayer player) {
         if (owner != player || world != player.clientLevel) {
             observed.clear();
+            lastDamageable.clear();
             damageObserved.clear();
             owner = player;
             world = player.clientLevel;

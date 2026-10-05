@@ -12,7 +12,7 @@ final class AbilitySummaries {
             case "maicraft:wait_for_condition" -> "Wait for a minimum amount of game time, then for the selected world or body condition.";
             case "maicraft:follow" -> "Continuously follow one selected loaded entity until stopped or failed; reaching the following distance does not finish the task.";
             case "maicraft:combat" -> "Fight selected loaded targets or defend against current threats with explicit harm permission; use actual defeat and loot evidence to judge completion.";
-            case "maicraft:suicide" -> "Explicitly seek in-game death through native hazards under keepInventory conditions; death and later respawn are confirmed separately.";
+            case "maicraft:suicide" -> "Explicitly seek in-game death under keepInventory conditions: take off armor and stow held totems, then use observed native hazards, light carried flint and steel, or pour a carried lava bucket; removed armor is re-equipped after respawn, and death and respawn are confirmed separately.";
 
             // 跑图靠实际移动和观察；已知地点的到达精度、现场发现与持久记忆登记不能相互冒充。
             case "maicraft:travel" -> "Reach a located destination with configurable horizontal and height tolerances or exact grounded standing; also supports declared discovery and transport modes.";

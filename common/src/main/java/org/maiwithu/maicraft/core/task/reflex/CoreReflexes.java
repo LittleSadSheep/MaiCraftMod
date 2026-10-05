@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.core.task.chain.BreathChain;
 import org.maiwithu.maicraft.core.task.chain.NightRestChain;
 import org.maiwithu.maicraft.core.task.chain.SettleChain;
 import org.maiwithu.maicraft.core.task.chain.TorchLightingChain;
+import org.maiwithu.maicraft.core.task.suicide.SuicideArmorRestore;
 
 /**
  * 登记自动自救与日常休息的名字和说明：防摔、换气、自卫、夜间休息。
@@ -25,6 +26,7 @@ public final class CoreReflexes {
         ReflexRegistry.register(new SettleChain());
         ReflexRegistry.register(new MobDefenseChain());
         ReflexRegistry.register(new NightRestChain());
+        ReflexRegistry.register(new SuicideArmorRestore());
         // 保留补光说明名；实际随行行为由帧末辅助通道执行，不进入反射抢占队列。
         ReflexRegistry.register(new TorchLightingChain());
     }
