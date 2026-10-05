@@ -8,6 +8,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -15,12 +16,16 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
-import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.tools.RecipeProbe;
 
 /**
  * 从当前客户端配方表找“展示产物是指定物品”的配方，并列出能读到的普通物品原料。
  * 最多检查四千零九十六条，输出十六条；模组的流体、化学品、动态产物和机器条件可能不在这些通用字段里。
+ *
+ * <p>遍历是纯只读查询，只需要已连接的本地玩家，不要求当刻身体上下文：
+ * 知识读取经客户端线程队列在两次游戏刻之间执行，而身体上下文只在单刻的
+ * begin/end 窗口内存在——若在这里经 {@code ClientRuntime.requireContext} 取上下文，
+ * 每次知识读取都会整体失败，并伪装成“配方管理器不可用”。
  */
 public final class MachineRecipeEvidence {
     public static final int MAX_EXAMINED_RECIPES = 4096;
@@ -32,7 +37,8 @@ public final class MachineRecipeEvidence {
     private MachineRecipeEvidence() {}
 
     /**
-     * 在角色有效的客户端更新中只读查询。找不到展示产物不能断言没有配方，报告会保留扫描范围及未读全的原因。
+     * 在客户端线程上对已连接的本地玩家做只读查询，两次游戏刻之间同样可用。
+     * 找不到展示产物不能断言没有配方，报告会保留扫描范围及未读全的原因。
      */
     public static JsonObject inspect(LocalPlayer player, String expectedOutputId) {
         return inspect(player, expectedOutputId, false);
@@ -61,21 +67,29 @@ public final class MachineRecipeEvidence {
         boolean exhausted = false;
         boolean detailsTruncated = false;
         try {
-            var context = ClientRuntime.requireContext(player);
+            Minecraft minecraft = Minecraft.getInstance();
+            // 只读遍历仍守住客户端线程纪律；线程不对时不报告不可用之外的状态。
+            if (minecraft == null || !minecraft.isSameThread()) {
+                throw new IllegalStateException("recipe knowledge inspection runs on the client thread only");
+            }
+            // 玩家或连接缺席（未进世界、断线）时抛给统一的不可用报告，不在此分支提前返回，保持回执字段形状一致。
+            if (player == null || player.connection == null || player.level() == null) {
+                throw new IllegalStateException("no local player in a connected world is available to read the recipe manager");
+            }
             if (!BuiltInRegistries.ITEM.containsKey(outputId)) {
                 report.addProperty("status", "invalid_output_id");
                 report.addProperty("issue", "The requested output item is not in the installed item registry.");
                 return report;
             }
             var target = BuiltInRegistries.ITEM.get(outputId);
-            Iterator<RecipeHolder<?>> recipes = context.connection().getRecipeManager().getRecipes().iterator();
+            Iterator<RecipeHolder<?>> recipes = player.connection.getRecipeManager().getRecipes().iterator();
             report.addProperty("available", true);
             while (examined < MAX_EXAMINED_RECIPES && recipes.hasNext()) {
                 RecipeHolder<?> holder = recipes.next();
                 examined++;
                 try {
                     Recipe<?> recipe = holder.value();
-                    ItemStack output = RecipeProbe.resultOf(recipe, context.level().registryAccess());
+                    ItemStack output = RecipeProbe.resultOf(recipe, player.level().registryAccess());
                     if (output.isEmpty()) {
                         // RecipeProbe 在显示信息不受支持、为 null 或 getter 抛出异常时也会返回 EMPTY；绝不能据此认定配方没有任何产物。
                         withoutStaticResult++;
@@ -85,7 +99,7 @@ public final class MachineRecipeEvidence {
                     matched++;
                     if (matches.size() >= MAX_EMITTED_RECIPES) continue;
                     JsonObject evidence = describe(holder, recipe, outputId, output.getCount());
-                    if (includeDefinitions) evidence.add("native_definition", NativeRecipeDefinition.read(recipe, context.level().registryAccess()));
+                    if (includeDefinitions) evidence.add("native_definition", NativeRecipeDefinition.read(recipe, player.level().registryAccess()));
                     matches.add(evidence);
                     detailsTruncated |= evidence.get("details_truncated").getAsBoolean();
                 } catch (RuntimeException | LinkageError unavailable) {
