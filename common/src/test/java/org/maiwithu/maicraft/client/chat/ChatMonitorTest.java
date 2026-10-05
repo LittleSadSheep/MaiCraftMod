@@ -49,6 +49,19 @@ public final class ChatMonitorTest {
         check(ChatMonitor.latestOverlay(1_000_000_000L).contains("怪物"), "新动作栏提示覆盖旧备忘");
         ChatMonitor.reset();
         check(ChatMonitor.latestOverlay(1_000_000_000L) == null, "世界或身体重绑清空动作栏备忘");
+        // AI 玩家自己的聊天被服务器回显：按 UUID 标成 from_self，别人的同名同句不算自己说的
+        UUID self = UUID.randomUUID();
+        ChatMonitor.localPlayer(() -> self);
+        long beforeSelf = runtime.chat(0, 1, null).get("cursor").getAsLong();
+        ChatMonitor.player("麦麦", self, "我来测试一下自动打字");
+        ChatMonitor.player("麦麦", first, "我来测试一下自动打字");
+        var echoed = runtime.chat(beforeSelf, 10, stream).getAsJsonArray("messages");
+        check(echoed.get(0).getAsJsonObject().getAsJsonObject("data").get("from_self").getAsBoolean()
+                && !echoed.get(1).getAsJsonObject().getAsJsonObject("data").get("from_self").getAsBoolean(),
+                "只有 UUID 与当前 AI 玩家一致的聊天才算自己说的");
+        check(!page.get(2).getAsJsonObject().getAsJsonObject("data").has("from_self"), "系统消息没有发送者，不带 from_self");
+        ChatMonitor.localPlayer(null);
+        ChatMonitor.reset();
         System.out.println("ChatMonitorTest: passed");
     }
 

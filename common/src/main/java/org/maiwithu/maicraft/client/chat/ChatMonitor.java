@@ -4,6 +4,8 @@ import com.google.gson.JsonObject;
 import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.UUID;
+import java.util.function.Supplier;
+import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 
 /** 将聊天区收到的文字送入独立聊天流；保留已知作者，限制重复与洪泛，不据此执行任何玩家指令。 */
@@ -18,11 +20,23 @@ public final class ChatMonitor {
     private static String lastOverlayText;
     private static long lastOverlayAtNanos;
     private static int suppressed;
+    // AI 玩家自己发出的聊天也会被服务器回显到聊天区；订阅方据此区分"我说的"和"别人对我说的"。
+    private static Supplier<UUID> localPlayer = ChatMonitor::currentPlayerId;
 
     private ChatMonitor() { }
 
     public static void player(String senderName, UUID senderId, String message) {
         receive(senderName, senderId, message, false);
+    }
+
+    /** 测试用：替换"当前 AI 玩家是谁"的来源；传 null 恢复为读取客户端当前玩家。 */
+    static synchronized void localPlayer(Supplier<UUID> source) {
+        localPlayer = source == null ? ChatMonitor::currentPlayerId : source;
+    }
+
+    private static UUID currentPlayerId() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft == null || minecraft.player == null ? null : minecraft.player.getUUID();
     }
 
     public static void system(String message, boolean overlay) {
@@ -69,6 +83,8 @@ public final class ChatMonitor {
         if (senderId != null) data.addProperty("sender_id", senderId.toString());
         data.addProperty("message", text);
         data.addProperty("system", system);
+        // 只有发送者 UUID 与当前 AI 玩家一致才算自己说的；名字可能重名或未同步，不拿来判断
+        if (!system) data.addProperty("from_self", senderId != null && senderId.equals(localPlayer.get()));
         data.addProperty("untrusted_external_text", true);
         if (message.strip().length() > MAX_TEXT) data.addProperty("message_truncated", true);
         if (suppressed > 0) {
