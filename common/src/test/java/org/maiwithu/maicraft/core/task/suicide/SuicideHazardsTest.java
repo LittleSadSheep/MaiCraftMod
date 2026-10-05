@@ -75,20 +75,20 @@ public final class SuicideHazardsTest {
             check(world.blockUses() == 0 && world.itemUses() == 0, "选点火格不能提前使用物品");
         }
         try (var world = new InteractionWorldTestHarness()) {
-            // 同时带着岩浆桶和打火石：auto 先倒岩浆；倒桶被原生拒绝后改为点火；岩浆流经范围有木板时不倒，退回点火。
+            // 同时带着岩浆桶和打火石：auto 先点火；点火被原生拒绝后才倒岩浆；岩浆流经范围有木板时连倒桶也不选。
             SuicideTaskTest.dimension(world); world.position(new Vec3(8.5, 1, 8.5));
             world.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
             world.inventory.setItem(1, new ItemStack(Items.FLINT_AND_STEEL));
             var auto = new SuicideHazards(world.player, new SuicideRequest("auto", 8, 120, true));
             while (!auto.scan()) { }
-            var lava = auto.choose(world.player, Set.of());
-            check(lava != null && lava.method().equals("lava_bucket") && lava.entry().equals(new BlockPos(8, 1, 8)), "没有现成危险时 auto 应先原地倒岩浆");
-            var fallback = auto.choose(world.player, Set.of(SuicideSelfHazard.Kind.LAVA_BUCKET.rejectedKey()));
-            check(fallback != null && fallback.method().equals("fire"), "倒桶被原生拒绝后应改为点火");
+            var fire = auto.choose(world.player, Set.of());
+            check(fire != null && fire.method().equals("fire") && fire.entry().equals(new BlockPos(8, 1, 8)), "没有现成危险时 auto 应先原地点火");
+            var fireRejected = Set.of(SuicideSelfHazard.Kind.FIRE.rejectedKey());
+            var lava = auto.choose(world.player, fireRejected);
+            check(lava != null && lava.method().equals("lava_bucket") && lava.entry().equals(new BlockPos(8, 1, 8)), "点火被原生拒绝后才倒岩浆");
             world.set(new BlockPos(12, 2, 8), Blocks.OAK_PLANKS.defaultBlockState());
-            var guarded = auto.choose(world.player, Set.of());
-            check(guarded != null && guarded.method().equals("fire") && guarded.entry().equals(new BlockPos(8, 1, 8)),
-                    "岩浆流经并可点燃的范围内有木板时不能倒岩浆，火的蔓延范围够不着时仍可点火");
+            check(auto.choose(world.player, fireRejected) == null, "岩浆流经并可点燃的范围内有木板时不能倒岩浆");
+            check(auto.choose(world.player, Set.of()).method().equals("fire"), "火的蔓延范围够不着木板时仍可点火");
             check(world.blockUses() == 0 && world.itemUses() == 0, "选倒桶格不能提前使用物品");
         }
         try (var world = new InteractionWorldTestHarness()) {

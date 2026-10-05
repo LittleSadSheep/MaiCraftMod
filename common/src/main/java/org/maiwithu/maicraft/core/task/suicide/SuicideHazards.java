@@ -78,7 +78,7 @@ public final class SuicideHazards {
         // 这里只选当前最近且未放弃的候选，尚未证明它能走到；实际接近失败后才留下导航失败事实。
         var observed = nearest(player, candidates, attempted);
         if (observed != null) return observed;
-        // 已观察的岩浆、高处和怪物都用完或根本没有时，才用随身物品原地造危险：先倒岩浆桶，再点火，避免身边没危险就直接失败。
+        // 已观察的岩浆、高处和怪物都用完或根本没有时，才用随身物品原地造危险：先点火，最后才倒岩浆桶，避免身边没危险就直接失败。
         for (Kind kind : Kind.values()) {
             if (!request.permits(kind.method) || attempted.contains(kind.rejectedKey())) continue;
             var made = selfMade(player, attempted, kind);

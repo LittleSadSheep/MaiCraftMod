@@ -45,6 +45,6 @@ public record SuicideRequest(String method, int radius, int timeoutSeconds, bool
         throw new IllegalArgumentException(key + " must be an integer in " + min + ".." + max);
     }
 
-    // auto 先从三类已观察危险中选取，都用完后才随身倒岩浆桶、再点火；指定方式时，没找到也不偷偷切到另一种寻死方式。
+    // auto 先从三类已观察危险中选取，都用完后才随身点火、最后倒岩浆桶；指定方式时，没找到也不偷偷切到另一种寻死方式。
     public boolean permits(String candidate) { return method.equals("auto") || method.equals(candidate); }
 }

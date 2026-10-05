@@ -13,6 +13,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.GuiPreparation;
@@ -28,16 +30,20 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 确认死亡不掉落 -> 脱下护甲 -> 找危险（没有现成危险时随身倒岩浆或点火） -> 原生走近并受伤 -> 观察死亡；只控制按键与原生物品操作，死亡和重生由原生生命周期结算。 */
+/** 确认死亡不掉落 -> 脱下护甲、收起手上的不死图腾 -> 找危险（没有现成危险时随身点火或倒岩浆） -> 原生走近并受伤 -> 观察死亡 -> 登记护甲待穿回；只控制按键与原生物品操作，死亡和重生由原生生命周期结算。 */
 public final class SuicideTask implements Task {
-    // 寻死前依次尝试脱下的护甲栏，从头到脚。
-    private static final List<EquipmentSlot> ARMOR = List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET);
+    // 寻死前依次处理的栏位：先从头到脚脱护甲，再收副手和主手上的不死图腾，免得图腾把这次死亡挡掉。
+    private static final List<EquipmentSlot> STOW = List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+            EquipmentSlot.FEET, EquipmentSlot.OFFHAND, EquipmentSlot.MAINHAND);
     private final LocalPlayer player;
     private final SuicideRequest request;
     private final GuiPreparation gui = new GuiPreparation();
     private final Set<String> attempted = new HashSet<>();
     private final List<Map<String, Object>> attempts = new ArrayList<>();
     private final List<String> armorRemoved = new ArrayList<>(), armorStillWorn = new ArrayList<>();
+    private final List<String> totemsStowed = new ArrayList<>(), totemsStillHeld = new ArrayList<>();
+    // 本次确认脱下的护甲原件，寻死结束时交给穿回流程；不含图腾，图腾留在背包里。
+    private final Map<EquipmentSlot, ItemStack> stowedArmor = new LinkedHashMap<>();
     private final Map<String, Integer> selfMadeConfirmed = new LinkedHashMap<>();
     private SuicideHazards survey;
     private SuicideHazards.Candidate candidate;
@@ -46,9 +52,10 @@ public final class SuicideTask implements Task {
     private UnequipCompanionTask undress;
     private CompletableFuture<Boolean> ruleRead;
     private Boolean keepInventory;
-    private int ticks, lastRuleRead, lastProgress, enteredTicks, armorIndex;
+    private int ticks, lastRuleRead, lastProgress, enteredTicks, stowIndex;
+    private ItemStack stowing = ItemStack.EMPTY;
     private float previousHealth, healthLost;
-    private boolean acting, armed, ended, deathObserved;
+    private boolean acting, armed, ended, deathObserved, handedOver;
     private String detail = "Seeking a native death opportunity.";
     private String ruleSource = "unconfirmed";
 
@@ -133,28 +140,47 @@ public final class SuicideTask implements Task {
     }
 
     private boolean undressed() {
-        // 从头到脚逐件交给原生背包卸甲；每件单独结算，一件卸不下（没空位、绑定诅咒或界面未确认）只记下仍穿着，不影响其余部位和寻死本身。
+        // 先从头到脚把护甲、再把手上的不死图腾逐件交给原生背包收起；每件单独结算，
+        // 一件收不走（没空位、绑定诅咒或界面未确认）只记下仍在身上，不影响其余栏位和寻死本身。
         if (undress != null) {
             TaskState state = undress.tick(player);
             if (!state.isTerminal()) return false;
-            EquipmentSlot slot = ARMOR.get(armorIndex++);
+            EquipmentSlot slot = STOW.get(stowIndex++);
             var result = undress.result(state); undress = null;
-            var data = result.data() == null ? Map.<String, Object>of() : result.data();
-            if (data.get("removed") instanceof List<?> removed) removed.forEach(piece -> armorRemoved.add(String.valueOf(piece)));
-            if (data.get("still_worn") instanceof List<?> kept) kept.forEach(piece -> armorStillWorn.add(String.valueOf(piece)));
-            var worn = player.getItemBySlot(slot);
-            if (!result.success() && !worn.isEmpty())
-                armorStillWorn.add(BuiltInRegistries.ITEM.getKey(worn.getItem()).getPath() + " (" + slot.getName() + "): " + result.message());
+            // 以原生回执之后栏位里的实际物品为准：护甲栏空了、手上不再是图腾才算收走。
+            boolean hand = slot.getType() == EquipmentSlot.Type.HAND;
+            boolean moved = hand ? !totem(player.getItemBySlot(slot)) : player.getItemBySlot(slot).isEmpty();
+            String label = BuiltInRegistries.ITEM.getKey(stowing.getItem()).getPath() + " (" + slot.getName() + ")";
+            String reason = result.success() ? "no free main-inventory slot" : result.message();
+            if (moved && !hand) stowedArmor.put(slot, stowing.copy());
+            (hand ? moved ? totemsStowed : totemsStillHeld : moved ? armorRemoved : armorStillWorn).add(moved ? label : label + ": " + reason);
+            stowing = ItemStack.EMPTY;
             return false;
         }
-        while (armorIndex < ARMOR.size() && player.getItemBySlot(ARMOR.get(armorIndex)).isEmpty()) armorIndex++;
-        if (armorIndex >= ARMOR.size()) return true;
-        // 新建卸甲子任务的这一刻只登记，下一刻再让它打开背包，不和本刻刚结清的界面准备挤在同一刻。
-        EquipmentSlot slot = ARMOR.get(armorIndex);
-        undress = new UnequipCompanionTask(player, new UnequipTaskRecord("suicide-armor",
+        while (stowIndex < STOW.size() && !stowable(STOW.get(stowIndex))) stowIndex++;
+        if (stowIndex >= STOW.size()) return true;
+        // 新建子任务的这一刻只登记，下一刻再让它打开背包，不和本刻刚结清的界面准备挤在同一刻。
+        EquipmentSlot slot = STOW.get(stowIndex);
+        stowing = player.getItemBySlot(slot).copy();
+        undress = new UnequipCompanionTask(player, new UnequipTaskRecord("suicide-stow",
                 player.level().getGameTime() + 200, List.of(slot), slot.getName()));
         undress.start(player);
         return false;
+    }
+
+    private boolean stowable(EquipmentSlot slot) {
+        // 护甲栏有东西就脱；主手和副手只收不死图腾，其他手持物品照旧留着。
+        var stack = player.getItemBySlot(slot);
+        return slot.getType() == EquipmentSlot.Type.HAND ? totem(stack) : !stack.isEmpty();
+    }
+
+    private static boolean totem(ItemStack stack) { return stack.is(Items.TOTEM_OF_UNDYING); }
+
+    private void handOver() {
+        // 寻死结束（死亡、失败、超时或取消）时只交接一次：把确认脱下的护甲原件交给穿回流程，重生后或仍活着时自动穿回。
+        if (handedOver) return;
+        handedOver = true;
+        SuicideArmorRestore.remember(player, stowedArmor);
     }
 
     private TaskState expose(Kind kind) {
@@ -232,7 +258,7 @@ public final class SuicideTask implements Task {
     }
 
     private TaskState finish(String message, TaskState state) {
-        detail = message; ended = true; cleanup(); return state;
+        detail = message; ended = true; cleanup(); handOver(); return state;
     }
 
     private void stopNavigation() {
@@ -266,7 +292,7 @@ public final class SuicideTask implements Task {
     @Override public void stop(LocalPlayer body, StopReason reason) {
         // 临时让出身体只撤移动，恢复后重查并重新接近；取消或旧身体消失则封存本次尝试，不能沿用到新玩家对象。
         cleanup();
-        if (reason != StopReason.PREEMPTED) { ended = true; detail = "Suicide stopped before confirmed death: " + reason; }
+        if (reason != StopReason.PREEMPTED) { ended = true; detail = "Suicide stopped before confirmed death: " + reason; handOver(); }
         // 暂停后危险和怪物可能变化，恢复时先重新接近；总执行预算与已受伤事实保留。
         acting = false;
     }
@@ -278,7 +304,7 @@ public final class SuicideTask implements Task {
     @Override
     public String describeCurrentAction() {
         if (ended) return "寻死流程已结束";
-        if (undress != null) return "正在脱下护甲";
+        if (undress != null) return totem(stowing) ? "正在收起不死图腾" : "正在脱下护甲";
         if (candidate == null) return "正在观察附近寻找危险";
         return switch (candidate.method()) {
             case "lava" -> acting ? "正在站在岩浆中" : "正在走向岩浆";
@@ -292,7 +318,7 @@ public final class SuicideTask implements Task {
 
     @Override public TaskResult result(TaskState terminal) {
         // 寻死的成功只确认死亡；重生请求和重生后背包观察由公共生命周期另发回执，不能在这里提前承诺。
-        ended = true; cleanup();
+        ended = true; cleanup(); handOver();
         return new TaskResult(deathObserved && terminal == TaskState.SUCCESS, detail,
                 terminal == TaskState.TIMEOUT, terminal == TaskState.CANCELLED, progress());
     }
@@ -302,15 +328,16 @@ public final class SuicideTask implements Task {
         // 子任务的保护字段表达自身执行意图，父任务查询会按暂停、终态和步骤切换覆盖为实际调度资格。
         var facts = new LinkedHashMap<String, Object>();
         facts.put("task", name()); facts.put("method", candidate == null ? request.method() : candidate.method());
-        facts.put("phase", ended ? "finished" : undress != null ? "removing_armor" : acting ? "exposing_to_hazard"
+        facts.put("phase", ended ? "finished" : undress != null ? "stowing_protection" : acting ? "exposing_to_hazard"
                 : candidate == null ? "observing" : "approaching");
         facts.put("keep_inventory_confirmed", Boolean.TRUE.equals(keepInventory)); facts.put("rule_evidence", ruleSource);
         facts.put("survival_reflexes_suppressed", !ended); facts.put("death_observed", deathObserved);
         facts.put("respawn_observed", false); facts.put("health_lost", healthLost); facts.put("execution_ticks", ticks);
         facts.put("ignitions_confirmed", selfMadeConfirmed.getOrDefault(Kind.FIRE.method, 0));
         facts.put("lava_pours_confirmed", selfMadeConfirmed.getOrDefault(Kind.LAVA_BUCKET.method, 0));
-        // 护甲是否真的脱下以原生背包回执为准；没空位、绑定诅咒或界面未确认而仍穿着的部位单独列出。
+        // 护甲和图腾是否真的收走以原生背包回执后的栏位为准；没空位、绑定诅咒或界面未确认而仍在身上的单独列出。
         facts.put("armor_removed", List.copyOf(armorRemoved)); facts.put("armor_still_worn", List.copyOf(armorStillWorn));
+        facts.put("totems_stowed", List.copyOf(totemsStowed)); facts.put("totems_still_held", List.copyOf(totemsStillHeld));
         facts.put("attempts", List.copyOf(attempts)); facts.put("mechanical_retry_allowed", false);
         return facts;
     }

@@ -34,9 +34,10 @@ import org.maiwithu.maicraft.task.TaskState;
 /** 站在选定格里低头，用随身岩浆桶、打火石或火焰弹在脚下造一次原生危险；只等这次回执和真实危险格，不重复同一次操作。 */
 final class SuicideSelfHazard {
     enum Kind {
-        // 岩浆桶致死最快，排在点火前；打火石有耐久可反复点火，排在火焰弹前面。
-        LAVA_BUCKET("lava_bucket", "lava bucket", List.of(Items.LAVA_BUCKET)),
-        FIRE("fire", "flint and steel or fire charge", List.of(Items.FLINT_AND_STEEL, Items.FIRE_CHARGE));
+        // 点火排在前面：火会自然熄灭，倒出的岩浆源却永久留在原地，只在点火也用不上时才倒；
+        // 打火石有耐久可反复点火，排在火焰弹前面。
+        FIRE("fire", "flint and steel or fire charge", List.of(Items.FLINT_AND_STEEL, Items.FIRE_CHARGE)),
+        LAVA_BUCKET("lava_bucket", "lava bucket", List.of(Items.LAVA_BUCKET));
         final String method, label;
         final List<Item> items;
         Kind(String method, String label, List<Item> items) { this.method = method; this.label = label; this.items = items; }
