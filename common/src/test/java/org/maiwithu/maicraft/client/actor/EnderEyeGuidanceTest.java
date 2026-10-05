@@ -26,9 +26,10 @@ import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchCompanio
 import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchTaskRecord;
 
 /**
- * 投眼引导的三个实机卡点：站姿不合格先有界换位再失败；眼实体已确认而消耗不可证
+ * 投眼引导的四个实机卡点：站姿不合格先有界换位再失败；眼实体已确认而消耗不可证
  * （创造模式或自返眼被拾回）时声明后继续跟踪而不中止；死亡或任务重启后沿上次
- * 掷出的方向免掷续走一段。
+ * 掷出的方向免掷续走一段且续走必须先建立移动腿；主动路线腿丢失时先有界重建一次，
+ * 再丢才终态失败并携带复位证据。
  */
 public final class EnderEyeGuidanceTest {
     public static void main(String[] args) throws Exception {
@@ -42,6 +43,7 @@ public final class EnderEyeGuidanceTest {
             unsafeStanceRelocatesBeforeFailing(w);
             unconfirmedConsumptionContinuesTracking(w);
             rememberedDirectionResumesWithoutThrow(w);
+            lostRouteRecoversOnceThenFailsHonest(w);
         }
         System.out.println("EnderEyeGuidanceTest: passed");
     }
@@ -91,22 +93,36 @@ public final class EnderEyeGuidanceTest {
                 "声明后应进入本眼方向跟踪");
     }
 
-    /** 点 3：保鲜期内的方向记忆让新任务沿旧方向续走；超龄记忆被淘汰回正常投眼循环。 */
+    /** 点 3：保鲜期内的方向记忆让新任务免掷续走——先经路线截取建立移动腿或进入有界等待，
+     * 不再空腿直接进入行进阶段；方向截不出已加载路段时有界等待后如实失败。 */
     private static void rememberedDirectionResumesWithoutThrow(InteractionWorldTestHarness w) throws Exception {
         var task = newTask(w);
         set(task, "stronghold", true);
         set(task, "origin", w.player.blockPosition().immutable());
+        attachSector(task, w);
         @SuppressWarnings("unchecked")
         Map<String, Object> memory = (Map<String, Object>) getStatic(
                 PhysicalStructureSearchCompanionTask.class, "EYE_DIRECTION_MEMORY");
         Object fresh = storedDirection(w, new Vec3(0, 0, 1), w.level.getGameTime());
         memory.put("minecraft:overworld|minecraft:stronghold", fresh);
         resume(task);
-        check(String.valueOf(stage(task)).equals("MOVE_DIRECTION"),
-                "保鲜期内的方向记忆应免掷续走");
         check(String.valueOf(get(task, "pendingDirection")).contains("0.0, 0.0, 1.0"),
                 "续走方向应来自记忆");
         check((int) get(task, "directionSegments") == 1, "续走段计入方向段计数");
+        check(get(task, "moveChild") != null || String.valueOf(stage(task)).equals("OBSERVE"),
+                "续走必须建立移动腿或进入有界等待，不得空腿进入行进阶段"
+                        + "（空腿会在首刻路线丢失且跨任务复现）");
+
+        // 夹具世界只有原点区块已加载、截不出十二格以上的路段：有界等待耗尽后按方向话术如实失败，
+        // 而不是 internal_route_lost。
+        set(task, "directionLoadWaitTicks", 41);
+        Method continueTravel = PhysicalStructureSearchCompanionTask.class
+                .getDeclaredMethod("continueDirectionTravel");
+        continueTravel.setAccessible(true);
+        check(continueTravel.invoke(task) == org.maiwithu.maicraft.task.TaskState.FAILED,
+                "截不出已加载路段应有界失败");
+        check(issueCode(task).equals("eye_direction_not_traversable"),
+                "有界等待耗尽沿用方向不可行问题码");
 
         // 超龄记忆：不续走并淘汰，任务回到观察/投眼循环。
         var stale = storedDirection(w, new Vec3(1, 0, 0), w.level.getGameTime() - 100_000);
@@ -119,6 +135,95 @@ public final class EnderEyeGuidanceTest {
                 "超龄方向记忆不得续走");
         check(!memory.containsKey("minecraft:overworld|minecraft:stronghold"),
                 "超龄记忆应被淘汰");
+    }
+
+    /**
+     * 点 4：主动路线腿丢失先有界重建一次（116：原实现立即 internal_route_lost 且每次
+     * 重提复现）；重建不出路线腿时有界降级，第二次丢失才终态失败且回执携带复位证据。
+     */
+    private static void lostRouteRecoversOnceThenFailsHonest(InteractionWorldTestHarness w) throws Exception {
+        Method tickMove = PhysicalStructureSearchCompanionTask.class
+                .getDeclaredMethod("tickMove", boolean.class, boolean.class);
+        tickMove.setAccessible(true);
+
+        // 证据接近腿丢失：按已确认线索位置直接重建移动腿。
+        var task = newTask(w);
+        set(task, "stronghold", true);
+        set(task, "origin", w.player.blockPosition().immutable());
+        set(task, "activeEvidence", evidenceMatch(w));
+        set(task, "stage", stageEnum("MOVE_EVIDENCE"));
+        var state = (org.maiwithu.maicraft.task.TaskState) tickMove.invoke(task, true, false);
+        check(state == org.maiwithu.maicraft.task.TaskState.RUNNING,
+                "路线腿丢失应先重建一次而不是立即失败");
+        check(get(task, "moveChild") != null, "复位应重建出移动腿");
+        check((int) get(task, "internalRouteRecoveries") == 1, "复位应计入回执证据");
+
+        // 方向腿丢失而截不出已加载路段：有界降级进入观察等待，不按内部错误终止。
+        var bounded = newTask(w);
+        set(bounded, "stronghold", true);
+        set(bounded, "origin", w.player.blockPosition().immutable());
+        attachSector(bounded, w);
+        set(bounded, "pendingDirection", new Vec3(0, 0, 1));
+        set(bounded, "pendingDirectionDistance", 64.0);
+        set(bounded, "stage", stageEnum("MOVE_DIRECTION"));
+        state = (org.maiwithu.maicraft.task.TaskState) tickMove.invoke(bounded, false, true);
+        check(state == org.maiwithu.maicraft.task.TaskState.RUNNING,
+                "重建不出路段时应有界降级而不是失败");
+        check(String.valueOf(stage(bounded)).equals("OBSERVE"),
+                "有界降级回到观察等待已加载地形");
+
+        // 第二次丢失：终态失败，问题码保持 internal_route_lost且回执带复位计数。
+        set(bounded, "moveChild", null);
+        set(bounded, "moveRecord", null);
+        state = (org.maiwithu.maicraft.task.TaskState) tickMove.invoke(bounded, false, true);
+        check(state == org.maiwithu.maicraft.task.TaskState.FAILED,
+                "复位后再次丢腿应终态失败");
+        check(issueCode(bounded).equals("internal_route_lost"), "终态失败沿用原问题码");
+        Method resultData = PhysicalStructureSearchCompanionTask.class
+                .getDeclaredMethod("resultData");
+        resultData.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) resultData.invoke(bounded);
+        check(Integer.valueOf(1).equals(((Number) data.get("internal_route_recoveries")).intValue()),
+                "失败回执应携带复位计数");
+
+        // 换位腿丢失：回到投眼选择重新做有界换位，不按内部错误终止。
+        var stance = newTask(w);
+        set(stance, "stronghold", true);
+        set(stance, "origin", w.player.blockPosition().immutable());
+        set(stance, "stage", stageEnum("RELOCATE_STANCE"));
+        Method tickRelocate = PhysicalStructureSearchCompanionTask.class
+                .getDeclaredMethod("tickRelocateStance");
+        tickRelocate.setAccessible(true);
+        var stanceState = (org.maiwithu.maicraft.task.TaskState) tickRelocate.invoke(stance);
+        check(stanceState == org.maiwithu.maicraft.task.TaskState.RUNNING,
+                "换位腿丢失应回到投眼选择重试");
+        check(String.valueOf(stage(stance)).equals("SELECT_EYE"),
+                "换位腿丢失后回到投眼选择阶段");
+    }
+
+    private static Object evidenceMatch(InteractionWorldTestHarness w) throws Exception {
+        Class<?> type = Class.forName(
+                PhysicalStructureSearchCompanionTask.class.getName() + "$EvidenceMatch");
+        Constructor<?> ctor = type.getDeclaredConstructor(
+                BlockPos.class, Map.class, Map.class, int.class);
+        ctor.setAccessible(true);
+        return ctor.newInstance(w.player.blockPosition().immutable(), Map.of(), Map.of(), 0);
+    }
+
+    private static void attachSector(Object task, InteractionWorldTestHarness w) throws Exception {
+        var record = (PhysicalStructureSearchTaskRecord) get(task, "r");
+        set(task, "sector", record.sector.at(
+                w.player.getX(), w.player.getZ(), w.player.getYRot()));
+    }
+
+    private static Object stageEnum(String name) throws Exception {
+        Class<?> type = Class.forName(
+                PhysicalStructureSearchCompanionTask.class.getName() + "$Stage");
+        for (Object constant : type.getEnumConstants()) {
+            if (((Enum<?>) constant).name().equals(name)) return constant;
+        }
+        throw new IllegalStateException("no stage " + name);
     }
 
     private static PhysicalStructureSearchCompanionTask newTask(InteractionWorldTestHarness w) {

@@ -41,9 +41,10 @@ public final class CollectItemsApproach {
             var min = BlockPos.containing(box.minX - half - 1.5, box.minY - height - .5, box.minZ - half - 1.5);
             var max = BlockPos.containing(box.maxX + half + .5, box.maxY + 1.5, box.maxZ + half + .5);
             var corridor = corridor(player);
+            // 掉落格自身能站立时，走下凹格拾取属普通行走；水面等站不住的格子不享受这条放宽。
+            boolean walkableDropCell = corridor.stance(drop.blockPosition()) != null;
             for (var cell : BlockPos.betweenClosed(min, max)) {
-                if (contactPoint(player, drop, cell, corridor) != null
-                        || mayAlterTerrain && preparableContact(player, drop, cell)) cells.add(cell.immutable());
+                if (contactStance(player, drop, cell, corridor, walkableDropCell, mayAlterTerrain)) cells.add(cell.immutable());
             }
             cells.add(drop.blockPosition());
         }
@@ -61,31 +62,60 @@ public final class CollectItemsApproach {
         return cells.isEmpty() ? null : GoalCompiler.mineField(List.of(), List.copyOf(cells));
     }
 
-    private static boolean preparableContact(LocalPlayer player, ItemEntity drop, BlockPos feet) {
+    /** 站位安全核查结论：不能站人、直接可站的空气站位，或需要补挖才能到达的站位。 */
+    private enum StanceSafety { BLOCKED, STANDABLE, DIGGABLE }
+
+    /**
+     * 判断一格能否作为该掉落物的接近站位：空气身体直接可站；需要补挖的脚位和头顶候选只在开路获准时纳入。
+     * 掉落格自身能站立且掉落物停在站立面下一格以内时（1 格深凹格坑底），走下凹格拾取属普通行走，
+     * 坑边站位不要求开路授权；接近候选只表示可以交给寻路，实际拾取仍以走到、碰到和入包回执确认。
+     */
+    private static boolean contactStance(LocalPlayer player, ItemEntity drop, BlockPos feet,
+            GroundCorridor corridor, boolean walkableDropCell, boolean mayAlterTerrain) {
+        if (contactPoint(player, drop, feet, corridor) != null) return true;
+        var body = player.getBoundingBox().move(Vec3.atBottomCenterOf(feet).subtract(player.position()));
+        AABB reach = body.inflate(1, .5, 1);
+        if (!reach.intersects(drop.getBoundingBox())) {
+            if (!walkableDropCell) return false;
+            AABB steppedDown = new AABB(body.minX - 1, body.minY - 1.5, body.minZ - 1,
+                    body.maxX + 1, body.maxY + .5, body.maxZ + 1);
+            if (!steppedDown.intersects(drop.getBoundingBox())) return false;
+            reach = steppedDown;
+        }
+        return switch (stanceSafety(player, drop, feet, reach)) {
+            case STANDABLE -> true;
+            case DIGGABLE -> mayAlterTerrain;
+            case BLOCKED -> false;
+        };
+    }
+
+    private static StanceSafety stanceSafety(LocalPlayer player, ItemEntity drop, BlockPos feet, AABB reach) {
         var world = player.level();
         Vec3 point = Vec3.atBottomCenterOf(feet);
         AABB body = player.getBoundingBox().move(point.subtract(player.position()));
-        if (!body.inflate(1, .5, 1).intersects(drop.getBoundingBox())) return false;
+        if (!reach.intersects(drop.getBoundingBox())) return StanceSafety.BLOCKED;
         BlockPos floor = feet.below();
         // 这里仅扩大寻路候选，绝不把尚未挖开的洞口判为已经走通；脚下必须有真实支撑且保持原位。
-        if (!world.isLoaded(floor) || !world.getWorldBorder().isWithinBounds(floor)) return false;
+        if (!world.isLoaded(floor) || !world.getWorldBorder().isWithinBounds(floor)) return StanceSafety.BLOCKED;
         var support = world.getBlockState(floor);
-        if (!support.isCollisionShapeFullBlock(world, floor) || TransportLanding.unsafe(world, floor, support)) return false;
+        if (!support.isCollisionShapeFullBlock(world, floor) || TransportLanding.unsafe(world, floor, support)) return StanceSafety.BLOCKED;
         if (!EmbeddedBaritoneRuntime.physicalObstacles().clearSegment(point, point,
-                body.getXsize(), body.getYsize())) return false;
+                body.getXsize(), body.getYsize())) return StanceSafety.BLOCKED;
         var min = BlockPos.containing(body.minX + 1e-5, body.minY + 1e-5, body.minZ + 1e-5);
         var max = BlockPos.containing(body.maxX - 1e-5, body.maxY - 1e-5, body.maxZ - 1e-5);
+        boolean needsDigging = false;
         for (var cell : BlockPos.betweenClosed(min, max)) {
             if (!world.isLoaded(cell) || !world.getWorldBorder().isWithinBounds(cell)
-                    || NavigationSafetyContext.forbidsBody(cell)) return false;
+                    || NavigationSafetyContext.forbidsBody(cell)) return StanceSafety.BLOCKED;
             var state = world.getBlockState(cell);
-            if (TransportLanding.unsafe(world, cell, state)) return false;
+            if (TransportLanding.unsafe(world, cell, state)) return StanceSafety.BLOCKED;
             if (state.getCollisionShape(world, cell).toAabbs().stream().noneMatch(box -> box.move(cell).intersects(body))) continue;
             // 脚位和头顶的天然障碍可由导航补挖；容器、明确保护和名单外构件不能借拾取获得拆除权限。
             if (!ClearanceWhitelist.allows(state) || NavigationSafetyContext.protectsMutation(cell)
-                    || state.hasBlockEntity() || state.getDestroySpeed(world, cell) < 0) return false;
+                    || state.hasBlockEntity() || state.getDestroySpeed(world, cell) < 0) return StanceSafety.BLOCKED;
+            needsDigging = true;
         }
-        return true;
+        return needsDigging ? StanceSafety.DIGGABLE : StanceSafety.STANDABLE;
     }
 
     public static Vec3 nudgePoint(LocalPlayer player, ItemEntity drop) {

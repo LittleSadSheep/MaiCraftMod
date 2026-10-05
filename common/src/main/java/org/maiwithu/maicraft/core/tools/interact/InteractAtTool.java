@@ -26,7 +26,7 @@ public final class InteractAtTool implements MaiCraftTool {
     private record Args(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
                         String item_id, String expected_block_id, String required_block_id, Boolean empty_hand,
                         String item_resource_id, Boolean approach, Boolean may_alter_terrain, Boolean observe_menu,
-                        String expected_output_item_id) {}
+                        String expected_output_item_id, String expected_effect) {}
 
     @Override
     public String name() {
@@ -59,6 +59,7 @@ public final class InteractAtTool implements MaiCraftTool {
                 .nullableString("expected_block_id", "Optional required resulting block at the aim; an ineffective click is not success.")
                 .nullableString("required_block_id", "Optional block identity that must still occupy the aim immediately before native use.")
                 .nullableString("expected_output_item_id", "Optional carried return/output to observe after the single native interaction.")
+                .nullableString("expected_effect", "ignite: after confirmation also require visible fire at the clicked face's adjacent cell; a confirmed click without fire fails.")
                 .optionalBool("empty_hand", "Prepare an empty main hand before block use; incompatible with item_id. Omitted or false retains held-item use.")
                 .optionalBool("approach", "Choose and reach a visible interaction stance before the native click.")
                 .optionalBool("may_alter_terrain", "Allow native terrain preparation only when approach is enabled.")
@@ -77,6 +78,8 @@ public final class InteractAtTool implements MaiCraftTool {
         if (a.item_resource_id() != null) task.withItemResourceId(a.item_resource_id());
         // 倒桶后可以等待原版返桶同步；预期返还物随同一个任务传递，不为了拿回空桶再次点击。
         if (a.expected_output_item_id() != null) task.withExpectedOutput(ToolArgs.parseItem(a.expected_output_item_id()));
+        // 点火类使用要求相邻格真的出现火；点击确认不冒充点火成功。
+        if ("ignite".equals(a.expected_effect())) task.withIgnitionCheck();
         // 上层只给目标与地形许可，站位和换路留给同一原生任务，避免把寻路失败退给模型手动拆步。
         if (Boolean.TRUE.equals(a.approach())) task.withApproach(Boolean.TRUE.equals(a.may_alter_terrain()));
         // 开箱意图额外结算菜单观察，普通右键仍维持自身原生交互语义。

@@ -236,6 +236,19 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
     // 本任务的导航与沿途地形改动记录。
     // ---------------------------------------------------------------------
 
+    /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 docs/architecture/07-attention.md）。 */
+    public static final int DISTANCE_QUANTUM_BLOCKS = 16;
+
+    /**
+     * 剩余距离按 16 格量化档向上取整。向上取整是口径的一半：剩余 0 只出现在真实到达，
+     * 不会出现「计数说完了人还在掘」的伪终点；四舍五入会在半档处提前报 0。
+     */
+    public static int quantizedRemaining(double distance) {
+        if (distance <= 0) return 0;
+        return (int) Math.min(Integer.MAX_VALUE,
+                Math.ceil(distance / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS);
+    }
+
     /** 记下路上改过的地形，再停止并移走导航；重复调用不会重复记账。 */
     protected void stopNav() {
         PlayerNav active = nav;

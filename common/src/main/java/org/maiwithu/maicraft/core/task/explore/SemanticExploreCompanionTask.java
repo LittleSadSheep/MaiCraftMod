@@ -68,6 +68,8 @@ public final class SemanticExploreCompanionTask
     private static final double RELOCATION_HOP_BLOCKS = 32.0;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
+    /** 观察驻留为在途扫描轮保留的额外刻数上限：冷索引一轮约需 15~130 刻，超限按未覆盖处理不无限等待。 */
+    private static final int MAX_SCAN_DWELL_TICKS = 200;
 
     private static final List<ColumnOffset> BIOME_OBSERVATION_OFFSETS =
             buildOffsets(BIOME_OBSERVATION_STEP);
@@ -86,6 +88,7 @@ public final class SemanticExploreCompanionTask
 
     private int observationColumn;
     private int biomeYIndex;
+    private int scanDwellTicks;
     private int observationCycles;
     private BlockPos observationCenter;
     private long loadedSampleCount;
@@ -231,6 +234,7 @@ public final class SemanticExploreCompanionTask
         observationCenter = player.blockPosition().immutable();
         observationColumn = 0;
         biomeYIndex = 0;
+        scanDwellTicks = 0;
         observationCycles++;
         surfaceCache.clear();
         long centerKey = BlockPos.asLong(
@@ -284,6 +288,14 @@ public final class SemanticExploreCompanionTask
         }
         if (observationColumn < offsets.size()) {
             // 观察会按每刻预算分批抽样有限的本地网格。保留这一 CPU 上限，同时不要因排队等待抽样而消耗语义任务的存活期限，尤其是在游戏刻加速时。
+            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+            return TaskState.RUNNING;
+        }
+        // 列抽样完成后给在途扫描轮留驻留：聚类判定结算（或到达上限）前不进入路点移动，
+        // 否则路点间的位移会在下一轮观察把进度重开，村庄就在眼前也攒不出一次完整判定。
+        if (sightingScanner != null && sightingScanner.roundInProgress()
+                && scanDwellTicks < MAX_SCAN_DWELL_TICKS) {
+            scanDwellTicks++;
             r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
             return TaskState.RUNNING;
         }
@@ -994,6 +1006,7 @@ public final class SemanticExploreCompanionTask
 
     @Override protected void cleanup() {
         if (memory != null) memory.close();
+        if (sightingScanner != null) sightingScanner.release();
         stopActiveChild(TaskState.CANCELLED);
         super.cleanup();
     }

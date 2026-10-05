@@ -122,30 +122,50 @@ public record OreGenerationBand(
         UNKNOWN_BAND,
         /** 生成带在另一维度：拒绝在本维度下降，如实报告维度壁垒。 */
         OTHER_DIMENSION,
-        /** 派出下降子任务，目标 = 当前 xz + 推荐探矿 Y。 */
+        /** 派出下降子任务，目标 = 当前 xz + 推荐探矿 Y；当前位置已在生成带内时取当前位置（就地带）。 */
         DESCEND,
+        /**
+         * 生成带推荐层高于当前位置且当前位置不在带内：到达它只能露天空中垫柱爬升——那是
+         * 改变地貌的重定位，不是授权的「挖着找」。如实拒绝，出路交给调用方（沿地表移动到
+         * 该海拔带再提交，或显式下降到带内某层）。
+         */
+        UPHILL_BAND,
         /** 下降完成后派探矿采矿：矿道掘进，边暴露边采。 */
         PROSPECT,
         /** 探矿已执行过：不再重复，交给既有来源推进与终态逻辑。 */
         ALREADY_PROSPECTED
     }
 
-    public record Plan(Step step, OreGenerationBand band) {
+    public record Plan(Step step, OreGenerationBand band, int prospectY) {
         public static final Plan UNAUTHORIZED = new Plan(Step.UNAUTHORIZED, null);
         public static final Plan UNKNOWN_BAND = new Plan(Step.UNKNOWN_BAND, null);
+
+        /** 带内决策的便捷构造：探矿 Y 取带推荐值。 */
+        Plan(Step step, OreGenerationBand band) {
+            this(step, band, band == null ? Integer.MIN_VALUE : band.prospectY());
+        }
     }
 
     /**
      * 探矿决策：公平扫描空手后是否、以及如何进入探矿。决策只读请求事实
-     * （授权、表、当前维度、已推进到的阶段），不携带任何世界内部状态。
+     * （授权、表、当前维度、已推进到的阶段、当前脚位高度），不携带任何世界内部状态。
+     *
+     * <p>就地带优先：当前位置已落在生成带 [minY, maxY] 内时，探矿 Y 取当前位置——
+     * 本地同为生成带且常已在石头里，为凑推荐层先垫柱爬升会把探矿变成露天施工。
+     * 推荐层低于当前位置时仍按推荐层下降（向下掘进就是「挖着找」本身）；
+     * 推荐层高于当前位置且当前位置不在带内时拒绝（{@link Step#UPHILL_BAND}）。
      */
     public static Plan plan(boolean allowProspecting, Collection<ResourceLocation> itemIds,
-                            String currentDimension, boolean descendStarted, boolean prospectMineStarted) {
+                            String currentDimension, boolean descendStarted, boolean prospectMineStarted,
+                            int currentFeetY) {
         if (!allowProspecting) return Plan.UNAUTHORIZED;
         if (prospectMineStarted || descendStarted) return new Plan(Step.ALREADY_PROSPECTED, null);
         OreGenerationBand band = forItems(itemIds);
         if (band == null) return Plan.UNKNOWN_BAND;
         if (!band.matchesDimension(currentDimension)) return new Plan(Step.OTHER_DIMENSION, band);
+        if (currentFeetY >= band.minY && currentFeetY <= band.maxY)
+            return new Plan(Step.DESCEND, band, currentFeetY);
+        if (band.prospectY() > currentFeetY) return new Plan(Step.UPHILL_BAND, band);
         return new Plan(Step.DESCEND, band);
     }
 }

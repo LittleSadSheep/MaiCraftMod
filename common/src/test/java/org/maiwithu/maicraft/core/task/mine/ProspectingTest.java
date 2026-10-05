@@ -94,29 +94,40 @@ public final class ProspectingTest {
 
     private static void decision() {
         var overworld = OreGenerationBand.OVERWORLD;
-        check(OreGenerationBand.plan(false, List.of(DIAMOND), overworld, false, false).step()
+        check(OreGenerationBand.plan(false, List.of(DIAMOND), overworld, false, false, 45).step()
                         == OreGenerationBand.Step.UNAUTHORIZED,
                 "授权关：维持公平空手行为，不派下降");
-        check(OreGenerationBand.plan(true, List.of(STICK), overworld, false, false).step()
+        check(OreGenerationBand.plan(true, List.of(STICK), overworld, false, false, 45).step()
                         == OreGenerationBand.Step.UNKNOWN_BAND,
                 "表外物品：拒绝探矿，不猜下降深度");
-        check(OreGenerationBand.plan(true, List.of(DIAMOND), OreGenerationBand.NETHER, false, false).step()
+        check(OreGenerationBand.plan(true, List.of(DIAMOND), OreGenerationBand.NETHER, false, false, 45).step()
                         == OreGenerationBand.Step.OTHER_DIMENSION,
                 "生成带在另一维度：不在当前维度下降");
-        var descend = OreGenerationBand.plan(true, List.of(DIAMOND), overworld, false, false);
-        check(descend.step() == OreGenerationBand.Step.DESCEND && descend.band().prospectY() == -59,
-                "授权开 + 表内物品 + 维度相符 → 下降，目标 Y = 推荐探矿值");
-        check(OreGenerationBand.plan(true, List.of(DIAMOND), overworld, true, false).step()
+        var descend = OreGenerationBand.plan(true, List.of(DIAMOND), overworld, false, false, 45);
+        check(descend.step() == OreGenerationBand.Step.DESCEND && descend.prospectY() == -59,
+                "带外且推荐层在下方：下降，目标 Y = 推荐探矿值");
+        check(OreGenerationBand.plan(true, List.of(DIAMOND), overworld, true, false, 45).step()
                         == OreGenerationBand.Step.ALREADY_PROSPECTED,
                 "下降已派出：不再重复决策");
+        // 就地带优先（109）：当前位置已在生成带内时探矿 Y 取当前位置，不为凑推荐层垫柱爬升。
+        var inBand = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, 45);
+        check(inBand.step() == OreGenerationBand.Step.DESCEND && inBand.prospectY() == 45,
+                "y45 在煤带 [0,320] 内：就地带探矿，prospectY = 45 而非推荐层 96");
+        // 向上重定位拒绝（109）：当前位置在带外且推荐层在上方，露天空中垫柱不是授权的「挖着找」。
+        var uphillUnderground = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, -10);
+        check(uphillUnderground.step() == OreGenerationBand.Step.UPHILL_BAND,
+                "y-10 在煤带 [0,320] 外且推荐层 96 在上方：拒绝向上重定位");
+        var uphillDeep = OreGenerationBand.plan(true, List.of(IRON_INGOT), overworld, false, false, -70);
+        check(uphillDeep.step() == OreGenerationBand.Step.UPHILL_BAND,
+                "y-70 在铁带 [-64,320] 外且推荐层 16 在上方：同样拒绝向上重定位");
         // 矿方块 ID 走同一条决策链：iron_ore 授权探矿派下降，与 raw_iron 落在同一条带。
-        var ironOreDescend = OreGenerationBand.plan(true, List.of(IRON_ORE), overworld, false, false);
-        var rawIronDescend = OreGenerationBand.plan(true, List.of(RAW_IRON), overworld, false, false);
+        var ironOreDescend = OreGenerationBand.plan(true, List.of(IRON_ORE), overworld, false, false, 45);
+        var rawIronDescend = OreGenerationBand.plan(true, List.of(RAW_IRON), overworld, false, false, 45);
         check(ironOreDescend.step() == OreGenerationBand.Step.DESCEND
                         && rawIronDescend.step() == OreGenerationBand.Step.DESCEND
                         && ironOreDescend.band().equals(rawIronDescend.band()),
                 "矿方块 ID 与产物 ID 授权探矿同带下降，prospectY = "
-                        + ironOreDescend.band().prospectY());
+                        + ironOreDescend.prospectY());
     }
 
     // ---- 掘进驱动：空候选继续掘进而非立即终局；预算耗尽诚实收手 ----

@@ -166,6 +166,11 @@ public final class IntentTaskRecord extends TaskRecord {
     public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
         return Map.copyOf(internalStepPositions);
     }
+
+    /** 本计划已成功步骤验证站立过的位置，按记录顺序去重；这是回执事实的读取，供寻路输入使用，不构成执行指令。 */
+    public List<Goal.WorldPosition> internalKnownPositions() {
+        return List.copyOf(new LinkedHashSet<>(internalStepPositions.values()));
+    }
     /** 供检查点保存保护范围，MCP 查询不输出这里的具体方块格。 */
     public Map<Integer, List<InternalAreaProtectionReceipt.Footprint>>
             internalAreaProtectionReceipts() {

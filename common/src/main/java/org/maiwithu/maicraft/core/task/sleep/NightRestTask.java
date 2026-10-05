@@ -74,6 +74,10 @@ public final class NightRestTask extends AbstractCompanionTask<NightRestTask.Rec
                     ? r.bed.relative(state.getValue(BedBlock.FACING).getOpposite()) : r.bed;
             if (!vanillaReachable(foot)) return false;
         }
+        // 原版距离盒的对角上角满足入睡判定但眼距仍超过交互半径（067 实机：闸口放行后
+        // 入睡子任务零动作即以"床太远"放弃）。接近闸口与入睡闸口同判交互半径，
+        // 超出就继续寻路走近，不能把一步式失败交给子任务。
+        if (player.getEyePosition().distanceTo(Vec3.atCenterOf(r.bed)) > SleepCompanionTask.INTERACTION_REACH) return false;
         var hit = player.level().clip(new ClipContext(player.getEyePosition(), Vec3.atCenterOf(r.bed),
                 ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().distManhattan(r.bed) <= 1

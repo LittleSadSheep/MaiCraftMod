@@ -45,6 +45,7 @@ public final class RecipeFrontierFallbackTest {
         List<AssertionError> failures = new ArrayList<>();
         runCase("窄化替代材料失败后保留父配方", RecipeFrontierFallbackTest::narrowedAlternativeKeepsParentRoute, failures);
         runCase("真实效果出现后保留承诺停止边界", RecipeFrontierFallbackTest::observedEffectsStillStopRouteSwitching, failures);
+        runCase("标签替代原料保留在补料前沿", RecipeFrontierFallbackTest::tagAlternativesStayInSupplyFrontier, failures);
         if (!failures.isEmpty()) {
             AssertionError failed = new AssertionError("配方前沿回放发现 " + failures.size() + " 项行为不符合预期");
             failures.forEach(failed::addSuppressed);
@@ -102,6 +103,39 @@ public final class RecipeFrontierFallbackTest {
             check(planner.materialPlan(chest, parent).supplies().isEmpty(), "新观察到的足量现货仍能完成原配方");
             check(world.itemUses() == 0 && world.blockUses() == 0,
                     "离线回放不得执行取物或方块交互");
+        }
+    }
+
+    /**
+     * 006 局实机回归：火把配方原料是 #minecraft:coals 标签（煤与木炭都是合法成员），
+     * 补料前沿若收缩成单一"煤"，标签内已验证可行的替代路线（烧原木出木炭）就从需求里消失，
+     * 挖煤失败后整个补给直接终局。补料行必须携带整组替代原料，成本比较只在组内挑选执行入口。
+     */
+    private static void tagAlternativesStayInSupplyFrontier() throws Exception {
+        ResourceLocation torch = id("minecraft:torch");
+        ResourceLocation coal = id("minecraft:coal");
+        ResourceLocation charcoal = id("minecraft:charcoal");
+        try (var world = new InteractionWorldTestHarness()) {
+            var record = record(List.of(torch), 48);
+            var task = new SemanticAcquireCompanionTask(world.player, record);
+            task.onStart();
+            AcquisitionNeed parent = (AcquisitionNeed) get(task, "rootNeed");
+            CraftRecoveryCandidate torchRecipe = candidate("test:torch_from_coals", List.of(coal, charcoal), 48);
+            var planner = new AcquisitionRecipePlanner(world.player, false, 16, List.of());
+
+            RecipeMaterialPlan.Result plan = planner.materialPlan(torchRecipe, parent);
+            check(plan.feasible(), "火把配方应能生成可行的补料计划");
+            check(!plan.supplies().isEmpty(), "无现货时应列出待补材料");
+            var supplyRow = plan.supplies().getFirst();
+            check(supplyRow.alternatives().contains(coal) && supplyRow.alternatives().contains(charcoal),
+                    "补料行必须保留标签槽位的全部替代原料，不能收缩成单一煤矿物品: " + supplyRow);
+
+            AcquisitionRecipePlanner.Frontier frontier = planner.chooseFrontier(torchRecipe, List.of(torchRecipe), parent);
+            check(frontier != null, "火把配方应能生成一个补料前沿");
+            var ids = frontier.ingredient().itemIds();
+            check(ids.contains(coal) && ids.contains(charcoal),
+                    "补给子需求应同时接受煤与木炭，挖煤受阻后仍能改走已验证的木炭链路: " + ids);
+            System.out.println("tag supply frontier=" + ids + "; required=" + frontier.ingredient().missing());
         }
     }
 

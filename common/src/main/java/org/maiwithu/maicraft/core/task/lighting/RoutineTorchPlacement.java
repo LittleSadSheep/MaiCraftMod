@@ -60,16 +60,31 @@ public final class RoutineTorchPlacement {
 
     public static boolean usable(LocalPlayer player, BlockPos at, BlockState expected,
                                  BlockPos support, Direction face, Set<BlockPos> protectedCells) {
-        // 临出手再核对空格、支撑面、保护范围和真实射线；快速火把路径只接受空气，不会先清草或替换已有方块。
+        // 临出手再核对空格、支撑面、保护范围和真实射线；快速火把路径接受空气与可替换植物，
+        // 不会先清草或替换已有方块——草丛格由原版放置语义原地替换成火把，与区域任务的候选资格一致。
         var level = player.level();
-        if (!level.isLoaded(at) || !level.isLoaded(support) || protectedCells.contains(at) || protectedCells.contains(support)
+        if (!level.isLoaded(at) || !level.isLoaded(support)) return false;
+        BlockState current = level.getBlockState(at);
+        // 只有立地火把允许借可替换格当落点；挂墙火把仍要求空气格，避免替换语义与贴面朝向互相打架。
+        boolean replaceableGroundCell = face == Direction.UP && !current.isAir()
+                && current.canBeReplaced() && level.getFluidState(at).isEmpty();
+        if ((!current.isAir() && !replaceableGroundCell) || !level.getFluidState(at).isEmpty()
+                || protectedCells.contains(at) || protectedCells.contains(support)
                 || NavigationSafetyContext.protectsMutation(at) || NavigationSafetyContext.protectsUse(support)
-                || NavigationSafetyContext.forbidsBody(at) || !level.getBlockState(at).isAir()
-                || !level.getFluidState(at).isEmpty() || new AABB(at).intersects(player.getBoundingBox().inflate(.1))) return false;
+                || NavigationSafetyContext.forbidsBody(at)) return false;
         BlockState base = level.getBlockState(support);
         // 箱子、机器和工作台不作默认灯座，避免打开界面；基地木板、砖墙等普通结实表面也可直接挂灯。
         if (base.hasBlockEntity() || base.getMenuProvider(level, support) != null || !base.getFluidState().isEmpty()
                 || !base.isFaceSturdy(level, support, face) || !expected.canSurvive(level, at)) return false;
+        if (new AABB(at).intersects(player.getBoundingBox().inflate(.1))) return false;
+        if (replaceableGroundCell) {
+            // 草丛有选中轮廓，射线命中该格本身即算对准；不再要求穿到下方支撑面。
+            Vec3 cellCenter = Vec3.atCenterOf(at);
+            if (player.getEyePosition().distanceToSqr(cellCenter) > Math.pow(Math.min(4.25, player.blockInteractionRange()), 2)) return false;
+            var cellHit = level.clip(new ClipContext(player.getEyePosition(), cellCenter,
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+            return cellHit.getType() == HitResult.Type.BLOCK && cellHit.getBlockPos().equals(at);
+        }
         Vec3 point = Vec3.atCenterOf(support).add(Vec3.atLowerCornerOf(face.getNormal()).scale(.5));
         if (player.getEyePosition().distanceToSqr(point) > Math.pow(Math.min(4.25, player.blockInteractionRange()), 2)) return false;
         var hit = level.clip(new ClipContext(player.getEyePosition(), point.add(Vec3.atLowerCornerOf(face.getNormal()).scale(-.01)),

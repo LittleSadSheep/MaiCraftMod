@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.cook;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -115,6 +116,7 @@ public final class SemanticCookCompanionTask
     private final Set<String> rejectedInputCandidates = new LinkedHashSet<>();
     private final Set<CookingDevice> rejectedDevices = new LinkedHashSet<>();
     private final List<Map<String, Object>> planningAttempts = new ArrayList<>();
+    private Map<String, Object> planningDiagnosis = Map.of();
 
     public SemanticCookCompanionTask(LocalPlayer player, SemanticCookTaskRecord record) {
         super(player, record);
@@ -274,9 +276,7 @@ public final class SemanticCookCompanionTask
                 .min(recipePlanner.candidateComparator())
                 .orElse(null);
         if (selected == null) {
-            return failOrClean("no_reachable_cooking_plan",
-                    "Cooking recipes exist, but none has a supported path to its input, fuel and workstation.",
-                    FailureType.NO_MATERIAL);
+            return failUnreachablePlan(plans);
         }
         candidate = selected.candidate();
         FuelChoice selectedFuel = selected.fuel();
@@ -285,6 +285,77 @@ public final class SemanticCookCompanionTask
         prerequisiteFailure = Map.of();
         phase = Phase.PREPARE;
         return TaskState.RUNNING;
+    }
+
+    // 原料、燃料和设备的准备成本取自同一套估价；这里只挑阻碍最少的方案做失败解释，不改变估价本身。
+    private static final long UNREACHABLE = CookingRecipePlanner.UNAVAILABLE_COST;
+
+    // 全部备料方案都达不到目标时，点名堵在哪一层（原料/燃料/设备）以及要多少、许可来源内可见多少，
+    // 不再用"配方存在但没有受支持路径"的合并话术——调用方分不清是配方缺失、燃料不够还是设备找不到。
+    private TaskState failUnreachablePlan(List<ResolvedCandidate> plans) {
+        ResolvedCandidate closest = plans.stream()
+                .min(Comparator.comparingInt((ResolvedCandidate plan) -> blockedLayers(plan).size())
+                        .thenComparingLong(ResolvedCandidate::preparationCost)
+                        .thenComparing(recipePlanner.candidateComparator()))
+                .orElse(null);
+        if (closest == null) {
+            return failOrClean("no_reachable_cooking_plan",
+                    "Cooking recipes exist, but none has a supported path to its input, fuel and workstation.",
+                    FailureType.NO_MATERIAL);
+        }
+        CookingRecipe option = closest.candidate();
+        Item input = option.input();
+        Item fuelItem = closest.fuel().item();
+        int inputRequired = rawRemaining(option);
+        int fuelRequired = closest.fuel().count();
+        List<String> blocked = blockedLayers(closest);
+        List<String> details = new ArrayList<>();
+        if (blocked.contains("input")) {
+            details.add("input blocked: needs " + inputRequired + "x " + key(input)
+                    + ", only " + recipePlanner.reachableCount(input) + " reachable from allowed_sources");
+        }
+        if (blocked.contains("fuel")) {
+            details.add("fuel blocked: needs " + fuelRequired + "x " + key(fuelItem)
+                    + ", only " + recipePlanner.reachableCount(fuelItem) + " reachable from allowed_sources");
+        }
+        if (blocked.contains("workstation")) {
+            details.add("workstation blocked: no " + blockKey(option.device().block)
+                    + " within loaded reach and none obtainable from allowed_sources");
+        }
+        Map<String, Object> diagnosis = new LinkedHashMap<>();
+        diagnosis.put("item_id", r.itemId.toString());
+        diagnosis.put("recipe_id", option.recipeId().toString());
+        diagnosis.put("device", blockKey(option.device().block));
+        diagnosis.put("input_item_id", key(input));
+        diagnosis.put("input_required", inputRequired);
+        diagnosis.put("input_reachable", recipePlanner.reachableCount(input));
+        diagnosis.put("fuel_item_id", key(fuelItem));
+        diagnosis.put("fuel_required", fuelRequired);
+        diagnosis.put("fuel_reachable", recipePlanner.reachableCount(fuelItem));
+        diagnosis.put("blocked_layers", List.copyOf(blocked));
+        planningDiagnosis = Map.copyOf(diagnosis);
+        return failOrClean("no_reachable_cooking_plan",
+                "Cooking recipes exist for " + r.itemId + ", but the full goal of " + r.count
+                        + " cannot be prepared in one bounded plan. Closest plan: " + option.recipeId()
+                        + " cooking " + inputRequired + "x " + key(input) + " in " + blockKey(option.device().block)
+                        + " with " + fuelRequired + "x " + key(fuelItem) + ". " + String.join("; ", details) + ".",
+                FailureType.NO_MATERIAL);
+    }
+
+    private static List<String> blockedLayers(ResolvedCandidate plan) {
+        List<String> blocked = new ArrayList<>();
+        if (plan.inputCost() >= UNREACHABLE) blocked.add("input");
+        if (plan.fuel().acquisitionCost() >= UNREACHABLE) blocked.add("fuel");
+        if (plan.stationCost() >= UNREACHABLE) blocked.add("workstation");
+        return blocked;
+    }
+
+    private static String key(Item item) {
+        return BuiltInRegistries.ITEM.getKey(item).toString();
+    }
+
+    private static String blockKey(Block block) {
+        return BuiltInRegistries.BLOCK.getKey(block).toString();
     }
 
     // 还欠上一炉的结果时先回到原设备核对；新批次则根据产物和燃料堆叠上限决定装多少原料。
@@ -1511,6 +1582,9 @@ public final class SemanticCookCompanionTask
         }
         if (!planningAttempts.isEmpty()) {
             data.put("preparation_plan_failures", List.copyOf(planningAttempts));
+        }
+        if (!planningDiagnosis.isEmpty()) {
+            data.put("planning_diagnosis", planningDiagnosis);
         }
         if (!stationAttempts.isEmpty()) data.put("workstation_attempts", List.copyOf(stationAttempts));
         // 这里保存的是恢复建议；语义父任务收到实际失败会结算终态，不因这张建议表自动进入待回答状态。

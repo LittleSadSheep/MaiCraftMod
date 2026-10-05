@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.mcp.knowledge;
 
 import com.google.gson.JsonObject;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -48,6 +50,19 @@ public final class KnowledgeLibraryTest {
             check(body != null && body.text().contains("## 规则") && body.text().contains("这个规则会怎么坑你"),
                     "mechanics card readable with rule and pitfall sections: " + card[0]);
         }
+        // 注册数组必须与 resources 目录下的机制卡文件集合一致：漏登记的卡正文还在，
+        // 但 URI 不可达、搜索不命中，比缺文件更隐蔽（tick-rate 曾漏登记）。
+        Set<String> bundled = new HashSet<>();
+        try (var files = Files.list(Path.of(KnowledgeLibrary.class.getResource("/assets/maicraft/knowledge/game_mechanics").toURI()))) {
+            files.map(p -> p.getFileName().toString())
+                    .filter(n -> n.endsWith(".md"))
+                    .forEach(n -> bundled.add(n.substring(0, n.length() - 3)));
+        } catch (Exception failure) { throw new IllegalStateException("cannot list bundled game_mechanics directory", failure); }
+        Set<String> registered = new HashSet<>();
+        for (String[] card : KnowledgeLibrary.GAME_MECHANICS) registered.add(card[0]);
+        Set<String> missing = new HashSet<>(bundled); missing.removeAll(registered);
+        Set<String> extra = new HashSet<>(registered); extra.removeAll(bundled);
+        check(bundled.equals(registered), "GAME_MECHANICS registry matches bundled game_mechanics/*.md; missing=" + missing + " extra=" + extra);
         check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
         check(library.read(KnowledgeLibrary.RECIPES).text().contains("display_recipes"), "material planning guide available on demand");
         check(library.read(KnowledgeLibrary.PHYSICS).text().contains("native_flight_verified"),"配平资料必须区分预测与实船证据");

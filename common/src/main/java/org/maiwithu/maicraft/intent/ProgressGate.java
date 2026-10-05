@@ -18,7 +18,7 @@ final class ProgressGate {
     record Decision(String message, boolean keylessWarn) {}
 
     private static final List<String> SCOREBOARD_KEYS =
-            List.of("done", "total", "phase", "remaining", "initial");
+            List.of("done", "total", "phase", "remaining", "initial", "calc");
     private static final long FLOOR_TICKS = 40;
     static final long KEYLESS_WARN_TICKS = 2400;
 
@@ -87,6 +87,9 @@ final class ProgressGate {
                     : "剩余 " + remaining + "/" + initial + " 格");
         }
         if (observation.get("phase") != null) parts.add(String.valueOf(observation.get("phase")));
+        // 规划心跳：搜索尝试次数只在规划期增长，让「还在算」的停滞每过地板间隔仍有一条事件可发。
+        Object calc = observation.get("calc");
+        if (calc != null) parts.add("calc " + calc);
         return parts.toString();
     }
 }

@@ -7,12 +7,17 @@ import java.util.List;
 import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
@@ -67,6 +72,7 @@ public final class ExactInteractionTargetTest {
         changedAfterCompilation(true);
         heldItemUseHasItsOwnSemanticEntry();
         foodEffectsAreAnExplicitPlannerChoice();
+        flintIgnitionTargetsAndHonestFire();
         bucketSourceSelection(false);
         bucketSourceSelection(true);
         // 公开 use_item 的定点分支同时覆盖空格倒桶与门框嵌眼，避免退回只读契约测试。
@@ -194,6 +200,98 @@ public final class ExactInteractionTargetTest {
                 () -> new InteractAtTool().onGameCall("exact-target", tool.arguments(), f.player,
                         ignored -> { throw new AssertionError("captured internal interaction replied directly"); }));
         return result.get();
+    }
+
+    /**
+     * 打火石的目标格口径与点火诚实性：空气格即火落格（点击编译到相邻实心支撑），
+     * 实心格保留原坐标；点击确认后相邻格必须真有火，无火不得以成功收尾。
+     */
+    private static void flintIgnitionTargetsAndHonestFire() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            f.set(NEIGHBOR, Blocks.STONE.defaultBlockState());
+            var record = compile(adaptFlint(flintGoal(NEIGHBOR.above(), f), f), f);
+            check(record.aim.equals(NEIGHBOR) && record.expectIgnition && record.requiredBlock == Blocks.STONE,
+                    "air target for a flint use compiles to the solid support and requires the honest fire check");
+            f.set(NEIGHBOR, Blocks.AIR.defaultBlockState());
+            var noSupport = adaptFlint(flintGoal(NEIGHBOR.above(), f), f);
+            check(noSupport instanceof IntentAction.Decision decision
+                            && decision.snapshot().question().contains("no adjacent solid block"),
+                    "an air cell with no solid neighbor must refuse ignition instead of swinging at air");
+        }
+        igniteWithVisibleFire(true);
+        igniteWithVisibleFire(false);
+    }
+
+    private static IntentAction adaptFlint(Goal goal, InteractionWorldTestHarness f) throws Exception {
+        SemanticGoalContract.validate(goal, GeneralAbilityAdapter.abilities());
+        for (int tick = 0; tick < 100; tick++) {
+            IntentAction action = AbilityAdapter.adapt(goal, f.player, null);
+            if (action != IntentAction.Pending.INSTANCE) return action;
+            f.nextTick();
+        }
+        throw new AssertionError("the flint adaptation never completed");
+    }
+
+    private static Goal flintGoal(BlockPos fireCell, InteractionWorldTestHarness f) {
+        JsonObject parameters = new JsonObject();
+        parameters.addProperty("item_id", "minecraft:flint_and_steel");
+        var target = new Goal.SemanticTarget("coordinates", null,
+                new Goal.WorldPosition(fireCell.getX(), fireCell.getY(), fireCell.getZ(), "minecraft:overworld"), null);
+        return new Goal(GeneralAbilityAdapter.USE_ITEM, "ignite the support beside this cell",
+                target, parameters.toString(), "{}", List.of(), List.of());
+    }
+
+    /** 真实落火成功并写入回执；点击确认而无火时按失败收尾，不再自评成功。 */
+    private static void igniteWithVisibleFire(boolean placeFire) throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            f.position(new Vec3(3.5, 1, .5));
+            f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            f.set(TARGET, Blocks.STONE.defaultBlockState());
+            var record = compile(adaptFlint(flintGoal(TARGET, f), f), f);
+            check(record.aim.equals(TARGET) && record.expectIgnition,
+                    "a solid flint target keeps the exact aim and the fire check");
+            var task = new InteractAtCompanionTask(f.player, record); task.start(f.player);
+            TaskState state = TaskState.RUNNING;
+            BlockHitResult visible = null;
+            boolean clicked = false;
+            for (int tick = 0; tick < 160 && state == TaskState.RUNNING; tick++) {
+                var hit = FirstPersonInteractionTargeting.visibleBlockHit(
+                        f.level, f.player, f.player.getEyePosition(), TARGET, 4.5);
+                if (hit != null) aim(f, hit.getLocation());
+                f.nextTick(); state = task.tick(f.player);
+                if (f.blockUses() == 1 && !clicked) {
+                    clicked = true; visible = hit;
+                    if (placeFire) {
+                        f.set(TARGET.relative(hit.getDirection()), Blocks.FIRE.defaultBlockState());
+                        f.level.acknowledgedSequence = f.level.blockSequence;
+                    } else {
+                        // 用耐久变化模拟“原版接受了右键”的确认线索，世界照旧无火。
+                        var damaged = new ItemStack(Items.FLINT_AND_STEEL);
+                        damaged.setDamageValue(1);
+                        f.inventory.setItem(0, damaged);
+                    }
+                }
+            }
+            if (placeFire) {
+                check(state == TaskState.SUCCESS && clicked,
+                        "confirmed ignition with real fire at the adjacent cell succeeds: " + state);
+                var data = task.result(state).data();
+                check(Boolean.TRUE.equals(data.get("fire_observed")), "receipt reports the verified fire");
+            } else {
+                check(state == TaskState.FAILED,
+                        "a confirmed click without fire must fail instead of claiming success: " + state);
+                check(!(f.level.getBlockState(TARGET.relative(visible == null ? Direction.UP : visible.getDirection())).getBlock() instanceof BaseFireBlock),
+                        "the failing replay keeps the world without fire");
+            }
+        }
+    }
+
+    /** 夹具显式完成转头，让断言关注真实命中与动作选择。 */
+    private static void aim(InteractionWorldTestHarness world, Vec3 point) {
+        Vec3 direction = point.subtract(world.player.getEyePosition());
+        world.player.setYRot((float) Math.toDegrees(Math.atan2(-direction.x, direction.z)));
+        world.player.setXRot((float) -Math.toDegrees(Math.atan2(direction.y, Math.hypot(direction.x, direction.z))));
     }
 
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }

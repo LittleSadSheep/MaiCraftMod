@@ -292,17 +292,29 @@ def regressionSuites = [
         heap: '512m', directory: 'combat-regression', timeoutSeconds: 45,
         purpose: '验证受伤证据与自动自卫'
     ],
-    // 装备同步包是服务端耐久扣除到达客户端的唯一通道；打空消灭必须在事件里显式可归因。
+    // 装备增量包从不发给本玩家；打空事实经原版实体事件必达本人，必须在事件里显式可归因。
     equipmentReceiptRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.EquipmentReceiptsTest',
         heap: '512m', directory: 'equipment-receipt-regression', timeoutSeconds: 45,
-        purpose: '验证装备包观察、耐久消耗累计与打空显式回执'
+        purpose: '验证装备观察账目、耐久消耗累计与打空显式回执（同步包与实体事件双通道）'
+    ],
+    // 夜休整链独立回放：整夜等待、床资格、入睡闸口与被抢占的返程预算，防止"附近有床"掩盖失效睡眠。
+    nightRestRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.NightRestBehaviorTest',
+        heap: '512m', directory: 'night-rest-regression', timeoutSeconds: 60,
+        purpose: '验证夜休的等待醒来、床资格与入睡距离闸口的一致性'
     ],
     // R21 距离循环使用独立入口，单独核对格心站位与真实玩家攻击距离的边界。
     combatStanceReplayRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.CombatStanceReplayTest',
         heap: '512m', directory: 'combat-stance-replay-regression', timeoutSeconds: 45,
         purpose: '回放近战站位与原生出刀边界'
+    ],
+    // 睡眠门控与回执：可睡窗口按原版天空变暗公式判定，入睡跳夜以日指数前进的实物证据判成功。
+    sleepGateRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.SleepGateReceiptTest',
+        heap: '512m', directory: 'sleep-gate-regression', timeoutSeconds: 60,
+        purpose: '验证睡眠白天门控与原版可睡窗口同源，入睡跳刻后回执与世界实物一致'
     ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
@@ -346,6 +358,12 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.core.task.mine.FairMineGateTest',
         heap: '512m', directory: 'fair-mine-gate-regression', timeoutSeconds: 90,
         purpose: '验证挖掘目标只认即时可见或观察记忆见过，空手回执无透视泄漏'
+    ],
+    // 定点采收概率掉落独立回放：破坏成立即事实成功，回执区分概率未中与未破坏，范围采矿预算失败口径不变。
+    harvestProbabilisticReceiptRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.mine.HarvestProbabilisticReceiptTest',
+        heap: '512m', directory: 'harvest-probabilistic-receipt-regression', timeoutSeconds: 60,
+        purpose: '验证定点采收对概率掉落方块破坏成功即成功且回执如实区分未中与未破坏'
     ],
     // 授权探矿独立回放：生成带表只认公开数据、决策按授权与维度分步、掘进预算耗尽诚实收手。
     prospectingRegression: [

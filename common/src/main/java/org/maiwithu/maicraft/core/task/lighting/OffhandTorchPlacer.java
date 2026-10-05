@@ -9,6 +9,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.WallTorchBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
@@ -73,10 +74,16 @@ public final class OffhandTorchPlacer {
     public boolean place(LocalPlayerContext context, BuildTaskRecord.Target candidate, Set<BlockPos> protectedCells) {
         if (!prepare(context) || !RoutineTorchPlacement.stillUsable(context.player(), candidate, protectedCells)) return false;
         var player = context.player();
+        // 草丛等可替换落点是点击本体；命中该格即提交，原版放置语义会原地替换成火把，不再要求射线穿到支撑面。
+        BlockState occupied = context.level().getBlockState(candidate.pos());
+        boolean replaceableCell = candidate.desiredState().is(Blocks.TORCH) && !occupied.isAir()
+                && occupied.canBeReplaced() && context.level().getFluidState(candidate.pos()).isEmpty();
         Direction face = candidate.desiredState().is(Blocks.WALL_TORCH)
                 ? candidate.desiredState().getValue(WallTorchBlock.FACING) : Direction.UP;
         BlockPos support = candidate.pos().relative(face.getOpposite());
-        Vec3 point = Vec3.atCenterOf(support).add(Vec3.atLowerCornerOf(face.getNormal()).scale(.5));
+        Vec3 point = replaceableCell
+                ? Vec3.atCenterOf(candidate.pos())
+                : Vec3.atCenterOf(support).add(Vec3.atLowerCornerOf(face.getNormal()).scale(.5));
         Vec3 delta = point.subtract(player.getEyePosition());
         float yaw = (float) Math.toDegrees(Math.atan2(-delta.x, delta.z));
         float pitch = (float) -Math.toDegrees(Math.atan2(delta.y, Math.hypot(delta.x, delta.z)));
@@ -87,7 +94,9 @@ public final class OffhandTorchPlacer {
             Vec3 end = player.getEyePosition().add(player.getViewVector(1).scale(Math.min(4.25, player.blockInteractionRange())));
             var hit = context.level().clip(new ClipContext(player.getEyePosition(), end,
                     ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-            if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(support) || hit.getDirection() != face) {
+            if (hit.getType() != HitResult.Type.BLOCK
+                    || !hit.getBlockPos().equals(replaceableCell ? candidate.pos() : support)
+                    || !replaceableCell && hit.getDirection() != face) {
                 state = "placement_ray_changed"; return false;
             }
             placement = context.actions().tryAuxiliaryBlockUse(context, hit, TorchLightingChain.confirmation(player, candidate), 40);

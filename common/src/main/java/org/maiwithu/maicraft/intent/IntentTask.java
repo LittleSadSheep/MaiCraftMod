@@ -59,6 +59,8 @@ final class IntentTask implements Task {
     private final LocalPlayer player;
     private final IntentTaskRecord record;
     private final IntentRuntime runtime;
+    /** 随移动任务单交付的已知可站立位置上限：数量再多寻路也只消费临近的少数几格。 */
+    private static final int KNOWN_CELL_HANDOFF_LIMIT = 24;
 
     private Task child;
     private TaskRecord childRecord;
@@ -295,6 +297,11 @@ final class IntentTask implements Task {
 
         if (captured.get() != null) {
             // 工具交回一张任务单，说明还要在游戏里继续做；立即返回的文字不能当作已完成。
+            if (captured.get() instanceof org.maiwithu.maicraft.core.task.move.MoveToTaskRecord moveRecord) {
+                // 语义层只传递输入数据：本计划验证过与已登记地标中的可站立位置，供移动任务规划收敛失败时作分段中转；
+                // 是否使用、何时使用由移动任务自己决定，这里不指定任何路线。
+                moveRecord.withKnownStandableCells(knownStandableCells());
+            }
             return beginNative(captured.get());
         }
 
@@ -308,6 +315,24 @@ final class IntentTask implements Task {
                 TaskState.FAILED,
                 TaskResult.fail("internal capability produced neither a child task nor a result: "
                         + action.toolName()));
+    }
+
+    /** 交给移动任务单的已知可站立位置：本计划已验证的步骤回执加已登记地标，只留当前维度，超量截断。 */
+    private List<BlockPos> knownStandableCells() {
+        String dimension = player.level().dimension().location().toString();
+        LinkedHashSet<Goal.WorldPosition> seen = new LinkedHashSet<>(record.internalKnownPositions());
+        if (runtime != null) {
+            for (IntentRuntime.Landmark landmark : runtime.landmarks()) {
+                if (landmark.position() != null) seen.add(landmark.position());
+            }
+        }
+        List<BlockPos> cells = new ArrayList<>();
+        for (Goal.WorldPosition position : seen) {
+            if (cells.size() >= KNOWN_CELL_HANDOFF_LIMIT) break;
+            if (position == null || !dimension.equals(position.dimension())) continue;
+            cells.add(new BlockPos(position.x(), position.y(), position.z()));
+        }
+        return cells;
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
@@ -849,7 +874,13 @@ final class IntentTask implements Task {
         for (String key : List.of("outcome_uncertain", "effects_started", "mechanical_retry_allowed")) {
             if (clean.data().containsKey(key)) data.put(key, clean.data().get(key));
         }
-        return parent.withData(data);
+        TaskResult merged = parent.withData(data);
+        // 子任务带着更具体的取消来源（如聊天命令尚未发出就被取消）时交给顶层回执，
+        // 调用方才能区分“没发出去”与“发完才被叫停”，而不是只看到通用的接管取消。
+        if (clean.cancelSource() != null && !clean.cancelSource().isBlank()) {
+            merged = merged.withCancelSource(clean.cancelSource());
+        }
+        return merged;
     }
 
     private TaskResult completionResult() {

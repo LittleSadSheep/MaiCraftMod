@@ -92,6 +92,24 @@ public final class SettleChainControlTest {
             chain.tick(player);
             check(!player.isInWall() && suffocating(chain) == null,
                     "clearing the suffocating block finishes the escape episode");
+
+            // 场景 E 的口径差（2026-10-05 实机三轮）：窒息被击退/推挤提前"翻出"原版薄盒判定，
+            // 眼位方块却仍是致窒实心格——反射必须按眼位方块本身继续触发，否则围困永不逃逸。
+            // 用 noPhysics 强制关掉原版 isInWall 来模拟该形态。
+            w.set(eyeBlock, Blocks.STONE.defaultBlockState());
+            ActorControlTestHarness.field(net.minecraft.world.entity.Entity.class, "noPhysics")
+                    .setBoolean(player, true);
+            w.nextTick();
+            check(!player.isInWall(), "fixture: the vanilla thin-box predicate no longer sees the wall");
+            check(chain.canRun(player), "a suffocating eye cell triggers the escape even when the vanilla predicate misses it");
+            chain.tick(player);
+            check(suffocating(chain) != null, "the escape still issues a native break on the suffocating block");
+            w.set(eyeBlock, Blocks.AIR.defaultBlockState());
+            w.nextTick();
+            chain.tick(player);
+            check(suffocating(chain) == null, "clearing the block closes the widened escape episode");
+            ActorControlTestHarness.field(net.minecraft.world.entity.Entity.class, "noPhysics")
+                    .setBoolean(player, false);
         }
         System.out.println("SettleChainControlTest: passed");
     }

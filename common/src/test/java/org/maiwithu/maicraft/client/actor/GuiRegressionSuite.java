@@ -406,6 +406,8 @@ public final class GuiRegressionSuite {
         AcquisitionSourceInheritanceTest.main(args);
         // mine 子任务如实报采区耗尽后，父层终态保真为 MINED_OUT 并给出换区域重扫选项。
         org.maiwithu.maicraft.core.task.acquire.AcquisitionMineExhaustionRecoveryTest.main(args);
+        // 小麦种子的 mine 族谱系必须含野生草族，短草在场时可选中并派出采矿子任务。
+        org.maiwithu.maicraft.core.task.acquire.WheatSeedsGrassLineageTest.main(args);
         AcquisitionRecipePlanningTest.main(args);
         CookingFuelTest.main(args);
         CookingBatchTest.main(args);
@@ -418,6 +420,8 @@ public final class GuiRegressionSuite {
         CookingProtectionTest.main(args);
         CookingQuantityTest.main(args);
         CookingPrerequisiteChainTest.main(args);
+        // 非食物冶炼与熟食同通路；燃料不够时立项失败要点名燃料层与数量，不允许退回合并话术。
+        org.maiwithu.maicraft.core.task.cook.CookingNonFoodSmeltingTest.main(args);
         CookingMenuCloseTest.main(args);
         CookingMenuOwnershipTest.main(args);
         CookingSettlementTest.main(args);

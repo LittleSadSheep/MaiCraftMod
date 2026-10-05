@@ -1318,12 +1318,22 @@ public final class SemanticLightAreaCompanionTask
     }
 
     private TaskState exhausted(String reason) {
+        // 失败话术区分「一轮都没出手」与「出手后仍不达标」；调用方不能把从未尝试的放置误读成放置过但没照亮。
+        String attempts = requestedPlacements == 0
+                ? "no placement attempt was ever submitted; the placement gate rejected every planned site "
+                        + "before a native action was sent"
+                : "requested_placements=" + requestedPlacements + " across " + passes + " build pass(es)";
+        List<String> options = new ArrayList<>(List.of("supply a different light source or style",
+                "use a smaller area or lower required coverage",
+                "inspect the aggregate dark-area evidence and choose a semantic prerequisite"));
+        if (requestedPlacements == 0) {
+            options.add("retry one dark-adjacent site with maicraft:place_block to expose the qualification mismatch");
+        }
         giveUp("verified_coverage_not_reached", reason + "; actual achieved_coverage="
-                        + String.format(Locale.ROOT, "%.3f", achievedCoverage),
+                        + String.format(Locale.ROOT, "%.3f", achievedCoverage)
+                        + "; placement attempts: " + attempts,
                 FailureType.NO_SUPPORT,
-                List.of("supply a different light source or style",
-                        "use a smaller area or lower required coverage",
-                        "inspect the aggregate dark-area evidence and choose a semantic prerequisite"));
+                List.copyOf(options));
         return TaskState.FAILED;
     }
 

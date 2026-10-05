@@ -30,6 +30,8 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public boolean approachTarget;
     public boolean mayAlterTerrain;
     public boolean observeMenu;
+    /** 点火类使用要求点击后目标面的相邻格真的出现火；只认点击确认不算诚实结果。 */
+    public boolean expectIgnition;
     public Item expectedOutputItem;
     public String itemResourceId;
 
@@ -71,6 +73,13 @@ public final class InteractAtTaskRecord extends TaskRecord {
     public InteractAtTaskRecord withExpectedOutput(Item output) {
         if (button != MouseButton.RIGHT || output == null) throw new IllegalArgumentException("expected output requires right-click item use");
         expectedOutputItem = output; return this;
+    }
+
+    /** 点火类使用在确认后核对相邻格真有火；需要右键方块目标，火落在被点面的外侧空气格。 */
+    public InteractAtTaskRecord withIgnitionCheck() {
+        if (button != MouseButton.RIGHT || aim == null || heldItemUseOnly)
+            throw new IllegalArgumentException("ignition check requires a right-click block target");
+        expectIgnition = true; return this;
     }
 
     public InteractAtTaskRecord(String toolCallId, long deadlineGameTime,

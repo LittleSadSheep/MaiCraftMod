@@ -658,6 +658,15 @@ public final class EmbeddedBaritoneNavigator {
         return observedPlanningRevision + probeProgress.revision();
     }
 
+    /**
+     * 规划期搜索尝试次数：主搜索与前瞻段的重试都算。搜索零新进展时工作单位计数会停在原地，
+     * 尝试次数却仍单调增长——长规划进度事件用它当心跳，调用方据此区分「还在算」与「彻底无话」。
+     */
+    public long planningCalcAttempts() {
+        return events.getOrDefault(PathEvent.CALC_STARTED, 0)
+                + events.getOrDefault(PathEvent.NEXT_SEGMENT_CALC_STARTED, 0);
+    }
+
     public String outcomeSummary() {
         if (dismount != null) return "native_dismount=" + dismount.detail();
         if (events.isEmpty()) return "baritone_events={}; dispatch=" + dispatchEvidence + "; health=" + healthDiagnostics();

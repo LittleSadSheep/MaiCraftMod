@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.core.task.move;
 
 import net.minecraft.core.BlockPos;
+import java.util.List;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
@@ -39,8 +40,20 @@ public final class MoveToTaskRecord extends TaskRecord implements InternalPositi
     /** 候选交互站位失败后由父任务换位，不为单个候选继续探测未授权改地形的假想路线。 */
     public boolean skipTerrainProbe;
     public MoveToTaskRecord withoutTerrainProbe(){skipTerrainProbe=true;return this;}
+    /** 语义层随单交付的已知可站立位置（本计划验证过的回执格与已登记地标，当前维度内）；
+     *  只是规划输入，路线怎么走仍由执行任务决定。 */
+    private List<BlockPos> knownStandableCells = List.of();
     /** 成功的实时身体操作回执；不会复制到公开的 TaskResult。 */
     private Position verifiedPosition;
+
+    public MoveToTaskRecord withKnownStandableCells(List<BlockPos> cells) {
+        knownStandableCells = cells == null ? List.of() : List.copyOf(cells);
+        return this;
+    }
+
+    public List<BlockPos> knownStandableCells() {
+        return knownStandableCells;
+    }
 
     public MoveToTaskRecord(String toolCallId, long deadlineGameTime,
                             Double x, Double y, Double z, String block, boolean mayAlterTerrain) {

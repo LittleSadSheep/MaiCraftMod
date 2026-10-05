@@ -78,6 +78,45 @@ public final class AreaLightingTest {
                     "原生确认后记录一支灯，重复 tick 不重复扣料");
             pass.result(state);
         }
+        // 006 局实机回归：草原营地在手 48 支火把却零放置零调查，no_support 收场两次复现。
+        // 根因是候选资格按 canBeReplaced 选中草丛格，副手放置闸却要求严格空气，每个灯位
+        // 都在提交前被拒，放置轮空转至停滞后再以"无新增亮格"的同一文案失败。
+        try (var h = new InteractionWorldTestHarness()) {
+            AutomaticLightingTest.prepareBody(h);
+            h.level.blockLight = 8;
+            h.level.blockLightByCell = Map.of(new BlockPos(4, 1, 4), 2);
+            var torchState = Blocks.TORCH.defaultBlockState();
+            BlockPos grassCell = new BlockPos(5, 1, 4);
+            h.set(new BlockPos(5, 0, 4), Blocks.GRASS_BLOCK.defaultBlockState());
+            h.set(grassCell, Blocks.TALL_GRASS.defaultBlockState());
+            // 两道闸必须说同一种话：资格闸接受的可替换格，出手闸也必须允许提交。
+            check(org.maiwithu.maicraft.core.task.lighting.RoutineTorchPlacement.usable(
+                    h.player, grassCell, torchState, grassCell.below(),
+                    net.minecraft.core.Direction.UP, Set.of()),
+                    "草丛格应与资格闸一致地被判定为合法立地灯位");
+            h.set(grassCell, Blocks.STONE.defaultBlockState());
+            check(!org.maiwithu.maicraft.core.task.lighting.RoutineTorchPlacement.usable(
+                    h.player, grassCell, torchState, grassCell.below(),
+                    net.minecraft.core.Direction.UP, Set.of()),
+                    "被实体方块占用的格子仍不是灯位");
+            h.set(grassCell, Blocks.TALL_GRASS.defaultBlockState());
+            h.inventory.setItem(40, new ItemStack(Items.TORCH, 8));
+            var target = new BuildTaskRecord.Target(torchState, Items.TORCH, grassCell, "torch", null, null, null);
+            var build = new BuildTaskRecord("lighting-grass", 600, List.of(target), false, true, false);
+            var pass = new TorchLightingPass(h.player, build, List.of(new BlockPos(4, 1, 4)), 8, Set.of(), Set.of());
+            pass.start(h.player);
+            pass.tick(h.player);
+            AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+            check(h.blockUses() == 1, "草丛灯位必须真实提交副手放置，不能静默拒绝空转到停滞");
+            h.set(grassCell, torchState);
+            h.player.getOffhandItem().shrink(1);
+            h.level.acknowledgedSequence = h.level.blockSequence;
+            TaskState state = TaskState.RUNNING;
+            for (int i = 0; i < 4 && !state.isTerminal(); i++) { h.nextTick(); state = pass.tick(h.player); }
+            check(state == TaskState.SUCCESS && build.placed() == 1 && h.blockUses() == 1,
+                    "草丛格上的原生确认结算为一支灯，不重复扣料");
+            pass.result(state);
+        }
         System.out.println("AreaLightingTest: passed");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

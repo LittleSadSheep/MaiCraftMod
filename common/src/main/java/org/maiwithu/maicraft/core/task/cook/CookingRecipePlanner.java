@@ -216,6 +216,11 @@ final class CookingRecipePlanner {
         return stock;
     }
 
+    // 与备料估价同一份可见性口径：主背包，外加已授权且新近观察过的库存现货，供失败诊断报"可见多少"。
+    long reachableCount(Item item) {
+        return inventoryStock().getOrDefault(item, 0L);
+    }
+
     private static int takeStock(Map<Item, Long> stock, Item item, int required) {
         long carried = stock.getOrDefault(item, 0L);
         int used = (int) Math.min(required, carried);

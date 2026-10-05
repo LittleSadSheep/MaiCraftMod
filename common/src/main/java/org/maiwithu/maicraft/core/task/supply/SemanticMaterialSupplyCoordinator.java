@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
@@ -249,7 +250,7 @@ public final class SemanticMaterialSupplyCoordinator {
                 && (result.data() == null || !Boolean.TRUE.equals(result.data().get("outcome_uncertain"))
                         && !Boolean.TRUE.equals(result.data().get("world_change_uncertain")))
                 && observed >= demand.requiredFinalCount();
-        Map<String, Object> receipt = receipt(result, terminal, observed, proven);
+        Map<String, Object> receipt = receipt(player, result, terminal, observed, proven);
         FailureType type = proven ? FailureType.UNKNOWN : failureType(result, terminal);
         String message = result == null || result.message() == null
                 ? (proven ? "material fact satisfied" : "material supply did not complete")
@@ -343,7 +344,7 @@ public final class SemanticMaterialSupplyCoordinator {
     }
 
     private Map<String, Object> receipt(
-            TaskResult result, TaskState terminal, int observed, boolean proven) {
+            LocalPlayer player, TaskResult result, TaskState terminal, int observed, boolean proven) {
         // 返回需要多少、实际多少、还差多少，并保留少量失败字段；不是把内部取物任务整个对象交出去。
         Map<String, Object> receipt = new LinkedHashMap<>();
         receipt.put("purpose", demand.purpose());
@@ -414,7 +415,35 @@ public final class SemanticMaterialSupplyCoordinator {
             }
             if (!storage.isEmpty()) receipt.put("storage_attempts", List.copyOf(storage));
         }
+        if (!proven && observed < demand.requiredFinalCount()) {
+            annotateOffhandHolding(receipt, player);
+        }
         return Map.copyOf(receipt);
+    }
+
+    /**
+     * 材料不足而副手正握着目标物品时，回执必须说明这一点并给零成本换手建议。
+     * 施工与放置的实取只走 36 个主格，副手数量不能计入账面（预估与实取须同范围），
+     * 但也不能让调用方拿着副手库存听到"无材料"后直接走昂贵的采集路线。
+     */
+    private void annotateOffhandHolding(Map<String, Object> receipt, LocalPlayer player) {
+        ItemStack offhand = player.getOffhandItem();
+        if (offhand.isEmpty()) return;
+        ResourceLocation heldId = BuiltInRegistries.ITEM.getKey(offhand.getItem());
+        if (!demand.acceptableItemIds().contains(heldId)) return;
+        receipt.put("offhand_holding", List.of(Map.of(
+                "item_id", heldId.toString(),
+                "count", offhand.getCount())));
+        Map<String, Object> option = new LinkedHashMap<>();
+        option.put("id", "swap_offhand_to_mainhand");
+        option.put("summary", "the offhand already holds " + offhand.getCount() + "x " + heldId
+                + "; actions draw materials only from the 36 main inventory slots, "
+                + "so move it back to the main inventory before retrying");
+        option.put("risk", "none");
+        List<Object> options = new ArrayList<>();
+        options.add(Map.copyOf(option));
+        if (receipt.get("recovery_options") instanceof List<?> existing) options.addAll(existing);
+        receipt.put("recovery_options", List.copyOf(options));
     }
 
     /** 默认仍须回原工位两格内；只有事先选择建筑交接的调用方可以在仓库接回控制。 */
