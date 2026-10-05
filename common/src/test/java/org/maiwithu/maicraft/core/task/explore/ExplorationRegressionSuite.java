@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.explore;
 
 import net.minecraft.SharedConstants;

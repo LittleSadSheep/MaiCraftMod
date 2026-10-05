@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package baritone.pathing.movement;
 
 import baritone.api.pathing.movement.ActionCosts;
