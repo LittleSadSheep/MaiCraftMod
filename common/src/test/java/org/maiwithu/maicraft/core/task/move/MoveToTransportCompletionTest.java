@@ -397,9 +397,14 @@ public final class MoveToTransportCompletionTest {
         try (var f = new Fixture(memory,.5)) {
             var record=coordinates(0D,0D); var task=f.task(record,true); task.onStart();
             LandingAssistPolicy.report(failed);
-            check(task.onTick()==TaskState.FAILED && record.internalVerifiedPosition()==null,
-                    "arrival cannot overwrite this move's failed automatic protection");
-            check(task.result(TaskState.FAILED).data().get("landing_assist").equals(failed),"failure receipt must retain actual rescue evidence");
+            // 到达事实成立时，失败的自动落地保护只作注记降级：终态仍按到达交付，
+            // 现场证据随回执保留，由调用方决定是否复检脚下支撑。
+            check(task.onTick()==TaskState.SUCCESS && record.internalVerifiedPosition()!=null,
+                    "arrival must stand even when this move's automatic protection failed");
+            var result = task.result(TaskState.SUCCESS).data();
+            check(Boolean.TRUE.equals(result.get("landing_protection_unverified")),
+                    "the receipt must annotate the unverified landing protection");
+            check(result.get("landing_assist").equals(failed),"receipt must retain actual rescue evidence");
         }
     }
 

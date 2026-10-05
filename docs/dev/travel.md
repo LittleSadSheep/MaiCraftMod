@@ -181,8 +181,12 @@
 | `best_distance_blocks` | 已观察的最近目标距离；存在有效采样时提供 |
 | `navigation`、`landing_assist` | 路线与实际落地辅助证据；按是否产生相应记录提供 |
 | `landing_assist_observed` | 是否记录过自动落地辅助事实；不单独代表辅助成功 |
+| `arrival_grade` | `arrived_exact`（身体站在目的地格、带 Y 提示时脚位同层）或 `arrived_within_tolerance`（到达范围内但不在目的地格）；仅成功回执提供 |
+| `remaining_horizontal_blocks`、`remaining_vertical_blocks` | 身体到目的地格中心的水平直线距离、脚位与目标层的差；无 Y 提示时不含垂直项 |
+| `arrival_direction` | 目的地相对身体的八向水平罗盘与目标在上/在下/同层，如 `north-east, target below` |
+| `landing_protection_unverified` | 到达成立但本次自动落地保护收场未验证或失败时的注记；终态仍按到达交付，调用方自行决定是否复检脚下支撑 |
 
-`y_hint_delta` 使用原始身体格层，到达判断使用半砖修正后的脚位节点，不能把两者当作浮点高度完全一致的证明。当前没有 `arrived_exact/arrived_within_tolerance` 到达等级字段，也没有统一的水平偏差字段；精度来自请求与完成判定，容差内成功只说明本次旅行条件满足。
+`y_hint_delta` 使用原始身体格层，到达判断使用半砖修正后的脚位节点，不能把两者当作浮点高度完全一致的证明。`arrival_grade` 让调用方程序化分辨精确落位与容差内到达：容差内成功只说明本次旅行条件满足，要身体与目标同层（贴水舀取、贴站台等）应显式传 `vertical_tolerance:0` 或 `exact:true`。
 
 `PLANNING_STALL` 说明规划停滞或没有收敛，不证明地形无路。连续无进展预算当前为 600 个活动游戏刻；另有累计工作量超过 60,000 且约 600 刻没有继续接近目标的收敛熔断。后者可以终止仍在展开节点的病态搜索。暂停计时与子任务共享规则见 [任务预算](tasks.md#新能力的无进展预算)。
 

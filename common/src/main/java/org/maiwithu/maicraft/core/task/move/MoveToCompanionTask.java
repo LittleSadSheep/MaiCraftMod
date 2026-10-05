@@ -88,6 +88,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private BlockPos knownCellLegTarget;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
+    /** 到达后落地保护仍未验证或已失败；到达事实成立，只作注记降级交付。 */
+    private boolean landingProtectionUnverified;
     private final JetpackGroundMode groundFlight=
             new JetpackGroundMode();
     /** FIND(就近方块)子系统:扫描/入册/契约/轮换全在组件里,此处只驱动。 */
@@ -607,12 +609,19 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return dx * dx + dz * dz;
     }
 
-    /** 到达后保存实际位置，供后续引用；如果途中落地保护已经确认失败，则不能只因到达就报告成功。 */
+    /**
+     * 到达后保存实际位置，供后续引用。自动落地保护未验证或已失败时，到达事实仍成立：
+     * 终态按到达交付，只附带 landing_protection_unverified 注记让调用方自行复检，
+     * 不再把「身体已在目的地」整体否决成失败。
+     */
     private TaskState successAtBody() {
         observeLanding();
-        if (Boolean.TRUE.equals(landingFacts.get("complete")) && Boolean.TRUE.equals(landingFacts.get("failed"))) {
-            fail("destination reached after unverified or failed automatic landing protection",FailureType.UNKNOWN);
-            return TaskState.FAILED;
+        landingProtectionUnverified = landingProtectionUnverified(landingFacts);
+        if (landingProtectionUnverified) {
+            Constants.LOG.info(
+                    "[maicraft-task] goto end kind={} result=success feet={} requested={}"
+                            + " landing_protection_unverified=true",
+                    r.kind, player.blockPosition().toShortString(), blockTarget.toShortString());
         }
         BlockPos body = player.blockPosition();
         // 到达即留痕:最终脚位与请求格同框——"报 exact 成功却站在别处"这类悬案,
@@ -624,6 +633,36 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 body.getX(), body.getY(), body.getZ(),
                 player.level().dimension().location().toString()));
         return TaskState.SUCCESS;
+    }
+
+    /** 落地保护事实表明这轮自动保护已收场且失败/未确认；到达事实不受它否决。 */
+    static boolean landingProtectionUnverified(Map<String, Object> facts) {
+        return Boolean.TRUE.equals(facts.get("complete")) && Boolean.TRUE.equals(facts.get("failed"));
+    }
+
+    /** 目的地已知（x/z 均给出）时计算到达分级；FIND、纯高度目标没有固定格中心可比。 */
+    private ArrivalVerdict arrivalVerdict() {
+        if (r.x == null || r.z == null) return null;
+        return ArrivalVerdict.of(player.getX(), player.getY(), player.getZ(),
+                bx, by, bz, r.y != null);
+    }
+
+    /** 到达成立但安全层未验证时的注记；调用方据此自行复检脚下支撑。 */
+    private String landingNote() {
+        return landingProtectionUnverified
+                ? " Note: the automatic landing protection ended unverified or failed after arrival;"
+                  + " the body did stand at the destination, recheck ground support if the next"
+                  + " action depends on it."
+                : "";
+    }
+
+    /** 到达分级的可读后缀：等级 + 剩余水平距离与方向。 */
+    private String arrivalGradeNote() {
+        ArrivalVerdict verdict = arrivalVerdict();
+        if (verdict == null) return "";
+        return "; arrival " + verdict.grade()
+                + " (" + String.format(java.util.Locale.ROOT, "%.1f", verdict.remainingHorizontal())
+                + " blocks " + verdict.direction() + ")";
     }
 
     private void observeLanding() {
@@ -704,6 +743,22 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return data;
     }
 
+    /** 到达成立时的分级交付：等级、剩余水平/垂直距离与方向，以及安全层注记。 */
+    @Override
+    protected Map<String, Object> resultData(TaskState finalState) {
+        Map<String, Object> data = resultData();
+        if (finalState != TaskState.SUCCESS) return data;
+        ArrivalVerdict verdict = arrivalVerdict();
+        if (verdict != null) {
+            data.put("arrival_grade", verdict.grade());
+            data.put("remaining_horizontal_blocks", verdict.remainingHorizontal());
+            if (verdict.hasVerticalHint()) data.put("remaining_vertical_blocks", verdict.remainingVertical());
+            data.put("arrival_direction", verdict.direction());
+        }
+        if (landingProtectionUnverified) data.put("landing_protection_unverified", true);
+        return data;
+    }
+
     /** 与请求高度提示的对照说明；提示与站位同高时不必解释。 */
     private String heightHintNote(int gy) {
         if (r.y == null) return "";
@@ -719,20 +774,22 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected String successMessage() {
         int gy = player.blockPosition().getY();
         return switch (r.kind) {
-            case BLOCK -> r.requiresStrictStance() ? "reached the exact cell " + bx + "," + by + "," + bz + "."
+            case BLOCK -> r.requiresStrictStance()
+                    ? "reached the exact cell " + bx + "," + by + "," + bz + "." + landingNote()
                     : "arrived within " + r.horizontalRadius + " blocks horizontally and " + r.verticalTolerance
                             + " blocks vertically of the destination; supported at y=" + gy + "."
-                            + heightHintNote(gy);
+                            + arrivalGradeNote() + heightHintNote(gy) + landingNote();
             case COLUMN -> "arrived at location x=" + bx + " z=" + bz
-                    + (player.isInWater() ? ", in water at y=" : ", standing on the ground at y=") + gy + ".";
+                    + (player.isInWater() ? ", in water at y=" : ", standing on the ground at y=") + gy + "."
+                    + arrivalGradeNote() + landingNote();
             case YLEVEL -> "reached elevation y=" + gy
-                    + (gy == by ? "." : " (requested y=" + by + ").");
+                    + (gy == by ? "." : " (requested y=" + by + ").") + landingNote();
             case FIND -> {
                 BlockPos n = finder.nearest();
                 yield n == null
-                        ? "arrived beside the target block."
+                        ? "arrived beside the target block." + landingNote()
                         : "arrived beside " + r.block + " at " + n.getX() + "," + n.getY()
-                                + "," + n.getZ() + " — within reach to use.";
+                                + "," + n.getZ() + " — within reach to use." + landingNote();
             }
         };
     }
