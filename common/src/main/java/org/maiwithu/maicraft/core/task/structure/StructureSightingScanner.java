@@ -49,6 +49,11 @@ public final class StructureSightingScanner {
     private final Map<Block, List<Integer>> anchorOwners = new LinkedHashMap<>();
 
     private Phase phase = Phase.ANCHOR_INDEX;
+    /** TargetIndex 只为注册过的方块建段条目；未注册时查询直接空收工，锚点命中永远为零。 */
+    private boolean registered;
+    private ClientLevel registeredLevel;
+    /** 本轮已投入进度且聚类判定未结算；调用方据此延长观察驻留，不把在途轮丢给路点移动。 */
+    private boolean roundActive;
     private BlockPos roundCenter;
     private final Map<Long, BlockPos> queued = new LinkedHashMap<>();
     private List<BlockPos> hits;
@@ -92,6 +97,17 @@ public final class StructureSightingScanner {
 
     public boolean isEmpty() { return profiles.isEmpty(); }
 
+    /** 归还 TargetIndex 引用计数；任务收尾必须调用，热缓存由索引的闲置清扫周期回收。 */
+    public void release() {
+        if (registered) {
+            TargetIndex.unregister(registeredLevel, watchedBlocks);
+            registered = false;
+        }
+    }
+
+    /** 观察驻留据此决定是否继续等待本轮结算；结算后为 false，路点移动才允许开始。 */
+    public boolean roundInProgress() { return roundActive; }
+
     /**
      * 每刻至多推进一步：两条索引查询共用 TargetIndex 的跨刻游标，可见性按墙钟窗口限量，
      * 匹配阶段每画像每刻只试一小窗锚点。单刻工作量有封顶，一轮在多刻内必然走完；
@@ -103,6 +119,12 @@ public final class StructureSightingScanner {
         ClientLevel level = player.clientLevel;
         if (level == null) return out;
         if (roundCenter == null) roundCenter = player.blockPosition().immutable();
+        if (!registered) {
+            TargetIndex.register(level, watchedBlocks);
+            registered = true;
+            registeredLevel = level;
+        }
+        roundActive = true;
         if (phase == Phase.ANCHOR_INDEX || phase == Phase.MASS_INDEX) {
             double dx = player.getX() - roundCenter.getX();
             double dz = player.getZ() - roundCenter.getZ();
@@ -110,8 +132,10 @@ public final class StructureSightingScanner {
         }
         switch (phase) {
             case ANCHOR_INDEX -> {
-                if (TargetIndex.query(level, roundCenter, anchorBlocks,
-                        INDEX_WANT, chunkRadius, INDEX_BUILD_BUDGET).complete()) {
+                var result = TargetIndex.query(level, roundCenter, anchorBlocks,
+                        INDEX_WANT, chunkRadius, INDEX_BUILD_BUDGET);
+                result.hits().forEach(at -> queued.putIfAbsent(at.asLong(), at.immutable()));
+                if (result.complete()) {
                     phase = Phase.MASS_INDEX;
                 }
             }
@@ -120,6 +144,7 @@ public final class StructureSightingScanner {
                         ? new TargetIndex.Result(List.of(), true)
                         : TargetIndex.query(level, roundCenter, massBlocks,
                                 INDEX_WANT, chunkRadius, INDEX_BUILD_BUDGET);
+                result.hits().forEach(at -> queued.putIfAbsent(at.asLong(), at.immutable()));
                 if (result.complete()) beginMatchPreparation();
             }
             case VISIBILITY -> {
@@ -201,6 +226,7 @@ public final class StructureSightingScanner {
     /** 一轮结束后清空现场；新轮锚在新位置，重复发现由调用方按簇半径去重。 */
     private void restartRound(LocalPlayer player) {
         phase = Phase.ANCHOR_INDEX;
+        roundActive = false;
         roundCenter = player.blockPosition().immutable();
         queued.clear();
         hits = null;
