@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import org.maiwithu.maicraft.client.chat.AgentCommandPolicyTest;
 import org.maiwithu.maicraft.client.chat.ChatTypingTest;
 import org.maiwithu.maicraft.intent.ChatAbilityTest;
 import org.maiwithu.maicraft.intent.ChatCancelObservabilityTest;
@@ -13,6 +14,8 @@ public final class ChatRegressionSuite {
         ChatGuiPreparationTest.main(args);
         ChatTypingTest.main(args);
         ChatSessionTest.main(args);
+        // AI 只能用普通玩家命令；管理员命令默认关闭，接单即拒绝
+        AgentCommandPolicyTest.main(args);
         ChatAbilityTest.main(args);
         // 清理界面不能提前预约消息，恢复后的旧发送编号仍不允许再次提交。
         ChatSubmissionHistoryTest.main(args);

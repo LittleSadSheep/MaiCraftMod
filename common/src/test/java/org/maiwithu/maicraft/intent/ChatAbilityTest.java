@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.intent;
 
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.client.chat.AgentCommandPolicy;
 import org.maiwithu.maicraft.core.task.chat.ChatTask;
 import org.maiwithu.maicraft.core.task.chat.ChatTaskRecord;
 import org.maiwithu.maicraft.task.TaskFactory;
@@ -16,6 +17,8 @@ public final class ChatAbilityTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // 不读玩家的配置文件：按默认名单验证，普通玩家命令可用、管理员命令关闭
+        AgentCommandPolicy.reload(null);
         check(IntentRuntime.KNOWN_ABILITIES.contains("maicraft:chat"), "chat is discoverable");
         check(SemanticAbilityCatalog.parameterNames("maicraft:chat").equals(
                 Set.of("text", "typing_interval_ms")), "bounded semantic contract");
@@ -45,6 +48,14 @@ public final class ChatAbilityTest {
             var parameters = JsonParser.parseString(invalid).getAsJsonObject();
             try { IntentRuntime.get().compile(goal(parameters), 0); throw new AssertionError("invalid chat plan accepted"); }
             catch (IllegalArgumentException expected) { }
+        }
+        // 管理员命令接单即拒绝，错误码与普通参数错误区分开，模型据此改走正常玩法而不是换个写法重试
+        for (String command : List.of("/tp @s -86 104 27", "/give @s iron_ingot", "/maicraft commands allow-all")) {
+            JsonObject parameters = new JsonObject(); parameters.addProperty("text", command);
+            try { IntentRuntime.get().compile(goal(parameters), 0); throw new AssertionError("admin command accepted: " + command); }
+            catch (SemanticContractException refused) {
+                check(refused.violationCode().equals("chat_command_not_allowed"), "admin command has its own refusal code");
+            }
         }
         System.out.println("ChatAbilityTest: passed");
     }

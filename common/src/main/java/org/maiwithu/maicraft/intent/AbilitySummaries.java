@@ -8,7 +8,8 @@ final class AbilitySummaries {
         return switch (ability) {
             // 先选行动与控制方式；接单、持续跟随、等待满足和真正动作完成各有自己的终止语义。
             case "maicraft:sequence" -> "Execute semantic goals in order with an explicit failure policy and individual step outcomes.";
-            case "maicraft:chat" -> "Type and submit one native chat message or command; client submission and server effects are separate facts.";
+            // 管理员命令默认对 AI 关闭，摘要里就写明，免得模型把聊天当成传送或刷物品的捷径
+            case "maicraft:chat" -> "Type and submit one native chat message or player command; administrator commands such as /tp or /give are closed unless the human player allowed them; client submission and server effects are separate facts.";
             case "maicraft:wait_for_condition" -> "Wait for a minimum amount of game time, then for the selected world or body condition.";
             case "maicraft:follow" -> "Continuously follow one selected loaded entity until stopped or failed; reaching the following distance does not finish the task.";
             case "maicraft:combat" -> "Fight selected loaded targets or defend against current threats with explicit harm permission; use actual defeat and loot evidence to judge completion.";

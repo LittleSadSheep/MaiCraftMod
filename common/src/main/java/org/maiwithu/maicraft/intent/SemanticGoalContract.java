@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import org.maiwithu.maicraft.client.chat.AgentCommandPolicy;
 import org.maiwithu.maicraft.client.chat.ChatMessage;
 import org.maiwithu.maicraft.core.task.suicide.SuicideRequest;
 import org.maiwithu.maicraft.core.integration.create.CreateManualInput;
@@ -97,9 +98,15 @@ final class SemanticGoalContract {
         // 在角色接管前确认 FTB 对象编号与动作种类，不接受混用任务、奖励或自行编写点击序列。
         if (QuestAbilityAdapter.ABILITY.equals(ability)) QuestAbilityAdapter.validate(goal);
         if (ChatAbilityAdapter.ABILITY.equals(ability)) {
-            try { ChatMessage.parse(goal.parameters()); }
+            ChatMessage message;
+            try { message = ChatMessage.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
+            }
+            // 管理员命令（/tp、/give 等）默认对 AI 关闭：接单时就拒绝，不让它拿命令当捷径
+            try { AgentCommandPolicy.check(message); }
+            catch (IllegalArgumentException refused) {
+                throw violation("chat_command_not_allowed", path + ".parameters.text", ability, refused.getMessage());
             }
         }
         // 主动寻死的方式与预算必须在接管身体前确定，不能默默放宽未知参数。
