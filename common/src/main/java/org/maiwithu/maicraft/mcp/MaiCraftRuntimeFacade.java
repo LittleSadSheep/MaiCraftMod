@@ -218,6 +218,18 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         }
     }
 
+    /** resume 与新提交同义：都要有身体才能继续，幂等登记接管请求；登记不了时把原因与出路写进同一份失败回执。 */
+    private static ClientActorBoundary.AutomationRequest requestResumeControl(LocalPlayer player) {
+        if (ClientRuntime.actor().automationControlRequested()) return null;
+        try {
+            return ClientRuntime.requestAutomationControl(player);
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException(
+                    "this task cannot retake body control (" + failure.getMessage()
+                    + "); cancel it and resubmit, or retry after the client body is ready");
+        }
+    }
+
     @Override
     public CompletionStage<JsonElement> task(JsonObject arguments) {
         return onClient(() -> taskOnClient(arguments));
@@ -385,6 +397,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
         UUID id = UUID.fromString(arguments.get("task_id").getAsString());
         IntentTaskRecord record = requireTask(id);
         long now = Minecraft.getInstance().level.getGameTime();
+        String resumeControlStatus = null;
         switch (action) {
             case "get" -> {
             }
@@ -396,21 +409,35 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 intents.paused(record, "Paused by MCP request");
             }
             case "resume" -> {
-                // 从磁盘恢复的任务只存在于任务记录里，继续前要重新放入调度器；这可能替换当前任务。
-                intents.requireCurrentBinding(record);
-                boolean restoredDetached = record.restoredDetached();
-                if (!record.resume()) {
-                    throw new IllegalStateException(record.decisionSnapshot() != null
-                            ? "task needs task action=answer"
-                            : "task cannot be resumed");
-                }
-                if (restoredDetached) {
-                    if (CompanionTickDispatcher.find(record.publicId()) != record) {
-                        CompanionTickDispatcher.submitCurrent(player, record);
+                // resume 表达“要它继续跑”：先重新登记身体接管请求再解除暂停，否则恢复出的任务
+                // 每刻都会因无人持有身体再次暂停（接管请求不随检查点存盘，重启后只剩任务记录）。
+                // 只读设计与随行照明与新提交同口径，不申请身体。
+                boolean independentGoal = IntentRuntime.isIndependentRequest(record.goal());
+                ClientActorBoundary.AutomationRequest control = independentGoal
+                        ? null : requestResumeControl(player);
+                resumeControlStatus = independentGoal ? "not_required"
+                        : control == null ? "already_held_or_requested" : "takeover_requested";
+                try {
+                    // 从磁盘恢复的任务只存在于任务记录里，继续前要重新放入调度器；这可能替换当前任务。
+                    intents.requireCurrentBinding(record);
+                    boolean restoredDetached = record.restoredDetached();
+                    if (!record.resume()) {
+                        throw new IllegalStateException(record.decisionSnapshot() != null
+                                ? "task needs task action=answer"
+                                : "task cannot be resumed");
                     }
-                    intents.restoredTaskAttached(record);
+                    if (restoredDetached) {
+                        if (CompanionTickDispatcher.find(record.publicId()) != record) {
+                            CompanionTickDispatcher.submitCurrent(player, record);
+                        }
+                        intents.restoredTaskAttached(record);
+                    }
+                    intents.resumed(record);
+                } catch (RuntimeException failure) {
+                    // 任务没能继续就不留新请求；接管请求幂等，此前已生效的控制权不受影响。
+                    if (control != null) ClientRuntime.rollbackAutomationControl(control);
+                    throw failure;
                 }
-                intents.resumed(record);
             }
             case "cancel" -> {
                 // 恢复记录尚未占用身体，只结算它本身；已有身体任务则通过调度器停止实际动作。
@@ -476,6 +503,7 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             default -> throw new IllegalArgumentException("unknown task action: " + action);
         }
         JsonObject result = TaskView.read(record, arguments);
+        if (resumeControlStatus != null) result.addProperty("control_status", resumeControlStatus);
         result.add("next_attention", AttentionSnapshot.continuation(
                 intents.attentionCheckpoint(), record.externalId().toString()));
         return result;

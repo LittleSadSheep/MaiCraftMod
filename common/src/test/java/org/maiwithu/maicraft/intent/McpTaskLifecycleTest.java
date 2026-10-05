@@ -42,6 +42,7 @@ public final class McpTaskLifecycleTest {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         repeatedExecutionLeavesHumanControlAlone();
+        resumedRestoredTaskRetakesBody();
         restoredCancellationPreservesCurrentWork();
         fullHistoryRejectsBeforeAcceptingMoreWork();
         networkCancellationRespectsClientDispatch();
@@ -154,6 +155,32 @@ public final class McpTaskLifecycleTest {
                 check(expected.getCause() instanceof IllegalArgumentException, "应报告参数错误");
             }
             check(!ClientRuntime.actor().automationControlRequested(), "无效重试也不能接管玩家");
+        }
+    }
+
+    private static void resumedRestoredTaskRetakesBody() throws Exception {
+        try (var f = new Fixture()) {
+            // 重启后恢复出的暂停任务没有接管请求（它不随检查点存盘）；resume 即表达继续，
+            // 必须重新登记身体接管，否则任务每刻都会因无人持有身体再次暂停（114 修复点）。
+            var restored = IntentTaskRecord.restored(UUID.randomUUID(), null, f.goal, f.identity.key(),
+                    List.of(f.goal), 0, List.of(), Map.of(), Map.of(), List.of(), null, null, null, 2);
+            f.tasks().put(restored.externalId(), restored);
+            var args = new JsonObject();
+            args.addProperty("action", "resume");
+            args.addProperty("task_id", restored.externalId().toString());
+            var result = f.facade.task(args).toCompletableFuture().join().getAsJsonObject();
+            check(!restored.paused(), "resume 应解除恢复态任务的暂停");
+            check(ClientRuntime.actor().automationControlRequested(), "恢复态任务的 resume 必须重新登记接管请求");
+            check(result.get("control_status").getAsString().equals("takeover_requested"),
+                    "resume 回执应声明已请求接管");
+            check(CompanionTickDispatcher.find(restored.publicId()) == restored,
+                    "恢复态任务 resume 后应重新进入调度器");
+
+            // 接管请求已存在时 resume 幂等：不再新建请求，回执如实说明身体已由该请求覆盖。
+            result = f.facade.task(args).toCompletableFuture().join().getAsJsonObject();
+            check(ClientRuntime.actor().automationControlRequested()
+                    && result.get("control_status").getAsString().equals("already_held_or_requested"),
+                    "已持接管请求的 resume 不能重复申请，回执应如实说明");
         }
     }
 
