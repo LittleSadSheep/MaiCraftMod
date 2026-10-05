@@ -82,7 +82,9 @@ public final class GenericEntitySearchCompanionTask
     }
 
     private BlockPos origin;
-    private Stage stage;
+    // 阶段字段在声明处初始化：行动自述与进度自任务入槽起就会被调试面板每刻轮询，
+    // 早于 onStart 的首刻没有 null 窗口可用（null 阶段进 switch 即拆箱崩溃客户端）。
+    private Stage stage = Stage.OBSERVE;
     private MoveToCompanionTask moveChild;
     private MoveToTaskRecord moveRecord;
     private BlockPos activeFrontierTarget;
@@ -124,7 +126,6 @@ public final class GenericEntitySearchCompanionTask
         origin = player.blockPosition().immutable();
         spiral = new SpiralWalker(origin, Math.min(WAYPOINT_GRID, Math.max(1, r.maxDistance / 2)));
         preferLandFrontiers = targetsUseGroundSpawnPlacement();
-        stage = Stage.OBSERVE;
     }
 
     @Override

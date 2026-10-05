@@ -31,8 +31,9 @@ import org.maiwithu.maicraft.task.TaskState;
  * 已经够数就不再添加；当前只向空槽放入，不补齐已有但未满的一叠，也不取走原有物品。
  */
 public final class MachineContentsTask extends AbstractCompanionTask<MachineContentsTaskRecord> {
-    private enum Phase { HAND, OPEN, OBSERVE, DEPOSIT, CLOSE, FAILURE_CLEANUP, DONE }
-    private Phase phase;
+    // 阶段字段在声明处初始化：调试面板自任务入槽起每刻轮询行动自述，早于 onStart 的首刻没有 null 窗口。
+    private enum Phase { START, HAND, OPEN, OBSERVE, DEPOSIT, CLOSE, FAILURE_CLEANUP, DONE }
+    private Phase phase = Phase.START;
     private Level world;
     private Task child;
     private TaskRecord childRecord;
@@ -108,6 +109,7 @@ public final class MachineContentsTask extends AbstractCompanionTask<MachineCont
     @Override public String describeCurrentAction() {
         if (child != null) return child.describeCurrentAction();
         return switch (phase) {
+            case START -> "正在初始化机器内容物";
             case HAND -> "正在腾空主手";
             case OPEN -> "正在打开机器菜单";
             case OBSERVE -> "正在观察机器菜单库存";

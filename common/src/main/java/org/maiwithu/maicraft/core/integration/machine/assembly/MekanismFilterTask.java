@@ -29,8 +29,9 @@ import org.maiwithu.maicraft.task.TaskState;
  * 每项设置都等新服务器数据确认；已有不相容规则时报告冲突，不擅自删掉原规则。
  */
 public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilterTaskRecord> {
-    private enum Phase { HAND, OPEN, OBSERVE, CLOSE, DONE }
-    private Phase phase;
+    // 阶段字段在声明处初始化：调试面板自任务入槽起每刻轮询行动自述，早于 onStart 的首刻没有 null 窗口。
+    private enum Phase { START, HAND, OPEN, OBSERVE, CLOSE, DONE }
+    private Phase phase = Phase.START;
     private Level world;
     private Task child;
     private TaskRecord childRecord;
@@ -179,6 +180,7 @@ public final class MekanismFilterTask extends AbstractCompanionTask<MekanismFilt
         if (child != null) return child.describeCurrentAction();
         if (submitted) return "正在确认分拣机过滤设置";
         return switch (phase) {
+            case START -> "正在准备分拣机过滤配置";
             case HAND -> "正在腾空主手";
             case OPEN -> "正在打开分拣机菜单";
             case OBSERVE -> "正在设置分拣机过滤";

@@ -401,6 +401,12 @@ def regressionSuites = [
         heap: '512m', directory: 'entity-part-aggregation-regression', timeoutSeconds: 60,
         purpose: '验证实体搜索把多部件实体折叠为主体一条观察并附 boss 生命值事实'
     ],
+    // 未启动窗口守护：行动自述与进度自任务入槽起被每刻轮询，阶段字段留 null 窗口会崩客户端。
+    earlyDescribeSafetyRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.entity.EarlyDescribeSafetyTest',
+        heap: '512m', directory: 'early-describe-safety-regression', timeoutSeconds: 30,
+        purpose: '验证任务入槽到首刻启动之间行动自述与进度可安全轮询'
+    ],
     // 公平闸消费 find_block 已验证观察：视线命中写入共享观察记忆，mine 据记忆放行。
     fairnessMemoryFeedsMineRegression: [
         entry: 'org.maiwithu.maicraft.core.task.mine.FairnessMemoryFeedsMineTest',
