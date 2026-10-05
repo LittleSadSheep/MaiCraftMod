@@ -60,6 +60,14 @@ public final class NaturalTreeSourceTest {
         Scene beam = new Scene(); beam.grow(root);
         beam.blocks.put(root.above(2), Blocks.BIRCH_LOG.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.X));
         check(!accepts(root.above(2), beam), "horizontal timber was treated as upright trunk");
+        Scene branch = new Scene(); branch.grow(root);
+        BlockPos twig = root.above(5).east();
+        branch.blocks.put(twig, Blocks.BIRCH_LOG.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.X));
+        check(accepts(twig, branch), "a natural branch log was rejected by its horizontal shape");
+        Scene loose = new Scene(); loose.grow(root);
+        BlockPos timber = root.above(7).east(3);
+        loose.blocks.put(timber, Blocks.BIRCH_LOG.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.X));
+        check(!accepts(timber, loose), "loose horizontal timber joined a distant tree");
         Scene complete = new Scene(); complete.grow(root);
         var missing = new NaturalTreeSource(); missing.beginQuery();
         check(!missing.accepts(root, complete, pos -> !pos.equals(root.below())) && missing.unloadedEvidence && !missing.budgetDeferred

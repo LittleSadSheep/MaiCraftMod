@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.mine;
 
 import java.util.HashSet;
@@ -59,10 +60,22 @@ final class NaturalTreeSource {
     }
 
     // 寻找同种竖直原木的上下边界，最多 31 格；至少三格高、根部下方是泥土类方块才继续。
+    // 种子格可以是横向原木，但只有天然树的枝干形态才随树干判定：枝干斜贴在树干顶段侧面，
+    // 正上下方不会是竖直同种原木；嵌在竖直柱列里的横木（房梁、木柱嵌梁）维持拒绝。
     private static boolean inspect(BlockPos seed, BlockGetter world, Predicate<BlockPos> loaded, Set<BlockPos> trunk) {
         if (!loaded.test(seed)) return false;
         BlockState first = world.getBlockState(seed);
-        if (!upright(first, first.getBlock())) return false;
+        if (!upright(first, first.getBlock())) {
+            if (!loaded.test(seed.below()) || !loaded.test(seed.above())) return false;
+            if (upright(world.getBlockState(seed.below()), first.getBlock())
+                    || upright(world.getBlockState(seed.above()), first.getBlock())) {
+                return false;
+            }
+            BlockPos trunkSeed = attachedUprightLog(seed, first.getBlock(), world, loaded);
+            if (trunkSeed == null) return false;
+            seed = trunkSeed;
+            first = world.getBlockState(seed);
+        }
         BlockPos bottom = seed;
         for (int n = 0; n < 32; n++) {
             if (!loaded.test(bottom.below())) return false;
@@ -100,5 +113,21 @@ final class NaturalTreeSource {
     private static boolean upright(BlockState state, Block type) {
         return state.is(type) && state.is(BlockTags.LOGS) && state.hasProperty(RotatedPillarBlock.AXIS)
                 && state.getValue(RotatedPillarBlock.AXIS) == Direction.Axis.Y;
+    }
+
+    /** 在种子的贴邻立方（26 格）里找一根竖直的同种原木作为树干种子；找不到返回 null。
+     *  只认已加载的格子，未加载的邻格不参与猜测。 */
+    private static BlockPos attachedUprightLog(BlockPos seed, Block type, BlockGetter world, Predicate<BlockPos> loaded) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    BlockPos neighbor = seed.offset(dx, dy, dz);
+                    if (!loaded.test(neighbor)) continue;
+                    if (upright(world.getBlockState(neighbor), type)) return neighbor;
+                }
+            }
+        }
+        return null;
     }
 }
