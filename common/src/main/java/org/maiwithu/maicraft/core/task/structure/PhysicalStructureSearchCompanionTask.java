@@ -152,6 +152,11 @@ public final class PhysicalStructureSearchCompanionTask
     private BlockPos activeMoveTarget;
     private boolean eyeConsumptionUnverified;
     private int internalRouteRecoveries;
+    /** 行进涉水守卫的记数：当前腿的连续滞水刻、最近一次逼近目标的时刻与已弃腿次数。 */
+    private int legWaterTicks;
+    private long lastWaterApproachTick;
+    private double legWaterBestDistance = Double.MAX_VALUE;
+    private int waterAbandonments;
 
     /**
      * 同一游戏会话内共享的投眼方向记忆（按维度+结构键控）：死亡或任务重启后沿上次
@@ -598,6 +603,11 @@ public final class PhysicalStructureSearchCompanionTask
             terminal = runChild(moveChild);
             if (terminal == null) {
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                // 行进涉水守卫：身体被腿带进水里且不再逼近目标（或连续涉水越过硬上限）
+                // 时立即弃腿换向，不等九十秒租约烧完，更不靠漂浮续命（175）。
+                if (tickWaterLegGuard()) {
+                    return abandonLegInWater(evidenceMove, directionMove, false);
+                }
                 return TaskState.RUNNING;
             }
         }
@@ -687,6 +697,85 @@ public final class PhysicalStructureSearchCompanionTask
         return beginFrontierTravel();
     }
 
+    /** 行进涉水守卫的一刻：更新滞水计数与最近逼近时刻，返回是否应弃腿；离水即清零。 */
+    private boolean tickWaterLegGuard() {
+        long now = player.level().getGameTime();
+        if (!player.isInWater()) {
+            legWaterTicks = 0;
+            lastWaterApproachTick = now;
+            return false;
+        }
+        legWaterTicks++;
+        if (activeMoveTarget != null) {
+            double d = horizontalDistance(player.blockPosition(), activeMoveTarget);
+            if (d < legWaterBestDistance - 0.5) {
+                legWaterBestDistance = d;
+                lastWaterApproachTick = now;
+            }
+        }
+        return WaterCrossingProbe.waterLegExpired(
+                legWaterTicks, now - lastWaterApproachTick);
+    }
+
+    /**
+     * 滞水弃腿：停掉移动子任务，回执与日志如实记录弃腿原因，再走对应阶段的失败升级。
+     * 子任务行进中被打断，消费可能已发生，不自动重试同一路线。
+     */
+    private TaskState abandonLegInWater(boolean evidenceMove, boolean directionMove,
+            boolean relocationLeg) {
+        waterAbandonments++;
+        int wetTicks = legWaterTicks;
+        legWaterTicks = 0;
+        BlockPos target = activeMoveTarget;
+        stopActiveChild(TaskState.FAILED);
+        TaskResult result = TaskResult.fail("leg abandoned: the body stayed in water for "
+                + wetTicks + " continuous ticks without approaching the leg target"
+                + (target == null ? "" : " at " + target.toShortString())
+                + "; the search redirects instead of floating in place");
+        Constants.LOG.warn(
+                "[maicraft-task] structure search abandoned a water-bound leg"
+                        + " (ticks={} target={} evidence={} direction={} relocation={})",
+                wetTicks, target == null ? "unknown" : target.toShortString(),
+                evidenceMove, directionMove, relocationLeg);
+        recordRouteFailure(TaskState.FAILED);
+        recordLegFailure(evidenceMove ? "evidence_approach_abandoned_in_water"
+                : directionMove ? "eye_direction_leg_abandoned_in_water"
+                : relocationLeg ? "anchor_relocation_abandoned_in_water"
+                : "frontier_leg_abandoned_in_water", result);
+        activeMoveTarget = null;
+        if (relocationLeg) {
+            return handleFrontierLegFailure(true);
+        }
+        if (evidenceMove) {
+            if (activeEvidence != null) rejectedEvidence.add(activeEvidence.position().asLong());
+            activeEvidence = null;
+            if (stronghold) {
+                failIssue(
+                        "evidence_unreachable",
+                        "An end portal frame was verified in loaded world facts, but the first-person "
+                                + "route to it kept the body in open water and was abandoned. No more eyes "
+                                + "will be thrown for a structure that is already located.",
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            stage = Stage.OBSERVE;
+            return TaskState.RUNNING;
+        }
+        if (directionMove) {
+            clearDirectionTravel();
+            failIssue(
+                    "eye_direction_route_failed",
+                    "A real eye trajectory supplied the direction, but the first-person route in "
+                            + "that direction led into open water and was abandoned under the "
+                            + "allowed terrain policy.",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        frontierFailed++;
+        stage = Stage.OBSERVE;
+        return handleFrontierLegFailure(false);
+    }
+
     /**
      * 前沿腿失败的升级处置。RELOCATED 时沿建议方位截取已加载落点发起换锚腿；
      * 截不出落点视同换锚失败，继续下一级（第二次换锚用对侧方位），轮换与受阻语义不变。
@@ -742,6 +831,9 @@ public final class PhysicalStructureSearchCompanionTask
             terminal = runChild(moveChild);
             if (terminal == null) {
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                if (tickWaterLegGuard()) {
+                    return abandonLegInWater(false, false, true);
+                }
                 return TaskState.RUNNING;
             }
         }
@@ -851,6 +943,9 @@ public final class PhysicalStructureSearchCompanionTask
                 r.mayAlterTerrain, false, r.transportMode);
         moveChild = new MoveToCompanionTask(player, moveRecord);
         activeMoveTarget = target.immutable();
+        legWaterTicks = 0;
+        legWaterBestDistance = Double.MAX_VALUE;
+        lastWaterApproachTick = now;
     }
 
     // 按向外绕圈的顺序选新方向，再截成当前地形已经加载的一小段。已经尝试过的横向落点不重复选。
@@ -872,16 +967,26 @@ public final class PhysicalStructureSearchCompanionTask
         }
     }
 
+    // 航点候选的涉水口径：落点列本身是纯水面（海面、湖心），或路线判穿水，都算被水挡住。
+    // 包内可见供回归直测；130 的短促渡水豁免不变，只是航点不再落在水面上。
+    static boolean candidateBlockedByWater(boolean landsOnWater, boolean routeCrossesWater) {
+        return landsOnWater || routeCrossesWater;
+    }
+
     private boolean routeCrossesWater(BlockPos candidate) {
-        return waterProbe.crossesWater(player.blockPosition(), candidate);
+        return candidateBlockedByWater(
+                waterProbe.landsOnWater(candidate.getX(), candidate.getZ()),
+                waterProbe.crossesWater(player.blockPosition(), candidate));
     }
 
     private BlockPos loadedFrontierToward(BlockPos desired) {
         return loadedFrontierToward(desired, false);
     }
 
-    // avoidWater 时优先返回不穿水的最远已加载路段；全线皆水回退最近已加载路段，
-    // 缩短穿水承诺，不在水域环境卡死。
+    // avoidWater 时优先返回不穿水的最远已加载路段；全线皆穿水时回退最近已加载路段，
+    // 但落点列本身是纯水面（海面、湖心）的候选一律不选——短促渡水到对岸干地仍允许
+    // （130 豁免），把航点设到水面上只会把身体领进海里（175），截不出干地落点就返回
+    // null 由上层如实失败或升级，不在水域环境无守卫硬闯。
     private BlockPos loadedFrontierToward(BlockPos desired, boolean avoidWater) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
@@ -901,7 +1006,9 @@ public final class PhysicalStructureSearchCompanionTask
             fallback = candidate;
             if (!routeCrossesWater(candidate)) return candidate;
         }
-        return avoidWater ? fallback : null;
+        return avoidWater && fallback != null
+                && !waterProbe.landsOnWater(fallback.getX(), fallback.getZ())
+                ? fallback : null;
     }
 
     private boolean columnLoaded(int x, int z) {
@@ -991,6 +1098,18 @@ public final class PhysicalStructureSearchCompanionTask
             terminal = runChild(moveChild);
             if (terminal == null) {
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                // 换位腿同样受涉水守卫：落点本是干燥站位，身体落水说明路线已不可信，
+                // 不等超时，按站姿话术如实失败（175：任何腿不允许无限期滞水）。
+                if (tickWaterLegGuard()) {
+                    waterAbandonments++;
+                    stopActiveChild(TaskState.FAILED);
+                    failIssue(
+                            "unsafe_ender_eye_throw_stance",
+                            "The stance relocation kept the body in water for " + legWaterTicks
+                                    + " continuous ticks and was abandoned before the throw.",
+                            FailureType.HAZARD);
+                    return TaskState.FAILED;
+                }
                 return TaskState.RUNNING;
             }
         }
@@ -1162,6 +1281,11 @@ public final class PhysicalStructureSearchCompanionTask
             double dz = player.getZ() - moveRecord.z;
             data.put("move_leg_remaining", Math.sqrt(dx * dx + dz * dz));
         }
+        // 滞水守卫对调用方可见：行进中身体落水要能从进度流里看出，弃腿不等楔死才暴露。
+        if (legWaterTicks > 0) {
+            data.put("leg_water_ticks", legWaterTicks);
+            data.put("leg_water_stall_limit", WaterCrossingProbe.WATER_LEG_STALL_TICKS);
+        }
         return data;
     }
 
@@ -1187,6 +1311,9 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_relocations", frontierBreaker.relocations());
         data.put("evidence_approaches", evidenceApproaches);
         data.put("internal_route_recoveries", internalRouteRecoveries);
+        if (waterAbandonments > 0) {
+            data.put("leg_water_abandonments", waterAbandonments);
+        }
         if (!legFailures.isEmpty()) {
             data.put("travel_failures", List.copyOf(legFailures));
         }
