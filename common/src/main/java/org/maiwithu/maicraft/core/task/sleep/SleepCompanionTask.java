@@ -33,8 +33,6 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
     /** 床点击提交那刻的日指数；确认窗读到白天时用来识别“入睡本身把整夜跳过了”的后验事实。 */
     private long clickDayIndex = Long.MIN_VALUE;
     private boolean nightSkippedBySleep;
-    /** 原生点击与就近检查共用的床交互半径（眼位到床中心的直线距离）；接近闸口必须与本闸同判。 */
-    public static final double INTERACTION_REACH = 4.5;
     private static final int WAKE_SYNC_TICKS = 200;
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     public SleepCompanionTask(LocalPlayer player, SleepTaskRecord record) { super(player, record); }
