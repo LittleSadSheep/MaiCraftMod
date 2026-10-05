@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
 import org.maiwithu.maicraft.core.integration.machine.MachineControlTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord;
@@ -158,6 +159,20 @@ final class IntentTask implements Task {
                 explore.applyInterestAnswer(answer.choice());
                 return TaskState.RUNNING;
             }
+            if (answer.decisionId().equals(sleepGateDecision)) {
+                // 白天门答复只在本分支消费；编号随即作废，迟到的重复答复不再匹配同一扇门。
+                sleepGateDecision = null;
+                if ("recover".equals(answer.choice())) {
+                    // recover 的语义是「等到可睡窗口再睡」：消费后转入等待腿，绝不对同一扇
+                    // 关着的门重问（实机三连 4123f34f→c885717c→d3697403：每个 recover 都
+                    // 换来同门新决策，睡觉永远到不了点击那一步）。
+                    record.armSleepGateWait();
+                    Constants.LOG.info("[maicraft-sleep] 白天门 recover 已消费（decision {}），转入等待原版可睡窗口",
+                            answer.decisionId());
+                    return TaskState.RUNNING;
+                }
+                // skip 与 cancel 落进下面的通用分支：skip 消费当前步骤、cancel 终结任务，都没有重提窗口。
+            }
             if ("cancel".equals(answer.choice()) || "cancel_task".equals(answer.choice())) {
                 mechanicalContinuations.clear();
                 record.setCancelSource("answer_cancel");
@@ -183,6 +198,15 @@ final class IntentTask implements Task {
             if (refused != null) return requestDecision(refused);
             // 参数已经成为当前持久步骤，消费屏障与恢复读取同一意图；地点只在创建动作时临时解析。
             return begin(AbilityAdapter.adapt(resolvedCurrentGoal(), player, runtime, continuationFor(currentGoal())));
+        }
+
+        // 白天门 recover 的等待腿：窗口关着就原地等，不重新翻译当前目标——翻译会再次撞上
+        // 同一扇关着的门（发射点 AbilityAdapter.waitForNightDecision），重提就是这么来的。
+        if (record.sleepGateWaiting() && child == null && wait == null && chain.isEmpty()) {
+            if (!WorldTimeSemantics.canAttemptSleep(player.level())) return TaskState.RUNNING;
+            record.disarmSleepGateWait();
+            Constants.LOG.info("[maicraft-sleep] 可睡窗口已打开，恢复睡觉步骤");
+            // 落到下方重新翻译：此刻门已开，翻译给出 goto+sleep 链而不是决策。
         }
 
         // 正在走路就继续走这条路，不能每一刻都重新创建“去目的地”的任务。
@@ -254,7 +278,15 @@ final class IntentTask implements Task {
                 chainIndex = 0;
                 yield beginTool(chain.getFirst());
             }
-            case IntentAction.Decision decision -> requestDecision(decision.snapshot());
+            case IntentAction.Decision decision -> switch (sleepGateRelayAction(
+                    record.decisionSnapshot() != null,
+                    isSleepGateDecision(decision.snapshot()),
+                    record.sleepGateWaiting())) {
+                // 决策还开着（未答）：原地等答复；已答 recover 的白天门在等待窗口：
+                // 同一扇关着的门绝不换发新决策（与 explore 兴趣中继同一三态语义）。
+                case PARK, HOLD_REISSUE -> TaskState.RUNNING;
+                case ISSUE -> requestDecision(decision.snapshot());
+            };
             case IntentAction.Remember remember -> {
                 // 先登记地点，再保留供后续步骤引用的内部位置，最后完成本步；本分支没有原生点击，也不验证目标处的地形。
                 runtime.remember(remember.label(), remember.position(), remember.areaRole());
@@ -748,8 +780,45 @@ final class IntentTask implements Task {
 
     private TaskState requestDecision(IntentTaskRecord.DecisionSnapshot decision) {
         record.requestDecision(decision, player.level().getGameTime());
+        // 白天门决策记住编号：答复到达时按编号识别这扇门，走专属消费分支。
+        sleepGateDecision = isSleepGateDecision(decision) ? decision.id() : null;
         runtime.decision(record, decision);
         return TaskState.RUNNING;
+    }
+
+    /** 白天门决策的 context 标记，与发射侧 AbilityAdapter.waitForNightDecision 保持同一字面量。 */
+    static final String SLEEP_GATE_DECISION_KIND = "sleep_day_gate";
+
+    /** 本次会话挂着的白天门决策编号；仅用于答复路由，检查点恢复后待答问题整体原样恢复。 */
+    private UUID sleepGateDecision;
+
+    static boolean isSleepGateDecision(IntentTaskRecord.DecisionSnapshot decision) {
+        try {
+            var kind = decision.context().get("decision_kind");
+            return kind != null && kind.isJsonPrimitive()
+                    && SLEEP_GATE_DECISION_KIND.equals(kind.getAsString());
+        } catch (RuntimeException brokenContext) {
+            // 上下文损坏时按普通决策走通用答复分支；异常路径带原因落日志，不静默吞掉。
+            Constants.LOG.warn("[maicraft-sleep] 决策 context 解析失败，按普通决策处理", brokenContext);
+            return false;
+        }
+    }
+
+    /** 白天门中继处置：等答复、按住已答复门的重发、放行新决策——与 explore 兴趣中继同一三态。 */
+    enum SleepGateRelayAction { PARK, HOLD_REISSUE, ISSUE }
+
+    /**
+     * 中继判定纯函数：
+     * - 语义决策快照还开着（未被回答）：PARK，等 task action=answer；
+     * - 白天门且 recover 已消费（等待腿接管，窗口未开）：HOLD_REISSUE——此刻若放行发射点，
+     *   翻译会对同一扇关着的门换发新决策编号，每个 recover 都换来一次重问（实机三连形态）；
+     * - 其余（全新决策，或非白天门的普通决策）：ISSUE 照常发出。
+     */
+    static SleepGateRelayAction sleepGateRelayAction(
+            boolean decisionSnapshotOpen, boolean gateDecision, boolean gateWaiting) {
+        if (decisionSnapshotOpen) return SleepGateRelayAction.PARK;
+        return gateDecision && gateWaiting
+                ? SleepGateRelayAction.HOLD_REISSUE : SleepGateRelayAction.ISSUE;
     }
 
     /** 语义层观察动作任务单上的待询问发现并拉起决策；决策期间任务记录会暂停，等待 task action=answer。 */
@@ -1192,6 +1261,7 @@ final class IntentTask implements Task {
     public Map<String, Object> progress() {
         Map<String, Object> progress = new LinkedHashMap<>(child != null ? SemanticResultView.data(child.progress())
                 : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
+                : record.sleepGateWaiting() ? "waiting_for_sleep_window"
                 : wait != null ? "waiting_for_condition" : "preparing_step"));
         addBuildProjects(progress);
         // 子任务表达的是执行意图，父任务暂停时实际已允许自救接手；公开状态按当前调度条件纠正。

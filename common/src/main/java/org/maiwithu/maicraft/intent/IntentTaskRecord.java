@@ -67,6 +67,11 @@ public final class IntentTaskRecord extends TaskRecord {
     private TerminalSnapshot terminal;
     private boolean restoredDetached;
     private boolean chatSubmissionTracked = true;
+    /**
+     * 睡眠白天门 recover 已消费：任务在等原版可睡窗口打开，期间同一扇关着的门不再换发新决策。
+     * 随检查点持久化——重启恢复后等待语义不丢，重译目标也不会对同一扇已答复的门重提。
+     */
+    private boolean sleepGateWait;
     /** 同一 request_key 重提命中去重的次数：调用方据此分辨拿到的是旧任务还是新执行，本进程内计数，恢复后从零开始。 */
     private int deduplicatedRequestHits;
     private Runnable dirty = () -> {};
@@ -486,6 +491,27 @@ public final class IntentTaskRecord extends TaskRecord {
         return true;
     }
 
+    /** 消费白天门 recover 答复：转入等待可睡窗口，同一扇已答复的门不再重提。 */
+    void armSleepGateWait() {
+        sleepGateWait = true;
+        changed();
+    }
+
+    /** 可睡窗口打开、等待腿结束：清掉标记，任务恢复普通翻译。 */
+    void disarmSleepGateWait() {
+        sleepGateWait = false;
+        changed();
+    }
+
+    public boolean sleepGateWaiting() {
+        return sleepGateWait;
+    }
+
+    /** 检查点恢复等待语义；随恢复的记录重建，不触发脏标记。 */
+    void restoreSleepGateWait(boolean waiting) {
+        sleepGateWait = waiting;
+    }
+
     private boolean deathRecoveryPending(UUID decisionId) {
         return decision != null && decisionId.equals(decision.id())
                 && decision.contextJson() != null
@@ -508,6 +534,7 @@ public final class IntentTaskRecord extends TaskRecord {
         terminal = new TerminalSnapshot(state, result == null ? "{}" : result.toJson(), gameTime);
         setState(state);
         pause = null;
+        sleepGateWait = false;
         if (!deathRecovery(decision)) decision = null;
         pendingAnswer = null;
         changed();

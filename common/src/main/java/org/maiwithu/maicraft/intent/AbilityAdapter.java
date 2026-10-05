@@ -257,23 +257,32 @@ final class AbilityAdapter {
                         option("cancel", "Cancel the whole task.")));
     }
 
-    private static IntentAction waitForNightDecision(Goal goal, LocalPlayer player) {
+    static IntentAction waitForNightDecision(Goal goal, LocalPlayer player) {
         // 判定已与原版可睡窗口同源；走到这里说明此刻确实不可睡。决策文本带上当前时刻与
         // 最近可睡时点，调用方据此在可睡窗口内应答，而不是拿着一个过期的白天断言盲等整夜。
         long now = WorldTimeSemantics.timeOfDay(player.level());
         long nextSleepable = now < WorldTimeSemantics.SLEEP_WINDOW_START
                 ? WorldTimeSemantics.SLEEP_WINDOW_START - now
                 : 24_000L - now + WorldTimeSemantics.SLEEP_WINDOW_START;
-        // 目前的处理是询问要不要先等到可睡时刻，并不会在睡觉任务里自动等，也不会反复点床。
-        return decision(goal,
+        // decision_kind 标记这扇门：语义层据此把 recover 消费成「等到可睡窗口再睡」，
+        // 而不是对同一扇关着的门换发新决策重问（145 批六B 实机三连形态）。
+        JsonObject context = new JsonObject();
+        context.addProperty("decision_kind", IntentTask.SLEEP_GATE_DECISION_KIND);
+        context.addProperty("ability", goal.ability());
+        context.addProperty("outcome", goal.outcome());
+        context.addProperty("time_of_day", now);
+        context.addProperty("next_sleepable_in_ticks", nextSleepable);
+        return new IntentAction.Decision(new IntentTaskRecord.DecisionSnapshot(
+                UUID.randomUUID(),
                 "A usable bed is available, but the vanilla sleep window is closed now: time_of_day=" + now
                         + ", sleepable again in about " + nextSleepable + " ticks. The gate follows the vanilla"
                         + " sky-darkening rule (clear weather roughly 12542-23458; a thunderstorm opens it any time)."
                         + " MaiCraft will not click it repeatedly or pretend sleep succeeded.",
                 List.of(
-                        option("recover", "Provide details.goal to wait for the observable night condition, then resume sleep."),
+                        option("recover", "Wait here until the vanilla sleep window opens, then sleep automatically; no details.goal needed."),
                         option("skip", "Continue without sleeping."),
-                        option("cancel", "Cancel the whole task.")));
+                        option("cancel", "Cancel the whole task.")),
+                context.toString()));
     }
 
     /**

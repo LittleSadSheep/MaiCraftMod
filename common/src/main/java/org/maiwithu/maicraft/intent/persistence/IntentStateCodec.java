@@ -77,6 +77,7 @@ public final class IntentStateCodec {
             IntentTaskRecord.DecisionAnswer pendingAnswer,
             IntentTaskRecord.TerminalSnapshot terminal,
             boolean chatSubmissionTracked,
+            boolean sleepGateWaiting,
             Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes,
             Map<Integer, IntentTaskRecord.AcquireBaseline> acquireBaselines) {}
 
@@ -269,6 +270,10 @@ public final class IntentStateCodec {
             Goal current = task.stepIndex() < task.steps().size() ? task.steps().get(task.stepIndex()) : task.goal();
             item.add("details", answerDetails(answer.details(), current));
             value.add("pending_answer", item);
+        }
+        if (task.sleepGateWaiting()) {
+            // 白天门 recover 已消费、正在等可睡窗口：重启后同一扇已答复的门不能重提。
+            value.addProperty("sleep_gate_waiting", true);
         }
         if (task.terminalSnapshot() != null) {
             IntentTaskRecord.TerminalSnapshot terminal = task.terminalSnapshot();
@@ -475,6 +480,7 @@ public final class IntentStateCodec {
                 List.copyOf(attempts),
                 decision, answer, terminal,
                 value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean(),
+                value.has("sleep_gate_waiting") && value.get("sleep_gate_waiting").getAsBoolean(),
                 decodeContainerSearchScopes(value, steps),
                 decodeAcquireBaselines(value, steps, stepIndex));
     }
@@ -514,6 +520,9 @@ public final class IntentStateCodec {
             if (result.put(index, baseline) != null) throw new IllegalArgumentException("duplicate acquisition baseline");
         }
         return Map.copyOf(result);
+=======
+                value.has("sleep_gate_waiting") && value.get("sleep_gate_waiting").getAsBoolean(),
+                decodeContainerSearchScopes(value, steps));
     }
 
     private static Map<Integer, Optional<ContainerSearchScope>> decodeContainerSearchScopes(JsonObject value, List<Goal> steps) {

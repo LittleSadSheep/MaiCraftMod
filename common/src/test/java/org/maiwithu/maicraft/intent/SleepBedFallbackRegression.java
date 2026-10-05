@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.UUID;
+import com.google.gson.JsonObject;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
@@ -19,6 +20,8 @@ import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
+import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -35,6 +38,11 @@ public final class SleepBedFallbackRegression {
         emptyWorldPlansCarriedBedDirectly();
         fallbackChainFailureReportsBothAttempts();
         fallbackSuccessReceiptNamesTheCarriedBed();
+        gateDecisionKindMarksTheDoor();
+        gateRelayThreeStates();
+        recoverConsumesIntoWindowWait();
+        skipAnswerStaysGeneric();
+        gateWaitSurvivesCheckpoint();
         System.out.println("SleepBedFallbackRegression: passed");
     }
 
@@ -135,6 +143,123 @@ public final class SleepBedFallbackRegression {
                             && receipt.contains("occluded from the current stance"),
                     "the success receipt names the carried bed and why the village bed was abandoned: " + receipt);
         }
+    }
+
+    // ------------------------------------------------------------------
+
+    /**
+     * 145 批六B：白天门决策的发射侧标记——快照 context 带 decision_kind=sleep_day_gate，
+     * 语义层据此认出这扇门、把 recover 消费成等待而不是重问同一扇关着的门。
+     */
+    private static void gateDecisionKindMarksTheDoor() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            var decision = snapshotOf(AbilityAdapter.waitForNightDecision(goal, world.player));
+            check(IntentTask.isSleepGateDecision(decision), "the sleep day gate decision carries the gate kind");
+            check(decision.context().get("time_of_day") != null
+                    && decision.context().get("next_sleepable_in_ticks") != null,
+                    "the gate context keeps the time facts for receipt reconciliation");
+            var generic = new IntentTaskRecord.DecisionSnapshot(UUID.randomUUID(), "choose",
+                    List.of(new IntentTaskRecord.DecisionOption("recover", "d")), "{}");
+            check(!IntentTask.isSleepGateDecision(generic), "a context without the kind is an ordinary decision");
+        }
+    }
+
+    /** 三态中继与 explore 兴趣中继同一语义：等答复 / 已答门按住重发 / 新决策照发。 */
+    private static void gateRelayThreeStates() {
+        check(IntentTask.sleepGateRelayAction(true, true, false) == IntentTask.SleepGateRelayAction.PARK,
+                "an open decision parks until the answer arrives");
+        check(IntentTask.sleepGateRelayAction(false, true, true) == IntentTask.SleepGateRelayAction.HOLD_REISSUE,
+                "an answered gate in its wait leg must not re-issue the same closed gate");
+        check(IntentTask.sleepGateRelayAction(false, true, false) == IntentTask.SleepGateRelayAction.ISSUE,
+                "a fresh gate encounter issues the decision exactly once");
+        check(IntentTask.sleepGateRelayAction(false, false, false) == IntentTask.SleepGateRelayAction.ISSUE,
+                "ordinary decisions keep the generic path");
+    }
+
+    /** recover 消费后转入等待腿：同门换新编号的重提被按住，窗口打开后才恢复睡觉步骤。 */
+    private static void recoverConsumesIntoWindowWait() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            var snapshot = snapshotOf(AbilityAdapter.waitForNightDecision(goal, world.player));
+            var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            check(!record.sleepGateWaiting(), "a fresh task is not waiting for the sleep window");
+            record.requestDecision(snapshot, 1);
+            check(record.answer(snapshot.id(), "recover", new JsonObject()),
+                    "the gate accepts a recover answer without details.goal");
+            check("recover".equals(record.takeAnswer().choice()), "the answer is consumed once");
+            record.armSleepGateWait();
+            check(record.sleepGateWaiting(), "the consumed recover answer arms the window wait");
+            // 同门换新编号再问被按住——实机三连 4123f34f→c885717c→d3697403 的回归锚点。
+            var reissue = snapshotOf(AbilityAdapter.waitForNightDecision(goal, world.player));
+            check(IntentTask.sleepGateRelayAction(record.decisionSnapshot() != null,
+                            IntentTask.isSleepGateDecision(reissue), record.sleepGateWaiting())
+                    == IntentTask.SleepGateRelayAction.HOLD_REISSUE,
+                    "the same closed gate gets no new decision id while the wait leg holds");
+            check(!WorldTimeSemantics.canAttemptSleep(world.level), "the daytime world keeps the window closed");
+            night(world);
+            check(WorldTimeSemantics.canAttemptSleep(world.level), "night opens the window");
+            record.disarmSleepGateWait();
+            check(!record.sleepGateWaiting(), "an open window disarms the wait and the sleep step re-plans");
+        }
+    }
+
+    /** skip 与 cancel 走通用消费分支：skip 一次消费成功、两种答复都不进入等待腿。 */
+    private static void skipAnswerStaysGeneric() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            var snapshot = snapshotOf(AbilityAdapter.waitForNightDecision(goal, world.player));
+            var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            record.requestDecision(snapshot, 1);
+            check(record.answer(snapshot.id(), "skip", new JsonObject()), "skip is an accepted gate choice");
+            check("skip".equals(record.takeAnswer().choice()), "the skip answer is consumed once");
+            check(!record.sleepGateWaiting(), "skip never arms the window wait");
+            var cancelRecord = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            cancelRecord.requestDecision(snapshot, 1);
+            check(cancelRecord.answer(snapshot.id(), "cancel", new JsonObject()),
+                    "cancel is an accepted gate choice");
+            check(!cancelRecord.sleepGateWaiting(), "cancel never arms the window wait");
+        }
+    }
+
+    /** 等待腿随检查点持久化：重启恢复后同一扇已答复的门继续等窗口，不重提。 */
+    private static void gateWaitSurvivesCheckpoint() {
+        var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+        var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        record.armSleepGateWait();
+        var encoded = IntentStateCodec.encode("sleep-gate-test", List.of(), List.of(record), Map.of(), List.of());
+        check(encoded.getAsJsonArray("tasks").get(0).getAsJsonObject().get("sleep_gate_waiting").getAsBoolean(),
+                "the armed window wait persists with the checkpoint");
+        var snapshot = IntentStateCodec.decode(encoded).tasks().getFirst();
+        var restored = IntentTaskRecord.restored(snapshot.id(), snapshot.planId(), snapshot.goal(),
+                "sleep-gate-test", snapshot.steps(), snapshot.stepIndex(), snapshot.completed(),
+                snapshot.internalPositions(), snapshot.internalAreaProtections(), snapshot.attempts(),
+                snapshot.decision(), snapshot.pendingAnswer(), snapshot.terminal(), 100);
+        restored.restoreSleepGateWait(snapshot.sleepGateWaiting());
+        check(restored.sleepGateWaiting(), "a restored task keeps waiting instead of re-asking the gate");
+        var plain = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        var plainEncoded = IntentStateCodec.encode("sleep-gate-test", List.of(), List.of(plain), Map.of(), List.of());
+        check(!plainEncoded.getAsJsonArray("tasks").get(0).getAsJsonObject().has("sleep_gate_waiting"),
+                "an unmarked task keeps its checkpoint free of the gate field");
+    }
+
+    private static IntentTaskRecord.DecisionSnapshot snapshotOf(IntentAction action) {
+        return ((IntentAction.Decision) action).snapshot();
+    }
+
+    /** 白天且可用床的维度：白天门决策只在窗口确实关着时发射。 */
+    private static void day(InteractionWorldTestHarness world) throws Exception {
+        var time = new ClientLevel.ClientLevelData(Difficulty.NORMAL, false, false);
+        field(Level.class, "levelData").set(world.level, time);
+        var dimension = new DimensionType(OptionalLong.empty(), true, false, false, true, 1.0, true, false,
+                0, 16, 16, BlockTags.INFINIBURN_OVERWORLD,
+                ResourceLocation.withDefaultNamespace("overworld"), 0,
+                new DimensionType.MonsterSettings(false, false, ConstantInt.of(0), 0));
+        field(Level.class, "dimensionTypeRegistration").set(world.level, Holder.direct(dimension));
+        time.setDayTime(6000);
     }
 
     // ------------------------------------------------------------------
