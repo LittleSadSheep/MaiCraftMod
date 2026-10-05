@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import java.util.List;
 import java.util.function.BooleanSupplier;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.suicide.SuicideRequest;
 import org.maiwithu.maicraft.core.task.suicide.SuicideTask;
 import org.maiwithu.maicraft.core.task.suicide.SuicideTaskRecord;
@@ -15,11 +20,17 @@ import org.maiwithu.maicraft.core.task.suicide.SuicideTaskTest;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 洞里没有现成危险时用随身打火石原地点火；火由原生回执注入，熄灭后再点，被拒绝时不换格反复点。 */
+/** 洞里没有现成危险时用随身岩浆桶或打火石原地造危险，寻死前先脱甲；原生结果由夹具注入，被拒绝时不换格反复操作。 */
 public final class SuicideSelfHazardTest {
     private static final BlockPos CELL = new BlockPos(8, 1, 8);
 
     public static void main(String[] args) throws Exception {
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        fire(); lavaBucket(); armor();
+        System.out.println("SuicideSelfHazardTest: passed");
+    }
+
+    private static void fire() throws Exception {
         try (var world = cave()) {
             // auto：没有岩浆、高处和怪物，带着打火石就低头对脚下地面点火，站在火里受原生伤害。
             world.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
@@ -57,7 +68,71 @@ public final class SuicideSelfHazardTest {
             check(task.result(state).message().contains("No flint and steel"), "失败说明应指出缺少点火物");
             task.stop(world.player, Task.StopReason.REPLACED);
         }
-        System.out.println("SuicideSelfHazardTest: passed");
+    }
+
+    private static void lavaBucket() throws Exception {
+        try (var world = cave()) {
+            // 同时带着岩浆桶和打火石：auto 先低头把岩浆倒进自己站的格子，原生回执确认扣桶后站在岩浆里等死。
+            world.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
+            world.inventory.setItem(1, new ItemStack(Items.FLINT_AND_STEEL));
+            world.mode.itemUse = player -> {
+                world.set(CELL, Blocks.LAVA.defaultBlockState());
+                world.inventory.setItem(0, new ItemStack(Items.BUCKET)); world.level.blockSequence++;
+            };
+            var task = task(world, "auto");
+            run(world, task, () -> task.progress().get("lava_pours_confirmed").equals(1));
+            check(world.itemUses() == 1 && world.blockUses() == 0 && world.mode.usedHand == InteractionHand.MAIN_HAND,
+                    "倒岩浆是一次主手原生用桶，不点火也不另点方块");
+            check(task.progress().get("method").equals("lava_bucket") && task.progress().get("phase").equals("exposing_to_hazard"),
+                    "倒完岩浆应站在里面");
+            for (int tick = 0; tick < 20; tick++) step(world, task);
+            check(world.itemUses() == 1 && world.blockUses() == 0, "岩浆还在时不能再倒或改去点火");
+            world.player.setHealth(0);
+            check(task.observeDeath(world.player) && task.result(TaskState.SUCCESS).success(), "倒岩浆后本人死亡应完成寻死");
+        }
+        try (var world = cave()) {
+            // 倒桶已提交但服务器没有放出岩浆、桶也没少：按原生拒绝处理，不再换格倒，改用打火石点火。
+            world.inventory.setItem(0, new ItemStack(Items.LAVA_BUCKET));
+            world.inventory.setItem(1, new ItemStack(Items.FLINT_AND_STEEL));
+            world.mode.itemUse = player -> world.level.blockSequence++;
+            world.mode.beforeBlockUse = () -> world.set(CELL, Blocks.FIRE.defaultBlockState());
+            var task = task(world, "auto");
+            run(world, task, () -> task.progress().get("ignitions_confirmed").equals(1));
+            check(world.itemUses() == 1 && world.blockUses() == 1, "倒桶被拒绝只试一次，随后点火一次");
+            check(task.progress().get("attempts").toString().contains("lava_bucket use did not produce"), "回执应保留倒桶未生效的原因");
+            task.stop(world.player, Task.StopReason.REPLACED);
+        }
+    }
+
+    private static void armor() throws Exception {
+        try (var world = cave()) {
+            // 背包已满：护甲原生收不回去就留在身上并记入回执，寻死不因此失败，继续点火。
+            for (int slot = 0; slot < 36; slot++) world.inventory.setItem(slot, new ItemStack(Items.DIRT, 64));
+            world.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            world.inventory.armor.set(EquipmentSlot.HEAD.getIndex(), new ItemStack(Items.IRON_HELMET));
+            world.mode.beforeBlockUse = () -> world.set(CELL, Blocks.FIRE.defaultBlockState());
+            var task = task(world, "fire");
+            run(world, task, () -> world.blockUses() == 1);
+            check(task.progress().get("armor_still_worn").toString().contains("iron_helmet")
+                    && ((List<?>) task.progress().get("armor_removed")).isEmpty(), "没空位的护甲应如实记为仍穿着");
+            check(!world.player.getItemBySlot(EquipmentSlot.HEAD).isEmpty(), "卸甲不能丢掉护甲腾位置");
+            task.stop(world.player, Task.StopReason.REPLACED);
+        }
+        try (var world = cave()) {
+            // 有空位：先经原生背包界面把头盔快速移回背包，再去点火；护甲保留在背包里，不丢不毁。
+            world.enableCraftingTransactions(); world.h.minecraft.screen = null;
+            world.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            world.inventory.armor.set(EquipmentSlot.HEAD.getIndex(), new ItemStack(Items.IRON_HELMET));
+            world.mode.beforeBlockUse = () -> world.set(CELL, Blocks.FIRE.defaultBlockState());
+            var task = task(world, "fire");
+            run(world, task, () -> world.blockUses() == 1);
+            check(world.player.getItemBySlot(EquipmentSlot.HEAD).isEmpty() && PlayerInv.count(world.inventory, Items.IRON_HELMET) == 1,
+                    "头盔应原生移回背包");
+            check(task.progress().get("armor_removed").toString().contains("iron_helmet")
+                    && ((List<?>) task.progress().get("armor_still_worn")).isEmpty(), "回执应记录已脱下的护甲");
+            check(world.mode.menuClicks == 1 && world.h.minecraft.screen == null, "卸甲只点一次背包并在点火前关好界面");
+            task.stop(world.player, Task.StopReason.REPLACED);
+        }
     }
 
     private static InteractionWorldTestHarness cave() throws Exception {
@@ -72,23 +147,29 @@ public final class SuicideSelfHazardTest {
     }
 
     private static SuicideTask task(InteractionWorldTestHarness world, String method) {
-        return new SuicideTask(world.player, new SuicideTaskRecord("fire-test", new SuicideRequest(method, 8, 60, true)));
+        return new SuicideTask(world.player, new SuicideTaskRecord("self-hazard-test", new SuicideRequest(method, 8, 60, true)));
     }
 
     private static TaskState step(InteractionWorldTestHarness world, SuicideTask task) throws Exception {
-        // 每刻先给出服务端方块确认，再推进任务，最后把身体控制器要求的视角落到角色上。
+        // 每刻先给出服务端方块确认并标记背包页已绘制，再推进任务，最后把身体控制器要求的视角落到角色上。
         world.nextTick(); world.level.acknowledgedSequence = world.level.blockSequence;
+        if (world.h.minecraft.screen != null) MenuVisibility.rendered(world.h.minecraft.screen);
         TaskState state = task.tick(world.player);
         DiscardFireTest.align(world);
+        // 无窗口夹具不能真正打开界面：启用真实菜单点击的场景里，卸甲子任务登记后、尚未点击前由夹具补上原生背包页；
+        // 点击后子任务自己关页并等关闭确认，夹具不能再把页面塞回去。
+        if (world.mode.craftingClicks && world.mode.menuClicks == 0 && "正在脱下护甲".equals(task.describeCurrentAction())
+                && world.h.minecraft.screen == null)
+            world.h.minecraft.screen = world.h.inventoryScreen();
         return state;
     }
 
     private static void run(InteractionWorldTestHarness world, SuicideTask task, BooleanSupplier done) throws Exception {
-        for (int tick = 0; tick < 200; tick++) {
-            check(step(world, task) == TaskState.RUNNING, "活着时不能提前结束点火寻死: " + task.progress());
+        for (int tick = 0; tick < 300; tick++) {
+            check(step(world, task) == TaskState.RUNNING, "活着时不能提前结束寻死: " + task.progress());
             if (done.getAsBoolean()) return;
         }
-        throw new AssertionError("未完成原生点火: " + task.progress() + " uses=" + world.blockUses());
+        throw new AssertionError("未完成原生动作: " + task.progress() + " blocks=" + world.blockUses() + " items=" + world.itemUses());
     }
 
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }

@@ -11,6 +11,8 @@ import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.GuiPreparation;
@@ -18,25 +20,33 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.pathing.goal.GoalCompiler;
+import org.maiwithu.maicraft.core.task.inventory.UnequipCompanionTask;
+import org.maiwithu.maicraft.core.task.inventory.UnequipTaskRecord;
+import org.maiwithu.maicraft.core.task.suicide.SuicideSelfHazard.Kind;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 确认死亡不掉落 -> 找危险（没有现成危险时随身点火） -> 原生走近并受伤 -> 观察死亡；只控制按键与原生点火，死亡和重生由原生生命周期结算。 */
+/** 确认死亡不掉落 -> 脱下护甲 -> 找危险（没有现成危险时随身倒岩浆或点火） -> 原生走近并受伤 -> 观察死亡；只控制按键与原生物品操作，死亡和重生由原生生命周期结算。 */
 public final class SuicideTask implements Task {
+    // 寻死前依次尝试脱下的护甲栏，从头到脚。
+    private static final List<EquipmentSlot> ARMOR = List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET);
     private final LocalPlayer player;
     private final SuicideRequest request;
     private final GuiPreparation gui = new GuiPreparation();
     private final Set<String> attempted = new HashSet<>();
     private final List<Map<String, Object>> attempts = new ArrayList<>();
+    private final List<String> armorRemoved = new ArrayList<>(), armorStillWorn = new ArrayList<>();
+    private final Map<String, Integer> selfMadeConfirmed = new LinkedHashMap<>();
     private SuicideHazards survey;
     private SuicideHazards.Candidate candidate;
     private PlayerNav nav;
-    private SuicideSelfHazard ignition;
+    private SuicideSelfHazard making;
+    private UnequipCompanionTask undress;
     private CompletableFuture<Boolean> ruleRead;
     private Boolean keepInventory;
-    private int ticks, lastRuleRead, lastProgress, enteredTicks, ignitions;
+    private int ticks, lastRuleRead, lastProgress, enteredTicks, armorIndex;
     private float previousHealth, healthLost;
     private boolean acting, armed, ended, deathObserved;
     private String detail = "Seeking a native death opportunity.";
@@ -66,7 +76,9 @@ public final class SuicideTask implements Task {
             return finish("Suicide requires a non-hardcore survival or adventure body.", TaskState.FAILED);
         if (!checkRule()) return ended ? TaskState.FAILED : TaskState.RUNNING;
         // 先等在途菜单操作并尝试原生关页返料，普通聊天框可保留；角色仍睡在床上时只等待自然醒来。
-        if (!gui.ready(ClientRuntime.requireContext(player), true)) return TaskState.RUNNING;
+        // 卸甲子任务进行中由它自己管理打开的背包，不能让界面准备在半途把它关掉。
+        if (undress == null && !gui.ready(ClientRuntime.requireContext(player), true)) return TaskState.RUNNING;
+        if (!undressed()) return TaskState.RUNNING;
         float health = player.getHealth();
         if (previousHealth > health) { healthLost += previousHealth - health; lastProgress = ticks; }
         previousHealth = health;
@@ -104,7 +116,8 @@ public final class SuicideTask implements Task {
             stopNavigation(); acting = true; lastProgress = ticks;
         }
         armed = true; enteredTicks++;
-        if (candidate.method().equals("fire")) return burn();
+        Kind kind = Kind.of(candidate.method());
+        if (kind != null) return expose(kind);
         // 踏出后重新落地且仍存活，只放弃这一入口并尝试下一处，不把“已经跳下去”记作完成。
         if (candidate.method().equals("fall") && enteredTicks > 10 && player.onGround()
                 && player.getY() < candidate.approach().getY() - 2) return abandon("The native fall ended with the body still alive.");
@@ -119,37 +132,66 @@ public final class SuicideTask implements Task {
         return TaskState.RUNNING;
     }
 
-    private TaskState burn() {
-        BlockPos cell = candidate.entry();
-        // 点火回执未结清前只轮询这一次原生使用；结清后按实际火格计数，不把未确认的点击冒称为点燃。
-        if (ignition != null) {
-            TaskState state = ignition.tick(ClientRuntime.requireContext(player));
-            if (state == TaskState.RUNNING) return TaskState.RUNNING;
-            boolean submitted = ignition.submitted(); String reason = ignition.failure(); closeIgnition();
-            if (state == TaskState.SUCCESS || SuicideHazards.burning(player.level(), cell)) { ignitions++; return TaskState.RUNNING; }
-            // 已经右键却没出火，说明原生拒绝或结果未知，之后不再换格反复点火；还没点出去的瞄准失败只放弃这一格。
-            if (submitted) attempted.add(SuicideHazards.FIRE_REJECTED);
-            return abandon("Native ignition did not produce fire: " + reason);
+    private boolean undressed() {
+        // 从头到脚逐件交给原生背包卸甲；每件单独结算，一件卸不下（没空位、绑定诅咒或界面未确认）只记下仍穿着，不影响其余部位和寻死本身。
+        if (undress != null) {
+            TaskState state = undress.tick(player);
+            if (!state.isTerminal()) return false;
+            EquipmentSlot slot = ARMOR.get(armorIndex++);
+            var result = undress.result(state); undress = null;
+            var data = result.data() == null ? Map.<String, Object>of() : result.data();
+            if (data.get("removed") instanceof List<?> removed) removed.forEach(piece -> armorRemoved.add(String.valueOf(piece)));
+            if (data.get("still_worn") instanceof List<?> kept) kept.forEach(piece -> armorStillWorn.add(String.valueOf(piece)));
+            var worn = player.getItemBySlot(slot);
+            if (!result.success() && !worn.isEmpty())
+                armorStillWorn.add(BuiltInRegistries.ITEM.getKey(worn.getItem()).getPath() + " (" + slot.getName() + "): " + result.message());
+            return false;
         }
-        // 身体被挤出火格时先走回格中央，再判断是否需要重新点火；低头点火要求射线全程留在这一列。
+        while (armorIndex < ARMOR.size() && player.getItemBySlot(ARMOR.get(armorIndex)).isEmpty()) armorIndex++;
+        if (armorIndex >= ARMOR.size()) return true;
+        // 新建卸甲子任务的这一刻只登记，下一刻再让它打开背包，不和本刻刚结清的界面准备挤在同一刻。
+        EquipmentSlot slot = ARMOR.get(armorIndex);
+        undress = new UnequipCompanionTask(player, new UnequipTaskRecord("suicide-armor",
+                player.level().getGameTime() + 200, List.of(slot), slot.getName()));
+        undress.start(player);
+        return false;
+    }
+
+    private TaskState expose(Kind kind) {
+        BlockPos cell = candidate.entry();
+        // 造危险的回执未结清前只轮询这一次原生使用；结清后按实际危险格或扣桶计数，不把未确认的点击冒称为成功。
+        if (making != null) {
+            TaskState state = making.tick(ClientRuntime.requireContext(player));
+            if (state == TaskState.RUNNING) return TaskState.RUNNING;
+            boolean submitted = making.submitted(); String reason = making.failure(); closeMaking();
+            if (state == TaskState.SUCCESS || kind.present(player.level(), cell)) {
+                selfMadeConfirmed.merge(kind.method, 1, Integer::sum); return TaskState.RUNNING;
+            }
+            // 已经出手却没出效果，说明原生拒绝或结果未知，之后不再换格反复尝试这种方式；还没出手的瞄准失败只放弃这一格。
+            if (submitted) attempted.add(kind.rejectedKey());
+            return abandon("Native " + kind.method + " use did not produce its hazard: " + reason);
+        }
+        // 身体被挤出危险格时先走回格中央，再判断是否需要重新造危险；低头操作要求射线全程留在这一列。
         if (!player.blockPosition().equals(cell)) { InputDriver.stepToward(player, Vec3.atBottomCenterOf(cell), false); return TaskState.RUNNING; }
         InputDriver.halt(player);
-        // 火还烧着就站着承受原生伤害；火自然熄灭后原地再点，点火物用尽且身上也不再着火才放弃这一格。
-        if (SuicideHazards.burning(player.level(), cell)) return TaskState.RUNNING;
-        if (SuicideSelfHazard.igniterSlot(player.getInventory()) < 0)
-            return player.isOnFire() ? TaskState.RUNNING : abandon("No flint and steel or fire charge remains for another native ignition.");
-        ignition = new SuicideSelfHazard(cell);
+        // 危险还在就站着承受原生伤害；火自然熄灭或岩浆被冲走后原地再造，物品用尽且身上也不再着火才放弃这一格。
+        if (kind.present(player.level(), cell)) return TaskState.RUNNING;
+        if (kind.slot(player.getInventory()) < 0)
+            return player.isOnFire() ? TaskState.RUNNING : abandon("No " + kind.label + " remains for another native " + kind.method + " use.");
+        making = new SuicideSelfHazard(kind, cell);
         return TaskState.RUNNING;
     }
 
     private String exhausted() {
-        // 没有候选时区分“没带点火物”“点火被原生拒绝”和“附近没有安全点火格”，让模型知道该补物品、换地方还是换方式。
-        String base = "No remaining reachable native hazard was found in the loaded search area.";
-        if (!request.permits("fire")) return base;
-        if (attempted.contains(SuicideHazards.FIRE_REJECTED)) return base + " Native ignition was already rejected or left unconfirmed.";
-        return base + (SuicideSelfHazard.igniterSlot(player.getInventory()) < 0
-                ? " No flint and steel or fire charge is carried for self-ignition."
-                : " No untried air cell on a sturdy floor without flammable blocks nearby was found for self-ignition.");
+        // 没有候选时按每种随身方式说明是“没带物品”“已被原生拒绝”还是“附近没有安全格”，让模型知道该补物品、换地方还是换方式。
+        var message = new StringBuilder("No remaining reachable native hazard was found in the loaded search area.");
+        for (Kind kind : Kind.values()) {
+            if (!request.permits(kind.method)) continue;
+            message.append(' ').append(attempted.contains(kind.rejectedKey()) ? "Native " + kind.method + " use was already rejected or left unconfirmed."
+                    : kind.slot(player.getInventory()) < 0 ? "No " + kind.label + " is carried for " + kind.method + "."
+                    : "No untried air cell on a sturdy floor clear of flammable or protected blocks was found for " + kind.method + ".");
+        }
+        return message.toString();
     }
 
     private boolean checkRule() {
@@ -175,7 +217,7 @@ public final class SuicideTask implements Task {
         // 一处危险不可达或未奏效，只放弃该处并记录事实；已发生的烧伤、坠伤与原生爆炸不回滚。
         // 替换本次尝试的结论后记住入口或怪物 UUID，后续从原地形候选和新观察的活怪中另选，不全量重扫地形。
         attempts.set(attempts.size() - 1, Map.of("method", candidate.method(), "outcome", reason));
-        attempted.add(candidate.key()); closeIgnition(); stopNavigation(); InputDriver.halt(player); candidate = null; acting = false;
+        attempted.add(candidate.key()); closeMaking(); stopNavigation(); InputDriver.halt(player); candidate = null; acting = false;
         return TaskState.RUNNING;
     }
 
@@ -198,14 +240,20 @@ public final class SuicideTask implements Task {
         if (previous != null) previous.stop();
     }
 
-    private void closeIgnition() {
-        // 结束等待只释放动作槽，已经发出的点火结果仍以世界里的火格为准，不能当作撤销。
-        SuicideSelfHazard previous = ignition; ignition = null;
+    private void closeMaking() {
+        // 结束等待只释放动作槽，已经发出的点火或倒桶结果仍以世界里的危险格为准，不能当作撤销。
+        SuicideSelfHazard previous = making; making = null;
         if (previous != null) previous.close(player);
     }
 
+    private void closeUndress() {
+        // 卸甲中途暂停或结束时收掉子任务的背包会话；这件护甲恢复后重新检查，不把未确认的搬运记成已脱下。
+        UnequipCompanionTask previous = undress; undress = null;
+        if (previous != null) { previous.stop(player, StopReason.REPLACED); previous.result(TaskState.CANCELLED); }
+    }
+
     // 路线收尾异常也必须松键，不能把暂停、超时或失败变成持续冲向危险。
-    private void cleanup() { try { closeIgnition(); stopNavigation(); } finally { release(); } }
+    private void cleanup() { try { closeUndress(); closeMaking(); stopNavigation(); } finally { release(); } }
 
     private void release() {
         // 取消或死亡可能发生在动作上下文之外；只释放本任务旧身体持有的输入，不向新身体发送任何动作。
@@ -230,12 +278,14 @@ public final class SuicideTask implements Task {
     @Override
     public String describeCurrentAction() {
         if (ended) return "寻死流程已结束";
+        if (undress != null) return "正在脱下护甲";
         if (candidate == null) return "正在观察附近寻找危险";
         return switch (candidate.method()) {
             case "lava" -> acting ? "正在站在岩浆中" : "正在走向岩浆";
             case "hostile" -> acting ? "正在让怪物攻击" : "正在接近怪物";
             case "fall" -> acting ? "正在踏入高处边缘" : "正在走向高处边缘";
             case "fire" -> acting ? "正在原地点火燃烧" : "正在走向点火位置";
+            case "lava_bucket" -> acting ? "正在站在倒出的岩浆中" : "正在走向倒岩浆位置";
             default -> acting ? "正在暴露在危险中" : "正在走向危险处";
         };
     }
@@ -252,11 +302,15 @@ public final class SuicideTask implements Task {
         // 子任务的保护字段表达自身执行意图，父任务查询会按暂停、终态和步骤切换覆盖为实际调度资格。
         var facts = new LinkedHashMap<String, Object>();
         facts.put("task", name()); facts.put("method", candidate == null ? request.method() : candidate.method());
-        facts.put("phase", ended ? "finished" : acting ? "exposing_to_hazard" : candidate == null ? "observing" : "approaching");
+        facts.put("phase", ended ? "finished" : undress != null ? "removing_armor" : acting ? "exposing_to_hazard"
+                : candidate == null ? "observing" : "approaching");
         facts.put("keep_inventory_confirmed", Boolean.TRUE.equals(keepInventory)); facts.put("rule_evidence", ruleSource);
         facts.put("survival_reflexes_suppressed", !ended); facts.put("death_observed", deathObserved);
         facts.put("respawn_observed", false); facts.put("health_lost", healthLost); facts.put("execution_ticks", ticks);
-        facts.put("ignitions_confirmed", ignitions);
+        facts.put("ignitions_confirmed", selfMadeConfirmed.getOrDefault(Kind.FIRE.method, 0));
+        facts.put("lava_pours_confirmed", selfMadeConfirmed.getOrDefault(Kind.LAVA_BUCKET.method, 0));
+        // 护甲是否真的脱下以原生背包回执为准；没空位、绑定诅咒或界面未确认而仍穿着的部位单独列出。
+        facts.put("armor_removed", List.copyOf(armorRemoved)); facts.put("armor_still_worn", List.copyOf(armorStillWorn));
         facts.put("attempts", List.copyOf(attempts)); facts.put("mechanical_retry_allowed", false);
         return facts;
     }
