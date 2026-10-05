@@ -11,12 +11,25 @@ import net.minecraft.util.valueproviders.ConstantInt;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.Difficulty;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
+import org.maiwithu.maicraft.core.task.sleep.SleepCompanionTask;
+import org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
+import org.maiwithu.maicraft.task.TaskState;
 
 /** 睡眠门控与原版可睡窗口同源；入睡自己把整夜跳过时，确认以世界实物判成功而不是按拒绝收场。 */
 public final class SleepGateReceiptTest {
@@ -24,6 +37,8 @@ public final class SleepGateReceiptTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         gateFollowsVanillaWindow();
         honestReceiptCarriesTimeFacts();
+        skippedNightProvesSuccess();
+        rejectedClickWithoutDayAdvanceStillFails();
         System.out.println("SleepGateReceiptTest: passed");
     }
 
@@ -90,6 +105,74 @@ public final class SleepGateReceiptTest {
                     && decision.question().contains("in about 6542 ticks"),
                     "a midday decision reports the next window on the following day");
         }
+    }
+
+    /** 122：点击后被服务器接受、入睡当场跳到清晨，确认窗只会读到白天——按日指数前进加醒在床边判成功。 */
+    private static void skippedNightProvesSuccess() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var time = new net.minecraft.client.multiplayer.ClientLevel.ClientLevelData(Difficulty.NORMAL, false, false);
+            ActorControlTestHarness.field(Level.class, "levelData").set(h.level, time);
+            registerDimension(h, false);
+            placeBed(h);
+            time.setDayTime(17 * 24_000L + 13_564);
+            var task = new SleepCompanionTask(h.player,
+                    new SleepTaskRecord("skip-night", 1_000_000, new BlockPos(0, 1, 1)).untilAwake());
+            runUntilTerminal(h, task, true);
+            check(task.result(TaskState.SUCCESS).success(), "a night skipped by sleep itself ends the task as success");
+            var data = task.result(TaskState.SUCCESS).data();
+            check(Boolean.TRUE.equals(data.get("entered_sleep")) && Boolean.TRUE.equals(data.get("night_skipped_by_sleep")),
+                    "the success receipt carries the skipped-night evidence for reconciliation");
+        }
+    }
+
+    /** 122 对照：确认窗过期而世界没有跳夜，仍是失败，不能把普通拒绝误判成已入睡。 */
+    private static void rejectedClickWithoutDayAdvanceStillFails() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var time = new net.minecraft.client.multiplayer.ClientLevel.ClientLevelData(Difficulty.NORMAL, false, false);
+            ActorControlTestHarness.field(Level.class, "levelData").set(h.level, time);
+            registerDimension(h, false);
+            placeBed(h);
+            time.setDayTime(17 * 24_000L + 13_564);
+            var task = new SleepCompanionTask(h.player,
+                    new SleepTaskRecord("stuck-night", 1_000_000, new BlockPos(0, 1, 1)).untilAwake());
+            runUntilTerminal(h, task, false);
+            check(task.result(TaskState.FAILED).message().contains("rejected or not confirmed"),
+                    "an unconfirmed click without a day advance stays an honest failure");
+            check(!Boolean.TRUE.equals(task.result(TaskState.FAILED).data().get("night_skipped_by_sleep")),
+                    "the failure receipt does not claim a skipped night");
+        }
+    }
+
+    private static void placeBed(InteractionWorldTestHarness h) {
+        BlockPos head = new BlockPos(0, 1, 1), foot = head.south();
+        var state = Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.NORTH);
+        h.set(head, state.setValue(BedBlock.PART, BedPart.HEAD)); h.set(foot, state.setValue(BedBlock.PART, BedPart.FOOT));
+    }
+
+    /** 注入一次未决的床点击（与入睡任务自己发出的同一端口原语），从确认窗过期处开始回放。 */
+    private static void runUntilTerminal(InteractionWorldTestHarness h, SleepCompanionTask task,
+            boolean skipNight) throws Exception {
+        var context = ClientRuntime.requireContext(h.player);
+        var at = new BlockPos(0, 1, 2);
+        var receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND,
+                new BlockHitResult(Vec3.atCenterOf(at), Direction.UP, at, false),
+                NativeConfirmation.pending(), 40);
+        ActorControlTestHarness.field(SleepCompanionTask.class, "receipt").set(task, receipt);
+        ActorControlTestHarness.field(SleepCompanionTask.class, "clickDayIndex").setLong(task,
+                WorldTimeSemantics.dayIndex(h.level));
+        for (int i = 0; i < 200; i++) {
+            h.nextTick();
+            if (skipNight && i == 5) timeAdvanceToMorning(h);
+            var state = task.tick(h.player);
+            if (state == TaskState.SUCCESS || state == TaskState.FAILED) return;
+        }
+        throw new AssertionError("sleep task never reached a terminal state");
+    }
+
+    private static void timeAdvanceToMorning(InteractionWorldTestHarness h) throws Exception {
+        var time = (net.minecraft.client.multiplayer.ClientLevel.ClientLevelData)
+                ActorControlTestHarness.field(Level.class, "levelData").get(h.level);
+        time.setDayTime(18 * 24_000L + 1000);
     }
 
     /** IntentAction 是包私有密封接口，这里只借反射取出其中的公开决策快照。 */

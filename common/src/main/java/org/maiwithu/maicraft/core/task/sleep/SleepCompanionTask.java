@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.sleep;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -13,6 +14,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.Constants;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
@@ -28,6 +30,11 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
     private boolean enteredSleep;
     private long wakeObservedAt = -1;
     private boolean morningObserved;
+    /** 床点击提交那刻的日指数；确认窗读到白天时用来识别“入睡本身把整夜跳过了”的后验事实。 */
+    private long clickDayIndex = Long.MIN_VALUE;
+    private boolean nightSkippedBySleep;
+    /** 原生点击与就近检查共用的床交互半径（眼位到床中心的直线距离）；接近闸口必须与本闸同判。 */
+    public static final double INTERACTION_REACH = 4.5;
     private static final int WAKE_SYNC_TICKS = 200;
     private final ActualViewConvergenceGate aimConvergence = new ActualViewConvergenceGate();
     public SleepCompanionTask(LocalPlayer player, SleepTaskRecord record) { super(player, record); }
@@ -89,6 +96,7 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
             receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit,
                     c -> c.player().isSleeping() ? NativeConfirmation.Verdict.APPLIED
                             : NativeConfirmation.Verdict.PENDING, 40);
+            clickDayIndex = WorldTimeSemantics.dayIndex(context.level());
             return TaskState.RUNNING;
         }
         // 点击已发出后只等待确认，不每刻重复右键；未确认可能是白天、有怪、床被占用等。
@@ -97,6 +105,18 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
         if (receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
             enteredSleep = true;
             return r.waitUntilAwake ? TaskState.RUNNING : TaskState.SUCCESS;
+        }
+        // 确认窗读到“没躺下”还有一种可能：点击被服务器接受、入睡当场把整夜跳到清晨，
+        // 窗口随后读到的只有醒后的白天（122 实机：day 17→18、醒在床格，终态却按拒绝收场）。
+        // 确认窗最长 40 刻，日指数在这段窗口内前进只可能来自入睡本身——按世界实物判成功，
+        // 回执与实物不再相反；对账事实进 result data，调用方可复核。
+        if (clickDayIndex != Long.MIN_VALUE && !player.isSleeping()
+                && player.getEyePosition().distanceTo(Vec3.atCenterOf(r.bed)) <= INTERACTION_REACH
+                && WorldTimeSemantics.dayIndex(player.level()) > clickDayIndex) {
+            enteredSleep = true;
+            morningObserved = !WorldTimeSemantics.canAttemptSleep(player.level());
+            nightSkippedBySleep = true;
+            return TaskState.SUCCESS;
         }
         // 原版的拒绝原因（床太远/有怪/已占用）只走动作栏提示；最近 5 秒内出现过就引用原文，
         // 不再把真实原因笼统归入三选一猜测。
@@ -112,7 +132,10 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
                 .ifPresent(context -> context.actions().retireOneShotForTaskBoundary(context, receipt, "sleep task ended"));
         receipt = null; aimConvergence.reset(); super.cleanup();
     }
-    @Override protected String successMessage() { return r.waitUntilAwake ? "slept and observed a natural morning wake-up" : "sleeping in bed"; }
+    @Override protected String successMessage() {
+        if (nightSkippedBySleep) return "slept through the night: the day advanced past the bed click and the player woke at the bed";
+        return r.waitUntilAwake ? "slept and observed a natural morning wake-up" : "sleeping in bed";
+    }
 
     /** 面板行动行的一句话汇报；阶段来自真实睡眠状态与右键确认进度。 */
     @Override
@@ -123,8 +146,13 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
         return "正在对准床准备入睡";
     }
     @Override protected Map<String, Object> resultData() {
-        return Map.of("entered_sleep", enteredSleep, "wait_until_awake", r.waitUntilAwake,
-                "wake_observed", wakeObservedAt >= 0, "morning_observed", morningObserved);
+        var data = new LinkedHashMap<String, Object>();
+        data.put("entered_sleep", enteredSleep);
+        data.put("wait_until_awake", r.waitUntilAwake);
+        data.put("wake_observed", wakeObservedAt >= 0);
+        data.put("morning_observed", morningObserved);
+        if (nightSkippedBySleep) data.put("night_skipped_by_sleep", true);
+        return Map.copyOf(data);
     }
     @Override protected String cancelledMessage() { return "sleep interrupted"; }
 }
