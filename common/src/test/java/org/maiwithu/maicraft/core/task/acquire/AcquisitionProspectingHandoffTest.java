@@ -40,6 +40,9 @@ public final class AcquisitionProspectingHandoffTest {
         wetBodyEvacuatesBeforeScanning();
         evacuationBudgetExhaustionFailsHonestly();
         noDryCellNearbyFailsWithScope();
+        sourceScanHeartbeatMonotonic();
+        sourceScanTimeoutFailsHonestly();
+        slowScanSurvivesAndWindowResets();
         System.out.println("AcquisitionProspectingHandoffTest: passed");
     }
 
@@ -199,6 +202,130 @@ public final class AcquisitionProspectingHandoffTest {
     }
 
     // ---- 夹具：语义取物任务 + 手工派发 stub 子任务，驱动完成处理而不动真实世界 ----
+
+    /**
+     * 源扫描心跳（issue 170）：querying_sources 等待窗内 progress 携带标准 phase + 单调
+     * 增长的扫描拍数 calc + 已等秒数；宽上限内继续等待，不误杀合法慢扫描。
+     */
+    private static void sourceScanHeartbeatMonotonic() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            var task = scanTask(h, "scan-heartbeat", 10_000);
+            startTask(task);
+            var wait = mineMethod(task, "waitWhileSourceScanIncomplete");
+            set(task, "lastQueryComplete", false);
+            TaskState first = (TaskState) wait.invoke(task);
+            check(first == TaskState.RUNNING, "扫描等待窗内任务保持运行，实际 " + first);
+            var p1 = task.progress();
+            check("querying_sources".equals(p1.get("phase")),
+                    "等待窗 phase=querying_sources，实际 " + p1.get("phase"));
+            check(p1.get("calc") instanceof Number beats && beats.longValue() >= 1,
+                    "等待窗应携带单调扫描拍数 calc，实际 " + p1);
+            check(p1.get("planning_seconds") instanceof Number, "等待窗应携带已等秒数，实际 " + p1);
+            for (int i = 0; i < 100; i++) h.nextTick();
+            TaskState later = (TaskState) wait.invoke(task);
+            check(later == TaskState.RUNNING, "宽上限内的慢扫描继续等待，不得误杀，实际 " + later);
+            var p2 = task.progress();
+            check(((Number) p2.get("calc")).longValue() > ((Number) p1.get("calc")).longValue(),
+                    "扫描拍数应单调增长（门卫据此按地板间隔发布心跳），实际 " + p1 + " → " + p2);
+            check(((Number) p2.get("planning_seconds")).longValue()
+                            >= ((Number) p1.get("planning_seconds")).longValue() + 4,
+                    "已等秒数应随真实等待推进，实际 " + p1 + " → " + p2);
+        }
+    }
+
+    /** 源扫描超宽上限：如实失败（planning_stall），阶段名、已等秒数、扫描口径进回执，不再静默楔死。 */
+    private static void sourceScanTimeoutFailsHonestly() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            var task = scanTask(h, "scan-timeout", 100);
+            startTask(task);
+            var wait = mineMethod(task, "waitWhileSourceScanIncomplete");
+            set(task, "lastQueryComplete", false);
+            TaskState state = TaskState.RUNNING;
+            for (int i = 0; i < 400 && state == TaskState.RUNNING; i++) {
+                h.nextTick();
+                state = (TaskState) wait.invoke(task);
+            }
+            check(state == TaskState.FAILED, "超过宽上限必须诚实失败，实际 " + state);
+            var result = task.result(TaskState.FAILED);
+            var data = result.data();
+            check("source_scan_planning_timeout".equals(data.get("failure_code")),
+                    "失败应声明 source_scan_planning_timeout，实际: " + data);
+            check("planning_stall".equals(data.get("failure_type")),
+                    "扫描超限是 planning_stall 而非目标丢失，实际: " + data.get("failure_type"));
+            check("querying_sources".equals(data.get("source_scan_phase")),
+                    "回执应携带阶段名，实际: " + data.get("source_scan_phase"));
+            check(data.get("source_scan_waited_seconds") instanceof Number waited && waited.longValue() >= 5,
+                    "回执应携带已等待秒数，实际: " + data.get("source_scan_waited_seconds"));
+            check(data.get("source_scan_pulses") instanceof Number pulses && pulses.longValue() > 0,
+                    "回执应携带等待期扫描拍数，实际: " + data.get("source_scan_pulses"));
+            String message = result.message();
+            check(message.contains("querying_sources") && message.contains("not evidence"),
+                    "失败正文应点名阶段并声明不构成世界中不存在的证据，实际: " + message);
+            check(data.get("search_scope") instanceof Map<?, ?> scope
+                            && Boolean.FALSE.equals(scope.get("index_complete")),
+                    "回执扫描口径应声明索引未覆盖完整，实际: " + data.get("search_scope"));
+        }
+    }
+
+    /**
+     * 合法慢扫描不误杀，等待窗收口后重开预算不残留：第一窗等待、扫描完成收表；
+     * 名单耗尽后的新等待窗重新起表，不会带上旧窗已消耗的时间被立即误判超限。
+     */
+    private static void slowScanSurvivesAndWindowResets() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            var task = scanTask(h, "scan-slow", 100);
+            startTask(task);
+            var wait = mineMethod(task, "waitWhileSourceScanIncomplete");
+            var maybeQuery = mineMethod(task, "maybeQuery");
+            set(task, "lastQueryComplete", false);
+            check((TaskState) wait.invoke(task) == TaskState.RUNNING, "第一等待窗正常开始");
+            for (int i = 0; i < 60; i++) {
+                h.nextTick();
+                check((TaskState) wait.invoke(task) == TaskState.RUNNING, "上限内的慢扫描持续等待");
+            }
+            // 扫描覆盖完成（夹具世界一拍内查完）：守卫收表，progress 不再带扫描心跳键。
+            maybeQuery.invoke(task);
+            var settled = task.progress();
+            check(settled.get("calc") == null && settled.get("planning_seconds") == null,
+                    "扫描完成后守卫应收表，实际 " + settled);
+            // 新等待窗重新起表：旧窗已烧的 60 刻不得累加，第二窗再等 60 刻仍运行（若残留则累计
+            // 120 刻 > 上限 100 刻会提前误杀），直到本窗自身超限才如实失败。
+            set(task, "lastQueryComplete", false);
+            check((TaskState) wait.invoke(task) == TaskState.RUNNING, "新等待窗重新起表");
+            for (int i = 0; i < 60; i++) {
+                h.nextTick();
+                check((TaskState) wait.invoke(task) == TaskState.RUNNING,
+                        "新窗预算独立，不得因旧窗残留提前超限（第 " + i + " 拍）");
+            }
+            TaskState state = TaskState.RUNNING;
+            for (int i = 0; i < 100 && state == TaskState.RUNNING; i++) {
+                h.nextTick();
+                state = (TaskState) wait.invoke(task);
+            }
+            check(state == TaskState.FAILED, "新窗自身超限后仍须如实失败，实际 " + state);
+        }
+    }
+
+    /** 构造注入小扫描上限的 mine 任务：目标选夹具世界中不存在的钻石矿，扫描永远等不到命中。 */
+    private static org.maiwithu.maicraft.core.task.mine.MineCompanionTask scanTask(
+            InteractionWorldTestHarness h, String id, long limitTicks) throws Exception {
+        var ctor = org.maiwithu.maicraft.core.task.mine.MineCompanionTask.class.getDeclaredConstructor(
+                LocalPlayer.class, org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord.class, long.class);
+        ctor.setAccessible(true);
+        return ctor.newInstance(h.player,
+                new MineBlockTaskRecord(id, 100000, Set.of(Blocks.DIAMOND_ORE), 4, "diamond_ore"),
+                limitTicks);
+    }
+
+    private static java.lang.reflect.Method mineMethod(
+            org.maiwithu.maicraft.core.task.mine.MineCompanionTask task, String name) throws Exception {
+        var method = org.maiwithu.maicraft.core.task.mine.MineCompanionTask.class.getDeclaredMethod(name);
+        method.setAccessible(true);
+        return method;
+    }
 
     /**
      * 真实流程回放：不替换任何子任务，让真实 mine 子任务在空世界里完成公平扫描并空手

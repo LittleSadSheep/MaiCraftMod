@@ -100,6 +100,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     // 目前关闭盲目向外挖隧道找矿。附近已加载区域查完仍没目标，就报告没有合适来源。
     private static final boolean EXPLORE_FOR_BLOCKS = false;
 
+    /**
+     * 源扫描（querying_sources）宽上限：10 分钟。索引逐批构建且与全部查询共享每刻 2ms
+     * 墙钟预算，大范围扫描合法地慢（视距 32 chunk 全量构建约需 1-2 分钟），上限因此取
+     * 宽松值；超过仍无覆盖就如实失败（planning_stall），不再逐刻无限顺延截止时间。
+     * 注意守卫数的是游戏刻而扫描按真实时间推进，不限速环境下超限会偏保守（提前判超）。
+     */
+    private static final long SOURCE_SCAN_LIMIT_TICKS = 10 * 60 * 20;
+
     // ---- 探矿驱动预算（授权「挖着找」后生效；内部常量，不做成模型参数）----
     /** 到层位后的水平掘进预算；下降所需的身体断面另按实际高度差计入，整批副目标同样消耗预算。 */
     private static final int PROSPECT_MAX_BLOCKS = 128;
@@ -247,6 +255,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 最近一次来源查询的实际中心；未声明范围时随玩家移动，回执据此声明真实扫描口径。 */
     private BlockPos lastQueryCenter;
     private int lastQueryChunkRadius;
+    /** 源扫描等待期的心跳拍数：守卫覆盖的每一刻 +1，单调增长供进度门卫按地板间隔发布。 */
+    private long scanPulses;
+    /** 源扫描守卫的宽上限（刻）；生产取 {@link #SOURCE_SCAN_LIMIT_TICKS}，回归可注入小值。 */
+    private final long sourceScanLimitTicks;
+    /** 源扫描超限失败时置位，回执据此声明 failure_code 与等待拍数。 */
+    private boolean sourceScanTimedOut;
 
     // 按玩家正常速度逐刻挖掘，与寻路执行器共用 BlockDigger，确保两条破坏路径读取同一进度。
     private UltimineBreak chainBreak;
@@ -260,7 +274,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private int truncatedHarvests;
 
     public MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record) {
+        this(player, record, SOURCE_SCAN_LIMIT_TICKS);
+    }
+
+    /** 回归注入小扫描上限用；生产路径统一走默认宽上限。 */
+    MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record, long sourceScanLimitTicks) {
         super(player, record);
+        this.sourceScanLimitTicks = sourceScanLimitTicks;
         this.naturalLogSource = record.naturalLogsOnly
                 && record.targets.stream().anyMatch(block -> block.defaultBlockState().is(BlockTags.LOGS));
     }
@@ -540,8 +560,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         //    TIMEOUT。与 nav 规划在飞的冻结(AbstractCompanionTask)同一条保护。
         // 索引只查了一部分时继续等并顺延截止时间；还没查完不能说附近没有材料。
         if (!lastQueryComplete) {
-            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
-            return TaskState.RUNNING;
+            return waitWhileSourceScanIncomplete();
         }
         // 默认在此停止；只有显式开启探索模式时才向外分支挖掘。返回已核实的部分库存，不让角色跑遍世界，也不把消失的方块冒充采集所得。
         // 当前配置会在这里结束“查完却没找到”的情况；下面保留的隧道探索分支不会执行。
@@ -1358,6 +1377,35 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 knownOres.size());
         mergeHits(res.hits());
         lastQueryComplete &= !naturalTrees.budgetDeferred && rejectedBefore == naturalTrees.rejected.size();
+        // 扫描覆盖完成即停守卫表；之后新出现的等待窗（名单耗尽后的补查）会重新起表、预算不残留。
+        if (lastQueryComplete) planningPhaseEnd();
+    }
+
+    /**
+     * 源扫描等待窗：索引逐批构建、合法地慢，等待刻不烧任务预算（期限逐刻顺延），
+     * 但顺延不再无限——挂规划期宽上限守卫（{@link #SOURCE_SCAN_LIMIT_TICKS}），超限如实
+     * 失败并携带阶段名、已等待秒数与扫描口径，调用方据此改走 travel/explore，而不是
+     * 像过去那样盲等十几分钟或盲取消（两次实机复现的静默楔死）。等待期 scanPulses 逐拍
+     * 单调增长，进度门卫据此在 phase 不变的静默窗里按地板间隔保持心跳。
+     */
+    private TaskState waitWhileSourceScanIncomplete() {
+        scanPulses++;
+        if (!planningPhaseActive()) {
+            planningPhaseBegin("querying_sources", sourceScanLimitTicks);
+        } else if (planningPhaseExceeded()) {
+            sourceScanTimedOut = true;
+            Constants.LOG.info(
+                    "[maicraft-task] mine source scan exceeded the wide bound: waited {}s pulses={} feet={} chunkRadius={}",
+                    planningPhaseSeconds(), scanPulses, feet().toShortString(), lastQueryChunkRadius);
+            fail("source scan phase 'querying_sources' did not complete within about " + planningPhaseSeconds()
+                    + "s (scan scope in search_scope, loaded chunks only, index still incomplete at "
+                    + Math.max(1, lastQueryChunkRadius) + " chunk radius). Waiting longer will not help;"
+                    + " travel toward or load more terrain and resubmit. This timeout is not evidence that"
+                    + " the material does not exist in the world.", FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
+        }
+        r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+        return TaskState.RUNNING;
     }
 
     private int queryChunkRadius() {
@@ -1539,6 +1587,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("phase", currentPhase());
         data.put("done", r.getMined());
         data.put("total", r.count);
+        // 源扫描等待窗的心跳：calc 逐拍单调增长、planning_seconds 随等待推进，phase 虽不
+        // 变签名也持续更新，门卫按地板间隔发布「还在扫」——调用方据此区分正常慢扫描与
+        // 楔死，不再只能盲等或盲取消。
+        if (planningPhaseActive() && "querying_sources".equals(planningPhaseLabel()) && !lastQueryComplete) {
+            data.put("calc", scanPulses);
+            data.put("planning_seconds", planningPhaseSeconds());
+        }
         // 身体安全心跳：滞水是受胁状态，坐标进标准键让 ProgressGate 随浪况变化按地板间隔持续发布，
         // 观察者不用等终态才发现角色在溺水边缘。
         if (bodyWet()) {
@@ -1904,6 +1959,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     .forEach(entry -> gains.put(BuiltInRegistries.ITEM.getKey(entry.getKey()).toString(), entry.getValue() - rawInventoryBaseline.getOrDefault(entry.getKey(), 0)));
             data.put("observed_inventory_increases", gains);
             data.put("inventory_change_scope", "observed since mining started; inventory changes alone do not prove drop origin");
+        }
+        if (sourceScanTimedOut) {
+            // 超限回执自带等待证据：阶段名、已等秒数与扫描拍数，调用方不再对"慢还是死"猜谜。
+            data.put("failure_code", "source_scan_planning_timeout");
+            data.put("source_scan_phase", "querying_sources");
+            data.put("source_scan_waited_seconds", planningPhaseSeconds());
+            data.put("source_scan_pulses", scanPulses);
         }
         if (r.exactHarvest()) {
             data.put("exact_source", true); data.put("confirmed_source_breaks", brokenTargets);
