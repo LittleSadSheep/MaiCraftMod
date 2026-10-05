@@ -100,9 +100,9 @@ public final class WheatSeedsGrassLineageTest {
             check(recorded.stream().anyMatch(issue -> {
                 Object facts = ((Map<?, ?>) issue).get("facts");
                 return facts instanceof Map<?, ?> map
-                        && "mine".equals(map.get("knowledge_source_family"))
-                        && map.get("knowledge_source_block_refs") != null;
-            }), "拒绝披露必须指出知识表中种子来源属于 mine 族");
+                        && map.get("knowledge_source_block_refs") != null
+                        && String.valueOf(map.get("knowledge_source_block_refs")).contains("short_grass");
+            }), "拒绝披露必须带出知识表中种子的来源方块族（草族）");
             // 唯一允许的世界来源已耗尽后，主管线以逐族评估话术判死。
             var exhaust = SemanticAcquireCompanionTask.class.getDeclaredMethod("exhaustNeed", need.getClass());
             exhaust.setAccessible(true);

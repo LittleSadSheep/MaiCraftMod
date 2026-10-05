@@ -379,9 +379,13 @@ public final class SemanticAcquireCompanionTask
             Map<String, Object> facts = new LinkedHashMap<>();
             facts.put("requested_item_ids", itemStrings(need.itemIds));
             SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(need.itemIds);
+            // 键值直接来自知识表提示，不手填家族名：一次请求可同时命中方块与实体两族来源
+            // （如圆石加生猪排），只点名一族会让调用方误读为知识表认定仅有该族来源。
             if (!hint.blockRefs().isEmpty()) {
                 facts.put("knowledge_source_block_refs", hint.blockRefs());
-                facts.put("knowledge_source_family", "mine");
+            }
+            if (!hint.entityTypeIds().isEmpty()) {
+                facts.put("knowledge_entity_type_ids", stringIds(hint.entityTypeIds()));
             }
             addIssue("harvest", "no_mature_crop_source",
                     "the harvest family only harvests mature crops and replants them; none of the "
