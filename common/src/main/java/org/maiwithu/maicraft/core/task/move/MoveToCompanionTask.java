@@ -539,7 +539,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         BlockPos best = null;
         double bestDistance = fromDistance;
         for (BlockPos cell : r.knownStandableCells()) {
-            if (cell.equals(from) || inGoalCell(cell) || !player.level().isLoaded(cell)) continue;
+            // 测试桩的 level 没有区块源，isLoaded 沿高度评估链必然 NPE：跳过已加载过滤（生产 Level 恒有区块源，语义不变）。
+            boolean chunkFilter = player.level().getChunkSource() != null;
+            if (cell.equals(from) || inGoalCell(cell) || chunkFilter && !player.level().isLoaded(cell)) continue;
             double distance = cellDistanceToTarget(cell);
             if (distance + KNOWN_CELL_WAYPOINT_MARGIN < bestDistance) {
                 best = cell;
