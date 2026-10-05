@@ -68,8 +68,12 @@ public final class SemanticExploreCompanionTask
     private static final double RELOCATION_HOP_BLOCKS = 32.0;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
-    /** 观察驻留为在途扫描轮保留的额外刻数上限：冷索引一轮约需 15~130 刻，超限按未覆盖处理不无限等待。 */
-    private static final int MAX_SCAN_DWELL_TICKS = 200;
+    /**
+     * 观察驻留为在途扫描轮保留的额外刻数上限：真实世界的冷索引要给观测半径内全部已加载区块段建条目
+     * （半径 112 时约五千段，共享每刻 2ms 墙钟），加上可见性与逐画像分组相，一轮可超出两百刻；
+     * 驻留只在扫描轮确实在途时消耗，结算即止，超限按未覆盖处理不无限等待。
+     */
+    private static final int MAX_SCAN_DWELL_TICKS = 400;
 
     private static final List<ColumnOffset> BIOME_OBSERVATION_OFFSETS =
             buildOffsets(BIOME_OBSERVATION_STEP);
@@ -962,6 +966,11 @@ public final class SemanticExploreCompanionTask
             data.put("waypoint_rotation_bearings", waypointBreaker.rotatedBearings());
         }
         data.put("target_approaches_attempted", targetAttempts);
+        // 结构 sighting 扫描逐相计数：零落账时回执直接指出断在哪一相（索引/可见性/分组/匹配）。
+        if (sightingScanner != null) {
+            data.put("structure_scan", sightingScanner.diagnostics());
+            data.put("structure_sightings_recorded", sightedAnchors.values().stream().mapToInt(List::size).sum());
+        }
         // 路段失败完整保留在任务证据中；默认回执可按既有归档机制分页，不能按固定条数丢弃卡点。
         data.put("travel_failures", List.copyOf(legFailures));
 
