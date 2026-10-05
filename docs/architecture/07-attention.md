@@ -18,11 +18,22 @@
 | `decision` | **需要你回答** |
 | `paused` / `resumed` | 暂停 / 恢复 |
 | `completed` / `failed` / `cancelled` | 终态 |
-| `state_restored` | 从检查点恢复 |
+| `state_restored` | 从检查点恢复；`data.reload_cause` 标注来源：`session_start`（进程内首次绑定，含重启）、`world_changed`（换世界）、`body_reattached`（同一世界内身体重新绑定——**死亡重生与断线重连都走这条**） |
 | `runtime.unavailable` | 身体断开，需要重新对齐 |
 | `agent.reminder` | 游戏生活提醒出现、持续或撤下；`data.status` 区分 `active` / `cleared` |
 
 **事件只提示"发生了什么"**；完整事实在任务记录里，用 `task(get, path=...)` 按需读。
+
+### 死亡重生伴随状态重载（有意设计）
+
+重生会替换玩家对象，运行时把这次替换当作"身体脱离后重新绑定"处理：死亡前已截取任务
+检查点，重生后第一次绑定世界时从检查点整体恢复任务记忆，并发布 `state_restored`
+（`reload_cause=body_reattached`）。副作用是**所有未完成任务一律转为暂停**——检查点里
+只保存任务记录，不保存旧身体正在做的菜单操作、光标物品与原生动作，直接把执行状态接到
+新身体上不安全。恢复出的任务在 `task(get)` 中 `pause.reason` 为
+`paused_restored:body_reattached`；要继续哪个任务由调用方显式 `task(action=resume)`，
+运行时不自动恢复——死亡原因可能正与任务现场相关，自动把新身体投回原现场属于产品取舍，
+当前一律交给调用方决定。
 
 ### task_progress 的记分牌契约
 

@@ -172,7 +172,7 @@ public final class ContainerSearchScopePersistenceTest {
         void flush() { while (!writes.isEmpty()) writes.removeFirst().run(); }
         void restore() throws Exception {
             UUID id = parent.externalId(); newRuntime();
-            var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class); restore.setAccessible(true); restore.invoke(runtime, 100L);
+            var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class, String.class); restore.setAccessible(true); restore.invoke(runtime, 100L, "session_start");
             runtime.requireRecoveredState(); parent = runtime.task(id);
             check(parent != null && parent.restoredDetached() && parent.resume(), "disk-restored parent can resume explicitly");
             runtime.restoredTaskAttached(parent);
