@@ -31,7 +31,7 @@ public final class SuicideSelfHazardTest {
 
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        fire(); lavaBucket(); armor(); restore();
+        fire(); lavaBucket(); aimBounded(); armor(); restore();
         System.out.println("SuicideSelfHazardTest: passed");
     }
 
@@ -187,6 +187,37 @@ public final class SuicideSelfHazardTest {
             }
             check(SuicideArmorRestore.pending().isEmpty() && world.itemUses() == 0 && world.mode.menuClicks == 0
                     && world.player.getItemBySlot(EquipmentSlot.HEAD).is(Items.LEATHER_HELMET), "占用部位不替换，缺原件如实放弃");
+        }
+    }
+
+    private static void aimBounded() throws Exception {
+        try (var world = cave()) {
+            // 镜头始终低头失败（真实会话的瞄准卡点）：不能换格无限循环，同一方式连续三次停在提交之前就应有界失败，
+            // 失败说明带最后一次诊断与候选格，逐次经过的原因留在 attempts。
+            world.inventory.setItem(Inventory.SLOT_OFFHAND, new ItemStack(Items.FLINT_AND_STEEL));
+            var task = task(world, "fire");
+            TaskState state = TaskState.RUNNING;
+            int moved = 0;
+            for (int tick = 0; tick < 1500 && state == TaskState.RUNNING; tick++) {
+                world.nextTick(); world.level.acknowledgedSequence = world.level.blockSequence;
+                if (world.h.minecraft.screen != null) MenuVisibility.rendered(world.h.minecraft.screen);
+                state = task.tick(world.player);
+                // 接近不靠真实寻路（用例只验证瞄准有界性）：放弃后把身体直接放到下一格；
+                // 镜头全程没有代转，模拟低头永远不收敛的会话。
+                if (moved < 2 && "observing".equals(task.progress().get("phase"))) {
+                    world.position(Vec3.atBottomCenterOf(new BlockPos(8 + ++moved, 1, 8)));
+                    world.player.setOnGround(true);
+                }
+            }
+            check(state == TaskState.FAILED && world.blockUses() == 0 && world.itemUses() == 0,
+                    "瞄准不了应有界失败且从未出手: state=" + state + " progress=" + task.progress());
+            var message = task.result(state).message();
+            check(message.contains("never got submitted") && message.contains("candidate cell"),
+                    "失败说明应携带最后诊断与候选格: " + message);
+            check(message.contains("converge"), "诊断应指出卡在准星收敛: " + message);
+            check(task.progress().get("attempts").toString().contains("could not aim"),
+                    "逐次瞄准失败应留在 attempts");
+            task.stop(world.player, Task.StopReason.REPLACED);
         }
     }
 

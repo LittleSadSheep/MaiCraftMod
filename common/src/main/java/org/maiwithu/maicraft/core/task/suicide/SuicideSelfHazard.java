@@ -33,6 +33,9 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /** 站在选定格里低头，用随身岩浆桶、打火石或火焰弹在脚下造一次原生危险；只等这次回执和真实危险格，不重复同一次操作。 */
 final class SuicideSelfHazard {
+    // 瞄准预算按本实例实际被调度的刻数计：世界时间在任务被暂停期间照常流逝，
+    // 用它计时会把"还没轮到瞄准"误判成"瞄准超时"，在抢占频繁的真实会话里每格都提前失败。
+    private static final int AIM_TICKS = 200;
     enum Kind {
         // 点火排在前面：火会自然熄灭，倒出的岩浆源却永久留在原地，只在点火也用不上时才倒；
         // 打火石有耐久可反复点火，排在火焰弹前面。
@@ -73,13 +76,15 @@ final class SuicideSelfHazard {
     private final ActualViewConvergenceGate view = new ActualViewConvergenceGate();
     private NativeActionReceipt receipt;
     private int slot = -1;
-    private long started = -1;
+    private int aimedTicks;
+    /** 预算耗尽时的最后卡点：记录到失败原因里，回执才能区分视角、权限、预算和命中面各是哪一环没过。 */
+    private String pending = "the aim phase to start";
     private String failure;
 
     SuicideSelfHazard(Kind kind, BlockPos cell) { this.kind = kind; this.cell = cell.immutable(); }
 
     TaskState tick(LocalPlayerContext context) {
-        var player = context.player(); long now = context.level().getGameTime();
+        var player = context.player();
         // 操作期间站定不动：先选物品 -> 低头对准脚下支撑面顶部 -> 准星确认后右键一次 -> 等服务端确认真实结果。
         context.body().applyMovement(BodyControlPort.Movement.STOPPED, context.tickRevision());
         if (receipt != null) {
@@ -89,22 +94,40 @@ final class SuicideSelfHazard {
             return receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED
                     ? TaskState.SUCCESS : failed("native " + kind.method + " use was not confirmed: " + receipt.detail());
         }
-        if (started < 0) started = now;
-        if (now - started > 200) return failed("could not aim the " + kind.method + " item at the floor below the chosen cell");
+        if (++aimedTicks > AIM_TICKS)
+            return failed("could not aim the " + kind.method + " item at the floor below the chosen cell within "
+                    + AIM_TICKS + " executed ticks; still waiting for " + pending);
         if (NavigationSafetyContext.protectsMutation(cell) || NavigationSafetyContext.protectsUse(cell.below()))
             return failed("the chosen cell or its floor is explicitly protected");
-        if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
+        if (!context.menus().ensureWorldVisible(context)) {
+            pending = "the world to become visible";
+            return TaskState.RUNNING;
+        }
         if (slot < 0 && (slot = kind.slot(player.getInventory())) < 0)
             return failed("no " + kind.label + " remains in the carried inventory");
         var ready = slot == Inventory.SLOT_OFFHAND ? FirstPersonActionGate.Status.READY : selection.select(context, player, slot);
         if (ready == FirstPersonActionGate.Status.FAILED) return failed(selection.failure());
-        if (ready != FirstPersonActionGate.Status.READY) return TaskState.RUNNING;
+        if (ready != FirstPersonActionGate.Status.READY) {
+            pending = "the " + kind.method + " item selection to confirm";
+            return TaskState.RUNNING;
+        }
         InteractionHand hand = slot == Inventory.SLOT_OFFHAND ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         if (!kind.holds(player.getItemInHand(hand))) return failed("the " + kind.method + " item changed before use");
         Vec3 aim = aim();
         InputDriver.lookAt(player, aim);
-        if (!view.ready(player, aim.subtract(player.getEyePosition())) || !context.permitsNativeActions() || !context.mutationAvailable())
+        if (!view.ready(player, aim.subtract(player.getEyePosition()))) {
+            pending = "the crosshair to converge on the floor (still " + String.format(java.util.Locale.ROOT,
+                    "%.1f", degreesOff(player.getViewVector(1.0F), aim.subtract(player.getEyePosition()))) + " degrees off)";
             return TaskState.RUNNING;
+        }
+        if (!context.permitsNativeActions()) {
+            pending = "native actions to be permitted";
+            return TaskState.RUNNING;
+        }
+        if (!context.mutationAvailable()) {
+            pending = "an unused native mutation budget this tick";
+            return TaskState.RUNNING;
+        }
         return kind == Kind.FIRE ? ignite(context, hand) : pour(context, hand);
     }
 
@@ -113,7 +136,10 @@ final class SuicideSelfHazard {
         var player = context.player();
         var ray = Interaction.nativeRaytrace(player, player.blockInteractionRange());
         if (!(ray instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK
-                || !hit.getBlockPos().equals(cell.below()) || hit.getDirection() != Direction.UP) return TaskState.RUNNING;
+                || !hit.getBlockPos().equals(cell.below()) || hit.getDirection() != Direction.UP) {
+            pending = "the crosshair to rest on the floor top face (ray " + describe(ray) + ")";
+            return TaskState.RUNNING;
+        }
         receipt = context.actions().useBlock(context, hand, hit, new NativeConfirmation() {
             @Override public boolean requiresBlockAcknowledgement() { return true; }
             @Override public Verdict observe(LocalPlayerContext current) {
@@ -129,12 +155,27 @@ final class SuicideSelfHazard {
         var hit = FirstPersonInteractionTargeting.bucketRay(context.level(), player, eye,
                 eye.add(player.getViewVector(1).scale(player.blockInteractionRange())), Items.LAVA_BUCKET);
         if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(cell.below()) || hit.getDirection() != Direction.UP
-                || !FirstPersonInteractionTargeting.acceptsBucketHit(context.level(), cell, Items.LAVA_BUCKET, hit)) return TaskState.RUNNING;
+                || !FirstPersonInteractionTargeting.acceptsBucketHit(context.level(), cell, Items.LAVA_BUCKET, hit)) {
+            pending = "the bucket ray to land on the floor top face (ray " + describe(hit) + ")";
+            return TaskState.RUNNING;
+        }
         if (!(context.level() instanceof BlockUseAcknowledgement sequences)) return failed("native block acknowledgement hook is unavailable");
         var confirmation = new PourConfirmation(sequences, PlayerInv.count(player.getInventory(), Items.LAVA_BUCKET));
         receipt = context.actions().useItem(context, hand, confirmation, 80);
         confirmation.sequence = sequences.maicraft$currentBlockSequence();
         return TaskState.RUNNING;
+    }
+
+    private static double degreesOff(Vec3 currentLook, Vec3 desired) {
+        if (currentLook.lengthSqr() < 1.0e-8D || desired.lengthSqr() < 1.0e-8D) return 180.0D;
+        double dot = currentLook.normalize().dot(desired.normalize());
+        return Math.toDegrees(Math.acos(Math.max(-1.0D, Math.min(1.0D, dot))));
+    }
+
+    private static String describe(HitResult ray) {
+        if (!(ray instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK)
+            return ray != null && ray.getType() == HitResult.Type.ENTITY ? "hit an entity" : "missed everything";
+        return "hit " + hit.getBlockPos().toShortString() + " on its " + hit.getDirection().getName() + " face";
     }
 
     /** 倒桶确认先等服务器承认这次使用序号，再看格里出现岩浆或岩浆桶确实少了一只；凝固或流走不能把已扣桶记成未知。 */
