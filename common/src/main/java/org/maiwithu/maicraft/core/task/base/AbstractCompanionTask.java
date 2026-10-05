@@ -262,6 +262,11 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         }
     }
 
+    /** 本旅程已确认放置过的世界格（含历次导航）；清理阶段据此识别自己垫过的支撑柱。 */
+    protected java.util.Set<net.minecraft.core.BlockPos> journeyPlacedCells() {
+        return new java.util.HashSet<>(journey.placedCells());
+    }
+
     // ---------------------------------------------------------------------
     // 推进当前子任务；其停止和结果收尾仍由调用方负责。
     // ---------------------------------------------------------------------

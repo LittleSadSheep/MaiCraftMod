@@ -15,8 +15,8 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 
 /** 对齐柱心 -> 验证整柱退路 -> 原生拆一格 -> 自然落稳；每格后交回清理队列，先收身边能碰到的支撑。 */
-final class BuildScaffoldDescentDrive {
-    enum Status { RUNNING, STEP_DONE, UNAVAILABLE, FAILED }
+public final class BuildScaffoldDescentDrive {
+    public enum Status { RUNNING, STEP_DONE, UNAVAILABLE, FAILED }
     private final LocalPlayer player;
     private final BlockPos first;
     private final Map<BlockPos, BlockState> owned;
@@ -31,7 +31,7 @@ final class BuildScaffoldDescentDrive {
     private Status status = Status.RUNNING;
     private String reason = "aligning_owned_column";
 
-    BuildScaffoldDescentDrive(LocalPlayer player, BlockPos first, Map<BlockPos, BlockState> owned,
+    public BuildScaffoldDescentDrive(LocalPlayer player, BlockPos first, Map<BlockPos, BlockState> owned,
             Predicate<BlockPos> permitted, LongSet forbidden, PlayerNav.ContextProvider walking, Consumer<BlockPos> confirmed) {
         this.player = player; this.first = first.immutable(); this.owned = Map.copyOf(owned);
         this.permitted = permitted; this.forbidden = forbidden; this.confirmed = confirmed;
@@ -40,7 +40,7 @@ final class BuildScaffoldDescentDrive {
                 at -> !walking.embeddedForbiddenBodyCells().contains(at.asLong()));
     }
 
-    Status tick() {
+    public Status tick() {
         if (status != Status.RUNNING) return status;
         if (++ticks > 300) return finish(Status.FAILED, "scaffold_descent_drive_timeout");
         if (!aligned) {
@@ -89,7 +89,7 @@ final class BuildScaffoldDescentDrive {
     }
 
     private Status finish(Status next, String detail) { status = next; reason = detail; stop(); return status; }
-    void stop() {
+    public void stop() {
         // 中断不能带着旧身体控制租约继续下拆；已发生的确认由调用方保留，未完成阶段重新观察后再恢复。
         if (!acknowledged && first.equals(digger.current())) {
             // 暂停边界也可能刚收到服务器确认；只结算已有回执，绝不把空气本身当作本次挖掘成功。
@@ -104,7 +104,7 @@ final class BuildScaffoldDescentDrive {
         if (status == Status.RUNNING) { status = Status.FAILED; reason = "scaffold_descent_interrupted_reobserve_required"; }
         if (alignment != null) alignment.stop(player); digger.cancel(); InputDriver.halt(player);
     }
-    Map<String, Object> evidence() { return Map.of("state", status.name(), "reason", reason, "confirmed_removal", acknowledged, "interrupted_break_uncertain", interruptedBreak,
+    public Map<String, Object> evidence() { return Map.of("state", status.name(), "reason", reason, "confirmed_removal", acknowledged, "interrupted_break_uncertain", interruptedBreak,
             "proof", proof == null ? Map.of() : proof.evidence()); }
-    String reason() { return reason; }
+    public String reason() { return reason; }
 }

@@ -93,6 +93,11 @@ public final class TerrainBill {
         return places.values().stream().mapToInt(List::size).sum();
     }
 
+    /** 本账本记录的全部已放置世界格；清理阶段据此识别自己垫过的支撑柱。 */
+    public List<BlockPos> placedCells() {
+        return places.values().stream().flatMap(List::stream).toList();
+    }
+
     /** 完整导出本账本的方块种类和位置；拾取开路回执不能沿用人类摘要的六坐标展示上限。 */
     public Map<String, Object> snapshot() {
         return Map.of("broken", positions(breaks), "placed", positions(places));
