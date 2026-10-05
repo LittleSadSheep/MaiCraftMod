@@ -1183,6 +1183,9 @@ public final class PhysicalStructureSearchCompanionTask
             data.put("requires_decision", true);
             data.put("recovery_options", recoveryOptions());
         } else if (verifiedEvidence == null) {
+            // 与语义探索路径同口径：结构自然生成稀疏，观察范围内无命中不构成范围外不存在的证据。
+            data.put("suggestions", List.of(
+                    "sparse generation is normal; no match over the observed area is not proof of absence beyond it"));
             data.put("recovery_options", recoveryOptions());
         }
         return data;
