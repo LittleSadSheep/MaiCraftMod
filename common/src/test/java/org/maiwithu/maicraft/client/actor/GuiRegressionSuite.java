@@ -188,6 +188,8 @@ public final class GuiRegressionSuite {
         ExactHarvestTest.main(args);
         // 身体门槛属于全局前置，不能被工作台选址和上层材料来源循环吞掉。
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
+        // 产物对得上但输入候选不可读的合成配方要在回执点名，不得折进"没有配方"。
+        org.maiwithu.maicraft.core.task.acquire.CraftUnreadableRecipeDiagnosisTest.main(args);
         // 区分实体点击与物品自身使用，避免砂纸等工序停在不可选中的掉落物上。
         UseHeldItemPrimitiveTest.main(args);
         // 打开村民交易必须先有可支付条件并准备空手，不能退回使用上一轮拿着的 AE 终端。
@@ -424,6 +426,8 @@ public final class GuiRegressionSuite {
         CookingPrerequisiteChainTest.main(args);
         // 非食物冶炼与熟食同通路；燃料不够时立项失败要点名燃料层与数量，不允许退回合并话术。
         org.maiwithu.maicraft.core.task.cook.CookingNonFoodSmeltingTest.main(args);
+        // 输入不可读的熔炼配方不得被静默丢弃：回执点名配方与原因，并保留每条已评估路线的阻碍层。
+        org.maiwithu.maicraft.core.task.cook.CookingFallbackRouteDiagnosisTest.main(args);
         CookingMenuCloseTest.main(args);
         CookingMenuOwnershipTest.main(args);
         CookingSettlementTest.main(args);

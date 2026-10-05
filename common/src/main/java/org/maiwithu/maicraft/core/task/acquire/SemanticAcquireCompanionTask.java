@@ -515,6 +515,18 @@ public final class SemanticAcquireCompanionTask
                 executable.add(new ExecutableCraft(output, plan));
             } else {
                 candidates.addAll(plan.recoveryCandidates());
+                // 产物对得上但输入在本端读不出来的配方要点名留证，不能折进"没有配方"的结论里。
+                if (plan.recoveryCandidates().isEmpty() && plan.immediate() != null
+                        && plan.immediate().data() instanceof Map<?, ?> data
+                        && data.get("recipes_with_unreadable_inputs") instanceof List<?> unreadable
+                        && !unreadable.isEmpty()) {
+                    addIssue("craft", "recipes_with_unreadable_inputs",
+                            "matching recipes exist but their ingredient alternatives cannot be "
+                                    + "enumerated on this client; read the recipe knowledge page "
+                                    + "for the exact inputs",
+                            Map.of("requested_item_id", output.toString(),
+                                    "recipes", unreadable));
+                }
                 // 可替代成品按合计数量交付；两根橡木加一根桦木可分别做木板，不要求九张必须全来自一种木头。
                 if(deficit>1 && need.itemIds.size()>1) {
                     var one=craftOps.plan(output.toString(),requestedOwnFinal-deficit+1,player,context,workstation,excludedRecipes,r.preferredMaterials);
