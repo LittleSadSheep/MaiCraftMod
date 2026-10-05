@@ -46,7 +46,7 @@ public final class DebugHudController {
     /** 事件区一行，由一个或多个着色片段组成；换行产生的续行只有内容片段。 */
     public record EventLine(List<Segment> segments) {}
 
-    /** 每刻快照：固定状态行、事件区换行结果和面板宽度（背景框与折行共用的同一口径）；面板不可见时两段皆空。 */
+    /** 每刻快照：固定状态行、事件区换行结果和面板宽度（背景框与折行共用的同一口径）；面板不可见时行与事件两段皆空、宽度为 0。 */
     public record Snapshot(List<Row> rows, List<EventLine> events, int panelWidth) {}
 
     /** 面板单行放不下的说明截断到 64 字符并以 … 结尾，让人看得出后面还有内容。 */
@@ -100,7 +100,7 @@ public final class DebugHudController {
                 ? new Snapshot(List.of(), List.of(), 0) : buildSnapshot(minecraft);
     }
 
-    /** 渲染层每帧读取的最近一次快照；不可见时两段皆空，渲染器据此不画。 */
+    /** 渲染层每帧读取的最近一次快照；不可见时行与事件两段皆空、宽度为 0，渲染器据此不画。 */
     public static Snapshot snapshot() { return snapshot; }
 
     private static Snapshot buildSnapshot(Minecraft minecraft) {

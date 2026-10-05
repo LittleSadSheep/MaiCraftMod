@@ -141,11 +141,13 @@ public final class AcquisitionProspectingHandoffTest {
             effects.set(h.player, new java.util.HashMap<>());
             h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
             org.maiwithu.maicraft.intent.IntentRuntime.get().observedSourceMemory().clear();
-            // 无服务器数据包的夹具先补 raw_iron 的直挖源与镐采掘标签（ProspectingTest 同款），结束后恢复。
+            // 无服务器数据包的夹具先补 raw_iron 的直挖源与镐采掘标签（ProspectingTest 同款），
+            // 并按生产注册表补 mine 子任务执行器（其他场景直接实例化子任务，覆盖不到这条派发链）；
+            // 两类注册都在 finally 恢复，夹具间不靠注册残留巧合隔离。
             var tags = new java.util.HashMap<net.minecraft.tags.TagKey<net.minecraft.world.level.block.Block>,
                     java.util.List<net.minecraft.core.Holder<net.minecraft.world.level.block.Block>>>();
             net.minecraft.core.registries.BuiltInRegistries.BLOCK.getTags().forEach(pair -> tags.put(pair.getFirst(), pair.getSecond().stream().toList()));
-            var previous = java.util.Map.copyOf(tags);
+            var previousTags = java.util.Map.copyOf(tags);
             tags.put(net.minecraft.tags.BlockTags.MINEABLE_WITH_PICKAXE,
                     List.of(Blocks.IRON_ORE.builtInRegistryHolder(), Blocks.DEEPSLATE_IRON_ORE.builtInRegistryHolder()));
             tags.put(net.minecraft.tags.BlockTags.INCORRECT_FOR_WOODEN_TOOL, List.of());
@@ -153,36 +155,47 @@ public final class AcquisitionProspectingHandoffTest {
                     ResourceLocation.parse("minecraft:iron_ores")),
                     List.of(Blocks.IRON_ORE.builtInRegistryHolder(), Blocks.DEEPSLATE_IRON_ORE.builtInRegistryHolder()));
             net.minecraft.core.registries.BuiltInRegistries.BLOCK.bindTags(tags);
-            // 夹具没有走模组初始化，按生产注册表补 mine 子任务执行器（其他场景直接实例化子任务，覆盖不到这条派发链）。
+            var runnersField = org.maiwithu.maicraft.task.TaskFactory.class.getDeclaredField("RUNNERS");
+            runnersField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var runners = (java.util.Map<Class<? extends org.maiwithu.maicraft.task.TaskRecord>,
+                    org.maiwithu.maicraft.task.TaskFactory.Runner<? extends org.maiwithu.maicraft.task.TaskRecord>>) runnersField.get(null);
+            var previousRunner = runners.get(org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord.class);
             org.maiwithu.maicraft.task.TaskFactory.register(org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord.class,
                     (p, r) -> new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(p, r));
-            try { runRealFlow(h); } finally { net.minecraft.core.registries.BuiltInRegistries.BLOCK.bindTags(previous); }
+            try {
+                runRealFlow(h);
+            } finally {
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.bindTags(previousTags);
+                if (previousRunner != null) {
+                    runners.put(org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord.class, previousRunner);
+                }
+            }
         }
     }
 
     private static void runRealFlow(InteractionWorldTestHarness h) throws Exception {
-            org.maiwithu.maicraft.intent.IntentRuntime.get().observedSourceMemory().clear();
-            var items = List.of(ResourceLocation.parse("minecraft:raw_iron"));
-            var record = new SemanticAcquireTaskRecord("prospect-real-flow", 100000, items, 3,
-                    List.of(SemanticAcquireTaskRecord.Source.MINE), false,
-                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8)
-                    .withProspecting(true).withLoadedMiningView(true);
-            var task = new SemanticAcquireCompanionTask(h.player, record);
-            task.onStart();
-            TaskState state = TaskState.RUNNING;
-            boolean dispatched = false;
-            for (int i = 0; i < 600 && state == TaskState.RUNNING && !dispatched; i++) {
-                state = task.onTick();
-                h.nextTick();
-                if (activeRecord(task) instanceof MineBlockTaskRecord mine && mine.prospecting()) {
-                    dispatched = true;
-                    check(mine.prospectY() == 1, "脚位 y=1 在铁带内且推荐层 16 不低于脚位："
-                            + "就地带探矿 prospectY=1，实际 prospectY=" + mine.prospectY());
-                }
+        var items = List.of(ResourceLocation.parse("minecraft:raw_iron"));
+        var record = new SemanticAcquireTaskRecord("prospect-real-flow", 100000, items, 3,
+                List.of(SemanticAcquireTaskRecord.Source.MINE), false,
+                SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8)
+                .withProspecting(true).withLoadedMiningView(true);
+        var task = new SemanticAcquireCompanionTask(h.player, record);
+        task.onStart();
+        TaskState state = TaskState.RUNNING;
+        boolean dispatched = false;
+        for (int i = 0; i < 600 && state == TaskState.RUNNING && !dispatched; i++) {
+            state = task.onTick();
+            h.nextTick();
+            if (activeRecord(task) instanceof MineBlockTaskRecord mine && mine.prospecting()) {
+                dispatched = true;
+                check(mine.prospectY() == 1, "脚位 y=1 在铁带内且推荐层 16 不低于脚位："
+                        + "就地带探矿 prospectY=1，实际 prospectY=" + mine.prospectY());
             }
-            check(dispatched, "真实 mine 子任务公平空手 + 授权开 → 必须派出探矿任务，终态=" + state
-                    + "，活动记录=" + activeRecord(task)
-                    + "，回执=" + task.result(TaskState.FAILED).data());
+        }
+        check(dispatched, "真实 mine 子任务公平空手 + 授权开 → 必须派出探矿任务，终态=" + state
+                + "，活动记录=" + activeRecord(task)
+                + "，回执=" + task.result(TaskState.FAILED).data());
     }
 
     /** 当前位置在带外且推荐层在下方：目标层取生成带推荐值（109 之前的既有语义保留）。 */
