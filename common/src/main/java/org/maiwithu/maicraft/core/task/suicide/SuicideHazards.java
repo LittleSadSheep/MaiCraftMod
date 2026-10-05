@@ -85,7 +85,7 @@ public final class SuicideHazards {
 
     private Candidate ignition(LocalPlayer player, Set<String> attempted) {
         // 点火格围绕身体当前位置找最近处，上下两格、水平不超过 8 格且不越过请求半径；身上没有点火物就不编造候选。
-        if (SuicideIgnition.igniterSlot(player.getInventory()) < 0) return null;
+        if (SuicideSelfHazard.igniterSlot(player.getInventory()) < 0) return null;
         int reach = Math.min(request.radius(), FIRE_REACH); BlockPos feet = player.blockPosition();
         var cells = new ArrayList<Candidate>();
         for (BlockPos cell : BlockPos.betweenClosed(feet.offset(-reach, -2, -reach), feet.offset(reach, 2, reach))) {
@@ -107,7 +107,7 @@ public final class SuicideHazards {
         Level level = player.level();
         // 点火格还要求格子本身为空气或已有火，并且身上仍有点火物或火已经烧着。
         if (candidate.method().equals("fire")) return igniteable(level, candidate.entry())
-                && (burning(level, candidate.entry()) || SuicideIgnition.igniterSlot(player.getInventory()) >= 0);
+                && (burning(level, candidate.entry()) || SuicideSelfHazard.igniterSlot(player.getInventory()) >= 0);
         return standing(level, candidate.approach()) && clear(level, candidate.entry()) && clear(level, candidate.entry().above())
                 && (candidate.method().equals("lava") ? lava(level, candidate.entry()) : fallHeight(level, candidate.entry()) >= 6);
     }

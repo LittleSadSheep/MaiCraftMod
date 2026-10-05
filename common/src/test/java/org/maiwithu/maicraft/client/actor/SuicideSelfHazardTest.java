@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 洞里没有现成危险时用随身打火石原地点火；火由原生回执注入，熄灭后再点，被拒绝时不换格反复点。 */
-public final class SuicideFireTest {
+public final class SuicideSelfHazardTest {
     private static final BlockPos CELL = new BlockPos(8, 1, 8);
 
     public static void main(String[] args) throws Exception {
@@ -57,7 +57,7 @@ public final class SuicideFireTest {
             check(task.result(state).message().contains("No flint and steel"), "失败说明应指出缺少点火物");
             task.stop(world.player, Task.StopReason.REPLACED);
         }
-        System.out.println("SuicideFireTest: passed");
+        System.out.println("SuicideSelfHazardTest: passed");
     }
 
     private static InteractionWorldTestHarness cave() throws Exception {

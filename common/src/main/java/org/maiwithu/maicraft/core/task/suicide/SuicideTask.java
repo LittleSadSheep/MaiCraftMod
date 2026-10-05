@@ -33,7 +33,7 @@ public final class SuicideTask implements Task {
     private SuicideHazards survey;
     private SuicideHazards.Candidate candidate;
     private PlayerNav nav;
-    private SuicideIgnition ignition;
+    private SuicideSelfHazard ignition;
     private CompletableFuture<Boolean> ruleRead;
     private Boolean keepInventory;
     private int ticks, lastRuleRead, lastProgress, enteredTicks, ignitions;
@@ -136,9 +136,9 @@ public final class SuicideTask implements Task {
         InputDriver.halt(player);
         // 火还烧着就站着承受原生伤害；火自然熄灭后原地再点，点火物用尽且身上也不再着火才放弃这一格。
         if (SuicideHazards.burning(player.level(), cell)) return TaskState.RUNNING;
-        if (SuicideIgnition.igniterSlot(player.getInventory()) < 0)
+        if (SuicideSelfHazard.igniterSlot(player.getInventory()) < 0)
             return player.isOnFire() ? TaskState.RUNNING : abandon("No flint and steel or fire charge remains for another native ignition.");
-        ignition = new SuicideIgnition(cell);
+        ignition = new SuicideSelfHazard(cell);
         return TaskState.RUNNING;
     }
 
@@ -147,7 +147,7 @@ public final class SuicideTask implements Task {
         String base = "No remaining reachable native hazard was found in the loaded search area.";
         if (!request.permits("fire")) return base;
         if (attempted.contains(SuicideHazards.FIRE_REJECTED)) return base + " Native ignition was already rejected or left unconfirmed.";
-        return base + (SuicideIgnition.igniterSlot(player.getInventory()) < 0
+        return base + (SuicideSelfHazard.igniterSlot(player.getInventory()) < 0
                 ? " No flint and steel or fire charge is carried for self-ignition."
                 : " No untried air cell on a sturdy floor without flammable blocks nearby was found for self-ignition.");
     }
@@ -200,7 +200,7 @@ public final class SuicideTask implements Task {
 
     private void closeIgnition() {
         // 结束等待只释放动作槽，已经发出的点火结果仍以世界里的火格为准，不能当作撤销。
-        SuicideIgnition previous = ignition; ignition = null;
+        SuicideSelfHazard previous = ignition; ignition = null;
         if (previous != null) previous.close(player);
     }
 

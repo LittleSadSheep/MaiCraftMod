@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.TaskState;
 
 /** 站在选定格里低头，用随身打火石或火焰弹对脚下支撑面点一次原生火；只等这次回执和真实火格，不重复同一次点击。 */
-final class SuicideIgnition {
+final class SuicideSelfHazard {
     // 打火石有耐久可反复点火，排在前面；只有没有打火石时才消耗火焰弹。
     static final List<Item> IGNITERS = List.of(Items.FLINT_AND_STEEL, Items.FIRE_CHARGE);
     private final BlockPos cell;
@@ -37,7 +37,7 @@ final class SuicideIgnition {
     private long started = -1;
     private String failure;
 
-    SuicideIgnition(BlockPos cell) { this.cell = cell.immutable(); }
+    SuicideSelfHazard(BlockPos cell) { this.cell = cell.immutable(); }
 
     static int igniterSlot(Inventory inventory) {
         // 只找背包、快捷栏和副手里的点火物；副手已握着就直接用副手，不为点火挪动主手物品。
