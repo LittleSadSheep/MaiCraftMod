@@ -415,6 +415,8 @@ public final class GuiRegressionSuite {
         CookingProtectionTest.main(args);
         CookingQuantityTest.main(args);
         CookingPrerequisiteChainTest.main(args);
+        // 非食物冶炼与熟食同通路；燃料不够时立项失败要点名燃料层与数量，不允许退回合并话术。
+        org.maiwithu.maicraft.core.task.cook.CookingNonFoodSmeltingTest.main(args);
         CookingMenuCloseTest.main(args);
         CookingMenuOwnershipTest.main(args);
         CookingSettlementTest.main(args);
