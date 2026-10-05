@@ -323,7 +323,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 && planningWorkHighWater > PLANNING_WORK_FUSE_UNITS
                 && lastApproachTick != Long.MIN_VALUE
                 && now - lastApproachTick >= PLANNING_CONVERGENCE_WINDOW_TICKS) {
-            // 熔断先给一次预算内的降级腿（109/110 同型教训：目标在脚下竖井底时，搜索从
+            // 规划从原站位不收敛时，先试一次已知格中转：例如本会话亲自挖出并站立过的井底格，
+            // 从那里恢复原目标比在远处扩展搜索有增量得多。无候选（未交付已知格）时自然落空。
+            if (tryKnownCellWaypointLeg("planning did not converge")) return TaskState.RUNNING;
+            // 已知格走不通再给一次预算内的降级腿（109/110 同型教训：目标在脚下竖井底时，搜索从
             // 原站位出发的所有下降边都被准入闸门诚实拒绝，绕行楼梯的空间它自己走不完）：
             // 先站到目标柱旁两格的「楼梯头」，再用全新搜索恢复原目标——起点离开井口柱后，
             // 楼梯下掘不再与被拒的直降前沿竞争。只试一次，降级腿单独计量熔断工作量。
@@ -345,9 +348,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         WALK_SPEED, () -> false, terrain()));
                 return TaskState.RUNNING;
             }
-            // 规划从原站位不收敛时，先试一次已知格中转：例如本会话亲自挖出并站立过的井底格，
-            // 从那里恢复原目标比在远处扩展搜索有增量得多。
-            if (tryKnownCellWaypointLeg("planning did not converge")) return TaskState.RUNNING;
             fail("planning did not converge: the dig-route search has banked " + planningWorkHighWater
                     + " work units while the closest approach stayed " + String.format("%.1f", bestDist)
                     + " blocks from the target for about " + (PLANNING_CONVERGENCE_WINDOW_TICKS / 20)
