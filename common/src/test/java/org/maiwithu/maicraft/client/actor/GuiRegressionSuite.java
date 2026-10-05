@@ -190,6 +190,8 @@ public final class GuiRegressionSuite {
         CraftSurfaceFailureTest.main(args); AcquisitionBodyFailureTest.main(args);
         // 产物对得上但输入候选不可读的合成配方要在回执点名，不得折进"没有配方"。
         org.maiwithu.maicraft.core.task.acquire.CraftUnreadableRecipeDiagnosisTest.main(args);
+        // 配方证据在位时的合成规划四态复现：全料/前置齐备/链式应走通，缺料要点名材料。
+        org.maiwithu.maicraft.core.task.acquire.CraftFallbackConsumptionTest.main(args);
         // 区分实体点击与物品自身使用，避免砂纸等工序停在不可选中的掉落物上。
         UseHeldItemPrimitiveTest.main(args);
         // 打开村民交易必须先有可支付条件并准备空手，不能退回使用上一轮拿着的 AE 终端。

@@ -86,6 +86,8 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class SemanticAcquireCompanionTask
         extends AbstractCompanionTask<SemanticAcquireTaskRecord> {
     private static final int PLANNER_STEPS_PER_TICK = 1;
+    /** 终局缺料诊断逐配方点名的上限；与回执候选展示同量级，超出部分不代表不存在。 */
+    private static final int CRAFT_DIAGNOSIS_RECIPE_LIMIT = 8;
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
     private static final long COLLECT_TICKS = 60L * 20L;
     private static final long MINE_MIN_TICKS = 60L * 20L;
@@ -633,6 +635,23 @@ public final class SemanticAcquireCompanionTask
             facts.put("rejected_recipes", List.copyOf(need.rejectedRecipes));
             facts.put("lineage_recipes", List.copyOf(need.lineageRecipes));
             if (workstation != null) facts.put("crafting_surface", workstation.facts(player));
+            // 失败要点名到具体配方与缺的材料，调用方才能区分“材料缺”“台面缺”与“配方读不出”。
+            List<Map<String, Object>> missingByRecipe = candidates.stream()
+                    .filter(candidate -> candidate.cost().missingMaterials() > 0)
+                    .limit(CRAFT_DIAGNOSIS_RECIPE_LIMIT)
+                    .<Map<String, Object>>map(candidate -> Map.of(
+                            "recipe_id", candidate.recipeId(),
+                            "missing_ingredients", candidate.ingredients().stream()
+                                    .filter(ingredient -> ingredient.missing() > 0)
+                                    .map(ingredient -> Map.of(
+                                            "item_ids", ingredient.itemIds().stream()
+                                                    .map(ResourceLocation::toString).toList(),
+                                            "missing", ingredient.missing()))
+                                    .toList()))
+                    .toList();
+            if (!missingByRecipe.isEmpty()) {
+                facts.put("missing_materials_by_recipe", missingByRecipe);
+            }
             addIssue("craft", surfaceMissing
                             ? "crafting_surface_missing" : "no_finite_recipe_path",
                     surfaceMissing
