@@ -19,6 +19,7 @@ public final class ExplorationRegressionSuite {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         ExplorationSectorTest.main(args);
         ExplorationFrontiersTest.main(args);
+        SurveyRadiusVerdictTest.main(args);
         FrontierLegBreakerTest.main(args);
         ExplorationIntentTest.main(args);
         ExploreInterestDecisionTest.main(args);

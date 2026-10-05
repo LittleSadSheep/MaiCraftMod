@@ -28,6 +28,11 @@ public enum FailureType {
     /** 本次寻路没有找到到达目标的路线；不代表允许任意放宽原目标。 */
     NO_PATH("travel + may_alter_terrain digs/bridges/pillars a route, or pick a nearer destination", List.of(
             "maicraft://knowledge/game_mechanics/gravity-blocks", "maicraft://knowledge/game_mechanics/lighting")),
+    /**
+     * 有界探索的身体越出了请求半径并被安全截停：这是范围保护，不是寻路无路。
+     * 观察成果仍在回执里；要继续向外就从终点位置重新提交，确实想要更远才调大 max_distance。
+     */
+    RADIUS_BOUND_EXIT("submit a new explore from the final position to continue outward; enlarge max_distance only when coverage beyond the reached radius is intended", List.of()),
     /** 搜索未能按预算产出结论且有界恢复已耗尽，不能当作地形确实无路。 */
     PLANNING_STALL("the search hit its budget rather than proving a dead end; re-submitting or approaching from another direction can still succeed, e.g. retry as a slanted staircase descent (horizontal offset plus target y) or tunnel horizontally at the target band", List.of(
             "maicraft://knowledge/game_mechanics/tunneling", "maicraft://knowledge/game_mechanics/lighting")),
