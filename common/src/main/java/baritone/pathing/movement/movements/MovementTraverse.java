@@ -106,6 +106,10 @@ public class MovementTraverse extends Movement {
                     sneaking = true;
                     WC += (SNEAK_ONE_BLOCK_COST - WALK_ONE_BLOCK_COST) / 2;
                 }
+                if (destOn.getBlock() == Blocks.FARMLAND || srcDownBlock == Blocks.FARMLAND) {
+                    // 行走本身不踩坏耕地,惩罚只为让路径默认绕开农田
+                    WC += FARMLAND_WALK_PENALTY;
+                }
             }
             double hardness1 = MovementHelper.getMiningDurationTicks(context, destX, y, destZ, pb1, false);
             if (hardness1 >= COST_INF) {

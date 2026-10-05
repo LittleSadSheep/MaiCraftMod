@@ -69,6 +69,12 @@ import static baritone.pathing.precompute.Ternary.*;
  */
 public interface MovementHelper extends ActionCosts, Helper {
 
+    /**
+     * 踩过一格耕地格的寻路惩罚(tick)。正常行走不会踩坏耕地,惩罚只为让
+     * 路径默认绕开农田;跳跃/跌落把落点放在耕地上的路线则直接禁行。
+     */
+    double FARMLAND_WALK_PENALTY = 20.0;
+
     static boolean avoidBreaking(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
         if (!bsi.worldBorder.canPlaceAt(x, z)) {
             return true;

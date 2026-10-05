@@ -76,6 +76,9 @@ public class MovementPillar extends Movement {
             if (fromDown.getBlock() instanceof SlabBlock && fromDown.getValue(SlabBlock.TYPE) == SlabType.BOTTOM) {
                 return COST_INF; // can't pillar up from a bottom slab onto a non ladder
             }
+            if (fromDown.getBlock() == Blocks.FARMLAND) {
+                return COST_INF; // 原地起跳会把脚下的耕地踩回泥土
+            }
         }
         BlockState toBreak = context.get(x, y + 2, z);
         Block toBreakBlock = toBreak.getBlock();

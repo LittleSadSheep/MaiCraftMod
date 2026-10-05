@@ -12,6 +12,7 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
@@ -66,9 +67,25 @@ public final class TravelJumpPolicy {
             Vec3 end = runway.point(reach);
             // 树冠或顶棚存在缺口时，必须预留完整飞行空间，不能假设头部会提前撞上障碍。
             if (headHit && !corridor.hasContinuousCeiling(runway.start(), end, 2)) continue;
+            // 跳跃及其落地会把沿线的耕地踩回泥土,地面支撑里有耕地就放弃这次加速跳,退回普通行走
+            if (crossesFarmland(world, runway.start(), end)) continue;
             if (corridor.clear(runway.start(), end)) return new Plan(verified, flight.apexHeight(), headHit);
         }
         return null;
+    }
+
+    /** 起跳点到预计落点之间的地面支撑只要有一格耕地就视为穿过农田。 */
+    private static boolean crossesFarmland(BlockGetter world, Vec3 start, Vec3 end) {
+        Vec3 delta = end.subtract(start);
+        double length = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        int steps = Math.max(1, (int) Math.ceil(length * 2));
+        double supportY = Math.floor(start.y) - 1;
+        for (int i = 0; i <= steps; i++) {
+            double t = i / (double) steps;
+            BlockPos support = BlockPos.containing(start.x + delta.x * t, supportY, start.z + delta.z * t);
+            if (world.getBlockState(support).is(Blocks.FARMLAND)) return true;
+        }
+        return false;
     }
 
     /** 完整干燥支撑面确保起跳摩擦和高度与预测飞行一致。 */

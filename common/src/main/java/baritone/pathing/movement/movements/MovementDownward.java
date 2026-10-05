@@ -60,6 +60,9 @@ public class MovementDownward extends Movement {
         if (!MovementHelper.canWalkOn(context, x, y - 2, z)) {
             return COST_INF;
         }
+        if (context.get(x, y - 2, z).getBlock() == Blocks.FARMLAND) {
+            return COST_INF; // 跌落在农田上会把耕地踩回泥土,落点禁耕地
+        }
         BlockState down = context.get(x, y - 1, z);
         Block downBlock = down.getBlock();
         if (downBlock == Blocks.LADDER || downBlock == Blocks.VINE) {
