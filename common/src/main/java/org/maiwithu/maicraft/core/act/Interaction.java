@@ -688,6 +688,8 @@ public final class Interaction {
         String trace = last.useOnTrace();
         if (!trace.isEmpty()) evidence.put("use_on_trace", trace);
         if (last.kind() == NativeActionReceipt.Kind.USE_BLOCK && submittedBlockHit != null) {
+            // 提交格命中不等于面正确：落格与门框效应都发生在被点面的相邻格，面必须可对账。
+            evidence.put("submitted_face", submittedBlockHit.getDirection().getName());
             BlockPos cell = submittedBlockHit.getBlockPos().relative(submittedBlockHit.getDirection());
             evidence.put("settlement_placement_cell", cell.toShortString() + "="
                     + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(

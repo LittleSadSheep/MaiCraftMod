@@ -167,11 +167,35 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (!r.approachTarget || r.aim == null) return null;
         var stances = FirstPersonInteractionTargeting.visibleInteractionStands(player, r.aim,
                 rejectedStances, this::visibleFrom);
+        if (r.expectIgnition) stances = portalCapableStancesFirst(stances);
         approachCandidates = stances.size(); approachAttempts++;
         var goal = GoalCompiler.interactionStances(r.aim, stances);
         // 先走现成路线；确实走不通且请求允许时再准备通路，目标方块始终受保护。
         return PlayerNav.to(player, () -> goal, WALK_SPEED, () -> bodySettled() && visibleFrom(player.getEyePosition()),
                 terrainApproach ? PlayerNav.ContextProvider.TERRAFORM : PlayerNav.ContextProvider.DEFAULT).withTerrainProbe();
+    }
+
+    /**
+     * 点火站位排序：从各脚位预演点火面，落格经 vanilla 口径审计能直接成门的排最前，
+     * 其余保持原相对顺序。门框外的最近站位也能把火点进空气，但那格装不出传送门——
+     * 不排优先级就会复现「点了、有火、门不成型」的假成功。无任何能成门的站位时原样返回，
+     * 营火等普通点火不受影响。
+     */
+    private List<BlockPos> portalCapableStancesFirst(List<BlockPos> stances) {
+        double eyeHeight = player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING);
+        List<BlockPos> capable = new ArrayList<>(), plain = new ArrayList<>();
+        for (BlockPos stance : stances) {
+            var aimHit = FirstPersonInteractionTargeting.visibleBlockHit(player.level(), player,
+                    Vec3.atBottomCenterOf(stance).add(0, eyeHeight, 0),
+                    r.aim, REACH, null, hit -> FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), hit));
+            boolean formsPortal = aimHit != null && NetherPortalVanillaAudit.audit(player.level()::getBlockState,
+                    aimHit.getBlockPos().relative(aimHit.getDirection())).wouldFormPortal();
+            (formsPortal ? capable : plain).add(stance);
+        }
+        if (capable.isEmpty() || plain.isEmpty()) return stances;
+        List<BlockPos> ordered = new ArrayList<>(capable);
+        ordered.addAll(plain);
+        return List.copyOf(ordered);
     }
 
     @Override protected TaskState handleNavFailure(FailureType type, String reason) {
@@ -217,8 +241,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (FirstPersonInteractionTargeting.usesBucketRay(item))
             return FirstPersonInteractionTargeting.visibleBucketHit(player.level(), player, eyes, r.aim, player.blockInteractionRange(), item) != null;
         var surface = CreateInteractionSurface.forUse(player.level().getBlockState(r.aim), item);
-        return surface.constrained() ? surface.visibleHit(player.level(), player, eyes, r.aim, REACH) != null
-                : FirstPersonInteractionTargeting.hasLoadedReachLine(player.level(), player, eyes, r.aim, REACH);
+        if (surface.constrained()) return surface.visibleHit(player.level(), player, eyes, r.aim, REACH) != null;
+        // 点火面的可见性必须绑定落格：被点面相邻格不是空气的站位装不下火，不能当作可用站位。
+        if (r.expectIgnition) return FirstPersonInteractionTargeting.visibleBlockHit(
+                player.level(), player, eyes, r.aim, REACH, null,
+                hit -> FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), hit)) != null;
+        return FirstPersonInteractionTargeting.hasLoadedReachLine(player.level(), player, eyes, r.aim, REACH);
     }
 
     @Override
@@ -347,9 +375,13 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                                     player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), useItem)
                             : state.isAir()
                             ? null
-                            : useSurface == null ? FirstPersonInteractionTargeting.visibleBlockHit(
+                            : useSurface != null ? useSurface.visibleHit(
                                     player.level(), player, player.getEyePosition(), r.aim, REACH)
-                            : useSurface.visibleHit(player.level(), player, player.getEyePosition(), r.aim, REACH);
+                            : r.expectIgnition ? FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH, null,
+                                    hit -> FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), hit))
+                            : FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH);
                     aimPoint = visible == null ? Vec3.atCenterOf(r.aim) : visible.getLocation();
                 }
                 // 使用交互不能继承前一施工任务留下的潜行放置状态。
@@ -406,6 +438,20 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 fail("aim " + aimLabel() + " is blocked from here — the crosshair lands on "
                         + landing + " instead. Reposition to the target's open side, then retry.",
                         FailureType.OCCLUDED);
+                return TaskState.FAILED;
+            }
+            // 点火面绑定落格：命中了提交格但被点面的相邻格不是空气时，火无处可落，
+            // 这次点击注定白耗耐久——先排除该站位再换位重试，不把「点到了」当成「点对了」。
+            if (r.expectIgnition && !bucket && button() == Interaction.Button.USE
+                    && hit instanceof BlockHitResult ignitionHit
+                    && !FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), ignitionHit)) {
+                var placement = ignitionHit.getBlockPos().relative(ignitionHit.getDirection());
+                String detail = "the aimed face opens into "
+                        + BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(placement).getBlock())
+                        + " at " + placement.toShortString() + ", so fire cannot land there";
+                if (retryFromDifferentStance(detail)) return TaskState.RUNNING;
+                fail("aim " + aimLabel() + " offers no ignition placement from this stance: " + detail
+                        + ". Aim at a face opening into air, or reposition manually.", FailureType.OCCLUDED);
                 return TaskState.FAILED;
             }
             // 右键命中方块会激活它，例如打开工作台界面或切换开关。记录交互过的方块，让 <known_blocks> 除了已放置工作台外，也能带角色返回用过的工作站。

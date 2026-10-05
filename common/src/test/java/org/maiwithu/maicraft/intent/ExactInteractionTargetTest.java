@@ -18,6 +18,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
+import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.task.interact.InteractAtCompanionTask;
 import org.maiwithu.maicraft.core.task.interact.InteractAtTaskRecord;
 import org.maiwithu.maicraft.core.task.interact.UseItemBatchTaskRecord;
@@ -288,6 +289,9 @@ public final class ExactInteractionTargetTest {
         igniteWithVisibleFire(false);
         igniteFireThenNaturalBurnout();
         ignitePortalConversion();
+        ignitionFaceBindsPlacementAndRejectsBuriedFaces();
+        portalCapableStanceOrderingPrefersInteriorIgnition();
+        ignitionInsideFrameLandsInInterior();
     }
 
     private static IntentAction adaptFlint(Goal goal, InteractionWorldTestHarness f) throws Exception {
@@ -298,6 +302,148 @@ public final class ExactInteractionTargetTest {
             f.nextTick();
         }
         throw new AssertionError("the flint adaptation never completed");
+    }
+
+    /**
+     * 174 批六E 定案的执行层修复：点火面绑定落格语义。命中提交格不算数——
+     * 被点面相邻格装不下火（非空气）的站位不得出手，先换位重试；能用 vanilla 口径
+     * 审计直接成门的站位在接近候选中排最前；框内点火端到端落进框内并回报 submitted_face。
+     */
+    private static void ignitionFaceBindsPlacementAndRejectsBuriedFaces() throws Exception {
+        // 落格判据本体：相邻格是空气才可点火，被占用格不冒充可点火面。
+        try (var f = new InteractionWorldTestHarness()) {
+            f.set(new BlockPos(3, 2, 3), Blocks.OBSIDIAN.defaultBlockState());
+            var up = new BlockHitResult(Vec3.atCenterOf(new BlockPos(3, 2, 3)), Direction.UP, new BlockPos(3, 2, 3), false);
+            check(FirstPersonInteractionTargeting.admitsIgnitionPlacement(f.level, up),
+                    "an open adjacent cell admits ignition");
+            f.set(new BlockPos(3, 3, 3), Blocks.STONE.defaultBlockState());
+            check(!FirstPersonInteractionTargeting.admitsIgnitionPlacement(f.level, up),
+                    "an occupied adjacent cell cannot catch fire and must not be clicked");
+        }
+        // 174 批六E 现场：命中了提交格、但被点面的落格被占用——不出手，如实按遮挡族失败。
+        try (var f = new InteractionWorldTestHarness()) {
+            BlockPos target = new BlockPos(3, 2, 3);
+            f.set(target, Blocks.OBSIDIAN.defaultBlockState());
+            // 链子的轮廓只在格子中柱：射线从它旁边穿过命中目标东面，而落格已装着链子。
+            f.set(new BlockPos(4, 2, 3), Blocks.CHAIN.defaultBlockState());
+            f.position(new Vec3(5.5, 1, 3.2));
+            var record = new InteractAtTaskRecord("ignition-buried-face",
+                    f.player.level().getGameTime() + 400, MouseButton.RIGHT, target, 0, null).withIgnitionCheck();
+            var task = new InteractAtCompanionTask(f.player, record); task.start(f.player);
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 160 && state == TaskState.RUNNING; tick++) {
+                var hit = FirstPersonInteractionTargeting.visibleBlockHit(
+                        f.level, f.player, f.player.getEyePosition(), target, 4.5);
+                if (hit != null) aim(f, hit.getLocation());
+                f.nextTick(); state = task.tick(f.player);
+            }
+            check(f.blockUses() == 0, "a face whose placement cell is occupied must not be clicked");
+            check(state == TaskState.FAILED, "the buried ignition face fails honestly instead of clicking: " + state);
+        }
+        // 同现场但允许接近：命中占格落格时自动换站位重试一次，并把坏站位记入拒绝账本。
+        try (var f = new InteractionWorldTestHarness()) {
+            BlockPos target = new BlockPos(3, 2, 3);
+            f.set(target, Blocks.OBSIDIAN.defaultBlockState());
+            f.set(new BlockPos(4, 2, 3), Blocks.CHAIN.defaultBlockState());
+            f.position(new Vec3(5.5, 1, 3.2));
+            f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            var record = new InteractAtTaskRecord("ignition-buried-face-approach",
+                    f.player.level().getGameTime() + 400, MouseButton.RIGHT, target, 0,
+                    Items.FLINT_AND_STEEL).withApproach(false).withIgnitionCheck();
+            var task = new InteractAtCompanionTask(f.player, record); task.start(f.player);
+            var act = InteractAtCompanionTask.class.getDeclaredMethod("act"); act.setAccessible(true);
+            var forcing = field(InteractAtCompanionTask.class, "forcingNewStance");
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 30 && !Boolean.TRUE.equals(forcing.get(task)); tick++) {
+                var visible = FirstPersonInteractionTargeting.visibleBlockHit(
+                        f.level, f.player, f.player.getEyePosition(), target, 4.5);
+                aim(f, visible == null ? Vec3.atCenterOf(target) : visible.getLocation());
+                f.nextTick();
+                state = (TaskState) act.invoke(task);
+            }
+            check(Boolean.TRUE.equals(forcing.get(task)),
+                    "a buried ignition face starts a stance retry instead of clicking");
+            check(state == TaskState.RUNNING, "the retry keeps the task alive for the new stance");
+            check(f.blockUses() == 0, "no native use is sent while the only visible face cannot catch fire");
+            var retry = field(InteractAtCompanionTask.class, "stanceRetryUsed");
+            check(Boolean.TRUE.equals(retry.get(task)), "the stance retry gate consumed the single reposition");
+        }
+    }
+
+    /** 成门站位排序：有效门框的框内脚位排到框外脚位之前，其余顺序保持不变。 */
+    private static void portalCapableStanceOrderingPrefersInteriorIgnition() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            // 站位预演按眼高发射线：假身体补上真实体格，让 getEyeHeight(Pose.STANDING) 有据可依。
+            var dimensions = field(net.minecraft.world.entity.Entity.class, "dimensions");
+            dimensions.set(f.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+            field(net.minecraft.world.entity.Entity.class, "eyeHeight").setFloat(f.player, 1.62F);
+            buildFrame(f);
+            BlockPos floor = new BlockPos(3, 2, 3);
+            BlockPos exterior = new BlockPos(3, 1, 5), interior = new BlockPos(3, 3, 3);
+            var method = InteractAtCompanionTask.class.getDeclaredMethod("portalCapableStancesFirst", List.class);
+            method.setAccessible(true);
+            var record = new InteractAtTaskRecord("ordering", 0, MouseButton.RIGHT, floor, 0, null);
+            var task = new InteractAtCompanionTask(f.player, record);
+            @SuppressWarnings("unchecked")
+            List<BlockPos> ordered = (List<BlockPos>) method.invoke(task, List.of(exterior, interior));
+            check(ordered.equals(List.of(interior, exterior)),
+                    "the interior stance that would form the portal must come first: " + ordered);
+            @SuppressWarnings("unchecked")
+            List<BlockPos> unchanged = (List<BlockPos>) method.invoke(task, List.of(exterior));
+            check(unchanged.equals(List.of(exterior)),
+                    "a stance list with no portal-capable member is returned as-is");
+        }
+    }
+
+    /** C 收官现场锚定：站在框内点框底顶面，火落框内、门成型、回执带 submitted_face=top 与 ignition_cell=框内格。 */
+    private static void ignitionInsideFrameLandsInInterior() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            buildFrame(f);
+            BlockPos floor = new BlockPos(3, 2, 3), interior = new BlockPos(3, 3, 3);
+            f.position(new Vec3(3.5, 3, 3.5));
+            f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            var record = compile(adaptFlint(flintGoal(floor, f), f), f);
+            check(record.aim.equals(floor) && record.expectIgnition,
+                    "the frame-floor ignition keeps the exact aim and the fire check");
+            var task = new InteractAtCompanionTask(f.player, record); task.start(f.player);
+            TaskState state = TaskState.RUNNING;
+            BlockHitResult visible = null;
+            boolean clicked = false;
+            for (int tick = 0; tick < 160 && state == TaskState.RUNNING; tick++) {
+                var hit = FirstPersonInteractionTargeting.visibleBlockHit(
+                        f.level, f.player, f.player.getEyePosition(), floor, 4.5);
+                if (hit != null) aim(f, hit.getLocation());
+                f.nextTick(); state = task.tick(f.player);
+                if (f.blockUses() == 1 && !clicked) {
+                    clicked = true; visible = hit;
+                    // 有效门框内 vanilla 同刻把火换成传送门：落格只见 nether_portal。
+                    f.set(floor.above(), Blocks.NETHER_PORTAL.defaultBlockState());
+                    f.level.acknowledgedSequence = f.level.blockSequence;
+                }
+            }
+            check(state == TaskState.SUCCESS && clicked && visible != null,
+                    "igniting the frame floor from inside succeeds: " + state);
+            check(visible.getDirection() == Direction.UP && visible.getBlockPos().equals(floor),
+                    "the interior stance clicks the floor's top face, not a frame-outer side: " + visible);
+            var data = task.result(state).data();
+            check(Boolean.TRUE.equals(data.get("nether_portal_formed"))
+                            && "minecraft:nether_portal".equals(data.get("ignition_observed_block_id"))
+                            && "up".equals(data.get("submitted_face"))
+                            && interior.toShortString().equals(String.valueOf(data.get("ignition_cell"))),
+                    "the fire lands in the interior cell and the receipt names the face and landing: " + data);
+        }
+    }
+
+    /** 174 批六E 的 4×5 黑曜石门框（14 块，框内 2×3，沿 x 轴），供框内点火与站位排序场景复用。 */
+    private static void buildFrame(InteractionWorldTestHarness f) {
+        for (int x = 2; x <= 5; x++) {
+            f.set(new BlockPos(x, 2, 3), Blocks.OBSIDIAN.defaultBlockState());
+            f.set(new BlockPos(x, 6, 3), Blocks.OBSIDIAN.defaultBlockState());
+        }
+        for (int y = 3; y <= 5; y++) {
+            f.set(new BlockPos(2, y, 3), Blocks.OBSIDIAN.defaultBlockState());
+            f.set(new BlockPos(5, y, 3), Blocks.OBSIDIAN.defaultBlockState());
+        }
     }
 
     private static Goal flintGoal(BlockPos fireCell, InteractionWorldTestHarness f) {

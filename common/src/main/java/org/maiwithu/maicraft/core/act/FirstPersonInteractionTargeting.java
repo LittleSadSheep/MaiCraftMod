@@ -225,6 +225,12 @@ public final class FirstPersonInteractionTargeting {
         return null;
     }
 
+    /** 点火面判据：被点面的相邻格必须真是可装火的空气。 */
+    public static boolean admitsIgnitionPlacement(Level level, BlockHitResult hit) {
+        BlockPos placement = hit.getBlockPos().relative(hit.getDirection());
+        return level.isLoaded(placement) && level.getBlockState(placement).isAir();
+    }
+
     /**
      * 选择最近的已加载可站立脚位格，确保能从该处实际点击 {@code target} 的某个表面。
      * 这是通用的物理交互几何判定，不是工作台专用规则。
