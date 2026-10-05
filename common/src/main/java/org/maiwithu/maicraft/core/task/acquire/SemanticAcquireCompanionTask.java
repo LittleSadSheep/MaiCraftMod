@@ -1259,7 +1259,9 @@ public final class SemanticAcquireCompanionTask
         if (completedRecord instanceof BackpackSupplyTaskRecord) {
             String code = result == null || result.data() == null ? "backpack_result_missing" : string(result.data().get("failure_code"));
             // 某只包确定没货才继续看下一只；读不到或未关闭不是空包，不能因此转去采矿。
-            if ("backpack_stock_insufficient".equals(code) && Boolean.TRUE.equals(result.data().get("menu_closed"))) {
+            // 开错的包已放好鼠标物品并确认关闭、未动任何材料时，也记下问题接着试下一只，不卡在这一步。
+            if (("backpack_stock_insufficient".equals(code) || "backpack_open_mismatch".equals(code))
+                    && Boolean.TRUE.equals(result.data().get("menu_closed"))) {
                 addIssue("inventory", code, result.message(), result.data()); return TaskState.RUNNING;
             }
             failureNeed = completedNeed;

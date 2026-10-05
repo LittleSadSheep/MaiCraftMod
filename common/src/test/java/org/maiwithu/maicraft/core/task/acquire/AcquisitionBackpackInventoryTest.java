@@ -27,7 +27,7 @@ public final class AcquisitionBackpackInventoryTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         restrictedPickupKeepsStorageClosed(false);
         restrictedPickupKeepsStorageClosed(true);
-        for (String scenario : List.of("available", "second_bag", "unreadable", "uncertain", "worn")) run(scenario);
+        for (String scenario : List.of("available", "second_bag", "wrong_bag", "unreadable", "uncertain", "worn")) run(scenario);
         check(!AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.MINE)), "mine-only does not open carried storage");
         check(!AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.WIRELESS)), "wireless-only stays at AE");
         check(AcquisitionBackpackInventory.permitted(List.of(SemanticAcquireTaskRecord.Source.STORAGE)), "storage permission includes one's carried backpack");
@@ -72,6 +72,9 @@ public final class AcquisitionBackpackInventoryTest {
                             "only the current exact need is requested from carried stock");
                     if (scenario.equals("second_bag") && record.backpackSlot == 0)
                         result = TaskResult.fail("observed no matching stock", Map.of("failure_code", "backpack_stock_insufficient", "menu_closed", true, "outcome_uncertain", false));
+                    // 第一只包开错且已放好鼠标物品、确认关闭：不算没货也不算未知，接着开第二只取货。
+                    else if (scenario.equals("wrong_bag") && record.backpackSlot == 0)
+                        result = TaskResult.fail("wrong backpack closed", Map.of("failure_code", "backpack_open_mismatch", "menu_closed", true, "outcome_uncertain", false));
                     else if (scenario.equals("unreadable") || scenario.equals("uncertain"))
                         result = TaskResult.fail("observation failed", Map.of("failure_code", "backpack_open_failed", "menu_closed", true, "outcome_uncertain", scenario.equals("uncertain")));
                     else { h.inventory.setItem(0, new ItemStack(Items.QUARTZ, 2)); result = TaskResult.ok("withdrawal settled", Map.of("menu_closed", true, "outcome_uncertain", false)); }
@@ -85,14 +88,15 @@ public final class AcquisitionBackpackInventoryTest {
                     SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 16);
             var task = new SemanticAcquireCompanionTask(h.player, request, player -> true, new AcquisitionInventoryTidy(Set::copyOf),
                     new AcquisitionBackpackInventory(player -> scenario.equals("worn") ? List.of(new Carrier("curios", "back", 0))
-                            : scenario.equals("second_bag") ? List.of(Carrier.vanilla(0), Carrier.vanilla(1)) : List.of(Carrier.vanilla(0))));
+                            : scenario.equals("second_bag") || scenario.equals("wrong_bag") ? List.of(Carrier.vanilla(0), Carrier.vanilla(1)) : List.of(Carrier.vanilla(0))));
             task.onStart(); var state = TaskState.RUNNING;
             for (int i = 0; i < 30 && !state.isTerminal(); i++) state = task.onTick();
             var result = task.result(state);
             if (scenario.equals("unreadable")) check(state == TaskState.FAILED && result.data().get("failure_code").equals("backpack_access_unverified"), "unreadable bag is not an empty source");
             else if (scenario.equals("uncertain")) check(state == TaskState.FAILED && Boolean.TRUE.equals(result.data().get("outcome_uncertain")), "unknown transfer blocks all new sources");
             else check(state == TaskState.SUCCESS && h.inventory.countItem(Items.QUARTZ) == 2, "carried stock satisfies the same acquisition without model retry");
-            check(opened.equals(scenario.equals("worn") ? List.of(-1) : scenario.equals("second_bag") ? List.of(0, 1) : List.of(0)), "each physical backpack is attempted once in order");
+            check(opened.equals(scenario.equals("worn") ? List.of(-1) : scenario.equals("second_bag") || scenario.equals("wrong_bag") ? List.of(0, 1) : List.of(0)),
+                    "each physical backpack is attempted once in order");
         } finally { runners.put(BackpackSupplyTaskRecord.class, previousBag); runners.put(Ae2SupplyTaskRecord.class, previousAe); }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

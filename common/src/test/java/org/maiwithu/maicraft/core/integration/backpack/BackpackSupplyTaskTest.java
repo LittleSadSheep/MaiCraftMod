@@ -29,7 +29,34 @@ public final class BackpackSupplyTaskTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         for (var operation : BackpackSupplyTaskRecord.Operation.values()) run(operation, false);
         run(BackpackSupplyTaskRecord.Operation.WITHDRAW, true);
+        wrongBackpack();
         System.out.println("BackpackSupplyTaskTest: passed");
+    }
+    // 开包会话已把开错的包放好鼠标物品并关闭：任务不读库存、不搬运、不再关包，以确定的 backpack_open_mismatch 结束。
+    private static void wrongBackpack() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.inventoryMenu.setCarried(ItemStack.EMPTY); int[] closed = {0}, cancelled = {0}, reads = {0};
+            var quartz = BuiltInRegistries.ITEM.getKey(Items.QUARTZ);
+            var record = new BackpackSupplyTaskRecord("wrong", 10000, 8, BackpackSupplyTaskRecord.Operation.WITHDRAW, List.of(quartz), 3, Map.of());
+            var access = new BackpackSupplyTask.Access() {
+                public BackpackOpenSession.Status open(LocalPlayerContext context) { return BackpackOpenSession.Status.FAILED; }
+                public BackpackOpenSession.Status close(LocalPlayerContext context) { closed[0]++; return BackpackOpenSession.Status.CLOSED; }
+                public BackpackMenuAccess.Read read(LocalPlayer player) { reads[0]++; return new BackpackMenuAccess.Read("not_open", "fixture", null); }
+                public void cancel(LocalPlayerContext context) { cancelled[0]++; }
+                public String failure() { return "opened menu does not match the initiating carried backpack: native menu opened main::35 instead of main::8"; }
+                public boolean uncertain() { return false; }
+                public boolean wrongMenuClosed() { return true; }
+                public Map<String, Object> settlement() { return Map.of("wrong_menu_closed", true, "cursor_placements", List.of()); }
+            };
+            var task = new BackpackSupplyTask(h.player, record, access); task.start(h.player); var state = TaskState.RUNNING;
+            for (int i = 0; i < 4 && !state.isTerminal(); i++) { h.nextTick(); state = task.tick(h.player); }
+            var result = task.result(state);
+            check(state == TaskState.FAILED && "backpack_open_mismatch".equals(result.data().get("failure_code"))
+                    && Boolean.TRUE.equals(result.data().get("menu_closed")) && Boolean.FALSE.equals(result.data().get("outcome_uncertain")),
+                    "a settled wrong backpack is a certain, closed failure the caller may move past");
+            check(closed[0] == 0 && cancelled[0] == 0 && reads[0] == 0 && result.data().containsKey("wrong_menu_settlement"),
+                    "the wrong backpack is neither read nor closed twice, and its settlement stays in the receipt");
+        }
     }
     private static void run(BackpackSupplyTaskRecord.Operation operation, boolean uncertain) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {

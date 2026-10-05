@@ -29,6 +29,9 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
         void cancel(LocalPlayerContext context);
         String failure();
         boolean uncertain();
+        // 开错的包已放好鼠标物品并原生关闭时为真；回放替身默认没有开错包。
+        default boolean wrongMenuClosed() { return false; }
+        default Map<String, Object> settlement() { return Map.of(); }
     }
     private final Access access;
     private final Map<ResourceLocation, Integer> moved = new LinkedHashMap<>();
@@ -54,6 +57,8 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
             public void cancel(LocalPlayerContext context) { session.cancel(context); }
             public String failure() { return session.failure(); }
             public boolean uncertain() { return session.uncertain(); }
+            public boolean wrongMenuClosed() { return session.wrongMenuClosed(); }
+            public Map<String, Object> settlement() { return session.settlement(); }
         };
     }
 
@@ -63,7 +68,11 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
         if (settlementOnly && !started) { closed = true; return complete(); }
         if (phase == 0) {
             started = true; var status = access.open(context);
-            if (status == BackpackOpenSession.Status.FAILED) return broken("backpack_open_failed", access.uncertain());
+            if (status == BackpackOpenSession.Status.FAILED) {
+                // 开错的包已放下鼠标物品并原生关闭，这只包没有任何存取：按确定失败返回，交由上层接着试下一只。
+                if (access.wrongMenuClosed()) { closed = true; code = "backpack_open_mismatch"; failureType = FailureType.TARGET_LOST; return complete(); }
+                return broken("backpack_open_failed", access.uncertain());
+            }
             if (status != BackpackOpenSession.Status.READY) return TaskState.RUNNING;
             phase = 1;
         }
@@ -157,6 +166,7 @@ public final class BackpackSupplyTask extends AbstractCompanionTask<BackpackSupp
         data.put("outcome_uncertain", uncertain || access.uncertain()); data.put("menu_closed", closed);
         if (code != null) data.put("failure_code", code);
         if (access.failure() != null) data.put("access_detail", access.failure());
+        if (!access.settlement().isEmpty()) data.put("wrong_menu_settlement", access.settlement());
         if (observed != null) { data.put("storage_id", observed.storageId()); data.put("observed_game_tick", observed.observedTick());
             data.put("stored", strings(observed.stored())); data.put("extractable", strings(observed.extractable())); }
         if (!lastTransfer.isEmpty()) data.put("last_native_transfer", lastTransfer);

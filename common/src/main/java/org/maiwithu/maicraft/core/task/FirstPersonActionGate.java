@@ -2,13 +2,12 @@ package org.maiwithu.maicraft.core.task;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
-import java.util.Objects;
-import java.util.stream.Stream;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.menu.VisibleMenuSession;
+import org.maiwithu.maicraft.core.inventory.ItemComponentDiff;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.VanillaHotbar;
 
@@ -136,21 +135,12 @@ public final class FirstPersonActionGate {
         ItemStack hotbarNow = player.getInventory().getItem(swap.hotbar());
         return "; source_slot=" + swap.source() + " before=" + identity(swap.sourceBefore()) + " now=" + identity(sourceNow)
                 + "; hotbar_slot=" + swap.hotbar() + " before=" + identity(swap.hotbarBefore()) + " now=" + identity(hotbarNow)
-                + "; source_components_vs_expected=" + changedComponents(sourceNow, swap.hotbarBefore())
-                + "; hotbar_components_vs_expected=" + changedComponents(hotbarNow, swap.sourceBefore());
+                + "; source_components_vs_expected=" + ItemComponentDiff.changed(sourceNow, swap.hotbarBefore())
+                + "; hotbar_components_vs_expected=" + ItemComponentDiff.changed(hotbarNow, swap.sourceBefore());
     }
 
     private static String identity(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()) + "x" + stack.getCount();
-    }
-
-    // 只公开发生变化的组件名，不倾倒容器内容或任意自定义文本；这些差异不改变严格交换确认规则。
-    private static String changedComponents(ItemStack actual, ItemStack expected) {
-        return Stream.concat(actual.getComponents().stream(), expected.getComponents().stream())
-                .map(component -> component.type()).distinct()
-                .filter(type -> !Objects.equals(actual.get(type), expected.get(type)))
-                .map(type -> String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type)))
-                .sorted().limit(16).toList().toString();
     }
 
     public String failure() {
