@@ -90,6 +90,12 @@ public final class NightRestBehaviorTest {
             check((boolean) reachable.invoke(task), "three blocks from the head half is exactly vanilla sleep range");
             h.position(new Vec3(.5, 1, 6.0));
             check(!(boolean) reachable.invoke(task), "both halves beyond vanilla range require approach navigation first");
+            // 原版距离盒的对角上角（067 实机形态）：入睡盒内但眼距超交互半径，必须判外继续接近，
+            // 不能交给入睡子任务零动作失败；走到交互半径内后同判定放行。
+            h.position(new Vec3(3.5, 3, 4.5));
+            check(!(boolean) reachable.invoke(task), "a vanilla-box corner beyond interaction reach keeps navigating closer");
+            h.position(new Vec3(3.5, 1, 3.5));
+            check((boolean) reachable.invoke(task), "inside both the vanilla box and interaction reach the handoff proceeds");
             h.position(new Vec3(.5, 1, 3.5));
             h.set(new BlockPos(0, 2, 2), Blocks.STONE.defaultBlockState());
             check(!(boolean) reachable.invoke(task), "the same distance behind a wall still requires navigation");

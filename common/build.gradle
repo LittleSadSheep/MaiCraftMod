@@ -298,6 +298,12 @@ def regressionSuites = [
         heap: '512m', directory: 'equipment-receipt-regression', timeoutSeconds: 45,
         purpose: '验证装备观察账目、耐久消耗累计与打空显式回执（同步包与实体事件双通道）'
     ],
+    // 夜休整链独立回放：整夜等待、床资格、入睡闸口与被抢占的返程预算，防止"附近有床"掩盖失效睡眠。
+    nightRestRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.NightRestBehaviorTest',
+        heap: '512m', directory: 'night-rest-regression', timeoutSeconds: 60,
+        purpose: '验证夜休的等待醒来、床资格与入睡距离闸口的一致性'
+    ],
     // R21 距离循环使用独立入口，单独核对格心站位与真实玩家攻击距离的边界。
     combatStanceReplayRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.CombatStanceReplayTest',

@@ -22,6 +22,8 @@ import org.maiwithu.maicraft.task.TaskState;
 
 /** 到床边后瞄准并原生右键；公开 sleep 确认躺下即结束，自动夜间休息另设 waitUntilAwake 等自然醒。 */
 public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRecord> {
+    /** 原生点击与就近检查共用的床交互半径（眼位到床中心的直线距离）；接近闸口必须与本闸同判。 */
+    public static final double INTERACTION_REACH = 4.5;
     private NativeActionReceipt receipt;
     private boolean enteredSleep;
     private long wakeObservedAt = -1;
@@ -65,7 +67,7 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
                 fail("bed is outside loaded client terrain", FailureType.TARGET_LOST);
                 return TaskState.FAILED;
             }
-            if (player.getEyePosition().distanceTo(Vec3.atCenterOf(r.bed)) > 4.5) {
+            if (player.getEyePosition().distanceTo(Vec3.atCenterOf(r.bed)) > INTERACTION_REACH) {
                 fail("bed is outside interaction reach", FailureType.OUT_OF_REACH);
                 return TaskState.FAILED;
             }
