@@ -22,6 +22,10 @@ public final class AttentionFeedTest {
             cursor = page.get("cursor").getAsLong();
         } while (page.get("has_more").getAsBoolean());
         check(received == 25 && cursor == 25, "drain every page including the last five completions");
+        page = feed.read(0, 10, null, task);
+        check(page.get("cursor_valid").getAsBoolean() && page.get("unread_before_page").getAsInt() == 15
+                && page.get("page_first_cursor").getAsLong() == 16 && page.get("page_last_cursor").getAsLong() == 25,
+                "initial tail window quantifies the events it skipped");
         feed.publish("world.time_phase_changed", null, "night", null);
         feed.publish("world.weather_changed", null, "rain", null);
         feed.publish("completed", UUID.randomUUID(), "other task", null);
@@ -39,10 +43,13 @@ public final class AttentionFeedTest {
         for (int i = 0; i < 300; i++) feed.publish("world.weather_changed", null, "noise", null);
         page = feed.read(1, 20, stream, task);
         check(page.get("history_lost").getAsBoolean() && page.get("resync_required").getAsBoolean(), "overflow cannot look like a reliable empty feed");
+        check(!page.get("cursor_valid").getAsBoolean() && page.has("cursor_status") && page.get("evicted_before_page").getAsLong() > 0,
+                "evicted history is announced with a recovery notice, never silently skipped");
         check(signals.get() == 1, "unsubscribe is idempotent");
         feed.clear();
         page = feed.read(cursor, 10, stream, task);
         check(page.get("stream_reset").getAsBoolean() && page.get("cursor").getAsLong() == 0, "world reset invalidates old checkpoints");
+        check(!page.get("cursor_valid").getAsBoolean() && page.has("cursor_status"), "reset pages tell the caller the cursor is gone");
         page = new AttentionFeed().read(0, 10, stream, task);
         check(page.get("stream_reset").getAsBoolean(), "restart detected even if the numeric cursor is zero");
         page = feed.read(999, 10, null, task);
