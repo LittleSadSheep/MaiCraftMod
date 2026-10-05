@@ -103,10 +103,14 @@ final class SemanticGoalContract {
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
             }
-            // 管理员命令（/tp、/give 等）默认对 AI 关闭：接单时就拒绝，不让它拿命令当捷径
-            try { AgentCommandPolicy.check(message); }
-            catch (IllegalArgumentException refused) {
-                throw violation("chat_command_not_allowed", path + ".parameters.text", ability, refused.getMessage());
+            // 管理员命令（/tp、/give 等）默认对 AI 关闭：接单时就拒绝，不让它拿命令当捷径。
+            // 恢复检查点时不查：名单收紧前已经执行过的 /tp 记录只是历史，拦它会锁住整份存档、让所有新任务都接不了；
+            // 被恢复的旧命令若要重新执行，ChatAbilityAdapter 开始执行前仍按当前名单再拒一次。
+            if (!restoredHistory) {
+                try { AgentCommandPolicy.check(message); }
+                catch (IllegalArgumentException refused) {
+                    throw violation("chat_command_not_allowed", path + ".parameters.text", ability, refused.getMessage());
+                }
             }
         }
         // 主动寻死的方式与预算必须在接管身体前确定，不能默默放宽未知参数。

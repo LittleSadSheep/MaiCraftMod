@@ -652,9 +652,10 @@ public final class IntentRuntime {
                 restoredLandmarks = 0;
                 restoredTerminal = 0;
                 status = "recovery_blocked";
+                // 日志写出具体违规（错误码、字段与原因）：只写异常类名时，排查得去翻整份检查点才知道是哪条旧任务挡住了恢复
                 Constants.LOG.warn(
-                        "MaiCraft semantic state could not be restored; the checkpoint was preserved ({})",
-                        invalidModel.getClass().getSimpleName());
+                        "MaiCraft semantic state could not be restored; the checkpoint was preserved ({}: {})",
+                        invalidModel.getClass().getSimpleName(), invalidModel.getMessage());
             }
         }
         dirty = false;
