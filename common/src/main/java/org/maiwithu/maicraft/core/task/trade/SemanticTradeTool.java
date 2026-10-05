@@ -39,7 +39,8 @@ public final class SemanticTradeTool implements MaiCraftTool {
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .string("item_id", "Requested namespaced trade output.")
-                .integer("count", "Required final main-inventory count.", 1,
+                // 内部工具仍收最终合计数（取物里的交易来源直接给目标总数）；公开交易能力在语义步骤启动时把它绑定成“再换几件”。
+                .integer("count", "Required final main-inventory count. The public maicraft:trade ability binds it as an additional count over the step's starting inventory.", 1,
                         SemanticTradeTaskRecord.MAX_FINAL_COUNT)
                 .optionalEnum("merchant_kind", "Allowed merchant family.",
                         "auto", "villager", "wandering_trader")

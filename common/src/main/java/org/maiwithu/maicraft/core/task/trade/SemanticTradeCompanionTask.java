@@ -127,7 +127,7 @@ public final class SemanticTradeCompanionTask
     }
 
     @Override
-    // 目标是背包最终至少有这么多物品，已经够了就请求收尾；正在执行的付款／收货子任务先结束。
+    // 目标是背包最终至少有这么多物品（公开交易已换算成起始已有数 + 请求件数），已经够了就请求收尾；正在执行的付款／收货子任务先结束。
     // 已有物品够数时也会进入关界面流程；当前没有先核对该界面是否由本次交易打开。
     protected TaskState onTick() {
         if (outputCount() >= r.count && !finishRequested) {
@@ -911,8 +911,14 @@ public final class SemanticTradeCompanionTask
     protected Map<String, Object> resultData() {
         Map<String, Object> data = new LinkedHashMap<>();
         int observed = outputCount();
-        data.put("goal", "final_main_inventory_count");
+        data.put("goal", r.additionalCount > 0 ? "additional_main_inventory_count" : "final_main_inventory_count");
         data.put("item_id", r.itemId.toString());
+        if (r.additionalCount > 0) {
+            // “再换几件”的请求同时给出请求件数、本步起始已有数和净增量；initial_count 只是本次子任务开始时的数量。
+            data.put("requested_additional_count", r.additionalCount);
+            data.put("baseline_count", r.baselineCount);
+            data.put("net_gained_count", observed - r.baselineCount);
+        }
         data.put("required_final_count", r.count);
         data.put("initial_count", initialOutputCount);
         data.put("observed_final_count", observed);
@@ -962,7 +968,7 @@ public final class SemanticTradeCompanionTask
                     "cancel");
             case "inventory_space_required" -> List.of(
                     "free main-inventory space, then retry",
-                    "lower the requested final count",
+                    "lower the requested count",
                     "cancel");
             case "unknown_protected_label", "only_protected_loaded_merchants" -> List.of(
                     "resolve or revise protected labels explicitly",
@@ -984,8 +990,17 @@ public final class SemanticTradeCompanionTask
 
     @Override
     protected String successMessage() {
+        if (r.additionalCount > 0) return "traded for " + countLabel() + " of " + r.itemId;
         return "traded until the real main inventory held at least " + r.count
                 + " of " + r.itemId;
+    }
+
+    /** 回执里的进度口径：公开交易说“净增/请求件数，当前与起始各几件”，内部交易来源仍说“当前/最终合计”。 */
+    private String countLabel() {
+        int observed = outputCount();
+        if (r.additionalCount <= 0) return observed + " of required final " + r.count;
+        return (observed - r.baselineCount) + "/" + r.additionalCount + " additional (carrying " + observed
+                + ", started with " + r.baselineCount + ")";
     }
 
     /** 面板行动行的一句话汇报；阶段来自当前 {@link Phase}，交易对象是已锁定的村民本地化名称。 */
@@ -1007,13 +1022,11 @@ public final class SemanticTradeCompanionTask
     @Override
     protected String timeoutMessage() {
         return "trading stopped making verifiable first-person progress; the real main inventory holds "
-                + outputCount()
-                + " of required final " + r.count;
+                + countLabel();
     }
 
     @Override
     protected String cancelledMessage() {
-        return "trading interrupted; the real main inventory holds " + outputCount()
-                + " of required final " + r.count;
+        return "trading interrupted; the real main inventory holds " + countLabel();
     }
 }

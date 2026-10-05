@@ -25,11 +25,11 @@ final class AbilitySummaries {
 
             // 取材和加工都要说明数量终点；主包目标、单次采收、扫取与切制次数不是同一个计数口径。
             case "maicraft:acquire_items" -> "Obtain count more acceptable items in the main inventory than the step started with, through selected acquisition sources and recipe prerequisites.";
-            case "maicraft:craft" -> "Reach a final inventory quantity through inventory or crafting-table recipes and permitted grid-craftable intermediates.";
+            case "maicraft:craft" -> "Obtain count more of an item than the step started with, through inventory or crafting-table recipes and permitted grid-craftable intermediates.";
             case "maicraft:harvest_block" -> "Harvest one specified observed block and settle its native drops, keeping source destruction and received output separate.";
             case "maicraft:collect_items" -> "Collect one observed drop reference or sweep nearby loose items, confirming pickup through the evidence available to that mode.";
             case "maicraft:cook" -> "Use a nearby furnace-type device to obtain the final inventory quantity, preparing ingredients and fuel and settling the current batch.";
-            case "maicraft:trade" -> "Use native merchant offers to reach a final main-inventory quantity under the selected payment policy.";
+            case "maicraft:trade" -> "Use native merchant offers to obtain count more of an item in the main inventory than the step started with, under the selected payment policy.";
             case "maicraft:stonecut" -> "Process carried input through a loaded stonecutter for the requested recipe uses and report observed inventory changes.";
 
             // 原生交互的完成效果由回执解释；丢弃可能主动开挖或点火，开箱成功也须另读实际菜单状态。

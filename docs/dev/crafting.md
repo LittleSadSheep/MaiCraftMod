@@ -1,6 +1,6 @@
 # 从背包材料到真正入包的合成产物
 
-玩家要求“做 8 支火把”时，`maicraft:craft` 要让主背包最终至少有 8 支火把。若已带 4 支，只需补 4 支；没有火把而有煤、木棍时，两批普通配方可以在背包 2×2 格内完成。做木锄、铁镐等需要较大网格的物品时，角色会寻找已放置的工作台，或摆出随身工作台，合成结束后尝试收回。
+玩家要求“做 8 支火把”时，`maicraft:craft` 的 `count` 是“再做 8 支”：本步开始时已带 4 支，目标就是主背包至少 12 支，已带的只作起始数，不算新做的；没有火把而有煤、木棍时，两批普通配方可以在背包 2×2 格内完成。做木锄、铁镐等需要较大网格的物品时，角色会寻找已放置的工作台，或摆出随身工作台，合成结束后尝试收回。
 
 这不是远程凭空生成物品，也没有“工作台留在物品栏就直接拥有 3×3 网格”的操作。放置、开菜单、摆料、取结果、入包和回收都经过原生操作。允许外出补料应使用 [acquire_items](acquiring.md)；格子合成不能代替熔炉、切石或 Create 等机器加工，EMI 能展示一种配方也不代表这里能执行它。
 
@@ -12,7 +12,7 @@
 {
   "goal": {
     "ability": "maicraft:craft",
-    "outcome": "让主背包火把达到8支",
+    "outcome": "再做8支火把",
     "parameters": {
       "item_id": "minecraft:torch",
       "count": 8
@@ -38,7 +38,7 @@
 | 字段 | 类型、默认值与边界 |
 | --- | --- |
 | `goal.parameters.item_id` | 请求产物的物品 ID 字符串，推荐明确写 `namespace:id`；最终须为已注册非空气物品。正常调用必须提供，不支持本能力的 `item_ids` 或 `item_tag`。 |
-| `goal.parameters.count` | 正常调用使用整数 1～256，默认 1；单位是最终主背包物品数，不是点击数或新增数。配方按整批产出，最后数量可能高于目标。只数快捷栏和主背包，不计副手、护甲、鼠标或工作台格子。 |
+| `goal.parameters.count` | 正常调用使用整数 1～256，默认 1；单位是要再做的件数，不是最终主背包物品数或点击数。本步第一次启动时冻结主背包已有数作为起始数，目标为起始数 + `count`；同一步 `retry`、`recover`、暂停和重启都沿用该起始数，只有 `replace_goal` 才重新起算。配方按整批产出，最后数量可能高于目标。只数快捷栏和主背包，不计副手、护甲、鼠标或工作台格子。 |
 | `goal.parameters.preferred_materials` | 物品 ID 字符串数组，必须带命名空间并存在于当前注册表；去重后最多 256 项。省略、`null`、`[]` 无偏好；数组内空白或 `null` 无效。它是贯穿中间配方的软偏好，不是指定配方 ID，也不是禁止其他材料。 |
 | `goal.target` | 推荐省略。目录当前声明 `nearest`、`prior_result`，但本能力适配器没有按目标位置寻找指定工作台；不要靠它指定异地工作面，需先单独移动。兼容路径会在 `item_id` 缺失时把 `target.label` 当作物品 ID。 |
 | `goal.preferences` / `goal.constraints` | 本能力没有自己的偏好对象字段或硬约束；材料偏好放在 `parameters.preferred_materials`。全局生命周期控制另见 [任务说明](tasks.md)，不要把坐标、槽位、点击脚本或配方编号放进自然语言以期生效。 |
@@ -91,11 +91,11 @@
 
 ## 回执怎样解释
 
-公开 `craft` 返回的是取物父任务结果。先看最终 `state`、`goal_satisfied`、`observed_final_count` 和 `missing`，再看 `attempts` 中来源为 `craft` 的 `child_data`；接单、配方选定或鼠标点击都不是库存完成证明。
+公开 `craft` 返回的是取物父任务结果。先看最终 `state`、`goal_satisfied`、`requested_additional_count`、`baseline_count`、`net_gained_count`、`required_final_count`（起始数 + 件数）、`observed_final_count` 和 `missing`，再看 `attempts` 中来源为 `craft` 的 `child_data`；接单、配方选定或鼠标点击都不是库存完成证明。
 
 | 子回执字段 | 说明 |
 | --- | --- |
-| `recipe`、`planned_batches`、`completed_batches`、`output_per_batch`、`crafted` | 配方身份与实际完成的批次、产量；`crafted` 是本次新增产量，公开 `count` 是最终库存目标。 |
+| `recipe`、`planned_batches`、`completed_batches`、`output_per_batch`、`crafted` | 配方身份与实际完成的批次、产量；`crafted` 是这一个合成子任务的新增产量；公开 `count` 是整步要再做的件数，整步净增看父回执的 `net_gained_count`。 |
 | `crafting_placement_method`、`recipe_book_unlocked` | 实际采用 `recipe_book` 或 `native_grid_clicks`，不能只凭“已解锁”推断走了哪条路径。 |
 | `crafting_grid_cleanup_verified`、`foreign_grid_preserved` | 自有材料是否归还、外来网格是否保留；强制结束可能另有 `crafting_grid_cleanup_unconfirmed_on_terminal`。 |
 | `crafting_table_placed`、`crafting_table_recovery_attempted`、`crafting_table_recovered` | 放台、尝试回收和真实回收是三项独立事实；必要时还有位置及 `crafting_table_recovery_detail`。 |

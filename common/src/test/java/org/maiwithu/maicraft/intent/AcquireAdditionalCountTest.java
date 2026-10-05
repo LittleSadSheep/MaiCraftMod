@@ -18,13 +18,15 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
+import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
+import org.maiwithu.maicraft.core.task.trade.SemanticTradeTool;
 import org.maiwithu.maicraft.core.tools.work.SemanticAcquireTool;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
 import org.maiwithu.maicraft.intent.persistence.IntentStateStore;
 import org.maiwithu.maicraft.intent.persistence.StateIdentity;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 公开取物的 count 是“再拿几件”：已带物品不算新获取，起始数随暂停、重试和重启沿用，内部组合仍给最终合计数。 */
+/** 公开取物、合成、交易的 count 是“再拿几件”：已带物品不算新获取，起始数随暂停、重试和重启沿用，其他内部组合仍给最终合计数。 */
 public final class AcquireAdditionalCountTest {
     private static final ResourceLocation OAK = ResourceLocation.parse("minecraft:oak_planks");
     private static final ResourceLocation BIRCH = ResourceLocation.parse("minecraft:birch_planks");
@@ -33,15 +35,19 @@ public final class AcquireAdditionalCountTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         // 走正式取物工具与语义父任务，不直接伪造绑定后的子任务。
         var previous = ToolRegistry.remove("acquire_items"); ToolRegistry.register(new SemanticAcquireTool());
+        var previousTrade = ToolRegistry.remove("trade_items"); ToolRegistry.register(new SemanticTradeTool());
         try {
             carriedItemsAreNotNewAcquisition();
             baselineSurvivesRestart();
             retryKeepsBaselineAndWidensFamily();
             baselineFollowsItsOriginalStep();
             legacyCheckpointKeepsFinalCount();
-            internalCraftKeepsFinalCount();
+            craftCountsAdditionally();
+            tradeCountsAdditionally();
+            legacyCraftAndTradeKeepFinalCount();
         } finally {
             ToolRegistry.remove("acquire_items"); if (previous != null) ToolRegistry.register(previous);
+            ToolRegistry.remove("trade_items"); if (previousTrade != null) ToolRegistry.register(previousTrade);
         }
         System.out.println("AcquireAdditionalCountTest: passed");
     }
@@ -126,15 +132,53 @@ public final class AcquireAdditionalCountTest {
         }
     }
 
-    private static void internalCraftKeepsFinalCount() throws Exception {
-        // craft 能力转成内部取物时仍给最终合计数；这次修改只改变公开 acquire_items 的语义。
-        var craft = new Goal("maicraft:craft", "做一块橡木板", null, "{\"item_id\":\"minecraft:oak_planks\",\"count\":1}", "{}", List.of(), List.of());
-        try (var f = new Fixture(craft)) {
+    private static Goal craft() {
+        return new Goal("maicraft:craft", "再做一块橡木板", null, "{\"item_id\":\"minecraft:oak_planks\",\"count\":1}", "{}", List.of(), List.of());
+    }
+
+    private static Goal trade() {
+        return new Goal("maicraft:trade", "再换一个面包", null, "{\"item_id\":\"minecraft:bread\",\"count\":1}", "{}", List.of(), List.of());
+    }
+
+    private static void craftCountsAdditionally() throws Exception {
+        // craft 转成内部取物后同样按“再做几件”：已带一块橡木板时目标是合计两块，起始数登记在本步。
+        try (var f = new Fixture(craft())) {
             f.world.inventory.setItem(0, new ItemStack(Items.OAK_PLANKS));
             var child = f.start();
-            check(child.additionalCount == 0 && child.count == 1 && f.parent.acquireBaselines().isEmpty(),
-                    "internal craft acquisition stays a final-count request");
+            check(child.additionalCount == 1 && child.baselineCount() == 1 && child.count == 2
+                    && f.parent.acquireBaselines().get(0).carried().equals(Map.of(OAK, 1)), "craft counts additionally from the step baseline");
         }
+        // 其他能力（如交互前取工具）里的内部取物不进增量分支，仍按最终合计数执行。
+        check(!IntentTaskRecord.countsAdditionally("maicraft:interact") && !IntentTaskRecord.countsAdditionally("maicraft:cook"),
+                "only acquire, craft and trade use additional counts");
+    }
+
+    private static void tradeCountsAdditionally() throws Exception {
+        // trade 走交易任务：已带三个面包再换一个，目标是合计四个，不因已有面包直接收尾。
+        try (var f = new Fixture(trade())) {
+            f.world.inventory.setItem(0, new ItemStack(Items.BREAD, 3));
+            f.task = new IntentTask(f.world.player, f.parent, f.runtime);
+            check(f.task.tick(f.world.player) == TaskState.RUNNING, "trade step starts its child");
+            var child = (SemanticTradeTaskRecord) field(IntentTask.class, "childRecord").get(f.task);
+            check(child.additionalCount == 1 && child.baselineCount == 3 && child.count == 4,
+                    "trade counts additionally from the step baseline");
+            // 重启前吃掉一个面包，恢复后新建的交易子任务仍以三个为起始数，不按恢复时的两个重算。
+            f.save(f.snapshot()); f.world.inventory.setItem(0, new ItemStack(Items.BREAD, 2)); f.restore();
+            f.task = new IntentTask(f.world.player, f.parent, f.runtime); f.task.tick(f.world.player);
+            var resumed = (SemanticTradeTaskRecord) field(IntentTask.class, "childRecord").get(f.task);
+            check(resumed.baselineCount == 3 && resumed.count == 4, "restart keeps the trade baseline");
+        }
+    }
+
+    private static void legacyCraftAndTradeKeepFinalCount() {
+        // 升级前保存的合成、交易步骤同样按旧版最终合计数恢复。
+        var parent = new IntentTaskRecord(UUID.randomUUID(), null,
+                new Goal("maicraft:sequence", "合成后交易", null, "{}", "{}", List.of(), List.of(craft(), trade())));
+        var root = IntentStateCodec.encode("a".repeat(64), List.of(), List.of(parent), Map.of(), List.of());
+        root.getAsJsonArray("tasks").get(0).getAsJsonObject().remove("acquire_count_baselines");
+        var decoded = IntentStateCodec.decode(root).tasks().getFirst().acquireBaselines();
+        check(decoded.size() == 2 && decoded.values().stream().allMatch(IntentTaskRecord.AcquireBaseline::legacyFinalCount),
+                "legacy craft and trade steps keep final-count semantics");
     }
 
     private static final class Fixture implements AutoCloseable {
@@ -170,7 +214,7 @@ public final class AcquireAdditionalCountTest {
         void flush() { while (!writes.isEmpty()) writes.removeFirst().run(); }
         void restore() throws Exception {
             UUID id = parent.externalId(); newRuntime();
-            var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class); restore.setAccessible(true); restore.invoke(runtime, 100L);
+            var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class, String.class); restore.setAccessible(true); restore.invoke(runtime, 100L, "session_start");
             runtime.requireRecoveredState(); parent = runtime.task(id);
             check(parent != null && parent.restoredDetached() && parent.resume(), "disk-restored parent can resume explicitly");
             runtime.restoredTaskAttached(parent);

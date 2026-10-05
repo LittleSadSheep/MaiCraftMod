@@ -1,6 +1,6 @@
 # 交易：先看真实报价，再花背包里的东西
 
-`maicraft:trade` 要让主背包里的某种物品达到最终数量。例如已经有 2 个面包，要求 `count: 8`，缺的是 6 个；不是再买 8 次。主背包含快捷栏，不包含副手和装备。成品、付款和报价都按游戏里实际同步的数据处理，不生成物品，不给商人刷报价。
+`maicraft:trade` 的 `count` 是“再换到几件”。例如本步开始时已经有 2 个面包，要求 `count: 8`，目标就是主背包至少 10 个面包；已带的只作起始数，不算新换到的，也不是交易 8 次。主背包含快捷栏，不包含副手和装备。成品、付款和报价都按游戏里实际同步的数据处理，不生成物品，不给商人刷报价。
 
 ## 一份完整请求
 
@@ -10,7 +10,7 @@
 {
   "goal": {
     "ability": "maicraft:trade",
-    "outcome": "用绿宝石把面包补到八个",
+    "outcome": "用绿宝石再换八个面包",
     "parameters": {
       "item_id": "minecraft:bread",
       "count": 8,
@@ -28,7 +28,7 @@
 | 字段 | 类型、默认和实际含义 |
 | --- | --- |
 | `item_id` | 目标成品 ID 字符串；正常请求应显式填写，执行时须为已安装的非空气物品。缺少时适配器提出决定；旧实现还会把 `target.label` 当成物品 ID，不能依赖它表示交易地点 |
-| `count` | 主背包最终数量，约定整数 1～256，默认 1。当前适配器对省略、`null` 或非原始 JSON 值用默认数，对数字先转整数再夹到边界；因此 0 变成 1，257 变成 256，小数可能截断，数字字符串也可能接受。这是现有宽松解析，不是严格拒绝 |
+| `count` | 要再换到的件数，约定整数 1～256，默认 1。本步第一次启动时冻结主背包已有数作为起始数，目标为起始数 + `count`；同一步 `retry`、`recover`、暂停和重启都沿用该起始数，只有 `replace_goal` 才重新起算。当前适配器对省略、`null` 或非原始 JSON 值用默认数，对数字先转整数再夹到边界；因此 0 变成 1，257 变成 256，小数可能截断，数字字符串也可能接受。这是现有宽松解析，不是严格拒绝 |
 | `merchant_kind` | 字符串 `auto`、`villager`、`wandering_trader`，默认 `auto`；省略、`null`、空白或非字符串目前也落到 `auto`。兼容 `any`、`trader`、`wandering-trader`，大小写和首尾空白会整理 |
 | `allowed_payment_items` | 允许花费的物品 ID 数组。省略、`null`、`[]` 都是**仅允许绿宝石**，不是任意付款，也不是禁止交易。显式清单要求报价中两种付款物品都在名单内；不合法或未知物品拒绝 |
 | `protected_labels` | 已记住的地点名数组；省略或 `[]` 不新增地点保护。公开目标拒绝 `null`、空白或非字符串成员；未知地标在执行时失败。商人有自定义名字时始终排除 |
@@ -77,7 +77,7 @@
 
 ## 结果与打断
 
-`required_final_count`、`initial_count`、`observed_final_count` 和 `goal_satisfied` 是数量账；`completed_trades` 是当前流程确认的收货轮数，不能据此倒推出精确花费。`selected_payment` 和 `selected_output_count_per_trade` 描述最后选用的报价，并不是完整累计消费明细。
+`requested_additional_count`（请求件数）、`baseline_count`（本步起始数）、`net_gained_count`（当前数减起始数）、`required_final_count`（起始数 + 件数）、`initial_count`（本次交易子任务开始时的数量）、`observed_final_count` 和 `goal_satisfied` 是数量账；`completed_trades` 是当前流程确认的收货轮数，不能据此倒推出精确花费。`selected_payment` 和 `selected_output_count_per_trade` 描述最后选用的报价，并不是完整累计消费明细。
 
 `observed_offer_outcomes` 汇总试过的报价问题，`observed_payment_item_candidates` 列出观察到的付款种类。缺钱、没空间、无货、付款政策拒绝和没有报价分别说明，不统一称“找不到商人”。`outcome_uncertain` 表示尚未确认的付款、取货或关闭；有未知项就先读回执和现场，不能直接再买一次。
 

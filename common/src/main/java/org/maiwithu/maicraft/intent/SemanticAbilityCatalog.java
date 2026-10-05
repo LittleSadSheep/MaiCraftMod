@@ -624,20 +624,20 @@ public final class SemanticAbilityCatalog {
                             field("allow_rare_consumables", "boolean", "Explicitly permits the real ender-pearl use required for End Gateway traversal; default false."),
                             field("protected_labels", "array<string>", "Remembered areas or possessions that must not be touched.")));
             case "maicraft:craft" -> contract(
-                    // 先解释最终库存、真实工作面与逐批原生确认，再交代旧参数转换和未接通目标位置，避免目录承诺超出执行器。
-                    "用途：让当前主背包及快捷栏中的指定物品最终达到 count；已携带数量计入目标，整批配方可使结果略多。参数放在 goal.parameters，材料倾向不是 goal.preferences。"
+                    // 先解释“再做几件”、真实工作面与逐批原生确认，再交代旧参数转换和未接通目标位置，避免目录承诺超出执行器。
+                    "用途：让当前主背包及快捷栏中的指定物品比本步开始时再多 count 件；已携带数量只作起始数，不算新做的，整批配方可使结果略多。参数放在 goal.parameters，材料倾向不是 goal.preferences。"
                             + " 入口复用取物任务，固定获取来源 inventory、craft；可原生取出支持的 Sophisticated Backpacks 随身包现货，并递归合成中间件。不会因缺料自动取世界容器或 AE 现货、挖矿、烧炼、采收、交易或狩猎；这些应另用 acquire_items 并明确来源。容量受阻后的整理可能把不需物品存入随身包或可用随身 AE，此存入分支与获取许可分开。"
                             + " 过程：先核对最终库存，再选普通配方和工作面；2×2 配方用背包网格，较大配方使用已放置的可用台、摆出随身台，或在原来源内先补一张台。需要真实已加载摆放位置与原生交互，不把背包中的台当作远程 3×3 网格。已持有一张台不追加造第二张；中间件到包后，在已提交子动作结清后收起旧材料分支。"
                             + " 配方书可用时原生摆料，否则用原生材料谓词和逐格点击；逐批等待准确产物、组件、数量和实际入包，归还自有网格材料并关闭菜单，再尝试回收登记的临时台。不会清走外来光标或网格物品；回收失败可保留合成成功与未回收事实。机器加工、特殊配方及未识别的模组桌面不保证支持。"
-                            + " plan 接受不代表材料够或工作面可用；execute 返回 accepted 只说明登记。跟随 next_attention，看最终 state、goal_satisfied、observed_final_count、missing，以及 attempts[].child_data 的 recipe、crafted、completed_batches、crafting_placement_method、crafting_grid_cleanup_verified 和三项工作台放置/回收字段。recipe_trace 的材料账只用于规划，feasible 不证明原料已在世界中可得。"
+                            + " plan 接受不代表材料够或工作面可用；execute 返回 accepted 只说明登记。跟随 next_attention，看最终 state、goal_satisfied、requested_additional_count、baseline_count、net_gained_count、required_final_count（起始数+count）、observed_final_count、missing，以及 attempts[].child_data 的 recipe、crafted、completed_batches、crafting_placement_method、crafting_grid_cleanup_verified 和三项工作台放置/回收字段。recipe_trace 的材料账只用于规划，feasible 不证明原料已在世界中可得。"
                             + " 失败先读具体 failure_code、failure_detail、issues 和未知效果；NO_SPACE 也可能是光标/网格占用，不能只据父层容量摘要重复调用。按当前 decision_id 和列出的 choice 答复，retry 的参数放 details.parameters，前置或换目标用 details.goal。暂停不回滚原生操作，取消保留既有物品和世界变化；重启/换世界后未完成语义任务先暂停，不复用旧菜单或临时台所有权。"
                             + " 目标位置边界：目录虽保留 nearest、prior_result，但适配器不按它们定位异地工作台；请省略 target，异地操作先 travel。缺 item_id 时只存在 target.label 作为物品编号的兼容回退。数量原始值未在计划阶段严格校验，具体宽松转换见 count。"
-                            + " 完整 plan 工具参数示例：{\"goal\":{\"ability\":\"maicraft:craft\",\"outcome\":\"让主背包火把达到8支\",\"parameters\":{\"item_id\":\"minecraft:torch\",\"count\":8}}}",
+                            + " 完整 plan 工具参数示例：{\"goal\":{\"ability\":\"maicraft:craft\",\"outcome\":\"再做8支火把\",\"parameters\":{\"item_id\":\"minecraft:torch\",\"count\":8}}}",
                     targets("nearest", "prior_result"),
                     fields(
                             field("item_id", "resource_id", "goal.parameters.item_id：正常调用必填的产物物品 ID，推荐 namespace:id；执行时须为已注册非空气物品。省略/null 沿兼容路径尝试 target.label，仍无编号则要求补充；不接受本能力的物品数组或标签字段。"),
                             field("preferred_materials", "array<resource_id>", "goal.parameters.preferred_materials：可选软偏好，必须是带命名空间的真实物品 ID，去重后最多256种；省略/null/[] 为无偏好，数组中的空白/null 不合法。可影响中间配方；现货覆盖优先，偏好不可用时保留其他路线，不扩大获取来源。"),
-                            field("count", "integer", "goal.parameters.count：推荐整数1..256，默认1，单位为最终主背包数量，不是新增数量或点击次数。当前适配器对省略/null/对象/数组采用默认1，对原始标量先 getAsInt 再夹到1..256；因此0变1，小数可能截断、数字字符串可能被接收，非法转换可能到执行时才失败。不要依赖这些宽松行为；acquire_items 的数量检查更严格。")));
+                            field("count", "integer", "goal.parameters.count：推荐整数1..256，默认1，单位为要再做的件数，不是最终主背包数量或点击次数。本步第一次启动时冻结主背包已有数作为起始数，目标为起始数+count；同一步 retry、recover 补前置、暂停和重启都沿用该起始数，只有 replace_goal 才重新起算。当前适配器对省略/null/对象/数组采用默认1，对原始标量先 getAsInt 再夹到1..256；因此0变1，小数可能截断、数字字符串可能被接收，非法转换可能到执行时才失败。不要依赖这些宽松行为；acquire_items 的数量检查更严格。")));
             case "maicraft:cook" -> contract(
                     // 目标总数、单炉投入与已收产物分别记账，取消或未知同步不能抹掉已经发生的加工。
                     "从当前位置用普通熔炉、高炉或烟熏炉补足主背包最终成品数量，快捷栏计入，副手和穿戴栏不计。目标已有足量直接收尾；count 不是新增量。成品范围是一切熔炉族配方的产物，不只食物：熟食、铁锭/铜锭等金属锭、石头、玻璃、木炭都在内。立项前提是整批原料与燃料能从 allowed_sources 一次备齐（每份原料烧 200 刻，1 木棍供 100 刻，烧 11 锭约需 22 木棍）；备不齐时任务终态失败，回执 planning_diagnosis 点名堵在原料、燃料还是设备层并给出需要量与可见量。参数放 goal.parameters；target 省略、null 或无附加限定的 nearest，去其他地方先用 sequence 旅行。"
@@ -679,18 +679,18 @@ public final class SemanticAbilityCatalog {
                             field("output_item_id", "resource_id", "goal.parameters.output_item_id 必填已安装非空气产物ID字符串；装入输入后按真实菜单列表匹配。没有配方明确失败，不接受recipe索引或输出槽号。"),
                             field("count", "integer", "goal.parameters.count 为配方次数，整数1～64，省略默认1。0、负数、分数和越界值拒绝，null/布尔值无效；当前转换也接受可精确转整数的数字字符串。每次一份原料，最终一比一成品核对仍是已知实现限制。")));
             case "maicraft:trade" -> contract(
-                    // 真实报价决定付款和原生产物，最终库存数量与每笔效果、未知收尾分开呈现。
-                    "从真实已加载村民或流浪商人的报价中购买，让主背包含快捷栏的目标物品达到最终数量，副手与装备不计；已有数量足够直接收尾。参数放goal.parameters，不提供实体ID、报价下标、槽号或点击脚本。"
+                    // 真实报价决定付款和原生产物，“再换几件”的目标与每笔效果、未知收尾分开呈现。
+                    "从真实已加载村民或流浪商人的报价中购买，让主背包含快捷栏的目标物品比本步开始时再多 count 件，副手与装备不计；已带的只作起始数，不算新换到的。参数放goal.parameters，不提供实体ID、报价下标、槽号或点击脚本。"
                             + "目录接受nearest、area、landmark、prior_result，但适配器未将地点传给执行器，始终从当前位置搜索；命名目标要label、前序目标要relation，仍不能据此承诺定点交易。要去别处先旅行，并显式给item_id，旧target.label回退为物品名不要当地点用。"
                             + "先退出挡路界面，找成年、有交易职业、非自定义命名且不在保护地标水平12格内的商人，按距离走近空手开菜单，读取真实报价，原生搬付款、取结果，观察主背包目标物品增加，够数后退余款关界面。默认没有绿宝石时不开商人菜单；不自动补钱、升级商人或等补货。"
                             + "当前每条报价必须单独供应并支付全部缺额，不能拼单；只按付款组合默认匹配而未主动选择报价；成品空间按付款前计算。商人菜单仍只按类型识别，收尾可能关闭别的当前页面。completed_trades仅计确认的取货轮数，selected_payment是最后报价而非累计消费明细；精确付款消耗和产量未完整逐笔核对。"
-                            + "读goal_satisfied、observed_final_count、observed_offer_outcomes、observed_payment_item_candidates、outcome_uncertain。取消不退款，已提交但未知的付款/取货不要盲目重复；当前取消子任务的回执传递仍不完整。普通暂停保留内存阶段，死亡/换世界/重启不恢复商人菜单与付款账，未完成父任务先暂停，再执行前核对库存。实际失败默认终态，内部decision只是恢复建议；有真实decision_id才回答，同次网络重试复用request_key。"
-                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:trade\",\"outcome\":\"用绿宝石补足八个面包\",\"parameters\":{\"item_id\":\"minecraft:bread\",\"count\":8,\"merchant_kind\":\"villager\",\"allowed_payment_items\":[\"minecraft:emerald\"],\"radius\":32}}}。"
+                            + "读goal_satisfied、requested_additional_count、baseline_count、net_gained_count、required_final_count（起始数+count）、observed_final_count、observed_offer_outcomes、observed_payment_item_candidates、outcome_uncertain。取消不退款，已提交但未知的付款/取货不要盲目重复；当前取消子任务的回执传递仍不完整。普通暂停保留内存阶段，死亡/换世界/重启不恢复商人菜单与付款账，未完成父任务先暂停，再执行前核对库存。实际失败默认终态，内部decision只是恢复建议；有真实decision_id才回答，同次网络重试复用request_key。"
+                            + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:trade\",\"outcome\":\"用绿宝石再换八个面包\",\"parameters\":{\"item_id\":\"minecraft:bread\",\"count\":8,\"merchant_kind\":\"villager\",\"allowed_payment_items\":[\"minecraft:emerald\"],\"radius\":32}}}。"
                             + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:trade\",\"outcome\":\"按默认绿宝石政策买一个面包\",\"parameters\":{\"item_id\":\"minecraft:bread\"}}}。",
                     targets("nearest", "area", "landmark", "prior_result"),
                     fields(
                             field("item_id", "resource_id", "goal.parameters.item_id 为想换到的已安装非空气物品ID字符串，正式请求显式必填。缺少时可能提出决定，旧实现还会取target.label作物品名；它不指定商人地点。"),
-                            field("count", "integer", "goal.parameters.count 约定为最终主背包整数1～256，默认1，不是交易次数或新增量。当前适配器对省略/null/非原始值用1，数字先转整数再夹取，0变1、超限变256、小数可能截断、数字字符串可能接受；布尔或不可转换字符串可能失败，不用作开关。"),
+                            field("count", "integer", "goal.parameters.count 为要再换到的件数，整数1～256，默认1，不是交易次数或最终主背包数量。本步第一次启动时冻结主背包已有数作为起始数，目标为起始数+count；同一步 retry、recover 补前置、暂停和重启都沿用该起始数，只有 replace_goal 才重新起算。当前适配器对省略/null/非原始值用1，数字先转整数再夹取，0变1、超限变256、小数可能截断、数字字符串可能接受；布尔或不可转换字符串可能失败，不用作开关。"),
                             field("merchant_kind", "string", "goal.parameters.merchant_kind 为auto、villager、wandering_trader。省略/null/空白/非字符串目前为auto；大小写与首尾空白整理。兼容any、trader、wandering-trader；不自动变更职业或解锁报价。"),
                             field("allowed_payment_items", "array<resource_id>", "goal.parameters.allowed_payment_items 为允许花费的已安装物品ID字符串数组；省略/null/[]都只允许绿宝石，不是任意付款或禁止交易。非空名单要求报价两种成本都被允许；数组成员须非空字符串，未知物品拒绝。选择付款政策是已授权任务内策略，不自动增加人工审批。"),
                             field("protected_labels", "array<string>", "goal.parameters.protected_labels 为已记住地点名数组；省略/[]不新增保护，公开请求拒绝null及空白/非字符串成员。未知名字失败；同维度锚点水平12格内商人排除，不看高度。自定义命名商人始终排除。"),

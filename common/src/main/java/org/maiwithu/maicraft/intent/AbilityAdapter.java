@@ -708,7 +708,8 @@ final class AbilityAdapter {
     }
 
     private static IntentAction craft(Goal goal) {
-        // 转成 inventory、craft 两种获取来源的最终主包需求；inventory 可取支持的随身背包现货，不自动取世界箱子或采矿。
+        // 转成 inventory、craft 两种获取来源的内部取物；count 是“再做几件”，语义步骤启动时按背包已有数换算成最终目标。
+        // inventory 可取支持的随身背包现货，不自动取世界箱子或采矿。
         // 缺中间件及工作台由同一取物链继续准备，已够目标数量时不再追加合成；位置目标未交给这个入口处理。
         // count 仍沿通用宽松转换夹到 1～256，材料偏好再由取物 API 校验；不能把计划接受说成已严格验证原始数值。
         JsonObject parameters = goal.parameters();
@@ -731,7 +732,8 @@ final class AbilityAdapter {
     }
 
     private static IntentAction trade(Goal goal) {
-        // 传递成品、最终数量与付款政策；当前不把目标地点传给交易任务，商人仍从角色当前位置选择。
+        // 传递成品、请求件数与付款政策；count 是“再换几件”，语义步骤启动时按背包已有数换算成最终目标。
+        // 当前不把目标地点传给交易任务，商人仍从角色当前位置选择。
         JsonObject parameters = goal.parameters();
         String item = itemId(goal, parameters);
         if (item == null) {
