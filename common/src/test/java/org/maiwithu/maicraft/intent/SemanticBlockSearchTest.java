@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.core.task.locate.SemanticBlockSearchTaskRecord;
 import org.maiwithu.maicraft.core.tools.work.SemanticBlockSearchApi;
 import org.maiwithu.maicraft.core.scan.ObservationVisibilityTest;
 import org.maiwithu.maicraft.core.scan.LoadedBlockScanTest;
+import org.maiwithu.maicraft.core.scan.RecentBlockWrites;
 import java.util.UUID;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -33,6 +34,8 @@ public final class SemanticBlockSearchTest {
         adapterCompilesSelectorsAndRejectsUnknown();
         apiClampsAndRecordRejectsInvalid();
         scanReportsCountsAndVerifiedCoordinate();
+        freshWriteIsObservedBeforeScanOrderReachesIt();
+        recentWriteTrailCapsAndExpires();
         deepMatchesReportThreeDimensionalDistance();
         absenceFailsWithHonestScopeNote();
         denseHiddenStoneConvergesWithProgress();
@@ -150,6 +153,56 @@ public final class SemanticBlockSearchTest {
             // 公开坐标可供后续能力使用，但不能携带运行时 BlockPos 对象；最近位置必须是刚才真正看见的目标。
             check(Map.of("x", 2, "y", 1, "z", 2).equals(data.get("nearest_match_position")), "nearest coordinate belongs to the verified match");
             check(noRuntimePositions(data), "runtime position objects stay inside the executor");
+        }
+    }
+
+    /**
+     * 写后读序：place_block 成功后立即 find_block，扫描格序先经过更早入序的旧命中且 count 满足即收束，
+     * 刚落格的方块可能整轮不被看到。最近写入快照先于常规游标核查，让刚放置的格子成为可见证据。
+     */
+    private static void freshWriteIsObservedBeforeScanOrderReachesIt() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            RecentBlockWrites.clear();
+            h.position(new Vec3(4.5, 1, 4.5));
+            // 原点格 (4,1,4)：(6,1,5) 在游标格序（x→z 打包递增）里先出现却相距 sqrt5；
+            // (4,1,6) 游标靠后却相距 2。按旧序 count=1 会在 (6,1,5) 收束，刚写入的 (4,1,6) 整轮不被看到。
+            BlockPos stale = new BlockPos(6, 1, 5), fresh = new BlockPos(4, 1, 6);
+            h.set(stale, Blocks.STONECUTTER.defaultBlockState());
+            h.set(fresh, Blocks.STONECUTTER.defaultBlockState());
+            // 模拟原生放置确认后的客户端同步：mixin 在 onBlockStateChange 记录，测试显式喂入同一路径。
+            RecentBlockWrites.record(h.level, fresh);
+            // 已记录但现场不是目标的格子（如同步到的破坏）不得成为证据。
+            RecentBlockWrites.record(h.level, new BlockPos(8, 1, 8));
+            var record = SemanticBlockSearchApi.newRecord(CONTEXT, List.of("minecraft:stonecutter"), 1, 64);
+            var task = new SemanticBlockSearchCompanionTask(h.player, record);
+            task.start(h.player);
+            var state = runToTerminal(h, task);
+            check(state == TaskState.SUCCESS, "a freshly written cell is verified by the same-tick query");
+            var data = task.result(TaskState.SUCCESS).data();
+            // 游标收束语义会再核查一个格序候选，旧命中也会入集；刚写入的格子必须先入集并赢下最近距离。
+            check(Integer.valueOf(2).equals(data.get("observed_acceptable_count")),
+                    "the recent-write pre-check observes the fresh cell before the cursor order does");
+            check(Map.of("x", 4, "y", 1, "z", 6).equals(data.get("nearest_match_position")),
+                    "the just-placed cell is the reported nearest match, not an earlier cursor hit");
+            check(data.get("write_visibility_note") != null,
+                    "the receipt names the residual write-visibility window honestly");
+        } finally {
+            RecentBlockWrites.clear();
+        }
+    }
+
+    /** 最近写入轨迹的容量与保鲜：超限淘汰最旧、过期条目不再交付，读侧只见窗口内的位置。 */
+    private static void recentWriteTrailCapsAndExpires() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            RecentBlockWrites.clear();
+            for (int i = 0; i < 300; i++) RecentBlockWrites.record(h.level, new BlockPos(i & 15, 1, i >> 4 & 15));
+            var trail = RecentBlockWrites.recent(h.level);
+            check(trail.size() == 256, "the per-world write trail stays within its capacity");
+            check(trail.get(0).equals(new BlockPos(299 & 15, 1, 299 >> 4 & 15)), "newest writes come first");
+            check(trail.get(255).equals(new BlockPos(44 & 15, 1, 44 >> 4 & 15)), "the oldest survivors keep the cutoff");
+            for (int tick = 0; tick < 101; tick++) h.nextTick();
+            check(RecentBlockWrites.recent(h.level).isEmpty(), "writes older than the fresh window are not delivered");
+            RecentBlockWrites.clear();
         }
     }
 
