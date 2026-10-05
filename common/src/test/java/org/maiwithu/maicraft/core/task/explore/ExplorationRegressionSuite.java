@@ -31,6 +31,7 @@ public final class ExplorationRegressionSuite {
         TerrainFeatureMemoryTest.main(args);
         StructureSightingMemoryTest.main(args);
         SurfaceColumnClassificationTest.main(args);
+        WaterCrossingDecisionTest.main(args);
         ExplorationMemoryStoreTest.main(args);
         McpProtocolBudgetTest.main(args);
         System.out.println("ExplorationRegressionSuite: passed");

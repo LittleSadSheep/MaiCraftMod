@@ -746,7 +746,8 @@ public final class SemanticExploreCompanionTask
         return null;
     }
 
-    // 优先返回不穿水的最远已加载路段；全线皆水回退最远已加载路段，岛屿环境不卡死。
+    // 优先返回不穿水的最远已加载路段；全线皆水回退最近已加载路段，缩短穿水承诺，
+    // 岛屿环境不卡死。
     private BlockPos loadedFrontierToward(
             ClientLevel level, BlockPos desired, Predicate<BlockPos> avoidWater) {
         BlockPos current = player.blockPosition();
@@ -762,7 +763,7 @@ public final class SemanticExploreCompanionTask
             if (!insideScope(x, z) || !columnLoaded(level, x, z)) continue;
             BlockPos candidate = new BlockPos(x, current.getY(), z);
             if (avoidWater == null) return candidate;
-            if (fallback == null) fallback = candidate;
+            fallback = candidate;
             if (!avoidWater.test(candidate)) return candidate;
         }
         return avoidWater == null ? null : fallback;
