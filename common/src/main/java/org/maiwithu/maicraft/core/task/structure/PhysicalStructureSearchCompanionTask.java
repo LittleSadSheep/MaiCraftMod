@@ -94,6 +94,8 @@ public final class PhysicalStructureSearchCompanionTask
     private static final int SCOPE_TOLERANCE = 8;
     /** 换锚的小半径：沿垂直方位横移这段距离再继续前沿腿，不远离原搜索扇区。 */
     private static final double RELOCATION_HOP_BLOCKS = 32.0;
+    /** 主动路线腿意外丢失时允许的重建次数；再丢才按内部错误终态失败。 */
+    private static final int MAX_INTERNAL_ROUTE_RECOVERIES = 1;
 
     private final FirstPersonActionGate eyeSelection = new FirstPersonActionGate();
     private final Set<Long> rejectedEvidence = new HashSet<>();
@@ -149,6 +151,7 @@ public final class PhysicalStructureSearchCompanionTask
     private BlockPos relocateTarget;
     private BlockPos activeMoveTarget;
     private boolean eyeConsumptionUnverified;
+    private int internalRouteRecoveries;
 
     /**
      * 同一游戏会话内共享的投眼方向记忆（按维度+结构键控）：死亡或任务重启后沿上次
@@ -239,7 +242,9 @@ public final class PhysicalStructureSearchCompanionTask
         Constants.LOG.info(
                 "[maicraft-task] stronghold search resumed along remembered eye direction {} (age {} ticks)",
                 stored.direction(), player.level().getGameTime() - stored.gameTime());
-        stage = Stage.MOVE_DIRECTION;
+        // 续走必须先经路线截取建立移动腿，不能空腿直接进入行进阶段：
+        // 空腿会在首个行进刻命中路线丢失检查，且方向记忆跨任务共享，会让每次重提都立刻失败。
+        continueDirectionTravel();
     }
 
     @Override
@@ -583,11 +588,7 @@ public final class PhysicalStructureSearchCompanionTask
     // 收取这一小段路的结果。靠近要塞线索失败就停止，不为已经找到的位置继续耗眼；普通探索走不通则换方向。
     private TaskState tickMove(boolean evidenceMove, boolean directionMove) {
         if (moveChild == null) {
-            failIssue(
-                    "internal_route_lost",
-                    "The active first-person route disappeared.",
-                    FailureType.INTERNAL);
-            return TaskState.FAILED;
+            return recoverLostRouteLeg(evidenceMove, directionMove);
         }
         TaskState terminal;
         if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
@@ -659,6 +660,34 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     /**
+     * 主动路线腿意外丢失时的有界自恢复：按当前阶段重建一次移动腿，再丢才按内部错误
+     * 终态失败。重建本身可能如实失败（前沿耗尽、方向截不出路段），话术随失败路径携带。
+     */
+    private TaskState recoverLostRouteLeg(boolean evidenceMove, boolean directionMove) {
+        if (internalRouteRecoveries >= MAX_INTERNAL_ROUTE_RECOVERIES) {
+            failIssue(
+                    "internal_route_lost",
+                    "The active first-person route disappeared again after "
+                            + internalRouteRecoveries + " bounded leg-rebuild recovery.",
+                    FailureType.INTERNAL);
+            return TaskState.FAILED;
+        }
+        internalRouteRecoveries++;
+        Constants.LOG.warn(
+                "[maicraft-task] structure search lost its active route leg; rebuilding once"
+                        + " (stage={})",
+                stage);
+        if (evidenceMove && activeEvidence != null) {
+            startMove(activeEvidence.position(), true);
+            return TaskState.RUNNING;
+        }
+        if (directionMove && pendingDirection != null) {
+            return continueDirectionTravel();
+        }
+        return beginFrontierTravel();
+    }
+
+    /**
      * 前沿腿失败的升级处置。RELOCATED 时沿建议方位截取已加载落点发起换锚腿；
      * 截不出落点视同换锚失败，继续下一级（第二次换锚用对侧方位），轮换与受阻语义不变。
      */
@@ -693,9 +722,17 @@ public final class PhysicalStructureSearchCompanionTask
     /** 换锚腿结束：到达即从新发射点继续前沿腿；失败按换锚失败继续升级，不在坏锚点原地再烧一窗腿。 */
     private TaskState tickRelocateAnchor() {
         if (moveChild == null) {
-            failIssue("internal_route_lost", "The active first-person route disappeared.",
-                    FailureType.INTERNAL);
-            return TaskState.FAILED;
+            if (internalRouteRecoveries >= MAX_INTERNAL_ROUTE_RECOVERIES) {
+                failIssue("internal_route_lost", "The active first-person route disappeared again"
+                        + " after " + internalRouteRecoveries + " bounded leg-rebuild recovery.",
+                        FailureType.INTERNAL);
+                return TaskState.FAILED;
+            }
+            internalRouteRecoveries++;
+            Constants.LOG.warn(
+                    "[maicraft-task] structure search lost its relocation leg; escalating frontier"
+                            + " recovery instead of failing (stage={})", stage);
+            return handleFrontierLegFailure(true);
         }
         TaskState terminal;
         if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
@@ -941,9 +978,9 @@ public final class PhysicalStructureSearchCompanionTask
     /** 换位移动结束：到达即回到投眼选择；失败或超时按原站姿话术失败，不无限换位。 */
     private TaskState tickRelocateStance() {
         if (moveChild == null) {
-            failIssue("internal_route_lost", "The active first-person route disappeared.",
-                    FailureType.INTERNAL);
-            return TaskState.FAILED;
+            // 换位腿意外丢失时回到投眼选择：站姿检查会再次发起有界换位，次数上限仍由 stanceEscapes 把守。
+            stage = Stage.SELECT_EYE;
+            return TaskState.RUNNING;
         }
         TaskState terminal;
         if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
@@ -1148,6 +1185,7 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_sector_rotations", frontierBreaker.rotations());
         data.put("frontier_relocations", frontierBreaker.relocations());
         data.put("evidence_approaches", evidenceApproaches);
+        data.put("internal_route_recoveries", internalRouteRecoveries);
         if (!legFailures.isEmpty()) {
             data.put("travel_failures", List.copyOf(legFailures));
         }
@@ -1258,6 +1296,21 @@ public final class PhysicalStructureSearchCompanionTask
             options.add(Map.of(
                     "choice", "stop",
                     "description", "Stop without widening the search goal."));
+            return List.copyOf(options);
+        }
+        if ("internal_route_lost".equals(issueCode)) {
+            options.add(Map.of(
+                    "choice", "retry",
+                    "description",
+                    "Resubmit the search; one automatic leg-rebuild already ran and failed again,"
+                            + " so a fresh task starts from a clean route state."));
+            options.add(Map.of(
+                    "choice", "travel_elsewhere",
+                    "description",
+                    "Travel to different terrain and resubmit; route acquisition kept failing here."));
+            options.add(Map.of(
+                    "choice", "stop",
+                    "description", "Stop the search; this is an internal defect worth reporting."));
             return List.copyOf(options);
         }
         options.add(Map.of(
