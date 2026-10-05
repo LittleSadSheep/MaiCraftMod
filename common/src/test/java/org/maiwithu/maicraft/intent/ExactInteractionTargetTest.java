@@ -286,6 +286,7 @@ public final class ExactInteractionTargetTest {
         }
         igniteWithVisibleFire(true);
         igniteWithVisibleFire(false);
+        ignitePortalConversion();
     }
 
     private static IntentAction adaptFlint(Goal goal, InteractionWorldTestHarness f) throws Exception {
@@ -349,6 +350,39 @@ public final class ExactInteractionTargetTest {
                 check(!(f.level.getBlockState(TARGET.relative(visible == null ? Direction.UP : visible.getDirection())).getBlock() instanceof BaseFireBlock),
                         "the failing replay keeps the world without fire");
             }
+        }
+    }
+
+    /** 有效门框把火直接换成传送门方块：点火对账必须认账并回报传送门证据，不得误判为失败。 */
+    private static void ignitePortalConversion() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            f.position(new Vec3(3.5, 1, .5));
+            f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            f.set(TARGET, Blocks.STONE.defaultBlockState());
+            var record = compile(adaptFlint(flintGoal(TARGET, f), f), f);
+            check(record.aim.equals(TARGET) && record.expectIgnition,
+                    "the portal ignition keeps the exact aim and the fire check");
+            var task = new InteractAtCompanionTask(f.player, record); task.start(f.player);
+            TaskState state = TaskState.RUNNING;
+            boolean clicked = false;
+            for (int tick = 0; tick < 160 && state == TaskState.RUNNING; tick++) {
+                var hit = FirstPersonInteractionTargeting.visibleBlockHit(
+                        f.level, f.player, f.player.getEyePosition(), TARGET, 4.5);
+                if (hit != null) aim(f, hit.getLocation());
+                f.nextTick(); state = task.tick(f.player);
+                if (f.blockUses() == 1 && !clicked) {
+                    clicked = true;
+                    // 服务端在有效门框中同一刻把火换成传送门：落格只见 nether_portal，从不见 fire。
+                    f.set(TARGET.relative(hit.getDirection()), Blocks.NETHER_PORTAL.defaultBlockState());
+                    f.level.acknowledgedSequence = f.level.blockSequence;
+                }
+            }
+            check(state == TaskState.SUCCESS && clicked,
+                    "a confirmed ignition that becomes a nether portal succeeds: " + state);
+            var data = task.result(state).data();
+            check(Boolean.TRUE.equals(data.get("fire_observed")) && Boolean.TRUE.equals(data.get("nether_portal_formed"))
+                            && "minecraft:nether_portal".equals(data.get("ignition_observed_block_id")),
+                    "the portal ignition receipt reports the verified effect, the portal flag and the observed block: " + data);
         }
     }
 

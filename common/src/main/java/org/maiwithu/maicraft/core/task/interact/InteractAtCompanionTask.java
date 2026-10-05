@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.GoToThenDoTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.block.BaseFireBlock;
+import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -102,6 +102,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private int expectedItemBefore = -1, outputWaitTicks;
     private int fireWaitTicks;
     private boolean ignitionVerified;
+    /** 点火对账观察到的具体结局：true=火被有效门框直接换成传送门；false=普通落火。 */
+    private boolean ignitionPortal;
+    private String ignitionObservedBlockId;
     private boolean manualCrank;
     private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
@@ -651,18 +654,26 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     + BuiltInRegistries.BLOCK.getKey(r.expectedBlock), FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
-        // 点火类使用（如打火石）的诚实结果在火方块：点击确认只代表原版接受了右键，
-        // 火必须真实出现在被点面的相邻空气格；短窗口内没见到火就如实失败，不以"无可见变化"冒充成功。
+        // 点火类使用（如打火石）的诚实结果在火或传送门方块：点击确认只代表原版接受了右键，
+        // 世界效果必须真实出现在被点面的相邻格；黑曜石旁的火会自然熄灭、有效门框会把火直接
+        // 换成传送门，两种结局都算点火生效并如实带证据回报，短窗口内两者皆无才如实失败。
         if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
             var submitted = interaction.submittedBlockHit();
             BlockPos cell = submitted.getBlockPos().relative(submitted.getDirection()).immutable();
-            if (player.level().getBlockState(cell).getBlock() instanceof BaseFireBlock) {
+            var live = player.level().isLoaded(cell) ? player.level().getBlockState(cell) : null;
+            if (live != null && NativeConfirmation.ignitionEffect(live)) {
                 ignitionVerified = true;
+                ignitionPortal = live.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock;
+                ignitionObservedBlockId = BuiltInRegistries.BLOCK.getKey(live.getBlock()).toString();
+                successMsg += " — " + (ignitionPortal ? "nether portal formed" : "fire observed")
+                        + " at " + cell.toShortString();
                 return verifyExpectedOutput();
             }
             if (++fireWaitTicks <= 20) return TaskState.RUNNING;
-            fail("the ignition click was confirmed, but no fire appeared at " + cell.toShortString()
-                    + "; the clicked face may not open into air. Inspect the site or aim at a different face.",
+            fail("the ignition click was confirmed, but no fire or portal appeared at " + cell.toShortString()
+                    + " (observed there: " + (live == null ? "unloaded" : BuiltInRegistries.BLOCK.getKey(live.getBlock()))
+                    + "); the clicked face may not open into air, or the fire already burned out on "
+                    + "non-flammable ground. Inspect the site, the frame validity, or aim at a different face.",
                     FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
@@ -854,11 +865,14 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             data.put("y", r.aim.getY());
             data.put("z", r.aim.getZ());
         }
-        // 点火类使用回执带落火格与核验结论；调用方对照确认状态与火观察，不再猜"点击是否生效"。
+        // 点火类使用回执带落火格、观察到的具体方块与核验结论；调用方对照确认状态与火观察，不再猜"点击是否生效"。
+        // 火在不可燃支撑旁会自然熄灭，事后 find_block 扫不到不构成「点火没发生」的证据，结论以这份观察为准。
         if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
             var submitted = interaction.submittedBlockHit();
             data.put("ignition_cell", submitted.getBlockPos().relative(submitted.getDirection()).toShortString());
             data.put("fire_observed", ignitionVerified);
+            if (ignitionObservedBlockId != null) data.put("ignition_observed_block_id", ignitionObservedBlockId);
+            if (ignitionVerified) data.put("nether_portal_formed", ignitionPortal);
         }
         // 报告已激活的工作站和确切位置；位置以实际命中为准，不使用原始瞄准点，供智能体循环收录到 <known_blocks>。
         if (activatedBlock != null) {

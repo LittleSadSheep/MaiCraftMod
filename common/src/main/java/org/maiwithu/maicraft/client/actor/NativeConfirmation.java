@@ -84,6 +84,23 @@ public interface NativeConfirmation {
                 ? Verdict.APPLIED : Verdict.PENDING;
     }
 
+    /**
+     * 打火石类点火的世界效果：落格出现火，或在有效门框中直接成为下界传送门方块。
+     * 手持物耐久变化只证明原版接受了使用，不能证明世界效果；黑曜石等不可燃支撑旁的火
+     * 会自然熄灭，事后扫描看不到火也不构成「点火没发生」的证据。
+     */
+    public static NativeConfirmation ignitionWorldEffect(BlockPos cell) {
+        BlockPos frozen = cell.immutable();
+        return context -> !context.level().isLoaded(frozen) ? Verdict.PENDING
+                : ignitionEffect(context.level().getBlockState(frozen)) ? Verdict.APPLIED : Verdict.PENDING;
+    }
+
+    /** 火与传送门方块共用同一判定口径；点击确认与点火对账都引用它，避免两处各认一半。 */
+    public static boolean ignitionEffect(BlockState state) {
+        return state.getBlock() instanceof net.minecraft.world.level.block.BaseFireBlock
+                || state.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock;
+    }
+
     public static NativeConfirmation heldItemChanged(InteractionHand hand, ItemStack before) {
         ItemStack frozen = before.copy();
         return context -> sameStack(context.player().getItemInHand(hand), frozen)

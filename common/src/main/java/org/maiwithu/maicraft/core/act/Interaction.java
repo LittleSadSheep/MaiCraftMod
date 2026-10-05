@@ -636,13 +636,19 @@ public final class Interaction {
         NativeConfirmation signEditor = clickedBefore.getBlock() instanceof SignBlock
                 ? NativeConfirmation.signEditorScreenOpened()
                 : NativeConfirmation.pending();
+        // 打火石把落格的火或传送门方块补进确认依据；只有耐久变化时确认虽可通过，
+        // 火是否真实出现仍由点火对账（expectIgnition）如实裁决，不在这里改写结论。
+        NativeConfirmation ignition = heldBefore.is(net.minecraft.world.item.Items.FLINT_AND_STEEL)
+                ? NativeConfirmation.ignitionWorldEffect(clicked.relative(hit.getDirection()))
+                : NativeConfirmation.pending();
         return NativeConfirmation.anyOf(
                 wheelMountUse == null ? NativeConfirmation.pending() : wheelMountUse,
                 NativeConfirmation.blockChanged(clicked, clickedBefore),
                 adjacentChanged,
                 NativeConfirmation.heldItemChanged(usedHand, heldBefore),
                 NativeConfirmation.menuChanged(beforeMenu),
-                signEditor);
+                signEditor,
+                ignition);
     }
 
     private NativeConfirmation itemUseConfirmation(InteractionHand usedHand, ItemStack heldBefore) {
