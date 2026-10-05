@@ -17,8 +17,9 @@ final class ProgressGate {
     /** null = 这一刻不发布；keylessWarn=true 时调用方应记日志提醒开发者。 */
     record Decision(String message, boolean keylessWarn) {}
 
+    // body 是身体安全键：值含当前位置，滞水随浪况浮沉不断变化签名，受胁状态按地板间隔持续可见。
     private static final List<String> SCOREBOARD_KEYS =
-            List.of("done", "total", "phase", "remaining", "initial", "calc");
+            List.of("done", "total", "phase", "remaining", "initial", "calc", "body");
     private static final long FLOOR_TICKS = 40;
     static final long KEYLESS_WARN_TICKS = 2400;
 
@@ -90,6 +91,8 @@ final class ProgressGate {
         // 规划心跳：搜索尝试次数只在规划期增长，让「还在算」的停滞每过地板间隔仍有一条事件可发。
         Object calc = observation.get("calc");
         if (calc != null) parts.add("calc " + calc);
+        Object body = observation.get("body");
+        if (body != null) parts.add(String.valueOf(body));
         return parts.toString();
     }
 }

@@ -47,6 +47,7 @@ public final class McpTaskLifecycleTest {
         fullHistoryRejectsBeforeAcceptingMoreWork();
         networkCancellationRespectsClientDispatch();
         progressEventsFollowScoreboard();
+        bodyHazardHeartbeatFollowsPosition();
         System.out.println("McpTaskLifecycleTest: passed");
     }
 
@@ -88,6 +89,40 @@ public final class McpTaskLifecycleTest {
             f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 20, "total", 64), 1_060);
             events = f.runtime.attention(0, 256).getAsJsonArray("events");
             check(countProgressFor(events, record) == 3, "终态清空记账后新进度应立即发送");
+        }
+    }
+
+    /**
+     * 身体安全心跳（issue 168）：body 是标准键，值含当前位置——滞水随浪浮沉坐标不断变化，
+     * 受胁期每过地板间隔仍有一条事件，观察者不必等终态才发现角色在溺水边缘。
+     */
+    private static void bodyHazardHeartbeatFollowsPosition() throws Exception {
+        try (var f = new Fixture()) {
+            var record = f.record();
+            f.tasks().put(record.externalId(), record);
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,58,120"), 2_000);
+            var events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "滞水观察带 body 标准键应立即发布");
+            check(lastProgressFor(events, record).get("message").getAsString().contains("滞水@260,58,120"),
+                    "摘要应携带滞水位置");
+            // 位置没变不重复发布；浪况浮沉改变坐标后重新武装签名，地板过后照常发布。
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,58,120"), 2_010);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "滞水位置未变不应重复发布");
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,59,120"), 2_020);
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,60,120"), 2_030);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "地板窗口内的坐标变化合并待发");
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,60,120"), 2_041);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 2, "地板过后应发布最新滞水位置");
+            check(lastProgressFor(events, record).get("message").getAsString().contains("滞水@260,60,120"),
+                    "事件应携带最新的滞水坐标");
         }
     }
 

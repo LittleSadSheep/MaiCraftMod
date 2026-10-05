@@ -37,6 +37,9 @@ public final class AcquisitionProspectingHandoffTest {
         outsideBandUsesNearestBandEdge();
         uphillBandRefused();
         realFairScanDispatchesProspecting();
+        wetBodyEvacuatesBeforeScanning();
+        evacuationBudgetExhaustionFailsHonestly();
+        noDryCellNearbyFailsWithScope();
         System.out.println("AcquisitionProspectingHandoffTest: passed");
     }
 
@@ -124,6 +127,74 @@ public final class AcquisitionProspectingHandoffTest {
             }
             check(booleanField(get(task, "rootNeed"), "prospectingMineStarted"),
                     "需求侧记录探矿腿已派出");
+        }
+    }
+
+    /**
+     * 身体安全（issue 168）：脚位格与身体格有水时，mine 任务第一刻停下扫描并建立撤离导航，
+     * progress 携带 body 滞水键；身体回到干地后撤离收尾、扫描恢复。
+     */
+    private static void wetBodyEvacuatesBeforeScanning() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            initNavRuntime();
+            h.set(new BlockPos(0, 1, 3), Blocks.WATER.defaultBlockState());
+            h.set(new BlockPos(0, 2, 3), Blocks.WATER.defaultBlockState());
+            var task = new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(h.player,
+                    new MineBlockTaskRecord("wet-scan", 100000, Set.of(Blocks.STONE), 4, "stone"));
+            startTask(task);
+            TaskState state = tickTask(task);
+            check(state == TaskState.RUNNING, "滞水时任务保持运行并开始撤离，实际 " + state);
+            check(get(task, "evacuationNav") != null, "滞水第一刻就应建立撤离导航，不得在水中开始扫描");
+            Object body = task.progress().get("body");
+            check(String.valueOf(body).contains("滞水"), "progress 应携带 body 滞水键，实际: " + body);
+            // 身体被推回干地（实机等价：撤到岸上）：下一刻撤离收尾，任务恢复正常扫描。
+            h.position(new net.minecraft.world.phys.Vec3(6.5, 1, 6.5));
+            h.nextTick();
+            tickTask(task);
+            check(get(task, "evacuationNav") == null, "回到干地后撤离导航应收尾");
+            check(task.progress().get("body") == null, "干地上 progress 不再携带滞水键");
+        }
+    }
+
+    /** 撤离预算耗尽仍湿身：诚实失败收手，回执写明滞水刻数与换气反射可能介入过，不无限漂着。 */
+    private static void evacuationBudgetExhaustionFailsHonestly() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            initNavRuntime();
+            h.set(new BlockPos(0, 1, 3), Blocks.WATER.defaultBlockState());
+            h.set(new BlockPos(0, 2, 3), Blocks.WATER.defaultBlockState());
+            var task = new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(h.player,
+                    new MineBlockTaskRecord("wet-budget", 100000, Set.of(Blocks.STONE), 4, "stone"));
+            startTask(task);
+            tickTask(task);
+            set(task, "evacuationTicks", 200);
+            TaskState state = tickTask(task);
+            check(state == TaskState.FAILED, "撤离预算耗尽必须诚实失败，实际 " + state);
+            var data = task.result(TaskState.FAILED).data();
+            check(data.get("body_wet_ticks") instanceof Integer && (Integer) data.get("body_wet_ticks") >= 2,
+                    "回执应携带滞水刻数，实际: " + data);
+            check(String.valueOf(task.result(TaskState.FAILED).message()).contains("breath reflex"),
+                    "失败正文应写明换气反射可能兜过底");
+        }
+    }
+
+    /** 周围全是水、找不到干地站立格：立即诚实失败并携带搜索范围，声明不构成陆地不存在的证据。 */
+    private static void noDryCellNearbyFailsWithScope() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++)
+                h.set(new BlockPos(x, 1, z), Blocks.WATER.defaultBlockState());
+            var task = new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(h.player,
+                    new MineBlockTaskRecord("wet-ocean", 100000, Set.of(Blocks.STONE), 4, "stone"));
+            startTask(task);
+            TaskState state = tickTask(task);
+            check(state == TaskState.FAILED, "找不到干地必须立即诚实失败，实际 " + state);
+            String message = task.result(TaskState.FAILED).message();
+            check(message.contains("no dry standable cell") && message.contains("16"),
+                    "失败应携带干地搜索半径，实际: " + message);
+            check(message.contains("not evidence that land does not exist"),
+                    "范围型失败必须声明不构成陆地不存在的证据");
         }
     }
 
@@ -226,6 +297,34 @@ public final class AcquisitionProspectingHandoffTest {
                     "y=-10 在煤带外且带底 0 在上方：拒绝向上重定位，不派探矿子任务，实际: "
                             + activeRecord(task));
         }
+    }
+
+    /** 撤离导航走真实寻路栈，测试桩需要给 baritone 一个可写目录才能完成运行时初始化。 */
+    private static void initNavRuntime() throws Exception {
+        var gameDirectory = net.minecraft.client.Minecraft.class.getDeclaredField("gameDirectory");
+        gameDirectory.setAccessible(true);
+        gameDirectory.set(net.minecraft.client.Minecraft.getInstance(),
+                new java.io.File("prospect-body-safety-fixture"));
+    }
+
+    /** 夹具角色未经原版构造器，药水效果表为 null；寻路上下文读取药水放大前需补空表。 */
+    private static void initEffects(InteractionWorldTestHarness h) throws Exception {
+        var effects = net.minecraft.world.entity.LivingEntity.class.getDeclaredField("activeEffects");
+        effects.setAccessible(true);
+        effects.set(h.player, new java.util.HashMap<>());
+    }
+
+    /** onStart/onTick 是 protected：测试用反射驱动真实 MineCompanionTask，不改其可见性。 */
+    private static void startTask(org.maiwithu.maicraft.core.task.mine.MineCompanionTask task) throws Exception {
+        var start = org.maiwithu.maicraft.core.task.mine.MineCompanionTask.class.getDeclaredMethod("onStart");
+        start.setAccessible(true);
+        start.invoke(task);
+    }
+
+    private static TaskState tickTask(org.maiwithu.maicraft.core.task.mine.MineCompanionTask task) throws Exception {
+        var tick = org.maiwithu.maicraft.core.task.mine.MineCompanionTask.class.getDeclaredMethod("onTick");
+        tick.setAccessible(true);
+        return (TaskState) tick.invoke(task);
     }
 
     private static SemanticAcquireCompanionTask task(InteractionWorldTestHarness h,
