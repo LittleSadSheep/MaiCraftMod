@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.core.integration.backpack.BackpackTransferPlanTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackStockTest;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackCarriersTest;
+import org.maiwithu.maicraft.core.integration.backpack.BackpackOpenIdentityTest;
 import org.maiwithu.maicraft.core.inventory.InventoryWorkItemsTest;
 import org.maiwithu.maicraft.core.pathing.baritone.landing.LandingMaterialSupplyTest;
 import org.maiwithu.maicraft.core.task.acquire.ObservedRecipeStockCostTest;
@@ -388,6 +389,8 @@ public final class GuiRegressionSuite {
         BackpackMenuAccessTest.main(args);
         // 开关背包也需要等待原生回执，取消或鼠标残留时不能无条件关闭菜单。
         BackpackOpenSessionTest.main(args);
+        // 同时带两只随身包时，开包只按服务端地址与内容身份认包，界面组件漂移不误判、另一只包不放行。
+        BackpackOpenIdentityTest.main(args);
         // 精妙升级只放大存储槽，鼠标每次取物仍按一叠或半叠计算。
         BackpackSplitPlannerTest.main(args);
         // 逐笔存取尊重需求、真实余量和现有堆叠，满包与没有库存分开报告。
