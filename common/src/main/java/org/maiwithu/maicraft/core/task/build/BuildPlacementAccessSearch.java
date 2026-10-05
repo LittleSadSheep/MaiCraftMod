@@ -12,6 +12,7 @@ import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
@@ -48,6 +49,8 @@ final class BuildPlacementAccessSearch {
     /** 每道闸最多采样三个被拒站位坐标，供回执对照现场。 */
     private static final int GATE_SAMPLES = 3;
     private final Map<String, List<BlockPos>> gateSamples = new LinkedHashMap<>();
+    /** 目标格六向内容物；附着面缺失这类目标级事实在搜索前点名，不再逐站位重扫。 */
+    private Map<String, String> attachmentNeighbors = Map.of();
     private Node node;
     private int candidateAt, checked, rejectedReturns;
     private boolean initialized, complete;
@@ -89,6 +92,9 @@ final class BuildPlacementAccessSearch {
                     }
                     // 实际脚位可能已在安全檐边，不能先强制量化到外侧无地板格心；直接验证完整身体的足底支撑。
                     if (visitLimit == 0 || !corridor.clear(origin, origin)) { fail("current_footing_not_connected"); break; }
+                    // 火把等附着类方块可能整格没有任何支撑面：这是目标级事实，与站在哪里无关。
+                    // 先在这里点名六向内容物，否则每个可达站位都会重复推导同一结论，最后仍汇成无名 no_click_gesture 全拒。
+                    if (targetLacksAttachmentFace()) { fail("target_attachment_face_missing"); break; }
                     visited.add(BlockPos.containing(origin)); frontier.add(new Node(origin, null));
                     continue;
                 }
@@ -163,6 +169,27 @@ final class BuildPlacementAccessSearch {
         complete = true; reason = edge ? "reachable_crouching_edge_verified"
                 : lowerEye ? "reachable_lower_eye_placement_verified" : "reachable_placement_verified";
     }
+    /** 目标格是空气且六向都没有可点击支撑面时成立；同名回执携带逐向内容物，供模型改选贴地格。 */
+    private boolean targetLacksAttachmentFace() {
+        var stage = new BuildPlacementStage(world, player.level()::isLoaded, Map.of(), target, false, true);
+        if (!stage.state(target.pos()).isAir()) return false;
+        var facts = new LinkedHashMap<String, String>();
+        boolean supported = false;
+        for (Direction direction : Direction.values()) {
+            BlockPos clicked = target.pos().relative(direction);
+            net.minecraft.world.level.block.state.BlockState state = stage.state(clicked);
+            String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            facts.put(direction.getName(), state.isAir() ? "air"
+                    : state.canBeReplaced() ? "replaceable:" + id : id);
+            supported |= stage.support(clicked, direction.getOpposite());
+        }
+        if (supported) return false;
+        attachmentNeighbors = Map.copyOf(facts);
+        return true;
+    }
+
+    Map<String, String> attachmentNeighbors() { return attachmentNeighbors; }
+
     private void reject(String gate, BlockPos at) {
         gateCounts.merge(gate, 1, Integer::sum);
         var samples = gateSamples.get(gate);

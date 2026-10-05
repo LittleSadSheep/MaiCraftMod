@@ -232,6 +232,8 @@ final class BuildPlacementAccessDrive {
         if (search != null && !search.accepted()) {
             data.put("stance_rejection_gates", search.gateCounts());
             data.put("stance_rejection_samples", search.gateSamples());
+            if (!search.attachmentNeighbors().isEmpty())
+                data.put("target_attachment_neighbors", search.attachmentNeighbors());
         }
         if (search != null) data.put("rejected_post_placement_returns", search.rejectedReturns());
         // 锚点未对齐时也公开实际身体与目标的差异，不能只留下笼统的“贴边失败”而丢失半阶高度证据。
