@@ -111,6 +111,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean terrainApproach;
     /** 告示牌写字的阶段推进与对账证据；提交即走原版编辑屏，文字与提交内容一致才算确认。 */
     private boolean legacyEditorClosed, signSubmitted;
+    /** 出手前正在等待退出的遗留屏身份；换成另一块屏时重新计时并再次按 Done 退出。 */
+    private net.minecraft.client.gui.screens.Screen leftoverScreen;
     private int legacyEditorCloseWaitTicks, editorOpenWaitTicks, signSyncWaitTicks;
     private boolean signVerified;
     private int verifiedSide = -1;
@@ -262,15 +264,24 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             stopNav();
             return TaskState.RUNNING;
         }
-        // 放置告示牌的原版流程会立刻打开编辑屏；写字目标先按原版 Done 退出旧屏，
-        // 再走标准右键重开，保证这次编辑屏确实是本任务自己打开的。
-        if (r.signLines != null && !signSubmitted && playerScreen() != null) {
-            if (!legacyEditorClosed) {
+        // 放置告示牌的原版流程会立刻打开编辑屏；写字目标出手前先按原版 Done 退出遗留屏。
+        // 只清理 interaction 为 null 的准备阶段：右键提交后出现的编辑屏正是本任务要用的，
+        // 这里一旦误关，点击回执失去确认依据、写字阶段也拿不到屏幕（089 一轮的双失败签名即源于此）。
+        if (r.signLines != null && !signSubmitted && interaction == null && playerScreen() != null) {
+            var screen = playerScreen();
+            if (screen != leftoverScreen) {
+                leftoverScreen = screen;
                 legacyEditorClosed = true;
-                playerScreen().onClose();
-            } else if (++legacyEditorCloseWaitTicks < SIGN_EDITOR_CLOSE_WAIT_TICKS) return TaskState.RUNNING;
-            else if (playerScreen() != null) {
-                fail("a leftover screen did not exit after native closure; sign writing needs the native edit screen",
+                legacyEditorCloseWaitTicks = 0;
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "[maicraft-task] closing leftover screen {} before sign write at {}",
+                        screen.getClass().getName(), r.aim == null ? "?" : aimLabel());
+                screen.onClose();
+            } else if (++legacyEditorCloseWaitTicks < SIGN_EDITOR_CLOSE_WAIT_TICKS) {
+                return TaskState.RUNNING;
+            } else {
+                fail("a leftover screen (" + screen.getClass().getSimpleName()
+                        + ") did not exit after native closure; sign writing needs the native edit screen",
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
@@ -452,7 +463,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 yield verifiedOutcome();
             }
             case FAILED -> {
-                fail(interaction.failReason(), interaction.failType());
+                // 写字腿点击未确认时补上告示牌两侧现状：蜡封、带样式文字的一侧都会让编辑屏开不出来。
+                if (r.signLines != null && interaction.submittedBlockHit() != null)
+                    fail(interaction.failReason() + ". Observed sign text: " + signLinesForReceipt(),
+                            interaction.failType());
+                else fail(interaction.failReason(), interaction.failType());
                 yield TaskState.FAILED;
             }
             case RUNNING -> TaskState.RUNNING;

@@ -27,6 +27,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -630,12 +631,18 @@ public final class Interaction {
                 ? NativeConfirmation.blockChanged(
                         adjacent, player.level().getBlockState(adjacent))
                 : NativeConfirmation.pending();
+        // 告示牌右键的原生效果是打开编辑屏，四项世界观察全都察觉不到；把屏幕出现补进确认依据，
+        // 否则点击注定以"未确认"超时收场，后续写字阶段根本拿不到执行权。
+        NativeConfirmation signEditor = clickedBefore.getBlock() instanceof SignBlock
+                ? NativeConfirmation.signEditorScreenOpened()
+                : NativeConfirmation.pending();
         return NativeConfirmation.anyOf(
                 wheelMountUse == null ? NativeConfirmation.pending() : wheelMountUse,
                 NativeConfirmation.blockChanged(clicked, clickedBefore),
                 adjacentChanged,
                 NativeConfirmation.heldItemChanged(usedHand, heldBefore),
-                NativeConfirmation.menuChanged(beforeMenu));
+                NativeConfirmation.menuChanged(beforeMenu),
+                signEditor);
     }
 
     private NativeConfirmation itemUseConfirmation(InteractionHand usedHand, ItemStack heldBefore) {
