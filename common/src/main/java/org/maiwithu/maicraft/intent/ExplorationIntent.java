@@ -13,8 +13,14 @@ import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 /** LLM 选择想找的群系或结构；没有指定种类时，角色按给定扇区跑图并积累现场观察。 */
 public final class ExplorationIntent {
     public static final String ABILITY = "maicraft:explore";
-    /** 顺带兴趣白名单由探索任务单持有，语义契约与直接工具入口共用同一份判定。 */
-    public static final List<String> LEGAL_INTERESTS = SemanticExploreTaskRecord.LEGAL_INTERESTS;
+    /** 顺带兴趣白名单由探索任务单持有；结构 id 随证据画像动态扩展，报错文案指向目录查询而非枚举全表。 */
+    public static boolean isLegalInterest(String value) {
+        return SemanticExploreTaskRecord.isLegalInterest(value);
+    }
+
+    private static final String LEGAL_INTERESTS_HINT =
+            "lava_pool or any structure id with an evidence profile"
+                    + " (query perceive(view=exploration, focus=structures))";
     private ExplorationIntent() {}
 
     public static IntentAction adapt(Goal goal) {
@@ -60,21 +66,22 @@ public final class ExplorationIntent {
         if (!parameters.has("interests") || parameters.get("interests").isJsonNull()) return List.of();
         JsonElement raw = parameters.get("interests");
         if (!raw.isJsonArray())
-            throw new IllegalArgumentException("interests must be an array of strings; legal values: " + LEGAL_INTERESTS);
+            throw new IllegalArgumentException(
+                    "interests must be an array of strings; legal values: " + LEGAL_INTERESTS_HINT);
         List<String> values = new ArrayList<>();
         for (JsonElement element : raw.getAsJsonArray()) {
             if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString())
                 throw new IllegalArgumentException(
-                        "interests must be an array of strings; legal values: " + LEGAL_INTERESTS);
+                        "interests must be an array of strings; legal values: " + LEGAL_INTERESTS_HINT);
             String value = element.getAsString().trim().toLowerCase(Locale.ROOT);
-            if (!LEGAL_INTERESTS.contains(value))
+            if (!isLegalInterest(value))
                 throw new IllegalArgumentException(
-                        "unknown interest '" + value + "'; legal values: " + LEGAL_INTERESTS);
+                        "unknown interest '" + value + "'; legal values: " + LEGAL_INTERESTS_HINT);
             if (!values.contains(value)) values.add(value);
         }
         if (values.isEmpty())
             throw new IllegalArgumentException(
-                    "interests must not be empty; omit the field or use legal values: " + LEGAL_INTERESTS);
+                    "interests must not be empty; omit the field or use legal values: " + LEGAL_INTERESTS_HINT);
         return List.copyOf(values);
     }
 

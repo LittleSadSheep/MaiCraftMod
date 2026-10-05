@@ -32,6 +32,8 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.CompassUtil;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.structure.StructureEvidenceProfiles;
+import org.maiwithu.maicraft.core.task.structure.StructureSightingScanner;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.Task;
@@ -99,6 +101,11 @@ public final class SemanticExploreCompanionTask
     private final Map<Long, SurfaceInfo> surfaceCache = new HashMap<>();
     /** 只统计去重后真正新记录的发现；同一空间格重复扫到不会重复计数。 */
     private final Map<String, Integer> notableFindings = new LinkedHashMap<>();
+    /** 沿途结构 sighting 扫描器；当前维度无可用画像时保持 null，不产生任何扫描开销。 */
+    private StructureSightingScanner sightingScanner;
+    private final Map<String, Integer> sightingRadii = new HashMap<>();
+    /** 已记 sighting 的锚点，按 canonicalId 分桶；新锚点与任一已记锚点同簇即视为同一座。 */
+    private final Map<String, List<BlockPos>> sightedAnchors = new HashMap<>();
 
     private MoveToCompanionTask moveChild;
     private MoveToTaskRecord moveRecord;
@@ -139,6 +146,7 @@ public final class SemanticExploreCompanionTask
         }
         memory = new ClientExplorationMemory(player);
         waterProbe = new WaterCrossingProbe(level);
+        sightingScanner = createStructureScanner(level);
         beginObservation();
     }
 
@@ -232,6 +240,7 @@ public final class SemanticExploreCompanionTask
 
     private TaskState tickObservation() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
+        noteStructureSightings();
         List<ColumnOffset> offsets = BIOME_OBSERVATION_OFFSETS;
         int budget = BIOME_SAMPLES_PER_TICK;
         while (budget-- > 0 && observationColumn < offsets.size()) {
@@ -275,6 +284,57 @@ public final class SemanticExploreCompanionTask
             return TaskState.RUNNING;
         }
         return startNextWaypoint(level);
+    }
+
+    /**
+     * 每刻消费扫描器本轮完成的 sighting：同簇去重后记一条线索，画像符合只是线索口径，不当成到访或生成器确认。
+     * 模型声明的兴趣含此 canonicalId 时复用地形要素同一条询问链路。
+     */
+    private void noteStructureSightings() {
+        if (sightingScanner == null) return;
+        for (var sighting : sightingScanner.tick(player)) {
+            String id = sighting.canonicalId();
+            int clusterRadius = sightingRadii.getOrDefault(id, 0);
+            if (isDuplicateSighting(sightedAnchors.get(id), sighting.anchor(), clusterRadius)) continue;
+            sightedAnchors.computeIfAbsent(id, ignored -> new ArrayList<>()).add(sighting.anchor());
+            Map<String, Object> evidence = new LinkedHashMap<>();
+            evidence.put("group_counts", sighting.groupCounts());
+            evidence.put("block_counts", sighting.blockCounts());
+            evidence.put("total_blocks", sighting.totalBlocks());
+            ExplorationFinding finding =
+                    memory.observeStructureSighting(id, sighting.anchor(), evidence);
+            if (finding == null) continue;
+            notableFindings.merge(id, 1, Integer::sum);
+            noteInterestFinding(finding, sighting.anchor());
+        }
+    }
+
+    /** 当前维度可解析的画像去重后交给扫描器；别名共享同一份画像，canonicalId 相同只留一份。 */
+    private StructureSightingScanner createStructureScanner(ClientLevel level) {
+        String dimension = level.dimension().location().toString();
+        Map<String, StructureEvidenceProfiles.ResolvedProfile> unique = new LinkedHashMap<>();
+        for (String id : StructureEvidenceProfiles.registeredIds()) {
+            var resolved = StructureEvidenceProfiles.resolve(id);
+            if (resolved == null) continue;
+            Set<String> dims = resolved.profile().dimensions();
+            if (!dims.isEmpty() && !dims.contains(dimension)) continue;
+            unique.putIfAbsent(resolved.profile().canonicalId(), resolved);
+        }
+        if (unique.isEmpty()) return null;
+        for (var resolved : unique.values()) {
+            sightingRadii.put(resolved.profile().canonicalId(), resolved.profile().clusterRadius());
+        }
+        return new StructureSightingScanner(List.copyOf(unique.values()), OBSERVATION_RADIUS);
+    }
+
+    /** 新锚点与任一已记锚点落进同簇半径即视为同一座；纯几何判定供回归直测。 */
+    static boolean isDuplicateSighting(List<BlockPos> recordedAnchors, BlockPos candidate, int clusterRadius) {
+        if (recordedAnchors == null || clusterRadius < 1) return false;
+        double radiusSquared = (double) clusterRadius * clusterRadius;
+        for (BlockPos existing : recordedAnchors) {
+            if (existing.distSqr(candidate) <= radiusSquared) return true;
+        }
+        return false;
     }
 
     /** 熔岩湖是远望地形要素：记入探索记忆但不给移动决策，只有真正新记录的发现才计入进度。 */

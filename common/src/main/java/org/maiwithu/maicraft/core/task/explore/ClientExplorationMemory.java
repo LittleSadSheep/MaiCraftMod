@@ -89,6 +89,25 @@ public final class ClientExplorationMemory {
     }
 
     /**
+     * 沿途结构 sighting：线索口径，visited 固定为 false，证据画像符合不冒充到访或生成器确认。
+     * kind 用 structure，使它与 find_structure 到达核实后的记录经确定性 id 自然合并；
+     * 已有记录（含已到访）时不降级不重写，返回 null 交回调用方决定是否计数。
+     */
+    public ExplorationFinding observeStructureSighting(String canonicalId, BlockPos at, Map<String, Object> evidence) {
+        if (at == null || !dimension.equals(player.level().dimension().location().toString())) return null;
+        var finding = ExplorationFinding.observed("structure", canonicalId, canonicalId, dimension,
+                at.getX(), at.getY(), at.getZ(), false, System.currentTimeMillis(), "{}");
+        if (!journal.needs(finding.id(), false) || !ObservationVisibility.block(player, at)) return null;
+        JsonObject payload = GSON.toJsonTree(evidence).getAsJsonObject();
+        payload.addProperty("authority", "visible_signature_cluster");
+        ExplorationFinding recorded = new ExplorationFinding(finding.id(), finding.kind(), canonicalId,
+                finding.name(), dimension, at.getX(), at.getY(), at.getZ(), false,
+                finding.firstSeen(), finding.lastSeen(), payload.toString());
+        journal.observe(recorded);
+        return recorded;
+    }
+
+    /**
      * 远望地形要素（熔岩湖等）：visited 固定为 false，远望事实不冒充到访。
      * 返回真正新记录的发现（同一空间格的重复观察由确定性 id 自动合并），非新记录返回 null；
      * 返回完整发现供兴趣询问携带 finding id 与坐标。
