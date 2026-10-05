@@ -149,11 +149,13 @@ public final class StructureEvidenceProfiles {
                 group("ocean_temple_fittings", 2,
                         "minecraft:dark_prismarine", "minecraft:sea_lantern")));
 
+        // 村庄的建筑设施（床、工作方块）几乎都在屋内，地面视角被墙体挡住；
+        // 屋外可透视证据是土径（dirt_path 仅村庄等少数生成结构使用）与露天堆肥桶，聚集半径取村庄实际尺度。
         Profile village = profile(
-                "minecraft:village", dims("minecraft:overworld"), 24, 4,
-                "a village bell with multiple domestic or profession blocks",
-                group("village_center", 1, "minecraft:bell"),
-                group("village_activity", 3,
+                "minecraft:village", dims("minecraft:overworld"), 64, 8,
+                "a village bell or packed dirt paths with multiple domestic or profession blocks",
+                group("village_center", 1, "minecraft:bell", "minecraft:dirt_path"),
+                group("village_activity", 2,
                         "minecraft:white_bed", "minecraft:orange_bed",
                         "minecraft:magenta_bed", "minecraft:light_blue_bed",
                         "minecraft:yellow_bed", "minecraft:lime_bed",
