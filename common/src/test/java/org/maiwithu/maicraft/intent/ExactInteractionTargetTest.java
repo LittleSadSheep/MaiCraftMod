@@ -72,6 +72,7 @@ public final class ExactInteractionTargetTest {
         changedAfterCompilation(true);
         heldItemUseHasItsOwnSemanticEntry();
         foodEffectsAreAnExplicitPlannerChoice();
+        starvingLockedBodySeesTheInterlock();
         flintIgnitionTargetsAndHonestFire();
         bucketSourceSelection(false);
         bucketSourceSelection(true);
@@ -128,6 +129,27 @@ public final class ExactInteractionTargetTest {
                     "explicit planner choice compiles one native eating action without requesting human approval or eating during planning");
             // 中文契约须点名由 LLM 在已授权任务内决定是否接受食物效果，而不是再向玩家要人工审批。
             check(SemanticAbilityCatalog.describe(GeneralAbilityAdapter.CONSUME).toString().contains("LLM可在已授权游戏任务内作此策略选择"), "the public contract identifies the actual decision maker");
+        }
+    }
+
+    /** 互锁处境：血量在拒战线下且无安全食物时，缺粮决策点破处境，recover 出路仍指向可授权的死亡重置。 */
+    private static void starvingLockedBodySeesTheInterlock() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.player.setHealth(4.0f);
+            h.player.getFoodData().setFoodLevel(6);
+            var goal = new Goal(GeneralAbilityAdapter.CONSUME, "restore hunger",
+                    new Goal.SemanticTarget("current_place", null, null, null), "{}", "{}", List.of(), List.of());
+            var locked = (IntentAction.Decision) AbilityAdapter.adapt(goal, h.player, null);
+            check(locked.snapshot().question().contains("food-combat recovery loop is interlocked"),
+                    "the no-safe-food decision must name the interlock when health and hunger block recovery");
+            check(locked.snapshot().options().stream()
+                            .anyMatch(o -> o.description().contains("maicraft:suicide death reset")),
+                    "the recover option must still offer the authorized death reset");
+            // 血量在拒战线上方时常规缺粮即可恢复，互锁长文不得淹没普通缺粮决策。
+            h.player.setHealth(20.0f);
+            var fed = (IntentAction.Decision) AbilityAdapter.adapt(goal, h.player, null);
+            check(!fed.snapshot().question().contains("interlocked"),
+                    "a healthy starving body keeps the ordinary no-food decision");
         }
     }
 

@@ -1,5 +1,6 @@
 package org.maiwithu.maicraft.core.combat;
 
+import net.minecraft.world.entity.LivingEntity;
 import org.maiwithu.maicraft.core.combat.Battlefield.Foe;
 
 /**
@@ -78,6 +79,14 @@ public final class AttackPlan {
     /** 剩余红心与吸收值不足四颗心时提早撤离，不能因为高护甲倍率一直打到最后半颗心才行动。 */
     public static boolean outmatched(double effectiveHealth, double availableHealth) {
         return outmatched(effectiveHealth) || availableHealth <= MIN_EFFECTIVE_HEALTH;
+    }
+
+    /**
+     * 语义层（进食决策等）可用的低血判定：只看真实血量加吸收值这条下半边，不做护甲折算。
+     * 折算版需要伤害来源注册表，观察型入口不该为此依赖它；两条线共用同一个 {@link #MIN_EFFECTIVE_HEALTH} 数值。
+     */
+    public static boolean belowRefusalLine(LivingEntity self) {
+        return self.getHealth() + self.getAbsorptionAmount() <= MIN_EFFECTIVE_HEALTH;
     }
 
     /**

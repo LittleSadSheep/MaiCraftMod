@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.FirstPersonActionGate;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -55,8 +56,15 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     private record FishingSetup(BlockPos stance, BlockPos water) {}
 
+    private record WaterScan(boolean foundFishableWater, double nearestWaterDistance) {}
+
+    /** 失败回执的失败码之一：站位搜索圈内连一个可钓水面都没扫到。命名只声明"这圈没看见"，不构成圈外无水的证据。 */
+    public static final String NO_VISIBLE_WATER_REASON = "no_visible_water_in_search_circle";
+
     private static final int STANCE_SEARCH_RADIUS = 12;
     private static final int STANCE_SEARCH_Y = 4;
+    /** 无水判定比站位搜得更深一截：干岸下方与低洼处的水面也要扫到，圈没扫够深就不能说"圈内无可视水面"。 */
+    private static final int WATER_SCAN_VERTICAL_RANGE = 8;
     private static final int MAX_STANCE_CHECKS = 256;
     private static final int MAX_POSITION_FAILURES = 3;
     private static final double NAV_SPEED = 1.0;
@@ -164,11 +172,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
             FishingSetup setup = findFishingSetup();
             if (setup == null) {
                 String reason = positioningObservation.get("reason").getAsString();
-                // 原地已经干燥却没有可用抛竿落点时，明确报告缺少落点，不能暗示角色仍泡在水里。
-                String message = reason.equals("no_cast_target_from_current_dry_stance")
-                        ? "already at a dry stance, but no unobstructed cast target was found from the current position"
-                        : "no dry stance with an unobstructed cast target was found in the local search";
-                fail(message + "; in_water=" + positioningObservation.get("in_water")
+                fail(positioningFailureMessage(reason)
+                                + "; in_water=" + positioningObservation.get("in_water")
                                 + ", underwater=" + positioningObservation.get("underwater")
                                 + "; inspect the observed position and water access before retrying fish",
                         FailureType.OUT_OF_REACH);
@@ -249,19 +254,77 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         return null;
     }
 
-    private void observePositioningFailure(String reason, boolean currentDry) {
+    /**
+     * 失败当刻的身体实况、站位几何与水面扫描结论一起写进回执观察。
+     * 与既有 reason 码的映射：圈内扫到可钓水面时保留几何原因（{@code no_cast_target_from_current_dry_stance}
+     * / {@code no_local_stance_with_cast_target} / {@code nearby_stances_unreachable}，问题出在站位或落点弹道）；
+     * 圈内连一个可钓水面都没有时改报 {@link #NO_VISIBLE_WATER_REASON}，几何原因此时已无意义。
+     * 圈内没有只说明这圈没看见，搜索半径随回执公开，调用方靠 travel/explore 加载更远地形后再试，
+     * 这份缺席不构成圈外或未加载地形无水的证据。
+     */
+    private void observePositioningFailure(String geometryReason, boolean currentDry) {
         // 身体实况、站位几何和抛竿搜索结论分开记录；原生浸水状态不能从失败提示反推。
         positioningObservation = BodyEnvironmentObservation.describe(player);
+        WaterScan scan = scanFishableWater();
+        String reason = scan.foundFishableWater() ? geometryReason : NO_VISIBLE_WATER_REASON;
         positioningObservation.addProperty("reason", reason);
         positioningObservation.addProperty("current_stance_dry", currentDry);
         positioningObservation.addProperty("cast_min_horizontal_distance", MIN_CAST_DISTANCE);
         positioningObservation.addProperty("cast_max_horizontal_distance", CAST_SEARCH_RADIUS);
         positioningObservation.addProperty("cast_vertical_range", CAST_SEARCH_Y);
+        positioningObservation.addProperty("water_scan_radius", STANCE_SEARCH_RADIUS);
+        positioningObservation.addProperty("water_scan_vertical_range", WATER_SCAN_VERTICAL_RANGE);
+        if (scan.foundFishableWater()) {
+            positioningObservation.addProperty("nearest_visible_water_distance",
+                    Math.round(scan.nearestWaterDistance() * 10.0) / 10.0);
+        }
         if (!reason.equals("no_cast_target_from_current_dry_stance")) {
             positioningObservation.addProperty("stance_search_radius", STANCE_SEARCH_RADIUS);
             positioningObservation.addProperty("stance_search_vertical_range", STANCE_SEARCH_Y);
             positioningObservation.addProperty("stance_check_limit", MAX_STANCE_CHECKS);
         }
+    }
+
+    // 失败当刻在站位搜索圈内扫一遍可钓水面（水源方块且上方无碰撞）；只在定位失败路径执行一次，不是逐刻查询。
+    private WaterScan scanFishableWater() {
+        BlockPos origin = player.blockPosition();
+        double nearest = -1.0;
+        for (int dy = -WATER_SCAN_VERTICAL_RANGE; dy <= WATER_SCAN_VERTICAL_RANGE; dy++) {
+            for (int dx = -STANCE_SEARCH_RADIUS; dx <= STANCE_SEARCH_RADIUS; dx++) {
+                for (int dz = -STANCE_SEARCH_RADIUS; dz <= STANCE_SEARCH_RADIUS; dz++) {
+                    if (dx * dx + dz * dz > STANCE_SEARCH_RADIUS * STANCE_SEARCH_RADIUS) continue;
+                    if (!isScannableWaterSurface(origin.offset(dx, dy, dz))) continue;
+                    double distance = Math.sqrt(dx * dx + (double) dy * dy + dz * dz);
+                    if (nearest < 0 || distance < nearest) nearest = distance;
+                }
+            }
+        }
+        return new WaterScan(nearest >= 0, nearest);
+    }
+
+    /**
+     * 扫描用的水面判据：与 {@link #isCastableSurface} 同一几何（水源最上层且上方无碰撞），
+     * 但判水用流体同一性而不是 {@link FluidTags}——抛竿判据依赖运行时绑定的流体标签，
+     * 回归的引导环境不加载标签包，扫描若共用它会在测试里把整片水判成无水。
+     */
+    private boolean isScannableWaterSurface(BlockPos pos) {
+        var fluid = player.level().getFluidState(pos);
+        if (!fluid.isSource() || !fluid.getType().isSame(Fluids.WATER)) return false;
+        if (!player.level().getFluidState(pos.above()).isEmpty()) return false;
+        return player.level().getBlockState(pos.above())
+                .getCollisionShape(player.level(), pos.above()).isEmpty();
+    }
+
+    // 定位失败的对外说明按真实原因分流：圈内无水时点明搜索范围与缺席边界，其余保持站位/落点几何的说法。
+    private static String positioningFailureMessage(String reason) {
+        return switch (reason) {
+            case NO_VISIBLE_WATER_REASON -> "no fishable water surface is visible within the " + STANCE_SEARCH_RADIUS
+                    + "-block search circle; travel toward known water or explore before retrying — the circle is a"
+                    + " bounded scan, not evidence that water does not exist beyond it";
+            case "no_cast_target_from_current_dry_stance" ->
+                    "already at a dry stance, but no unobstructed cast target was found from the current position";
+            default -> "no dry stance with an unobstructed cast target was found in the local search";
+        };
     }
 
     // 先收回已有鱼钩，再重查站位、水面和轨迹；准备好后进入瞄准，不在这里直接抛竿。
@@ -291,7 +354,8 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
         }
         if (target == null) {
             observePositioningFailure("no_cast_target_from_current_dry_stance", true);
-            fail("no unobstructed fishing cast is available from this dry stance; move along the shoreline and try again",
+            fail(positioningFailureMessage(positioningObservation.get("reason").getAsString())
+                            + "; move along the shoreline and try again",
                     FailureType.OUT_OF_REACH);
             return TaskState.FAILED;
         }

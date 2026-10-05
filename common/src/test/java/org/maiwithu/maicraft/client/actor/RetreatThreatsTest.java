@@ -2,6 +2,8 @@ package org.maiwithu.maicraft.client.actor;
 
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.combat.RetreatThreats;
@@ -45,6 +47,32 @@ public final class RetreatThreatsTest {
             f.h.level.time += 201;
             check(!(boolean) invoke(task, "retreatThreatsPresent"), "a separated attacker with expired damage evidence no longer holds retreat");
         }
+        interlockExit();
         System.out.println("RetreatThreatsTest: active pursuit, ambient exclusion and native damage memory passed");
+    }
+
+    /** 深层互锁：血量在拒战线下、无安全食物、饥饿低于回血线三者同时成立时，撤退回执点破处境并给出全部出路。 */
+    private static void interlockExit() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            var player = f.h.player;
+            player.setHealth(4.0f);
+            player.getFoodData().setFoodLevel(10);
+            f.h.inventory.clearContent();
+            // 腐肉带食用效果，安全食品策略不静默选择——它不能解开互锁，只有无效果食物才算出口。
+            f.h.inventory.setItem(0, new ItemStack(Items.ROTTEN_FLESH));
+            check(AttackCompanionTask.foodCombatLocked(player),
+                    "effect-bearing food alone must not unlock the food-combat recovery loop");
+            String locked = AttackCompanionTask.retreatFailureMessage(player);
+            check(locked.contains("food-combat recovery loop is interlocked"),
+                    "the too-hurt receipt must name the interlock when health, safe food and hunger all block recovery");
+            check(locked.contains("maicraft:suicide death reset"),
+                    "the interlocked receipt must still offer the authorized death reset");
+            f.h.inventory.setItem(0, new ItemStack(Items.COOKED_BEEF));
+            check(!AttackCompanionTask.foodCombatLocked(player),
+                    "effect-free food in inventory means the loop is not interlocked");
+            String fed = AttackCompanionTask.retreatFailureMessage(player);
+            check(!fed.contains("interlocked") && fed.contains("maicraft:suicide death reset"),
+                    "a body with safe food keeps the ordinary low-health receipt without the interlock passage");
+        }
     }
 }
