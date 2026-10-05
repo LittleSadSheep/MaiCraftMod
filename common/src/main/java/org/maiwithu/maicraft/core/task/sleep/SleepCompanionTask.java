@@ -94,7 +94,10 @@ public final class SleepCompanionTask extends AbstractCompanionTask<SleepTaskRec
             receipt = context.actions().useBlock(context, InteractionHand.MAIN_HAND, hit,
                     c -> c.player().isSleeping() ? NativeConfirmation.Verdict.APPLIED
                             : NativeConfirmation.Verdict.PENDING, 40);
-            clickDayIndex = WorldTimeSemantics.dayIndex(context.level());
+            // 测试桩的 level 可能没有 levelData：拿不到日指数就退回旧确认语义（不做跳夜后验）。
+            clickDayIndex = context.level().getLevelData() == null
+                    ? Long.MIN_VALUE
+                    : WorldTimeSemantics.dayIndex(context.level());
             return TaskState.RUNNING;
         }
         // 点击已发出后只等待确认，不每刻重复右键；未确认可能是白天、有怪、床被占用等。
