@@ -53,8 +53,9 @@ public final class SemanticAcquireTool implements MaiCraftTool {
                 // 与公开能力共享材料倾向，内部调用也能保留模型选定的递归路线提示。
                 .optionalStringArray("preferred_materials",
                         "Soft namespaced item-ID preferences for recipe routes and intermediates; available stock stays first and allowed sources are unchanged.")
+                // 内部工具仍收最终合计数（合成、取工具等内部组合直接给目标总数）；公开取物能力在语义步骤启动时把它绑定成“再拿几件”。
                 .optionalInteger("count",
-                        "Required final aggregate main-inventory count (default 1).",
+                        "Required final aggregate main-inventory count (default 1). The public maicraft:acquire_items ability binds it as an additional count over the step's starting inventory.",
                         1, SemanticAcquireTaskRecord.MAX_FINAL_COUNT)
                 .optionalEnumStringArray("allowed_sources",
                         "Optional hard source restriction: omit for ordinary acquisition, including visible containers. Carried inventory is checked first, then containers before other external sources. Only narrow this list for an explicit user restriction; it is not execution order.",

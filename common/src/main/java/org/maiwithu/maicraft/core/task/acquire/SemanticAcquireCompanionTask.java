@@ -2691,10 +2691,16 @@ public final class SemanticAcquireCompanionTask
         }
         int observed = count(r.itemIds);
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("goal", "final_main_inventory_count");
+        data.put("goal", r.additionalCount > 0 ? "additional_main_inventory_count" : "final_main_inventory_count");
         if (storageScope != null) data.put("container_search_scope", storageScope.receipt());
         else if (r.storageScopeUnknown) data.put("container_search_scope", Map.of("status", "unknown", "reason", "missing_checkpoint_scope"));
         data.put("item_ids", itemStrings(r.itemIds));
+        if (r.additionalCount > 0) {
+            // “再拿几件”的请求同时给出请求件数、本步起始已有数和净增量；最终合计数仍照常列出，供核对是否已达标。
+            data.put("requested_additional_count", r.additionalCount);
+            data.put("baseline_count", r.baselineCount());
+            data.put("net_gained_count", observed - r.baselineCount());
+        }
         data.put("required_final_count", r.count);
         data.put("observed_final_count", observed);
         data.put("missing", Math.max(0, r.count - observed));
@@ -2794,9 +2800,17 @@ public final class SemanticAcquireCompanionTask
     @Override
     protected String successMessage() {
         if (hasIssue("mining_loot_uncollected")) return "requested inventory count reached: "
-                + count(r.itemIds) + "/" + r.count + "; mining left uncollected drops; see issues for details";
-        return "final inventory fact satisfied: carrying " + count(r.itemIds)
-                + "/" + r.count + " across acceptable items " + itemStrings(r.itemIds);
+                + countLabel() + "; mining left uncollected drops; see issues for details";
+        if (r.additionalCount > 0) return "acquired " + countLabel() + " across acceptable items " + itemStrings(r.itemIds);
+        return "final inventory fact satisfied: carrying " + countLabel() + " across acceptable items " + itemStrings(r.itemIds);
+    }
+
+    /** 回执里的进度口径：增量请求说“净增/请求件数，当前与起始各几件”，内部补料仍说“当前/最终合计”。 */
+    private String countLabel() {
+        int observed = count(r.itemIds);
+        if (r.additionalCount <= 0) return observed + "/" + r.count;
+        return (observed - r.baselineCount()) + "/" + r.additionalCount + " additional (carrying " + observed
+                + ", started with " + r.baselineCount() + ")";
     }
 
     @Override
@@ -2808,13 +2822,13 @@ public final class SemanticAcquireCompanionTask
                     Map.of("observed_final_count", count(r.itemIds),
                             "required_final_count", r.count));
         }
-        return "semantic acquisition timed out at " + count(r.itemIds) + "/" + r.count
+        return "semantic acquisition timed out at " + countLabel()
                 + "; review attempts before retrying";
     }
 
     @Override
     protected String cancelledMessage() {
-        return "semantic acquisition was interrupted at " + count(r.itemIds) + "/" + r.count;
+        return "semantic acquisition was interrupted at " + countLabel();
     }
 
     @Override
@@ -2828,8 +2842,11 @@ public final class SemanticAcquireCompanionTask
         AcquisitionNeed need = activeNeed == null ? needs.peek() : activeNeed;
         if (need != null) {
             // 记分牌标准键 done/total 进事件摘要；契约见 docs/architecture/07-attention.md。
-            data.put("total", need.requiredFinalCount);
-            if (need.lastObservedCount >= 0) data.put("done", need.lastObservedCount);
+            // 正在追顶层“再拿几件”时按净增/请求件数计分，递归补的木棍、燃料等内部需求仍按最终合计数。
+            int offset = need == rootNeed && r.additionalCount > 0 ? r.baselineCount() : 0;
+            data.put("total", need.requiredFinalCount - offset);
+            // 记分牌只显示进度，跌破起始数时记 0；真实净增（可为负）在最终回执 net_gained_count 中如实给出。
+            if (need.lastObservedCount >= 0) data.put("done", Math.max(0, need.lastObservedCount - offset));
             data.put("acceptable_item_count", need.itemIds.size());
             if (need.itemIds.size() == 1) data.put("item_id", need.itemIds.getFirst().toString());
         }

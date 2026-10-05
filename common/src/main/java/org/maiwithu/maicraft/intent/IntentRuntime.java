@@ -624,6 +624,8 @@ public final class IntentRuntime {
                             snapshot.pendingAnswer(), snapshot.terminal(), gameTime);
                     record.restoreChatSubmissionTracking(snapshot.chatSubmissionTracked());
                     record.restoreContainerSearchScopes(snapshot.containerSearchScopes());
+                    // 取物起始数随检查点恢复，重启后继续追同一个“再拿几件”的目标，不按恢复时的背包重新起算。
+                    record.restoreAcquireBaselines(snapshot.acquireBaselines());
                     record.bindDirty(this::markDirty);
                     if (tasks.putIfAbsent(record.externalId(), record) != null) {
                         throw new IllegalArgumentException("duplicate persisted task id");

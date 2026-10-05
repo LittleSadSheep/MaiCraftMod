@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskResult;
@@ -41,6 +42,13 @@ public final class IntentTaskRecord extends TaskRecord {
             internalAreaProtections = new LinkedHashMap<>();
     /** 每个取物步骤的首次翻箱范围；空值表示旧检查点未记录，不能在恢复地点重新捕获。 */
     private final Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes = new LinkedHashMap<>();
+    /** 每个公开取物步骤首次启动时的主背包已有数；count 是“再拿几件”，重试、暂停和重启都按这份基数算目标。 */
+    private final Map<Integer, AcquireBaseline> acquireBaselines = new LinkedHashMap<>();
+
+    /** legacyFinalCount 表示升级前保存的步骤，count 仍按旧版“最终合计数”执行；否则 carried 是各候选物品的起始已有数。 */
+    public record AcquireBaseline(boolean legacyFinalCount, Map<ResourceLocation, Integer> carried) {
+        public AcquireBaseline { carried = Map.copyOf(carried); }
+    }
 
     private int stepIndex;
     private PauseSnapshot pause;
@@ -161,6 +169,29 @@ public final class IntentTaskRecord extends TaskRecord {
             containerSearchScopes.put(stepIndex, Optional.of(Objects.requireNonNull(initial))); changed();
         }
         return containerSearchScopes.get(stepIndex);
+    }
+
+    public Map<Integer, AcquireBaseline> acquireBaselines() { return Map.copyOf(acquireBaselines); }
+
+    void restoreAcquireBaselines(Map<Integer, AcquireBaseline> saved) {
+        // 只接受检查点里明确保存的基数；没保存过的新步骤等真正启动时再按当时背包记录。
+        acquireBaselines.putAll(saved);
+    }
+
+    /**
+     * 取物步骤启动子任务时调用：首次启动记下此刻各候选物品数量；之后同一步重试、暂停或重启只沿用已记下的数。
+     * 重试改了物品范围时，旧物品保留原起始数，新加入的物品按此刻数量补记，已移出的物品不再计入。
+     * 返回空值表示旧检查点留下的步骤，count 继续按旧版最终合计数执行，不能在恢复后再多拿一轮。
+     */
+    Optional<Map<ResourceLocation, Integer>> retainAcquireBaseline(Map<ResourceLocation, Integer> current) {
+        AcquireBaseline saved = acquireBaselines.get(stepIndex);
+        if (saved != null && saved.legacyFinalCount()) return Optional.empty();
+        Map<ResourceLocation, Integer> carried = new LinkedHashMap<>();
+        current.forEach((id, count) -> carried.put(id, saved == null ? count : saved.carried().getOrDefault(id, count)));
+        if (saved == null || !saved.carried().equals(carried)) {
+            acquireBaselines.put(stepIndex, new AcquireBaseline(false, carried)); changed();
+        }
+        return Optional.of(carried);
     }
     /** 供检查点保存内部位置，MCP 查询不序列化这份坐标表。 */
     public Map<Integer, Goal.WorldPosition> internalPositionReceipts() {
@@ -321,13 +352,18 @@ public final class IntentTaskRecord extends TaskRecord {
     }
 
     private void shiftContainerSearchScopes(int removed, int inserted) {
-        // 插入备料步骤时原目标只是后移，仍保留旧范围；明确替换目标才丢弃被替换步骤的范围。
-        var shifted = new LinkedHashMap<Integer, Optional<ContainerSearchScope>>();
-        containerSearchScopes.forEach((index, scope) -> {
-            if (index < stepIndex) shifted.put(index, scope);
-            else if (index >= stepIndex + removed) shifted.put(index + inserted - removed, scope);
+        // 插入备料步骤时原目标只是后移，仍保留旧范围和取物起始数；明确替换目标才丢弃被替换步骤的这两份事实。
+        shiftByStep(containerSearchScopes, removed, inserted);
+        shiftByStep(acquireBaselines, removed, inserted);
+    }
+
+    private <T> void shiftByStep(Map<Integer, T> byStep, int removed, int inserted) {
+        var shifted = new LinkedHashMap<Integer, T>();
+        byStep.forEach((index, value) -> {
+            if (index < stepIndex) shifted.put(index, value);
+            else if (index >= stepIndex + removed) shifted.put(index + inserted - removed, value);
         });
-        containerSearchScopes.clear(); containerSearchScopes.putAll(shifted);
+        byStep.clear(); byStep.putAll(shifted);
     }
 
     /** 建筑编译成可执行工程后保留冻结设计，恢复时沿用原来的几何与材料。 */

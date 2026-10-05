@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.IntentTaskRecord;
 import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.intent.ObservedGameEvidence;
+import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
 import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -76,7 +77,8 @@ public final class IntentStateCodec {
             IntentTaskRecord.DecisionAnswer pendingAnswer,
             IntentTaskRecord.TerminalSnapshot terminal,
             boolean chatSubmissionTracked,
-            Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes) {}
+            Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes,
+            Map<Integer, IntentTaskRecord.AcquireBaseline> acquireBaselines) {}
 
     public record Decoded(
             List<Plan> plans,
@@ -173,6 +175,19 @@ public final class IntentStateCodec {
             scopes.add(item);
         });
         value.add("container_search_scopes", scopes);
+        // 取物“再拿几件”的起始数随父任务落盘；旧版步骤的标记也照存，二次恢复不能变成新的增量目标。
+        JsonArray baselines = new JsonArray();
+        task.acquireBaselines().forEach((index, baseline) -> {
+            JsonObject item = new JsonObject(); item.addProperty("step_index", index);
+            item.addProperty("count_semantics", baseline.legacyFinalCount() ? "legacy_final" : "additional");
+            if (!baseline.legacyFinalCount()) {
+                JsonObject carried = new JsonObject();
+                baseline.carried().forEach((id, count) -> carried.addProperty(id.toString(), count));
+                item.add("carried", carried);
+            }
+            baselines.add(item);
+        });
+        value.add("acquire_count_baselines", baselines);
 
         JsonArray completed = new JsonArray();
         task.stepResults().forEach(step -> {
@@ -460,7 +475,45 @@ public final class IntentStateCodec {
                 List.copyOf(attempts),
                 decision, answer, terminal,
                 value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean(),
-                decodeContainerSearchScopes(value, steps));
+                decodeContainerSearchScopes(value, steps),
+                decodeAcquireBaselines(value, steps, stepIndex));
+    }
+
+    private static Map<Integer, IntentTaskRecord.AcquireBaseline> decodeAcquireBaselines(
+            JsonObject value, List<Goal> steps, int stepIndex) {
+        var result = new LinkedHashMap<Integer, IntentTaskRecord.AcquireBaseline>();
+        if (!value.has("acquire_count_baselines")) {
+            // 升级前的检查点没有这份字段：当时的 count 是最终合计数，未完成的取物步骤继续按旧语义执行，不在恢复后再多拿一轮。
+            for (int index = Math.max(0, stepIndex); index < steps.size(); index++)
+                if ("maicraft:acquire_items".equals(steps.get(index).ability()))
+                    result.put(index, new IntentTaskRecord.AcquireBaseline(true, Map.of()));
+            return Map.copyOf(result);
+        }
+        for (var element : array(value, "acquire_count_baselines", steps.size())) {
+            // 起始数是当初的背包事实，越界或负数直接拒绝，不能钳制后冒充原值。
+            JsonObject row = element.getAsJsonObject(); int index = row.get("step_index").getAsBigDecimal().intValueExact();
+            if (index < 0 || index >= steps.size() || !"maicraft:acquire_items".equals(steps.get(index).ability()))
+                throw new IllegalArgumentException("acquire count baseline is outside an acquisition step");
+            IntentTaskRecord.AcquireBaseline baseline = switch (text(row, "count_semantics")) {
+                case "legacy_final" -> new IntentTaskRecord.AcquireBaseline(true, Map.of());
+                case "additional" -> {
+                    var carried = new LinkedHashMap<ResourceLocation, Integer>();
+                    var saved = row.getAsJsonObject("carried");
+                    if (saved == null || saved.size() > SemanticAcquireTaskRecord.MAX_ITEM_ALTERNATIVES)
+                        throw new IllegalArgumentException("invalid persisted acquisition baseline");
+                    for (var entry : saved.entrySet()) {
+                        int count = entry.getValue().getAsBigDecimal().intValueExact();
+                        // 模组堆叠上限可能超过六十四，起始数只拒绝负数，不按请求件数上限误判整份检查点损坏。
+                        if (count < 0) throw new IllegalArgumentException("invalid persisted acquisition baseline count");
+                        carried.put(ResourceLocation.parse(entry.getKey()), count);
+                    }
+                    yield new IntentTaskRecord.AcquireBaseline(false, carried);
+                }
+                default -> throw new IllegalArgumentException("invalid acquisition count semantics");
+            };
+            if (result.put(index, baseline) != null) throw new IllegalArgumentException("duplicate acquisition baseline");
+        }
+        return Map.copyOf(result);
     }
 
     private static Map<Integer, Optional<ContainerSearchScope>> decodeContainerSearchScopes(JsonObject value, List<Goal> steps) {

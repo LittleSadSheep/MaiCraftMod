@@ -83,7 +83,9 @@ public final class ContainerSearchScopePersistenceTest {
 
     private static void legacyScopeRemainsUnknown(boolean alreadyCarried) throws Exception {
         try (var f = new Fixture()) {
-            JsonObject legacy = f.snapshot(); legacy.getAsJsonArray("tasks").get(0).getAsJsonObject().remove("container_search_scopes");
+            // 旧版检查点同时缺少容器范围和取物起始数；后者让 count 继续按旧版最终合计数理解，已带一块即满足。
+            JsonObject legacy = f.snapshot(); var legacyTask = legacy.getAsJsonArray("tasks").get(0).getAsJsonObject();
+            legacyTask.remove("container_search_scopes"); legacyTask.remove("acquire_count_baselines");
             f.save(legacy); f.world.position(new Vec3(6.5, 1, 3.5)); f.restore();
             check(f.parent.containerSearchScopes().get(0).isEmpty(), "legacy checkpoint reports unknown scope");
             // 未知状态再保存、再次恢复仍为未知；不能因为文件升级过一遍就重新授予当前位置附近的访问范围。

@@ -2,14 +2,18 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.task.container.ContainerSearchScope;
 import org.maiwithu.maicraft.core.task.entity.GenericEntitySearchTaskRecord;
 import net.minecraft.world.item.Items;
@@ -89,7 +93,12 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
                     Source.MINE, Source.HUNT);
 
     public final List<ResourceLocation> itemIds;
-    public final int count;
+    /** 执行器追的最终主背包合计数；公开取物绑定增量后变成“起始已有数 + 请求件数”，内部补料直接给最终数。 */
+    public int count;
+    /** 公开取物请求“再拿几件”时的件数；为 0 表示内部调用沿用最终数量语义。 */
+    public int additionalCount;
+    /** 本步首次启动时各候选物品的主背包已有数，只在增量语义下有值，供回执说明净增多少。 */
+    public Map<ResourceLocation, Integer> baselineByItem = Map.of();
     public final List<Source> allowedSources;
     public final boolean allowHarm;
     public final SourceHint sourceHint;
@@ -136,6 +145,33 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public SemanticAcquireTaskRecord withApproachTerrainAlter(boolean enabled) {
         approachTerrainAlter = enabled;
         return this;
+    }
+
+    /**
+     * 公开取物的 count 表示“再拿几件”：把请求件数挪到 additionalCount，最终目标改成起始已有数加请求件数。
+     * 起始数由语义步骤首次启动时冻结，重试、暂停和重启沿用同一份，避免每次重建子任务都再多拿一轮。
+     */
+    public SemanticAcquireTaskRecord withAdditionalCount(Map<ResourceLocation, Integer> baseline) {
+        if (additionalCount > 0) throw new IllegalStateException("acquisition increment is already bound");
+        Map<ResourceLocation, Integer> carried = new LinkedHashMap<>();
+        for (ResourceLocation id : itemIds) carried.put(id, Math.max(0, baseline.getOrDefault(id, 0)));
+        additionalCount = count;
+        baselineByItem = Collections.unmodifiableMap(carried);
+        count = baselineCount() + additionalCount;
+        return this;
+    }
+
+    /** 读出此刻主背包里每种可接受物品的数量，口径与执行器每刻核对的最终数量相同。 */
+    public Map<ResourceLocation, Integer> carriedByItem(LocalPlayer player) {
+        Map<ResourceLocation, Integer> carried = new LinkedHashMap<>();
+        for (ResourceLocation id : itemIds)
+            carried.put(id, player == null ? 0 : PlayerInv.buildableCount(player.getInventory(), BuiltInRegistries.ITEM.get(id)));
+        return carried;
+    }
+
+    /** 起始已有数按全部可接受物品合计，与执行器核对最终数量的口径一致。 */
+    public int baselineCount() {
+        return baselineByItem.values().stream().mapToInt(Integer::intValue).sum();
     }
     /** 内部补料可单独查更远的已加载仓库；附近采集、采矿等仍使用原来的 searchRadius。 */
     public final int storageSearchRadius;
@@ -215,6 +251,8 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public String describe() {
         String first = itemIds.getFirst().toString();
         String alternatives = itemIds.size() == 1 ? "" : "+" + (itemIds.size() - 1);
+        // 公开请求按“再拿几件”描述，内部补料仍说凑到背包总数。
+        if (additionalCount > 0) return "再获取 " + first + alternatives + " " + additionalCount + " 件（起始已有 " + baselineCount() + "）";
         return "获取 " + first + alternatives + " 至背包总数 " + count;
     }
 

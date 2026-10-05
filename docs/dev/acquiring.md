@@ -1,6 +1,6 @@
 # 想要物品时，角色究竟会做什么
 
-`acquire_items` 的目标是“背包里最后有多少”，不是“再拿多少”。要 16 根木棍，已经带着 4 根，就还缺 12 根；如果允许橡木板和桦木板替代，数量按两种木板合计。这里只数主背包和快捷栏，不把装备栏、工作台格子或仓库里的物品当成已经到手。
+`acquire_items` 的 `count` 是“再拿多少”，不是“背包里最后有多少”。已经带着 4 根木棍再要 16 根，本步开始时记下起始数 4，目标就是主背包合计 20 根；如果允许橡木板和桦木板替代，起始数和目标都按两种木板合计。这里只数主背包和快捷栏，不把装备栏、工作台格子或仓库里的物品当成已经到手。
 
 这页说明 `maicraft:acquire_items` 如何从一个库存目标选择来源、拆分需求并结算实际结果。只想用随身材料合成时，先看 [craft 与工作台流程](crafting.md)；炉次细节见 [烹饪](cooking.md)，菜单转移见 [菜单事务](menu-transfers.md)。读到配方、看到仓库现货和最终物品入包是三个不同阶段。
 
@@ -31,7 +31,7 @@
 {
   "goal": {
     "ability": "maicraft:acquire_items",
-    "outcome": "让主背包中可替代的木板合计达到16张，优先使用桦木材料",
+    "outcome": "再获取16张可替代的木板，优先使用桦木材料",
     "parameters": {
       "item_tag": "minecraft:planks",
       "count": 16,
@@ -45,7 +45,7 @@
 | --- | --- |
 | `item_id` / `item_ids` | 单个物品 ID 字符串 / 字符串数组；与下面两种标签输入至少提供一种，可同时提供并合并。须能解析为当前注册的非空气物品，合并去重后最多 256 种。数组不是逐项采购单。 |
 | `item_tag` / `item_tags` | 单个物品标签 / 标签数组，可带前导 `#`；执行时展开实时成员，空标签或未知标签报错，展开后同样计入 256 种上限。建议始终写 `namespace:id`。 |
-| `count` | 整数 1～2304，省略或 `null` 为 1；按主背包 36 格内所有可接受物品合计。0、小数、数字字符串、越界值拒绝。2304 是数量上限，不保证不可堆叠物品装得下。 |
+| `count` | 要再获取的件数，整数 1～2304，省略或 `null` 为 1。本步第一次启动时冻结主背包 36 格内所有可接受物品的合计作为起始数，目标为起始数 + `count`；已带物品不算新获取。0、小数、数字字符串、越界值拒绝。2304 是件数上限，不保证不可堆叠物品装得下。 |
 | `allowed_sources` | 字符串数组，枚举见下表；省略、`null`、`[]` 都选择默认来源。非空数组才收窄获取许可，不规定执行顺序。每个元素非空；解析时忽略大小写并去除两侧空白。 |
 | `preferred_materials` | 明确带命名空间的物品 ID 数组，去重后最多 256 种；省略、`null`、`[]` 无偏好。当前注册表中必须存在且不能是空气；不是配方 ID、标签或禁止其他材料的清单。 |
 | `allow_harm` | 布尔值，省略或 `null` 为 `false`；`true` 才允许狩猎来源伤害核实后的目标，不豁免实体关系及保护检查。 |
@@ -73,7 +73,7 @@
 {
   "goal": {
     "ability": "maicraft:acquire_items",
-    "outcome": "允许捕捉野生鳕鱼，让主背包鳕鱼达到4条",
+    "outcome": "允许捕捉野生鳕鱼，再获取4条鳕鱼",
     "target": {"kind": "nearest"},
     "parameters": {
       "item_id": "minecraft:cod",
@@ -121,6 +121,8 @@
 
 箱子调查和接近路线默认限于工具接单起点三维 32 格，显式更小 `radius` 会收窄；排队、递归补料和走到下一只箱子都不会扩大范围。`ObservationVisibility` 统一从角色眼睛按视觉外形核对箱子、方块和实体探索证据，透明材质与不完整外形的空隙允许观察，实心墙、关闭的实心门与未加载地形仍遮挡目标。观察到箱子不代表原生准星已经能点中它。
 
+起始数与容器范围一样按语义步骤保存：同一步 `retry`、`recover` 补完前置后回到本步、同进程暂停和重启恢复都沿用首次启动时的起始数，只有 `replace_goal` 换掉本步才重新起算；`retry` 改了物品范围时，原有物品保留旧起始数，新加入的物品按当时数量补记。升级前保存、尚未完成的取物步骤没有起始数，恢复后仍按旧版“最终合计数”执行，不会再多拿一轮。内部组合（`craft`、交互前取工具、施工补料等）直接给最终合计数，不受这条增量语义影响。
+
 语义取物步骤首次捕获的维度、原点和半径随任务检查点保存，第一次调查箱子前等待实际写入完成。同进程暂停或重启恢复都复用该范围；插入前置步骤不会把原范围转给新的步骤。旧检查点缺少范围时，回执明确报告 `container_search_scope.status=unknown`，不从恢复地点重新开始搜索；背包已满足目标时仍直接完成，取物尝试为空。磁盘保存失败也会在开箱前结束并说明原因。
 
 来源填写顺序不会成为执行脚本。每刻先确认最终主背包数量及在途子任务，再收起已由现货满足的前置；允许 `inventory` 或 `storage` 时先尝试支持的随身背包取货，然后调查获准的可见容器、观察可用无线现货，再由来源排序选择剩余操作。已能合成或烹饪的路线、已知采矿或狩猎线索会影响顺序。已经耗尽的来源按名字记录，不能因重新排序又凭换下标重试。
@@ -162,7 +164,7 @@
 
 取消不会撤销已经挖掉的方块或取走的物品。收尾会停止子任务，并保留尝试、库存变化与不确定性。主要结果字段包括 `goal_satisfied`、`attempts`、`recipe_trace`、`issues`、`effects_observed` 和 `outcome_uncertain`；配方记录里的 `allowed_sources` 表示许可，不能当作已经执行的顺序。
 
-`required_final_count`、`observed_final_count`、`missing` 和前后分物品计数说明目标事实；`attempts[].child_data` 说明具体子任务。`recipe_trace[].preparation_plan` 记录补料清单、加工顺序、估价、偏好及附近来源证据；中间件后来到包时会记录收起的旧材料分支。`issues[].facts.crafting_surface` 区分已有台、尚需取台及无摆放点。不要只凭最终英文错误猜是缺材料还是缺空间。
+`requested_additional_count`（请求的件数）、`baseline_count`（本步起始数）、`net_gained_count`（当前合计减起始数，消耗时可为负）、`required_final_count`（起始数 + 件数）、`observed_final_count`、`missing` 和前后分物品计数说明目标事实；`attempts[].child_data` 说明具体子任务。`recipe_trace[].preparation_plan` 记录补料清单、加工顺序、估价、偏好及附近来源证据；中间件后来到包时会记录收起的旧材料分支。`issues[].facts.crafting_surface` 区分已有台、尚需取台及无摆放点。不要只凭最终英文错误猜是缺材料还是缺空间。
 
 容量故障可能启动 `AcquisitionInventoryTidy`：保留任务材料、工具等物品，把其他物品存入随身背包或可用随身 AE 以腾空间，同一调用最多四轮，有未确认转移则停下。这个存入分支目前不按 `allowed_sources` 过滤，取货限制不是完整的“禁止任何存储副作用”开关；看 `inventory_maintenance` 和 `inventory_capacity` 确认实际转移。
 
@@ -176,7 +178,7 @@
 | 失败待决策 | 读取实际 `decision_id` 和列出的 `choice` 后用 `task(action="answer")`。`retry` 可更新 `details.parameters`；`recover` / `replace_goal` 使用 `details.goal`，不要把 `recovery_options[].id` 直接当成必定有效的选择。 |
 | 取消、超时 | 停止并结算子任务，保留实际物品、世界变化及未知事务；不回滚库存，不把部分完成改成完整成功。 |
 | 死亡、玩家替换、断线或换世界 | 总任务层先保存检查点并清理旧身体；未完成工作恢复为暂停。死亡问题需按实际回执处理，重生不等于物品找回或自动恢复旧菜单。 |
-| 重启后恢复 | 使用原任务查询历史再继续，重新读当前库存和现场；容器范围沿保存的原点恢复，旧档缺范围时明确为未知。参见 [任务生命周期](tasks.md)。 |
+| 重启后恢复 | 使用原任务查询历史再继续，重新读当前库存和现场；取物起始数和容器范围沿保存的值恢复，旧档缺范围时明确为未知。参见 [任务生命周期](tasks.md)。 |
 
 ## 想看哪一步，打开哪里
 
@@ -202,6 +204,7 @@
 ## 修改后怎样核对
 
 - [AcquireGoalTest](../../common/src/test/java/org/maiwithu/maicraft/intent/AcquireGoalTest.java)：检查新目标数量、来源提示、地点边界及发现上限。
+- [AcquireAdditionalCountTest](../../common/src/test/java/org/maiwithu/maicraft/intent/AcquireAdditionalCountTest.java)：已带物品时 `count` 仍要再拿一件；起始数随暂停、重试和重启沿用，旧检查点按旧版最终合计数执行。
 - [AcquisitionSourceInheritanceTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/acquire/AcquisitionSourceInheritanceTest.java)：经过实际工具准备分支，检查来源不扩大；只盘点背包不会扫描配方。
 - [AcquisitionRecipePlanningTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/acquire/AcquisitionRecipePlanningTest.java)：原生配方与真实背包分配、完整候选、循环、材料组与替代路线。
 - [AcquisitionPrerequisiteRefreshTest](../../common/src/test/java/org/maiwithu/maicraft/core/task/acquire/AcquisitionPrerequisiteRefreshTest.java)：工作台或木板后来到包后退出旧原料分支，保留已经发生的效果。

@@ -341,6 +341,9 @@ final class IntentTask implements Task {
                 var scope = record.retainContainerSearchScope(acquire.storageScope == null
                         ? ContainerSearchScope.capture(player, acquire.storageSearchRadius) : acquire.storageScope);
                 acquire.bindStorageScope(scope.orElse(null), NativeSubmissionBinding.barrier(record, runtime, "container_search_scope", () -> true));
+                // 公开取物的 count 是“再拿几件”：本步首次启动时记下背包已有数，目标 = 已有数 + count；
+                // 之后重试、暂停和重启复用这份起始数，不会因重建子任务又多拿一轮。旧检查点留下的步骤仍按最终合计数执行。
+                record.retainAcquireBaseline(acquire.carriedByItem(player)).ifPresent(acquire::withAdditionalCount);
             }
             // 单次提交先绑定父任务的持久身份，附魔、投料和聊天都不能因重启后新建子任务而重复执行。
             if (nextRecord instanceof NativeSubmissionTaskRecord submission)

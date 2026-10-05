@@ -24,7 +24,7 @@ final class AbilitySummaries {
             case "maicraft:remember_place" -> "Register or overwrite a named world location in runtime memory; the later persistent save is a separate step.";
 
             // 取材和加工都要说明数量终点；主包目标、单次采收、扫取与切制次数不是同一个计数口径。
-            case "maicraft:acquire_items" -> "Reach a requested final main-inventory quantity through selected acquisition sources and recipe prerequisites.";
+            case "maicraft:acquire_items" -> "Obtain count more acceptable items in the main inventory than the step started with, through selected acquisition sources and recipe prerequisites.";
             case "maicraft:craft" -> "Reach a final inventory quantity through inventory or crafting-table recipes and permitted grid-craftable intermediates.";
             case "maicraft:harvest_block" -> "Harvest one specified observed block and settle its native drops, keeping source destruction and received output separate.";
             case "maicraft:collect_items" -> "Collect one observed drop reference or sweep nearby loose items, confirming pickup through the evidence available to that mode.";
