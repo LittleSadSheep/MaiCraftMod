@@ -67,6 +67,8 @@ public final class IntentTaskRecord extends TaskRecord {
     private TerminalSnapshot terminal;
     private boolean restoredDetached;
     private boolean chatSubmissionTracked = true;
+    /** 同一 request_key 重提命中去重的次数：调用方据此分辨拿到的是旧任务还是新执行，本进程内计数，恢复后从零开始。 */
+    private int deduplicatedRequestHits;
     private Runnable dirty = () -> {};
     /** 只保存最近一次观察的诊断副本；不持有世界对象，也不把旧进度当成重启后的现场事实。 */
     private JsonObject activeExecution;
@@ -172,6 +174,14 @@ public final class IntentTaskRecord extends TaskRecord {
         }
         return record;
     }
+
+    /** 幂等去重命中时登记：旧任务被再次交付这一事实必须留在任务单上，只靠 execute 即时响应标注，走 attention 等终态的调用链看不见。 */
+    void noteDeduplicatedRequestHit() {
+        deduplicatedRequestHits++;
+        changed();
+    }
+
+    public int deduplicatedRequestHits() { return deduplicatedRequestHits; }
 
     public UUID externalId() { return externalId; }
     public UUID planId() { return planId; }

@@ -100,6 +100,7 @@ bindForRequest            检查这请求属于当前世界吗
 bindForRequest + requireRecoveredState    世界可用？旧检查点恢复了吗？
   ├─ 有 plan_id → 取出计划里的目标
   ├─ request_key 去重                      重复请求直接返回原任务
+  │                                        （命中事实同时写上任务单，task 查询可见 deduplicated_request_hits）
   ├─ 非只读设计 → 申请接管玩家身体
   └─ IntentRuntime.execute
         ├─ 校验目标、建总任务单、登记、发 started 事件

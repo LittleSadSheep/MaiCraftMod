@@ -187,7 +187,11 @@ public final class IntentRuntime {
             // 网络重试可能重复提交同一请求；同一 request_key 复用原记录，避免重复开工。
             UUID existingId = requestKeys.get(requestKey);
             IntentTaskRecord existing = existingId == null ? null : tasks.get(existingId);
-            if (existing != null) return existing;
+            if (existing != null) {
+                // 重提交付的是旧记录；命中事实同时写上任务单，走 attention/task 轮询终态的调用链也能看见这不是一次新执行。
+                existing.noteDeduplicatedRequestHit();
+                return existing;
+            }
         }
 
         if (stateIdentity == null) {

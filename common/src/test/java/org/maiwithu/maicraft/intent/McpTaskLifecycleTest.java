@@ -148,6 +148,17 @@ public final class McpTaskLifecycleTest {
             check(!ClientRuntime.actor().automationControlRequested(), "查询原请求不能重新接管玩家");
             check(result.get("control_status").getAsString().equals("not_requested"), "重试回复不能声称已请求接管");
             check(f.tasks().size() == 1, "重试不能登记第二件任务");
+            // 去重命中必须写上任务单：走 attention/task 轮询终态的调用链看不到 execute 即时响应的
+            // deduplicated 标注，重放与新执行在任务视图上必须可分辨（147 勘察同参重提逐字同回执的教训）。
+            check(original.deduplicatedRequestHits() == 1, "去重命中应在任务单登记重放计数");
+            var viewArgs = new JsonObject();
+            viewArgs.addProperty("action", "get");
+            viewArgs.addProperty("task_id", original.externalId().toString());
+            var view = f.facade.task(viewArgs).toCompletableFuture().join().getAsJsonObject();
+            check(view.get("deduplicated_request_hits").getAsInt() == 1,
+                    "任务视图应交付重放计数");
+            f.facade.execute(args).toCompletableFuture().join();
+            check(original.deduplicatedRequestHits() == 2, "再次重提应累计重放计数");
 
             // 保留原有目标校验：使用旧请求编号不能绕过能力参数检查，也不能因此申请身体。
             args.getAsJsonObject("goal").getAsJsonObject("parameters").addProperty("slot", 2);
