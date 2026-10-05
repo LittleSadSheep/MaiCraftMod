@@ -168,6 +168,11 @@ def regressionSuites = [
         heap: '512m', directory: 'placement-access-regression', timeoutSeconds: 60,
         purpose: '验证开阔平地单格放置的站位证明与工位覆盖，拒绝时回执逐闸点名'
     ],
+    constructionZeroChangeRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.supply.BuildSupplyZeroChangeTest',
+        heap: '512m', directory: 'construction-zero-change-regression', timeoutSeconds: 60,
+        purpose: '验证施工回执以世界净变化为准：零变更一律如实失败并携带批次与格数对账'
+    ],
     buildingBudgetRegression: [
         entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
         heap: '768m', directory: 'building-budget-regression', timeoutSeconds: 120,

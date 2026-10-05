@@ -55,6 +55,8 @@ public enum FailureType {
     HAZARD("retreat and re-plan around the hazard; the fluid card explains what water and lava do to dig sites", List.of("maicraft://knowledge/game_mechanics/fluid-flow")),
     /** 操作被停止或打断，例如玩家要求停止或身体失效。 */
     INTERRUPTED(null, List.of()),
+    /** 任务到达终态时目标处没有任何已核验的世界变更；回执如实计零，调用方先对账现场再决定下一步。 */
+    NO_WORLD_CHANGE(null, List.of()),
     /** 超出这项任务允许的执行时间。 */
     TIMED_OUT(null, List.of()),
     /** 当前没有支持这类任务或操作的实现。 */

@@ -76,6 +76,11 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     /** 建造完成后保留的位置，让下一步能引用“刚建好的地方”。 */
     private Position verifiedPosition;
     private List<BlockPos> protectedNavigationCells = List.of();
+    /**
+     * 计划自注册的导航保护：保护名单就是自家目标格（门框类计划把整圈框登记为导航保护）。
+     * 只有这种名单可以对目标格豁免继承保护；其他流程传入的保护格即使恰好是目标格也照旧全量生效。
+     */
+    private boolean selfRegisteredNavigationProtection;
     private Predicate<LocalPlayer> preflightGuard = player -> true;
     private BiPredicate<LocalPlayer, BlockPos> mutationGuard = (player, pos) -> true;
     private BiConsumer<LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
@@ -179,6 +184,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.observedMachineEdits = observedMachineEdits;
         destination.fixedMachineModification = fixedMachineModification;
         destination.declaredMachineEdits = declaredMachineEdits;
+        destination.selfRegisteredNavigationProtection = selfRegisteredNavigationProtection;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
                 preflightGuard, mutationGuard, confirmedMutation);
     }
@@ -196,6 +202,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     }
 
     List<BlockPos> protectedNavigationCells() { return protectedNavigationCells; }
+
+    /** 标记保护名单来自计划自注册（名单即自家目标格）；施工任务据此决定目标格能否豁免继承保护。 */
+    public void selfRegisteredNavigationProtection(boolean value) { this.selfRegisteredNavigationProtection = value; }
+    public boolean selfRegisteredNavigationProtection() { return selfRegisteredNavigationProtection; }
     boolean preflightGuardMatches(LocalPlayer player) { return preflightGuard.test(player); }
     boolean mutationGuardMatches(LocalPlayer player, BlockPos pos) { return mutationGuard.test(player, pos); }
     boolean hasExecutionGuards() { return hasExecutionGuards; }

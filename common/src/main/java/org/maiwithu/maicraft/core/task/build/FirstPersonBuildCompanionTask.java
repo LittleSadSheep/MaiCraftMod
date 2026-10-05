@@ -264,17 +264,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     "navigation protection must be supplied before construction starts");
         }
         if (cells == null) return;
+        // 计划自注册的导航保护（名单即自家目标格，门框类）只约束非目标格（清障与挖掘路线），
+        // 不得否决自家目标格：门框类施工曾让任何场地都报 blocked_site_cells。目标格的授权由
+        // ReplaceMode 与可破坏性把关。其他流程传入的保护格即使恰好落在目标格上，也照旧并入
+        // 继承保护集全量生效——供料保护、机器观察等显式保护不因「是目标格」而失守。
+        boolean selfRegistered = r.selfRegisteredNavigationProtection();
         for (BlockPos cell : cells) {
             if (cell != null) {
                 protectedCells.add(cell.asLong());
-                // 计划自注册的导航保护只约束非目标格（清障与挖掘路线），不得否决自家目标格：
-                // 门框类施工把整圈框注册为导航保护，目标格同时被自己的保护集否决过，曾让
-                // 任何场地都报 blocked_site_cells。目标格的授权由 ReplaceMode 与可破坏性把关；
-                // 继承的显式保护（NavigationSafetyContext）仍照常否决，不经此入口。
-                if (!targets.containsKey(cell.asLong())) {
+                if (!selfRegistered || !targets.containsKey(cell.asLong())) {
                     inheritedProtectedMutationCells.add(cell.asLong());
                     // 前一施工层仍需在受保护目标为空时进入该格；目标建成后，实时碰撞会阻止角色再次进入。
-                    forbiddenBodyCells.add(cell.asLong());
+                    if (!targets.containsKey(cell.asLong())) forbiddenBodyCells.add(cell.asLong());
                 }
             }
         }
@@ -2962,6 +2963,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     protected String successMessage() {
         if(!nativePlacementDeviation.isEmpty())return "原生放置已确认，实际落点偏离声明；已返回耗材、实际效果及完整设计差异";
         if (r.supplyAccessOnly()) return "reached the exterior ground for material supply; temporary supports remain tracked for construction";
+        // 零动作收尾不是「建成」：提交时目标就全部满足，话术必须如实区分，不能让调用方误读为这次施工有效。
+        if (r.placed() == 0 && r.broken() == 0)
+            return "verified every requested build cell already matched the target; no placement or clearing gesture was submitted ("
+                    + r.completed() + "/" + r.targets.size() + " re-verified)";
         return "built and re-verified " + r.completed() + "/" + r.targets.size()
                 + " block(s) through first-person actions; placed " + r.placed()
                 + ", cleared " + r.broken() + " (" + note
