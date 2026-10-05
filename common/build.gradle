@@ -310,6 +310,12 @@ def regressionSuites = [
         heap: '512m', directory: 'combat-stance-replay-regression', timeoutSeconds: 45,
         purpose: '回放近战站位与原生出刀边界'
     ],
+    // 睡眠门控与回执：可睡窗口按原版天空变暗公式判定，入睡跳夜以日指数前进的实物证据判成功。
+    sleepGateRegression: [
+        entry: 'org.maiwithu.maicraft.client.actor.SleepGateReceiptTest',
+        heap: '512m', directory: 'sleep-gate-regression', timeoutSeconds: 60,
+        purpose: '验证睡眠白天门控与原版可睡窗口同源，入睡跳刻后回执与世界实物一致'
+    ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
         heap: '768m', directory: 'optional-server-regression', timeoutSeconds: 90,
