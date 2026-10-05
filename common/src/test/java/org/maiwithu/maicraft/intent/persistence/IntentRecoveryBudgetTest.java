@@ -23,15 +23,16 @@ import org.maiwithu.maicraft.intent.Plan;
 import org.maiwithu.maicraft.task.CompanionTickDispatcher;
 import java.lang.reflect.Field;
 
-/** 模拟重启后收紧建筑预算：保留旧世界的完整任务，恢复之前不接新施工，提高预算后恢复原编号和地标。 */
+/** 收紧内容预算只约束新提交，旧任务以暂停历史在场；字节超限与不兼容内容仍保留原检查点并阻断接单。 */
 public final class IntentRecoveryBudgetTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         Path workspace = Path.of("").toAbsolutePath().normalize();
         Path directory = Files.createTempDirectory(workspace, "intent-recovery-budget-");
         try {
-            for (String property : List.of("maxTargets", "maxObjects", "maxRadius", "maxConnections", "maxVoxelWork", "maxIntentStateBytes"))
-                preservesCheckpointUntilRestored(directory.resolve(property), property);
+            for (String property : List.of("maxTargets", "maxObjects", "maxRadius", "maxConnections", "maxVoxelWork"))
+                restoresAsPausedHistory(directory.resolve(property), property);
+            overBudgetKeepsCheckpoint(directory.resolve("maxIntentStateBytes"));
             incompatibleContentStaysPreserved(directory.resolve("incompatible"));
             malformedJsonStillQuarantines(directory.resolve("malformed"));
             System.out.println("IntentRecoveryBudgetTest: passed");
@@ -43,7 +44,11 @@ public final class IntentRecoveryBudgetTest {
         }
     }
 
-    private static void preservesCheckpointUntilRestored(Path directory, String property) throws Exception {
+    /**
+     * 内容级预算（目标数、对象数等）收紧不再追溯裁决旧检查点：恢复照常完成，历史任务以暂停状态在场，
+     * 同内容的新提交仍被收紧后的预算拒绝；预算恢复默认后可继续保存进度，沿用原任务编号。
+     */
+    private static void restoresAsPausedHistory(Path directory, String property) throws Exception {
         configure(directory, "");
         Goal goal = property.equals("maxTargets") ? blueprintGoal() : sceneGoal();
         StateIdentity identity = identity(directory); Plan plan = Plan.compile(goal, 10);
@@ -52,19 +57,48 @@ public final class IntentRecoveryBudgetTest {
         JsonObject root = IntentStateCodec.encode(identity.key(), List.of(plan), List.of(task), Map.of("原请求", task.externalId()), List.of(landmark));
         new IntentStateStore(Runnable::run).saveAsync(identity, root).get(5, TimeUnit.SECONDS);
         Path file = stateFile(identity); byte[] original = Files.readAllBytes(file);
-        // 文件仍在字节限额内时也要覆盖内容校验的失败；只有最后一组专门模拟文件本身超过新限额。
         configure(directory, property + "=1\n");
-        check(property.equals("maxIntentStateBytes") || original.length < IntentStateStore.maxBytes(), "内容预算夹具不能意外走文件字节分支");
+        check(original.length < IntentStateStore.maxBytes(), "内容预算夹具不能意外走文件字节分支");
         IntentStateStore store = new IntentStateStore(Runnable::run); IntentRuntime runtime = runtime(store, identity);
         restore(runtime);
-        assertBlocked(runtime, store, identity, original, property.equals("maxIntentStateBytes") ? "over_budget" : "recovery_blocked");
+        runtime.requireRecoveredState();
+        check(runtime.task(task.externalId()) != null && runtime.task(task.externalId()).goal().toJson().equals(goal.toJson())
+                        && runtime.taskForRequestKey("原请求").externalId().equals(task.externalId())
+                        && runtime.plan(plan.id()) != null && runtime.landmarks().equals(List.of(landmark)),
+                "预算收紧后旧计划、任务、去重请求和地标仍以暂停历史在场");
+        check(runtime.task(task.externalId()).restoredDetached(), "恢复旧工程后仍须等待明确继续，不能自动接管身体");
+        try {
+            runtime.compile(goal, 20);
+            throw new AssertionError("收紧的内容预算仍须拒绝同内容的新提交");
+        } catch (RuntimeException expected) { }
+        check(Arrays.equals(Files.readAllBytes(file), original), "恢复读取不能重写原文件");
+        configure(directory, "");
+        check(runtime.checkpointDeath(), "预算恢复默认后应允许保存死亡交接快照");
+        var restored = IntentStateCodec.decode(new IntentStateStore().load(identity).root());
+        check(restored.tasks().getFirst().id().equals(task.externalId()) && restored.landmarks().equals(List.of(landmark)),
+                "解除保护后保存的仍是原任务和地标");
+    }
+
+    /** 文件本身超过新字节限额时仍不加载也不覆盖：阻断接单直到预算调回，退出与重生不能写坏旧进度。 */
+    private static void overBudgetKeepsCheckpoint(Path directory) throws Exception {
+        configure(directory, "");
+        StateIdentity identity = identity(directory); Plan plan = Plan.compile(sceneGoal(), 10);
+        var task = new IntentTaskRecord(UUID.randomUUID(), plan.id(), sceneGoal());
+        var landmark = new IntentRuntime.Landmark("原仓库", new Goal.WorldPosition(3, 64, 5, "minecraft:overworld"));
+        JsonObject root = IntentStateCodec.encode(identity.key(), List.of(plan), List.of(task), Map.of("原请求", task.externalId()), List.of(landmark));
+        new IntentStateStore(Runnable::run).saveAsync(identity, root).get(5, TimeUnit.SECONDS);
+        Path file = stateFile(identity); byte[] original = Files.readAllBytes(file);
+        configure(directory, "maxIntentStateBytes=1\n");
+        IntentStateStore store = new IntentStateStore(Runnable::run); IntentRuntime runtime = runtime(store, identity);
+        restore(runtime);
+        assertBlocked(runtime, store, identity, original, "over_budget");
         configure(directory, "");
         rejected(runtime::requireRecoveredState);
         rejectSave(store, identity);
         // 改回数字还不够，必须重新读回并验证旧任务；之后继续使用原任务编号，不生成替代任务。
         restore(runtime);
         runtime.requireRecoveredState();
-        check(runtime.task(task.externalId()) != null && runtime.task(task.externalId()).goal().toJson().equals(goal.toJson())
+        check(runtime.task(task.externalId()) != null && runtime.task(task.externalId()).goal().toJson().equals(sceneGoal().toJson())
                         && runtime.taskForRequestKey("原请求").externalId().equals(task.externalId())
                         && runtime.plan(plan.id()) != null && runtime.landmarks().equals(List.of(landmark)),
                 "提高预算后应找回原计划、任务、去重请求和地标");
@@ -96,7 +130,9 @@ public final class IntentRecoveryBudgetTest {
                         && event.get("message").getAsString().contains(BuildingBudgets.CONFIG_PATH),
                 "恢复结果必须明确报告保留状态、接单阻塞与配置位置");
         rejectSave(store, identity);
-        check(!runtime.checkpointDeath() && !runtime.prepareRespawnHandoff(), "未恢复的状态不能冒称已有死亡或重生交接快照");
+        check(!runtime.checkpointDeath(), "未恢复的状态不能伪造新的死亡交接快照");
+        // 重生是恢复行为本身：阻断期旧检查点已原样保留在存储层，交接必须放行，不能把尸体困在死亡屏幕。
+        check(runtime.prepareRespawnHandoff(), "恢复受阻时重生交接仍须放行");
         runtime.shutdownPersistence();
         check(!store.hasSnapshot(identity) && Arrays.equals(Files.readAllBytes(stateFile(identity)), original),
                 "保存、重生和退出都不能用空任务覆盖仍未加载的旧世界进度");

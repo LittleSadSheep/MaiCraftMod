@@ -142,7 +142,9 @@ public final class ExploreInterestDecisionTest {
                 "{\"biome_id\":\"modded:autumn_forest\",\"interests\":[\"lava_pool\"]}", "{}", List.of(), List.of());
         SemanticGoalContract.validate(original, IntentRuntime.KNOWN_ABILITIES);
         Goal restored = Goal.fromJson(original.toJson());
-        SemanticGoalContract.validateRestored(restored, IntentRuntime.KNOWN_ABILITIES);
+        // 恢复期只校验能力名在册；参数合法性由上面的新提交校验与执行适配器把关。
+        if (!IntentRuntime.KNOWN_ABILITIES.contains(restored.ability()))
+            throw new AssertionError("序列化往返后的能力名应仍在册");
         IntentAction.Tool adapted = (IntentAction.Tool) AbilityAdapter.adapt(restored, null, null);
         check(adapted.arguments().getAsJsonArray("interests").size() == 1
                 && adapted.arguments().getAsJsonArray("interests").get(0).getAsString().equals("lava_pool"),

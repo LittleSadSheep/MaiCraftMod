@@ -655,8 +655,17 @@ public final class IntentStateCodec {
     private static JsonObject safeGoal(Goal goal) {
         // 目标里的合法蓝图另按蓝图规则检查，其他内容不能含内部操作字段；若过滤会改掉目标，就拒绝保存。
         JsonObject original = goal.toJson();
-        JsonObject inspection = BlueprintGoalData.instructionView(goal);
-            JsonElement safe = safeGoalElement(inspection);
+        JsonObject inspection = BlueprintGoalData.instructionView(goal, true);
+        return safeGoal(goal, inspection);
+    }
+
+    /** lenient 只用于恢复读回：按保存时的同形规则清洗，不重新执行当前预算与政策校验。 */
+    private static JsonObject safeGoal(Goal goal, boolean enforceCurrentRules) {
+        return safeGoal(goal, BlueprintGoalData.instructionView(goal, enforceCurrentRules));
+    }
+
+    private static JsonObject safeGoal(Goal goal, JsonObject inspection) {
+        JsonElement safe = safeGoalElement(inspection);
         if (!safe.isJsonObject()) {
             throw new IllegalArgumentException("semantic goal must encode as an object");
         }
@@ -664,6 +673,7 @@ public final class IntentStateCodec {
             throw new IllegalArgumentException(
                     "semantic goal contains native execution details or exceeds persistence bounds");
         }
+        JsonObject original = goal.toJson();
         // 执行步骤另存分组范围，公开 Goal JSON 仍只描述原请求；重启不能丢掉这些约束。
         if (!goal.inheritedProtectionLabels().isEmpty()) {
             JsonArray inherited = new JsonArray();
@@ -690,8 +700,8 @@ public final class IntentStateCodec {
             inherited.add(label.getAsString());
         }
         goal = goal.withInheritedProtection(inherited);
-        JsonElement safe = safeGoal(goal);
-        if (!safe.equals(value)) {
+        // 恢复历史不做当前预算与政策的参数级复核：数据在写入当刻已通过当时的检查（163）。
+        if (!safeGoal(goal, false).equals(value)) {
             throw new IllegalArgumentException(
                     "persisted semantic goal contains native execution details or exceeds bounds");
         }

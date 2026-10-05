@@ -391,7 +391,9 @@ public final class IntentRuntime {
     public boolean prepareRespawnHandoff() {
         boolean saved = captureCheckpoint(true);
         bodyAttached = false;
-        return saved;
+        // 恢复受阻时旧检查点已被原样保留在存储层；重生是恢复行为本身，
+        // 不能因为此刻无法再写新检查点就把尸体困在死亡屏幕（162 伴生缺陷）。
+        return saved || stateStore.recoveryProblem(stateIdentity) != null;
     }
 
     /** 为当前总任务记录死亡后要回答的问题，继续使用既有任务答复入口。 */
@@ -530,6 +532,15 @@ public final class IntentRuntime {
     public void requireCurrentBinding(IntentTaskRecord record) {
         // 旧任务恢复未完成时不能通过继续任务入口重新请求角色动作。
         requireRecoveredState();
+        requireSameWorldBinding(record);
+    }
+
+    /**
+     * 只核对任务是否属于当前绑定的世界，不做恢复闸检查。
+     * 取消与死亡答复（重生/观战）不推进身体动作，恢复受阻时也必须保持可达；
+     * 会重新请求身体动作的入口（resume、继续任务）仍走 {@link #requireCurrentBinding}。
+     */
+    public void requireSameWorldBinding(IntentTaskRecord record) {
         if (record == null || stateIdentity == null || !bodyAttached
                 || record.bindingKey() == null
                 || !stateIdentity.key().equals(record.bindingKey())) {
@@ -585,7 +596,8 @@ public final class IntentRuntime {
 
     /** 玩家不想继续恢复的旧任务时，直接结算记录，不能为取消而启动它或替换当前身体任务。 */
     public void cancelRestored(IntentTaskRecord record, long gameTime) {
-        requireCurrentBinding(record);
+        // 取消不推进身体动作，恢复受阻时也必须可达；但仍须属于当前绑定的世界。
+        requireSameWorldBinding(record);
         if (tasks.get(record.externalId()) != record || !record.restoredDetached()
                 || record.getState().isTerminal()) {
             throw new IllegalStateException("task is not an unfinished detached restoration");
@@ -608,6 +620,9 @@ public final class IntentRuntime {
         int restoredTasks = 0;
         int restoredLandmarks = 0;
         int restoredTerminal = 0;
+        // 排障定位用：校验在哪条历史记录上失败时，记录它的 id，日志与事件都带上。
+        Object restoringRecordId = null;
+        String failureDetail = null;
         String status = loaded.status().name().toLowerCase(Locale.ROOT);
         if (loaded.status() == IntentStateStore.Status.LOADED) {
             try {
@@ -615,17 +630,19 @@ public final class IntentRuntime {
                 containers.restore(loaded.root().getAsJsonArray("containers"));
                 observedSources.restore(loaded.root().getAsJsonArray("observed_sources"));
                 for (Plan plan : decoded.plans()) {
+                    restoringRecordId = plan.id();
                     validateRestoredGoal(plan.goal());
                     if (plans.putIfAbsent(plan.id(), plan) != null) {
                         throw new IllegalArgumentException("duplicate persisted plan id");
                     }
                 }
                 for (IntentStateCodec.TaskSnapshot snapshot : decoded.tasks()) {
+                    restoringRecordId = snapshot.id();
                     validateRestoredGoal(snapshot.goal());
                     // 原生试运行后的分析可能允许失败后继续刹车；摊平保存的步骤不能在重启时被误当成独立请求。
-                    for (Goal step : snapshot.steps()) validateRestoredGoal(step,true);
+                    for (Goal step : snapshot.steps()) validateRestoredGoal(step);
                     for (IntentTaskRecord.AttemptSnapshot attempt : snapshot.attempts()) {
-                        validateRestoredGoal(attempt.goal(),true);
+                        validateRestoredGoal(attempt.goal());
                     }
                     IntentTaskRecord record = IntentTaskRecord.restored(
                             snapshot.id(), snapshot.planId(), snapshot.goal(),
@@ -670,6 +687,15 @@ public final class IntentRuntime {
                 Constants.LOG.warn(
                         "MaiCraft semantic state could not be restored; the checkpoint was preserved ({}: {})",
                         invalidModel.getClass().getSimpleName(), invalidModel.getMessage());
+                // 契约违规带上违规码，排障时不用再离线重放校验定位肇事分支。
+                failureDetail = (invalidModel instanceof SemanticContractException contract
+                        ? contract.violationCode() + " / " : "")
+                        + invalidModel.getClass().getSimpleName()
+                        + (invalidModel.getMessage() == null ? "" : ": " + invalidModel.getMessage());
+                Constants.LOG.warn(
+                        "MaiCraft semantic state could not be restored; the checkpoint was preserved ({}; restoring record {})",
+                        failureDetail, restoringRecordId);
+)
             }
         }
         dirty = false;
@@ -680,6 +706,11 @@ public final class IntentRuntime {
         data.addProperty("restored_terminal_tasks", restoredTerminal);
         data.addProperty("restored_landmarks", restoredLandmarks);
         data.addProperty("reload_cause", reloadCause);
+        // 恢复失败的具体原因与肇事记录直接进事件流，定位不再依赖离线重放校验。
+        if (failureDetail != null) {
+            data.addProperty("recovery_failure", failureDetail);
+            if (restoringRecordId != null) data.addProperty("offending_record_id", restoringRecordId.toString());
+        }
         // 容量不足和内容无法恢复都明确提示旧文件已保留；查询方不能把零条已加载任务误认成一个新世界。
         String problem = stateStore.recoveryProblem(stateIdentity);
         if (problem != null) {
@@ -842,15 +873,16 @@ public final class IntentRuntime {
         return SemanticGoalContract.runtimeAuthorizationKeys();
     }
 
-    /** 恢复历史不等于重新批准执行；仍保留结构、容量与内部动作边界，避免旧记录锁住整个世界的任务。 */
+    /**
+     * 恢复历史只校验结构与身份：能力名在册即可暂停在场。参数与当前政策（含 chat 命令门禁）
+     * 只约束新提交，不追溯裁决旧任务——旧检查点按写入当刻的规则保留，否则配置收紧会把
+     * 整份历史一票否决、世界永久 recovery_blocked（163）。重新执行仍走 {@link #validateGoal} 全量校验。
+     */
     private void validateRestoredGoal(Goal goal) {
-        validateRestoredGoal(goal,false);
-    }
-
-    private void validateRestoredGoal(Goal goal,boolean storedStep) {
-        SemanticGoalContract.validateRestored(goal, KNOWN_ABILITIES,storedStep);
-        IntentStateCodec.requirePersistableGoal(goal);
-        rejectMicroInstructions(goal);
+        if (!KNOWN_ABILITIES.contains(goal.ability())) {
+            throw new SemanticContractException("unknown_ability", "goal.ability", goal.ability(),
+                    "Unknown semantic ability '" + goal.ability() + "'.");
+        }
     }
 
     /** 先校验答复的目标与参数，再允许它解除暂停或修改当前任务。 */

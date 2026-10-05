@@ -459,8 +459,9 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             }
             case "answer" -> {
                 // 先核对答复参数，再接受问题编号和选项；死亡后的复活／旁观有单独的游戏操作流程。
+                // 答复本身不推进身体动作，恢复受阻时死亡答复与取消仍须可达；续跑仍由 resume 入口设恢复闸。
                 if (record.restoredDetached()) {
-                    intents.requireCurrentBinding(record);
+                    intents.requireSameWorldBinding(record);
                 }
                 JsonObject answer = arguments.getAsJsonObject("answer");
                 UUID decisionId = UUID.fromString(answer.get("decision_id").getAsString());
@@ -484,7 +485,8 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
                 if (!record.answer(decisionId, choice, details)) {
                     throw new IllegalArgumentException("decision_id or choice does not match the pending decision");
                 }
-                if (record.restoredDetached()) {
+                if (record.restoredDetached() && deathEffect == GameplayAttentionMonitor.DeathDecisionEffect.NONE) {
+                    // 死亡答复走原生恢复路径，不再此刻把旧任务重新塞回身体槽——重绑定后的恢复流程会接管它。
                     if (CompanionTickDispatcher.find(record.publicId()) != record) {
                         CompanionTickDispatcher.submitCurrent(player, record);
                     }
