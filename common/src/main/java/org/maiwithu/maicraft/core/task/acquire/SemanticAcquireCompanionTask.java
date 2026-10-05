@@ -399,6 +399,7 @@ public final class SemanticAcquireCompanionTask
             return TaskState.RUNNING;
         }
         need.attempted(source);
+        boolean wirelessCrafting = false;
         if (wireless) {
             // 自动网络现货只拿已经查到的数量，先取部分现货，再对余下缺口拆配方；不顺便搜索普通容器。
             var stock = StockEvidence.latestNetwork(player);
@@ -411,14 +412,18 @@ public final class SemanticAcquireCompanionTask
             long available = need.itemIds.stream().mapToLong(stock.get()::storedCount).reduce(0L, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
             // 空桶加网络水已有原生灌装接口；没有成品桶不能在外层把这条合法存储路线提前剪掉。
             if (available <= 0) available = Ae2ResourceSupply.nativeWaterFillProbeCapacity(player, need.itemIds, missing, stock.get());
-            if (available <= 0) { advanceSource(need); return TaskState.RUNNING; }
-            missing = (int) Math.min(missing, available);
+            // 网络里有这件物品的合成样板（含加工样板）时，"从 AE 请求"就像玩家在终端里点请求合成：
+            // 先取现有现货，余下缺口交给 AE 用网络原料与机器合成，产物送进背包后再核对到手数量
+            wirelessCrafting = need.itemIds.stream().anyMatch(stock.get().craftable()::contains);
+            if (available <= 0 && !wirelessCrafting) { advanceSource(need); return TaskState.RUNNING; }
+            if (!wirelessCrafting) missing = (int) Math.min(missing, available);
         }
         Ae2ResourceSupply.Group group = new Ae2ResourceSupply.Group(
                 need.itemIds.getFirst(), need.itemIds, missing,
                 Ae2ResourceSupply.SelectionMode.AGGREGATE);
         // 网络制造也受当前前置需求约束，不能从顶层任务重新取回已经收窄的制造许可。
-        boolean allowNetworkCrafting = explicitStorage && need.allowedSources.contains(
+        // 无线来源本身就包含 AE 合成请求（物品带样板才会走到这里），不另要求 craft 来源许可。
+        boolean allowNetworkCrafting = wirelessCrafting || explicitStorage && need.allowedSources.contains(
                 SemanticAcquireTaskRecord.Source.CRAFT);
         Ae2ResourceSupply.Request request = new Ae2ResourceSupply.Request(
                 List.of(group), allowNetworkCrafting, Ae2ResourceSupply.Operation.SUPPLY, wireless);

@@ -30,7 +30,7 @@ public final class SemanticAcquireTaskRecord extends TaskRecord {
     public enum Source {
         INVENTORY,
         NEARBY,
-        /** 只取随身无线终端的已观察现货；不搜索普通箱子，也不委托网络合成。 */
+        /** 随身无线终端：先取已观察现货，现货不够而网络有合成或加工样板时提交 AE 合成补足；不搜索普通箱子。 */
         WIRELESS,
         STORAGE,
         /** 只采已加载的成熟农作物并补种；不把附近掉落物许可扩展为破坏农田。 */

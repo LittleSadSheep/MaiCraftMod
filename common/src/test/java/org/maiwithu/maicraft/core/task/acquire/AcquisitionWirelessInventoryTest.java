@@ -33,6 +33,9 @@ public final class AcquisitionWirelessInventoryTest {
         explicitMiningCannotOpenWireless();
         emptyAndUnknownAreDistinct();
         carriedBucketReachesNativeWaterFill();
+        // 网络有样板时"从 AE 请求"包含合成：零现货也提交合成，有部分现货时余下缺口一并交给 AE 合成
+        craftablePatternFillsTheGap(0, 1);
+        craftablePatternFillsTheGap(1, 3);
         // 同一供料入口也覆盖背包装不下后的停止边界，确认不会继续转去采集世界材料。
         AcquisitionCapacityFailureTest.main(args);
         AcquisitionInventoryTidyTest.main(args);
@@ -172,6 +175,54 @@ public final class AcquisitionWirelessInventoryTest {
                     "unspecified ordinary acquisition retains explicitly represented wireless stock access");
             task.stop(world.player, Task.StopReason.REPLACED);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void craftablePatternFillsTheGap(long stored, int wanted) throws Exception {
+        // 实测：AE 里有铁板加工样板却没有现货，旧逻辑看到零现货就跳过无线来源，角色永远拿不到铁板
+        Class.forName(Ae2SupplyTaskRecord.class.getName());
+        var registryField = TaskFactory.class.getDeclaredField("RUNNERS"); registryField.setAccessible(true);
+        var runners = (Map<Class<? extends TaskRecord>, TaskFactory.Runner<? extends TaskRecord>>) registryField.get(null);
+        var previous = runners.get(Ae2SupplyTaskRecord.class);
+        try (var world = new InteractionWorldTestHarness()) {
+            List<Ae2ResourceSupply.Request> requests = new ArrayList<>();
+            TaskFactory.register(Ae2SupplyTaskRecord.class, (player, record) -> new Task() {
+                @Override public String name() { return "wireless crafting test"; }
+                @Override public void start(LocalPlayer ignored) { requests.add(record.request); }
+                @Override public TaskState tick(LocalPlayer ignored) {
+                    if (record.request.operation() == Ae2ResourceSupply.Operation.OBSERVE) {
+                        try { remember(world, stored, Set.of(ITEM)); } catch (Exception failure) { throw new AssertionError(failure); }
+                    } else {
+                        // 取货请求仍只走随身终端，但带上合成许可，数量是完整缺口而不是现货件数
+                        check(record.request.wirelessOnly() && record.request.allowCrafting()
+                                && record.request.totalCount() == wanted, "craftable gap is requested from AE crafting");
+                        world.inventory.setItem(0, new ItemStack(Items.STONE_BRICKS, (int) record.request.totalCount()));
+                    }
+                    return TaskState.SUCCESS;
+                }
+                @Override public void stop(LocalPlayer ignored, StopReason reason) { }
+                @Override public TaskResult result(TaskState state) { return TaskResult.ok("settled crafting supply", Map.of("outcome_uncertain", false)); }
+            });
+            var record = new SemanticAcquireTaskRecord("wireless-crafting", 1000, List.of(ITEM), wanted,
+                    List.of(SemanticAcquireTaskRecord.Source.INVENTORY, SemanticAcquireTaskRecord.Source.WIRELESS), false,
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8);
+            var task = new SemanticAcquireCompanionTask(world.player, record, ignored -> true);
+            task.onStart();
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 16 && state == TaskState.RUNNING; tick++) state = task.onTick();
+            check(state == TaskState.SUCCESS && requests.size() == 2
+                    && world.inventory.countItem(Items.STONE_BRICKS) == wanted, "AE crafting completes the requested count");
+            task.stop(world.player, Task.StopReason.REPLACED);
+        } finally {
+            if (previous == null) runners.remove(Ae2SupplyTaskRecord.class); else runners.put(Ae2SupplyTaskRecord.class, previous);
+        }
+    }
+
+    private static void remember(InteractionWorldTestHarness world, long stored, Set<ResourceLocation> craftable) throws Exception {
+        var field = StockEvidence.class.getDeclaredField("NETWORK_CACHE"); field.setAccessible(true); Object cache = field.get(null);
+        var record = cache.getClass().getDeclaredMethod("record", Object.class, Object.class, Map.class, StockEvidence.Snapshot.class); record.setAccessible(true);
+        record.invoke(cache, world.player, world.level, Map.of(), new StockEvidence.Snapshot(StockEvidence.Source.AE2,
+                stored > 0 ? Map.of(ITEM, stored) : Map.of(), craftable, world.level.getGameTime()));
     }
 
     private static void remember(InteractionWorldTestHarness world) throws Exception {
