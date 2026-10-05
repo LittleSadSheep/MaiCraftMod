@@ -8,6 +8,8 @@ import org.maiwithu.maicraft.intent.RecoveryKnowledgeTest;
 public final class PortalRegressionSuite {
     public static void main(String[] args) throws Exception {
         NetherPortalFrameTest.main(args);
+        // 点火不成型时的 vanilla 口径门框审计：认可与拒绝都必须与原版 PortalShape 同判。
+        NetherPortalVanillaAuditTest.main(args);
         // 浇筑模板先核对四种池岸方向，水流效果另由实机验收。
         NetherPortalCastingLayoutTest.main(args);
         PortalCastingSurveyTest.main(args);

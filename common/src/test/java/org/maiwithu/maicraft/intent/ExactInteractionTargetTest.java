@@ -286,6 +286,7 @@ public final class ExactInteractionTargetTest {
         }
         igniteWithVisibleFire(true);
         igniteWithVisibleFire(false);
+        igniteFireThenNaturalBurnout();
         ignitePortalConversion();
     }
 
@@ -353,9 +354,61 @@ public final class ExactInteractionTargetTest {
         }
     }
 
-    /** 有效门框把火直接换成传送门方块：点火对账必须认账并回报传送门证据，不得误判为失败。 */
-    private static void ignitePortalConversion() throws Exception {
+    /** 真实复现 174 批六D 现场：火在无门框的黑曜石支撑上落格后自然熄灭——成功收口但如实携带完整证据链。 */
+    private static void igniteFireThenNaturalBurnout() throws Exception {
         try (var f = new InteractionWorldTestHarness()) {
+            f.position(new Vec3(3.5, 1, .5));
+            f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
+            f.set(TARGET, Blocks.OBSIDIAN.defaultBlockState());
+            var record = compile(adaptFlint(flintGoal(TARGET, f), f), f);
+            var task = new InteractAtCompanionTask(f.player, record); task.start(f.player);
+            TaskState state = TaskState.RUNNING;
+            BlockHitResult hit0 = null;
+            boolean clicked = false, burnedOut = false, fireObserved = false;
+            var observedField = field(InteractAtCompanionTask.class, "ignitionVerified");
+            int ticksSinceObserved = 0;
+            for (int tick = 0; tick < 160 && state == TaskState.RUNNING; tick++) {
+                var hit = FirstPersonInteractionTargeting.visibleBlockHit(
+                        f.level, f.player, f.player.getEyePosition(), TARGET, 4.5);
+                if (hit != null) aim(f, hit.getLocation());
+                f.nextTick(); state = task.tick(f.player);
+                if (f.blockUses() == 1 && !clicked) {
+                    clicked = true; hit0 = hit;
+                    f.set(TARGET.relative(hit.getDirection()), Blocks.FIRE.defaultBlockState());
+                    f.level.acknowledgedSequence = f.level.blockSequence;
+                    continue;
+                }
+                // 不可燃地面上的火因无可燃邻居而自然熄灭：等对账真的观察到火之后再把火撤成空气，
+                // 让窗口内的时间线记录 fire → air 的完整变化。
+                if (!fireObserved) {
+                    fireObserved = Boolean.TRUE.equals(observedField.get(task));
+                } else if (++ticksSinceObserved == 3) {
+                    f.set(TARGET.relative(hit0.getDirection()), Blocks.AIR.defaultBlockState());
+                    burnedOut = true;
+                }
+            }
+            check(state == TaskState.SUCCESS && clicked && burnedOut,
+                    "a fire that appears and burns out still completes the ignition: " + state);
+            var data = task.result(state).data();
+            check(Boolean.TRUE.equals(data.get("fire_observed"))
+                            && Boolean.FALSE.equals(data.get("nether_portal_formed"))
+                            && "minecraft:fire".equals(data.get("ignition_observed_block_id"))
+                            && "minecraft:air".equals(data.get("ignition_final_block_id")),
+                    "the burnout receipt separates fire evidence from portal evidence: " + data);
+            @SuppressWarnings("unchecked")
+            var timeline = (java.util.List<String>) data.get("ignition_timeline");
+            check(timeline != null && timeline.stream().anyMatch(s -> s.endsWith(":minecraft:fire"))
+                            && timeline.stream().anyMatch(s -> s.endsWith(":minecraft:air")),
+                    "the timeline records both the fire sighting and the burnout: " + timeline);
+            @SuppressWarnings("unchecked")
+            var audit = (java.util.Map<String, Object>) data.get("portal_frame_audit");
+            check(audit != null && Boolean.FALSE.equals(audit.get("would_form_portal")),
+                    "the attached audit honestly reports that no portal would form here: " + audit);
+        }
+    }
+
+    /** 有效门框把火直接换成传送门方块：点火对账必须认账并回报传送门证据，不得误判为失败。 */
+    private static void ignitePortalConversion() throws Exception {        try (var f = new InteractionWorldTestHarness()) {
             f.position(new Vec3(3.5, 1, .5));
             f.inventory.setItem(0, new ItemStack(Items.FLINT_AND_STEEL));
             f.set(TARGET, Blocks.STONE.defaultBlockState());
@@ -394,4 +447,15 @@ public final class ExactInteractionTargetTest {
     }
 
     private static void check(boolean value, String reason) { if (!value) throw new AssertionError(reason); }
+
+    private static java.lang.reflect.Field field(Class<?> owner, String name) throws Exception {
+        for (Class<?> type = owner; type != null; type = type.getSuperclass()) {
+            try {
+                var f = type.getDeclaredField(name);
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException ignored) { }
+        }
+        throw new NoSuchFieldException(name);
+    }
 }

@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.task.base.GoToThenDoTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import net.minecraft.core.registries.BuiltInRegistries;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.core.task.dimension.NetherPortalVanillaAudit;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -105,6 +106,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     /** 点火对账观察到的具体结局：true=火被有效门框直接换成传送门；false=普通落火。 */
     private boolean ignitionPortal;
     private String ignitionObservedBlockId;
+    /** 点火窗口插桩：落格观察时刻线（变化才记一条）、窗口闭合时的最终方块与 vanilla 口径门框审计。 */
+    private BlockPos ignitionCell;
+    private String lastObservedCellId;
+    private final List<String> ignitionTimeline = new ArrayList<>();
+    private String ignitionFinalBlockId;
+    private NetherPortalVanillaAudit.Result portalFrameAudit;
     private boolean manualCrank;
     private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
@@ -462,6 +469,9 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                             + (verifiedSide == 1 ? "front" : "back") + " side.";
                     yield verifiedOutcome();
                 }
+                // 点火是单次蓄意点击：对账观察窗内绝不允许交互计时器再补一刀（重复点击会再耗耐久，
+                // 且落格已成火/传送门时的二次点击只会以确认超时把整次成功拖成失败）。
+                if (r.expectIgnition) interaction.finishRepeating();
                 successMsg = describeDone() + settle();
                 yield verifiedOutcome();
             }
@@ -659,26 +669,61 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         // 换成传送门，两种结局都算点火生效并如实带证据回报，短窗口内两者皆无才如实失败。
         if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
             var submitted = interaction.submittedBlockHit();
-            BlockPos cell = submitted.getBlockPos().relative(submitted.getDirection()).immutable();
-            var live = player.level().isLoaded(cell) ? player.level().getBlockState(cell) : null;
+            if (ignitionCell == null) ignitionCell = submitted.getBlockPos().relative(submitted.getDirection()).immutable();
+            var live = player.level().isLoaded(ignitionCell) ? player.level().getBlockState(ignitionCell) : null;
+            String observedId = live == null ? "unloaded"
+                    : BuiltInRegistries.BLOCK.getKey(live.getBlock()).toString();
+            // 插桩：落格每次状态变化都记入时刻线，窗口闭合时连同 vanilla 口径门框审计一起进回执，
+            // 供区分「火自然熄灭」「火被换成传送门」「成型后被移除」三种结局。
+            if (!observedId.equals(lastObservedCellId)) {
+                ignitionTimeline.add("t" + fireWaitTicks + ":" + observedId);
+                lastObservedCellId = observedId;
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "ignition watch {} t{}: {}", ignitionCell.toShortString(), fireWaitTicks, observedId);
+            }
             if (live != null && NativeConfirmation.ignitionEffect(live)) {
-                ignitionVerified = true;
-                ignitionPortal = live.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock;
-                ignitionObservedBlockId = BuiltInRegistries.BLOCK.getKey(live.getBlock()).toString();
-                successMsg += " — " + (ignitionPortal ? "nether portal formed" : "fire observed")
-                        + " at " + cell.toShortString();
-                return verifyExpectedOutput();
+                if (!ignitionVerified) {
+                    ignitionVerified = true;
+                    ignitionObservedBlockId = observedId;
+                }
+                if (live.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock) {
+                    // 原版在火落格同刻换成传送门；看到即收口，不必再等。
+                    ignitionPortal = true;
+                    return ignitionWindowClose();
+                }
             }
             if (++fireWaitTicks <= 20) return TaskState.RUNNING;
-            fail("the ignition click was confirmed, but no fire or portal appeared at " + cell.toShortString()
-                    + " (observed there: " + (live == null ? "unloaded" : BuiltInRegistries.BLOCK.getKey(live.getBlock()))
-                    + "); the clicked face may not open into air, or the fire already burned out on "
-                    + "non-flammable ground. Inspect the site, the frame validity, or aim at a different face.",
-                    FailureType.TARGET_LOST);
-            return TaskState.FAILED;
+            return ignitionWindowClose();
         }
         // 定点倒桶也必须等到请求的返还物被真实观察到；等待期间不重新使用桶。
         return verifyExpectedOutput();
+    }
+
+    /** 点火观察窗口闭合：先固定 vanilla 口径门框审计，再按「看到过火/门」与最终落格如实收口。 */
+    private TaskState ignitionWindowClose() {
+        if (portalFrameAudit == null && player.level().isLoaded(ignitionCell)) {
+            portalFrameAudit = NetherPortalVanillaAudit.audit(player.level()::getBlockState, ignitionCell);
+            org.maiwithu.maicraft.core.Constants.LOG.info(
+                    "ignition frame audit at {}: axis={} bottom_left={} {}x{} valid={} would_form_portal={} offenses={}",
+                    ignitionCell.toShortString(), portalFrameAudit.axis(),
+                    portalFrameAudit.bottomLeft() == null ? "none" : portalFrameAudit.bottomLeft().toShortString(),
+                    portalFrameAudit.width(), portalFrameAudit.height(), portalFrameAudit.frameValid(),
+                    portalFrameAudit.wouldFormPortal(), portalFrameAudit.offenseLines());
+        }
+        ignitionFinalBlockId = lastObservedCellId;
+        if (ignitionVerified) {
+            successMsg += " — " + (ignitionPortal ? "nether portal formed" : "fire observed")
+                    + " at " + ignitionCell.toShortString();
+            if (!ignitionPortal && !"minecraft:fire".equals(ignitionFinalBlockId))
+                successMsg += " (later: " + ignitionFinalBlockId + " — fire burned out on non-flammable ground)";
+            return verifyExpectedOutput();
+        }
+        fail("the ignition click was confirmed, but no fire or portal appeared at " + ignitionCell.toShortString()
+                + " (observed there: " + ignitionFinalBlockId
+                + "); the clicked face may not open into air, or the fire already burned out on "
+                + "non-flammable ground. Inspect the site, the frame validity, or aim at a different face.",
+                FailureType.TARGET_LOST);
+        return TaskState.FAILED;
     }
 
     /**
@@ -873,6 +918,21 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             data.put("fire_observed", ignitionVerified);
             if (ignitionObservedBlockId != null) data.put("ignition_observed_block_id", ignitionObservedBlockId);
             if (ignitionVerified) data.put("nether_portal_formed", ignitionPortal);
+            // 插桩证据：落格状态时刻线、窗口闭合时的最终方块与 vanilla 口径门框审计。
+            if (!ignitionTimeline.isEmpty()) data.put("ignition_timeline", List.copyOf(ignitionTimeline));
+            if (ignitionFinalBlockId != null) data.put("ignition_final_block_id", ignitionFinalBlockId);
+            if (portalFrameAudit != null) {
+                var audit = new HashMap<String,Object>();
+                audit.put("axis", portalFrameAudit.axis().name());
+                audit.put("bottom_left", portalFrameAudit.bottomLeft() == null
+                        ? "none" : portalFrameAudit.bottomLeft().toShortString());
+                audit.put("width", portalFrameAudit.width());
+                audit.put("height", portalFrameAudit.height());
+                audit.put("frame_valid", portalFrameAudit.frameValid());
+                audit.put("would_form_portal", portalFrameAudit.wouldFormPortal());
+                audit.put("offenses", portalFrameAudit.offenseLines());
+                data.put("portal_frame_audit", audit);
+            }
         }
         // 报告已激活的工作站和确切位置；位置以实际命中为准，不使用原始瞄准点，供智能体循环收录到 <known_blocks>。
         if (activatedBlock != null) {
