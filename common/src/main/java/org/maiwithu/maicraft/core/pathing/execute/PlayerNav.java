@@ -162,6 +162,8 @@ public final class PlayerNav {
     /** 旅行、采集和施工读同一份已验证进度，不再把“后台正在运行”直接当作续期依据。 */
     public long lastVerifiedProgressTick() { return navigator.lastVerifiedProgressTick(); }
     public long planningProgressUnits() { return navigator.planningProgressUnits(); }
+    /** 规划期搜索尝试次数；搜索零新进展时它是唯一还在增长的心跳（见进度事件 calc 键）。 */
+    public long planningCalcAttempts() { return navigator.planningCalcAttempts(); }
     public NavigationStep executionStep(long clientRevision) { return navigator.executionStep(clientRevision); }
     public void stop() { navigator.stop(); }
     public void pause() { navigator.pause(); }

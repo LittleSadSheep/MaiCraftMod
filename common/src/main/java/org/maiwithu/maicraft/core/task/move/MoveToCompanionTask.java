@@ -787,6 +787,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (planning) {
             result.put("done", nav.planningProgressUnits());
             result.put("progress_unit", "verified_planning_work_units");
+            // 心跳：搜索零新进展时 done 停在原地，尝试次数仍单调增长，事件流不会在停滞期完全静默。
+            result.put("calc", nav.planningCalcAttempts());
             // 收敛趋势：曾达到的最近距离按同一量化档交付；它不再缩小说明搜索在空转，可以提前取消。
             result.put("best_remaining", bestDist == Double.MAX_VALUE
                     ? Integer.MAX_VALUE

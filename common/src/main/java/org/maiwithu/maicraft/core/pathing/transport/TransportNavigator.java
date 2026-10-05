@@ -315,6 +315,10 @@ public final class TransportNavigator {
         return ground.planningProgressUnits() + (targets == null ? 0 : targets.examined())
                 + (departureApproach == null ? 0 : departureApproach.planningProgressUnits());
     }
+    public long planningCalcAttempts() {
+        return (ground == null ? 0 : ground.planningCalcAttempts())
+                + (departureApproach == null ? 0 : departureApproach.planningCalcAttempts());
+    }
     public boolean hasRecentPhysicalProgress(int ticks) {
         // 物理进度只取实际位移或确认动作；计算进展由 lastVerifiedProgressTick 的独立通道交付。
         return departureApproach != null && departureApproach.hasRecentPhysicalProgress(ticks)

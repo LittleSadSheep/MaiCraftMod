@@ -160,6 +160,8 @@ public final class NavigationRegressionSuite {
         IntentStateStoreTest.main(args);
         MoveToContractTest.main(args);
         MoveToTransportCompletionTest.main(args);
+        // 接近与移动的进度契约：接近规划有界终态、停滞期 calc 心跳、剩余计数向上取整。
+        org.maiwithu.maicraft.core.task.move.MoveToProgressGuardTest.main(args);
         // 地表发现与坐标移动共享移动外壳；露天判定与误报防线在这里单独验证。
         org.maiwithu.maicraft.core.task.move.TravelSurfaceTaskTest.main(args);
         PathSearchRegressionTest.main(args);
