@@ -61,6 +61,21 @@ public final class ReleaseWindowReflexSelectionTest {
             holderField.set(brain, proxyField.get(brain));
             check(!brain.slotHoldsBody(),
                     "任务槽已空时，残留在 holder 上的槽代理不算在岗持有");
+
+            // 换手拒绝留痕的冷却判定：新建的脑从未留痕过，任意游戏刻的首次判定必须放行。
+            // 限频初值曾取 Long.MIN_VALUE，now - last 在首次判定即回绕为负，冷却恒成立，
+            // 留痕一次都打不出来——这里以任意典型游戏刻复现该形态并锁住修复。
+            CompanionBrain refusalBrain = new CompanionBrain();
+            check(refusalBrain.yieldRefusalLogDue(1000L),
+                    "首次换手拒绝必须立即留痕，不得被冷却初值挡住");
+            // 留痕发生后 logYieldRefusal 会写入当前刻；这里写入同一值模拟真实流程。
+            Field refusalStamp = CompanionBrain.class.getDeclaredField("lastYieldRefusalLog");
+            refusalStamp.setAccessible(true);
+            refusalStamp.setLong(refusalBrain, 1000L);
+            check(!refusalBrain.yieldRefusalLogDue(1000L + 99),
+                    "冷却窗口内的后续拒绝按限频跳过留痕");
+            check(refusalBrain.yieldRefusalLogDue(1000L + 100),
+                    "冷却窗口过后恢复留痕资格");
         }
         System.out.println("ReleaseWindowReflexSelectionTest: passed");
     }

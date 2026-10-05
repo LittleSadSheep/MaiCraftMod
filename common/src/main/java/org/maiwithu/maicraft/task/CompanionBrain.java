@@ -23,7 +23,9 @@ final class CompanionBrain {
     /** 换手被安全闸门拒绝的留痕冷却：持续拒绝只按节奏记，不刷屏。 */
     private static final long YIELD_REFUSAL_LOG_INTERVAL = 100;
 
-    private long lastYieldRefusalLog = Long.MIN_VALUE;
+    // 初值取 MIN_VALUE / 2：直接取 MIN_VALUE 时 now - last 在首次判定就回绕为负，
+    // 冷却条件恒成立，留痕一次都打不出来。
+    private long lastYieldRefusalLog = Long.MIN_VALUE / 2;
 
     private final Deque<TaskRecord> outbox = new ArrayDeque<>();
     final TaskSlot sync = new TaskSlot(outbox::addLast);
@@ -135,12 +137,17 @@ final class CompanionBrain {
      */
     private void logYieldRefusal(LocalPlayer player, Task winner) {
         long now = player.level().getGameTime();
-        if (now - lastYieldRefusalLog < YIELD_REFUSAL_LOG_INTERVAL) return;
+        if (!yieldRefusalLogDue(now)) return;
         lastYieldRefusalLog = now;
         Constants.LOG.info(
                 "[maicraft-task] handover refused; winner={} holder={} baritone_safe={} transport_safe={}",
                 winner == null ? "none" : winner.name(), describeHolder(),
                 EmbeddedBaritoneRuntime.canSafelySuspendActive(), TransportRuntime.canSafelySuspendActive());
+    }
+
+    /** 距上次留痕是否已过冷却；首次判定（从未留痕过）必须返回 true。 */
+    boolean yieldRefusalLogDue(long now) {
+        return now - lastYieldRefusalLog >= YIELD_REFUSAL_LOG_INTERVAL;
     }
 
     private String describeHolder() {
