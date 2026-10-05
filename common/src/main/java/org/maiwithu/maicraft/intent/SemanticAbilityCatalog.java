@@ -490,6 +490,8 @@ public final class SemanticAbilityCatalog {
                     "Reach a destination using caller-selected arrival precision. All ability fields belong in goal.parameters. "
                             + "For located travel, horizontal_radius defaults to 3 and vertical_tolerance to 2 blocks; "
                             + "set vertical_tolerance=0 with a known Y to require the same feet-node layer while allowing horizontal approach. "
+                            + "Height-sensitive intents — standing level with water to scoop it, boarding a platform or matching a work-surface layer — "
+                            + "should pass vertical_tolerance=0 or exact=true explicitly; the default tolerance of 2 blocks absorbs that much height drift and still reports success. "
                             + "exact=true instead requires the specified x/y/z cell and actual ground support. Arrival does not establish interaction reach or line of sight. "
                             + "With may_alter_terrain it digs/bridges/pillars its way there; elevator_floor rides observed elevators without coordinates; "
                             + "semantic_target discovers platforms, open-sky surface, biomes or coasts rather than an invented precise point.",
