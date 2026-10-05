@@ -5,7 +5,9 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.entity.InputDriver;
 
+import net.minecraft.client.gui.screens.inventory.AbstractSignEditScreen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
 import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.core.act.FirstPersonInteractionTargeting;
@@ -20,6 +22,7 @@ import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
@@ -55,6 +58,14 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private static final double REACH = 4.5;
     private static final double REACH_SQR = REACH * REACH;
     private static final double WALK_SPEED = 1.0;
+    /** 右键告示牌后等原版编辑屏出现的上限；站错了面或蜡封告示牌都不会开屏。 */
+    private static final int SIGN_EDITOR_OPEN_WAIT_TICKS = 60;
+    /** 告示牌编辑屏提交后等服务端文字同步回来的窗口。 */
+    private static final int SIGN_TEXT_SYNC_WAIT_TICKS = 60;
+    /** 放置流程遗留的编辑屏按原版 Done 退出前的等待上限。 */
+    private static final int SIGN_EDITOR_CLOSE_WAIT_TICKS = 40;
+    /** 单行退格清理的上限；告示牌每行本就装不下这么长的字。 */
+    private static final int SIGN_LINE_CLEAR_LIMIT = 128;
     /**
      * 当前这次点击或持续按住的执行过程。
      */
@@ -98,6 +109,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private Map<String,Object> deployerHandBefore = Map.of();
     private final Set<Long> rejectedStances = new HashSet<>();
     private boolean terrainApproach;
+    /** 告示牌写字的阶段推进与对账证据；提交即走原版编辑屏，文字与提交内容一致才算确认。 */
+    private boolean legacyEditorClosed, signSubmitted;
+    private int legacyEditorCloseWaitTicks, editorOpenWaitTicks, signSyncWaitTicks;
+    private boolean signVerified;
+    private int verifiedSide = -1;
+    private List<String> editorLinesBefore = List.of();
     private int approachAttempts, approachCandidates;
     private Map<String, Object> approachFailureEvidence = Map.of();
     /** 接近导航收尾前的健康快照；其中 rejected_descents 说明路线为安全避开了哪些会摔的深落。 */
@@ -244,6 +261,19 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             approachNavHealth = nav.transportDiagnostics();
             stopNav();
             return TaskState.RUNNING;
+        }
+        // 放置告示牌的原版流程会立刻打开编辑屏；写字目标先按原版 Done 退出旧屏，
+        // 再走标准右键重开，保证这次编辑屏确实是本任务自己打开的。
+        if (r.signLines != null && !signSubmitted && playerScreen() != null) {
+            if (!legacyEditorClosed) {
+                legacyEditorClosed = true;
+                playerScreen().onClose();
+            } else if (++legacyEditorCloseWaitTicks < SIGN_EDITOR_CLOSE_WAIT_TICKS) return TaskState.RUNNING;
+            else if (playerScreen() != null) {
+                fail("a leftover screen did not exit after native closure; sign writing needs the native edit screen",
+                        FailureType.UNKNOWN);
+                return TaskState.FAILED;
+            }
         }
         if (r.heldItemUseOnly) return useHeldItem();
         manualCrank = r.item == null && button() == Interaction.Button.USE && CreateManualInput.supported(player.level(), r.aim);
@@ -411,6 +441,13 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 // use_container 与机器菜单共享已确认来源，后续检查、存取和关闭无需再右击一次或重启客户端。
                 if (activatedBlock != null && interaction.confirmedUses() > 0 && menuOpened)
                     MachineMenu.rememberNativeOpened(player, player.containerMenu, activatedBlock);
+                if (r.signLines != null) {
+                    TaskState sign = signWrite();
+                    if (sign != null) yield sign;
+                    successMsg = describeDone() + settle() + " — sign text verified on the "
+                            + (verifiedSide == 1 ? "front" : "back") + " side.";
+                    yield verifiedOutcome();
+                }
                 successMsg = describeDone() + settle();
                 yield verifiedOutcome();
             }
@@ -420,6 +457,98 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             }
             case RUNNING -> TaskState.RUNNING;
         };
+    }
+
+    /** 告示牌写字阶段：等原版编辑屏出现、按屏幕事件填字并确认，再等告示牌真实文字与提交内容一致。null 表示写字流程已走完。 */
+    private TaskState signWrite() {
+        if (!signSubmitted) {
+            var screen = signEditor();
+            if (screen == null) {
+                if (++editorOpenWaitTicks < SIGN_EDITOR_OPEN_WAIT_TICKS) return TaskState.RUNNING;
+                fail("the sign edit screen did not open after the right-click; the sign may be waxed, its facing side "
+                        + "may hold styled or command text, or another player may be editing it. Observed text: "
+                        + signLinesForReceipt(), FailureType.TARGET_LOST);
+                return TaskState.FAILED;
+            }
+            signSubmitted = true;
+            submitSignText(screen);
+            return TaskState.RUNNING;
+        }
+        if (signVerified) return null;
+        // 确认条件是「编辑屏已关闭且告示牌文字与提交内容一致」：文字经原版提交包上送，
+        // 任何一侧与提交四行逐行相等即确认，并报告是哪一侧；短窗口没等到就如实失败。
+        Integer side = matchingSignSide();
+        if (side != null) {
+            signVerified = true;
+            verifiedSide = side;
+            return null;
+        }
+        if (++signSyncWaitTicks < SIGN_TEXT_SYNC_WAIT_TICKS) return TaskState.RUNNING;
+        fail("the sign edit screen closed, but the sign text does not match the submitted lines after the sync window; "
+                + "observed=" + signLinesForReceipt() + " submitted=" + r.signLines, FailureType.TARGET_LOST);
+        return TaskState.FAILED;
+    }
+
+    /**
+     * 向已打开的原版编辑屏逐行填字：每行先退格清掉预填旧文字，再输入目标行，行间用回车换行，
+     * 最后按原版 Done 关屏。退格、回车与确认全部走原版屏幕事件方法，等同真实键盘操作；
+     * 更新包由原版关屏流程自己发出，这里不直连协议、不改服务端数据。
+     */
+    private void submitSignText(AbstractSignEditScreen screen) {
+        var sign = signAt();
+        // 编辑屏按玩家面对的一侧预填旧文字；写字前的旧行留作回执证据。
+        editorLinesBefore = sign == null ? List.of() : linesOf(sign, sign.isFacingFrontText(player));
+        for (int line = 0; line < InteractAtTaskRecord.SIGN_LINE_COUNT; line++) {
+            String before = line < editorLinesBefore.size() ? editorLinesBefore.get(line) : "";
+            for (int back = 0; back < Math.min(before.length(), SIGN_LINE_CLEAR_LIMIT); back++)
+                screen.keyPressed(259, 0, 0);
+            String target = line < r.signLines.size() ? r.signLines.get(line) : "";
+            for (char c : target.toCharArray()) screen.charTyped(c, 0);
+            if (line < InteractAtTaskRecord.SIGN_LINE_COUNT - 1) screen.keyPressed(257, 0, 0);
+        }
+        screen.onClose();
+    }
+
+    private net.minecraft.client.gui.screens.Screen playerScreen() {
+        return ClientRuntime.requireContext(player).minecraft().screen;
+    }
+
+    private AbstractSignEditScreen signEditor() {
+        return playerScreen() instanceof AbstractSignEditScreen editor ? editor : null;
+    }
+
+    private SignBlockEntity signAt() {
+        return r.aim != null && player.level().isLoaded(r.aim)
+                && player.level().getBlockEntity(r.aim) instanceof SignBlockEntity sign ? sign : null;
+    }
+
+    private static List<String> linesOf(SignBlockEntity sign, boolean front) {
+        List<String> lines = new ArrayList<>();
+        for (int i = 0; i < InteractAtTaskRecord.SIGN_LINE_COUNT; i++)
+            lines.add(sign.getText(front).getMessage(i, false).getString());
+        return List.copyOf(lines);
+    }
+
+    /** 逐行比对告示牌正反两侧与提交四行（不足四行按空串补齐）；返回命中的一侧，1=正面 0=背面，null=都不一致。 */
+    private Integer matchingSignSide() {
+        var sign = signAt();
+        if (sign == null) return null;
+        for (int side = 0; side < 2; side++) {
+            var observed = linesOf(sign, side == 1);
+            boolean match = true;
+            for (int i = 0; i < InteractAtTaskRecord.SIGN_LINE_COUNT; i++) {
+                String submitted = i < r.signLines.size() ? r.signLines.get(i) : "";
+                if (!observed.get(i).equals(submitted)) { match = false; break; }
+            }
+            if (match) return side;
+        }
+        return null;
+    }
+
+    private String signLinesForReceipt() {
+        var sign = signAt();
+        if (sign == null) return "unloaded";
+        return "front=" + linesOf(sign, true) + " back=" + linesOf(sign, false);
     }
 
     private TaskState prepareEmptyHand() {
@@ -595,6 +724,11 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     protected void cleanup() {
         // 终态只释放选物、手持和导航；已倒出的流体、消耗的眼与打开的菜单不会在这里回滚。
         if (interaction != null) interaction.stop();
+        // 写字中断时若原版编辑屏还开着，按 Done 原生退出，不留一块挡住后续动作的屏幕。
+        if (r.signLines != null) {
+            var pendingEditor = signEditor();
+            if (pendingEditor != null) pendingEditor.onClose();
+        }
         manualHandParking.cleanup(player);
         if (manualHandSelection != null && !manualHandSelection.terminal()) {
             var context = ClientRuntime.actor().activeContext().filter(value -> value.player() == player && value.isCurrent());
@@ -638,6 +772,18 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 "stance_retries", stanceRetries,
                 "terrain_preparation_attempted", terrainApproach, "player_feet", player.blockPosition().toShortString(),
                 "rejected_descents", rejectedDescentsFromNav()));
+        // 告示牌写字的对账账本：提交了什么、正反两侧哪一侧对上了、写字前的旧行，判断留给读回执的人。
+        if (r.signLines != null) {
+            Map<String, Object> write = new HashMap<>();
+            write.put("submitted", r.signLines);
+            write.put("verified", signVerified);
+            write.put("verified_side", verifiedSide < 0 ? "unverified" : verifiedSide == 1 ? "front" : "back");
+            if (!editorLinesBefore.isEmpty()) write.put("editor_lines_before", editorLinesBefore);
+            write.put("editor_open_wait_ticks", editorOpenWaitTicks);
+            write.put("legacy_editor_closed", legacyEditorClosed);
+            if (!signVerified) write.put("observed_at_fail", signLinesForReceipt());
+            data.put("sign_write", write);
+        }
         if (surfaceCheckAttempted) {
             // 只读回执分别说明几何可见性与已尝试的镜头修正，便于区分机壳遮挡和真实射线仍未对准。
             data.put("surface_aim_corrections", surfaceAimCorrections);

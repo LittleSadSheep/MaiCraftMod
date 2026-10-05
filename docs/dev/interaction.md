@@ -16,6 +16,7 @@
 | 沿当前视线投掷、喝瓶装物品或持用加工 | 不带坐标的 `use_item` | 保留当前视线；优先使用已持有该物品的手，物品本身决定如何作用于世界或副手 |
 | 要若干件新增加工产物 | `use_item` 的 `count`、`expected_output_item_id`，可选 `ingredient_item_id` | 从随身库存准备双手，逐次持用并检查每次产物增量，缺料或未确认时保留部分结果后停止 |
 | 手摇 Create 曲柄一段时间 | `interact`、`purpose=use`、正的 `duration_seconds`，不指定 `item_id` | 在曲柄处空手重复原生使用并观察其转动；超载和生产结果单独报告 |
+| 在已放置的告示牌上写字 | `interact`、`purpose=write`、`text`，不指定 `item_id` | 空手右键打开原版告示牌编辑屏，逐行清旧填新后按原版 Done 提交；确认以告示牌真实文字与提交内容逐行一致为准，`sign_write` 报告命中的正面或背面 |
 
 `interact_at`、`interact_entity` 是 [内部工具桥接](../../common/src/main/java/org/maiwithu/maicraft/core/tools/interact/InteractAtTool.java)，不要把其 `button`、`hold_ticks`、运行期 `entity_id` 或槽位字段放进公开目标。攻击和拆除分别使用战斗、采矿能力；容器存取使用相应容器能力。
 
@@ -50,7 +51,8 @@
 | `entity_name` / `player_name` | 可选非空字符串；按显示名 / 玩家档案名不区分大小写匹配。名字不一定唯一，仍可能需要 `selection=nearest` |
 | `item_id` | 可选已注册物品 ID；显式指定的物品须在随身库存中。省略、`null` 或空白会走空手准备；`purpose=till` 且未给物品是自动准备锄的例外 |
 | `item_resource_id` | 可选字符串，仅方块交互且必须同时提供 `item_id`；复制当前观察给出的组件身份，内部记录要求非空且不超过 512 字符。不适用于实体或 `use_item`；身份消失或组件变化后不会换用同名其他工件 |
-| `purpose` | 可选字符串，不是严格枚举。`till` 会准备锄并要求目标变耕地；`attack/break` 返回改用战斗/采矿的决策；正时长要求 `use`。`open/talk/trade` 等其他值仍只是普通右键，不完成购买或菜单内操作 |
+| `purpose` | 可选字符串，不是严格枚举。`till` 会准备锄并要求目标变耕地；`attack/break` 返回改用战斗/采矿的决策；正时长要求 `use`。`open/talk/trade` 等其他值仍只是普通右键，不完成购买或菜单内操作。`write` 是唯一被强校验的值：要求方块目标、不点名 `item_id` 且 `text` 必填 |
+| `text` | 仅 `purpose=write`：调用方显式提供的告示牌文字，角色不自拟、不做语义审查。按换行拆行，至多 4 行，计划期行长上限 64 字符；原版按约 90 像素行宽校验，超宽字符会被编辑屏静默丢弃，请把每行控制在约 18 个半角或 10 个全角字符以内 |
 | `duration_seconds` | JSON 数字，秒，范围 0～30；省略和 0 都是一次交互。正值仅支持空手、`purpose=use` 的已加载原生 Create 手摇曲柄，换算为 `ceil(秒×20)` 游戏刻。`null`、布尔、数字字符串及越界值拒绝 |
 | `selection` | 字符串；只有不区分大小写的 `nearest` 开启任意最近匹配。省略时多个候选待决策；其他值不形成独立策略，也不能覆盖 `target.kind/relation=nearest` 已给出的许可 |
 | `radius` | 推荐整数，单位格，4～128。非坐标方块搜索默认 64，实体默认 48；解析为 `int` 后夹到 4～128，0 因而变为 4，省略、`null` 或解析失败取对应默认。底层 `getAsInt` 可能接受数字字符串、截断小数或转换过大数值，调用方应传范围内整数；坐标请求不使用它 |
@@ -154,6 +156,22 @@
 
 持续时间在建立交互时开始，不包含走近。发电、轴是否真正转动、是否超载和机器是否生产分开报告；`duration_seconds=0` 仅做一次，不等待十秒。
 
+### 在指定告示牌上写两行仓库标注
+
+```json
+{
+  "goal": {
+    "ability": "maicraft:interact",
+    "outcome": "在坐标处的告示牌上写两行仓库标注",
+    "target": {"kind": "coordinates", "position": {"x": 18, "y": 64, "z": 12, "dimension": "minecraft:overworld"}},
+    "parameters": {"purpose": "write", "text": "仓库 A
+只放铁锭"}
+  }
+}
+```
+
+角色面对告示牌的一侧是写入侧；编辑屏关闭后 Mod 等待告示牌真实文字与提交四行逐行一致才算成功，回执 `sign_write.verified` 与 `verified_side` 说明对账结果。该侧已含样式或命令文字、告示牌被蜡封或他人正在编辑时编辑屏不会打开，按失败回执如实报告两侧现有文字。放置告示牌本身仍是 `place_block`/`build` 的单一意图，「放置 + 写字」用 `sequence` 串两个目标；放置流程遗留的编辑屏会由写字任务先按原版 Done 退出再重新打开。
+
 ### 不带坐标的批次：喝蜜瓶并累计新增玻璃瓶
 
 ```json
@@ -217,6 +235,7 @@
 | `held_item_use_started/native_use_completed/used_hand` | 无坐标单次持用的推进与结束状态 | 持用结束本身不说明某个方块被正确操作 |
 | `interaction_approach`、`post_expiry_facts` | 寻路尝试、换位、实际脚位、拒绝下降及超时时的目标/手持快照 | 未提交前的站位失败不能解释成倒桶已失败；没有观察的状态不能填零 |
 | `manual_generator` | 已确认使用次数、原生转动、当前或过程中超载等 | `machine_production_verified=false`，手摇成功不代表整台机器有产出 |
+| `sign_write`（`submitted`/`verified`/`verified_side`/`editor_lines_before`） | 写字目标提交了哪四行、告示牌真实文字是否逐行对上、命中正面还是背面、写字前的旧行 | 编辑屏由原版提交更新包，客户端文字与提交一致即是确认条件本身；`verified=false` 不区分「编辑屏没打开」与「文字没对上」，要读失败消息与 `observed_at_fail` |
 | 实体的羊属性、`attributed_shearing_drop_count` | 当下筛选事实与归属到剪毛动作的新掉落数 | 不等于掉落已进包；实体回执目前没有完整透传原生状态 |
 | 批次的 `completed_output_count/completed_uses/remaining_output_count`、`last_step` | 已接受的每步增量、已完成次数、剩余目标及最后一步 | `count` 不是点击次数；成功一次多产时实际件数可超目标；不要直接重跑原 `count` |
 

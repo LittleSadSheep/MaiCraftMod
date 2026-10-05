@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -26,7 +27,7 @@ public final class InteractAtTool implements MaiCraftTool {
     private record Args(String button, Integer x, Integer y, Integer z, Integer hold_ticks,
                         String item_id, String expected_block_id, String required_block_id, Boolean empty_hand,
                         String item_resource_id, Boolean approach, Boolean may_alter_terrain, Boolean observe_menu,
-                        String expected_output_item_id, String expected_effect) {}
+                        String expected_output_item_id, String expected_effect, List<String> sign_text) {}
 
     @Override
     public String name() {
@@ -64,6 +65,7 @@ public final class InteractAtTool implements MaiCraftTool {
                 .optionalBool("approach", "Choose and reach a visible interaction stance before the native click.")
                 .optionalBool("may_alter_terrain", "Allow native terrain preparation only when approach is enabled.")
                 .optionalBool("observe_menu", "Wait briefly after one block use and report whether a new native container menu is visibly open.")
+                .optionalStringArray("sign_text", "1..4 lines to write through the native sign edit screen after the right-click; requires an item-free block target.")
                 .build();
     }
 
@@ -84,6 +86,8 @@ public final class InteractAtTool implements MaiCraftTool {
         if (Boolean.TRUE.equals(a.approach())) task.withApproach(Boolean.TRUE.equals(a.may_alter_terrain()));
         // 开箱意图额外结算菜单观察，普通右键仍维持自身原生交互语义。
         if (Boolean.TRUE.equals(a.observe_menu())) task.withMenuObservation();
+        // 告示牌写字走同一桥接：右键打开原版编辑屏后填入点名文字，确认仍以告示牌真实文字对账。
+        if (a.sign_text() != null) task.withSignText(a.sign_text());
         runSync(companion, task, reply);
     }
 }

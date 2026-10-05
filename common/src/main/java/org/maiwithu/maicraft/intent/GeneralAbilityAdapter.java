@@ -20,6 +20,7 @@ import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
@@ -704,6 +705,22 @@ public final class GeneralAbilityAdapter {
         }
         var hoe = !containerOnly && "till".equals(purpose) && itemId(p) == null
                 ? WorkToolPreparation.tillingTool(player) : null;
+        // 写字只认已放置的告示牌方块；文字必须由调用方显式提供，角色不自拟，也不带手持物去点。
+        List<String> signLines = signWriteLines(p);
+        if (signLines != null) {
+            if (containerOnly)
+                return decision(goal, "`use_container` only opens containers; sign writing is an `interact` purpose=write request.",
+                        List.of(option("replace_goal", "Resend as maicraft:interact with purpose=write and text."),
+                                option("cancel", "Cancel container use.")), null);
+            if (!selector.empty())
+                return decision(goal, "Sign writing targets a placed sign block, not an entity.",
+                        List.of(option("retry", "Retry with block_id or coordinates of the sign."),
+                                option("cancel", "Cancel sign writing.")), null);
+            if (itemId(p) != null || itemResourceId != null)
+                return decision(goal, "Sign writing uses an empty hand so the right-click opens the native edit screen; omit item_id/item_resource_id.",
+                        List.of(option("retry", "Retry without naming an item."),
+                                option("cancel", "Cancel sign writing.")), null);
+        }
         // 要耕地但没指定工具时，Mod 自己找合适的锄；必要时先取到工具，再执行原交互。
         String selectedItem = hoe == null ? itemId(p) : hoe.itemId().toString();
         IntentAction interaction = interactBlock(goal, player, runtime, blockId, selectedItem, hoe != null && !hoe.carried());
@@ -931,6 +948,22 @@ public final class GeneralAbilityAdapter {
         }
         if ("till".equals(lower(string(goal.parameters(), "purpose"))))
             use.addProperty("expected_block_id", "minecraft:farmland");
+        // 写字目标必须真的是告示牌（站立或悬挂）；编辑屏只在这些方块上打开，其他方块直接回决策不走空试。
+        List<String> signLines = signWriteLines(goal.parameters());
+        if (signLines != null) {
+            var targetState = level.getBlockState(target);
+            if (!(targetState.getBlock() instanceof SignBlock)) {
+                JsonObject facts = new JsonObject();
+                facts.addProperty("observed_block_id", BuiltInRegistries.BLOCK.getKey(targetState.getBlock()).toString());
+                return decision(goal, "purpose=write targets placed signs (standing or hanging signs); this block has no native sign edit screen.",
+                        List.of(option("retry", "Retry with the coordinates or block_id of a sign."),
+                                option("cancel", "Cancel sign writing.")), facts);
+            }
+            var lines = new JsonArray();
+            signLines.forEach(lines::add);
+            use.add("sign_text", lines);
+            use.addProperty("empty_hand", true);
+        }
         if (itemId != null) {
             use.addProperty("item_id", itemId);
             // 点火类使用的诚实结果在火方块；点击确认本身不保证目标面外真的落了火。
@@ -1428,6 +1461,18 @@ public final class GeneralAbilityAdapter {
             if (value != null) return value;
         }
         return null;
+    }
+
+    /**
+     * purpose=write 时的告示牌文字：非 write 返回 null；write 但缺 text 是结构性错误，
+     * 计划期与编译期共用了这份解析，行数与行长越界在这里统一拒绝。
+     */
+    static List<String> signWriteLines(JsonObject parameters) {
+        if (!"write".equals(lower(string(parameters, "purpose")))) return null;
+        List<String> lines = InteractAtTaskRecord.parseSignText(string(parameters, "text"));
+        if (lines == null)
+            throw new IllegalArgumentException("purpose=write requires goal.parameters.text with the sign lines to submit");
+        return lines;
     }
 
     private static String string(JsonObject object, String key) {

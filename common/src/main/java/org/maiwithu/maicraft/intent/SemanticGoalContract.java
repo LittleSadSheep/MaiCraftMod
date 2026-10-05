@@ -186,6 +186,13 @@ final class SemanticGoalContract {
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_interaction_duration", path + ".parameters", ability, invalid.getMessage());
             }
+            // purpose=write 的告示牌文字在计划期定形：缺 text、行数或行长越界都不能接管身体后再被编辑屏丢弃。
+            if (!restoredHistory) {
+                try { GeneralAbilityAdapter.signWriteLines(goal.parameters()); }
+                catch (IllegalArgumentException invalid) {
+                    throw violation("invalid_sign_write_contract", path + ".parameters", ability, invalid.getMessage());
+                }
+            }
         }
 
         if (SEQUENCE.equals(ability)) {

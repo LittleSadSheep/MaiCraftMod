@@ -33,6 +33,7 @@
 | `find_entity` | 搜索指定种类的实体 | `GeneralAbilityAdapter.findEntity` | [实际可见数量与搜索范围](combat.md)；本轮静态复盘 |
 | `find_block` | 查询附近有没有指定方块 | `GeneralAbilityAdapter.findBlock` | [只读扫描、池面用途和已知边界](mining.md)；本轮静态复盘 |
 | `use_item` | 定点使用或按新增产物有限次持用随身物品 | `GeneralAbilityAdapter.useItem` | [交互与定点使用](interaction.md) |
+| `interact` | 普通原生右键方块或实体，含通过原版编辑屏向已放置告示牌写字（`purpose=write`） | `GeneralAbilityAdapter.interact` | [交互与定点使用](interaction.md)；告示牌写字待实机验收 |
 | `harvest_block` | 精确采收一个观察到的资源方块 | `GeneralAbilityAdapter.harvestBlock` | [源格破坏与产物入包](mining.md)；本轮静态复盘 |
 | `place_block` | 在精确坐标用随身物品放置一个方块及其状态 | `GeneralAbilityAdapter.placeBlock` | [单格放置与施工分工](building.md)；实机验收待安排 |
 | `acquire_items` | 从允许的来源拿到所需物品 | `AcquireAbilityAdapter` | 主执行器与配方推演已通读并重构；八类子任务链继续审阅，[当前实现](acquiring.md) |
