@@ -874,7 +874,13 @@ final class IntentTask implements Task {
         for (String key : List.of("outcome_uncertain", "effects_started", "mechanical_retry_allowed")) {
             if (clean.data().containsKey(key)) data.put(key, clean.data().get(key));
         }
-        return parent.withData(data);
+        TaskResult merged = parent.withData(data);
+        // 子任务带着更具体的取消来源（如聊天命令尚未发出就被取消）时交给顶层回执，
+        // 调用方才能区分“没发出去”与“发完才被叫停”，而不是只看到通用的接管取消。
+        if (clean.cancelSource() != null && !clean.cancelSource().isBlank()) {
+            merged = merged.withCancelSource(clean.cancelSource());
+        }
+        return merged;
     }
 
     private TaskResult completionResult() {

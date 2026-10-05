@@ -81,6 +81,7 @@ public final class SemanticAbilityCatalog {
                     "打开真实游戏聊天框，逐个显示完整可见字符，整份草稿再停留250毫秒后提交一次。goal.parameters 放文字与速度；target 省略或为 null，没有收件人参数；preferences、constraints、children 留空。"
                             + "普通文字交给公开聊天，前缀 / 交给原生命令处理，沿用玩家权限与加载器钩子，不需要前台窗口或键盘模拟。获准执行后先等待旧菜单事务结清，再通过原生退出流程关闭挡路容器、旧聊天或暂停页面，之后继续同一条消息。自动草稿开始后，玩家输入或 Esc 取消自动提交；普通暂停保留草稿。"
                             + "完整草稿和父任务检查点、单次提交标记都就绪才发送。成功的 delivery_status=submitted_to_client 只证明交给客户端，不证明服务器收信或命令执行成功；回复另读 maicraft://chatflow。未提交、已提交、未知分别看 delivery_status、outcome_uncertain 和 gui_preparation。"
+                            + "命令发出前任务被取消（连续提交新任务时常见）时，回执 cancel_source=cancelled_before_submit 且消息明示命令未提交：该条指令没有产生任何游戏效果，需要重新提交而不是当作已执行。"
                             + "同次 execute 网络重试复用 request_key。重启不恢复半份草稿；未完成记录先暂停，恢复同操作若已有预约或旧历史未跟踪则不重发，先核对历史。另一次明确新操作才可再次发送同文。"
                             + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:chat\",\"outcome\":\"说明正在整理背包\",\"parameters\":{\"text\":\"我先整理一下背包。\",\"typing_interval_ms\":100}}}。"
                             + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:chat\",\"outcome\":\"查看当前命令帮助\",\"parameters\":{\"text\":\"/help\"}}}。",

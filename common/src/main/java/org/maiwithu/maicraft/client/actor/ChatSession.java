@@ -144,6 +144,8 @@ public final class ChatSession {
 
     public Status status() { return status; }
     public String detail() { return detail; }
+    /** 是否已经尝试过原版提交；取消回执据此区分“没发出去”与“发出后结果未知”。 */
+    public boolean submissionAttempted() { return typing.submissionAttempted(); }
     public Map<String, Object> evidence() {
         // 容器收尾不确定也必须单独保留；没有发送消息并不能证明鼠标物品已经正确返还。
         boolean menuUncertain = preparation.uncertain();
