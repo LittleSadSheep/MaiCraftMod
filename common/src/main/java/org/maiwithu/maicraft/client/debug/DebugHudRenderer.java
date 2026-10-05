@@ -36,9 +36,11 @@ public final class DebugHudRenderer {
         if (snapshot.rows().isEmpty()) return;
         Font font = minecraft.font;
 
-        int width = 0;
+        // 背景框宽度以快照携带的面板宽度为准——它与事件区、最新报错的折行是同一个口径，
+        // 折行右缘因此贴住框的内容右缘；正文行实测宽度只作兜底，正常不超出该口径。
+        int contentWidth = 0;
         for (DebugHudController.Row row : snapshot.rows()) {
-            width = Math.max(width, font.width(row.label().isBlank() ? "" : row.label() + ": ")
+            contentWidth = Math.max(contentWidth, font.width(row.label().isBlank() ? "" : row.label() + ": ")
                     + font.width(row.value()));
         }
         for (DebugHudController.EventLine line : snapshot.events()) {
@@ -46,8 +48,9 @@ public final class DebugHudRenderer {
             for (DebugHudController.Segment segment : line.segments()) {
                 segments += font.width(segment.text());
             }
-            width = Math.max(width, segments);
+            contentWidth = Math.max(contentWidth, segments);
         }
+        int width = Math.max(snapshot.panelWidth(), contentWidth);
 
         // 事件区钉在面板底部：固定行永远从面板顶端开始，不随事件多少上下跳动。
         int eventHeight = snapshot.events().isEmpty() ? 0

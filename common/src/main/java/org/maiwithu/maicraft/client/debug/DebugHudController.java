@@ -46,8 +46,8 @@ public final class DebugHudController {
     /** 事件区一行，由一个或多个着色片段组成；换行产生的续行只有内容片段。 */
     public record EventLine(List<Segment> segments) {}
 
-    /** 每刻快照：固定状态行加事件区换行结果；面板不可见时两段皆空。 */
-    public record Snapshot(List<Row> rows, List<EventLine> events) {}
+    /** 每刻快照：固定状态行、事件区换行结果和面板宽度（背景框与折行共用的同一口径）；面板不可见时两段皆空。 */
+    public record Snapshot(List<Row> rows, List<EventLine> events, int panelWidth) {}
 
     /** 面板单行放不下的说明截断到 64 字符并以 … 结尾，让人看得出后面还有内容。 */
     private static final int TEXT_LIMIT = 64;
@@ -63,7 +63,7 @@ public final class DebugHudController {
     private static final DateTimeFormatter EVENT_TIME =
             DateTimeFormatter.ofPattern("HH:mm:ss");
 
-    private static volatile Snapshot snapshot = new Snapshot(List.of(), List.of());
+    private static volatile Snapshot snapshot = new Snapshot(List.of(), List.of(), 0);
     private static boolean toggleWasDown;
     private static boolean comboWasDown;
     private static boolean pathComboWasDown;
@@ -97,7 +97,7 @@ public final class DebugHudController {
         pathComboWasDown = pathCombo;
         snapshot = minecraft.player == null
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())
-                ? new Snapshot(List.of(), List.of()) : buildSnapshot(minecraft);
+                ? new Snapshot(List.of(), List.of(), 0) : buildSnapshot(minecraft);
     }
 
     /** 渲染层每帧读取的最近一次快照；不可见时两段皆空，渲染器据此不画。 */
@@ -135,16 +135,29 @@ public final class DebugHudController {
             rows.add(new Row("蓝图", blueprintText(preview), blueprintColor(preview)));
         }
 
+        StringSplitter splitter = minecraft.font.getSplitter();
         if (listMode) {
             appendTaskListPage(rows);
-        } else {
-            appendTaskStatusRows(rows, minecraft);
+            return new Snapshot(List.copyOf(rows), List.of(),
+                    panelWidth(rows, splitter, maxPanelWidth(minecraft)));
         }
-        return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows));
+        // 最新报错行按最终面板宽度折行后再入行集，折行口径与事件区、背景框保持同一个值。
+        String pendingError = appendTaskStatusRows(rows, minecraft);
+        int panel = panelWidth(rows, splitter, maxPanelWidth(minecraft));
+        if (pendingError != null) {
+            rows.addAll(errorRows(pendingError, panel, splitter));
+        }
+        return new Snapshot(List.copyOf(rows), eventLines(minecraft.font, rows, panel), panel);
     }
 
-    // 状态页的任务区：当前任务详情加身体动作，只看"此刻"。
-    private static void appendTaskStatusRows(List<Row> rows, Minecraft minecraft) {
+    // 面板宽度上限随屏宽走：取缩放后屏宽的九成，长内容撑到这个上限就折行，不会把面板推出屏幕。
+    private static int maxPanelWidth(Minecraft minecraft) {
+        return Math.max(160, minecraft.getWindow().getGuiScaledWidth() * 9 / 10);
+    }
+
+    // 状态页的任务区：当前任务详情加身体动作，只看"此刻"。返回待折行的最新报错消息（可能为 null），
+    // 由调用方在面板宽度确定后统一折行，保证折行宽度就是最终的面板宽度。
+    private static String appendTaskStatusRows(List<Row> rows, Minecraft minecraft) {
         // 从最近五十个任务里找第一个未结束的；没有时显示空闲，再查看最近二十个任务中的失败或超时。
         // 死后被取消的任务若仍挂着重生问题，也算待处理，面板不能在角色停在死亡屏幕时显示空闲。
         List<IntentTaskRecord> open = IntentRuntime.get().tasks(50).stream()
@@ -153,34 +166,32 @@ public final class DebugHudController {
         IntentTaskRecord active = open.isEmpty() ? null : open.getFirst();
         if (active == null) {
             rows.add(new Row("任务", "空闲", ChatFormatting.GRAY));
-            appendLatestTerminalIssue(rows, minecraft.font);
             // 没有语义任务时反射（进食、休息、自救）仍可能占用身体；这种错位值得单独看见。
             CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
             if (action != null && action.currentAction() != null) {
                 rows.add(new Row("行动", clamp(action.currentAction()), actionColor(action)));
             }
-        } else {
-            // 尝试次数与排队数并入任务行，不单列；重试循环和积压都该在这行一眼看到。
-            rows.add(new Row("任务", taskTitle(active)
-                            + (active.attempts().isEmpty() ? "" : " · 尝试 " + active.attempts().size())
-                            + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
-                    ChatFormatting.AQUA));
-            // 等了多久和等什么同样重要：等 5 秒是在等模型，等 5 分钟大概率是卡死。
-            long nowGameTime = minecraft.level == null ? 0 : minecraft.level.getGameTime();
-            CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
-            appendMilestoneRow(rows, active, action);
-            appendActionRow(rows, action);
-            if (active.decisionSnapshot() != null) {
-                appendDecisionRows(rows, active, nowGameTime);
-            } else if (active.pauseSnapshot() != null) {
-                rows.add(new Row("已暂停", clamp(active.pauseSnapshot().reason())
-                                + " · 已暂停 " + formatDuration(nowGameTime - active.pauseSnapshot().gameTime()),
-                        ChatFormatting.YELLOW));
-            }
-            if (!active.attempts().isEmpty()) {
-                appendErrorRows(rows, minecraft.font, repeatSummary(active.attempts()));
-            }
+            return latestTerminalIssue();
         }
+
+        // 尝试次数与排队数并入任务行，不单列；重试循环和积压都该在这行一眼看到。
+        rows.add(new Row("任务", taskTitle(active)
+                        + (active.attempts().isEmpty() ? "" : " · 尝试 " + active.attempts().size())
+                        + (open.size() > 1 ? " · 队列 " + (open.size() - 1) : ""),
+                ChatFormatting.AQUA));
+        // 等了多久和等什么同样重要：等 5 秒是在等模型，等 5 分钟大概率是卡死。
+        long nowGameTime = minecraft.level == null ? 0 : minecraft.level.getGameTime();
+        CompanionTickDispatcher.BodyAction action = CompanionTickDispatcher.bodyAction();
+        appendMilestoneRow(rows, active, action);
+        appendActionRow(rows, action);
+        if (active.decisionSnapshot() != null) {
+            appendDecisionRows(rows, active, nowGameTime);
+        } else if (active.pauseSnapshot() != null) {
+            rows.add(new Row("已暂停", clamp(active.pauseSnapshot().reason())
+                            + " · 已暂停 " + formatDuration(nowGameTime - active.pauseSnapshot().gameTime()),
+                    ChatFormatting.YELLOW));
+        }
+        return active.attempts().isEmpty() ? null : repeatSummary(active.attempts());
     }
 
     // 进度行汇报任务单上的持久里程碑：目标计数来自当前干活者的任务单，步骤进度来自总任务单。
@@ -256,15 +267,14 @@ public final class DebugHudController {
         };
     }
 
-    // 事件区换行宽度随固定行的宽度走，整块面板保持一个矩形；事件少时固定行布局纹丝不动。
-    private static List<EventLine> eventLines(Font font, List<Row> rows) {
+    // 事件区换行宽度就是快照里的面板宽度，与背景框同一口径；事件少时固定行布局纹丝不动。
+    private static List<EventLine> eventLines(Font font, List<Row> rows, int contentWidth) {
         List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
         if (events.isEmpty()) return List.of();
-        int contentWidth = panelWidth(rows, font.getSplitter());
         List<EventLine> newestFirst = new ArrayList<>();
         int used = 0;
         for (int i = events.size() - 1; i >= 0; i--) {
-            EventLine[] lines = wrapEvent(font, events.get(i), contentWidth);
+            EventLine[] lines = wrapEvent(font.getSplitter(), events.get(i), contentWidth);
             if (used + lines.length > EVENT_LINE_BUDGET) break;
             for (int j = lines.length - 1; j >= 0; j--) newestFirst.addFirst(lines[j]);
             used += lines.length;
@@ -273,7 +283,8 @@ public final class DebugHudController {
     }
 
     // 时间与类型着色后占首行行首，内容从剩余宽度换行；灰类型是 world.* 降权事件。
-    private static EventLine[] wrapEvent(Font font, IntentRuntime.AttentionItem event, int contentWidth) {
+    // 纯函数：宽度全部经 StringSplitter 测量，回归用假宽度函数即可脱离游戏实例覆盖。
+    static EventLine[] wrapEvent(StringSplitter splitter, IntentRuntime.AttentionItem event, int contentWidth) {
         String time = EVENT_TIME.format(event.timestamp().atZone(ZoneId.systemDefault())) + " ";
         ChatFormatting priorityColor = switch (event.priority()) {
             case "important" -> ChatFormatting.YELLOW;
@@ -283,8 +294,8 @@ public final class DebugHudController {
         String head = event.type() + ": ";
         Segment timeSegment = new Segment(time, ChatFormatting.GRAY);
         Segment typeSegment = new Segment(head, priorityColor);
-        int messageWidth = Math.max(80, contentWidth - font.width(time) - font.width(head));
-        List<String> messageLines = wrap(font, event.message(), messageWidth);
+        int messageWidth = Math.max(80, contentWidth - (int) splitter.stringWidth(time) - (int) splitter.stringWidth(head));
+        List<String> messageLines = wrap(splitter, event.message(), messageWidth);
         EventLine[] lines = new EventLine[messageLines.size()];
         for (int i = 0; i < messageLines.size(); i++) {
             lines[i] = i == 0
@@ -296,10 +307,6 @@ public final class DebugHudController {
     }
 
     /** 按字形宽度把内容折行：超过上限在最后一行行尾补 …；由字体分词器断行，中英文都不断在词中间。 */
-    private static List<String> wrap(Font font, String text, int width) {
-        return wrap(font.getSplitter(), text, width);
-    }
-
     private static List<String> wrap(StringSplitter splitter, String text, int width) {
         String singleLine = text.replace('\r', ' ').replace('\n', ' ')
                 .replaceAll("\\s+", " ").strip();
@@ -375,24 +382,16 @@ public final class DebugHudController {
         return mspt <= targetMspt * 1.25 ? ChatFormatting.YELLOW : ChatFormatting.RED;
     }
 
-    private static void appendLatestTerminalIssue(List<Row> rows, Font font) {
+    private static String latestTerminalIssue() {
         IntentTaskRecord failed = IntentRuntime.get().tasks(20).stream()
                 .filter(record -> record.getState() == TaskState.FAILED
                         || record.getState() == TaskState.TIMEOUT)
                 .findFirst()
                 .orElse(null);
-        if (failed == null) return;
-        String message = failed.terminalSnapshot() == null
+        if (failed == null) return null;
+        return failed.terminalSnapshot() == null
                 ? failed.getState().name().toLowerCase(Locale.ROOT)
                 : jsonMessage(failed.terminalSnapshot().result(), failed.getState());
-        appendErrorRows(rows, font, message);
-    }
-
-    // 最新报错不再截成一行：宽度跟随其余固定行撑起的面板宽度（首行扣除标签），与事件区
-    // 相同的 4 行上限，放不下的尾部以 … 收尾；空白报错没有可显示内容，落"未知"保持行可见。
-    private static void appendErrorRows(List<Row> rows, Font font, String message) {
-        StringSplitter splitter = font.getSplitter();
-        rows.addAll(errorRows(message, panelWidth(rows, splitter), splitter));
     }
 
     /** 折行与行拆分单独成纯函数：StringSplitter 可脱离游戏实例构造，回归用假宽度函数即可覆盖。 */
@@ -408,15 +407,17 @@ public final class DebugHudController {
         return rows;
     }
 
-    // 面板宽度由已确定的固定行撑起；最新报错行与事件区共用这个宽度，不各自把面板加宽。
-    static int panelWidth(List<Row> rows, StringSplitter splitter) {
+    // 面板宽度是折行与背景框共用的唯一口径：由已确定的固定行撑起，下限 160、
+    // 上限为调用方给的屏宽预算（缩放后屏宽的九成），长内容撑到上限即折行。
+    // 渲染层直接用快照里的同一宽度画背景框，折行右缘因此与框的内容右缘一致。
+    static int panelWidth(List<Row> rows, StringSplitter splitter, int maxWidth) {
         int width = 0;
         for (Row row : rows) {
             width = Math.max(width, (row.label().isBlank() ? 0
                     : (int) splitter.stringWidth(row.label() + ": "))
                     + (int) splitter.stringWidth(row.value()));
         }
-        return Math.max(160, width);
+        return Math.min(maxWidth, Math.max(160, width));
     }
 
     private static String jsonMessage(JsonObject result, TaskState fallback) {

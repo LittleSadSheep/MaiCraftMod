@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.debug;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.stream.Collectors;
 import net.minecraft.SharedConstants;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.StringSplitter;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.debug.DebugHudController.Row;
+import org.maiwithu.maicraft.intent.IntentRuntime;
 import static org.maiwithu.maicraft.client.debug.DebugHudController.errorRows;
 import static org.maiwithu.maicraft.client.debug.DebugHudController.panelWidth;
 import static org.maiwithu.maicraft.client.debug.DebugHudController.perfColor;
 import static org.maiwithu.maicraft.client.debug.DebugHudController.perfText;
+import static org.maiwithu.maicraft.client.debug.DebugHudController.wrapEvent;
 
 /** 最新报错行必须按面板宽度折成多行并守住与事件区相同的 4 行上限；空报错落"未知"，不能回到单行截断。
+ * 面板宽度与事件区折行共用同一口径：下限 160、上限为屏宽预算；事件消息里的长 token 不被词中硬切。
  * 性能行在同一套件覆盖：TPS 按目标单刻预算折算（预算内满速、超出 1000÷MSPT 掉速），配色分满速/轻度/明显三档。 */
 public final class DebugHudErrorRowsTest {
     /** 假宽度函数：一个码点一像素，行数断言只取决于消息长度与给定宽度，不依赖真实字体。 */
@@ -25,10 +30,11 @@ public final class DebugHudErrorRowsTest {
         overlongErrorTruncatesAtLineBudget();
         shortErrorStaysSingleRow();
         blankErrorFallsBackToUnknown();
-        panelWidthFollowsWidestRow();
+        panelWidthClampsBetweenFloorAndScreenBudget();
+        eventWrapKeepsLongTokenWholeAndWithinPanel();
         perfTextFollowsTickBudget();
         perfColorSeparatesThreeSpeedBands();
-        System.out.println("DebugHudErrorRowsTest: latest error rows wrap, truncate and stay visible; perf row follows tick budget");
+        System.out.println("DebugHudErrorRowsTest: latest error rows wrap, truncate and stay visible; panel width clamps to screen budget; event wrap keeps long tokens whole; perf row follows tick budget");
     }
 
     // 60 个 7 字符单词（约 480 像素）在 200 像素行宽下至少占三行：多行展示且未触及截断。
@@ -66,12 +72,40 @@ public final class DebugHudErrorRowsTest {
         }
     }
 
-    private static void panelWidthFollowsWidestRow() {
-        check(panelWidth(List.of(), SPLITTER) == 160, "the panel width has a 160px floor");
+    private static void panelWidthClampsBetweenFloorAndScreenBudget() {
+        check(panelWidth(List.of(), SPLITTER, 1000) == 160, "the panel width has a 160px floor");
         List<Row> rows = List.of(new Row("任务", "空闲", ChatFormatting.GRAY),
                 new Row("", "r".repeat(180), ChatFormatting.AQUA));
-        check(panelWidth(rows, SPLITTER) == 180,
+        check(panelWidth(rows, SPLITTER, 1000) == 180,
                 "the panel width follows the widest row, labeled or not");
+        check(panelWidth(List.of(new Row("", "r".repeat(500), ChatFormatting.AQUA)), SPLITTER, 300) == 300,
+                "content wider than the screen budget clamps the panel to the budget");
+        check(panelWidth(rows, SPLITTER, 160) == 160,
+                "the screen budget never shrinks the panel below the 160px floor");
+    }
+
+    // 折行宽度统一到面板宽度后，事件消息里的长 token 必须整体保留，且每行总宽不超出面板口径。
+    private static void eventWrapKeepsLongTokenWholeAndWithinPanel() {
+        IntentRuntime.AttentionItem event = new IntentRuntime.AttentionItem(
+                Instant.now(), "task_progress", "task", "planning_acquisition finished");
+        DebugHudController.EventLine[] lines = wrapEvent(SPLITTER, event, 200);
+        check(lines.length == 1, "a message that fits the panel width must stay on one line");
+        String joined = lines[0].segments().stream()
+                .map(DebugHudController.Segment::text).collect(Collectors.joining());
+        check(joined.contains("planning_acquisition"),
+                "a long token must not be split mid-word now that the wrap width follows the panel");
+        check(joined.length() <= 200, "the rendered line must not exceed the shared panel width");
+
+        DebugHudController.EventLine[] wrapped = wrapEvent(SPLITTER,
+                new IntentRuntime.AttentionItem(Instant.now(), "task_progress", "task",
+                        "word ".repeat(60).strip()), 100);
+        check(wrapped.length > 1, "a message wider than the panel wraps into continuation lines");
+        for (DebugHudController.EventLine line : wrapped) {
+            int width = line.segments().stream()
+                    .mapToInt(segment -> segment.text().length()).sum();
+            // 分词器在词边界断行时允许少量超出（原版 splitLines 行为），背景框以正文实测宽度兜底。
+            check(width <= 100 + 10, "every wrapped line stays within the panel width budget");
+        }
     }
 
     // 预算内（含边界）给满速 1000÷目标，超出按 1000÷MSPT 等比掉速；目标随 tick rate 走，不写死 50/20。
