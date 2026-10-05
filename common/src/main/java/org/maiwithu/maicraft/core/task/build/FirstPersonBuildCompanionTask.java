@@ -267,9 +267,15 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         for (BlockPos cell : cells) {
             if (cell != null) {
                 protectedCells.add(cell.asLong());
-                inheritedProtectedMutationCells.add(cell.asLong());
-                // 前一施工层仍需在受保护目标为空时进入该格；目标建成后，实时碰撞会阻止角色再次进入。
-                if (!targets.containsKey(cell.asLong())) forbiddenBodyCells.add(cell.asLong());
+                // 计划自注册的导航保护只约束非目标格（清障与挖掘路线），不得否决自家目标格：
+                // 门框类施工把整圈框注册为导航保护，目标格同时被自己的保护集否决过，曾让
+                // 任何场地都报 blocked_site_cells。目标格的授权由 ReplaceMode 与可破坏性把关；
+                // 继承的显式保护（NavigationSafetyContext）仍照常否决，不经此入口。
+                if (!targets.containsKey(cell.asLong())) {
+                    inheritedProtectedMutationCells.add(cell.asLong());
+                    // 前一施工层仍需在受保护目标为空时进入该格；目标建成后，实时碰撞会阻止角色再次进入。
+                    forbiddenBodyCells.add(cell.asLong());
+                }
             }
         }
     }
@@ -522,7 +528,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.UNSUPPORTED, "unsupported_cells"); return TaskState.FAILED;
         }
         if (!blocked.isEmpty()) {
-            failPreflight("site contains protected or unbreakable cells",
+            // 失败话术直接点名被拒格与拒绝来源（保护类型），调用方能据此换地或申请清障，
+            // 不必先翻 data 里的 blocked_cells 才知道该躲开哪里。
+            String named = blocked.stream()
+                    .map(cell -> cell.get("code") + "@" + cell.get("pos"))
+                    .collect(Collectors.joining(", "));
+            failPreflight("site contains protected or unbreakable cells: " + named,
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
         if (r.supplyAccessOnly()) {

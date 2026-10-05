@@ -355,6 +355,12 @@ def regressionSuites = [
         heap: '512m', directory: 'portal-casting-honest-selection-regression', timeoutSeconds: 45,
         purpose: '验证 lava_cast 选址可达性、拒绝原因与契约诚实性'
     ],
+    // 门框施工单自注册的导航保护不得否决自家目标格：荒地建门预检放行、显式保护仍拦且点名、未授权路径维持拒绝。
+    portalFrameSelfProtectionRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.dimension.PortalFrameSelfProtectionTest',
+        heap: '512m', directory: 'portal-frame-self-protection-regression', timeoutSeconds: 60,
+        purpose: '验证 may_alter_terrain 授权下门框目标格不被自家保护集拒绝，真保护格回执点名'
+    ],
     semanticBlockSearchRegression: [
         entry: 'org.maiwithu.maicraft.intent.SemanticBlockSearchTest',
         heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
