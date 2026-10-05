@@ -131,6 +131,9 @@ public class MovementDiagonal extends Movement {
             if (!context.allowDiagonalAscend || !MovementHelper.canWalkThrough(context, x, y + 2, z) || !MovementHelper.canWalkOn(context, destX, y, destZ, destInto) || !MovementHelper.canWalkThrough(context, destX, y + 2, destZ)) {
                 return;
             }
+            if (destInto.is(Blocks.FARMLAND)) {
+                return; // 斜向跳上耕地会把耕地踩回泥土,落点禁耕地
+            }
             destWalkOn = destInto;
             fromDown = context.get(x, y - 1, z);
         } else {
@@ -158,6 +161,10 @@ public class MovementDiagonal extends Movement {
         } else if (destWalkOn.getBlock() == Blocks.WATER) {
             multiplier += context.walkOnWaterOnePenalty * SQRT_2;
         }
+        if (destWalkOn.is(Blocks.FARMLAND)) {
+            // 行走本身不踩坏耕地,惩罚只为让路径默认绕开农田
+            multiplier += FARMLAND_WALK_PENALTY;
+        }
         Block fromDownBlock = fromDown.getBlock();
         if (MovementHelper.isClimbable(fromDownBlock)) {
             return;
@@ -167,6 +174,9 @@ public class MovementDiagonal extends Movement {
         } else if (context.allowWalkOnMagmaBlocks && fromDownBlock.equals(Blocks.MAGMA_BLOCK)) {
             multiplier += (SNEAK_ONE_BLOCK_COST - WALK_ONE_BLOCK_COST) / 2;
             sneaking = true;
+        }
+        if (fromDownBlock == Blocks.FARMLAND) {
+            multiplier += FARMLAND_WALK_PENALTY;
         }
         BlockState cuttingOver1 = context.get(x, y - 1, destZ);
         if ((!context.allowWalkOnMagmaBlocks && cuttingOver1.is(Blocks.MAGMA_BLOCK)) || MovementHelper.isLava(cuttingOver1)) {

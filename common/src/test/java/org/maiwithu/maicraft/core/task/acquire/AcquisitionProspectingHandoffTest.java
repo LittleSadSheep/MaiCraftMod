@@ -36,10 +36,11 @@ public final class AcquisitionProspectingHandoffTest {
         descendSuccessStartsProspectMine();
         outsideBandUsesRecommendedLayer();
         uphillBandRefused();
+        realFairScanDispatchesProspecting();
         System.out.println("AcquisitionProspectingHandoffTest: passed");
     }
 
-    /** 授权开 + 表内物品：公平空手后下一张子任务单是探矿采矿；当前位置已在其生成带内时取就地带（夹具地面 y=1 在钻石带 [-64,16] 内）。 */
+    /** 授权开 + 表内物品：公平空手后下一张子任务单是探矿采矿；推荐层低于脚位时按推荐层下降（地表起点不再就地挖表层）。 */
     private static void authorizedDescendsToBand() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
@@ -50,12 +51,12 @@ public final class AcquisitionProspectingHandoffTest {
             check(active instanceof MineBlockTaskRecord,
                     "公平空手 + 授权开 → 统一探矿任务负责下降与到层后的水平通道，实际: " + active);
             if (active instanceof MineBlockTaskRecord mine) {
-                check(mine.prospecting() && mine.prospectY() == 1,
-                        "y=1 已在钻石带内：就地带探矿，prospectY 取当前位置而非推荐值 -59");
+                check(mine.prospecting() && mine.prospectY() == -59,
+                        "y=1 虽在钻石带 [-64,16] 内，推荐层 -59 在下方：按推荐层下降而非就地挖表层");
                 check(mine.searchCenter() == null, "探矿不能被旧地表扫描中心限制");
             }
             Object need = get(task, "rootNeed");
-            check(intField(need, "prospectingY") == 1, "需求侧记住探矿目标层");
+            check(intField(need, "prospectingY") == -59, "需求侧记住探矿目标层");
         }
     }
 
@@ -127,6 +128,62 @@ public final class AcquisitionProspectingHandoffTest {
     }
 
     // ---- 夹具：语义取物任务 + 手工派发 stub 子任务，驱动完成处理而不动真实世界 ----
+
+    /**
+     * 真实流程回放：不替换任何子任务，让真实 mine 子任务在空世界里完成公平扫描并空手
+     * 失败（mined_out），随后父层必须派出探矿任务。地表场景（脚位在生成带内）是实机
+     * 提交的主要形态，stub 回执覆盖不到真实 mine 子任务回执进结算的整条链路。
+     */
+    private static void realFairScanDispatchesProspecting() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var effects = net.minecraft.world.entity.LivingEntity.class.getDeclaredField("activeEffects");
+            effects.setAccessible(true);
+            effects.set(h.player, new java.util.HashMap<>());
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
+            org.maiwithu.maicraft.intent.IntentRuntime.get().observedSourceMemory().clear();
+            // 无服务器数据包的夹具先补 raw_iron 的直挖源与镐采掘标签（ProspectingTest 同款），结束后恢复。
+            var tags = new java.util.HashMap<net.minecraft.tags.TagKey<net.minecraft.world.level.block.Block>,
+                    java.util.List<net.minecraft.core.Holder<net.minecraft.world.level.block.Block>>>();
+            net.minecraft.core.registries.BuiltInRegistries.BLOCK.getTags().forEach(pair -> tags.put(pair.getFirst(), pair.getSecond().stream().toList()));
+            var previous = java.util.Map.copyOf(tags);
+            tags.put(net.minecraft.tags.BlockTags.MINEABLE_WITH_PICKAXE,
+                    List.of(Blocks.IRON_ORE.builtInRegistryHolder(), Blocks.DEEPSLATE_IRON_ORE.builtInRegistryHolder()));
+            tags.put(net.minecraft.tags.BlockTags.INCORRECT_FOR_WOODEN_TOOL, List.of());
+            tags.put(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.BLOCK,
+                    ResourceLocation.parse("minecraft:iron_ores")),
+                    List.of(Blocks.IRON_ORE.builtInRegistryHolder(), Blocks.DEEPSLATE_IRON_ORE.builtInRegistryHolder()));
+            net.minecraft.core.registries.BuiltInRegistries.BLOCK.bindTags(tags);
+            // 夹具没有走模组初始化，按生产注册表补 mine 子任务执行器（其他场景直接实例化子任务，覆盖不到这条派发链）。
+            org.maiwithu.maicraft.task.TaskFactory.register(org.maiwithu.maicraft.core.task.mine.MineBlockTaskRecord.class,
+                    (p, r) -> new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(p, r));
+            try { runRealFlow(h); } finally { net.minecraft.core.registries.BuiltInRegistries.BLOCK.bindTags(previous); }
+        }
+    }
+
+    private static void runRealFlow(InteractionWorldTestHarness h) throws Exception {
+            org.maiwithu.maicraft.intent.IntentRuntime.get().observedSourceMemory().clear();
+            var items = List.of(ResourceLocation.parse("minecraft:raw_iron"));
+            var record = new SemanticAcquireTaskRecord("prospect-real-flow", 100000, items, 3,
+                    List.of(SemanticAcquireTaskRecord.Source.MINE), false,
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8)
+                    .withProspecting(true).withLoadedMiningView(true);
+            var task = new SemanticAcquireCompanionTask(h.player, record);
+            task.onStart();
+            TaskState state = TaskState.RUNNING;
+            boolean dispatched = false;
+            for (int i = 0; i < 600 && state == TaskState.RUNNING && !dispatched; i++) {
+                state = task.onTick();
+                h.nextTick();
+                if (activeRecord(task) instanceof MineBlockTaskRecord mine && mine.prospecting()) {
+                    dispatched = true;
+                    check(mine.prospectY() == 1, "脚位 y=1 在铁带内且推荐层 16 不低于脚位："
+                            + "就地带探矿 prospectY=1，实际 prospectY=" + mine.prospectY());
+                }
+            }
+            check(dispatched, "真实 mine 子任务公平空手 + 授权开 → 必须派出探矿任务，终态=" + state
+                    + "，活动记录=" + activeRecord(task)
+                    + "，回执=" + task.result(TaskState.FAILED).data());
+    }
 
     /** 当前位置在带外且推荐层在下方：目标层取生成带推荐值（109 之前的既有语义保留）。 */
     private static void outsideBandUsesRecommendedLayer() throws Exception {

@@ -122,6 +122,9 @@ public class MovementAscend extends Movement {
         if (jumpingFromBottomSlab && !jumpingToBottomSlab) {
             return COST_INF;// the only thing we can ascend onto from a bottom slab is another bottom slab
         }
+        if (toPlace.is(Blocks.FARMLAND)) {
+            return COST_INF; // 跳跃落在耕地顶面会把耕地踩回泥土,落点禁耕地
+        }
         double walk;
         if (jumpingToBottomSlab) {
             if (jumpingFromBottomSlab) {

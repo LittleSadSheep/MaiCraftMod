@@ -373,7 +373,23 @@ public final class SemanticAcquireCompanionTask
         if (!sourceDimensionAllowed(need, SemanticAcquireTaskRecord.Source.HARVEST) || !takePlannerStep()) return TaskState.RUNNING;
         need.attempted(SemanticAcquireTaskRecord.Source.HARVEST);
         var items = need.itemIds.stream().map(BuiltInRegistries.ITEM::get).filter(HarvestCropCompanionTask::supports).toList();
-        if (items.isEmpty()) { advanceSource(need); return TaskState.RUNNING; }
+        if (items.isEmpty()) {
+            // 显式限 harvest 而目标不是成熟作物产物时，静默换源会让终局回执只剩一句“穷尽”；
+            // 这里把被拒家族与已知来源家族点名进 issues，调用方才能区分“限错了家族”与“世界无源”。
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("requested_item_ids", itemStrings(need.itemIds));
+            SemanticAcquireTaskRecord.SourceHint hint = SemanticSourceKnowledge.infer(need.itemIds);
+            if (!hint.blockRefs().isEmpty()) {
+                facts.put("knowledge_source_block_refs", hint.blockRefs());
+                facts.put("knowledge_source_family", "mine");
+            }
+            addIssue("harvest", "no_mature_crop_source",
+                    "the harvest family only harvests mature crops and replants them; none of the "
+                            + "requested items is a mature-crop product, so no harvest subtask was dispatched",
+                    facts);
+            advanceSource(need);
+            return TaskState.RUNNING;
+        }
         var record = new HarvestCropTaskRecord(childId("harvest"), player.level().getGameTime() + 2400,
                 items, need.requiredFinalCount, player.blockPosition(), r.searchRadius);
         return startChild(need, SemanticAcquireTaskRecord.Source.HARVEST, record, "harvest and replant loaded mature crops");
@@ -1920,6 +1936,22 @@ public final class SemanticAcquireCompanionTask
         return true;
     }
 
+    /** 终局话术逐族点名评估结果：issues 里记录的拒绝原因跟随家族名，没留下记录的家族如实标成未评估。 */
+    private String familyEvaluationSummary(AcquisitionNeed need) {
+        List<String> evaluated = new ArrayList<>();
+        for (var source : need.allowedSources) {
+            if (source == SemanticAcquireTaskRecord.Source.INVENTORY) continue;
+            String name = source.name().toLowerCase(Locale.ROOT);
+            String code = null;
+            for (var issue : issues) {
+                if (name.equals(issue.get("source"))) code = String.valueOf(issue.get("code"));
+            }
+            evaluated.add(name + "=" + (code != null ? code
+                    : need.attempts(source) > 0 ? "attempted" : "not_evaluated"));
+        }
+        return evaluated.isEmpty() ? "" : "; per-family evaluation: " + String.join(", ", evaluated);
+    }
+
     private TaskState exhaustNeed(AcquisitionNeed need) {
         // 最终需求所有来源都失败就报告做不到；小需求失败则回到原配方，视是否已经动过东西决定能否换方案。
         if (need.depth == 0) {
@@ -1955,7 +1987,8 @@ public final class SemanticAcquireCompanionTask
             }
             return failAcquisition(
                     "allowed_sources_exhausted",
-                    "none of the allowed source families could make the final inventory fact true",
+                    "none of the allowed source families could make the final inventory fact true"
+                            + familyEvaluationSummary(need),
                     FailureType.NO_MATERIAL);
         }
         // 效率工具链缺料时结清已发生的效果，再回到原采集；真实工具门槛仍在下一次派发前检查。

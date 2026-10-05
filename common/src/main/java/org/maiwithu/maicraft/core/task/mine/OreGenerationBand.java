@@ -122,7 +122,7 @@ public record OreGenerationBand(
         UNKNOWN_BAND,
         /** 生成带在另一维度：拒绝在本维度下降，如实报告维度壁垒。 */
         OTHER_DIMENSION,
-        /** 派出下降子任务，目标 = 当前 xz + 推荐探矿 Y；当前位置已在生成带内时取当前位置（就地带）。 */
+        /** 派出下降子任务，目标 = 当前 xz + 推荐探矿 Y；带内且推荐层不低于当前位置时取当前位置（就地带）。 */
         DESCEND,
         /**
          * 生成带推荐层高于当前位置且当前位置不在带内：到达它只能露天空中垫柱爬升——那是
@@ -150,10 +150,11 @@ public record OreGenerationBand(
      * 探矿决策：公平扫描空手后是否、以及如何进入探矿。决策只读请求事实
      * （授权、表、当前维度、已推进到的阶段、当前脚位高度），不携带任何世界内部状态。
      *
-     * <p>就地带优先：当前位置已落在生成带 [minY, maxY] 内时，探矿 Y 取当前位置——
-     * 本地同为生成带且常已在石头里，为凑推荐层先垫柱爬升会把探矿变成露天施工。
-     * 推荐层低于当前位置时仍按推荐层下降（向下掘进就是「挖着找」本身）；
-     * 推荐层高于当前位置且当前位置不在带内时拒绝（{@link Step#UPHILL_BAND}）。
+     * <p>就地带优先：推荐探矿层不低于当前位置时，探矿 Y 取当前位置——本地同为生成带
+     * 且常已在石头里，为凑推荐层先垫柱爬升会把探矿变成露天施工（{@link Step#UPHILL_BAND}
+     * 只拦带外爬升，带内爬升就地解决）。推荐层低于当前位置时仍按推荐层下降：
+     * 向下掘进就是「挖着找」本身，地表起点若就地水平掘进只会挖表层泥土，
+     * 永远到不了矿物富集层（铁 16、钻石 -59 等推荐层都在地表之下）。
      */
     public static Plan plan(boolean allowProspecting, Collection<ResourceLocation> itemIds,
                             String currentDimension, boolean descendStarted, boolean prospectMineStarted,
@@ -163,8 +164,10 @@ public record OreGenerationBand(
         OreGenerationBand band = forItems(itemIds);
         if (band == null) return Plan.UNKNOWN_BAND;
         if (!band.matchesDimension(currentDimension)) return new Plan(Step.OTHER_DIMENSION, band);
-        if (currentFeetY >= band.minY && currentFeetY <= band.maxY)
-            return new Plan(Step.DESCEND, band, currentFeetY);
+        if (currentFeetY >= band.minY && currentFeetY <= band.maxY) {
+            if (band.prospectY() >= currentFeetY) return new Plan(Step.DESCEND, band, currentFeetY);
+            return new Plan(Step.DESCEND, band);
+        }
         if (band.prospectY() > currentFeetY) return new Plan(Step.UPHILL_BAND, band);
         return new Plan(Step.DESCEND, band);
     }

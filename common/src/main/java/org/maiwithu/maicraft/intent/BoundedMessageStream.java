@@ -78,6 +78,11 @@ abstract class BoundedMessageStream {
      * 游标协议的唯一实现：校验进度、判定重置（流编号不符或游标超前）与丢失（游标落后于已淘汰的
      * 最旧条目）、按进度分页，并在回执中附带最新/最旧游标与恢复提示。
      * filter 决定哪些条目进入本页：全量流传 {@code event -> true}，任务通知流传任务匹配谓词。
+     *
+     * <p>游标失效必须显式交付：{@code cursor_valid=false} 配 {@code cursor_status} 说明失效原因
+     * 与恢复动作，调用方不需要从空事件页自行猜测；缺口量化为 {@code unread_before_page}（本页
+     * 窗口之前未交付的匹配条目）与 {@code evicted_before_page}（容量淘汰、不可恢复的流内条目），
+     * 让跳跃可被调用方察觉而不是静默吞掉。
      */
     protected synchronized JsonObject readPage(long after, int limit, String expectedStream, Predicate<JsonObject> filter) {
         // 调用者带来的流编号变了，或游标比当前最新事件还大，说明它拿着另一轮的进度，需要重新对齐。
@@ -105,8 +110,26 @@ abstract class BoundedMessageStream {
         result.addProperty("history_lost", lost);
         result.addProperty("stream_reset", reset);
         result.addProperty("resync_required", reset || lost);
+        // 游标是否被原样遵守；失效时给调用方一句可直接执行的恢复动作，替代猜游标。
+        result.addProperty("cursor_valid", !(reset || lost));
+        if (reset || lost) result.addProperty("cursor_status", invalidationNotice(reset, oldest));
+        // 页边界与缺口量化：调用方对比相邻事件的 cursor 即可察觉任何跳跃，不必靠人眼对账。
+        if (!page.isEmpty()) {
+            result.addProperty("page_first_cursor", page.get(0).getAsJsonObject().get("cursor").getAsLong());
+            result.addProperty("page_last_cursor", page.get(page.size() - 1).getAsJsonObject().get("cursor").getAsLong());
+        }
+        if (start > 0) result.addProperty("unread_before_page", start);
+        long evicted = Math.max(0, oldest - 1 - from);
+        if (evicted > 0) result.addProperty("evicted_before_page", evicted);
         result.add(pageKey(), page);
         return result;
+    }
+
+    private String invalidationNotice(boolean reset, long oldest) {
+        String recovery = " continue paging from the cursor in this response";
+        if (reset) return "cursor invalidated: stream_id mismatch or cursor ahead of stream;" + recovery;
+        return "cursor invalidated: events up to cursor " + (oldest - 1)
+                + " were evicted (capacity " + CAPACITY + ") and cannot be recovered; this page starts at the oldest retained event;" + recovery;
     }
 
     AutoCloseable subscribe(Consumer<JsonElement> listener) {

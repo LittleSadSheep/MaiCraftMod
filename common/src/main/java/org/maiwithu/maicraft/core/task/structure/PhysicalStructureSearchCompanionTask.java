@@ -880,7 +880,8 @@ public final class PhysicalStructureSearchCompanionTask
         return loadedFrontierToward(desired, false);
     }
 
-    // avoidWater 时优先返回不穿水的最远已加载路段；全线皆水回退最远已加载路段，不在水域环境卡死。
+    // avoidWater 时优先返回不穿水的最远已加载路段；全线皆水回退最近已加载路段，
+    // 缩短穿水承诺，不在水域环境卡死。
     private BlockPos loadedFrontierToward(BlockPos desired, boolean avoidWater) {
         BlockPos current = player.blockPosition();
         double dx = desired.getX() - current.getX();
@@ -897,7 +898,7 @@ public final class PhysicalStructureSearchCompanionTask
             BlockPos candidate = new BlockPos(x, current.getY(), z);
             if (!insideScope(candidate) || !sector.contains(x, z) || !columnLoaded(x, z)) continue;
             if (!avoidWater) return candidate;
-            if (fallback == null) fallback = candidate;
+            fallback = candidate;
             if (!routeCrossesWater(candidate)) return candidate;
         }
         return avoidWater ? fallback : null;

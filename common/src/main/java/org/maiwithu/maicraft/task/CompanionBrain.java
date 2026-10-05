@@ -1,6 +1,7 @@
 package org.maiwithu.maicraft.task;
 
 import net.minecraft.client.player.LocalPlayer;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.agent.tool.LocalToolDispatcher;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 
@@ -19,6 +20,10 @@ import org.maiwithu.maicraft.core.task.chain.BreathChain;
 final class CompanionBrain {
 
     private static final int HAND_PIN_GRACE_TICKS = 600;
+    /** 换手被安全闸门拒绝的留痕冷却：持续拒绝只按节奏记，不刷屏。 */
+    private static final long YIELD_REFUSAL_LOG_INTERVAL = 100;
+
+    private long lastYieldRefusalLog = Long.MIN_VALUE;
 
     private final Deque<TaskRecord> outbox = new ArrayDeque<>();
     final TaskSlot sync = new TaskSlot(outbox::addLast);
@@ -49,7 +54,7 @@ final class CompanionBrain {
                 slotHoldsBody());
 
         // 正在跳跃、下落或乘交通工具时，突然换人控制可能摔下去；通常先让当前动作走到能安全停下的位置。
-        // 但如果原来的落地方案已经失败，而且自救任务准备好了，就允许它马上接手。
+        // 但如果原来的落地方案已经失败，或者获胜者是围困窒息这类等不起的紧急自救，就允许它马上接手。
         if (holder != winner && (!EmbeddedBaritoneRuntime.canSafelySuspendActive()
                 || !TransportRuntime.canSafelySuspendActive())) {
             boolean rescue = winner instanceof MLGChain mlg
@@ -59,7 +64,11 @@ final class CompanionBrain {
             // 坠落已被水缓冲后，低氧逃生可以接手；不能继续以“尚未落地”为由把角色压在水下。
             boolean breathing = winner instanceof BreathChain && !TransportRuntime.occupied()
                     && EmbeddedBaritoneRuntime.handOffForBreathing(player);
-            if (!rescue && !breathing) winner = holder;
+            boolean urgent = winner != null && winner.urgentBodyRescue(player);
+            if (!rescue && !breathing && !urgent) {
+                logYieldRefusal(player, winner);
+                winner = holder;
+            }
         }
         if (holder != null && holder != winner) {
             // 先停掉旧任务的自动走路和交通控制，再通知它暂停，避免旧路线继续按键干扰新任务。
@@ -112,9 +121,33 @@ final class CompanionBrain {
                 && (holder == null || !holder.suppressesSurvivalReflexes());
     }
 
-    /** 身体此刻是否被任务槽记录持有（反射自救不算持有）：释放窗口反射据此让位给在岗任务。 */
+    /** 身体此刻是否被任务槽记录持有（反射自救不算持有）：释放窗口反射据此让位给在岗任务。
+     *  持有以任务槽的真实占用为准——槽位已结算而 holder 还停在槽代理上的那一刻不算持有，
+     *  否则释放窗口反射会被一个已经不存在的任务无限期挡在门外。 */
     boolean slotHoldsBody() {
-        return holder == syncProxy || holder == currentProxy;
+        return (!sync.isEmpty() && holder == syncProxy) || (!current.isEmpty() && holder == currentProxy);
+    }
+
+    /**
+     * 换手安全闸门拒绝本次交接时留痕：获胜者是谁、哪个运行时拒绝、身体此刻在谁手里。
+     * 这个分支此前完全静默——释放窗口反射"通过了触发判定却从未接管"的实机现象
+     * （零事件、零动作）正是从这里被吃掉的，留痕后下一次实机窗口才能定位到具体闸门。
+     */
+    private void logYieldRefusal(LocalPlayer player, Task winner) {
+        long now = player.level().getGameTime();
+        if (now - lastYieldRefusalLog < YIELD_REFUSAL_LOG_INTERVAL) return;
+        lastYieldRefusalLog = now;
+        Constants.LOG.info(
+                "[maicraft-task] handover refused; winner={} holder={} baritone_safe={} transport_safe={}",
+                winner == null ? "none" : winner.name(), describeHolder(),
+                EmbeddedBaritoneRuntime.canSafelySuspendActive(), TransportRuntime.canSafelySuspendActive());
+    }
+
+    private String describeHolder() {
+        if (holder == null) return "none";
+        if (holder == syncProxy) return "sync_task";
+        if (holder == currentProxy) return "current_task";
+        return holder.name();
     }
 
     // 先结清寻死目标再保存重生检查点；普通任务返回 false，仍按原有死亡恢复流程处理。

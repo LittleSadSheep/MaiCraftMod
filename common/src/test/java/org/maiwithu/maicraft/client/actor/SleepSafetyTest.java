@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.Difficulty;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.valueproviders.ConstantInt;
 import net.minecraft.world.level.Level;
@@ -34,6 +35,7 @@ public final class SleepSafetyTest {
         refusesUnsafeClick(false);
         refusesUnsafeClick(true);
         safeBedStillWorks();
+        bedAreaTargetTravelsThenSleeps();
         System.out.println("SleepSafetyTest: unsafe dimensions never submit a bed click");
     }
 
@@ -49,10 +51,11 @@ public final class SleepSafetyTest {
                     "automatic bed selection must explain the same dimension hazard");
 
             var adapter = Class.forName("org.maiwithu.maicraft.intent.AbilityAdapter")
-                    .getDeclaredMethod("sleep", Goal.class, LocalPlayer.class);
+                    .getDeclaredMethod("sleep", Goal.class, LocalPlayer.class,
+                            org.maiwithu.maicraft.intent.IntentRuntime.class);
             adapter.setAccessible(true);
             var goal = new Goal("maicraft:sleep", "sleep safely", null, "{}", "{}", List.of(), List.of());
-            Object action = adapter.invoke(null, goal, f.player);
+            Object action = adapter.invoke(null, goal, f.player, null);
             check(action.getClass().getSimpleName().equals("Decision") && action.toString().contains("explode"),
                     "semantic sleep must explain the hazard before suggesting a bed or waiting for night");
             check(f.level.searches == 0 && f.blockUses() == 0,
@@ -101,6 +104,38 @@ public final class SleepSafetyTest {
             check(task.tick(f.player) == TaskState.SUCCESS && f.blockUses() == 1,
                     "observed sleep completes without another click");
             task.result(TaskState.SUCCESS);
+        }
+    }
+
+    /** 125：coordinates 床区目标按准确坐标先走后睡，床的位置进入请求而不再只认 current_place。 */
+    private static void bedAreaTargetTravelsThenSleeps() throws Exception {
+        try (var f = new InteractionWorldTestHarness()) {
+            bedWorks(f, true);
+            f.set(BED, Blocks.RED_BED.defaultBlockState().setValue(BedBlock.PART, BedPart.HEAD));
+            var time = new net.minecraft.client.multiplayer.ClientLevel.ClientLevelData(Difficulty.NORMAL, false, false);
+            ActorControlTestHarness.field(Level.class, "levelData").set(f.level, time);
+            time.setDayTime(17 * 24_000L + 13_564);
+            var goal = new Goal("maicraft:sleep", "sleep at the camp",
+                    new Goal.SemanticTarget("coordinates", null,
+                            new Goal.WorldPosition(BED.getX(), BED.getY(), BED.getZ(), "minecraft:overworld"), null),
+                    "{}", "{}", List.of(), List.of());
+            var adapter = Class.forName("org.maiwithu.maicraft.intent.AbilityAdapter")
+                    .getDeclaredMethod("sleep", Goal.class, LocalPlayer.class,
+                            org.maiwithu.maicraft.intent.IntentRuntime.class);
+            adapter.setAccessible(true);
+            Object action = adapter.invoke(null, goal, f.player, null);
+            check(action.getClass().getSimpleName().equals("Chain"),
+                    "a coordinates bed-area target resolves into a goto-then-sleep chain, got " + action);
+            @SuppressWarnings("unchecked")
+            List<Object> actions = (List<Object>) action.getClass().getMethod("actions").invoke(action);
+            check(actions.size() == 2, "the chain is exactly goto then sleep");
+            String gotoArgs = (String) actions.get(0).getClass().getMethod("argumentsJson").invoke(actions.get(0));
+            String tool0 = (String) actions.get(0).getClass().getMethod("toolName").invoke(actions.get(0));
+            String tool1 = (String) actions.get(1).getClass().getMethod("toolName").invoke(actions.get(1));
+            check("goto".equals(tool0) && "sleep".equals(tool1), "chain order is goto then sleep");
+            check(gotoArgs.contains("\"x\":" + BED.getX()) && gotoArgs.contains("\"y\":" + BED.getY())
+                            && gotoArgs.contains("\"z\":" + BED.getZ()),
+                    "the goto step travels to the bed coordinates themselves: " + gotoArgs);
         }
     }
 

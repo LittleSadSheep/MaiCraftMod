@@ -175,6 +175,8 @@ public final class NavigationRegressionSuite {
         PathTickBudgetTest.main(args);
         DoorPassageTest.main(args);
         DiagonalHazardTest.main(args);
+        // 寻路保护耕地:行走耕地加罚让路径默认绕行,跳跃/跌落落点在耕地直接禁行。
+        baritone.pathing.movement.FarmlandProtectionTest.main(args);
         CollisionGeometryTest.main(args);
         PlacementHandoffTest.main(args);
         NearbyCollisionPerceptionTest.main(args);

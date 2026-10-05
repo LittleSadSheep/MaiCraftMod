@@ -121,6 +121,9 @@ public class MovementDescend extends Movement {
         if (MovementHelper.canUseFrostWalker(context, destDown)) { // no need to check assumeWalkOnWater
             return; // the water will freeze when we try to walk into it
         }
+        if (below.getBlock() == Blocks.FARMLAND) {
+            return; // 跌落进农田会把耕地踩回泥土,落点禁耕地
+        }
         if (!MovementHelper.isWater(below)
                 && !context.canLandWithoutDamage(x, y, z, y, destX, y - 2, destZ, below)) {
             DescentAdmissionLog.rejected(BlockPos.asLong(destX, y - 2, destZ), 1,
@@ -218,6 +221,9 @@ public class MovementDescend extends Movement {
                 DescentAdmissionLog.rejected(BlockPos.asLong(destX, newY, destZ), fallHeight,
                         "landing_column_not_standable");
                 return false;
+            }
+            if (ontoBlock.getBlock() == Blocks.FARMLAND) {
+                return false; // 长距离坠落在农田上会把耕地踩回泥土,落点禁耕地
             }
             boolean harmless = context.canLandWithoutDamage(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
             var dropPlans = reachedMinimum && !harmless

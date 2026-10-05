@@ -25,8 +25,9 @@ import org.maiwithu.maicraft.task.reflex.Reflex;
  * interact 地形准备把身体围在 stone 里的实机形态）。
  * 失败、取消都可能把身体留在中途位置；零输入挡不住残余动量，紧贴边缘的身体
  * 会在无人接管窗口滑落。窒息逃逸只挖致窒的那一格，不替调用方规划脱困路线。
- * 在岗任务持有身体时不参与抢占：贴边站位可以是任务的正当姿态（建筑贴墙、
- * 钓鱼池边、寻路贴崖），抢占会把锚点对齐和寻路按秒打断。
+ * 在岗任务持有身体时贴边退避不参与抢占：贴边站位可以是任务的正当姿态（建筑贴墙、
+ * 钓鱼池边、寻路贴崖），抢占会把锚点对齐和寻路按秒打断。围困窒息例外：它在岗与
+ * 释放都触发、且越过换手安全闸门（urgentBodyRescue），致窒方块里的等待只会掉血。
  */
 public final class SettleChain implements Task, Reflex {
     /** 邻格向下扫满这个深度仍无支撑，才算深落差；更浅的台阶不值得抢占身体。 */
@@ -55,15 +56,26 @@ public final class SettleChain implements Task, Reflex {
         return edge != null && nearEdgeOrDrifting(companion, edge);
     }
 
-    /** 只服务释放窗口：在岗任务的贴边站位由任务自己负责，见类注释。 */
+    /** 只服务释放窗口：在岗任务的贴边站位由任务自己负责，见类注释。窒息逃逸见 urgentBodyRescue。 */
     @Override
     public boolean onlyWhenBodyReleased() {
         return true;
     }
 
+    /**
+     * 围困窒息豁免释放窗口与换手安全闸门：致窒方块里的每一刻都在掉血，等待
+     * "任务释放"或"路线可安全交接"没有意义；贴边退避不豁免，继续只在释放窗口参与。
+     */
+    @Override
+    public boolean urgentBodyRescue(LocalPlayer companion) {
+        return suffocating(companion);
+    }
+
     @Override
     public TaskState tick(LocalPlayer companion) {
         if (suffocating(companion)) return escapeSuffocation(companion);
+        // 未开集且触发条件已不成立时不开新集：闸门残留的持有权不应让本反射凭空开一条贴边记录。
+        if (!active && !canRun(companion)) return TaskState.RUNNING;
         if (!active) {
             active = true;
             ticks = 0;

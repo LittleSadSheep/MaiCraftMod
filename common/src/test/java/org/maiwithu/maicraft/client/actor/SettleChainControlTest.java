@@ -102,6 +102,13 @@ public final class SettleChainControlTest {
             w.nextTick();
             check(!player.isInWall(), "fixture: the vanilla thin-box predicate no longer sees the wall");
             check(chain.canRun(player), "a suffocating eye cell triggers the escape even when the vanilla predicate misses it");
+            check(chain.urgentBodyRescue(player),
+                    "suffocation declares the urgent-rescue exemption while the eye cell is sealed");
+            // 调度层旧形态复现：身体仍被在岗任务持有（taskHoldsBody=true）且眼位被塞——
+            // 修复前释放窗口判定直接跳过本反射，窒息无人接管；修复后紧急豁免必须胜出。
+            check(org.maiwithu.maicraft.task.TaskSelector.select(
+                    java.util.List.of(chain), null, new OccupyingStubTask(), java.util.List.of(), player, true) == chain,
+                    "a held body with a sealed eye cell is still handed to the suffocation escape");
             chain.tick(player);
             check(suffocating(chain) != null, "the escape still issues a native break on the suffocating block");
             w.set(eyeBlock, Blocks.AIR.defaultBlockState());
@@ -110,8 +117,20 @@ public final class SettleChainControlTest {
             check(suffocating(chain) == null, "clearing the block closes the widened escape episode");
             ActorControlTestHarness.field(net.minecraft.world.entity.Entity.class, "noPhysics")
                     .setBoolean(player, false);
+            check(!chain.urgentBodyRescue(player),
+                    "the urgent-rescue exemption only covers the suffocation branch, not the edge retreat");
         }
         System.out.println("SettleChainControlTest: passed");
+    }
+
+    /** 占身桩任务：canRun 恒真，用于让选人器进入"在岗任务持有身体"分支。 */
+    private static final class OccupyingStubTask implements org.maiwithu.maicraft.task.Task {
+        @Override public boolean canRun(net.minecraft.client.player.LocalPlayer companion) { return true; }
+        @Override public org.maiwithu.maicraft.task.TaskState tick(net.minecraft.client.player.LocalPlayer companion) {
+            return org.maiwithu.maicraft.task.TaskState.RUNNING;
+        }
+        @Override public void stop(net.minecraft.client.player.LocalPlayer companion, StopReason why) { }
+        @Override public String name() { return "occupying_stub"; }
     }
 
     private static BlockPos suffocating(SettleChain chain) throws Exception {

@@ -113,6 +113,10 @@ public final class ProspectingTest {
         var inBand = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, 45);
         check(inBand.step() == OreGenerationBand.Step.DESCEND && inBand.prospectY() == 45,
                 "y45 在煤带 [0,320] 内：就地带探矿，prospectY = 45 而非推荐层 96");
+        // 推荐层低于脚位时即使在带内也按推荐层下降：地表起点就地水平掘进只挖表层，到不了矿物富集层。
+        var surfaceIron = OreGenerationBand.plan(true, List.of(RAW_IRON), overworld, false, false, 64);
+        check(surfaceIron.step() == OreGenerationBand.Step.DESCEND && surfaceIron.prospectY() == 16,
+                "y64 地表在铁带 [-64,320] 内但推荐层 16 在下方：按推荐层下降到 16，不在地表就地挖");
         // 向上重定位拒绝（109）：当前位置在带外且推荐层在上方，露天空中垫柱不是授权的「挖着找」。
         var uphillUnderground = OreGenerationBand.plan(true, List.of(COAL), overworld, false, false, -10);
         check(uphillUnderground.step() == OreGenerationBand.Step.UPHILL_BAND,

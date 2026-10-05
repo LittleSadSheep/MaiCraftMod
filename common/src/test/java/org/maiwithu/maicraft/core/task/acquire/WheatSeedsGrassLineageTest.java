@@ -24,6 +24,7 @@ public final class WheatSeedsGrassLineageTest {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         knowledgeLineage();
         dispatchSelectsGrass();
+        explicitHarvestOnlyDisclosesRejectedFamily();
         System.out.println("WheatSeedsGrassLineageTest: passed");
     }
 
@@ -72,8 +73,56 @@ public final class WheatSeedsGrassLineageTest {
         }
     }
 
+    /**
+     * 显式限 harvest 的对照：种子不是成熟作物产物，任务失败但回执必须点名被拒家族——
+     * issues 记录 harvest 家族的拒绝原因与知识表中属于 mine 族的来源方块，终局话术逐族给出评估结果，
+     * 不再只有一句“来源族穷尽”让调用方无法区分“限错家族”与“世界无源”。
+     */
+    private static void explicitHarvestOnlyDisclosesRejectedFamily() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.set(h.player.blockPosition().offset(2, 0, 0), Blocks.SHORT_GRASS.defaultBlockState());
+            var record = new SemanticAcquireTaskRecord("seeds-harvest-only", 4000,
+                    List.of(ResourceLocation.parse("minecraft:wheat_seeds")), 4,
+                    List.of(SemanticAcquireTaskRecord.Source.HARVEST), false,
+                    SemanticAcquireTaskRecord.SourceHint.empty(), List.of(), 8);
+            var task = new SemanticAcquireCompanionTask(h.player, record);
+            task.onStart();
+            Object need = get(task, "rootNeed");
+            var attempt = SemanticAcquireCompanionTask.class.getDeclaredMethod("attemptHarvest", need.getClass());
+            attempt.setAccessible(true);
+            check(attempt.invoke(task, need) == TaskState.RUNNING,
+                    "harvest 族对非作物产物只换源，不在家族评估内直接判死");
+            var recorded = issues(task);
+            check(recorded.stream().anyMatch(issue ->
+                            "harvest".equals(((Map<?, ?>) issue).get("source"))
+                                    && "no_mature_crop_source".equals(((Map<?, ?>) issue).get("code"))),
+                    "issues 必须点名 harvest 家族被拒原因，实际: " + recorded);
+            check(recorded.stream().anyMatch(issue -> {
+                Object facts = ((Map<?, ?>) issue).get("facts");
+                return facts instanceof Map<?, ?> map
+                        && "mine".equals(map.get("knowledge_source_family"))
+                        && map.get("knowledge_source_block_refs") != null;
+            }), "拒绝披露必须指出知识表中种子来源属于 mine 族");
+            // 唯一允许的世界来源已耗尽后，主管线以逐族评估话术判死。
+            var exhaust = SemanticAcquireCompanionTask.class.getDeclaredMethod("exhaustNeed", need.getClass());
+            exhaust.setAccessible(true);
+            check(exhaust.invoke(task, need) == TaskState.FAILED,
+                    "换源后无剩余来源，需求应判失败");
+            check("allowed_sources_exhausted".equals(get(task, "failureCode")),
+                    "失败码应为 allowed_sources_exhausted，实际: " + get(task, "failureCode"));
+            check(String.valueOf(doneReason(task)).contains("per-family evaluation: harvest=no_mature_crop_source"),
+                    "终局话术必须逐族点名评估结果，实际: " + doneReason(task));
+        }
+    }
+
     private static Object get(Object instance, String name) throws Exception {
-        var field = instance.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(instance);
+        Class<?> type = instance.getClass();
+        while (type != null) {
+            try {
+                var field = type.getDeclaredField(name); field.setAccessible(true); return field.get(instance);
+            } catch (NoSuchFieldException missing) { type = type.getSuperclass(); }
+        }
+        throw new NoSuchFieldException(name);
     }
 
     @SuppressWarnings("unchecked")
@@ -82,4 +131,9 @@ public final class WheatSeedsGrassLineageTest {
     }
 
     private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+
+    /** 失败说明由基类 fail 记入 doneReason；测试据此核对终局话术。 */
+    private static String doneReason(SemanticAcquireCompanionTask task) throws Exception {
+        return String.valueOf(get(task, "doneReason"));
+    }
 }

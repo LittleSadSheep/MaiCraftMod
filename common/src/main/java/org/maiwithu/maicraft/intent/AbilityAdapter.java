@@ -70,7 +70,7 @@ final class AbilityAdapter {
             // 只有明确提交寻死目标才临时停用自保；其他饥饿和返程任务保持原行为。
             case SuicideAbilityAdapter.ABILITY -> SuicideAbilityAdapter.adapt(goal);
             case "maicraft:remember_place" -> remember(goal, player, runtime);
-            case "maicraft:sleep" -> sleep(goal, player);
+            case "maicraft:sleep" -> sleep(goal, player, runtime);
             case "maicraft:travel" -> travel(goal, player, runtime);
             case "maicraft:travel_dimension" -> travelDimension(goal);
             case "maicraft:prepare_portal" -> preparePortal(goal, player);
@@ -152,7 +152,7 @@ final class AbilityAdapter {
         return new IntentAction.Remember(label, position, areaRole);
     }
 
-    private static IntentAction sleep(Goal goal, LocalPlayer player) {
+    private static IntentAction sleep(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         // 先判断这里能否安全用床，避免为爆炸维度安排找床、放床或等待夜晚。
         if (!BedBlock.canSetSpawn(player.level())) {
             return decision(goal, "Beds explode in this dimension; sleeping here is unsafe.",
@@ -160,19 +160,36 @@ final class AbilityAdapter {
                             option("skip", "Continue without sleeping."),
                             option("cancel", "Cancel the whole task.")));
         }
-        // 先找已加载区域里的床；查询分多刻进行，没有查完就等，不把“暂时没找到”当作“没有”。
+        // 床区目标：省略或 current_place 在脚下找；coordinates/landmark 解析成同维度位置，
+        // 床不在已加载范围时先走到目标位置再找身边的床，地标复用 travel 同一份记忆表。
+        Goal.WorldPosition bedArea = position(goal, player, runtime);
+        Goal.SemanticTarget target = goal.target();
+        if (bedArea == null && target != null) {
+            if (isNamedPlace(target)) {
+                return unresolvedNamedPlaceDecision(goal, target, player, runtime, "Sleep");
+            }
+            return decision(goal,
+                    "Sleep target coordinates are in another dimension; travel to that dimension first.",
+                    List.of(option("recover", "Use maicraft:travel_dimension to reach the bed's dimension first."),
+                            option("replace_goal", "Provide same-dimension coordinates or a remembered landmark."),
+                            option("cancel", "Cancel without sleeping.")));
+        }
+        // 先查已加载区域里的床；查询以床区目标为中心（有目标时）或玩家脚下展开，
+        // 分多刻进行，没有查完就等，不把“暂时没找到”当作“没有”。
         Set<Block> bedBlocks = BuiltInRegistries.BLOCK
                 .getTag(BlockTags.BEDS)
                 .map(tag -> tag.stream().map(holder -> holder.value())
                         .collect(Collectors.toUnmodifiableSet()))
                 .orElseGet(Set::of);
+        BlockPos searchCenter = bedArea != null
+                ? new BlockPos(bedArea.x(), bedArea.y(), bedArea.z()) : player.blockPosition();
         if (!bedBlocks.isEmpty()) {
             TargetIndex.register(player.clientLevel, bedBlocks);
             TargetIndex.Result beds;
             try {
                 beds = TargetIndex.query(
                         player.clientLevel,
-                        player.blockPosition(),
+                        searchCenter,
                         bedBlocks,
                         1,
                         2,
@@ -185,15 +202,34 @@ final class AbilityAdapter {
                 if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
                     return waitForNightDecision(goal, player);
                 }
-                Block bed = player.clientLevel.getBlockState(beds.hits().getFirst()).getBlock();
-                String bedId = BuiltInRegistries.BLOCK.getKey(bed).toString();
-                // 找到床后安排两步：先走到这种床旁边，再调用“上床”工具。
+                // 找到床后安排两步：先走到这张床的准确位置，再按坐标上床；远距床区不再依赖就近扫描。
+                BlockPos bedPos = beds.hits().getFirst();
                 JsonObject travel = new JsonObject();
-                travel.addProperty("block", bedId);
+                travel.addProperty("x", bedPos.getX());
+                travel.addProperty("y", bedPos.getY());
+                travel.addProperty("z", bedPos.getZ());
+                JsonObject rest = new JsonObject();
+                rest.addProperty("x", bedPos.getX());
+                rest.addProperty("y", bedPos.getY());
+                rest.addProperty("z", bedPos.getZ());
                 return new IntentAction.Chain(List.of(
                         new IntentAction.Tool("goto", travel.toString()),
-                        new IntentAction.Tool("sleep", "{}")));
+                        new IntentAction.Tool("sleep", rest.toString())));
             }
+        }
+        if (bedArea != null) {
+            // 床区目标周围暂无已加载的床：先走到目标位置，到齐后由上床工具在伸手可及范围找床；
+            // 到场仍没有床时如实报“伸手可及范围内没有床”，不假装入睡。
+            if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
+                return waitForNightDecision(goal, player);
+            }
+            JsonObject travel = new JsonObject();
+            travel.addProperty("x", bedArea.x());
+            travel.addProperty("y", bedArea.y());
+            travel.addProperty("z", bedArea.z());
+            return new IntentAction.Chain(List.of(
+                    new IntentAction.Tool("goto", travel.toString()),
+                    new IntentAction.Tool("sleep", "{}")));
         }
 
         String carriedBed = inventoryBed(player);
@@ -232,7 +268,8 @@ final class AbilityAdapter {
         }
 
         return decision(goal,
-                "No bed is visible in loaded terrain and no bed is in inventory. "
+                "No bed is visible in loaded terrain and no bed is in inventory; the bed may exist outside "
+                        + "loaded chunks, so travel to a remembered landmark near it first. "
                         + "Choose a semantic prerequisite before MaiCraft changes the world.",
                 List.of(
                         option("recover", "Provide details.goal, for example acquiring any usable bed."),
