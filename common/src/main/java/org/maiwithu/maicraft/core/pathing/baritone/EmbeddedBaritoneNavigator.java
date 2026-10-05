@@ -285,6 +285,9 @@ public final class EmbeddedBaritoneNavigator {
         failureEvidence = NavigationFailureEvidence.capture(player, plannedCenter, permit, EmbeddedBaritonePolicy.snapshot());
         String detail = "Baritone found no path to " + plannedCenter.toShortString();
         if (!rejectedScaffolds.isEmpty()) detail += "; temporary scaffold safety excluded " + rejectedScaffolds.size() + " placement cells";
+        var escape = org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.detect(
+                player.level(), feet(), cell -> player.level().isLoaded(cell));
+        if (escape.active()) detail += "; " + escape.detail();
         if (!terrainProbeRequested || permit != TerrainPermit.PRESERVE) {
             return failWhenSafe(FailureType.NO_PATH, detail);
         }

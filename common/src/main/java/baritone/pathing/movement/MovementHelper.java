@@ -76,22 +76,43 @@ public interface MovementHelper extends ActionCosts, Helper {
     double FARMLAND_WALK_PENALTY = 20.0;
 
     static boolean avoidBreaking(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
+        return avoidBreaking(bsi, null, null, x, y, z, state);
+    }
+
+    /**
+     * 带脱困上下文的禁挖判定。{@code escape} 非空且生效时，只放行一类例外：
+     * 破坏开口比脱困基准身体位置更远离岩浆危险源——起点已在致死邻域内时，
+     * 常规的「邻格有岩浆禁挖」会把所有出逃路线全数拒绝；其余规则原样不变。
+     */
+    static boolean avoidBreaking(BlockStateInterface bsi,
+                                 org.maiwithu.maicraft.core.pathing.HazardEscapePolicy escape,
+                                 net.minecraft.core.BlockPos escapeBody,
+                                 int x, int y, int z, BlockState state) {
         if (!bsi.worldBorder.canPlaceAt(x, z)) {
             return true;
         }
+        // 脱困豁免只在「破坏点净远离危险源」时成立；上方邻格永远走常规规则。
+        boolean escapeWaivesLava = escape != null && escape.active()
+                && escapeBody != null
+                && escape.permitsBreakingBesideLava(escapeBody, x, y, z);
         Block b = state.getBlock();
         return Baritone.settings().blocksToDisallowBreaking.value.contains(b)
                 || b == Blocks.ICE // ice becomes water, and water can mess up the path
                 || b instanceof InfestedBlock // obvious reasons
                 // call context.get directly with x,y,z. no need to make 5 new BlockPos for no reason
-                || avoidAdjacentBreaking(bsi, x, y + 1, z, true)
-                || avoidAdjacentBreaking(bsi, x + 1, y, z, false)
-                || avoidAdjacentBreaking(bsi, x - 1, y, z, false)
-                || avoidAdjacentBreaking(bsi, x, y, z + 1, false)
-                || avoidAdjacentBreaking(bsi, x, y, z - 1, false);
+                || avoidAdjacentBreaking(bsi, x, y + 1, z, true, false)
+                || avoidAdjacentBreaking(bsi, x + 1, y, z, false, escapeWaivesLava)
+                || avoidAdjacentBreaking(bsi, x - 1, y, z, false, escapeWaivesLava)
+                || avoidAdjacentBreaking(bsi, x, y, z + 1, false, escapeWaivesLava)
+                || avoidAdjacentBreaking(bsi, x, y, z - 1, false, escapeWaivesLava);
     }
 
     static boolean avoidAdjacentBreaking(BlockStateInterface bsi, int x, int y, int z, boolean directlyAbove) {
+        return avoidAdjacentBreaking(bsi, x, y, z, directlyAbove, false);
+    }
+
+    static boolean avoidAdjacentBreaking(BlockStateInterface bsi, int x, int y, int z,
+                                         boolean directlyAbove, boolean escapeWaivesLava) {
         // returns true if you should avoid breaking a block that's adjacent to this one (e.g. lava that will start flowing if you give it a path)
         // this is only called for north, south, east, west, and up. this is NOT called for down.
         // we assume that it's ALWAYS okay to break the block thats ABOVE liquid
@@ -107,6 +128,11 @@ public interface MovementHelper extends ActionCosts, Helper {
         // only pure liquids for now
         // waterlogged blocks can have closed bottom sides and such
         if (block instanceof LiquidBlock) {
+            // 脱困豁免:起点已在岩浆致死邻域内、且破坏点净远离危险源时，放行贴岩浆挖掘;
+            // 只豁免岩浆,水漫进隧道仍是常规禁区。
+            if (escapeWaivesLava && !directlyAbove && isLava(state)) {
+                return false;
+            }
             if (directlyAbove || Baritone.settings().strictLiquidCheck.value) {
                 return true;
             }
@@ -635,7 +661,8 @@ public interface MovementHelper extends ActionCosts, Helper {
             if (mult >= COST_INF) {
                 return COST_INF;
             }
-            if (avoidBreaking(context.bsi, x, y, z, state)) {
+            if (avoidBreaking(context.bsi, context.hazardEscape, context.escapeBodyOrigin(),
+                    x, y, z, state)) {
                 return COST_INF;
             }
             double strVsBlock = context.toolSet.getStrVsBlock(state);

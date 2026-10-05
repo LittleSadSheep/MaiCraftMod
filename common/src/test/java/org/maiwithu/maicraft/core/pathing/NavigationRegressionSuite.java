@@ -42,6 +42,7 @@ import org.maiwithu.maicraft.core.integration.physics.StructurePoseTest;
 import org.maiwithu.maicraft.core.integration.physics.StructureExitPathTest;
 import org.maiwithu.maicraft.core.integration.physics.StructurePresentationTest;
 import org.maiwithu.maicraft.core.pathing.baritone.BaritonePlayerFeetTest;
+import org.maiwithu.maicraft.core.pathing.HazardEscapePolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudgetTest;
 import org.maiwithu.maicraft.core.pathing.baritone.FallLandingTest;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundMovementReplayTest;
@@ -124,6 +125,8 @@ public final class NavigationRegressionSuite {
         ProgressBudgetTest.main(args);
         PlanningWorkProgressTest.main(args);
         PathPlannerProgressTest.main(args);
+        // 起点在岩浆致死邻域内时只放行净远离危险源的破坏开口，常规危险回避原样不变。
+        HazardEscapePolicyTest.main(args);
         InputDriverTest.main(args);
         // 清障权限先检查实际路线费用和客户端配置，确保名单外建筑始终留给绕行。
         ClearanceWhitelistTest.main(args);
