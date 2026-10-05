@@ -27,6 +27,7 @@ public final class ExplorationRegressionSuite {
         VisibleStructureEvidenceTest.run();
         ExplorationJournalTest.main(args);
         TerrainFeatureMemoryTest.main(args);
+        StructureSightingMemoryTest.main(args);
         SurfaceColumnClassificationTest.main(args);
         ExplorationMemoryStoreTest.main(args);
         McpProtocolBudgetTest.main(args);

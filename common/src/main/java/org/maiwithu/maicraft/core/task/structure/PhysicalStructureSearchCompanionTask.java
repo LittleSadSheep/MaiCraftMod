@@ -56,7 +56,8 @@ public final class PhysicalStructureSearchCompanionTask
         MOVE_FRONTIER,
         MOVE_EVIDENCE,
         VERIFY_EVIDENCE,
-        RELOCATE_STANCE
+        RELOCATE_STANCE,
+        RELOCATE_ANCHOR
     }
 
     private record EvidenceMatch(
@@ -91,11 +92,15 @@ public final class PhysicalStructureSearchCompanionTask
     private static final double MIN_DIRECTION_STEP = 8.0;
     private static final double REVERSE_DOT = -0.15;
     private static final int SCOPE_TOLERANCE = 8;
+    /** 换锚的小半径：沿垂直方位横移这段距离再继续前沿腿，不远离原搜索扇区。 */
+    private static final double RELOCATION_HOP_BLOCKS = 32.0;
 
     private final FirstPersonActionGate eyeSelection = new FirstPersonActionGate();
     private final Set<Long> rejectedEvidence = new HashSet<>();
     private final Set<Long> attemptedFrontiers = new HashSet<>();
     private final List<String> routeFailureKinds = new ArrayList<>();
+    /** 逐腿失败明细：目标位置、移动子任务原话与已拉近距离；回执不按固定条数丢弃卡点。 */
+    private final List<Map<String, Object>> legFailures = new ArrayList<>();
     private final FrontierLegBreaker frontierBreaker = new FrontierLegBreaker();
     private StructureEvidenceProfiles.ResolvedProfile profile;
     private ClientLevel indexedLevel;
@@ -142,6 +147,7 @@ public final class PhysicalStructureSearchCompanionTask
     private int scanHitsObserved;
     private int stanceEscapes;
     private BlockPos relocateTarget;
+    private BlockPos activeMoveTarget;
     private boolean eyeConsumptionUnverified;
 
     /**
@@ -287,6 +293,7 @@ public final class PhysicalStructureSearchCompanionTask
             case MOVE_EVIDENCE -> tickMove(true, false);
             case VERIFY_EVIDENCE -> tickEvidenceVerification(scan);
             case RELOCATE_STANCE -> tickRelocateStance();
+            case RELOCATE_ANCHOR -> tickRelocateAnchor();
         };
     }
 
@@ -613,9 +620,13 @@ public final class PhysicalStructureSearchCompanionTask
                 frontierBreaker.onLegSuccess();
                 stage = Stage.OBSERVE;
             }
+            activeMoveTarget = null;
             return TaskState.RUNNING;
         }
         recordRouteFailure(terminal);
+        recordLegFailure(evidenceMove ? "evidence_approach"
+                : directionMove ? "eye_direction_leg" : "frontier_leg", result);
+        activeMoveTarget = null;
         if (evidenceMove) {
             if (activeEvidence != null) rejectedEvidence.add(activeEvidence.position().asLong());
             activeEvidence = null;
@@ -640,23 +651,85 @@ public final class PhysicalStructureSearchCompanionTask
                     FailureType.NO_PATH);
             return TaskState.FAILED;
         }
-        // 前沿腿连续走不到时先轮换候选扇区再重选；八个方位都试过仍失败就宣布方向受阻并终止，
-        // 让调用方决定换出发点或扩大挖掘授权，而不是在同一条不可行地形带上无限重付寻路成本。
+        // 前沿腿高频走不到时按 换锚→轮换→受阻 升级：先挪发射位置，再换候选扇区，
+        // 都失败就宣布受阻并给出远距换区建议，不在不可行地形带无限重付寻路成本。
         frontierFailed++;
-        switch (frontierBreaker.onLegFailure(sector)) {
-            case ROTATED -> sector = frontierBreaker.rotated(sector);
-            case EXHAUSTED -> {
-                failIssue(
-                        "frontier_legs_circuit_broken",
-                        FrontierLegBreaker.blockedMessage(
-                                "frontier leg", frontierFailed, frontierBreaker, sector),
-                        FailureType.NO_PATH);
-                return TaskState.FAILED;
+        stage = Stage.OBSERVE;
+        return handleFrontierLegFailure(false);
+    }
+
+    /**
+     * 前沿腿失败的升级处置。RELOCATED 时沿建议方位截取已加载落点发起换锚腿；
+     * 截不出落点视同换锚失败，继续下一级（第二次换锚用对侧方位），轮换与受阻语义不变。
+     */
+    private TaskState handleFrontierLegFailure(boolean fromRelocationLeg) {
+        FrontierLegBreaker.Decision decision = fromRelocationLeg
+                ? frontierBreaker.onRelocationLegFailed(sector)
+                : frontierBreaker.onLegFailure(sector);
+        while (decision == FrontierLegBreaker.Decision.RELOCATED) {
+            BlockPos hop = relocationTarget(frontierBreaker.relocationBearing(sector));
+            if (hop != null) {
+                startMove(hop, false);
+                stage = Stage.RELOCATE_ANCHOR;
+                return TaskState.RUNNING;
             }
-            case KEEP_GOING -> { }
+            decision = frontierBreaker.onRelocationLegFailed(sector);
+        }
+        if (decision == FrontierLegBreaker.Decision.ROTATED) {
+            sector = frontierBreaker.rotated(sector);
+            return TaskState.RUNNING;
+        }
+        if (decision == FrontierLegBreaker.Decision.EXHAUSTED) {
+            failIssue(
+                    "frontier_legs_circuit_broken",
+                    FrontierLegBreaker.blockedMessage(
+                            "frontier leg", frontierFailed, frontierBreaker, sector),
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        return TaskState.RUNNING;
+    }
+
+    /** 换锚腿结束：到达即从新发射点继续前沿腿；失败按换锚失败继续升级，不在坏锚点原地再烧一窗腿。 */
+    private TaskState tickRelocateAnchor() {
+        if (moveChild == null) {
+            failIssue("internal_route_lost", "The active first-person route disappeared.",
+                    FailureType.INTERNAL);
+            return TaskState.FAILED;
+        }
+        TaskState terminal;
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
+            moveChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = runChild(moveChild);
+            if (terminal == null) {
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
+        }
+        TaskResult result = moveChild.result(terminal);
+        moveChild = null;
+        moveRecord = null;
+        activeMoveTarget = null;
+        boolean arrived = terminal == TaskState.SUCCESS && result != null && result.success();
+        if (!arrived) {
+            recordRouteFailure(terminal);
+            recordLegFailure("anchor_relocation", result);
+            return handleFrontierLegFailure(true);
         }
         stage = Stage.OBSERVE;
         return TaskState.RUNNING;
+    }
+
+    /** 换锚落点：沿建议方位截取已加载的小半径路段；截不出（未加载或过近）返回 null 继续升级。 */
+    private BlockPos relocationTarget(double bearingDegrees) {
+        double radians = Math.toRadians(bearingDegrees);
+        BlockPos desired = new BlockPos(
+                (int) Math.round(player.getX() + Math.sin(radians) * RELOCATION_HOP_BLOCKS),
+                player.blockPosition().getY(),
+                (int) Math.round(player.getZ() - Math.cos(radians) * RELOCATION_HOP_BLOCKS));
+        return loadedFrontierToward(desired, false);
     }
 
     // 到达后再要求附近出现同组线索；原候选不再成立时排除它，继续搜索。
@@ -740,6 +813,7 @@ public final class PhysicalStructureSearchCompanionTask
                 null,
                 r.mayAlterTerrain, false, r.transportMode);
         moveChild = new MoveToCompanionTask(player, moveRecord);
+        activeMoveTarget = target.immutable();
     }
 
     // 按向外绕圈的顺序选新方向，再截成当前地形已经加载的一小段。已经尝试过的横向落点不重复选。
@@ -945,6 +1019,24 @@ public final class PhysicalStructureSearchCompanionTask
         });
     }
 
+    /** 逐腿失败明细：目标位置、移动子任务原话与已拉近距离，调用方据此区分规划失败与行走超时。 */
+    private void recordLegFailure(String kind, TaskResult result) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put("kind", kind);
+        if (activeMoveTarget != null) {
+            failure.put("x", activeMoveTarget.getX());
+            failure.put("y", activeMoveTarget.getY());
+            failure.put("z", activeMoveTarget.getZ());
+        }
+        if (result != null) {
+            failure.put("message", result.message());
+            Object bestDistance = result.data() == null
+                    ? null : result.data().get("best_distance_blocks");
+            if (bestDistance != null) failure.put("best_distance_blocks", bestDistance);
+        }
+        legFailures.add(failure);
+    }
+
     private boolean insideScope(BlockPos position) {
         double dx = position.getX() - origin.getX();
         double dz = position.getZ() - origin.getZ();
@@ -1018,7 +1110,9 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_reached", frontierReached);
         data.put("frontier_legs_failed", frontierFailed);
         data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
+        data.put("frontier_recent_failures", frontierBreaker.recentWindowFailures());
         data.put("frontier_sector_rotations", frontierBreaker.rotations());
+        data.put("frontier_relocations", frontierBreaker.relocations());
         if (stage == Stage.OBSERVE) {
             data.put("observe_ticks", observeTicks);
             data.put("observe_wait_limit", OBSERVE_MAX_TICKS);
@@ -1052,9 +1146,16 @@ public final class PhysicalStructureSearchCompanionTask
         data.put("frontier_legs_failed", frontierFailed);
         data.put("frontier_consecutive_failures", frontierBreaker.consecutiveFailures());
         data.put("frontier_sector_rotations", frontierBreaker.rotations());
+        data.put("frontier_relocations", frontierBreaker.relocations());
         data.put("evidence_approaches", evidenceApproaches);
+        if (!legFailures.isEmpty()) {
+            data.put("travel_failures", List.copyOf(legFailures));
+        }
         if (!routeFailureKinds.isEmpty()) {
             data.put("route_failure_kinds", List.copyOf(routeFailureKinds));
+        }
+        if (frontierBreaker.relocations() > 0) {
+            data.put("frontier_relocation_bearings", frontierBreaker.anchorRelocationBearings());
         }
         if (frontierBreaker.rotations() > 0) {
             data.put("frontier_rotation_bearings", frontierBreaker.rotatedBearings());
@@ -1135,6 +1236,12 @@ public final class PhysicalStructureSearchCompanionTask
         }
         if ("frontier_legs_circuit_broken".equals(issueCode)) {
             options.add(Map.of(
+                    "choice", "travel_elsewhere",
+                    "description",
+                    "Travel a few hundred blocks to open terrain and resubmit the search there;"
+                            + " nearby anchor relocations already failed, so the launch terrain"
+                            + " itself is the blocker, not one direction."));
+            options.add(Map.of(
                     "choice", "retry_other_direction",
                     "description",
                     "Resume the search from the final position toward another sector or origin; "
@@ -1186,6 +1293,7 @@ public final class PhysicalStructureSearchCompanionTask
             case MOVE_EVIDENCE -> "正在走近观察到的结构证据";
             case VERIFY_EVIDENCE -> "正在核实结构证据";
             case RELOCATE_STANCE -> "掷眼站姿不合格，正在换到安全站位";
+            case RELOCATE_ANCHOR -> "前沿路线反复受阻，正在换到附近的备用发射点";
         };
     }
 

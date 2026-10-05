@@ -30,6 +30,13 @@ public final class ProspectingTest {
     private static final ResourceLocation COAL = ResourceLocation.parse("minecraft:coal");
     private static final ResourceLocation DEBRIS = ResourceLocation.parse("minecraft:ancient_debris");
     private static final ResourceLocation STICK = ResourceLocation.parse("minecraft:stick");
+    // 调用方的自然表达是矿方块："我要挖铁矿" = minecraft:iron_ore，产物 ID 是反面。
+    private static final ResourceLocation IRON_ORE = ResourceLocation.parse("minecraft:iron_ore");
+    private static final ResourceLocation COAL_ORE = ResourceLocation.parse("minecraft:coal_ore");
+    private static final ResourceLocation DEEPSLATE_DIAMOND_ORE =
+            ResourceLocation.parse("minecraft:deepslate_diamond_ore");
+    private static final ResourceLocation STONE = ResourceLocation.parse("minecraft:stone");
+    private static final ResourceLocation DIRT = ResourceLocation.parse("minecraft:dirt");
     /** 类初始化先于 Bootstrap，目标方块族在 main 引导后再解析，不能放进静态字段。 */
     private static Set<net.minecraft.world.level.block.Block> diamondOres() {
         return Set.of(Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE);
@@ -69,6 +76,18 @@ public final class ProspectingTest {
         check(OreGenerationBand.forItem(DIAMOND).minY() == -64
                         && OreGenerationBand.forItem(DIAMOND).maxY() == 16,
                 "钻石生成带边界取公开数据 [-64, 16]");
+        // 矿方块物品按目标方块族反查到产物带：iron_ore、coal_ore 与深层变体都与产物 ID 同带。
+        check(OreGenerationBand.forItem(IRON_ORE).prospectY() == 16
+                        && OreGenerationBand.forItem(IRON_ORE).equals(OreGenerationBand.forItem(RAW_IRON)),
+                "iron_ore 反查到 raw_iron 同一条生成带");
+        check(OreGenerationBand.forItem(COAL_ORE).prospectY() == 96,
+                "coal_ore 反查到煤带");
+        check(OreGenerationBand.forItem(DEEPSLATE_DIAMOND_ORE).prospectY() == -59,
+                "深层钻石矿变体反查到钻石带");
+        check(OreGenerationBand.forItem(DEBRIS).prospectY() == 15,
+                "ancient_debris 产物与方块同名，仍按下界推荐层 15");
+        check(OreGenerationBand.forItem(STONE) == null && OreGenerationBand.forItem(DIRT) == null,
+                "stone/dirt 等普通方块不在任何方块族，反查仍拒绝");
     }
 
     // ---- 探矿决策：授权、表、维度与阶段共同决定下一步 ----
@@ -90,6 +109,14 @@ public final class ProspectingTest {
         check(OreGenerationBand.plan(true, List.of(DIAMOND), overworld, true, false).step()
                         == OreGenerationBand.Step.ALREADY_PROSPECTED,
                 "下降已派出：不再重复决策");
+        // 矿方块 ID 走同一条决策链：iron_ore 授权探矿派下降，与 raw_iron 落在同一条带。
+        var ironOreDescend = OreGenerationBand.plan(true, List.of(IRON_ORE), overworld, false, false);
+        var rawIronDescend = OreGenerationBand.plan(true, List.of(RAW_IRON), overworld, false, false);
+        check(ironOreDescend.step() == OreGenerationBand.Step.DESCEND
+                        && rawIronDescend.step() == OreGenerationBand.Step.DESCEND
+                        && ironOreDescend.band().equals(rawIronDescend.band()),
+                "矿方块 ID 与产物 ID 授权探矿同带下降，prospectY = "
+                        + ironOreDescend.band().prospectY());
     }
 
     // ---- 掘进驱动：空候选继续掘进而非立即终局；预算耗尽诚实收手 ----

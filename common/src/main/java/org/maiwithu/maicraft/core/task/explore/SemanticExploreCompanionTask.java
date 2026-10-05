@@ -32,6 +32,8 @@ import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.task.CompassUtil;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
+import org.maiwithu.maicraft.core.task.structure.StructureEvidenceProfiles;
+import org.maiwithu.maicraft.core.task.structure.StructureSightingScanner;
 import org.maiwithu.maicraft.core.task.move.MoveToCompanionTask;
 import org.maiwithu.maicraft.core.task.move.MoveToTaskRecord;
 import org.maiwithu.maicraft.task.Task;
@@ -45,7 +47,7 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class SemanticExploreCompanionTask
         extends AbstractCompanionTask<SemanticExploreTaskRecord> {
 
-    private enum Stage { OBSERVE, TRAVEL_TARGET, VERIFY_TARGET, TRAVEL_WAYPOINT }
+    private enum Stage { OBSERVE, TRAVEL_TARGET, VERIFY_TARGET, TRAVEL_WAYPOINT, TRAVEL_RELOCATE }
     // 包内可见：地表列分类的判定需要静态直测，LAVA 只进地形要素记忆，移动消费仍只有 LAND/WATER。
     enum SurfaceKind { LAND, WATER, LAVA, UNKNOWN }
 
@@ -62,6 +64,8 @@ public final class SemanticExploreCompanionTask
     private static final int BIOME_SAMPLES_PER_TICK = 192;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
+    /** 换锚的小半径：沿垂直方位横移这段距离再继续航点腿，不远离原探索扇区。 */
+    private static final double RELOCATION_HOP_BLOCKS = 32.0;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
 
@@ -99,12 +103,18 @@ public final class SemanticExploreCompanionTask
     private final Map<Long, SurfaceInfo> surfaceCache = new HashMap<>();
     /** 只统计去重后真正新记录的发现；同一空间格重复扫到不会重复计数。 */
     private final Map<String, Integer> notableFindings = new LinkedHashMap<>();
+    /** 沿途结构 sighting 扫描器；当前维度无可用画像时保持 null，不产生任何扫描开销。 */
+    private StructureSightingScanner sightingScanner;
+    private final Map<String, Integer> sightingRadii = new HashMap<>();
+    /** 已记 sighting 的锚点，按 canonicalId 分桶；新锚点与任一已记锚点同簇即视为同一座。 */
+    private final Map<String, List<BlockPos>> sightedAnchors = new HashMap<>();
 
     private MoveToCompanionTask moveChild;
     private MoveToTaskRecord moveRecord;
     private int legSerial;
     private TargetCandidate candidate;
     private BlockPos activeWaypoint;
+    private BlockPos activeRelocationTarget;
     private int waypointAttempts;
     private int waypointReached;
     private int waypointFailed;
@@ -139,6 +149,7 @@ public final class SemanticExploreCompanionTask
         }
         memory = new ClientExplorationMemory(player);
         waterProbe = new WaterCrossingProbe(level);
+        sightingScanner = createStructureScanner(level);
         beginObservation();
     }
 
@@ -174,6 +185,7 @@ public final class SemanticExploreCompanionTask
             case TRAVEL_TARGET -> tickTravel(true);
             case VERIFY_TARGET -> tickVerification();
             case TRAVEL_WAYPOINT -> tickTravel(false);
+            case TRAVEL_RELOCATE -> tickRelocation();
         };
     }
 
@@ -232,6 +244,7 @@ public final class SemanticExploreCompanionTask
 
     private TaskState tickObservation() {
         ClientLevel level = ClientRuntime.requireContext(player).level();
+        noteStructureSightings();
         List<ColumnOffset> offsets = BIOME_OBSERVATION_OFFSETS;
         int budget = BIOME_SAMPLES_PER_TICK;
         while (budget-- > 0 && observationColumn < offsets.size()) {
@@ -275,6 +288,57 @@ public final class SemanticExploreCompanionTask
             return TaskState.RUNNING;
         }
         return startNextWaypoint(level);
+    }
+
+    /**
+     * 每刻消费扫描器本轮完成的 sighting：同簇去重后记一条线索，画像符合只是线索口径，不当成到访或生成器确认。
+     * 模型声明的兴趣含此 canonicalId 时复用地形要素同一条询问链路。
+     */
+    private void noteStructureSightings() {
+        if (sightingScanner == null) return;
+        for (var sighting : sightingScanner.tick(player)) {
+            String id = sighting.canonicalId();
+            int clusterRadius = sightingRadii.getOrDefault(id, 0);
+            if (isDuplicateSighting(sightedAnchors.get(id), sighting.anchor(), clusterRadius)) continue;
+            sightedAnchors.computeIfAbsent(id, ignored -> new ArrayList<>()).add(sighting.anchor());
+            Map<String, Object> evidence = new LinkedHashMap<>();
+            evidence.put("group_counts", sighting.groupCounts());
+            evidence.put("block_counts", sighting.blockCounts());
+            evidence.put("total_blocks", sighting.totalBlocks());
+            ExplorationFinding finding =
+                    memory.observeStructureSighting(id, sighting.anchor(), evidence);
+            if (finding == null) continue;
+            notableFindings.merge(id, 1, Integer::sum);
+            noteInterestFinding(finding, sighting.anchor());
+        }
+    }
+
+    /** 当前维度可解析的画像去重后交给扫描器；别名共享同一份画像，canonicalId 相同只留一份。 */
+    private StructureSightingScanner createStructureScanner(ClientLevel level) {
+        String dimension = level.dimension().location().toString();
+        Map<String, StructureEvidenceProfiles.ResolvedProfile> unique = new LinkedHashMap<>();
+        for (String id : StructureEvidenceProfiles.registeredIds()) {
+            var resolved = StructureEvidenceProfiles.resolve(id);
+            if (resolved == null) continue;
+            Set<String> dims = resolved.profile().dimensions();
+            if (!dims.isEmpty() && !dims.contains(dimension)) continue;
+            unique.putIfAbsent(resolved.profile().canonicalId(), resolved);
+        }
+        if (unique.isEmpty()) return null;
+        for (var resolved : unique.values()) {
+            sightingRadii.put(resolved.profile().canonicalId(), resolved.profile().clusterRadius());
+        }
+        return new StructureSightingScanner(List.copyOf(unique.values()), OBSERVATION_RADIUS);
+    }
+
+    /** 新锚点与任一已记锚点落进同簇半径即视为同一座；纯几何判定供回归直测。 */
+    static boolean isDuplicateSighting(List<BlockPos> recordedAnchors, BlockPos candidate, int clusterRadius) {
+        if (recordedAnchors == null || clusterRadius < 1) return false;
+        double radiusSquared = (double) clusterRadius * clusterRadius;
+        for (BlockPos existing : recordedAnchors) {
+            if (existing.distSqr(candidate) <= radiusSquared) return true;
+        }
+        return false;
     }
 
     /** 熔岩湖是远望地形要素：记入探索记忆但不给移动决策，只有真正新记录的发现才计入进度。 */
@@ -431,22 +495,89 @@ public final class SemanticExploreCompanionTask
         } else {
             waypointFailed++;
             recordLegFailure("exploration_waypoint", activeWaypoint, result);
-            // 航点连续走不到时先轮换候选扇区再重选；八个方位都试过仍失败就宣布方向受阻并终止，
-            // 不在同一条不可行地形带上无限重付寻路成本。
-            switch (waypointBreaker.onLegFailure(sector)) {
-                case ROTATED -> sector = waypointBreaker.rotated(sector);
-                case EXHAUSTED -> {
-                    fail(FrontierLegBreaker.blockedMessage(
-                            "waypoint", waypointFailed, waypointBreaker, sector),
-                            FailureType.NO_PATH);
-                    return TaskState.FAILED;
+            // 航点高频走不到时按 换锚→轮换→受阻 升级：先挪发射位置，再换候选扇区，
+            // 都失败就宣布受阻并给出远距换区建议，不在不可行地形带无限重付寻路成本。
+            FrontierLegBreaker.Decision decision = waypointBreaker.onLegFailure(sector);
+            while (decision == FrontierLegBreaker.Decision.RELOCATED) {
+                BlockPos hop = relocationTarget(waypointBreaker.relocationBearing(sector));
+                if (hop != null) {
+                    activeWaypoint = null;
+                    activeRelocationTarget = hop;
+                    startMove(hop, false);
+                    stage = Stage.TRAVEL_RELOCATE;
+                    return TaskState.RUNNING;
                 }
-                case KEEP_GOING -> { }
+                decision = waypointBreaker.onRelocationLegFailed(sector);
+            }
+            if (decision == FrontierLegBreaker.Decision.ROTATED) {
+                sector = waypointBreaker.rotated(sector);
+            } else if (decision == FrontierLegBreaker.Decision.EXHAUSTED) {
+                fail(FrontierLegBreaker.blockedMessage(
+                        "waypoint", waypointFailed, waypointBreaker, sector),
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
             }
         }
         activeWaypoint = null;
         beginObservation();
         return TaskState.RUNNING;
+    }
+
+    /** 换锚腿结束：到达即在新发射点重新观察选航点；失败按换锚失败继续升级，不在坏锚点原地再烧一窗腿。 */
+    private TaskState tickRelocation() {
+        TaskState terminal;
+        if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
+            moveChild.stop(player, Task.StopReason.REPLACED);
+            terminal = TaskState.TIMEOUT;
+        } else {
+            terminal = runChild(moveChild);
+            if (terminal == null) {
+                r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
+                return TaskState.RUNNING;
+            }
+        }
+        TaskResult result = moveChild.result(terminal);
+        moveChild = null;
+        moveRecord = null;
+        BlockPos relocationTarget = activeRelocationTarget;
+        activeRelocationTarget = null;
+        if (terminal == TaskState.SUCCESS && result != null && result.success()) {
+            beginObservation();
+            return TaskState.RUNNING;
+        }
+        recordLegFailure("anchor_relocation", relocationTarget, result);
+        FrontierLegBreaker.Decision decision = waypointBreaker.onRelocationLegFailed(sector);
+        while (decision == FrontierLegBreaker.Decision.RELOCATED) {
+            BlockPos hop = relocationTarget(waypointBreaker.relocationBearing(sector));
+            if (hop != null) {
+                activeRelocationTarget = hop;
+                startMove(hop, false);
+                return TaskState.RUNNING;
+            }
+            decision = waypointBreaker.onRelocationLegFailed(sector);
+        }
+        if (decision == FrontierLegBreaker.Decision.ROTATED) {
+            sector = waypointBreaker.rotated(sector);
+        } else if (decision == FrontierLegBreaker.Decision.EXHAUSTED) {
+            fail(FrontierLegBreaker.blockedMessage(
+                    "waypoint", waypointFailed, waypointBreaker, sector),
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        beginObservation();
+        return TaskState.RUNNING;
+    }
+
+    /** 换锚落点：沿建议方位截取已加载的小半径路段；截不出（未加载或过近）返回 null 继续升级。 */
+    private BlockPos relocationTarget(double bearingDegrees) {
+        ClientLevel level = ClientRuntime.requireContext(player).level();
+        double radians = Math.toRadians(bearingDegrees);
+        BlockPos desired = new BlockPos(
+                (int) Math.round(player.getX() + Math.sin(radians) * RELOCATION_HOP_BLOCKS),
+                player.blockPosition().getY(),
+                (int) Math.round(player.getZ() - Math.cos(radians) * RELOCATION_HOP_BLOCKS));
+        return loadedFrontierToward(level, desired,
+                pos -> waterProbe.crossesWater(player.blockPosition(), pos));
     }
 
     private TaskState tickVerification() {
@@ -719,7 +850,9 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_reached", waypointReached);
         data.put("waypoints_failed", waypointFailed);
         data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
+        data.put("waypoint_recent_failures", waypointBreaker.recentWindowFailures());
         data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        data.put("waypoint_relocations", waypointBreaker.relocations());
         data.put("notable_findings", Map.copyOf(notableFindings));
         if (r.hasPendingInterestFinding()) data.put("paused_for_interest_decision", true);
         return data;
@@ -782,6 +915,10 @@ public final class SemanticExploreCompanionTask
         data.put("waypoints_failed", waypointFailed);
         data.put("waypoint_consecutive_failures", waypointBreaker.consecutiveFailures());
         data.put("waypoint_sector_rotations", waypointBreaker.rotations());
+        data.put("waypoint_relocations", waypointBreaker.relocations());
+        if (waypointBreaker.relocations() > 0) {
+            data.put("waypoint_relocation_bearings", waypointBreaker.anchorRelocationBearings());
+        }
         if (waypointBreaker.rotations() > 0) {
             data.put("waypoint_rotation_bearings", waypointBreaker.rotatedBearings());
         }
@@ -814,6 +951,14 @@ public final class SemanticExploreCompanionTask
             suggestions.add("increase max_distance or choose another semantic landmark");
             suggestions.add("continue from the final position to search a different loaded frontier");
             suggestions.add("sparse generation is normal; no match over the observed area is not proof of absence beyond it");
+            if (waypointBreaker.relocations() > 0) {
+                suggestions.add("anchor relocations toward "
+                        + waypointBreaker.anchorRelocationBearings().stream()
+                                .map(value -> Math.round(value) + " degrees")
+                                .collect(java.util.stream.Collectors.joining(", "))
+                        + " also failed route finding; the launch terrain itself looks infeasible,"
+                        + " so travel to open terrain a few hundred blocks away and re-submit");
+            }
             if (!r.mayAlterTerrain && waypointFailed > 0) {
                 suggestions.add("review travel_failures; enable may_alter_terrain only if those route changes are acceptable");
             }
