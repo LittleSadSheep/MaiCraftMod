@@ -30,6 +30,7 @@ public final class AcquisitionProspectingHandoffTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         authorizedDescendsToBand();
+        blockIdItemDescendsToBand();
         declinedWithoutAuthorization();
         unknownBandDeclinesProspecting();
         descendSuccessStartsProspectMine();
@@ -69,6 +70,26 @@ public final class AcquisitionProspectingHandoffTest {
             check(state == TaskState.FAILED, "唯一来源耗尽后任务终态失败");
             check("mined_out".equals(task.result(TaskState.FAILED).data().get("failure_type")),
                     "终态保真为 MINED_OUT，不因探矿缺席改变口径");
+        }
+    }
+
+    /**
+     * 矿方块 ID 同样表达探矿意图：item_ids=["minecraft:iron_ore"] 曾因只查产物表 key
+     * 被如实拒为 prospecting_band_unknown，现按目标方块族反查到铁带并照常派下降。
+     */
+    private static void blockIdItemDescendsToBand() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            h.inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
+            var task = task(h, List.of("minecraft:iron_ore"), true);
+            startStubMine(task, "mined_out");
+            tickActiveChild(task);
+            var active = activeRecord(task);
+            check(active instanceof MineBlockTaskRecord,
+                    "矿方块 ID + 授权开 → 照常派出统一探矿任务，实际: " + active);
+            if (active instanceof MineBlockTaskRecord mine) {
+                check(mine.prospecting() && mine.prospectY() == 16,
+                        "探矿腿目标层取铁带推荐值 16，不得回退为 band_unknown 拒绝");
+            }
         }
     }
 
