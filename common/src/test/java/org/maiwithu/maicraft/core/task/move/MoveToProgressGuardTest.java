@@ -55,6 +55,7 @@ public final class MoveToProgressGuardTest {
         approachPlanningWithProgressKeepsRunning(memory);
         approachProgressEmitsScoreboardHeartbeat(memory);
         moveToPlanningHeartbeat(memory);
+        moveToRemainingScaleTracksArrival(memory);
         System.out.println("MoveToProgressGuardTest: passed");
     }
 
@@ -139,8 +140,41 @@ public final class MoveToProgressGuardTest {
         }
     }
 
-    private static void bumpCalcAttempts(Fixture f, int count) throws Exception {
-        var ground = (EmbeddedBaritoneNavigator) field(TransportNavigator.class, "ground").get(f.navigator);
+    /** 剩余口径对照：36 格直列不再缩水成 32，半档与近身段不再提前报 0，0 与到达同刻成立。 */
+    private static void moveToRemainingScaleTracksArrival(Unsafe memory) throws Exception {
+        try (Fixture f = new Fixture(memory)) {
+            var task = new MoveToCompanionTask(f.player,
+                    new MoveToTaskRecord("scale", 600, 0D, 0D, 0D, null, false));
+            place(f, 36.5);
+            Map<String, Object> progress = task.progress();
+            check(Integer.valueOf(48).equals(progress.get("remaining"))
+                    && Integer.valueOf(48).equals(progress.get("initial")),
+                    "36-block route must declare its scale as 48, not the understated 32");
+            check(progress.get("remaining_unit") instanceof String unit && unit.toString().contains("quantized"),
+                    "the counting scale must be declared alongside the numbers");
+            place(f, 8.5);
+            progress = task.progress();
+            check(Integer.valueOf(16).equals(progress.get("remaining"))
+                    && Integer.valueOf(48).equals(progress.get("initial")),
+                    "mid-route half-band must keep a nonzero remaining and a stable initial");
+            place(f, 0.9);
+            progress = task.progress();
+            check(Integer.valueOf(16).equals(progress.get("remaining")),
+                    "approaching within one block must not report 0 remaining while still digging");
+            place(f, 0);
+            progress = task.progress();
+            check(Integer.valueOf(0).equals(progress.get("remaining")),
+                    "remaining zero must coincide with the body standing at the target");
+        }
+    }
+
+    /** 沿 x 轴把夹具身体放到 (x+0.5, 0, 0.5)，与 0,0,0 目标的直线距离即 x。 */
+    private static void place(Fixture f, double x) throws Exception {
+        field(LocalPlayer.class, "position").set(f.player, new Vec3(x + 0.5, 0, 0.5));
+        field(LocalPlayer.class, "blockPosition").set(f.player, BlockPos.containing(x + 0.5, 0, 0.5));
+    }
+
+    private static void bumpCalcAttempts(Fixture f, int count) throws Exception {        var ground = (EmbeddedBaritoneNavigator) field(TransportNavigator.class, "ground").get(f.navigator);
         @SuppressWarnings("unchecked")
         EnumMap<PathEvent, Integer> events =
                 (EnumMap<PathEvent, Integer>) field(EmbeddedBaritoneNavigator.class, "events").get(ground);

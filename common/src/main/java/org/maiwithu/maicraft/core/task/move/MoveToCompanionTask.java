@@ -72,7 +72,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 上一次到目标距离有意义的缩短（>0.1 格）发生的活动 tick；首个观察刻由距离更新自动初始化。 */
     private long lastApproachTick = Long.MIN_VALUE;
     /** 移动记分牌的量化档位：档内行走不触发进度事件（契约见 docs/architecture/07-attention.md）。 */
-    private static final int DISTANCE_QUANTUM_BLOCKS = 16;
+    private static final int DISTANCE_QUANTUM_BLOCKS = AbstractCompanionTask.DISTANCE_QUANTUM_BLOCKS;
     /** 出发时（或路线重估后）的分母；剩余变大说明在绕路或新路线更长，分母跟着刷新。 */
     private int initialRemaining = -1;
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
@@ -776,12 +776,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     @Override
     public Map<String, Object> progress() {
         double distance = repDistance();
-        int remaining = (int) Math.round(distance / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS;
+        // 剩余按 16 格量化档向上取整：半档不再提前报 0，「剩余 0」与真实到达同刻成立。
+        // 口径随事件声明（remaining_unit），调用方拿到的计数不再是无口径的裸格数。
+        int remaining = AbstractCompanionTask.quantizedRemaining(distance);
         if (initialRemaining < 0 || remaining > initialRemaining) initialRemaining = remaining;
         boolean planning = nav != null && nav.planningInFlight();
         var result = new HashMap<String, Object>();
         result.putAll(Map.of("task", name(), "phase", planning ? "planning" : "moving",
-                "remaining", remaining, "initial", initialRemaining));
+                "remaining", remaining, "initial", initialRemaining,
+                "remaining_unit", "straight_line_blocks_quantized_" + DISTANCE_QUANTUM_BLOCKS));
         result.put("planning_idle_budget", planningBudget.diagnostics(player.level().getGameTime()));
         result.put("planning_budget_unit", "active_game_ticks");
         if (planning) {
@@ -792,8 +795,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             // 收敛趋势：曾达到的最近距离按同一量化档交付；它不再缩小说明搜索在空转，可以提前取消。
             result.put("best_remaining", bestDist == Double.MAX_VALUE
                     ? Integer.MAX_VALUE
-                    : (int) Math.min(Integer.MAX_VALUE,
-                        Math.round(bestDist / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS));
+                    : AbstractCompanionTask.quantizedRemaining(bestDist));
         }
         return Map.copyOf(result);
     }
@@ -815,8 +817,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         boolean planning = nav != null && nav.planningInFlight();
         return (planning ? "正在规划路线，之后前往 " : "正在前往 ") + destination
-                + "，剩余约 " + (int) Math.round(repDistance() / DISTANCE_QUANTUM_BLOCKS) * DISTANCE_QUANTUM_BLOCKS
-                + " 格";
+                + "，剩余约 " + AbstractCompanionTask.quantizedRemaining(repDistance()) + " 格";
     }
 
     /** 降级腿的楼梯头：目标柱旁两格、当前脚位高度；起点离开井口柱后，楼梯下掘的扩展前沿不再被直降拒绝支配。 */
