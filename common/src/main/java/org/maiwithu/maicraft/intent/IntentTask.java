@@ -755,21 +755,39 @@ final class IntentTask implements Task {
     /** 语义层观察动作任务单上的待询问发现并拉起决策；决策期间任务记录会暂停，等待 task action=answer。 */
     private TaskState relayExploreInterestDecision(SemanticExploreTaskRecord explore) {
         var finding = explore.pendingInterestFinding();
-        if (finding == null || record.decisionSnapshot() != null) return null;
-        // 已登记编号说明决策已发出；恢复后同一发现不会重复询问（探索记忆的去重会挡住重新置位）。
-        if (exploreInterestRelayBlocksTick(explore)) return TaskState.RUNNING;
-        UUID decisionId = UUID.randomUUID();
-        explore.beginInterestDecision(decisionId);
-        return requestDecision(exploreInterestDecision(currentGoal(), decisionId, finding));
+        if (finding == null) return null;
+        InterestRelayAction action = exploreInterestRelayAction(
+                explore, record.decisionSnapshot() != null);
+        return switch (action) {
+            case PASS_THROUGH -> null;
+            case PARK -> TaskState.RUNNING;
+            case ISSUE -> {
+                UUID decisionId = UUID.randomUUID();
+                explore.beginInterestDecision(decisionId);
+                yield requestDecision(exploreInterestDecision(currentGoal(), decisionId, finding));
+            }
+        };
     }
 
+    /** 中继对待询问发现的三种处置：放行伴随任务 tick、原地等答复、发起新决策。 */
+    enum InterestRelayAction { PASS_THROUGH, PARK, ISSUE }
+
     /**
-     * 决策已发出且答复未写回时伴随任务不被 tick（等语义层应答）。
-     * 答复写回后必须放行：应答的消费点在伴随任务的 onTick 里，这里若只看「决策编号还在」
-     * 就短路，continue 与 stop 都会被永远挡在伴随任务之外，任务冻结到人工 cancel。
+     * 中继判定纯函数：
+     * - 语义决策快照还开着（问题未被回答）：原地 PARK，等 task action=answer；
+     * - 决策已发出、答复已写回但伴随任务尚未消费（消费点在伴随任务 onTick，晚于本中继执行）：
+     *   PASS_THROUGH 放行 tick——此刻绝不能对同一待询问发现再发新决策，否则每个答复都在
+     *   消费前换来一次重提，continue 与 stop 双双失效，任务永远回不到推进态；
+     * - 全新待询问发现：ISSUE 发起决策。
      */
-    static boolean exploreInterestRelayBlocksTick(SemanticExploreTaskRecord explore) {
-        return explore.interestDecisionId() != null && !explore.hasInterestAnswer();
+    static InterestRelayAction exploreInterestRelayAction(
+            SemanticExploreTaskRecord explore, boolean decisionSnapshotOpen) {
+        if (decisionSnapshotOpen) return InterestRelayAction.PARK;
+        if (explore.interestDecisionId() != null) {
+            return explore.hasInterestAnswer()
+                    ? InterestRelayAction.PASS_THROUGH : InterestRelayAction.PARK;
+        }
+        return InterestRelayAction.ISSUE;
     }
 
     /** 兴趣决策快照：finding 细节进 context 供回执核对，question 与选项面向模型陈述两种走向。 */
