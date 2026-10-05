@@ -163,6 +163,11 @@ def regressionSuites = [
         heap: '512m', directory: 'place-block-regression', timeoutSeconds: 60,
         purpose: '验证 place_block 合成单格蓝图 build 并继承施工预检与验证'
     ],
+    placementAccessRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.BuildPlacementOpenGroundTorchTest',
+        heap: '512m', directory: 'placement-access-regression', timeoutSeconds: 60,
+        purpose: '验证开阔平地单格放置的站位证明与工位覆盖，拒绝时回执逐闸点名'
+    ],
     buildingBudgetRegression: [
         entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
         heap: '768m', directory: 'building-budget-regression', timeoutSeconds: 120,

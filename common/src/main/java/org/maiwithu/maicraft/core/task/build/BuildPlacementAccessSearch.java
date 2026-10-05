@@ -5,7 +5,9 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -41,6 +43,11 @@ final class BuildPlacementAccessSearch {
     private final int minX, maxX, minZ, maxZ;
     private final ArrayDeque<Node> frontier = new ArrayDeque<>();
     private final Set<BlockPos> visited = new HashSet<>();
+    /** 每道闸各拒掉多少个站位；实机零出手时回执直接点名是哪道闸堵死，不再留下无名全拒。 */
+    private final Map<String, Integer> gateCounts = new LinkedHashMap<>();
+    /** 每道闸最多采样三个被拒站位坐标，供回执对照现场。 */
+    private static final int GATE_SAMPLES = 3;
+    private final Map<String, List<BlockPos>> gateSamples = new LinkedHashMap<>();
     private Node node;
     private int candidateAt, checked, rejectedReturns;
     private boolean initialized, complete;
@@ -91,7 +98,9 @@ final class BuildPlacementAccessSearch {
                 }
                 if (candidateAt <= EDGES.length) {
                     int candidate = candidateAt++;
-                    if (node.feet().add(0, player.getEyeHeight(), 0).distanceToSqr(target.pos().getCenter()) > 49) continue;
+                    if (node.feet().add(0, player.getEyeHeight(), 0).distanceToSqr(target.pos().getCenter()) > 49) {
+                        reject("outside_click_range", BlockPos.containing(node.feet())); continue;
+                    }
                     // 通道预算只覆盖这一站位及它的锚点扫掠；不能让早先候选的重复查询耗尽后来合法站位的证明。
                     // 整轮仍受512个节点、每刻工作量以及BuildSupportWorld的8192个唯一观察格约束。
                     corridor = corridors.get();
@@ -131,7 +140,10 @@ final class BuildPlacementAccessSearch {
         checked++;
         // 普通偏移也保留可寻路的真实节点，避免把半墙旁的连续位置取整后交给一个会撞墙的格心目标。
         Vec3 anchor = edge ? safeAnchor(node.feet()) : node.feet();
-        if (anchor == null || edge && (anchor.distanceToSqr(feet) > .7 * .7 || !corridor.clear(anchor, feet))) return;
+        if (anchor == null) { reject("edge_anchor_unavailable", BlockPos.containing(feet)); return; }
+        if (edge && (anchor.distanceToSqr(feet) > .7 * .7 || !corridor.clear(anchor, feet))) {
+            reject("edge_anchor_corridor_blocked", BlockPos.containing(feet)); return;
+        }
         // 自动重选站位时同时排除本格已经失败的手法，避免每次搜索又选回同一条堵住的点击路线。
         var gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, edge, gestureAllowed);
         boolean lowerEye = false;
@@ -140,7 +152,7 @@ final class BuildPlacementAccessSearch {
             gesture = BuildPlacementGeometry.projectedGestureFrom(player, target, world, player.level()::isLoaded, feet, true, gestureAllowed);
             lowerEye = gesture != null;
         }
-        if (gesture == null) return;
+        if (gesture == null) { reject("no_click_gesture", BlockPos.containing(feet)); return; }
         // 当前能点击不代表放完还能退回；先检查新方块的真实碰撞形状，再接受这条贴边方案。
         if (edge && !BuildPlacementReturnGeometry.allowed(player, target, world, player.level()::isLoaded,
                 forbidden, physical, feet, anchor)) { rejectedReturns++; return; }
@@ -150,6 +162,18 @@ final class BuildPlacementAccessSearch {
         access = new Access(anchor, feet, BuildWorksiteRoute.compact(route), gesture, edge);
         complete = true; reason = edge ? "reachable_crouching_edge_verified"
                 : lowerEye ? "reachable_lower_eye_placement_verified" : "reachable_placement_verified";
+    }
+    private void reject(String gate, BlockPos at) {
+        gateCounts.merge(gate, 1, Integer::sum);
+        var samples = gateSamples.get(gate);
+        if (samples == null) { gateSamples.put(gate, new ArrayList<>(List.of(at.immutable()))); return; }
+        if (samples.size() < GATE_SAMPLES) samples.add(at.immutable());
+    }
+    Map<String, Integer> gateCounts() { return Map.copyOf(gateCounts); }
+    Map<String, List<BlockPos>> gateSamples() {
+        var out = new LinkedHashMap<String, List<BlockPos>>();
+        gateSamples.forEach((gate, samples) -> out.put(gate, List.copyOf(samples)));
+        return Map.copyOf(out);
     }
     private Vec3 safeAnchor(Vec3 feet) {
         // 即便上一步结束时已在檐边，也保留附近真实格心作为安全退回点，不能把外侧空中格当下一段普通导航的起点。
