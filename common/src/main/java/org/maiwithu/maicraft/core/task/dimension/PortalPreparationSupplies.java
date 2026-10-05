@@ -24,6 +24,8 @@ final class PortalPreparationSupplies {
     }
     private PortalPreparationSupplies() {}
     static Need eyes(int count) { return new Need(List.of(Items.ENDER_EYE), count, "End portal eyes"); }
+    /** 临时通道候选，与 {@link PortalCastingStep#SUPPORTS} 保持同一份清单，两处漂移即回归失败。 */
+    static final List<Item> SUPPORT_ALTERNATIVES = PortalCastingStep.SUPPORTS;
     /** 火镰或火焰弹任选已有的一种；都没有时沿普通补给解析真实配方，施工前就落实点火用品。 */
     static Need ignition() { return new Need(List.of(Items.FLINT_AND_STEEL, Items.FIRE_CHARGE), 1, "portal ignition"); }
 
@@ -36,8 +38,9 @@ final class PortalPreparationSupplies {
         var frame = new Need(List.of(Items.OBSIDIAN), missing, "missing Nether frame blocks");
         if (!frame.satisfied(player)) return frame;
         if (missing > 0) {
-            var support = new Need(List.of(Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.NETHERRACK), 8,
-                    "temporary access for portal construction");
+            // 临时通道候选与浇筑模具/站台共用同一份不可燃石材清单（{@link PortalCastingStep#SUPPORTS}）：
+            // 泥土就地可取、参与补台，也在候选内；原木等可燃方块有意排除——通道紧邻岩浆与火焰，可燃材料会被点燃拆掉通道。
+            var support = new Need(SUPPORT_ALTERNATIVES, 8, "temporary access for portal construction");
             if (!support.satisfied(player)) return support;
         }
         var ignition = ignition(); return ignition.satisfied(player) ? null : ignition;

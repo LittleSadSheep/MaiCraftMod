@@ -543,6 +543,8 @@ public final class SemanticAbilityCatalog {
                             + "The observed lava pool is both the material source and the portal site; a carried lava bucket does not substitute for it, and the casting task builds no portal without a verified pool bank. "
                             + "It obtains or reuses a bucket, collects water, prepares flint-and-steel or a fire charge, then selects and builds the frame. A carried lava bucket is natively emptied back into an observed pool before collecting water. "
                             + "Missing local water or a suitable pool triggers bounded physical exploration; collection and supply are verified before construction. max_resource_search_distance defaults to 768; 0 restricts preparation to loaded terrain. "
+                            + "Temporary access paths and the lava_cast mold/platform count only cobblestone, cobbled_deepslate, netherrack or dirt; flammable blocks such as logs are deliberately excluded (a channel beside lava would burn away) even when carried. "
+                            + "When the supply stage fails, blocked_facts name supply_candidates and supply_required, so carry those blocks instead of discovering the rule by trial. "
                             + "Acceptance is not proof of resource readiness or started construction: read resource_preparation and construction_phase_started. Action completion, whole-frame differences and portal activation are reported separately.",
                     targets("current_place"), fields(
                             field("destination_dimension", "resource_id", "Portal destination; default minecraft:the_nether."),

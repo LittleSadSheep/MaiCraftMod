@@ -243,7 +243,13 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             if (end) facts.put("missing_eyes",
                     site.end().missingEyes(p -> PortalPreparationSite.read(world, p)).size());
         }
-        if (supplyNeed != null) facts.put("supply_purpose", supplyNeed.purpose());
+        if (supplyNeed != null) {
+            facts.put("supply_purpose", supplyNeed.purpose());
+            // 点名候选与需求数：调用方据此预判带什么材料才够，不再靠试错补料；候选之外（如可燃原木）即使身上有也不计入。
+            facts.put("supply_required", supplyNeed.count());
+            facts.put("supply_candidates", supplyNeed.alternatives().stream()
+                    .map(item -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString()).toList());
+        }
         facts.put("survey_radius", r.radius);
         blockedFacts = Map.copyOf(facts);
         fail(message == null ? code : message, FailureType.fromCode(childEvidence.get("failure_type"), FailureType.TARGET_LOST));
