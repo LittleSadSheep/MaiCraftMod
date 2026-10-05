@@ -13,12 +13,43 @@ import org.maiwithu.maicraft.core.task.inventory.DropCompanionTask;
 import org.maiwithu.maicraft.core.task.inventory.DropItemsTaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 
-/** 以真实菜单端口驱动丢弃任务，确认低头时不出手、余量只投一次、朝向包先发以及未知操作不重发。 */
+/** 以真实菜单端口驱动丢弃任务，确认低头时不出手、余量只投一次、朝向包先发、未知操作不重发，以及确认分歧时报不确定而非确定失败。 */
 public final class DropCompanionTaskTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         run(false, false); run(true, false); run(true, true);
-        System.out.println("DropCompanionTaskTest: actual view, single partial toss, rotation order and cancellation passed");
+        divergedConfirmationReportsUncertain();
+        System.out.println("DropCompanionTaskTest: actual view, single partial toss, rotation order, cancellation and diverged confirmation passed");
+    }
+
+    /** 投掷已执行但菜单状态对不上冻结前后两侧时，回执必须标注不确定并说明可能已丢出，不能与背包实物相反。 */
+    private static void divergedConfirmationReportsUncertain() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            world.enableCraftingTransactions(); world.position(new Vec3(8.5, 1, 8.5));
+            var nativeDrops = world.h.simulateItemDrops();
+            world.inventory.setItem(0, new ItemStack(Items.COBBLESTONE, 64));
+            world.h.minecraft.screen = null; world.player.setXRot(80); world.player.setYRot(0);
+            var record = new DropItemsTaskRecord("drop-test", 2000, Items.COBBLESTONE, 64, "cobblestone");
+            var task = new DropCompanionTask(world.player, record); task.start(world.player);
+            check(task.tick(world.player) == TaskState.RUNNING, "first look request cannot toss immediately");
+            world.nextTick(); task.tick(world.player);
+            // 夹具模拟镜头已实际到达抬头方向与背包已绘制；投掷走真实菜单端口与原生点击。
+            world.player.setXRot(-15); world.player.setYRot(0); world.h.minecraft.screen = world.h.inventoryScreen();
+            // 服务器侧同步一个既不等于提交前、也不等于预期后的第三种槽位状态，复刻"确认分歧但物品已消失"。
+            world.mode.afterCraftingClick = () -> world.inventory.setItem(0, new ItemStack(Items.DIRT, 7));
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 400 && !state.isTerminal(); tick++) {
+                world.nextTick(); MenuVisibility.rendered(world.h.minecraft.screen); DiscardedItems.observe(world.player);
+                state = task.tick(world.player);
+            }
+            check(state == TaskState.FAILED, "diverged confirmation ends the task: " + task.result(state).toJson());
+            var result = task.result(state).toJson();
+            check(PlayerInv.count(world.inventory, Items.COBBLESTONE) == 0, "the stack really left the inventory before the divergence");
+            check(nativeDrops.size() == 1 && nativeDrops.getFirst().getCount() == 64, "the native toss happened exactly once with the whole stack");
+            check(result.contains("\"outcome_uncertain\":true"), "diverged drop is reported as uncertain, not a definite failure");
+            check(result.contains("may have executed"), "the message states the click may have executed");
+            check(!result.contains("was not confirmed"), "the old definite-failure wording is gone");
+        } finally { DiscardedItems.observe(null); }
     }
 
     private static void run(boolean full, boolean cancel) throws Exception {

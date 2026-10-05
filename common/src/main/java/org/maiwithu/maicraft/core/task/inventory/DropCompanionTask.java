@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.inventory;
 import org.maiwithu.maicraft.core.PlayerInv;
 import org.maiwithu.maicraft.core.FailureType;
@@ -82,8 +83,14 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
             receipt = context.menus().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
             if (receipt.status() != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                uncertain |= pendingClick.dropped() > 0 && receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED;
-                fail("item drop or split was not confirmed: " + receipt.detail(), FailureType.UNKNOWN);
+                // 只有服务器明确拒绝才能断言未执行；超时与分歧路径的点击已进入客户端事务，物品可能已经丢出，
+                // 不能把"确认没等到"报成"确定没丢"，否则调用方按未丢重试会造成重复消耗。
+                boolean rejected = receipt.status() == MenuReceipt.Status.CONFIRMED_NOT_APPLIED;
+                uncertain |= !rejected;
+                fail(rejected
+                        ? "the drop or split click was rejected by the server; items remain in inventory: " + receipt.detail()
+                        : "the drop or split click may have executed but its confirmation was not observed; reconcile the inventory before retrying: " + receipt.detail(),
+                        FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
             acceptClick();
@@ -153,7 +160,8 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     protected void cleanup() {
         // 取消时保留已经冻结的完成量；未结投掷明确报告未知，鼠标上的未丢余料由原生关闭背包返还。
         if (receipt != null && receipt.status() == MenuReceipt.Status.CONFIRMED_APPLIED) acceptClick();
-        uncertain |= pendingClick != null && pendingClick.dropped() > 0
+        // 未结的任何点击（含分堆）都可能已改变背包或鼠标；除非服务器明确拒绝，否则一律按不确定上报。
+        uncertain |= pendingClick != null
                 && (receipt == null || receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED);
         menuSession.cleanup(player);
         try {
