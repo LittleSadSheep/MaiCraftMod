@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.task.reflex.Reflex;
 
 /**
  * 任务释放身体后的两类险境姿势处置：贴着深落差边缘时潜行退到安全位置；
- * 身体被围困在实心方块里持续窒息时，原生挖开窒息方块恢复呼吸（005 局
+ * 身体被围困在实心方块里持续窒息时，原生挖开围困格恢复呼吸（005 局
  * interact 地形准备把身体围在 stone 里的实机形态）。
  * 失败、取消都可能把身体留在中途位置；零输入挡不住残余动量，紧贴边缘的身体
  * 会在无人接管窗口滑落。窒息逃逸只挖致窒的那一格，不替调用方规划脱困路线。
@@ -48,8 +48,8 @@ public final class SettleChain implements Task, Reflex {
     @Override
     public boolean canRun(LocalPlayer companion) {
         if (WorkProfile.of(companion).fearless()) return false;
-        // 窒息优先：眼位在窒息方块里每刻掉血，不要求落地或贴边（005 局围困形态）。
-        if (suffocating(companion)) return true;
+        // 窒息优先：身体被致窒方块围困时每刻掉血，不要求落地或贴边（005 局围困形态）。
+        if (trappedCell(companion) != null) return true;
         // 空中、水中、攀爬与乘坐都有各自的稳定机制；这里只处理"站在地上但贴着深渊"的姿势。
         if (!companion.onGround()) return false;
         Direction edge = edgeBeside(companion);
@@ -68,12 +68,12 @@ public final class SettleChain implements Task, Reflex {
      */
     @Override
     public boolean urgentBodyRescue(LocalPlayer companion) {
-        return suffocating(companion);
+        return trappedCell(companion) != null;
     }
 
     @Override
     public TaskState tick(LocalPlayer companion) {
-        if (suffocating(companion)) return escapeSuffocation(companion);
+        if (trappedCell(companion) != null) return escapeSuffocation(companion);
         // 未开集且触发条件已不成立时不开新集：闸门残留的持有权不应让本反射凭空开一条贴边记录。
         if (!active && !canRun(companion)) return TaskState.RUNNING;
         if (!active) {
@@ -96,7 +96,7 @@ public final class SettleChain implements Task, Reflex {
         return TaskState.RUNNING;
     }
 
-    /** 挖开致窒方块的原生逃逸：只动眼位那一格，窒息解除即收尾，脱困路线仍归调用方。 */
+    /** 挖开致窒方块的原生逃逸：只动身体被围困的那一格，窒息解除即收尾，脱困路线仍归调用方。 */
     private TaskState escapeSuffocation(LocalPlayer companion) {
         if (!active) {
             active = true;
@@ -109,23 +109,23 @@ public final class SettleChain implements Task, Reflex {
         if (++ticks > SUFFOCATION_MAX_TICKS) {
             return finish(companion, "could not clear the suffocating block within the bounded attempt; position stays unverified");
         }
-        if (!suffocating(companion)) {
+        BlockPos trapped = trappedCell(companion);
+        if (trapped == null) {
             return finish(companion, "suffocating block cleared; the body can breathe again, escape route is still up to the caller");
         }
         LocalPlayerContext context = ClientRuntime.requireContext(companion);
-        BlockPos eye = BlockPos.containing(companion.getEyePosition());
-        if (suffocating == null || !suffocating.equals(eye)) {
+        if (suffocating == null || !suffocating.equals(trapped)) {
             settleBreak(companion);
-            if (EmbeddedBaritonePolicy.protects(eye)) {
+            if (EmbeddedBaritonePolicy.protects(trapped)) {
                 return finish(companion, "the suffocating block is protected; clearing it is not authorized for this reflex");
             }
-            BlockState state = companion.level().getBlockState(eye);
-            float progress = state.getDestroyProgress(companion, companion.level(), eye);
+            BlockState state = companion.level().getBlockState(trapped);
+            float progress = state.getDestroyProgress(companion, companion.level(), trapped);
             if (!(progress > 0) || !Float.isFinite(progress)) {
                 return finish(companion, "the suffocating block cannot be mined natively");
             }
             if (!context.mutationAvailable()) return TaskState.RUNNING;
-            suffocating = eye.immutable();
+            suffocating = trapped.immutable();
             BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(suffocating), Direction.UP, suffocating, false);
             breakReceipt = context.actions().startBreaking(context, hit,
                     (int) Math.clamp(Math.ceil(1D / progress) + 40, 20, 1200));
@@ -192,16 +192,30 @@ public final class SettleChain implements Task, Reflex {
     }
 
     /**
-     * 围困窒息的判定比原版 isInWall 宽一档：原版在眼位处取一个极薄的碰撞盒做相交，
-     * 身体被服务器击退或方块更新推得贴住格边时，原版判定可能已翻成"不在墙内"
-     * 而眼位方块仍是致窒的实心格——2026-10-05 场景 E 三轮实机中窒息恰打一击后
-     * 自停、反射全程未启动、fill 探测眼位格仍是 stone，正是这个口径差。这里补上
-     * "眼位方块本身致窒"的直接判定，围困不解除反射就一直可触发。
+     * 围困判定：找出身体嵌进的那个致窒方块。原版 isInWall 在眼位处取一个极薄的碰撞盒
+     * （宽 0.8 倍身位、厚 1e-6）做相交，窒息伤害的击退、方块更新或睡眠传送把身体挪出
+     * 眼位格后，该判定与"眼位格本身致窒"都会翻成不围困，而身体头部所在格仍是致窒的
+     * 实心格——2026-10-05 场景 E 至批四 A 的五轮实机（窒息恰一击自停、反射零事件、
+     * fill 探测眼位格仍是 stone）与这套"以眼位点为锚的判定整体失明"自洽。
+     * 这里按身体占据格判定：眼位格、头位格任一致窒即围困；薄盒命中而两格都干净时
+     * 命中的是眼位格邻格的致窒方块，逐面找出来。返回 null 表示没有围困。
      */
-    private static boolean suffocating(LocalPlayer player) {
-        if (player.isInWall()) return true;
+    /** 包外只读调用点：夜休链与回归测试用它问「身体此刻是否被致窒方块围困」。 */
+    public static BlockPos trappedCell(LocalPlayer player) {
         BlockPos eye = BlockPos.containing(player.getEyePosition());
-        return player.level().getBlockState(eye).isSuffocating(player.level(), eye);
+        if (suffocates(player, eye)) return eye;
+        BlockPos head = player.blockPosition().above();
+        if (suffocates(player, head)) return head;
+        if (!player.isInWall()) return null;
+        for (Direction side : Direction.values()) {
+            BlockPos beside = eye.relative(side);
+            if (suffocates(player, beside)) return beside;
+        }
+        return null;
+    }
+
+    private static boolean suffocates(LocalPlayer player, BlockPos at) {
+        return player.level().getBlockState(at).isSuffocating(player.level(), at);
     }
 
     /** 找脚位四周的第一个深落差方向；四个水平方向按常量顺序扫描，结果稳定。 */
@@ -237,10 +251,11 @@ public final class SettleChain implements Task, Reflex {
     @Override public String name() { return "settle"; }
     @Override public String id() { return name(); }
     @Override public String describeCurrentAction() {
-        return active && suffocating != null ? "身体被围困窒息，正在挖开致窒方块" : "贴着深落差边缘，正在潜行退到安全位置";
+        return active && suffocating != null ? "身体被围困窒息，正在挖开围困格" : "贴着深落差边缘，正在潜行退到安全位置";
     }
     @Override public String describe() {
         return "任务释放身体后的险境处置：贴着深落差边缘时潜行退到离边安全位置（不用物品）；"
-                + "身体被围困窒息时原生挖开致窒的那一格恢复呼吸，脱困路线仍归调用方；坠落中的保护归防摔链";
+                + "身体被实心方块围困（眼位格、头位格或贴着眼位的致窒方块）时原生挖开围困的那一格恢复呼吸，"
+                + "脱困路线仍归调用方；坠落中的保护归防摔链";
     }
 }

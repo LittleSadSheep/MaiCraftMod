@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.task.TaskRecord;
 import org.maiwithu.maicraft.task.TaskState;
 import org.maiwithu.maicraft.task.reflex.Reflex;
 
-/** 夜间普通工作在安全间隙自动休息；先让防摔、换气、自卫处理危险，不抢占菜单事务或明确的夜间活动。 */
+/** 夜间普通工作在安全间隙自动休息；身体被围困窒息或防摔、换气、自卫处理危险时不睡，也不抢占菜单事务或明确的夜间活动。 */
 public final class NightRestChain implements Task, Reflex {
     public static final String ID = "night_rest";
     private final Set<Block> beds = BuiltInRegistries.BLOCK.stream().filter(block -> block instanceof BedBlock).collect(Collectors.toUnmodifiableSet());
@@ -51,6 +51,9 @@ public final class NightRestChain implements Task, Reflex {
 
     @Override public boolean canRun(LocalPlayer player) {
         if (rest != null) return true;
+        // 被实心方块围困的身体不睡：入睡与醒来的传送都以身体为锚搬运，只会把围困带进床位；
+        // 围困逃逸归 SettleChain，这里让出身体（2026-10-05 批四 A 实机：窒息现场夜休抢身入睡）。
+        if (SettleChain.trappedCell(player) != null) return false;
         long now = player.level().getGameTime();
         if (now < retryAt || !player.isAlive() || player.getAbilities().instabuild || !player.onGround()
                 || player.isPassenger() || player.isInWater() || player.isUsingItem() || player.isSleeping()
