@@ -56,6 +56,18 @@ public final class AttackPlan {
      */
     private static final double MIN_EFFECTIVE_HEALTH = 8.0;
 
+    /**
+     * 低血拒战线的对外披露文本。阈值只此一处（{@link #MIN_EFFECTIVE_HEALTH}），话术、
+     * 回执与知识文档都引用这一句；调用方靠它知道差多少血、做什么能解除，而不是只收到
+     * 一句 "too hurt"。威胁度分级一并写明：无反击能力的被动生物不受这条线限制。
+     */
+    public static String lowHealthRefusalNotice() {
+        return "threat combat is refused at or below " + MIN_EFFECTIVE_HEALTH
+                + " health points (4 hearts, counting both effective armor-adjusted and real health)"
+                + "; heal above this line, or attack animals that cannot fight back (passive food animals),"
+                + " which is allowed at any health";
+    }
+
     private AttackPlan() {}
 
     /** 这点有效血量还够不够站着打。阈值只有这一处。 */

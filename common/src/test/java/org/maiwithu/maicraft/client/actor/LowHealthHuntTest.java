@@ -24,6 +24,8 @@ public final class LowHealthHuntTest {
         hostileTargetsStillRetreat();
         ambushStillInterruptsHunting();
         retaliatingNeutralIsAThreat();
+        passivePigAndChickenRemainHuntable();
+        refusalNoticeDisclosesThresholdAndRelease();
         // 周围没有威胁时，低血本身不制造一次失败的“撤离”，也不阻止安全收尾。
         check(AttackPlan.decide(new Battlefield(4, 3, false, false, false, List.of()), null).action()
                 == AttackPlan.Action.DONE, "an empty battlefield does not reject work solely for low health");
@@ -94,9 +96,41 @@ public final class LowHealthHuntTest {
         }
     }
 
+    /** 拍板 092：威胁度分级要求话术披露具体阈值与解除条件，调用方才知道差多少、该做什么。 */
+    private static void refusalNoticeDisclosesThresholdAndRelease() {
+        String notice = AttackPlan.lowHealthRefusalNotice();
+        check(notice.contains("8.0") && notice.contains("4 hearts"),
+                "the refusal notice states the numeric low-health line");
+        check(notice.contains("cannot fight back") && notice.contains("any health"),
+                "the refusal notice states the passive-animal release condition");
+        check(AttackPlan.outmatched(8.0) && !AttackPlan.outmatched(8.1),
+                "the disclosed line is the same threshold the decision actually enforces");
+    }
+
+    private static void passivePigAndChickenRemainHuntable() throws Exception {
+        try (var f = new CombatThreatsTest.Fixture()) {
+            f.h.player.setHealth(1);
+            f.mob(FoodPig.class, EntityType.PIG, 11, 2);
+            f.mob(FoodChicken.class, EntityType.CHICKEN, 12, 3);
+            var task = new AttackCompanionTask(f.h.player, new AttackTaskRecord("poultry", 1000, List.of(11, 12), false));
+            var plan = AttackPlan.decide(MobDefenseDamageTest.survey(task), null);
+            check(plan.action() == AttackPlan.Action.SKIRMISH && plan.foeId() == 11,
+                    "passive pigs and chickens stay huntable at one health point");
+            task.result(TaskState.CANCELLED);
+        }
+    }
+
     private static final class FoodSheep extends Sheep {
         private FoodSheep() { super(EntityType.SHEEP, null); }
         @Override public float getHealth() { return 8; }
+    }
+    private static final class FoodPig extends net.minecraft.world.entity.animal.Pig {
+        private FoodPig() { super(EntityType.PIG, null); }
+        @Override public float getHealth() { return 10; }
+    }
+    private static final class FoodChicken extends net.minecraft.world.entity.animal.Chicken {
+        private FoodChicken() { super(EntityType.CHICKEN, null); }
+        @Override public float getHealth() { return 4; }
     }
     private static final class FoodCow extends Cow {
         private FoodCow() { super(EntityType.COW, null); }
