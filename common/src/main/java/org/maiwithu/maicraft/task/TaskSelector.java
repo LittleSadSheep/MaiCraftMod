@@ -42,8 +42,9 @@ public final class TaskSelector {
         if (reflexes != null) {
             for (Task reflex : reflexes) {
                 if (reflex == null) continue;
-                // 在岗任务把身体留在边缘是它的正当姿态，释放窗口反射不得按秒抢回。
-                if (taskHoldsBody && reflex.onlyWhenBodyReleased()) continue;
+                // 在岗任务把身体留在边缘是它的正当姿态，释放窗口反射不得按秒抢回；
+                // 围困窒息这类紧急自救豁免（urgentBodyRescue）仍照常接管。
+                if (taskHoldsBody && reflex.onlyWhenBodyReleased() && !reflex.urgentBodyRescue(companion)) continue;
                 if (reflex.canRun(companion)) {
                     return reflex;
                 }

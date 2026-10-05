@@ -53,6 +53,14 @@ public interface Task {
      */
     default boolean onlyWhenBodyReleased() { return false; }
 
+    /**
+     * 紧急自救豁免：声明释放窗口的反射在身体此刻的真实处境满足该条件时，仍参与抢占，
+     * 并且在换手安全闸门拒绝常规换手时照样接管。围困窒息是例外中的例外——在岗任务
+     * 不可能合法地把身体站进致窒的实心方块，等待释放窗口或换手窗口的每一刻都在掉血；
+     * 贴边退避不豁免（空中换手有可避免的坠落风险，退避可以等）。
+     */
+    default boolean urgentBodyRescue(LocalPlayer companion) { return false; }
+
     /** 死亡观察先于普通任务 tick；只有以死亡为目标且已有执行证据的任务可以在这里结清目标。 */
     default boolean observeDeath(LocalPlayer companion) { return false; }
 
