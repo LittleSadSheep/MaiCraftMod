@@ -567,7 +567,7 @@ final class AbilityAdapter {
             args.addProperty("may_alter_terrain", true);
         }
         for (String key : List.of("prepare_portal", "allow_rare_consumables", "allow_combat",
-                "max_search_distance", "allowed_sources", "material_policy", "protected_labels", "portal_method", "max_resource_search_distance")) {
+                "max_search_distance", "allowed_sources", "material_policy", "protected_labels", "portal_method", "max_resource_search_distance", "spoil_policy")) {
             if (parameters.has(key)) args.add(key, parameters.get(key).deepCopy());
         }
         return new IntentAction.Tool("dimension_travel", args.toString());

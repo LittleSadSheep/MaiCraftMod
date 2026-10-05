@@ -552,6 +552,7 @@ public final class SemanticAbilityCatalog {
                             field("allowed_sources", "array<string>", "Permitted acquisition sources for supplies."),
                             field("allow_combat", "boolean", "Permit hunting for supplies; default false."),
                             field("allow_rare_consumables", "boolean", "Permit End portal eye consumption; default false."),
+                            field("spoil_policy", "deposit|drop", "Excavation surplus disposal for lava_cast digging; default deposit stores surplus only into nearby loaded containers and fails without one. drop additionally discards verified surplus (ordinary digging spoils above the retained floor only; items carried before the task are never touched) at the discard site: dropped item entities despawn after 5 minutes and are destroyed instantly if they land in liquid. Drop-site selection needs open walkable ground nearby; on farmland or open water the task can fail to find a discard stance."),
                             field("protected_labels", "array<string>", "Remembered places to preserve.")));
             case "maicraft:travel_dimension" -> contract(
                     "Reach another dimension through a real portal. With prepare_portal, MaiCraft can prepare a Nether or End entry portal before walking through and verifying the new dimension.",
@@ -567,6 +568,7 @@ public final class SemanticAbilityCatalog {
                             field("max_search_distance", "integer", "Physical stronghold search limit during preparation; default and maximum 4096."),
                             field("allowed_sources", "array<string>", "Permitted material sources for portal preparation."),
                             field("material_policy", "string", "Ordinary, storage_available or inventory_only material supply."),
+                            field("spoil_policy", "deposit|drop", "Excavation surplus disposal for lava_cast digging; default deposit stores surplus only into nearby loaded containers and fails without one. drop additionally discards verified surplus (ordinary digging spoils above the retained floor only; items carried before the task are never touched) at the discard site: dropped item entities despawn after 5 minutes and are destroyed instantly if they land in liquid. Drop-site selection needs open walkable ground nearby; on farmland or open water the task can fail to find a discard stance."),
                             field("protected_labels", "array<string>", "Remembered places and inherited areas to preserve throughout preparation."),
                             field("may_alter_terrain", "boolean", "Hard consent for route digging, bridging or pillaring; default false.")));
             case "maicraft:find_structure" -> contract(

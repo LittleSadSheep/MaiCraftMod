@@ -449,6 +449,12 @@ def regressionSuites = [
         heap: '512m', directory: 'build-clearance-own-targets-regression', timeoutSeconds: 60,
         purpose: '验证材料/导航保护区中的施工目标格仍按授权变更集合放行'
     ],
+    // 浇筑余土丢弃通道独立回放：spoil_policy=drop 只丢核实的普通余土并按背包净减量对账，默认仍存入容器。
+    spoilDropPolicyRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.SpoilDropCoordinatorTest',
+        heap: '512m', directory: 'spoil-drop-policy-regression', timeoutSeconds: 60,
+        purpose: '验证 spoil_policy=drop 的丢弃通道作用域、净减量对账与默认存入行为'
+    ],
     // 重生回执的库存对比等内容包同步后再算：keepInventory 不再误报全部丢失。
     respawnInventorySyncRegression: [
         entry: 'org.maiwithu.maicraft.client.runtime.RespawnInventorySyncTest',

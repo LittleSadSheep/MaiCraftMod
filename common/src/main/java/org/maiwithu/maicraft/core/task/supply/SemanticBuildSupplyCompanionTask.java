@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.core.task.build.BuildOrder;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationFrontier;
 import org.maiwithu.maicraft.core.task.build.BuildExcavationCargo;
 import org.maiwithu.maicraft.core.task.build.InventoryDepositCoordinator;
+import org.maiwithu.maicraft.core.task.build.SpoilDropCoordinator;
 import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.build.BuildTraversabilityVerifier;
 import org.maiwithu.maicraft.core.task.build.BuildTemporarySupportMaterials;
@@ -89,6 +90,8 @@ final class SemanticBuildSupplyCompanionTask
     private final SemanticMaterialSupplyCoordinator supply =
             new SemanticMaterialSupplyCoordinator();
     private final InventoryDepositCoordinator spoilSupply = new InventoryDepositCoordinator();
+    /** 计划声明 spoil_policy=drop 时改走余土丢弃通道；与存入通道互斥。 */
+    private final SpoilDropCoordinator spoilDrop = new SpoilDropCoordinator();
     private final Map<ResourceLocation, ResourceLocation> selectedVariants =
             new LinkedHashMap<>();
     private final List<BlockPos> plannedMutationCells = new ArrayList<>();
@@ -180,6 +183,7 @@ final class SemanticBuildSupplyCompanionTask
         // 正在取料或施工就先推进那件事；不能看见目标方块恰好都存在，就跳过尚未结束的点击和支撑清理。
         if (supportSupply != null) return tickSupportSupply();
         if (supply.active()) return tickSupply();
+        if (spoilDrop.active()) return tickSpoilDrop();
         if (spoilSupply.active()) return tickSpoilSupply();
         if (activeChild != null) return tickChild();
         if (traversabilityScan != null) return finishMatched();
@@ -433,7 +437,10 @@ final class SemanticBuildSupplyCompanionTask
         cargoCheckPending = false;
         cargoSearchOrigin = player.blockPosition().immutable();
         cargoEffectsSeen = false;
-        spoilSupply.begin(player, childId("excavation-spoil"), r.getDeadlineGameTime(), excess, r.protectedLabels, 48);
+        if (activePlan.spoilPolicy() == BuildTaskRecord.SpoilPolicy.DROP)
+            spoilDrop.begin(player, childId("excavation-spoil"), r.getDeadlineGameTime(), excess);
+        else
+            spoilSupply.begin(player, childId("excavation-spoil"), r.getDeadlineGameTime(), excess, r.protectedLabels, 48);
         return true;
     }
 
@@ -445,6 +452,23 @@ final class SemanticBuildSupplyCompanionTask
             stopWith("construction_supply_exit_unavailable", "No verified exterior supply route: " + access.code(), FailureType.NO_PATH);
         else startBuild(true);
         return true;
+    }
+
+    private TaskState tickSpoilDrop() {
+        // drop 授权下不搜索容器：丢弃原语自带站点判定；失败即如实终止，没有存入通道那套「无箱延期」逻辑。
+        var tick = NavigationSafetyContext.withProtectedArea(plannedMutationCells, List.of(),
+                () -> spoilDrop.tick(player, this::runChild));
+        r.extendDeadlineTo(spoilDrop.childDeadline());
+        if (tick.status() == SpoilDropCoordinator.Status.RUNNING) return TaskState.RUNNING;
+        rounds.add(Map.of("kind", "excavation_spoil_drop", "terminal_state", tick.status().name().toLowerCase(), "data", tick.receipt()));
+        if (tick.status() == SpoilDropCoordinator.Status.FAILED || outcomeUnknown(tick.receipt())) {
+            clearCargoDeferral();
+            stopWith("excavation_spoil_drop_failed", "Excavation surplus drop stopped: " + tick.receipt(), FailureType.NO_SPACE);
+            return TaskState.FAILED;
+        }
+        clearCargoDeferral();
+        cargoCheckPending = true;
+        return TaskState.RUNNING;
     }
 
     private TaskState tickSpoilSupply() {
@@ -501,7 +525,8 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private boolean cargoMenuSettled() {
-        return !spoilSupply.mustSettleBeforeSatisfiedCancellation() && player.containerMenu == player.inventoryMenu
+        return !spoilSupply.mustSettleBeforeSatisfiedCancellation() && !spoilDrop.mustSettleBeforeSatisfiedCancellation()
+                && player.containerMenu == player.inventoryMenu
                 && player.inventoryMenu.getCarried() != null && player.inventoryMenu.getCarried().isEmpty()
                 && Minecraft.getInstance().screen == null;
     }
@@ -540,7 +565,7 @@ final class SemanticBuildSupplyCompanionTask
     private boolean unresolvedOutcome() {
         // 干净的仓库回执只证明存入已确认，不能把后来门、楼梯等放置产生的未知状态覆盖成 false。
         return buildOutcomeUncertain || outcomeUnknown(finalBuildData) || supplyOutcomeUncertain || spoilOutcomeUncertain
-                || outcomeUnknown(spoilSupply.receipt());
+                || outcomeUnknown(spoilSupply.receipt()) || outcomeUnknown(spoilDrop.receipt());
     }
 
     private void startBuild(boolean accessOnly) {
@@ -842,12 +867,16 @@ final class SemanticBuildSupplyCompanionTask
         if (!spoilSupply.receipt().get("proven_spoil").equals(Map.of())) {
             data.put("excavation_spoil", spoilSupply.receipt());
         }
+        if (!spoilDrop.receipt().get("proven_spoil").equals(Map.of())) {
+            data.put("excavation_spoil_drop", spoilDrop.receipt());
+        }
         data.put("outcome_uncertain", unresolvedOutcome());
         data.put("world_change_uncertain", buildOutcomeUncertain || outcomeUnknown(finalBuildData));
         boolean traversalSatisfied = activePlan.traversabilityContract() == null
                 || traversabilityResult != null && traversabilityResult.valid();
         boolean complete = !nativePlacementDeviation && allMatched() && traversalSatisfied && !activePlan.hasTrackedScaffolds()
-                && failureCode == null && !unresolvedOutcome() && !cargoCheckPending && !spoilSupply.active() && (buildRounds == 0 || batchVerified);
+                && failureCode == null && !unresolvedOutcome() && !cargoCheckPending && !spoilSupply.active()
+                && !spoilDrop.active() && (buildRounds == 0 || batchVerified);
         data.put("goal_satisfied", complete);
         if(nativePlacementDeviation) {
             data.put("goal_satisfied",false);data.put("construction_complete",false);data.put("native_placement_completed",true);
@@ -932,6 +961,7 @@ final class SemanticBuildSupplyCompanionTask
     @Override
     public String describeCurrentAction() {
         if (supportSupply != null) return "正在补充临时支撑材料";
+        if (spoilDrop.active()) return "正在丢弃挖出的余料";
         if (spoilSupply.active()) return "正在存放挖出的余料";
         if (supply.active()) return "正在补充建材";
         if (activeKind == ChildKind.BUILD_ACCESS) return "正在打通取料通道";
@@ -944,12 +974,13 @@ final class SemanticBuildSupplyCompanionTask
     @Override public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("task", name());
-        data.put("phase", supportSupply != null ? "temporary_support_supply" : spoilSupply.active() ? "storing_excavation_spoil" : supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
+        data.put("phase", supportSupply != null ? "temporary_support_supply" : spoilDrop.active() ? "dropping_excavation_spoil" : spoilSupply.active() ? "storing_excavation_spoil" : supply.active() ? "material_supply" : activeKind == ChildKind.BUILD_ACCESS ? "preparing_supply_access" : activeChild != null ? "building"
                 : traversabilityScan != null ? "verifying" : !prepared ? "preparing_materials"
                 : "awaiting_preview_or_batch");
         data.put("construction_batches_started", buildRounds);
         if(supportAccessReserve>0)data.put("support_access_reserve",supportAccessReserve);
         if (supportSupply != null) data.put("child", supportSupply.receipt());
+        else if (spoilDrop.active()) data.put("child", spoilDrop.receipt());
         else if (spoilSupply.active()) data.put("child", spoilSupply.receipt());
         else if (supply.active()) data.put("child", supply.progress());
         else if (activeChild != null) data.put("child", activeChild.progress());
@@ -977,7 +1008,8 @@ final class SemanticBuildSupplyCompanionTask
             supply.cancel(player);
         }
         if (spoilSupply.active()) spoilSupply.cancel(player);
-        spoilOutcomeUncertain |= outcomeUnknown(spoilSupply.receipt());
+        if (spoilDrop.active()) spoilDrop.cancel(player);
+        spoilOutcomeUncertain |= outcomeUnknown(spoilSupply.receipt()) || outcomeUnknown(spoilDrop.receipt());
         if (activeChild != null) {
             activeChild.stop(player, Task.StopReason.REPLACED);
             TaskResult stopped = activeChild.result(TaskState.CANCELLED);
@@ -989,7 +1021,7 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override public boolean mustSettleBeforeSatisfiedCancellation() {
         // 即使施工格已全部匹配，正在存土石的鼠标和容器回执仍须先收尾，不能半次搬运时宣告完成。
-        return spoilSupply.mustSettleBeforeSatisfiedCancellation()
+        return spoilSupply.mustSettleBeforeSatisfiedCancellation() || spoilDrop.mustSettleBeforeSatisfiedCancellation()
                 || supportSupply != null && supportSupply.mustSettle()
                 || activeChild != null && activeChild.mustSettleBeforeSatisfiedCancellation();
     }
