@@ -29,6 +29,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -187,8 +188,8 @@ public final class SemanticContainerCompanionTask
         }
         List<Candidate> candidates = new ArrayList<>(loadedCandidates(center));
         if (candidates.isEmpty()) {
-            return failFinal("no_safe_loaded_container", "No matching, loaded and unprotected "
-                    + "block container can be selected safely.", FailureType.TARGET_LOST);
+            return failFinal("no_safe_loaded_container", emptySelectionDetail(center),
+                    FailureType.TARGET_LOST);
         }
         candidates.sort(Comparator
                 .comparingInt((Candidate c) -> c.nameMatches() ? 0 : 1)
@@ -317,6 +318,39 @@ public final class SemanticContainerCompanionTask
                 ? named.getCustomName().getString() : null;
         if (name != null && r.protectedLabels.stream().anyMatch(label -> label.equalsIgnoreCase(name))) return null;
         return new Candidate(pos.immutable(), id, name != null && r.landmarkLabel != null && name.equalsIgnoreCase(r.landmarkLabel));
+    }
+
+    // 候选为空时区分真因：上方被堵无法开启、受保护、类型不符、范围内确无已加载匹配容器。
+    // 原版箱子上方格为红石导体（如实木方块）时 getMenuProvider 直接返回 null，遮挡在候选
+    // 扫描阶段就被排除；笼统的"不能安全选择"会把这种可自行清障的场景误归为容器不存在。
+    private String emptySelectionDetail(BlockPos center) {
+        BlockPos probe = r.exactTarget != null ? r.exactTarget : (r.storageSupply() ? center : null);
+        var level = player.level();
+        if (probe != null && level.isLoaded(probe)
+                && level.getBlockEntity(probe) instanceof Container) {
+            BlockState state = level.getBlockState(probe);
+            ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+            if (state.getMenuProvider(level, probe) == null) {
+                return "The container at " + coords(probe) + " is loaded but cannot be opened: the "
+                        + "cell above is occupied and blocks its lid. Clear the cell above the "
+                        + "container and retry.";
+            }
+            if (insideProtectedLandmark(probe)) {
+                return "The container at " + coords(probe) + " exists but sits inside a protected "
+                        + "landmark; choose an unprotected container or lift the protection.";
+            }
+            if (r.blockId != null && !r.blockId.equals(id)) {
+                return "The container at " + coords(probe) + " exists but is " + id
+                        + ", not the requested " + r.blockId + ".";
+            }
+        }
+        return "No matching, loaded and unprotected block container can be selected safely within "
+                + "the requested " + r.radius + "-block radius; this covers loaded chunks only and "
+                + "is not proof that no container exists beyond them.";
+    }
+
+    private String coords(BlockPos pos) {
+        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     // 以每个保护地标为中心，把十二格距离内的容器位置排除；这里没有检查关联的大箱子另一半。
