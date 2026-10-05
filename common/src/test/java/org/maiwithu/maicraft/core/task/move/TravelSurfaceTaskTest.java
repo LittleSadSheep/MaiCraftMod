@@ -42,6 +42,8 @@ public final class TravelSurfaceTaskTest {
         openSkyArrivesImmediately(memory, TransportMode.GROUND);
         openSkyArrivesImmediately(memory, TransportMode.JETPACK);
         coveredCeilingFailsHonestly(memory);
+        buriedAuthorizedProducesVerticalLeg(memory);
+        fluidCoverSkipsShaftAndFailsWithEvidence(memory);
         seabedIsNotSurface(memory);
         unloadedChunkDoesNotArrive(memory);
         System.out.println("TravelSurfaceTaskTest: passed");
@@ -89,6 +91,65 @@ public final class TravelSurfaceTaskTest {
                     "the range failure must declare the searched radius and that unseen terrain stays unknown");
             check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("no_path"),
                     "no reachable open-sky column is a path failure, not an internal error");
+            check(result.message().contains("may_alter_terrain"),
+                    "a buried start without terrain consent must point the caller at may_alter_terrain or an exact coordinate dig-out");
+        }
+        try (var f = new Fixture(memory)) {
+            f.world.shape = WorldShape.SOLID_ROCK;
+            var record = new TravelSurfaceTaskRecord("mcp-covered-consent", 200000, 64, TransportMode.GROUND, true);
+            var task = new TravelSurfaceTask(f.player, record);
+            task.start(f.player);
+            check(task.onTick() == TaskState.RUNNING,
+                    "a buried start with terrain consent must keep running on the vertical ascent leg");
+            check(task.describeCurrentAction().contains("竖直"),
+                    "the panel action must name the vertical dig while the ascent leg is in flight");
+        }
+    }
+
+    /** 已授权动土的被埋起点：竖直腿精确指向所在列顶盖（heightmap 顶），复用 exact 上掘链路。 */
+    private static void buriedAuthorizedProducesVerticalLeg(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory)) {
+            f.world.shape = WorldShape.SOLID_ROCK;
+            var record = new TravelSurfaceTaskRecord("mcp-shaft", 200000, 64, TransportMode.GROUND, true);
+            var task = new TravelSurfaceTask(f.player, record);
+            task.start(f.player);
+            var leg = task.verticalLeg();
+            check(leg != null, "with terrain consent a buried column must produce a vertical ascent leg");
+            check(leg.exact && leg.x == 0 && leg.z == 0 && leg.y == 21,
+                    "the ascent leg must target the starting column's heightmap top exactly");
+            check(leg.mayAlterTerrain, "the ascent leg inherits the granted terrain consent");
+        }
+        try (var f = new Fixture(memory)) {
+            f.world.shape = WorldShape.OPEN;
+            var record = new TravelSurfaceTaskRecord("mcp-shaft-open", 200000, 64, TransportMode.GROUND, true);
+            var task = new TravelSurfaceTask(f.player, record);
+            task.start(f.player);
+            check(task.verticalLeg() == null,
+                    "an unburied column must not spawn a vertical ascent leg");
+        }
+    }
+
+    /** 顶盖是液体时竖井不可通过：记下位置证据后回退地面流程，失败回执如实携带该证据。 */
+    private static void fluidCoverSkipsShaftAndFailsWithEvidence(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory)) {
+            f.world.shape = WorldShape.WATER_ABOVE;
+            var record = new TravelSurfaceTaskRecord("mcp-fluid-cover", 200000, 64, TransportMode.GROUND, true);
+            var task = new TravelSurfaceTask(f.player, record);
+            task.start(f.player);
+            check(task.verticalLeg() == null,
+                    "a fluid cover must not produce a diggable vertical leg");
+            TaskState last = TaskState.RUNNING;
+            int ticks = 0;
+            while (last == TaskState.RUNNING && ticks++ < 400) {
+                f.nextTick();
+                last = task.onTick();
+            }
+            check(last == TaskState.FAILED && record.internalVerifiedPosition() == null,
+                    "a fluid-covered start must still end in an honest failure");
+            var result = task.result(TaskState.FAILED);
+            check(result.message().contains("fluid"), "the receipt must name the fluid cover as the skipped shaft reason");
+            check(String.valueOf(result.data().get("vertical_ascent")).contains("fluid"),
+                    "the vertical_ascent receipt field must carry the fluid-cover evidence");
         }
     }
 

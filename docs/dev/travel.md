@@ -134,7 +134,7 @@
 | 已定位地点 | `destination`，或 `target` 的 `coordinates`、`landmark`、`area`；使用本节前述到达精度 |
 | 前步结果 | `target.kind:"prior_result"`，用 `relation` 指明此前能力或结果；总任务绑定成功步骤的权威位置后再移动，无法绑定则等待决策 |
 | 平台 | `semantic_target:"platform"`；默认 `direction:"forward"`，可用 `up/down/forward/backward/left/right/north/south/east/west` |
-| 露天地表 | `semantic_target:"surface"`；向上寻找脚下列露天的支撑处，不接受方向；树叶不作为天空遮挡，固体和液体遮挡仍计入 |
+| 露天地表 | `semantic_target:"surface"`；向上寻找脚下列露天的支撑处，不接受方向；树叶不作为天空遮挡，固体和液体遮挡仍计入。地下出发须配 `may_alter_terrain:true`：先沿所在列竖直上掘到顶盖再破出（顶盖为液体时不掘，如实带位置回退地面流程）；未授权则范围失败，回执指路「坐标目标 + `exact:true` 上掘，或补授权」 |
 | 群系／标签／海岸 | 在 `semantic_target`、`biome_id`、`biome_tag` 中选择一种；`nearest` 目标的 `label/relation` 也可表达探索目标，推荐显式参数 |
 | 电梯楼层 | `elevator_floor` 可选 `ask`、`top`、`bottom`、`next_up`、`next_down` 或已同步的楼层 ID／名称；可用 `elevator_id` 指定已观察的电梯 UUID |
 | 登上物理船体 | `structure_id` 是已观察的船体 UUID；仅 `auto/jetpack`，需装备可用背包。可带 `seat_position:{x,y,z}`，为相对 `origin_storage` 的整数座位偏移；确认支撑或原生乘坐后完成，不负责开船 |
