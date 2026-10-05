@@ -66,6 +66,7 @@ public final class MoveToTransportCompletionTest {
         transportFailure(memory, false, 8.5);
         planningStallFailsAfterCeiling(memory);
         planningWorkFuseTripsWithoutApproach(memory);
+        degradedShaftLegBeforeFuseFailure(memory);
         planningWorkFuseSparedWhileApproaching(memory);
         longPlanningRenewsOnlyOnProgress(memory);
         discoveryFailure(memory);
@@ -215,8 +216,52 @@ public final class MoveToTransportCompletionTest {
         }
     }
 
-    /** 距离在持续缩短的规划无论消耗多少工作单位都不熔断：收敛本身就是进展。 */
-    private static void planningWorkFuseSparedWhileApproaching(Unsafe memory) throws Exception {
+    /**
+     * 收敛熔断触发后先走一次「井口旁楼梯头」降级腿（110）：目标在脚下且授权动土时，
+     * 熔断不再直接收场，而是先站到目标柱旁一格再用全新搜索恢复原目标；降级腿之后
+     * 再次不收敛才诚实失败，回执声明降级腿已尝试。
+     */
+    private static void degradedShaftLegBeforeFuseFailure(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            var record = new MoveToTaskRecord("fuse-degraded-leg", 20000, 0D, -5D, 0D, null, true);
+            var task = f.task(record, true); task.onStart();
+            // 目标不在脚下：onStart 走过 startWalkingNav 用真实导航替换了夹具导航，桩要打在它身上。
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            boolean legStarted = false;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 3600 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+                if (!legStarted && field(MoveToCompanionTask.class, "degradedShaftLegTried").getBoolean(task)) {
+                    legStarted = true;
+                    // 降级腿的导航在 onTick 里新建；给这条新腿打上同一套 planning 桩再继续驱动。
+                    f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                            .get(field(AbstractCompanionTask.class, "nav").get(task));
+                    session = planningSession(f);
+                    probe = bareGround(memory, f);
+                    highWater = 0;
+                }
+            }
+            check(legStarted, "收敛熔断必须先尝试一次井口旁降级腿，而不是直接收场");
+            check(state == TaskState.FAILED, "降级腿之后再次不收敛必须诚实收场");
+            var result = task.result(TaskState.FAILED);
+            check(String.valueOf(result.message()).contains("planning did not converge"),
+                    "降级腿后的失败仍要携带不收敛证据与工作量");
+            check(Boolean.TRUE.equals(result.data().get("degraded_shaft_leg_tried")),
+                    "回执要声明降级腿已尝试过");
+        }
+    }
+
+    /** 距离在持续缩短的规划无论消耗多少工作单位都不熔断：收敛本身就是进展。 */    private static void planningWorkFuseSparedWhileApproaching(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, 30.5)) {
             var record = new MoveToTaskRecord("planning-converging", 6000, 0D, 0D, 0D, null, false,
                     false, TransportMode.ELEVATOR);

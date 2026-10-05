@@ -75,6 +75,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private int initialRemaining = -1;
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
+    /** 规划收敛熔断触发后唯一一次「井口旁楼梯头」降级腿：先站到目标柱旁一格，再用全新搜索恢复原目标。 */
+    private boolean degradedShaftLegTried;
+    /** 当前导航是否为降级腿；到达后恢复原目标并重开规划。 */
+    private boolean degradedShaftLegActive;
     private boolean worldViewPrepared;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
@@ -313,10 +317,33 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 && planningWorkHighWater > PLANNING_WORK_FUSE_UNITS
                 && lastApproachTick != Long.MIN_VALUE
                 && now - lastApproachTick >= PLANNING_CONVERGENCE_WINDOW_TICKS) {
+            // 熔断先给一次预算内的降级腿（109/110 同型教训：目标在脚下竖井底时，搜索从
+            // 原站位出发的所有下降边都被准入闸门诚实拒绝，绕行楼梯的空间它自己走不完）：
+            // 先站到目标柱旁两格的「楼梯头」，再用全新搜索恢复原目标——起点离开井口柱后，
+            // 楼梯下掘不再与被拒的直降前沿竞争。只试一次，降级腿单独计量熔断工作量。
+            if (!degradedShaftLegTried && r.kind == MoveToTaskRecord.Kind.BLOCK
+                    && by <= feet().getY() - 3 && r.mayAlterTerrain) {
+                degradedShaftLegTried = true;
+                degradedShaftLegActive = true;
+                planningWorkHighWater = 0;
+                lastApproachTick = now;
+                BlockPos head = staircaseHeadCell();
+                Constants.LOG.info(
+                        "[maicraft-task] goto 规划不收敛，先走井口旁降级腿 head={} 目标={},{},{}",
+                        head.toShortString(), bx, by, bz);
+                stopNav();
+                r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
+                NavGoal headGoal = NavGoal.exact(head);
+                nav = navigationOptions(PlayerNav.to(player,
+                        () -> new GoalCompiler.Compiled(headGoal, LongSets.emptySet()),
+                        WALK_SPEED, () -> false, terrain()));
+                return TaskState.RUNNING;
+            }
             fail("planning did not converge: the dig-route search has banked " + planningWorkHighWater
                     + " work units while the closest approach stayed " + String.format("%.1f", bestDist)
                     + " blocks from the target for about " + (PLANNING_CONVERGENCE_WINDOW_TICKS / 20)
                     + " seconds with no improvement; " + nav.outcomeSummary()
+                    + belowTargetEgressAdvice()
                     + " Pick a nearer waypoint, approach the target from another direction,"
                     + " or abandon this destination.",
                     FailureType.PLANNING_STALL);
@@ -326,6 +353,15 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
                 if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
+                // 降级腿到头：站上楼梯头后用全新搜索恢复原目标；新腿的熔断工作量单独计量。
+                if (degradedShaftLegActive) {
+                    degradedShaftLegActive = false;
+                    stopNav();
+                    planningWorkHighWater = 0;
+                    lastApproachTick = player.level().getGameTime();
+                    startWalkingNav();
+                    yield TaskState.RUNNING;
+                }
                 // 导航说路线到头了，还要按玩家实际身体检查；exact 任务不能用附近的落脚点替代。
                 if (r.requiresStrictStance()) {
                     if (reached()) {
@@ -354,6 +390,18 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // 交通已经可能产生副作用而结果不明时，不因“已经很近”就当成功，也不自动换目标重试。
                 if (nav.failType() == FailureType.UNKNOWN) {
                     fail(blockedMessage(nav.failReason()), nav.failType());
+                    yield TaskState.FAILED;
+                }
+                // 降级腿自身打不通：不再绕路，按原目标直接收场并给出场景化出路。
+                if (degradedShaftLegActive) {
+                    String reason = nav.failReason();
+                    stopNav();
+                    Constants.LOG.info(
+                            "[maicraft-task] goto end kind={} result=failed type=NO_PATH"
+                                    + " feet={} reason=degraded shaft-leg approach failed",
+                            r.kind, player.blockPosition().toShortString());
+                    fail(blockedMessage("the degraded approach beside the target shaft also failed: "
+                            + reason) + belowTargetEgressAdvice(), FailureType.NO_PATH);
                     yield TaskState.FAILED;
                 }
                 // FIND:打不通就近候选 -> 除名,朝余下候选重开导航
@@ -552,6 +600,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // 搜索预算消耗与收敛趋势：调用方据此判断这条路线是“还在接近”还是“规划已病态”。
         data.put("planning_work_units", planningWorkHighWater);
         data.put("planning_work_fuse_units", PLANNING_WORK_FUSE_UNITS);
+        data.put("degraded_shaft_leg_tried", degradedShaftLegTried);
         if (bestDist != Double.MAX_VALUE) {
             data.put("best_distance_blocks", Math.round(bestDist * 10) / 10.0);
         }
@@ -679,8 +728,32 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 + " 格";
     }
 
-    private String blockedMessage(String failReason) {
-        int gy = player.blockPosition().getY();
+    /** 降级腿的楼梯头：目标柱旁两格、当前脚位高度；起点离开井口柱后，楼梯下掘的扩展前沿不再被直降拒绝支配。 */
+    private BlockPos staircaseHeadCell() {
+        int offX = offsetAxisTowardPlayer(player.getX(), bx);
+        int offZ = offsetAxisTowardPlayer(player.getZ(), bz);
+        if (offX == 0 && offZ == 0) offX = 2;   // 就站在目标柱上时固定向东偏移，保证离开井口柱。
+        return new BlockPos(bx + offX, feet().getY(), bz + offZ);
+    }
+
+    /** 朝角色所在方向偏移两格；角色与目标同柱时返回 0，由另一轴提供偏移。 */
+    private static int offsetAxisTowardPlayer(double playerCoord, int targetCoord) {
+        double delta = playerCoord - (targetCoord + 0.5);
+        if (Math.abs(delta) < 1.0) return 0;
+        return delta > 0 ? 2 : -2;
+    }
+
+    /** 目标在脚下时的收场出路：直降竖井需要着陆授权或下方缓冲，否则从井口旁挖楼梯或分段路点。 */
+    private String belowTargetEgressAdvice() {
+        if (by >= feet().getY() - 3) return "";
+        return " The target lies below the current stance: a one-drop descent into an open shaft"
+                + " is only planned with landing-assist authorization (allow_landing_assists) or"
+                + " water below; otherwise authorize terrain alteration and dig a staircase route"
+                + " starting beside the shaft, or travel to a remembered standable cell inside the"
+                + " shaft first and continue from there.";
+    }
+
+    private String blockedMessage(String failReason) {        int gy = player.blockPosition().getY();
         double remaining = repDistance();
         String where = switch (r.kind) {
             case BLOCK, COLUMN -> "location x=" + bx + " z=" + bz;
