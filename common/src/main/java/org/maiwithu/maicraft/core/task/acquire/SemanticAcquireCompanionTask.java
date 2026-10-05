@@ -653,7 +653,8 @@ public final class SemanticAcquireCompanionTask
     private TaskState startProspectingIfAuthorized(AcquisitionNeed need) {
         var plan = OreGenerationBand.plan(r.allowProspecting, need.itemIds,
                 player.level().dimension().location().toString(),
-                need.prospectingDescendStarted, need.prospectingMineStarted);
+                need.prospectingDescendStarted, need.prospectingMineStarted,
+                player.blockPosition().getY());
         switch (plan.step()) {
             case UNKNOWN_BAND -> addIssue("mine", "prospecting_band_unknown",
                     "mining came back empty-handed; prospecting is allowed but this item has no"
@@ -664,14 +665,22 @@ public final class SemanticAcquireCompanionTask
                             + " in another dimension, and no descent was started here",
                     Map.of("band_dimension", plan.band().dimension(),
                             "current_dimension", player.level().dimension().location().toString()));
+            case UPHILL_BAND -> addIssue("mine", "prospecting_uphill_band_refused",
+                    "mining came back empty-handed; the known generation band for this item sits"
+                            + " above the current position and the current elevation is outside the band,"
+                            + " so reaching it would mean pillaring up through open air instead of digging"
+                            + " for the ore. Move along the surface to terrain at that elevation and submit"
+                            + " again, or travel to a spot already inside the band",
+                    Map.of("prospect_y", plan.band().prospectY(),
+                            "current_y", player.blockPosition().getY()));
             case DESCEND -> {
                 need.prospectingDescendStarted = true;
                 need.prospectingMineStarted = true;
-                need.prospectingY = plan.band().prospectY();
+                need.prospectingY = plan.prospectY();
                 addIssue("mine", "prospecting_descend_started",
                         "fair scan came back empty-handed; open a walkable descending passage to the"
                                 + " generation band, then a horizontal tunnel, using native Ultimine when available",
-                        Map.of("prospect_y", plan.band().prospectY()));
+                        Map.of("prospect_y", plan.prospectY()));
                 renewProgressLease();
                 return attemptMine(need);
             }

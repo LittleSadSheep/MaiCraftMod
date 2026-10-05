@@ -591,17 +591,37 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         }
     }
 
-    /** 探矿缺路与预算耗尽分别报告；石头开路量不能再用目标矿物计数冒充。 */
+    /** 探矿缺路与预算耗尽分别报告；石头开路量不能再用目标矿物计数冒充，垫块消耗同样对账。 */
     private TaskState prospectFailure() {
+        String terrainNote = tunnelDriver == null ? "" : prospectTerrainNote();
         if (tunnelDriver != null && tunnelDriver.failure() != null) {
             miningUncertain |= tunnelDriver.uncertain();
-            fail("prospect tunnel stopped: " + tunnelDriver.failure(), miningUncertain ? FailureType.UNKNOWN : FailureType.NO_PATH);
+            fail("prospect tunnel stopped: " + tunnelDriver.failure() + terrainNote,
+                    miningUncertain ? FailureType.UNKNOWN : FailureType.NO_PATH);
         } else {
             progressNote = "prospect budget spent: dug " + excavatedBlocks + " blocks over " + prospectTicks
                     + " active ticks toward Y " + r.prospectY() + ", gathered " + r.getMined() + "/" + r.count;
-            fail(progressNote + ". Unexplored areas remain unknown.", FailureType.MINED_OUT);
+            fail(progressNote + terrainNote + ". Unexplored areas remain unknown.", FailureType.MINED_OUT);
         }
         return TaskState.FAILED;
+    }
+
+    /**
+     * 垫块消耗摘要：探矿中途收手时，原生确认的垫块总量进失败正文，逐格位置在回执
+     * {@code prospecting.tunnel.terrain_bill}——调用方靠它清理柱子与补给，消耗不再无声。
+     */
+    private String prospectTerrainNote() {
+        Map<String, Object> evidence = tunnelDriver.evidence();
+        if (!(evidence.get("terrain_bill") instanceof Map<?, ?> bill)
+                || !(bill.get("placed") instanceof Map<?, ?> placed)) {
+            return "";
+        }
+        int placedCount = placed.values().stream()
+                .filter(List.class::isInstance)
+                .mapToInt(cells -> ((List<?>) cells).size()).sum();
+        return placedCount == 0 ? ""
+                : "; support blocks confirmed placed while prospecting: " + placedCount
+                        + " (per-block positions in the receipt's terrain_bill)";
     }
 
     // ---- 矿物寻路目标：只追踪当前批次；批次为空时退化为原地目标，避免无效寻路 ----
