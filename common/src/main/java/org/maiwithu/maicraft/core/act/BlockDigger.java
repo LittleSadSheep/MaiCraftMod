@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.act;
+import org.maiwithu.maicraft.client.actor.DefaultNativeActionPort;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.MenuReceipt;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
 
 
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -383,9 +386,30 @@ public final class BlockDigger {
                 || (toolStageReceipt != null && !toolStageReceipt.terminal())
                 || MenuVisibility.inventoryVisible(
                         Minecraft.getInstance(), player);
-        LocalPlayerContext context = pendingBreak || pendingSelection || pendingMenu
-                ? ClientRuntime.requireContext(player)
-                : null;
+        LocalPlayerContext context = null;
+        if (pendingBreak || pendingSelection || pendingMenu) {
+            try {
+                context = ClientRuntime.requireContext(player);
+            } catch (RuntimeException unavailable) {
+                // MCP 取消等刻外收尾没有当刻上下文：发不了停止包，但不允许就此把 PENDING 回执留在动作
+                // 队列里占位数千刻（实机楔死事故的来源正是这条路径）。交给端口延迟收尾，下一刻先停挖再结算。
+                DefaultNativeActionPort actions = ClientRuntime.actor().actions();
+                if (pendingBreak) {
+                    actions.deferBreakCancellationForTaskBoundary(receipt,
+                            "the block-digging task ended before its native break was confirmed");
+                }
+                if (pendingSelection) {
+                    actions.abandonOneShotForTaskBoundary(toolSelectReceipt,
+                            "the block-digging task ended while tool selection was awaiting confirmation");
+                }
+                Constants.LOG.warn(
+                        "[maicraft-actor] task-boundary digger cancel ran without an active tick context ({});"
+                                + " pending break deferred to next tick, one-shot receipts settled uncertain",
+                        unavailable.getMessage());
+                reset();
+                return;
+            }
+        }
         if (pendingBreak) {
             context.actions().cancelBreakingForTaskBoundary(
                     context,
