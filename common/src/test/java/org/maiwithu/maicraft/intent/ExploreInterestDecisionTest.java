@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
 public final class ExploreInterestDecisionTest {
     public static void main(String[] args) {
         recordStateMachine();
+        answerGate();
         decisionSnapshot();
         goalParametersRoundTrip();
         System.out.println("ExploreInterestDecisionTest: passed");
@@ -66,6 +67,46 @@ public final class ExploreInterestDecisionTest {
         paused.renewAfterInterestAnswer(100_000L);
         check(paused.getDeadlineGameTime() == 100_000L + SemanticExploreTaskRecord.LEG_LEASE_TICKS,
                 "answering renews the lease from the answer moment");
+    }
+
+    /**
+     * 答复后的恢复闸：决策应答写回但伴随任务尚未消费的窗口内，中继必须放行 tick——
+     * 应答的消费点在伴随任务里，这里若按「决策编号还在」短路，continue 与 stop 都会把
+     * 任务冻结到人工 cancel（实机事故：答复受理后身体零推进、stop 也不收尾）。
+     */
+    private static void answerGate() {
+        var finding = new SemanticExploreTaskRecord.InterestFinding(
+                "finding-1", "lava_pool", 100, 64, -200, "north-east", 137);
+        var record = record(List.of("lava_pool"));
+        record.noteInterestFinding(finding);
+        record.beginInterestDecision(UUID.randomUUID());
+        check(IntentTask.exploreInterestRelayBlocksTick(record),
+                "an open decision without an answer keeps the companion parked");
+
+        // continue 分支：答复写回即放行；伴随任务消费后待询问与决策编号清空，推进恢复。
+        record.applyInterestAnswer("continue");
+        check(!IntentTask.exploreInterestRelayBlocksTick(record),
+                "a written continue answer lets the companion tick");
+        check("continue".equals(record.consumeInterestAnswer()),
+                "the resumed companion consumes the continue answer");
+        check(!record.hasPendingInterestFinding() && record.interestDecisionId() == null,
+                "continue clears the pending finding and the decision id");
+        check(!IntentTask.exploreInterestRelayBlocksTick(record),
+                "nothing keeps blocking after the continue answer is consumed");
+
+        // stop 分支：同样放行；消费后待询问发现保留，收尾回执据此携带发现明细。
+        var stopping = record(List.of("lava_pool"));
+        stopping.noteInterestFinding(finding);
+        stopping.beginInterestDecision(UUID.randomUUID());
+        stopping.applyInterestAnswer("stop");
+        check(!IntentTask.exploreInterestRelayBlocksTick(stopping),
+                "a written stop answer lets the companion tick");
+        check("stop".equals(stopping.consumeInterestAnswer()),
+                "the resumed companion consumes the stop answer");
+        check(stopping.hasPendingInterestFinding(),
+                "stop keeps the finding so the final receipt can name it");
+        check(!IntentTask.exploreInterestRelayBlocksTick(stopping),
+                "nothing blocks the finish after the stop answer is consumed");
     }
 
     private static void decisionSnapshot() {

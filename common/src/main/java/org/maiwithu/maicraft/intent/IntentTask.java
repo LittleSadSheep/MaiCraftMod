@@ -687,10 +687,19 @@ final class IntentTask implements Task {
         var finding = explore.pendingInterestFinding();
         if (finding == null || record.decisionSnapshot() != null) return null;
         // 已登记编号说明决策已发出；恢复后同一发现不会重复询问（探索记忆的去重会挡住重新置位）。
-        if (explore.interestDecisionId() != null) return TaskState.RUNNING;
+        if (exploreInterestRelayBlocksTick(explore)) return TaskState.RUNNING;
         UUID decisionId = UUID.randomUUID();
         explore.beginInterestDecision(decisionId);
         return requestDecision(exploreInterestDecision(currentGoal(), decisionId, finding));
+    }
+
+    /**
+     * 决策已发出且答复未写回时伴随任务不被 tick（等语义层应答）。
+     * 答复写回后必须放行：应答的消费点在伴随任务的 onTick 里，这里若只看「决策编号还在」
+     * 就短路，continue 与 stop 都会被永远挡在伴随任务之外，任务冻结到人工 cancel。
+     */
+    static boolean exploreInterestRelayBlocksTick(SemanticExploreTaskRecord explore) {
+        return explore.interestDecisionId() != null && !explore.hasInterestAnswer();
     }
 
     /** 兴趣决策快照：finding 细节进 context 供回执核对，question 与选项面向模型陈述两种走向。 */
