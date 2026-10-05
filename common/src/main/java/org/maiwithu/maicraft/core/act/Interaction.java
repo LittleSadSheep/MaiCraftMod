@@ -603,7 +603,9 @@ public final class Interaction {
             fallingThrough = true;
             return false;
         }
-        failReason = action + " was not confirmed: " + detail;
+        // 167：失败回执必须携带提交现场的插桩事实，否则“点击被谁拒了”只能靠猜。
+        String trace = lastUseReceipt.useOnTrace();
+        failReason = action + " was not confirmed: " + detail + (trace.isEmpty() ? "" : "; " + trace);
         failType = FailureType.UNKNOWN;
         hardFail = true;
         return false;
@@ -681,6 +683,16 @@ public final class Interaction {
         var evidence = new LinkedHashMap<String, Object>(Map.of("submission_attempted", true, "native_action_status", last.status().name(),
                 "native_action_kind", last.kind().name(), "outcome_uncertain", uncertain,
                 "mechanical_retry_allowed", last.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED));
+        // 167 插桩：提交现场（点击面、客户端预测结果、预测包是否发出）与结算后的落格权威状态
+        // （客户端已在服务器确认后校正）一起进证据，实机回执可直接对出服务端对这次点击的处理结果。
+        String trace = last.useOnTrace();
+        if (!trace.isEmpty()) evidence.put("use_on_trace", trace);
+        if (last.kind() == NativeActionReceipt.Kind.USE_BLOCK && submittedBlockHit != null) {
+            BlockPos cell = submittedBlockHit.getBlockPos().relative(submittedBlockHit.getDirection());
+            evidence.put("settlement_placement_cell", cell.toShortString() + "="
+                    + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(
+                            player.level().getBlockState(cell).getBlock()));
+        }
         // 完成回执保留轮座自己的前后观察，规划者据此跳过已安装轮胎，避免再次点击把它取下。
         if (wheelMountUse != null) evidence.put("wheel_mount_observation", wheelMountUse.evidence());
         return evidence;

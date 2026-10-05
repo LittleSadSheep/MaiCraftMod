@@ -27,7 +27,7 @@ public final class BuildPlacementOpenGroundTorchTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
         openGroundAirCell(); grassCellSupport(); plannerCoversTorch(); floatingTargetNamesItsFace();
-        heldHandsDoNotChangeGestureProof(); deniedGesturesStillNameTheirGate();
+        heldHandsDoNotChangeGestureProof(); deniedGesturesStillNameTheirGate(); plantTargetKeepsSupportFacts();
         System.out.println("BuildPlacementOpenGroundTorchTest: open-ground torch access, planner coverage and named rejection gates passed");
     }
 
@@ -116,6 +116,28 @@ public final class BuildPlacementOpenGroundTorchTest {
             Integer noGesture = search.gateCounts().get("no_click_gesture");
             check(noGesture != null && noGesture > 0 && !search.gateSamples().get("no_click_gesture").isEmpty(),
                     "per-stance rejections still name the gate and sample positions");
+            // 167 三轮实机形态：目标有支撑面仍全拒。六向事实必须随失败回执一起出现，
+            // 否则下一轮无法区分“支撑误判”与“真正的点击不可能”。
+            String down = search.attachmentNeighbors().get("down");
+            check(down != null && !down.equals("air") && !down.startsWith("replaceable:"),
+                    "a denied search with a grounded target still names the solid support under the target cell");
+        }
+    }
+
+    private static void plantTargetKeepsSupportFacts() throws Exception {
+        try (var h = fixture()) {
+            // 实机草地的常见形态：目标格里长着可替换的短草而非空气。支撑面在脚下存在，
+            // 快速归因闸不能把这种目标误判成附着面缺失；六向事实里要逐字点名可替换内容物。
+            BuildTaskRecord.Target target = torchTarget(new BlockPos(5, 1, 3));
+            h.set(target.pos(), Blocks.SHORT_GRASS.defaultBlockState());
+            var world = new BuildSupportWorld(h.level, h.level::isLoaded, Map.of());
+            var search = new BuildPlacementAccessSearch(h.player, target, world, ANCHOR, LongSets.emptySet(),
+                    PhysicalObstacleSnapshot.EMPTY, 512, true, gesture -> false);
+            for (int step = 0; step < 500 && !search.advance(16); step++) { }
+            check(!"target_attachment_face_missing".equals(search.reason()),
+                    "a replaceable plant in the target cell is not an attachment-face failure while the ground below supports");
+            check("replaceable:minecraft:short_grass".equals(search.attachmentNeighbors().get("target")),
+                    "the receipt names what actually occupies the target cell");
         }
     }
 

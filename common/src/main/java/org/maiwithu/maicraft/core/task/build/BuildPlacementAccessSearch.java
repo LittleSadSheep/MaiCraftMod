@@ -169,11 +169,20 @@ final class BuildPlacementAccessSearch {
         complete = true; reason = edge ? "reachable_crouching_edge_verified"
                 : lowerEye ? "reachable_lower_eye_placement_verified" : "reachable_placement_verified";
     }
-    /** 目标格是空气且六向都没有可点击支撑面时成立；同名回执携带逐向内容物，供模型改选贴地格。 */
+    /**
+     * 目标格是空气且六向都没有可点击支撑面时成立；无论成立与否，六向内容物都进
+     * {@code attachmentNeighbors}——实机 167 三轮证明“有支撑面仍全拒”时回执需要
+     * 直接看到六向是什么，才能区分支撑误判、可替换植物遮挡与真正的点击不可能。
+     */
     private boolean targetLacksAttachmentFace() {
         var stage = new BuildPlacementStage(world, player.level()::isLoaded, Map.of(), target, false, true);
-        if (!stage.state(target.pos()).isAir()) return false;
         var facts = new LinkedHashMap<String, String>();
+        {
+            net.minecraft.world.level.block.state.BlockState self = stage.state(target.pos());
+            String selfId = BuiltInRegistries.BLOCK.getKey(self.getBlock()).toString();
+            facts.put("target", self.isAir() ? "air"
+                    : self.canBeReplaced() ? "replaceable:" + selfId : selfId);
+        }
         boolean supported = false;
         for (Direction direction : Direction.values()) {
             BlockPos clicked = target.pos().relative(direction);
@@ -183,9 +192,8 @@ final class BuildPlacementAccessSearch {
                     : state.canBeReplaced() ? "replaceable:" + id : id);
             supported |= stage.support(clicked, direction.getOpposite());
         }
-        if (supported) return false;
         attachmentNeighbors = Map.copyOf(facts);
-        return true;
+        return stage.state(target.pos()).isAir() && !supported;
     }
 
     Map<String, String> attachmentNeighbors() { return attachmentNeighbors; }

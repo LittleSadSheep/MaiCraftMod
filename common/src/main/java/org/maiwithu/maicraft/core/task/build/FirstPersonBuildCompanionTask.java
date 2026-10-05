@@ -186,6 +186,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildAimProgress aimProgress = new BuildAimProgress();
     private String aimWaitReason = "not_aiming", aimHit = "not_checked";
     private Map<String, Object> lastPlacementRejection = Map.of();
+    /** 最近一次放置右键的提交现场插桩（167）；空串表示本轮尚未出手。 */
+    private String lastPlacementUseOnTrace = "";
     private Map<String, Object> lastAimObservation = Map.of();
     private double aimError;
     private NativeActionReceipt useReceipt;
@@ -1651,10 +1653,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         useReceipt = ctx.actions().poll(ctx, useReceipt);
         if (!useReceipt.terminal()) return TaskState.RUNNING;
         NativeActionReceipt.Status status = useReceipt.status();
-        String detail = useReceipt.detail(); useReceipt = null;
+        String detail = useReceipt.detail();
+        // 167 插桩：无论哪种终态都保留这次右键提交的现场事实，全拒与“出手不落块”两种实机形态都要能对出服务端结论。
+        lastPlacementUseOnTrace = useReceipt.useOnTrace();
+        useReceipt = null;
         if (status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED) return rejectGesture();
         if (status != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            failAt(cell.target().pos(), "native placement not safely confirmed: " + detail,
+            failAt(cell.target().pos(), "native placement not safely confirmed: " + detail
+                    + (lastPlacementUseOnTrace.isEmpty() ? "" : "; " + lastPlacementUseOnTrace),
                     FailureType.UNKNOWN,
                     "placement_" + status.name().toLowerCase(),
                     status == NativeActionReceipt.Status.UNCERTAIN
@@ -2838,6 +2844,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!diagnostics.isEmpty()) data.put("build_diagnostics", List.copyOf(diagnostics.subList(0, Math.min(16, diagnostics.size()))));
         if (phase == Phase.AIM && !lastAimObservation.isEmpty()) data.put("placement", lastAimObservation);
         if (!lastPlacementRejection.isEmpty()) data.put("last_placement_rejection", lastPlacementRejection);
+        if (!lastPlacementUseOnTrace.isEmpty()) data.put("use_on_trace", lastPlacementUseOnTrace);
         if (lastUseConfirmation != null && failureCode != null) data.put("placement_confirmation",
                 lastUseConfirmation.diagnostics(player.level()::isLoaded, player.level()::getBlockState));
         data.put("site_min", siteMin == null ? "-" : siteMin.toShortString());
