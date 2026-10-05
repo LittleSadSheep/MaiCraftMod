@@ -858,11 +858,26 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private void nudgeDrop(ItemEntity drop) {
         // 到岸边后向可接触的格心补齐最后距离，仍保持真实支撑；不能为捡产物直接走入矿坑。
         var point = CollectItemsApproach.nudgePoint(player, drop);
-        if (CollectItemsApproach.safeNudge(player, point)) InputDriver.stepToward(player, point, false);
-        else {
-            InputDriver.halt(player);
-            if (!pickupNavigationRetry.afterFailure(drop.getUUID(), player.level().getGameTime(), FailureType.NO_PATH))
-                fail("the final mined-drop approach has no supported path", FailureType.NO_PATH);
+        if (CollectItemsApproach.safeNudge(player, point)) {
+            InputDriver.stepToward(player, point, false);
+            return;
+        }
+        InputDriver.halt(player);
+        if (!pickupNavigationRetry.afterFailure(drop.getUUID(), player.level().getGameTime(), FailureType.NO_PATH)) {
+            // 与寻路无路失败共用同一份证据口径：这个失败只证明最后一步走近不成立，
+            // 回执带足掉落与站位事实，调用方才能区分地形、悬空等原因，而不是把
+            // 工具状态或来源缺失误判成卡点。
+            uncollectedDropEvidence = Map.of(
+                    "failure_position", List.of(drop.getX(), drop.getY(), drop.getZ()),
+                    "player_feet", List.of(player.getX(), player.getY(), player.getZ()),
+                    "observed_at_tick", player.level().getGameTime(),
+                    "item_id", BuiltInRegistries.ITEM.getKey(drop.getItem().getItem()).toString(),
+                    "count", drop.getItem().getCount(),
+                    "player_on_ground", player.onGround(),
+                    "player_in_water", player.isInWater(),
+                    "nudge_target", List.of(point.x, point.y, point.z),
+                    "envelope_wait_ticks", dropCloseTicks);
+            fail("the final mined-drop approach has no supported path", FailureType.NO_PATH);
         }
     }
 

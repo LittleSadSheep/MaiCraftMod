@@ -17,6 +17,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -48,6 +50,7 @@ public final class MineApproachTerrainTest {
             approachTerrainAlterDefaults();
             travelContextFollowsTheRecord();
             exhaustedPathNamesTheGatedCandidates();
+            nudgeFailureCarriesApproachEvidence();
             moveToHeightHintSemantics();
             acquireContractAcceptsMayAlterTerrain();
         } finally {
@@ -136,6 +139,50 @@ public final class MineApproachTerrainTest {
             String plainReceipt = plainTask.result(TaskState.FAILED).message();
             check(!plainReceipt.contains("natural-tree check"),
                     "非天然树源的无路失败不携带树形闸门口径：" + plainReceipt);
+        }
+    }
+
+    /**
+     * 最后一步走近产物的无路失败与寻路无路失败共用证据口径：重试窗耗尽才收场，
+     * 回执的 uncollected_drop 带掉落与站位事实，调用方能区分地形、悬空等原因，
+     * 不会把工具状态或来源缺失误判成卡点。
+     */
+    private static void nudgeFailureCarriesApproachEvidence() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            var effects = LivingEntity.class.getDeclaredField("activeEffects"); effects.setAccessible(true);
+            effects.set(h.player, new HashMap<>());
+            // 目标选空手可采的泥土，工具预检不拦路，这一用例只看走近失败的回执证据。
+            var record = new MineBlockTaskRecord("drop-nudge", 1000, Set.of(Blocks.DIRT), 1, "dirt",
+                    Set.of(Items.DIRT)).withinRadius(h.player.blockPosition(), 16);
+            var task = new MineCompanionTask(h.player, record); task.start(h.player);
+            // 测试关卡未注入随机源，ItemEntity 构造需要它；按 ObservationVisibilityTest 先例补上。
+            var random = net.minecraft.world.level.Level.class.getDeclaredField("random");
+            random.setAccessible(true);
+            random.set(h.player.level(), net.minecraft.util.RandomSource.create(1));
+            // 掉落物放在 3 格外：nudge 只允许 1.5 格内的同高度短走，安全检查必然拒绝。
+            var drop = new ItemEntity(h.player.level(),
+                    h.player.getX() + 3, h.player.getY(), h.player.getZ(),
+                    new ItemStack(Items.COBBLESTONE, 1));
+            Method nudge = MineCompanionTask.class.getDeclaredMethod("nudgeDrop", ItemEntity.class);
+            nudge.setAccessible(true);
+            Field pendingTerminal = org.maiwithu.maicraft.core.task.base.AbstractCompanionTask.class.getDeclaredField("pendingTerminal");
+            pendingTerminal.setAccessible(true);
+            nudge.invoke(task, drop);
+            check(pendingTerminal.get(task) == null,
+                    "同证据下的第一次走近失败先留在拾取重试窗内，不立即收场");
+            for (int i = 0; i < 41; i++) h.nextTick();
+            nudge.invoke(task, drop);
+            Map<String, Object> data = task.result(TaskState.FAILED).data();
+            check(task.result(TaskState.FAILED).message().contains("mined-drop approach"),
+                    "失败话术仍指向产物走近这一步");
+            check(data.get("failure_type").equals("no_path"), "失败类型保持 no_path");
+            Object evidence = data.get("uncollected_drop");
+            check(evidence instanceof Map<?, ?> ev
+                            && ev.containsKey("failure_position") && ev.containsKey("player_feet")
+                            && ev.containsKey("player_on_ground") && ev.containsKey("player_in_water")
+                            && ev.containsKey("nudge_target") && ev.containsKey("observed_at_tick")
+                            && "minecraft:cobblestone".equals(ev.get("item_id")),
+                    "走近无路失败回执携带掉落与站位证据：" + evidence);
         }
     }
 
