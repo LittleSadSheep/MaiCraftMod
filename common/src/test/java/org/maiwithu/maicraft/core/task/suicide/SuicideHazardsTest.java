@@ -15,7 +15,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.player.Inventory;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
-/** 已加载岩浆与悬崖提供真实候选，随身点火只在没有现成危险时兜底；凝固、积水、未加载和无效参数不能伪造危险或成功。 */
+/** 已加载岩浆、悬崖与仙人掌提供真实候选，随身点火只在没有现成危险时兜底；凝固、积水、未加载和无效参数不能伪造危险或成功。 */
 public final class SuicideHazardsTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -102,6 +102,25 @@ public final class SuicideHazardsTest {
             world.set(new BlockPos(candidate.entry().getX(), 1, candidate.entry().getZ()), Blocks.WATER.defaultBlockState());
             check(!SuicideHazards.valid(world.player, candidate), "已有水缓冲的柱不能误报为已观察到的摔伤地点");
             check(SuicideHazards.fallHeight(world.level, new BlockPos(16, 10, 8)) == 0, "未加载列不能读方块或伪造悬崖");
+        }
+        try (var world = new InteractionWorldTestHarness()) {
+            // 沙漠场景：可站立沙面紧邻仙人掌，cactus 与 auto 都应把贴身接触选为候选；仙人掌消失后不再盲走贴身。
+            world.position(new Vec3(8.5, 2, 8.5));
+            world.set(new BlockPos(8, 1, 8), Blocks.SAND.defaultBlockState());
+            world.set(new BlockPos(9, 1, 8), Blocks.SAND.defaultBlockState());
+            world.set(new BlockPos(9, 2, 8), Blocks.CACTUS.defaultBlockState());
+            var cactus = new SuicideHazards(world.player, new SuicideRequest("cactus", 8, 120, true));
+            while (!cactus.scan()) { }
+            var candidate = cactus.choose(world.player, Set.of());
+            check(candidate != null && candidate.method().equals("cactus") && candidate.entry().equals(new BlockPos(9, 2, 8))
+                    && candidate.approach().equals(new BlockPos(8, 2, 8)), "紧邻仙人掌应能被选为贴身接触候选");
+            check(SuicideHazards.valid(world.player, candidate), "仙人掌还在时接触候选应通过复检");
+            var auto = new SuicideHazards(world.player, new SuicideRequest("auto", 8, 120, true));
+            while (!auto.scan()) { }
+            var autoChoice = auto.choose(world.player, Set.of());
+            check(autoChoice != null && autoChoice.method().equals("cactus"), "auto 没带点火物时也应给出仙人掌接触候选");
+            world.set(new BlockPos(9, 2, 8), Blocks.AIR.defaultBlockState());
+            check(!SuicideHazards.valid(world.player, candidate), "仙人掌消失后不能继续盲走贴身");
         }
         System.out.println("SuicideHazardsTest: passed");
     }

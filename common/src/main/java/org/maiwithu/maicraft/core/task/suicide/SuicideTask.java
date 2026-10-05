@@ -129,6 +129,7 @@ public final class SuicideTask implements Task {
         if (candidate.method().equals("fall") && enteredTicks > 10 && player.onGround()
                 && player.getY() < candidate.approach().getY() - 2) return abandon("The native fall ended with the body still alive.");
         // 站入岩浆后停留受伤；靠怪只接近不攻击、不举盾；坠落只踏出边缘，不放水或展开鞘翅。
+        // 仙人掌永远保持贴身推进：碰撞面比整格小一格像素，抵着它走就会持续结算接触伤害。
         if (player.isInLava() || candidate.method().equals("hostile") && player.distanceToSqr(destination) < 2.25
                 || candidate.method().equals("fall") && player.getY() < candidate.approach().getY() - 0.5) {
             InputDriver.halt(player);
@@ -310,6 +311,7 @@ public final class SuicideTask implements Task {
             case "lava" -> acting ? "正在站在岩浆中" : "正在走向岩浆";
             case "hostile" -> acting ? "正在让怪物攻击" : "正在接近怪物";
             case "fall" -> acting ? "正在踏入高处边缘" : "正在走向高处边缘";
+            case "cactus" -> acting ? "正在贴身接触仙人掌" : "正在走向仙人掌";
             case "fire" -> acting ? "正在原地点火燃烧" : "正在走向点火位置";
             case "lava_bucket" -> acting ? "正在站在倒出的岩浆中" : "正在走向倒岩浆位置";
             default -> acting ? "正在暴露在危险中" : "正在走向危险处";
