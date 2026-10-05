@@ -292,11 +292,11 @@ def regressionSuites = [
         heap: '512m', directory: 'combat-regression', timeoutSeconds: 45,
         purpose: '验证受伤证据与自动自卫'
     ],
-    // 装备同步包是服务端耐久扣除到达客户端的唯一通道；打空消灭必须在事件里显式可归因。
+    // 装备增量包从不发给本玩家；打空事实经原版实体事件必达本人，必须在事件里显式可归因。
     equipmentReceiptRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.EquipmentReceiptsTest',
         heap: '512m', directory: 'equipment-receipt-regression', timeoutSeconds: 45,
-        purpose: '验证装备包观察、耐久消耗累计与打空显式回执'
+        purpose: '验证装备观察账目、耐久消耗累计与打空显式回执（同步包与实体事件双通道）'
     ],
     // R21 距离循环使用独立入口，单独核对格心站位与真实玩家攻击距离的边界。
     combatStanceReplayRegression: [
