@@ -723,18 +723,9 @@ final class SemanticBuildSupplyCompanionTask
     }
 
     private TaskState finishMatched() {
-        // 零世界变更一律不报 success：曾经「0 verified construction batches」也宣称每个格已复核，
-        // 调用方无从区分刚建好与提交时本来就建好了，假成功拉长了整条排障链。
-        if (cellsBroughtToTarget() == 0) {
-            stopWith("construction_zero_world_change",
-                    (buildRounds == 0
-                            ? "no construction batch was started because every requested build cell already matched the target"
-                            : "construction batches ended but no requested build cell changed toward the target during this task")
-                            + "; verified world change is 0 placed cell(s) across " + buildRounds
-                            + " started batch(es), " + remainingCellCount() + " cell(s) still outstanding",
-                    FailureType.NO_WORLD_CHANGE);
-            return TaskState.FAILED;
-        }
+        // 目标格全部对上就是目标达成，即使是提交时本来就满足、这次一格没动，也不能改判成失败——
+        // 否则调用方会以为施工出错而反复重试。“刚建好”与“本来就好”靠回执里的 placed_cells、
+        // already_satisfied 和成功话术区分，不靠成败。
         // 方块都对后，若方案要求能进门上楼，就再分刻验证通行；完成后才保留供后续任务引用的位置。
         if (activePlan.traversabilityContract() == null) {
             retainVerifiedPosition();
@@ -880,10 +871,8 @@ final class SemanticBuildSupplyCompanionTask
         }
         data.put("verified_construction_batches", buildRounds);
         data.put("placed_cells", cellsBroughtToTarget());
-        if ("construction_zero_world_change".equals(failureCode)) {
-            // 调用方据此把这次失败当作「现场已满足」的对账线索，而不是可机械重试的施工故障。
-            data.put("mechanical_retry_allowed", false);
-        }
+        // 开工前目标格就全部满足、没有开过施工批次：如实标明这次没有改变世界，调用方无需再建一遍。
+        data.put("already_satisfied", initialUnmatchedCells == 0 && buildRounds == 0);
         data.put("cleanup_deferred", cleanupDeferredReason != null);
         if (cleanupDeferredReason != null) {
             Map<String, Integer> remaining = new LinkedHashMap<>();
@@ -973,6 +962,11 @@ final class SemanticBuildSupplyCompanionTask
 
     @Override protected String successMessage() {
         if(nativePlacementDeviation)return "原生放置已完成，实际落点与设计不同；保留现场和完整差异，等待模型修改方案";
+        // 零净变化的成功分两种如实说明：开工前就已满足，或施工期间由别的变化补齐；都不冒称“这次建好了”。
+        if (cellsBroughtToTarget() == 0) return buildRounds == 0
+                ? "every requested build cell already matched the target before construction; no batch was needed and 0 cells were changed"
+                : "every requested build cell matches the target, but this task changed 0 cells across " + buildRounds
+                        + " batch(es); the remaining cells were satisfied by other changes during the task";
         return "semantic material families selected and supplied across " + buildRounds
                 + " verified construction batch(es); " + cellsBroughtToTarget()
                 + " build cell(s) changed to target and every requested build cell"

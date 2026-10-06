@@ -20,19 +20,19 @@ import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * 施工回执以世界净变化为准：提交时目标已满足或整轮零格变更都不得报 success，
- * 也不能再出现「0 verified construction batches 却宣称每格已复核」的空转假成功。
+ * 施工回执如实记账世界净变化：提交时目标已满足按目标达成报 success，但必须标明 already_satisfied、
+ * placed_cells=0，话术不得冒称“这次建好了”；真实变更的 success 携带能与现场对账的格数。
  */
 public final class BuildSupplyZeroChangeTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
-        zeroChangeFailsInsteadOfVacuousSuccess();
+        alreadySatisfiedSucceedsWithZeroChange();
         realChangeSucceedsWithCellAccounting();
         System.out.println("BuildSupplyZeroChangeTest: passed");
     }
 
-    /** 173 主症状：目标格提交时已满足，旧链路会报「0 批次、每格已复核」的 success，现在必须如实失败。 */
-    private static void zeroChangeFailsInsteadOfVacuousSuccess() throws Exception {
+    /** 173：目标格提交时已满足——目标达成仍报 success，但回执与话术都写明这次一格没动，不冒称“建好了”。 */
+    private static void alreadySatisfiedSucceedsWithZeroChange() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             BlockPos target = new BlockPos(5, 1, 5);
             h.set(target, Blocks.OAK_PLANKS.defaultBlockState());
@@ -40,17 +40,16 @@ public final class BuildSupplyZeroChangeTest {
             var task = parent(h, target);
             task.start(h.player);
             TaskState state = drive(task, h);
-            check(state == TaskState.FAILED, "目标已满足且零世界变更时不得报 success");
-            var result = task.result(TaskState.FAILED);
-            check(!result.success() && "construction_zero_world_change".equals(result.data().get("failure_code")),
-                    "失败回执点名零世界变更，而不是沿用空转成功话术");
-            check(!result.message().contains("0 verified construction batch(es)"),
-                    "空转假成功的原话术不得再以 success 面目出现");
+            check(state == TaskState.SUCCESS, "目标已满足就是目标达成，不能改判成失败让调用方重试");
+            var result = task.result(TaskState.SUCCESS);
+            check(result.success() && Boolean.TRUE.equals(result.data().get("already_satisfied")),
+                    "成功回执标明开工前就已满足");
+            check(result.message().contains("already matched the target before construction")
+                            && !result.message().contains("verified construction batch(es)"),
+                    "话术写明本来就满足、0 格变更，不沿用“批次已复核”的建成话术");
             check(Integer.valueOf(0).equals(result.data().get("placed_cells"))
                             && Integer.valueOf(0).equals(result.data().get("verified_construction_batches")),
                     "回执携带 placed_cells 与批次计数，零变更时均为 0");
-            check(Boolean.FALSE.equals(result.data().get("mechanical_retry_allowed")),
-                    "零变更是对账线索而非可机械重试的施工故障");
         }
     }
 
@@ -77,6 +76,7 @@ public final class BuildSupplyZeroChangeTest {
                     "success 回执携带 1 格净变化与 1 个已核验批次，可与现场对账");
             check(result.message().contains("1 build cell(s) changed to target"),
                     "成功话术写明实际变更格数，不再只宣称每格已复核");
+            check(Boolean.FALSE.equals(result.data().get("already_satisfied")), "真实施工不标记为本来就满足");
         }
     }
 

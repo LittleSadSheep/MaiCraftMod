@@ -257,6 +257,7 @@ const executeRequest = {plan_id: readyPlanId};
 | `build_diagnostics`、`failure_code`、`failure_position` | 预期/实际状态及失败位置；当前诊断列表仍有截断，见下文 |
 | `clearance_report` | 声明目标的保护、替换或原生破坏限制；含维度、实际方块、坐标、原因和可能的水平偏移，当前错误码为 `build_clearance_blocked`，不再是声明格“不在自然方块名单” |
 | `suggested_offsets` 和 `search` | 半径 16 格内、同高度整份蓝图的最多三个等距最近候选；只读观察预算 262144 次，未知区块不算空地；不自动迁移旧工程，也不证明地基、通路和功能 |
+| `already_satisfied:true`、`placed_cells:0` | 开工前目标格就已全部满足、没有开施工批次：按目标达成报成功，话术写明 0 格变更，不冒称这次建好；`placed_cells` 始终是本任务带来的净变化格数 |
 | `native_placement_completed:true`、`construction_complete:false`、`declared_structure_diff` | 已确认的原生放置落点偏离声明，动作与设计满足度分开；供料父任务也保留 `goal_satisfied:false`，交回 LLM 修改 |
 | `world_change_uncertain`、`outcome_uncertain`、原生 confirmation | 真正未结算的动作/库存/世界事实；先查对应回执，不把方块看起来存在等同于服务端确认，也不把已确认偏移重新当作未知 |
 | `temporary_supports_remaining`、`remaining_scaffolds` | 仍待回收的本项目支撑；中断不会把它们或已建实体自动撤销 |

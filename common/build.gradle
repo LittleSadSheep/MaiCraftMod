@@ -171,7 +171,7 @@ def regressionSuites = [
     constructionZeroChangeRegression: [
         entry: 'org.maiwithu.maicraft.core.task.supply.BuildSupplyZeroChangeTest',
         heap: '512m', directory: 'construction-zero-change-regression', timeoutSeconds: 60,
-        purpose: '验证施工回执以世界净变化为准：零变更一律如实失败并携带批次与格数对账'
+        purpose: '验证施工回执如实记账净变化：已满足按达成报成功并标明零变更，真实变更携带格数对账'
     ],
     buildingBudgetRegression: [
         entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
