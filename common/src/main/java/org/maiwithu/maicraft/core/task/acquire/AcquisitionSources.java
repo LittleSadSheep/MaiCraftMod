@@ -17,8 +17,8 @@ final class AcquisitionSources {
         return need.allowedSources.stream().filter(need::canTry)
                 .sorted(Comparator.comparingInt(source -> switch (source) {
                     case INVENTORY -> 0;
-                    // 随身终端不需要离开工位，先取已观察的无线现货，再走向地上掉落物或其他世界来源。
-                    case WIRELESS -> 5;
+                    // 随身终端不需要离开工位：带着已绑定的无线终端时先取网络现货，再去翻附近箱子或走向其他世界来源。
+                    case WIRELESS -> 2;
                     case NEARBY -> 10;
                     // 可见普通箱子先于掉落物和加工；具体开箱顺序由各箱最近的真实观察决定。
                     case STORAGE -> 3;

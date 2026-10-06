@@ -249,15 +249,17 @@ public final class SemanticAcquireCompanionTask
             if (backpack != null) return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, backpack, "read and withdraw carried backpack stock");
         }
 
-        // 主背包和随身背包不足时先按三类记忆调查可见箱子，再考虑网络与加工路线。
+        // 主背包和随身背包不足时，带着已绑定的无线终端就先读网络库存、从网络取现货，角色不必离开工位；
+        // 无线来源用尽（网络没货、读不到或取不到）后，才按三类记忆走去调查附近可见箱子。
         if (!needs.isEmpty() && needs.peek().canTry(SemanticAcquireTaskRecord.Source.STORAGE)
-                && !needs.peek().containerSearchComplete && missing(needs.peek()) > 0) {
+                && !needs.peek().containerSearchComplete && missing(needs.peek()) > 0
+                && !wirelessPending(needs.peek())) {
             if (!takePlannerStep()) return TaskState.RUNNING;
             TaskState container = attemptContainers(needs.peek());
             if (container != null) return container;
         }
 
-        // 箱子调查结束后读随身终端的网络库存，再比较材料树；查询不领取物品或提交网络合成。
+        // 读随身终端的网络库存，再比较材料树；查询不领取物品或提交网络合成。
         if (wirelessInventoryAllowed() && (!wirelessStockChecked
                 || player.level().getGameTime() - wirelessStockQueryTick >= StockEvidence.MAX_AGE_TICKS)) {
             wirelessStockChecked = true;
@@ -2303,6 +2305,13 @@ public final class SemanticAcquireCompanionTask
         need.plannedSourceOrder = AcquisitionSources.order(need,
                 new AcquisitionSources.Readiness(craftReady, cookReady, naturalMine, directHunt));
         return need.plannedSourceOrder;
+    }
+
+    /** 本需求允许走无线、身上有可用终端、且无线来源还没用尽：这时先不去翻附近箱子。 */
+    private boolean wirelessPending(AcquisitionNeed need) {
+        return need.allowedSources.contains(SemanticAcquireTaskRecord.Source.WIRELESS)
+                && !need.exhaustedSources.contains(SemanticAcquireTaskRecord.Source.WIRELESS)
+                && wirelessAvailable.test(player);
     }
 
     private boolean wirelessInventoryAllowed() {

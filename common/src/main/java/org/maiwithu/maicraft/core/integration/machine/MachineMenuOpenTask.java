@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.core.integration.machine;
 
 import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -38,6 +39,8 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     // 显式开菜单成功后供后续观察和存取使用；失败的界面仍由普通收尾退出。
     @Override public boolean keepsGuiOnCompletion() { return verified; }
     private static final double REACH = 4.5;
+    /** 原地等待（退出旧界面、腾手、瞄准、确认）连续这么久没有推进就放弃这台机器；走路由导航自己判定失败。 */
+    private static final long STALL_TICKS = 30L * 20L;
     private enum Phase { START, APPROACH, HAND, AIM, CONFIRM }
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
     private final MachineMenuHandParking handParking = new MachineMenuHandParking();
@@ -52,6 +55,10 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
     private String failureCode;
     private JsonObject menuReport;
     private BlockPos faceStance;
+    private Phase progressPhase;
+    private long progressTick = -1;
+    private long lastTick = -1;
+    private String stalledPhase;
 
     public MachineMenuOpenTask(LocalPlayer player, MachineMenuOpenTaskRecord record) { super(player, record); }
 
@@ -60,6 +67,18 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         if (!r.request.dimension().equals(player.level().dimension().location().toString())
                 || !player.level().isLoaded(position)) {
             return failure("machine_menu_target_lost", "The inspected machine is no longer loaded in this dimension.", FailureType.TARGET_LOST);
+        }
+        // 阶段向前推进或导航仍在移动就重新计时；原地等待超过上限就放弃这台机器，让调用方换下一个目标，
+        // 不让一只打不开的箱子把整个取料任务拖上十分钟。
+        long now = player.level().getGameTime();
+        // 任务被暂停（例如玩家临时接管身体）期间不执行，恢复后把暂停的那段时间从等待计时里扣掉。
+        if (lastTick >= 0 && now - lastTick > 20 && progressTick >= 0) progressTick += now - lastTick - 1;
+        lastTick = now;
+        if (progressTick < 0 || phase.ordinal() > progressPhase.ordinal()) { progressPhase = phase; progressTick = now; }
+        if (now - progressTick > STALL_TICKS) {
+            stalledPhase = phase.name().toLowerCase(Locale.ROOT);
+            return failure("machine_menu_open_stalled", "Opening the machine menu made no progress for "
+                    + STALL_TICKS / 20 + " seconds in phase " + stalledPhase + "; this machine was skipped.", FailureType.UNKNOWN);
         }
         if (phase == Phase.CONFIRM) return confirm();
         // 腾手期间的背包属于当前开菜单准备，先完成它自己的交换和关闭，不被外层世界恢复抢先退出。
@@ -119,7 +138,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
                     1.0, this::inReach, PlayerNav.ContextProvider.DEFAULT);
         }
         return switch (nav.tick()) {
-            case RUNNING -> TaskState.RUNNING;
+            case RUNNING -> { progressTick = player.level().getGameTime(); yield TaskState.RUNNING; }
             case ARRIVED -> ++dudTicks < 10 ? TaskState.RUNNING : failure("machine_menu_no_stance",
                     "No clear interaction stance reached the selected machine.", FailureType.STANCE_DUD);
             case FAILED -> failure("machine_menu_unreachable", "The machine cannot be reached without changing terrain.", nav.failType());
@@ -273,6 +292,7 @@ public final class MachineMenuOpenTask extends AbstractCompanionTask<MachineMenu
         data.put("machine_production_verified", false);
         if (menuReport != null) data.put("menu_report", menuReport);
         if (failureCode != null) data.put("failure_code", failureCode);
+        if (stalledPhase != null) data.put("stalled_phase", stalledPhase);
         return data;
     }
 

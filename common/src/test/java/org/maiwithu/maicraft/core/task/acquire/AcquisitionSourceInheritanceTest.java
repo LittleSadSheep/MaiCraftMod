@@ -132,6 +132,12 @@ public final class AcquisitionSourceInheritanceTest {
         portable.wirelessInventory=true;
         check(AcquisitionSources.order(portable,new AcquisitionSources.Readiness(false,false,true,false))
                 .equals(List.of(Source.INVENTORY,Source.WIRELESS,Source.NEARBY,Source.MINE)),"随身与无线库存先于世界取材");
+        // 带着已绑定的无线终端时，网络现货也先于附近箱子：直播实测里先去翻箱子，一只打不开的箱子拖住了七分钟。
+        var terminal = new AcquisitionNeed(List.of(item),1,0,Set.of(item),Set.of(),Set.of(),
+                List.of(Source.STORAGE,Source.WIRELESS,Source.INVENTORY));
+        terminal.wirelessInventory=true;
+        check(AcquisitionSources.order(terminal,new AcquisitionSources.Readiness(false,false,false,false))
+                .equals(List.of(Source.INVENTORY,Source.WIRELESS,Source.STORAGE)),"无线现货先于附近箱子");
         var need = new AcquisitionNeed(List.of(item), 1, 0, Set.of(item), Set.of(), Set.of(),
                 List.of(Source.COOK, Source.MINE, Source.CRAFT, Source.STORAGE, Source.INVENTORY));
         var ready = new AcquisitionSources.Readiness(true, false, true, false);
