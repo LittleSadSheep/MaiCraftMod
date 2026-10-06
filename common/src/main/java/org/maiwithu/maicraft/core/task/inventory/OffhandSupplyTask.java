@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.inventory;
 
+import net.minecraft.world.entity.player.Inventory;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -112,7 +113,7 @@ public final class OffhandSupplyTask extends AbstractCompanionTask<OffhandSupply
     }
 
     /** 第一个空主格：先看快捷栏（选中即可直接使用），再走主背包；返回背包 0-35 格号。 */
-    static int firstEmptyMainSlot(net.minecraft.world.entity.player.Inventory inventory) {
+    static int firstEmptyMainSlot(Inventory inventory) {
         for (int i = 0; i < 9; i++) if (inventory.getItem(i).isEmpty()) return i;
         for (int i = 9; i < 36; i++) if (inventory.getItem(i).isEmpty()) return i;
         return -1;

@@ -1,4 +1,8 @@
 package org.maiwithu.maicraft.core.task.interact;
+import net.minecraft.world.level.block.NetherPortalBlock;
+import org.maiwithu.maicraft.core.Constants;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.client.gui.screens.Screen;
 import org.maiwithu.maicraft.core.task.MouseButton;
 import org.maiwithu.maicraft.core.PlayerInv;
 
@@ -122,7 +126,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     /** 告示牌写字的阶段推进与对账证据；提交即走原版编辑屏，文字与提交内容一致才算确认。 */
     private boolean legacyEditorClosed, signSubmitted;
     /** 出手前正在等待退出的遗留屏身份；换成另一块屏时重新计时并再次按 Done 退出。 */
-    private net.minecraft.client.gui.screens.Screen leftoverScreen;
+    private Screen leftoverScreen;
     private int legacyEditorCloseWaitTicks, editorOpenWaitTicks, signSyncWaitTicks;
     private boolean signVerified;
     private int verifiedSide = -1;
@@ -182,7 +186,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
      * 营火等普通点火不受影响。
      */
     private List<BlockPos> portalCapableStancesFirst(List<BlockPos> stances) {
-        double eyeHeight = player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING);
+        double eyeHeight = player.getEyeHeight(Pose.STANDING);
         List<BlockPos> capable = new ArrayList<>(), plain = new ArrayList<>();
         for (BlockPos stance : stances) {
             var aimHit = FirstPersonInteractionTargeting.visibleBlockHit(player.level(), player,
@@ -229,7 +233,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             forcingNewStance = false;
             return false;
         }
-        org.maiwithu.maicraft.core.Constants.LOG.info(
+        Constants.LOG.info(
                 "[maicraft-task] OCCLUDED stance retry {} feet={} aim={} — {}",
                 getClass().getSimpleName(), player.blockPosition().toShortString(),
                 r.aim.toShortString(), blockedDetail);
@@ -311,7 +315,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 leftoverScreen = screen;
                 legacyEditorClosed = true;
                 legacyEditorCloseWaitTicks = 0;
-                org.maiwithu.maicraft.core.Constants.LOG.info(
+                Constants.LOG.info(
                         "[maicraft-task] closing leftover screen {} before sign write at {}",
                         screen.getClass().getName(), r.aim == null ? "?" : aimLabel());
                 screen.onClose();
@@ -583,7 +587,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         screen.onClose();
     }
 
-    private net.minecraft.client.gui.screens.Screen playerScreen() {
+    private Screen playerScreen() {
         return ClientRuntime.requireContext(player).minecraft().screen;
     }
 
@@ -724,7 +728,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             if (!observedId.equals(lastObservedCellId)) {
                 ignitionTimeline.add("t" + fireWaitTicks + ":" + observedId);
                 lastObservedCellId = observedId;
-                org.maiwithu.maicraft.core.Constants.LOG.info(
+                Constants.LOG.info(
                         "ignition watch {} t{}: {}", ignitionCell.toShortString(), fireWaitTicks, observedId);
             }
             if (live != null && NativeConfirmation.ignitionEffect(live)) {
@@ -732,7 +736,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     ignitionVerified = true;
                     ignitionObservedBlockId = observedId;
                 }
-                if (live.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock) {
+                if (live.getBlock() instanceof NetherPortalBlock) {
                     // 原版在火落格同刻换成传送门；看到即收口，不必再等。
                     ignitionPortal = true;
                     return ignitionWindowClose();
@@ -749,7 +753,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private TaskState ignitionWindowClose() {
         if (portalFrameAudit == null && player.level().isLoaded(ignitionCell)) {
             portalFrameAudit = NetherPortalVanillaAudit.audit(player.level()::getBlockState, ignitionCell);
-            org.maiwithu.maicraft.core.Constants.LOG.info(
+            Constants.LOG.info(
                     "ignition frame audit at {}: axis={} bottom_left={} {}x{} valid={} would_form_portal={} offenses={}",
                     ignitionCell.toShortString(), portalFrameAudit.axis(),
                     portalFrameAudit.bottomLeft() == null ? "none" : portalFrameAudit.bottomLeft().toShortString(),

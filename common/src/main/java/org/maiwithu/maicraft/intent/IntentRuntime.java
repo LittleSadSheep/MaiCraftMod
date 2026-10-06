@@ -895,7 +895,9 @@ public final class IntentRuntime {
     /**
      * 恢复历史只校验结构与身份：能力名在册即可暂停在场。参数与当前政策（含 chat 命令门禁）
      * 只约束新提交，不追溯裁决旧任务——旧检查点按写入当刻的规则保留，否则配置收紧会把
-     * 整份历史一票否决、世界永久 recovery_blocked（163）。重新执行仍走 {@link #validateGoal} 全量校验。
+     * 整份历史一票否决、世界永久 recovery_blocked（163）。续跑（task action=resume）也不在这里重验整条目标：
+     * 检查点解码时仍按保存口径拒绝内部执行细节，真正执行某一步时由该能力的适配器按当前规则再检查
+     * （例如聊天命令门禁），不合当前规则的步骤在执行时如实失败。
      */
     private void validateRestoredGoal(Goal goal) {
         if (!KNOWN_ABILITIES.contains(goal.ability())) {

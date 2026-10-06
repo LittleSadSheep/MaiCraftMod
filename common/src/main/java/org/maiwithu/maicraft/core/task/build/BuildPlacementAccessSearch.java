@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.build;
 
+import net.minecraft.world.item.StandingAndWallBlockItem;
+import net.minecraft.world.level.block.state.BlockState;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -180,12 +182,12 @@ final class BuildPlacementAccessSearch {
      * 目标级事实与站位无关，工点搜索失败终局也用它点名真实原因（186），不再被
      * 笼统的 construction_worksite_unproven 覆盖。
      */
-    static AttachmentProbe probeAttachmentFace(BlockGetter level, java.util.function.Predicate<BlockPos> loaded,
+    static AttachmentProbe probeAttachmentFace(BlockGetter level, Predicate<BlockPos> loaded,
                                                BuildTaskRecord.Target target) {
         var stage = new BuildPlacementStage(level, loaded, Map.of(), target, false, true);
         var facts = new LinkedHashMap<String, String>();
         {
-            net.minecraft.world.level.block.state.BlockState self = stage.state(target.pos());
+            BlockState self = stage.state(target.pos());
             String selfId = BuiltInRegistries.BLOCK.getKey(self.getBlock()).toString();
             facts.put("target", self.isAir() ? "air"
                     : self.canBeReplaced() ? "replaceable:" + selfId : selfId);
@@ -193,7 +195,7 @@ final class BuildPlacementAccessSearch {
         boolean supported = false;
         for (Direction direction : Direction.values()) {
             BlockPos clicked = target.pos().relative(direction);
-            net.minecraft.world.level.block.state.BlockState state = stage.state(clicked);
+            BlockState state = stage.state(clicked);
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             if (state.isAir()) {
                 facts.put(direction.getName(), "air");
@@ -222,11 +224,11 @@ final class BuildPlacementAccessSearch {
      * 计入候选会让快速归因闸失效（167 批六A 点位4）；其他方块对着任意可点击面即可放置，
      * 不受自身 canSurvive 约束，仍沿用形状非空口径。
      */
-    private static boolean attachmentFace(net.minecraft.world.level.block.state.BlockState state,
+    private static boolean attachmentFace(BlockState state,
                                           BuildPlacementStage stage, BlockPos clicked, Direction face,
                                           BuildTaskRecord.Target target) {
         if (state.isAir() || state.canBeReplaced()) return false;
-        if (target.item() instanceof net.minecraft.world.item.StandingAndWallBlockItem)
+        if (target.item() instanceof StandingAndWallBlockItem)
             return state.isFaceSturdy(stage, clicked, face);
         return !state.getShape(stage, clicked).isEmpty();
     }

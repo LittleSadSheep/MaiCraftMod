@@ -177,6 +177,8 @@ MLG 反射在角色入水或游泳时停用，已有救援会话和已排队的�
 | 普通断线或换到其他世界 | 对应世界的持久检查点 | 旧世界的身体、路线、菜单和扫描状态 |
 | 从磁盘恢复 | 目标、已确认步骤、问题和持久证据 | 不恢复旧的输入对象或未验证路线；未完成任务先暂停 |
 
+操作者取消正在施工的任务时，若台账里还有角色自己搭的临时支撑，任务会先进入最长约 30 秒的取消缓期，拆净能拆的再交回 `cancelled`；缓期内 `task` 查询仍是 running，并带 `cancellation_cleanup_in_progress:true` 和 `cancellation_note`，不必重复取消。提交新任务会立即打断缓期；整体停机、换身体不走缓期。
+
 恢复后的暂停记录还没有进入身体调度槽。取消它应只结算这张记录，不应该要求先让角色继续干活，更不能挤掉正在执行的另一件事。
 
 实现入口：[CompanionTickDispatcher](../../common/src/main/java/org/maiwithu/maicraft/task/CompanionTickDispatcher.java)、[IntentTaskRecord](../../common/src/main/java/org/maiwithu/maicraft/intent/IntentTaskRecord.java)、[IntentStateCodec](../../common/src/main/java/org/maiwithu/maicraft/intent/persistence/IntentStateCodec.java)。

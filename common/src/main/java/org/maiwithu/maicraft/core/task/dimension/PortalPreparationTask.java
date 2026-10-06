@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.core.task.dimension;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -268,7 +269,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             // 点名候选与需求数：调用方据此预判带什么材料才够，不再靠试错补料；候选之外（如可燃原木）即使身上有也不计入。
             facts.put("supply_required", supplyNeed.count());
             facts.put("supply_candidates", supplyNeed.alternatives().stream()
-                    .map(item -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString()).toList());
+                    .map(item -> BuiltInRegistries.ITEM.getKey(item).toString()).toList());
         }
         facts.put("survey_radius", r.radius);
         if (planningPhaseActive())

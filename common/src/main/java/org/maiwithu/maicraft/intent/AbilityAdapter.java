@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.intent;
 
+import net.minecraft.client.multiplayer.ClientLevel;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -334,7 +335,7 @@ final class AbilityAdapter {
      * 索引条目可能落后于世界（原版床失去支撑即消失）或命中本身悬空；以这样的命中为导航锚，
      * 寻路器面对一个永远无法满足的目标带只能空转直到停滞，角色零位移。
      */
-    private static boolean usableBed(net.minecraft.client.multiplayer.ClientLevel level, BlockPos pos) {
+    private static boolean usableBed(ClientLevel level, BlockPos pos) {
         if (!level.isLoaded(pos) || !(level.getBlockState(pos).getBlock() instanceof BedBlock)) return false;
         for (Direction side : Direction.Plane.HORIZONTAL) {
             if (BlockHelper.isStandable(level, pos.relative(side))) return true;

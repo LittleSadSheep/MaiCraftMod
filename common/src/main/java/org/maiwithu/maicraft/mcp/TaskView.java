@@ -48,6 +48,14 @@ final class TaskView {
         if (record.deduplicatedRequestHits() > 0) {
             result.addProperty("deduplicated_request_hits", record.deduplicatedRequestHits());
         }
+        // 操作者已取消但任务还在跑：这是取消缓期，角色正在回收自己搭的脚手架等现场（最多约 30 秒），
+        // 结束后自动交回 cancelled；明说出来，调用方不会把“还在 running”误当成取消没生效而重复取消。
+        if (!terminal && "operator_cancel".equals(record.getCancelSource())) {
+            result.addProperty("cancellation_cleanup_in_progress", true);
+            result.addProperty("cancellation_note", "cancel accepted; the body is removing its own temporary"
+                    + " supports (about 30 seconds at most) and the task will then settle as cancelled;"
+                    + " submitting a new task interrupts this cleanup immediately");
+        }
         if (terminal) {
             if (record.terminalSnapshot() != null) {
                 JsonObject finished = new JsonObject();

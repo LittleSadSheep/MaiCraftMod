@@ -3,16 +3,20 @@ package org.maiwithu.maicraft.client.actor;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import java.util.Objects;
+import java.util.function.BiFunction;
 import org.maiwithu.maicraft.core.Constants;
 
 /** 真正调用游戏的挖掘、使用、攻击等操作，并保存一项待确认动作；结果由后续观察判断，不直接用 API 返回值。 */
@@ -214,8 +218,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             var result = current.gameMode().useItemOn(current.player(), hand, hit);
             if (acknowledged != null) acknowledged.submitted();
             receipt.attachUseOnTrace(useOnTrace(current, hand, hit, result, sequenceBefore));
-            // 167 的实机下一轮要在 latest.log 里直接看到服务端收到的点击现场，与回执互为对照。
-            Constants.LOG.info("[maicraft-actor] {}", receipt.useOnTrace());
+            // 点击现场已随回执交给调用方（施工失败回执带 use_on_trace）；日志降为 debug，
+            // 建造时每放一块都打 INFO 会刷屏，排查时再打开 debug 对照服务端现场。
+            Constants.LOG.debug("[maicraft-actor] {}", receipt.useOnTrace());
             if (result.shouldSwing()) current.player().swing(hand);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
@@ -231,7 +236,7 @@ public final class DefaultNativeActionPort implements NativeActionPort {
      * 只读观察与字符串拼装，不改变任何世界状态。
      */
     private static String useOnTrace(DefaultLocalPlayerContext context, InteractionHand hand, BlockHitResult hit,
-                                     net.minecraft.world.InteractionResult result, int sequenceBefore) {
+                                     InteractionResult result, int sequenceBefore) {
         try {
             var level = context.level();
             var player = context.player();
@@ -239,10 +244,10 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             var placementCell = clicked.relative(hit.getDirection());
             int sequenceAfter = level instanceof BlockUseAcknowledgement acknowledgement
                     ? acknowledgement.maicraft$currentBlockSequence() : Integer.MIN_VALUE;
-            java.util.function.BiFunction<BlockPos, net.minecraft.world.level.block.state.BlockState, String> describe =
-                    (pos, state) -> pos.toShortString() + "=" + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock());
+            BiFunction<BlockPos, BlockState, String> describe =
+                    (pos, state) -> pos.toShortString() + "=" + BuiltInRegistries.BLOCK.getKey(state.getBlock());
             return "use_on{hand=" + hand
-                    + ", held=" + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                    + ", held=" + BuiltInRegistries.ITEM.getKey(
                             player.getItemInHand(hand).getItem()) + "x" + player.getItemInHand(hand).getCount()
                     + ", clicked=" + describe.apply(clicked, level.getBlockState(clicked))
                     + ", face=" + hit.getDirection()

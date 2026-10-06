@@ -1,5 +1,7 @@
 package org.maiwithu.maicraft.core.act;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Items;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import org.maiwithu.maicraft.entity.InputDriver;
@@ -640,7 +642,7 @@ public final class Interaction {
                 : NativeConfirmation.pending();
         // 打火石把落格的火或传送门方块补进确认依据；只有耐久变化时确认虽可通过，
         // 火是否真实出现仍由点火对账（expectIgnition）如实裁决，不在这里改写结论。
-        NativeConfirmation ignition = heldBefore.is(net.minecraft.world.item.Items.FLINT_AND_STEEL)
+        NativeConfirmation ignition = heldBefore.is(Items.FLINT_AND_STEEL)
                 ? NativeConfirmation.ignitionWorldEffect(clicked.relative(hit.getDirection()))
                 : NativeConfirmation.pending();
         return NativeConfirmation.anyOf(
@@ -692,7 +694,7 @@ public final class Interaction {
             evidence.put("submitted_face", submittedBlockHit.getDirection().getName());
             BlockPos cell = submittedBlockHit.getBlockPos().relative(submittedBlockHit.getDirection());
             evidence.put("settlement_placement_cell", cell.toShortString() + "="
-                    + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(
+                    + BuiltInRegistries.BLOCK.getKey(
                             player.level().getBlockState(cell).getBlock()));
         }
         // 完成回执保留轮座自己的前后观察，规划者据此跳过已安装轮胎，避免再次点击把它取下。

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import net.minecraft.world.level.block.NetherPortalBlock;
+import net.minecraft.world.level.block.BaseFireBlock;
 import java.util.Arrays;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
@@ -97,8 +99,8 @@ public interface NativeConfirmation {
 
     /** 火与传送门方块共用同一判定口径；点击确认与点火对账都引用它，避免两处各认一半。 */
     public static boolean ignitionEffect(BlockState state) {
-        return state.getBlock() instanceof net.minecraft.world.level.block.BaseFireBlock
-                || state.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock;
+        return state.getBlock() instanceof BaseFireBlock
+                || state.getBlock() instanceof NetherPortalBlock;
     }
 
     public static NativeConfirmation heldItemChanged(InteractionHand hand, ItemStack before) {
