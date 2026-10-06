@@ -2693,9 +2693,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private void drainScaffolds() {
         // 导航过程中可能为到达工作位置搭过支撑，把它们收进施工清理名单，避免任务结束后留一堆脚手架。
+        // 旧移动流程只留位置名单没有原生确认回执，这里按现场方块状态核验后补记入台账：
+        // 名单登记时该格只能是可替换的空气，之后读到的非空气实心状态即本次导航垫的块；
+        // 取消缓期等以台账为界的清理入口由此覆盖导航期垫块，空位与目标格不记账。
         boolean added = false;
-        for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player))
-            if (!targets.containsKey(pos.asLong())) added |= scaffolds.add(pos.immutable());
+        for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player)) {
+            if (targets.containsKey(pos.asLong())) continue;
+            added |= scaffolds.add(pos.immutable());
+            if (player.level().isLoaded(pos)) {
+                BlockState live = player.level().getBlockState(pos);
+                if (!live.isAir() && live.getFluidState().isEmpty()) r.scaffoldLedger().confirmed(pos, live);
+            }
+        }
         if (added) renewBuildProgress();
     }
 

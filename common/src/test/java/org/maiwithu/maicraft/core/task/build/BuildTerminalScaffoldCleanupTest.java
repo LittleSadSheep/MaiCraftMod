@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
@@ -31,6 +32,7 @@ public final class BuildTerminalScaffoldCleanupTest {
         cancellationDefersToCleanupAndDeliversCancelled();
         cancellationDuringRunningCleanupKeepsDeliveringCancelled();
         cancellationWithoutTrackedScaffoldsTerminatesImmediately();
+        navigationPlacedScaffoldEntersLedgerAndIsRecoveredOnCancellation();
         System.out.println("BuildTerminalScaffoldCleanupTest: terminal cleanup wrap passed");
     }
 
@@ -83,6 +85,41 @@ public final class BuildTerminalScaffoldCleanupTest {
                     "without tracked scaffolds the cancellation is not deferred");
             check(field(task, "terminalWrap").get(task).toString().equals("NONE"),
                     "no wrap is armed without a ledger");
+        }
+    }
+
+    /**
+     * 批七实机锚点——导航期垫的支撑原先只进位置名单不进台账，取消缓期的台账空守卫直接放行立即取消，
+     * 五块支撑永久残留。修复后 drainScaffolds 按现场方块状态核验补记台账，取消缓期覆盖导航垫块，
+     * 支撑被确认移除后账目结清、任务按 CANCELLED 交付。
+     */
+    private static void navigationPlacedScaffoldEntersLedgerAndIsRecoveredOnCancellation() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            var task = task(h, null);
+            // 模拟旧移动放置流：只登记位置名单，方块随后真实落地，没有原生确认回执。
+            BuildPlacementRegistry.register(h.player, (FirstPersonBuildCompanionTask) task);
+            BuildPlacementRegistry.recordScaffold(h.player, STANDING);
+            h.set(STANDING, Blocks.DIRT.defaultBlockState());
+            invoke(task, "drainScaffolds");
+            BuildPlacementRegistry.unregister(h.player, (FirstPersonBuildCompanionTask) task);
+            check(record(task).scaffoldLedger().contains(STANDING),
+                    "a navigation-placed scaffold enters the ledger once the world confirms the block");
+            check(((FirstPersonBuildCompanionTask) task).requestCancellationCleanup(),
+                    "the cancellation grace now covers the navigation-placed scaffold");
+            check(field(task, "terminalWrap").get(task).toString().equals("CANCELLED"),
+                    "the cancellation wrap is armed for the navigation scaffold");
+            setPhase(task, "SCAFFOLD_SELECT");
+            field(task, "scaffoldQueue").set(task, List.of(STANDING));
+            check(invokeSelect(task) == TaskState.RUNNING, "the recycle engages the standing scaffold");
+            // 本夹具不执行原生破坏；模拟世界侧确认移除后，生产确认入口结清账目并交付取消。
+            h.set(STANDING, Blocks.AIR.defaultBlockState());
+            invoke(task, "confirmedScaffoldBreak");
+            check(invokeSelect(task) == TaskState.CANCELLED,
+                    "after the navigation scaffold is settled the task is delivered as CANCELLED");
+            check(record(task).scaffoldLedger().isEmpty(), "the navigation scaffold left the ledger");
+            check(field(task, "failureCode").get(task) == null,
+                    "a recycled navigation scaffold never grows a failure code");
         }
     }
 
