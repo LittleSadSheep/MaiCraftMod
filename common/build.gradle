@@ -246,6 +246,12 @@ def regressionSuites = [
         heap: '512m', directory: 'occluded-stance-retry-regression', timeoutSeconds: 60,
         purpose: '验证瞄准遮挡后的自动换站位重试与回执计数'
     ],
+    // 决策答复的地形授权在同一任务链内共享：recover 前置步骤与重试原步骤不再对同一授权重问，显式拒绝不被覆盖。
+    recoveryTerrainAuthorizationRegression: [
+        entry: 'org.maiwithu.maicraft.intent.RecoveryTerrainAuthorizationTest',
+        heap: '512m', directory: 'recovery-terrain-authorization-regression', timeoutSeconds: 60,
+        purpose: '验证同任务链内 may_alter_terrain 授权从决策答复传入自动前置步骤与原步骤'
+    ],
     // 定点交互语义入口整链验证：精确目标坐标、定点倒桶落格与门框嵌眼，级联 TargetedItemUseTest。
     exactInteractionTargetRegression: [
         entry: 'org.maiwithu.maicraft.intent.ExactInteractionTargetTest',

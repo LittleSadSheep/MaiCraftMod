@@ -554,8 +554,9 @@ final class IntentTask implements Task {
         }
         if ("recover".equals(answer.choice())) {
             record.discardInternalStepPosition(record.stepIndex());
-            record.insertRecovery(semanticGoal);
-            runtime.semanticPlanChanged(record, semanticGoal, false);
+            Goal inserted = shareTerrainAuthorization(semanticGoal);
+            record.insertRecovery(inserted);
+            runtime.semanticPlanChanged(record, inserted, false);
         } else {
             record.discardInternalStepPosition(record.stepIndex());
             record.replaceCurrent(semanticGoal);
@@ -563,6 +564,42 @@ final class IntentTask implements Task {
         }
         invalidateProtectionCache();
         return TaskState.RUNNING;
+    }
+
+    /**
+     * 同一条任务链内已获回答的地形授权对整条链生效：决策答复或失败步骤任一侧带着 may_alter_terrain=true 时，
+     * 另一侧只在完全缺省（参数与偏好都没有这个字段）时补上，自动插入的前置步骤与重试的原步骤不再对同一授权重问一轮。
+     * 任一侧显式给出的值（含 false）保持原样——授权范围不同的步骤仍各自如实询问；授权也只在本任务链内传递，不跨任务。
+     */
+    private Goal shareTerrainAuthorization(Goal answeredGoal) {
+        Goal failedStep = currentGoal();
+        SharedAuthorization shared = shareTerrainAuthorization(failedStep, answeredGoal);
+        if (!shared.failedStep().equals(failedStep)) {
+            record.updateCurrentParameters(shared.failedStep().parameters());
+        }
+        return shared.answeredGoal();
+    }
+
+    /** 参数或偏好任一处写明了 may_alter_terrain 都算表过态，缺省（字段缺席）才允许继承同链授权。 */
+    private static boolean statesTerrainAuthorization(Goal goal) {
+        return goal.parameters().has("may_alter_terrain") || goal.preferences().has("may_alter_terrain");
+    }
+
+    private static Goal withTerrainAuthorization(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        parameters.addProperty("may_alter_terrain", true);
+        return goal.withParameters(parameters);
+    }
+
+    /** 授权共享后的两侧目标；任一侧保持原样时就是传入的同一实例。 */
+    record SharedAuthorization(Goal answeredGoal, Goal failedStep) {}
+
+    static SharedAuthorization shareTerrainAuthorization(Goal failedStep, Goal answeredGoal) {
+        boolean stepAuthorized = statesTerrainAuthorization(failedStep);
+        boolean answerAuthorized = statesTerrainAuthorization(answeredGoal);
+        if (stepAuthorized == answerAuthorized) return new SharedAuthorization(answeredGoal, failedStep);
+        if (stepAuthorized) return new SharedAuthorization(withTerrainAuthorization(answeredGoal), failedStep);
+        return new SharedAuthorization(answeredGoal, withTerrainAuthorization(failedStep));
     }
 
     private TaskState failStep(TaskState state, TaskResult result) {
