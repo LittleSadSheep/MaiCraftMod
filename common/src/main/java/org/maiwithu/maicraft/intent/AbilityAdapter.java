@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
@@ -206,19 +207,25 @@ final class AbilityAdapter {
                         player.clientLevel,
                         searchCenter,
                         bedBlocks,
-                        1,
+                        5,
                         2,
                         256);
             } finally {
                 TargetIndex.unregister(player.clientLevel, bedBlocks);
             }
             if (!beds.complete()) return IntentAction.Pending.INSTANCE;
-            if (!beds.hits().isEmpty()) {
+            // 索引命中在行动前做活世界复验（索引自身约定：使用位置前必须核对实际世界）。
+            // 悬空、失去站立位的床会让寻路器对着一个永远无法满足的目标带反复规划直到停滞
+            // （177 实机：导航目标 y 高出角色地面 18 格，角色零位移空转 30 秒），宁可如实改道
+            // 也不把这类命中交给导航。
+            BlockPos bedPos = beds.hits().stream()
+                    .filter(hit -> usableBed(player.clientLevel, hit))
+                    .findFirst().orElse(null);
+            if (bedPos != null) {
                 if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
                     return waitForNightDecision(goal, player);
                 }
-                // 找到床后安排两步：先走到这张床的准确位置，再按坐标上床；远距床区不再依赖就近扫描。
-                BlockPos bedPos = beds.hits().getFirst();
+                // 找到可用床后安排两步：先走到这张床的准确位置，再按坐标上床；远距床区不再依赖就近扫描。
                 JsonObject travel = new JsonObject();
                 travel.addProperty("x", bedPos.getX());
                 travel.addProperty("y", bedPos.getY());
@@ -230,6 +237,24 @@ final class AbilityAdapter {
                 return new IntentAction.Chain(List.of(
                         new IntentAction.Tool("goto", travel.toString()),
                         new IntentAction.Tool("sleep", rest.toString())));
+            }
+            if (!beds.hits().isEmpty()) {
+                if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
+                    return waitForNightDecision(goal, player);
+                }
+                if (bedArea == null && inventoryBed(player) == null) {
+                    // 命中全部复验失败且没有自带床：不把失效命中当床交给导航，也不假装
+                    // “已加载范围没有床”，交回调用方决定（走近核实或放弃）。
+                    return decision(goal,
+                            "Bed positions were remembered in the loaded area, but none of them is currently"
+                                    + " approachable: the block is gone or no standable cell remains beside it."
+                                    + " Navigate close to the remembered spot to re-check, or acquire a bed to place.",
+                            List.of(
+                                    option("recover", "Provide details.goal to travel near the remembered bed area first."),
+                                    option("skip", "Continue without sleeping."),
+                                    option("cancel", "Cancel the whole task.")));
+                }
+                // 有床区目标或自带床时继续走后面的路径：到场再核、或就地放床。
             }
         }
         if (bedArea != null) {
@@ -259,6 +284,19 @@ final class AbilityAdapter {
                         option("recover", "Provide details.goal, for example acquiring any usable bed."),
                         option("skip", "Continue without sleeping."),
                         option("cancel", "Cancel the whole task.")));
+    }
+
+    /**
+     * 索引命中的床做行动前的活世界复验：床方块仍真实存在，且任一水平相邻格可以站立。
+     * 索引条目可能落后于世界（原版床失去支撑即消失）或命中本身悬空；以这样的命中为导航锚，
+     * 寻路器面对一个永远无法满足的目标带只能空转直到停滞，角色零位移。
+     */
+    private static boolean usableBed(net.minecraft.client.multiplayer.ClientLevel level, BlockPos pos) {
+        if (!level.isLoaded(pos) || !(level.getBlockState(pos).getBlock() instanceof BedBlock)) return false;
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            if (BlockHelper.isStandable(level, pos.relative(side))) return true;
+        }
+        return false;
     }
 
     static IntentAction waitForNightDecision(Goal goal, LocalPlayer player) {

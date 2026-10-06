@@ -33,6 +33,12 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class SleepBedFallbackRegression {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        // 夹具环境不加载原版数据包标签；睡眠翻译按 BlockTags.BEDS 找床，这里手工绑定同一标签。
+        net.minecraft.core.registries.BuiltInRegistries.BLOCK.bindTags(java.util.Map.of(
+                BlockTags.BEDS, List.of(net.minecraft.world.level.block.Blocks.WHITE_BED.builtInRegistryHolder())));
+        usableIndexedBedAnchorsTheChain();
+        unusableIndexedBedIsNotChased();
+        unusableIndexedBedFallsThroughToCarriedBed();
         occludedVillageBedFallsBackToCarriedBed();
         explicitBedTargetNeverSwapsBeds();
         noCarriedBedKeepsHonestFailure();
@@ -47,6 +53,101 @@ public final class SleepBedFallbackRegression {
         skipAnswerStaysGeneric();
         gateWaitSurvivesCheckpoint();
         System.out.println("SleepBedFallbackRegression: passed");
+    }
+
+    /**
+     * 177：索引命中的可用床仍是行动锚——链上 goto 与 sleep 都用床的真实坐标。
+     * 索引命中在使用前必须过活世界复验，这是复验不误伤正常床的对照面。
+     */
+    private static void usableIndexedBedAnchorsTheChain() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            placeBedAt(world, new net.minecraft.core.BlockPos(4, 1, 4),
+                    net.minecraft.core.Direction.EAST);
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            // 冷索引一次查询预算内走不完：生产中翻译每刻重跑，这里同样推进到查询收敛。
+            Object action = invokeSleep(world, goal);
+            for (int i = 0; i < 50 && action == IntentAction.Pending.INSTANCE; i++) {
+                world.nextTick();
+                action = invokeSleep(world, goal);
+            }
+            check(action instanceof IntentAction.Chain,
+                    "a grounded indexed bed still anchors the goto-then-sleep chain: " + action);
+            List<?> actions = ((IntentAction.Chain) action).actions();
+            check("goto".equals(((IntentAction.Tool) actions.get(0)).toolName())
+                            && "sleep".equals(((IntentAction.Tool) actions.get(1)).toolName()),
+                    "the usable-bed chain is goto then sleep");
+            var sleepArgs = JsonParser.parseString(
+                    ((IntentAction.Tool) actions.get(1)).argumentsJson()).getAsJsonObject();
+            check(sleepArgs.get("y").getAsInt() == 1,
+                    "the usable-bed chain targets the bed's real height, not a stale one: " + sleepArgs);
+        }
+    }
+
+    /**
+     * 177：索引命中悬空（无支撑、床边无站立格）时不交给导航——寻路器对这样的目标带
+     * 只会空转停滞，角色零位移；无自带床时如实交回决定，不假装“范围里没有床”。
+     */
+    private static void unusableIndexedBedIsNotChased() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            placeBedAt(world, new net.minecraft.core.BlockPos(4, 8, 4),
+                    net.minecraft.core.Direction.EAST);
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            Object action = invokeSleep(world, goal);
+            for (int i = 0; i < 50 && action == IntentAction.Pending.INSTANCE; i++) {
+                world.nextTick();
+                action = invokeSleep(world, goal);
+            }
+            check(!(action instanceof IntentAction.Chain),
+                    "a floating indexed bed is never handed to navigation");
+            check(action instanceof IntentAction.Decision
+                            && ((IntentAction.Decision) action).snapshot().question()
+                                    .contains("currently approachable"),
+                    "an unusable bed hit ends in an honest decision: " + action);
+        }
+    }
+
+    /** 悬空命中不追，但背包里有床时照常回退到就地放床，不再额外多问一轮。 */
+    private static void unusableIndexedBedFallsThroughToCarriedBed() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            placeBedAt(world, new net.minecraft.core.BlockPos(4, 8, 4),
+                    net.minecraft.core.Direction.EAST);
+            world.inventory.add(new ItemStack(Items.WHITE_BED));
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            Object action = invokeSleep(world, goal);
+            for (int i = 0; i < 50 && action == IntentAction.Pending.INSTANCE; i++) {
+                world.nextTick();
+                action = invokeSleep(world, goal);
+            }
+            check(action instanceof IntentAction.Chain,
+                    "a carried bed still plans place-then-sleep past an unusable hit");
+            assertCarriedBedChain((IntentAction.Chain) action, "minecraft:white_bed");
+        }
+    }
+
+    /** 在指定格放一张完整的床（床头按朝向自动补齐），不落支撑。 */
+    private static void placeBedAt(InteractionWorldTestHarness world,
+            net.minecraft.core.BlockPos foot, net.minecraft.core.Direction facing) {
+        var footState = net.minecraft.world.level.block.Blocks.WHITE_BED.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.BedBlock.PART,
+                        net.minecraft.world.level.block.state.properties.BedPart.FOOT)
+                .setValue(net.minecraft.world.level.block.BedBlock.FACING, facing);
+        var headState = net.minecraft.world.level.block.Blocks.WHITE_BED.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.BedBlock.PART,
+                        net.minecraft.world.level.block.state.properties.BedPart.HEAD)
+                .setValue(net.minecraft.world.level.block.BedBlock.FACING, facing);
+        world.set(foot, footState);
+        world.set(foot.relative(facing), headState);
+    }
+
+    /** 反射调用私有 sleep 翻译：与 emptyWorldPlansCarriedBedDirectly 同一入口。 */
+    private static Object invokeSleep(InteractionWorldTestHarness world, Goal goal) throws Exception {
+        Method sleep = AbilityAdapter.class.getDeclaredMethod("sleep",
+                Goal.class, net.minecraft.client.player.LocalPlayer.class, IntentRuntime.class);
+        sleep.setAccessible(true);
+        return sleep.invoke(null, goal, world.player, null);
     }
 
     /** ①现成床被遮挡：回退链是 放自带床 → 走到预选站位 → 按床头坐标入睡。 */
