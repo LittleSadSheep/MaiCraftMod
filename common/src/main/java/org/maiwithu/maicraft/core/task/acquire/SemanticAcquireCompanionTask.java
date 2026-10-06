@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+import org.maiwithu.maicraft.core.task.inventory.OffhandSupplyTaskRecord;
 
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
@@ -156,6 +157,7 @@ public final class SemanticAcquireCompanionTask
     private final AcquisitionWirelessEvidence wirelessEvidence = new AcquisitionWirelessEvidence();
     private final AcquisitionInventoryTidy inventoryTidy;
     private final AcquisitionBackpackInventory backpacks;
+    private final AcquisitionOffhandInventory offhands = new AcquisitionOffhandInventory();
     private TaskRecord inventoryCapacityBlockedRecord;
     private ContainerSearchScope storageScope;
 
@@ -245,6 +247,12 @@ public final class SemanticAcquireCompanionTask
         // 主背包不足时先取随身背包现货，随后才开无线终端或找外部来源；mine/wireless等单一许可不被扩权。
         if (!needs.isEmpty()) {
             var need = needs.peek();
+            // 副手握着点名物品而主背包口径数不到它时，先换位再谈采集；来源许可沿用随身背包的口径。
+            OffhandSupplyTaskRecord offhandPull = offhands.next(player, need, missing(need),
+                    () -> childId("offhand"), player.level().getGameTime() + STORAGE_TICKS);
+            if (offhandPull != null)
+                return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, offhandPull,
+                        "swap the requested offhand stack into the main inventory");
             BackpackSupplyTaskRecord backpack;
             try { backpack = backpacks.next(player, need, missing(need), () -> childId("backpack"), player.level().getGameTime() + STORAGE_TICKS); }
             catch (IllegalStateException unavailable) { return failAcquisition("backpack_inventory_unverified", unavailable.getMessage(), FailureType.TARGET_LOST); }
@@ -1323,6 +1331,13 @@ public final class SemanticAcquireCompanionTask
             bodyPreparationFailure = Map.copyOf(result.data()); failureNeed = completedNeed; completedNeed.decisionRequired = true;
             addIssue("craft", "crafting_body_preparation_required", result.message(), result.data());
             return failAcquisition("crafting_body_preparation_required", result.message(), childFailureType(terminal, result));
+        }
+        if (completedRecord instanceof OffhandSupplyTaskRecord) {
+            // 未结清的不确定效果已由上方统一拦截；这里的确定失败只记下原因，按普通来源继续，不重试同一换位。
+            addIssue("inventory", "offhand_pull_unavailable",
+                    result == null ? "offhand swap result missing" : result.message(),
+                    result == null ? Map.of() : result.data());
+            return TaskState.RUNNING;
         }
         if (completedRecord instanceof BackpackSupplyTaskRecord) {
             String code = result == null || result.data() == null ? "backpack_result_missing" : string(result.data().get("failure_code"));

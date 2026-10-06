@@ -271,7 +271,7 @@ public final class SemanticAbilityCatalog {
                             + "scenes, supply or multi-cell placement. Display entities (item frames, armor stands, paintings) "
                             + "are not blocks and are rejected here.",
                     targets("coordinates"), fields(
-                            field("block_id", "resource_id", "Required namespaced block to set down; it must be carried, and missing items fail without an acquisition run. Display entities are not blocks and cannot be placed here."),
+                            field("block_id", "resource_id", "Required namespaced block to set down. Carried means the 36 main-inventory slots: placement itself cannot pick from the offhand, so a missing item first triggers one inventory-family pass that swaps a requested offhand stack into an empty main slot, and only a still-missing item fails without mining or crafting. Display entities are not blocks and cannot be placed here."),
                             field("properties", "object", "Optional final block-state requirements under the same rules as blueprint properties: omitted states stay unconstrained, declared states are final requirements, and unsupported final changes fail without secretly breaking blocks."),
                             field("replace_existing", "boolean", "Explicit permission to replace an occupied cell; default false.")));
             case GeneralAbilityAdapter.FOLLOW -> contract(
@@ -300,7 +300,7 @@ public final class SemanticAbilityCatalog {
             case GeneralAbilityAdapter.EQUIP -> contract(
                     // 拿在手上和使用物品分开；卸下结果同时披露收回与仍留在身上的装备。
                     "把随身某类物品拿到主手、副手或穿到对应部位，也可卸下指定部位。业务参数放goal.parameters；target省略/null/current_place，preferences和constraints无专属选项。主手持物不会使用它；护甲按原生使用穿戴，副手用可见背包交换。"
-                            + "未点名且指定部位时，只在兼容候选按物品ID去重后仅一种时自动选。没有附魔/耐久最优选择，也不能指定某个组件版本。真正穿戴来源只看主背包和快捷栏；已经戴好但背包没有另一件时仍可能报缺料。"
+                            + "未点名且指定部位时，只在兼容候选按物品ID去重后仅一种时自动选。没有附魔/耐久最优选择，也不能指定某个组件版本。真正穿戴来源按主背包和快捷栏查找；副手握着同类物品时先原样换进空主格再装备（无空主格则报缺料），已在副手而点名副手时按已装备核对。已经戴好但背包没有另一件时仍可能报缺料。"
                             + "卸甲按头胸腿脚逐件处理；放不下的留身上，不主动丢物品。当前卸下仍可能success但still_worn非空，全部留下时消息甚至写已为空，必须看removed和still_worn。副手原有完全相同物品堆时交换确认可能失败。"
                             + "暂停保留内存阶段并释放输入，原生已提交交换可能继续；取消收尾不回滚已穿装备。死亡/换世界/重启清理旧界面，未完成父任务先暂停，继续按当前库存重建，不能假定原来的来源槽仍有效。"
                             + "完整 plan 参数：{\"goal\":{\"ability\":\"maicraft:equip\",\"outcome\":\"把铁镐拿到主手\",\"parameters\":{\"action\":\"equip\",\"item_id\":\"minecraft:iron_pickaxe\",\"equipment_location\":\"mainhand\"}}}。"
@@ -308,7 +308,7 @@ public final class SemanticAbilityCatalog {
                     targets("current_place"),
                     fields(
                             field("action", "string", "goal.parameters.action 为equip或unequip，省略/null/空白默认equip，名称转小写。其他动作提出决定；当前并非严格类型读取，错误原始值可能转字符串，错误形状可能按省略处理。"),
-                            field("item_id", "resource_id", "goal.parameters.item_id 为随身物品ID字符串；equip时通常必填，省略/null/空白只可在指定equipment_location且恰有一种兼容物品ID时自动选。unequip时忽略，不是互斥报错。"),
+                            field("item_id", "resource_id", "goal.parameters.item_id 为随身物品ID字符串；装备来源按主背包36格查找，副手握着同类物品且有空主格时先原样换进主背包再装备，已在副手而点名副手时直接按已装备核对。equip时通常必填，省略/null/空白只可在指定equipment_location且恰有一种兼容物品ID时自动选。unequip时忽略，不是互斥报错。"),
                             field("equipment_location", "string", "goal.parameters.equipment_location 取mainhand、offhand、head、chest、legs、feet、armor。equip省略/null/空白按物品自然部位，显式护甲部位须匹配；unequip必须提供，armor仅表示按头胸腿脚卸四件，不能用来自动穿全套。这里是语义部位，不是GUI格号；0和false不是有效部位。")));
             case GeneralAbilityAdapter.FISH -> contract(
                     // 咬钩、收线和战利品入包按顺序确认；公开目标数量与旧内部常驻钓鱼模式分开说明。

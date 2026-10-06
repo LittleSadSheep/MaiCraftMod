@@ -395,6 +395,12 @@ def regressionSuites = [
         heap: '512m', directory: 'recipe-frontier-fallback-regression', timeoutSeconds: 60,
         purpose: '回放配方前沿替代材料失败与承诺边界'
     ],
+    // 副手供给回放单独核对：取物调度安排副手换位、换位任务净增确认与 equip 从副手取用。
+    offhandSupplyRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.acquire.OffhandSupplyTest',
+        heap: '512m', directory: 'offhand-supply-regression', timeoutSeconds: 60,
+        purpose: '验证副手物资对取物调度可见并可经原生换位进入主背包'
+    ],
     stonecuttingProcessRegression: [
         entry: 'org.maiwithu.maicraft.core.task.stonecutter.StonecuttingProcessTest',
         heap: '512m', directory: 'stonecutting-process-regression', timeoutSeconds: 45,
