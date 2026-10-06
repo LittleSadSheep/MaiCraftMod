@@ -21,10 +21,12 @@ import org.maiwithu.maicraft.core.blueprint.BuildingModelContract;
 import com.google.gson.JsonArray;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbQuestFixture;
 import org.maiwithu.maicraft.core.integration.ftbquests.FtbRewardFixture.Reward;
 import org.maiwithu.maicraft.mcp.knowledge.FtbQuestsKnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.mcp.knowledge.web.KnowledgeEnvironment;
 
 /** 直接对嵌入服务执行真实 JSON-RPC/HTTP 测试，不需要 Minecraft 世界。 */
 public final class KnowledgeHttpTest {
@@ -83,16 +85,27 @@ public final class KnowledgeHttpTest {
             String scene = null;
             boolean attention = false;
             boolean chatflow = false;
+            boolean environment = false;
             for (var element : allResources) {
                 var row = element.getAsJsonObject();
                 check(!row.has("text"), "resources/list must not preload tutorial bodies");
                 String uri = row.get("uri").getAsString();
                 attention |= uri.equals("maicraft://attention");
                 chatflow |= uri.equals("maicraft://chatflow");
+                environment |= uri.equals(EmbeddedMcpService.ENVIRONMENT_URI.toString());
                 if (uri.startsWith(PonderKnowledgeSource.SCENE)) scene = uri;
             }
-            check(attention && chatflow && scene != null && PonderFixture.compiled == 0,
-                    "keep attention and chatflow, and discover foreign Ponder scenes");
+            check(attention && chatflow && environment && scene != null && PonderFixture.compiled == 0,
+                    "keep attention, chatflow and environment, and discover foreign Ponder scenes");
+            // 宿主按已装模组挑选玩法：清单经标准资源读取完整交付，按编号排序且标明来自客户端安装。
+            KnowledgeEnvironment.install("neoforge", "1.21.1", Map.of("mekanism", "10.7.0", "create", "6.0.6"));
+            var installed = json(send("resources/read", uri(EmbeddedMcpService.ENVIRONMENT_URI.toString())).getAsJsonObject("result")
+                    .getAsJsonArray("contents").get(0).getAsJsonObject().get("text").getAsString());
+            check(installed.get("mods_known").getAsBoolean() && installed.get("loader").getAsString().equals("neoforge")
+                    && installed.getAsJsonObject("mods").keySet().stream().toList().equals(List.of("create", "mekanism"))
+                    && installed.getAsJsonObject("mods").get("create").getAsString().equals("6.0.6")
+                    && installed.get("version_scope").getAsString().equals("client_installation"),
+                    "installed mods are listed in id order from the client installation");
             // 穿过真实 HTTP 参数校验与分流：近似搜索只出目录，选定 URI 后才取正文。
             var fuzzy = payload(send("tools/call", json("{\"name\":\"perceive\",\"arguments\":{\"view\":\"knowledge\",\"query\":\"精密构建\",\"limit\":5}}")));
             var chosen = fuzzy.getAsJsonArray("resources").get(0).getAsJsonObject();

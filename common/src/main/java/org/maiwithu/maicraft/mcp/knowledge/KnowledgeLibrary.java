@@ -151,7 +151,11 @@ public final class KnowledgeLibrary {
         JsonObject chatPriority = new JsonObject(); chatPriority.addProperty("priority", 0.9);
         JsonArray chatAudience = new JsonArray(); chatAudience.add("assistant"); chatPriority.add("audience", chatAudience);
         chatflow.add("annotations", chatPriority);
-        all.add(attention); all.add(chatflow); catalog().forEach(entry -> all.add(entry.metadata()));
+        // 安装环境只给宿主挑选模组玩法用，不进模型的知识搜索；列在这里方便客户端发现入口。
+        JsonObject environment = new JsonObject(); environment.addProperty("uri", "maicraft://environment");
+        environment.addProperty("name", "Installed environment"); environment.addProperty("mimeType", "application/json");
+        environment.addProperty("description", "Loader, Minecraft version and every loaded mod id with its version, frozen at client startup. Client installation only; not proof of server configuration or current executability.");
+        all.add(attention); all.add(chatflow); all.add(environment); catalog().forEach(entry -> all.add(entry.metadata()));
         String revision = digest(all.toString());
         int offset = 0;
         if (cursor != null) {

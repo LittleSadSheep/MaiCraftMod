@@ -33,6 +33,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CancellationException;
@@ -52,6 +53,7 @@ import java.util.concurrent.ExecutionException;
 import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeException;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.web.KnowledgeEnvironment;
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
@@ -61,6 +63,7 @@ import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 public final class EmbeddedMcpService implements AutoCloseable {
     public static final URI ATTENTION_URI = URI.create("maicraft://attention");
     public static final URI CHATFLOW_URI = URI.create("maicraft://chatflow");
+    public static final URI ENVIRONMENT_URI = URI.create("maicraft://environment");
 
     // MCP 通过 application/json 传递游戏事实；只做 JSON 必需转义，避免物品说明中的尖括号等字符膨胀为六字符 HTML 转义。
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
@@ -515,7 +518,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject readResource(JsonObject params) {
-        // Attention 和 ChatFlow 资源读各自的快照；其他地址交给知识库。这里只读资源，不启动目标执行。
+        // Attention、ChatFlow 与安装环境各读自己的快照；其他地址交给知识库。这里只读资源，不启动目标执行。
         only(params, "uri", "_meta");
         optionalMeta(params);
         String uri = requiredString(params, "uri");
@@ -530,6 +533,10 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
         if (CHATFLOW_URI.toString().equals(uri)) {
             return jsonResource(CHATFLOW_URI, runtime.readChat());
+        }
+        if (ENVIRONMENT_URI.toString().equals(uri)) {
+            // 宿主连上后读一次已装模组清单，决定准备哪些模组玩法；清单启动时已冻结，不经过游戏线程。
+            return jsonResource(ENVIRONMENT_URI, CompletableFuture.<JsonElement>completedFuture(KnowledgeEnvironment.installation()));
         }
         JsonObject request = new JsonObject(); request.addProperty("action", "read"); request.addProperty("uri", uri);
         // 标准资源读取供宿主校验 Schema 和保存原件，必须保持所选 URI 的完整正文与 MIME；模型工具入口单独投影。

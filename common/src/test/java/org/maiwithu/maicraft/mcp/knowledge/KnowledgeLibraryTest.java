@@ -39,11 +39,12 @@ public final class KnowledgeLibraryTest {
         }
         // 材料工艺和原生过程知识都只发布元数据，不在默认发现时展开合成树、机制契约或教程正文。
         // 六份主文档包含起飞前配平；发现阶段仍只返回元数据，不提前读取物理或教程正文。
-        check(uris.size() == source.entries().size() + 8 + KnowledgeLibrary.GAME_MECHANICS.length + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
+        // 另有任务注意流、游戏聊天流与已装模组清单三个宿主入口。
+        check(uris.size() == source.entries().size() + 9 + KnowledgeLibrary.GAME_MECHANICS.length + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
                 && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES, KnowledgeLibrary.PHYSICS,
-                        "maicraft://attention", "maicraft://chatflow", MachineAssemblyResources.URI,
+                        "maicraft://attention", "maicraft://chatflow", "maicraft://environment", MachineAssemblyResources.URI,
                         KnowledgeLibrary.GAME_MECHANICS_PREFIX + "gravity-blocks", KnowledgeLibrary.GAME_MECHANICS_PREFIX + "mine-source-scope")),
-                "attention, chatflow, builtins and all extension resources discovered without bodies");
+                "attention, chatflow, environment, builtins and all extension resources discovered without bodies");
         // 每张机制常识卡必须真能读出正文，且同时带"规则"与"会怎么坑你"两节——注册了 URI 而正文缺失比没有卡片更误导。
         for (String[] card : KnowledgeLibrary.GAME_MECHANICS) {
             KnowledgeDocument body = library.read(KnowledgeLibrary.GAME_MECHANICS_PREFIX + card[0]);
