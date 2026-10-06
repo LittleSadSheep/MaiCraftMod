@@ -85,6 +85,12 @@ final class IntentTask implements Task {
     private BlockPos bedFallbackBedHead;
     /** 换位重试只做一次：换位后仍判遮挡就让两段失败诚实终局。 */
     private boolean bedFallbackRepositioned;
+    /** 最近一次入睡尝试锚定的床头：sleep 子任务启动时记下，现成床遮挡的换位重试回到同一张床。 */
+    private BlockPos sleepAttemptBedHead;
+    /** 现成床遮挡的换位重试只做一次；重试后仍遮挡就进入回退或诚实终局（166 批七）。 */
+    private boolean sleepRepositioned;
+    /** 触发现成床换位重试的那次失败原文：两段终局如实带上，调用方不必翻历史对账。 */
+    private String sleepRepositionFailure;
     /** 单次机械续建凭据只保留在 Mod 内部，调用方仍通过语义重试选择下一步。 */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
     private String cachedProtectionDimension;
@@ -392,6 +398,10 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
+            // 入睡尝试的床头锚点：遮挡失败的换位重试按它回到同一张床，不按类型重扫附近。
+            if (nextRecord instanceof org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord sleepRecord) {
+                sleepAttemptBedHead = sleepRecord.bed;
+            }
             if (nextRecord instanceof SemanticAcquireTaskRecord acquire && AcquireAbilityAdapter.ABILITY.equals(currentGoal().ability())) {
                 // 恢复时覆盖新子任务临时捕获的位置；首次翻箱前复用现有检查点屏障，保证原范围已真正落盘。
                 var scope = record.retainContainerSearchScope(acquire.storageScope == null
@@ -587,6 +597,9 @@ final class IntentTask implements Task {
         bedFallbackFailure = null;
         bedFallbackBedHead = null;
         bedFallbackRepositioned = false;
+        sleepAttemptBedHead = null;
+        sleepRepositioned = false;
+        sleepRepositionFailure = null;
         return result.withData(data);
     }
 
@@ -675,6 +688,14 @@ final class IntentTask implements Task {
                     + bedFallbackFailure + "; " + failure.message(),
                     failure.timedOut(), failure.interrupted(), failure.data());
         }
+        // 现成床的换位重试也失败过：终局话术同样两段带全（166 批七：单句 occluded 收场，
+        // 调用方无从得知换位已经试过）。回退链的前缀可能已经叠了第一段，同样防双包。
+        if (sleepRepositionFailure != null
+                && !failure.message().startsWith("the reposition retry also failed")) {
+            failure = new TaskResult(false, "the reposition retry also failed; the earlier attempt failed with: "
+                    + sleepRepositionFailure + "; " + failure.message(),
+                    failure.timedOut(), failure.interrupted(), failure.data());
+        }
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
                 record.stepIndex(),
                 failedGoal,
@@ -701,10 +722,10 @@ final class IntentTask implements Task {
     }
 
     /**
-     * sleep 步骤里的现成床不可用（遮挡/够不着/失效）时接上自带床回退步骤：放床、走到预选站位、
-     * 按床头坐标入睡。放置后入睡仍判遮挡时，先换到床边另一个可交互站位重试一次（锚定同一张床），
-     * 仍失败才让两段失败终局；没有落位或不在可睡窗口则把那个决定交给调用方；
-     * 背包里没有床时返回 null，维持原本的诚实失败。
+     * sleep 步骤失败时的遮挡恢复阶梯。现成床（含点名床）入睡判遮挡时，先换到床边另一个
+     * 可交互站位重试一次（锚定同一张床头）；换位后仍遮挡，再按原有规则考虑自带床回退——
+     * 背包有床且未点名床区时放床再睡，否则两段失败诚实终局（166 批七：走到床边后单句
+     * occluded 收场、无换位无回退，因为换位重试原先只在自带床回退链内生效）。
      */
     private TaskState trySleepCarriedBedFallback(Goal goal, TaskResult failure, TaskState failureState) {
         String failureType = String.valueOf(failure.data().get("failure_type"));
@@ -728,6 +749,21 @@ final class IntentTask implements Task {
         }
         if (failureState != TaskState.FAILED
                 || !"maicraft:sleep".equals(goal.ability())) return null;
+        // 现成床入睡判遮挡：先换位重试一次（锚定同一张床头），再谈换床或终局。
+        if ("occluded".equals(failureType) && !sleepRepositioned && sleepAttemptBedHead != null) {
+            IntentAction.Chain retry = AbilityAdapter.sleepRepositionRetry(player, sleepAttemptBedHead);
+            if (retry != null) {
+                sleepRepositioned = true;
+                sleepRepositionFailure = failure.message();
+                chain = retry.actions();
+                chainIndex = 0;
+                Constants.LOG.info("[maicraft-sleep] 现成床 {} 入睡判遮挡，换到床边可交互站位重试一次",
+                        sleepAttemptBedHead);
+                return TaskState.RUNNING;
+            }
+            Constants.LOG.info("[maicraft-sleep] 现成床 {} 入睡判遮挡，床边没有可站立换位",
+                    sleepAttemptBedHead);
+        }
         AbilityAdapter.CarriedBedPlan fallback = AbilityAdapter.carriedBedFallback(goal, player, failureType);
         if (fallback == null) return null;
         bedFallbackEngaged = true;
@@ -762,6 +798,9 @@ final class IntentTask implements Task {
         bedFallbackFailure = null;
         bedFallbackBedHead = null;
         bedFallbackRepositioned = false;
+        sleepAttemptBedHead = null;
+        sleepRepositioned = false;
+        sleepRepositionFailure = null;
         record.addStepResult(new IntentTaskRecord.StepSnapshot(
                 record.stepIndex(), goal.ability(), false, failure.message(), failure.toJson(), false));
         runtime.stepProcessed(record);
@@ -1043,6 +1082,9 @@ final class IntentTask implements Task {
         result = SemanticResultView.result(result);
         bedFallbackEngaged = false;
         bedFallbackFailure = null;
+        sleepAttemptBedHead = null;
+        sleepRepositioned = false;
+        sleepRepositionFailure = null;
         int index = record.stepIndex();
         if (skipped) record.discardInternalStepPosition(index);
         Goal goal = record.steps().get(index);

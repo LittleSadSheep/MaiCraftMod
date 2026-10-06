@@ -39,6 +39,10 @@ public final class SleepBedFallbackRegression {
         usableIndexedBedAnchorsTheChain();
         unusableIndexedBedIsNotChased();
         unusableIndexedBedFallsThroughToCarriedBed();
+        bedAreaAnchorSnapsToVerifiedGround();
+        unverifiedBedAreaAnchorIsNotNavigated();
+        occludedReachedBedRepositionsOnce();
+        occludedLadderRepositionsThenFallsBack();
         occludedVillageBedFallsBackToCarriedBed();
         explicitBedTargetNeverSwapsBeds();
         noCarriedBedKeepsHonestFailure();
@@ -124,6 +128,121 @@ public final class SleepBedFallbackRegression {
             check(action instanceof IntentAction.Chain,
                     "a carried bed still plans place-then-sleep past an unusable hit");
             assertCarriedBedChain((IntentAction.Chain) action, "minecraft:white_bed");
+        }
+    }
+
+    /**
+     * 177 二轮：床区 target 的 y 与已加载地形不符时，goto 锚必须落到核验过的真实地面格，
+     * 不把模型或记忆里的悬空 y 原样交给导航（实机 target_y_hint=90 vs ground_y=72）。
+     */
+    private static void bedAreaAnchorSnapsToVerifiedGround() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            var goal = new Goal("maicraft:sleep", "sleep at the village bed area",
+                    new Goal.SemanticTarget("coordinates", null,
+                            new Goal.WorldPosition(2, 90, 2, "minecraft:overworld"), null),
+                    "{}", "{}", List.of(), List.of());
+            Object action = invokeSleep(world, goal);
+            for (int i = 0; i < 50 && action == IntentAction.Pending.INSTANCE; i++) {
+                world.nextTick();
+                action = invokeSleep(world, goal);
+            }
+            check(action instanceof IntentAction.Chain,
+                    "a loaded bed-area column still produces the goto-then-sleep chain: " + action);
+            var gotoArgs = JsonParser.parseString(
+                    ((IntentAction.Tool) ((IntentAction.Chain) action).actions().get(0)).argumentsJson())
+                    .getAsJsonObject();
+            check(gotoArgs.get("y").getAsInt() == 1,
+                    "the goto anchor snaps to the verified standable ground, not the supplied y: " + gotoArgs);
+        }
+    }
+
+    /**
+     * 177 二轮：目标列未加载时床区锚无法核验——这样的锚不交给导航（寻路器对不可满足的
+     * 目标带只会空转停滞），如实交回决定请调用方先 travel 到附近。
+     */
+    private static void unverifiedBedAreaAnchorIsNotNavigated() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            var goal = new Goal("maicraft:sleep", "sleep at the village bed area",
+                    new Goal.SemanticTarget("coordinates", null,
+                            new Goal.WorldPosition(80, 90, 80, "minecraft:overworld"), null),
+                    "{}", "{}", List.of(), List.of());
+            Object action = invokeSleep(world, goal);
+            for (int i = 0; i < 50 && action == IntentAction.Pending.INSTANCE; i++) {
+                world.nextTick();
+                action = invokeSleep(world, goal);
+            }
+            check(action instanceof IntentAction.Decision
+                            && ((IntentAction.Decision) action).snapshot().question()
+                                    .contains("cannot be verified"),
+                    "an unverifiable bed-area anchor ends in a decision, never in navigation: " + action);
+        }
+    }
+
+    /**
+     * 166 批七：走到现成床边后判遮挡，先换到床边另一可交互站位重试一次（锚定同一张床头），
+     * 不再单句 occluded 直接终局；换位后仍遮挡才进入回退或诚实终局。
+     */
+    private static void occludedReachedBedRepositionsOnce() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            // 无自带床：换位重试后仍遮挡就以两段失败终局，不虚构换床出路。
+            var bedHead = new net.minecraft.core.BlockPos(5, 1, 5);
+            placeBedAt(world, bedHead.west(), net.minecraft.core.Direction.EAST);
+            var task = task(world);
+            field(IntentTask.class, "sleepAttemptBedHead").set(task, bedHead);
+            var state = failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded")));
+            check(state == TaskState.RUNNING, "an occluded reached bed repositions instead of ending the task");
+            var retryChain = chainOf(task);
+            check(retryChain.size() == 2 && "goto".equals(retryChain.get(0).toolName())
+                            && "sleep".equals(retryChain.get(1).toolName()),
+                    "the reached-bed reposition retry is goto then sleep");
+            check(bedHead.equals(sleepCoordsOf(new IntentAction.Chain(retryChain))),
+                    "the reposition retry stays anchored to the same reached bed: " + retryChain);
+            var terminal = failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded")));
+            check(terminal == TaskState.FAILED, "a second occluded failure without a carried bed ends the task");
+            String message = resultMessage(task);
+            check(message.startsWith("the reposition retry also failed")
+                            && message.contains("occluded from the current stance"),
+                    "the terminal message carries both the reposition failure and the earlier attempt: " + message);
+        }
+    }
+
+    /**
+     * 166 完整阶梯：现成床遮挡 → 换位重试 → 仍遮挡回退放自带床 → 回退床遮挡换位 → 仍遮挡
+     * 两段终局。换位重试先于换床，两级终局前缀各带一段失败原文且不互相双包。
+     */
+    private static void occludedLadderRepositionsThenFallsBack() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            world.inventory.add(new ItemStack(Items.WHITE_BED));
+            var bedHead = new net.minecraft.core.BlockPos(5, 1, 5);
+            placeBedAt(world, bedHead.west(), net.minecraft.core.Direction.EAST);
+            var task = task(world);
+            field(IntentTask.class, "sleepAttemptBedHead").set(task, bedHead);
+            check(failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded"))) == TaskState.RUNNING,
+                    "the first occluded failure engages the reached-bed reposition");
+            check(failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded"))) == TaskState.RUNNING,
+                    "a second occluded failure engages the carried-bed fallback");
+            var fallbackChain = chainOf(task);
+            check(fallbackChain.size() == 3 && "build".equals(fallbackChain.get(0).toolName()),
+                    "the fallback chain places the carried bed: " + fallbackChain);
+            placeBedFromBuildStep(world, fallbackChain.get(0));
+            check(failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded"))) == TaskState.RUNNING,
+                    "an occluded placed bed repositions within the fallback chain");
+            var state = failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded")));
+            check(state == TaskState.FAILED, "a final occluded failure ends the task");
+            String message = resultMessage(task);
+            check(message.contains("carried-bed fallback also failed")
+                            && message.contains("reposition retry also failed"),
+                    "the terminal message carries both escalation stages: " + message);
         }
     }
 
