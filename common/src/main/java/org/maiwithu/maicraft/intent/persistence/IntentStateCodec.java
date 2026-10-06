@@ -78,6 +78,7 @@ public final class IntentStateCodec {
             IntentTaskRecord.TerminalSnapshot terminal,
             boolean chatSubmissionTracked,
             boolean sleepGateWaiting,
+            boolean sleepGateRecoverConsumed,
             Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes,
             Map<Integer, IntentTaskRecord.AcquireBaseline> acquireBaselines) {}
 
@@ -274,6 +275,11 @@ public final class IntentStateCodec {
         if (task.sleepGateWaiting()) {
             // 白天门 recover 已消费、正在等可睡窗口：重启后同一扇已答复的门不能重提。
             value.addProperty("sleep_gate_waiting", true);
+        }
+        if (task.sleepGateRecoverConsumed()) {
+            // recover 消费标记独立于等待阶段保存：开窗沿失败回退等场景清掉等待后，
+            // 同一扇已答复的门仍然不重提（145 批七开窗沿）。
+            value.addProperty("sleep_gate_recover_consumed", true);
         }
         if (task.terminalSnapshot() != null) {
             IntentTaskRecord.TerminalSnapshot terminal = task.terminalSnapshot();
@@ -481,6 +487,7 @@ public final class IntentStateCodec {
                 decision, answer, terminal,
                 value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean(),
                 value.has("sleep_gate_waiting") && value.get("sleep_gate_waiting").getAsBoolean(),
+                value.has("sleep_gate_recover_consumed") && value.get("sleep_gate_recover_consumed").getAsBoolean(),
                 decodeContainerSearchScopes(value, steps),
                 decodeAcquireBaselines(value, steps, stepIndex));
     }

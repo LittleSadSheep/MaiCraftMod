@@ -352,15 +352,25 @@ final class IntentTask implements Task {
                 chainIndex = 0;
                 yield beginTool(chain.getFirst());
             }
-            case IntentAction.Decision decision -> switch (sleepGateRelayAction(
-                    record.decisionSnapshot() != null,
-                    isSleepGateDecision(decision.snapshot()),
-                    record.sleepGateWaiting())) {
-                // 决策还开着（未答）：原地等答复；已答 recover 的白天门在等待窗口：
-                // 同一扇关着的门绝不换发新决策（与 explore 兴趣中继同一三态语义）。
-                case PARK, HOLD_REISSUE -> TaskState.RUNNING;
-                case ISSUE -> requestDecision(decision.snapshot());
-            };
+            case IntentAction.Decision decision -> {
+                // recover 已消费过的门在任何路径上都不再换发新决策。等待标记若已被清
+                // （开窗沿入睡失败后回退等场景），先重新置位，让等待阶段接管——窗口开了
+                // 直接重执行睡觉步骤，而不是对同一扇已答复的门重问一次（145 批七开窗沿）。
+                if (shouldRearmSleepGateWait(
+                        record.sleepGateWaiting(), record.sleepGateRecoverConsumed(),
+                        isSleepGateDecision(decision.snapshot()))) {
+                    record.armSleepGateWait();
+                }
+                yield switch (sleepGateRelayAction(
+                        record.decisionSnapshot() != null,
+                        isSleepGateDecision(decision.snapshot()),
+                        record.sleepGateWaiting())) {
+                    // 决策还开着（未答）：原地等答复；已答 recover 的白天门在等待窗口：
+                    // 同一扇关着的门绝不换发新决策（与 explore 兴趣中继同一三态语义）。
+                    case PARK, HOLD_REISSUE -> TaskState.RUNNING;
+                    case ISSUE -> requestDecision(decision.snapshot());
+                };
+            }
             case IntentAction.Remember remember -> {
                 // 先登记地点，再保留供后续步骤引用的内部位置，最后完成本步；本分支没有原生点击，也不验证目标处的地形。
                 runtime.remember(remember.label(), remember.position(), remember.areaRole());
@@ -829,6 +839,16 @@ final class IntentTask implements Task {
         }
         // 没有安全落位或可睡窗口已关：这个决定本来就要调用方拍板，转成待答问题而不是吞掉。
         if (fallback.action() instanceof IntentAction.Decision decision) {
+            if (isSleepGateDecision(decision.snapshot()) && record.sleepGateRecoverConsumed()) {
+                // 这条路径绕过翻译中继直发决策；已答过 recover 的门在这里同样不重问，
+                // 否则开窗沿的入睡失败会换来同门新决策（145 批七）。重新置位等待标记，
+                // 窗口真打开后由等待分支恢复翻译，睡产行为按原授权自动继续。
+                chain = List.of();
+                chainIndex = 0;
+                record.armSleepGateWait();
+                Constants.LOG.info("[maicraft-sleep] 失败回退路径撞上已答复的白天门，重新等待窗口不重问");
+                return TaskState.RUNNING;
+            }
             Constants.LOG.info("[maicraft-sleep] 现成床不可用（failure_type={}），自带床缺少回退条件，转为决定",
                     failureType);
             return requestDecision(decision.snapshot());
@@ -1030,6 +1050,15 @@ final class IntentTask implements Task {
         if (decisionSnapshotOpen) return SleepGateRelayAction.PARK;
         return gateDecision && gateWaiting
                 ? SleepGateRelayAction.HOLD_REISSUE : SleepGateRelayAction.ISSUE;
+    }
+
+    /**
+     * 开窗沿自愈判定：recover 已消费、等待标记已被清时，翻译再撞上这扇门先恢复等待阶段，
+     * 而不是按全新决策重问（145 批七：重问发生在可睡窗口开启沿，多耗一整轮模型往返）。
+     */
+    static boolean shouldRearmSleepGateWait(
+            boolean gateWaiting, boolean recoverConsumed, boolean gateDecision) {
+        return !gateWaiting && recoverConsumed && gateDecision;
     }
 
     /** 语义层观察动作任务单上的待询问发现并拉起决策；决策期间任务记录会暂停，等待 task action=answer。 */

@@ -26,7 +26,43 @@ public final class McpProtocolBudgetTest {
         }
         index.remove("query"); index.addProperty("view", "tasks");
         PublicToolCatalog.validateAndNormalize("perceive", index);
+        answerShapeFollowsDecisionOwnership();
         System.out.println("McpProtocolBudgetTest: passed");
+    }
+
+    /**
+     * 188：recover 是否必须带 details.goal 由决策本身决定（sleep_day_gate 的 recover 原地等
+     * 窗口，不需要替换目标），这个不含决策上下文的入口层只查形状；replace_goal 任何决策都要
+     * 换目标，仍在入口硬性要求。按决策收紧的校验在 IntentRuntime.validateDecisionAnswer。
+     */
+    private static void answerShapeFollowsDecisionOwnership() {
+        PublicToolCatalog.validateAndNormalize("task", answer("recover"));
+        var recoverWithGoal = answer("recover");
+        recoverWithGoal.getAsJsonObject("answer").getAsJsonObject("details").add("goal",
+                JsonParser.parseString("{\"ability\":\"maicraft:sleep\",\"outcome\":\"sleep\"}"));
+        PublicToolCatalog.validateAndNormalize("task", recoverWithGoal);
+        try {
+            PublicToolCatalog.validateAndNormalize("task", answer("replace_goal"));
+            throw new AssertionError("replace_goal without details.goal is still refused at the entry");
+        } catch (IllegalArgumentException expected) {
+            check(expected.getMessage().contains("details.goal"), "the refusal names the missing field");
+        }
+        var recoverWithParameters = answer("recover");
+        recoverWithParameters.getAsJsonObject("answer").getAsJsonObject("details")
+                .add("parameters", new JsonObject());
+        try {
+            PublicToolCatalog.validateAndNormalize("task", recoverWithParameters);
+            throw new AssertionError("recover carrying parameters instead of goal is still refused");
+        } catch (IllegalArgumentException expected) {
+            check(expected.getMessage().contains("details.goal"), "the refusal names the field mix-up");
+        }
+    }
+
+    private static JsonObject answer(String choice) {
+        return JsonParser.parseString("{\"action\":\"answer\",\"task_id\":"
+                + "\"00000000-0000-4000-8000-000000000001\",\"answer\":{\"decision_id\":"
+                + "\"00000000-0000-4000-8000-000000000002\",\"choice\":\"" + choice + "\","
+                + "\"details\":{}}}").getAsJsonObject();
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

@@ -157,7 +157,7 @@ final class PublicToolCatalog {
                             """), annotations(false, true, false)),
             tool(TASK,
                     // 查看状态、读取旧证据和处理待答问题分清用途；恢复参数留在这里说明，防止把查历史误当成重新执行。
-                    "Check or control a task. To answer a decision, copy decision_id and a listed choice. retry can change details.parameters; recover or replace_goal needs details.goal. Then follow next_attention.",
+                    "Check or control a task. To answer a decision, copy decision_id and a listed choice. retry can change details.parameters; replace_goal needs details.goal; recover needs details.goal unless the option text says otherwise (some decisions, like the sleep day gate, recover without one). Then follow next_attention.",
                     goalSchema("""
                             {
                               "type":"object",
@@ -394,11 +394,14 @@ final class PublicToolCatalog {
             if (present(details, "goal")) validateGoal(object(details, "goal"), 0);
             boolean changesSemanticGoal = "recover".equals(choice) || "replace_goal".equals(choice);
             // 改目标用 details.goal，普通重试调整参数用 details.parameters，不能把两种含义混着传。
-            if (changesSemanticGoal && !present(details, "goal")) {
-                throw bad(choice + " requires one semantic details.goal");
-            }
+            // recover 是否必须带 goal 由决策本身决定（sleep_day_gate 的 recover 是原地等窗口，
+            // 不需要替换目标），这个不含决策上下文的入口层只查形状；按决策收紧的校验在
+            // IntentRuntime.validateDecisionAnswer，答复到不了那层就会按决策要求被拒。
             if (changesSemanticGoal && present(details, "parameters")) {
                 throw bad(choice + " accepts details.goal, not a separate parameters object");
+            }
+            if ("replace_goal".equals(choice) && !present(details, "goal")) {
+                throw bad("replace_goal requires one semantic details.goal");
             }
             if (!changesSemanticGoal && present(details, "goal")) {
                 throw bad("details.goal is accepted only by recover or replace_goal");

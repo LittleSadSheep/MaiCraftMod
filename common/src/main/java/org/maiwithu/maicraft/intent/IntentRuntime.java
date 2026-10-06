@@ -653,6 +653,7 @@ public final class IntentRuntime {
                             snapshot.pendingAnswer(), snapshot.terminal(), gameTime, reloadCause);
                     record.restoreChatSubmissionTracking(snapshot.chatSubmissionTracked());
                     record.restoreSleepGateWait(snapshot.sleepGateWaiting());
+                    record.restoreSleepGateRecoverConsumed(snapshot.sleepGateRecoverConsumed());
                     record.restoreContainerSearchScopes(snapshot.containerSearchScopes());
                     // 取物起始数随检查点恢复，重启后继续追同一个“再拿几件”的目标，不按恢复时的背包重新起算。
                     record.restoreAcquireBaselines(snapshot.acquireBaselines());
@@ -914,6 +915,20 @@ public final class IntentRuntime {
                                 + "is uncertain or explicitly unsafe to repeat; inspect current "
                                 + "facts and choose recover, replace_goal, skip or cancel");
             }
+        }
+        // 白天门的 recover 语义是“原地等到可睡窗口再自动睡”，不使用替换目标；带 goal 的答复
+        // 同样受理（只校验形状）。这里若与选项文案各执一词，模型按文案提交就被拒，多耗一次
+        // 往返（188 实机：文案写 no details.goal needed，校验硬性要求 goal）。
+        if ("recover".equals(choice) && pending != null && IntentTask.isSleepGateDecision(pending)) {
+            if (supplied.size() > 1 || (supplied.size() == 1 && !supplied.has("goal"))) {
+                throw new SemanticContractException(
+                        "unknown_decision_detail", "answer.details",
+                        record.stepIndex() < record.steps().size()
+                                ? record.steps().get(record.stepIndex()).ability() : null,
+                        "sleep gate recover accepts no details, or details.goal only; extra fields were refused.");
+            }
+            if (supplied.has("goal")) validateGoal(Goal.fromJson(supplied.getAsJsonObject("goal")));
+            return;
         }
         boolean semanticReplacement = "recover".equals(choice) || "replace_goal".equals(choice);
         if (semanticReplacement) {

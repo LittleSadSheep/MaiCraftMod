@@ -72,6 +72,13 @@ public final class IntentTaskRecord extends TaskRecord {
      * 随检查点持久化——重启恢复后等待语义不丢，重译目标也不会对同一扇已答复的门重提。
      */
     private boolean sleepGateWait;
+    /**
+     * 本记录消费过白天门 recover 答复：此后同一扇关着的门在任何路径（翻译重提、失败回退、
+     * 检查点恢复）都不再换发新决策，等窗口打开后直接重执行睡觉步骤。与 sleepGateWait 的差别
+     * 是它不随开窗清除——开窗沿的入睡失败仍属于这扇已答复的门，重问一次就是 145 批七的形态。
+     * 随检查点持久化；任务终态后记录不再翻译，无需主动清除。
+     */
+    private boolean sleepGateRecoverConsumed;
     /** 同一 request_key 重提命中去重的次数：调用方据此分辨拿到的是旧任务还是新执行，本进程内计数，恢复后从零开始。 */
     private int deduplicatedRequestHits;
     private Runnable dirty = () -> {};
@@ -494,6 +501,7 @@ public final class IntentTaskRecord extends TaskRecord {
     /** 消费白天门 recover 答复：转入等待可睡窗口，同一扇已答复的门不再重提。 */
     void armSleepGateWait() {
         sleepGateWait = true;
+        sleepGateRecoverConsumed = true;
         changed();
     }
 
@@ -507,9 +515,19 @@ public final class IntentTaskRecord extends TaskRecord {
         return sleepGateWait;
     }
 
+    /** 本记录是否消费过白天门 recover 答复；抑制重提的依据，见字段注释。 */
+    public boolean sleepGateRecoverConsumed() {
+        return sleepGateRecoverConsumed;
+    }
+
     /** 检查点恢复等待语义；随恢复的记录重建，不触发脏标记。 */
     void restoreSleepGateWait(boolean waiting) {
         sleepGateWait = waiting;
+    }
+
+    /** 检查点恢复 recover 消费标记，同一扇已答复的门跨重启继续被抑制。 */
+    void restoreSleepGateRecoverConsumed(boolean consumed) {
+        sleepGateRecoverConsumed = consumed;
     }
 
     private boolean deathRecoveryPending(UUID decisionId) {

@@ -54,6 +54,9 @@ public final class SleepBedFallbackRegression {
         gateDecisionKindMarksTheDoor();
         gateRelayThreeStates();
         recoverConsumesIntoWindowWait();
+        gateRecoverAnswerNeedsNoGoalAtRuntime();
+        recoverConsumptionSuppressesTheGateAfterDisarm();
+        failurePathGateAfterRecoverRearmsWaitInsteadOfAsking();
         skipAnswerStaysGeneric();
         gateWaitSurvivesCheckpoint();
         System.out.println("SleepBedFallbackRegression: passed");
@@ -493,9 +496,77 @@ public final class SleepBedFallbackRegression {
         }
     }
 
-    /** skip 与 cancel 走通用消费分支：skip 一次消费成功、两种答复都不进入等待阶段。 */
-    private static void skipAnswerStaysGeneric() throws Exception {
+    /**
+     * 188：白天门 recover 的语义是原地等窗口，不需要 details.goal——语义层校验与选项文案
+     * 同一结论；普通决策的 recover 仍然硬性要求 details.goal，两件事互不稀释。
+     */
+    private static void gateRecoverAnswerNeedsNoGoalAtRuntime() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            var snapshot = snapshotOf(AbilityAdapter.waitForNightDecision(goal, world.player));
+            var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            record.requestDecision(snapshot, 1);
+            runtime().validateDecisionAnswer(record, "recover", new JsonObject());
+            var generic = new IntentTaskRecord.DecisionSnapshot(UUID.randomUUID(), "choose",
+                    List.of(new IntentTaskRecord.DecisionOption("recover", "d")), "{}");
+            var genericRecord = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+            genericRecord.requestDecision(generic, 1);
+            try {
+                runtime().validateDecisionAnswer(genericRecord, "recover", new JsonObject());
+                throw new AssertionError("a generic recover without details.goal stays refused");
+            } catch (SemanticContractException expected) {
+                check("decision_goal_required".equals(expected.violationCode()),
+                        "the generic refusal keeps the decision_goal_required code");
+            }
+        }
+    }
+
+    /** 145 批七：recover 消费标记不随开窗清除；等待标记丢失后翻译再撞这扇门先重挂等待。 */
+    private static void recoverConsumptionSuppressesTheGateAfterDisarm() {
+        var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+        var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        check(!record.sleepGateRecoverConsumed(), "a fresh task has never consumed a gate recover");
+        record.armSleepGateWait();
+        record.disarmSleepGateWait();
+        check(!record.sleepGateWaiting() && record.sleepGateRecoverConsumed(),
+                "the open window clears the wait but keeps the consumption record");
+        check(IntentTask.shouldRearmSleepGateWait(false, true, true),
+                "a re-encountered gate re-arms the wait instead of re-asking");
+        check(!IntentTask.shouldRearmSleepGateWait(true, true, true),
+                "an armed wait needs no re-arm");
+        check(!IntentTask.shouldRearmSleepGateWait(false, false, true),
+                "a first gate encounter still issues the decision");
+        check(!IntentTask.shouldRearmSleepGateWait(false, true, false),
+                "non-gate decisions keep the generic path");
+        record.armSleepGateWait();
+        check(record.sleepGateWaiting(), "the re-armed wait takes over from the wait leg");
+    }
+
+    /** 145 批七：失败回退路径绕过翻译中继直发决策；已答 recover 的门在这里重挂等待而不重问。 */
+    private static void failurePathGateAfterRecoverRearmsWaitInsteadOfAsking() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            world.inventory.add(new ItemStack(Items.WHITE_BED));
+            var task = task(world);
+            record(task).armSleepGateWait();
+            record(task).disarmSleepGateWait();
+            // 换位重试已用过：遮挡失败直接落到自带床回退；白天窗口关着，回退只产出门决策。
+            field(IntentTask.class, "sleepRepositioned").setBoolean(task, true);
+            field(IntentTask.class, "sleepAttemptBedHead").set(task,
+                    new net.minecraft.core.BlockPos(4, 1, 4));
+            var state = failStep(task, world, TaskResult.fail(
+                    "bed is occluded from the current stance", Map.of("failure_type", "occluded")));
+            check(state == TaskState.RUNNING, "the failure path folds back into the wait leg: " + state);
+            check(record(task).sleepGateWaiting(),
+                    "the wait is re-armed instead of asking the same closed gate again");
+            check(record(task).decisionSnapshot() == null,
+                    "no new decision is issued for the already answered gate");
+        }
+    }
+
+    /** skip 与 cancel 走通用消费分支：skip 一次消费成功、两种答复都不进入等待阶段。 */
+    private static void skipAnswerStaysGeneric() throws Exception {        try (var world = new InteractionWorldTestHarness()) {
             day(world);
             var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
             var snapshot = snapshotOf(AbilityAdapter.waitForNightDecision(goal, world.player));
@@ -526,11 +597,16 @@ public final class SleepBedFallbackRegression {
                 snapshot.internalPositions(), snapshot.internalAreaProtections(), snapshot.attempts(),
                 snapshot.decision(), snapshot.pendingAnswer(), snapshot.terminal(), 100);
         restored.restoreSleepGateWait(snapshot.sleepGateWaiting());
+        restored.restoreSleepGateRecoverConsumed(snapshot.sleepGateRecoverConsumed());
         check(restored.sleepGateWaiting(), "a restored task keeps waiting instead of re-asking the gate");
+        check(restored.sleepGateRecoverConsumed(),
+                "the consumption record persists so a disarmed wait still suppresses re-issues");
         var plain = new IntentTaskRecord(UUID.randomUUID(), null, goal);
         var plainEncoded = IntentStateCodec.encode("sleep-gate-test", List.of(), List.of(plain), Map.of(), List.of());
         check(!plainEncoded.getAsJsonArray("tasks").get(0).getAsJsonObject().has("sleep_gate_waiting"),
                 "an unmarked task keeps its checkpoint free of the gate field");
+        check(!plainEncoded.getAsJsonArray("tasks").get(0).getAsJsonObject().has("sleep_gate_recover_consumed"),
+                "an unmarked task keeps its checkpoint free of the consumption field");
     }
 
     private static IntentTaskRecord.DecisionSnapshot snapshotOf(IntentAction action) {
