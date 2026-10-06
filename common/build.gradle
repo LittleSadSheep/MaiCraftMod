@@ -507,6 +507,12 @@ def regressionSuites = [
         heap: '512m', directory: 'spoil-drop-policy-regression', timeoutSeconds: 60,
         purpose: '验证 spoil_policy=drop 的丢弃通道作用域、净减量对账与默认存入行为'
     ],
+    // 收尾清理包裹回归：失败与绕过验证的直达成功都先拆净台账里的自有临时支撑，再按原终态交出。
+    buildTerminalScaffoldCleanupRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.BuildTerminalScaffoldCleanupTest',
+        heap: '512m', directory: 'build-terminal-scaffold-cleanup-regression', timeoutSeconds: 60,
+        purpose: '验证失败与直达成功的收尾清理包裹按原终态交付且不残留脚手架'
+    ],
     // 重生回执的库存对比等内容包同步后再算：keepInventory 不再误报全部丢失。
     respawnInventorySyncRegression: [
         entry: 'org.maiwithu.maicraft.client.runtime.RespawnInventorySyncTest',

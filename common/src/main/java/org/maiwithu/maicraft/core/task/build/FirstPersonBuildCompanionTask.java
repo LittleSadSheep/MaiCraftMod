@@ -224,6 +224,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastScaffoldAccess = Map.of();
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
+
+    /**
+     * 收尾清理包裹：台账里还有自己立着或悬空的临时支撑时，失败与绕过验证的直达成功
+     * 都先走一遍既有清理阶段再交出原终态；清理不到的按 remaining_scaffolds 如实声明。
+     * UNCERTAIN 失败不包裹——保留现场供人工核验，不在未定结果上继续改世界。
+     */
+    private enum TerminalWrap { NONE, FAILURE, SUCCESS }
+    private TerminalWrap terminalWrap = TerminalWrap.NONE;
+    private BlockPos wrapPos;
+    private String wrapMessage, wrapCode, wrapCleanupDetail;
+    private FailureType wrapType;
+    private boolean wrapUncertain;
     private BuildClearanceSurvey clearanceSurvey;
     private BlockPos clearanceDeniedAt;
     private Map<String, Object> clearanceTrigger = Map.of();
@@ -1674,6 +1686,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             BlockPos actualPosition=lastUseConfirmation.redirectedPosition();
             confirmedBlockChange(actualPosition);ConstructionOwnership.placed(player,actualPosition,r.getToolCallId());
             if(placementAccess!=null&&placementAccess.edgeActive()) {phase=Phase.EDGE_RETURN;return TaskState.RUNNING;}
+            if (beginTerminalCleanup(TerminalWrap.SUCCESS, null, null, null, null, false)) return TaskState.RUNNING;
             return TaskState.SUCCESS;
         }
         confirmedBlockChange(cell.target().pos());
@@ -1752,7 +1765,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (retryPlacementAccess(message)) return TaskState.RUNNING;
             failAt(cell.target().pos(), message, FailureType.NO_PATH, code, false); return TaskState.FAILED;
         }
-        if(!nativePlacementDeviation.isEmpty())return TaskState.SUCCESS;
+        if(!nativePlacementDeviation.isEmpty()){
+            if (beginTerminalCleanup(TerminalWrap.SUCCESS, null, null, null, null, false)) return TaskState.RUNNING;
+            return TaskState.SUCCESS;
+        }
         finishPlaced(); return TaskState.RUNNING;
     }
 
@@ -2120,6 +2136,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         scaffoldQueue = List.of(); deferredScaffolds.clear();
         scaffold = null; scaffoldCleanup = null; scaffoldDescent = null;
         stopNav(); unregisterProvider();
+        if (terminalWrap == TerminalWrap.FAILURE) return deliverWrappedFailure();
+        if (terminalWrap == TerminalWrap.SUCCESS) return TaskState.SUCCESS;
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
     }
@@ -2171,6 +2189,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             scaffoldAt = 0; scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
             phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
         }
+        if (terminalWrap == TerminalWrap.FAILURE) { stopNav(); unregisterProvider(); return deliverWrappedFailure(); }
+        if (terminalWrap == TerminalWrap.SUCCESS) { stopNav(); unregisterProvider(); return TaskState.SUCCESS; }
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
     }
@@ -2566,7 +2586,53 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         failureCode = code; fail(message + "; no mutation was submitted", type);
     }
     private void failAt(BlockPos pos, String message, FailureType type, String code, boolean unknown) {
+        if (terminalWrap == TerminalWrap.FAILURE) {
+            // 包裹中的清理阶段自己失败时不覆盖原始失败原因，只记下清理中断事实随原失败交出。
+            if (wrapCleanupDetail == null) wrapCleanupDetail = (code == null ? "scaffold_cleanup_failed" : code) + ": " + message;
+            reissueWrappedFailure();
+            return;
+        }
+        if (beginTerminalCleanup(TerminalWrap.FAILURE, pos, message, type, code, unknown)) return;
         failurePos = pos == null ? null : pos.immutable(); failureCode = code; uncertain = unknown; fail(message, type);
+    }
+
+    /**
+     * 台账里还有自有临时支撑时，把终态推迟到清理阶段之后：先拆净能拆的，再按原失败/原成功收场。
+     * 返回 false 表示没有需要收尾的支撑或场景不适合继续动作（未开工、UNCERTAIN、已在清理阶段），调用方按原路终止。
+     */
+    private boolean beginTerminalCleanup(TerminalWrap wrap, BlockPos pos, String message, FailureType type,
+                                         String code, boolean unknown) {
+        if (terminalWrap != TerminalWrap.NONE || !preflightDone || unknown || scaffoldPhaseActive()
+                || r.scaffoldLedger().isEmpty()) return false;
+        terminalWrap = wrap; wrapPos = pos == null ? null : pos.immutable();
+        wrapMessage = message; wrapCode = code; wrapType = type == null ? FailureType.UNKNOWN : type;
+        wrapUncertain = unknown; wrapCleanupDetail = null;
+        Constants.LOG.info("[maicraft-build] {} deferring terminal state to remove {} tracked scaffolds first",
+                getClass().getSimpleName(), r.scaffoldLedger().snapshot().size());
+        stopNav(); drainScaffolds(); unregisterProvider();
+        scaffoldQueue = scaffolds.stream().filter(p -> !targets.containsKey(p.asLong())
+                        || BuildCellRules.isAirTarget(targets.get(p.asLong())))
+                .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
+                        .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
+        deferredScaffolds.clear(); scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
+        armScaffoldWatch();
+        scaffoldAt = 0; scaffold = null; scaffoldCleanup = null; scaffoldDescent = null;
+        phase = Phase.SCAFFOLD_SELECT;
+        return true;
+    }
+
+    private TaskState deliverWrappedFailure() {
+        failurePos = wrapPos == null ? null : wrapPos.immutable(); failureCode = wrapCode; uncertain = wrapUncertain;
+        fail(wrapMessage + (wrapCleanupDetail == null ? ""
+                : "; scaffold cleanup could not finish: " + wrapCleanupDetail), wrapType);
+        return TaskState.FAILED;
+    }
+
+    /** 清理阶段内的失败交给包裹失败收场时同步补一条日志，现场事实不只在回执里。 */
+    private void reissueWrappedFailure() {
+        Constants.LOG.warn("[maicraft-build] scaffold cleanup interrupted during terminal wrap: {}", wrapCleanupDetail);
+        stopNav(); unregisterProvider();
+        deliverWrappedFailure();
     }
 
     private void drainScaffolds() {
@@ -2834,6 +2900,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         else if (!lastScaffoldDescent.isEmpty()) data.put("scaffold_descent", lastScaffoldDescent);
         data.put("scaffold_cleanup_confirmed_removals", scaffoldConfirmedRemovals);
         data.put("scaffold_cleanup_deferred_count", deferredScaffolds.size());
+        if (terminalWrap != TerminalWrap.NONE) data.put("terminal_scaffold_cleanup", true);
+        if (wrapCleanupDetail != null) data.put("scaffold_cleanup_stopped_early", wrapCleanupDetail);
         if (!lastDeferredScaffold.isEmpty()) data.put("last_deferred_scaffold", lastDeferredScaffold);
         var diagnostics = new ArrayList<>(targetDiagnostics);
         if (failurePos != null) {

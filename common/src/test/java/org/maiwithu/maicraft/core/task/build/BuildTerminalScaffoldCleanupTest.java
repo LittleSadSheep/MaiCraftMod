@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.core.task.build;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.List;
+import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.FailureType;
+import org.maiwithu.maicraft.task.TaskState;
+
+/**
+ * 收尾清理包裹回归：失败与绕过验证的直达成功都不能把台账里的自有临时支撑留在世界里。
+ * 181 实机病症的锚点——回执如实列 remaining_scaffolds 却零 removal，失败收尾从不进入清理阶段。
+ */
+public final class BuildTerminalScaffoldCleanupTest {
+    private static final BlockPos STANDING = new BlockPos(6, 1, 6);
+    private static final BlockPos GONE = new BlockPos(4, 1, 4);
+    public static void main(String[] args) throws Exception {
+        SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+        failureDefersToCleanupAndDeliversOriginalReason();
+        standingScaffoldEntersCleanupBeforeFailure();
+        uncertainFailureKeepsSceneAndFailsImmediately();
+        successWrapAlsoClearsTheLedger();
+        emptyLedgerFailsImmediately();
+        System.out.println("BuildTerminalScaffoldCleanupTest: terminal cleanup wrap passed");
+    }
+
+    /** 台账里有已消失支撑时，失败先被推迟，清完账再按原始失败原因交出 FAILED。 */
+    private static void failureDefersToCleanupAndDeliversOriginalReason() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            h.set(GONE, Blocks.DIRT.defaultBlockState());
+            var task = task(h, GONE);
+            h.set(GONE, Blocks.AIR.defaultBlockState());
+            failAt(task, GONE, "the target changed hands", FailureType.TARGET_LOST, "original_failure_code", false);
+            check(phase(task).equals("SCAFFOLD_SELECT"), "a failure with tracked scaffolds first enters the cleanup phase");
+            check(field(task, "failureCode").get(task) == null, "the original failure is deferred, not delivered yet");
+            check(invokeSelect(task) == TaskState.FAILED, "after the ledger clears, the wrapped failure is delivered");
+            check("original_failure_code".equals(field(task, "failureCode").get(task)),
+                    "the delivered failure keeps the original code, not a cleanup-phase code");
+            check(record(task).scaffoldLedger().isEmpty(), "cleared entries leave the ledger empty at delivery");
+            check(number(task, "scaffoldCleanupPasses") == 1, "the cleanup pass actually ran before delivery");
+        }
+    }
+
+    /** 还立在世界的支撑先进入真实清理阶段；支撑随后消失时同样以原失败收场。 */
+    private static void standingScaffoldEntersCleanupBeforeFailure() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            h.set(STANDING, Blocks.DIRT.defaultBlockState());
+            var task = task(h, STANDING);
+            failAt(task, STANDING, "placement stance lost", FailureType.NO_PATH, "original_failure_code", false);
+            check(phase(task).equals("SCAFFOLD_SELECT"), "a standing scaffold defers the failure to cleanup");
+            check(invokeSelect(task) == TaskState.RUNNING, "the cleanup pass engages instead of failing");
+            String engaged = phase(task);
+            check(engaged.startsWith("SCAFFOLD_"), "cleanup scheduling took over: " + engaged);
+            // 支撑被外界移除后，清理阶段按空气结算账目，再交付原失败。
+            h.set(STANDING, Blocks.AIR.defaultBlockState());
+            int guard = 0;
+            while (guard++ < 16) {
+                TaskState state = stepCleanup(task);
+                if (state == TaskState.FAILED) break;
+            }
+            check("original_failure_code".equals(field(task, "failureCode").get(task)),
+                    "the standing-scaffold wrap still delivers the original failure code");
+            check(record(task).scaffoldLedger().isEmpty(), "the vanished scaffold is settled out of the ledger");
+        }
+    }
+
+    /** UNCERTAIN 失败不包裹：保留现场供人工核验，不在未定结果上继续改世界。 */
+    private static void uncertainFailureKeepsSceneAndFailsImmediately() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            h.set(STANDING, Blocks.DIRT.defaultBlockState());
+            var task = task(h, STANDING);
+            failAt(task, STANDING, "click outcome uncertain", FailureType.UNKNOWN, "uncertain_code", true);
+            check(field(task, "failureCode").get(task).equals("uncertain_code"),
+                    "an uncertain failure terminates immediately with its own code");
+            check(field(task, "terminalWrap").get(task).toString().equals("NONE"),
+                    "uncertain failures never enter the cleanup wrap");
+            check(record(task).scaffoldLedger().contains(STANDING),
+                    "the scene is preserved for manual verification");
+        }
+    }
+
+    /** 绕过验证的直达成功同样先清账：成功包裹清完账后按 SUCCESS 交付。 */
+    private static void successWrapAlsoClearsTheLedger() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            h.set(GONE, Blocks.DIRT.defaultBlockState());
+            var task = task(h, GONE);
+            h.set(GONE, Blocks.AIR.defaultBlockState());
+            Method begin = task.getClass().getDeclaredMethod("beginTerminalCleanup",
+                    terminalWrapClass(), BlockPos.class, String.class, FailureType.class, String.class, boolean.class);
+            begin.setAccessible(true);
+            Object success = Enum.valueOf((Class) terminalWrapClass(), "SUCCESS");
+            check(Boolean.TRUE.equals(begin.invoke(task, success,
+                    null, null, null, null, false)),
+                    "a success wrap engages when tracked scaffolds remain");
+            check(phase(task).equals("SCAFFOLD_SELECT"), "the success wrap runs the same cleanup phase");
+            check(invokeSelect(task) == TaskState.SUCCESS,
+                    "after the ledger clears the wrapped success is delivered");
+            check(record(task).scaffoldLedger().isEmpty(), "the success wrap also empties the ledger");
+        }
+    }
+
+    /** 台账为空时失败按原路立即交付，不多跑任何清理刻。 */
+    private static void emptyLedgerFailsImmediately() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            var task = task(h, null);
+            failAt(task, STANDING, "no scaffold here", FailureType.NO_PATH, "plain_code", false);
+            check(field(task, "failureCode").get(task).equals("plain_code"),
+                    "without tracked scaffolds the failure is delivered immediately");
+            check(field(task, "terminalWrap").get(task).toString().equals("NONE"), "no wrap without a ledger");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 夹具：带台账的施工任务，scaffoldQueue 由 beginTerminalCleanup 现场构建。
+    // ------------------------------------------------------------------
+
+    private static InteractionWorldTestHarness scene(Vec3 feet) throws Exception {
+        var world = new InteractionWorldTestHarness(); world.position(feet);
+        // 原生距离与碰撞查询读取实体的尺寸缓存与游戏模式；此夹具不建立网络连接。
+        sun.misc.Unsafe memory = (sun.misc.Unsafe) field(sun.misc.Unsafe.class, "theUnsafe").get(null);
+        Object info = memory.allocateInstance(net.minecraft.client.multiplayer.PlayerInfo.class);
+        field(net.minecraft.client.multiplayer.PlayerInfo.class, "gameMode").set(info, net.minecraft.world.level.GameType.SURVIVAL);
+        field(net.minecraft.client.player.AbstractClientPlayer.class, "playerInfo").set(world.player, info);
+        field(net.minecraft.world.entity.Entity.class, "dimensions").set(world.player, net.minecraft.world.entity.EntityDimensions.scalable(.6F, 1.8F));
+        return world;
+    }
+
+    private static FirstPersonBuildCompanionTask task(InteractionWorldTestHarness h, BlockPos tracked) throws Exception {
+        var record = new BuildTaskRecord("terminal-cleanup", 1000, List.of(), false);
+        if (tracked != null) record.scaffoldLedger().confirmed(tracked, h.level.getBlockState(tracked));
+        var task = new FirstPersonBuildCompanionTask(h.player, record);
+        field(task, "preflightDone").setBoolean(task, true);
+        if (tracked != null) {
+            @SuppressWarnings("unchecked") var scaffolds = (java.util.Set<BlockPos>) field(task, "scaffolds").get(task);
+            scaffolds.add(tracked);
+        }
+        return task;
+    }
+    private static void failAt(Object task, BlockPos pos, String message, FailureType type, String code,
+                               boolean unknown) throws Exception {
+        Method fail = task.getClass().getDeclaredMethod("failAt",
+                BlockPos.class, String.class, FailureType.class, String.class, boolean.class);
+        fail.setAccessible(true);
+        fail.invoke(task, pos, message, type, code, unknown);
+    }
+    private static TaskState invokeSelect(Object task) throws Exception {
+        return (TaskState) invoke(task, "scaffoldSelectTick");
+    }
+    /** 按当前清理阶段推进一步；SCAFFOLD_SELECT 以外的阶段循环驱动对应 tick。 */
+    private static TaskState stepCleanup(Object task) throws Exception {
+        String current = phase(task);
+        return switch (current) {
+            case "SCAFFOLD_SELECT" -> invokeSelect(task);
+            case "SCAFFOLD_NAV" -> (TaskState) invoke(task, "scaffoldNavTick");
+            case "SCAFFOLD_BREAK" -> (TaskState) invoke(task, "scaffoldBreakTick");
+            default -> TaskState.FAILED;
+        };
+    }
+    private static String phase(Object task) throws Exception { return field(task, "phase").get(task).toString(); }
+    private static BuildTaskRecord record(Object task) throws Exception { return (BuildTaskRecord) field(task, "r").get(task); }
+    private static int number(Object task, String name) throws Exception { return field(task, name).getInt(task); }
+    private static Object invoke(Object task, String name) throws Exception {
+        Method method = task.getClass().getDeclaredMethod(name); method.setAccessible(true); return method.invoke(task);
+    }
+    private static Class<?> terminalWrapClass() throws Exception {
+        for (Class<?> inner : FirstPersonBuildCompanionTask.class.getDeclaredClasses())
+            if (inner.getSimpleName().equals("TerminalWrap")) return inner;
+        throw new NoSuchFieldException("TerminalWrap");
+    }
+    private static Field field(Object instance, String name) throws Exception { return field(instance.getClass(), name); }
+    private static Field field(Class<?> type, String name) throws Exception {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) try {
+            Field field = current.getDeclaredField(name); field.setAccessible(true); return field;
+        } catch (NoSuchFieldException inherited) { }
+        throw new NoSuchFieldException(name);
+    }
+    private static void check(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+}
