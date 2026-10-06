@@ -268,7 +268,7 @@ public final class IntentStateCodec {
             item.addProperty("decision_id", answer.decisionId().toString());
             item.addProperty("choice", bounded(answer.choice()));
             Goal current = task.stepIndex() < task.steps().size() ? task.steps().get(task.stepIndex()) : task.goal();
-            item.add("details", answerDetails(answer.details(), current));
+            item.add("details", answerDetails(answer.details(), current, true));
             value.add("pending_answer", item);
         }
         if (task.sleepGateWaiting()) {
@@ -520,9 +520,6 @@ public final class IntentStateCodec {
             if (result.put(index, baseline) != null) throw new IllegalArgumentException("duplicate acquisition baseline");
         }
         return Map.copyOf(result);
-=======
-                value.has("sleep_gate_waiting") && value.get("sleep_gate_waiting").getAsBoolean(),
-                decodeContainerSearchScopes(value, steps));
     }
 
     private static Map<Integer, Optional<ContainerSearchScope>> decodeContainerSearchScopes(JsonObject value, List<Goal> steps) {
@@ -590,17 +587,18 @@ public final class IntentStateCodec {
         return new IntentTaskRecord.DecisionAnswer(
                 UUID.fromString(text(value, "decision_id")),
                 bounded(text(value, "choice")),
-                answerDetails(value.get("details"), current).toString());
+                // 恢复历史答复只做同形清洗，不按当前预算与政策复核（163）：参数在写入当刻已通过检查。
+                answerDetails(value.get("details"), current, false).toString());
     }
 
-    private static JsonObject answerDetails(JsonElement value, Goal current) {
+    private static JsonObject answerDetails(JsonElement value, Goal current, boolean enforceCurrentRules) {
         if (value == null || value.isJsonNull()) return new JsonObject();
         if (!value.isJsonObject()) throw new IllegalArgumentException("persisted answer details must be an object");
         JsonObject details = value.getAsJsonObject();
         if (details.has("goal")) {
             if (!details.get("goal").isJsonObject())
                 throw new IllegalArgumentException("persisted answer goal must be an object");
-            safeGoal(Goal.fromJson(details.getAsJsonObject("goal")));
+            safeGoal(Goal.fromJson(details.getAsJsonObject("goal")), enforceCurrentRules);
         } else {
             if (details.has("parameters") && !details.get("parameters").isJsonObject())
                 throw new IllegalArgumentException("persisted answer parameters must be an object");
@@ -608,7 +606,7 @@ public final class IntentStateCodec {
             JsonObject merged = current.parameters();
             updates.entrySet().forEach(entry -> merged.add(entry.getKey(), entry.getValue().deepCopy()));
             // 重试只带部分参数，须结合当前目标验证；合法蓝图沿用目标编码的完整性与大小检查。
-            safeGoal(current.withParameters(merged));
+            safeGoal(current.withParameters(merged), enforceCurrentRules);
         }
         return details.deepCopy();
     }

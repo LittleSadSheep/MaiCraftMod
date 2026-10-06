@@ -696,7 +696,6 @@ public final class IntentRuntime {
                 Constants.LOG.warn(
                         "MaiCraft semantic state could not be restored; the checkpoint was preserved ({}; restoring record {})",
                         failureDetail, restoringRecordId);
-)
             }
         }
         dirty = false;

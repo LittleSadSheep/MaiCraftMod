@@ -252,6 +252,12 @@ def regressionSuites = [
         heap: '512m', directory: 'exact-interaction-target-regression', timeoutSeconds: 90,
         purpose: '验证 interact/use_item 定点目标编译与定点倒桶、嵌眼链路'
     ],
+    // 公开取物/合成/烹饪/交易的 count 增量语义与起始数持久化独立回放。
+    acquireAdditionalCountRegression: [
+        entry: 'org.maiwithu.maicraft.intent.AcquireAdditionalCountTest',
+        heap: '512m', directory: 'acquire-additional-count-regression', timeoutSeconds: 90,
+        purpose: '验证公开 count 为再拿几件：已带量作起始数，随暂停重试重启沿用'
+    ],
     // 聊天独立回放界面收尾与持久发送，不让其他游戏操作回归遮住消息提交结论。
     chatRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.ChatRegressionSuite',

@@ -57,9 +57,10 @@ public final class ChatAbilityTest {
                 check(refused.violationCode().equals("chat_command_not_allowed"), "admin command has its own refusal code");
             }
         }
-        // 名单收紧前留在检查点里的 /tp 历史照常恢复，不能锁住整份存档；真要重新执行时开工前仍被拒绝
+        // 名单收紧前留在检查点里的 /tp 历史照常恢复（恢复校验只做结构与身份，不查命令名单，
+        // 该性质由 GoalCheckpointCompatibilityTest.verifyAdminChatHistory 以真实恢复入口锚定）；
+        // 这里锚定另一半：历史命令真要重新执行时，开工前仍按当前名单拒绝。
         JsonObject history = new JsonObject(); history.addProperty("text", "/tp @s -86 104 27");
-        SemanticGoalContract.validateRestored(goal(history), IntentRuntime.KNOWN_ABILITIES);
         try { AbilityAdapter.adapt(goal(history), null, null); throw new AssertionError("restored admin command executed"); }
         catch (IllegalArgumentException refused) { }
         System.out.println("ChatAbilityTest: passed");
