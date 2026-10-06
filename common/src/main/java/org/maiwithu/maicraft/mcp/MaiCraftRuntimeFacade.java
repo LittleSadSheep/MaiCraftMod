@@ -189,10 +189,26 @@ public final class MaiCraftRuntimeFacade implements RuntimeFacade {
             UUID selectedPlanId = planId;
             // 网络重试只复用原任务，不能趁玩家已经接手时再次申请控制权；原目标校验仍由 execute 完成。
             boolean repeatedRequest = intents.taskForRequestKey(requestKey) != null;
+            // 新的身体任务会按接管取消所有未结束的旧任务；接单前先记下它们，回执里明说顶掉了谁。
+            List<IntentTaskRecord> displaced = repeatedRequest || IntentRuntime.isIndependentRequest(goal) ? List.of()
+                    : intents.tasks(64).stream().filter(task -> task.terminalSnapshot() == null && !task.getState().isTerminal()).toList();
+            JsonArray replaced = new JsonArray();
+            for (IntentTaskRecord old : displaced) {
+                JsonObject row = new JsonObject();
+                row.addProperty("task_id", old.externalId().toString());
+                row.addProperty("status_before", publicState(old));
+                row.addProperty("outcome", old.goal().outcome());
+                replaced.add(row);
+            }
             Supplier<IntentTaskRecord> submit = () -> intents.execute(player, goal, selectedPlanId, requestKey);
             IntentTaskRecord record = repeatedRequest ? submit.get() : dispatchExecution(goal, player, submit);
             JsonObject result = new JsonObject();
             result.addProperty("task_id", record.externalId().toString());
+            if (!replaced.isEmpty()) {
+                result.add("replaced_tasks", replaced);
+                result.addProperty("replacement_note", "This execute took over the body; the listed unfinished tasks are cancelled by takeover. "
+                        + "Effects they already made stay in the world. Submit one body action at a time and wait for its result unless replacing it is intended.");
+            }
             result.addProperty("status", publicState(record));
             result.addProperty("accepted", true);
             result.addProperty("outcome", record.goal().outcome());
