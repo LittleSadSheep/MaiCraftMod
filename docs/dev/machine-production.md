@@ -24,7 +24,7 @@
 | `open_menu` | 必填 `snapshot_id`；可选 `component_index` | 靠近、准备空手、原生右键、等待真正菜单及可见界面；未确认不会重复右键 |
 | `close_menu` | 无其他参数，省略 `target` | 关闭本流程拥有的机器菜单，或符合空鼠标/空合成格条件的玩家背包；不关闭任意外来菜单 |
 | `deposit` / `withdraw` | 必填 `menu_receipt_id`、`entry_index`、`item_id`；可选 `count`；省略 `target` | 绑定当前菜单的真实条目，验证规则与数量后进行可见原生搬运 |
-| `set_control` | 必填 `snapshot_id`、布尔 `powered`；可选 `control_label` | 对指定或唯一的原版拉杆设置目标状态；不是“开机成功/产出达标”的证明 |
+| `set_control` | 必填布尔 `powered`；可选 `snapshot_id`、`control_label` | 对指定或唯一的原版拉杆设置目标状态：已是目标状态直接成功，否则走近、空手只拨一次并核对。带 `snapshot_id` 时沿用同址观察；省略时按 `target` 就地划范围——`coordinates` 只认该格，`landmark`/`area`（含附近唯一同名告示牌）取半径 4，`nearest` 以角色为中心取半径 6，范围内须恰好一根拉杆，点击前复核这一范围结构未变。不是“开机成功/产出达标”的证明 |
 | `ae2_supply` | 必填 `item_id`；可选 `count`、`allow_crafting` | 必须 `target:{kind:"nearest"}`，不能带名字/位置/关系；使用真实可达终端，按许可取现货或提交既有样板合成 |
 | `drive_vehicle` | 必填观察所得 UUID `structure_id`，目标为目的地 | 原生移动结构的兼容入口，见专属物理/车辆实现；此分支不接受机器快照、库存和生产字段 |
 
@@ -37,7 +37,7 @@
 | `entry_index` | 0..511，交易必填，必须来自本次 `perceive(view="machine_menu")`；0是第一个条目。它不由 `component_index` 代替。 |
 | `count` | `deposit/withdraw` 默认1、范围1..64；`ae2_supply` 默认1、范围1..256，目标是本次获准的净增量。0不是全部搬走。 |
 | `powered` | `set_control` 必填布尔值。`false` 是明确要求关拉杆，不能按“未指定”处理。 |
-| `control_label` | 1..160 字符的已有确切拉杆地标；省略仅在区域中有唯一拉杆时可判定。 |
+| `control_label` | 1..160 字符，指已记住地点或附近唯一同名告示牌所在的确切拉杆，须落在本次范围内；省略仅在区域中有唯一拉杆时可判定。 |
 | `allow_crafting` | AE2 默认 `false`；`true` 也只许可既有样板，不能凭名称建立新自动化样板。 |
 | `material_policy` | `run_production` 缺省 `inventory_only`。v1 外层策略用于配置工具供给，各 source 节点还有独立策略；v2 外层显式值仅接受字面 `inventory_only`，先备原料再运行。 |
 | `protected_labels` | `run_production` 可选字符串数组；与继承的保护名称合并，空数组不撤销已有保护。 |

@@ -195,6 +195,12 @@ public final class MachineRegressionSuite {
         rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"ae2_supply\",\"item_id\":\"minecraft:iron_ingot\",\"allow_use\":\"true\"}");
         rejects("maicraft:operate_machine", "{\"kind\":\"landmark\",\"label\":\"factory\"}", "{\"operation\":\"set_control\",\"snapshot_id\":\"receipt\"}");
         rejects("maicraft:operate_machine", "{\"kind\":\"landmark\",\"label\":\"factory\"}", "{\"operation\":\"set_control\",\"snapshot_id\":\"receipt\",\"powered\":true,\"count\":1}");
+        // 拨拉杆可不带观察编号：坐标、地点（含附近同名告示牌）或 nearest 就地划范围；当前位置和缺目标状态仍拒绝。
+        accepts("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"set_control\",\"powered\":false,\"allow_use\":true}");
+        accepts("maicraft:operate_machine", "{\"kind\":\"landmark\",\"label\":\"停机开关\"}", "{\"operation\":\"set_control\",\"powered\":false,\"allow_use\":true}");
+        accepts("maicraft:operate_machine", "{\"kind\":\"coordinates\",\"position\":{\"x\":-86,\"y\":106,\"z\":28}}", "{\"operation\":\"set_control\",\"powered\":true,\"allow_use\":true}");
+        rejects("maicraft:operate_machine", "{\"kind\":\"current_place\"}", "{\"operation\":\"set_control\",\"powered\":false,\"allow_use\":true}");
+        rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"set_control\",\"allow_use\":true}");
         accepts("maicraft:operate_machine", "null", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"entry_index\":2,\"item_id\":\"minecraft:iron_ingot\",\"count\":3}");
         rejects("maicraft:operate_machine", "null", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"item_id\":\"minecraft:iron_ingot\"}");
         rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"entry_index\":2,\"item_id\":\"minecraft:iron_ingot\"}");

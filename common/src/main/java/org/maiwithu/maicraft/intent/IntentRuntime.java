@@ -26,6 +26,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.mcp.NearbySignPerception;
 import org.maiwithu.maicraft.client.preview.PreviewController;
 import org.maiwithu.maicraft.client.preview.PreviewSession;
 import org.maiwithu.maicraft.core.Constants;
@@ -291,6 +293,22 @@ public final class IntentRuntime {
         var minecraft = Minecraft.getInstance();
         var location = minecraft == null ? null : ClientMachineCatalog.resolveLabel(minecraft.player,label);
         return location == null ? null : new Landmark(label,location,LandmarkAreaRole.ORDINARY);
+    }
+
+    /**
+     * 动作目标的地点：先查已记住的地点；没有时，角色附近恰好一块告示牌的某一行或整面文字与名字一致，
+     * 就以那块牌子所在格为地点（例如写着「蜂房」「停机开关」的牌子）。多块同名或没有都返回 null，不猜。
+     * 只用于走路、交互、机器操作等动作目标；保护名单与施工锚点仍只认已记住的地点。
+     */
+    public Landmark targetPlace(String label) {
+        Landmark known = landmark(label);
+        if (known != null || label == null || label.isBlank()) return known;
+        var minecraft = Minecraft.getInstance();
+        LocalPlayer player = minecraft == null ? null : minecraft.player;
+        if (player == null) return null;
+        BlockPos sign = NearbySignPerception.uniqueLabelledSign(player, label);
+        return sign == null ? null : new Landmark(label, new Goal.WorldPosition(sign.getX(), sign.getY(), sign.getZ(),
+                player.level().dimension().location().toString()), LandmarkAreaRole.ORDINARY);
     }
 
     /** 角色取料或绕行后再看同一工地时沿用原锚点；显式记忆地点仍可另行修改地标。 */

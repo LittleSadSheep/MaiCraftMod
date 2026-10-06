@@ -19,6 +19,15 @@ public final class NearbySignPerceptionTest {
         check(NearbySignPerception.matches(frontLines, backLines, "充气"), "search must match the front");
         check(NearbySignPerception.matches(frontLines, backLines, "jetpack"), "search must match the back case-insensitively");
         check(!NearbySignPerception.matches(frontLines, backLines, "睡眠"), "unrelated signs must not match");
+        // 动作目标按名字找牌子时只认整行或整面完全一致，"蜂房" 不能命中 "蜂房机器"，分两行写的名字仍能对上。
+        var hive = NearbySignPerception.lines(new SignText().setMessage(0, Component.literal(" 蜂房 ")), false);
+        check(NearbySignPerception.labelled(hive, "蜂房"), "a one-line sign label matches exactly after trimming");
+        var machines = NearbySignPerception.lines(new SignText().setMessage(0, Component.literal("蜂房机器")), false);
+        check(!NearbySignPerception.labelled(machines, "蜂房"), "a longer sign text is not an exact label");
+        var split = NearbySignPerception.lines(new SignText().setMessage(0, Component.literal("停机"))
+                .setMessage(1, Component.literal("开关")), false);
+        check(NearbySignPerception.labelled(split, "停机开关"), "a label written across two lines still matches");
+        check(NearbySignPerception.labelled(backLines, "jetpack fill"), "label comparison ignores letter case");
         SignText filtered = new SignText().setMessage(0, Component.literal("original"), Component.literal("filtered"));
         check(NearbySignPerception.lines(filtered, true).get(0).getAsString().equals("filtered"),
                 "honor the Minecraft client's text-filtering selection");

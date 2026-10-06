@@ -135,7 +135,7 @@ public final class SemanticAbilityCatalog {
                             field("replace_block_entities", "boolean", "布尔，默认true，但仅在replace_existing实际允许时生效；false保留方块实体，不扩大拆除区域。null拒绝。"),
                             field("protected_labels", "array<string>", "字符串数组，名称来自已记住的受保护区域；省略/[]不额外添加保护，不是坐标名单或新增操作授权。")));
             case MachineAbilityAdapter.OPERATE -> contract(
-                    "操作现有机器。参数放goal.parameters，production再嵌套其格式；所有operation都须玩家已授权并allow_use=true，省略/false不执行、null拒绝。run_production/watch_production/open_menu/set_control要求已有landmark/area及同址snapshot_id；deposit/withdraw/close_menu/cancel_watch省略target；ae2_supply只用无名nearest。原生接单、监控注册、菜单变更、实际消费与产出达标分别看各自回执。典型完整请求：{\"goal\":{\"ability\":\"maicraft:operate_machine\",\"outcome\":\"从可用AE2终端补给铁锭\",\"target\":{\"kind\":\"nearest\"},\"parameters\":{\"operation\":\"ae2_supply\",\"item_id\":\"minecraft:iron_ingot\",\"count\":4,\"allow_crafting\":false,\"allow_use\":true}}}。终端和库存须真实存在，名称不赋予操作他人物品的权限。未知效果先查原任务、当前菜单/库存和latest_snapshot，不换request_key盲重做。",
+                    "操作现有机器。参数放goal.parameters，production再嵌套其格式；所有operation都须玩家已授权并allow_use=true，省略/false不执行、null拒绝。run_production/watch_production/open_menu要求已有landmark/area及同址snapshot_id；set_control可带同址snapshot_id，也可省略它直接用target：coordinates只认该拉杆格，landmark/area（已记地点或附近唯一同名告示牌）取半径4，nearest以角色为中心取半径6，范围内须恰好一根拉杆；deposit/withdraw/close_menu/cancel_watch省略target；ae2_supply只用无名nearest。原生接单、监控注册、菜单变更、实际消费与产出达标分别看各自回执。典型完整请求：{\"goal\":{\"ability\":\"maicraft:operate_machine\",\"outcome\":\"从可用AE2终端补给铁锭\",\"target\":{\"kind\":\"nearest\"},\"parameters\":{\"operation\":\"ae2_supply\",\"item_id\":\"minecraft:iron_ingot\",\"count\":4,\"allow_crafting\":false,\"allow_use\":true}}}。终端和库存须真实存在，名称不赋予操作他人物品的权限。未知效果先查原任务、当前菜单/库存和latest_snapshot，不换request_key盲重做。",
                     targets("landmark", "area", "nearest", "coordinates", "prior_result"),
                     fields(
                             field("operation", "string", "必填字符串。run_production执行v1网络或v2有限工序；watch_production只注册v1物品生产观察，不补料/配置/启动，成功不是产出完成；cancel_watch仅请求取消观察，不关机器。open_menu/close_menu/deposit/withdraw管理原生菜单；set_control设置原版拉杆；ae2_supply取原生终端库存；drive_vehicle是另有structure_id的车辆兼容入口。每个分支仅接受自己的字段。"),
@@ -149,12 +149,12 @@ public final class SemanticAbilityCatalog {
                             field("structure_id", "string", "仅drive_vehicle：已观察移动结构UUID，target为目的地。当前机器本地resolve不实现prior_result，使用同维度coordinates/landmark/area；其余物理和控制约束以专属车辆回执为准。"),
                             field("allow_use", "boolean", "布尔默认false，全部操作执行前必须true。表示已有用户许可，不是Mod授予所有权；null拒绝。"),
                             // 生产复用同会话机器范围并重验现场；有时效的菜单、库存交易与控制观察仍分别绑定原回执。
-                            field("snapshot_id", "string", "run_production/watch_production/open_menu/set_control必填字符串1..36字符，与具名target来自同次真实观察。按现场重验而非固定时长失效；操作消费临时绑定，引用失效或现场变化可附latest_snapshot，先核对再重提。"),
+                            field("snapshot_id", "string", "run_production/watch_production/open_menu必填、set_control可选的字符串1..36字符，与具名target来自同次真实观察。按现场重验而非固定时长失效；操作消费临时绑定，引用失效或现场变化可附latest_snapshot，先核对再重提。"),
                             field("component_index", "integer", "仅open_menu：整数0..767。省略使用观察中心；显式0指snapshot.relative_blocks[0]，不是相同默认。必须来自这份观察，null拒绝。"),
                             field("menu_receipt_id", "string", "deposit/withdraw必填字符串1..36字符，来自当前perceive(machine_menu)。它绑定原生菜单及条目版本，交易不再给target；每次交易后重读当前菜单，null拒绝。"),
                             field("entry_index", "integer", "deposit/withdraw必填整数0..511，来自该menu_receipt_id的真实条目；0是第一个条目，不是自动选槽，null拒绝。角色自己选择背包搬运槽。"),
-                            field("powered", "boolean", "set_control必填布尔；false明确关拉杆，true开拉杆，不证明机器产出。省略/null拒绝。"),
-                            field("control_label", "string", "set_control可选字符串1..160字符，指已记住且在观察区内的确切原版拉杆；省略只能在唯一拉杆时判定，null拒绝。"),
+                            field("powered", "boolean", "set_control必填布尔；false明确关拉杆，true开拉杆。已是目标状态直接成功不再拨动，否则只拨一次并核对；不证明机器产出。省略/null拒绝。"),
+                            field("control_label", "string", "set_control可选字符串1..160字符，指已记住地点或附近唯一同名告示牌所在的确切原版拉杆，须在本次范围内；省略只能在唯一拉杆时判定，null拒绝。"),
                             field("item_id", "resource_id", "ae2_supply/deposit/withdraw必填完整注册ID（字符串1..256字符）；必须是可用真实物品，不以相似名称代替。"),
                             field("count", "integer", "可选精确整数，默认1。菜单存取1..64件；AE2本次获准净增量1..256件。0不表示全部，null/小数拒绝。execute的request_key不放在这里。"),
                             field("allow_crafting", "boolean", "ae2_supply布尔默认false；true可提交已有样板合成，不能生成新样板。null拒绝；target必须{kind:nearest}且没有label/position/relation。")));
@@ -211,7 +211,7 @@ public final class SemanticAbilityCatalog {
                             field("confirm_risky_target", "boolean", "Boolean default false (omitted/null/false). Required true in addition to allow_harm when selected targets include players, named/tamed entities or non-Enemy creatures; confirm this semantic target, not blanket nearby harm."))));
             case GeneralAbilityAdapter.INTERACT -> contract(
                     // 契约按实际目标分流、原生确认和已知恢复边界说明，示例不替调用者虚构现场证据。
-                    "对一个方块或实体执行普通原生右键；适合按按钮、打开目标、登船、剪毛、使用已带物品、Create 手摇曲柄，以及通过原版编辑屏向已放置的告示牌写字（purpose=write）。不是攻击、挖掘、菜单内交易或容器存取；这些目标应选对应能力。 "
+                    "对一个方块或实体执行普通原生右键；适合按按钮、打开目标、登船、剪毛、使用已带物品、Create 手摇曲柄，以及通过原版编辑屏向已放置的告示牌写字（purpose=write）。不是攻击、挖掘、菜单内交易或容器存取；这些目标应选对应能力。右键拉杆每次都会翻转一次；要把拉杆设为开或关，用 operate_machine 的 set_control（powered=true/false），已是目标状态时不会再拨。 "
                             + "请求层级：goal.ability=maicraft:interact，goal.outcome 描述目的；下面字段均在 goal.parameters。goal.target 可省略，或选 coordinates/entity/player/nearest/landmark/area。不要传内部 button、hold_ticks、槽位或运行期 entity_id。 "
                             + "coordinates 使用 goal.target.position={x,y,z,dimension?}，x/y/z 为整数方块格；dimension 省略或 null 取当前维度，异维度不执行。坐标只操作该格；满桶坐标是流体落格，可为空气，不是支撑块坐标。实体描述与方块类型或坐标不能混用。 "
                             + "非坐标方块需 block_id，省略目标或 nearest 时围绕玩家查找；landmark/area 的 position 或已记住同维度 label 作为搜索中心，解析失败不改为玩家附近。实体按类型、显示名、玩家名及羊属性取交集；entity 的 label 可作注册类型或显示名，player 的 label 可作玩家名。匹配多于一个时需 nearest 许可，否则待决策。 "

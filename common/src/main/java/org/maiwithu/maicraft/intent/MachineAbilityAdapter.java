@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineMenu;
 import org.maiwithu.maicraft.core.integration.machine.MachineRecipeEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshotRejection;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
+import org.maiwithu.maicraft.core.integration.machine.MachineSurvey;
 import org.maiwithu.maicraft.core.integration.machine.MachineInspectionBlueprintView;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprint;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
@@ -169,12 +170,19 @@ final class MachineAbilityAdapter {
                         if (goal.target() != null) throw bad("Menu transactions bind the exact observed menu_receipt_id; omit target rather than selecting another machine");
                     }
                     case "set_control" -> {
+                        // 拉杆设到明确的开或关：带观察编号时沿用同址观察；不带时按目标就地划一个小范围找唯一拉杆。
                         only(p, "operation", "snapshot_id", "control_label", "powered", "allow_use");
-                        requiredString(p, "snapshot_id", 36);
                         optionalString(p, "control_label", 160);
                         bool(p, "powered", null);
                         bool(p, "allow_use", false);
-                        requireMachineTarget(goal);
+                        if (p.has("snapshot_id")) {
+                            requiredString(p, "snapshot_id", 36);
+                            requireMachineTarget(goal);
+                        } else if (goal.target() == null
+                                || !Set.of("coordinates", "landmark", "area", "nearest").contains(goal.target().kind())) {
+                            throw bad("set_control without snapshot_id needs target coordinates (the lever cell), "
+                                    + "landmark/area (a remembered place or the exact text of one nearby sign) or nearest");
+                        }
                     }
                     case "ae2_supply" -> {
                         // 无名 nearest 表示使用原生可达终端；公开目标契约已允许这种形态，这里仍拒绝借名称选择另一网络。
@@ -376,6 +384,7 @@ final class MachineAbilityAdapter {
                     bool(p, "allow_crafting", false));
             return new IntentAction.Native(Ae2ResourceSupply.taskRecord(callId, deadline, request));
         }
+        if ("set_control".equals(operation) && !p.has("snapshot_id")) return controlWithoutSnapshot(goal, player, runtime, callId, deadline);
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
         if ("open_menu".equals(operation)) {
             BlockPos machine = snapshot.center();
@@ -400,6 +409,30 @@ final class MachineAbilityAdapter {
         var nativeRecord = MachineControl.task(callId, deadline, request);
         MachineSnapshots.consume(snapshot);
         return new IntentAction.Native(nativeRecord);
+    }
+
+    /**
+     * 不带观察编号拨拉杆：坐标目标只认那一格；地点或附近同名告示牌以它为中心取半径 4；nearest 以角色脚下为中心取半径 6。
+     * 范围内必须恰好一根原版拉杆（或用 control_label 点名），提交时记下这一小范围的结构摘要，点击前复核没有变化。
+     * 拉杆已是目标状态就直接完成，不会再拨一次；拨动后的机器是否运转、是否产出仍需另行观察。
+     */
+    private static IntentAction controlWithoutSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime,
+                                                       String callId, long deadline) {
+        JsonObject p = goal.parameters();
+        String kind = goal.target().kind();
+        BlockPos center = "nearest".equals(kind) ? player.blockPosition() : block(resolve(goal.target(), player, runtime));
+        int radius = switch (kind) {
+            case "coordinates" -> 0;
+            case "nearest" -> 6;
+            default -> 4;
+        };
+        if (!player.level().isLoaded(center)) throw bad("machine_control_region_unloaded: move closer to the lever first");
+        String controlLabel = optionalString(p, "control_label", 160);
+        BlockPos control = "coordinates".equals(kind) ? center : controlLabel == null ? null
+                : block(resolve(new Goal.SemanticTarget("landmark", controlLabel, null, null), player, runtime));
+        var request = new MachineControl.Request(player.level().dimension().location().toString(), center, radius,
+                MachineSurvey.fingerprint(player, center, radius), bool(p, "powered", null), control);
+        return new IntentAction.Native(MachineControl.task(callId, deadline, request));
     }
 
     private static IntentAction modify(Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
@@ -637,7 +670,8 @@ final class MachineAbilityAdapter {
             case "current_place" -> new Goal.WorldPosition(player.blockPosition().getX(), player.blockPosition().getY(), player.blockPosition().getZ(), dimension);
             case "coordinates" -> target.position();
             case "landmark", "area" -> {
-                var place = runtime.landmark(target.label());
+                // 机器操作的地点同样可用附近唯一同名告示牌；观察编号仍按记住的标签核对同址。
+                var place = runtime.targetPlace(target.label());
                 yield place == null ? null : place.position();
             }
             default -> null;

@@ -55,7 +55,7 @@ final class PublicToolCatalog {
                 "type":"object",
                 "properties": {
                   "kind":{"type":"string","enum":["current_place","coordinates","landmark","player","entity","nearest","area","prior_result"]},
-                  "label":{"type":["string","null"],"minLength":1,"maxLength":160},
+                  "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"landmark/area: a remembered place, or the exact text of one sign within 32 blocks."},
                   "position":{"anyOf":[{"$ref":"#/$defs/worldPosition"},{"type":"null"}]},
                   "relation":{"type":["string","null"],"minLength":1,"maxLength":120,"description":"Name the earlier ability or outcome for prior_result. Do not copy coordinates."}
                 },

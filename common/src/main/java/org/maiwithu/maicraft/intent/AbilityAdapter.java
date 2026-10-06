@@ -967,7 +967,8 @@ final class AbilityAdapter {
         if ("coordinates".equals(target.kind())) return sameDimension(target.position(), player)
                 ? target.position() : null;
         if ("landmark".equals(target.kind()) || "area".equals(target.kind())) {
-            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            // 名字先查已记住的地点，再查附近唯一写着这个名字的告示牌。
+            IntentRuntime.Landmark landmark = runtime.targetPlace(target.label());
             return landmark == null || !sameDimension(landmark.position(), player)
                     ? null : landmark.position();
         }
@@ -979,7 +980,7 @@ final class AbilityAdapter {
         // current_place 是专用值，表示玩家脚下；其他名字只从已经记住的地点表里找。
         if (label == null || label.isBlank()) return null;
         if ("current_place".equals(label)) return currentPosition(player);
-        IntentRuntime.Landmark landmark = runtime.landmark(label);
+        IntentRuntime.Landmark landmark = runtime.targetPlace(label);
         return landmark == null || !sameDimension(landmark.position(), player)
                 ? null : landmark.position();
     }
@@ -996,10 +997,10 @@ final class AbilityAdapter {
         String label = target.label() == null || target.label().isBlank()
                 ? "the requested named place" : "'" + target.label() + "'";
         IntentRuntime.Landmark landmark = target.label() == null
-                ? null : runtime.landmark(target.label());
+                ? null : runtime.targetPlace(target.label());
         String reason;
         if (landmark == null) {
-            reason = label + " is not remembered for this world";
+            reason = label + " is not remembered for this world, and no single sign within 32 blocks carries this exact text";
         } else if (!sameDimension(landmark.position(), player)) {
             reason = label + " is remembered in another dimension";
         } else {
@@ -1051,7 +1052,7 @@ final class AbilityAdapter {
         if ("coordinates".equals(target.kind())) return target.position();
         if ("landmark".equals(target.kind()) || "area".equals(target.kind())) {
             // 别名只复制已解析的位置，不复制来源区域类型；找不到来源就交给调用方处理，不能拿当前位置顶替。
-            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            IntentRuntime.Landmark landmark = runtime.targetPlace(target.label());
             return landmark == null ? null : landmark.position();
         }
         return null;

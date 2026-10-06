@@ -1308,7 +1308,8 @@ public final class GeneralAbilityAdapter {
         if (sameDimension(position, player)) return new BlockPos(position.x(), position.y(), position.z());
         String kind = lower(target.kind());
         if (("landmark".equals(kind) || "area".equals(kind)) && target.label() != null) {
-            IntentRuntime.Landmark landmark = runtime.landmark(target.label());
+            // 搜索中心可以是已记住的地点，也可以是附近唯一写着这个名字的告示牌。
+            IntentRuntime.Landmark landmark = runtime.targetPlace(target.label());
             if (landmark != null && sameDimension(landmark.position(), player)) {
                 Goal.WorldPosition at = landmark.position();
                 return new BlockPos(at.x(), at.y(), at.z());
