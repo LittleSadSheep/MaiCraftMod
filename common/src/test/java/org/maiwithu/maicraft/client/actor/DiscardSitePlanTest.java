@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.client.actor;
 
+import java.util.List;
 import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -12,7 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.task.inventory.DiscardSitePlan;
 
-/** 直线巷道两头仍能走，空地优先，侧袋挖掘有界；区块边缘和不可挖围墙不能伪装成可堵的死路。 */
+/** 直线巷道两头仍能走，空地优先，侧袋挖掘有界；带台阶的开阔地原地可丢，区块边缘和不可挖围墙不能伪装成可堵的死路。 */
 public final class DiscardSitePlanTest {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
@@ -38,8 +39,22 @@ public final class DiscardSitePlanTest {
                 world.set(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState());
             var room = DiscardSitePlan.find(world.player, Set.of());
             check(room != null && room.excavation().isEmpty() && !room.stance().equals(world.player.blockPosition()), "a reachable open room is preferred over digging");
+            // 露天开阔平台带零星一格台阶：台阶出口四周都能绕回空地，原地丢弃不受影响（issue 183 的 005 平台形态）。
+            world.position(new Vec3(8.5, 1, 8.5));
+            openWithSteps(world);
+            var stepped = DiscardSitePlan.find(world.player, Set.of());
+            check(stepped != null && stepped.excavation().isEmpty() && stepped.stance().equals(world.player.blockPosition()),
+                    "open terrain with scattered one-block steps still allows dropping in place");
         }
-        System.out.println("DiscardSitePlanTest: corridor, side pocket, open room and loaded frontier passed");
+        System.out.println("DiscardSitePlanTest: corridor, side pocket, open room, stepped open terrain and loaded frontier passed");
+    }
+    /** 开阔平台加几处一格台阶，四个朝向的丢弃带邻域都有台阶出口，但出口都能绕行。 */
+    static void openWithSteps(InteractionWorldTestHarness world) {
+        for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) for (int y = 1; y <= 2; y++)
+            world.set(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState());
+        for (BlockPos step : List.of(new BlockPos(6, 1, 11), new BlockPos(10, 1, 12), new BlockPos(12, 1, 8),
+                new BlockPos(4, 1, 8), new BlockPos(5, 1, 6), new BlockPos(11, 1, 6)))
+            world.set(step, Blocks.STONE.defaultBlockState());
     }
     static void corridor(InteractionWorldTestHarness world, boolean unbreakable) {
         for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) for (int y = 1; y <= 2; y++)

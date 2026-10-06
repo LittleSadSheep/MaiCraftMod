@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 /** 有打火石先检查当前位置的投掷通道；其余候选限于同层已加载平面，优先空地，再考虑四格深、两格高的侧袋。 */
 public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation, boolean requiresBurn) {
     private static final int RADIUS = 12;
+    // 出口绕行搜索的勘察上限；超出仍没接回已勘察区域时按堵死通道处理。
+    private static final int ESCAPE_RADIUS = 8;
     public DiscardSitePlan { stance = stance.immutable(); excavation = List.copyOf(excavation); }
     public DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation) { this(stance, direction, excavation, false); }
 
@@ -101,14 +103,35 @@ public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPo
     }
 
     private static boolean blocksFrontier(Level world, Set<BlockPos> connected, LongSet excluded) {
-        // 勘察半径和已加载区块的边缘仍可能通往远处；不能把局部扫描截断的走廊误当成可以堵住的死胡同。
+        // 拾取范围只有堵住勘察范围之外区域的唯一入口才算边界；开阔地形上零星台阶与 BFS 半径截断
+        // 都能绕行，不因邻接就整片拒绝候选。未加载区块之外无从核验，仍按边界处理。
         for (BlockPos cell : connected) if (excluded.contains(cell.asLong()))
             for (Direction side : Direction.Plane.HORIZONTAL) {
                 BlockPos next = cell.relative(side);
-                if (!connected.contains(next) && (!world.isLoaded(next) || walkable(world, next))) return true;
-                // 平面勘察也保留通向高低台阶的出口，不能把楼梯前唯一的脚位当成可堵住的边角。
-                if (walkable(world, next.above()) || walkable(world, next.below())) return true;
+                if (!world.isLoaded(next)) return true;
+                if (connected.contains(next)) continue;
+                for (BlockPos exit : List.of(next, next.above(), next.below()))
+                    if (walkable(world, exit) && !escapesAround(world, connected, excluded, exit)) return true;
             }
+        return false;
+    }
+
+    /** 出口能否不穿过拾取范围就回到已勘察区域；出不去说明丢弃会堵死这条通往远处的通道。 */
+    private static boolean escapesAround(Level world, Set<BlockPos> connected, LongSet excluded, BlockPos exit) {
+        var seen = new LongOpenHashSet(); var queue = new ArrayDeque<BlockPos>();
+        seen.add(exit.asLong()); queue.add(exit);
+        while (!queue.isEmpty()) {
+            BlockPos at = queue.removeFirst();
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos nb = at.relative(side);
+                if (connected.contains(nb)) { if (!excluded.contains(nb.asLong())) return true; continue; }
+                if (!world.isLoaded(nb) || !seen.add(nb.asLong())
+                        || Math.abs(nb.getX() - exit.getX()) > ESCAPE_RADIUS || Math.abs(nb.getZ() - exit.getZ()) > ESCAPE_RADIUS)
+                    continue;
+                for (BlockPos feet : List.of(nb, nb.above(), nb.below()))
+                    if (walkable(world, feet)) { queue.add(feet); break; }
+            }
+        }
         return false;
     }
 
