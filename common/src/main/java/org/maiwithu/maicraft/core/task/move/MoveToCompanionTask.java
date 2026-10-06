@@ -10,8 +10,11 @@ import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import net.minecraft.core.BlockPos;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -98,8 +101,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 行船段:开工时坐在船上就先驾船,靠岸(或搁浅)后接步行。null = 没有/已交棒。 */
     private BoatNav boatLeg;
 
-    /** 到达后的自有垫柱回收；非空表示回收阶段进行中或已收场（成功路径收尾注记消费）。 */
-    private PillarRecovery pillarRecovery;
+    /** 单条垫柱认领的高度上限，与施工侧整柱证明同一量级；只用于回执说明，不触发任何拆除。 */
+    private static final int OWN_PILLAR_REPORT_LIMIT = 32;
 
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
@@ -153,31 +156,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         // 已经符合到达条件时不用新建导航，下一次 tick 就可以报告成功。
         if (reached()) return;
-        // 出发前上超预检：只有授权动土（规划器才会垫柱）且目标确在头顶方向时才有意义；
-        // 未授权路径与常规目标行为完全不变（169）。
-        if (r.kind == MoveToTaskRecord.Kind.BLOCK && r.mayAlterTerrain
-                && by > feet().getY() && !targetCellSolid()) {
-            var precheck = TravelUphillPrecheck.evaluate(player.level(), blockTarget, feet().getY());
-            if (precheck.gated()) {
-                Constants.LOG.info(
-                        "[maicraft-task] goto end kind={} result=failed type=NO_PATH feet={}"
-                                + " reason=uphill_precheck verdict={} surface_y={} rise={}",
-                        r.kind, player.blockPosition().toShortString(),
-                        precheck.verdict(), precheck.surfaceY(), precheck.rise());
-                fail("cannot plan an honest route to " + bx + "," + by + "," + bz
-                        + TravelUphillPrecheck.advice(precheck, blockTarget), FailureType.NO_PATH);
-                return;
-            }
-        }
+        // 悬空的高处目标不在出发前拦截：调用方已授权动地形，要站到那里就照常垫柱上去，
+        // 到达后脚下留着的自有垫柱由回执如实说明，交给调用方决定拆不拆。
         startWalkingNav();
-    }
-
-    /** 包任务可见的预检入口，供回归直接核对闸门判定；不做任何世界改动。 */
-    TravelUphillPrecheck.Result uphillPrecheck() {
-        return r.kind == MoveToTaskRecord.Kind.BLOCK && r.mayAlterTerrain
-                && by > feet().getY() && !targetCellSolid()
-                ? TravelUphillPrecheck.evaluate(player.level(), blockTarget, feet().getY())
-                : TravelUphillPrecheck.Result.ALLOW;
     }
 
     /** 这次 goto 的地形许可:模型点头了才开路,否则只走不改。四处建导航都从这儿取。 */
@@ -291,10 +272,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected TaskState onTick() {
         // 先处理已经开始的交通和导航，再判断是否到达；飞行刚碰地、电梯刚到楼层，都可能还没完成收尾。
         observeLanding();
-        // 到达后的垫柱回收阶段：导航已停，只剩逐格下拆；终态在这里落定。
-        if (pillarRecovery != null) {
-            return tickPillarRecovery();
-        }
         // 现有导航必须先消费其原生完成回执，之后任务清理才可停止它；仅仅碰到船舱地板或喷气背包触地，不代表退出或模式恢复已经完成。
         if (nav == null && reached()) return successAtBody();
         // 只有本次移动开始前明确退出旧页面；后续导航换装备或交通准备自己的菜单不被每刻抢关。
@@ -418,7 +395,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // 导航说路线到头了，还要按玩家实际身体检查；exact 任务不能用附近的落脚点替代。
                 if (r.requiresStrictStance()) {
                     if (reached()) {
-                        if (beginPillarRecovery()) yield TaskState.RUNNING;
                         yield successAtBody();
                     }
                     if (strictLandingInProgress()) {
@@ -438,7 +414,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     fail(blockedMessage("the route ended outside the supported destination region"), FailureType.NO_PATH);
                     yield TaskState.FAILED;
                 }
-                if (beginPillarRecovery()) yield TaskState.RUNNING;
                 yield successAtBody();
             }
             case FAILED -> {
@@ -472,7 +447,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 }
                 // 否则按地形允许的最近位置处理，再判断是否满足教学性成功或必须失败。
                 if (!r.requiresStrictStance() && closeEnoughToSucceed()) {
-                    if (beginPillarRecovery()) yield TaskState.RUNNING;
                     yield successAtBody();
                 }
                 // 旧兼容逻辑允许水平误差为零的非精确目标再试一次附近三格；这可能放宽调用者明确给出的零误差。
@@ -506,36 +480,22 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     }
 
     /**
-     * 到达后进入垫柱回收阶段：从旅程放置账里认领脚下连续自有柱，交给逐格下拆驱动。
-     * 没有垫过柱（或脚下不是自有柱）时返回 false，收尾照旧。回收尽力而为：
-     * 拆不动时按 RESIDUE 声明剩余垫块，到达事实不被回收成败否决。
+     * 到达时脚下正下方连续的自有垫块（从脚下一格向下，遇到非本次旅程放置的格子即停）。
+     * 只用于回执说明：垫柱原样保留，调用方要拆再另行提交；途中别处的垫块由旅程地形账统一列出。
      */
-    private boolean beginPillarRecovery() {
-        if (pillarRecovery != null) return false;
-        if (!r.mayAlterTerrain || !player.onGround()) return false;
-        var forbidden = terrain().embeddedForbiddenBodyCells();
-        stopNav();   // 先把最后一段导航的地形账并入旅程账，再据此认领柱列。
-        var column = PillarRecovery.ownPillarUnder(journeyPlacedCells(), feet(), Integer.MAX_VALUE);
-        if (column.isEmpty()) return false;
-        pillarRecovery = new PillarRecovery(player, column,
-                at -> player.level().isLoaded(at),
-                forbidden,
-                terrain());
-        Constants.LOG.info(
-                "[maicraft-task] goto 到达后回收自有垫柱 column_top={} blocks={}",
-                column.getFirst().toShortString(), column.size());
-        return true;
+    static List<BlockPos> ownPillarUnder(Set<BlockPos> placed, BlockPos feet) {
+        List<BlockPos> column = new ArrayList<>();
+        BlockPos at = feet.below();
+        while (column.size() < OWN_PILLAR_REPORT_LIMIT && placed.contains(at)) {
+            column.add(at);
+            at = at.below();
+        }
+        return column;
     }
 
-    /** 回收阶段的一刻：续期截止时间并驱动下拆，终态后带注记按成功收场。 */
-    private TaskState tickPillarRecovery() {
-        r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
-        var status = pillarRecovery.tick();
-        if (status == PillarRecovery.Status.RUNNING) return TaskState.RUNNING;
-        Constants.LOG.info(
-                "[maicraft-task] goto 垫柱回收收场 status={} feet={}",
-                status, player.blockPosition().toShortString());
-        return successAtBody();
+    /** 收场时（导航已停、旅程账已并入）读一次脚下自有垫柱；未授权动地形时不可能垫柱，直接为空。 */
+    private List<BlockPos> ownPillarAtFeet() {
+        return r.mayAlterTerrain ? ownPillarUnder(journeyPlacedCells(), feet()) : List.of();
     }
 
     /**
@@ -823,9 +783,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             data.put("arrival_direction", verdict.direction());
         }
         if (landingProtectionUnverified) data.put("landing_protection_unverified", true);
-        // 垫柱回收对账：回收了哪些格、还剩哪些格；调用方靠它复验登顶柱没有留在世界里。
-        if (pillarRecovery != null) {
-            data.put("pillar_recovery", pillarRecovery.evidence());
+        // 脚下留着本次垫的柱子时点名列出（自顶向下）：到达后不自动拆，拆不拆由调用方决定。
+        List<BlockPos> pillar = ownPillarAtFeet();
+        if (!pillar.isEmpty()) {
+            data.put("standing_on_own_pillar", pillar.stream().map(BlockPos::toShortString).toList());
         }
         return data;
     }
@@ -844,8 +805,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     @Override
     protected String successMessage() {
         int gy = player.blockPosition().getY();
-        // 垫柱回收注记跟在到达事实之后：回收成立报净变化，残留时点名列出坐标与去向。
-        String recovery = pillarRecovery == null ? "" : pillarRecovery.note();
+        // 站在自己垫的柱子上到达时，在到达事实后补一句：柱子原样保留，需要清理再另行提交。
+        List<BlockPos> pillar = ownPillarAtFeet();
+        String recovery = pillar.isEmpty() ? "" : " I am standing on " + pillar.size()
+                + " scaffolding block(s) I placed for this trip (" + pillar.getFirst().toShortString()
+                + (pillar.size() > 1 ? " down to " + pillar.getLast().toShortString() : "")
+                + "); they were left in place, so dig them back separately if they should not stay.";
         return switch (r.kind) {
             case BLOCK -> r.requiresStrictStance()
                     ? "reached the exact cell " + bx + "," + by + "," + bz + "." + landingNote()
@@ -899,10 +864,6 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (boatLeg != null) {
             boatLeg.stop();   // 中途被取消/让位:收桨,别让船带着按下的前进键漂走
             boatLeg = null;
-        }
-        // 回收阶段被抢占或取消时停掉进行中的下拆；已确认的拆除由驱动结算交账，剩余垫块按残留声明。
-        if (pillarRecovery != null) {
-            pillarRecovery.stop();
         }
     }
 

@@ -204,11 +204,11 @@ def regressionSuites = [
         heap: '512m', directory: 'replan-stagnation-regression', timeoutSeconds: 60,
         purpose: '验证同目标同站位零进展重规划快速无路收场并携带归因'
     ],
-    // travel 上超预检与垫柱回收：悬空精确目标出发前拒绝，登顶垫柱收尾清理或残留声明。
-    travelPillarPrecheckRegression: [
-        entry: 'org.maiwithu.maicraft.core.task.move.TravelPillarPrecheckTest',
-        heap: '512m', directory: 'travel-pillar-precheck-regression', timeoutSeconds: 120,
-        purpose: '验证 travel 上超预检拒绝口径与到达后垫柱回收的认领与残留声明'
+    // travel 到达时脚下自有垫柱：不自动拆，只把连续自有垫块写进回执，交给调用方决定。
+    travelPillarArrivalRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.move.TravelPillarArrivalTest',
+        heap: '512m', directory: 'travel-pillar-arrival-regression', timeoutSeconds: 60,
+        purpose: '验证到达时脚下自有垫柱的认领口径，垫柱原样保留并在回执点名'
     ],
     // 单独回放入水后的 MLG 让位，覆盖旧会话和已经排队的执行入口，避免水中换桶抢占主任务。
     mlgWaterRegression: [
