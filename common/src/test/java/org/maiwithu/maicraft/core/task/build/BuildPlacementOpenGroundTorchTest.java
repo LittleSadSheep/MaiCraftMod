@@ -29,6 +29,7 @@ public final class BuildPlacementOpenGroundTorchTest {
         openGroundAirCell(); grassCellSupport(); plannerCoversTorch(); floatingTargetNamesItsFace();
         heldHandsDoNotChangeGestureProof(); deniedGesturesStillNameTheirGate(); plantTargetKeepsSupportFacts();
         wallNeighbourProvesAttachGesture(); leavesNeighbourShortCircuitsAsMissingFace(); torchTargetAcceptsWallVariant();
+        faceMissingReachesTerminalAttribution();
         System.out.println("BuildPlacementOpenGroundTorchTest: open-ground torch access, planner coverage and named rejection gates passed");
     }
 
@@ -186,8 +187,42 @@ public final class BuildPlacementOpenGroundTorchTest {
                     .setValue(net.minecraft.world.level.block.WallTorchBlock.FACING, Direction.SOUTH);
             check(target.acceptsPlacedState(wall),
                     "a torch target accepts the wall variant placed by the native item dispatch");
-            check(!target.acceptsPlacedState(Blocks.STONE.defaultBlockState()),
+            // 五轮实机新签名：手势与预检都放行，点击后核验与终局验收却仍按图纸期望的
+            // 立式火把点名 placement_state_mismatch——核验路径必须同样认得墙面变体。
+            check(target.matches(wall),
+                    "the post-click verification accepts the wall variant as the placed result");
+            check(BuildPlacementGeometry.placementComplete(target, wall),
+                    "a wall torch in the target cell completes the placement without another click");
+            check(target.constructionMatches(wall),
+                    "construction verification accepts the wall variant as this cell being built");
+            check(target.matches(Blocks.TORCH.defaultBlockState()),
+                    "the ground variant keeps satisfying verification unchanged");
+            check(!target.matches(Blocks.STONE.defaultBlockState()),
                     "an unrelated block is still not accepted as the torch target result");
+        }
+    }
+
+    private static void faceMissingReachesTerminalAttribution() throws Exception {
+        try (var h = fixture()) {
+            // 167 五轮实机：face_missing 只在进度事件闪现，终局被 construction_worksite_unproven/no_path
+            // 笼统覆盖。任务层的终局归因键是通道驱动的 failure 名；这个名字一旦变动或缺席，
+            // 终局 cause_code 就会退回无名 no_path——把「驱动以该名失败、证据随行」钉在这里。
+            BuildTaskRecord.Target target = torchTarget(new BlockPos(5, 1, 3));
+            h.set(target.pos().below(), Blocks.AIR.defaultBlockState());
+            var drive = new BuildPlacementAccessDrive(h.player, target,
+                    org.maiwithu.maicraft.core.pathing.execute.PlayerNav.ContextProvider.DEFAULT,
+                    () -> true, null, () -> BuildPlacementAccessDrive.Status.READY);
+            BuildPlacementAccessDrive.Status status = BuildPlacementAccessDrive.Status.RUNNING;
+            for (int tick = 0; tick < 400 && status == BuildPlacementAccessDrive.Status.RUNNING; tick++) {
+                status = drive.tick();
+                h.nextTick();
+            }
+            check(status == BuildPlacementAccessDrive.Status.UNAVAILABLE,
+                    "an unsupportable torch cell ends the access drive without proving any stance");
+            check("target_attachment_face_missing".equals(drive.failure()),
+                    "the drive failure names the missing attachment face so the task can report it as the terminal cause");
+            check(drive.evidence().get("target_attachment_neighbors") != null,
+                    "the terminal evidence carries the six-neighbour facts for the receipt");
         }
     }
 

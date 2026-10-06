@@ -570,6 +570,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
         // 成品验收：新规则只逐项检查明确要求的最终属性；旧入口继续按精确属性和兼容设置判断。
         public boolean matches(BlockState state) {
+            // 点击后核验与终局验收都走这里；立式/墙式双形态物品落成另一变体同样算本格完成。
+            if (attachableVariantAccepts(state)) return true;
             if (finalProperties != null) return matchesProperties(state, finalProperties);
             if (!matchesExactProperties(state)) return false;
             if (itemPlace) {
@@ -602,7 +604,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
          * 点名了属性（exact/final 非空）时才维持原口径，不替作者扩大验收范围。
          */
         private boolean attachableVariantAccepts(BlockState state) {
-            if (!(item instanceof StandingAndWallBlockItem)
+            if (state == null
+                    || !(item instanceof StandingAndWallBlockItem)
                     || !exactProperties.isEmpty()
                     || (finalProperties != null && !finalProperties.isEmpty())) return false;
             // 原版把立式与墙式两个方块都注册到同一物品（两者的 Block.asItem 相同）；
@@ -612,9 +615,14 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
         /**
          * 新规则下，现场已有同种方块就先复用，不因为状态不同额外备料或拆换；明确要求的属性仍要在收尾时验收。
+         * 点名属性时维持放置阶段口径只看方块种类（门的开合等最终状态留给收尾）；未点名属性时
+         * 走成品口径，立式/墙式双形态物品落成另一变体同样算本格完成（与点击后核验一致）。
          */
         public boolean constructionMatches(BlockState state) {
-            return finalProperties == null ? matches(state) : state != null && state.getBlock() == desiredState.getBlock();
+            if (state == null) return false;
+            if (finalProperties != null && !finalProperties.isEmpty())
+                return state.getBlock() == desiredState.getBlock();
+            return matches(state);
         }
 
         private boolean matchesProperties(BlockState state, Set<String> properties) {

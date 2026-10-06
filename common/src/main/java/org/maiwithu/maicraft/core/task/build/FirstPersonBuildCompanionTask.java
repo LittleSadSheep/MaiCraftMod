@@ -1715,7 +1715,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState drivePlacementAccess() {
         var access = placementAccess.tick(); r.extendDeadlineTo(placementAccess.deadline());
-        if (access == BuildPlacementAccessDrive.Status.UNAVAILABLE) return null;
+        if (access == BuildPlacementAccessDrive.Status.UNAVAILABLE) {
+            // 目标级事实（整格六向无可附着支撑面）与站位无关，工位搜索和垫块兜底都改变不了它；
+            // 继续走既有流程只会被笼统的 construction_worksite_unproven 覆盖，终局必须点名真实原因。
+            if ("target_attachment_face_missing".equals(placementAccess.failure())) {
+                var neighbors = placementAccess.evidence().get("target_attachment_neighbors");
+                failAt(cell.target().pos(),
+                        "target cell is air and none of its six neighbors offers an attachable support face"
+                                + (neighbors == null ? "" : ": " + neighbors),
+                        FailureType.UNSUPPORTED, "target_attachment_face_missing", false);
+                return TaskState.FAILED;
+            }
+            return null;
+        }
         if (access == BuildPlacementAccessDrive.Status.FAILED) {
             if (!placementAccess.edgeActive() && retryPlacementAccess(placementAccess.failure())) return TaskState.RUNNING;
             return failAfterEdgeReturn(placementAccess.failure(), "placement_access_failed");
