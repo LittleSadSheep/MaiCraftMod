@@ -22,6 +22,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
@@ -280,6 +281,16 @@ public final class EmbeddedBaritoneRuntime {
                 backend, start, goal, EmbeddedBaritonePolicy.snapshot());
     }
 
+    /**
+     * 当前导航卡住后为这扇门／栅栏门登记的目标开关状态，供移动在门前决定是否右键；
+     * 没有登记、方块已不是可徒手开关的通道或没有导航持有身体时返回 null，仍按门板朝向判断。
+     */
+    public static Boolean passageOpenOverride(BlockPos pos, BlockState state) {
+        EmbeddedBaritoneNavigator current = owner;
+        if (current == null || !EmbeddedBaritoneActionBridge.isHandOpenable(state)) return null;
+        return current.passageOpenOverride(MovementStall.passageKey(pos, state));
+    }
+
     static EmbeddedBaritonePolicy.Snapshot policySnapshot(
             EmbeddedBaritoneNavigator navigator) {
         requireClientThread();
@@ -363,7 +374,12 @@ public final class EmbeddedBaritoneRuntime {
                     events.apply(EventState.PRE, TickEvent.Type.IN));
             baritone.getGameEventHandler().onPostTick(
                     events.apply(EventState.POST, TickEvent.Type.IN));
-            if (owner == current) current.observeDrivenState(context, pathing.drivenTicks() > previousPathingTick);
+            if (owner == current) {
+                // 本刻执行器若放弃了某一步，把卡点交给导航累计：先切门或重试，同一格第二次卡住再列障碍重算。
+                MovementStall stall = pathing.consumeStall();
+                if (stall != null) current.movementStalled(stall);
+                current.observeDrivenState(context, pathing.drivenTicks() > previousPathingTick);
+            }
             lastDrivenOwner = current;
             lastDrivenRevision = context.tickRevision();
         } catch (RuntimeException failure) {

@@ -49,6 +49,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
+import org.maiwithu.maicraft.core.pathing.baritone.MovementStall;
 import org.maiwithu.maicraft.core.pathing.baritone.SwimTravelControl;
 import org.maiwithu.maicraft.core.Constants;
 
@@ -101,6 +102,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private BetterBlockPos expectedSegmentStart;
 
     private final LinkedBlockingQueue<PathEvent> toDispatch = new LinkedBlockingQueue<>();
+    // 执行器放弃某一步时留下的卡点，等运行器在本刻结束时取走交给导航。
+    private MovementStall lastStall;
 
     public PathingBehavior(Baritone baritone) {
         super(baritone);
@@ -136,6 +139,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     public void discardPendingPathEvents(boolean resetWork) {
         toDispatch.clear();
         calcFailedLastTick = false;
+        // 换导航或重发路线时，旧路线的卡点不能算到新路线头上。
+        lastStall = null;
         if (resetWork) { planningWork = null; workOrigin = null; workGoal = null; workWorld = null; workFrontier = null; }
     }
 
@@ -200,6 +205,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         }
         safeToCancel = current.onTick();
         if (current.failed() || current.finished()) {
+            if (current.stall() != null) lastStall = current.stall();
             current = null;
             if (goal == null || goal.isInGoal(ctx.playerFeet())) {
                 logDebug("All done. At " + goal);
@@ -645,6 +651,12 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         return planningWork;
     }
     public long drivenTicks() { return drivenTicks; }
+    /** 取走最近一次执行器放弃某一步时的卡点，只交一次。 */
+    public MovementStall consumeStall() {
+        MovementStall stall = lastStall;
+        lastStall = null;
+        return stall;
+    }
     public boolean calculationErrored() { return lastCalculationResult == PathCalculationResult.Type.EXCEPTION; }
 
     /** 默认回执分别呈现真正无解、搜索停滞与已有执行路线，不能仅以“没有位移”反推搜索结论。 */

@@ -25,11 +25,13 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import baritone.utils.BlockStateInterface;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
 import java.util.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.item.FallingBlockEntity;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 public abstract class Movement implements IMovement, MovementHelper {
@@ -64,6 +66,8 @@ public abstract class Movement implements IMovement, MovementHelper {
     private Set<BetterBlockPos> validPositionsCached = null;
 
     private Boolean calculatedWhileLoaded;
+
+    private boolean livePolicyRejected;
 
     protected Movement(IBaritone baritone, BetterBlockPos src, BetterBlockPos dest, BetterBlockPos[] toBreak, BetterBlockPos toPlace) {
         this.baritone = baritone;
@@ -136,6 +140,8 @@ public abstract class Movement implements IMovement, MovementHelper {
         // checked here from its exact implementation-provided valid-position set.
         if (safeToCancel(currentState) && entersLiveForbiddenBodyCell()) {
             baritone.getInputOverrideHandler().clearAllKeys();
+            // 禁入格变化会让导航按新策略重算绕开，这次放弃不算卡住。
+            livePolicyRejected = true;
             currentState = currentState.setStatus(MovementStatus.UNREACHABLE);
             return currentState.getStatus();
         }
@@ -236,10 +242,21 @@ public abstract class Movement implements IMovement, MovementHelper {
         return true;
     }
 
+    /** 这一步是否因实时禁入格被放弃；执行器据此区分“策略变了要重算”和“真的走不通”。 */
+    public boolean rejectedByLivePolicy() {
+        return livePolicyRejected;
+    }
+
     private boolean preparePassage(MovementState state, BlockPos pos) {
         var blockState = BlockStateInterface.get(ctx, pos);
-        if (!MovementHelper.passageNeedsInteraction(blockState, src, dest)) return true;
-        if (blockState.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door) {
+        // 同一面前格卡住过一次后，导航为这扇门／栅栏门登记了目标开关状态：已是该状态就通行，否则先右键切换，
+        // 不再按门板朝向推断，避免推断失误时一直顶门或来回开关。
+        Boolean wantOpen = EmbeddedBaritoneRuntime.passageOpenOverride(pos, blockState);
+        if (wantOpen != null) {
+            if (blockState.getValue(BlockStateProperties.OPEN) == wantOpen) return true;
+        } else if (!MovementHelper.passageNeedsInteraction(blockState, src, dest)) {
+            return true;
+        } else if (blockState.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door) {
             if (MovementHelper.passageNeedsInteraction(
                     blockState.cycle(net.minecraft.world.level.block.DoorBlock.OPEN), src, dest)) {
                 state.setStatus(MovementStatus.UNREACHABLE);
@@ -285,6 +302,7 @@ public abstract class Movement implements IMovement, MovementHelper {
     @Override
     public void reset() {
         currentState = new MovementState().setStatus(MovementStatus.PREPPING);
+        livePolicyRejected = false;
     }
 
     /**

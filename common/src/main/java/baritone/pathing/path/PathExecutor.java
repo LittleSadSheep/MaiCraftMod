@@ -36,6 +36,7 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.core.pathing.baritone.MovementStall;
 import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicy;
 import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPolicy;
 import java.util.*;
@@ -68,6 +69,11 @@ public class PathExecutor implements IPathExecutor, Helper {
     private Double currentMovementOriginalCostEstimate;
     private Integer costEstimateIndex;
     private boolean failed;
+    // 这条路线走到过的最远一步与此后未能越过它的刻数；被撞回再走回来不算推进，单步超时计时会被清零，这里不会。
+    private int furthest;
+    private int ticksSinceFurthest;
+    private double furthestCostEstimate = Double.NaN;
+    private MovementStall stall;
     private boolean recalcBP = true;
     private HashSet<BlockPos> toBreak = new HashSet<>();
     private HashSet<BlockPos> toPlace = new HashSet<>();
@@ -129,6 +135,12 @@ public class PathExecutor implements IPathExecutor, Helper {
         }
         if (pathPosition >= path.length()) {
             return true; // stop bugging me, I'm done
+        }
+        // 越过最远一步才清零无推进计时；它的预计耗时等这一步第一次成为当前步时再记下。
+        if (pathPosition > furthest) {
+            furthest = pathPosition;
+            ticksSinceFurthest = 0;
+            furthestCostEstimate = Double.NaN;
         }
         Movement movement = (Movement) path.movements().get(pathPosition);
         waterTravel.update(pathPosition);
@@ -223,6 +235,9 @@ public class PathExecutor implements IPathExecutor, Helper {
             costEstimateIndex = pathPosition;
             // do this only once, when the movement starts, and deliberately get the cost as cached when this path was calculated, not the cost as it is right now
             currentMovementOriginalCostEstimate = movement.getCost();
+            if (pathPosition == furthest && Double.isNaN(furthestCostEstimate)) {
+                furthestCostEstimate = currentMovementOriginalCostEstimate;
+            }
             for (int i = 1; i < Baritone.settings().costVerificationLookahead.value && pathPosition + i < path.length() - 1; i++) {
                 if (((Movement) path.movements().get(pathPosition + i)).calculateCost(behavior.secretInternalGetCalculationContext()) >= ActionCosts.COST_INF && canCancel) {
                     logDebug("Something has changed in the world and a future movement has become impossible. Cancelling.");
@@ -252,6 +267,8 @@ public class PathExecutor implements IPathExecutor, Helper {
         MovementStatus movementStatus = movement.update();
         if (movementStatus == UNREACHABLE || movementStatus == FAILED) {
             logDebug("Movement returns status " + movementStatus);
+            // 实时禁入格拦下的一步会由新策略重算绕开，不算卡住；其余“这一步走不通”都记一次卡点交给导航。
+            if (!movement.rejectedByLivePolicy()) recordStall(MovementStall.Cause.UNREACHABLE, movement, ticksOnCurrent);
             cancel();
             return true;
         }
@@ -268,6 +285,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ctx.player().setSprinting(false); // letting go of control doesn't make you stop sprinting actually
             }
             ticksOnCurrent++;
+            ticksSinceFurthest++;
             if (cancelIfTimedOut(movement)) return true;
         }
         return canCancel && !groundJump.controls(movement); // A hop launched this tick also retains the body through landing.
@@ -294,11 +312,37 @@ public class PathExecutor implements IPathExecutor, Helper {
     private boolean cancelIfTimedOut(Movement movement) {
         // An airborne aid owns finite native receipt/recovery windows. The generic timeout
         // cannot discard that owner while it still has to land or account for its own water.
-        if (ownsUnsettledLanding(movement)
-                || ticksOnCurrent <= currentMovementOriginalCostEstimate + Baritone.settings().movementTimeoutTicks.value) return false;
-        logDebug("This movement has taken too long (" + ticksOnCurrent + " ticks, expected " + currentMovementOriginalCostEstimate + "). Cancelling.");
+        if (ownsUnsettledLanding(movement)) return false;
+        double furthestExpected = Double.isNaN(furthestCostEstimate) ? currentMovementOriginalCostEstimate : furthestCostEstimate;
+        boolean furthestKnown = furthest < path.movements().size();
+        MovementStall.Cause cause = timeoutCause(ticksOnCurrent, currentMovementOriginalCostEstimate,
+                furthestKnown ? ticksSinceFurthest : 0, furthestExpected, Baritone.settings().movementTimeoutTicks.value);
+        if (cause == null) return false;
+        Movement stalled = cause == MovementStall.Cause.TIMEOUT ? movement : (Movement) path.movements().get(furthest);
+        int ticks = cause == MovementStall.Cause.TIMEOUT ? ticksOnCurrent : ticksSinceFurthest;
+        logDebug("Movement " + stalled.getDest() + " stalled (" + cause + ", " + ticks + " ticks). Cancelling.");
+        recordStall(cause, stalled, ticks);
         cancel();
         return true;
+    }
+
+    // 当前这一步超过预计耗时加宽限就是单步超时；被撞回上一步会把单步计时清零，
+    // 所以再看走到过的最远一步：同样时限内始终没被越过，也算卡在那一步面前。
+    static MovementStall.Cause timeoutCause(int ticksOnCurrent, double currentExpected,
+                                            int ticksSinceFurthest, double furthestExpected, int allowance) {
+        if (ticksOnCurrent > currentExpected + allowance) return MovementStall.Cause.TIMEOUT;
+        if (ticksSinceFurthest > furthestExpected + allowance) return MovementStall.Cause.NO_ADVANCE;
+        return null;
+    }
+
+    // 只记下放弃的是哪一步和角色当时的位置；是否切门或列障碍由持有这次导航的上层决定。
+    private void recordStall(MovementStall.Cause cause, Movement movement, int ticks) {
+        stall = MovementStall.capture(cause, movement, ctx.player().position(), ctx.playerFeet(), ticks);
+    }
+
+    /** 本执行器放弃某一步时留下的卡点；正常完成或被外部取消时为 null。 */
+    public MovementStall stall() {
+        return stall;
     }
 
     private Tuple<Double, BlockPos> closestPathPos(IPath path) {
@@ -690,6 +734,10 @@ public class PathExecutor implements IPathExecutor, Helper {
             ret.currentMovementOriginalCostEstimate = currentMovementOriginalCostEstimate;
             ret.costEstimateIndex = costEstimateIndex;
             ret.ticksOnCurrent = ticksOnCurrent;
+            // 拼接保留前段下标，最远进度和无推进计时原样延续，不能因换了执行器就重新计时。
+            ret.furthest = furthest;
+            ret.ticksSinceFurthest = ticksSinceFurthest;
+            ret.furthestCostEstimate = furthestCostEstimate;
             return ret;
         }).orElseGet(this::cutIfTooLong); // dont actually call cutIfTooLong every tick if we won't actually use it, use a method reference
     }
@@ -712,6 +760,10 @@ public class PathExecutor implements IPathExecutor, Helper {
                 ret.costEstimateIndex = costEstimateIndex - cutoffAmt;
             }
             ret.ticksOnCurrent = ticksOnCurrent;
+            // 裁掉前段后下标整体前移，最远进度同步平移。
+            ret.furthest = Math.max(0, furthest - cutoffAmt);
+            ret.ticksSinceFurthest = ticksSinceFurthest;
+            ret.furthestCostEstimate = furthestCostEstimate;
             return ret;
         }
         return this;

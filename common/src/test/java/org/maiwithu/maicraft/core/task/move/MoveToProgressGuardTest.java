@@ -255,6 +255,10 @@ public final class MoveToProgressGuardTest {
                     "probeRecovery", "failureEvidence")) {
                 field(EmbeddedBaritoneNavigator.class, diagnostics).set(ground, Map.of());
             }
+            // 卡点记忆同样要真实构造：诊断链路会读取它是否为空。
+            var stallMemory = Class.forName("org.maiwithu.maicraft.core.pathing.baritone.NavigationStallMemory").getDeclaredConstructor();
+            stallMemory.setAccessible(true);
+            field(EmbeddedBaritoneNavigator.class, "stalls").set(ground, stallMemory.newInstance());
             field(EmbeddedBaritoneNavigator.class, "probeProgress").set(ground, new PlanningWorkProgress());
             field(TransportNavigator.class, "ground").set(navigator, ground);
         }

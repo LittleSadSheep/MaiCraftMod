@@ -63,6 +63,7 @@ import org.maiwithu.maicraft.core.pathing.baritone.NavigationDismountTest;
 import org.maiwithu.maicraft.core.pathing.baritone.MovingGoalRefreshTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationPolicySnapshotTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationProgressTest;
+import org.maiwithu.maicraft.core.pathing.baritone.NavigationStallMemoryTest;
 import org.maiwithu.maicraft.core.pathing.baritone.PreserveProbeRecoveryTest;
 import org.maiwithu.maicraft.core.pathing.baritone.NavigationScaffoldPlacementPolicyTest;
 import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicyTest;
@@ -186,6 +187,9 @@ public final class NavigationRegressionSuite {
         PlacementHandoffTest.main(args);
         NearbyCollisionPerceptionTest.main(args);
         NavigationProgressTest.main(args);
+        // 同一面前格卡住：先切门或重试，第二次列为障碍重算；被撞回清零单步计时后仍能判出卡住。
+        NavigationStallMemoryTest.main(args);
+        baritone.pathing.path.MovementStallTimeoutTest.main(args);
         // 复算证明无需改地形后，原移动任务应自行恢复，并限制原地反复计算。
         PreserveProbeRecoveryTest.main(args);
         GroundPathSmoothingTest.main(args);

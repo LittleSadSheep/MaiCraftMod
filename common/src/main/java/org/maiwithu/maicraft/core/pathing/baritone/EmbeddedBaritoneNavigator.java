@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.List;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext.BodyRange;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
@@ -18,6 +19,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.FailureType;
@@ -53,6 +55,7 @@ public final class EmbeddedBaritoneNavigator {
     private final EnumMap<PathEvent, Integer> events = new EnumMap<>(PathEvent.class);
     private final LongOpenHashSet rejectedScaffolds = new LongOpenHashSet();
     private final LongOpenHashSet rejectedClearance = new LongOpenHashSet();
+    private final NavigationStallMemory stalls = new NavigationStallMemory();
 
     private GoalCompiler.Compiled compiled;
     private GoalCompiler.CompiledFingerprint compiledFingerprint;
@@ -120,8 +123,13 @@ public final class EmbeddedBaritoneNavigator {
         return cells;
     }
 
+    // 任务给出的禁入格之外，再加上本次导航反复卡住后学到的障碍格；下一刻 refreshPolicy 发现策略变化就重算绕行。
     LongSet forbiddenBodyCells() {
-        return contextProvider.embeddedForbiddenBodyCells();
+        LongSet base = contextProvider.embeddedForbiddenBodyCells();
+        if (stalls.obstacles().isEmpty()) return base;
+        var cells = new LongOpenHashSet(base);
+        cells.addAll(stalls.obstacles());
+        return cells;
     }
 
     int minimumFeetY() { return contextProvider.minimumFeetY(); }
@@ -185,6 +193,53 @@ public final class EmbeddedBaritoneNavigator {
         if (rejectedClearance.size() < 64) rejectedClearance.add(pos.asLong());
         else if (!rejectedClearance.contains(pos.asLong()))
             failWhenSafe(FailureType.NO_PATH, "clearance whitelist exclusions exhausted navigation alternatives");
+    }
+
+    /**
+     * 执行器放弃某一步后由运行器转交：同一面前格第一次卡住，先切换这一步途经的门（没有门就原样重试）；
+     * 第二次仍卡住就把面前格列为障碍，下一刻刷新策略并重算绕行；障碍数用完则如实失败。整个过程不挖不放。
+     */
+    void movementStalled(MovementStall stall) {
+        if (terminalFailure || pendingFailureType != null || stall.front() == null) return;
+        var level = player.level();
+        BlockPos passage = null;
+        boolean open = false;
+        for (BlockPos cell : stall.passageCells()) {
+            if (!level.isLoaded(cell)) continue;
+            BlockState state = level.getBlockState(cell);
+            if (!EmbeddedBaritoneActionBridge.isHandOpenable(state)) continue;
+            BlockPos key = MovementStall.passageKey(cell, state);
+            if (stalls.wantOpen(key) != null) continue;
+            passage = key;
+            open = !state.getValue(BlockStateProperties.OPEN);
+            break;
+        }
+        BlockPos front = stall.front();
+        var facts = new LinkedHashMap<String, Object>();
+        facts.put("cause", stall.cause().name().toLowerCase(Locale.ROOT));
+        facts.put("movement", stall.movement());
+        facts.put("from", stall.src().toShortString());
+        facts.put("to", stall.dest().toShortString());
+        facts.put("feet_block", level.isLoaded(front) ? level.getBlockState(front).toString() : "unloaded");
+        facts.put("head_block", level.isLoaded(front.above()) ? level.getBlockState(front.above()).toString() : "unloaded");
+        facts.put("stalled_ticks", stall.ticks());
+        facts.put("game_time", level.getGameTime());
+        var decision = stalls.observe(front, passage, open, facts);
+        switch (decision) {
+            case RETRY -> Constants.LOG.info("[maicraft-path] movement stalled before {} ({}); retrying once", front.toShortString(), facts);
+            case TOGGLE_PASSAGE -> Constants.LOG.info("[maicraft-path] movement stalled before {}; toggling passage {} to open={} before retrying",
+                    front.toShortString(), passage.toShortString(), open);
+            case OBSTACLE -> Constants.LOG.warn("[maicraft-path] movement stalled {} times before {}; excluding it and replanning; {}",
+                    NavigationStallMemory.ATTEMPTS, front.toShortString(), facts);
+            case EXHAUSTED -> failWhenSafe(FailureType.NO_PATH, "movement stalled again before " + front.toShortString()
+                    + " after " + NavigationStallMemory.MAX_OBSTACLES + " cells were already excluded as physical obstacles "
+                    + stalls.obstacleCells() + "; no terrain was altered");
+        }
+    }
+
+    /** 卡住后为这扇门（下半格）登记的目标开关状态；没有登记返回 null。 */
+    Boolean passageOpenOverride(BlockPos passage) {
+        return stalls.wantOpen(passage);
     }
 
     void recordConfirmedNativeAction() {
@@ -285,6 +340,9 @@ public final class EmbeddedBaritoneNavigator {
         failureEvidence = NavigationFailureEvidence.capture(player, plannedCenter, permit, EmbeddedBaritonePolicy.snapshot());
         String detail = "Baritone found no path to " + plannedCenter.toShortString();
         if (!rejectedScaffolds.isEmpty()) detail += "; temporary scaffold safety excluded " + rejectedScaffolds.size() + " placement cells";
+        // 反复卡住学到的障碍格也会让路线无解，写进原因，回执明细见 stuck_obstacles。
+        if (!stalls.obstacles().isEmpty()) detail += "; " + stalls.obstacleCells().size()
+                + " cells were excluded after repeated physical stalls " + stalls.obstacleCells();
         var escape = org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.detect(
                 player.level(), feet(), cell -> player.level().isLoaded(cell));
         if (escape.active()) detail += "; " + escape.detail();
@@ -582,10 +640,14 @@ public final class EmbeddedBaritoneNavigator {
     public Map<String, Object> healthDiagnostics() {
         var current = EmbeddedBaritoneRuntime.searchDiagnostics(this);
         if (!healthLatched && !current.isEmpty()) healthEvidence = current;
-        if (dispatchRecovery.isEmpty() && probeRecovery.isEmpty()) return healthEvidence;
+        if (dispatchRecovery.isEmpty() && probeRecovery.isEmpty() && stalls.isEmpty()) return healthEvidence;
         var facts = new LinkedHashMap<String, Object>(healthEvidence);
-        facts.put("dispatch_recovery", dispatchRecovery); facts.put("dispatch_restart_count", dispatchWatchdog.restarts());
-        facts.put("terrain_probe_recovery", probeRecovery); facts.put("terrain_probe_restart_count", probeRestarts);
+        if (!dispatchRecovery.isEmpty() || !probeRecovery.isEmpty()) {
+            facts.put("dispatch_recovery", dispatchRecovery); facts.put("dispatch_restart_count", dispatchWatchdog.restarts());
+            facts.put("terrain_probe_recovery", probeRecovery); facts.put("terrain_probe_restart_count", probeRestarts);
+        }
+        // 卡点学到的障碍格与切门登记直接进诊断，失败回执不必再翻日志。
+        stalls.describeInto(facts);
         return Map.copyOf(facts);
     }
 
