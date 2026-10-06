@@ -51,6 +51,14 @@
 .\gradlew.bat :common:check :fabric:compileJava :neoforge:compileJava --console=plain
 ```
 
+收口前的完整公共回归也可并行执行，并发度跟 `--max-workers` 走，按机器内存选择（8GB 用 2，16GB 用 4，更大用 8）：
+
+```powershell
+.\gradlew.bat :common:parallelRegressionCheck --max-workers=4 --console=plain
+```
+
+每个套件仍是独立 JVM，工作目录、堆上限与逐套件超时同 `check` 的独立任务；失败会指明具体套件。`--max-workers=1` 即串行基线。
+
 按修改范围先选择对应回归，最后再跑完整检查：
 
 | 改动范围 | 对应任务 |
