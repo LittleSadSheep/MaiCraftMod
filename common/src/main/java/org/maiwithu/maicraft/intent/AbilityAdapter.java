@@ -13,7 +13,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.pathing.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
@@ -244,8 +248,8 @@ final class AbilityAdapter {
         }
 
         // 世界里没有找到床，再看背包有没有；有床则找位置放下，之后仍按“走过去、上床”执行。
-        IntentAction carried = carriedBedPlan(goal, player);
-        if (carried != null) return carried;
+        CarriedBedPlan carried = carriedBedPlan(goal, player);
+        if (carried != null) return carried.action();
 
         return decision(goal,
                 "No bed is visible in loaded terrain and no bed is in inventory; the bed may exist outside "
@@ -285,24 +289,29 @@ final class AbilityAdapter {
                 context.toString()));
     }
 
+    /** 自带床回退方案：动作链之外把床头坐标一并交给任务层，入睡判定失败时换位重试仍锚定同一张床。 */
+    record CarriedBedPlan(IntentAction action, BlockPos bedHead) {}
+
     /**
-     * 自带床的行动方案：放下背包里的床，再走过去躺下。背包没有床时返回 null；
-     * 有床但没有安全落位、或当前不在可睡窗口时，返回交还调用方决定的动作。
+     * 自带床的行动方案：放下背包里的床，再走到预选的可交互站位、按床头坐标入睡。
+     * 走位与入睡都带显式坐标：平原村庄的现成床与自带床是同一种方块，按类型就近寻床会走回
+     * 被遮挡的现成床（166 批六B），只有坐标能把整条链钉在刚放下的这张床上。
+     * 背包没有床时返回 null；有床但没有安全落位、或当前不在可睡窗口时，返回交还调用方决定的动作。
      */
-    private static IntentAction carriedBedPlan(Goal goal, LocalPlayer player) {
+    private static CarriedBedPlan carriedBedPlan(Goal goal, LocalPlayer player) {
         String carriedBed = inventoryBed(player);
         if (carriedBed == null) return null;
         if (!WorldTimeSemantics.canAttemptSleep(player.level())) {
-            return waitForNightDecision(goal, player);
+            return new CarriedBedPlan(waitForNightDecision(goal, player), null);
         }
         BedSite site = nearbyBedSite(player);
         if (site == null) {
-            return decision(goal,
+            return new CarriedBedPlan(decision(goal,
                     "There is a bed in inventory, but no safe loaded two-block placement site nearby.",
                     List.of(
                             option("recover", "Provide a semantic travel prerequisite to reach a safe open area."),
                             option("skip", "Do not sleep."),
-                            option("cancel", "Cancel the whole task.")));
+                            option("cancel", "Cancel the whole task."))), null);
         }
         JsonObject op = new JsonObject();
         op.addProperty("op", "set");
@@ -316,12 +325,20 @@ final class AbilityAdapter {
         JsonObject build = new JsonObject();
         build.add("ops", ops);
         build.addProperty("replace_existing", false);
-        JsonObject travel = new JsonObject();
-        travel.addProperty("block", carriedBed);
-        return new IntentAction.Chain(List.of(
+        JsonObject travel = positionJson(site.stance());
+        JsonObject rest = positionJson(site.head());
+        return new CarriedBedPlan(new IntentAction.Chain(List.of(
                 new IntentAction.Tool("build", build.toString()),
                 new IntentAction.Tool("goto", travel.toString()),
-                new IntentAction.Tool("sleep", "{}")));
+                new IntentAction.Tool("sleep", rest.toString()))), site.head());
+    }
+
+    private static JsonObject positionJson(BlockPos pos) {
+        JsonObject json = new JsonObject();
+        json.addProperty("x", pos.getX());
+        json.addProperty("y", pos.getY());
+        json.addProperty("z", pos.getZ());
+        return json;
     }
 
     /** 睡眠目标可触发自带床回退的失败类型：目标床被遮挡、够不着或已失效，睡觉本身没有推进。 */
@@ -329,13 +346,28 @@ final class AbilityAdapter {
 
     /**
      * 现成床不可用时的自带床回退：村庄床等现成床被遮挡或够不着时，改放背包里的床完成睡眠，
-     * 而不是让睡觉目标随现成床一起落空。goal 明确指定床区（coordinates/landmark）时不回退——
+     * 而不是让睡觉目标随一张被挡住的现成床一起落空。goal 明确指定床区（coordinates/landmark）时不回退——
      * 那是调用方点名的床，换床属于语义变更，应如实失败交回决定。
      */
-    static IntentAction carriedBedFallback(Goal goal, LocalPlayer player, String failureType) {
+    static CarriedBedPlan carriedBedFallback(Goal goal, LocalPlayer player, String failureType) {
         if (failureType == null || !BED_FALLBACK_FAILURE_TYPES.contains(failureType)) return null;
         if (goal.target() != null) return null;
         return carriedBedPlan(goal, player);
+    }
+
+    /**
+     * 回退床入睡仍判遮挡后的换位重试：走到床边另一个可站立格，按同一张床头再睡一次。
+     * 坐标钉死床头，不重扫附近（附近可能有更近的同类型现成床）；床边没有可站立格时返回 null，
+     * 由调用方维持诚实失败。
+     */
+    static IntentAction.Chain sleepRepositionRetry(LocalPlayer player, BlockPos bedHead) {
+        BlockPos foot = footOf(player, bedHead);
+        if (foot == null) return null;
+        BlockPos stance = interactionStance(player, bedHead, foot);
+        if (stance == null) return null;
+        return new IntentAction.Chain(List.of(
+                new IntentAction.Tool("goto", positionJson(stance).toString()),
+                new IntentAction.Tool("sleep", positionJson(bedHead).toString())));
     }
 
     private static String inventoryBed(LocalPlayer player) {
@@ -352,8 +384,11 @@ final class AbilityAdapter {
 
     private static BedSite nearbyBedSite(LocalPlayer player) {
         // 从附近一圈圈找能放床的两格，床头可以朝四个水平方向。
-        // 这里每列只看最高的非树叶地形上方，没围绕玩家当前高度找室内或洞穴地板。
+        // 每个候选还必须配一个可站立、视线通床头的相邻站位：放下的床从当时的站位看不见时，
+        // 入睡判定会以遮挡失败、整夜耗尽（166 批六B），所以落位与交互在选址时一并核验。
         BlockPos origin = player.blockPosition();
+        BlockPos body = origin;
+        BlockPos bodyAbove = origin.above();
         for (int radius = 1; radius <= 5; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
@@ -365,14 +400,69 @@ final class AbilityAdapter {
                     BlockPos foot = new BlockPos(x, y, z);
                     for (Direction facing : Direction.Plane.HORIZONTAL) {
                         BlockPos head = foot.relative(facing);
+                        // 床尾或床头压住自己站的两格：服务器会拒绝放置，选址时直接跳过。
+                        if (foot.equals(body) || foot.equals(bodyAbove)
+                                || head.equals(body) || head.equals(bodyAbove)) continue;
                         if (validBedCell(player, foot) && validBedCell(player, head)) {
-                            return new BedSite(foot, facing);
+                            BlockPos stance = interactionStance(player, head, foot);
+                            if (stance != null) return new BedSite(foot, head, facing, stance);
                         }
                     }
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * 床头周围的可交互站位：床尾或床头的水平相邻格里，脚下有支撑、身位两格无碰撞，
+     * 且从站位眼位看向床头中心不被地形挡住；取离玩家最近的一个，没有返回 null。
+     */
+    private static BlockPos interactionStance(LocalPlayer player, BlockPos bedHead, BlockPos foot) {
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos cell : List.of(foot, bedHead)) {
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos stance = cell.relative(side);
+                if (!standable(player, stance)) continue;
+                Vec3 eye = Vec3.atCenterOf(stance).add(0, player.getEyeHeight() - 0.5, 0);
+                Vec3 target = Vec3.atCenterOf(bedHead);
+                var hit = player.clientLevel.clip(new ClipContext(
+                        eye, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+                // 床还没放，视线通时射线落空；先撞到别处地形说明从这个站位看不见床头。
+                if (hit.getType() == HitResult.Type.BLOCK
+                        && !hit.getBlockPos().equals(foot) && !hit.getBlockPos().equals(bedHead)) continue;
+                double distance = stance.distSqr(player.blockPosition());
+                if (distance < bestDistance) {
+                    best = stance;
+                    bestDistance = distance;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** 站立格资格：脚下支撑扎实，该格与头顶一格都没有碰撞体（原站着的格子天然满足）。 */
+    private static boolean standable(LocalPlayer player, BlockPos stance) {
+        BlockPos support = stance.below();
+        return player.clientLevel.isLoaded(stance)
+                && player.clientLevel.isLoaded(support)
+                && player.clientLevel.getBlockState(support)
+                        .isFaceSturdy(player.clientLevel, support, Direction.UP)
+                && player.clientLevel.getBlockState(stance).getCollisionShape(
+                        player.clientLevel, stance).isEmpty()
+                && player.clientLevel.getBlockState(stance.above()).getCollisionShape(
+                        player.clientLevel, stance.above()).isEmpty();
+    }
+
+    /** 由床头反查床尾：床头格按 FACING 的反向相邻格就是床尾；床方块信息缺失时返回 null。 */
+    private static BlockPos footOf(LocalPlayer player, BlockPos bedHead) {
+        if (!player.clientLevel.isLoaded(bedHead)) return null;
+        var state = player.clientLevel.getBlockState(bedHead);
+        if (!(state.getBlock() instanceof BedBlock) || !state.hasProperty(BedBlock.PART)
+                || !state.hasProperty(BedBlock.FACING)) return null;
+        if (state.getValue(BedBlock.PART) != BedPart.HEAD) return bedHead;
+        return bedHead.relative(state.getValue(BedBlock.FACING).getOpposite());
     }
 
     private static boolean validBedCell(LocalPlayer player, BlockPos cell) {
@@ -389,7 +479,7 @@ final class AbilityAdapter {
                         .isFaceSturdy(player.clientLevel, support, Direction.UP);
     }
 
-    private record BedSite(BlockPos foot, Direction facing) {}
+    private record BedSite(BlockPos foot, BlockPos head, Direction facing, BlockPos stance) {}
 
     private static IntentAction travel(Goal goal, LocalPlayer player, IntentRuntime runtime) {
         // 已登记飞机承担长途路段，落地后仍由同一旅行任务核实原来的地面终点。

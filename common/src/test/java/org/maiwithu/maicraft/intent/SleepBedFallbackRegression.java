@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.OptionalLong;
 import java.util.UUID;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
@@ -37,6 +38,8 @@ public final class SleepBedFallbackRegression {
         noCarriedBedKeepsHonestFailure();
         emptyWorldPlansCarriedBedDirectly();
         fallbackChainFailureReportsBothAttempts();
+        unreachableBedFailsHonestly();
+        placementSiteRequiresInteractiveStance();
         fallbackSuccessReceiptNamesTheCarriedBed();
         gateDecisionKindMarksTheDoor();
         gateRelayThreeStates();
@@ -46,15 +49,18 @@ public final class SleepBedFallbackRegression {
         System.out.println("SleepBedFallbackRegression: passed");
     }
 
-    /** ①现成床被遮挡：回退链是 放自带床 → 走过去 → 入睡，放置用的是背包里的那张床。 */
+    /** ①现成床被遮挡：回退链是 放自带床 → 走到预选站位 → 按床头坐标入睡。 */
     private static void occludedVillageBedFallsBackToCarriedBed() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             night(world);
             world.inventory.add(new ItemStack(Items.WHITE_BED));
             var goal = new Goal("maicraft:sleep", "sleep through the night", null, "{}", "{}", List.of(), List.of());
-            IntentAction action = AbilityAdapter.carriedBedFallback(goal, world.player, "occluded");
-            check(action instanceof IntentAction.Chain, "an occluded village bed with a carried bed engages the fallback chain");
-            assertCarriedBedChain((IntentAction.Chain) action, "minecraft:white_bed");
+            AbilityAdapter.CarriedBedPlan plan = AbilityAdapter.carriedBedFallback(goal, world.player, "occluded");
+            check(plan != null && plan.action() instanceof IntentAction.Chain,
+                    "an occluded village bed with a carried bed engages the fallback chain");
+            assertCarriedBedChain((IntentAction.Chain) plan.action(), "minecraft:white_bed");
+            check(plan.bedHead() != null && plan.bedHead().equals(sleepCoordsOf((IntentAction.Chain) plan.action())),
+                    "the fallback plan hands the anchored bed head to the task layer");
         }
     }
 
@@ -102,7 +108,7 @@ public final class SleepBedFallbackRegression {
         }
     }
 
-    /** 回退链再次失败：终局话术把两段失败都带全，不回退第二次。 */
+    /** 回退链再次判遮挡：先换到床边可交互站位重试一次（锚定同一张床头），第三次才诚实终局。 */
     private static void fallbackChainFailureReportsBothAttempts() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             night(world);
@@ -113,12 +119,73 @@ public final class SleepBedFallbackRegression {
             var chain = chainOf(task);
             check(chain.size() == 3 && "build".equals(chain.get(0).toolName()),
                     "the first failure engages the carried-bed fallback chain");
-            TaskState state = failStep(task, world,
-                    TaskResult.fail("sleep interaction was rejected", Map.of("failure_type", "unknown")));
-            check(state == TaskState.FAILED, "a second failure inside the fallback chain ends the task");
+            var anchoredHead = sleepCoordsOf(new IntentAction.Chain(chain));
+            // 换位重试的选址读真实床方块：按 build 步的落位把床放进测试世界。
+            placeBedFromBuildStep(world, (IntentAction.Tool) chain.get(0));
+            var reposition = failStep(task, world,
+                    TaskResult.fail("bed is occluded from the current stance",
+                            Map.of("failure_type", "occluded")));
+            check(reposition == TaskState.RUNNING, "an occluded placed bed repositions instead of ending the task");
+            var retryChain = chainOf(task);
+            check(retryChain.size() == 2 && "goto".equals(retryChain.get(0).toolName())
+                            && "sleep".equals(retryChain.get(1).toolName()),
+                    "the reposition retry is goto then sleep");
+            check(sleepCoordsOf(new IntentAction.Chain(retryChain)).equals(anchoredHead),
+                    "the reposition retry sleeps in the same anchored bed, not a rescan");
+            var state = failStep(task, world,
+                    TaskResult.fail("bed is occluded from the current stance",
+                            Map.of("failure_type", "occluded")));
+            check(state == TaskState.FAILED, "a third failure after the single reposition ends the task");
             check(resultMessage(task).contains("carried-bed fallback also failed")
                             && resultMessage(task).contains("occluded from the current stance"),
                     "the terminal message carries both the fallback failure and the earlier village-bed failure");
+            int wrapCount = resultMessage(task).split("carried-bed fallback also failed", -1).length - 1;
+            check(wrapCount == 1, "the two-part failure is not double-wrapped by the retry: " + resultMessage(task));
+        }
+    }
+
+    /** 床边没有可站立换位（床头信息已失效）：遮挡不再重试，如实终局。 */
+    private static void unreachableBedFailsHonestly() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            world.inventory.add(new ItemStack(Items.WHITE_BED));
+            var task = task(world);
+            failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded")));
+            // 床头锚点失效（床已被破坏）：footOf 读不到床方块，换位无从谈起。
+            field(IntentTask.class, "bedFallbackBedHead").set(task,
+                    new net.minecraft.core.BlockPos(3, 1, 3));
+            var state = failStep(task, world, TaskResult.fail("bed is occluded from the current stance",
+                    Map.of("failure_type", "occluded")));
+            check(state == TaskState.FAILED, "a stale anchored bed ends the task honestly");
+            check(resultMessage(task).contains("carried-bed fallback also failed"),
+                    "the honest terminal still names both failures");
+        }
+    }
+
+    /** 选址预核交互：地形被石墙抬高、相邻格多被堵死时，选出的落位仍带可站立、视线通床头的站位。 */
+    private static void placementSiteRequiresInteractiveStance() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            night(world);
+            world.inventory.add(new ItemStack(Items.WHITE_BED));
+            // 把玩家西侧一圈立起石墙：首圈候选 (7,1,7)/床头 (7,1,8) 的全部相邻格都被堵死，
+            // 选址必须跳过它，落到一个带可交互站位的落位上。
+            for (int x = 6; x <= 8; x++) {
+                for (int z = 6; z <= 9; z++) {
+                    world.set(new net.minecraft.core.BlockPos(x, 1, z),
+                            x == 8 && z == 8 ? net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
+                                    : net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+                    world.set(new net.minecraft.core.BlockPos(x, 2, z),
+                            x == 8 && z == 8 ? net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
+                                    : net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+                }
+            }
+            var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+            AbilityAdapter.CarriedBedPlan plan = AbilityAdapter.carriedBedFallback(goal, world.player, "occluded");
+            check(plan != null && plan.action() instanceof IntentAction.Chain,
+                    "a walled-off first ring still finds an interactive placement site");
+            IntentAction.Chain chain = (IntentAction.Chain) plan.action();
+            assertCarriedBedChain(chain, "minecraft:white_bed");
         }
     }
 
@@ -315,11 +382,56 @@ public final class SleepBedFallbackRegression {
                 && "goto".equals(((IntentAction.Tool) actions.get(1)).toolName())
                 && "sleep".equals(((IntentAction.Tool) actions.get(2)).toolName()),
                 "the fallback chain order is build, goto, sleep");
+        JsonObject build = JsonParser.parseString(
+                ((IntentAction.Tool) actions.get(0)).argumentsJson()).getAsJsonObject();
         String buildArgs = ((IntentAction.Tool) actions.get(0)).argumentsJson();
         check(buildArgs.contains("\"op\":\"set\"") && buildArgs.contains("\"block_id\":\"" + expectedBlock + "\""),
                 "the build step places the carried bed itself: " + buildArgs);
-        check(((IntentAction.Tool) actions.get(2)).argumentsJson().contains("{}"),
-                "the final sleep step lets the placed bed be found on arrival");
+        // 走位与入睡都用显式坐标：村庄现成床与自带床常是同一种方块，按类型就近会走回被遮挡的现成床。
+        JsonObject foot = build.getAsJsonArray("ops").get(0).getAsJsonObject();
+        var head = new net.minecraft.core.BlockPos(foot.get("x").getAsInt(), foot.get("y").getAsInt(),
+                foot.get("z").getAsInt())
+                .relative(net.minecraft.core.Direction.byName(foot.get("facing").getAsString()));
+        var gotoArgs = JsonParser.parseString(((IntentAction.Tool) actions.get(1)).argumentsJson()).getAsJsonObject();
+        var sleepArgs = JsonParser.parseString(((IntentAction.Tool) actions.get(2)).argumentsJson()).getAsJsonObject();
+        check(sleepArgs.get("x").getAsInt() == head.getX() && sleepArgs.get("y").getAsInt() == head.getY()
+                        && sleepArgs.get("z").getAsInt() == head.getZ(),
+                "the final sleep step targets the placed bed's head by explicit coordinates: " + sleepArgs);
+        var stance = new net.minecraft.core.BlockPos(gotoArgs.get("x").getAsInt(), gotoArgs.get("y").getAsInt(),
+                gotoArgs.get("z").getAsInt());
+        var footPos = new net.minecraft.core.BlockPos(foot.get("x").getAsInt(), foot.get("y").getAsInt(),
+                foot.get("z").getAsInt());
+        boolean adjacent = stance.distManhattan(footPos) == 1 || stance.distManhattan(head) == 1;
+        check(adjacent, "the goto step walks to a stance adjacent to the placed bed: " + gotoArgs);
+    }
+
+    /** 按 build 步的落位把床方块放进测试世界：换位重试的选址与 footOf 读的是真实床方块。 */
+    private static void placeBedFromBuildStep(InteractionWorldTestHarness world, IntentAction.Tool build)
+            throws Exception {
+        JsonObject op = JsonParser.parseString(build.argumentsJson()).getAsJsonObject()
+                .getAsJsonArray("ops").get(0).getAsJsonObject();
+        var facing = net.minecraft.core.Direction.byName(op.get("facing").getAsString());
+        var footPos = new net.minecraft.core.BlockPos(op.get("x").getAsInt(),
+                op.get("y").getAsInt(), op.get("z").getAsInt());
+        var footState = net.minecraft.world.level.block.Blocks.WHITE_BED.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.BedBlock.PART,
+                        net.minecraft.world.level.block.state.properties.BedPart.FOOT)
+                .setValue(net.minecraft.world.level.block.BedBlock.FACING, facing);
+        var headState = net.minecraft.world.level.block.Blocks.WHITE_BED.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.BedBlock.PART,
+                        net.minecraft.world.level.block.state.properties.BedPart.HEAD)
+                .setValue(net.minecraft.world.level.block.BedBlock.FACING, facing);
+        world.set(footPos, footState);
+        world.set(footPos.relative(facing), headState);
+    }
+
+    /** 回执链 sleep 步的显式床头坐标；链上没有显式坐标时返回 null。 */
+    private static net.minecraft.core.BlockPos sleepCoordsOf(IntentAction.Chain chain) {
+        JsonObject sleepArgs = JsonParser.parseString(
+                chain.actions().getLast().argumentsJson()).getAsJsonObject();
+        if (!sleepArgs.has("x")) return null;
+        return new net.minecraft.core.BlockPos(sleepArgs.get("x").getAsInt(),
+                sleepArgs.get("y").getAsInt(), sleepArgs.get("z").getAsInt());
     }
 
     /** 可睡窗口内的夜晚与可用床的维度；回退方案只在确实能入睡时排链。 */

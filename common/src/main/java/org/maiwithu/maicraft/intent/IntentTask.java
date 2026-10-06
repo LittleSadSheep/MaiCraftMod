@@ -79,6 +79,10 @@ final class IntentTask implements Task {
     private boolean bedFallbackEngaged;
     /** 触发回退的那次失败原文，回执里说明为什么改用了自带床。 */
     private String bedFallbackFailure;
+    /** 回退链锚定的床头坐标：入睡遮挡的换位重试必须回到刚放下的这张床，不按类型重扫。 */
+    private BlockPos bedFallbackBedHead;
+    /** 换位重试只做一次：换位后仍判遮挡就让两段失败诚实终局。 */
+    private boolean bedFallbackRepositioned;
     /** 单次机械续建凭据只保留在 Mod 内部，调用方仍通过语义重试选择下一步。 */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
     private String cachedProtectionDimension;
@@ -527,6 +531,8 @@ final class IntentTask implements Task {
         if (bedFallbackFailure != null) data.put("village_bed_fallback_reason", bedFallbackFailure);
         bedFallbackEngaged = false;
         bedFallbackFailure = null;
+        bedFallbackBedHead = null;
+        bedFallbackRepositioned = false;
         return result.withData(data);
     }
 
@@ -571,7 +577,9 @@ final class IntentTask implements Task {
         // 现场和效果账本已经结清，知识提示从同一份失败事实生成并一起落盘，不再要求模型先重复观察。
         failure = RecoveryKnowledge.attach(failedGoal, failure);
         // 回退腿已经用过一次还再失败：终局话术把两段失败都带全，调用方不必翻历史就能对账。
-        if (bedFallbackEngaged && bedFallbackFailure != null) {
+        // 换位重试后的再次失败会第二次走到这里，前缀已带第一段就不再叠一层。
+        if (bedFallbackEngaged && bedFallbackFailure != null
+                && !failure.message().startsWith("the carried-bed fallback also failed")) {
             failure = new TaskResult(false, "the carried-bed fallback also failed; the earlier attempt failed with: "
                     + bedFallbackFailure + "; " + failure.message(),
                     failure.timedOut(), failure.interrupted(), failure.data());
@@ -602,27 +610,48 @@ final class IntentTask implements Task {
     }
 
     /**
-     * sleep 步骤里的现成床不可用（遮挡/够不着/失效）时接上自带床回退腿：放床、走近、入睡。
-     * 有安全落位就排回退链；没有落位或不在可睡窗口则把那个决定交给调用方；
+     * sleep 步骤里的现成床不可用（遮挡/够不着/失效）时接上自带床回退步骤：放床、走到预选站位、
+     * 按床头坐标入睡。放置后入睡仍判遮挡时，先换到床边另一个可交互站位重试一次（锚定同一张床），
+     * 仍失败才让两段失败终局；没有落位或不在可睡窗口则把那个决定交给调用方；
      * 背包里没有床时返回 null，维持原本的诚实失败。
      */
     private TaskState trySleepCarriedBedFallback(Goal goal, TaskResult failure, TaskState failureState) {
-        if (bedFallbackEngaged || failureState != TaskState.FAILED
-                || !"maicraft:sleep".equals(goal.ability())) return null;
         String failureType = String.valueOf(failure.data().get("failure_type"));
-        IntentAction action = AbilityAdapter.carriedBedFallback(goal, player, failureType);
-        if (action == null) return null;
+        if (bedFallbackEngaged) {
+            // 放下的床从走到的那格看不见：先换位再睡同一张床头，而不是让整夜耗在一次坏站位上。
+            if (!bedFallbackRepositioned && failureState == TaskState.FAILED
+                    && "occluded".equals(failureType) && bedFallbackBedHead != null) {
+                IntentAction.Chain retry = AbilityAdapter.sleepRepositionRetry(player, bedFallbackBedHead);
+                if (retry != null) {
+                    bedFallbackRepositioned = true;
+                    chain = retry.actions();
+                    chainIndex = 0;
+                    Constants.LOG.info("[maicraft-sleep] 回退床 {} 入睡判遮挡，换到床边可交互站位重试一次",
+                            bedFallbackBedHead);
+                    return TaskState.RUNNING;
+                }
+                Constants.LOG.info("[maicraft-sleep] 回退床 {} 入睡判遮挡，床边没有可站立换位，维持诚实失败",
+                        bedFallbackBedHead);
+            }
+            return null;
+        }
+        if (failureState != TaskState.FAILED
+                || !"maicraft:sleep".equals(goal.ability())) return null;
+        AbilityAdapter.CarriedBedPlan fallback = AbilityAdapter.carriedBedFallback(goal, player, failureType);
+        if (fallback == null) return null;
         bedFallbackEngaged = true;
         bedFallbackFailure = failure.message();
-        if (action instanceof IntentAction.Chain fallback) {
-            chain = fallback.actions();
+        bedFallbackBedHead = fallback.bedHead();
+        bedFallbackRepositioned = false;
+        if (fallback.action() instanceof IntentAction.Chain fallbackChain) {
+            chain = fallbackChain.actions();
             chainIndex = 0;
             Constants.LOG.info("[maicraft-sleep] 现成床不可用（failure_type={}），回退放置自带床: {}",
                     failureType, bedFallbackFailure);
             return TaskState.RUNNING;
         }
         // 没有安全落位或可睡窗口已关：这个决定本来就要调用方拍板，转成待答问题而不是吞掉。
-        if (action instanceof IntentAction.Decision decision) {
+        if (fallback.action() instanceof IntentAction.Decision decision) {
             Constants.LOG.info("[maicraft-sleep] 现成床不可用（failure_type={}），自带床缺少回退条件，转为决定",
                     failureType);
             return requestDecision(decision.snapshot());
@@ -640,6 +669,8 @@ final class IntentTask implements Task {
         Goal goal = record.steps().get(record.stepIndex());
         bedFallbackEngaged = false;
         bedFallbackFailure = null;
+        bedFallbackBedHead = null;
+        bedFallbackRepositioned = false;
         record.addStepResult(new IntentTaskRecord.StepSnapshot(
                 record.stepIndex(), goal.ability(), false, failure.message(), failure.toJson(), false));
         runtime.stepProcessed(record);
