@@ -36,6 +36,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlacementItems;
+import org.maiwithu.maicraft.core.mixin.StandingAndWallBlockItemAccess;
 
 /**
  * 为每个施工格寻找能从第一人称完成的点击：人站在哪里、点哪块的哪个面、看向哪里，以及是否要蹲下。
@@ -706,9 +707,19 @@ final class BuildPlacementGeometry {
                 };
                 // 例如点同类半砖可能补成点击格的双层砖，而不是放到邻格；必须连落点也匹配本次目标。
                 BlockPos destination = context.getClickedPos();
+                BlockState placed = MachinePlacementItems.placementState(blockItem, context, projectedSupport);
+                // 对着实墙点击时，贴附物品的原生结果就是墙式方块；只用立式估计会证明一条实际不会发生的放法
+                // （167 四点矩阵：悬空单邻格全站位无手势）。垫块尚未落地时墙式 canSurvive 不成立，
+                // 回退立式估计，保持垫块通路「先证明、落地后由原生分派」的既有语义。
+                if (placed != null && hit.getDirection().getAxis().isHorizontal()
+                        && blockItem instanceof StandingAndWallBlockItem
+                        && blockItem instanceof StandingAndWallBlockItemAccess access) {
+                    BlockState wall = access.maicraft$wallBlock().getStateForPlacement(context);
+                    if (wall != null) placed = wall;
+                }
                 return new NativePlacement(destination, destination.equals(target)
                         ? MachinePlacementItems.projectedFinalState(stack,
-                            player.level(), destination, context.getHorizontalDirection(), MachinePlacementItems.placementState(blockItem, context, projectedSupport)) : null);
+                            player.level(), destination, context.getHorizontalDirection(), placed) : null);
             });
         } catch (RuntimeException ignored) {
             return null;

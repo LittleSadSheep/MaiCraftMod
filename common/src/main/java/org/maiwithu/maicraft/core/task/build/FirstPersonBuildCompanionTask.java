@@ -186,6 +186,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private final BuildAimProgress aimProgress = new BuildAimProgress();
     private String aimWaitReason = "not_aiming", aimHit = "not_checked";
     private Map<String, Object> lastPlacementRejection = Map.of();
+    /** 最近一次放置右键的提交现场插桩（167）；空串表示本轮尚未出手。 */
+    private String lastPlacementUseOnTrace = "";
     private Map<String, Object> lastAimObservation = Map.of();
     private double aimError;
     private NativeActionReceipt useReceipt;
@@ -222,6 +224,18 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private Map<String, Object> lastScaffoldAccess = Map.of();
     private BlockPos scaffold, siteMin, siteMax, failurePos;
     private String failureCode, note = "all native actions re-verified";
+
+    /**
+     * 收尾清理包裹：台账里还有自己立着或悬空的临时支撑时，失败、绕过验证的直达成功与
+     * 操作者取消都先走一遍既有清理阶段再交出原终态；清理不到的按 remaining_scaffolds 如实声明。
+     * UNCERTAIN 失败不包裹——保留现场供人工核验，不在未定结果上继续改世界。
+     */
+    private enum TerminalWrap { NONE, FAILURE, SUCCESS, CANCELLED }
+    private TerminalWrap terminalWrap = TerminalWrap.NONE;
+    private BlockPos wrapPos;
+    private String wrapMessage, wrapCode, wrapCleanupDetail;
+    private FailureType wrapType;
+    private boolean wrapUncertain;
     private BuildClearanceSurvey clearanceSurvey;
     private BlockPos clearanceDeniedAt;
     private Map<String, Object> clearanceTrigger = Map.of();
@@ -264,12 +278,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     "navigation protection must be supplied before construction starts");
         }
         if (cells == null) return;
+        // 计划自注册的导航保护（名单即自家目标格，门框类）只约束非目标格（清障与挖掘路线），
+        // 不得否决自家目标格：门框类施工曾让任何场地都报 blocked_site_cells。目标格的授权由
+        // ReplaceMode 与可破坏性把关。其他流程传入的保护格即使恰好落在目标格上，也照旧并入
+        // 继承保护集全量生效——供料保护、机器观察等显式保护不因「是目标格」而失守。
+        boolean selfRegistered = r.selfRegisteredNavigationProtection();
         for (BlockPos cell : cells) {
             if (cell != null) {
                 protectedCells.add(cell.asLong());
-                inheritedProtectedMutationCells.add(cell.asLong());
-                // 前一施工层仍需在受保护目标为空时进入该格；目标建成后，实时碰撞会阻止角色再次进入。
-                if (!targets.containsKey(cell.asLong())) forbiddenBodyCells.add(cell.asLong());
+                if (!selfRegistered || !targets.containsKey(cell.asLong())) {
+                    inheritedProtectedMutationCells.add(cell.asLong());
+                    // 前一施工层仍需在受保护目标为空时进入该格；目标建成后，实时碰撞会阻止角色再次进入。
+                    if (!targets.containsKey(cell.asLong())) forbiddenBodyCells.add(cell.asLong());
+                }
             }
         }
     }
@@ -351,6 +372,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (result == TaskState.SUCCESS && player.getAbilities().instabuild && creativeMaterials.hasOwned(player)) {
             phase = Phase.CLEAR_CREATIVE;
             return TaskState.RUNNING;
+        }
+        if (result == TaskState.FAILED && terminalWrap == TerminalWrap.CANCELLED) {
+            // 取消缓期内的清理失败不改变取消语义：中断事实经 scaffold_cleanup_stopped_early
+            // 随取消回执如实声明，不把一次主动停工改判成失败。
+            if (wrapCleanupDetail == null) wrapCleanupDetail = "scaffold_cleanup_failed: " + doneReason();
+            return deliverWrappedCancellation();
         }
         return result;
     }
@@ -522,7 +549,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                     FailureType.UNSUPPORTED, "unsupported_cells"); return TaskState.FAILED;
         }
         if (!blocked.isEmpty()) {
-            failPreflight("site contains protected or unbreakable cells",
+            // 失败话术直接点名被拒格与拒绝来源（保护类型），调用方能据此换地或申请清障，
+            // 不必先翻 data 里的 blocked_cells 才知道该躲开哪里。
+            String named = blocked.stream()
+                    .map(cell -> cell.get("code") + "@" + cell.get("pos"))
+                    .collect(Collectors.joining(", "));
+            failPreflight("site contains protected or unbreakable cells: " + named,
                     FailureType.NO_SUPPORT, "blocked_site_cells"); return TaskState.FAILED;
         }
         if (r.supplyAccessOnly()) {
@@ -1318,6 +1350,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             TaskState support = prepareTemporarySupports();
             if (support != null) return support;
         }
+        // 工点不可证明时先核目标级事实：悬空且六向无可附着支撑面的格子任何站位都放不了，
+        // 这才是工点搜索全空的真实原因；归因点名它（167 口径），不被笼统的 no_path 覆盖（186）。
+        if (cell != null && player.level().isLoaded(cell.target().pos())) {
+            var probe = BuildPlacementAccessSearch.probeAttachmentFace(player.level(), player.level()::isLoaded,
+                    cell.target());
+            if (probe.lacksAttachmentFace()) {
+                failAt(cell.target().pos(),
+                        "target cell is air and none of its six neighbors offers an attachable support face: "
+                                + probe.neighbors(),
+                        FailureType.UNSUPPORTED, "target_attachment_face_missing", false);
+                return TaskState.FAILED;
+            }
+        }
         failAt(cell == null ? siteMin : cell.target().pos(), reason + "; no shared construction access was proven",
                 FailureType.NO_PATH, "construction_worksite_unproven", false);
         return TaskState.FAILED;
@@ -1639,10 +1684,14 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         useReceipt = ctx.actions().poll(ctx, useReceipt);
         if (!useReceipt.terminal()) return TaskState.RUNNING;
         NativeActionReceipt.Status status = useReceipt.status();
-        String detail = useReceipt.detail(); useReceipt = null;
+        String detail = useReceipt.detail();
+        // 167 插桩：无论哪种终态都保留这次右键提交的现场事实，全拒与“出手不落块”两种实机形态都要能对出服务端结论。
+        lastPlacementUseOnTrace = useReceipt.useOnTrace();
+        useReceipt = null;
         if (status == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED) return rejectGesture();
         if (status != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            failAt(cell.target().pos(), "native placement not safely confirmed: " + detail,
+            failAt(cell.target().pos(), "native placement not safely confirmed: " + detail
+                    + (lastPlacementUseOnTrace.isEmpty() ? "" : "; " + lastPlacementUseOnTrace),
                     FailureType.UNKNOWN,
                     "placement_" + status.name().toLowerCase(),
                     status == NativeActionReceipt.Status.UNCERTAIN
@@ -1656,6 +1705,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             BlockPos actualPosition=lastUseConfirmation.redirectedPosition();
             confirmedBlockChange(actualPosition);ConstructionOwnership.placed(player,actualPosition,r.getToolCallId());
             if(placementAccess!=null&&placementAccess.edgeActive()) {phase=Phase.EDGE_RETURN;return TaskState.RUNNING;}
+            if (beginTerminalCleanup(TerminalWrap.SUCCESS, null, null, null, null, false)) return TaskState.RUNNING;
             return TaskState.SUCCESS;
         }
         confirmedBlockChange(cell.target().pos());
@@ -1697,7 +1747,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
 
     private TaskState drivePlacementAccess() {
         var access = placementAccess.tick(); r.extendDeadlineTo(placementAccess.deadline());
-        if (access == BuildPlacementAccessDrive.Status.UNAVAILABLE) return null;
+        if (access == BuildPlacementAccessDrive.Status.UNAVAILABLE) {
+            // 目标级事实（整格六向无可附着支撑面）与站位无关，工位搜索和垫块兜底都改变不了它；
+            // 继续走既有流程只会被笼统的 construction_worksite_unproven 覆盖，终局必须点名真实原因。
+            if ("target_attachment_face_missing".equals(placementAccess.failure())) {
+                var neighbors = placementAccess.evidence().get("target_attachment_neighbors");
+                failAt(cell.target().pos(),
+                        "target cell is air and none of its six neighbors offers an attachable support face"
+                                + (neighbors == null ? "" : ": " + neighbors),
+                        FailureType.UNSUPPORTED, "target_attachment_face_missing", false);
+                return TaskState.FAILED;
+            }
+            return null;
+        }
         if (access == BuildPlacementAccessDrive.Status.FAILED) {
             if (!placementAccess.edgeActive() && retryPlacementAccess(placementAccess.failure())) return TaskState.RUNNING;
             return failAfterEdgeReturn(placementAccess.failure(), "placement_access_failed");
@@ -1722,7 +1784,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             if (retryPlacementAccess(message)) return TaskState.RUNNING;
             failAt(cell.target().pos(), message, FailureType.NO_PATH, code, false); return TaskState.FAILED;
         }
-        if(!nativePlacementDeviation.isEmpty())return TaskState.SUCCESS;
+        if(!nativePlacementDeviation.isEmpty()){
+            if (beginTerminalCleanup(TerminalWrap.SUCCESS, null, null, null, null, false)) return TaskState.RUNNING;
+            return TaskState.SUCCESS;
+        }
         finishPlaced(); return TaskState.RUNNING;
     }
 
@@ -2090,6 +2155,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         scaffoldQueue = List.of(); deferredScaffolds.clear();
         scaffold = null; scaffoldCleanup = null; scaffoldDescent = null;
         stopNav(); unregisterProvider();
+        if (terminalWrap == TerminalWrap.FAILURE) return deliverWrappedFailure();
+        if (terminalWrap == TerminalWrap.SUCCESS) return TaskState.SUCCESS;
+        if (terminalWrap == TerminalWrap.CANCELLED) {
+            note = "cancellation cleanup stalled: " + remaining + " temporary supports remain in place";
+            return deliverWrappedCancellation();
+        }
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
     }
@@ -2141,6 +2212,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             scaffoldAt = 0; scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
             phase = Phase.SCAFFOLD_SELECT; return TaskState.RUNNING;
         }
+        if (terminalWrap == TerminalWrap.FAILURE) { stopNav(); unregisterProvider(); return deliverWrappedFailure(); }
+        if (terminalWrap == TerminalWrap.SUCCESS) { stopNav(); unregisterProvider(); return TaskState.SUCCESS; }
+        if (terminalWrap == TerminalWrap.CANCELLED) return deliverWrappedCancellation();
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
     }
@@ -2536,14 +2610,101 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         failureCode = code; fail(message + "; no mutation was submitted", type);
     }
     private void failAt(BlockPos pos, String message, FailureType type, String code, boolean unknown) {
+        if (terminalWrap == TerminalWrap.FAILURE) {
+            // 包裹中的清理阶段自己失败时不覆盖原始失败原因，只记下清理中断事实随原失败交出。
+            if (wrapCleanupDetail == null) wrapCleanupDetail = (code == null ? "scaffold_cleanup_failed" : code) + ": " + message;
+            reissueWrappedFailure();
+            return;
+        }
+        if (terminalWrap == TerminalWrap.CANCELLED) {
+            // 取消缓期里的清理失败不升级成任务失败：记下中断事实随取消回执如实声明。
+            if (wrapCleanupDetail == null) wrapCleanupDetail = (code == null ? "scaffold_cleanup_failed" : code) + ": " + message;
+            Constants.LOG.warn("[maicraft-build] scaffold cleanup interrupted during cancellation wrap: {}", wrapCleanupDetail);
+            stopNav(); unregisterProvider();
+            return;
+        }
+        if (beginTerminalCleanup(TerminalWrap.FAILURE, pos, message, type, code, unknown)) return;
         failurePos = pos == null ? null : pos.immutable(); failureCode = code; uncertain = unknown; fail(message, type);
+    }
+
+    /**
+     * 台账里还有自有临时支撑时，把终态推迟到清理阶段之后：先拆净能拆的，再按原失败/原成功/取消收场。
+     * 返回 false 表示没有需要收尾的支撑或场景不适合继续动作（未开工、UNCERTAIN、已在清理阶段），调用方按原路终止。
+     */
+    private boolean beginTerminalCleanup(TerminalWrap wrap, BlockPos pos, String message, FailureType type,
+                                         String code, boolean unknown) {
+        if (terminalWrap != TerminalWrap.NONE || !preflightDone || unknown || scaffoldPhaseActive()
+                || r.scaffoldLedger().isEmpty()) return false;
+        terminalWrap = wrap; wrapPos = pos == null ? null : pos.immutable();
+        wrapMessage = message; wrapCode = code; wrapType = type == null ? FailureType.UNKNOWN : type;
+        wrapUncertain = unknown; wrapCleanupDetail = null;
+        Constants.LOG.info("[maicraft-build] {} deferring terminal state to remove {} tracked scaffolds first",
+                getClass().getSimpleName(), r.scaffoldLedger().snapshot().size());
+        stopNav(); drainScaffolds(); unregisterProvider();
+        scaffoldQueue = scaffolds.stream().filter(p -> !targets.containsKey(p.asLong())
+                        || BuildCellRules.isAirTarget(targets.get(p.asLong())))
+                .sorted(Comparator.comparingInt((BlockPos position) -> position.getY()).reversed()
+                        .thenComparingDouble(p -> p.distSqr(player.blockPosition()))).toList();
+        deferredScaffolds.clear(); scaffoldPassRemovals = 0; scaffoldCleanupPasses++;
+        armScaffoldWatch();
+        scaffoldAt = 0; scaffold = null; scaffoldCleanup = null; scaffoldDescent = null;
+        phase = Phase.SCAFFOLD_SELECT;
+        return true;
+    }
+
+    private TaskState deliverWrappedFailure() {
+        failurePos = wrapPos == null ? null : wrapPos.immutable(); failureCode = wrapCode; uncertain = wrapUncertain;
+        fail(wrapMessage + (wrapCleanupDetail == null ? ""
+                : "; scaffold cleanup could not finish: " + wrapCleanupDetail), wrapType);
+        return TaskState.FAILED;
+    }
+
+    /** 取消缓期收场：现场清理到此为止，终态仍是取消；剩余支撑与中断事实由回执如实声明。 */
+    private TaskState deliverWrappedCancellation() {
+        Constants.LOG.info("[maicraft-build] cancellation cleanup settled with {} tracked supports remaining",
+                r.scaffoldLedger().snapshot().size());
+        stopNav(); unregisterProvider();
+        return TaskState.CANCELLED;
+    }
+
+    /**
+     * 操作者取消的仅清理缓期：台账里还有自有临时支撑时，转入既有清理阶段先拆净能拆的，
+     * 再交回 CANCELLED。已经在清理阶段的直接改包裹终点，让正在跑的回收自然收尾；
+     * 未开工、UNCERTAIN 保留现场与无台账的场景不缓期，返回 false 由调用方立即取消。
+     */
+    @Override
+    public boolean requestCancellationCleanup() {
+        if (terminalWrap != TerminalWrap.NONE || !preflightDone) return false;
+        if (scaffoldPhaseActive()) {
+            terminalWrap = TerminalWrap.CANCELLED; wrapCleanupDetail = null;
+            Constants.LOG.info("[maicraft-build] operator cancellation waits for the running scaffold cleanup ({} tracked)",
+                    r.scaffoldLedger().snapshot().size());
+            return true;
+        }
+        return beginTerminalCleanup(TerminalWrap.CANCELLED, null, null, null, null, false);
+    }
+
+    /** 清理阶段内的失败交给包裹失败收场时同步补一条日志，现场事实不只在回执里。 */
+    private void reissueWrappedFailure() {
+        Constants.LOG.warn("[maicraft-build] scaffold cleanup interrupted during terminal wrap: {}", wrapCleanupDetail);
+        stopNav(); unregisterProvider();
+        deliverWrappedFailure();
     }
 
     private void drainScaffolds() {
         // 导航过程中可能为到达工作位置搭过支撑，把它们收进施工清理名单，避免任务结束后留一堆脚手架。
+        // 旧移动流程只留位置名单没有原生确认回执，这里按现场方块状态核验后补记入台账：
+        // 名单登记时该格只能是可替换的空气，之后读到的非空气实心状态即本次导航垫的块；
+        // 取消缓期等以台账为界的清理入口由此覆盖导航期垫块，空位与目标格不记账。
         boolean added = false;
-        for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player))
-            if (!targets.containsKey(pos.asLong())) added |= scaffolds.add(pos.immutable());
+        for (BlockPos pos : BuildPlacementRegistry.drainScaffold(player)) {
+            if (targets.containsKey(pos.asLong())) continue;
+            added |= scaffolds.add(pos.immutable());
+            if (player.level().isLoaded(pos)) {
+                BlockState live = player.level().getBlockState(pos);
+                if (!live.isAir() && live.getFluidState().isEmpty()) r.scaffoldLedger().confirmed(pos, live);
+            }
+        }
         if (added) renewBuildProgress();
     }
 
@@ -2804,6 +2965,8 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         else if (!lastScaffoldDescent.isEmpty()) data.put("scaffold_descent", lastScaffoldDescent);
         data.put("scaffold_cleanup_confirmed_removals", scaffoldConfirmedRemovals);
         data.put("scaffold_cleanup_deferred_count", deferredScaffolds.size());
+        if (terminalWrap != TerminalWrap.NONE) data.put("terminal_scaffold_cleanup", true);
+        if (wrapCleanupDetail != null) data.put("scaffold_cleanup_stopped_early", wrapCleanupDetail);
         if (!lastDeferredScaffold.isEmpty()) data.put("last_deferred_scaffold", lastDeferredScaffold);
         var diagnostics = new ArrayList<>(targetDiagnostics);
         if (failurePos != null) {
@@ -2826,6 +2989,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (!diagnostics.isEmpty()) data.put("build_diagnostics", List.copyOf(diagnostics.subList(0, Math.min(16, diagnostics.size()))));
         if (phase == Phase.AIM && !lastAimObservation.isEmpty()) data.put("placement", lastAimObservation);
         if (!lastPlacementRejection.isEmpty()) data.put("last_placement_rejection", lastPlacementRejection);
+        if (!lastPlacementUseOnTrace.isEmpty()) data.put("use_on_trace", lastPlacementUseOnTrace);
         if (lastUseConfirmation != null && failureCode != null) data.put("placement_confirmation",
                 lastUseConfirmation.diagnostics(player.level()::isLoaded, player.level()::getBlockState));
         data.put("site_min", siteMin == null ? "-" : siteMin.toShortString());
@@ -2951,6 +3115,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     protected String successMessage() {
         if(!nativePlacementDeviation.isEmpty())return "原生放置已确认，实际落点偏离声明；已返回耗材、实际效果及完整设计差异";
         if (r.supplyAccessOnly()) return "reached the exterior ground for material supply; temporary supports remain tracked for construction";
+        // 零动作收尾不是「建成」：提交时目标就全部满足，话术必须如实区分，不能让调用方误读为这次施工有效。
+        if (r.placed() == 0 && r.broken() == 0)
+            return "verified every requested build cell already matched the target; no placement or clearing gesture was submitted ("
+                    + r.completed() + "/" + r.targets.size() + " re-verified)";
         return "built and re-verified " + r.completed() + "/" + r.targets.size()
                 + " block(s) through first-person actions; placed " + r.placed()
                 + ", cleared " + r.broken() + " (" + note

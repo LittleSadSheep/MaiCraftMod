@@ -163,6 +163,16 @@ def regressionSuites = [
         heap: '512m', directory: 'place-block-regression', timeoutSeconds: 60,
         purpose: '验证 place_block 合成单格蓝图 build 并继承施工预检与验证'
     ],
+    placementAccessRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.BuildPlacementOpenGroundTorchTest',
+        heap: '512m', directory: 'placement-access-regression', timeoutSeconds: 60,
+        purpose: '验证开阔平地单格放置的站位证明与工位覆盖，拒绝时回执逐闸点名'
+    ],
+    constructionZeroChangeRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.supply.BuildSupplyZeroChangeTest',
+        heap: '512m', directory: 'construction-zero-change-regression', timeoutSeconds: 60,
+        purpose: '验证施工回执以世界净变化为准：零变更一律如实失败并携带批次与格数对账'
+    ],
     buildingBudgetRegression: [
         entry: 'org.maiwithu.maicraft.intent.BuildingBudgetRegressionSuite',
         heap: '768m', directory: 'building-budget-regression', timeoutSeconds: 120,
@@ -187,6 +197,18 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.core.pathing.NavigationRegressionSuite',
         heap: '512m', directory: 'navigation-regression', timeoutSeconds: 45,
         purpose: '验证导航取消、路径推进、开门与落地'
+    ],
+    // 无法满足的目标带靠重规划震荡快速给出诚实无路结论，不再烧满外层预算；正常进展不被误杀。
+    replanStagnationRegression: [
+        entry: 'org.maiwithu.maicraft.core.pathing.baritone.ReplanStagnationNoPathTest',
+        heap: '512m', directory: 'replan-stagnation-regression', timeoutSeconds: 60,
+        purpose: '验证同目标同站位零进展重规划快速无路收场并携带归因'
+    ],
+    // travel 上超预检与垫柱回收：悬空精确目标出发前拒绝，登顶垫柱收尾清理或残留声明。
+    travelPillarPrecheckRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.move.TravelPillarPrecheckTest',
+        heap: '512m', directory: 'travel-pillar-precheck-regression', timeoutSeconds: 120,
+        purpose: '验证 travel 上超预检拒绝口径与到达后垫柱回收的认领与残留声明'
     ],
     // 单独回放入水后的 MLG 让位，覆盖旧会话和已经排队的执行入口，避免水中换桶抢占主任务。
     mlgWaterRegression: [
@@ -230,11 +252,29 @@ def regressionSuites = [
         heap: '512m', directory: 'occluded-stance-retry-regression', timeoutSeconds: 60,
         purpose: '验证瞄准遮挡后的自动换站位重试与回执计数'
     ],
+    // 决策答复的地形授权在同一任务链内共享：recover 前置步骤与重试原步骤不再对同一授权重问，显式拒绝不被覆盖。
+    recoveryTerrainAuthorizationRegression: [
+        entry: 'org.maiwithu.maicraft.intent.RecoveryTerrainAuthorizationTest',
+        heap: '512m', directory: 'recovery-terrain-authorization-regression', timeoutSeconds: 60,
+        purpose: '验证同任务链内 may_alter_terrain 授权从决策答复传入自动前置步骤与原步骤'
+    ],
+    // harvest 链的完成确认独立回放：本链已收获的同一格重复步骤按更早成功证据结算，执行前失配仍如实翻译校验。
+    harvestChainCompletionSettleRegression: [
+        entry: 'org.maiwithu.maicraft.intent.HarvestChainCompletionSettleTest',
+        heap: '512m', directory: 'harvest-chain-completion-settle-regression', timeoutSeconds: 60,
+        purpose: '验证 harvest 链重复同格步骤不再对已变 air 的目标重跑失配询问'
+    ],
     // 定点交互语义入口整链验证：精确目标坐标、定点倒桶落格与门框嵌眼，级联 TargetedItemUseTest。
     exactInteractionTargetRegression: [
         entry: 'org.maiwithu.maicraft.intent.ExactInteractionTargetTest',
         heap: '512m', directory: 'exact-interaction-target-regression', timeoutSeconds: 90,
         purpose: '验证 interact/use_item 定点目标编译与定点倒桶、嵌眼链路'
+    ],
+    // 公开取物/合成/烹饪/交易的 count 增量语义与起始数持久化独立回放。
+    acquireAdditionalCountRegression: [
+        entry: 'org.maiwithu.maicraft.intent.AcquireAdditionalCountTest',
+        heap: '512m', directory: 'acquire-additional-count-regression', timeoutSeconds: 90,
+        purpose: '验证公开 count 为再拿几件：已带量作起始数，随暂停重试重启沿用'
     ],
     // 聊天独立回放界面收尾与持久发送，不让其他游戏操作回归遮住消息提交结论。
     chatRegression: [
@@ -322,6 +362,12 @@ def regressionSuites = [
         heap: '512m', directory: 'sleep-gate-regression', timeoutSeconds: 60,
         purpose: '验证睡眠白天门控与原版可睡窗口同源，入睡跳刻后回执与世界实物一致'
     ],
+    // 自带床回退：现成床被遮挡、够不着或失效时改放背包里的床入睡，回执如实记录换床。
+    sleepBedFallbackRegression: [
+        entry: 'org.maiwithu.maicraft.intent.SleepBedFallbackRegression',
+        heap: '512m', directory: 'sleep-bed-fallback-regression', timeoutSeconds: 60,
+        purpose: '验证携带床时现成床不可用触发自带床回退，回执诚实披露换床与双重失败'
+    ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',
         heap: '768m', directory: 'optional-server-regression', timeoutSeconds: 90,
@@ -338,6 +384,12 @@ def regressionSuites = [
         heap: '512m', directory: 'portal-casting-honest-selection-regression', timeoutSeconds: 45,
         purpose: '验证 lava_cast 选址可达性、拒绝原因与契约诚实性'
     ],
+    // 门框施工单自注册的导航保护不得否决自家目标格：荒地建门预检放行、显式保护仍拦且点名、未授权路径维持拒绝。
+    portalFrameSelfProtectionRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.dimension.PortalFrameSelfProtectionTest',
+        heap: '512m', directory: 'portal-frame-self-protection-regression', timeoutSeconds: 60,
+        purpose: '验证 may_alter_terrain 授权下门框目标格不被自家保护集拒绝，真保护格回执点名'
+    ],
     semanticBlockSearchRegression: [
         entry: 'org.maiwithu.maicraft.intent.SemanticBlockSearchTest',
         heap: '512m', directory: 'semantic-block-search-regression', timeoutSeconds: 45,
@@ -348,6 +400,12 @@ def regressionSuites = [
         entry: 'org.maiwithu.maicraft.core.task.acquire.RecipeFrontierFallbackTest',
         heap: '512m', directory: 'recipe-frontier-fallback-regression', timeoutSeconds: 60,
         purpose: '回放配方前沿替代材料失败与承诺边界'
+    ],
+    // 副手供给回放单独核对：取物调度安排副手换位、换位任务净增确认与 equip 从副手取用。
+    offhandSupplyRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.acquire.OffhandSupplyTest',
+        heap: '512m', directory: 'offhand-supply-regression', timeoutSeconds: 60,
+        purpose: '验证副手物资对取物调度可见并可经原生换位进入主背包'
     ],
     stonecuttingProcessRegression: [
         entry: 'org.maiwithu.maicraft.core.task.stonecutter.StonecuttingProcessTest',
@@ -455,6 +513,12 @@ def regressionSuites = [
         heap: '512m', directory: 'spoil-drop-policy-regression', timeoutSeconds: 60,
         purpose: '验证 spoil_policy=drop 的丢弃通道作用域、净减量对账与默认存入行为'
     ],
+    // 收尾清理包裹回归：失败与绕过验证的直达成功都先拆净台账里的自有临时支撑，再按原终态交出。
+    buildTerminalScaffoldCleanupRegression: [
+        entry: 'org.maiwithu.maicraft.core.task.build.BuildTerminalScaffoldCleanupTest',
+        heap: '512m', directory: 'build-terminal-scaffold-cleanup-regression', timeoutSeconds: 60,
+        purpose: '验证失败与直达成功的收尾清理包裹按原终态交付且不残留脚手架'
+    ],
     // 重生回执的库存对比等内容包同步后再算：keepInventory 不再误报全部丢失。
     respawnInventorySyncRegression: [
         entry: 'org.maiwithu.maicraft.client.runtime.RespawnInventorySyncTest',
@@ -479,6 +543,21 @@ regressionSuites.each { name, suite ->
         doFirst { directory.get().asFile.mkdirs() }
     }
     tasks.named('check') { dependsOn regression }
+}
+
+// 试验任务：同一份 regressionSuites 配置改用进程隔离 worker 并发执行，并发度跟 --max-workers 走（配 1 即串行基线）。
+// 套件间隔离语义（独立 JVM、独立工作目录、独立堆与超时）与逐个 JavaExec 相同；
+// 现有 check 与逐套件任务保持原样，本任务只服务并行提速验证，显式调用才会运行。
+tasks.register('parallelRegressionCheck', org.maiwithu.build.ParallelRegressionCheckTask) {
+    group = 'verification'
+    dependsOn tasks.named('testClasses')
+    suiteClasspath.from sourceSets.test.runtimeClasspath
+    suiteClasspath.from tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact }
+    workingRoot.set layout.buildDirectory
+    suiteFilter.set providers.gradleProperty('maicraftSuiteFilter').orElse('')
+    suites.set regressionSuites.collectEntries { name, suite ->
+        [name, suite.findAll { it.key != 'purpose' }.collectEntries { key, value -> [key, String.valueOf(value)] }]
+    }
 }
 
 // 提供实际安装的 AE2 包时，原生工序回归还会核对注入位置；其他回归组不依赖该可选路径。

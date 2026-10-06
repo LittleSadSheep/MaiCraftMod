@@ -231,10 +231,23 @@ public final class SemanticCookCompanionTask
 
     // 先找能产出目标的配方，再估原料、燃料和设备的准备成本，从认为可行的组合里选择一组。
     private TaskState resolve() {
-        List<CookingRecipe> candidates = recipePlanner.candidates();
+        CookingRecipePlanner.CandidateScan scan = recipePlanner.scan();
+        List<CookingRecipe> candidates = new ArrayList<>(scan.usable());
         if (candidates.isEmpty()) {
-            return failOrClean("no_cooking_recipe",
-                    "No smelting, blasting, smoking or campfire recipe produces " + r.itemId + ".",
+            if (scan.skipped().isEmpty()) {
+                return failOrClean("no_cooking_recipe",
+                        "No smelting, blasting, smoking or campfire recipe produces " + r.itemId + ".",
+                        FailureType.NO_MATERIAL);
+            }
+            // 配方在证据里、输入在本端读不出来：执行器无法操作，但回执必须点名配方与原因。
+            planningDiagnosis = Map.of(
+                    "item_id", r.itemId.toString(),
+                    "skipped_recipes", skippedEvidence(scan.skipped()));
+            return failOrClean("cooking_recipe_inputs_unreadable",
+                    "Recipes producing " + r.itemId + " exist in the client recipe manager, but their "
+                            + "input alternatives cannot be enumerated on this client: "
+                            + describeSkipped(scan.skipped())
+                            + ". Read the recipe knowledge page for the exact input, or supply that input directly.",
                     FailureType.NO_MATERIAL);
         }
         // 能识别营火配方，但本版本不执行营火操作；明确要求营火时报告不支持，不改用炉子偷偷替代。
@@ -252,8 +265,19 @@ public final class SemanticCookCompanionTask
                 || rejectedDevices.contains(c.device())
                 || rejectedInputCandidates.contains(candidateKey(c)));
         if (candidates.isEmpty()) {
+            // 偏好过滤后无人可选时，被偏好覆盖却因输入不可读而跳过的配方必须点名，否则调用方会误以为没有那条配方。
+            List<CookingRecipePlanner.SkippedCookingRecipe> preferredSkipped = scan.skipped().stream()
+                    .filter(s -> s.device() != null && recipePlanner.preferred(s.device()))
+                    .toList();
+            String skippedSuffix = preferredSkipped.isEmpty() ? ""
+                    : " Matching recipes were skipped because their input alternatives cannot be enumerated "
+                            + "on this client: " + describeSkipped(preferredSkipped) + ".";
+            planningDiagnosis = preferredSkipped.isEmpty() ? Map.of()
+                    : Map.of(
+                            "item_id", r.itemId.toString(),
+                            "skipped_recipes", skippedEvidence(preferredSkipped));
             return failOrClean("no_preferred_recipe",
-                    "No untried recipe matching recipe_preference can produce " + r.itemId + ".",
+                    "No untried recipe matching recipe_preference can produce " + r.itemId + "." + skippedSuffix,
                     FailureType.NO_MATERIAL);
         }
         recipePlanner.observeNearbyBlocks();
@@ -276,7 +300,7 @@ public final class SemanticCookCompanionTask
                 .min(recipePlanner.candidateComparator())
                 .orElse(null);
         if (selected == null) {
-            return failUnreachablePlan(plans);
+            return failUnreachablePlan(plans, scan);
         }
         candidate = selected.candidate();
         FuelChoice selectedFuel = selected.fuel();
@@ -291,8 +315,8 @@ public final class SemanticCookCompanionTask
     private static final long UNREACHABLE = CookingRecipePlanner.UNAVAILABLE_COST;
 
     // 全部备料方案都达不到目标时，点名堵在哪一层（原料/燃料/设备）以及要多少、许可来源内可见多少，
-    // 不再用"配方存在但没有受支持路径"的合并话术——调用方分不清是配方缺失、燃料不够还是设备找不到。
-    private TaskState failUnreachablePlan(List<ResolvedCandidate> plans) {
+    // 并把每条已评估路线的阻碍层与被跳过的配方一并写进回执——调用方才能看到"不是只有最快一条路线"。
+    private TaskState failUnreachablePlan(List<ResolvedCandidate> plans, CookingRecipePlanner.CandidateScan scan) {
         ResolvedCandidate closest = plans.stream()
                 .min(Comparator.comparingInt((ResolvedCandidate plan) -> blockedLayers(plan).size())
                         .thenComparingLong(ResolvedCandidate::preparationCost)
@@ -333,6 +357,15 @@ public final class SemanticCookCompanionTask
         diagnosis.put("fuel_required", fuelRequired);
         diagnosis.put("fuel_reachable", recipePlanner.reachableCount(fuelItem));
         diagnosis.put("blocked_layers", List.copyOf(blocked));
+        // 每条已评估路线与其放弃原因都留在回执里；"只评估了最快路线"从此可以从回执本身证伪。
+        diagnosis.put("planning_routes", plans.stream().map(plan -> Map.of(
+                "recipe_id", plan.candidate().recipeId().toString(),
+                "device", blockKey(plan.candidate().device().block),
+                "input_item_id", key(plan.candidate().input()),
+                "blocked_layers", blockedLayers(plan),
+                "preparation_cost", plan.preparationCost())).toList());
+        List<CookingRecipePlanner.SkippedCookingRecipe> skipped = scan.skipped();
+        if (!skipped.isEmpty()) diagnosis.put("skipped_recipes", skippedEvidence(skipped));
         planningDiagnosis = Map.copyOf(diagnosis);
         return failOrClean("no_reachable_cooking_plan",
                 "Cooking recipes exist for " + r.itemId + ", but the full goal of " + r.count
@@ -348,6 +381,23 @@ public final class SemanticCookCompanionTask
         if (plan.fuel().acquisitionCost() >= UNREACHABLE) blocked.add("fuel");
         if (plan.stationCost() >= UNREACHABLE) blocked.add("workstation");
         return blocked;
+    }
+
+    private static List<Map<String, Object>> skippedEvidence(List<CookingRecipePlanner.SkippedCookingRecipe> skipped) {
+        return skipped.stream().map(entry -> {
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            row.put("recipe_id", entry.recipeId().toString());
+            if (entry.device() != null) row.put("device", blockKey(entry.device().block));
+            row.put("reason", entry.reason());
+            return row;
+        }).toList();
+    }
+
+    private static String describeSkipped(List<CookingRecipePlanner.SkippedCookingRecipe> skipped) {
+        return skipped.stream()
+                .map(entry -> entry.recipeId() + " (" + entry.reason() + ")")
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("");
     }
 
     private static String key(Item item) {

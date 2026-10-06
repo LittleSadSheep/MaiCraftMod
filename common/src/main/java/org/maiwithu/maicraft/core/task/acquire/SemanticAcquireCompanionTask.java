@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.core.task.acquire;
 
 import org.maiwithu.maicraft.core.task.entity.SheepTraits;
+import org.maiwithu.maicraft.core.task.inventory.OffhandSupplyTaskRecord;
 
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.integration.backpack.BackpackSupplyTaskRecord;
@@ -86,6 +87,8 @@ import org.maiwithu.maicraft.task.TaskState;
 public final class SemanticAcquireCompanionTask
         extends AbstractCompanionTask<SemanticAcquireTaskRecord> {
     private static final int PLANNER_STEPS_PER_TICK = 1;
+    /** 终局缺料诊断逐配方点名的上限；与回执候选展示同量级，超出部分不代表不存在。 */
+    private static final int CRAFT_DIAGNOSIS_RECIPE_LIMIT = 8;
     private static final long PROGRESS_LEASE_TICKS = 60L * 20L;
     private static final long COLLECT_TICKS = 60L * 20L;
     private static final long MINE_MIN_TICKS = 60L * 20L;
@@ -154,6 +157,7 @@ public final class SemanticAcquireCompanionTask
     private final AcquisitionWirelessEvidence wirelessEvidence = new AcquisitionWirelessEvidence();
     private final AcquisitionInventoryTidy inventoryTidy;
     private final AcquisitionBackpackInventory backpacks;
+    private final AcquisitionOffhandInventory offhands = new AcquisitionOffhandInventory();
     private TaskRecord inventoryCapacityBlockedRecord;
     private ContainerSearchScope storageScope;
 
@@ -243,6 +247,12 @@ public final class SemanticAcquireCompanionTask
         // 主背包不足时先取随身背包现货，随后才开无线终端或找外部来源；mine/wireless等单一许可不被扩权。
         if (!needs.isEmpty()) {
             var need = needs.peek();
+            // 副手握着点名物品而主背包口径数不到它时，先换位再谈采集；来源许可沿用随身背包的口径。
+            OffhandSupplyTaskRecord offhandPull = offhands.next(player, need, missing(need),
+                    () -> childId("offhand"), player.level().getGameTime() + STORAGE_TICKS);
+            if (offhandPull != null)
+                return startChild(need, SemanticAcquireTaskRecord.Source.INVENTORY, offhandPull,
+                        "swap the requested offhand stack into the main inventory");
             BackpackSupplyTaskRecord backpack;
             try { backpack = backpacks.next(player, need, missing(need), () -> childId("backpack"), player.level().getGameTime() + STORAGE_TICKS); }
             catch (IllegalStateException unavailable) { return failAcquisition("backpack_inventory_unverified", unavailable.getMessage(), FailureType.TARGET_LOST); }
@@ -517,6 +527,18 @@ public final class SemanticAcquireCompanionTask
                 executable.add(new ExecutableCraft(output, plan));
             } else {
                 candidates.addAll(plan.recoveryCandidates());
+                // 产物对得上但输入在本端读不出来的配方要点名留证，不能折进"没有配方"的结论里。
+                if (plan.recoveryCandidates().isEmpty() && plan.immediate() != null
+                        && plan.immediate().data() instanceof Map<?, ?> data
+                        && data.get("recipes_with_unreadable_inputs") instanceof List<?> unreadable
+                        && !unreadable.isEmpty()) {
+                    addIssue("craft", "recipes_with_unreadable_inputs",
+                            "matching recipes exist but their ingredient alternatives cannot be "
+                                    + "enumerated on this client; read the recipe knowledge page "
+                                    + "for the exact inputs",
+                            Map.of("requested_item_id", output.toString(),
+                                    "recipes", unreadable));
+                }
                 // 可替代成品按合计数量交付；两根橡木加一根桦木可分别做木板，不要求九张必须全来自一种木头。
                 if(deficit>1 && need.itemIds.size()>1) {
                     var one=craftOps.plan(output.toString(),requestedOwnFinal-deficit+1,player,context,workstation,excludedRecipes,r.preferredMaterials);
@@ -623,6 +645,23 @@ public final class SemanticAcquireCompanionTask
             facts.put("rejected_recipes", List.copyOf(need.rejectedRecipes));
             facts.put("lineage_recipes", List.copyOf(need.lineageRecipes));
             if (workstation != null) facts.put("crafting_surface", workstation.facts(player));
+            // 失败要点名到具体配方与缺的材料，调用方才能区分“材料缺”“台面缺”与“配方读不出”。
+            List<Map<String, Object>> missingByRecipe = candidates.stream()
+                    .filter(candidate -> candidate.cost().missingMaterials() > 0)
+                    .limit(CRAFT_DIAGNOSIS_RECIPE_LIMIT)
+                    .<Map<String, Object>>map(candidate -> Map.of(
+                            "recipe_id", candidate.recipeId(),
+                            "missing_ingredients", candidate.ingredients().stream()
+                                    .filter(ingredient -> ingredient.missing() > 0)
+                                    .map(ingredient -> Map.of(
+                                            "item_ids", ingredient.itemIds().stream()
+                                                    .map(ResourceLocation::toString).toList(),
+                                            "missing", ingredient.missing()))
+                                    .toList()))
+                    .toList();
+            if (!missingByRecipe.isEmpty()) {
+                facts.put("missing_materials_by_recipe", missingByRecipe);
+            }
             addIssue("craft", surfaceMissing
                             ? "crafting_surface_missing" : "no_finite_recipe_path",
                     surfaceMissing
@@ -731,7 +770,7 @@ public final class SemanticAcquireCompanionTask
         }
         List<String> refs = new ArrayList<>();
         if (need.prospectingMineStarted) {
-            // 探矿腿的目标方块族来自生成带表：普通矿与深层矿变体一并覆盖，不再按物品直翻方块。
+            // 探矿行程的目标方块族来自生成带表：普通矿与深层矿变体一并覆盖，不再按物品直翻方块。
             OreGenerationBand band = OreGenerationBand.forItems(need.itemIds);
             if (band == null) {
                 addIssue("mine", "prospecting_band_unknown",
@@ -1294,6 +1333,13 @@ public final class SemanticAcquireCompanionTask
             bodyPreparationFailure = Map.copyOf(result.data()); failureNeed = completedNeed; completedNeed.decisionRequired = true;
             addIssue("craft", "crafting_body_preparation_required", result.message(), result.data());
             return failAcquisition("crafting_body_preparation_required", result.message(), childFailureType(terminal, result));
+        }
+        if (completedRecord instanceof OffhandSupplyTaskRecord) {
+            // 未结清的不确定效果已由上方统一拦截；这里的确定失败只记下原因，按普通来源继续，不重试同一换位。
+            addIssue("inventory", "offhand_pull_unavailable",
+                    result == null ? "offhand swap result missing" : result.message(),
+                    result == null ? Map.of() : result.data());
+            return TaskState.RUNNING;
         }
         if (completedRecord instanceof BackpackSupplyTaskRecord) {
             String code = result == null || result.data() == null ? "backpack_result_missing" : string(result.data().get("failure_code"));

@@ -58,7 +58,15 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     }
     PortalPreparationTask(LocalPlayer player, PortalPreparationTaskRecord record,
                           BiFunction<LocalPlayer, TaskRecord, Task> childFactory) {
+        this(player, record, childFactory, SURVEY_PLANNING_LIMIT_TICKS);
+    }
+    /** 选址勘察的宽上限：分钟级；超过仍无可用场址就如实收场，不再靠逐刻延期无限等待。 */
+    private static final long SURVEY_PLANNING_LIMIT_TICKS = 2 * 60 * 20;
+    private final long surveyPlanningLimitTicks;
+    PortalPreparationTask(LocalPlayer player, PortalPreparationTaskRecord record,
+                          BiFunction<LocalPlayer, TaskRecord, Task> childFactory, long surveyPlanningLimitTicks) {
         super(player, record); world = player.clientLevel; this.childFactory = childFactory;
+        this.surveyPlanningLimitTicks = surveyPlanningLimitTicks;
     }
 
     @Override protected void onStart() {
@@ -87,6 +95,7 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             child = casting; return;
         }
         survey = new PortalSiteSurvey(world, player.blockPosition(), r.radius, end);
+        planningPhaseBegin("survey", surveyPlanningLimitTicks);
     }
 
     @Override protected TaskState onTick() {
@@ -125,8 +134,15 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
 
     private TaskState survey() {
         phase = Phase.SURVEY;
+        // 勘察是有界守卫覆盖的规划期：超宽上限即如实失败，绝不静默延长截止时间。
+        if (planningPhaseExceeded())
+            return blocked("portal_survey_planning_timeout",
+                    "Site survey produced no usable portal site within about " + planningPhaseSeconds()
+                            + "s (radius " + r.radius + ", loaded chunks only). Travel toward more loaded"
+                            + " terrain, widen the search, or retry from another spot instead of waiting.",
+                    FailureType.PLANNING_STALL);
         site = survey.tick(r.mayAlterTerrain);
-        if (site != null) { survey.close(); return TaskState.RUNNING; }
+        if (site != null) { survey.close(); planningPhaseEnd(); return TaskState.RUNNING; }
         if (!survey.complete()) { r.extendDeadlineTo(r.getDeadlineGameTime() + 1); return TaskState.RUNNING; }
         if (!end) return blocked(r.mayAlterTerrain ? "portal_site_unavailable" : "portal_construction_permission_required",
                 "No reusable frame or suitable loaded construction site was found within radius " + r.radius
@@ -225,12 +241,16 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
         }
         if (phase == Phase.LOCATE) {
             survey.close(); survey = new PortalSiteSurvey(world, player.blockPosition(), r.radius, true);
+            planningPhaseBegin("survey", surveyPlanningLimitTicks);
         }
         if (phase == Phase.BUILD && !site.ready(world)) return blocked("portal_frame_unverified", "Construction ended without a complete live obsidian frame.");
         return TaskState.RUNNING;
     }
 
     private TaskState blocked(String code, String message) {
+        return blocked(code, message, FailureType.fromCode(childEvidence.get("failure_type"), FailureType.TARGET_LOST));
+    }
+    private TaskState blocked(String code, String message, FailureType type) {
         issue = code;
         // 失败回执自带"卡在哪"：阶段、站位、扫描范围与该阶段的关键缺口，
         // 模型据此能直接判断下一步，不用再盲查世界状态。
@@ -243,10 +263,18 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
             if (end) facts.put("missing_eyes",
                     site.end().missingEyes(p -> PortalPreparationSite.read(world, p)).size());
         }
-        if (supplyNeed != null) facts.put("supply_purpose", supplyNeed.purpose());
+        if (supplyNeed != null) {
+            facts.put("supply_purpose", supplyNeed.purpose());
+            // 点名候选与需求数：调用方据此预判带什么材料才够，不再靠试错补料；候选之外（如可燃原木）即使身上有也不计入。
+            facts.put("supply_required", supplyNeed.count());
+            facts.put("supply_candidates", supplyNeed.alternatives().stream()
+                    .map(item -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString()).toList());
+        }
         facts.put("survey_radius", r.radius);
+        if (planningPhaseActive())
+            facts.put("planned_for_seconds", planningPhaseSeconds());
         blockedFacts = Map.copyOf(facts);
-        fail(message == null ? code : message, FailureType.fromCode(childEvidence.get("failure_type"), FailureType.TARGET_LOST));
+        fail(message == null ? code : message, type);
         return TaskState.FAILED;
     }
     @Override protected Map<String, Object> resultData() {
@@ -265,7 +293,19 @@ public final class PortalPreparationTask extends AbstractCompanionTask<PortalPre
     }
     @Override public Map<String, Object> progress() {
         var data = new LinkedHashMap<>(resultData());
-        if (child != null) data.put("child", child.progress()); return data;
+        if (child == null) {
+            // 标准键 phase 让进度门卫认识本任务；勘察期另报 calc（扫描次数）与已规划秒数，
+            // 勘察停滞期每过事件地板间隔仍有一条「还在找」的心跳，不再零事件黑洞。
+            // 有子任务时不占 phase：一线子任务的规划心跳由 child 键上提保持可见，包装层不顶掉它。
+            data.put("phase", preparationPhase());
+            if (planningPhaseActive() && "survey".equals(planningPhaseLabel())
+                    && survey != null && !survey.complete()) {
+                data.put("calc", survey.scans());
+                data.put("planning_seconds", planningPhaseSeconds());
+            }
+        }
+        if (child != null) data.put("child", child.progress());
+        return data;
     }
     @Override public void stop(LocalPlayer player, Task.StopReason why) {
         try {

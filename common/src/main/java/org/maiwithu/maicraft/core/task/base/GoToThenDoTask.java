@@ -24,6 +24,9 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     private static final long PLANNING_WORK_FUSE_UNITS = 60_000;
     /** 距离最后一次接近目标超过这么长的活动 tick（且工作量已越熔断线）判定规划无收敛。 */
     private static final long CONVERGENCE_WINDOW_TICKS = 30 * 20;
+    /** 整条接近段的宽上限：不进规划也不挪窝的静默窗（导航既不报规划在飞也不给终态的楔死形态）
+     *  由这把分钟级的总表收场，健康步行接近远用不满。 */
+    private static final long APPROACH_PHASE_LIMIT_TICKS = 5 * 60 * 20;
 
     private ProgressBudget planningBudget;
     private long planningWorkHighWater;
@@ -86,7 +89,15 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     @Override
     // 具体任务说现在能干活，就直接执行 act；否则推进导航。没有导航且还够不到时，只报告需要先走近。
     protected final TaskState onTick() {
-        if (reached()) return act();
+        if (reached()) {
+            planningPhaseEnd();
+            return act();
+        }
+        // 接近段起表：无论导航处于规划在飞还是执行行走，整条接近段都有宽上限兜底——
+        // 既不规划也不挪窝、也不给终态的静默窗不再无限 running（消费类接近段的楔死形态）。
+        if (nav != null && !planningPhaseActive()) {
+            planningPhaseBegin("approach", APPROACH_PHASE_LIMIT_TICKS);
+        }
         if (nav == null) {
             // 无到场导航的动作任务:不在工作距离内 = 教学失败,旅行归 goto
             BlockPos t = gotoFirstTarget();
@@ -150,6 +161,16 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     private TaskState boundedApproachPlanning() {
         if (planningBudget == null) planningBudget = r.progressBudget(PLANNING_IDLE_TICKS);
         long now = player.level().getGameTime();
+        // 宽上限先于规划在飞判定：导航停在既不规划也不终态的行走假运行时，idle 预算没有
+        // lastVerifiedProgressTick 可依，只有这张总表能把接近段收进有界终态。
+        if (planningPhaseExceeded()) {
+            fail("approach phase 'approach' did not complete within about " + planningPhaseSeconds()
+                    + " seconds; the body neither reached working distance nor produced a path"
+                    + " verdict; " + nav.outcomeSummary()
+                    + " Travel closer with goto and resubmit, or inspect the approach first.",
+                    FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
+        }
         boolean stalled = planningBudget.observeCounter(now, nav.lastVerifiedProgressTick());
         double distance = approachDistance();
         if (distance < bestApproachDistance - 0.1) {
@@ -209,6 +230,11 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         if (planning) {
             result.put("done", nav.planningProgressUnits());
             result.put("calc", nav.planningCalcAttempts());
+        }
+        // 接近静默窗的心跳：身体近期没有真实位移（既不规划在飞也不挪窝的楔死形态）时报
+        // 已接近秒数——单调增长让门卫按地板间隔持续发布，健康步行不报、不加事件噪音。
+        if (!planning && !nav.hasRecentPhysicalProgress(40)) {
+            result.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
         }
         return Map.copyOf(result);
     }

@@ -213,13 +213,12 @@ public final class CraftOps {
         int deficit = wantedInventoryCount - currentTargetCount;
         var context = ClientRuntime.requireContext(self);
         List<Candidate> candidates = new ArrayList<>();
+        // 产物对得上目标但输入在本端读不出来的配方：执行器确实用不了它们，
+        // 但不能静默丢弃后伪装成"没有配方"——失败回执要点名配方与原因。
+        List<Map<String, Object>> unreadableRecipes = new ArrayList<>();
         for (RecipeHolder<?> holder : context.connection().getRecipeManager().getRecipes()) {
             try {
-                if (!(holder.value() instanceof CraftingRecipe recipe)
-                        || recipe.isSpecial()
-                        || !RecipeProbe.usableIngredients(recipe)) {
-                    continue;
-                }
+                if (!(holder.value() instanceof CraftingRecipe recipe)) continue;
                 ItemStack result = RecipeProbe.resultOf(recipe, context.level().registryAccess());
                 if (result.isEmpty() || result.getItem() != target) {
                     continue;
@@ -228,9 +227,22 @@ public final class CraftOps {
                 if (id == null || excluded.contains(id.toString())) {
                     continue;
                 }
+                if (recipe.isSpecial()) {
+                    unreadableRecipes.add(Map.of("recipe_id", id.toString(), "reason", "special_recipe_not_executable"));
+                    continue;
+                }
+                if (!RecipeProbe.usableIngredients(recipe)) {
+                    unreadableRecipes.add(Map.of("recipe_id", id.toString(), "reason", "ingredients_unreadable"));
+                    continue;
+                }
                 int outputCount = Math.max(1, result.getCount());
                 int batches = Math.max(1, (deficit + outputCount - 1) / outputCount);
                 List<IndexedIngredient> ingredients = indexedIngredients(recipe);
+                // 标签或谓词原料在本端枚举不出成员时，摆料谓词没有可接受物品：按输入不可读留证并跳过。
+                if (ingredients.stream().allMatch(indexed -> indexed.ingredient().getItems().length == 0)) {
+                    unreadableRecipes.add(Map.of("recipe_id", id.toString(), "reason", "input_alternatives_unreadable"));
+                    continue;
+                }
                 if (ingredients.isEmpty()) {
                     continue;
                 }
@@ -258,9 +270,19 @@ public final class CraftOps {
         if (candidates.isEmpty()) {
             targetFacts.put("goal_satisfied", false);
             targetFacts.put("candidate_recipes", List.of());
+            if (!unreadableRecipes.isEmpty()) {
+                targetFacts.put("recipes_with_unreadable_inputs",
+                        List.copyOf(unreadableRecipes.stream().limit(MAX_RECOVERY_CANDIDATES).toList()));
+            }
+            String unreadableNote = unreadableRecipes.isEmpty() ? "" : "; matching recipes with unreadable "
+                    + "client-side ingredient alternatives: " + unreadableRecipes.stream()
+                            .map(entry -> entry.get("recipe_id") + " (" + entry.get("reason") + ")")
+                            .limit(MAX_RECOVERY_CANDIDATES)
+                            .reduce((left, right) -> left + ", " + right).orElse("")
+                    + "; read the recipe knowledge page for the exact inputs";
             return new Plan(null, TaskResult.fail(
                     "no client-known ordinary crafting recipe makes " + targetName
-                            + "; inspect another acquisition method",
+                            + "; inspect another acquisition method" + unreadableNote,
                     targetFacts), null);
         }
 

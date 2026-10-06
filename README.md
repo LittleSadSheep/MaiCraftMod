@@ -380,7 +380,17 @@ http://127.0.0.1:8766/mcp
 | `neoforge/` | NeoForge 通用与客户端入口、加载器配置 |
 | `third_party/baritone/` | 内嵌寻路代码及其许可证 |
 
-完整验证：
+### 运行回归测试
+
+日常修改只跑与改动对应的回归套件（套件名登记在 `common/build.gradle`，每行附有它验证的内容）。例如改了合成相关代码：
+
+```powershell
+.\gradlew.bat :common:craftingRegression --console=plain
+```
+
+最后一行 `BUILD SUCCESSFUL` 表示通过；`BUILD FAILED` 时日志会点名失败的套件和断言原因。改动范围与套件的对照表、全量并行入口 `:common:parallelRegressionCheck --max-workers=4`（约 3 分半）的用法，见[开发指南的构建与回归](docs/dev/contributing.md#构建与回归)。
+
+完整验证（并入或发布前）：
 
 ```powershell
 .\gradlew.bat check --no-daemon --no-parallel --max-workers=1

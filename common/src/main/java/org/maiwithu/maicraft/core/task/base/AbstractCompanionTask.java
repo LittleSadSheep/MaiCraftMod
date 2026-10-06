@@ -262,6 +262,55 @@ public abstract class AbstractCompanionTask<R extends TaskRecord>
         }
     }
 
+    /** 本旅程已确认放置过的世界格（含历次导航）；清理阶段据此识别自己垫过的支撑柱。 */
+    protected java.util.Set<net.minecraft.core.BlockPos> journeyPlacedCells() {
+        return new java.util.HashSet<>(journey.placedCells());
+    }
+
+    // ---------------------------------------------------------------------
+    // 任务自身规划期的有界守卫：选址、勘察这类不派子任务的规划阶段没有子任务
+    // 截止时间可依赖，卡住即无限 running。进入规划阶段时登记阶段名与宽上限
+    // （分钟级，按任务类型自定），超限由调用方按 planning_stall 如实收场。
+    // ---------------------------------------------------------------------
+
+    private String planningPhaseLabel;
+    private long planningPhaseStart = Long.MIN_VALUE;
+    private long planningPhaseLimitTicks;
+
+    /** 进入本任务自己主导的一个规划阶段：记阶段名、开始时刻与宽上限。 */
+    protected void planningPhaseBegin(String label, long limitTicks) {
+        planningPhaseLabel = label;
+        planningPhaseStart = player.level().getGameTime();
+        planningPhaseLimitTicks = limitTicks;
+    }
+
+    /** 规划阶段结束（得到场址、进入执行或交给子任务）时停表；不调用则守卫一直计时。 */
+    protected void planningPhaseEnd() {
+        planningPhaseLabel = null;
+        planningPhaseStart = Long.MIN_VALUE;
+    }
+
+    /** 是否正处于有界规划阶段。 */
+    protected boolean planningPhaseActive() {
+        return planningPhaseLabel != null;
+    }
+
+    /** 当前规划阶段名；不在规划阶段时为 {@code null}。 */
+    protected String planningPhaseLabel() {
+        return planningPhaseLabel;
+    }
+
+    /** 当前规划阶段已进行的整秒数；不在规划阶段时为 0。 */
+    protected long planningPhaseSeconds() {
+        return planningPhaseActive() ? (player.level().getGameTime() - planningPhaseStart) / 20 : 0;
+    }
+
+    /** 规划阶段是否已超宽上限；超限后调用方应如实失败并携带阶段名与已等待时长。 */
+    protected boolean planningPhaseExceeded() {
+        return planningPhaseActive()
+                && player.level().getGameTime() - planningPhaseStart >= planningPhaseLimitTicks;
+    }
+
     // ---------------------------------------------------------------------
     // 推进当前子任务；其停止和结果收尾仍由调用方负责。
     // ---------------------------------------------------------------------

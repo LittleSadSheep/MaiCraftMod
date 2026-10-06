@@ -8,6 +8,8 @@ import org.maiwithu.maicraft.intent.RecoveryKnowledgeTest;
 public final class PortalRegressionSuite {
     public static void main(String[] args) throws Exception {
         NetherPortalFrameTest.main(args);
+        // 点火不成型时的 vanilla 口径门框审计：认可与拒绝都必须与原版 PortalShape 同判。
+        NetherPortalVanillaAuditTest.main(args);
         // 浇筑模板先核对四种池岸方向，水流效果另由实机验收。
         NetherPortalCastingLayoutTest.main(args);
         PortalCastingSurveyTest.main(args);
@@ -29,6 +31,8 @@ public final class PortalRegressionSuite {
         PortalPolicyTest.main(args);
         PortalSurveyTest.main(args);
         PortalPreparationTaskTest.main(args);
+        // 编译型任务的规划期也要有界：勘察停滞期出心跳，超宽上限如实收场而非静默楔死。
+        PortalPlanningGuardTest.main(args);
         PortalPreparationContractTest.main(args);
         DimensionPreparationFallbackTest.main(args);
         // 高台旁先比较整扇门的底部入口，一列受阻后仍能尝试另一列。

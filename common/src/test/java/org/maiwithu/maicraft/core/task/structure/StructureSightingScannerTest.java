@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 
 /**
  * 联合锚点扫描全链路：索引感知画像方块后，一轮四相在多刻驻留内走完并交付 sighting；
- * 路点间移动触发的换址重开不丢已建的索引条目，热索引下新轮仍能完成判定。
+ * 观察点间换位不弃在途轮——覆盖半径内继续旧轮，热索引下新址仍能完成判定。
  * 村庄场景按真实几何建模：屋外可透视证据（土径、露天堆肥桶）跨越旧聚集半径分布，
  * 屋内设施被墙体遮挡不得计入；只有土径而没有生活方块不构成村庄。
  */
@@ -33,6 +33,7 @@ public final class StructureSightingScannerTest {
         spreadVillageConfirmsFromOutdoorEvidence();
         pathsWithoutActivityDoNotConfirm();
         indoorFurnitureDoesNotCount();
+        denseCommonBlocksDoNotStarveSparseEvidence();
         System.out.println("StructureSightingScannerTest: passed");
     }
 
@@ -121,11 +122,11 @@ public final class StructureSightingScannerTest {
         }
     }
 
-    /** 换址重开只换轮心不弃索引：已建段条目仍在，新轮在少数几刻内完成判定。 */
+    /** 覆盖半径内换观察位不弃在途轮：已建索引条目仍在，换位后少数几刻内完成判定。 */
     private static void relocationKeepsIndex() throws Exception {
         try (var world = villageWorld()) {
             var scanner = scanner();
-            // 先推进几刻让锚点索引吃进已建条目，再模拟路点间移动触发换址重开。
+            // 先推进几刻让锚点索引吃进已建条目，再模拟观察点间移动：新位置仍在轮次覆盖半径内。
             for (int tick = 0; tick < 3; tick++) {
                 world.nextTick();
                 scanner.tick(world.player);
@@ -197,6 +198,53 @@ public final class StructureSightingScannerTest {
                 sighting = scanner.tick(world.player).stream().findFirst().orElse(null);
             }
             check(sighting == null, "wall-hidden furniture must not be counted as visible evidence");
+            scanner.release();
+        }
+    }
+
+    /**
+     * 实机三连败的最小复现：玩家身边一大片常见方块（房屋木板）把联合 MASS 查询的
+     * 最近窗口全部占满，远处的露天生活方块（堆肥桶）被挤出查询结果，
+     * activity 组永远凑不齐——村庄贴脸也不落账。修复后稠密常见方块不得饿死稀疏证据。
+     */
+    private static void denseCommonBlocksDoNotStarveSparseEvidence() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            world.set(BELL, Blocks.BELL.defaultBlockState());
+            for (int x = 10; x <= 15; x++) {
+                world.set(new BlockPos(x, 1, 5), Blocks.DIRT_PATH.defaultBlockState());
+            }
+            // 露天生活方块放在远处（距玩家约 17 格），近处铺 200+ 块更近的木板占满最近窗口。
+            BlockPos composterFarA = new BlockPos(15, 1, 14);
+            BlockPos composterFarB = new BlockPos(13, 1, 15);
+            world.set(composterFarA, Blocks.COMPOSTER.defaultBlockState());
+            world.set(composterFarB, Blocks.COMPOSTER.defaultBlockState());
+            int planks = 0;
+            // 木板铺在脚下 y0 作地板：与证据方块不同层，挤占查询窗口但不遮挡视线——
+            // 本测试隔离的是「最近窗口被稠密方块占满」这一断相，不掺入可见性遮挡因素。
+            for (int x = 0; x <= 15; x++) {
+                for (int z = 0; z <= 11; z++) {
+                    world.set(new BlockPos(x, 0, z), Blocks.OAK_PLANKS.defaultBlockState());
+                    planks++;
+                }
+            }
+            for (int x = 2; x <= 9; x++) {
+                for (int z = 12; z <= 15; z++) {
+                    world.set(new BlockPos(x, 0, z), Blocks.OAK_PLANKS.defaultBlockState());
+                    planks++;
+                }
+            }
+            if (planks < 200) throw new AssertionError("repro needs more planks than the query window");
+            var scanner = scanner();
+            StructureSightingScanner.Sighting sighting = null;
+            for (int tick = 0; tick < 300 && sighting == null; tick++) {
+                world.nextTick();
+                sighting = scanner.tick(world.player).stream().findFirst().orElse(null);
+            }
+            check(sighting != null,
+                    "dense common blocks near the body must not crowd sparse village evidence out of the scan");
+            assert sighting != null;
+            check(sighting.groupCounts().getOrDefault("village_activity", 0) >= 2,
+                    "the outdoor composters must be counted even when planks fill the nearby window");
             scanner.release();
         }
     }

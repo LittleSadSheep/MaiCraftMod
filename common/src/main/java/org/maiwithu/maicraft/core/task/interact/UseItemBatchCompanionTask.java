@@ -91,7 +91,17 @@ public final class UseItemBatchCompanionTask extends AbstractCompanionTask<UseIt
         if (active != null) { lastStep = active.result(TaskState.CANCELLED); active = null; activeRecord = null; }
         super.cleanup();
     }
-    @Override public Map<String, Object> progress() { return resultData(); }
+    /** 进度记分牌：done/total 与 phase 是门卫认的标准键，活跃子任务嵌在 child 键下供
+     *  规划心跳上提——批六A/B 的流体接近静默窗里，包装任务顶层不再无话可说。 */
+    @Override
+    public Map<String, Object> progress() {
+        Map<String, Object> data = new LinkedHashMap<>(resultData());
+        data.put("done", completedOutput);
+        data.put("total", r.count);
+        if (active != null) data.put("child", active.progress());
+        return data;
+    }
+
     /** 面板行动行的一句话汇报；工具与原料名取物品的本地化名称，子任务在跑时由一线先说话。 */
     @Override public String describeCurrentAction() {
         if (active != null) {

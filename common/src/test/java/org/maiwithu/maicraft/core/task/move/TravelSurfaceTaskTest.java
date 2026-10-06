@@ -106,7 +106,7 @@ public final class TravelSurfaceTaskTest {
         }
     }
 
-    /** 已授权动土的被埋起点：竖直腿精确指向所在列顶盖（heightmap 顶），复用 exact 上掘链路。 */
+    /** 已授权动土的被埋起点：竖直段精确指向所在列顶盖（heightmap 顶），复用 exact 上掘链路。 */
     private static void buriedAuthorizedProducesVerticalLeg(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory)) {
             f.world.shape = WorldShape.SOLID_ROCK;

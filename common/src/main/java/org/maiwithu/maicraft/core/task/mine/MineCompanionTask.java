@@ -100,6 +100,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     // 目前关闭盲目向外挖隧道找矿。附近已加载区域查完仍没目标，就报告没有合适来源。
     private static final boolean EXPLORE_FOR_BLOCKS = false;
 
+    /**
+     * 源扫描（querying_sources）宽上限：10 分钟。索引逐批构建且与全部查询共享每刻 2ms
+     * 墙钟预算，大范围扫描合法地慢（视距 32 chunk 全量构建约需 1-2 分钟），上限因此取
+     * 宽松值；超过仍无覆盖就如实失败（planning_stall），不再逐刻无限顺延截止时间。
+     * 注意守卫数的是游戏刻而扫描按真实时间推进，不限速环境下超限会偏保守（提前判超）。
+     */
+    private static final long SOURCE_SCAN_LIMIT_TICKS = 10 * 60 * 20;
+
     // ---- 探矿驱动预算（授权「挖着找」后生效；内部常量，不做成模型参数）----
     /** 到层位后的水平掘进预算；下降所需的身体断面另按实际高度差计入，整批副目标同样消耗预算。 */
     private static final int PROSPECT_MAX_BLOCKS = 128;
@@ -116,6 +124,11 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
      * 只有"站着不动又什么都没挖出来"才是卡住,而那种状态没有出口,只能收工报给主人。
      */
     private static final int STALL_TICKS = 400;
+
+    /** 接近段规划在飞的宽上限（三分钟）：寻路器挂在单次搜索永不返回的病理里时，
+     *  stalledOut 的活动刻预算被冻结（规划在飞不算卡住），任务会零事件零终态地静默楔死
+     *  （harvest 接近段 20 分钟样本）。健康接近的单次搜索用不满这张表。 */
+    private static final long APPROACH_PLANNING_LIMIT_TICKS = 3 * 60 * 20;
 
     /** 只有目标方块确认挖掉或角色确实移动后才续期，避免原地等待被误判为有进展。 */
     private static final int PROGRESS_LEASE_TICKS = STALL_TICKS + 40;
@@ -225,6 +238,19 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private long lastProgressTick;
     private BlockPos lastProgressPos;
 
+    /** 滞水撤离的一轮预算(刻)：10 秒内走不回干地就诚实收手，不靠换气反射无限漂。 */
+    private static final int WATER_EVACUATION_BUDGET_TICKS = 200;
+    /** 滞水撤离时搜索干地站立格的最大半径(格)。 */
+    private static final int WATER_EVACUATION_SEARCH_RADIUS = 16;
+    /** 滞水撤离导航；与挖矿接近导航分开持有，撤离期间身体只归它指挥。 */
+    private PlayerNav evacuationNav;
+    /** 当前撤离目标已持续的刻数；每次换目标重计，预算按一轮尝试算。 */
+    private int evacuationTicks;
+    /** 本任务期间身体处于水中的累计刻数，回执如实携带，不因成功撤离而抹掉。 */
+    private int wetTicks;
+    /** 本次任务是否发生过滞水；回执与进度观察据此声明，调用方才能对账换气反射的介入。 */
+    private boolean wadedDuringTask;
+
     private NoPathVerdict failedPath;
     private int noPathRetries;
     private NoPathVerdict pathAttempt;
@@ -234,6 +260,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     /** 最近一次来源查询的实际中心；未声明范围时随玩家移动，回执据此声明真实扫描口径。 */
     private BlockPos lastQueryCenter;
     private int lastQueryChunkRadius;
+    /** 源扫描等待期的心跳拍数：守卫覆盖的每一刻 +1，单调增长供进度门卫按地板间隔发布。 */
+    private long scanPulses;
+    /** 源扫描守卫的宽上限（刻）；生产取 {@link #SOURCE_SCAN_LIMIT_TICKS}，回归可注入小值。 */
+    private final long sourceScanLimitTicks;
+    /** 源扫描超限失败时置位，回执据此声明 failure_code 与等待拍数。 */
+    private boolean sourceScanTimedOut;
 
     // 按玩家正常速度逐刻挖掘，与寻路执行器共用 BlockDigger，确保两条破坏路径读取同一进度。
     private UltimineBreak chainBreak;
@@ -247,7 +279,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private int truncatedHarvests;
 
     public MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record) {
+        this(player, record, SOURCE_SCAN_LIMIT_TICKS);
+    }
+
+    /** 回归注入小扫描上限用；生产路径统一走默认宽上限。 */
+    MineCompanionTask(LocalPlayer player, MineBlockTaskRecord record, long sourceScanLimitTicks) {
         super(player, record);
+        this.sourceScanLimitTicks = sourceScanLimitTicks;
         this.naturalLogSource = record.naturalLogsOnly
                 && record.targets.stream().anyMatch(block -> block.defaultBlockState().is(BlockTags.LOGS));
     }
@@ -350,6 +388,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             return TaskState.FAILED;
         }
         observeNavigationBreakOrigins();
+        // 身体安全闸：脚下方块或身体所在格有水时，先撤到干地再继续扫描/挖掘。
+        // 换气反射只兜底溺水，不能成为任务的常态路径——扫描选址必须以干燥可站立为前提。
+        if (bodyWet()) return evacuateFromBody();
+        if (evacuationNav != null) {
+            // 外部原因（回流、传送、方块更新）先一步把身体带回干地：撤离就地收尾，扫描继续。
+            finishEvacuation();
+            noteProgress();
+        }
         long tDrops = NavProfiler.begin();
         drops = droppedItems();
         NavProfiler.end("mine.drops", tDrops);
@@ -448,6 +494,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             if (stalled != null) {
                 return stalled;
             }
+            // 接近段规划在飞的宽上限：stalledOut 对规划在飞免检（活动刻预算被冻结），寻路器
+            // 挂在单次搜索永不返回的病理里时只有这张表能把接近段收进有界终态；搜索正常返回
+            // 即停表，重复重启的停滞由 stalledOut 的活动刻预算兜底。
+            TaskState approachBound = approachingSourcesBound(
+                    nav != null && nav.planningInFlight(),
+                    nav == null ? 0 : nav.planningCalcAttempts(),
+                    nav == null ? "" : nav.outcomeSummary());
+            if (approachBound != null) {
+                return approachBound;
+            }
             if (failedPath != null) {
                 switch (failedPath.next(player.position(), currentGoals, lastQueryComplete, player.level().getGameTime())) {
                     case FAIL -> { return exhaustedPath(); }
@@ -519,8 +575,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         //    TIMEOUT。与 nav 规划在飞的冻结(AbstractCompanionTask)同一条保护。
         // 索引只查了一部分时继续等并顺延截止时间；还没查完不能说附近没有材料。
         if (!lastQueryComplete) {
-            r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
-            return TaskState.RUNNING;
+            return waitWhileSourceScanIncomplete();
         }
         // 默认在此停止；只有显式开启探索模式时才向外分支挖掘。返回已核实的部分库存，不让角色跑遍世界，也不把消失的方块冒充采集所得。
         // 当前配置会在这里结束“查完却没找到”的情况；下面保留的隧道探索分支不会执行。
@@ -1337,6 +1392,36 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                 knownOres.size());
         mergeHits(res.hits());
         lastQueryComplete &= !naturalTrees.budgetDeferred && rejectedBefore == naturalTrees.rejected.size();
+        // 扫描覆盖完成即停守卫表；之后新出现的等待窗（名单耗尽后的补查）会重新起表、预算不残留。
+        // 只关源扫描自己的表，不动接近段可能正挂着的 approaching_sources 表。
+        if (lastQueryComplete && "querying_sources".equals(planningPhaseLabel())) planningPhaseEnd();
+    }
+
+    /**
+     * 源扫描等待窗：索引逐批构建、合法地慢，等待刻不烧任务预算（期限逐刻顺延），
+     * 但顺延不再无限——挂规划期宽上限守卫（{@link #SOURCE_SCAN_LIMIT_TICKS}），超限如实
+     * 失败并携带阶段名、已等待秒数与扫描口径，调用方据此改走 travel/explore，而不是
+     * 像过去那样盲等十几分钟或盲取消（两次实机复现的静默楔死）。等待期 scanPulses 逐拍
+     * 单调增长，进度门卫据此在 phase 不变的静默窗里按地板间隔保持心跳。
+     */
+    private TaskState waitWhileSourceScanIncomplete() {
+        scanPulses++;
+        if (!planningPhaseActive()) {
+            planningPhaseBegin("querying_sources", sourceScanLimitTicks);
+        } else if (planningPhaseExceeded()) {
+            sourceScanTimedOut = true;
+            Constants.LOG.info(
+                    "[maicraft-task] mine source scan exceeded the wide bound: waited {}s pulses={} feet={} chunkRadius={}",
+                    planningPhaseSeconds(), scanPulses, feet().toShortString(), lastQueryChunkRadius);
+            fail("source scan phase 'querying_sources' did not complete within about " + planningPhaseSeconds()
+                    + "s (scan scope in search_scope, loaded chunks only, index still incomplete at "
+                    + Math.max(1, lastQueryChunkRadius) + " chunk radius). Waiting longer will not help;"
+                    + " travel toward or load more terrain and resubmit. This timeout is not evidence that"
+                    + " the material does not exist in the world.", FailureType.PLANNING_STALL);
+            return TaskState.FAILED;
+        }
+        r.extendDeadlineTo(r.getDeadlineGameTime() + 1);
+        return TaskState.RUNNING;
     }
 
     private int queryChunkRadius() {
@@ -1477,6 +1562,10 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         observation.put("known_sources", knownOres.size()); observation.put("query_complete", lastQueryComplete);
         observation.put("gathered", gathered); observation.put("confirmed_source_breaks", brokenTargets);
         observation.put("food", player.getFoodData().getFoodLevel());
+        boolean wet = bodyWet();
+        observation.put("in_water", wet);
+        if (wet) observation.put("wet_ticks", wetTicks);
+        if (evacuationNav != null) observation.put("evacuating", true);
         var nearest = nearestOre();
         if (nearest != null) {
             observation.put("nearest_source", List.of(nearest.getX(), nearest.getY(), nearest.getZ()));
@@ -1514,6 +1603,26 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("phase", currentPhase());
         data.put("done", r.getMined());
         data.put("total", r.count);
+        // 源扫描等待窗的心跳：calc 逐拍单调增长、planning_seconds 随等待推进，phase 虽不
+        // 变签名也持续更新，门卫按地板间隔发布「还在扫」——调用方据此区分正常慢扫描与
+        // 楔死，不再只能盲等或盲取消。
+        if (planningPhaseActive() && "querying_sources".equals(planningPhaseLabel()) && !lastQueryComplete) {
+            data.put("calc", scanPulses);
+            data.put("planning_seconds", planningPhaseSeconds());
+        }
+        // 接近段规划在飞的心跳：calc 尝试数与已规划秒数随等待推进（后者恒增），让「还在算路」
+        // 的接近停滞每过地板间隔仍有一条进度可读，与源扫描等待窗同一纪律。
+        if (nav != null && nav.planningInFlight() && "approaching_sources".equals(currentPhase())) {
+            data.put("calc", nav.planningCalcAttempts());
+            data.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
+        }
+        // 身体安全心跳：滞水是受胁状态，坐标进标准键让 ProgressGate 随浪况变化按地板间隔持续发布，
+        // 观察者不用等终态才发现角色在溺水边缘。
+        if (bodyWet()) {
+            BlockPos at = feet();
+            data.put("body", "滞水@" + at.getX() + "," + at.getY() + "," + at.getZ()
+                    + (evacuationNav != null ? " 撤离中" : ""));
+        }
         if (activeTarget != null) {
             data.put("target_pos", List.of(activeTarget.getX(), activeTarget.getY(), activeTarget.getZ()));
             data.put("target_block", BuiltInRegistries.BLOCK
@@ -1560,6 +1669,144 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         lastProgressPos = feet();
         noPathRetries = 0;
         r.extendDeadlineTo(lastProgressTick + PROGRESS_LEASE_TICKS);
+    }
+
+    /** 脚位格或其上一格有液体即视为滞水：扫描与开挖都必须从干燥可站立格开始。 */
+    private boolean bodyWet() {
+        BlockPos at = feet();
+        Level level = player.level();
+        return !level.getFluidState(at).isEmpty() || !level.getFluidState(at.above()).isEmpty();
+    }
+
+    /** 在身体四周按距离就近找一块干地站立格：脚下实心且无水、身体两格无碰撞无液体。找不到返回 null。 */
+    private BlockPos findDryStandable() {
+        Level level = player.level();
+        BlockPos center = feet();
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (int radius = 1; radius <= WATER_EVACUATION_SEARCH_RADIUS && best == null; radius++) {
+            for (BlockPos at : BlockPos.betweenClosed(center.offset(-radius, -2, -radius),
+                    center.offset(radius, 2, radius))) {
+                if (!level.isLoaded(at)) continue;
+                BlockState floor = level.getBlockState(at.below());
+                if (floor.getFluidState().isEmpty() && MovementHelper.canWalkOn(level, at.below())
+                        && bodyCellDry(level, at) && bodyCellDry(level, at.above())) {
+                    double dist = at.distSqr(center);
+                    if (dist < bestDist) { bestDist = dist; best = at.immutable(); }
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean bodyCellDry(Level level, BlockPos at) {
+        BlockState state = level.getBlockState(at);
+        return state.getFluidState().isEmpty()
+                && state.getCollisionShape(level, at).isEmpty()
+                && !MovementHelper.avoidWalkingInto(state);
+    }
+
+    /**
+     * 滞水撤离：先停下挖矿接近导航，再朝就近干地步行；预算用尽或周围找不到干地就诚实收手，
+     * 回执写明滞水事实——换气反射可能救过她的命，但那不是本任务的完成方式。
+     */
+    private TaskState evacuateFromBody() {
+        wetTicks++;
+        wadedDuringTask = true;
+        if (evacuationNav == null && (nav != null || navIsBranch || navIsDrop)) stopNav();
+        if (chainBreak != null) { closeChain(); }
+        if (evacuationTicks >= WATER_EVACUATION_BUDGET_TICKS) {
+            stopEvacuation();
+            fail("mine scan aborted: the body stayed in water at " + feet().toShortString()
+                    + " for " + wetTicks + " ticks and did not reach dry ground within the "
+                    + WATER_EVACUATION_BUDGET_TICKS + "-tick evacuation budget; the breath reflex may have"
+                    + " kept the body alive, resubmit from dry land or travel out of the water first",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        if (evacuationNav == null) {
+            BlockPos dry = findDryStandable();
+            if (dry == null) {
+                fail("mine scan aborted: the body is in water at " + feet().toShortString()
+                        + " and no dry standable cell was found within " + WATER_EVACUATION_SEARCH_RADIUS
+                        + " blocks; resubmit after traveling to shore — surrounding water is not evidence"
+                        + " that land does not exist",
+                        FailureType.NO_PATH);
+                return TaskState.FAILED;
+            }
+            Constants.LOG.info("[maicraft-task] mine task={} body in water at {}, evacuating to dry ground {}",
+                    r.getToolCallId(), feet().toShortString(), dry.toShortString());
+            evacuationNav = PlayerNav.toGoal(player, () -> NavGoal.exact(dry), MINE_SPEED,
+                    () -> false, PlayerNav.ContextProvider.DEFAULT).walkingOnly();
+            evacuationTicks = 0;
+        }
+        evacuationTicks++;
+        switch (evacuationNav.tick()) {
+            case RUNNING -> {
+                // 水流可能把身体推离目标格，脚下已干即视为撤离成功，导航下刻再收尾。
+                if (!bodyWet()) finishEvacuation();
+                return TaskState.RUNNING;
+            }
+            case ARRIVED -> {
+                if (!bodyWet()) {
+                    finishEvacuation();
+                    noteProgress();
+                } else {
+                    // 到点仍是水（目标格被流沙/流体更新占据）：换一块干地重找，预算继续计时。
+                    stopEvacuation();
+                }
+                return TaskState.RUNNING;
+            }
+            case FAILED -> {
+                Constants.LOG.info("[maicraft-task] mine task={} evacuation nav failed: {}, looking for another dry cell",
+                        r.getToolCallId(), evacuationNav.failReason());
+                stopEvacuation();
+                return TaskState.RUNNING;
+            }
+        }
+        // 语句形式 switch 不参与穷举判定；枚举三分支上面都已返回，此处只为编译器闭合。
+        return TaskState.RUNNING;
+    }
+
+    private void finishEvacuation() {
+        Constants.LOG.info("[maicraft-task] mine task={} back on dry ground at {} after {} wet ticks, resuming scan",
+                r.getToolCallId(), feet().toShortString(), wetTicks);
+        stopEvacuation();
+    }
+
+    private void stopEvacuation() {
+        if (evacuationNav != null) evacuationNav.stop();
+        evacuationNav = null;
+        evacuationTicks = 0;
+    }
+
+    /**
+     * 接近段规划在飞的宽上限守卫（approaching_sources 段）：规划在飞期间挂分钟级总表，
+     * 超限按 planning_stall 如实收场并携带阶段名、已等待秒数与 calc 尝试数；搜索一返回
+     * 就停表。参数化导航状态是为了回归可以直接驱动守卫，不必先起一次真实寻路。
+     *
+     * @return 该收场就给终态，否则 null 继续正常推进
+     */
+    TaskState approachingSourcesBound(boolean planningInFlight, long calcAttempts, String navOutcome) {
+        if (!planningInFlight) {
+            if ("approaching_sources".equals(planningPhaseLabel())) planningPhaseEnd();
+            return null;
+        }
+        if (!planningPhaseActive()) {
+            planningPhaseBegin("approaching_sources", APPROACH_PLANNING_LIMIT_TICKS);
+            return null;
+        }
+        if (!planningPhaseExceeded()) return null;
+        Constants.LOG.info(
+                "[maicraft-task] mine approach planning exceeded the wide bound: waited {}s calc={} feet={} targets={}",
+                planningPhaseSeconds(), calcAttempts, feet().toShortString(), knownOres.size());
+        fail("approach phase 'approaching_sources' did not complete within about "
+                + planningPhaseSeconds() + "s; the path search held the planner in flight the"
+                + " whole time (" + calcAttempts + " calc attempts, nearest: " + nearestOreInfo()
+                + "; " + navOutcome + "). Travel closer with goto and resubmit; this timeout is"
+                + " not evidence that the sources are unreachable from anywhere.",
+                FailureType.PLANNING_STALL);
+        return TaskState.FAILED;
     }
 
     /**
@@ -1701,6 +1948,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         // 随后释放挖掘器并注销目标索引，避免任务结束后继续控制角色或扫描方块。
         InputDriver.halt(player);
         super.cleanup();
+        stopEvacuation();
         closeChain();
         if (tunnelDriver != null) { tunnelDriver.close(); collectTunnelEffects(); miningUncertain |= tunnelDriver.uncertain(); }
         activeTarget = null;
@@ -1736,6 +1984,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         data.put("gathered", r.getMined());
         if (!ultimineActions.isEmpty()) data.put("ultimine_actions", List.copyOf(ultimineActions));
         if (miningUncertain) data.put("outcome_uncertain", true);
+        // 滞水事实不因成功撤离或任务成功而抹掉：换气反射可能介入过，调用方对账时要知道。
+        if (wadedDuringTask) {
+            data.put("body_wet_ticks", wetTicks);
+            data.put("body_wet_note",
+                    "the body stood or drifted in water during this task and had to be walked back to"
+                            + " dry ground before scanning could continue; the breath reflex may have assisted");
+        }
         if (!lastMiningObservation.isEmpty()) data.put("mining_observation", lastMiningObservation);
         if (probabilisticDropMissed) {
             data.put("probabilistic_drop_missed", true);
@@ -1755,6 +2010,13 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     .forEach(entry -> gains.put(BuiltInRegistries.ITEM.getKey(entry.getKey()).toString(), entry.getValue() - rawInventoryBaseline.getOrDefault(entry.getKey(), 0)));
             data.put("observed_inventory_increases", gains);
             data.put("inventory_change_scope", "observed since mining started; inventory changes alone do not prove drop origin");
+        }
+        if (sourceScanTimedOut) {
+            // 超限回执自带等待证据：阶段名、已等秒数与扫描拍数，调用方不再对"慢还是死"猜谜。
+            data.put("failure_code", "source_scan_planning_timeout");
+            data.put("source_scan_phase", "querying_sources");
+            data.put("source_scan_waited_seconds", planningPhaseSeconds());
+            data.put("source_scan_pulses", scanPulses);
         }
         if (r.exactHarvest()) {
             data.put("exact_source", true); data.put("confirmed_source_breaks", brokenTargets);

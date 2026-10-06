@@ -64,12 +64,16 @@ public final class SemanticExploreCompanionTask
     private static final int BIOME_SAMPLES_PER_TICK = 192;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    /** 换锚的小半径：沿垂直方位横移这段距离再继续航点腿，不远离原探索扇区。 */
+    /** 换锚的小半径：沿垂直方位横移这段距离再继续航点行程，不远离原探索扇区。 */
     private static final double RELOCATION_HOP_BLOCKS = 32.0;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
-    /** 观察驻留为在途扫描轮保留的额外刻数上限：冷索引一轮约需 15~130 刻，超限按未覆盖处理不无限等待。 */
-    private static final int MAX_SCAN_DWELL_TICKS = 200;
+    /**
+     * 观察驻留为在途扫描轮保留的额外刻数上限：真实世界的冷索引要给观测半径内全部已加载区块段建条目
+     * （半径 112 时约五千段，共享每刻 2ms 墙钟），加上可见性与逐画像分组相，一轮可超出两百刻；
+     * 驻留只在扫描轮确实在途时消耗，结算即止，超限按未覆盖处理不无限等待。
+     */
+    private static final int MAX_SCAN_DWELL_TICKS = 400;
 
     private static final List<ColumnOffset> BIOME_OBSERVATION_OFFSETS =
             buildOffsets(BIOME_OBSERVATION_STEP);
@@ -126,6 +130,11 @@ public final class SemanticExploreCompanionTask
     private final Set<Long> attemptedWaypoints = new HashSet<>();
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
     private final FrontierLegBreaker waypointBreaker = new FrontierLegBreaker();
+    /** 行进涉水守卫的记数：当前行程的连续滞水刻、最近一次逼近目标的时刻与已放弃行程次数。 */
+    private int legWaterTicks;
+    private long lastWaterApproachTick;
+    private double legWaterBestDistance = Double.MAX_VALUE;
+    private int waterAbandonments;
 
     private SpiralWalker spiral;
 
@@ -134,6 +143,8 @@ public final class SemanticExploreCompanionTask
     private double farthestBodyDistance;
     /** 模型在兴趣决策中选了 stop；收尾回执保留发现与标签，不声称主目标已核实。 */
     private boolean stoppedByInterestDecision;
+    /** 身体越过请求半径被安全截停时置位：失败码与建议都按越界实情给，不冒用寻路失败。 */
+    private boolean radiusBoundExit;
 
     public SemanticExploreCompanionTask(
             LocalPlayer player, SemanticExploreTaskRecord record) {
@@ -165,10 +176,22 @@ public final class SemanticExploreCompanionTask
         memory.tick();
         double bodyDistance = horizontalDistance(origin, player.blockPosition());
         farthestBodyDistance = Math.max(farthestBodyDistance, bodyDistance);
-        if (bodyDistance > r.maxDistance + SCOPE_TOLERANCE) {
+        // 「到达半径即达成」优先于「走完航点」：跑图身体一进到达容差带就按 radius_reached 成功收尾，
+        // 不等当前航点行程走完，也不会再向边界外推进；真越过硬边界才按越界截停如实失败。
+        RadiusVerdict verdict = radiusVerdict(survey, bodyDistance, r.maxDistance);
+        if (verdict == RadiusVerdict.RADIUS_REACHED) {
+            // 航点行程未走完也被达成覆盖：子任务按取消记录，父任务按 radius_reached 成功收尾。
+            stopActiveChild(TaskState.CANCELLED);
+            surveyStopReason = "radius_reached";
+            succeed();
+            return TaskState.SUCCESS;
+        }
+        if (verdict == RadiusVerdict.RADIUS_BOUND_EXIT) {
+            radiusBoundExit = true;
+            surveyStopReason = "radius_bound_exit";
             stopActiveChild(TaskState.FAILED);
             fail("exploration movement left the bounded radius of " + r.maxDistance
-                    + " blocks and was stopped", FailureType.NO_PATH);
+                    + " blocks and was stopped", FailureType.RADIUS_BOUND_EXIT);
             return TaskState.FAILED;
         }
         // 兴趣答复由伴随任务消费一次；stop 是模型选择的收尾，发现与标签保留，不声称主目标已核实。
@@ -439,12 +462,7 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState startNextWaypoint(ClientLevel level) {
-        // 抵达请求范围边缘后结束本轮跑图；这只证明真实推进到边缘，不宣称每个区块都已覆盖。
-        if (survey && waypointReached > 0 && horizontalDistance(origin, player.blockPosition())
-                >= r.maxDistance - Math.min(16, r.maxDistance / 8)) {
-            surveyStopReason = "radius_reached";
-            return TaskState.SUCCESS;
-        }
+        // 抵达请求半径的收尾判定统一在 onTick 的 radius_reached 检查里做；这里只负责选下一条航点行程。
         if (waypointAttempts >= r.maxWaypoints) {
             return exhausted();
         }
@@ -470,10 +488,15 @@ public final class SemanticExploreCompanionTask
                         (double) target.getZ(), null,
                         r.mayAlterTerrain, false, r.transportMode);
         moveChild = new MoveToCompanionTask(player, moveRecord);
+        legWaterTicks = 0;
+        legWaterBestDistance = Double.MAX_VALUE;
+        lastWaterApproachTick = now;
     }
 
     private TaskState tickTravel(boolean targetTravel) {
-        TaskState terminal;
+        TaskState terminal = null;
+        TaskResult result = null;
+        boolean abandonedInWater = false;
         if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
@@ -482,12 +505,24 @@ public final class SemanticExploreCompanionTask
             if (terminal == null) {
                 // 只要实际执行的子任务持续续期已核实进度期限，耗时较长但健康的旅程就继续存活。语义半径和航点边界仍限制搜索范围，墙上时间不会改变目标含义。
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
-                return TaskState.RUNNING;
+                // 行进涉水守卫：身体被行程带进水里且不再逼近目标（或连续涉水越过硬上限）
+                // 时立即放弃当前行程换向，不等租约烧完，更不靠漂浮续命。
+                if (tickWaterLegGuard()) {
+                    abandonedInWater = true;
+                } else {
+                    return TaskState.RUNNING;
+                }
             }
         }
-        TaskResult result = moveChild.result(terminal);
-        moveChild = null;
-        moveRecord = null;
+        if (abandonedInWater) {
+            waterAbandonments++;
+            result = TaskResult.fail(waterAbandonMessage());
+            stopActiveChild(TaskState.FAILED);
+        } else {
+            result = moveChild.result(terminal);
+            moveChild = null;
+            moveRecord = null;
+        }
 
         if (targetTravel) {
             if (terminal == TaskState.SUCCESS) {
@@ -495,7 +530,9 @@ public final class SemanticExploreCompanionTask
                 return TaskState.RUNNING;
             }
             rejectedTargets.add(candidate.approach().asLong());
-            recordLegFailure("target_approach", candidate.approach(), result);
+            recordLegFailure(abandonedInWater
+                            ? "target_approach_abandoned_in_water" : "target_approach",
+                    candidate.approach(), result);
             candidate = null;
             beginObservation();
             return TaskState.RUNNING;
@@ -506,7 +543,9 @@ public final class SemanticExploreCompanionTask
             waypointBreaker.onLegSuccess();
         } else {
             waypointFailed++;
-            recordLegFailure("exploration_waypoint", activeWaypoint, result);
+            recordLegFailure(abandonedInWater
+                            ? "exploration_waypoint_abandoned_in_water" : "exploration_waypoint",
+                    activeWaypoint, result);
             // 航点高频走不到时按 换锚→轮换→受阻 升级：先挪发射位置，再换候选扇区，
             // 都失败就宣布受阻并给出远距换区建议，不在不可行地形带无限重付寻路成本。
             FrontierLegBreaker.Decision decision = waypointBreaker.onLegFailure(sector);
@@ -535,9 +574,11 @@ public final class SemanticExploreCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 换锚腿结束：到达即在新发射点重新观察选航点；失败按换锚失败继续升级，不在坏锚点原地再烧一窗腿。 */
+    /** 换锚行程结束：到达即在新发射点重新观察选航点；失败按换锚失败继续升级，不在坏锚点原地再烧一窗尝试。 */
     private TaskState tickRelocation() {
-        TaskState terminal;
+        TaskState terminal = null;
+        TaskResult result = null;
+        boolean abandonedInWater = false;
         if (player.level().getGameTime() >= moveRecord.getDeadlineGameTime()) {
             moveChild.stop(player, Task.StopReason.REPLACED);
             terminal = TaskState.TIMEOUT;
@@ -545,19 +586,31 @@ public final class SemanticExploreCompanionTask
             terminal = runChild(moveChild);
             if (terminal == null) {
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
-                return TaskState.RUNNING;
+                if (tickWaterLegGuard()) {
+                    abandonedInWater = true;
+                } else {
+                    return TaskState.RUNNING;
+                }
             }
         }
-        TaskResult result = moveChild.result(terminal);
-        moveChild = null;
-        moveRecord = null;
+        if (abandonedInWater) {
+            waterAbandonments++;
+            result = TaskResult.fail(waterAbandonMessage());
+            stopActiveChild(TaskState.FAILED);
+        } else {
+            result = moveChild.result(terminal);
+            moveChild = null;
+            moveRecord = null;
+        }
         BlockPos relocationTarget = activeRelocationTarget;
         activeRelocationTarget = null;
         if (terminal == TaskState.SUCCESS && result != null && result.success()) {
             beginObservation();
             return TaskState.RUNNING;
         }
-        recordLegFailure("anchor_relocation", relocationTarget, result);
+        recordLegFailure(abandonedInWater
+                        ? "anchor_relocation_abandoned_in_water" : "anchor_relocation",
+                relocationTarget, result);
         FrontierLegBreaker.Decision decision = waypointBreaker.onRelocationLegFailed(sector);
         while (decision == FrontierLegBreaker.Decision.RELOCATED) {
             BlockPos hop = relocationTarget(waypointBreaker.relocationBearing(sector));
@@ -580,6 +633,34 @@ public final class SemanticExploreCompanionTask
         return TaskState.RUNNING;
     }
 
+    /** 行进涉水守卫的一刻：更新滞水计数与最近逼近时刻，返回是否应放弃当前行程；离水即清零。 */
+    private boolean tickWaterLegGuard() {
+        long now = player.level().getGameTime();
+        if (!player.isInWater()) {
+            legWaterTicks = 0;
+            lastWaterApproachTick = now;
+            return false;
+        }
+        legWaterTicks++;
+        BlockPos target = activeWaypoint != null ? activeWaypoint : activeRelocationTarget;
+        if (target != null) {
+            double d = horizontalDistance(player.blockPosition(), target);
+            if (d < legWaterBestDistance - 0.5) {
+                legWaterBestDistance = d;
+                lastWaterApproachTick = now;
+            }
+        }
+        return WaterCrossingProbe.waterLegExpired(
+                legWaterTicks, now - lastWaterApproachTick);
+    }
+
+    /** 滞水放弃行程的如实话术：回执与 travel_failures 都能看出放弃原因是涉水楔死。 */
+    private String waterAbandonMessage() {
+        return "leg abandoned: the body stayed in water for " + legWaterTicks
+                + " continuous ticks without approaching the leg target"
+                + "; the exploration redirects instead of floating in place";
+    }
+
     /** 换锚落点：沿建议方位截取已加载的小半径路段；截不出（未加载或过近）返回 null 继续升级。 */
     private BlockPos relocationTarget(double bearingDegrees) {
         ClientLevel level = ClientRuntime.requireContext(player).level();
@@ -588,8 +669,7 @@ public final class SemanticExploreCompanionTask
                 (int) Math.round(player.getX() + Math.sin(radians) * RELOCATION_HOP_BLOCKS),
                 player.blockPosition().getY(),
                 (int) Math.round(player.getZ() - Math.cos(radians) * RELOCATION_HOP_BLOCKS));
-        return loadedFrontierToward(level, desired,
-                pos -> waterProbe.crossesWater(player.blockPosition(), pos));
+        return loadedFrontierToward(level, desired, this::routeBlockedByWater);
     }
 
     private TaskState tickVerification() {
@@ -725,11 +805,17 @@ public final class SemanticExploreCompanionTask
                 && !level.getBlockState(below).getFluidState().is(FluidTags.LAVA);
     }
 
+    /** 航点候选的涉水口径：落点列是纯水面（海面、湖心）或路线判穿水都算被水挡住；短促渡水豁免不变（130）。 */
+    private boolean routeBlockedByWater(BlockPos candidate) {
+        return waterProbe.landsOnWater(candidate.getX(), candidate.getZ())
+                || waterProbe.crossesWater(player.blockPosition(), candidate);
+    }
+
     private BlockPos nextWaypoint(ClientLevel level) {
         if (r.sector.direction() != null) {
             return ExplorationFrontiers.next(player.blockPosition(), sector, r.maxDistance,
                     attemptedWaypoints, pos -> columnLoaded(level, pos.getX(), pos.getZ()),
-                    pos -> waterProbe.crossesWater(player.blockPosition(), pos));
+                    this::routeBlockedByWater);
         }
         return nextTerrainNeutralWaypoint(level);
     }
@@ -739,15 +825,16 @@ public final class SemanticExploreCompanionTask
             BlockPos desired = spiral.next(player.blockPosition().getY());
             if (!insideScope(desired.getX(), desired.getZ())) continue;
             BlockPos frontier = loadedFrontierToward(level, desired,
-                    pos -> waterProbe.crossesWater(player.blockPosition(), pos));
+                    this::routeBlockedByWater);
             if (frontier != null && attemptedWaypoints.add(
                     BlockPos.asLong(frontier.getX(), 0, frontier.getZ()))) return frontier;
         }
         return null;
     }
 
-    // 优先返回不穿水的最远已加载路段；全线皆水回退最近已加载路段，缩短穿水承诺，
-    // 岛屿环境不卡死。
+    // 优先返回不穿水的最远已加载路段；全线皆穿水时回退最近已加载路段，但落点列本身是
+    // 纯水面的候选一律不选——短促渡水到对岸干地仍允许（130 豁免），航点落在水面上只会
+    // 把身体领进海里（175），截不出干地落点就返回 null 由上层如实失败。
     private BlockPos loadedFrontierToward(
             ClientLevel level, BlockPos desired, Predicate<BlockPos> avoidWater) {
         BlockPos current = player.blockPosition();
@@ -766,7 +853,8 @@ public final class SemanticExploreCompanionTask
             fallback = candidate;
             if (!avoidWater.test(candidate)) return candidate;
         }
-        return avoidWater == null ? null : fallback;
+        if (avoidWater == null || fallback == null) return null;
+        return waterProbe.landsOnWater(fallback.getX(), fallback.getZ()) ? null : fallback;
     }
 
     private TaskState exhausted() {
@@ -819,6 +907,23 @@ public final class SemanticExploreCompanionTask
         return dx * dx + dz * dz <= (double) r.maxDistance * r.maxDistance;
     }
 
+    /** 跑图达成半径的距离阈值：到这条线即算 radius_reached，与航点落点上限共用同一容差，留出收尾判定的提前量。 */
+    static double surveyRadiusReachThreshold(int maxDistance) {
+        return maxDistance - ExplorationFrontiers.arrivalMargin(maxDistance);
+    }
+
+    // 包内可见：跑图半径收尾判定由回归直测。越界判定优先——身体一次跳到硬边界外
+    // （传送、失控等不可控位移）不冒充达成；达成带内的正常推进不等航点行程走完即收尾。
+    enum RadiusVerdict { WITHIN_RADIUS, RADIUS_REACHED, RADIUS_BOUND_EXIT }
+
+    static RadiusVerdict radiusVerdict(boolean survey, double bodyDistance, int maxDistance) {
+        if (bodyDistance > maxDistance + SCOPE_TOLERANCE) return RadiusVerdict.RADIUS_BOUND_EXIT;
+        if (survey && bodyDistance >= surveyRadiusReachThreshold(maxDistance)) {
+            return RadiusVerdict.RADIUS_REACHED;
+        }
+        return RadiusVerdict.WITHIN_RADIUS;
+    }
+
     private boolean columnLoaded(ClientLevel level, int x, int z) {
         int y = Math.clamp(player.blockPosition().getY(),
                 level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
@@ -866,6 +971,11 @@ public final class SemanticExploreCompanionTask
         data.put("waypoint_recent_failures", waypointBreaker.recentWindowFailures());
         data.put("waypoint_sector_rotations", waypointBreaker.rotations());
         data.put("waypoint_relocations", waypointBreaker.relocations());
+        // 滞水守卫对调用方可见：行进中身体落水要能从进度流里看出，放弃行程不等楔死才暴露。
+        if (legWaterTicks > 0) {
+            data.put("leg_water_ticks", legWaterTicks);
+            data.put("leg_water_stall_limit", WaterCrossingProbe.WATER_LEG_STALL_TICKS);
+        }
         data.put("notable_findings", Map.copyOf(notableFindings));
         if (r.hasPendingInterestFinding()) data.put("paused_for_interest_decision", true);
         return data;
@@ -936,6 +1046,14 @@ public final class SemanticExploreCompanionTask
             data.put("waypoint_rotation_bearings", waypointBreaker.rotatedBearings());
         }
         data.put("target_approaches_attempted", targetAttempts);
+        if (waterAbandonments > 0) {
+            data.put("leg_water_abandonments", waterAbandonments);
+        }
+        // 结构 sighting 扫描逐相计数：零落账时回执直接指出断在哪一相（索引/可见性/分组/匹配）。
+        if (sightingScanner != null) {
+            data.put("structure_scan", sightingScanner.diagnostics());
+            data.put("structure_sightings_recorded", sightedAnchors.values().stream().mapToInt(List::size).sum());
+        }
         // 路段失败完整保留在任务证据中；默认回执可按既有归档机制分页，不能按固定条数丢弃卡点。
         data.put("travel_failures", List.copyOf(legFailures));
 
@@ -961,9 +1079,16 @@ public final class SemanticExploreCompanionTask
             data.put("verification", verifiedDescription);
         } else {
             List<String> suggestions = new ArrayList<>();
-            suggestions.add("increase max_distance or choose another semantic landmark");
-            suggestions.add("continue from the final position to search a different loaded frontier");
-            suggestions.add("sparse generation is normal; no match over the observed area is not proof of absence beyond it");
+            if (radiusBoundExit) {
+                // 越界截停的实情是身体已越过请求半径，不是寻路无路；通用扩距建议只会误导归因。
+                suggestions.add("the body moved past the requested radius and was stopped for safety;"
+                        + " observations gathered before the stop remain in exploration memory");
+                suggestions.add("submit a new explore from the final position to continue outward");
+            } else {
+                suggestions.add("increase max_distance or choose another semantic landmark");
+                suggestions.add("continue from the final position to search a different loaded frontier");
+                suggestions.add("sparse generation is normal; no match over the observed area is not proof of absence beyond it");
+            }
             if (waypointBreaker.relocations() > 0) {
                 suggestions.add("anchor relocations toward "
                         + waypointBreaker.anchorRelocationBearings().stream()

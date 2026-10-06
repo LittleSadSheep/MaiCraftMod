@@ -371,25 +371,48 @@ final class CookingRecipePlanner {
             long stationCost,
             long preparationCost) {}
 
-    // 从客户端已收到的配方表读加工结果，展开第一种原料的物品种类；读出异常的配方略过。
+    /** 知识层能读到、但本端展开不出可执行输入的配方：跳过必须留下证据，不能伪装成"没有配方"。 */
+    record SkippedCookingRecipe(ResourceLocation recipeId, CookingDevice device, String reason) {}
+
+    record CandidateScan(List<CookingRecipe> usable, List<SkippedCookingRecipe> skipped) {}
+
+    // 从客户端已收到的配方表读加工结果，展开第一种原料的物品种类。
     // 这里保存 Item 而非完整 ItemStack，组件敏感的特殊配方需要另查是否能完整表达。
-    List<CookingRecipe> candidates() {
+    // 产物能对上目标但输入枚举为空的配方（标签/谓词原料在本端读不出成员）不再静默丢弃：
+    // 执行器确实无法操作它们，但失败回执必须点名这些配方与原因，调用方才知道该补什么证据。
+    CandidateScan scan() {
         List<CookingRecipe> result = new ArrayList<>();
+        List<SkippedCookingRecipe> skipped = new ArrayList<>();
         var manager = ClientRuntime.requireContext(player).connection().getRecipeManager();
         for (RecipeHolder<?> holder : manager.getRecipes()) {
             try {
-                if (!(holder.value() instanceof AbstractCookingRecipe cooking)
-                        || !RecipeProbe.usableIngredients(cooking)) continue;
+                if (!(holder.value() instanceof AbstractCookingRecipe cooking)) continue;
+                if (!RecipeProbe.usableIngredients(cooking)) {
+                    skipped.add(new SkippedCookingRecipe(holder.id(), CookingDevice.forRecipe(cooking.getType()),
+                            "ingredients_unreadable"));
+                    continue;
+                }
                 ItemStack output = RecipeProbe.resultOf(
                         cooking, player.level().registryAccess());
                 if (output.isEmpty() || !output.is(BuiltInRegistries.ITEM.get(request.itemId))) {
                     continue;
                 }
                 CookingDevice device = CookingDevice.forRecipe(cooking.getType());
-                if (device == null || cooking.getIngredients().isEmpty()) continue;
+                if (device == null) {
+                    skipped.add(new SkippedCookingRecipe(holder.id(), null, "unsupported_device"));
+                    continue;
+                }
+                if (cooking.getIngredients().isEmpty()) {
+                    skipped.add(new SkippedCookingRecipe(holder.id(), device, "input_alternatives_unreadable"));
+                    continue;
+                }
                 LinkedHashSet<Item> inputs = new LinkedHashSet<>();
                 for (ItemStack stack : cooking.getIngredients().getFirst().getItems()) {
                     if (stack != null && !stack.isEmpty()) inputs.add(stack.getItem());
+                }
+                if (inputs.isEmpty()) {
+                    skipped.add(new SkippedCookingRecipe(holder.id(), device, "input_alternatives_unreadable"));
+                    continue;
                 }
                 for (Item input : inputs) result.add(new CookingRecipe(
                         holder.id(), cooking, device, input, Math.max(1, output.getCount())));
@@ -399,7 +422,7 @@ final class CookingRecipePlanner {
                         holder.id(), brokenRecipe.toString());
             }
         }
-        return result;
+        return new CandidateScan(List.copyOf(result), List.copyOf(skipped));
     }
 
     // FASTEST 优先比较单次烧制时间，再看准备成本；其他偏好先看准备成本。

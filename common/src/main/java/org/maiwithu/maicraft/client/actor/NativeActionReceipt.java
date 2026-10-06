@@ -25,6 +25,8 @@ public final class NativeActionReceipt {
     private long lastStableTickRevision = Long.MIN_VALUE;
     private long lastNativeTick;
     private String detail = "awaiting authoritative client facts";
+    /** 右键方块提交现场的插桩事实（点击面、客户端预测结果、预测包是否发出）；只有 useBlock 提交时写入一次。 */
+    private String useOnTrace = "";
 
     NativeActionReceipt(
             Kind kind,
@@ -57,6 +59,10 @@ public final class NativeActionReceipt {
     public long submittedTick() { return submittedTick; }
     public long deadlineTick() { return deadlineTick; }
     public String detail() { return detail; }
+    /** 本次右键方块提交现场的插桩事实；非 useBlock 提交为空串。 */
+    public String useOnTrace() { return useOnTrace; }
+    /** 提交现场的插桩事实随回执走，避免全局最新值被后续提交覆盖后张冠李戴。 */
+    void attachUseOnTrace(String trace) { if (useOnTrace.isEmpty()) useOnTrace = trace == null ? "" : trace; }
     public boolean terminal() { return status != Status.PENDING; }
 
     NativeConfirmation confirmation() { return confirmation; }

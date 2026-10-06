@@ -77,6 +77,8 @@ public final class IntentStateCodec {
             IntentTaskRecord.DecisionAnswer pendingAnswer,
             IntentTaskRecord.TerminalSnapshot terminal,
             boolean chatSubmissionTracked,
+            boolean sleepGateWaiting,
+            boolean sleepGateRecoverConsumed,
             Map<Integer, Optional<ContainerSearchScope>> containerSearchScopes,
             Map<Integer, IntentTaskRecord.AcquireBaseline> acquireBaselines) {}
 
@@ -267,8 +269,17 @@ public final class IntentStateCodec {
             item.addProperty("decision_id", answer.decisionId().toString());
             item.addProperty("choice", bounded(answer.choice()));
             Goal current = task.stepIndex() < task.steps().size() ? task.steps().get(task.stepIndex()) : task.goal();
-            item.add("details", answerDetails(answer.details(), current));
+            item.add("details", answerDetails(answer.details(), current, true));
             value.add("pending_answer", item);
+        }
+        if (task.sleepGateWaiting()) {
+            // 白天门 recover 已消费、正在等可睡窗口：重启后同一扇已答复的门不能重提。
+            value.addProperty("sleep_gate_waiting", true);
+        }
+        if (task.sleepGateRecoverConsumed()) {
+            // recover 消费标记独立于等待阶段保存：开窗沿失败回退等场景清掉等待后，
+            // 同一扇已答复的门仍然不重提（145 批七开窗沿）。
+            value.addProperty("sleep_gate_recover_consumed", true);
         }
         if (task.terminalSnapshot() != null) {
             IntentTaskRecord.TerminalSnapshot terminal = task.terminalSnapshot();
@@ -475,6 +486,8 @@ public final class IntentStateCodec {
                 List.copyOf(attempts),
                 decision, answer, terminal,
                 value.has("chat_submission_tracked") && value.get("chat_submission_tracked").getAsBoolean(),
+                value.has("sleep_gate_waiting") && value.get("sleep_gate_waiting").getAsBoolean(),
+                value.has("sleep_gate_recover_consumed") && value.get("sleep_gate_recover_consumed").getAsBoolean(),
                 decodeContainerSearchScopes(value, steps),
                 decodeAcquireBaselines(value, steps, stepIndex));
     }
@@ -581,17 +594,18 @@ public final class IntentStateCodec {
         return new IntentTaskRecord.DecisionAnswer(
                 UUID.fromString(text(value, "decision_id")),
                 bounded(text(value, "choice")),
-                answerDetails(value.get("details"), current).toString());
+                // 恢复历史答复只做同形清洗，不按当前预算与政策复核（163）：参数在写入当刻已通过检查。
+                answerDetails(value.get("details"), current, false).toString());
     }
 
-    private static JsonObject answerDetails(JsonElement value, Goal current) {
+    private static JsonObject answerDetails(JsonElement value, Goal current, boolean enforceCurrentRules) {
         if (value == null || value.isJsonNull()) return new JsonObject();
         if (!value.isJsonObject()) throw new IllegalArgumentException("persisted answer details must be an object");
         JsonObject details = value.getAsJsonObject();
         if (details.has("goal")) {
             if (!details.get("goal").isJsonObject())
                 throw new IllegalArgumentException("persisted answer goal must be an object");
-            safeGoal(Goal.fromJson(details.getAsJsonObject("goal")));
+            safeGoal(Goal.fromJson(details.getAsJsonObject("goal")), enforceCurrentRules);
         } else {
             if (details.has("parameters") && !details.get("parameters").isJsonObject())
                 throw new IllegalArgumentException("persisted answer parameters must be an object");
@@ -599,7 +613,7 @@ public final class IntentStateCodec {
             JsonObject merged = current.parameters();
             updates.entrySet().forEach(entry -> merged.add(entry.getKey(), entry.getValue().deepCopy()));
             // 重试只带部分参数，须结合当前目标验证；合法蓝图沿用目标编码的完整性与大小检查。
-            safeGoal(current.withParameters(merged));
+            safeGoal(current.withParameters(merged), enforceCurrentRules);
         }
         return details.deepCopy();
     }
@@ -655,8 +669,17 @@ public final class IntentStateCodec {
     private static JsonObject safeGoal(Goal goal) {
         // 目标里的合法蓝图另按蓝图规则检查，其他内容不能含内部操作字段；若过滤会改掉目标，就拒绝保存。
         JsonObject original = goal.toJson();
-        JsonObject inspection = BlueprintGoalData.instructionView(goal);
-            JsonElement safe = safeGoalElement(inspection);
+        JsonObject inspection = BlueprintGoalData.instructionView(goal, true);
+        return safeGoal(goal, inspection);
+    }
+
+    /** lenient 只用于恢复读回：按保存时的同形规则清洗，不重新执行当前预算与政策校验。 */
+    private static JsonObject safeGoal(Goal goal, boolean enforceCurrentRules) {
+        return safeGoal(goal, BlueprintGoalData.instructionView(goal, enforceCurrentRules));
+    }
+
+    private static JsonObject safeGoal(Goal goal, JsonObject inspection) {
+        JsonElement safe = safeGoalElement(inspection);
         if (!safe.isJsonObject()) {
             throw new IllegalArgumentException("semantic goal must encode as an object");
         }
@@ -664,6 +687,7 @@ public final class IntentStateCodec {
             throw new IllegalArgumentException(
                     "semantic goal contains native execution details or exceeds persistence bounds");
         }
+        JsonObject original = goal.toJson();
         // 执行步骤另存分组范围，公开 Goal JSON 仍只描述原请求；重启不能丢掉这些约束。
         if (!goal.inheritedProtectionLabels().isEmpty()) {
             JsonArray inherited = new JsonArray();
@@ -690,8 +714,8 @@ public final class IntentStateCodec {
             inherited.add(label.getAsString());
         }
         goal = goal.withInheritedProtection(inherited);
-        JsonElement safe = safeGoal(goal);
-        if (!safe.equals(value)) {
+        // 恢复历史不做当前预算与政策的参数级复核：数据在写入当刻已通过当时的检查（163）。
+        if (!safeGoal(goal, false).equals(value)) {
             throw new IllegalArgumentException(
                     "persisted semantic goal contains native execution details or exceeds bounds");
         }

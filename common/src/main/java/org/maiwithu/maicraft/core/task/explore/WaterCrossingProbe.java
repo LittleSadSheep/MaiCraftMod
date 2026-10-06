@@ -21,6 +21,20 @@ public final class WaterCrossingProbe {
     private static final int DEEP_WATER_MIN_DEPTH = 2;
     /** 深水连段门槛：连续两个采样段判深水（每段步长 {@link #SAMPLE_STEP} 格）即视为穿水路线。 */
     private static final int DEEP_RUN_SAMPLES = 2;
+    /**
+     * 行程行进涉水守卫的两个放弃阈值，方向探索与结构搜索两个勘察任务共用同一口径：
+     * 滞水窗口要求「连续滞水且未再逼近目标」，短促渡水有豁免口径（实测最长约半分钟上岸）
+     * 全程在拉近目标不会命中；硬上限是连续涉水的绝对界，超过它无论是否仍在逼近都放弃该段行程——
+     * 任何行程不允许无限期滞水。
+     */
+    public static final int WATER_LEG_STALL_TICKS = 100;
+    public static final int WATER_LEG_MAX_TICKS = 600;
+
+    /** 连续滞水不逼近目标超过窗口，或连续涉水越过硬上限，即放弃当前行程；供回归直测。 */
+    public static boolean waterLegExpired(int waterTicks, long ticksSinceLastApproach) {
+        return waterTicks >= WATER_LEG_MAX_TICKS
+                || ticksSinceLastApproach >= WATER_LEG_STALL_TICKS;
+    }
 
     private final ClientLevel level;
     private final Long2ObjectOpenHashMap<Column> columns = new Long2ObjectOpenHashMap<>();
@@ -55,6 +69,15 @@ public final class WaterCrossingProbe {
             longestDeepRun = Math.max(longestDeepRun, deepRun);
         }
         return isCrossing(samples, water, longestDeepRun);
+    }
+
+    /**
+     * 候选落点列本身是水面（纯水域格，如海面、湖心）时为真：航点不落水面，
+     * 与 {@link #crossesWater} 共用同一份列缓存。列判定按地表高度图取顶，
+     * 未加载列不可知，调用方需先确认列已加载。
+     */
+    public boolean landsOnWater(int x, int z) {
+        return column(x, z).water();
     }
 
     /** 纯判定供回归直测：多数水样规则或深水连段规则任一成立即穿水。 */

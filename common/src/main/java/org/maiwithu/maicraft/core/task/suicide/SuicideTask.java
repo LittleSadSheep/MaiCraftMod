@@ -45,6 +45,10 @@ public final class SuicideTask implements Task {
     // 本次确认脱下的护甲原件，寻死结束时交给穿回流程；不含图腾，图腾留在背包里。
     private final Map<EquipmentSlot, ItemStack> stowedArmor = new LinkedHashMap<>();
     private final Map<String, Integer> selfMadeConfirmed = new LinkedHashMap<>();
+    // 还没提交出手就失败的造危险（选不到物品、镜头收敛不了、命中面对不上）逐方式计数：
+    // 这类失败不消耗物品也不证明方式被原生拒绝，但连续多次都停在提交之前说明执行环境系统性不允许，按上限收尾。
+    private static final int PRE_SUBMISSION_FAILURE_LIMIT = 3;
+    private final Map<String, Integer> preSubmissionFailures = new LinkedHashMap<>();
     private SuicideHazards survey;
     private SuicideHazards.Candidate candidate;
     private PlayerNav nav;
@@ -192,10 +196,14 @@ public final class SuicideTask implements Task {
             if (state == TaskState.RUNNING) return TaskState.RUNNING;
             boolean submitted = making.submitted(); String reason = making.failure(); closeMaking();
             if (state == TaskState.SUCCESS || kind.present(player.level(), cell)) {
+                preSubmissionFailures.remove(kind.method);
                 selfMadeConfirmed.merge(kind.method, 1, Integer::sum); return TaskState.RUNNING;
             }
-            // 已经出手却没出效果，说明原生拒绝或结果未知，之后不再换格反复尝试这种方式；还没出手的瞄准失败只放弃这一格。
+            // 已经出手却没出效果，说明原生拒绝或结果未知，之后不再换格反复尝试这种方式；还没出手的失败先累计，
+            // 同一方式连续多次都停在提交之前就如实失败——换格重试解决不了瞄准层的问题，只会拖着身体无限循环。
             if (submitted) attempted.add(kind.rejectedKey());
+            else if (preSubmissionFailures.merge(kind.method, 1, Integer::sum) >= PRE_SUBMISSION_FAILURE_LIMIT)
+                return giveUpBeforeSubmission(kind, reason, cell);
             return abandon("Native " + kind.method + " use did not produce its hazard: " + reason);
         }
         // 身体被挤出危险格时先走回格中央，再判断是否需要重新造危险；低头操作要求射线全程留在这一列。
@@ -207,6 +215,15 @@ public final class SuicideTask implements Task {
             return player.isOnFire() ? TaskState.RUNNING : abandon("No " + kind.label + " remains for another native " + kind.method + " use.");
         making = new SuicideSelfHazard(kind, cell);
         return TaskState.RUNNING;
+    }
+
+    private TaskState giveUpBeforeSubmission(Kind kind, String reason, BlockPos cell) {
+        // 造危险始终没能提交出手：终态失败并携带最后一次诊断与候选格，逐次经过的失败都在 attempts 里。
+        attempts.set(attempts.size() - 1, Map.of("method", kind.method, "outcome", reason,
+                "candidate_cell", cell.toShortString()));
+        return finish("Native " + kind.method + " use never got submitted: the same pre-submission failure repeated "
+                + PRE_SUBMISSION_FAILURE_LIMIT + " times on successive cells (last: " + reason + "; candidate cell "
+                + cell.toShortString() + ").", TaskState.FAILED);
     }
 
     private String exhausted() {

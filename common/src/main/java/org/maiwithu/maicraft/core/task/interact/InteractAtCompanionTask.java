@@ -18,7 +18,8 @@ import org.maiwithu.maicraft.core.task.ActualViewConvergenceGate;
 import org.maiwithu.maicraft.core.task.base.GoToThenDoTask;
 import org.maiwithu.maicraft.core.task.base.Precondition;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.block.BaseFireBlock;
+import org.maiwithu.maicraft.client.actor.NativeConfirmation;
+import org.maiwithu.maicraft.core.task.dimension.NetherPortalVanillaAudit;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -102,6 +103,15 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private int expectedItemBefore = -1, outputWaitTicks;
     private int fireWaitTicks;
     private boolean ignitionVerified;
+    /** 点火对账观察到的具体结局：true=火被有效门框直接换成传送门；false=普通落火。 */
+    private boolean ignitionPortal;
+    private String ignitionObservedBlockId;
+    /** 点火窗口插桩：落格观察时刻线（变化才记一条）、窗口闭合时的最终方块与 vanilla 口径门框审计。 */
+    private BlockPos ignitionCell;
+    private String lastObservedCellId;
+    private final List<String> ignitionTimeline = new ArrayList<>();
+    private String ignitionFinalBlockId;
+    private NetherPortalVanillaAudit.Result portalFrameAudit;
     private boolean manualCrank;
     private final CreateManualInput.UsageEvidence manualUsage = new CreateManualInput.UsageEvidence();
     private MachineMenuHandParking manualHandParking = new MachineMenuHandParking();
@@ -111,6 +121,8 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
     private boolean terrainApproach;
     /** 告示牌写字的阶段推进与对账证据；提交即走原版编辑屏，文字与提交内容一致才算确认。 */
     private boolean legacyEditorClosed, signSubmitted;
+    /** 出手前正在等待退出的遗留屏身份；换成另一块屏时重新计时并再次按 Done 退出。 */
+    private net.minecraft.client.gui.screens.Screen leftoverScreen;
     private int legacyEditorCloseWaitTicks, editorOpenWaitTicks, signSyncWaitTicks;
     private boolean signVerified;
     private int verifiedSide = -1;
@@ -155,11 +167,35 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (!r.approachTarget || r.aim == null) return null;
         var stances = FirstPersonInteractionTargeting.visibleInteractionStands(player, r.aim,
                 rejectedStances, this::visibleFrom);
+        if (r.expectIgnition) stances = portalCapableStancesFirst(stances);
         approachCandidates = stances.size(); approachAttempts++;
         var goal = GoalCompiler.interactionStances(r.aim, stances);
         // 先走现成路线；确实走不通且请求允许时再准备通路，目标方块始终受保护。
         return PlayerNav.to(player, () -> goal, WALK_SPEED, () -> bodySettled() && visibleFrom(player.getEyePosition()),
                 terrainApproach ? PlayerNav.ContextProvider.TERRAFORM : PlayerNav.ContextProvider.DEFAULT).withTerrainProbe();
+    }
+
+    /**
+     * 点火站位排序：从各脚位预演点火面，落格经 vanilla 口径审计能直接成门的排最前，
+     * 其余保持原相对顺序。门框外的最近站位也能把火点进空气，但那格装不出传送门——
+     * 不排优先级就会复现「点了、有火、门不成型」的假成功。无任何能成门的站位时原样返回，
+     * 营火等普通点火不受影响。
+     */
+    private List<BlockPos> portalCapableStancesFirst(List<BlockPos> stances) {
+        double eyeHeight = player.getEyeHeight(net.minecraft.world.entity.Pose.STANDING);
+        List<BlockPos> capable = new ArrayList<>(), plain = new ArrayList<>();
+        for (BlockPos stance : stances) {
+            var aimHit = FirstPersonInteractionTargeting.visibleBlockHit(player.level(), player,
+                    Vec3.atBottomCenterOf(stance).add(0, eyeHeight, 0),
+                    r.aim, REACH, null, hit -> FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), hit));
+            boolean formsPortal = aimHit != null && NetherPortalVanillaAudit.audit(player.level()::getBlockState,
+                    aimHit.getBlockPos().relative(aimHit.getDirection())).wouldFormPortal();
+            (formsPortal ? capable : plain).add(stance);
+        }
+        if (capable.isEmpty() || plain.isEmpty()) return stances;
+        List<BlockPos> ordered = new ArrayList<>(capable);
+        ordered.addAll(plain);
+        return List.copyOf(ordered);
     }
 
     @Override protected TaskState handleNavFailure(FailureType type, String reason) {
@@ -205,8 +241,12 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
         if (FirstPersonInteractionTargeting.usesBucketRay(item))
             return FirstPersonInteractionTargeting.visibleBucketHit(player.level(), player, eyes, r.aim, player.blockInteractionRange(), item) != null;
         var surface = CreateInteractionSurface.forUse(player.level().getBlockState(r.aim), item);
-        return surface.constrained() ? surface.visibleHit(player.level(), player, eyes, r.aim, REACH) != null
-                : FirstPersonInteractionTargeting.hasLoadedReachLine(player.level(), player, eyes, r.aim, REACH);
+        if (surface.constrained()) return surface.visibleHit(player.level(), player, eyes, r.aim, REACH) != null;
+        // 点火面的可见性必须绑定落格：被点面相邻格不是空气的站位装不下火，不能当作可用站位。
+        if (r.expectIgnition) return FirstPersonInteractionTargeting.visibleBlockHit(
+                player.level(), player, eyes, r.aim, REACH, null,
+                hit -> FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), hit)) != null;
+        return FirstPersonInteractionTargeting.hasLoadedReachLine(player.level(), player, eyes, r.aim, REACH);
     }
 
     @Override
@@ -262,15 +302,24 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             stopNav();
             return TaskState.RUNNING;
         }
-        // 放置告示牌的原版流程会立刻打开编辑屏；写字目标先按原版 Done 退出旧屏，
-        // 再走标准右键重开，保证这次编辑屏确实是本任务自己打开的。
-        if (r.signLines != null && !signSubmitted && playerScreen() != null) {
-            if (!legacyEditorClosed) {
+        // 放置告示牌的原版流程会立刻打开编辑屏；写字目标出手前先按原版 Done 退出遗留屏。
+        // 只清理 interaction 为 null 的准备阶段：右键提交后出现的编辑屏正是本任务要用的，
+        // 这里一旦误关，点击回执失去确认依据、写字阶段也拿不到屏幕（089 一轮的双失败签名即源于此）。
+        if (r.signLines != null && !signSubmitted && interaction == null && playerScreen() != null) {
+            var screen = playerScreen();
+            if (screen != leftoverScreen) {
+                leftoverScreen = screen;
                 legacyEditorClosed = true;
-                playerScreen().onClose();
-            } else if (++legacyEditorCloseWaitTicks < SIGN_EDITOR_CLOSE_WAIT_TICKS) return TaskState.RUNNING;
-            else if (playerScreen() != null) {
-                fail("a leftover screen did not exit after native closure; sign writing needs the native edit screen",
+                legacyEditorCloseWaitTicks = 0;
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "[maicraft-task] closing leftover screen {} before sign write at {}",
+                        screen.getClass().getName(), r.aim == null ? "?" : aimLabel());
+                screen.onClose();
+            } else if (++legacyEditorCloseWaitTicks < SIGN_EDITOR_CLOSE_WAIT_TICKS) {
+                return TaskState.RUNNING;
+            } else {
+                fail("a leftover screen (" + screen.getClass().getSimpleName()
+                        + ") did not exit after native closure; sign writing needs the native edit screen",
                         FailureType.UNKNOWN);
                 return TaskState.FAILED;
             }
@@ -326,9 +375,13 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                                     player.level(), player, player.getEyePosition(), r.aim, player.blockInteractionRange(), useItem)
                             : state.isAir()
                             ? null
-                            : useSurface == null ? FirstPersonInteractionTargeting.visibleBlockHit(
+                            : useSurface != null ? useSurface.visibleHit(
                                     player.level(), player, player.getEyePosition(), r.aim, REACH)
-                            : useSurface.visibleHit(player.level(), player, player.getEyePosition(), r.aim, REACH);
+                            : r.expectIgnition ? FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH, null,
+                                    hit -> FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), hit))
+                            : FirstPersonInteractionTargeting.visibleBlockHit(
+                                    player.level(), player, player.getEyePosition(), r.aim, REACH);
                     aimPoint = visible == null ? Vec3.atCenterOf(r.aim) : visible.getLocation();
                 }
                 // 使用交互不能继承前一施工任务留下的潜行放置状态。
@@ -385,6 +438,20 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 fail("aim " + aimLabel() + " is blocked from here — the crosshair lands on "
                         + landing + " instead. Reposition to the target's open side, then retry.",
                         FailureType.OCCLUDED);
+                return TaskState.FAILED;
+            }
+            // 点火面绑定落格：命中了提交格但被点面的相邻格不是空气时，火无处可落，
+            // 这次点击注定白耗耐久——先排除该站位再换位重试，不把「点到了」当成「点对了」。
+            if (r.expectIgnition && !bucket && button() == Interaction.Button.USE
+                    && hit instanceof BlockHitResult ignitionHit
+                    && !FirstPersonInteractionTargeting.admitsIgnitionPlacement(player.level(), ignitionHit)) {
+                var placement = ignitionHit.getBlockPos().relative(ignitionHit.getDirection());
+                String detail = "the aimed face opens into "
+                        + BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(placement).getBlock())
+                        + " at " + placement.toShortString() + ", so fire cannot land there";
+                if (retryFromDifferentStance(detail)) return TaskState.RUNNING;
+                fail("aim " + aimLabel() + " offers no ignition placement from this stance: " + detail
+                        + ". Aim at a face opening into air, or reposition manually.", FailureType.OCCLUDED);
                 return TaskState.FAILED;
             }
             // 右键命中方块会激活它，例如打开工作台界面或切换开关。记录交互过的方块，让 <known_blocks> 除了已放置工作台外，也能带角色返回用过的工作站。
@@ -448,11 +515,18 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                             + (verifiedSide == 1 ? "front" : "back") + " side.";
                     yield verifiedOutcome();
                 }
+                // 点火是单次蓄意点击：对账观察窗内绝不允许交互计时器再补一刀（重复点击会再耗耐久，
+                // 且落格已成火/传送门时的二次点击只会以确认超时把整次成功拖成失败）。
+                if (r.expectIgnition) interaction.finishRepeating();
                 successMsg = describeDone() + settle();
                 yield verifiedOutcome();
             }
             case FAILED -> {
-                fail(interaction.failReason(), interaction.failType());
+                // 写字一步的点击未确认时补上告示牌两侧现状：蜡封、带样式文字的一侧都会让编辑屏开不出来。
+                if (r.signLines != null && interaction.submittedBlockHit() != null)
+                    fail(interaction.failReason() + ". Observed sign text: " + signLinesForReceipt(),
+                            interaction.failType());
+                else fail(interaction.failReason(), interaction.failType());
                 yield TaskState.FAILED;
             }
             case RUNNING -> TaskState.RUNNING;
@@ -636,23 +710,66 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                     + BuiltInRegistries.BLOCK.getKey(r.expectedBlock), FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
-        // 点火类使用（如打火石）的诚实结果在火方块：点击确认只代表原版接受了右键，
-        // 火必须真实出现在被点面的相邻空气格；短窗口内没见到火就如实失败，不以"无可见变化"冒充成功。
+        // 点火类使用（如打火石）的诚实结果在火或传送门方块：点击确认只代表原版接受了右键，
+        // 世界效果必须真实出现在被点面的相邻格；黑曜石旁的火会自然熄灭、有效门框会把火直接
+        // 换成传送门，两种结局都算点火生效并如实带证据回报，短窗口内两者皆无才如实失败。
         if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
             var submitted = interaction.submittedBlockHit();
-            BlockPos cell = submitted.getBlockPos().relative(submitted.getDirection()).immutable();
-            if (player.level().getBlockState(cell).getBlock() instanceof BaseFireBlock) {
-                ignitionVerified = true;
-                return verifyExpectedOutput();
+            if (ignitionCell == null) ignitionCell = submitted.getBlockPos().relative(submitted.getDirection()).immutable();
+            var live = player.level().isLoaded(ignitionCell) ? player.level().getBlockState(ignitionCell) : null;
+            String observedId = live == null ? "unloaded"
+                    : BuiltInRegistries.BLOCK.getKey(live.getBlock()).toString();
+            // 插桩：落格每次状态变化都记入时刻线，窗口闭合时连同 vanilla 口径门框审计一起进回执，
+            // 供区分「火自然熄灭」「火被换成传送门」「成型后被移除」三种结局。
+            if (!observedId.equals(lastObservedCellId)) {
+                ignitionTimeline.add("t" + fireWaitTicks + ":" + observedId);
+                lastObservedCellId = observedId;
+                org.maiwithu.maicraft.core.Constants.LOG.info(
+                        "ignition watch {} t{}: {}", ignitionCell.toShortString(), fireWaitTicks, observedId);
+            }
+            if (live != null && NativeConfirmation.ignitionEffect(live)) {
+                if (!ignitionVerified) {
+                    ignitionVerified = true;
+                    ignitionObservedBlockId = observedId;
+                }
+                if (live.getBlock() instanceof net.minecraft.world.level.block.NetherPortalBlock) {
+                    // 原版在火落格同刻换成传送门；看到即收口，不必再等。
+                    ignitionPortal = true;
+                    return ignitionWindowClose();
+                }
             }
             if (++fireWaitTicks <= 20) return TaskState.RUNNING;
-            fail("the ignition click was confirmed, but no fire appeared at " + cell.toShortString()
-                    + "; the clicked face may not open into air. Inspect the site or aim at a different face.",
-                    FailureType.TARGET_LOST);
-            return TaskState.FAILED;
+            return ignitionWindowClose();
         }
         // 定点倒桶也必须等到请求的返还物被真实观察到；等待期间不重新使用桶。
         return verifyExpectedOutput();
+    }
+
+    /** 点火观察窗口闭合：先固定 vanilla 口径门框审计，再按「看到过火/门」与最终落格如实收口。 */
+    private TaskState ignitionWindowClose() {
+        if (portalFrameAudit == null && player.level().isLoaded(ignitionCell)) {
+            portalFrameAudit = NetherPortalVanillaAudit.audit(player.level()::getBlockState, ignitionCell);
+            org.maiwithu.maicraft.core.Constants.LOG.info(
+                    "ignition frame audit at {}: axis={} bottom_left={} {}x{} valid={} would_form_portal={} offenses={}",
+                    ignitionCell.toShortString(), portalFrameAudit.axis(),
+                    portalFrameAudit.bottomLeft() == null ? "none" : portalFrameAudit.bottomLeft().toShortString(),
+                    portalFrameAudit.width(), portalFrameAudit.height(), portalFrameAudit.frameValid(),
+                    portalFrameAudit.wouldFormPortal(), portalFrameAudit.offenseLines());
+        }
+        ignitionFinalBlockId = lastObservedCellId;
+        if (ignitionVerified) {
+            successMsg += " — " + (ignitionPortal ? "nether portal formed" : "fire observed")
+                    + " at " + ignitionCell.toShortString();
+            if (!ignitionPortal && !"minecraft:fire".equals(ignitionFinalBlockId))
+                successMsg += " (later: " + ignitionFinalBlockId + " — fire burned out on non-flammable ground)";
+            return verifyExpectedOutput();
+        }
+        fail("the ignition click was confirmed, but no fire or portal appeared at " + ignitionCell.toShortString()
+                + " (observed there: " + ignitionFinalBlockId
+                + "); the clicked face may not open into air, or the fire already burned out on "
+                + "non-flammable ground. Inspect the site, the frame validity, or aim at a different face.",
+                FailureType.TARGET_LOST);
+        return TaskState.FAILED;
     }
 
     /**
@@ -839,11 +956,29 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
             data.put("y", r.aim.getY());
             data.put("z", r.aim.getZ());
         }
-        // 点火类使用回执带落火格与核验结论；调用方对照确认状态与火观察，不再猜"点击是否生效"。
+        // 点火类使用回执带落火格、观察到的具体方块与核验结论；调用方对照确认状态与火观察，不再猜"点击是否生效"。
+        // 火在不可燃支撑旁会自然熄灭，事后 find_block 扫不到不构成「点火没发生」的证据，结论以这份观察为准。
         if (r.expectIgnition && interaction != null && interaction.submittedBlockHit() != null) {
             var submitted = interaction.submittedBlockHit();
             data.put("ignition_cell", submitted.getBlockPos().relative(submitted.getDirection()).toShortString());
             data.put("fire_observed", ignitionVerified);
+            if (ignitionObservedBlockId != null) data.put("ignition_observed_block_id", ignitionObservedBlockId);
+            if (ignitionVerified) data.put("nether_portal_formed", ignitionPortal);
+            // 插桩证据：落格状态时刻线、窗口闭合时的最终方块与 vanilla 口径门框审计。
+            if (!ignitionTimeline.isEmpty()) data.put("ignition_timeline", List.copyOf(ignitionTimeline));
+            if (ignitionFinalBlockId != null) data.put("ignition_final_block_id", ignitionFinalBlockId);
+            if (portalFrameAudit != null) {
+                var audit = new HashMap<String,Object>();
+                audit.put("axis", portalFrameAudit.axis().name());
+                audit.put("bottom_left", portalFrameAudit.bottomLeft() == null
+                        ? "none" : portalFrameAudit.bottomLeft().toShortString());
+                audit.put("width", portalFrameAudit.width());
+                audit.put("height", portalFrameAudit.height());
+                audit.put("frame_valid", portalFrameAudit.frameValid());
+                audit.put("would_form_portal", portalFrameAudit.wouldFormPortal());
+                audit.put("offenses", portalFrameAudit.offenseLines());
+                data.put("portal_frame_audit", audit);
+            }
         }
         // 报告已激活的工作站和确切位置；位置以实际命中为准，不使用原始瞄准点，供智能体循环收录到 <known_blocks>。
         if (activatedBlock != null) {

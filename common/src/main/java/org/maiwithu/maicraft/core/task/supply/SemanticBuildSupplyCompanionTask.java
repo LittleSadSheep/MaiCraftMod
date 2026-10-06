@@ -62,6 +62,8 @@ final class SemanticBuildSupplyCompanionTask
     private int childSerial;
     private int buildRounds;
     private boolean batchVerified;
+    /** 材料方案冻结时仍未满足的目标格数；成功回执的世界净变化以它对当前缺口的差值为准。 */
+    private int initialUnmatchedCells = -1;
     private boolean nativePlacementDeviation;
     // 放置尚未开始就发现缺料时，先回供料队列；不能让清障优先分支反复启动同一个缺料批次。
     private boolean resupplyBeforeBuild;
@@ -162,6 +164,8 @@ final class SemanticBuildSupplyCompanionTask
             advanceMaterialBinding();
             return failureCode == null ? TaskState.RUNNING : TaskState.FAILED;
         }
+        // 材料方案一定型就记下开工缺口；此后成功与否只看这份缺口实际被填掉多少，不再看回执状态。
+        if (initialUnmatchedCells < 0) initialUnmatchedCells = remainingCellCount();
         // 先绑定最终建材，再检查这份实际图纸；原地可复用的同族方块不能被旧材料方案误判成清障对象。
         if (!clearanceChecked) {
             if (clearanceSurvey == null) clearanceSurvey = BuildClearanceSurvey.forPlan(player, activePlan);
@@ -713,7 +717,24 @@ final class SemanticBuildSupplyCompanionTask
         return activePlan.targets.stream().allMatch(this::matches);
     }
 
+    /** 本任务真正带来的世界净变化：开工缺口减去当前缺口；外部破坏会吃掉其中一部分，净额如实记账。 */
+    private int cellsBroughtToTarget() {
+        return initialUnmatchedCells < 0 ? 0 : Math.max(0, initialUnmatchedCells - remainingCellCount());
+    }
+
     private TaskState finishMatched() {
+        // 零世界变更一律不报 success：曾经「0 verified construction batches」也宣称每个格已复核，
+        // 调用方无从区分刚建好与提交时本来就建好了，假成功拉长了整条排障链。
+        if (cellsBroughtToTarget() == 0) {
+            stopWith("construction_zero_world_change",
+                    (buildRounds == 0
+                            ? "no construction batch was started because every requested build cell already matched the target"
+                            : "construction batches ended but no requested build cell changed toward the target during this task")
+                            + "; verified world change is 0 placed cell(s) across " + buildRounds
+                            + " started batch(es), " + remainingCellCount() + " cell(s) still outstanding",
+                    FailureType.NO_WORLD_CHANGE);
+            return TaskState.FAILED;
+        }
         // 方块都对后，若方案要求能进门上楼，就再分刻验证通行；完成后才保留供后续任务引用的位置。
         if (activePlan.traversabilityContract() == null) {
             retainVerifiedPosition();
@@ -857,6 +878,12 @@ final class SemanticBuildSupplyCompanionTask
                     "available_item_capacity", capacityFor(need.item()), "reserved_main_slots", 0,
                     "minimum_additional_slots", capacityFor(need.item()) > 0 ? 0 : 1));
         }
+        data.put("verified_construction_batches", buildRounds);
+        data.put("placed_cells", cellsBroughtToTarget());
+        if ("construction_zero_world_change".equals(failureCode)) {
+            // 调用方据此把这次失败当作「现场已满足」的对账线索，而不是可机械重试的施工故障。
+            data.put("mechanical_retry_allowed", false);
+        }
         data.put("cleanup_deferred", cleanupDeferredReason != null);
         if (cleanupDeferredReason != null) {
             Map<String, Integer> remaining = new LinkedHashMap<>();
@@ -947,7 +974,8 @@ final class SemanticBuildSupplyCompanionTask
     @Override protected String successMessage() {
         if(nativePlacementDeviation)return "原生放置已完成，实际落点与设计不同；保留现场和完整差异，等待模型修改方案";
         return "semantic material families selected and supplied across " + buildRounds
-                + " verified construction batch(es), and every requested build cell"
+                + " verified construction batch(es); " + cellsBroughtToTarget()
+                + " build cell(s) changed to target and every requested build cell"
                 + (activePlan.traversabilityContract() == null ? "" : " and required route")
                 + " re-verified" + (cleanupDeferredReason == null ? "" : "; surplus storage cleanup deferred: " + cleanupDeferredReason);
     }

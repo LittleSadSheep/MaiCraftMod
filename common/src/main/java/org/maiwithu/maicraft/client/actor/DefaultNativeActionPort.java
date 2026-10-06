@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.client.actor;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
@@ -206,14 +207,59 @@ public final class DefaultNativeActionPort implements NativeActionPort {
             current.connection().send(new ServerboundPlayerCommandPacket(player, player.isShiftKeyDown()
                     ? ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY
                     : ServerboundPlayerCommandPacket.Action.RELEASE_SHIFT_KEY));
+            // 167：火把等附着方块在实机上出现“出手成功但方块不出现”。把提交现场的点击面、
+            // 客户端预测结果与预测包是否发出逐项落到回执与日志里，下一轮实机回执即可看出服务端对这次点击做了什么。
+            int sequenceBefore = current.level() instanceof BlockUseAcknowledgement acknowledgement
+                    ? acknowledgement.maicraft$currentBlockSequence() : Integer.MIN_VALUE;
             var result = current.gameMode().useItemOn(current.player(), hand, hit);
             if (acknowledged != null) acknowledged.submitted();
+            receipt.attachUseOnTrace(useOnTrace(current, hand, hit, result, sequenceBefore));
+            // 167 的实机下一轮要在 latest.log 里直接看到服务端收到的点击现场，与回执互为对照。
+            Constants.LOG.info("[maicraft-actor] {}", receipt.useOnTrace());
             if (result.shouldSwing()) current.player().swing(hand);
         } catch (RuntimeException failure) {
             receipt.finish(NativeActionReceipt.Status.UNCERTAIN,
                     "native block use threw after entering the client action path");
         }
         return poll(current, receipt);
+    }
+
+    /**
+     * 一次右键方块提交现场的逐项事实：提交的点击面与位置、客户端原生预测结果、
+     * 点击后客户端观察到的落格状态，以及方块操作编号是否前进（前进＝预测包已发出，
+     * 服务端收到了这次点击；不前进＝客户端本地就拒绝了，根本没有发包）。
+     * 只读观察与字符串拼装，不改变任何世界状态。
+     */
+    private static String useOnTrace(DefaultLocalPlayerContext context, InteractionHand hand, BlockHitResult hit,
+                                     net.minecraft.world.InteractionResult result, int sequenceBefore) {
+        try {
+            var level = context.level();
+            var player = context.player();
+            var clicked = hit.getBlockPos();
+            var placementCell = clicked.relative(hit.getDirection());
+            int sequenceAfter = level instanceof BlockUseAcknowledgement acknowledgement
+                    ? acknowledgement.maicraft$currentBlockSequence() : Integer.MIN_VALUE;
+            java.util.function.BiFunction<BlockPos, net.minecraft.world.level.block.state.BlockState, String> describe =
+                    (pos, state) -> pos.toShortString() + "=" + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock());
+            return "use_on{hand=" + hand
+                    + ", held=" + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(
+                            player.getItemInHand(hand).getItem()) + "x" + player.getItemInHand(hand).getCount()
+                    + ", clicked=" + describe.apply(clicked, level.getBlockState(clicked))
+                    + ", face=" + hit.getDirection()
+                    + ", point=(" + Math.round(hit.getLocation().x * 100) / 100.0
+                    + "," + Math.round(hit.getLocation().y * 100) / 100.0
+                    + "," + Math.round(hit.getLocation().z * 100) / 100.0 + ")"
+                    + ", eye_dist=" + Math.round(player.getEyePosition().distanceTo(hit.getLocation()) * 100) / 100.0
+                    + ", feet=" + player.blockPosition().toShortString()
+                    + ", sneak=" + player.isShiftKeyDown()
+                    + ", native_result=" + result
+                    + ", placement_cell=" + describe.apply(placementCell, level.getBlockState(placementCell))
+                    + ", prediction_packet=" + (sequenceBefore == Integer.MIN_VALUE ? "unknown"
+                            : sequenceAfter > sequenceBefore ? "sent" : "none")
+                    + "}";
+        } catch (RuntimeException traceFailure) {
+            return "use_on{trace_failed=" + traceFailure + "}";
+        }
     }
 
     @Override

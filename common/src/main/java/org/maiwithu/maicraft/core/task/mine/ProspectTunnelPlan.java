@@ -25,6 +25,7 @@ final class ProspectTunnelPlan {
         length = descending ? Math.min(maxSteps, anchor.getY() - targetY) : maxSteps;
     }
     BlockPos foot(int step) { return anchor.relative(heading, step).below(descending ? step : 0); }
+    BlockPos anchor() { return anchor; }
     boolean descending() { return descending; }
     Direction heading() { return heading; }
     int length() { return length; }

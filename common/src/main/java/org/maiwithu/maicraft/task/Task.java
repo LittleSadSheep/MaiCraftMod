@@ -94,6 +94,14 @@ public interface Task {
     /** 父目标已满足时，只结算已提交效果并清理现场，不再开始新的工作。 */
     default void requestSatisfiedSettlement() {}
 
+    /**
+     * 操作者请求取消时，若任务还有必须逐刻回收的自有现场（如施工脚手架），
+     * 返回 true 请求一次「仅清理」缓期：任务继续占用身体跑既有收尾机制，
+     * 不再推进原任务，回收完成或放弃后由 {@link #tick} 自己交回 CANCELLED。
+     * 只用于操作者取消；被新任务接管、失去身体与整体停机仍经 {@link #stop} 立即终态。
+     */
+    default boolean requestCancellationCleanup() { return false; }
+
     /** 打开菜单或连续搬运的步骤交还界面给父流程；页面只由实际拥有它的流程收尾，不能按任务终局推断归属。 */
     default boolean keepsGuiOnCompletion() { return false; }
 

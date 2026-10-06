@@ -177,6 +177,8 @@ public final class NavigationRegressionSuite {
         PathCalculationStallTest.main(args);
         // 空背包在逐步加载的地形里自动续路，危险直线必须让位于有支撑的绕行。
         GroundJourneyContinuationTest.main(args);
+        // 一格式岸沿从水域可达陆地：水面节点贴岸壁时寻路给出游上沿顶的动作面，不再判无路。
+        baritone.pathing.calc.SwimShoreClimbPlanningTest.main(args);
         HeightPolicyTest.main(args);
         PathTickBudgetTest.main(args);
         DoorPassageTest.main(args);

@@ -92,7 +92,8 @@ public final class IntentStateStore {
         } catch (RuntimeException invalid) {
             if (stored) preserveUnrestored(identity);
             else { quarantine(file); clearRecoveryBlock(identity); }
-            Constants.LOG.warn("MaiCraft semantic checkpoint could not be decoded ({})", invalid.getClass().getSimpleName());
+            Constants.LOG.warn("MaiCraft semantic checkpoint could not be decoded ({}: {})",
+                    invalid.getClass().getSimpleName(), invalid.getMessage());
             return new LoadResult(Status.CORRUPT, new JsonObject());
         }
     }

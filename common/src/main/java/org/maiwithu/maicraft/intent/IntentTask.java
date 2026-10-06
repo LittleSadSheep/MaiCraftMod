@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.agent.tool.MaiCraftTool;
 import org.maiwithu.maicraft.agent.tool.ToolRegistry;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.integration.create.CreateMechanicalPower;
 import org.maiwithu.maicraft.core.integration.machine.MachineControlTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.MachineMenuOpenTaskRecord;
@@ -67,6 +68,8 @@ final class IntentTask implements Task {
     private Task child;
     private TaskRecord childRecord;
     private boolean reobserveAfterChild;
+    /** 操作者取消的仅清理缓期：子任务在回收自有现场期间语义计划整体冻结，清完按取消交回。 */
+    private boolean cancellationCleanup;
     private IntentAction.Wait wait;
     private List<IntentAction.Tool> chain = List.of();
     private int chainIndex;
@@ -74,6 +77,20 @@ final class IntentTask implements Task {
     private TaskResult interruptedChildResult;
     private boolean terminalPublished;
     private long childSerial;
+    /** 自带床回退：现成床失败已触发过一次回退步骤，同一个步骤内不重复回退。 */
+    private boolean bedFallbackEngaged;
+    /** 触发回退的那次失败原文，回执里说明为什么改用了自带床。 */
+    private String bedFallbackFailure;
+    /** 回退链锚定的床头坐标：入睡遮挡的换位重试必须回到刚放下的这张床，不按类型重扫。 */
+    private BlockPos bedFallbackBedHead;
+    /** 换位重试只做一次：换位后仍判遮挡就让两段失败诚实终局。 */
+    private boolean bedFallbackRepositioned;
+    /** 最近一次入睡尝试锚定的床头：sleep 子任务启动时记下，现成床遮挡的换位重试回到同一张床。 */
+    private BlockPos sleepAttemptBedHead;
+    /** 现成床遮挡的换位重试只做一次；重试后仍遮挡就进入回退或诚实终局（166 批七）。 */
+    private boolean sleepRepositioned;
+    /** 触发现成床换位重试的那次失败原文：两段终局如实带上，调用方不必翻历史对账。 */
+    private String sleepRepositionFailure;
     /** 单次机械续建凭据只保留在 Mod 内部，调用方仍通过语义重试选择下一步。 */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
     private String cachedProtectionDimension;
@@ -110,6 +127,16 @@ final class IntentTask implements Task {
     }
 
     @Override
+    public boolean requestCancellationCleanup() {
+        // 操作者取消时把缓期请求转给当前步骤子任务：只有子任务确认有必须逐刻回收的
+        // 自有现场（如施工脚手架）才缓期；没有子任务或子任务不需要回收就按原路立即取消。
+        if (child == null || childRecord == null || childRecord.getState().isTerminal()) return false;
+        if (!child.requestCancellationCleanup()) return false;
+        cancellationCleanup = true;
+        return true;
+    }
+
+    @Override
     public TaskState tick(LocalPlayer ignored) {
         try {
             return tickSemanticParent();
@@ -137,6 +164,8 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickSemanticParent() {
+        // 取消缓期只回收现场：答复消费、重翻译与步骤推进全部冻结，收尾完成即按取消交回。
+        if (cancellationCleanup) return tickCancellationCleanup();
         // 所有步骤都记为完成后，按统一结算报告：存在事实失败（含被容忍的）整体仍报 FAILED。
         if (record.stepIndex() >= record.steps().size()) {
             return finishCompletion();
@@ -153,6 +182,20 @@ final class IntentTask implements Task {
                 explore.renewAfterInterestAnswer(player.level().getGameTime());
                 explore.applyInterestAnswer(answer.choice());
                 return TaskState.RUNNING;
+            }
+            if (answer.decisionId().equals(sleepGateDecision)) {
+                // 白天门答复只在本分支消费；编号随即作废，迟到的重复答复不再匹配同一扇门。
+                sleepGateDecision = null;
+                if ("recover".equals(answer.choice())) {
+                    // recover 的语义是「等到可睡窗口再睡」：消费后转入等待阶段，绝不对同一扇
+                    // 关着的门重问（实机三连 4123f34f→c885717c→d3697403：每个 recover 都
+                    // 换来同门新决策，睡觉永远到不了点击那一步）。
+                    record.armSleepGateWait();
+                    Constants.LOG.info("[maicraft-sleep] 白天门 recover 已消费（decision {}），转入等待原版可睡窗口",
+                            answer.decisionId());
+                    return TaskState.RUNNING;
+                }
+                // skip 与 cancel 落进下面的通用分支：skip 消费当前步骤、cancel 终结任务，都没有重提窗口。
             }
             if ("cancel".equals(answer.choice()) || "cancel_task".equals(answer.choice())) {
                 mechanicalContinuations.clear();
@@ -178,7 +221,16 @@ final class IntentTask implements Task {
             var refused = persistAnswerParameters(answer);
             if (refused != null) return requestDecision(refused);
             // 参数已经成为当前持久步骤，消费屏障与恢复读取同一意图；地点只在创建动作时临时解析。
-            return begin(AbilityAdapter.adapt(resolvedCurrentGoal(), player, runtime, continuationFor(currentGoal())));
+            return adaptCurrentStep();
+        }
+
+        // 白天门 recover 的等待阶段：窗口关着就原地等，不重新翻译当前目标——翻译会再次撞上
+        // 同一扇关着的门（发射点 AbilityAdapter.waitForNightDecision），重提就是这么来的。
+        if (record.sleepGateWaiting() && child == null && wait == null && chain.isEmpty()) {
+            if (!WorldTimeSemantics.canAttemptSleep(player.level())) return TaskState.RUNNING;
+            record.disarmSleepGateWait();
+            Constants.LOG.info("[maicraft-sleep] 可睡窗口已打开，恢复睡觉步骤");
+            // 落到下方重新翻译：此刻门已开，翻译给出 goto+sleep 链而不是决策。
         }
 
         // 正在走路就继续走这条路，不能每一刻都重新创建“去目的地”的任务。
@@ -192,9 +244,59 @@ final class IntentTask implements Task {
             return beginTool(chain.get(chainIndex));
         }
 
-        Goal semanticGoal = currentGoal();
-        return begin(AbilityAdapter.adapt(
-                resolvedCurrentGoal(), player, runtime, continuationFor(semanticGoal)));
+        return adaptCurrentStep();
+    }
+
+    /**
+     * 当前步骤的统一翻译入口。harvest_block 有一条例外先行：本链更早的步骤已对同一格
+     * 确认收获时，这一步按已达成结算，不再交给适配器重跑翻译——翻译只会看到 air 并把
+     * 成功证据当失配询问（187）。其余目标照常翻译。
+     */
+    private TaskState adaptCurrentStep() {
+        Goal goal = resolvedCurrentGoal();
+        TaskResult settled = settleAlreadyHarvestedStep(record, goal);
+        if (settled != null) {
+            completeStep(settled);
+            return afterImmediate();
+        }
+        return begin(AbilityAdapter.adapt(goal, player, runtime, continuationFor(goal)));
+    }
+
+    /**
+     * 执行后的完成确认与执行前的目标匹配校验是两件事：定点收获的源格被本链更早步骤
+     * 成功挖掉并收尾后，同一条链里重复出现的同一格步骤（recover 答复插入的前置步骤
+     * 与紧随其后的原步骤）拿到的世界证据只有 air——这是收获的成功事实，不是失配。
+     * 只认「同能力 + 同一格 + 更早步骤真实成功」；执行前就不匹配的目标（如契约点名
+     * iron_ore 实际是 stone）没有本链成功证据，仍走原翻译如实失败。
+     */
+    static TaskResult settleAlreadyHarvestedStep(IntentTaskRecord record, Goal goal) {
+        if (!GeneralAbilityAdapter.HARVEST_BLOCK.equals(goal.ability())) return null;
+        Goal.SemanticTarget target = goal.target();
+        if (target == null || !"coordinates".equals(target.kind()) || target.position() == null) return null;
+        List<Goal> steps = record.steps();
+        List<IntentTaskRecord.StepSnapshot> results = record.stepResults();
+        for (int i = 0; i < record.stepIndex() && i < steps.size() && i < results.size(); i++) {
+            Goal earlier = steps.get(i);
+            if (!GeneralAbilityAdapter.HARVEST_BLOCK.equals(earlier.ability())
+                    || !sameTargetCell(earlier.target(), target)
+                    || !results.get(i).success()) continue;
+            Goal.WorldPosition at = target.position();
+            return TaskResult.ok("the target cell was already harvested by an earlier step of this task chain; "
+                    + "the confirmed break and pickup stand as this step's completion",
+                    Map.of("already_harvested_by_step", i,
+                            "x", at.x(), "y", at.y(), "z", at.z()));
+        }
+        return null;
+    }
+
+    /** 同一格判定：三维坐标一致；双方都声明维度时维度也须一致，未声明维度不否决（定点目标随当前世界解析）。 */
+    private static boolean sameTargetCell(Goal.SemanticTarget a, Goal.SemanticTarget b) {
+        if (a == null || b == null || a.position() == null || b.position() == null) return false;
+        Goal.WorldPosition pa = a.position();
+        Goal.WorldPosition pb = b.position();
+        return pa.x() == pb.x() && pa.y() == pb.y() && pa.z() == pb.z()
+                && (pa.dimension() == null || pb.dimension() == null
+                        || pa.dimension().equals(pb.dimension()));
     }
 
     IntentTaskRecord.DecisionSnapshot persistAnswerParameters(IntentTaskRecord.DecisionAnswer answer) {
@@ -250,7 +352,25 @@ final class IntentTask implements Task {
                 chainIndex = 0;
                 yield beginTool(chain.getFirst());
             }
-            case IntentAction.Decision decision -> requestDecision(decision.snapshot());
+            case IntentAction.Decision decision -> {
+                // recover 已消费过的门在任何路径上都不再换发新决策。等待标记若已被清
+                // （开窗沿入睡失败后回退等场景），先重新置位，让等待阶段接管——窗口开了
+                // 直接重执行睡觉步骤，而不是对同一扇已答复的门重问一次（145 批七开窗沿）。
+                if (shouldRearmSleepGateWait(
+                        record.sleepGateWaiting(), record.sleepGateRecoverConsumed(),
+                        isSleepGateDecision(decision.snapshot()))) {
+                    record.armSleepGateWait();
+                }
+                yield switch (sleepGateRelayAction(
+                        record.decisionSnapshot() != null,
+                        isSleepGateDecision(decision.snapshot()),
+                        record.sleepGateWaiting())) {
+                    // 决策还开着（未答）：原地等答复；已答 recover 的白天门在等待窗口：
+                    // 同一扇关着的门绝不换发新决策（与 explore 兴趣中继同一三态语义）。
+                    case PARK, HOLD_REISSUE -> TaskState.RUNNING;
+                    case ISSUE -> requestDecision(decision.snapshot());
+                };
+            }
             case IntentAction.Remember remember -> {
                 // 先登记地点，再保留供后续步骤引用的内部位置，最后完成本步；本分支没有原生点击，也不验证目标处的地形。
                 runtime.remember(remember.label(), remember.position(), remember.areaRole());
@@ -338,6 +458,10 @@ final class IntentTask implements Task {
     }
 
     private TaskState beginNative(TaskRecord nextRecord) {
+            // 入睡尝试的床头锚点：遮挡失败的换位重试按它回到同一张床，不按类型重扫附近。
+            if (nextRecord instanceof org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord sleepRecord) {
+                sleepAttemptBedHead = sleepRecord.bed;
+            }
             if (nextRecord instanceof SemanticAcquireTaskRecord acquire && AcquireAbilityAdapter.ABILITY.equals(currentGoal().ability())) {
                 // 恢复时覆盖新子任务临时捕获的位置；首次翻箱前复用现有检查点屏障，保证原范围已真正落盘。
                 var scope = record.retainContainerSearchScope(acquire.storageScope == null
@@ -384,6 +508,46 @@ final class IntentTask implements Task {
                 return finishChild();
             }
             return TaskState.RUNNING;
+    }
+
+    /**
+     * 取消缓期分支：只驱动当前子任务回收自有现场，不再推进语义计划。子任务截止时间逐刻顺延，
+     * 收尾本身有停滞放弃机制（外层槽位另有缓期硬上限），不会借缓期无限占用身体。
+     */
+    private TaskState tickCancellationCleanup() {
+        if (child == null || childRecord == null) return TaskState.CANCELLED;
+        childRecord.extendDeadlineTo(player.level().getGameTime() + 1);
+        try {
+            childRecord.setState(withExplicitAreaProtection(() -> child.tick(player)));
+        } catch (RuntimeException exception) {
+            childRecord.setState(TaskState.FAILED);
+            childRecord.setResult(TaskResult.fail(
+                    "cancellation cleanup tick failed: " + safeMessage(exception)));
+        }
+        retainBuildProject(childRecord);
+        if (!childRecord.getState().isTerminal()) return TaskState.RUNNING;
+        // 子任务收尾完成（或放弃）后只结算它的结果：不推进步骤、不发起询问，语义任务直接按取消交回。
+        settleCancelledChild();
+        return TaskState.CANCELLED;
+    }
+
+    /** 取消缓期后的子任务结算：取结果、松开身体、清掉子任务；不进入步骤推进或询问逻辑。 */
+    private void settleCancelledChild() {
+        Task finishingChild = child;
+        TaskRecord finishingRecord = childRecord;
+        try {
+            TaskState state = finishingRecord.getState();
+            TaskResult result = withExplicitAreaProtection(() -> finishingChild.result(state));
+            if (finishingRecord.getResult() == null) finishingRecord.setResult(result);
+            retainInterruptedChild(state, result);
+        } catch (RuntimeException ignoredFailure) {
+            retainInterruptedChild(TaskState.CANCELLED, TaskResult.fail(
+                    "Child cleanup could not confirm its effects; inspect before another operation.",
+                    Map.of("outcome_uncertain", true, "mechanical_retry_allowed", false)));
+        } finally {
+            releaseBody();
+            if (child == finishingChild) clearChild();
+        }
     }
 
     private TaskState tickChild() {
@@ -476,10 +640,27 @@ final class IntentTask implements Task {
             if (chainIndex < chain.size()) return TaskState.RUNNING;
             chain = List.of();
             chainIndex = 0;
+            result = withBedFallbackMarker(result);
         }
         discardContinuation(currentGoal());
         completeStep(result);
         return afterImmediate();
+    }
+
+    /** 回退链走完且睡成：步骤回执如实记录用了自带床，以及当初为什么放弃现成床。 */
+    private TaskResult withBedFallbackMarker(TaskResult result) {
+        if (!bedFallbackEngaged) return result;
+        Map<String, Object> data = new LinkedHashMap<>(result.data());
+        data.put("used_carried_bed_fallback", true);
+        if (bedFallbackFailure != null) data.put("village_bed_fallback_reason", bedFallbackFailure);
+        bedFallbackEngaged = false;
+        bedFallbackFailure = null;
+        bedFallbackBedHead = null;
+        bedFallbackRepositioned = false;
+        sleepAttemptBedHead = null;
+        sleepRepositioned = false;
+        sleepRepositionFailure = null;
+        return result.withData(data);
     }
 
     private TaskState applySemanticAnswer(IntentTaskRecord.DecisionAnswer answer) {
@@ -500,8 +681,9 @@ final class IntentTask implements Task {
         }
         if ("recover".equals(answer.choice())) {
             record.discardInternalStepPosition(record.stepIndex());
-            record.insertRecovery(semanticGoal);
-            runtime.semanticPlanChanged(record, semanticGoal, false);
+            Goal inserted = shareTerrainAuthorization(semanticGoal);
+            record.insertRecovery(inserted);
+            runtime.semanticPlanChanged(record, inserted, false);
         } else {
             record.discardInternalStepPosition(record.stepIndex());
             record.replaceCurrent(semanticGoal);
@@ -509,6 +691,42 @@ final class IntentTask implements Task {
         }
         invalidateProtectionCache();
         return TaskState.RUNNING;
+    }
+
+    /**
+     * 同一条任务链内已获回答的地形授权对整条链生效：决策答复或失败步骤任一侧带着 may_alter_terrain=true 时，
+     * 另一侧只在完全缺省（参数与偏好都没有这个字段）时补上，自动插入的前置步骤与重试的原步骤不再对同一授权重问一轮。
+     * 任一侧显式给出的值（含 false）保持原样——授权范围不同的步骤仍各自如实询问；授权也只在本任务链内传递，不跨任务。
+     */
+    private Goal shareTerrainAuthorization(Goal answeredGoal) {
+        Goal failedStep = currentGoal();
+        SharedAuthorization shared = shareTerrainAuthorization(failedStep, answeredGoal);
+        if (!shared.failedStep().equals(failedStep)) {
+            record.updateCurrentParameters(shared.failedStep().parameters());
+        }
+        return shared.answeredGoal();
+    }
+
+    /** 参数或偏好任一处写明了 may_alter_terrain 都算表过态，缺省（字段缺席）才允许继承同链授权。 */
+    private static boolean statesTerrainAuthorization(Goal goal) {
+        return goal.parameters().has("may_alter_terrain") || goal.preferences().has("may_alter_terrain");
+    }
+
+    private static Goal withTerrainAuthorization(Goal goal) {
+        JsonObject parameters = goal.parameters();
+        parameters.addProperty("may_alter_terrain", true);
+        return goal.withParameters(parameters);
+    }
+
+    /** 授权共享后的两侧目标；任一侧保持原样时就是传入的同一实例。 */
+    record SharedAuthorization(Goal answeredGoal, Goal failedStep) {}
+
+    static SharedAuthorization shareTerrainAuthorization(Goal failedStep, Goal answeredGoal) {
+        boolean stepAuthorized = statesTerrainAuthorization(failedStep);
+        boolean answerAuthorized = statesTerrainAuthorization(answeredGoal);
+        if (stepAuthorized == answerAuthorized) return new SharedAuthorization(answeredGoal, failedStep);
+        if (stepAuthorized) return new SharedAuthorization(withTerrainAuthorization(answeredGoal), failedStep);
+        return new SharedAuthorization(answeredGoal, withTerrainAuthorization(failedStep));
     }
 
     private TaskState failStep(TaskState state, TaskResult result) {
@@ -522,6 +740,22 @@ final class IntentTask implements Task {
         Goal failedGoal = currentGoal();
         // 现场和效果账本已经结清，知识提示从同一份失败事实生成并一起落盘，不再要求模型先重复观察。
         failure = RecoveryKnowledge.attach(failedGoal, failure);
+        // 回退步骤已经用过一次还再失败：终局话术把两段失败都带全，调用方不必翻历史就能对账。
+        // 换位重试后的再次失败会第二次走到这里，前缀已带第一段就不再叠一层。
+        if (bedFallbackEngaged && bedFallbackFailure != null
+                && !failure.message().startsWith("the carried-bed fallback also failed")) {
+            failure = new TaskResult(false, "the carried-bed fallback also failed; the earlier attempt failed with: "
+                    + bedFallbackFailure + "; " + failure.message(),
+                    failure.timedOut(), failure.interrupted(), failure.data());
+        }
+        // 现成床的换位重试也失败过：终局话术同样两段带全（166 批七：单句 occluded 收场，
+        // 调用方无从得知换位已经试过）。回退链的前缀可能已经叠了第一段，同样防双包。
+        if (sleepRepositionFailure != null
+                && !failure.message().startsWith("the reposition retry also failed")) {
+            failure = new TaskResult(false, "the reposition retry also failed; the earlier attempt failed with: "
+                    + sleepRepositionFailure + "; " + failure.message(),
+                    failure.timedOut(), failure.interrupted(), failure.data());
+        }
         record.addAttempt(new IntentTaskRecord.AttemptSnapshot(
                 record.stepIndex(),
                 failedGoal,
@@ -535,12 +769,91 @@ final class IntentTask implements Task {
             completeToleratedFailure(failure);
             return TaskState.RUNNING;
         }
+        // 现成床被遮挡、够不着或失效，且没有明确指定床区时，改放自带床再睡一次，
+        // 不让睡觉目标随一张被挡住的现成床一起落空（166）。失败已入账本，回执随后如实记录用了自带床。
+        TaskState fallback = trySleepCarriedBedFallback(failedGoal, failure, failureState);
+        if (fallback != null) return fallback;
         var data = new LinkedHashMap<String, Object>(failure.data());
         data.put("requires_decision", false);
         terminalResult = new TaskResult(false, failure.message(), failure.timedOut(), failure.interrupted(), data);
         chain = List.of();
         chainIndex = 0;
         return failureState == TaskState.TIMEOUT ? TaskState.TIMEOUT : TaskState.FAILED;
+    }
+
+    /**
+     * sleep 步骤失败时的遮挡恢复阶梯。现成床（含点名床）入睡判遮挡时，先换到床边另一个
+     * 可交互站位重试一次（锚定同一张床头）；换位后仍遮挡，再按原有规则考虑自带床回退——
+     * 背包有床且未点名床区时放床再睡，否则两段失败诚实终局（166 批七：走到床边后单句
+     * occluded 收场、无换位无回退，因为换位重试原先只在自带床回退链内生效）。
+     */
+    private TaskState trySleepCarriedBedFallback(Goal goal, TaskResult failure, TaskState failureState) {
+        String failureType = String.valueOf(failure.data().get("failure_type"));
+        if (bedFallbackEngaged) {
+            // 放下的床从走到的那格看不见：先换位再睡同一张床头，而不是让整夜耗在一次坏站位上。
+            if (!bedFallbackRepositioned && failureState == TaskState.FAILED
+                    && "occluded".equals(failureType) && bedFallbackBedHead != null) {
+                IntentAction.Chain retry = AbilityAdapter.sleepRepositionRetry(player, bedFallbackBedHead);
+                if (retry != null) {
+                    bedFallbackRepositioned = true;
+                    chain = retry.actions();
+                    chainIndex = 0;
+                    Constants.LOG.info("[maicraft-sleep] 回退床 {} 入睡判遮挡，换到床边可交互站位重试一次",
+                            bedFallbackBedHead);
+                    return TaskState.RUNNING;
+                }
+                Constants.LOG.info("[maicraft-sleep] 回退床 {} 入睡判遮挡，床边没有可站立换位，维持诚实失败",
+                        bedFallbackBedHead);
+            }
+            return null;
+        }
+        if (failureState != TaskState.FAILED
+                || !"maicraft:sleep".equals(goal.ability())) return null;
+        // 现成床入睡判遮挡：先换位重试一次（锚定同一张床头），再谈换床或终局。
+        if ("occluded".equals(failureType) && !sleepRepositioned && sleepAttemptBedHead != null) {
+            IntentAction.Chain retry = AbilityAdapter.sleepRepositionRetry(player, sleepAttemptBedHead);
+            if (retry != null) {
+                sleepRepositioned = true;
+                sleepRepositionFailure = failure.message();
+                chain = retry.actions();
+                chainIndex = 0;
+                Constants.LOG.info("[maicraft-sleep] 现成床 {} 入睡判遮挡，换到床边可交互站位重试一次",
+                        sleepAttemptBedHead);
+                return TaskState.RUNNING;
+            }
+            Constants.LOG.info("[maicraft-sleep] 现成床 {} 入睡判遮挡，床边没有可站立换位",
+                    sleepAttemptBedHead);
+        }
+        AbilityAdapter.CarriedBedPlan fallback = AbilityAdapter.carriedBedFallback(goal, player, failureType);
+        if (fallback == null) return null;
+        bedFallbackEngaged = true;
+        bedFallbackFailure = failure.message();
+        bedFallbackBedHead = fallback.bedHead();
+        bedFallbackRepositioned = false;
+        if (fallback.action() instanceof IntentAction.Chain fallbackChain) {
+            chain = fallbackChain.actions();
+            chainIndex = 0;
+            Constants.LOG.info("[maicraft-sleep] 现成床不可用（failure_type={}），回退放置自带床: {}",
+                    failureType, bedFallbackFailure);
+            return TaskState.RUNNING;
+        }
+        // 没有安全落位或可睡窗口已关：这个决定本来就要调用方拍板，转成待答问题而不是吞掉。
+        if (fallback.action() instanceof IntentAction.Decision decision) {
+            if (isSleepGateDecision(decision.snapshot()) && record.sleepGateRecoverConsumed()) {
+                // 这条路径绕过翻译中继直发决策；已答过 recover 的门在这里同样不重问，
+                // 否则开窗沿的入睡失败会换来同门新决策（145 批七）。重新置位等待标记，
+                // 窗口真打开后由等待分支恢复翻译，睡产行为按原授权自动继续。
+                chain = List.of();
+                chainIndex = 0;
+                record.armSleepGateWait();
+                Constants.LOG.info("[maicraft-sleep] 失败回退路径撞上已答复的白天门，重新等待窗口不重问");
+                return TaskState.RUNNING;
+            }
+            Constants.LOG.info("[maicraft-sleep] 现成床不可用（failure_type={}），自带床缺少回退条件，转为决定",
+                    failureType);
+            return requestDecision(decision.snapshot());
+        }
+        return null;
     }
 
     /** 容忍边界：仅确认失败且还有兄弟步骤；超时与取消效果不确定或调用方主动停，一律全停。 */
@@ -551,6 +864,13 @@ final class IntentTask implements Task {
 
     private void completeToleratedFailure(TaskResult failure) {
         Goal goal = record.steps().get(record.stepIndex());
+        bedFallbackEngaged = false;
+        bedFallbackFailure = null;
+        bedFallbackBedHead = null;
+        bedFallbackRepositioned = false;
+        sleepAttemptBedHead = null;
+        sleepRepositioned = false;
+        sleepRepositionFailure = null;
         record.addStepResult(new IntentTaskRecord.StepSnapshot(
                 record.stepIndex(), goal.ability(), false, failure.message(), failure.toJson(), false));
         runtime.stepProcessed(record);
@@ -691,28 +1011,92 @@ final class IntentTask implements Task {
 
     private TaskState requestDecision(IntentTaskRecord.DecisionSnapshot decision) {
         record.requestDecision(decision, player.level().getGameTime());
+        // 白天门决策记住编号：答复到达时按编号识别这扇门，走专属消费分支。
+        sleepGateDecision = isSleepGateDecision(decision) ? decision.id() : null;
         runtime.decision(record, decision);
         return TaskState.RUNNING;
+    }
+
+    /** 白天门决策的 context 标记，与发射侧 AbilityAdapter.waitForNightDecision 保持同一字面量。 */
+    static final String SLEEP_GATE_DECISION_KIND = "sleep_day_gate";
+
+    /** 本次会话挂着的白天门决策编号；仅用于答复路由，检查点恢复后待答问题整体原样恢复。 */
+    private UUID sleepGateDecision;
+
+    static boolean isSleepGateDecision(IntentTaskRecord.DecisionSnapshot decision) {
+        try {
+            var kind = decision.context().get("decision_kind");
+            return kind != null && kind.isJsonPrimitive()
+                    && SLEEP_GATE_DECISION_KIND.equals(kind.getAsString());
+        } catch (RuntimeException brokenContext) {
+            // 上下文损坏时按普通决策走通用答复分支；异常路径带原因落日志，不静默吞掉。
+            Constants.LOG.warn("[maicraft-sleep] 决策 context 解析失败，按普通决策处理", brokenContext);
+            return false;
+        }
+    }
+
+    /** 白天门中继处置：等答复、按住已答复门的重发、放行新决策——与 explore 兴趣中继同一三态。 */
+    enum SleepGateRelayAction { PARK, HOLD_REISSUE, ISSUE }
+
+    /**
+     * 中继判定纯函数：
+     * - 语义决策快照还开着（未被回答）：PARK，等 task action=answer；
+     * - 白天门且 recover 已消费（等待阶段接管，窗口未开）：HOLD_REISSUE——此刻若放行发射点，
+     *   翻译会对同一扇关着的门换发新决策编号，每个 recover 都换来一次重问（实机三连形态）；
+     * - 其余（全新决策，或非白天门的普通决策）：ISSUE 照常发出。
+     */
+    static SleepGateRelayAction sleepGateRelayAction(
+            boolean decisionSnapshotOpen, boolean gateDecision, boolean gateWaiting) {
+        if (decisionSnapshotOpen) return SleepGateRelayAction.PARK;
+        return gateDecision && gateWaiting
+                ? SleepGateRelayAction.HOLD_REISSUE : SleepGateRelayAction.ISSUE;
+    }
+
+    /**
+     * 开窗沿自愈判定：recover 已消费、等待标记已被清时，翻译再撞上这扇门先恢复等待阶段，
+     * 而不是按全新决策重问（145 批七：重问发生在可睡窗口开启沿，多耗一整轮模型往返）。
+     */
+    static boolean shouldRearmSleepGateWait(
+            boolean gateWaiting, boolean recoverConsumed, boolean gateDecision) {
+        return !gateWaiting && recoverConsumed && gateDecision;
     }
 
     /** 语义层观察动作任务单上的待询问发现并拉起决策；决策期间任务记录会暂停，等待 task action=answer。 */
     private TaskState relayExploreInterestDecision(SemanticExploreTaskRecord explore) {
         var finding = explore.pendingInterestFinding();
-        if (finding == null || record.decisionSnapshot() != null) return null;
-        // 已登记编号说明决策已发出；恢复后同一发现不会重复询问（探索记忆的去重会挡住重新置位）。
-        if (exploreInterestRelayBlocksTick(explore)) return TaskState.RUNNING;
-        UUID decisionId = UUID.randomUUID();
-        explore.beginInterestDecision(decisionId);
-        return requestDecision(exploreInterestDecision(currentGoal(), decisionId, finding));
+        if (finding == null) return null;
+        InterestRelayAction action = exploreInterestRelayAction(
+                explore, record.decisionSnapshot() != null);
+        return switch (action) {
+            case PASS_THROUGH -> null;
+            case PARK -> TaskState.RUNNING;
+            case ISSUE -> {
+                UUID decisionId = UUID.randomUUID();
+                explore.beginInterestDecision(decisionId);
+                yield requestDecision(exploreInterestDecision(currentGoal(), decisionId, finding));
+            }
+        };
     }
 
+    /** 中继对待询问发现的三种处置：放行伴随任务 tick、原地等答复、发起新决策。 */
+    enum InterestRelayAction { PASS_THROUGH, PARK, ISSUE }
+
     /**
-     * 决策已发出且答复未写回时伴随任务不被 tick（等语义层应答）。
-     * 答复写回后必须放行：应答的消费点在伴随任务的 onTick 里，这里若只看「决策编号还在」
-     * 就短路，continue 与 stop 都会被永远挡在伴随任务之外，任务冻结到人工 cancel。
+     * 中继判定纯函数：
+     * - 语义决策快照还开着（问题未被回答）：原地 PARK，等 task action=answer；
+     * - 决策已发出、答复已写回但伴随任务尚未消费（消费点在伴随任务 onTick，晚于本中继执行）：
+     *   PASS_THROUGH 放行 tick——此刻绝不能对同一待询问发现再发新决策，否则每个答复都在
+     *   消费前换来一次重提，continue 与 stop 双双失效，任务永远回不到推进态；
+     * - 全新待询问发现：ISSUE 发起决策。
      */
-    static boolean exploreInterestRelayBlocksTick(SemanticExploreTaskRecord explore) {
-        return explore.interestDecisionId() != null && !explore.hasInterestAnswer();
+    static InterestRelayAction exploreInterestRelayAction(
+            SemanticExploreTaskRecord explore, boolean decisionSnapshotOpen) {
+        if (decisionSnapshotOpen) return InterestRelayAction.PARK;
+        if (explore.interestDecisionId() != null) {
+            return explore.hasInterestAnswer()
+                    ? InterestRelayAction.PASS_THROUGH : InterestRelayAction.PARK;
+        }
+        return InterestRelayAction.ISSUE;
     }
 
     /** 兴趣决策快照：finding 细节进 context 供回执核对，question 与选项面向模型陈述两种走向。 */
@@ -775,6 +1159,11 @@ final class IntentTask implements Task {
 
     private void completeStep(TaskResult result, boolean skipped) {
         result = SemanticResultView.result(result);
+        bedFallbackEngaged = false;
+        bedFallbackFailure = null;
+        sleepAttemptBedHead = null;
+        sleepRepositioned = false;
+        sleepRepositionFailure = null;
         int index = record.stepIndex();
         if (skipped) record.discardInternalStepPosition(index);
         Goal goal = record.steps().get(index);
@@ -1115,6 +1504,7 @@ final class IntentTask implements Task {
     public Map<String, Object> progress() {
         Map<String, Object> progress = new LinkedHashMap<>(child != null ? SemanticResultView.data(child.progress())
                 : Map.of("phase", record.decisionSnapshot() != null ? "waiting_for_decision"
+                : record.sleepGateWaiting() ? "waiting_for_sleep_window"
                 : wait != null ? "waiting_for_condition" : "preparing_step"));
         addBuildProjects(progress);
         // 子任务表达的是执行意图，父任务暂停时实际已允许自救接手；公开状态按当前调度条件纠正。
@@ -1122,7 +1512,30 @@ final class IntentTask implements Task {
             progress.put("survival_reflexes_suppressed", suppressesSurvivalReflexes());
         // 内部机器任务等待人工蓝图确认时，总任务同步展示真实等待原因，供调用者结束无效轮询。
         progress.putAll(BuildPreviewGate.waitingProgress(record));
-        return Map.copyOf(progress);
+        return Map.copyOf(hoistChildPlanning(progress));
+    }
+
+    /**
+     * 包装类任务（施工、传送门准备、采集编排等）把一线子任务嵌在 {@code child} 键下，而进度
+     * 门卫只读顶层标准键——子任务在规划期变化时包装任务顶层反而无话可说，规划心跳被整层埋没。
+     * 子任务报出 {@code phase}/{@code calc}/{@code planning_seconds} 时把它们提到顶层（不覆盖
+     * 顶层已有值），包装任务的静默窗与一线任务遵守同一条心跳纪律；phase 只在顶层没有时上提，
+     * 心跳键即使顶层已有 phase 也照常上提——采集这类包装任务顶层 phase 恒定，卡住的一线子任务
+     * 的单调心跳是门卫唯一能看到的变化。
+     */
+    static Map<String, Object> hoistChildPlanning(Map<String, Object> progress) {
+        if (!(progress.get("child") instanceof Map<?, ?> childProgress)) {
+            return progress;
+        }
+        Object phase = childProgress.get("phase");
+        Object calc = childProgress.get("calc");
+        Object planningSeconds = childProgress.get("planning_seconds");
+        if (phase == null && calc == null && planningSeconds == null) return progress;
+        Map<String, Object> hoisted = new LinkedHashMap<>(progress);
+        if (phase != null) hoisted.putIfAbsent("phase", phase);
+        if (calc != null) hoisted.putIfAbsent("calc", calc);
+        if (planningSeconds != null) hoisted.putIfAbsent("planning_seconds", planningSeconds);
+        return hoisted;
     }
 
     private void addBuildProjects(Map<String, Object> data) {

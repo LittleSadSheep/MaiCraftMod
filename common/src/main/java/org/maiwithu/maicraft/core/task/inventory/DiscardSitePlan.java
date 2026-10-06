@@ -20,11 +20,14 @@ import org.maiwithu.maicraft.core.PlayerInv;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
 
-/** 有打火石先检查当前位置的投掷通道；其余候选限于同层已加载平面，优先空地，再考虑四格深、两格高的侧袋。 */
-public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation, boolean requiresBurn) {
+/** 有打火石先检查当前位置的投掷通道；其余候选依次为同层已加载平面的空地走廊、原地直接丢弃、四格深两格高的侧袋。 */
+public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation, boolean requiresBurn, boolean inPlace) {
     private static final int RADIUS = 12;
+    // 出口绕行搜索的勘察上限；超出仍没接回已勘察区域时按堵死通道处理。
+    private static final int ESCAPE_RADIUS = 8;
     public DiscardSitePlan { stance = stance.immutable(); excavation = List.copyOf(excavation); }
-    public DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation) { this(stance, direction, excavation, false); }
+    public DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation) { this(stance, direction, excavation, false, false); }
+    public DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPos> excavation, boolean requiresBurn) { this(stance, direction, excavation, requiresBurn, false); }
 
     public static DiscardSitePlan find(LocalPlayer player, Set<BlockPos> rejected) {
         return find(player, rejected, true);
@@ -53,6 +56,14 @@ public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPo
             if (plan.clear(world) && preservesRoutes(connected, origin, stance, plan.pickupEnvelope(player))
                     && !blocksFrontier(world, connected, plan.pickupEnvelope(player))) return plan;
         }
+        // 走廊形态全线不成立时，开阔平地仍可直接原地丢：走廊净空服务投掷弹道，不是丢弃成立的前提。
+        // 避让区盖住站位是原地形态的预期（物品不阻挡行走）；其余已勘察区域仍须互相连通，
+        // chokepoint 否决照常生效，狭窄走廊不会因兜底绕过侧袋。
+        if (!rejected.contains(origin)) for (Direction direction : directions) {
+            var plan = new DiscardSitePlan(origin, direction, List.of(), false, true);
+            var envelope = plan.pickupEnvelope(player);
+            if (keepsRegionConnected(connected, envelope) && !blocksFrontier(world, connected, envelope)) return plan;
+        }
         // 窄巷没有可绕行的位置时，把垃圾放到新开出的侧袋底部；不把原通道或储物机器算作可挖侧壁。
         for (BlockPos stance : stances) for (Direction direction : directions) {
             var cells = new ArrayList<BlockPos>(); boolean usable = true;
@@ -80,11 +91,17 @@ public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPo
     }
 
     private LongSet pickupEnvelope(LocalPlayer player) {
-        // 选点时以侧袋后段估计落点范围，再按拾取包围盒扩张；这是局部通行规划，真实碰撞、漂移仍由后续实体观察确认。
+        var cells = new LongOpenHashSet();
+        // 选点时按拾取包围盒估计落点避让范围；这是局部通行规划，真实碰撞、漂移仍由后续实体观察确认。
+        if (inPlace()) {
+            // 原地丢弃的物品会被前方障碍弹回，落点在站位邻域内不定；走廊形态的前置弹道带不再计入，
+            // 避让范围取站位整格邻域，通道堵死判定按这片范围评估。
+            DiscardedItems.addPickupCells(cells, new AABB(stance), player.getBoundingBox().getXsize(), player.getBoundingBox().getYsize());
+            return cells;
+        }
         Vec3 origin = Vec3.atBottomCenterOf(stance), along = Vec3.atLowerCornerOf(direction.getNormal());
         Vec3 near = origin.add(along.scale(2.5)), far = origin.add(along.scale(4));
         AABB items = new AABB(near, far).inflate(.3, .25, .3);
-        var cells = new LongOpenHashSet();
         DiscardedItems.addPickupCells(cells, items, player.getBoundingBox().getXsize(), player.getBoundingBox().getYsize());
         return cells;
     }
@@ -100,15 +117,50 @@ public record DiscardSitePlan(BlockPos stance, Direction direction, List<BlockPo
         return remaining.contains(stance) && before.stream().allMatch(pos -> excluded.contains(pos.asLong()) || remaining.contains(pos));
     }
 
+    /** 原地丢弃的避让区盖住站位本身是预期形态；除避让区外的已勘察格子必须仍互相连通，丢弃带不得把区域切成避让死区。 */
+    static boolean keepsRegionConnected(Set<BlockPos> before, LongSet excluded) {
+        BlockPos seed = null;
+        for (BlockPos pos : before) if (!excluded.contains(pos.asLong())) { seed = pos; break; }
+        if (seed == null) return true;
+        var remaining = new LinkedHashSet<BlockPos>(); var queue = new ArrayDeque<BlockPos>(); queue.add(seed);
+        while (!queue.isEmpty()) {
+            BlockPos at = queue.removeFirst();
+            if (!before.contains(at) || excluded.contains(at.asLong()) || !remaining.add(at)) continue;
+            for (Direction side : Direction.Plane.HORIZONTAL) queue.add(at.relative(side));
+        }
+        return before.stream().allMatch(pos -> excluded.contains(pos.asLong()) || remaining.contains(pos));
+    }
+
     private static boolean blocksFrontier(Level world, Set<BlockPos> connected, LongSet excluded) {
-        // 勘察半径和已加载区块的边缘仍可能通往远处；不能把局部扫描截断的走廊误当成可以堵住的死胡同。
+        // 拾取范围只有堵住勘察范围之外区域的唯一入口才算边界；开阔地形上零星台阶与 BFS 半径截断
+        // 都能绕行，不因邻接就整片拒绝候选。未加载区块之外无从核验，仍按边界处理。
         for (BlockPos cell : connected) if (excluded.contains(cell.asLong()))
             for (Direction side : Direction.Plane.HORIZONTAL) {
                 BlockPos next = cell.relative(side);
-                if (!connected.contains(next) && (!world.isLoaded(next) || walkable(world, next))) return true;
-                // 平面勘察也保留通向高低台阶的出口，不能把楼梯前唯一的脚位当成可堵住的边角。
-                if (walkable(world, next.above()) || walkable(world, next.below())) return true;
+                if (!world.isLoaded(next)) return true;
+                if (connected.contains(next)) continue;
+                for (BlockPos exit : List.of(next, next.above(), next.below()))
+                    if (walkable(world, exit) && !escapesAround(world, connected, excluded, exit)) return true;
             }
+        return false;
+    }
+
+    /** 出口能否不穿过拾取范围就回到已勘察区域；出不去说明丢弃会堵死这条通往远处的通道。 */
+    private static boolean escapesAround(Level world, Set<BlockPos> connected, LongSet excluded, BlockPos exit) {
+        var seen = new LongOpenHashSet(); var queue = new ArrayDeque<BlockPos>();
+        seen.add(exit.asLong()); queue.add(exit);
+        while (!queue.isEmpty()) {
+            BlockPos at = queue.removeFirst();
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos nb = at.relative(side);
+                if (connected.contains(nb)) { if (!excluded.contains(nb.asLong())) return true; continue; }
+                if (!world.isLoaded(nb) || !seen.add(nb.asLong())
+                        || Math.abs(nb.getX() - exit.getX()) > ESCAPE_RADIUS || Math.abs(nb.getZ() - exit.getZ()) > ESCAPE_RADIUS)
+                    continue;
+                for (BlockPos feet : List.of(nb, nb.above(), nb.below()))
+                    if (walkable(world, feet)) { queue.add(feet); break; }
+            }
+        }
         return false;
     }
 

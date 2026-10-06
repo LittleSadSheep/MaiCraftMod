@@ -71,42 +71,54 @@ public final class ExploreInterestDecisionTest {
 
     /**
      * 答复后的恢复闸：决策应答写回但伴随任务尚未消费的窗口内，中继必须放行 tick——
-     * 应答的消费点在伴随任务里，这里若按「决策编号还在」短路，continue 与 stop 都会把
-     * 任务冻结到人工 cancel（实机事故：答复受理后身体零推进、stop 也不收尾）。
+     * 应答的消费点在伴随任务里；且写回窗口内绝不能对同一待询问发现重发新决策
+     * （实机事故：continue 与 stop 每答一次都换来同一 finding 的全新决策，
+     * 四连重提 13b6913c→f0468be2→df49f7a2→478026fa，任务永远回不到推进态）。
      */
     private static void answerGate() {
         var finding = new SemanticExploreTaskRecord.InterestFinding(
                 "finding-1", "lava_pool", 100, 64, -200, "north-east", 137);
         var record = record(List.of("lava_pool"));
         record.noteInterestFinding(finding);
-        record.beginInterestDecision(UUID.randomUUID());
-        check(IntentTask.exploreInterestRelayBlocksTick(record),
-                "an open decision without an answer keeps the companion parked");
+        check(relay(record, false) == IntentTask.InterestRelayAction.ISSUE,
+                "a fresh pending finding issues exactly one decision");
+        UUID decisionId = UUID.randomUUID();
+        record.beginInterestDecision(decisionId);
+        check(relay(record, false) == IntentTask.InterestRelayAction.PARK
+                && relay(record, true) == IntentTask.InterestRelayAction.PARK,
+                "an open decision keeps the companion parked until the answer arrives");
 
-        // continue 分支：答复写回即放行；伴随任务消费后待询问与决策编号清空，推进恢复。
+        // continue 分支：答复写回即放行 tick，且同一发现不再换发新决策；伴随任务消费后推进恢复。
         record.applyInterestAnswer("continue");
-        check(!IntentTask.exploreInterestRelayBlocksTick(record),
-                "a written continue answer lets the companion tick");
+        check(relay(record, false) == IntentTask.InterestRelayAction.PASS_THROUGH
+                && record.interestDecisionId().equals(decisionId),
+                "a written continue answer passes through without re-issuing the decision");
         check("continue".equals(record.consumeInterestAnswer()),
                 "the resumed companion consumes the continue answer");
         check(!record.hasPendingInterestFinding() && record.interestDecisionId() == null,
                 "continue clears the pending finding and the decision id");
-        check(!IntentTask.exploreInterestRelayBlocksTick(record),
-                "nothing keeps blocking after the continue answer is consumed");
+        check(!record.noteInterestFinding(finding),
+                "the answered finding stays in the asked set, no new decision can pend for it");
 
-        // stop 分支：同样放行；消费后待询问发现保留，收尾回执据此携带发现明细。
+        // stop 分支：同样放行且不重提；消费后待询问发现保留，收尾回执据此携带发现明细。
         var stopping = record(List.of("lava_pool"));
         stopping.noteInterestFinding(finding);
         stopping.beginInterestDecision(UUID.randomUUID());
         stopping.applyInterestAnswer("stop");
-        check(!IntentTask.exploreInterestRelayBlocksTick(stopping),
-                "a written stop answer lets the companion tick");
+        check(relay(stopping, false) == IntentTask.InterestRelayAction.PASS_THROUGH,
+                "a written stop answer passes through without re-issuing the decision");
         check("stop".equals(stopping.consumeInterestAnswer()),
                 "the resumed companion consumes the stop answer");
         check(stopping.hasPendingInterestFinding(),
                 "stop keeps the finding so the final receipt can name it");
-        check(!IntentTask.exploreInterestRelayBlocksTick(stopping),
-                "nothing blocks the finish after the stop answer is consumed");
+        check(stopping.interestDecisionId() == null && stopping.consumeInterestAnswer() == null,
+                "the stop answer is fully consumed, nothing re-opens the decision");
+    }
+
+    /** 中继判定的测试缝：快照开关模拟语义决策是否仍开着。 */
+    private static IntentTask.InterestRelayAction relay(
+            SemanticExploreTaskRecord explore, boolean decisionSnapshotOpen) {
+        return IntentTask.exploreInterestRelayAction(explore, decisionSnapshotOpen);
     }
 
     private static void decisionSnapshot() {
@@ -142,7 +154,9 @@ public final class ExploreInterestDecisionTest {
                 "{\"biome_id\":\"modded:autumn_forest\",\"interests\":[\"lava_pool\"]}", "{}", List.of(), List.of());
         SemanticGoalContract.validate(original, IntentRuntime.KNOWN_ABILITIES);
         Goal restored = Goal.fromJson(original.toJson());
-        SemanticGoalContract.validateRestored(restored, IntentRuntime.KNOWN_ABILITIES);
+        // 恢复期只校验能力名在册；参数合法性由上面的新提交校验与执行适配器把关。
+        if (!IntentRuntime.KNOWN_ABILITIES.contains(restored.ability()))
+            throw new AssertionError("序列化往返后的能力名应仍在册");
         IntentAction.Tool adapted = (IntentAction.Tool) AbilityAdapter.adapt(restored, null, null);
         check(adapted.arguments().getAsJsonArray("interests").size() == 1
                 && adapted.arguments().getAsJsonArray("interests").get(0).getAsString().equals("lava_pool"),

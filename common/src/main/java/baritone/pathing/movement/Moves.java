@@ -147,6 +147,55 @@ public enum Moves {
         }
     },
 
+    // 从水面游上一格高岸沿：dest 在水面节点上方两格，是水陆过渡唯一的原生动作面
+    SWIM_CLIMB_NORTH(0, +2, -1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return new MovementSwimClimbOut(context.getBaritone(), src, new BetterBlockPos(src.x, src.y + 2, src.z - 1));
+        }
+
+        @Override
+        public double cost(CalculationContext context, int x, int y, int z) {
+            return MovementSwimClimbOut.cost(context, x, y, z, x, z - 1);
+        }
+    },
+
+    SWIM_CLIMB_SOUTH(0, +2, +1) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return new MovementSwimClimbOut(context.getBaritone(), src, new BetterBlockPos(src.x, src.y + 2, src.z + 1));
+        }
+
+        @Override
+        public double cost(CalculationContext context, int x, int y, int z) {
+            return MovementSwimClimbOut.cost(context, x, y, z, x, z + 1);
+        }
+    },
+
+    SWIM_CLIMB_EAST(+1, +2, 0) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return new MovementSwimClimbOut(context.getBaritone(), src, new BetterBlockPos(src.x + 1, src.y + 2, src.z));
+        }
+
+        @Override
+        public double cost(CalculationContext context, int x, int y, int z) {
+            return MovementSwimClimbOut.cost(context, x, y, z, x + 1, z);
+        }
+    },
+
+    SWIM_CLIMB_WEST(-1, +2, 0) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return new MovementSwimClimbOut(context.getBaritone(), src, new BetterBlockPos(src.x - 1, src.y + 2, src.z));
+        }
+
+        @Override
+        public double cost(CalculationContext context, int x, int y, int z) {
+            return MovementSwimClimbOut.cost(context, x, y, z, x - 1, z);
+        }
+    },
+
     DESCEND_EAST(+1, -1, 0, false, true) {
         @Override
         public Movement apply0(CalculationContext context, BetterBlockPos src) {

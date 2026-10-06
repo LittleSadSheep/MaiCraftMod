@@ -38,6 +38,7 @@ import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -123,7 +124,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private final Map<Integer, Vec3> lastTargetPositions = new HashMap<>();
     /**
      * 这一刻 {@link #FIELD_RADIUS} 内活着的敌对生物——<b>一刻只扫一次</b>,在 {@link #surveyField}
-     * 里;举盾、走位的躲避场都读这一份。"场上有哪些怪"各算各的,就会出现判据说打、腿说没人的局面。
+     * 里;举盾、走位的躲避场都读这一份。"场上有哪些怪"各算各的,就会出现判据说打、移动搜索却报没人的局面。
      */
     private List<LivingEntity> hostiles = List.of();
 
@@ -1053,6 +1054,40 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
 
     // ==================== 躲避 ====================
 
+    /**
+     * 食物-战斗互锁判定：血量已在拒战线下（调用方前提），背包再没有任何无效果食物、
+     * 饥饿又低于原版自然回血线（18）时，「进食回血 → 有体力作战」的常规恢复链断裂。
+     * 回执此时必须点破处境，否则调用方只能在战斗与觅食的交替拒绝中猜。
+     */
+    public static boolean foodCombatLocked(LocalPlayer player) {
+        if (player.getFoodData().getFoodLevel() >= 18) return false;
+        var inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            var food = inventory.getItem(i).get(DataComponents.FOOD);
+            if (food != null && food.effects().isEmpty()) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 低血撤退的终局失败文案。互锁处境只在真实成立（血量在拒战线下 + 无安全食物 + 饥饿低于回血线）
+     * 时插入，避免常态低血回执被互锁长文淹没；出路句（死亡重置/已知食物点）始终保留。
+     */
+    public static String retreatFailureMessage(LocalPlayer player) {
+        if (!Menace.outmatched(player)) {
+            return "broke off — nothing here can be fought with what you carry "
+                    + "(explosive, or out of reach with no bow); you are clear now";
+        }
+        return "broke off — too hurt to keep fighting hostile threats; active pursuit and nearby visible threats are clear; "
+                + AttackPlan.lowHealthRefusalNotice()
+                + (foodCombatLocked(player)
+                        ? "; the food-combat recovery loop is interlocked: no effect-free food in the"
+                          + " inventory and hunger is below the natural-regeneration line (18), so"
+                          + " health cannot recover by eating or resting and hostile combat stays refused"
+                        : "")
+                + "; consider the maicraft:suicide death reset (keepInventory confirmed) or travel to a known food point";
+    }
+
     /** 已承诺撤离就持续寻找离开所有威胁的安全范围，不绑定随机落点，也不因少量回血改追击。 */
     // 近处危险和近期远程伤害都消失后才结束撤退；持续来袭的箭不能被近战扫描范围漏掉。
     private TaskState tickFlee() {
@@ -1060,13 +1095,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
             clearRetreat();
             InputDriver.halt(player);
             Constants.LOG.info("[maicraft-attack] 脱离成功 —— 追击者已拉开距离，近期攻击与近处可见危险已解除");
-            fail(Menace.outmatched(player)
-                            ? "broke off — too hurt to keep fighting hostile threats; active pursuit and nearby visible threats are clear; "
-                                    + AttackPlan.lowHealthRefusalNotice()
-                                    + "; consider the maicraft:suicide death reset (keepInventory confirmed) or travel to a known food point"
-                            : "broke off — nothing here can be fought with what you carry "
-                                    + "(explosive, or out of reach with no bow); you are clear now",
-                    FailureType.TARGET_LOST);
+            fail(retreatFailureMessage(player), FailureType.TARGET_LOST);
             return TaskState.FAILED;
         }
         long now = player.level().getGameTime();

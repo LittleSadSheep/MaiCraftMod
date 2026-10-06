@@ -85,6 +85,9 @@ record PortalPreparationSite(NetherPortalFrame nether, EndPortalFrame end) {
                 (player, pos) -> player.level() == world && valid(world)
                         && (frames().contains(pos) ? air(world, pos) : !interior().contains(pos)),
                 (player, pos) -> {});
+        // 名单就是自家目标格：标记为计划自注册后，施工任务只把它当导航与清障路线保护，
+        // 不再把门框格并入继承保护集否决自己的施工授权。
+        record.selfRegisteredNavigationProtection(true);
         return record;
     }
 }

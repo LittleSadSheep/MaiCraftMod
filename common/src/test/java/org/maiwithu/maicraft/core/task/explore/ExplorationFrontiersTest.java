@@ -29,6 +29,16 @@ public final class ExplorationFrontiersTest {
                 p -> true, p -> true);
         check(wetPick != null && island.contains(wetPick.getX(), wetPick.getZ()),
                 "all-water environment still selects the best candidate");
+        // 航点落点被约束在「半径 - 到达容差」带内：身体走到航点即已达成请求半径，
+        // 不会在收尾判定生效前沿直线越过请求半径再被安全截停。
+        double margin = ExplorationFrontiers.arrivalMargin(64);
+        var bounded = ExplorationSector.of("north", 90, null, 64).at(0, 0, 0);
+        BlockPos inBand = ExplorationFrontiers.next(BlockPos.ZERO, bounded, 64, new HashSet<>(), p -> true);
+        check(inBand != null && Math.hypot(inBand.getX(), inBand.getZ()) <= 64 - margin,
+                "waypoints stay inside the radius arrival margin");
+        BlockPos farOnly = ExplorationFrontiers.next(BlockPos.ZERO, bounded, 64, new HashSet<>(),
+                p -> Math.hypot(p.getX(), p.getZ()) > 64 - margin);
+        check(farOnly == null, "no waypoint is returned beyond the radius arrival margin");
         System.out.println("ExplorationFrontiersTest: passed");
     }
     private static void check(boolean condition, String message) {

@@ -21,6 +21,7 @@ final class PortalSiteSurvey implements AutoCloseable {
     private final Set<BlockPos> examined = new HashSet<>();
     private PortalPreparationSite repair;
     private int newSiteCursor;
+    private int scans;
     private boolean complete;
     private boolean closed;
 
@@ -32,6 +33,7 @@ final class PortalSiteSurvey implements AutoCloseable {
 
     PortalPreparationSite tick(boolean mayBuild) {
         if (complete) return null;
+        scans++;
         var observed = TargetIndex.query(world, origin, targets, 128, Math.max(1, (radius + 15) / 16), 8);
         int budget = 4;
         for (var seed : observed.hits()) {
@@ -82,6 +84,8 @@ final class PortalSiteSurvey implements AutoCloseable {
         }
     }
     boolean complete() { return complete; }
+    /** 已执行的勘察扫描次数：随规划推进单调增长，进度门卫据此在静默期保持心跳。 */
+    int scans() { return scans; }
     @Override public void close() {
         if (!closed) { closed = true; TargetIndex.unregister(world, targets); }
     }

@@ -27,20 +27,10 @@ final class SemanticGoalContract {
     private SemanticGoalContract() {}
 
     static void validate(Goal goal, Set<String> knownAbilities) {
-        validate(goal, knownAbilities, "goal", false, false);
+        validate(goal, knownAbilities, "goal", false);
     }
 
-    /** 旧等待、取物和烹饪参数曾被宽松接收；保留历史供查询、取消和修订，重新执行仍须通过当前检查。 */
-    static void validateRestored(Goal goal, Set<String> knownAbilities) {
-        validateRestored(goal,knownAbilities,false);
-    }
-
-    /** 检查点把组合任务摊平成步骤保存；恢复这些步骤时仍保留原来的兄弟步骤语义。 */
-    static void validateRestored(Goal goal, Set<String> knownAbilities,boolean storedStep) {
-        validate(goal, knownAbilities, "goal", true, storedStep);
-    }
-
-    private static void validate(Goal goal, Set<String> knownAbilities, String path, boolean restoredHistory,
+    private static void validate(Goal goal, Set<String> knownAbilities, String path,
                                  boolean parentIsSequence) {
         // 不认识的能力或参数名立即报错，错误中带完整位置，方便调用者找到需要修改的字段。
         String ability = goal.ability();
@@ -62,15 +52,15 @@ final class SemanticGoalContract {
         validateObjectKeys(goal.preferences(), withRuntimeAuthorizationKeys(
                         SemanticAbilityCatalog.preferenceNames(ability)),
                 path + ".preferences", ability, "unknown_preference");
-        // acquire_items 在接单前严格检查数量、来源与地点，旧历史仅供恢复查询；真正重新执行仍由适配器再查。
+        // acquire_items 在接单前严格检查数量、来源与地点；真正执行时适配器还会再查一次。
         // craft 没有复用这项专属校验，当前只过通用字段检查，数量值仍在它的执行适配器里宽松转换。
-        if (!restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability)) {
+        if (AcquireAbilityAdapter.ABILITY.equals(ability)) {
             try { AcquireAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_acquisition_contract", path, ability, invalid.getMessage());
             }
         }
-        if (!restoredHistory && CookAbilityAdapter.ABILITY.equals(ability)) {
+        if (CookAbilityAdapter.ABILITY.equals(ability)) {
             try { CookAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_cooking_contract", path, ability, invalid.getMessage());
@@ -78,7 +68,7 @@ final class SemanticGoalContract {
         }
         // 新拾取请求先共用专属解析器核对引用、非空类型数组、整值半径及布尔开路许可；字段显式 null 不按省略处理。
         // 这里仅完成格式和注册表检查，物品是否仍在当前维度与扫描范围，留到创建任务及实际扫描时如实确认。
-        if (!restoredHistory && GeneralAbilityAdapter.COLLECT.equals(ability)) {
+        if (GeneralAbilityAdapter.COLLECT.equals(ability)) {
             try { CollectItemsRequest.parse(goal.parameters()); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_collection_contract", path + ".parameters", ability, invalid.getMessage());
@@ -92,7 +82,7 @@ final class SemanticGoalContract {
                         invalid.getMessage());
             }
         }
-        validateTarget(goal, path, ability, restoredHistory);
+        validateTarget(goal, path, ability);
         validateConstraints(goal, path, ability);
         // 起飞前就检查局部补丁和工况，防止执行中把观察请求误当成开桨或建造。
         if (PhysicsAbilityAdapter.ABILITY.equals(ability)) PhysicsAbilityAdapter.validate(goal);
@@ -108,13 +98,12 @@ final class SemanticGoalContract {
                 throw violation("invalid_chat_contract", path + ".parameters", ability, invalid.getMessage());
             }
             // 管理员命令（/tp、/give 等）默认对 AI 关闭：接单时就拒绝，不让它拿命令当捷径。
-            // 恢复检查点时不查：名单收紧前已经执行过的 /tp 记录只是历史，拦它会锁住整份存档、让所有新任务都接不了；
-            // 被恢复的旧命令若要重新执行，ChatAbilityAdapter 开始执行前仍按当前名单再拒一次。
-            if (!restoredHistory) {
-                try { AgentCommandPolicy.check(message); }
-                catch (IllegalArgumentException refused) {
-                    throw violation("chat_command_not_allowed", path + ".parameters.text", ability, refused.getMessage());
-                }
+            // 这里只约束新提交；恢复检查点不进本方法（恢复校验只做结构与身份），名单收紧前
+            // 已执行过的 /tp 记录只是历史，拦它会锁住整份存档。被恢复的旧命令若要重新执行，
+            // ChatAbilityAdapter 开始执行前仍按当前名单再拒一次。
+            try { AgentCommandPolicy.check(message); }
+            catch (IllegalArgumentException refused) {
+                throw violation("chat_command_not_allowed", path + ".parameters.text", ability, refused.getMessage());
             }
         }
         // 主动寻死的方式与预算必须在接管身体前确定，不能默默放宽未知参数。
@@ -130,7 +119,7 @@ final class SemanticGoalContract {
             try { org.maiwithu.maicraft.core.task.dimension.PortalPreparationPolicy.checkSpoilPolicy(goal.parameters()); }
             catch (IllegalArgumentException invalid) { throw violation("invalid_spoil_policy", path + ".parameters.spoil_policy", ability, invalid.getMessage()); }
         }
-        if (!restoredHistory && WaitAbilityAdapter.ABILITY.equals(ability)) {
+        if (WaitAbilityAdapter.ABILITY.equals(ability)) {
             try { WaitAbilityAdapter.validate(goal); }
             catch (IllegalArgumentException invalid) {
                 throw violation("invalid_wait_contract", path + ".parameters", ability, invalid.getMessage());
@@ -200,11 +189,9 @@ final class SemanticGoalContract {
                 throw violation("invalid_interaction_duration", path + ".parameters", ability, invalid.getMessage());
             }
             // purpose=write 的告示牌文字在计划期定形：缺 text、行数或行长越界都不能接管身体后再被编辑屏丢弃。
-            if (!restoredHistory) {
-                try { GeneralAbilityAdapter.signWriteLines(goal.parameters()); }
-                catch (IllegalArgumentException invalid) {
-                    throw violation("invalid_sign_write_contract", path + ".parameters", ability, invalid.getMessage());
-                }
+            try { GeneralAbilityAdapter.signWriteLines(goal.parameters()); }
+            catch (IllegalArgumentException invalid) {
+                throw violation("invalid_sign_write_contract", path + ".parameters", ability, invalid.getMessage());
             }
         }
 
@@ -233,7 +220,7 @@ final class SemanticGoalContract {
 
         for (int i = 0; i < goal.children().size(); i++) {
             // 组合目标的每个子目标也要经过同样检查，不能把不合法参数藏到子步骤里。
-            validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]", restoredHistory,
+            validate(goal.children().get(i), knownAbilities, path + ".children[" + i + "]",
                     SEQUENCE.equals(ability));
         }
     }
@@ -297,15 +284,10 @@ final class SemanticGoalContract {
         return " '" + key + "' is a goal-level field: write it at goal." + key + ", not inside " + path + ".";
     }
 
-    private static void validateTarget(Goal goal, String path, String ability, boolean restoredHistory) {
+    private static void validateTarget(Goal goal, String path, String ability) {
         Goal.SemanticTarget target = goal.target();
         if (target == null) return;
         String kind = target.kind();
-        // 旧版声明支持这些地点却没有执行；保留原请求供审阅，重新启动时由取物适配器明确拒绝。
-        if (restoredHistory && AcquireAbilityAdapter.ABILITY.equals(ability) && kind != null
-                && Set.of("nearest", "area", "landmark", "prior_result").contains(kind)) return;
-        if (restoredHistory && CookAbilityAdapter.ABILITY.equals(ability) && kind != null
-                && Set.of("nearest", "prior_result").contains(kind)) return;
         Set<String> accepted = SemanticAbilityCatalog.targetKinds(ability);
         if (kind == null || !accepted.contains(kind)) {
             // 地点填错时一次给出允许值；建造直接沿用场地观察，避免角色反复试探当前位置、最近地点和区域。

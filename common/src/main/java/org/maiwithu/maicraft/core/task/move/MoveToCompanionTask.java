@@ -56,7 +56,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private static final long PLANNING_WORK_FUSE_UNITS = 60_000;
     /** 距离最后一次接近目标超过这么长的活动 tick（且工作量已越熔断线），判定这次规划无收敛。 */
     private static final long PLANNING_CONVERGENCE_WINDOW_TICKS = 30 * 20;
-    /** 中转腿准入增量：候选已知格必须比当前站位距目标至少近这么多格，否则不值得花一条腿。 */
+    /** 中转段准入增量：候选已知格必须比当前站位距目标至少近这么多格，否则不值得多走一段。 */
     private static final double KNOWN_CELL_WAYPOINT_MARGIN = 4.0;
 
     private final int bx;
@@ -77,14 +77,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private int initialRemaining = -1;
     /** 唯一一次近距离重试恢复阶梯已用完；此阶梯状态会在挂起期间保留。 */
     private boolean nearRetried;
-    /** 规划收敛熔断触发后唯一一次「井口旁楼梯头」降级腿：先站到目标柱旁一格，再用全新搜索恢复原目标。 */
+    /** 规划收敛熔断触发后唯一一次「井口旁楼梯头」降级行程：先站到目标柱旁一格，再用全新搜索恢复原目标。 */
     private boolean degradedShaftLegTried;
-    /** 当前导航是否为降级腿；到达后恢复原目标并重开规划。 */
+    /** 当前导航是否为降级行程；到达后恢复原目标并重开规划。 */
     private boolean degradedShaftLegActive;
     private boolean worldViewPrepared;
-    /** 已知格中转腿只试一次：熔断或无路失败后先走到对本目标最有增量的已知可站立格，再全新搜索恢复原目标。 */
+    /** 已知格中转段只试一次：熔断或无路失败后先走到对本目标最有增量的已知可站立格，再全新搜索恢复原目标。 */
     private boolean knownCellLegTried;
-    /** 进行中的中转腿目标；到达后清空。非空且 tried=true 表示腿已用过但尚未走完。 */
+    /** 进行中的中转段目标；到达后清空。非空且 tried=true 表示该段已用过但尚未走完。 */
     private BlockPos knownCellLegTarget;
     private long landingBaseline = Long.MAX_VALUE;
     private Map<String,Object> landingFacts = Map.of();
@@ -95,8 +95,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** FIND(就近方块)子系统:扫描/入册/契约/轮换全在组件里,此处只驱动。 */
     private NearestBlockFinder finder;
 
-    /** 船腿:开工时坐在船上就先驾船,靠岸(或搁浅)后接步行。null = 没有/已交棒。 */
+    /** 行船段:开工时坐在船上就先驾船,靠岸(或搁浅)后接步行。null = 没有/已交棒。 */
     private BoatNav boatLeg;
+
+    /** 到达后的自有垫柱回收；非空表示回收阶段进行中或已收场（成功路径收尾注记消费）。 */
+    private PillarRecovery pillarRecovery;
 
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
@@ -111,7 +114,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected void onStart() {
         // 已经坐船且目标适合驾船时先走水路；找某种方块则先扫描，其他目标直接准备导航。
         landingBaseline = LandingAssistPolicy.observation().revision();
-        // 载具处置:坐在船上且有明确去处,先驾船——船腿走到离目标最近的水格,
+        // 载具处置:坐在船上且有明确去处,先驾船——行船段走到离目标最近的水格,
         // 靠岸后接步行(见 tickBoatLeg)。其余情况(矿车没有舵、马的寻路仍按步行
         // 物理算、FIND 要先扫描)直接走步行段;下座驾是步行导航自己的事(PlayerNav)。
         if (player.isPassenger()
@@ -150,7 +153,31 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
         // 已经符合到达条件时不用新建导航，下一次 tick 就可以报告成功。
         if (reached()) return;
+        // 出发前上超预检：只有授权动土（规划器才会垫柱）且目标确在头顶方向时才有意义；
+        // 未授权路径与常规目标行为完全不变（169）。
+        if (r.kind == MoveToTaskRecord.Kind.BLOCK && r.mayAlterTerrain
+                && by > feet().getY() && !targetCellSolid()) {
+            var precheck = TravelUphillPrecheck.evaluate(player.level(), blockTarget, feet().getY());
+            if (precheck.gated()) {
+                Constants.LOG.info(
+                        "[maicraft-task] goto end kind={} result=failed type=NO_PATH feet={}"
+                                + " reason=uphill_precheck verdict={} surface_y={} rise={}",
+                        r.kind, player.blockPosition().toShortString(),
+                        precheck.verdict(), precheck.surfaceY(), precheck.rise());
+                fail("cannot plan an honest route to " + bx + "," + by + "," + bz
+                        + TravelUphillPrecheck.advice(precheck, blockTarget), FailureType.NO_PATH);
+                return;
+            }
+        }
         startWalkingNav();
+    }
+
+    /** 包任务可见的预检入口，供回归直接核对闸门判定；不做任何世界改动。 */
+    TravelUphillPrecheck.Result uphillPrecheck() {
+        return r.kind == MoveToTaskRecord.Kind.BLOCK && r.mayAlterTerrain
+                && by > feet().getY() && !targetCellSolid()
+                ? TravelUphillPrecheck.evaluate(player.level(), blockTarget, feet().getY())
+                : TravelUphillPrecheck.Result.ALLOW;
     }
 
     /** 这次 goto 的地形许可:模型点头了才开路,否则只走不改。四处建导航都从这儿取。 */
@@ -161,7 +188,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     }
 
     /**
-     * 步行段的启动:预算、租约、建导航。开工时走它,船腿靠岸后接力也走它——
+     * 步行段的启动:预算、租约、建导航。开工时走它,行船段靠岸后接力也走它——
      * 两个入口一份逻辑。
      */
     private void startWalkingNav() {
@@ -264,6 +291,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected TaskState onTick() {
         // 先处理已经开始的交通和导航，再判断是否到达；飞行刚碰地、电梯刚到楼层，都可能还没完成收尾。
         observeLanding();
+        // 到达后的垫柱回收阶段：导航已停，只剩逐格下拆；终态在这里落定。
+        if (pillarRecovery != null) {
+            return tickPillarRecovery();
+        }
         // 现有导航必须先消费其原生完成回执，之后任务清理才可停止它；仅仅碰到船舱地板或喷气背包触地，不代表退出或模式恢复已经完成。
         if (nav == null && reached()) return successAtBody();
         // 只有本次移动开始前明确退出旧页面；后续导航换装备或交通准备自己的菜单不被每刻抢关。
@@ -328,10 +359,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             // 规划从原站位不收敛时，先试一次已知格中转：例如本会话亲自挖出并站立过的井底格，
             // 从那里恢复原目标比在远处扩展搜索有增量得多。无候选（未交付已知格）时自然落空。
             if (tryKnownCellWaypointLeg("planning did not converge")) return TaskState.RUNNING;
-            // 已知格走不通再给一次预算内的降级腿（109/110 同型教训：目标在脚下竖井底时，搜索从
+            // 已知格走不通再给一次预算内的降级行程（同型教训：目标在脚下竖井底时，搜索从
             // 原站位出发的所有下降边都被准入闸门诚实拒绝，绕行楼梯的空间它自己走不完）：
             // 先站到目标柱旁两格的「楼梯头」，再用全新搜索恢复原目标——起点离开井口柱后，
-            // 楼梯下掘不再与被拒的直降前沿竞争。只试一次，降级腿单独计量熔断工作量。
+            // 楼梯下掘不再与被拒的直降前沿竞争。只试一次，降级行程单独计量熔断工作量。
             if (!degradedShaftLegTried && r.kind == MoveToTaskRecord.Kind.BLOCK
                     && by <= feet().getY() - 3 && r.mayAlterTerrain) {
                 degradedShaftLegTried = true;
@@ -340,7 +371,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 lastApproachTick = now;
                 BlockPos head = staircaseHeadCell();
                 Constants.LOG.info(
-                        "[maicraft-task] goto 规划不收敛，先走井口旁降级腿 head={} 目标={},{},{}",
+                        "[maicraft-task] goto 规划不收敛，先走井口旁降级行程 head={} 目标={},{},{}",
                         head.toShortString(), bx, by, bz);
                 stopNav();
                 r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
@@ -363,11 +394,11 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
-                // 中转腿走到已知格后不在此判到达：站稳即停掉腿导航，用全新搜索恢复原目标。
+                // 中转段走到已知格后不在此判到达：站稳即停掉该段导航，用全新搜索恢复原目标。
                 if (knownCellLegTarget != null) {
                     if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
                     Constants.LOG.info(
-                            "[maicraft-task] goto 已知格中转腿完成 waypoint={} 恢复原目标 {},{},{}",
+                            "[maicraft-task] goto 已知格中转段完成 waypoint={} 恢复原目标 {},{},{}",
                             knownCellLegTarget.toShortString(), bx, by, bz);
                     knownCellLegTarget = null;
                     stopNav();
@@ -375,7 +406,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     yield TaskState.RUNNING;
                 }
                 if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
-                // 降级腿到头：站上楼梯头后用全新搜索恢复原目标；新腿的熔断工作量单独计量。
+                // 降级行程到头：站上楼梯头后用全新搜索恢复原目标；新一段的熔断工作量单独计量。
                 if (degradedShaftLegActive) {
                     degradedShaftLegActive = false;
                     stopNav();
@@ -387,6 +418,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 // 导航说路线到头了，还要按玩家实际身体检查；exact 任务不能用附近的落脚点替代。
                 if (r.requiresStrictStance()) {
                     if (reached()) {
+                        if (beginPillarRecovery()) yield TaskState.RUNNING;
                         yield successAtBody();
                     }
                     if (strictLandingInProgress()) {
@@ -406,6 +438,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     fail(blockedMessage("the route ended outside the supported destination region"), FailureType.NO_PATH);
                     yield TaskState.FAILED;
                 }
+                if (beginPillarRecovery()) yield TaskState.RUNNING;
                 yield successAtBody();
             }
             case FAILED -> {
@@ -414,7 +447,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     fail(blockedMessage(nav.failReason()), nav.failType());
                     yield TaskState.FAILED;
                 }
-                // 降级腿自身打不通：不再绕路，按原目标直接收场并给出场景化出路。
+                // 降级行程自身打不通：不再绕路，按原目标直接收场并给出场景化出路。
                 if (degradedShaftLegActive) {
                     String reason = nav.failReason();
                     stopNav();
@@ -439,6 +472,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 }
                 // 否则按地形允许的最近位置处理，再判断是否满足教学性成功或必须失败。
                 if (!r.requiresStrictStance() && closeEnoughToSucceed()) {
+                    if (beginPillarRecovery()) yield TaskState.RUNNING;
                     yield successAtBody();
                 }
                 // 旧兼容逻辑允许水平误差为零的非精确目标再试一次附近三格；这可能放宽调用者明确给出的零误差。
@@ -472,13 +506,46 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     }
 
     /**
-     * 船腿的一刻:驾船朝目标推进,终态(靠岸或搁浅)都走同一条接力——到不了目标的
-     * 水路不算失败,只是"这条腿到此为止",剩下的路归步行段(步行导航起步自会下船)。
+     * 到达后进入垫柱回收阶段：从旅程放置账里认领脚下连续自有柱，交给逐格下拆驱动。
+     * 没有垫过柱（或脚下不是自有柱）时返回 false，收尾照旧。回收尽力而为：
+     * 拆不动时按 RESIDUE 声明剩余垫块，到达事实不被回收成败否决。
+     */
+    private boolean beginPillarRecovery() {
+        if (pillarRecovery != null) return false;
+        if (!r.mayAlterTerrain || !player.onGround()) return false;
+        var forbidden = terrain().embeddedForbiddenBodyCells();
+        stopNav();   // 先把最后一段导航的地形账并入旅程账，再据此认领柱列。
+        var column = PillarRecovery.ownPillarUnder(journeyPlacedCells(), feet(), Integer.MAX_VALUE);
+        if (column.isEmpty()) return false;
+        pillarRecovery = new PillarRecovery(player, column,
+                at -> player.level().isLoaded(at),
+                forbidden,
+                terrain());
+        Constants.LOG.info(
+                "[maicraft-task] goto 到达后回收自有垫柱 column_top={} blocks={}",
+                column.getFirst().toShortString(), column.size());
+        return true;
+    }
+
+    /** 回收阶段的一刻：续期截止时间并驱动下拆，终态后带注记按成功收场。 */
+    private TaskState tickPillarRecovery() {
+        r.extendDeadlineTo(player.level().getGameTime() + PROGRESS_LEASE_TICKS);
+        var status = pillarRecovery.tick();
+        if (status == PillarRecovery.Status.RUNNING) return TaskState.RUNNING;
+        Constants.LOG.info(
+                "[maicraft-task] goto 垫柱回收收场 status={} feet={}",
+                status, player.blockPosition().toShortString());
+        return successAtBody();
+    }
+
+    /**
+     * 行船段的一刻:驾船朝目标推进,终态(靠岸或搁浅)都走同一条接力——到不了目标的
+     * 水路不算失败,只是"这段行船到此为止",剩下的路归步行段(步行导航起步自会下船)。
      * 目标就在水上时她留在船里,不往水里跳。船留在原地,那是她的船,不是垃圾。
      */
     private TaskState tickBoatLeg() {
         // 船走不下去时可以停船后换步行继续；整项移动是否成功，仍要按总目的地判断。
-        // 船腿的续约与步行段同一制式:还在消耗航线就把期限保持在租约窗口里
+        // 行船段的续约与步行段同一制式:还在消耗航线就把期限保持在租约窗口里
         if (boatLeg.progressing()) {
             long now = player.level().getGameTime();
             r.extendDeadlineTo(now + PROGRESS_LEASE_TICKS);
@@ -493,12 +560,12 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         boatLeg = null;
         if (reached()) {
             Constants.LOG.info(
-                    "[maicraft-task] 船腿结束({}),目标已在船下 feet={}", how,
+                    "[maicraft-task] 行船段结束({}),目标已在船下 feet={}", how,
                     player.blockPosition().toShortString());
             return successAtBody();
         }
         Constants.LOG.info(
-                "[maicraft-task] 船腿结束({}),接步行 feet={}", how,
+                "[maicraft-task] 行船段结束({}),接步行 feet={}", how,
                 player.blockPosition().toShortString());
         startWalkingNav();
         return TaskState.RUNNING;
@@ -530,9 +597,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     }
 
     /**
-     * 已知格中转腿：从任务单交付的已知可站立位置里挑「离目标最近且比当前站位有明显增量」的一格，
+     * 已知格中转段：从任务单交付的已知可站立位置里挑「离目标最近且比当前站位有明显增量」的一格，
      * 先走到那里，再用全新搜索恢复原目标。井底是本会话亲自挖出并站立过的格子时，规划器不必把它
-     * 当陌生埋藏点从头搜。只试一次；腿打不通就诚实失败，不自动换格重试。
+     * 当陌生埋藏点从头搜。只试一次；这段打不通就诚实失败，不自动换格重试。
      */
     private boolean tryKnownCellWaypointLeg(String reason) {
         if (knownCellLegTried || r.knownStandableCells().isEmpty()) return false;
@@ -560,17 +627,17 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         nav = navigationOptions(PlayerNav.toGoal(player, () -> NavGoal.exact(waypoint), WALK_SPEED,
                 () -> waypointReached(waypoint), terrain()));
         Constants.LOG.info(
-                "[maicraft-task] goto 已知格中转腿启动 reason={} waypoint={} from={}",
+                "[maicraft-task] goto 已知格中转段启动 reason={} waypoint={} from={}",
                 reason, waypoint.toShortString(), from.toShortString());
         return true;
     }
 
-    /** 中转腿的到达判定：脚确实落在已知格且有支撑，与任务目标无关。 */
+    /** 中转段的到达判定：脚确实落在已知格且有支撑，与任务目标无关。 */
     private boolean waypointReached(BlockPos waypoint) {
         return player.onGround() && waypoint.equals(feet());
     }
 
-    /** 方块格到目标格的中心距离，供中转腿比较增量。 */
+    /** 方块格到目标格的中心距离，供中转段比较增量。 */
     private double cellDistanceToTarget(BlockPos cell) {
         double dx = bx - cell.getX();
         double dy = by - cell.getY();
@@ -578,7 +645,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    /** 失败回执里对中转腿的交代：试过什么、走到了哪一步。 */
+    /** 失败回执里对中转段的交代：试过什么、走到了哪一步。 */
     private String knownCellLegSummary() {
         if (!knownCellLegTried) return "";
         return " A known standable cell waypoint leg"
@@ -725,7 +792,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         data.put("planning_work_units", planningWorkHighWater);
         data.put("planning_work_fuse_units", PLANNING_WORK_FUSE_UNITS);
         data.put("degraded_shaft_leg_tried", degradedShaftLegTried);
-        // 已知格中转的对账：任务单交付了多少已知格、腿是否启用、启用了哪一格。
+        // 已知格中转的对账：任务单交付了多少已知格、中转段是否启用、启用了哪一格。
         data.put("known_standable_cells_supplied", r.knownStandableCells().size());
         if (knownCellLegTried) data.put("known_cell_waypoint_tried", true);
         if (knownCellLegTarget != null) {
@@ -756,6 +823,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             data.put("arrival_direction", verdict.direction());
         }
         if (landingProtectionUnverified) data.put("landing_protection_unverified", true);
+        // 垫柱回收对账：回收了哪些格、还剩哪些格；调用方靠它复验登顶柱没有留在世界里。
+        if (pillarRecovery != null) {
+            data.put("pillar_recovery", pillarRecovery.evidence());
+        }
         return data;
     }
 
@@ -773,6 +844,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     @Override
     protected String successMessage() {
         int gy = player.blockPosition().getY();
+        // 垫柱回收注记跟在到达事实之后：回收成立报净变化，残留时点名列出坐标与去向。
+        String recovery = pillarRecovery == null ? "" : pillarRecovery.note();
         return switch (r.kind) {
             case BLOCK -> r.requiresStrictStance()
                     ? "reached the exact cell " + bx + "," + by + "," + bz + "." + landingNote()
@@ -791,7 +864,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         : "arrived beside " + r.block + " at " + n.getX() + "," + n.getY()
                                 + "," + n.getZ() + " — within reach to use." + landingNote();
             }
-        };
+        } + recovery;
     }
 
     @Override
@@ -826,6 +899,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (boatLeg != null) {
             boatLeg.stop();   // 中途被取消/让位:收桨,别让船带着按下的前进键漂走
             boatLeg = null;
+        }
+        // 回收阶段被抢占或取消时停掉进行中的下拆；已确认的拆除由驱动结算交账，剩余垫块按残留声明。
+        if (pillarRecovery != null) {
+            pillarRecovery.stop();
         }
     }
 
@@ -879,7 +956,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 + "，剩余约 " + AbstractCompanionTask.quantizedRemaining(repDistance()) + " 格";
     }
 
-    /** 降级腿的楼梯头：目标柱旁两格、当前脚位高度；起点离开井口柱后，楼梯下掘的扩展前沿不再被直降拒绝支配。 */
+    /** 降级行程的楼梯头：目标柱旁两格、当前脚位高度；起点离开井口柱后，楼梯下掘的扩展前沿不再被直降拒绝支配。 */
     private BlockPos staircaseHeadCell() {
         int offX = offsetAxisTowardPlayer(player.getX(), bx);
         int offZ = offsetAxisTowardPlayer(player.getZ(), bz);

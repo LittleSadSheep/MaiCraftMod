@@ -27,6 +27,9 @@ public final class GoalCheckpointCompatibilityTest {
                 new Goal.SemanticTarget("prior_result", null, null, null),
                 "{\"item_id\":\"minecraft:iron_ingot\"}", "{}", List.of(), List.of()));
         verifySequenceSteps();
+        verifyAdminChatHistory();
+        verifyUnknownAbilityNamesOffender();
+        verifyBlockedRecoveryExits();
         System.out.println("GoalCheckpointCompatibilityTest: passed");
     }
 
@@ -91,6 +94,106 @@ public final class GoalCheckpointCompatibilityTest {
         field("bodyAttached").set(runtime, true);
         runtime.cancelRestored(restored, 102);
         check(restored.getState() == TaskState.CANCELLED, "恢复的旧目标仍可取消");
+    }
+
+    /**
+     * 旧检查点里的管理员命令 chat 任务（历史上合法注入，后来 559bbea5 把命令门禁默认关闭）：
+     * 恢复校验不得拿当前政策一票否决整份历史；同一目标的新提交仍被命令政策拒绝，普通提交照常可用。
+     */
+    private static void verifyAdminChatHistory() throws Exception {
+        var runtime = newRuntime("6".repeat(64), "admin-chat-");
+        var identity = identity(runtime);
+        var store = (IntentStateStore) field("stateStore").get(runtime);
+        var goal = new Goal("maicraft:chat", "旧批次测试注入", null,
+                "{\"text\":\"/tp @s 100 64 100\"}", "{}", List.of(), List.of());
+        var plan = Plan.compile(goal, 0);
+        var original = new IntentTaskRecord(UUID.randomUUID(), plan.id(), goal, identity.key());
+        store.saveAsync(identity, IntentStateCodec.encode(identity.key(), List.of(plan), List.of(original),
+                Map.of(), List.of())).join();
+        invokeRestore(runtime, 100L, "session_start");
+        runtime.requireRecoveredState();
+        var restored = runtime.task(original.externalId());
+        check(restored != null && restored.paused() && restored.restoredDetached(),
+                "管理员命令 chat 历史应以暂停状态在场");
+        check(restored.goal().parameters().equals(goal.parameters()), "旧 chat 请求内容原样保留");
+        try {
+            runtime.compile(goal, 101);
+            throw new AssertionError("同一命令目标的新提交仍须被命令政策拒绝");
+        } catch (SemanticContractException expected) {
+            check("chat_command_not_allowed".equals(expected.violationCode()),
+                    "新提交拒绝码应为 chat_command_not_allowed");
+        }
+        runtime.compile(new Goal("maicraft:chat", "普通问候", null,
+                "{\"text\":\"hello\"}", "{}", List.of(), List.of()), 102);
+    }
+
+    /** 恢复失败（此处以旧版本能力名为例）必须点名肇事记录：日志与 state_restored 事件都携带 id 与原因。 */
+    private static void verifyUnknownAbilityNamesOffender() throws Exception {
+        var runtime = newRuntime("5".repeat(64), "offender-id-");
+        var identity = identity(runtime);
+        var store = (IntentStateStore) field("stateStore").get(runtime);
+        var plan = Plan.compile(new Goal("maicraft:vanished_ability", "旧版本能力", null,
+                "{}", "{}", List.of(), List.of()), 0);
+        UUID offenderId = plan.id();
+        store.saveAsync(identity, IntentStateCodec.encode(identity.key(), List.of(plan), List.of(),
+                Map.of(), List.of())).join();
+        invokeRestore(runtime, 100L, "session_start");
+        try {
+            runtime.requireRecoveredState();
+            throw new AssertionError("未知能力的历史应阻断恢复并保留检查点");
+        } catch (IllegalStateException expected) { }
+        boolean named = false;
+        for (var element : runtime.attention(0, 64).getAsJsonArray("events")) {
+            var event = element.getAsJsonObject();
+            if (!"state_restored".equals(event.get("type").getAsString())) continue;
+            var data = event.getAsJsonObject("data");
+            named = "recovery_blocked".equals(data.get("status").getAsString())
+                    && data.get("recovery_failure").getAsString().contains("unknown_ability")
+                    && data.has("offending_record_id")
+                    && offenderId.toString().equals(data.get("offending_record_id").getAsString());
+        }
+        check(named, "state_restored 事件应携带失败原因与肇事计划编号");
+    }
+
+    /** 恢复受阻期间的取消与重生交接必须可达：取消是结算记录，重生依赖已保留的旧检查点，都不推进身体。 */
+    private static void verifyBlockedRecoveryExits() throws Exception {
+        var runtime = newRuntime("4".repeat(64), "blocked-exit-");
+        var identity = identity(runtime);
+        var store = (IntentStateStore) field("stateStore").get(runtime);
+        var goal = new Goal("maicraft:wait_for_condition", "旧版等待", null,
+                "{\"after_s\":1.5}", "{}", List.of(), List.of());
+        var plan = Plan.compile(goal, 0);
+        var original = new IntentTaskRecord(UUID.randomUUID(), plan.id(), goal, identity.key());
+        store.saveAsync(identity, IntentStateCodec.encode(identity.key(), List.of(plan), List.of(original),
+                Map.of(), List.of())).join();
+        invokeRestore(runtime, 100L, "session_start");
+        runtime.requireRecoveredState();
+        var restored = runtime.task(original.externalId());
+        // 模拟恢复之后配置或版本再度收紧：恢复闸落下，但取消与重生出口不得被一并卡死。
+        store.preserveUnrestored(identity);
+        field("bodyAttached").set(runtime, true);
+        runtime.cancelRestored(restored, 102);
+        check(restored.getState() == TaskState.CANCELLED, "恢复受阻时旧任务仍可取消");
+        check(runtime.prepareRespawnHandoff(), "恢复受阻时重生交接必须放行：旧检查点已原样保留");
+    }
+
+    private static IntentRuntime newRuntime(String identityKey, String directoryPrefix) throws Exception {
+        var constructor = IntentRuntime.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        var runtime = constructor.newInstance();
+        field("stateIdentity").set(runtime,
+                new StateIdentity(identityKey, Files.createTempDirectory(directoryPrefix)));
+        return runtime;
+    }
+
+    private static StateIdentity identity(IntentRuntime runtime) throws Exception {
+        return (StateIdentity) field("stateIdentity").get(runtime);
+    }
+
+    private static void invokeRestore(IntentRuntime runtime, long gameTime, String reloadCause) throws Exception {
+        var restore = IntentRuntime.class.getDeclaredMethod("restoreBound", long.class, String.class);
+        restore.setAccessible(true);
+        restore.invoke(runtime, gameTime, reloadCause);
     }
 
     private static Field field(String name) throws Exception {

@@ -27,6 +27,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -602,7 +603,9 @@ public final class Interaction {
             fallingThrough = true;
             return false;
         }
-        failReason = action + " was not confirmed: " + detail;
+        // 167：失败回执必须携带提交现场的插桩事实，否则“点击被谁拒了”只能靠猜。
+        String trace = lastUseReceipt.useOnTrace();
+        failReason = action + " was not confirmed: " + detail + (trace.isEmpty() ? "" : "; " + trace);
         failType = FailureType.UNKNOWN;
         hardFail = true;
         return false;
@@ -630,12 +633,24 @@ public final class Interaction {
                 ? NativeConfirmation.blockChanged(
                         adjacent, player.level().getBlockState(adjacent))
                 : NativeConfirmation.pending();
+        // 告示牌右键的原生效果是打开编辑屏，四项世界观察全都察觉不到；把屏幕出现补进确认依据，
+        // 否则点击注定以"未确认"超时收场，后续写字阶段根本拿不到执行权。
+        NativeConfirmation signEditor = clickedBefore.getBlock() instanceof SignBlock
+                ? NativeConfirmation.signEditorScreenOpened()
+                : NativeConfirmation.pending();
+        // 打火石把落格的火或传送门方块补进确认依据；只有耐久变化时确认虽可通过，
+        // 火是否真实出现仍由点火对账（expectIgnition）如实裁决，不在这里改写结论。
+        NativeConfirmation ignition = heldBefore.is(net.minecraft.world.item.Items.FLINT_AND_STEEL)
+                ? NativeConfirmation.ignitionWorldEffect(clicked.relative(hit.getDirection()))
+                : NativeConfirmation.pending();
         return NativeConfirmation.anyOf(
                 wheelMountUse == null ? NativeConfirmation.pending() : wheelMountUse,
                 NativeConfirmation.blockChanged(clicked, clickedBefore),
                 adjacentChanged,
                 NativeConfirmation.heldItemChanged(usedHand, heldBefore),
-                NativeConfirmation.menuChanged(beforeMenu));
+                NativeConfirmation.menuChanged(beforeMenu),
+                signEditor,
+                ignition);
     }
 
     private NativeConfirmation itemUseConfirmation(InteractionHand usedHand, ItemStack heldBefore) {
@@ -668,6 +683,18 @@ public final class Interaction {
         var evidence = new LinkedHashMap<String, Object>(Map.of("submission_attempted", true, "native_action_status", last.status().name(),
                 "native_action_kind", last.kind().name(), "outcome_uncertain", uncertain,
                 "mechanical_retry_allowed", last.status() == NativeActionReceipt.Status.CONFIRMED_NOT_APPLIED));
+        // 167 插桩：提交现场（点击面、客户端预测结果、预测包是否发出）与结算后的落格权威状态
+        // （客户端已在服务器确认后校正）一起进证据，实机回执可直接对出服务端对这次点击的处理结果。
+        String trace = last.useOnTrace();
+        if (!trace.isEmpty()) evidence.put("use_on_trace", trace);
+        if (last.kind() == NativeActionReceipt.Kind.USE_BLOCK && submittedBlockHit != null) {
+            // 提交格命中不等于面正确：落格与门框效应都发生在被点面的相邻格，面必须可对账。
+            evidence.put("submitted_face", submittedBlockHit.getDirection().getName());
+            BlockPos cell = submittedBlockHit.getBlockPos().relative(submittedBlockHit.getDirection());
+            evidence.put("settlement_placement_cell", cell.toShortString() + "="
+                    + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(
+                            player.level().getBlockState(cell).getBlock()));
+        }
         // 完成回执保留轮座自己的前后观察，规划者据此跳过已安装轮胎，避免再次点击把它取下。
         if (wheelMountUse != null) evidence.put("wheel_mount_observation", wheelMountUse.evidence());
         return evidence;

@@ -228,6 +228,13 @@ final class BuildPlacementAccessDrive {
         if (originalReturnFailure != null) data.put("original_return_failure", originalReturnFailure);
         if (recovery != null) data.put("local_recovery", recovery.evidence());
         if (search != null) { data.put("reachable_stances", search.visited()); data.put("checked_stances", search.checked()); }
+        // 零出手失败时逐闸点名：每个被拒站位是被哪道闸、在哪个坐标拒掉的，不留无名全拒。
+        if (search != null && !search.accepted()) {
+            data.put("stance_rejection_gates", search.gateCounts());
+            data.put("stance_rejection_samples", search.gateSamples());
+            if (!search.attachmentNeighbors().isEmpty())
+                data.put("target_attachment_neighbors", search.attachmentNeighbors());
+        }
         if (search != null) data.put("rejected_post_placement_returns", search.rejectedReturns());
         // 锚点未对齐时也公开实际身体与目标的差异，不能只留下笼统的“贴边失败”而丢失半阶高度证据。
         if (anchorAlignment != null) data.put("anchor_alignment", anchorAlignment.evidence());

@@ -63,7 +63,7 @@ public final class CookingPrerequisiteChainTest {
             for (boolean network : List.of(true, false)) {
                 var planner = new CookingRecipePlanner(w.game.player, request("smooth_stone", network
                         ? List.of(Source.WIRELESS, Source.COOK) : List.of(Source.INVENTORY, Source.COOK)));
-                planner.observeNearbyBlocks(); var choice = planner.fuelChoice(planner.candidates().getFirst(), Items.COAL, 12);
+                planner.observeNearbyBlocks(); var choice = planner.fuelChoice(planner.scan().usable().getFirst(), Items.COAL, 12);
                 check((choice.preparationCost() < CookingRecipePlanner.UNAVAILABLE_COST) == network, "stock visibility must follow declared source permissions");
             }
             check(w.game.inventory.isEmpty(), "observed network stock is not a carried-item effect");

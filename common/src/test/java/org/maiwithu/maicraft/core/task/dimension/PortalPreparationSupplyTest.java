@@ -5,6 +5,8 @@ import static org.maiwithu.maicraft.core.task.dimension.NetherPortalFrameTest.ch
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 import org.maiwithu.maicraft.core.task.acquire.SemanticAcquireTaskRecord;
@@ -15,6 +17,14 @@ import org.maiwithu.maicraft.task.TaskState;
 
 public final class PortalPreparationSupplyTest {
     public static void main(String[] args) throws Exception {
+        // 临时通道候选必须与浇筑模具/站台共用同一份清单：泥土就地可取也参与补台（148），原木等可燃方块有意排除（通道邻岩浆会被点燃）。
+        check(PortalPreparationSupplies.SUPPORT_ALTERNATIVES.equals(PortalCastingStep.SUPPORTS),
+                "temporary access candidates must share the casting supports list");
+        check(PortalPreparationSupplies.SUPPORT_ALTERNATIVES.contains(Items.DIRT),
+                "dirt counts toward the temporary access requirement");
+        check(PortalPreparationSupplies.SUPPORT_ALTERNATIVES.stream()
+                        .noneMatch(item -> item.builtInRegistryHolder().is(ItemTags.LOGS)),
+                "flammable blocks must never be temporary access candidates");
         for (boolean needsDimension : new boolean[]{false, true}) {
             try (var world = new InteractionWorldTestHarness()) {
                 var policy = new PortalPreparationPolicy(true, true, false, 128, MaterialPolicy.INVENTORY_ONLY, List.of(), List.of());
@@ -47,6 +57,11 @@ public final class PortalPreparationSupplyTest {
                 if (needsDimension) check(result.data().get("allowed_dimensions").equals(List.of("minecraft:the_nether")),
                         "progression can select a supply dimension from the retained evidence");
                 check(world.blockUses() == 0 && world.itemUses() == 0, "unresolved materials cannot consume activation items");
+                // 失败回执必须点名候选与需求数，调用方据此备料，不靠试错补料（148）。
+                @SuppressWarnings("unchecked") var blocked = (Map<String, Object>) result.data().get("blocked_facts");
+                check(blocked != null && blocked.get("supply_candidates") instanceof List<?> candidates
+                        && !candidates.isEmpty() && blocked.get("supply_required") instanceof Integer required && required > 0,
+                        "supply failure must name accepted candidates and required count");
             }
         }
         System.out.println("PortalPreparationSupplyTest: typed dimension requirements and inventory proof passed");

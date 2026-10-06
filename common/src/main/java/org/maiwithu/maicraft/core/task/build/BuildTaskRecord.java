@@ -30,6 +30,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.StandingAndWallBlockItem;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.Rotation;
@@ -76,6 +77,11 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     /** 建造完成后保留的位置，让下一步能引用“刚建好的地方”。 */
     private Position verifiedPosition;
     private List<BlockPos> protectedNavigationCells = List.of();
+    /**
+     * 计划自注册的导航保护：保护名单就是自家目标格（门框类计划把整圈框登记为导航保护）。
+     * 只有这种名单可以对目标格豁免继承保护；其他流程传入的保护格即使恰好是目标格也照旧全量生效。
+     */
+    private boolean selfRegisteredNavigationProtection;
     private Predicate<LocalPlayer> preflightGuard = player -> true;
     private BiPredicate<LocalPlayer, BlockPos> mutationGuard = (player, pos) -> true;
     private BiConsumer<LocalPlayer, BlockPos> confirmedMutation = (player, pos) -> {};
@@ -179,6 +185,7 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
         destination.observedMachineEdits = observedMachineEdits;
         destination.fixedMachineModification = fixedMachineModification;
         destination.declaredMachineEdits = declaredMachineEdits;
+        destination.selfRegisteredNavigationProtection = selfRegisteredNavigationProtection;
         if (hasExecutionGuards) destination.executionGuards(protectedNavigationCells,
                 preflightGuard, mutationGuard, confirmedMutation);
     }
@@ -196,6 +203,10 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
     }
 
     List<BlockPos> protectedNavigationCells() { return protectedNavigationCells; }
+
+    /** 标记保护名单来自计划自注册（名单即自家目标格）；施工任务据此决定目标格能否豁免继承保护。 */
+    public void selfRegisteredNavigationProtection(boolean value) { this.selfRegisteredNavigationProtection = value; }
+    public boolean selfRegisteredNavigationProtection() { return selfRegisteredNavigationProtection; }
     boolean preflightGuardMatches(LocalPlayer player) { return preflightGuard.test(player); }
     boolean mutationGuardMatches(LocalPlayer player, BlockPos pos) { return mutationGuard.test(player, pos); }
     boolean hasExecutionGuards() { return hasExecutionGuards; }
@@ -559,6 +570,8 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
         // 成品验收：新规则只逐项检查明确要求的最终属性；旧入口继续按精确属性和兼容设置判断。
         public boolean matches(BlockState state) {
+            // 点击后核验与终局验收都走这里；立式/墙式双形态物品落成另一变体同样算本格完成。
+            if (attachableVariantAccepts(state)) return true;
             if (finalProperties != null) return matchesProperties(state, finalProperties);
             if (!matchesExactProperties(state)) return false;
             if (itemPlace) {
@@ -572,19 +585,44 @@ public final class BuildTaskRecord extends TaskRecord implements InternalPositio
 
         // 新规则下，一次放置先满足朝向等摆放属性；门是否打开等最终状态留给施工结束后处理。
         public boolean acceptsPlacedState(BlockState state) {
+            if (state == null) return false;
             if (finalProperties != null) {
                 var placement = finalProperties.stream().filter(name -> BuildValidity.isPlacementProperty(
                         desiredState.getBlock().getStateDefinition().getProperty(name))).collect(Collectors.toSet());
-                return matchesProperties(state, placement);
+                return matchesProperties(state, placement) || attachableVariantAccepts(state);
             }
-            return matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true);
+            if (matchesExactProperties(state) && BuildValidity.valid(state, desiredState, true)) return true;
+            return attachableVariantAccepts(state);
+        }
+
+        /**
+         * 立式/墙式共用的物品（火把、灯笼、旗、头颅等）由原生放置按点击面在两个方块之间分派，
+         * 图纸通常只以其中一个为锚。预测按立式、实际落成墙式（或反过来）落在同一格都是本格完成；
+         * 不作这层识别，贴墙放置会在点击前预检与放置核验两处被判失败——167 实机
+         * 「火把出手成功但方块永不出现」与站位全拒的定因之一。精确蓝图对普通格也标
+         * strictIdentity，但贴附双形态是原生物品的正确结果而不是类型漂移；只有作者真的
+         * 点名了属性（exact/final 非空）时才维持原口径，不替作者扩大验收范围。
+         */
+        private boolean attachableVariantAccepts(BlockState state) {
+            if (state == null
+                    || !(item instanceof StandingAndWallBlockItem)
+                    || !exactProperties.isEmpty()
+                    || (finalProperties != null && !finalProperties.isEmpty())) return false;
+            // 原版把立式与墙式两个方块都注册到同一物品（两者的 Block.asItem 相同）；
+            // 预测与真实落成只能是这两个方块之一，落入另一形态同样完成本格。
+            return state.getBlock().asItem() == item;
         }
 
         /**
          * 新规则下，现场已有同种方块就先复用，不因为状态不同额外备料或拆换；明确要求的属性仍要在收尾时验收。
+         * 点名属性时维持放置阶段口径只看方块种类（门的开合等最终状态留给收尾）；未点名属性时
+         * 走成品口径，立式/墙式双形态物品落成另一变体同样算本格完成（与点击后核验一致）。
          */
         public boolean constructionMatches(BlockState state) {
-            return finalProperties == null ? matches(state) : state != null && state.getBlock() == desiredState.getBlock();
+            if (state == null) return false;
+            if (finalProperties != null && !finalProperties.isEmpty())
+                return state.getBlock() == desiredState.getBlock();
+            return matches(state);
         }
 
         private boolean matchesProperties(BlockState state, Set<String> properties) {

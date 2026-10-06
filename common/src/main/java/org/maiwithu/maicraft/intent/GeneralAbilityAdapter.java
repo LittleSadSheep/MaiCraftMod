@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.core.PlayerInv;
+import org.maiwithu.maicraft.core.combat.AttackPlan;
 import org.maiwithu.maicraft.core.inventory.StockEvidence;
 import org.maiwithu.maicraft.core.task.acquire.WorkToolPreparation;
 import org.maiwithu.maicraft.core.task.container.SemanticContainerTaskRecord;
@@ -1033,9 +1034,17 @@ public final class GeneralAbilityAdapter {
         if (safe.isEmpty()) {
             JsonObject facts = new JsonObject();
             facts.add("available_food", foodFacts(choices));
-            return decision(goal, choices.isEmpty()
+            // 血量已在战斗拒战线下且饥饿低于原版自然回血线（18）时，「进食回血 → 有体力作战」互锁，
+            // 回执要点破处境；suicide 死亡重置作为可授权的恢复手段只出现在 recover 选项里，不变成默认动作。
+            boolean interlocked = player.getFoodData().getFoodLevel() < 18 && AttackPlan.belowRefusalLine(player);
+            String situation = interlocked
+                    ? "the food-combat recovery loop is interlocked: health is at or below the combat refusal line"
+                      + " and hunger is below the natural-regeneration line (18), so hostile combat stays refused"
+                      + " until food is obtained. "
+                    : "";
+            return decision(goal, situation + (choices.isEmpty()
                             ? "There is no food in the inventory."
-                            : "Only foods with effects are available; the safe-food policy will not choose one silently.",
+                            : "Only foods with effects are available; the safe-food policy will not choose one silently."),
                     List.of(option("recover", "Acquire ordinary effect-free food, then retry. When starving and blocked from acquiring, consider the maicraft:suicide death reset (keepInventory confirmed) or travel to a known food point."),
                             option("retry", "Name a specific food and set allow_effects=true if its effects are intended."),
                             option("cancel", "Cancel consumption.")), facts);

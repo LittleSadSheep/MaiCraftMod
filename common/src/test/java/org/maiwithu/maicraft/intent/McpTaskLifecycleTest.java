@@ -47,7 +47,64 @@ public final class McpTaskLifecycleTest {
         fullHistoryRejectsBeforeAcceptingMoreWork();
         networkCancellationRespectsClientDispatch();
         progressEventsFollowScoreboard();
+        bodyHazardHeartbeatFollowsPosition();
+        wrapperPlanningHeartbeat();
         System.out.println("McpTaskLifecycleTest: passed");
+    }
+
+    /**
+     * 编译型任务（包装任务）的规划期心跳：子任务嵌在 child 键下的 phase/calc 上提到顶层后
+     * 门卫照常认识它；phase 恒定、calc 单调增长时，停滞期每过地板间隔仍有一条事件可发，
+     * 不再因顶层无标准键而整段静默。
+     */
+    private static void wrapperPlanningHeartbeat() throws Exception {
+        // 上提规则本身：顶层无 phase 且 child 报出规划键时上提；顶层已有 phase 不覆盖，
+        // 但 child 的 calc/planning_seconds 心跳键即使顶层已有 phase 也照常上提——采集
+        // 这类包装任务顶层 phase 恒定，卡住的一线子任务的心跳是门卫唯一能看到的变化。
+        var hoisted = IntentTask.hoistChildPlanning(Map.of(
+                "portal_prepared", false, "child", Map.of("phase", "planning", "calc", 7)));
+        check("planning".equals(hoisted.get("phase")) && Integer.valueOf(7).equals(hoisted.get("calc")),
+                "child planning keys are hoisted to the top level for the gate");
+        var untouched = IntentTask.hoistChildPlanning(Map.of(
+                "phase", "survey", "child", Map.of("phase", "moving")));
+        check("survey".equals(untouched.get("phase")), "an existing top-level phase is never overridden");
+        var wrapperHeartbeat = IntentTask.hoistChildPlanning(Map.of(
+                "phase", "acquiring", "done", 0, "total", 2,
+                "child", Map.of("phase", "approaching_sources", "calc", 1, "planning_seconds", 95)));
+        check("acquiring".equals(wrapperHeartbeat.get("phase"))
+                        && Integer.valueOf(1).equals(wrapperHeartbeat.get("calc"))
+                        && Integer.valueOf(95).equals(wrapperHeartbeat.get("planning_seconds")),
+                "a constant wrapper phase still carries the stuck child's heartbeat keys");
+        var keyless = IntentTask.hoistChildPlanning(Map.of("task", "wrapper"));
+        check(!keyless.containsKey("phase"), "a child without planning keys stays buried");
+
+        // 门卫节奏：phase 恒定的规划期靠 calc 增长维持心跳，每过地板间隔一条。
+        try (var f = new Fixture()) {
+            var record = f.record();
+            f.tasks().put(record.externalId(), record);
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 1, "planning_seconds", 0), 2_000);
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 2, "planning_seconds", 0), 2_010);
+            var events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "planning observation publishes once and merges inside the floor");
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 2), 2_041);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            var second = lastProgressFor(events, record);
+            check(countProgressFor(events, record) == 2
+                            && second.get("message").getAsString().equals("survey · calc 3 · planning 2s"),
+                    "a stalled planning phase keeps a heartbeat via the growing calc counter");
+            check(second.getAsJsonObject("data").get("planning_seconds").getAsInt() == 2,
+                    "heartbeat data carries the planned-for seconds");
+            // calc 停止增长后 planning_seconds 单调推进：静默窗心跳键让停滞期继续可见。
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 4), 2_100);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            var third = lastProgressFor(events, record);
+            check(countProgressFor(events, record) == 3 && third.get("message").getAsString().contains("planning 4s"),
+                    "a growing planning_seconds keeps the silent-window heartbeat alive");
+            // 记分牌彻底冻结：不发事件——心跳只属于还在推进记账的段。
+            f.runtime.publishProgress(record, Map.of("phase", "survey", "calc", 3, "planning_seconds", 4), 2_200);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 3, "a frozen scoreboard stays silent instead of inventing still-working talk");
+        }
     }
 
     private static void progressEventsFollowScoreboard() throws Exception {
@@ -88,6 +145,40 @@ public final class McpTaskLifecycleTest {
             f.runtime.publishProgress(record, Map.of("phase", "acquiring", "done", 20, "total", 64), 1_060);
             events = f.runtime.attention(0, 256).getAsJsonArray("events");
             check(countProgressFor(events, record) == 3, "终态清空记账后新进度应立即发送");
+        }
+    }
+
+    /**
+     * 身体安全心跳（issue 168）：body 是标准键，值含当前位置——滞水随浪浮沉坐标不断变化，
+     * 受胁期每过地板间隔仍有一条事件，观察者不必等终态才发现角色在溺水边缘。
+     */
+    private static void bodyHazardHeartbeatFollowsPosition() throws Exception {
+        try (var f = new Fixture()) {
+            var record = f.record();
+            f.tasks().put(record.externalId(), record);
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,58,120"), 2_000);
+            var events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "滞水观察带 body 标准键应立即发布");
+            check(lastProgressFor(events, record).get("message").getAsString().contains("滞水@260,58,120"),
+                    "摘要应携带滞水位置");
+            // 位置没变不重复发布；浪况浮沉改变坐标后重新武装签名，地板过后照常发布。
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,58,120"), 2_010);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "滞水位置未变不应重复发布");
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,59,120"), 2_020);
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,60,120"), 2_030);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 1, "地板窗口内的坐标变化合并待发");
+            f.runtime.publishProgress(record,
+                    Map.of("phase", "querying_sources", "body", "滞水@260,60,120"), 2_041);
+            events = f.runtime.attention(0, 256).getAsJsonArray("events");
+            check(countProgressFor(events, record) == 2, "地板过后应发布最新滞水位置");
+            check(lastProgressFor(events, record).get("message").getAsString().contains("滞水@260,60,120"),
+                    "事件应携带最新的滞水坐标");
         }
     }
 
@@ -148,6 +239,17 @@ public final class McpTaskLifecycleTest {
             check(!ClientRuntime.actor().automationControlRequested(), "查询原请求不能重新接管玩家");
             check(result.get("control_status").getAsString().equals("not_requested"), "重试回复不能声称已请求接管");
             check(f.tasks().size() == 1, "重试不能登记第二件任务");
+            // 去重命中必须写上任务单：走 attention/task 轮询终态的调用链看不到 execute 即时响应的
+            // deduplicated 标注，重放与新执行在任务视图上必须可分辨（147 勘察同参重提逐字同回执的教训）。
+            check(original.deduplicatedRequestHits() == 1, "去重命中应在任务单登记重放计数");
+            var viewArgs = new JsonObject();
+            viewArgs.addProperty("action", "get");
+            viewArgs.addProperty("task_id", original.externalId().toString());
+            var view = f.facade.task(viewArgs).toCompletableFuture().join().getAsJsonObject();
+            check(view.get("deduplicated_request_hits").getAsInt() == 1,
+                    "任务视图应交付重放计数");
+            f.facade.execute(args).toCompletableFuture().join();
+            check(original.deduplicatedRequestHits() == 2, "再次重提应累计重放计数");
 
             // 保留原有目标校验：使用旧请求编号不能绕过能力参数检查，也不能因此申请身体。
             args.getAsJsonObject("goal").getAsJsonObject("parameters").addProperty("slot", 2);

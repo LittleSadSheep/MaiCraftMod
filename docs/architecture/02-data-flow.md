@@ -83,7 +83,7 @@ CompanionBrain.submitCurrent
 | Facade | 要不要**再申请接管**（重复请求不该再抢一次控制权） |
 | IntentRuntime | 要不要**开工**（重复请求直接返回**原来那张任务单**） |
 
-两次都命中 → 不重复开工，也不重复申请接管。
+两次都命中 → 不重复开工，也不重复申请接管。命中计数会写上原任务单，`task` 查询以 `deduplicated_request_hits` 呈现——走 attention 等终态的调用链看不到 execute 即时响应的 `deduplicated` 标注，靠这个计数分辨拿到的是旧任务还是一次新执行。
 
 ### 对照：`plan` 和 `execute` 有什么不同
 

@@ -44,6 +44,10 @@ final class TaskView {
         if (!record.attempts().isEmpty()) {
             result.addProperty("retained_attempt_count", record.attempts().size()); paths.add("/attempts");
         }
+        // 大于零说明这份记录是被同 request_key 重提交付的旧任务，不是新执行；与 execute 即时响应的 deduplicated 标注同源。
+        if (record.deduplicatedRequestHits() > 0) {
+            result.addProperty("deduplicated_request_hits", record.deduplicatedRequestHits());
+        }
         if (terminal) {
             if (record.terminalSnapshot() != null) {
                 JsonObject finished = new JsonObject();

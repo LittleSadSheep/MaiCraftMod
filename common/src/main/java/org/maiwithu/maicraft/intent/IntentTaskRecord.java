@@ -67,6 +67,20 @@ public final class IntentTaskRecord extends TaskRecord {
     private TerminalSnapshot terminal;
     private boolean restoredDetached;
     private boolean chatSubmissionTracked = true;
+    /**
+     * 睡眠白天门 recover 已消费：任务在等原版可睡窗口打开，期间同一扇关着的门不再换发新决策。
+     * 随检查点持久化——重启恢复后等待语义不丢，重译目标也不会对同一扇已答复的门重提。
+     */
+    private boolean sleepGateWait;
+    /**
+     * 本记录消费过白天门 recover 答复：此后同一扇关着的门在任何路径（翻译重提、失败回退、
+     * 检查点恢复）都不再换发新决策，等窗口打开后直接重执行睡觉步骤。与 sleepGateWait 的差别
+     * 是它不随开窗清除——开窗沿的入睡失败仍属于这扇已答复的门，重问一次就是 145 批七的形态。
+     * 随检查点持久化；任务终态后记录不再翻译，无需主动清除。
+     */
+    private boolean sleepGateRecoverConsumed;
+    /** 同一 request_key 重提命中去重的次数：调用方据此分辨拿到的是旧任务还是新执行，本进程内计数，恢复后从零开始。 */
+    private int deduplicatedRequestHits;
     private Runnable dirty = () -> {};
     /** 只保存最近一次观察的诊断副本；不持有世界对象，也不把旧进度当成重启后的现场事实。 */
     private JsonObject activeExecution;
@@ -172,6 +186,14 @@ public final class IntentTaskRecord extends TaskRecord {
         }
         return record;
     }
+
+    /** 幂等去重命中时登记：旧任务被再次交付这一事实必须留在任务单上，只靠 execute 即时响应标注，走 attention 等终态的调用链看不见。 */
+    void noteDeduplicatedRequestHit() {
+        deduplicatedRequestHits++;
+        changed();
+    }
+
+    public int deduplicatedRequestHits() { return deduplicatedRequestHits; }
 
     public UUID externalId() { return externalId; }
     public UUID planId() { return planId; }
@@ -476,6 +498,38 @@ public final class IntentTaskRecord extends TaskRecord {
         return true;
     }
 
+    /** 消费白天门 recover 答复：转入等待可睡窗口，同一扇已答复的门不再重提。 */
+    void armSleepGateWait() {
+        sleepGateWait = true;
+        sleepGateRecoverConsumed = true;
+        changed();
+    }
+
+    /** 可睡窗口打开、等待阶段结束：清掉标记，任务恢复普通翻译。 */
+    void disarmSleepGateWait() {
+        sleepGateWait = false;
+        changed();
+    }
+
+    public boolean sleepGateWaiting() {
+        return sleepGateWait;
+    }
+
+    /** 本记录是否消费过白天门 recover 答复；抑制重提的依据，见字段注释。 */
+    public boolean sleepGateRecoverConsumed() {
+        return sleepGateRecoverConsumed;
+    }
+
+    /** 检查点恢复等待语义；随恢复的记录重建，不触发脏标记。 */
+    void restoreSleepGateWait(boolean waiting) {
+        sleepGateWait = waiting;
+    }
+
+    /** 检查点恢复 recover 消费标记，同一扇已答复的门跨重启继续被抑制。 */
+    void restoreSleepGateRecoverConsumed(boolean consumed) {
+        sleepGateRecoverConsumed = consumed;
+    }
+
     private boolean deathRecoveryPending(UUID decisionId) {
         return decision != null && decisionId.equals(decision.id())
                 && decision.contextJson() != null
@@ -498,6 +552,7 @@ public final class IntentTaskRecord extends TaskRecord {
         terminal = new TerminalSnapshot(state, result == null ? "{}" : result.toJson(), gameTime);
         setState(state);
         pause = null;
+        sleepGateWait = false;
         if (!deathRecovery(decision)) decision = null;
         pendingAnswer = null;
         changed();
