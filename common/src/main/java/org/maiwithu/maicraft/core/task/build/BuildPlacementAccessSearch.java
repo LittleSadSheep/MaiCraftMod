@@ -15,6 +15,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.BlockGetter;
 import org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.core.pathing.baritone.GroundCorridor;
 import java.util.Collections;
@@ -169,13 +170,19 @@ final class BuildPlacementAccessSearch {
         complete = true; reason = edge ? "reachable_crouching_edge_verified"
                 : lowerEye ? "reachable_lower_eye_placement_verified" : "reachable_placement_verified";
     }
+    /** 目标格六向附着探测结论：是否悬空无附着面，以及六向内容物证据。 */
+    record AttachmentProbe(boolean lacksAttachmentFace, Map<String, String> neighbors) {}
+
     /**
      * 目标格是空气且六向都没有可点击支撑面时成立；无论成立与否，六向内容物都进
-     * {@code attachmentNeighbors}——实机 167 三轮证明“有支撑面仍全拒”时回执需要
+     * {@code neighbors}——实机 167 三轮证明“有支撑面仍全拒”时回执需要
      * 直接看到六向是什么，才能区分支撑误判、可替换植物遮挡与真正的点击不可能。
+     * 目标级事实与站位无关，工点搜索失败终局也用它点名真实原因（186），不再被
+     * 笼统的 construction_worksite_unproven 覆盖。
      */
-    private boolean targetLacksAttachmentFace() {
-        var stage = new BuildPlacementStage(world, player.level()::isLoaded, Map.of(), target, false, true);
+    static AttachmentProbe probeAttachmentFace(BlockGetter level, java.util.function.Predicate<BlockPos> loaded,
+                                               BuildTaskRecord.Target target) {
+        var stage = new BuildPlacementStage(level, loaded, Map.of(), target, false, true);
         var facts = new LinkedHashMap<String, String>();
         {
             net.minecraft.world.level.block.state.BlockState self = stage.state(target.pos());
@@ -192,7 +199,7 @@ final class BuildPlacementAccessSearch {
                 facts.put(direction.getName(), "air");
             } else if (state.canBeReplaced()) {
                 facts.put(direction.getName(), "replaceable:" + id);
-            } else if (attachmentFace(state, stage, clicked, direction.getOpposite())) {
+            } else if (attachmentFace(state, stage, clicked, direction.getOpposite(), target)) {
                 facts.put(direction.getName(), id);
                 supported = true;
             } else {
@@ -200,8 +207,13 @@ final class BuildPlacementAccessSearch {
                 facts.put(direction.getName(), "non_sturdy:" + id);
             }
         }
-        attachmentNeighbors = Map.copyOf(facts);
-        return stage.state(target.pos()).isAir() && !supported;
+        return new AttachmentProbe(stage.state(target.pos()).isAir() && !supported, Map.copyOf(facts));
+    }
+
+    private boolean targetLacksAttachmentFace() {
+        var probe = probeAttachmentFace(world, player.level()::isLoaded, target);
+        attachmentNeighbors = probe.neighbors();
+        return probe.lacksAttachmentFace();
     }
 
     /**
@@ -210,8 +222,9 @@ final class BuildPlacementAccessSearch {
      * 计入候选会让快速归因闸失效（167 批六A 点位4）；其他方块对着任意可点击面即可放置，
      * 不受自身 canSurvive 约束，仍沿用形状非空口径。
      */
-    private boolean attachmentFace(net.minecraft.world.level.block.state.BlockState state,
-                                   BuildPlacementStage stage, BlockPos clicked, Direction face) {
+    private static boolean attachmentFace(net.minecraft.world.level.block.state.BlockState state,
+                                          BuildPlacementStage stage, BlockPos clicked, Direction face,
+                                          BuildTaskRecord.Target target) {
         if (state.isAir() || state.canBeReplaced()) return false;
         if (target.item() instanceof net.minecraft.world.item.StandingAndWallBlockItem)
             return state.isFaceSturdy(stage, clicked, face);

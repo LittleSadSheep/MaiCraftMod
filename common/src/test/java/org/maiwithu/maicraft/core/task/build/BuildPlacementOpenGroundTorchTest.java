@@ -30,6 +30,7 @@ public final class BuildPlacementOpenGroundTorchTest {
         heldHandsDoNotChangeGestureProof(); deniedGesturesStillNameTheirGate(); plantTargetKeepsSupportFacts();
         wallNeighbourProvesAttachGesture(); leavesNeighbourShortCircuitsAsMissingFace(); torchTargetAcceptsWallVariant();
         faceMissingReachesTerminalAttribution();
+        worksiteFailureNamesDanglingTargetFace();
         System.out.println("BuildPlacementOpenGroundTorchTest: open-ground torch access, planner coverage and named rejection gates passed");
     }
 
@@ -223,6 +224,33 @@ public final class BuildPlacementOpenGroundTorchTest {
                     "the drive failure names the missing attachment face so the task can report it as the terminal cause");
             check(drive.evidence().get("target_attachment_neighbors") != null,
                     "the terminal evidence carries the six-neighbour facts for the receipt");
+        }
+    }
+
+    private static void worksiteFailureNamesDanglingTargetFace() throws Exception {
+        try (var h = fixture()) {
+            // 186 实机：贴身可达的悬空火把格工点搜不到站位，终局却被 construction_worksite_unproven/no_path
+            // 一票覆盖，归因不点名、脚手架访问也不尝试。工点失败终局先核目标级事实——
+            // 悬空无附着面的格子任何站位都放不了，回执必须点名 target_attachment_face_missing。
+            BuildTaskRecord.Target target = torchTarget(new BlockPos(6, 4, 4));
+            var planner = new BuildWorksitePlanner.Search(h.player, List.of(target), Map.of(target.pos().asLong(), target),
+                    pos -> true, LongSets.emptySet(), java.util.Set.of(), (t, g) -> true);
+            BuildWorksitePlanner.Progress progress = null;
+            for (int slice = 0; slice < 200; slice++) {
+                progress = planner.advance(64);
+                if (progress.complete()) break;
+            }
+            check(progress != null && progress.complete() && progress.best() == null,
+                    "a dangling torch cell with no attachable face proves no worksite stance");
+            var probe = BuildPlacementAccessSearch.probeAttachmentFace(h.level, h.level::isLoaded, target);
+            check(probe.lacksAttachmentFace(),
+                    "the same target-level probe the worksite failure path consults names the dangling torch");
+            check("air".equals(probe.neighbors().get("down")),
+                    "the reattributed receipt evidence lists the empty ground under the target");
+            // 反向锚：有支撑面的格子不得被工点失败路径改判成 face_missing，真实的 no_path 归因保持原样。
+            BuildTaskRecord.Target grounded = torchTarget(new BlockPos(5, 1, 3));
+            check(!BuildPlacementAccessSearch.probeAttachmentFace(h.level, h.level::isLoaded, grounded).lacksAttachmentFace(),
+                    "a grounded torch is never reattributed to a missing attachment face");
         }
     }
 

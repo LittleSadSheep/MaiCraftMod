@@ -1350,6 +1350,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             TaskState support = prepareTemporarySupports();
             if (support != null) return support;
         }
+        // 工点不可证明时先核目标级事实：悬空且六向无可附着支撑面的格子任何站位都放不了，
+        // 这才是工点搜索全空的真实原因；归因点名它（167 口径），不被笼统的 no_path 覆盖（186）。
+        if (cell != null && player.level().isLoaded(cell.target().pos())) {
+            var probe = BuildPlacementAccessSearch.probeAttachmentFace(player.level(), player.level()::isLoaded,
+                    cell.target());
+            if (probe.lacksAttachmentFace()) {
+                failAt(cell.target().pos(),
+                        "target cell is air and none of its six neighbors offers an attachable support face: "
+                                + probe.neighbors(),
+                        FailureType.UNSUPPORTED, "target_attachment_face_missing", false);
+                return TaskState.FAILED;
+            }
+        }
         failAt(cell == null ? siteMin : cell.target().pos(), reason + "; no shared construction access was proven",
                 FailureType.NO_PATH, "construction_worksite_unproven", false);
         return TaskState.FAILED;
