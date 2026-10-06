@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.Set;
+import org.maiwithu.maicraft.core.integration.create.DepotStationProcessTaskTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineControlTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignReviewTest;
 import org.maiwithu.maicraft.core.integration.machine.MachineDesignConstraintsTest;
@@ -201,6 +202,14 @@ public final class MachineRegressionSuite {
         accepts("maicraft:operate_machine", "{\"kind\":\"coordinates\",\"position\":{\"x\":-86,\"y\":106,\"z\":28}}", "{\"operation\":\"set_control\",\"powered\":true,\"allow_use\":true}");
         rejects("maicraft:operate_machine", "{\"kind\":\"current_place\"}", "{\"operation\":\"set_control\",\"powered\":false,\"allow_use\":true}");
         rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"set_control\",\"allow_use\":true}");
+        // 置物台加工按目标选一台置物台，不要观察编号；当前位置、缺原料和越界等待时间拒绝。
+        accepts("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"station_process\",\"item_id\":\"minecraft:iron_ingot\",\"allow_use\":true}");
+        accepts("maicraft:operate_machine", "{\"kind\":\"landmark\",\"label\":\"蜂房\"}", "{\"operation\":\"station_process\",\"item_id\":\"minecraft:iron_ingot\",\"max_wait_seconds\":60,\"allow_use\":true}");
+        rejects("maicraft:operate_machine", "{\"kind\":\"current_place\"}", "{\"operation\":\"station_process\",\"item_id\":\"minecraft:iron_ingot\",\"allow_use\":true}");
+        rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"station_process\",\"allow_use\":true}");
+        rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"station_process\",\"item_id\":\"minecraft:iron_ingot\",\"max_wait_seconds\":301,\"allow_use\":true}");
+        rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"station_process\",\"item_id\":\"minecraft:iron_ingot\",\"snapshot_id\":\"receipt\",\"allow_use\":true}");
+        DepotStationProcessTaskTest.main(args);
         accepts("maicraft:operate_machine", "null", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"entry_index\":2,\"item_id\":\"minecraft:iron_ingot\",\"count\":3}");
         rejects("maicraft:operate_machine", "null", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"item_id\":\"minecraft:iron_ingot\"}");
         rejects("maicraft:operate_machine", "{\"kind\":\"nearest\"}", "{\"operation\":\"deposit\",\"menu_receipt_id\":\"receipt\",\"entry_index\":2,\"item_id\":\"minecraft:iron_ingot\"}");

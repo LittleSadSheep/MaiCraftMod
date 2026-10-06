@@ -25,6 +25,7 @@
 | `close_menu` | 无其他参数，省略 `target` | 关闭本流程拥有的机器菜单，或符合空鼠标/空合成格条件的玩家背包；不关闭任意外来菜单 |
 | `deposit` / `withdraw` | 必填 `menu_receipt_id`、`entry_index`、`item_id`；可选 `count`；省略 `target` | 绑定当前菜单的真实条目，验证规则与数量后进行可见原生搬运 |
 | `set_control` | 必填布尔 `powered`；可选 `snapshot_id`、`control_label` | 对指定或唯一的原版拉杆设置目标状态：已是目标状态直接成功，否则走近、空手只拨一次并核对。带 `snapshot_id` 时沿用同址观察；省略时按 `target` 就地划范围——`coordinates` 只认该格，`landmark`/`area`（含附近唯一同名告示牌）取半径 4，`nearest` 以角色为中心取半径 6，范围内须恰好一根拉杆，点击前复核这一范围结构未变。不是“开机成功/产出达标”的证明 |
+| `station_process` | 必填 `item_id`；可选 `max_wait_seconds`；`target` 为 `coordinates`（置物台格）、`landmark`/`area`（已记地点或附近唯一同名告示牌，半径 4 内须恰好一台）或 `nearest`（角色 6 格内最近一台，距离相同拒绝），不要 `snapshot_id` | 在现成 `create:depot` 上加工随身原料：手持原料右键顶面放上整叠（原生逻辑会先收回台上旧物品），等现场注液器、压机、鼓风机等把台上原料加工掉，再空手右键收回台上物品与全部产物。两次右键交给通用交互子任务，结论以随后观察到的置物台物品和背包增减为准；回执分开报告 `placed`、`processing_observed`、`collected`、`inventory_changes`。到 `max_wait_seconds` 仍是原料也收回并报告 `processing_timed_out`，不判断机器设计对错。实现见 [DepotStationProcessTask](../../common/src/main/java/org/maiwithu/maicraft/core/integration/create/DepotStationProcessTask.java) |
 | `ae2_supply` | 必填 `item_id`；可选 `count`、`allow_crafting` | 必须 `target:{kind:"nearest"}`，不能带名字/位置/关系；使用真实可达终端，按许可取现货或提交既有样板合成 |
 | `drive_vehicle` | 必填观察所得 UUID `structure_id`，目标为目的地 | 原生移动结构的兼容入口，见专属物理/车辆实现；此分支不接受机器快照、库存和生产字段 |
 
@@ -36,6 +37,7 @@
 | `component_index` | 0..767；省略使用观察中心，显式 `0` 使用 `snapshot.relative_blocks[0]`，二者不一定是同一方块。不是任意槽位或全局组件序号。 |
 | `entry_index` | 0..511，交易必填，必须来自本次 `perceive(view="machine_menu")`；0是第一个条目。它不由 `component_index` 代替。 |
 | `count` | `deposit/withdraw` 默认1、范围1..64；`ae2_supply` 默认1、范围1..256，目标是本次获准的净增量。0不是全部搬走。 |
+| `max_wait_seconds` | `station_process` 放上原料后等待加工的最长游戏秒数，整数 1..300，默认 30。 |
 | `powered` | `set_control` 必填布尔值。`false` 是明确要求关拉杆，不能按“未指定”处理。 |
 | `control_label` | 1..160 字符，指已记住地点或附近唯一同名告示牌所在的确切拉杆，须落在本次范围内；省略仅在区域中有唯一拉杆时可判定。 |
 | `allow_crafting` | AE2 默认 `false`；`true` 也只许可既有样板，不能凭名称建立新自动化样板。 |

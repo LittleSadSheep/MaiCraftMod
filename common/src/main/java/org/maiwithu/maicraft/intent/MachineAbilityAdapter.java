@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.core.integration.machine.MachineRecipeEvidence;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshotRejection;
 import org.maiwithu.maicraft.core.integration.machine.MachineSnapshots;
 import org.maiwithu.maicraft.core.integration.machine.MachineSurvey;
+import org.maiwithu.maicraft.core.integration.create.DepotStationProcessTaskRecord;
 import org.maiwithu.maicraft.core.integration.machine.MachineInspectionBlueprintView;
 import org.maiwithu.maicraft.core.integration.machine.catalog.MachineBlueprint;
 import org.maiwithu.maicraft.core.integration.machine.MachineConstructionPlan;
@@ -25,6 +26,8 @@ import org.maiwithu.maicraft.core.integration.ponder.PonderBlueprintStore;
 import org.maiwithu.maicraft.core.task.supply.SemanticMaterialSupplyCoordinator;
 import org.maiwithu.maicraft.task.TaskResult;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -184,6 +187,17 @@ final class MachineAbilityAdapter {
                                     + "landmark/area (a remembered place or the exact text of one nearby sign) or nearest");
                         }
                     }
+                    case "station_process" -> {
+                        // 在现成置物台上加工：手持原料放上、等现场机器加工、空手收回；目标选一台置物台，不要观察编号。
+                        only(p, "operation", "item_id", "max_wait_seconds", "allow_use");
+                        requiredString(p, "item_id", 256);
+                        integer(p, "max_wait_seconds", 30, 1, 300);
+                        bool(p, "allow_use", false);
+                        if (goal.target() == null
+                                || !Set.of("coordinates", "landmark", "area", "nearest").contains(goal.target().kind()))
+                            throw bad("station_process needs target coordinates (the depot cell), landmark/area "
+                                    + "(a remembered place or the exact text of one nearby sign) or nearest");
+                    }
                     case "ae2_supply" -> {
                         // 无名 nearest 表示使用原生可达终端；公开目标契约已允许这种形态，这里仍拒绝借名称选择另一网络。
                         only(p, "operation", "item_id", "count", "allow_crafting", "allow_use");
@@ -197,7 +211,7 @@ final class MachineAbilityAdapter {
                             throw bad("ae2_supply requires target={kind:nearest}: it uses a natively accessible terminal, not a selected surveyed network");
                         }
                     }
-                    default -> throw bad("unsupported_machine_operation: choose run_production, watch_production, cancel_watch, drive_vehicle, set_control, open_menu, close_menu, deposit, withdraw or ae2_supply");
+                    default -> throw bad("unsupported_machine_operation: choose run_production, watch_production, cancel_watch, drive_vehicle, set_control, station_process, open_menu, close_menu, deposit, withdraw or ae2_supply");
                 }
             }
             case MODIFY -> {
@@ -385,6 +399,7 @@ final class MachineAbilityAdapter {
             return new IntentAction.Native(Ae2ResourceSupply.taskRecord(callId, deadline, request));
         }
         if ("set_control".equals(operation) && !p.has("snapshot_id")) return controlWithoutSnapshot(goal, player, runtime, callId, deadline);
+        if ("station_process".equals(operation)) return stationProcess(goal, player, runtime, callId);
         MachineSnapshots.Snapshot snapshot = boundSnapshot(goal, player, runtime);
         if ("open_menu".equals(operation)) {
             BlockPos machine = snapshot.center();
@@ -433,6 +448,40 @@ final class MachineAbilityAdapter {
         var request = new MachineControl.Request(player.level().dimension().location().toString(), center, radius,
                 MachineSurvey.fingerprint(player, center, radius), bool(p, "powered", null), control);
         return new IntentAction.Native(MachineControl.task(callId, deadline, request));
+    }
+
+    /**
+     * 现成置物台加工：坐标只认那一格；地点或附近同名告示牌周围半径 4 内必须恰好一台置物台；
+     * nearest 取角色 6 格内最近的一台，距离相同不猜。放料、等待和收取都由原生右键完成并按实际观察回执。
+     */
+    private static IntentAction stationProcess(Goal goal, LocalPlayer player, IntentRuntime runtime, String callId) {
+        JsonObject p = goal.parameters();
+        String item = requiredString(p, "item_id", 256);
+        if (!registered(item, false)) throw bad("unknown requested item: " + item);
+        String kind = goal.target().kind();
+        BlockPos center = "nearest".equals(kind) ? player.blockPosition() : block(resolve(goal.target(), player, runtime));
+        BlockPos station = "coordinates".equals(kind) ? center : nearestDepot(player, center, "nearest".equals(kind) ? 6 : 4,
+                !"nearest".equals(kind));
+        if (!player.level().isLoaded(station) || !BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(station).getBlock())
+                .toString().equals("create:depot"))
+            throw bad("station_process_requires_create_depot: the target cell is not a loaded create:depot");
+        int waitTicks = integer(p, "max_wait_seconds", 30, 1, 300) * 20;
+        DepotStationProcessTaskRecord.install();
+        return new IntentAction.Native(new DepotStationProcessTaskRecord(callId,
+                player.level().getGameTime() + 2L * 60 * 20 + waitTicks, station,
+                BuiltInRegistries.ITEM.get(ResourceLocation.parse(item)), waitTicks));
+    }
+
+    private static BlockPos nearestDepot(LocalPlayer player, BlockPos center, int radius, boolean requireUnique) {
+        List<BlockPos> depots = new ArrayList<>();
+        for (BlockPos at : BlockPos.betweenClosed(center.offset(-radius, -radius, -radius), center.offset(radius, radius, radius)))
+            if (player.level().isLoaded(at) && BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(at).getBlock())
+                    .toString().equals("create:depot")) depots.add(at.immutable());
+        if (depots.isEmpty()) throw bad("station_process_no_depot: no create:depot within " + radius + " blocks of the target");
+        depots.sort(Comparator.comparingDouble(at -> at.distSqr(center)));
+        if (depots.size() > 1 && (requireUnique || depots.get(0).distSqr(center) == depots.get(1).distSqr(center)))
+            throw bad("station_process_ambiguous_depot: " + depots.size() + " depots are near the target; use target coordinates of the intended depot");
+        return depots.getFirst();
     }
 
     private static IntentAction modify(Goal goal, LocalPlayer player, IntentRuntime runtime, UUID continuationToken) {
