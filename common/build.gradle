@@ -545,6 +545,21 @@ regressionSuites.each { name, suite ->
     tasks.named('check') { dependsOn regression }
 }
 
+// 试验任务：同一份 regressionSuites 配置改用进程隔离 worker 并发执行，并发度跟 --max-workers 走（配 1 即串行基线）。
+// 套件间隔离语义（独立 JVM、独立工作目录、独立堆与超时）与逐个 JavaExec 相同；
+// 现有 check 与逐套件任务保持原样，本任务只服务并行提速验证，显式调用才会运行。
+tasks.register('parallelRegressionCheck', org.maiwithu.build.ParallelRegressionCheckTask) {
+    group = 'verification'
+    dependsOn tasks.named('testClasses')
+    suiteClasspath.from sourceSets.test.runtimeClasspath
+    suiteClasspath.from tasks.named('createMinecraftArtifacts').flatMap { it.resourcesArtifact }
+    workingRoot.set layout.buildDirectory
+    suiteFilter.set providers.gradleProperty('maicraftSuiteFilter').orElse('')
+    suites.set regressionSuites.collectEntries { name, suite ->
+        [name, suite.findAll { it.key != 'purpose' }.collectEntries { key, value -> [key, String.valueOf(value)] }]
+    }
+}
+
 // 提供实际安装的 AE2 包时，原生工序回归还会核对注入位置；其他回归组不依赖该可选路径。
 tasks.named('nativeProcessRegression', JavaExec) {
     if (providers.gradleProperty('maicraftAe2Jar').isPresent()) {
