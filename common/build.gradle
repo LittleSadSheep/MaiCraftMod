@@ -258,6 +258,12 @@ def regressionSuites = [
         heap: '512m', directory: 'recovery-terrain-authorization-regression', timeoutSeconds: 60,
         purpose: '验证同任务链内 may_alter_terrain 授权从决策答复传入自动前置步骤与原步骤'
     ],
+    // harvest 链的完成确认独立回放：本链已收获的同一格重复步骤按更早成功证据结算，执行前失配仍如实翻译校验。
+    harvestChainCompletionSettleRegression: [
+        entry: 'org.maiwithu.maicraft.intent.HarvestChainCompletionSettleTest',
+        heap: '512m', directory: 'harvest-chain-completion-settle-regression', timeoutSeconds: 60,
+        purpose: '验证 harvest 链重复同格步骤不再对已变 air 的目标重跑失配询问'
+    ],
     // 定点交互语义入口整链验证：精确目标坐标、定点倒桶落格与门框嵌眼，级联 TargetedItemUseTest。
     exactInteractionTargetRegression: [
         entry: 'org.maiwithu.maicraft.intent.ExactInteractionTargetTest',

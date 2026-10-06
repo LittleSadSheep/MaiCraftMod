@@ -221,7 +221,7 @@ final class IntentTask implements Task {
             var refused = persistAnswerParameters(answer);
             if (refused != null) return requestDecision(refused);
             // 参数已经成为当前持久步骤，消费屏障与恢复读取同一意图；地点只在创建动作时临时解析。
-            return begin(AbilityAdapter.adapt(resolvedCurrentGoal(), player, runtime, continuationFor(currentGoal())));
+            return adaptCurrentStep();
         }
 
         // 白天门 recover 的等待阶段：窗口关着就原地等，不重新翻译当前目标——翻译会再次撞上
@@ -244,9 +244,59 @@ final class IntentTask implements Task {
             return beginTool(chain.get(chainIndex));
         }
 
-        Goal semanticGoal = currentGoal();
-        return begin(AbilityAdapter.adapt(
-                resolvedCurrentGoal(), player, runtime, continuationFor(semanticGoal)));
+        return adaptCurrentStep();
+    }
+
+    /**
+     * 当前步骤的统一翻译入口。harvest_block 有一条例外先行：本链更早的步骤已对同一格
+     * 确认收获时，这一步按已达成结算，不再交给适配器重跑翻译——翻译只会看到 air 并把
+     * 成功证据当失配询问（187）。其余目标照常翻译。
+     */
+    private TaskState adaptCurrentStep() {
+        Goal goal = resolvedCurrentGoal();
+        TaskResult settled = settleAlreadyHarvestedStep(record, goal);
+        if (settled != null) {
+            completeStep(settled);
+            return afterImmediate();
+        }
+        return begin(AbilityAdapter.adapt(goal, player, runtime, continuationFor(goal)));
+    }
+
+    /**
+     * 执行后的完成确认与执行前的目标匹配校验是两件事：定点收获的源格被本链更早步骤
+     * 成功挖掉并收尾后，同一条链里重复出现的同一格步骤（recover 答复插入的前置步骤
+     * 与紧随其后的原步骤）拿到的世界证据只有 air——这是收获的成功事实，不是失配。
+     * 只认「同能力 + 同一格 + 更早步骤真实成功」；执行前就不匹配的目标（如契约点名
+     * iron_ore 实际是 stone）没有本链成功证据，仍走原翻译如实失败。
+     */
+    static TaskResult settleAlreadyHarvestedStep(IntentTaskRecord record, Goal goal) {
+        if (!GeneralAbilityAdapter.HARVEST_BLOCK.equals(goal.ability())) return null;
+        Goal.SemanticTarget target = goal.target();
+        if (target == null || !"coordinates".equals(target.kind()) || target.position() == null) return null;
+        List<Goal> steps = record.steps();
+        List<IntentTaskRecord.StepSnapshot> results = record.stepResults();
+        for (int i = 0; i < record.stepIndex() && i < steps.size() && i < results.size(); i++) {
+            Goal earlier = steps.get(i);
+            if (!GeneralAbilityAdapter.HARVEST_BLOCK.equals(earlier.ability())
+                    || !sameTargetCell(earlier.target(), target)
+                    || !results.get(i).success()) continue;
+            Goal.WorldPosition at = target.position();
+            return TaskResult.ok("the target cell was already harvested by an earlier step of this task chain; "
+                    + "the confirmed break and pickup stand as this step's completion",
+                    Map.of("already_harvested_by_step", i,
+                            "x", at.x(), "y", at.y(), "z", at.z()));
+        }
+        return null;
+    }
+
+    /** 同一格判定：三维坐标一致；双方都声明维度时维度也须一致，未声明维度不否决（定点目标随当前世界解析）。 */
+    private static boolean sameTargetCell(Goal.SemanticTarget a, Goal.SemanticTarget b) {
+        if (a == null || b == null || a.position() == null || b.position() == null) return false;
+        Goal.WorldPosition pa = a.position();
+        Goal.WorldPosition pb = b.position();
+        return pa.x() == pb.x() && pa.y() == pb.y() && pa.z() == pb.z()
+                && (pa.dimension() == null || pb.dimension() == null
+                        || pa.dimension().equals(pb.dimension()));
     }
 
     IntentTaskRecord.DecisionSnapshot persistAnswerParameters(IntentTaskRecord.DecisionAnswer answer) {
