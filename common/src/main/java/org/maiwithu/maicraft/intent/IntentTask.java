@@ -68,6 +68,8 @@ final class IntentTask implements Task {
     private Task child;
     private TaskRecord childRecord;
     private boolean reobserveAfterChild;
+    /** 操作者取消的仅清理缓期：子任务在回收自有现场期间语义计划整体冻结，清完按取消交回。 */
+    private boolean cancellationCleanup;
     private IntentAction.Wait wait;
     private List<IntentAction.Tool> chain = List.of();
     private int chainIndex;
@@ -119,6 +121,16 @@ final class IntentTask implements Task {
     }
 
     @Override
+    public boolean requestCancellationCleanup() {
+        // 操作者取消时把缓期请求转给当前步骤子任务：只有子任务确认有必须逐刻回收的
+        // 自有现场（如施工脚手架）才缓期；没有子任务或子任务不需要回收就按原路立即取消。
+        if (child == null || childRecord == null || childRecord.getState().isTerminal()) return false;
+        if (!child.requestCancellationCleanup()) return false;
+        cancellationCleanup = true;
+        return true;
+    }
+
+    @Override
     public TaskState tick(LocalPlayer ignored) {
         try {
             return tickSemanticParent();
@@ -146,6 +158,8 @@ final class IntentTask implements Task {
     }
 
     private TaskState tickSemanticParent() {
+        // 取消缓期只回收现场：答复消费、重翻译与步骤推进全部冻结，收尾完成即按取消交回。
+        if (cancellationCleanup) return tickCancellationCleanup();
         // 所有步骤都记为完成后，按统一结算报告：存在事实失败（含被容忍的）整体仍报 FAILED。
         if (record.stepIndex() >= record.steps().size()) {
             return finishCompletion();
@@ -424,6 +438,46 @@ final class IntentTask implements Task {
                 return finishChild();
             }
             return TaskState.RUNNING;
+    }
+
+    /**
+     * 取消缓期分支：只驱动当前子任务回收自有现场，不再推进语义计划。子任务截止时间逐刻顺延，
+     * 收尾本身有停滞放弃机制（外层槽位另有缓期硬上限），不会借缓期无限占用身体。
+     */
+    private TaskState tickCancellationCleanup() {
+        if (child == null || childRecord == null) return TaskState.CANCELLED;
+        childRecord.extendDeadlineTo(player.level().getGameTime() + 1);
+        try {
+            childRecord.setState(withExplicitAreaProtection(() -> child.tick(player)));
+        } catch (RuntimeException exception) {
+            childRecord.setState(TaskState.FAILED);
+            childRecord.setResult(TaskResult.fail(
+                    "cancellation cleanup tick failed: " + safeMessage(exception)));
+        }
+        retainBuildProject(childRecord);
+        if (!childRecord.getState().isTerminal()) return TaskState.RUNNING;
+        // 子任务收尾完成（或放弃）后只结算它的结果：不推进步骤、不发起询问，语义任务直接按取消交回。
+        settleCancelledChild();
+        return TaskState.CANCELLED;
+    }
+
+    /** 取消缓期后的子任务结算：取结果、松开身体、清掉子任务；不进入步骤推进或询问逻辑。 */
+    private void settleCancelledChild() {
+        Task finishingChild = child;
+        TaskRecord finishingRecord = childRecord;
+        try {
+            TaskState state = finishingRecord.getState();
+            TaskResult result = withExplicitAreaProtection(() -> finishingChild.result(state));
+            if (finishingRecord.getResult() == null) finishingRecord.setResult(result);
+            retainInterruptedChild(state, result);
+        } catch (RuntimeException ignoredFailure) {
+            retainInterruptedChild(TaskState.CANCELLED, TaskResult.fail(
+                    "Child cleanup could not confirm its effects; inspect before another operation.",
+                    Map.of("outcome_uncertain", true, "mechanical_retry_allowed", false)));
+        } finally {
+            releaseBody();
+            if (child == finishingChild) clearChild();
+        }
     }
 
     private TaskState tickChild() {

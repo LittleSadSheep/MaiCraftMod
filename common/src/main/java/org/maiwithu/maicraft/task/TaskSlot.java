@@ -2,6 +2,7 @@ package org.maiwithu.maicraft.task;
 
 import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.Constants;
 import org.maiwithu.maicraft.entity.InputDriver;
 
 import java.util.Map;
@@ -15,6 +16,12 @@ final class TaskSlot {
     private Task task;
     private TaskRecord record;
     private long acceptedGameTime = Long.MIN_VALUE;
+    /** 操作者取消的仅清理缓期：任务在回收自有现场期间仍占用身体，清完自己交回 CANCELLED。 */
+    private boolean cancellationCleanup;
+    private long cancellationCleanupUntil;
+
+    /** 缓期硬上限：任务自身的停滞放弃机制通常更早收场，这里只兜底防止缓期无限占用身体。 */
+    private static final long CANCELLATION_CLEANUP_GRACE_TICKS = 30L * 20L;
 
     TaskSlot(Consumer<TaskRecord> outbox) {
         this.outbox = outbox;
@@ -94,8 +101,26 @@ final class TaskSlot {
             return;
         }
         if (record.getState() == TaskState.RUNNING) {
+            if (cancellationCleanup) {
+                // 仅清理缓期不受原截止时间约束：收尾任务是取消后留下的最后一段工作，
+                // 缓期到期仍没收完就按取消立即结算，不再继续占用身体。
+                if (player.level().getGameTime() >= cancellationCleanupUntil) {
+                    Constants.LOG.warn(
+                            "[maicraft-task] {} cancellation cleanup grace expired; settling as cancelled",
+                            task.name());
+                    cancellationCleanup = false;
+                    finishByInterruption(player, Task.StopReason.REPLACED, "operator_cancel");
+                    return;
+                }
+                try (var scope = record.deadlineScope()) {
+                    record.setState(task.tick(player));
+                } catch (RuntimeException exception) {
+                    record.setState(TaskState.FAILED);
+                    runCleanupAfterFailure();
+                    record.setResult(TaskResult.fail("task tick failed: " + safeMessage(exception)));
+                }
             // 先看是否超时，再让任务执行。因此一旦已超时，任务连“我还在正常前进，请延长时间”都来不及说。
-            if (player.level().getGameTime() >= record.getDeadlineGameTime()) {
+            } else if (player.level().getGameTime() >= record.getDeadlineGameTime()) {
                 record.setState(TaskState.TIMEOUT);
             } else {
                 try (var scope = record.deadlineScope()) {
@@ -129,6 +154,7 @@ final class TaskSlot {
         TaskRecord suspended = record;
         task = null;
         record = null;
+        cancellationCleanup = false;
         acceptedGameTime = Long.MIN_VALUE;
         return suspended;
     }
@@ -149,6 +175,24 @@ final class TaskSlot {
         if (record == null) {
             return false;
         }
+        // 操作者取消先问一次能否缓期回收：任务转入仅清理缓期继续占用身体，回收完成由
+        // tick 交回 CANCELLED；不能缓期或已在缓期中才按原路立即终态。
+        if (record.getState() == TaskState.RUNNING && !cancellationCleanup && task != null
+                && task.requestCancellationCleanup()) {
+            cancellationCleanup = true;
+            cancellationCleanupUntil = player.level().getGameTime() + CANCELLATION_CLEANUP_GRACE_TICKS;
+            record.setCancelSource("operator_cancel");
+            return true;
+        }
+        finishByInterruption(player, Task.StopReason.REPLACED, "operator_cancel");
+        return true;
+    }
+
+    /** 整体停机、换身体等场景的取消：不做仅清理缓期，立即终态，现场如实列进回执。 */
+    boolean cancelImmediate(LocalPlayer player) {
+        if (record == null) {
+            return false;
+        }
         finishByInterruption(player, Task.StopReason.REPLACED, "operator_cancel");
         return true;
     }
@@ -160,6 +204,7 @@ final class TaskSlot {
     }
 
     private void finishByInterruption(LocalPlayer player, Task.StopReason reason, String cancelSource) {
+        cancellationCleanup = false;
         // 如果事情已经做完，就保留原结果；迟到的“取消”不能把已经成功的事说成没做完。
         try {
             task.stop(player, reason);

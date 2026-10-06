@@ -14,8 +14,9 @@ import org.maiwithu.maicraft.core.FailureType;
 import org.maiwithu.maicraft.task.TaskState;
 
 /**
- * 收尾清理包裹回归：失败与绕过验证的直达成功都不能把台账里的自有临时支撑留在世界里。
- * 181 实机病症的锚点——回执如实列 remaining_scaffolds 却零 removal，失败收尾从不进入清理阶段。
+ * 收尾清理包裹回归：失败、绕过验证的直达成功与操作者取消都不能把台账里的自有临时支撑留在世界里。
+ * 181 实机病症的锚点——回执如实列 remaining_scaffolds 却零 removal，失败收尾从不进入清理阶段；
+ * 184 补齐取消终态——取消先转入仅清理缓期，清完账才交回 CANCELLED。
  */
 public final class BuildTerminalScaffoldCleanupTest {
     private static final BlockPos STANDING = new BlockPos(6, 1, 6);
@@ -27,7 +28,71 @@ public final class BuildTerminalScaffoldCleanupTest {
         uncertainFailureKeepsSceneAndFailsImmediately();
         successWrapAlsoClearsTheLedger();
         emptyLedgerFailsImmediately();
+        cancellationDefersToCleanupAndDeliversCancelled();
+        cancellationDuringRunningCleanupKeepsDeliveringCancelled();
+        cancellationWithoutTrackedScaffoldsTerminatesImmediately();
         System.out.println("BuildTerminalScaffoldCleanupTest: terminal cleanup wrap passed");
+    }
+
+    /**
+     * 184 的锚点——操作者取消不再跳过清理：台账里还有自有支撑时，取消请求转入仅清理缓期，
+     * 清完账才交回 CANCELLED；清理阶段自己失败也不把取消改判成失败。
+     */
+    private static void cancellationDefersToCleanupAndDeliversCancelled() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            h.set(GONE, Blocks.DIRT.defaultBlockState());
+            var task = task(h, GONE);
+            h.set(GONE, Blocks.AIR.defaultBlockState());
+            check(((FirstPersonBuildCompanionTask) task).requestCancellationCleanup(),
+                    "an operator cancellation with tracked scaffolds requests the cleanup grace");
+            check(phase(task).equals("SCAFFOLD_SELECT"), "the cancellation grace enters the cleanup phase");
+            check(field(task, "terminalWrap").get(task).toString().equals("CANCELLED"),
+                    "the cancellation wrap is armed instead of an immediate terminal state");
+            check(invokeSelect(task) == TaskState.CANCELLED,
+                    "after the ledger clears the task is delivered as CANCELLED, not FAILED");
+            check(record(task).scaffoldLedger().isEmpty(), "the cancellation grace empties the ledger");
+            check(field(task, "failureCode").get(task) == null,
+                    "a cancelled cleanup never grows a failure code");
+        }
+    }
+
+    /** 取消落在正在进行的清理阶段时，不重入清理：直接改包裹终点，让现有回收跑到取消收场。 */
+    private static void cancellationDuringRunningCleanupKeepsDeliveringCancelled() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            h.set(GONE, Blocks.DIRT.defaultBlockState());
+            var task = task(h, GONE);
+            h.set(GONE, Blocks.AIR.defaultBlockState());
+            setPhase(task, "SCAFFOLD_SELECT");
+            field(task, "scaffoldQueue").set(task, List.of(GONE));
+            check(((FirstPersonBuildCompanionTask) task).requestCancellationCleanup(),
+                    "a cancellation landing inside the running cleanup is still deferred");
+            check(invokeSelect(task) == TaskState.CANCELLED,
+                    "the already-running cleanup settles straight into CANCELLED");
+            check(record(task).scaffoldLedger().isEmpty(), "the running-cancellation wrap also clears the ledger");
+        }
+    }
+
+    /** 台账为空（或还没开工）时取消按原路立即终态，不多占任何清理刻。 */
+    private static void cancellationWithoutTrackedScaffoldsTerminatesImmediately() throws Exception {
+        try (var h = scene(new Vec3(3.5, 1, 6.5))) {
+            h.position(new Vec3(3.5, 1, 6.5));
+            var task = task(h, null);
+            check(!((FirstPersonBuildCompanionTask) task).requestCancellationCleanup(),
+                    "without tracked scaffolds the cancellation is not deferred");
+            check(field(task, "terminalWrap").get(task).toString().equals("NONE"),
+                    "no wrap is armed without a ledger");
+        }
+    }
+
+    private static void setPhase(Object task, String name) throws Exception {
+        for (Class<?> inner : FirstPersonBuildCompanionTask.class.getDeclaredClasses())
+            if (inner.getSimpleName().equals("Phase")) {
+                field(task, "phase").set(task, Enum.valueOf((Class) inner, name));
+                return;
+            }
+        throw new NoSuchFieldException("Phase");
     }
 
     /** 台账里有已消失支撑时，失败先被推迟，清完账再按原始失败原因交出 FAILED。 */

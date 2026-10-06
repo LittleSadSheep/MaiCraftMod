@@ -255,8 +255,9 @@ final class CompanionBrain {
     void cancelAll(LocalPlayer player) {
         // 结束两个任务并停掉正在自救的行为，随后触发保留的结束通知；具体动作清理由各执行器 stop 负责。
         boolean hadWork = !sync.isEmpty() || !current.isEmpty();
-        sync.cancel(player);
-        current.cancel(player);
+        // 整体停机不做仅清理缓期：两个槽位都立即终态，现场事实由各自回执如实列出。
+        sync.cancelImmediate(player);
+        current.cancelImmediate(player);
         stopNonSlotHolder(player, Task.StopReason.REPLACED);
         if (hadWork) {
             TaskSessionHooks.fireSessionEnd(player);

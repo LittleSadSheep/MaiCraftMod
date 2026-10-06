@@ -226,11 +226,11 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
     private String failureCode, note = "all native actions re-verified";
 
     /**
-     * 收尾清理包裹：台账里还有自己立着或悬空的临时支撑时，失败与绕过验证的直达成功
-     * 都先走一遍既有清理阶段再交出原终态；清理不到的按 remaining_scaffolds 如实声明。
+     * 收尾清理包裹：台账里还有自己立着或悬空的临时支撑时，失败、绕过验证的直达成功与
+     * 操作者取消都先走一遍既有清理阶段再交出原终态；清理不到的按 remaining_scaffolds 如实声明。
      * UNCERTAIN 失败不包裹——保留现场供人工核验，不在未定结果上继续改世界。
      */
-    private enum TerminalWrap { NONE, FAILURE, SUCCESS }
+    private enum TerminalWrap { NONE, FAILURE, SUCCESS, CANCELLED }
     private TerminalWrap terminalWrap = TerminalWrap.NONE;
     private BlockPos wrapPos;
     private String wrapMessage, wrapCode, wrapCleanupDetail;
@@ -372,6 +372,12 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         if (result == TaskState.SUCCESS && player.getAbilities().instabuild && creativeMaterials.hasOwned(player)) {
             phase = Phase.CLEAR_CREATIVE;
             return TaskState.RUNNING;
+        }
+        if (result == TaskState.FAILED && terminalWrap == TerminalWrap.CANCELLED) {
+            // 取消缓期内的清理失败不改变取消语义：中断事实经 scaffold_cleanup_stopped_early
+            // 随取消回执如实声明，不把一次主动停工改判成失败。
+            if (wrapCleanupDetail == null) wrapCleanupDetail = "scaffold_cleanup_failed: " + doneReason();
+            return deliverWrappedCancellation();
         }
         return result;
     }
@@ -2138,6 +2144,10 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         stopNav(); unregisterProvider();
         if (terminalWrap == TerminalWrap.FAILURE) return deliverWrappedFailure();
         if (terminalWrap == TerminalWrap.SUCCESS) return TaskState.SUCCESS;
+        if (terminalWrap == TerminalWrap.CANCELLED) {
+            note = "cancellation cleanup stalled: " + remaining + " temporary supports remain in place";
+            return deliverWrappedCancellation();
+        }
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
     }
@@ -2191,6 +2201,7 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         }
         if (terminalWrap == TerminalWrap.FAILURE) { stopNav(); unregisterProvider(); return deliverWrappedFailure(); }
         if (terminalWrap == TerminalWrap.SUCCESS) { stopNav(); unregisterProvider(); return TaskState.SUCCESS; }
+        if (terminalWrap == TerminalWrap.CANCELLED) return deliverWrappedCancellation();
         finalStateAt = 0; phase = Phase.FINAL_STATE;
         return TaskState.RUNNING;
     }
@@ -2592,12 +2603,19 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
             reissueWrappedFailure();
             return;
         }
+        if (terminalWrap == TerminalWrap.CANCELLED) {
+            // 取消缓期里的清理失败不升级成任务失败：记下中断事实随取消回执如实声明。
+            if (wrapCleanupDetail == null) wrapCleanupDetail = (code == null ? "scaffold_cleanup_failed" : code) + ": " + message;
+            Constants.LOG.warn("[maicraft-build] scaffold cleanup interrupted during cancellation wrap: {}", wrapCleanupDetail);
+            stopNav(); unregisterProvider();
+            return;
+        }
         if (beginTerminalCleanup(TerminalWrap.FAILURE, pos, message, type, code, unknown)) return;
         failurePos = pos == null ? null : pos.immutable(); failureCode = code; uncertain = unknown; fail(message, type);
     }
 
     /**
-     * 台账里还有自有临时支撑时，把终态推迟到清理阶段之后：先拆净能拆的，再按原失败/原成功收场。
+     * 台账里还有自有临时支撑时，把终态推迟到清理阶段之后：先拆净能拆的，再按原失败/原成功/取消收场。
      * 返回 false 表示没有需要收尾的支撑或场景不适合继续动作（未开工、UNCERTAIN、已在清理阶段），调用方按原路终止。
      */
     private boolean beginTerminalCleanup(TerminalWrap wrap, BlockPos pos, String message, FailureType type,
@@ -2626,6 +2644,31 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         fail(wrapMessage + (wrapCleanupDetail == null ? ""
                 : "; scaffold cleanup could not finish: " + wrapCleanupDetail), wrapType);
         return TaskState.FAILED;
+    }
+
+    /** 取消缓期收场：现场清理到此为止，终态仍是取消；剩余支撑与中断事实由回执如实声明。 */
+    private TaskState deliverWrappedCancellation() {
+        Constants.LOG.info("[maicraft-build] cancellation cleanup settled with {} tracked supports remaining",
+                r.scaffoldLedger().snapshot().size());
+        stopNav(); unregisterProvider();
+        return TaskState.CANCELLED;
+    }
+
+    /**
+     * 操作者取消的仅清理缓期：台账里还有自有临时支撑时，转入既有清理阶段先拆净能拆的，
+     * 再交回 CANCELLED。已经在清理阶段的直接改包裹终点，让正在跑的回收自然收尾；
+     * 未开工、UNCERTAIN 保留现场与无台账的场景不缓期，返回 false 由调用方立即取消。
+     */
+    @Override
+    public boolean requestCancellationCleanup() {
+        if (terminalWrap != TerminalWrap.NONE || !preflightDone) return false;
+        if (scaffoldPhaseActive()) {
+            terminalWrap = TerminalWrap.CANCELLED; wrapCleanupDetail = null;
+            Constants.LOG.info("[maicraft-build] operator cancellation waits for the running scaffold cleanup ({} tracked)",
+                    r.scaffoldLedger().snapshot().size());
+            return true;
+        }
+        return beginTerminalCleanup(TerminalWrap.CANCELLED, null, null, null, null, false);
     }
 
     /** 清理阶段内的失败交给包裹失败收场时同步补一条日志，现场事实不只在回执里。 */
