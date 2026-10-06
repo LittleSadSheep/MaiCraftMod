@@ -75,7 +75,8 @@ final class DiscardSitePreparation {
             return TaskState.RUNNING;
         }
         // 开挖确实形成空间后才进入分堆；流水、落沙等原生变化保留在现场，不能把计划中的空气当成已挖好。
-        if (!plan.clear(context.level())) { failure = "discard side area changed before throwing; no items submitted"; return TaskState.FAILED; }
+        // 原地候选没有走廊形态可复核，站位即角色当前所在格，落点变化由投掷后的实体观察接管。
+        if (!plan.inPlace() && !plan.clear(context.level())) { failure = "discard side area changed before throwing; no items submitted"; return TaskState.FAILED; }
         ready = true; return TaskState.SUCCESS;
     }
     DiscardSitePlan plan() { return plan; }

@@ -20,7 +20,8 @@ public final class DiscardSitePlanTest {
         try (var world = new InteractionWorldTestHarness()) {
             world.position(new Vec3(8.5, 1, 8.5));
             var open = DiscardSitePlan.find(world.player, Set.of());
-            check(open != null && open.excavation().isEmpty() && open.stance().equals(world.player.blockPosition()), "open terrain needs no excavation or relocation");
+            check(open != null && open.excavation().isEmpty() && !open.inPlace() && open.stance().equals(world.player.blockPosition()),
+                    "open terrain needs no excavation or relocation and prefers the corridor form");
             corridor(world, false);
             var pocket = DiscardSitePlan.find(world.player, Set.of());
             check(pocket != null && pocket.direction().getAxis() == Direction.Axis.X && pocket.excavation().size() == 8,
@@ -45,8 +46,22 @@ public final class DiscardSitePlanTest {
             var stepped = DiscardSitePlan.find(world.player, Set.of());
             check(stepped != null && stepped.excavation().isEmpty() && stepped.stance().equals(world.player.blockPosition()),
                     "open terrain with scattered one-block steps still allows dropping in place");
+            // 营地中心四周被一格高设施围住、其他站位都曾导航失败：走廊形态全线不成立时，
+            // 原地直接丢弃仍须给出候选（issue 183 批七的开阔营地形态）；狭窄走廊不因兜底绕过侧袋语义。
+            world.position(new Vec3(8.5, 1, 8.5));
+            openWithSteps(world);
+            for (BlockPos clutter : List.of(new BlockPos(6, 1, 8), new BlockPos(10, 1, 8),
+                    new BlockPos(8, 1, 6), new BlockPos(8, 1, 10)))
+                world.set(clutter, Blocks.STONE.defaultBlockState());
+            var rejected = new java.util.HashSet<BlockPos>();
+            for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++)
+                if (x != 8 || z != 8) rejected.add(new BlockPos(x, 1, z));
+            var inPlace = DiscardSitePlan.find(world.player, rejected);
+            check(inPlace != null && inPlace.inPlace() && inPlace.excavation().isEmpty()
+                            && inPlace.stance().equals(world.player.blockPosition()),
+                    "open camp with cluttered surroundings still yields an in-place discard candidate");
         }
-        System.out.println("DiscardSitePlanTest: corridor, side pocket, open room, stepped open terrain and loaded frontier passed");
+        System.out.println("DiscardSitePlanTest: corridor, side pocket, open room, stepped open terrain, in-place fallback and loaded frontier passed");
     }
     /** 开阔平台加几处一格台阶，四个朝向的丢弃带邻域都有台阶出口，但出口都能绕行。 */
     static void openWithSteps(InteractionWorldTestHarness world) {
