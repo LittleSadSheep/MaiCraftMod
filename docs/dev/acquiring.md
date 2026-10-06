@@ -162,6 +162,8 @@
 
 任何来源报告不确定效果，或烹饪报告仍有未结炉次时，父任务都会停下；即使此时背包增加，也不能用数量达标掩盖未知事务。仓库已经发生效果却没完成收尾的失败也保留。狩猎由攻击子任务收取死亡现场的候选掉落，旧堆、混堆及未知归属不阻止原生拾取；来源推断与实际背包增加分别返回，父任务不重复启动拾取。
 
+采矿子任务（`mine`）在身体真正泡进水里时先撤回干地再继续：头部所在格有液体，或脚位格与脚下一格都是液体才算，踩着实地蹚过一格深的浅水不算。一次滞水的撤离总预算 200 游戏刻，换撤离目标不重计，走不到的干地不再重选；同一任务撤回干地满 3 次后又下水，就以 `NO_PATH` 如实收场，说明矿源可能在水那边或水下。滞水期间进度记分键 `body` 只报 `滞水` / `滞水 撤离中`，位置放在 `body_at`；回执带 `body_wet_ticks`。
+
 取消不会撤销已经挖掉的方块或取走的物品。收尾会停止子任务，并保留尝试、库存变化与不确定性。主要结果字段包括 `goal_satisfied`、`attempts`、`recipe_trace`、`issues`、`effects_observed` 和 `outcome_uncertain`；配方记录里的 `allowed_sources` 表示许可，不能当作已经执行的顺序。
 
 `requested_additional_count`（请求的件数）、`baseline_count`（本步起始数）、`net_gained_count`（当前合计减起始数，消耗时可为负）、`required_final_count`（起始数 + 件数）、`observed_final_count`、`missing` 和前后分物品计数说明目标事实；`attempts[].child_data` 说明具体子任务。`recipe_trace[].preparation_plan` 记录补料清单、加工顺序、估价、偏好及附近来源证据；中间件后来到包时会记录收起的旧材料分支。`issues[].facts.crafting_surface` 区分已有台、尚需取台及无摆放点。不要只凭最终英文错误猜是缺材料还是缺空间。

@@ -17,7 +17,7 @@ final class ProgressGate {
     /** null = 这一刻不发布；keylessWarn=true 时调用方应记日志提醒开发者。 */
     record Decision(String message, boolean keylessWarn) {}
 
-    // body 是身体安全键：值含当前位置，滞水随浪况浮沉不断变化签名，受胁状态按地板间隔持续可见。
+    // body 是身体安全键：受胁状态（滞水、撤离中）出现或变化时立即发布；坐标等明细放在非记分键，不制造重复事件。
     // planning_seconds 是静默窗心跳键：只在零推进的段里单调增长，让「还在等」按地板间隔持续可见。
     private static final List<String> SCOREBOARD_KEYS =
             List.of("done", "total", "phase", "remaining", "initial", "calc", "body", "planning_seconds");

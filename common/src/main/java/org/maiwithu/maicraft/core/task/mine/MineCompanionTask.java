@@ -238,14 +238,22 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
     private long lastProgressTick;
     private BlockPos lastProgressPos;
 
-    /** 滞水撤离的一轮预算(刻)：10 秒内走不回干地就诚实收手，不靠换气反射无限漂。 */
+    /** 一次滞水的撤离总预算(刻)：10 秒内走不回干地就诚实收手，不靠换气反射无限漂；换撤离目标不重计。 */
     private static final int WATER_EVACUATION_BUDGET_TICKS = 200;
+    /** 同一任务里撤回干地的次数上限：路线反复把身体带回水里时如实收场，不在“下水—撤离”之间来回摆。 */
+    private static final int WATER_EVACUATION_EPISODE_LIMIT = 3;
     /** 滞水撤离时搜索干地站立格的最大半径(格)。 */
     private static final int WATER_EVACUATION_SEARCH_RADIUS = 16;
     /** 滞水撤离导航；与挖矿接近导航分开持有，撤离期间身体只归它指挥。 */
     private PlayerNav evacuationNav;
-    /** 当前撤离目标已持续的刻数；每次换目标重计，预算按一轮尝试算。 */
+    /** 本次滞水已花在撤离上的刻数；换撤离目标不清零，真正回到干地才清零。 */
     private int evacuationTicks;
+    /** 本次滞水里走不到或到了仍是水的撤离目标；重找干地时跳过，回到干地后清空。 */
+    private final Set<BlockPos> rejectedDryCells = new HashSet<>();
+    /** 当前撤离目标；导航失败时记入 rejectedDryCells。 */
+    private BlockPos evacuationTarget;
+    /** 本任务已成功撤回干地的次数，配合 WATER_EVACUATION_EPISODE_LIMIT 防止来回摆。 */
+    private int evacuationEpisodes;
     /** 本任务期间身体处于水中的累计刻数，回执如实携带，不因成功撤离而抹掉。 */
     private int wetTicks;
     /** 本次任务是否发生过滞水；回执与进度观察据此声明，调用方才能对账换气反射的介入。 */
@@ -1616,12 +1624,12 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
             data.put("calc", nav.planningCalcAttempts());
             data.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
         }
-        // 身体安全心跳：滞水是受胁状态，坐标进标准键让 ProgressGate 随浪况变化按地板间隔持续发布，
-        // 观察者不用等终态才发现角色在溺水边缘。
+        // 身体安全状态：滞水与撤离中进标准键，状态变化时立即发布；坐标另放非记分键，
+        // 随浪浮沉不会每两秒刷一条进度事件，调用方查看进度时仍能读到当前位置。
         if (bodyWet()) {
             BlockPos at = feet();
-            data.put("body", "滞水@" + at.getX() + "," + at.getY() + "," + at.getZ()
-                    + (evacuationNav != null ? " 撤离中" : ""));
+            data.put("body", evacuationNav != null ? "滞水 撤离中" : "滞水");
+            data.put("body_at", List.of(at.getX(), at.getY(), at.getZ()));
         }
         if (activeTarget != null) {
             data.put("target_pos", List.of(activeTarget.getX(), activeTarget.getY(), activeTarget.getZ()));
@@ -1671,11 +1679,15 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         r.extendDeadlineTo(lastProgressTick + PROGRESS_LEASE_TICKS);
     }
 
-    /** 脚位格或其上一格有液体即视为滞水：扫描与开挖都必须从干燥可站立格开始。 */
+    /**
+     * 真正泡在水里才算滞水：头部所在格有液体（没顶），或脚位格与脚下一格都是液体（深水里游、漂）。
+     * 蹚过一格深的浅水（脚下是实地）不算，连跳起来那一刻也不算——挖矿路线经过浅水坑时不必停下撤离。
+     */
     private boolean bodyWet() {
         BlockPos at = feet();
         Level level = player.level();
-        return !level.getFluidState(at).isEmpty() || !level.getFluidState(at.above()).isEmpty();
+        if (!level.getFluidState(at.above()).isEmpty()) return true;
+        return !level.getFluidState(at).isEmpty() && !level.getFluidState(at.below()).isEmpty();
     }
 
     /** 在身体四周按距离就近找一块干地站立格：脚下实心且无水、身体两格无碰撞无液体。找不到返回 null。 */
@@ -1687,7 +1699,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         for (int radius = 1; radius <= WATER_EVACUATION_SEARCH_RADIUS && best == null; radius++) {
             for (BlockPos at : BlockPos.betweenClosed(center.offset(-radius, -2, -radius),
                     center.offset(radius, 2, radius))) {
-                if (!level.isLoaded(at)) continue;
+                if (!level.isLoaded(at) || rejectedDryCells.contains(at)) continue;
                 BlockState floor = level.getBlockState(at.below());
                 if (floor.getFluidState().isEmpty() && MovementHelper.canWalkOn(level, at.below())
                         && bodyCellDry(level, at) && bodyCellDry(level, at.above())) {
@@ -1715,6 +1727,14 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         wadedDuringTask = true;
         if (evacuationNav == null && (nav != null || navIsBranch || navIsDrop)) stopNav();
         if (chainBreak != null) { closeChain(); }
+        // 撤回干地的次数已到上限又下了水：说明去矿源的路线一再把身体带回水里，如实收场而不是继续来回摆。
+        if (evacuationNav == null && evacuationTicks == 0 && evacuationEpisodes >= WATER_EVACUATION_EPISODE_LIMIT) {
+            fail("mine scan aborted: the route kept leading the body back into water (now at " + feet().toShortString()
+                    + ") after " + evacuationEpisodes + " evacuations to dry ground in this task; the sources may"
+                    + " sit beyond or under water — approach them from dry land or travel across the water first",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
         if (evacuationTicks >= WATER_EVACUATION_BUDGET_TICKS) {
             stopEvacuation();
             fail("mine scan aborted: the body stayed in water at " + feet().toShortString()
@@ -1738,7 +1758,7 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     r.getToolCallId(), feet().toShortString(), dry.toShortString());
             evacuationNav = PlayerNav.toGoal(player, () -> NavGoal.exact(dry), MINE_SPEED,
                     () -> false, PlayerNav.ContextProvider.DEFAULT).walkingOnly();
-            evacuationTicks = 0;
+            evacuationTarget = dry;
         }
         evacuationTicks++;
         switch (evacuationNav.tick()) {
@@ -1752,15 +1772,16 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
                     finishEvacuation();
                     noteProgress();
                 } else {
-                    // 到点仍是水（目标格被流沙/流体更新占据）：换一块干地重找，预算继续计时。
-                    stopEvacuation();
+                    // 到点仍是水（目标格被流沙/流体更新占据）：记下这块地，换一块干地重找，预算继续计时。
+                    rejectEvacuationTarget();
                 }
                 return TaskState.RUNNING;
             }
             case FAILED -> {
                 Constants.LOG.info("[maicraft-task] mine task={} evacuation nav failed: {}, looking for another dry cell",
                         r.getToolCallId(), evacuationNav.failReason());
-                stopEvacuation();
+                // 走不到的干地不再重选，换下一块；撤离总预算照常累计，不会因反复失败而无限重试。
+                rejectEvacuationTarget();
                 return TaskState.RUNNING;
             }
         }
@@ -1768,16 +1789,27 @@ public final class MineCompanionTask extends AbstractCompanionTask<MineBlockTask
         return TaskState.RUNNING;
     }
 
+    // 真正回到干地：本次滞水结束，撤离预算与被拒干地一起清零，并记一次成功撤离。
     private void finishEvacuation() {
         Constants.LOG.info("[maicraft-task] mine task={} back on dry ground at {} after {} wet ticks, resuming scan",
                 r.getToolCallId(), feet().toShortString(), wetTicks);
         stopEvacuation();
+        evacuationTicks = 0;
+        rejectedDryCells.clear();
+        evacuationEpisodes++;
     }
 
+    // 当前撤离目标不可用：记入被拒名单后停掉导航，下一刻另找干地；预算不清零。
+    private void rejectEvacuationTarget() {
+        if (evacuationTarget != null) rejectedDryCells.add(evacuationTarget);
+        stopEvacuation();
+    }
+
+    // 只停撤离导航；撤离预算是否清零由调用方决定（回到干地才清零）。
     private void stopEvacuation() {
         if (evacuationNav != null) evacuationNav.stop();
         evacuationNav = null;
-        evacuationTicks = 0;
+        evacuationTarget = null;
     }
 
     /**

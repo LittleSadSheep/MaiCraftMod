@@ -39,6 +39,8 @@ public final class AcquisitionProspectingHandoffTest {
         realFairScanDispatchesProspecting();
         wetBodyEvacuatesBeforeScanning();
         evacuationBudgetExhaustionFailsHonestly();
+        shallowWadingDoesNotEvacuate();
+        repeatedEvacuationsStopOscillation();
         noDryCellNearbyFailsWithScope();
         sourceScanHeartbeatMonotonic();
         sourceScanTimeoutFailsHonestly();
@@ -183,12 +185,15 @@ public final class AcquisitionProspectingHandoffTest {
         }
     }
 
-    /** 周围全是水、找不到干地站立格：立即诚实失败并携带搜索范围，声明不构成陆地不存在的证据。 */
+    /** 周围全是没顶的深水、找不到干地站立格：立即诚实失败并携带搜索范围，声明不构成陆地不存在的证据。 */
     private static void noDryCellNearbyFailsWithScope() throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
             initEffects(h);
-            for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++)
+            // 两层水：脚位与头部都在水里才算泡在水中；一格深的浅水能蹚过去，不触发撤离。
+            for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) {
                 h.set(new BlockPos(x, 1, z), Blocks.WATER.defaultBlockState());
+                h.set(new BlockPos(x, 2, z), Blocks.WATER.defaultBlockState());
+            }
             var task = new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(h.player,
                     new MineBlockTaskRecord("wet-ocean", 100000, Set.of(Blocks.STONE), 4, "stone"));
             startTask(task);
@@ -199,6 +204,39 @@ public final class AcquisitionProspectingHandoffTest {
                     "失败应携带干地搜索半径，实际: " + message);
             check(message.contains("not evidence that land does not exist"),
                     "范围型失败必须声明不构成陆地不存在的证据");
+        }
+    }
+
+    /** 踩着实地蹚一格深的浅水（头部在空气里）：不算滞水，不建撤离导航，progress 也不报 body。 */
+    private static void shallowWadingDoesNotEvacuate() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            initNavRuntime();
+            h.set(new BlockPos(0, 1, 3), Blocks.WATER.defaultBlockState());
+            var task = new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(h.player,
+                    new MineBlockTaskRecord("shallow-wade", 100000, Set.of(Blocks.STONE), 4, "stone"));
+            startTask(task);
+            tickTask(task);
+            check(get(task, "evacuationNav") == null, "浅水蹚水不应建立撤离导航");
+            check(task.progress().get("body") == null, "浅水蹚水不应报 body 滞水键");
+        }
+    }
+
+    /** 已撤回干地满上限后又泡进水里：说明路线一再把身体带回水中，如实收场而不再来回摆。 */
+    private static void repeatedEvacuationsStopOscillation() throws Exception {
+        try (var h = new InteractionWorldTestHarness()) {
+            initEffects(h);
+            initNavRuntime();
+            h.set(new BlockPos(0, 1, 3), Blocks.WATER.defaultBlockState());
+            h.set(new BlockPos(0, 2, 3), Blocks.WATER.defaultBlockState());
+            var task = new org.maiwithu.maicraft.core.task.mine.MineCompanionTask(h.player,
+                    new MineBlockTaskRecord("wet-oscillation", 100000, Set.of(Blocks.STONE), 4, "stone"));
+            startTask(task);
+            set(task, "evacuationEpisodes", 3);
+            TaskState state = tickTask(task);
+            check(state == TaskState.FAILED, "撤离次数到上限后再下水必须如实收场，实际 " + state);
+            check(task.result(TaskState.FAILED).message().contains("kept leading the body back into water"),
+                    "失败正文说明路线一再把身体带回水里");
         }
     }
 
