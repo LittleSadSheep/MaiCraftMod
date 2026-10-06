@@ -231,6 +231,15 @@ public class MovementFall extends Movement {
         // Once airborne, source-column doors or mining cannot delay the owned rescue. Its
         // native placement/recovery session and fall steering run until a supported outcome.
         if (departureObserved) return true;
+        // 先挖通再备落地物品：人站在出发点上，先用镐子把旁边下落柱最上面几格挖开，挖通之后才建落地保护、
+        // 拿出水桶并瞄准落点。若先备水桶，挖掘要镐子、落地准备要水桶，每刻来回切换，动作桥也会被落地保护
+        // 抢先处理而跳过挖掘点击，脚下那格永远挖不开。落点格本身留给落地方案处理，不在这里挖。
+        if (atDeparture && landingAssist == null && landingBoat == null) {
+            for (int i = 0; i < 4 && i < positionsToBreak.length; i++) {
+                if (positionsToBreak[i].equals(dest)) continue;
+                if (!MovementHelper.canWalkThrough(ctx, positionsToBreak[i])) return super.prepared(state);
+            }
+        }
         if (landingAssist == null && atDeparture && needsLandingAssist()) {
             var calculation = new CalculationContext(baritone);
             var plans = calculation.landingPlans(dest, src.y - dest.y);

@@ -275,6 +275,9 @@ public final class DefaultNativeActionPort implements NativeActionPort {
                 current,
                 NativeConfirmation.hotbarSelected(slot),
                 timeoutTicks);
+        // 诊断：真正换手时记下调用方，并检测两格之间的来回切换；只记录，不影响本次选择。
+        int previous = current.player().getInventory().selected;
+        if (previous != slot) HotbarSwitchLog.record(current.player(), previous, slot);
         try {
             current.player().getInventory().selected = slot;
             current.connection().send(new ServerboundSetCarriedItemPacket(slot));
