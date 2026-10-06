@@ -198,6 +198,12 @@ def regressionSuites = [
         heap: '512m', directory: 'navigation-regression', timeoutSeconds: 45,
         purpose: '验证导航取消、路径推进、开门与落地'
     ],
+    // 无法满足的目标带靠重规划震荡快速给出诚实无路结论，不再烧满外层预算；正常进展不被误杀。
+    replanStagnationRegression: [
+        entry: 'org.maiwithu.maicraft.core.pathing.baritone.ReplanStagnationNoPathTest',
+        heap: '512m', directory: 'replan-stagnation-regression', timeoutSeconds: 60,
+        purpose: '验证同目标同站位零进展重规划快速无路收场并携带归因'
+    ],
     // travel 上超预检与垫柱回收：悬空精确目标出发前拒绝，登顶垫柱收尾清理或残留声明。
     travelPillarPrecheckRegression: [
         entry: 'org.maiwithu.maicraft.core.task.move.TravelPillarPrecheckTest',

@@ -95,6 +95,13 @@ public final class EmbeddedBaritoneNavigator {
     private Map<String, Object> probeRecovery = Map.of();
     private int probeRestarts;
     private NavigationDismount dismount;
+    // 实测震荡形态每刻重算一至两次；60 次约三秒纯空转即收场。任何位移、确认动作或目标变化都会清零，
+    // 慢收敛场景的单次搜索本身耗秒级并持续产出工作单位，不可能在限额内累计。
+    private static final int STAGNANT_REPLAN_LIMIT = 60;
+    private GoalCompiler.CompiledFingerprint stagnantGoal;
+    private BlockPos stagnantFeet;
+    private long stagnantProgressTick = Long.MIN_VALUE;
+    private int stagnantReplans;
 
     public EmbeddedBaritoneNavigator(
             LocalPlayer player,
@@ -241,7 +248,7 @@ public final class EmbeddedBaritoneNavigator {
                 && !compiledFingerprint.equals(freshFingerprint);
         if (!started || semanticsChanged
                 || (arrivedLatched && !freshGoal.isAt(feet()))) {
-            if (semanticsChanged) { cancelTerrainProbe(); preserveReplans = 0; preserveReplanFeet = null; }
+            if (semanticsChanged) { cancelTerrainProbe(); preserveReplans = 0; preserveReplanFeet = null; resetReplanStagnation(); }
             compiled = fresh;
             compiledFingerprint = freshFingerprint;
             goal = freshGoal;
@@ -502,7 +509,46 @@ public final class EmbeddedBaritoneNavigator {
         if (event == PathEvent.CALC_FAILED) {
             calculationFailed = true;
             failedOrigin = feet().immutable();
+            return;
         }
+        if (event == PathEvent.CALC_STARTED || event == PathEvent.NEXT_SEGMENT_CALC_STARTED) {
+            observeReplanStagnation();
+        }
+    }
+
+    /**
+     * 同一目标、同一站位、零确认进展的重规划只会原样空转：实测单任务可烧六百多次 calc 而无任何位移，
+     * 外层要等约三十秒预算耗尽才以 planning_stall 收场。累计到限额即给出诚实的快速结论——
+     * 这是「该目标带从当前位置不可满足」的规划器收敛失败，不构成世界其他位置无路的证据；
+     * 换出发位置或修订目的地仍可能成功。位移、确认动作或目标变化都会重置计数。
+     */
+    private void observeReplanStagnation() {
+        BlockPos now = feet();
+        long confirmedAt = progress.confirmedTick();
+        if (stagnantGoal != null && stagnantGoal.equals(compiledFingerprint)
+                && now.equals(stagnantFeet) && confirmedAt == stagnantProgressTick) {
+            stagnantReplans++;
+        } else {
+            stagnantGoal = compiledFingerprint;
+            stagnantFeet = now;
+            stagnantProgressTick = confirmedAt;
+            stagnantReplans = 1;
+            return;
+        }
+        if (stagnantReplans < STAGNANT_REPLAN_LIMIT || pendingFailureType != null || terminalFailure) return;
+        failWhenSafe(FailureType.NO_PATH,
+                "unsatisfiable_target_band: " + stagnantReplans + " consecutive route calculations for the same goal "
+                        + "from the same standing position made no physical progress; concluding this goal band is not "
+                        + "satisfiable from the current position under the current terrain permission. This is a planner "
+                        + "convergence failure, not evidence that no route exists from another position; approach the "
+                        + "target from a different position or revise the destination. " + outcomeSummary());
+    }
+
+    private void resetReplanStagnation() {
+        stagnantGoal = null;
+        stagnantFeet = null;
+        stagnantProgressTick = Long.MIN_VALUE;
+        stagnantReplans = 0;
     }
 
     /**
