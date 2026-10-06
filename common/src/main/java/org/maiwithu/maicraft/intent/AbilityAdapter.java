@@ -305,6 +305,20 @@ final class AbilityAdapter {
             LocalPlayer player, Goal.WorldPosition area) {
         BlockPos column = new BlockPos(area.x(), area.y(), area.z());
         if (!player.clientLevel.isLoaded(column)) return null;
+        // 床区锚的核验证据是「该列确实有床」：锚常直接给床坐标，而床有碰撞箱不算可站立
+        // 地面，地表扫描的谓词会跳过它——列内邻域扫到床即放行，锚用扫到的床格，goto 到
+        // 床后由 sleep 工具在伸手范围完成入睡。
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int scanTop = Math.min(area.y() + 4, player.clientLevel.getMaxBuildHeight() - 1);
+        int scanBottom = Math.max(area.y() - 8, player.clientLevel.getMinBuildHeight());
+        for (int y = scanTop; y >= scanBottom; y--) {
+            if (player.clientLevel.getBlockState(cursor.set(column.getX(), y, column.getZ()))
+                    .getBlock() instanceof BedBlock) {
+                return new Goal.WorldPosition(column.getX(), y, column.getZ(), area.dimension());
+            }
+        }
+        // 列内没有床时退回地面核验：锚必须落地到可站立地面格，幻影高度在此被拒；
+        // 到场后确实没有床则由 sleep 工具如实报告，不假装入睡。
         int groundY = ClientSurfaceHeight.motionBlockingNoLeaves(
                 player.clientLevel, column.getX(), column.getZ());
         BlockPos ground = new BlockPos(column.getX(), groundY, column.getZ());
