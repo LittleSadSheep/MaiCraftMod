@@ -24,14 +24,18 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
     private static final long PLANNING_WORK_FUSE_UNITS = 60_000;
     /** 距离最后一次接近目标超过这么长的活动 tick（且工作量已越熔断线）判定规划无收敛。 */
     private static final long CONVERGENCE_WINDOW_TICKS = 30 * 20;
-    /** 整条接近段的宽上限：不进规划也不挪窝的静默窗（导航既不报规划在飞也不给终态的楔死形态）
-     *  由这把分钟级的总表收场，健康步行接近远用不满。 */
+    /** 接近段静默窗的宽上限：只计“身体没有真实位移、导航也没给终态”的连续时间（楔死形态）；
+     *  走远路时每次真实位移都重新起表，被反射或同步任务挂起的时间也不计入。 */
     private static final long APPROACH_PHASE_LIMIT_TICKS = 5 * 60 * 20;
+    /** 判定“近期有真实位移”的回看窗口（刻）。 */
+    private static final int APPROACH_MOVEMENT_GRACE_TICKS = 40;
 
     private ProgressBudget planningBudget;
     private long planningWorkHighWater;
     private long lastApproachTick = Long.MIN_VALUE;
     private double bestApproachDistance = Double.MAX_VALUE;
+    /** 上一次推进接近段的游戏刻；相隔超过一秒说明任务被挂起过，恢复后静默窗重新起表。 */
+    private long lastApproachTickSeen = Long.MIN_VALUE;
     /** 出发时（或路线重估后）的量化剩余距离分母；口径见 {@link #progress()}。 */
     private int initialRemaining = -1;
 
@@ -93,10 +97,15 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
             planningPhaseEnd();
             return act();
         }
-        // 接近段起表：无论导航处于规划在飞还是执行行走，整条接近段都有宽上限兜底——
-        // 既不规划也不挪窝、也不给终态的静默窗不再无限 running（消费类接近段的楔死形态）。
-        if (nav != null && !planningPhaseActive()) {
-            planningPhaseBegin("approach", APPROACH_PHASE_LIMIT_TICKS);
+        // 接近段静默窗起表：身体近期有真实位移、或任务刚从挂起（反射接管、吃饭、同步任务）恢复时重新计时，
+        // 只有既不挪窝也不给终态的楔死接近才会累计到上限——正常走远路不会因为总时长被判卡死。
+        if (nav != null) {
+            long now = player.level().getGameTime();
+            boolean resumed = lastApproachTickSeen != Long.MIN_VALUE && now - lastApproachTickSeen > 20;
+            lastApproachTickSeen = now;
+            if (!planningPhaseActive() || resumed || nav.hasRecentPhysicalProgress(APPROACH_MOVEMENT_GRACE_TICKS)) {
+                planningPhaseBegin("approach", APPROACH_PHASE_LIMIT_TICKS);
+            }
         }
         if (nav == null) {
             // 无到场导航的动作任务:不在工作距离内 = 教学失败,旅行归 goto
@@ -164,9 +173,9 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         // 宽上限先于规划在飞判定：导航停在既不规划也不终态的行走假运行时，idle 预算没有
         // lastVerifiedProgressTick 可依，只有这张总表能把接近段收进有界终态。
         if (planningPhaseExceeded()) {
-            fail("approach phase 'approach' did not complete within about " + planningPhaseSeconds()
-                    + " seconds; the body neither reached working distance nor produced a path"
-                    + " verdict; " + nav.outcomeSummary()
+            fail("approach made no physical progress for about " + planningPhaseSeconds()
+                    + " seconds; the body neither moved nor reached working distance, and navigation produced"
+                    + " no path verdict; " + nav.outcomeSummary()
                     + " Travel closer with goto and resubmit, or inspect the approach first.",
                     FailureType.PLANNING_STALL);
             return TaskState.FAILED;
@@ -233,7 +242,7 @@ public abstract class GoToThenDoTask<R extends TaskRecord> extends AbstractCompa
         }
         // 接近静默窗的心跳：身体近期没有真实位移（既不规划在飞也不挪窝的楔死形态）时报
         // 已接近秒数——单调增长让门卫按地板间隔持续发布，健康步行不报、不加事件噪音。
-        if (!planning && !nav.hasRecentPhysicalProgress(40)) {
+        if (!planning && !nav.hasRecentPhysicalProgress(APPROACH_MOVEMENT_GRACE_TICKS)) {
             result.put("planning_seconds", planningPhaseActive() ? planningPhaseSeconds() : 0);
         }
         return Map.copyOf(result);

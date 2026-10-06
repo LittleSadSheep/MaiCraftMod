@@ -56,6 +56,7 @@ public final class MoveToProgressGuardTest {
         approachProgressEmitsScoreboardHeartbeat(memory);
         approachSilentWindowHeartbeats(memory);
         approachSilentWindowWideCapTerminates(memory);
+        approachSuspensionRestartsSilentWindow(memory);
         moveToPlanningHeartbeat(memory);
         moveToRemainingScaleTracksArrival(memory);
         System.out.println("MoveToProgressGuardTest: passed");
@@ -164,9 +165,27 @@ public final class MoveToProgressGuardTest {
             TaskResult result = task.result(TaskState.FAILED);
             check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("planning_stall"),
                     "the wide-cap timeout must fail as planning_stall");
-            check(result.message().contains("approach phase 'approach'")
+            check(result.message().contains("approach made no physical progress")
                             && result.message().contains("seconds"),
-                    "failure message must name the approach phase and the waited duration");
+                    "failure message must name the silent approach and the waited duration");
+        }
+    }
+
+    /** 接近段被挂起（反射接管、吃饭等）期间游戏时间照走：恢复后静默窗重新起表，挂起时间不计入上限。 */
+    private static void approachSuspensionRestartsSilentWindow(Unsafe memory) throws Exception {
+        try (Fixture f = new Fixture(memory)) {
+            f.runSessionWithoutPlanning();
+            GoToThenDoTask<MoveToTaskRecord> task = f.approachTask();
+            TaskState state = TaskState.RUNNING;
+            int ticks = 0;
+            while (state == TaskState.RUNNING && ticks++ < 12000) {
+                // 第 3000 刻模拟任务被挂起 200 刻：这段时间不 tick 接近任务。
+                if (ticks == 3000) f.tick += 200;
+                f.nextTick();
+                state = task.tick(f.player);
+            }
+            check(state == TaskState.FAILED && ticks > 8500 && ticks <= 9600,
+                    "after a suspension the silent window restarts instead of counting the pause, ticks=" + ticks);
         }
     }
 
