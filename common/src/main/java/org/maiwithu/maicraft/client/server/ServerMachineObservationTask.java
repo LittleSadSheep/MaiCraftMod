@@ -33,6 +33,8 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
     private long requestTick;
     private boolean finished;
     private final Set<BlockPos> observedComponents = new HashSet<>();
+    /** 因人离部件超过 16 格而没有读取原生状态的部件数；非零时回执顶层明说要走近再看。 */
+    private int outsideRange;
 
     ServerMachineObservationTask(LocalPlayer player, ServerMachineObservationTaskRecord record) { super(player, record); }
 
@@ -68,6 +70,7 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
             if (world.getBlockEntity(position) == null && !declared.contains(index)) continue;
             if (player.distanceToSqr(position.getCenter()) > 16 * 16) {
                 pages.unavailable(offset(position), "component_outside_observation_range");
+                outsideRange++;
                 continue;
             }
             targets.add(new Target(index, position.immutable()));
@@ -211,6 +214,24 @@ final class ServerMachineObservationTask extends AbstractCompanionTask<ServerMac
                 : "正在观察机器部件 " + Math.min(targetIndex + 1, targets.size()) + "/" + targets.size();
     }
 
-    @Override protected Map<String, Object> resultData() { return Map.of("machine", report == null ? r.snapshot.report() : report); }
-    @Override protected String successMessage() { return "Machine structure and available native pages observed; missing state and production uncertainty remain explicit."; }
+    @Override protected Map<String, Object> resultData() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("machine", report == null ? r.snapshot.report() : report);
+        // 人离机器太远时，原生部件状态一项都没读到；把这件事放在回执顶层，避免被当成已经看清了现场。
+        if (outsideRange > 0 && world != null) {
+            data.put("observation_range", Map.of(
+                    "limit_blocks", 16,
+                    "player_distance_to_center", Math.round(Math.sqrt(player.distanceToSqr(r.snapshot.center().getCenter())) * 10.0) / 10.0,
+                    "components_outside_range", outsideRange,
+                    "components_observed", observedComponents.size(),
+                    "next_step", "travel within 16 blocks of the machine and inspect again to read native component states"));
+        }
+        return data;
+    }
+    @Override protected String successMessage() {
+        return outsideRange > 0
+                ? "Machine map observed, but " + outsideRange + " components were beyond the 16-block native observation range; "
+                        + "their live states were not read. Move within 16 blocks and inspect again."
+                : "Machine structure and available native pages observed; missing state and production uncertainty remain explicit.";
+    }
 }
