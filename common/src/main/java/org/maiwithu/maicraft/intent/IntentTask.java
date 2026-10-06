@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.core.task.supply.SemanticBuildSupplyTaskRecord;
 import org.maiwithu.maicraft.core.task.trade.SemanticTradeTaskRecord;
 import org.maiwithu.maicraft.core.task.cook.SemanticCookTaskRecord;
 import org.maiwithu.maicraft.core.task.explore.SemanticExploreTaskRecord;
+import org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord;
 import org.maiwithu.maicraft.entity.InputDriver;
 import org.maiwithu.maicraft.task.InternalAreaProtectionReceipt;
 import org.maiwithu.maicraft.task.InternalPositionReceipt;
@@ -459,7 +460,7 @@ final class IntentTask implements Task {
 
     private TaskState beginNative(TaskRecord nextRecord) {
             // 入睡尝试的床头锚点：遮挡失败的换位重试按它回到同一张床，不按类型重扫附近。
-            if (nextRecord instanceof org.maiwithu.maicraft.core.task.sleep.SleepTaskRecord sleepRecord) {
+            if (nextRecord instanceof SleepTaskRecord sleepRecord) {
                 sleepAttemptBedHead = sleepRecord.bed;
             }
             if (nextRecord instanceof SemanticAcquireTaskRecord acquire && AcquireAbilityAdapter.ABILITY.equals(currentGoal().ability())) {
@@ -712,6 +713,16 @@ final class IntentTask implements Task {
         return goal.parameters().has("may_alter_terrain") || goal.preferences().has("may_alter_terrain");
     }
 
+    /** 参数或偏好任一处明确写了 may_alter_terrain=true 才算授权；写 false 是拒绝，不能当作可传递的授权。 */
+    private static boolean grantsTerrainAuthorization(Goal goal) {
+        return isTrue(goal.parameters(), "may_alter_terrain") || isTrue(goal.preferences(), "may_alter_terrain");
+    }
+
+    private static boolean isTrue(JsonObject object, String key) {
+        var value = object.get(key);
+        return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
+    }
+
     private static Goal withTerrainAuthorization(Goal goal) {
         JsonObject parameters = goal.parameters();
         parameters.addProperty("may_alter_terrain", true);
@@ -722,11 +733,13 @@ final class IntentTask implements Task {
     record SharedAuthorization(Goal answeredGoal, Goal failedStep) {}
 
     static SharedAuthorization shareTerrainAuthorization(Goal failedStep, Goal answeredGoal) {
-        boolean stepAuthorized = statesTerrainAuthorization(failedStep);
-        boolean answerAuthorized = statesTerrainAuthorization(answeredGoal);
-        if (stepAuthorized == answerAuthorized) return new SharedAuthorization(answeredGoal, failedStep);
-        if (stepAuthorized) return new SharedAuthorization(withTerrainAuthorization(answeredGoal), failedStep);
-        return new SharedAuthorization(answeredGoal, withTerrainAuthorization(failedStep));
+        // 只把明确的 true 传给完全缺省的另一侧：一侧写 false 是拒绝动地形，不能因为另一侧没写就被补成授权；
+        // 两侧都写了值（不论真假）各自保持原样，授权范围不同的步骤仍各自如实询问。
+        if (grantsTerrainAuthorization(failedStep) && !statesTerrainAuthorization(answeredGoal))
+            return new SharedAuthorization(withTerrainAuthorization(answeredGoal), failedStep);
+        if (grantsTerrainAuthorization(answeredGoal) && !statesTerrainAuthorization(failedStep))
+            return new SharedAuthorization(answeredGoal, withTerrainAuthorization(failedStep));
+        return new SharedAuthorization(answeredGoal, failedStep);
     }
 
     private TaskState failStep(TaskState state, TaskResult result) {

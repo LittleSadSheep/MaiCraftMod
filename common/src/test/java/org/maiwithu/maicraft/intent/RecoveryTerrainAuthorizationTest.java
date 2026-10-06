@@ -51,6 +51,15 @@ public final class RecoveryTerrainAuthorizationTest {
                 goal("maicraft:travel", "{\"may_alter_terrain\":true}"));
         check(!narrow.failedStep().parameters().get("may_alter_terrain").getAsBoolean(),
                 "an explicit refusal on the main step is not overridden");
+        // 一侧明确拒绝、另一侧没写：拒绝不是授权，缺省的一侧不能被补成 true。
+        var refusedStep = IntentTask.shareTerrainAuthorization(
+                goal("maicraft:harvest_block", "{\"may_alter_terrain\":false}"), goal("maicraft:travel", "{}"));
+        check(!refusedStep.answeredGoal().parameters().has("may_alter_terrain"),
+                "a refusal on the main step never becomes permission for the recovery step");
+        var refusedAnswer = IntentTask.shareTerrainAuthorization(
+                goal("maicraft:harvest_block", "{}"), goal("maicraft:travel", "{\"may_alter_terrain\":false}"));
+        check(!refusedAnswer.failedStep().parameters().has("may_alter_terrain"),
+                "a refusal in the answer never becomes permission for the main step");
     }
 
     // 走真实的任务单路径：授权共享后插入的前置步骤带着授权排在原步骤之前，原步骤参数同步写回。
