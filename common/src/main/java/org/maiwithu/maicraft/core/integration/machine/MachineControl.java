@@ -38,9 +38,29 @@ public final class MachineControl {
         return new MachineControlTaskRecord(callId, deadlineGameTime, request);
     }
 
-    /** 多个开关中绝不猜测哪个控制目标输出。 */
-    static BlockPos selectControl(List<BlockPos> candidates, BlockPos namedControl) {
-        if (namedControl != null) return candidates.contains(namedControl) ? namedControl.immutable() : null;
-        return candidates.size() == 1 ? candidates.getFirst().immutable() : null;
+    /**
+     * 选杆结果：position 为空表示没选出来；basis 说明是怎么选中的，nearby 是点名格附近或整个范围内的候选拉杆，
+     * 选不出来时原样回报给调用方，让它改用目标拉杆的坐标。
+     */
+    public record Selection(BlockPos position, String basis, List<BlockPos> nearby) {}
+
+    /** 点名格旁边多远以内的拉杆算“挂在这块告示牌/地标旁边”的那根。 */
+    static final int NAMED_CELL_NEIGHBOUR_RANGE = 2;
+
+    /**
+     * 多个开关中绝不猜测哪个控制目标输出。点名格本身就是拉杆时只认它；点名格是告示牌或地标所在格、
+     * 本身不是拉杆时，取它两格内唯一的一根，并在回执里说明是按“点名格旁边唯一拉杆”选的；
+     * 两格内有多根或一根都没有就不选。没有点名时整个范围内必须恰好一根。
+     */
+    static Selection selectControl(List<BlockPos> candidates, BlockPos namedControl) {
+        if (namedControl == null) return candidates.size() == 1
+                ? new Selection(candidates.getFirst().immutable(), "only_lever_in_region", List.of())
+                : new Selection(null, null, List.copyOf(candidates));
+        if (candidates.contains(namedControl)) return new Selection(namedControl.immutable(), "named_lever", List.of());
+        List<BlockPos> near = candidates.stream().filter(position -> Math.max(Math.abs(position.getX() - namedControl.getX()),
+                Math.max(Math.abs(position.getY() - namedControl.getY()), Math.abs(position.getZ() - namedControl.getZ())))
+                <= NAMED_CELL_NEIGHBOUR_RANGE).map(BlockPos::immutable).toList();
+        return near.size() == 1 ? new Selection(near.getFirst(), "unique_lever_near_named_cell", List.of())
+                : new Selection(null, null, near);
     }
 }

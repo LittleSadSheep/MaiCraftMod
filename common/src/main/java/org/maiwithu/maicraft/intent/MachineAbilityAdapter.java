@@ -428,7 +428,8 @@ final class MachineAbilityAdapter {
 
     /**
      * 不带观察编号拨拉杆：坐标目标只认那一格；地点或附近同名告示牌以它为中心取半径 4；nearest 以角色脚下为中心取半径 6。
-     * 范围内必须恰好一根原版拉杆（或用 control_label 点名），提交时记下这一小范围的结构摘要，点击前复核没有变化。
+     * 范围内必须恰好一根原版拉杆（或用 control_label 点名；点名格是告示牌时由执行器取其两格内唯一一根），
+     * 提交时记下这一小范围的结构摘要，点击前复核没有变化。
      * 拉杆已是目标状态就直接完成，不会再拨一次；拨动后的机器是否运转、是否产出仍需另行观察。
      */
     private static IntentAction controlWithoutSnapshot(Goal goal, LocalPlayer player, IntentRuntime runtime,

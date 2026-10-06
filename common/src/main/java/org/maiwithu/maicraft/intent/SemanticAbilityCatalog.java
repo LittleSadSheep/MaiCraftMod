@@ -154,7 +154,7 @@ public final class SemanticAbilityCatalog {
                             field("menu_receipt_id", "string", "deposit/withdraw必填字符串1..36字符，来自当前perceive(machine_menu)。它绑定原生菜单及条目版本，交易不再给target；每次交易后重读当前菜单，null拒绝。"),
                             field("entry_index", "integer", "deposit/withdraw必填整数0..511，来自该menu_receipt_id的真实条目；0是第一个条目，不是自动选槽，null拒绝。角色自己选择背包搬运槽。"),
                             field("powered", "boolean", "set_control必填布尔；false明确关拉杆，true开拉杆。已是目标状态直接成功不再拨动，否则只拨一次并核对；不证明机器产出。省略/null拒绝。"),
-                            field("control_label", "string", "set_control可选字符串1..160字符，指已记住地点或附近唯一同名告示牌所在的确切原版拉杆，须在本次范围内；省略只能在唯一拉杆时判定，null拒绝。"),
+                            field("control_label", "string", "set_control可选字符串1..160字符，指已记住地点或附近唯一同名告示牌所在格，须在本次范围内：该格是原版拉杆就只认它，不是拉杆（如告示牌）就取它2格内唯一一根并在回执control_selected_by说明，2格内多根则拒绝并列出候选坐标；省略只能在唯一拉杆时判定，null拒绝。"),
                             field("item_id", "resource_id", "ae2_supply/deposit/withdraw/station_process必填完整注册ID（字符串1..256字符）；必须是可用真实物品，不以相似名称代替。station_process中是要放上置物台的随身原料。"),
                             field("max_wait_seconds", "integer", "仅station_process：放上原料后等待现场机器加工的最长游戏秒数，整数1..300，默认30。到时仍是原料就收回并报告processing_timed_out，不判断机器设计对错。"),
                             field("count", "integer", "可选精确整数，默认1。菜单存取1..64件；AE2本次获准净增量1..256件。0不表示全部，null/小数拒绝。execute的request_key不放在这里。"),

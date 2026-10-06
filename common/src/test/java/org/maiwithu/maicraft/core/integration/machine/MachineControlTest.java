@@ -13,11 +13,21 @@ public final class MachineControlTest {
     public static void main(String[] args) {
         BlockPos a = new BlockPos(2, 70, 3);
         BlockPos b = new BlockPos(5, 70, 3);
-        check(MachineControl.selectControl(List.of(), null) == null, "no invented control");
-        check(MachineControl.selectControl(List.of(a), null).equals(a), "one observed control is selectable");
-        check(MachineControl.selectControl(List.of(a, b), null) == null, "multiple controls require identity");
-        check(MachineControl.selectControl(List.of(a, b), b).equals(b), "named control disambiguates exactly");
-        check(MachineControl.selectControl(List.of(a), b) == null, "missing named control never falls back");
+        check(MachineControl.selectControl(List.of(), null).position() == null, "no invented control");
+        check(MachineControl.selectControl(List.of(a), null).position().equals(a), "one observed control is selectable");
+        check(MachineControl.selectControl(List.of(a, b), null).position() == null, "multiple controls require identity");
+        check(MachineControl.selectControl(List.of(a, b), null).nearby().size() == 2, "ambiguity reports every candidate");
+        check(MachineControl.selectControl(List.of(a, b), b).position().equals(b), "named control disambiguates exactly");
+        check(MachineControl.selectControl(List.of(a, b), b).basis().equals("named_lever"), "named lever basis is reported");
+        check(MachineControl.selectControl(List.of(a), b).position() == null, "named cell three blocks away never falls back");
+        // 告示牌格本身不是拉杆：两格内唯一一根拉杆可以选中并说明选法；两格内两根就不猜。
+        BlockPos sign = new BlockPos(2, 71, 2);
+        var nearSign = MachineControl.selectControl(List.of(a, b), sign);
+        check(a.equals(nearSign.position()) && "unique_lever_near_named_cell".equals(nearSign.basis()),
+                "the only lever beside a named sign is selected");
+        BlockPos c = new BlockPos(4, 70, 4);
+        var crowded = MachineControl.selectControl(List.of(a, c), sign);
+        check(crowded.position() == null && crowded.nearby().size() == 2, "two levers beside the named sign stay ambiguous");
         var region = new MachineSnapshots.Region("minecraft:overworld", BlockPos.ZERO, 8, "observed");
         check(region.contains(new BlockPos(8, -8, 8)), "boundary matches surveyed cube");
         check(!region.contains(new BlockPos(9, 0, 0)), "outside cube is rejected");

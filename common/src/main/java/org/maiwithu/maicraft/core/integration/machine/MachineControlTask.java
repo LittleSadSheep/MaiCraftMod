@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
 import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
 import org.maiwithu.maicraft.client.actor.NativeConfirmation;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
@@ -39,6 +40,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
     private enum Phase { SELECT, APPROACH, PREPARE_HAND, AIM, CONFIRM }
 
     private final ActualViewConvergenceGate aimGate = new ActualViewConvergenceGate();
+    private final MachineMenuHandParking handParking = new MachineMenuHandParking();
     private Phase phase = Phase.SELECT;
     private BlockPos control;
     private BlockState before;
@@ -50,6 +52,8 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
     private boolean controlStateVerified;
     private boolean alreadySatisfied;
     private int candidateCount;
+    private String selectionBasis;
+    private List<BlockPos> unresolvedCandidates = List.of();
     private int stanceDudTicks;
     private String failureCode;
     private String receiptStatus;
@@ -65,6 +69,8 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         }
         // 点过以后先收齐结果；此时拉杆本来就可能已经改变，不能再拿点击前状态把确认流程拦住。
         if (phase == Phase.CONFIRM) return confirm();
+        // 腾手用的背包画面属于本次拨杆准备，先等它自己交换并关闭，不被下面的世界画面恢复抢先关掉。
+        if (phase == Phase.PREPARE_HAND && handParking.started()) return prepareHand();
         // 拉杆或按钮尚未使用时先原生退出旧界面，保留选定控制器和实际目标状态，随后续本次控制。
         var context = ClientRuntime.requireContext(player);
         if (!context.menus().ensureWorldVisible(context)) return TaskState.RUNNING;
@@ -85,7 +91,8 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         };
     }
 
-    // 从已观察范围中找原版拉杆。指定位置时只认那一根；没有指定时必须恰好一根，不能随意选一个。
+    // 从已观察范围中找原版拉杆。点名格是拉杆就只认它；点名格是告示牌等非拉杆格时取它两格内唯一一根；
+    // 没有点名时必须恰好一根，不能随意选一个。选不出来就把附近候选拉杆的坐标交回调用方。
     private TaskState select() {
         if (!freshSurvey()) return TaskState.FAILED;
         List<BlockPos> candidates = new ArrayList<>();
@@ -98,12 +105,19 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
             }
         }
         candidateCount = candidates.size();
-        control = MachineControl.selectControl(candidates, r.request.controlPosition());
+        var selection = MachineControl.selectControl(candidates, r.request.controlPosition());
+        control = selection.position();
+        selectionBasis = selection.basis();
         if (control == null) {
-            return failure(candidateCount > 1 && r.request.controlPosition() == null
-                            ? "ambiguous_machine_control" : "machine_control_unavailable",
-                    candidateCount > 1 && r.request.controlPosition() == null
-                            ? "Several levers are present; select one remembered control label. No switch was used."
+            unresolvedCandidates = selection.nearby();
+            boolean named = r.request.controlPosition() != null;
+            boolean ambiguous = unresolvedCandidates.size() > 1;
+            return failure(ambiguous ? "ambiguous_machine_control" : "machine_control_unavailable",
+                    ambiguous && named ? "The named cell is not a lever and several levers are within "
+                            + MachineControl.NAMED_CELL_NEIGHBOUR_RANGE + " blocks of it; target the intended lever's coordinates. No switch was used."
+                            : ambiguous ? "Several levers are present; name one with control_label or target its coordinates. No switch was used."
+                            : named ? "Neither the named cell nor any cell within " + MachineControl.NAMED_CELL_NEIGHBOUR_RANGE
+                                    + " blocks of it holds an existing vanilla lever."
                             : "The surveyed region does not contain the requested existing vanilla lever.",
                     FailureType.TARGET_LOST);
         }
@@ -146,6 +160,8 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
 
     private TaskState prepareHand() {
         var context = ClientRuntime.requireContext(player);
+        // 背包腾手已经开始就先等它完成，不能同时切换别的快捷栏或提前右键拉杆。
+        if (handParking.started()) return parkHand(context);
         if (receipt != null) {
             receipt = context.actions().poll(context, receipt);
             if (!receipt.terminal()) return TaskState.RUNNING;
@@ -158,7 +174,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
             receipt = null;
         }
         // 空主手能避免手持物抢先处理右键；原版空手使用方块的后备分支只接受主手。
-        // 当前只会切到空快捷栏，不会把手持物移到普通背包；九格全满就报告需要空手。
+        // 先切到现成的空快捷栏；九格全满时把手持物经可见背包原样移到空主背包格，背包也满才报告缺空间。
         if (player.getMainHandItem().isEmpty()) hand = InteractionHand.MAIN_HAND;
         else {
             for (int slot = 0; slot < 9; slot++) {
@@ -169,10 +185,27 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
                     return TaskState.RUNNING;
                 }
             }
-            return failure("machine_empty_hand_required", "No empty main hand or empty hotbar slot is available for lever use.",
-                    FailureType.NO_SPACE);
+            if (!freshSurvey()) return TaskState.FAILED;
+            return parkHand(context);
         }
         phase = Phase.AIM;
+        return TaskState.RUNNING;
+    }
+
+    // 停车只搬动现有物品，不丢不删；停好并关闭背包后主手为空，再去瞄准拉杆。
+    private TaskState parkHand(LocalPlayerContext context) {
+        var state = handParking.tick(context);
+        if (state == MachineMenuHandParking.Status.FAILED) {
+            return "machine_menu_empty_hand_required".equals(handParking.failure())
+                    ? failure("machine_empty_hand_required", "No empty main hand, hotbar slot or main inventory slot is available for lever use.",
+                            FailureType.NO_SPACE)
+                    : failure(handParking.failure(), "Empty-hand inventory preparation stopped without discarding items: "
+                            + handParking.failure(), FailureType.UNKNOWN);
+        }
+        if (state == MachineMenuHandParking.Status.READY) {
+            hand = InteractionHand.MAIN_HAND;
+            phase = Phase.AIM;
+        }
         return TaskState.RUNNING;
     }
 
@@ -287,7 +320,7 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         String at = control == null ? "" : " (" + control.getX() + "," + control.getY() + "," + control.getZ() + ")";
         return switch (phase) {
             case APPROACH -> "正在走近拉杆" + at;
-            case PREPARE_HAND -> "正在腾空主手";
+            case PREPARE_HAND -> handParking.started() ? "正在把手持物放进背包腾空主手" : "正在腾空主手";
             case AIM -> "正在拨动拉杆" + at;
             case CONFIRM -> "正在确认拉杆状态" + at;
             default -> "正在寻找机器拉杆";
@@ -296,12 +329,13 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
 
     // 已经点过、确认还没结束时，父任务即使认为目标够了，也应先等这一笔点击结清。
     @Override public boolean mustSettleBeforeSatisfiedCancellation() {
-        return controlAttempted && !controlStateVerified && receipt != null && !receipt.terminal();
+        return handParking.settling() || controlAttempted && !controlStateVerified && receipt != null && !receipt.terminal();
     }
 
     @Override protected void cleanup() {
         super.cleanup();
         aimGate.reset();
+        handParking.cleanup(player);
         if (receipt != null && !receipt.terminal()) {
             try {
                 var context = ClientRuntime.requireContext(player);
@@ -326,9 +360,15 @@ public final class MachineControlTask extends AbstractCompanionTask<MachineContr
         data.put("connection_semantics_verified", false);
         data.put("already_satisfied", alreadySatisfied);
         data.put("effects_started", controlAttempted);
-        data.put("outcome_uncertain", outcomeUncertain);
-        data.put("mechanical_retry_allowed", !controlAttempted && !outcomeUncertain);
+        data.put("outcome_uncertain", outcomeUncertain || handParking.uncertain());
+        data.put("mechanical_retry_allowed", !controlAttempted && !outcomeUncertain && !handParking.uncertain());
         data.put("candidate_controls", candidateCount);
+        if (selectionBasis != null) data.put("control_selected_by", selectionBasis);
+        if (r.request.controlPosition() != null) data.put("named_control_cell", Map.of("x", r.request.controlPosition().getX(),
+                "y", r.request.controlPosition().getY(), "z", r.request.controlPosition().getZ()));
+        if (!unresolvedCandidates.isEmpty()) data.put("candidate_control_positions", unresolvedCandidates.stream()
+                .map(position -> Map.of("x", position.getX(), "y", position.getY(), "z", position.getZ())).toList());
+        if (handParking.started()) data.put("hand_preparation", handParking.evidence());
         data.put("structure_fingerprint", r.request.structuralFingerprint());
         data.put("next_observation", "survey the machine again and verify its actual output separately");
         if (control != null) data.put("control_position", Map.of(
